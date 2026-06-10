@@ -8,11 +8,13 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import sqlite3
 import subprocess
 import threading
 import time
 import zipfile
+from collections.abc import Iterable as IterableABC
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,12 +24,15 @@ from urllib import request as urlrequest
 from uuid import uuid4
 
 from apps.core.tls import urlopen_with_bundled_ca
+from apps.installer.workspace_init import get_workspace_status
+from apps.shell.credential_store import CredentialStore, CredentialStoreError, create_credential_store
 from apps.shell.model_profiles import (
     get_model_profile_service,
     openai_compatible_chat_message,
     read_openai_compatible_chat_timeout,
     supports_openai_compatible_api,
 )
+from packages.security import redact_api_error_text, redact_sensitive_text, sanitize_sensitive_value
 
 
 class AgentRuntimeError(RuntimeError):
@@ -42,7 +47,7 @@ class AgentApprovalRequired(AgentRuntimeError):
         super().__init__(f"等待审批：{pending_approval.get('tool') or 'tool'}")
 
 
-_EXECUTION_BACKENDS = {"hermes_profile", "yachiyo_profile", "external_cli"}
+_EXECUTION_BACKENDS = {"native_profile", "yachiyo_profile", "external_cli"}
 _KNOWN_AGENT_TOOLS = {
     "workspace.list",
     "workspace.read",
@@ -62,10 +67,17 @@ _TOOL_NAME_ALIASES = {value: key for key, value in _TOOL_FUNCTION_NAMES.items()}
 _MAX_AGENT_TOOL_ITERATIONS = 50
 _FINAL_RUN_STATUSES = {"completed", "failed", "cancelled"}
 _WORKFLOW_NODE_TYPES = {"start", "agent", "approval", "artifact"}
-_SKILL_SOURCE_TYPES = {"hermes_global", "hermes_project", "npx_skills", "hermes_cli", "local_zip", "local_dir"}
+_NATIVE_LIBRARY_SOURCE_TYPES = {"native_global", "native_project"}
+_SKILL_SOURCE_TYPES = {*_NATIVE_LIBRARY_SOURCE_TYPES, "npx_skills", "local_zip", "local_dir"}
 _SHELL_METACHARS = {"&&", "||", "&", ";", "|", ">", ">>", "<", "$(", "`", "\n", "\r"}
 _UNSET = object()
+_SENSITIVE_ENV_RE = re.compile(
+    r"(?i)(^SSH_AUTH_SOCK$|^GITHUB_TOKEN$|^(AWS|GOOGLE|AZURE)_|(_API_KEY|_TOKEN|_SECRET|_PASSWORD)$)"
+)
+_MAIN_CHAT_AGENT_ID = "builtin:yachiyo-main"
+_SYSTEM_AGENT_IDS = {_MAIN_CHAT_AGENT_ID}
 _DEFAULT_AGENT_IDS = {
+    _MAIN_CHAT_AGENT_ID,
     "agent_yachiyo_orchestrator",
     "agent_coding",
     "agent_design",
@@ -74,6 +86,92 @@ _DEFAULT_AGENT_IDS = {
     "agent_office",
     "agent_custom",
 }
+_TERMINAL_PROCESS_LOCK = threading.RLock()
+_TERMINAL_PROCESSES: set[subprocess.Popen[Any]] = set()
+_RUNTIME_JSON_REDACTION_MAX_ITEMS = 1000
+
+
+@dataclass(frozen=True)
+class _RunBudgetLimits:
+    max_model_calls: int = 50
+    max_tool_calls: int = 100
+    max_terminal_calls: int = 10
+    max_run_duration_seconds: int = 600
+    max_model_output_chars: int = 200_000
+    max_tool_output_chars: int = 100_000
+    max_context_chars: int = 200_000
+
+
+@dataclass
+class _RunBudget:
+    limits: _RunBudgetLimits
+    started_at_epoch: float
+    model_calls_used: int = 0
+    tool_calls_used: int = 0
+    terminal_calls_used: int = 0
+
+    def check_duration(self) -> None:
+        elapsed = max(0.0, time.time() - self.started_at_epoch)
+        if elapsed > max(1, int(self.limits.max_run_duration_seconds)):
+            raise AgentRuntimeError(
+                f"Run 已超过 max_run_duration_seconds={self.limits.max_run_duration_seconds} 的执行预算"
+            )
+
+    def check_context(self, context_chars: int) -> None:
+        self.check_duration()
+        if context_chars > max(1, int(self.limits.max_context_chars)):
+            raise AgentRuntimeError(
+                f"Run 上下文超过 max_context_chars={self.limits.max_context_chars} 的执行预算"
+            )
+
+    def claim_model_call(self) -> None:
+        self.check_duration()
+        if self.model_calls_used >= max(1, int(self.limits.max_model_calls)):
+            raise AgentRuntimeError(f"Run 已超过 max_model_calls={self.limits.max_model_calls} 的执行预算")
+        self.model_calls_used += 1
+
+    def claim_tool_call(self, tool_name: str, *, terminal_execution: bool = False) -> None:
+        self.check_duration()
+        if self.tool_calls_used >= max(1, int(self.limits.max_tool_calls)):
+            raise AgentRuntimeError(f"Run 已超过 max_tool_calls={self.limits.max_tool_calls} 的执行预算")
+        if terminal_execution and self.terminal_calls_used >= max(0, int(self.limits.max_terminal_calls)):
+            raise AgentRuntimeError(
+                f"Run 已超过 max_terminal_calls={self.limits.max_terminal_calls} 的执行预算"
+            )
+        self.tool_calls_used += 1
+        if terminal_execution:
+            self.terminal_calls_used += 1
+
+
+def cancel_terminal_process_groups() -> None:
+    with _TERMINAL_PROCESS_LOCK:
+        processes = list(_TERMINAL_PROCESSES)
+    for process in processes:
+        if process.poll() is not None:
+            with _TERMINAL_PROCESS_LOCK:
+                _TERMINAL_PROCESSES.discard(process)
+            continue
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+
+
+def _scrubbed_subprocess_env(extra: dict[str, str] | None = None) -> dict[str, str]:
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not _SENSITIVE_ENV_RE.search(key)
+    }
+    for key, value in (extra or {}).items():
+        clean_key = str(key)
+        if _SENSITIVE_ENV_RE.search(clean_key):
+            continue
+        env[clean_key] = str(value)
+    return env
 
 
 def _is_active_run_status(status: str) -> bool:
@@ -235,15 +333,14 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _hermes_yachiyo_home() -> Path:
-    hermes_home = os.getenv("HERMES_HOME", os.path.expanduser("~/.hermes"))
-    root = Path(hermes_home) / "yachiyo"
+def _oha_yachiyo_home() -> Path:
+    root = Path(os.getenv("OHA_YACHIYO_HOME", os.path.expanduser("~/.oha-yachiyo"))).expanduser()
     root.mkdir(parents=True, exist_ok=True)
     return root
 
 
-def _hermes_home() -> Path:
-    return Path(os.getenv("HERMES_HOME", os.path.expanduser("~/.hermes"))).expanduser()
+def _native_skill_home() -> Path:
+    return _oha_yachiyo_home() / "skill-library"
 
 
 def _slug(value: str, fallback: str) -> str:
@@ -265,26 +362,103 @@ def _json_dump(value: Any) -> str:
 
 
 def _normalize_execution_backend(value: Any, *, model_mode: str = "") -> str:
-    """Normalize legacy backend values to the persistent Yachiyo runtime.
-
-    Agent Studio used to expose Hermes/external CLI backends. Those values are
-    now kept only for database compatibility; custom Studio agents always run
-    through Yachiyo Agent Runtime.
-    """
+    """Normalize all Studio execution backends to the native runtime."""
     backend = str(value or "").strip()
     if backend and backend not in _EXECUTION_BACKENDS:
-        raise AgentRuntimeError("execution_backend 仅支持 yachiyo_profile（旧值将自动迁移）")
-    return "yachiyo_profile"
+        raise AgentRuntimeError("execution_backend 不再支持 legacy 或未知执行后端；请使用 native_profile")
+    return "native_profile"
 
 
-_SECRET_RE = re.compile(
-    r"(?i)(sk-[a-z0-9._-]{8,}|api[_-]?key\s*[:=]\s*[^\s,;]+|authorization\s*[:=]\s*bearer\s+[^\s,;]+)"
-)
+def _normalize_skill_source_type(value: Any) -> str:
+    source_type = str(value or "").strip()
+    return source_type
+
+
+def _is_native_library_source_type(value: Any) -> bool:
+    return _normalize_skill_source_type(value) in _NATIVE_LIBRARY_SOURCE_TYPES
 
 
 def redact_secrets(value: Any) -> str:
-    text = str(value if value is not None else "")
-    return _SECRET_RE.sub("[redacted]", text)
+    return redact_sensitive_text(
+        value,
+        limit=0,
+        collapse_whitespace=False,
+        trim=False,
+    )
+
+
+def _redact_json_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _redact_json_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_redact_json_value(item) for item in value]
+    if isinstance(value, tuple):
+        return [_redact_json_value(item) for item in value]
+    if isinstance(value, str):
+        return redact_secrets(value)
+    return value
+
+
+def _redact_run_event_payload(value: Any) -> Any:
+    return sanitize_sensitive_value(
+        value,
+        text_limit=0,
+        max_items=_RUNTIME_JSON_REDACTION_MAX_ITEMS,
+        collapse_whitespace=False,
+        trim=False,
+    )
+
+
+def _iso_epoch(value: Any) -> float:
+    text = str(value or "").strip()
+    if not text:
+        return time.time()
+    try:
+        return datetime.fromisoformat(text).timestamp()
+    except ValueError:
+        return time.time()
+
+
+def _json_chars(value: Any) -> int:
+    try:
+        return len(json.dumps(value, ensure_ascii=False, default=str))
+    except (TypeError, ValueError):
+        return len(str(value))
+
+
+def _truncate_text(value: Any, max_chars: int) -> tuple[str, bool]:
+    text = str(value or "")
+    limit = max(1, int(max_chars or 1))
+    if len(text) <= limit:
+        return text, False
+    marker = "\n\n[truncated]"
+    if limit <= len(marker):
+        return text[:limit], True
+    return text[: limit - len(marker)] + marker, True
+
+
+def _limit_json_strings(value: Any, max_chars: int) -> tuple[Any, bool]:
+    if isinstance(value, dict):
+        changed = False
+        limited: dict[str, Any] = {}
+        for key, item in value.items():
+            next_item, item_changed = _limit_json_strings(item, max_chars)
+            limited[str(key)] = next_item
+            changed = changed or item_changed
+        return limited, changed
+    if isinstance(value, list):
+        changed = False
+        limited_items = []
+        for item in value:
+            next_item, item_changed = _limit_json_strings(item, max_chars)
+            limited_items.append(next_item)
+            changed = changed or item_changed
+        return limited_items, changed
+    if isinstance(value, tuple):
+        return _limit_json_strings(list(value), max_chars)
+    if isinstance(value, str):
+        return _truncate_text(value, max_chars)
+    return value, False
 
 
 def _safe_rel_path(value: str) -> str:
@@ -306,6 +480,117 @@ def _is_within(path: Path, root: Path) -> bool:
 def _read_text(path: Path, limit: int = 200_000) -> str:
     data = path.read_bytes()[:limit]
     return data.decode("utf-8", errors="replace")
+
+
+def _sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _sha256_file(path: Path) -> str:
+    return _sha256_bytes(path.read_bytes())
+
+
+def _atomic_write_text(target: Path, content: str) -> None:
+    tmp = target.with_name(f".{target.name}.{uuid4().hex}.tmp")
+    try:
+        tmp.write_text(content, encoding="utf-8")
+        os.replace(tmp, target)
+    finally:
+        if tmp.exists():
+            tmp.unlink(missing_ok=True)
+
+
+_UNIFIED_HUNK_RE = re.compile(r"^@@ -(?P<old_start>\d+)(?:,(?P<old_count>\d+))? \+(?P<new_start>\d+)(?:,(?P<new_count>\d+))? @@")
+
+
+def _normalize_unified_diff_path(value: str) -> str:
+    path = str(value or "").strip()
+    if "\t" in path:
+        path = path.split("\t", 1)[0].strip()
+    elif " " in path:
+        path = path.split(" ", 1)[0].strip()
+    if path in {"", "/dev/null"}:
+        raise AgentRuntimeError("workspace.write_patch 不支持删除或创建型 /dev/null patch")
+    if path.startswith(("a/", "b/")):
+        path = path[2:]
+    return _safe_rel_path(path)
+
+
+def _apply_single_file_unified_diff(original: str, patch: str, *, expected_path: str) -> str:
+    if not patch.strip():
+        raise AgentRuntimeError("workspace.write_patch patch 不能为空")
+    if any(marker in patch for marker in ("GIT binary patch", "Binary files ")):
+        raise AgentRuntimeError("workspace.write_patch 不支持二进制 patch")
+    if re.search(r"(?m)^(rename from|rename to|deleted file mode|new file mode)\b", patch):
+        raise AgentRuntimeError("workspace.write_patch 不支持重命名、删除或新文件 patch")
+
+    lines = patch.splitlines(keepends=True)
+    old_headers = [line for line in lines if line.startswith("--- ")]
+    new_headers = [line for line in lines if line.startswith("+++ ")]
+    if len(old_headers) != 1 or len(new_headers) != 1:
+        raise AgentRuntimeError("workspace.write_patch 只支持单文件 unified diff")
+    old_path = _normalize_unified_diff_path(old_headers[0][4:].rstrip("\r\n"))
+    new_path = _normalize_unified_diff_path(new_headers[0][4:].rstrip("\r\n"))
+    clean_expected_path = _safe_rel_path(expected_path)
+    if old_path != clean_expected_path or new_path != clean_expected_path:
+        raise AgentRuntimeError("workspace.write_patch patch 路径必须与目标 path 一致")
+
+    original_lines = original.splitlines(keepends=True)
+    output: list[str] = []
+    old_pos = 0
+    index = 0
+    hunk_count = 0
+    while index < len(lines):
+        line = lines[index]
+        match = _UNIFIED_HUNK_RE.match(line)
+        if match is None:
+            index += 1
+            continue
+
+        hunk_count += 1
+        old_start = int(match.group("old_start"))
+        old_count = int(match.group("old_count") or "1")
+        new_count = int(match.group("new_count") or "1")
+        hunk_old_pos = max(0, old_start - 1)
+        if hunk_old_pos < old_pos:
+            raise AgentRuntimeError("workspace.write_patch hunk 顺序无效")
+        output.extend(original_lines[old_pos:hunk_old_pos])
+        old_pos = hunk_old_pos
+        consumed_old = 0
+        produced_new = 0
+        index += 1
+        while index < len(lines) and not _UNIFIED_HUNK_RE.match(lines[index]):
+            hunk_line = lines[index]
+            if hunk_line.startswith(("--- ", "+++ ")):
+                raise AgentRuntimeError("workspace.write_patch 不支持多文件 patch")
+            if hunk_line.startswith("\\"):
+                index += 1
+                continue
+            if not hunk_line:
+                raise AgentRuntimeError("workspace.write_patch hunk 格式无效")
+            marker = hunk_line[0]
+            text = hunk_line[1:]
+            if marker in {" ", "-"}:
+                if old_pos >= len(original_lines) or original_lines[old_pos] != text:
+                    raise AgentRuntimeError("workspace.write_patch hunk context 与当前文件不匹配")
+                consumed_old += 1
+                old_pos += 1
+                if marker == " ":
+                    output.append(text)
+                    produced_new += 1
+            elif marker == "+":
+                output.append(text)
+                produced_new += 1
+            else:
+                raise AgentRuntimeError("workspace.write_patch hunk 行格式无效")
+            index += 1
+        if consumed_old != old_count or produced_new != new_count:
+            raise AgentRuntimeError("workspace.write_patch hunk 行数与 header 不一致")
+
+    if hunk_count == 0:
+        raise AgentRuntimeError("workspace.write_patch 缺少 unified diff hunk")
+    output.extend(original_lines[old_pos:])
+    return "".join(output)
 
 
 def _skill_content_hash(root: Path) -> str:
@@ -345,6 +630,14 @@ def _normalize_tool_name(value: Any) -> str:
     return _TOOL_NAME_ALIASES.get(name, name)
 
 
+def _message_field(value: Any, name: str) -> Any:
+    if isinstance(value, dict):
+        return value.get(name)
+    if isinstance(value, (str, bytes, bytearray)):
+        return None
+    return getattr(value, name, None)
+
+
 def _message_content_text(content: Any) -> str:
     if isinstance(content, dict):
         nested = _message_content_text(content.get("content"))
@@ -362,8 +655,69 @@ def _message_content_text(content: Any) -> str:
         for item in content:
             if isinstance(item, dict) and isinstance(item.get("text"), str):
                 parts.append(item["text"])
+            elif isinstance(getattr(item, "text", None), str):
+                parts.append(item.text)
         return "\n".join(parts)
+    nested = _message_field(content, "content")
+    if nested is not None:
+        text = _message_content_text(nested)
+        if text:
+            return text
+    reasoning = _message_field(content, "reasoning_content")
+    if isinstance(reasoning, str) and reasoning.strip():
+        return reasoning
+    text = _message_field(content, "text")
+    if text is not None:
+        return str(text)
     return ""
+
+
+def _stream_chunk_text(chunk: Any) -> str:
+    if isinstance(chunk, str):
+        return chunk
+    choices = _message_field(chunk, "choices")
+    if isinstance(choices, list):
+        parts: list[str] = []
+        for choice in choices:
+            delta = _message_field(choice, "delta")
+            if delta is not None:
+                parts.append(_message_content_text(delta))
+            message = _message_field(choice, "message")
+            if message is not None:
+                parts.append(_message_content_text(message))
+            text = _message_field(choice, "text")
+            if text is not None:
+                parts.append(str(text))
+        if parts:
+            return "".join(parts)
+    delta = _message_field(chunk, "delta")
+    if delta is not None:
+        return _message_content_text(delta)
+    return _message_content_text(chunk)
+
+
+def _coalesce_model_message(message: Any) -> dict[str, Any]:
+    if isinstance(message, dict):
+        return message
+    if isinstance(message, str):
+        return {"role": "assistant", "content": message}
+    if not isinstance(message, IterableABC):
+        return {"role": "assistant", "content": _message_content_text(message)}
+
+    content_parts: list[str] = []
+    tool_calls: list[dict[str, Any]] | None = None
+    for chunk in message:
+        content = _stream_chunk_text(chunk)
+        if content:
+            content_parts.append(content)
+        chunk_tool_calls = _message_field(chunk, "tool_calls")
+        if isinstance(chunk_tool_calls, list):
+            tool_calls = chunk_tool_calls
+
+    result: dict[str, Any] = {"role": "assistant", "content": "".join(content_parts)}
+    if tool_calls is not None:
+        result["tool_calls"] = tool_calls
+    return result
 
 
 def _tool_input_preview(value: Any, *, limit: int = 1200) -> Any:
@@ -387,6 +741,140 @@ def _public_pending_approval(value: Any) -> dict[str, Any]:
         "input_preview": raw.get("input_preview") or _tool_input_preview(raw.get("input") or {}),
         "requested_at": str(raw.get("requested_at") or ""),
     }
+
+
+@dataclass(frozen=True)
+class ToolDescriptor:
+    name: str
+    description: str
+    properties: dict[str, Any]
+    required: tuple[str, ...] = ()
+
+    @property
+    def function_name(self) -> str:
+        return _TOOL_FUNCTION_NAMES[self.name]
+
+    @property
+    def allowed_fields(self) -> set[str]:
+        return set(self.properties)
+
+    def to_model_tool_schema(self) -> dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.function_name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": self.properties,
+                    "required": list(self.required),
+                    "additionalProperties": False,
+                },
+            },
+        }
+
+    def validate_payload(self, payload: dict[str, Any]) -> None:
+        extra_fields = sorted(set(payload) - self.allowed_fields)
+        if extra_fields:
+            raise AgentRuntimeError(f"{self.name} 参数包含未声明字段：{', '.join(extra_fields)}")
+        for key in self.required:
+            if not isinstance(payload.get(key), str) or not str(payload.get(key) or "").strip():
+                raise AgentRuntimeError(f"{self.name} 参数 {key} 必须是非空字符串")
+        if self.name == "workspace.write_patch":
+            patch_supplied = isinstance(payload.get("patch"), str) and str(payload.get("patch") or "").strip()
+            if not patch_supplied:
+                raise AgentRuntimeError("workspace.write_patch 参数 patch 必须是非空字符串")
+            hash_values = {
+                key: str(payload.get(key) or "").strip()
+                for key in ("expected_sha256", "base_sha256")
+                if key in payload
+            }
+            for key, value in hash_values.items():
+                if value and not re.fullmatch(r"[0-9a-fA-F]{64}", value):
+                    raise AgentRuntimeError(f"workspace.write_patch 参数 {key} 必须是 64 位 SHA-256 hex")
+            if hash_values.get("expected_sha256") and hash_values.get("base_sha256"):
+                if hash_values["expected_sha256"].lower() != hash_values["base_sha256"].lower():
+                    raise AgentRuntimeError("workspace.write_patch 参数 expected_sha256 与 base_sha256 不一致")
+        if "path" in payload and not isinstance(payload.get("path"), str):
+            raise AgentRuntimeError(f"{self.name} 参数 path 必须是字符串")
+        if "timeout_seconds" in payload:
+            value = payload.get("timeout_seconds")
+            if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 120:
+                raise AgentRuntimeError("terminal.run 参数 timeout_seconds 必须是 1-120 的整数")
+        if "shell" in payload and not isinstance(payload.get("shell"), bool):
+            raise AgentRuntimeError("terminal.run 参数 shell 必须是布尔值")
+        serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+        if redact_secrets(serialized) != serialized:
+            raise AgentRuntimeError(f"{self.name} 参数包含敏感凭据，已拒绝执行和持久化")
+
+
+TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
+    "workspace.list": ToolDescriptor(
+        name="workspace.list",
+        description="List entries in an allowed workspace directory. Use this before workspace.read when you only know a directory path.",
+        properties={"path": {"type": "string", "description": "Relative directory path."}},
+    ),
+    "workspace.read": ToolDescriptor(
+        name="workspace.read",
+        description="Read a UTF-8 text file from the allowed workspace. This only accepts file paths; use workspace.list for directories.",
+        properties={"path": {"type": "string", "description": "Relative file path."}},
+        required=("path",),
+    ),
+    "workspace.write_patch": ToolDescriptor(
+        name="workspace.write_patch",
+        description="Apply a single-file UTF-8 unified diff to an allowed workspace path. Requires user approval.",
+        properties={
+            "path": {"type": "string", "description": "Relative file path inside writable scopes."},
+            "patch": {"type": "string", "description": "Single-file unified diff whose file headers match path."},
+            "expected_sha256": {"type": "string", "description": "Optional current file SHA-256 precondition checked immediately before writing."},
+            "base_sha256": {"type": "string", "description": "Alias for expected_sha256."},
+        },
+        required=("path",),
+    ),
+    "terminal.run": ToolDescriptor(
+        name="terminal.run",
+        description="Run an argv command in the Agent workdir. Requires user approval. Shell mode is disabled unless explicitly requested and approved.",
+        properties={
+            "command": {"type": "string", "description": "Command parsed into argv by default."},
+            "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 120},
+            "shell": {"type": "boolean", "description": "Explicitly request shell parsing; the full command is shown for approval."},
+        },
+        required=("command",),
+    ),
+    "artifact.write": ToolDescriptor(
+        name="artifact.write",
+        description="Write a markdown/text artifact for the current run.",
+        properties={
+            "path": {"type": "string", "description": "Relative artifact path."},
+            "content": {"type": "string", "description": "Artifact content."},
+        },
+        required=("path", "content"),
+    ),
+}
+
+
+class ToolDescriptorRegistry:
+    @staticmethod
+    def model_tool_schemas(allowed_tools: list[str]) -> list[dict[str, Any]]:
+        schemas = []
+        for tool in allowed_tools:
+            descriptor = TOOL_DESCRIPTORS.get(tool)
+            if descriptor is not None:
+                schemas.append(descriptor.to_model_tool_schema())
+        return schemas
+
+    @staticmethod
+    def validate_payload(tool_name: str, payload: dict[str, Any]) -> None:
+        descriptor = TOOL_DESCRIPTORS.get(tool_name)
+        if descriptor is None:
+            raise AgentRuntimeError(f"未知工具：{tool_name}")
+        descriptor.validate_payload(payload)
+
+
+class PolicyGate:
+    @staticmethod
+    def allows_tool(tool_name: str, allowed_tools: list[str]) -> bool:
+        return tool_name in set(str(tool or "").strip() for tool in allowed_tools)
 
 
 @dataclass
@@ -479,31 +967,111 @@ class ToolBroker:
             }
         return {"ok": True, "path": display_path, "content": _read_text(target)}
 
-    def workspace_write_patch(self, path: str, content: str, *, approved: bool = False) -> dict[str, Any]:
+    def workspace_write_patch(
+        self,
+        path: str,
+        content: str = "",
+        *,
+        patch: str = "",
+        expected_sha256: str = "",
+        approved: bool = False,
+    ) -> dict[str, Any]:
+        if str(content or "").strip():
+            raise AgentRuntimeError("workspace.write_patch 不再支持 content 全量写入；请提供单文件 unified diff patch")
+        target = self._resolve_workspace_path(path, write=True)
         if not approved and not self.approvals.get("workspace.write_patch"):
             return {"ok": False, "approval_required": True, "tool": "workspace.write_patch"}
-        target = self._resolve_workspace_path(path, write=True)
+        mode = "patch"
+        if target.exists() and not target.is_file():
+            return {"ok": False, "path": path, "error": "workspace.write_patch 只能写入普通文件"}
+        if not target.exists():
+            return {"ok": False, "path": path, "error": "workspace.write_patch patch 模式要求目标文件已存在"}
+        before_bytes = target.read_bytes() if target.exists() else b""
+        before_sha256 = _sha256_bytes(before_bytes)
+        clean_expected_sha256 = str(expected_sha256 or "").strip()
+        if clean_expected_sha256 and clean_expected_sha256 != before_sha256:
+            return {
+                "ok": False,
+                "path": path,
+                "error": "workspace.write_patch 当前文件 hash 与 expected_sha256 不匹配",
+                "sha256_before": before_sha256,
+            }
+        try:
+            before_text = before_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            return {"ok": False, "path": path, "error": "workspace.write_patch patch 模式只支持 UTF-8 文本文件"}
+        content = _apply_single_file_unified_diff(before_text, str(patch or ""), expected_path=path)
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
-        return {"ok": True, "path": path, "bytes": len(content.encode("utf-8"))}
-
-    def terminal_run(self, command: str, *, approved: bool = False, timeout_seconds: int = 30) -> dict[str, Any]:
-        if not approved and not self.approvals.get("terminal.run"):
-            return {"ok": False, "approval_required": True, "tool": "terminal.run"}
-        result = subprocess.run(
-            command,
-            cwd=self.workdir,
-            shell=True,
-            text=True,
-            capture_output=True,
-            timeout=max(1, min(int(timeout_seconds or 30), 120)),
-            check=False,
-        )
+        _atomic_write_text(target, content)
+        after_sha256 = _sha256_file(target)
         return {
-            "ok": result.returncode == 0,
-            "returncode": result.returncode,
-            "stdout": redact_secrets(result.stdout)[-8000:],
-            "stderr": redact_secrets(result.stderr)[-8000:],
+            "ok": True,
+            "path": path,
+            "mode": mode,
+            "bytes": len(content.encode("utf-8")),
+            "sha256_before": before_sha256,
+            "sha256_after": after_sha256,
+        }
+
+    def terminal_run(
+        self,
+        command: str,
+        *,
+        approved: bool = False,
+        timeout_seconds: int = 30,
+        shell: bool = False,
+    ) -> dict[str, Any]:
+        if not approved and not self.approvals.get("terminal.run"):
+            return {
+                "ok": False,
+                "approval_required": True,
+                "tool": "terminal.run",
+                "input_preview": {"command": command, "shell": bool(shell)},
+            }
+        clean_command = str(command or "").strip()
+        if not clean_command:
+            return {"ok": False, "error": "terminal.run 命令不能为空"}
+        try:
+            argv: str | list[str] = clean_command if shell else shlex.split(clean_command)
+        except ValueError as exc:
+            return {"ok": False, "error": f"terminal.run 命令解析失败：{exc}"}
+        if not shell and not argv:
+            return {"ok": False, "error": "terminal.run 命令不能为空"}
+        env = _scrubbed_subprocess_env()
+        process = subprocess.Popen(
+            argv,
+            cwd=self.workdir,
+            shell=bool(shell),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+            start_new_session=True,
+        )
+        with _TERMINAL_PROCESS_LOCK:
+            _TERMINAL_PROCESSES.add(process)
+        timed_out = False
+        try:
+            stdout, stderr = process.communicate(
+                timeout=max(1, min(int(timeout_seconds or 30), 120))
+            )
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                process.kill()
+            stdout, stderr = process.communicate()
+        finally:
+            with _TERMINAL_PROCESS_LOCK:
+                _TERMINAL_PROCESSES.discard(process)
+        return {
+            "ok": process.returncode == 0 and not timed_out,
+            "returncode": process.returncode,
+            "timed_out": timed_out,
+            "shell": bool(shell),
+            "stdout": redact_secrets(stdout)[-8000:],
+            "stderr": redact_secrets(stderr)[-8000:],
         }
 
     def artifact_write(self, path: str, content: str) -> dict[str, Any]:
@@ -512,8 +1080,9 @@ class ToolBroker:
         if not _is_within(target, self.artifact_root):
             raise AgentRuntimeError("artifact 路径越界")
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
-        return {"ok": True, "path": rel, "bytes": len(content.encode("utf-8"))}
+        safe_content = redact_secrets(content)
+        target.write_text(safe_content, encoding="utf-8")
+        return {"ok": True, "path": rel, "bytes": len(safe_content.encode("utf-8"))}
 
     def call(self, name: str, payload: dict[str, Any], *, approved: bool = False) -> dict[str, Any]:
         if name == "workspace.list":
@@ -523,7 +1092,9 @@ class ToolBroker:
         if name == "workspace.write_patch":
             return self.workspace_write_patch(
                 str(payload.get("path") or ""),
-                str(payload.get("content") or payload.get("patch") or ""),
+                str(payload.get("content") or ""),
+                patch=str(payload.get("patch") or ""),
+                expected_sha256=str(payload.get("expected_sha256") or payload.get("base_sha256") or ""),
                 approved=approved,
             )
         if name == "terminal.run":
@@ -531,49 +1102,1766 @@ class ToolBroker:
                 str(payload.get("command") or ""),
                 approved=approved,
                 timeout_seconds=int(payload.get("timeout_seconds") or 30),
+                shell=bool(payload.get("shell", False)),
             )
         if name == "artifact.write":
             return self.artifact_write(str(payload.get("path") or ""), str(payload.get("content") or ""))
         raise AgentRuntimeError(f"未知工具：{name}")
 
 
-class AgentRuntimeService:
-    """Persistent service behind Agent Studio and Workflow Studio."""
+class RunEventRepository:
+    """Durable, replayable execution fact log for native runs."""
+
+    def __init__(self, conn: _LockedConnection, db_lock: threading.RLock, *, ensure_run_exists: Any | None = None) -> None:
+        self._conn = conn
+        self._db_lock = db_lock
+        self._ensure_run_exists = ensure_run_exists
+
+    def append(
+        self,
+        run_id: str,
+        event_type: str,
+        payload: dict[str, Any] | None = None,
+        *,
+        actor: str = "native_runtime",
+        visibility: str = "user",
+        sensitivity: str = "public",
+    ) -> dict[str, Any]:
+        clean_run_id = str(run_id or "").strip()
+        clean_event_type = str(event_type or "").strip()
+        if not clean_run_id or not clean_event_type:
+            raise AgentRuntimeError("RunEvent 缺少 run_id 或 event_type")
+
+        event_id = f"event_{uuid4().hex[:16]}"
+        created_at = _now()
+        safe_payload = _redact_run_event_payload(payload or {})
+        normalized_visibility = "internal" if str(visibility or "").strip() == "internal" else "user"
+        normalized_sensitivity = "secret" if str(sensitivity or "").strip() == "secret" else "public"
+
+        with self._db_lock:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                row = self._conn.execute(
+                    "SELECT COALESCE(MAX(sequence), 0) + 1 AS next_sequence FROM run_events WHERE run_id=?",
+                    (clean_run_id,),
+                ).fetchone()
+                sequence = int(row["next_sequence"] if row is not None else 1)
+                self._conn.execute(
+                    """
+                    INSERT INTO run_events (
+                        event_id, run_id, sequence, schema_version, event_type,
+                        actor, visibility, sensitivity, payload_json, created_at
+                    ) VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        event_id,
+                        clean_run_id,
+                        sequence,
+                        clean_event_type,
+                        str(actor or "native_runtime"),
+                        normalized_visibility,
+                        normalized_sensitivity,
+                        _json_dump(safe_payload),
+                        created_at,
+                    ),
+                )
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+
+        return {
+            "event_id": event_id,
+            "run_id": clean_run_id,
+            "sequence": sequence,
+            "schema_version": 1,
+            "event_type": clean_event_type,
+            "actor": str(actor or "native_runtime"),
+            "visibility": normalized_visibility,
+            "sensitivity": normalized_sensitivity,
+            "payload": safe_payload,
+            "created_at": created_at,
+        }
+
+    def list(
+        self,
+        run_id: str,
+        *,
+        after_sequence: int = 0,
+        limit: int = 200,
+        include_internal: bool = False,
+    ) -> dict[str, Any]:
+        clean_run_id = str(run_id or "").strip()
+        if callable(self._ensure_run_exists):
+            self._ensure_run_exists(clean_run_id)
+        safe_after_sequence = max(0, int(after_sequence or 0))
+        safe_limit = max(1, min(int(limit or 200), 1000))
+        params: list[Any] = [clean_run_id, safe_after_sequence]
+        visibility_clause = ""
+        if not include_internal:
+            visibility_clause = " AND visibility='user' AND sensitivity!='secret'"
+        params.append(safe_limit)
+        rows = self._conn.execute(
+            f"""
+            SELECT * FROM run_events
+             WHERE run_id=? AND sequence>?{visibility_clause}
+             ORDER BY sequence ASC
+             LIMIT ?
+            """,
+            tuple(params),
+        ).fetchall()
+        return {
+            "ok": True,
+            "run_id": clean_run_id,
+            "after_sequence": safe_after_sequence,
+            "limit": safe_limit,
+            "events": [
+                {
+                    "event_id": str(row["event_id"]),
+                    "run_id": str(row["run_id"]),
+                    "sequence": int(row["sequence"]),
+                    "schema_version": int(row["schema_version"]),
+                    "event_type": str(row["event_type"]),
+                    "actor": str(row["actor"]),
+                    "visibility": str(row["visibility"]),
+                    "sensitivity": str(row["sensitivity"]),
+                    "payload": _json_load(row["payload_json"], {}),
+                    "created_at": str(row["created_at"]),
+                }
+                for row in rows
+            ],
+        }
+
+
+class ApprovalRepository:
+    """Projection store for user-visible and idempotent run approvals."""
+
+    def __init__(self, conn: _LockedConnection, db_lock: threading.RLock) -> None:
+        self._conn = conn
+        self._db_lock = db_lock
+
+    def sync(self, run_id: str, *, status: str, pending_approval: dict[str, Any]) -> None:
+        if pending_approval:
+            self.upsert_pending(run_id, pending_approval)
+            return
+        self.resolve_pending(run_id, status=status)
+
+    def upsert_pending(self, run_id: str, pending_approval: dict[str, Any]) -> None:
+        public = _public_pending_approval(pending_approval)
+        approval_id = str(pending_approval.get("approval_id") or f"approval_{run_id}").strip()
+        requested_at = str(pending_approval.get("requested_at") or _now())
+        self._conn.execute(
+            """
+            INSERT INTO run_approvals (
+                approval_id, run_id, status, tool, input_preview_json, payload_json,
+                requested_at, resolved_at, updated_at
+            ) VALUES (?, ?, 'pending', ?, ?, ?, ?, '', ?)
+            ON CONFLICT(approval_id) DO UPDATE SET
+                status='pending',
+                tool=excluded.tool,
+                input_preview_json=excluded.input_preview_json,
+                payload_json=excluded.payload_json,
+                requested_at=excluded.requested_at,
+                resolved_at='',
+                updated_at=excluded.updated_at
+            """,
+            (
+                approval_id,
+                run_id,
+                str(public.get("tool") or "")[:120],
+                _json_dump(public.get("input_preview") or {}),
+                _json_dump(public),
+                requested_at,
+                _now(),
+            ),
+        )
+
+    def claim_pending_approval(self, run_id: str, pending_approval: dict[str, Any]) -> bool:
+        approval_id = str(pending_approval.get("approval_id") or f"approval_{run_id}").strip()
+        if not approval_id:
+            return False
+        public = _public_pending_approval(pending_approval)
+        now = _now()
+        requested_at = str(pending_approval.get("requested_at") or now)
+        with self._db_lock:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                row = self._conn.execute(
+                    "SELECT status FROM run_approvals WHERE approval_id=? AND run_id=?",
+                    (approval_id, run_id),
+                ).fetchone()
+                if row is None:
+                    self._conn.execute(
+                        """
+                        INSERT INTO run_approvals (
+                            approval_id, run_id, status, tool, input_preview_json, payload_json,
+                            requested_at, resolved_at, updated_at
+                        ) VALUES (?, ?, 'pending', ?, ?, ?, ?, '', ?)
+                        """,
+                        (
+                            approval_id,
+                            run_id,
+                            str(public.get("tool") or "")[:120],
+                            _json_dump(public.get("input_preview") or {}),
+                            _json_dump(public),
+                            requested_at,
+                            now,
+                        ),
+                    )
+                    current_status = "pending"
+                else:
+                    current_status = str(row["status"] or "")
+                if current_status != "pending":
+                    self._conn.commit()
+                    return False
+                cursor = self._conn.execute(
+                    """
+                    UPDATE run_approvals
+                       SET status='approved',
+                           resolved_at=CASE WHEN resolved_at='' THEN ? ELSE resolved_at END,
+                           updated_at=?
+                     WHERE approval_id=? AND run_id=? AND status='pending'
+                    """,
+                    (now, now, approval_id, run_id),
+                )
+                claimed = int(cursor.rowcount or 0) == 1
+                self._conn.commit()
+                return claimed
+            except Exception:
+                self._conn.rollback()
+                raise
+
+    def resolve_pending(self, run_id: str, *, status: str) -> None:
+        resolved_status = "approved" if status in {"running", "completed"} else "cancelled" if status == "cancelled" else "resolved"
+        self._conn.execute(
+            """
+            UPDATE run_approvals
+               SET status=?, resolved_at=CASE WHEN resolved_at='' THEN ? ELSE resolved_at END, updated_at=?
+             WHERE run_id=? AND status='pending'
+            """,
+            (resolved_status, _now(), _now(), run_id),
+        )
+
+
+class RunArtifactRepository:
+    """Projection store and file access boundary for run artifacts."""
+
+    def __init__(
+        self,
+        conn: _LockedConnection,
+        *,
+        agent_artifacts_dir: Path,
+        workflow_artifacts_dir: Path,
+        get_run: Any,
+    ) -> None:
+        self._conn = conn
+        self._agent_artifacts_dir = agent_artifacts_dir
+        self._workflow_artifacts_dir = workflow_artifacts_dir
+        self._get_run = get_run
+
+    def sync(self, run_id: str, artifacts: Any) -> None:
+        self._conn.execute("DELETE FROM run_artifacts WHERE run_id=?", (run_id,))
+        if not isinstance(artifacts, list):
+            return
+        now = _now()
+        for index, artifact in enumerate(item for item in artifacts if isinstance(item, dict)):
+            artifact_id = f"{run_id}:artifact:{index}"
+            self._conn.execute(
+                """
+                INSERT INTO run_artifacts (
+                    artifact_id, run_id, sequence, kind, path, source_run_id, payload_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    artifact_id,
+                    run_id,
+                    index,
+                    str(artifact.get("kind") or "")[:80],
+                    str(artifact.get("path") or "")[:500],
+                    str(artifact.get("source_run_id") or artifact.get("run_id") or "")[:160],
+                    _json_dump(_redact_json_value(artifact)),
+                    now,
+                ),
+            )
+
+    def read(self, run_id: str, artifact_path: str) -> dict[str, Any]:
+        run = self._get_run(run_id)
+        rel = _safe_rel_path(artifact_path)
+        root = self._run_artifact_root(run)
+        target = (root / rel).resolve()
+        if not _is_within(target, root) or not target.is_file():
+            raise KeyError(rel)
+        content = _read_text(target, limit=300_000)
+        return {
+            "ok": True,
+            "run_id": run_id,
+            "path": rel,
+            "content": redact_secrets(content),
+            "truncated": target.stat().st_size > 300_000,
+        }
+
+    def delete_files(self, run: dict[str, Any]) -> None:
+        run_id = str(run.get("run_id") or "")
+        if not run_id:
+            return
+        root = self._artifact_base_dir(run)
+        target = (root / run_id).resolve()
+        if _is_within(target, root) and target.exists():
+            shutil.rmtree(target, ignore_errors=True)
+
+    def _run_artifact_root(self, run: dict[str, Any]) -> Path:
+        return self._artifact_base_dir(run) / str(run["run_id"])
+
+    def _artifact_base_dir(self, run: dict[str, Any]) -> Path:
+        return self._agent_artifacts_dir if run.get("kind") == "agent_run" else self._workflow_artifacts_dir
+
+
+class RunGroupRepository:
+    """Lifecycle store for run groups and their child run membership."""
+
+    def __init__(
+        self,
+        conn: _LockedConnection,
+        *,
+        ensure_row_factory: Any,
+        row_to_run_group: Any,
+        row_to_run: Any,
+    ) -> None:
+        self._conn = conn
+        self._ensure_row_factory = ensure_row_factory
+        self._row_to_run_group = row_to_run_group
+        self._row_to_run = row_to_run
+
+    def list(self, limit: int = 50) -> dict[str, Any]:
+        self._ensure_row_factory()
+        rows = self._conn.execute(
+            "SELECT * FROM run_groups ORDER BY updated_at DESC LIMIT ?",
+            (max(1, min(int(limit or 50), 200)),),
+        ).fetchall()
+        return {"ok": True, "run_groups": [self._row_to_run_group(row) for row in rows]}
+
+    def get(self, run_group_id: str) -> dict[str, Any]:
+        self._ensure_row_factory()
+        row = self._conn.execute("SELECT * FROM run_groups WHERE run_group_id=?", (run_group_id,)).fetchone()
+        if row is None:
+            raise KeyError(run_group_id)
+        return self._row_to_run_group(row)
+
+    def source(self, run_group_id: str) -> str:
+        if not run_group_id:
+            return ""
+        row = self._conn.execute(
+            "SELECT source FROM run_groups WHERE run_group_id=?",
+            (run_group_id,),
+        ).fetchone()
+        if row is None:
+            return ""
+        return str(row["source"] or "")
+
+    def insert(self, *, title: str, source: str, workspace_dir: str = "") -> dict[str, Any]:
+        run_group_id = f"run_group_{uuid4().hex[:12]}"
+        now = _now()
+        self._conn.execute(
+            """
+            INSERT INTO run_groups (
+                run_group_id, title, source, workspace_dir, status, summary,
+                child_run_ids_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (run_group_id, title[:180], source[:80], workspace_dir, "running", "", "[]", now, now),
+        )
+        self._conn.commit()
+        return self.get(run_group_id)
+
+    def append_run(self, run_group_id: str, run_id: str) -> None:
+        if not run_group_id:
+            return
+        group = self.get(run_group_id)
+        child_run_ids = [str(item) for item in group.get("child_run_ids") or [] if str(item)]
+        if run_id not in child_run_ids:
+            child_run_ids.append(run_id)
+        self._conn.execute(
+            """
+            UPDATE run_groups
+               SET child_run_ids_json=?, updated_at=?
+             WHERE run_group_id=?
+            """,
+            (_json_dump(child_run_ids), _now(), run_group_id),
+        )
+        self._conn.commit()
+
+    def update(
+        self,
+        run_group_id: str,
+        *,
+        status: str | None = None,
+        summary: str | None = None,
+    ) -> None:
+        if not run_group_id:
+            return
+        current = self.get(run_group_id)
+        self._conn.execute(
+            """
+            UPDATE run_groups
+               SET status=?, summary=?, updated_at=?
+             WHERE run_group_id=?
+            """,
+            (
+                status or current["status"],
+                summary if summary is not None else current["summary"],
+                _now(),
+                run_group_id,
+            ),
+        )
+        self._conn.commit()
+
+    def runs(self, run_group_id: str) -> list[dict[str, Any]]:
+        if not run_group_id:
+            return []
+        self._ensure_row_factory()
+        rows = self._conn.execute(
+            "SELECT * FROM runs WHERE run_group_id=? ORDER BY created_at ASC",
+            (run_group_id,),
+        ).fetchall()
+        return [self._row_to_run(row) for row in rows]
+
+    def remove_run_ids(self, run_group_id: str, run_ids: set[str]) -> None:
+        if not run_group_id or not run_ids:
+            return
+        try:
+            group = self.get(run_group_id)
+        except KeyError:
+            return
+        child_run_ids = [
+            str(item)
+            for item in group.get("child_run_ids") or []
+            if str(item) and str(item) not in run_ids
+        ]
+        remaining_count = self._conn.execute(
+            "SELECT COUNT(*) AS count FROM runs WHERE run_group_id=?",
+            (run_group_id,),
+        ).fetchone()
+        if not child_run_ids or int(remaining_count["count"] if remaining_count else 0) <= 0:
+            self.delete(run_group_id)
+            return
+        self._conn.execute(
+            """
+            UPDATE run_groups
+               SET child_run_ids_json=?, updated_at=?
+             WHERE run_group_id=?
+            """,
+            (_json_dump(child_run_ids), _now(), run_group_id),
+        )
+
+    def delete(self, run_group_id: str) -> None:
+        if not run_group_id:
+            return
+        self._conn.execute("DELETE FROM run_groups WHERE run_group_id=?", (run_group_id,))
+
+
+class RunRepository:
+    """Source of truth for native run lifecycle rows."""
+
+    def __init__(
+        self,
+        conn: _LockedConnection,
+        *,
+        ensure_row_factory: Any,
+        row_to_run: Any,
+        accepting_runs: Any,
+        sync_projections: Any,
+        append_run_to_group: Any,
+    ) -> None:
+        self._conn = conn
+        self._ensure_row_factory = ensure_row_factory
+        self._row_to_run = row_to_run
+        self._accepting_runs = accepting_runs
+        self._sync_projections = sync_projections
+        self._append_run_to_group = append_run_to_group
+
+    def list(self, limit: int = 50) -> dict[str, Any]:
+        self._ensure_row_factory()
+        rows = self._conn.execute(
+            """
+            SELECT runs.*, run_groups.source AS run_group_source
+             FROM runs
+              LEFT JOIN run_groups ON run_groups.run_group_id = runs.run_group_id
+             WHERE NOT (
+                runs.kind = 'agent_run'
+                AND runs.run_group_id != ''
+                AND EXISTS (
+                    SELECT 1
+                      FROM runs workflow_parent
+                     WHERE workflow_parent.run_group_id = runs.run_group_id
+                       AND workflow_parent.kind = 'workflow_run'
+                )
+             )
+             ORDER BY runs.updated_at DESC
+             LIMIT ?
+            """,
+            (max(1, min(int(limit or 50), 200)),),
+        ).fetchall()
+        return {"ok": True, "runs": [self._row_to_run(row) for row in rows]}
+
+    def get(self, run_id: str) -> dict[str, Any]:
+        self._ensure_row_factory()
+        row = self._conn.execute("SELECT * FROM runs WHERE run_id=?", (run_id,)).fetchone()
+        if row is None:
+            raise KeyError(run_id)
+        return self._row_to_run(row)
+
+    def pending_approval_json(self, run_id: str) -> str:
+        self._ensure_row_factory()
+        row = self._conn.execute("SELECT pending_approval_json FROM runs WHERE run_id=?", (run_id,)).fetchone()
+        if row is None:
+            raise KeyError(run_id)
+        return str(row["pending_approval_json"] or "{}")
+
+    def by_client_request_id(self, client_request_id: str) -> dict[str, Any] | None:
+        clean_id = str(client_request_id or "").strip()
+        if not clean_id:
+            return None
+        self._ensure_row_factory()
+        row = self._conn.execute(
+            "SELECT * FROM runs WHERE client_request_id=? LIMIT 1",
+            (clean_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        run = self._row_to_run(row)
+        run["idempotent"] = True
+        return run
+
+    def insert(
+        self,
+        *,
+        kind: str,
+        runnable_id: str,
+        user_goal: str,
+        run_group_id: str = "",
+        client_request_id: str = "",
+    ) -> dict[str, Any]:
+        if not self._accepting_runs():
+            raise AgentRuntimeError("Native Runtime 正在关闭，暂不接受新的 Run")
+        run_id = f"{kind}_{uuid4().hex[:12]}"
+        now = _now()
+        clean_client_request_id = str(client_request_id or "").strip()[:128]
+        self._conn.execute(
+            """
+            INSERT INTO runs (
+                run_id, run_group_id, client_request_id, kind, runnable_id, status, user_goal, result,
+                timeline_json, artifacts_json, pending_approval_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                run_id,
+                run_group_id,
+                clean_client_request_id,
+                kind,
+                runnable_id,
+                "running",
+                redact_secrets(user_goal),
+                "",
+                "[]",
+                "[]",
+                "{}",
+                now,
+                now,
+            ),
+        )
+        self._conn.commit()
+        self._append_run_to_group(run_group_id, run_id)
+        return self.get(run_id)
+
+    def update(
+        self,
+        run_id: str,
+        *,
+        status: str | None = None,
+        result: str | None = None,
+        timeline: list[dict[str, Any]] | None = None,
+        artifacts: list[dict[str, Any]] | None = None,
+        pending_approval: dict[str, Any] | None | object = _UNSET,
+    ) -> dict[str, Any]:
+        current = self.get(run_id)
+        if pending_approval is _UNSET:
+            pending_approval_json = self.pending_approval_json(run_id)
+            next_pending_approval = _json_load(pending_approval_json, {})
+        else:
+            next_pending_approval = _redact_json_value(pending_approval or {})
+            pending_approval_json = _json_dump(next_pending_approval)
+        safe_result = redact_secrets(result) if result is not None else current["result"]
+        safe_timeline = _redact_json_value(timeline if timeline is not None else current["timeline"])
+        safe_artifacts = _redact_json_value(artifacts if artifacts is not None else current["artifacts"])
+        next_status = status or current["status"]
+        self._conn.execute(
+            """
+            UPDATE runs
+               SET status=?, result=?, timeline_json=?, artifacts_json=?, pending_approval_json=?, updated_at=?
+             WHERE run_id=?
+            """,
+            (
+                next_status,
+                safe_result,
+                _json_dump(safe_timeline),
+                _json_dump(safe_artifacts),
+                pending_approval_json,
+                _now(),
+                run_id,
+            ),
+        )
+        self._sync_projections(
+            run_id,
+            status=next_status,
+            artifacts=safe_artifacts,
+            pending_approval=next_pending_approval if isinstance(next_pending_approval, dict) else {},
+        )
+        self._conn.commit()
+        return self.get(run_id)
+
+
+class ApprovalCoordinator:
+    """Coordinates approval lifecycle transitions and replayable facts."""
+
+    def __init__(self, *, timeline_factory: Any, append_run_event: Any, update_run: Any) -> None:
+        self._timeline = timeline_factory
+        self._append_run_event = append_run_event
+        self._update_run = update_run
+
+    def approve_tool_run(
+        self,
+        run_id: str,
+        *,
+        timeline: list[dict[str, Any]],
+        artifacts: list[dict[str, Any]],
+        tool_name: str,
+        input_preview: dict[str, Any],
+        resumed_detail: str,
+        running_result: str,
+    ) -> dict[str, Any]:
+        display_tool = str(tool_name or "tool").strip() or "tool"
+        event_payload = {
+            "tool": display_tool,
+            "input_preview": input_preview,
+            "status": "completed",
+        }
+        timeline.append(
+            self._timeline(
+                "agent.tool.approval_approved",
+                display_tool,
+                input_preview=input_preview,
+                status="completed",
+            )
+        )
+        self._append_run_event(run_id, "agent.tool.approval_approved", event_payload)
+        timeline.append(
+            self._timeline(
+                "agent.run.resumed",
+                resumed_detail,
+                status="running",
+            )
+        )
+        return self._update_run(
+            run_id,
+            status="running",
+            result=running_result,
+            timeline=timeline,
+            artifacts=artifacts,
+            pending_approval=None,
+        )
+
+    def approve_workflow_node(
+        self,
+        run_id: str,
+        *,
+        timeline: list[dict[str, Any]],
+        artifacts: list[dict[str, Any]],
+        result_context: str,
+        workflow_node_id: str,
+        label: str,
+        criteria: str,
+        input_preview: dict[str, Any],
+    ) -> dict[str, Any]:
+        event_payload = {
+            "workflow_node_id": workflow_node_id,
+            "workflow_node_kind": "approval",
+            "workflow_node_label": label,
+            "workflow_node_approval_criteria": criteria,
+            "input_preview": input_preview,
+            "status": "completed",
+        }
+        timeline.append(
+            self._timeline(
+                "workflow.node.approval_approved",
+                label,
+                **event_payload,
+            )
+        )
+        self._append_run_event(run_id, "workflow.node.approval_approved", event_payload)
+        return self._update_run(
+            run_id,
+            status="running",
+            result=result_context,
+            timeline=timeline,
+            artifacts=artifacts,
+            pending_approval=None,
+        )
+
+    def reject_workflow_node(
+        self,
+        run_id: str,
+        *,
+        timeline: list[dict[str, Any]],
+        reason: str,
+        workflow_node_id: str,
+        label: str,
+        criteria: str,
+        input_preview: dict[str, Any],
+    ) -> dict[str, Any]:
+        detail = redact_secrets(reason).strip() or f"{label} approval rejected"
+        timeline_payload = {
+            "workflow_node_id": workflow_node_id,
+            "workflow_node_kind": "approval",
+            "workflow_node_label": label,
+            "workflow_node_approval_criteria": criteria,
+            "input_preview": input_preview,
+            "status": "cancelled",
+        }
+        event_payload = {**timeline_payload, "reason": detail}
+        timeline.append(
+            self._timeline(
+                "workflow.node.approval_rejected",
+                detail,
+                **timeline_payload,
+            )
+        )
+        timeline.append(
+            self._timeline(
+                "workflow.run.cancelled",
+                detail,
+                **timeline_payload,
+            )
+        )
+        result = self._update_run(
+            run_id,
+            status="cancelled",
+            result=f"Workflow 审批已拒绝：{detail}",
+            timeline=timeline,
+            pending_approval=None,
+        )
+        self._append_run_event(run_id, "workflow.node.approval_rejected", event_payload)
+        self._append_run_event(run_id, "workflow.run.cancelled", event_payload)
+        return result
+
+    def reject_tool_run(
+        self,
+        run_id: str,
+        *,
+        timeline: list[dict[str, Any]],
+        reason: str,
+        tool_name: str,
+        input_preview: dict[str, Any],
+    ) -> dict[str, Any]:
+        timeline_tool = str(tool_name or "").strip()
+        display_tool = timeline_tool or "tool"
+        detail = redact_secrets(reason).strip() or "Tool approval rejected"
+        timeline.append(
+            self._timeline(
+                "agent.tool.approval_rejected",
+                detail,
+                tool=timeline_tool,
+                input_preview=input_preview,
+                status="cancelled",
+            )
+        )
+        result = self._update_run(
+            run_id,
+            status="cancelled",
+            result=f"工具审批已拒绝：{detail}",
+            timeline=timeline,
+            pending_approval=None,
+        )
+        self._append_run_event(
+            run_id,
+            "agent.tool.approval_rejected",
+            {
+                "tool": display_tool,
+                "input_preview": input_preview,
+                "reason": detail,
+                "status": "cancelled",
+            },
+        )
+        return result
+
+    def timeout_workflow_node(
+        self,
+        run_id: str,
+        *,
+        timeline: list[dict[str, Any]],
+        reason: str,
+        workflow_node_id: str,
+        label: str,
+        criteria: str,
+        input_preview: dict[str, Any],
+    ) -> dict[str, Any]:
+        detail = redact_secrets(reason).strip() or "approval_wait_timeout"
+        timeline_payload = {
+            "workflow_node_id": workflow_node_id,
+            "workflow_node_kind": "approval",
+            "workflow_node_label": label,
+            "workflow_node_approval_criteria": criteria,
+            "input_preview": input_preview,
+            "status": "cancelled",
+        }
+        event_payload = {
+            **timeline_payload,
+            "reason": detail,
+            "tool": "workflow.approval",
+        }
+        timeline.append(
+            self._timeline(
+                "workflow.node.approval_timeout",
+                detail,
+                **timeline_payload,
+            )
+        )
+        timeline.append(
+            self._timeline(
+                "workflow.run.cancelled",
+                detail,
+                **timeline_payload,
+            )
+        )
+        result = self._update_run(
+            run_id,
+            status="cancelled",
+            result=f"Workflow 审批已超时：{detail}",
+            timeline=timeline,
+            pending_approval=None,
+        )
+        self._append_run_event(run_id, "approval.timeout", event_payload)
+        self._append_run_event(run_id, "workflow.run.cancelled", event_payload)
+        return result
+
+    def timeout_tool_run(
+        self,
+        run_id: str,
+        *,
+        timeline: list[dict[str, Any]],
+        reason: str,
+        tool_name: str,
+        input_preview: dict[str, Any],
+    ) -> dict[str, Any]:
+        timeline_tool = str(tool_name or "").strip()
+        display_tool = timeline_tool or "tool"
+        detail = redact_secrets(reason).strip() or "approval_wait_timeout"
+        timeline.append(
+            self._timeline(
+                "agent.tool.approval_timeout",
+                detail,
+                tool=timeline_tool,
+                input_preview=input_preview,
+                status="cancelled",
+            )
+        )
+        result = self._update_run(
+            run_id,
+            status="cancelled",
+            result=f"工具审批已超时：{detail}",
+            timeline=timeline,
+            pending_approval=None,
+        )
+        self._append_run_event(
+            run_id,
+            "approval.timeout",
+            {
+                "tool": display_tool,
+                "input_preview": input_preview,
+                "reason": detail,
+                "status": "cancelled",
+            },
+        )
+        return result
+
+
+@dataclass
+class ToolApprovalResumeContext:
+    """Private execution context needed to resume an approved tool call."""
+
+    run_id: str
+    timeline: list[dict[str, Any]]
+    artifacts: list[dict[str, Any]]
+    broker: ToolBroker
+    allowed_tools: list[str]
+    budget: _RunBudget
+    messages: list[dict[str, Any]]
+    tool_request: dict[str, Any]
+    tool_name: str
+    input_preview: dict[str, Any]
+    remaining_requests: list[dict[str, Any]]
+    next_iteration: int
+
+
+class ApprovalResumeCoordinator:
+    """Executes the approved tool portion of a paused run resume."""
+
+    def __init__(
+        self,
+        *,
+        call_agent_tool: Any,
+        fatal_tool_failure_detail: Any,
+        append_tool_result_message: Any,
+        run_tool_requests: Any,
+        timeline_factory: Any,
+    ) -> None:
+        self._call_agent_tool = call_agent_tool
+        self._fatal_tool_failure_detail = fatal_tool_failure_detail
+        self._append_tool_result_message = append_tool_result_message
+        self._run_tool_requests = run_tool_requests
+        self._timeline = timeline_factory
+
+    def execute_approved_tool(self, context: ToolApprovalResumeContext) -> None:
+        tool_result = self._call_agent_tool(
+            context.tool_request,
+            context.allowed_tools,
+            context.broker,
+            context.timeline,
+            artifacts=context.artifacts,
+            approved=True,
+            run_id=context.run_id,
+            budget=context.budget,
+        )
+        fatal_failure = self._fatal_tool_failure_detail(
+            context.tool_name,
+            context.tool_request,
+            tool_result,
+        )
+        if fatal_failure:
+            context.timeline.append(
+                self._timeline(
+                    "agent.tool.failed",
+                    context.tool_name or "tool",
+                    input_preview=context.input_preview,
+                    result=tool_result,
+                    status="failed",
+                )
+            )
+            raise AgentRuntimeError(fatal_failure)
+        self._append_tool_result_message(context.messages, context.tool_request, tool_result)
+        self._run_tool_requests(
+            context.remaining_requests,
+            context.allowed_tools,
+            context.broker,
+            context.messages,
+            context.timeline,
+            context.artifacts,
+            next_iteration=context.next_iteration,
+            run_id=context.run_id,
+            budget=context.budget,
+        )
+
+
+class WorkflowParentResumeCoordinator:
+    """Coordinates parent Workflow updates after a child Run changes state."""
+
+    def __init__(
+        self,
+        *,
+        parent_runs_waiting_for_child: Any,
+        workflow_run_is_group_root: Any,
+        workflow_child_node_context: Any,
+        merge_workflow_child_run_outcome: Any,
+        workflow_for_run_resume: Any,
+        workflow_resume_start_index: Any,
+        continue_workflow_run: Any,
+        timeline_factory: Any,
+        append_run_event: Any,
+        update_run: Any,
+        update_run_group: Any,
+    ) -> None:
+        self._parent_runs_waiting_for_child = parent_runs_waiting_for_child
+        self._workflow_run_is_group_root = workflow_run_is_group_root
+        self._workflow_child_node_context = workflow_child_node_context
+        self._merge_workflow_child_run_outcome = merge_workflow_child_run_outcome
+        self._workflow_for_run_resume = workflow_for_run_resume
+        self._workflow_resume_start_index = workflow_resume_start_index
+        self._continue_workflow_run = continue_workflow_run
+        self._timeline = timeline_factory
+        self._append_run_event = append_run_event
+        self._update_run = update_run
+        self._update_run_group = update_run_group
+
+    def mark_child_running(self, child_run: dict[str, Any]) -> None:
+        for workflow_run in self._parent_runs_waiting_for_child(child_run):
+            self._mark_parent_child_running(workflow_run, child_run)
+
+    def resume_after_child_update(self, child_run: dict[str, Any]) -> None:
+        for workflow_run in self._parent_runs_waiting_for_child(child_run):
+            self.resume_parent_after_child_update(workflow_run, child_run)
+
+    @staticmethod
+    def _child_artifact_count(artifacts: list[dict[str, Any]], child_run_id: str) -> int:
+        return sum(
+            1
+            for artifact in artifacts
+            if isinstance(artifact, dict)
+            and artifact.get("kind") == "workflow_child_artifact"
+            and str(artifact.get("source_run_id") or "") == child_run_id
+        )
+
+    def _append_child_agent_state_event(
+        self,
+        workflow_run: dict[str, Any],
+        child_run: dict[str, Any],
+        child_node_info: dict[str, str],
+        artifacts: list[dict[str, Any]],
+    ) -> None:
+        child_run_id = str(child_run.get("run_id") or "")
+        if not child_run_id:
+            return
+        status = str(child_run.get("status") or "")
+        payload = {
+            "child_run_id": child_run_id,
+            "status": status,
+            "result": _tool_input_preview(child_run.get("result") or status, limit=1800),
+            "artifact_count": self._child_artifact_count(artifacts, child_run_id),
+            **child_node_info,
+        }
+        self._append_run_event(
+            str(workflow_run["run_id"]),
+            "workflow.node.agent",
+            payload,
+        )
+
+    def _mark_parent_child_running(
+        self,
+        workflow_run: dict[str, Any],
+        child_run: dict[str, Any],
+    ) -> None:
+        root_group = self._workflow_run_is_group_root(workflow_run)
+        timeline = [
+            event
+            for event in workflow_run.get("timeline") or []
+            if isinstance(event, dict)
+        ]
+        artifacts = [item for item in workflow_run.get("artifacts") or [] if isinstance(item, dict)]
+        child_label, child_node_info = self._workflow_child_node_context(timeline, child_run)
+        child_run_id = str(child_run.get("run_id") or "")
+        self._merge_workflow_child_run_outcome(timeline, artifacts, child_run, child_label)
+        child_resumed_payload = {
+            "child_run_id": child_run_id,
+            "status": "running",
+            **child_node_info,
+        }
+        already_child_resumed = any(
+            event.get("event") == "workflow.run.child_resumed"
+            and str(event.get("child_run_id") or "") == child_run_id
+            for event in timeline
+            if isinstance(event, dict)
+        )
+        if not already_child_resumed:
+            self._append_child_agent_state_event(
+                workflow_run,
+                child_run,
+                child_node_info,
+                artifacts,
+            )
+            timeline.append(
+                self._timeline(
+                    "workflow.run.child_resumed",
+                    f"{child_label} approved and resumed",
+                    **child_resumed_payload,
+                )
+            )
+            self._append_run_event(
+                str(workflow_run["run_id"]),
+                "workflow.run.child_resumed",
+                child_resumed_payload,
+            )
+        result_text = f"{child_label} 已批准，正在继续执行"
+        result = self._update_run(
+            str(workflow_run["run_id"]),
+            status="running",
+            result=result_text,
+            timeline=timeline,
+            artifacts=artifacts,
+            pending_approval=None,
+        )
+        if root_group:
+            self._update_run_group(
+                str(result.get("run_group_id") or ""),
+                status="running",
+                summary=result_text,
+            )
+
+    def resume_parent_after_child_update(
+        self,
+        workflow_run: dict[str, Any],
+        child_run: dict[str, Any],
+    ) -> dict[str, Any]:
+        root_group = self._workflow_run_is_group_root(workflow_run)
+        timeline = [
+            event
+            for event in workflow_run.get("timeline") or []
+            if isinstance(event, dict)
+        ]
+        artifacts = [item for item in workflow_run.get("artifacts") or [] if isinstance(item, dict)]
+        child_status = str(child_run.get("status") or "")
+        child_result = str(child_run.get("result") or "")
+        child_run_id = str(child_run.get("run_id") or "")
+        run_group_id = str(workflow_run.get("run_group_id") or "")
+        child_label, child_node_info = self._workflow_child_node_context(timeline, child_run)
+        self._merge_workflow_child_run_outcome(timeline, artifacts, child_run, child_label)
+        if child_status == "approval_required":
+            self._append_child_agent_state_event(
+                workflow_run,
+                child_run,
+                child_node_info,
+                artifacts,
+            )
+            event_payload = {
+                "child_run_id": child_run_id,
+                "status": "approval_required",
+                **child_node_info,
+            }
+            timeline.append(
+                self._timeline(
+                    "workflow.run.approval_required",
+                    child_label,
+                    **event_payload,
+                )
+            )
+            self._append_run_event(
+                str(workflow_run["run_id"]),
+                "workflow.run.approval_required",
+                event_payload,
+            )
+            result = self._update_run(
+                str(workflow_run["run_id"]),
+                status="approval_required",
+                result=child_result,
+                timeline=timeline,
+                artifacts=artifacts,
+            )
+            if root_group:
+                self._update_run_group(
+                    run_group_id,
+                    status="approval_required",
+                    summary=child_result,
+                )
+            return result
+        if child_status != "completed":
+            status = "cancelled" if child_status == "cancelled" else "failed"
+            detail = (
+                f"{child_run.get('runnable_name') or child_run.get('runnable_id')}: "
+                f"{child_result}"
+            )
+            self._append_child_agent_state_event(
+                workflow_run,
+                child_run,
+                child_node_info,
+                artifacts,
+            )
+            timeline.append(
+                self._timeline(
+                    f"workflow.run.{status}",
+                    detail,
+                    child_run_id=child_run_id,
+                    status=child_status,
+                    **child_node_info,
+                )
+            )
+            self._append_run_event(
+                str(workflow_run["run_id"]),
+                f"workflow.run.{status}",
+                {
+                    "child_run_id": child_run_id,
+                    "status": child_status,
+                    "result": _tool_input_preview(child_result or child_status, limit=1800),
+                    **child_node_info,
+                },
+            )
+            result = self._update_run(
+                str(workflow_run["run_id"]),
+                status=status,
+                result=child_result,
+                timeline=timeline,
+                artifacts=artifacts,
+            )
+            if root_group:
+                self._update_run_group(run_group_id, status=status, summary=child_result)
+            return result
+        try:
+            workflow = self._workflow_for_run_resume(workflow_run)
+            start_index = self._workflow_resume_start_index(workflow, workflow_run, child_run_id)
+            if start_index is None:
+                return workflow_run
+            self._append_child_agent_state_event(
+                workflow_run,
+                child_run,
+                child_node_info,
+                artifacts,
+            )
+            resumed_payload = {"child_run_id": child_run_id, "status": "running", **child_node_info}
+            timeline.append(
+                self._timeline(
+                    "workflow.run.resumed",
+                    "Workflow resumed after child Agent approval",
+                    **resumed_payload,
+                )
+            )
+            self._append_run_event(
+                str(workflow_run["run_id"]),
+                "workflow.run.resumed",
+                resumed_payload,
+            )
+            return self._continue_workflow_run(
+                workflow_run,
+                workflow,
+                context=child_result,
+                timeline=timeline,
+                artifacts=artifacts,
+                start_index=start_index,
+                root_group=root_group,
+            )
+        except Exception as exc:
+            failed_event_extra = dict(child_node_info)
+            if child_run_id:
+                failed_event_extra["child_run_id"] = child_run_id
+            if child_status:
+                failed_event_extra["child_run_status"] = child_status
+            safe_error = redact_api_error_text(exc)
+            timeline.append(
+                self._timeline(
+                    "workflow.run.failed",
+                    safe_error,
+                    status="failed",
+                    **failed_event_extra,
+                )
+            )
+            result = self._update_run(
+                str(workflow_run["run_id"]),
+                status="failed",
+                result=safe_error,
+                timeline=timeline,
+                artifacts=artifacts,
+            )
+            if root_group:
+                self._update_run_group(run_group_id, status="failed", summary=safe_error)
+            return result
+
+
+class WorkflowContinuationCoordinator:
+    """Executes Workflow nodes for a Workflow Run."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    def continue_run(
+        self,
+        run: dict[str, Any],
+        workflow: dict[str, Any],
+        *,
+        context: str,
+        timeline: list[dict[str, Any]],
+        artifacts: list[dict[str, Any]],
+        start_index: int,
+        root_group: bool,
+    ) -> dict[str, Any]:
+        engine = self._engine
+        run_group_id = str(run.get("run_group_id") or "")
+        current_node_info: dict[str, str] = {}
+        try:
+            workflow_goal = str(run.get("user_goal") or context)
+            has_agent_upstream = max(0, start_index) > 0
+            path = engine._workflow_path(workflow)
+            for index, node in enumerate(path[max(0, start_index) :], start=max(0, start_index)):
+                kind = engine._node_kind(node)
+                label = str((node.get("data") or {}).get("label") or node.get("id"))
+                current_node_info = {
+                    "workflow_node_id": str(node.get("id") or ""),
+                    "workflow_node_kind": kind,
+                    "workflow_node_label": label,
+                }
+                if kind == "start":
+                    start_payload = {
+                        "workflow_node_id": str(node.get("id") or ""),
+                        "workflow_node_kind": kind,
+                        "workflow_node_label": label,
+                        "status": "completed",
+                    }
+                    timeline.append(
+                        engine._timeline(
+                            "workflow.node.start",
+                            label,
+                            workflow_node_id=start_payload["workflow_node_id"],
+                            status="completed",
+                        )
+                    )
+                    engine.append_run_event(
+                        str(run["run_id"]),
+                        "workflow.node.start",
+                        start_payload,
+                    )
+                    continue
+                if kind == "agent":
+                    result = self._run_agent_node(
+                        run,
+                        node,
+                        label=label,
+                        kind=kind,
+                        workflow_goal=workflow_goal,
+                        context=context,
+                        has_agent_upstream=has_agent_upstream,
+                        run_group_id=run_group_id,
+                        timeline=timeline,
+                        artifacts=artifacts,
+                        root_group=root_group,
+                    )
+                    if result.get("done"):
+                        return result["run"]
+                    context = str(result.get("context") or "")
+                    has_agent_upstream = True
+                    continue
+                if kind == "approval":
+                    return self._pause_for_approval_node(
+                        run,
+                        node,
+                        label=label,
+                        kind=kind,
+                        context=context,
+                        run_group_id=run_group_id,
+                        timeline=timeline,
+                        artifacts=artifacts,
+                        root_group=root_group,
+                        node_index=index,
+                    )
+                if kind == "artifact":
+                    self._write_artifact_node(
+                        run,
+                        node,
+                        label=label,
+                        kind=kind,
+                        context=context,
+                        artifacts=artifacts,
+                        timeline=timeline,
+                    )
+                    continue
+                raise AgentRuntimeError(f"未知 Workflow 节点类型：{kind}")
+            timeline.append(engine._timeline("workflow.run.completed", "Workflow run completed"))
+            engine.append_run_event(str(run["run_id"]), "workflow.run.completed", {"result": context})
+            result = engine._update_run(
+                str(run["run_id"]),
+                status="completed",
+                result=context,
+                timeline=timeline,
+                artifacts=artifacts,
+            )
+            if root_group:
+                engine._update_run_group(run_group_id, status="completed", summary=context)
+                result = engine.get_run(result["run_id"])
+            return result
+        except Exception as exc:
+            safe_error = redact_secrets(exc)
+            timeline.append(engine._timeline("workflow.run.failed", safe_error, status="failed", **current_node_info))
+            engine.append_run_event(
+                str(run["run_id"]),
+                "workflow.run.failed",
+                {"error": safe_error, **current_node_info},
+            )
+            result = engine._update_run(
+                str(run["run_id"]),
+                status="failed",
+                result=safe_error,
+                timeline=timeline,
+                artifacts=artifacts,
+            )
+            if root_group:
+                engine._update_run_group(run_group_id, status="failed", summary=safe_error)
+                result = engine.get_run(result["run_id"])
+            return result
+
+    def _run_agent_node(
+        self,
+        run: dict[str, Any],
+        node: dict[str, Any],
+        *,
+        label: str,
+        kind: str,
+        workflow_goal: str,
+        context: str,
+        has_agent_upstream: bool,
+        run_group_id: str,
+        timeline: list[dict[str, Any]],
+        artifacts: list[dict[str, Any]],
+        root_group: bool,
+    ) -> dict[str, Any]:
+        engine = self._engine
+        data = node.get("data") or {}
+        agent = engine._workflow_agent_for_node(node)
+        agent_id = str(agent.get("agent_id") or data.get("agent_id") or data.get("agentId") or "")
+        step_task = engine._workflow_node_task(node)
+        child_goal = engine._workflow_child_goal(workflow_goal, step_task)
+        agent_upstream = context if has_agent_upstream else ""
+        child = engine._insert_run(
+            kind="agent_run",
+            runnable_id=agent_id,
+            user_goal=child_goal,
+            run_group_id=run_group_id,
+        )
+        child = engine._execute_agent_run(
+            child["run_id"],
+            agent,
+            child_goal,
+            upstream=agent_upstream,
+        )
+        next_context = child["result"]
+        agent_payload = {
+            "workflow_node_id": str(node.get("id") or ""),
+            "workflow_node_kind": kind,
+            "workflow_node_label": label,
+            "workflow_node_task": step_task,
+            "child_run_id": child["run_id"],
+            "status": child["status"],
+            "result": _tool_input_preview(child.get("result") or "", limit=1800),
+            "artifact_count": len(engine._workflow_child_artifact_refs(child, label)),
+        }
+        timeline.append(
+            engine._timeline(
+                "workflow.node.agent",
+                label,
+                **agent_payload,
+            )
+        )
+        engine.append_run_event(str(run["run_id"]), "workflow.node.agent", agent_payload)
+        engine._merge_workflow_child_run_outcome(timeline, artifacts, child, label)
+        if child["status"] == "approval_required":
+            event_payload = {
+                "workflow_node_id": str(node.get("id") or ""),
+                "workflow_node_kind": kind,
+                "workflow_node_label": label,
+                "child_run_id": child["run_id"],
+                "status": "approval_required",
+            }
+            timeline.append(
+                engine._timeline(
+                    "workflow.run.approval_required",
+                    label,
+                    **event_payload,
+                )
+            )
+            engine.append_run_event(
+                str(run["run_id"]),
+                "workflow.run.approval_required",
+                event_payload,
+            )
+            result = engine._update_run(
+                str(run["run_id"]),
+                status="approval_required",
+                result=next_context,
+                timeline=timeline,
+                artifacts=artifacts,
+            )
+            if root_group:
+                engine._update_run_group(
+                    run_group_id,
+                    status="approval_required",
+                    summary=next_context,
+                )
+                result = engine.get_run(result["run_id"])
+            return {"done": True, "run": result}
+        if child["status"] != "completed":
+            status = "cancelled" if child["status"] == "cancelled" else "failed"
+            detail = f"{label}: {next_context or child['status']}"
+            timeline.append(
+                engine._timeline(
+                    f"workflow.run.{status}",
+                    detail,
+                    workflow_node_id=str(node.get("id") or ""),
+                    workflow_node_kind=kind,
+                    workflow_node_label=label,
+                    child_run_id=child["run_id"],
+                    status=child["status"],
+                )
+            )
+            engine.append_run_event(
+                str(run["run_id"]),
+                f"workflow.run.{status}",
+                {
+                    "workflow_node_id": str(node.get("id") or ""),
+                    "workflow_node_kind": kind,
+                    "workflow_node_label": label,
+                    "child_run_id": child["run_id"],
+                    "status": child["status"],
+                    "result": _tool_input_preview(next_context or child["status"], limit=1800),
+                },
+            )
+            result = engine._update_run(
+                str(run["run_id"]),
+                status=status,
+                result=next_context,
+                timeline=timeline,
+                artifacts=artifacts,
+            )
+            if root_group:
+                engine._update_run_group(run_group_id, status=status, summary=next_context)
+                result = engine.get_run(result["run_id"])
+            return {"done": True, "run": result}
+        return {"done": False, "context": next_context}
+
+    def _pause_for_approval_node(
+        self,
+        run: dict[str, Any],
+        node: dict[str, Any],
+        *,
+        label: str,
+        kind: str,
+        context: str,
+        run_group_id: str,
+        timeline: list[dict[str, Any]],
+        artifacts: list[dict[str, Any]],
+        root_group: bool,
+        node_index: int,
+    ) -> dict[str, Any]:
+        engine = self._engine
+        criteria = engine._workflow_approval_criteria(node)
+        pending = {
+            "approval_id": f"approval_{uuid4().hex[:12]}",
+            "tool": "workflow.approval",
+            "input_preview": {
+                "checkpoint": label,
+                "context": _tool_input_preview(context),
+                **({"criteria": criteria} if criteria else {}),
+            },
+            "requested_at": _now(),
+            "workflow_context": context,
+            "workflow_next_index": node_index + 1,
+            "workflow_node_id": str(node.get("id") or ""),
+            "workflow_node_label": label,
+            "workflow_node_approval_criteria": criteria,
+        }
+        timeline.append(
+            engine._timeline(
+                "workflow.node.approval_required",
+                label,
+                workflow_node_id=str(node.get("id") or ""),
+                workflow_node_kind=kind,
+                workflow_node_label=label,
+                workflow_node_approval_criteria=criteria,
+                status="approval_required",
+                pending_approval=_public_pending_approval(pending),
+            )
+        )
+        engine.append_run_event(
+            str(run["run_id"]),
+            "workflow.node.approval_required",
+            {
+                "workflow_node_id": str(node.get("id") or ""),
+                "workflow_node_kind": kind,
+                "workflow_node_label": label,
+                "workflow_node_approval_criteria": criteria,
+                "status": "approval_required",
+                "pending_approval": _public_pending_approval(pending),
+            },
+        )
+        result = engine._update_run(
+            str(run["run_id"]),
+            status="approval_required",
+            result=f"等待审批：{label}",
+            timeline=timeline,
+            artifacts=artifacts,
+            pending_approval=pending,
+        )
+        if root_group:
+            engine._update_run_group(
+                run_group_id,
+                status="approval_required",
+                summary=f"等待审批：{label}",
+            )
+            result = engine.get_run(result["run_id"])
+        return result
+
+    def _write_artifact_node(
+        self,
+        run: dict[str, Any],
+        node: dict[str, Any],
+        *,
+        label: str,
+        kind: str,
+        context: str,
+        artifacts: list[dict[str, Any]],
+        timeline: list[dict[str, Any]],
+    ) -> None:
+        engine = self._engine
+        data = node.get("data") or {}
+        broker = ToolBroker(
+            engine._default_workspace_policy(),
+            engine.workflow_artifacts_dir / str(run["run_id"]),
+        )
+        workflow_node_id = str(node.get("id") or "")
+        artifact_path = engine._workflow_artifact_path(
+            label,
+            artifacts,
+            str(data.get("artifact_path") or data.get("artifactPath") or ""),
+        )
+        artifact = broker.artifact_write(artifact_path, context)
+        artifacts.append(
+            {
+                "kind": "workflow_artifact",
+                "workflow_node_id": workflow_node_id,
+                "workflow_node_label": label,
+                **artifact,
+            }
+        )
+        artifact_payload = {
+            "workflow_node_id": workflow_node_id,
+            "workflow_node_kind": kind,
+            "workflow_node_label": label,
+            "status": "completed",
+            "artifact": artifact,
+        }
+        timeline.append(
+            engine._timeline(
+                "workflow.node.artifact",
+                label,
+                **artifact_payload,
+            )
+        )
+        engine.append_run_event(str(run["run_id"]), "workflow.node.artifact", artifact_payload)
+
+
+class NativeRunEngine:
+    """Persistent native agent execution engine shared by product entry points.
+
+    AgentRuntimeService is kept as a compatibility name below because mature
+    routes, tests, and UI-facing APIs still use the service label.
+    """
 
     def __init__(
         self,
         db_path: Path | str | None = None,
         workspace_dir: Path | str | None = None,
         *,
+        credential_store: CredentialStore | None = None,
         seed_templates: bool = True,
     ) -> None:
-        root = Path(workspace_dir) if workspace_dir is not None else _hermes_yachiyo_home()
+        root = Path(workspace_dir) if workspace_dir is not None else _oha_yachiyo_home()
         root.mkdir(parents=True, exist_ok=True)
         self.workspace_dir = root
         self.db_path = Path(db_path) if db_path is not None else root / "agent-runtime.db"
+        self._credential_store = credential_store or create_credential_store(root)
         self.skills_dir = root / "skills"
         self.skill_installs_dir = root / "skill-installs"
-        self.skill_installs_hermes_home = self.skill_installs_dir / "hermes-home"
+        self.skill_installs_native_home = self.skill_installs_dir / "native-home"
         self.agent_artifacts_dir = root / "artifacts" / "agent-runs"
         self.workflow_artifacts_dir = root / "artifacts" / "workflow-runs"
         self.agent_workspaces_dir = root / "workspaces" / "agents"
         self.skills_dir.mkdir(parents=True, exist_ok=True)
         self.skill_installs_dir.mkdir(parents=True, exist_ok=True)
-        self.skill_installs_hermes_home.mkdir(parents=True, exist_ok=True)
+        self.skill_installs_native_home.mkdir(parents=True, exist_ok=True)
         self.agent_artifacts_dir.mkdir(parents=True, exist_ok=True)
         self.workflow_artifacts_dir.mkdir(parents=True, exist_ok=True)
         self.agent_workspaces_dir.mkdir(parents=True, exist_ok=True)
+        self._accepting_runs = True
+        self._closed = False
+        self.runtime_limits = _RunBudgetLimits()
         self._db_lock = threading.RLock()
+        self._approval_execution_lock = threading.RLock()
+        self._approval_execution_in_progress: set[str] = set()
+        self._run_cancel_locks: dict[str, threading.RLock] = {}
+        self._run_cancel_locks_guard = threading.RLock()
         raw_conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        raw_conn.execute("PRAGMA foreign_keys=ON")
+        raw_conn.execute("PRAGMA journal_mode=WAL")
+        raw_conn.execute("PRAGMA busy_timeout=5000")
         self._conn = _LockedConnection(raw_conn, self._db_lock)
         self._conn.row_factory = _named_row_factory
+        self.run_groups = RunGroupRepository(
+            self._conn,
+            ensure_row_factory=self._ensure_row_factory,
+            row_to_run_group=self._row_to_run_group,
+            row_to_run=self._row_to_run,
+        )
+        self.runs = RunRepository(
+            self._conn,
+            ensure_row_factory=self._ensure_row_factory,
+            row_to_run=self._row_to_run,
+            accepting_runs=lambda: self._accepting_runs,
+            sync_projections=self._sync_run_projections,
+            append_run_to_group=self._append_run_to_group,
+        )
+        self.run_events = RunEventRepository(self._conn, self._db_lock, ensure_run_exists=self.get_run)
+        self.run_approvals = ApprovalRepository(self._conn, self._db_lock)
+        self.run_artifacts = RunArtifactRepository(
+            self._conn,
+            agent_artifacts_dir=self.agent_artifacts_dir,
+            workflow_artifacts_dir=self.workflow_artifacts_dir,
+            get_run=self.get_run,
+        )
+        self.approvals = ApprovalCoordinator(
+            timeline_factory=self._timeline,
+            append_run_event=self.append_run_event,
+            update_run=self._update_run,
+        )
+        self.approval_resume = ApprovalResumeCoordinator(
+            call_agent_tool=self._call_agent_tool,
+            fatal_tool_failure_detail=self._fatal_tool_failure_detail,
+            append_tool_result_message=self._append_tool_result_message,
+            run_tool_requests=self._run_tool_requests,
+            timeline_factory=self._timeline,
+        )
+        self.workflow_continuation = WorkflowContinuationCoordinator(self)
+        self.workflow_parent_resume = WorkflowParentResumeCoordinator(
+            parent_runs_waiting_for_child=lambda child_run: self._workflow_parent_runs_waiting_for_child(child_run),
+            workflow_run_is_group_root=lambda workflow_run: self._workflow_run_is_group_root(workflow_run),
+            workflow_child_node_context=lambda timeline, child_run: self._workflow_child_node_context(timeline, child_run),
+            merge_workflow_child_run_outcome=lambda timeline, artifacts, child_run, label: (
+                self._merge_workflow_child_run_outcome(timeline, artifacts, child_run, label)
+            ),
+            workflow_for_run_resume=lambda workflow_run: self._workflow_for_run_resume(workflow_run),
+            workflow_resume_start_index=lambda workflow, workflow_run, child_run_id: (
+                self._workflow_resume_start_index(workflow, workflow_run, child_run_id)
+            ),
+            continue_workflow_run=lambda run, workflow, **kwargs: self.workflow_continuation.continue_run(run, workflow, **kwargs),
+            timeline_factory=lambda event, detail="", **extra: self._timeline(event, detail, **extra),
+            append_run_event=lambda run_id, event_type, payload: self.append_run_event(run_id, event_type, payload),
+            update_run=lambda run_id, **kwargs: self._update_run(run_id, **kwargs),
+            update_run_group=lambda run_group_id, **kwargs: self._update_run_group(run_group_id, **kwargs),
+        )
         self._init_db()
         self._migrate_agent_workspace_policies()
         if seed_templates:
             self._seed_templates()
 
     def close(self) -> None:
-        self._conn.close()
+        self.shutdown()
+
+    def shutdown(self, *, close_db: bool = True) -> None:
+        if self._closed:
+            return
+        self._accepting_runs = False
+        cancel_terminal_process_groups()
+        try:
+            self._ensure_row_factory()
+            rows = self._conn.execute(
+                """
+                SELECT run_id
+                  FROM runs
+                 WHERE status NOT IN ('completed', 'failed', 'cancelled')
+                 ORDER BY updated_at DESC
+                """
+            ).fetchall()
+            for row in rows:
+                try:
+                    self.cancel_run(str(row["run_id"]))
+                except Exception:
+                    continue
+            self._conn.commit()
+        finally:
+            if close_db:
+                self._conn.close()
+                self._credential_store.close()
+                self._closed = True
 
     def _ensure_row_factory(self) -> None:
         if self._conn.row_factory is not _named_row_factory:
@@ -611,13 +2899,14 @@ class AgentRuntimeService:
                 instructions TEXT NOT NULL DEFAULT '',
                 persona_prompt TEXT NOT NULL DEFAULT '',
                 model_mode TEXT NOT NULL DEFAULT 'profile',
-                execution_backend TEXT NOT NULL DEFAULT 'yachiyo_profile',
+                execution_backend TEXT NOT NULL DEFAULT 'native_profile',
                 model_profile_id TEXT NOT NULL DEFAULT '',
                 vision_model_profile_id TEXT NOT NULL DEFAULT '',
                 model_provider TEXT NOT NULL DEFAULT 'openai_compatible',
                 model_base_url TEXT NOT NULL DEFAULT '',
                 model_name TEXT NOT NULL DEFAULT '',
                 model_api_key TEXT NOT NULL DEFAULT '',
+                model_credential_ref TEXT NOT NULL DEFAULT '',
                 tool_policy_json TEXT NOT NULL DEFAULT '{}',
                 workspace_policy_json TEXT NOT NULL DEFAULT '{}',
                 skill_ids_json TEXT NOT NULL DEFAULT '[]',
@@ -686,6 +2975,7 @@ class AgentRuntimeService:
             CREATE TABLE IF NOT EXISTS runs (
                 run_id TEXT PRIMARY KEY,
                 run_group_id TEXT NOT NULL DEFAULT '',
+                client_request_id TEXT NOT NULL DEFAULT '',
                 kind TEXT NOT NULL,
                 runnable_id TEXT NOT NULL,
                 status TEXT NOT NULL,
@@ -697,9 +2987,65 @@ class AgentRuntimeService:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS task_run_links (
+                task_id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL UNIQUE,
+                session_id TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS run_events (
+                event_id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL,
+                sequence INTEGER NOT NULL,
+                schema_version INTEGER NOT NULL DEFAULT 1,
+                event_type TEXT NOT NULL,
+                actor TEXT NOT NULL DEFAULT 'native_runtime',
+                visibility TEXT NOT NULL DEFAULT 'user',
+                sensitivity TEXT NOT NULL DEFAULT 'public',
+                payload_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE,
+                UNIQUE (run_id, sequence)
+            );
+            CREATE TABLE IF NOT EXISTS run_approvals (
+                approval_id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                tool TEXT NOT NULL DEFAULT '',
+                input_preview_json TEXT NOT NULL DEFAULT '{}',
+                payload_json TEXT NOT NULL DEFAULT '{}',
+                requested_at TEXT NOT NULL,
+                resolved_at TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS run_artifacts (
+                artifact_id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL,
+                sequence INTEGER NOT NULL,
+                kind TEXT NOT NULL DEFAULT '',
+                path TEXT NOT NULL DEFAULT '',
+                source_run_id TEXT NOT NULL DEFAULT '',
+                payload_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE,
+                UNIQUE (run_id, sequence)
+            );
+            CREATE TABLE IF NOT EXISTS trusted_workspaces (
+                path TEXT PRIMARY KEY,
+                source TEXT NOT NULL DEFAULT '',
+                trusted_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS runtime_schema_metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
             """
         )
-        self._ensure_runtime_columns()
+        scrubbed_agent_credentials = self._ensure_runtime_columns()
         self._conn.executescript(
             """
             CREATE INDEX IF NOT EXISTS idx_agents_name ON agents (LOWER(name));
@@ -711,22 +3057,40 @@ class AgentRuntimeService:
             CREATE INDEX IF NOT EXISTS idx_run_groups_status_updated ON run_groups (status, updated_at);
             CREATE INDEX IF NOT EXISTS idx_runs_group_updated ON runs (run_group_id, updated_at);
             CREATE INDEX IF NOT EXISTS idx_runs_kind_updated ON runs (kind, updated_at);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_client_request ON runs (client_request_id) WHERE client_request_id != '';
+            CREATE INDEX IF NOT EXISTS idx_task_run_links_session ON task_run_links (session_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_run_events_run_sequence ON run_events (run_id, sequence);
+            CREATE INDEX IF NOT EXISTS idx_run_approvals_run_status ON run_approvals (run_id, status);
+            CREATE INDEX IF NOT EXISTS idx_run_artifacts_run_sequence ON run_artifacts (run_id, sequence);
+            CREATE INDEX IF NOT EXISTS idx_trusted_workspaces_updated ON trusted_workspaces (updated_at);
             """
         )
+        self._conn.execute(
+            """
+            INSERT INTO runtime_schema_metadata (key, value, updated_at)
+            VALUES ('schema_version', '1', ?)
+            ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
+            """,
+            (_now(),),
+        )
         self._conn.commit()
+        if scrubbed_agent_credentials:
+            self._vacuum_after_secret_scrub()
 
-    def _ensure_runtime_columns(self) -> None:
+    def _ensure_runtime_columns(self) -> bool:
         columns = {str(row["name"]) for row in self._conn.execute("PRAGMA table_info(agents)").fetchall()}
         if "nickname" not in columns:
             self._conn.execute("ALTER TABLE agents ADD COLUMN nickname TEXT NOT NULL DEFAULT ''")
         if "persona_prompt" not in columns:
             self._conn.execute("ALTER TABLE agents ADD COLUMN persona_prompt TEXT NOT NULL DEFAULT ''")
         if "execution_backend" not in columns:
-            self._conn.execute("ALTER TABLE agents ADD COLUMN execution_backend TEXT NOT NULL DEFAULT 'yachiyo_profile'")
+            self._conn.execute("ALTER TABLE agents ADD COLUMN execution_backend TEXT NOT NULL DEFAULT 'native_profile'")
         if "model_profile_id" not in columns:
             self._conn.execute("ALTER TABLE agents ADD COLUMN model_profile_id TEXT NOT NULL DEFAULT ''")
         if "vision_model_profile_id" not in columns:
             self._conn.execute("ALTER TABLE agents ADD COLUMN vision_model_profile_id TEXT NOT NULL DEFAULT ''")
+        if "model_credential_ref" not in columns:
+            self._conn.execute("ALTER TABLE agents ADD COLUMN model_credential_ref TEXT NOT NULL DEFAULT ''")
         skill_columns = {str(row["name"]) for row in self._conn.execute("PRAGMA table_info(skills)").fetchall()}
         if "local_path" not in skill_columns:
             self._conn.execute("ALTER TABLE skills ADD COLUMN local_path TEXT NOT NULL DEFAULT ''")
@@ -749,8 +3113,95 @@ class AgentRuntimeService:
         run_columns = {str(row["name"]) for row in self._conn.execute("PRAGMA table_info(runs)").fetchall()}
         if "run_group_id" not in run_columns:
             self._conn.execute("ALTER TABLE runs ADD COLUMN run_group_id TEXT NOT NULL DEFAULT ''")
+        if "client_request_id" not in run_columns:
+            self._conn.execute("ALTER TABLE runs ADD COLUMN client_request_id TEXT NOT NULL DEFAULT ''")
         if "pending_approval_json" not in run_columns:
             self._conn.execute("ALTER TABLE runs ADD COLUMN pending_approval_json TEXT NOT NULL DEFAULT '{}'")
+        self._migrate_native_execution_and_skill_sources()
+        return self._migrate_agent_model_credentials()
+
+    def _vacuum_after_secret_scrub(self) -> None:
+        try:
+            self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            self._conn.execute("VACUUM")
+            self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except sqlite3.Error:
+            logger.debug("NativeRunEngine secret scrub vacuum failed", exc_info=True)
+
+    def _migrate_native_execution_and_skill_sources(self) -> None:
+        self._conn.execute(
+            """
+            UPDATE agents
+               SET execution_backend='native_profile'
+             WHERE execution_backend IN ('yachiyo_profile', 'external_cli', '')
+            """
+        )
+        self._conn.execute(
+            """
+            UPDATE skill_folders
+               SET source_scope='installed'
+             WHERE source_scope='yachiyo'
+            """
+        )
+        self._conn.execute(
+            """
+            UPDATE studio_deletions
+               SET item_key='installed:' || substr(item_key, 9)
+             WHERE item_type='skill_source'
+               AND item_key LIKE 'yachiyo:%'
+            """
+        )
+
+    def _agent_model_credential_ref(self, agent_id: str) -> str:
+        return f"agent:{agent_id}:model_api_key"
+
+    def _store_credential(self, ref: str, secret: str) -> None:
+        secret = str(secret or "").strip()
+        if not secret:
+            return
+        try:
+            self._credential_store.set(ref, secret)
+        except CredentialStoreError as exc:
+            raise AgentRuntimeError(redact_api_error_text(exc)) from exc
+
+    def _read_credential(self, ref: str) -> str:
+        ref = str(ref or "").strip()
+        if not ref:
+            return ""
+        try:
+            return self._credential_store.get(ref)
+        except CredentialStoreError as exc:
+            raise AgentRuntimeError(redact_api_error_text(exc)) from exc
+
+    def _delete_credential(self, ref: str) -> None:
+        ref = str(ref or "").strip()
+        if not ref:
+            return
+        try:
+            self._credential_store.delete(ref)
+        except CredentialStoreError:
+            pass
+
+    def _migrate_agent_model_credentials(self) -> bool:
+        scrubbed = False
+        rows = self._conn.execute(
+            "SELECT agent_id, model_api_key, model_credential_ref FROM agents WHERE model_api_key<>''"
+        ).fetchall()
+        for row in rows:
+            secret = str(row["model_api_key"] or "").strip()
+            if not secret:
+                continue
+            credential_ref = str(row["model_credential_ref"] or "").strip() or self._agent_model_credential_ref(str(row["agent_id"]))
+            try:
+                self._credential_store.set(credential_ref, secret)
+            except CredentialStoreError:
+                continue
+            self._conn.execute(
+                "UPDATE agents SET model_credential_ref=?, model_api_key='' WHERE agent_id=?",
+                (credential_ref, str(row["agent_id"])),
+            )
+            scrubbed = True
+        return scrubbed
 
     def _record_studio_deletion(self, item_type: str, item_key: str) -> None:
         clean_key = str(item_key or "").strip()
@@ -783,7 +3234,7 @@ class AgentRuntimeService:
         clean_origin = str(origin_path or "").strip()
         if not clean_origin:
             return ""
-        library = "hermes" if source_type in {"hermes_global", "hermes_project"} else "yachiyo"
+        library = "native" if _is_native_library_source_type(source_type) else "installed"
         try:
             clean_origin = str(Path(clean_origin).expanduser().resolve())
         except OSError:
@@ -1094,6 +3545,63 @@ class AgentRuntimeService:
             assigned["writable_scopes"] = ["."]
         return assigned
 
+    def trust_workspace(self, path: str | Path, *, source: str = "runtime", commit: bool = True) -> dict[str, Any]:
+        raw_path = str(path or "").strip()
+        if not raw_path:
+            raise AgentRuntimeError("trusted workspace 路径不能为空")
+        try:
+            resolved = Path(raw_path).expanduser().resolve()
+        except OSError as exc:
+            raise AgentRuntimeError(f"trusted workspace 路径无效：{exc}") from exc
+        if not resolved.exists() or not resolved.is_dir():
+            raise AgentRuntimeError("trusted workspace 必须是已存在目录")
+        now = _now()
+        self._conn.execute(
+            """
+            INSERT INTO trusted_workspaces (path, source, trusted_at, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(path) DO UPDATE SET
+                source=excluded.source,
+                updated_at=excluded.updated_at
+            """,
+            (str(resolved), str(source or "runtime")[:120], now, now),
+        )
+        if commit:
+            self._conn.commit()
+        return {"path": str(resolved), "source": str(source or "runtime")[:120], "trusted_at": now}
+
+    def _trust_workspace_from_policy(
+        self,
+        workspace_policy: dict[str, Any],
+        *,
+        source: str,
+        commit: bool = True,
+    ) -> None:
+        workdir = str(workspace_policy.get("default_workdir") or "").strip()
+        if not workdir:
+            return
+        try:
+            self.trust_workspace(workdir, source=source, commit=commit)
+        except AgentRuntimeError:
+            return
+
+    def list_trusted_workspaces(self) -> dict[str, Any]:
+        rows = self._conn.execute(
+            "SELECT path, source, trusted_at, updated_at FROM trusted_workspaces ORDER BY updated_at DESC"
+        ).fetchall()
+        return {
+            "ok": True,
+            "workspaces": [
+                {
+                    "path": str(row["path"]),
+                    "source": str(row["source"] or ""),
+                    "trusted_at": str(row["trusted_at"] or ""),
+                    "updated_at": str(row["updated_at"] or ""),
+                }
+                for row in rows
+            ],
+        }
+
     def _migrate_agent_workspace_policies(self) -> None:
         rows = self._conn.execute(
             "SELECT agent_id, category, tool_policy_json, workspace_policy_json FROM agents"
@@ -1120,63 +3628,7 @@ class AgentRuntimeService:
 
     @staticmethod
     def _tool_schemas(allowed_tools: list[str]) -> list[dict[str, Any]]:
-        specs: dict[str, dict[str, Any]] = {
-            "workspace.list": {
-                "description": "List entries in an allowed workspace directory. Use this before workspace.read when you only know a directory path.",
-                "properties": {"path": {"type": "string", "description": "Relative directory path."}},
-            },
-            "workspace.read": {
-                "description": "Read a UTF-8 text file from the allowed workspace. This only accepts file paths; use workspace.list for directories.",
-                "properties": {"path": {"type": "string", "description": "Relative file path."}},
-                "required": ["path"],
-            },
-            "workspace.write_patch": {
-                "description": "Write text content to an allowed workspace path. Requires user approval.",
-                "properties": {
-                    "path": {"type": "string", "description": "Relative file path inside writable scopes."},
-                    "content": {"type": "string", "description": "Full text content to write."},
-                },
-                "required": ["path", "content"],
-            },
-            "terminal.run": {
-                "description": "Run a shell command in the Agent workdir. Requires user approval.",
-                "properties": {
-                    "command": {"type": "string", "description": "Shell command to run."},
-                    "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 120},
-                },
-                "required": ["command"],
-            },
-            "artifact.write": {
-                "description": "Write a markdown/text artifact for the current run.",
-                "properties": {
-                    "path": {"type": "string", "description": "Relative artifact path."},
-                    "content": {"type": "string", "description": "Artifact content."},
-                },
-                "required": ["path", "content"],
-            },
-        }
-        schemas = []
-        for tool in allowed_tools:
-            spec = specs.get(tool)
-            function_name = _TOOL_FUNCTION_NAMES.get(tool)
-            if not spec or not function_name:
-                continue
-            schemas.append(
-                {
-                    "type": "function",
-                    "function": {
-                        "name": function_name,
-                        "description": spec["description"],
-                        "parameters": {
-                            "type": "object",
-                            "properties": spec.get("properties") or {},
-                            "required": spec.get("required") or [],
-                            "additionalProperties": False,
-                        },
-                    },
-                }
-            )
-        return schemas
+        return ToolDescriptorRegistry.model_tool_schemas(allowed_tools)
 
     def _compile_tool_policy(self, category: str, policy: Any = None) -> dict[str, Any]:
         raw = policy if isinstance(policy, dict) else {}
@@ -1238,7 +3690,7 @@ class AgentRuntimeService:
                 "provider": row["model_provider"],
                 "base_url": row["model_base_url"],
                 "model": row["model_name"],
-                "api_key_configured": bool(row["model_api_key"]),
+                "api_key_configured": bool(str(row["model_credential_ref"] or "").strip() or str(row["model_api_key"] or "").strip()),
             },
             "tool_policy": self._compile_tool_policy(
                 row["category"],
@@ -1256,8 +3708,55 @@ class AgentRuntimeService:
 
     def _row_to_agent_private(self, row: Any) -> dict[str, Any]:
         agent = self._row_to_agent(row)
-        agent["model_config"]["api_key"] = row["model_api_key"]
+        agent["model_config"]["credential_ref"] = row["model_credential_ref"]
+        agent["model_config"]["api_key"] = (
+            self._read_credential(str(row["model_credential_ref"] or "")) or str(row["model_api_key"] or "")
+        )
         return agent
+
+    def _main_chat_virtual_agent(self) -> dict[str, Any]:
+        try:
+            default_profile_id = str(get_model_profile_service().get_defaults().get("chat") or "").strip()
+        except Exception:
+            default_profile_id = ""
+        return {
+            "agent_id": _MAIN_CHAT_AGENT_ID,
+            "name": "Yachiyo",
+            "nickname": "Yachiyo",
+            "description": "Oha-Yachiyo main chat system agent.",
+            "avatar_url": "",
+            "category": "orchestrator",
+            "instructions": "Main chat native agent.",
+            "persona_prompt": "",
+            "model_mode": "profile",
+            "execution_backend": "native_profile",
+            "model_profile_id": default_profile_id,
+            "vision_model_profile_id": "",
+            "model_config": {
+                "provider": "model_profile",
+                "base_url": "",
+                "model": "",
+                "api_key_configured": bool(default_profile_id),
+            },
+            "tool_policy": self._main_chat_tool_policy(),
+            "workspace_policy": self._compile_workspace_policy(
+                {
+                    "default_workdir": str(self.agent_workspaces_dir / "builtin-yachiyo-main"),
+                    "readable_scopes": ["."],
+                    "writable_scopes": [],
+                }
+            ),
+            "skill_ids": [],
+            "output_contract": "chat",
+            "enabled": True,
+            "virtual": True,
+            "system": True,
+            "builtin": True,
+            "editable": False,
+            "deletable": False,
+            "created_at": "",
+            "updated_at": "",
+        }
 
     def _row_to_skill(self, row: sqlite3.Row) -> dict[str, Any]:
         keys = set(row.keys())
@@ -1293,8 +3792,8 @@ class AgentRuntimeService:
             "source_scope": row["source_scope"],
             "sort_order": int(row["sort_order"]),
             "skill_count": int(row["skill_count"] or 0),
-            "yachiyo_count": int(row["yachiyo_count"] or 0),
-            "hermes_count": int(row["hermes_count"] or 0),
+            "installed_count": int(row["installed_count"] or 0),
+            "native_count": int(row["native_count"] or 0),
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
         }
@@ -1320,10 +3819,24 @@ class AgentRuntimeService:
             if "run_group_source" in row_keys
             else self._run_group_source(str(run_group_id or ""))
         )
+        task_link = self._conn.execute(
+            """
+            SELECT task_id, session_id, created_at
+              FROM task_run_links
+             WHERE run_id=?
+             ORDER BY created_at DESC
+             LIMIT 1
+            """,
+            (str(row["run_id"] or ""),),
+        ).fetchone()
         run = {
             "run_id": row["run_id"],
+            "task_id": str(task_link["task_id"] or "") if task_link is not None else "",
+            "session_id": str(task_link["session_id"] or "") if task_link is not None else "",
+            "task_run_link_created_at": str(task_link["created_at"] or "") if task_link is not None else "",
             "run_group_id": run_group_id,
             "run_group_source": run_group_source,
+            "client_request_id": str(row["client_request_id"] or "") if "client_request_id" in row_keys else "",
             "kind": row["kind"],
             "runnable_id": row["runnable_id"],
             "runnable_name": self._runnable_name(str(row["kind"]), str(row["runnable_id"])),
@@ -1354,6 +3867,8 @@ class AgentRuntimeService:
 
     def _runnable_name(self, kind: str, runnable_id: str) -> str:
         self._ensure_row_factory()
+        if kind == "main_chat_run" and runnable_id == _MAIN_CHAT_AGENT_ID:
+            return "Yachiyo"
         if kind == "agent_run":
             row = self._conn.execute("SELECT name FROM agents WHERE agent_id=?", (runnable_id,)).fetchone()
             return str(row["name"]) if row is not None else ""
@@ -1367,6 +3882,8 @@ class AgentRuntimeService:
         clean = (name or "").strip()
         if not clean:
             raise AgentRuntimeError("名称不能为空")
+        if clean.lower() == "yachiyo":
+            raise AgentRuntimeError("Yachiyo 是系统 Agent 名称，不能作为普通 Agent/Workflow 名称")
         agent = self._conn.execute(
             "SELECT agent_id FROM agents WHERE LOWER(name)=LOWER(?)",
             (clean,),
@@ -1411,12 +3928,17 @@ class AgentRuntimeService:
         return {
             "ok": True,
             "agents": [
-                self._row_to_agent(self._coerce_named_row(row, cursor.description))
-                for row in rows
+                self._main_chat_virtual_agent(),
+                *[
+                    self._row_to_agent(self._coerce_named_row(row, cursor.description))
+                    for row in rows
+                ],
             ],
         }
 
     def get_agent(self, agent_id: str) -> dict[str, Any]:
+        if str(agent_id or "").strip() == _MAIN_CHAT_AGENT_ID:
+            return self._main_chat_virtual_agent()
         self._ensure_row_factory()
         cursor = self._conn.execute("SELECT * FROM agents WHERE agent_id=?", (agent_id,))
         row = cursor.fetchone()
@@ -1425,6 +3947,16 @@ class AgentRuntimeService:
         return self._row_to_agent(self._coerce_named_row(row, cursor.description))
 
     def _get_agent_private(self, agent_id: str) -> dict[str, Any]:
+        if str(agent_id or "").strip() == _MAIN_CHAT_AGENT_ID:
+            agent = self._main_chat_virtual_agent()
+            return {
+                **agent,
+                "model_config": {
+                    **agent["model_config"],
+                    "credential_ref": "",
+                    "api_key": "",
+                },
+            }
         self._ensure_row_factory()
         cursor = self._conn.execute("SELECT * FROM agents WHERE agent_id=?", (agent_id,))
         row = cursor.fetchone()
@@ -1438,6 +3970,8 @@ class AgentRuntimeService:
         self._validate_agent_profile_refs(payload)
         now = _now()
         agent_id = str(payload.get("agent_id") or f"agent_{_slug(name, 'agent')}_{uuid4().hex[:8]}")
+        if agent_id in _SYSTEM_AGENT_IDS:
+            raise AgentRuntimeError("系统 Agent 不能创建或覆盖")
         model_config = payload.get("model_config") or {}
         category = str(payload.get("category") or "custom")
         model_mode = str(payload.get("model_mode") or "profile")
@@ -1445,47 +3979,60 @@ class AgentRuntimeService:
         tool_policy = self._compile_tool_policy(category, payload.get("tool_policy"))
         workspace_policy = self._compile_workspace_policy(payload.get("workspace_policy"))
         workspace_policy = self._assign_default_agent_workdir(agent_id, workspace_policy, tool_policy)
-        self._conn.execute(
-            """
-            INSERT INTO agents (
-                agent_id, name, nickname, description, avatar_url, category, instructions, persona_prompt,
-                model_mode, execution_backend, model_profile_id, vision_model_profile_id, model_provider, model_base_url, model_name, model_api_key,
-                tool_policy_json, workspace_policy_json, skill_ids_json, output_contract,
-                enabled, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                agent_id,
-                name,
-                str(payload.get("nickname") or name),
-                str(payload.get("description") or ""),
-                str(payload.get("avatar_url") or ""),
-                category,
-                str(payload.get("instructions") or ""),
-                str(payload.get("persona_prompt") or ""),
-                model_mode,
-                execution_backend,
-                str(payload.get("model_profile_id") or ""),
-                str(payload.get("vision_model_profile_id") or ""),
-                str(model_config.get("provider") or "openai_compatible"),
-                str(model_config.get("base_url") or ""),
-                str(model_config.get("model") or ""),
-                str(model_config.get("api_key") or ""),
-                _json_dump(tool_policy),
-                _json_dump(workspace_policy),
-                _json_dump(payload.get("skill_ids") or []),
-                str(payload.get("output_contract") or "chat"),
-                1 if payload.get("enabled", True) else 0,
-                now,
-                now,
-            ),
-        )
+        self._trust_workspace_from_policy(workspace_policy, source=f"agent:{agent_id}", commit=False)
+        api_key = str(model_config.get("api_key") or "").strip()
+        credential_ref = self._agent_model_credential_ref(agent_id) if api_key else ""
+        if api_key:
+            self._store_credential(credential_ref, api_key)
+        try:
+            self._conn.execute(
+                """
+                INSERT INTO agents (
+                    agent_id, name, nickname, description, avatar_url, category, instructions, persona_prompt,
+                    model_mode, execution_backend, model_profile_id, vision_model_profile_id, model_provider,
+                    model_base_url, model_name, model_api_key, model_credential_ref,
+                    tool_policy_json, workspace_policy_json, skill_ids_json, output_contract,
+                    enabled, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    agent_id,
+                    name,
+                    str(payload.get("nickname") or name),
+                    str(payload.get("description") or ""),
+                    str(payload.get("avatar_url") or ""),
+                    category,
+                    str(payload.get("instructions") or ""),
+                    str(payload.get("persona_prompt") or ""),
+                    model_mode,
+                    execution_backend,
+                    str(payload.get("model_profile_id") or ""),
+                    str(payload.get("vision_model_profile_id") or ""),
+                    str(model_config.get("provider") or "openai_compatible"),
+                    str(model_config.get("base_url") or ""),
+                    str(model_config.get("model") or ""),
+                    "",
+                    credential_ref,
+                    _json_dump(tool_policy),
+                    _json_dump(workspace_policy),
+                    _json_dump(payload.get("skill_ids") or []),
+                    str(payload.get("output_contract") or "chat"),
+                    1 if payload.get("enabled", True) else 0,
+                    now,
+                    now,
+                ),
+            )
+        except sqlite3.Error:
+            self._delete_credential(credential_ref)
+            raise
         if not seed:
             self._clear_studio_deletion("agent", agent_id)
         self._conn.commit()
         return self.get_agent(agent_id)
 
     def update_agent(self, agent_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if str(agent_id or "").strip() in _SYSTEM_AGENT_IDS:
+            raise AgentRuntimeError("系统 Agent 不能修改")
         current = self._get_agent_private(agent_id)
         if "name" in payload:
             self._ensure_global_name_available(str(payload.get("name") or ""), ignore_agent_id=agent_id)
@@ -1497,6 +4044,10 @@ class AgentRuntimeService:
             api_key = str(current.get("model_config", {}).get("api_key") or "")
         if "model_config" in payload and "api_key" in payload.get("model_config", {}) and not api_key:
             api_key = str(current.get("model_config", {}).get("api_key") or "")
+        credential_ref = str(current.get("model_config", {}).get("credential_ref") or "").strip()
+        if api_key:
+            credential_ref = credential_ref or self._agent_model_credential_ref(agent_id)
+            self._store_credential(credential_ref, api_key)
         now = _now()
         category = str(next_agent.get("category") or "custom")
         model_mode = str(next_agent.get("model_mode") or "profile")
@@ -1504,11 +4055,13 @@ class AgentRuntimeService:
         tool_policy = self._compile_tool_policy(category, next_agent.get("tool_policy"))
         workspace_policy = self._compile_workspace_policy(next_agent.get("workspace_policy"))
         workspace_policy = self._assign_default_agent_workdir(agent_id, workspace_policy, tool_policy)
+        self._trust_workspace_from_policy(workspace_policy, source=f"agent:{agent_id}", commit=False)
         self._conn.execute(
             """
             UPDATE agents
                SET name=?, nickname=?, description=?, avatar_url=?, category=?, instructions=?, persona_prompt=?,
-                   model_mode=?, execution_backend=?, model_profile_id=?, vision_model_profile_id=?, model_provider=?, model_base_url=?, model_name=?, model_api_key=?,
+                   model_mode=?, execution_backend=?, model_profile_id=?, vision_model_profile_id=?, model_provider=?,
+                   model_base_url=?, model_name=?, model_api_key='', model_credential_ref=?,
                    tool_policy_json=?, workspace_policy_json=?, skill_ids_json=?, output_contract=?,
                    enabled=?, updated_at=?
              WHERE agent_id=?
@@ -1528,7 +4081,7 @@ class AgentRuntimeService:
                 str(model_config.get("provider") or "openai_compatible"),
                 str(model_config.get("base_url") or ""),
                 str(model_config.get("model") or ""),
-                api_key,
+                credential_ref,
                 _json_dump(tool_policy),
                 _json_dump(workspace_policy),
                 _json_dump(next_agent.get("skill_ids") or []),
@@ -1542,10 +4095,15 @@ class AgentRuntimeService:
         return self.get_agent(agent_id)
 
     def delete_agent(self, agent_id: str) -> dict[str, Any]:
+        if str(agent_id or "").strip() in _SYSTEM_AGENT_IDS:
+            raise AgentRuntimeError("系统 Agent 不能删除")
+        row = self._conn.execute("SELECT model_credential_ref FROM agents WHERE agent_id=?", (agent_id,)).fetchone()
         if self._conn.execute("SELECT 1 FROM agents WHERE agent_id=?", (agent_id,)).fetchone() is not None:
             self._record_studio_deletion("agent", agent_id)
         self._conn.execute("DELETE FROM agents WHERE agent_id=?", (agent_id,))
         self._conn.commit()
+        if row is not None:
+            self._delete_credential(str(row["model_credential_ref"] or ""))
         return {"ok": True}
 
     def attach_skill(self, agent_id: str, skill_id: str) -> dict[str, Any]:
@@ -1567,8 +4125,8 @@ class AgentRuntimeService:
             """
             SELECT f.*,
                    COUNT(s.skill_id) AS skill_count,
-                   SUM(CASE WHEN s.source_type IN ('hermes_global', 'hermes_project') THEN 0 ELSE 1 END) AS yachiyo_count,
-                   SUM(CASE WHEN s.source_type IN ('hermes_global', 'hermes_project') THEN 1 ELSE 0 END) AS hermes_count
+                   SUM(CASE WHEN s.source_type IN ('native_global', 'native_project') THEN 0 ELSE 1 END) AS installed_count,
+                   SUM(CASE WHEN s.source_type IN ('native_global', 'native_project') THEN 1 ELSE 0 END) AS native_count
               FROM skill_folders f
               LEFT JOIN skills s ON s.folder_id = f.folder_id
              GROUP BY f.folder_id
@@ -1578,8 +4136,8 @@ class AgentRuntimeService:
         uncategorized = self._conn.execute(
             """
             SELECT COUNT(*) AS skill_count,
-                   SUM(CASE WHEN source_type IN ('hermes_global', 'hermes_project') THEN 0 ELSE 1 END) AS yachiyo_count,
-                   SUM(CASE WHEN source_type IN ('hermes_global', 'hermes_project') THEN 1 ELSE 0 END) AS hermes_count
+                   SUM(CASE WHEN source_type IN ('native_global', 'native_project') THEN 0 ELSE 1 END) AS installed_count,
+                   SUM(CASE WHEN source_type IN ('native_global', 'native_project') THEN 1 ELSE 0 END) AS native_count
               FROM skills
              WHERE folder_id = ''
             """
@@ -1594,8 +4152,8 @@ class AgentRuntimeService:
                 "source_scope": "all",
                 "sort_order": -1,
                 "skill_count": int(uncategorized["skill_count"] or 0),
-                "yachiyo_count": int(uncategorized["yachiyo_count"] or 0),
-                "hermes_count": int(uncategorized["hermes_count"] or 0),
+                "installed_count": int(uncategorized["installed_count"] or 0),
+                "native_count": int(uncategorized["native_count"] or 0),
             },
         }
 
@@ -1610,7 +4168,7 @@ class AgentRuntimeService:
             folder_id = f"folder_{folder_id}"
         description = str(payload.get("description") or "").strip()[:1000]
         source_scope = str(payload.get("source_scope") or "all")
-        if source_scope not in {"all", "yachiyo", "hermes"}:
+        if source_scope not in {"all", "installed", "native"}:
             source_scope = "all"
         sort_order = int(payload.get("sort_order") or 0)
         now = _now()
@@ -1634,8 +4192,8 @@ class AgentRuntimeService:
             """
             SELECT f.*,
                    COUNT(s.skill_id) AS skill_count,
-                   SUM(CASE WHEN s.source_type IN ('hermes_global', 'hermes_project') THEN 0 ELSE 1 END) AS yachiyo_count,
-                   SUM(CASE WHEN s.source_type IN ('hermes_global', 'hermes_project') THEN 1 ELSE 0 END) AS hermes_count
+                   SUM(CASE WHEN s.source_type IN ('native_global', 'native_project') THEN 0 ELSE 1 END) AS installed_count,
+                   SUM(CASE WHEN s.source_type IN ('native_global', 'native_project') THEN 1 ELSE 0 END) AS native_count
               FROM skill_folders f
               LEFT JOIN skills s ON s.folder_id = f.folder_id
              WHERE f.folder_id=?
@@ -1655,7 +4213,7 @@ class AgentRuntimeService:
         self._validate_skill_folder_name(name, current_folder_id=folder_id)
         description = str(payload.get("description") if "description" in payload else current["description"]).strip()[:1000]
         source_scope = str(payload.get("source_scope") if "source_scope" in payload else current["source_scope"])
-        if source_scope not in {"all", "yachiyo", "hermes"}:
+        if source_scope not in {"all", "installed", "native"}:
             source_scope = "all"
         sort_order = int(payload.get("sort_order") if "sort_order" in payload else current["sort_order"])
         self._conn.execute(
@@ -1689,8 +4247,8 @@ class AgentRuntimeService:
 
     def list_skills(self) -> dict[str, Any]:
         self._ensure_row_factory()
-        self._repair_hermes_skill_references()
-        self._repair_yachiyo_installed_skill_provenance()
+        self._repair_native_skill_references()
+        self._repair_installed_skill_provenance()
         rows = self._conn.execute(
             """
             SELECT s.*, f.name AS folder_name
@@ -1701,15 +4259,15 @@ class AgentRuntimeService:
         ).fetchall()
         return {"ok": True, "skills": [self._row_to_skill(row) for row in rows]}
 
-    def list_hermes_skill_sources(self) -> dict[str, Any]:
-        roots = self._hermes_skill_root_specs()
+    def list_native_skill_sources(self) -> dict[str, Any]:
+        roots = self._native_skill_root_specs()
         return {
             "ok": True,
             "roots": [
                 {
                     "path": str(root["path"]),
                     "source_type": root["source_type"],
-                    "library": "hermes",
+                    "library": "native",
                     "exists": root["path"].exists(),
                     "skill_count": self._count_skill_files(root["path"]),
                 }
@@ -1719,8 +4277,8 @@ class AgentRuntimeService:
 
     def get_skill(self, skill_id: str) -> dict[str, Any]:
         self._ensure_row_factory()
-        self._repair_hermes_skill_references()
-        self._repair_yachiyo_installed_skill_provenance()
+        self._repair_native_skill_references()
+        self._repair_installed_skill_provenance()
         row = self._conn.execute(
             """
             SELECT s.*, f.name AS folder_name
@@ -1781,10 +4339,10 @@ class AgentRuntimeService:
             if temp_dir is not None:
                 shutil.rmtree(temp_dir, ignore_errors=True)
 
-    def sync_hermes_skills(self, roots: list[Any] | None = None) -> dict[str, Any]:
-        return self._sync_skill_roots(self._hermes_skill_root_specs(roots), library="hermes")
+    def sync_native_skills(self, roots: list[Any] | None = None) -> dict[str, Any]:
+        return self._sync_skill_roots(self._native_skill_root_specs(roots), library="native")
 
-    def sync_yachiyo_installed_skills(
+    def sync_installed_skills(
         self,
         *,
         record_source_type: str = "npx_skills",
@@ -1792,11 +4350,11 @@ class AgentRuntimeService:
         source_ref_override: str = "",
         restore_deleted: bool = False,
     ) -> dict[str, Any]:
-        source_type = record_source_type if record_source_type in {"npx_skills", "hermes_cli"} else "npx_skills"
-        roots = self._yachiyo_skill_root_specs(source_type=source_type, source_ref_override=source_ref_override)
+        source_type = record_source_type if record_source_type == "npx_skills" else "npx_skills"
+        roots = self._installed_skill_root_specs(source_type=source_type, source_ref_override=source_ref_override)
         return self._sync_skill_roots(
             roots,
-            library="yachiyo",
+            library="installed",
             folder_id=folder_id,
             restore_deleted=restore_deleted,
         )
@@ -1903,7 +4461,7 @@ class AgentRuntimeService:
                         "library": library,
                         "source_ref": source_ref,
                         "status": "failed",
-                        "message": str(exc),
+                        "message": redact_api_error_text(exc),
                     })
         summary = {
             "imported": sum(1 for item in results if item.get("status") == "imported"),
@@ -1928,8 +4486,7 @@ class AgentRuntimeService:
         target_folder_id = self._normalize_skill_folder_id(folder_id)
         source_ref = self._skill_install_source_ref(argv, installer)
         started_at = _now()
-        env = os.environ.copy()
-        env["HERMES_HOME"] = str(self.skill_installs_hermes_home)
+        env = _scrubbed_subprocess_env({"OHA_YACHIYO_HOME": str(self.skill_installs_native_home)})
         try:
             completed = subprocess.run(
                 argv,
@@ -1947,7 +4504,7 @@ class AgentRuntimeService:
         stdout = redact_secrets(completed.stdout)[-12000:]
         stderr = redact_secrets(completed.stderr)[-12000:]
         sync_result = (
-            self.sync_yachiyo_installed_skills(
+            self.sync_installed_skills(
                 record_source_type=installer,
                 folder_id=target_folder_id,
                 source_ref_override=source_ref,
@@ -2110,9 +4667,9 @@ class AgentRuntimeService:
     def _find_existing_skill(self, origin_path: str, content_hash: str, source_type: str) -> sqlite3.Row | None:
         self._ensure_row_factory()
         library_condition = (
-            "source_type IN ('hermes_global', 'hermes_project')"
-            if source_type in {"hermes_global", "hermes_project"}
-            else "source_type NOT IN ('hermes_global', 'hermes_project')"
+            "source_type IN ('native_global', 'native_project')"
+            if _is_native_library_source_type(source_type)
+            else "source_type NOT IN ('native_global', 'native_project')"
         )
         if origin_path:
             row = self._conn.execute(
@@ -2139,15 +4696,15 @@ class AgentRuntimeService:
         if _is_within(resolved, self.skills_dir) and resolved.exists():
             shutil.rmtree(resolved, ignore_errors=True)
 
-    def _skill_path_owned_by_yachiyo(self, path: Path) -> bool:
+    def _skill_path_owned_by_runtime(self, path: Path) -> bool:
         return _is_within(path, self.skills_dir) or _is_within(path, self.skill_installs_dir)
 
-    def _repair_hermes_skill_references(self) -> None:
+    def _repair_native_skill_references(self) -> None:
         rows = self._conn.execute(
             """
             SELECT skill_id, local_path, origin_path
               FROM skills
-             WHERE source_type IN ('hermes_global', 'hermes_project')
+             WHERE source_type IN ('native_global', 'native_project')
                AND origin_path != ''
                AND local_path != origin_path
             """
@@ -2168,7 +4725,7 @@ class AgentRuntimeService:
             )
         self._conn.commit()
 
-    def _repair_yachiyo_installed_skill_provenance(self) -> None:
+    def _repair_installed_skill_provenance(self) -> None:
         source_map = self._installed_skill_source_map()
         if not source_map:
             return
@@ -2176,8 +4733,8 @@ class AgentRuntimeService:
         rows = self._conn.execute(
             """
             SELECT skill_id, local_path, origin_path, source_ref, source_type
-              FROM skills
-             WHERE source_type IN ('npx_skills', 'hermes_cli')
+             FROM skills
+             WHERE source_type='npx_skills'
             """
         ).fetchall()
         changed = False
@@ -2202,10 +4759,10 @@ class AgentRuntimeService:
         if changed:
             self._conn.commit()
 
-    def _hermes_skill_root_specs(self, roots: list[Any] | None = None) -> list[dict[str, Any]]:
+    def _native_skill_root_specs(self, roots: list[Any] | None = None) -> list[dict[str, Any]]:
         if roots is None:
             raw_roots: list[Any] = [
-                {"path": _hermes_home() / "skills", "source_type": "hermes_global"},
+                {"path": _native_skill_home() / "skills", "source_type": "native_global"},
             ]
         else:
             raw_roots = roots
@@ -2214,12 +4771,12 @@ class AgentRuntimeService:
         for item in raw_roots:
             if isinstance(item, dict):
                 path = Path(str(item.get("path") or "")).expanduser()
-                source_type = str(item.get("source_type") or self._infer_hermes_source_type(path))
+                source_type = _normalize_skill_source_type(item.get("source_type") or self._infer_native_source_type(path))
             else:
                 path = Path(str(item)).expanduser()
-                source_type = self._infer_hermes_source_type(path)
-            if source_type not in {"hermes_global", "hermes_project"}:
-                source_type = "hermes_global"
+                source_type = self._infer_native_source_type(path)
+            if source_type not in _NATIVE_LIBRARY_SOURCE_TYPES:
+                source_type = "native_global"
             key = str(path.resolve()) if path.exists() else str(path)
             if not key or key in seen:
                 continue
@@ -2227,10 +4784,10 @@ class AgentRuntimeService:
             specs.append({"path": path, "source_type": source_type})
         return specs
 
-    def _yachiyo_skill_root_specs(self, *, source_type: str, source_ref_override: str = "") -> list[dict[str, Any]]:
+    def _installed_skill_root_specs(self, *, source_type: str, source_ref_override: str = "") -> list[dict[str, Any]]:
         roots = [
-            self.skill_installs_dir / ".hermes" / "skills",
-            self.skill_installs_hermes_home / "skills",
+            self.skill_installs_dir / ".skills" / "skills",
+            self.skill_installs_native_home / "skills",
         ]
         source_map = self._installed_skill_source_map()
         return [
@@ -2279,14 +4836,14 @@ class AgentRuntimeService:
         return " · ".join(part for part in [source, skill_path] if part)
 
     @staticmethod
-    def _infer_hermes_source_type(path: Path) -> str:
-        project_root = Path.cwd() / ".hermes" / "skills"
+    def _infer_native_source_type(path: Path) -> str:
+        project_root = Path.cwd() / ".oha-yachiyo" / "skills"
         try:
             if path.resolve() == project_root.resolve():
-                return "hermes_project"
+                return "native_project"
         except OSError:
             pass
-        return "hermes_global"
+        return "native_global"
 
     @staticmethod
     def _count_skill_files(root: Path) -> int:
@@ -2309,16 +4866,12 @@ class AgentRuntimeService:
             argv = ["npx", *argv]
         if argv[0] == "npx":
             return self._validated_npx_skills_argv(argv), "npx_skills"
-        if argv[:3] == ["hermes", "skills", "install"]:
-            return argv, "hermes_cli"
         if argv[0] in {"npm", "pnpm", "yarn", "bun", "curl", "bash", "sh", "zsh"}:
-            raise AgentRuntimeError("只允许 skills 来源、npx skills add 或 hermes skills install")
+            raise AgentRuntimeError("只允许 skills 来源或 npx skills add")
         return self._validated_npx_skills_argv(["npx", "skills@latest", "add", *argv]), "npx_skills"
 
     @staticmethod
     def _skill_install_source_ref(argv: list[str], installer: str) -> str:
-        if installer == "hermes_cli" and argv[:3] == ["hermes", "skills", "install"]:
-            return " ".join(argv[3:])
         if installer != "npx_skills":
             return ""
         index = 1
@@ -2366,9 +4919,9 @@ class AgentRuntimeService:
         install_args = normalized[index + 2:]
         if not install_args:
             raise AgentRuntimeError("请提供要安装的 Skill 来源")
-        AgentRuntimeService._validate_skill_install_agent_target(install_args)
-        if not AgentRuntimeService._has_agent_target(install_args):
-            normalized.extend(["-a", "hermes-agent"])
+        NativeRunEngine._validate_skill_install_agent_target(install_args)
+        if not NativeRunEngine._has_agent_target(install_args):
+            normalized.extend(["-a", "oha-yachiyo"])
         if "--copy" not in install_args:
             normalized.append("--copy")
         if "-y" not in normalized and "--yes" not in normalized:
@@ -2384,10 +4937,10 @@ class AgentRuntimeService:
         for index, arg in enumerate(args):
             if arg == "-a" or arg == "--agent":
                 value = args[index + 1] if index + 1 < len(args) else ""
-                if value != "hermes-agent":
-                    raise AgentRuntimeError("Yachiyo 安装入口固定使用 hermes-agent 目标")
-            elif arg.startswith("--agent=") and arg != "--agent=hermes-agent":
-                raise AgentRuntimeError("Yachiyo 安装入口固定使用 hermes-agent 目标")
+                if value != "oha-yachiyo":
+                    raise AgentRuntimeError("Yachiyo 安装入口固定使用 oha-yachiyo 目标")
+            elif arg.startswith("--agent=") and arg != "--agent=oha-yachiyo":
+                raise AgentRuntimeError("Yachiyo 安装入口固定使用 oha-yachiyo 目标")
 
     def _normalize_skill_folder_id(self, folder_id: str | None) -> str:
         clean = str(folder_id or "").strip()
@@ -2484,9 +5037,9 @@ class AgentRuntimeService:
             )
         self._conn.commit()
         source_type = str(skill_row["source_type"] if skill_row is not None else "")
-        if source_type not in {"hermes_global", "hermes_project"}:
+        if not _is_native_library_source_type(source_type):
             local_path = Path(str(skill_row["local_path"])) if skill_row is not None and skill_row["local_path"] else self.skills_dir / skill_id
-            if self._skill_path_owned_by_yachiyo(local_path):
+            if self._skill_path_owned_by_runtime(local_path):
                 shutil.rmtree(local_path, ignore_errors=True)
         return {"ok": True}
 
@@ -2713,80 +5266,93 @@ class AgentRuntimeService:
             raise AgentRuntimeError("Workflow 至少需要一个可执行节点（Agent、Approval 或 Artifact）")
 
     def list_runs(self, limit: int = 50) -> dict[str, Any]:
-        self._ensure_row_factory()
-        rows = self._conn.execute(
-            """
-            SELECT runs.*, run_groups.source AS run_group_source
-             FROM runs
-              LEFT JOIN run_groups ON run_groups.run_group_id = runs.run_group_id
-             WHERE NOT (
-                runs.kind = 'agent_run'
-                AND runs.run_group_id != ''
-                AND EXISTS (
-                    SELECT 1
-                      FROM runs workflow_parent
-                     WHERE workflow_parent.run_group_id = runs.run_group_id
-                       AND workflow_parent.kind = 'workflow_run'
-                )
-             )
-             ORDER BY runs.updated_at DESC
-             LIMIT ?
-            """,
-            (max(1, min(int(limit or 50), 200)),),
-        ).fetchall()
-        return {"ok": True, "runs": [self._row_to_run(row) for row in rows]}
+        return self.runs.list(limit)
 
     def list_run_groups(self, limit: int = 50) -> dict[str, Any]:
-        self._ensure_row_factory()
-        rows = self._conn.execute(
-            "SELECT * FROM run_groups ORDER BY updated_at DESC LIMIT ?",
-            (max(1, min(int(limit or 50), 200)),),
-        ).fetchall()
-        return {"ok": True, "run_groups": [self._row_to_run_group(row) for row in rows]}
+        return self.run_groups.list(limit)
 
     def get_run_group(self, run_group_id: str) -> dict[str, Any]:
-        self._ensure_row_factory()
-        row = self._conn.execute("SELECT * FROM run_groups WHERE run_group_id=?", (run_group_id,)).fetchone()
-        if row is None:
-            raise KeyError(run_group_id)
-        return self._row_to_run_group(row)
+        return self.run_groups.get(run_group_id)
 
     def _run_group_source(self, run_group_id: str) -> str:
-        if not run_group_id:
-            return ""
-        row = self._conn.execute(
-            "SELECT source FROM run_groups WHERE run_group_id=?",
-            (run_group_id,),
-        ).fetchone()
-        if row is None:
-            return ""
-        return str(row["source"] or "")
+        return self.run_groups.source(run_group_id)
 
     def get_run(self, run_id: str) -> dict[str, Any]:
+        return self.runs.get(run_id)
+
+    def link_task_run(self, *, task_id: str, run_id: str, session_id: str = "") -> dict[str, Any]:
+        clean_task_id = str(task_id or "").strip()
+        clean_run_id = str(run_id or "").strip()
+        if not clean_task_id or not clean_run_id:
+            raise AgentRuntimeError("Task 与 Run 映射缺少 task_id 或 run_id")
+        self.get_run(clean_run_id)
+        self._conn.execute(
+            """
+            INSERT INTO task_run_links (task_id, run_id, session_id, created_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(task_id) DO UPDATE SET
+                run_id=excluded.run_id,
+                session_id=excluded.session_id
+            """,
+            (clean_task_id, clean_run_id, str(session_id or ""), _now()),
+        )
+        self._conn.commit()
+        return self.get_task_run_link(clean_task_id)
+
+    def get_task_run_link(self, task_id: str) -> dict[str, Any]:
         self._ensure_row_factory()
-        row = self._conn.execute("SELECT * FROM runs WHERE run_id=?", (run_id,)).fetchone()
+        row = self._conn.execute(
+            "SELECT task_id, run_id, session_id, created_at FROM task_run_links WHERE task_id=?",
+            (str(task_id or "").strip(),),
+        ).fetchone()
         if row is None:
-            raise KeyError(run_id)
-        return self._row_to_run(row)
+            raise KeyError(task_id)
+        return {
+            "task_id": str(row["task_id"]),
+            "run_id": str(row["run_id"]),
+            "session_id": str(row["session_id"] or ""),
+            "created_at": str(row["created_at"]),
+        }
+
+    def append_run_event(
+        self,
+        run_id: str,
+        event_type: str,
+        payload: dict[str, Any] | None = None,
+        *,
+        actor: str = "native_runtime",
+        visibility: str = "user",
+        sensitivity: str = "public",
+    ) -> dict[str, Any]:
+        return self.run_events.append(
+            run_id,
+            event_type,
+            payload,
+            actor=actor,
+            visibility=visibility,
+            sensitivity=sensitivity,
+        )
+
+    def list_run_events(
+        self,
+        run_id: str,
+        *,
+        after_sequence: int = 0,
+        limit: int = 200,
+        include_internal: bool = False,
+    ) -> dict[str, Any]:
+        return self.run_events.list(
+            run_id,
+            after_sequence=after_sequence,
+            limit=limit,
+            include_internal=include_internal,
+        )
 
     def _delete_run_artifacts(self, run: dict[str, Any]) -> None:
-        run_id = str(run.get("run_id") or "")
-        if not run_id:
-            return
-        root = self.agent_artifacts_dir if run.get("kind") == "agent_run" else self.workflow_artifacts_dir
-        target = (root / run_id).resolve()
-        if _is_within(target, root) and target.exists():
-            shutil.rmtree(target, ignore_errors=True)
+        self.run_artifacts.delete_files(run)
 
     def _runs_in_group(self, run_group_id: str) -> list[dict[str, Any]]:
-        if not run_group_id:
-            return []
-        self._ensure_row_factory()
-        rows = self._conn.execute(
-            "SELECT * FROM runs WHERE run_group_id=? ORDER BY created_at ASC",
-            (run_group_id,),
-        ).fetchall()
-        return [self._row_to_run(row) for row in rows]
+        return self.run_groups.runs(run_group_id)
 
     def _delete_run_rows(self, runs: list[dict[str, Any]]) -> list[str]:
         deleted_run_ids: list[str] = []
@@ -2800,32 +5366,7 @@ class AgentRuntimeService:
         return deleted_run_ids
 
     def _remove_run_ids_from_group(self, run_group_id: str, run_ids: set[str]) -> None:
-        if not run_group_id or not run_ids:
-            return
-        try:
-            group = self.get_run_group(run_group_id)
-        except KeyError:
-            return
-        child_run_ids = [
-            str(item)
-            for item in group.get("child_run_ids") or []
-            if str(item) and str(item) not in run_ids
-        ]
-        remaining_count = self._conn.execute(
-            "SELECT COUNT(*) AS count FROM runs WHERE run_group_id=?",
-            (run_group_id,),
-        ).fetchone()
-        if not child_run_ids or int(remaining_count["count"] if remaining_count else 0) <= 0:
-            self._conn.execute("DELETE FROM run_groups WHERE run_group_id=?", (run_group_id,))
-            return
-        self._conn.execute(
-            """
-            UPDATE run_groups
-               SET child_run_ids_json=?, updated_at=?
-             WHERE run_group_id=?
-            """,
-            (_json_dump(child_run_ids), _now(), run_group_id),
-        )
+        self.run_groups.remove_run_ids(run_group_id, run_ids)
 
     def delete_run(self, run_id: str) -> dict[str, Any]:
         run = self.get_run(run_id)
@@ -2843,7 +5384,7 @@ class AgentRuntimeService:
         deleted_run_ids = self._delete_run_rows(targets)
         deleted_ids = set(deleted_run_ids)
         if delete_group and run_group_id:
-            self._conn.execute("DELETE FROM run_groups WHERE run_group_id=?", (run_group_id,))
+            self.run_groups.delete(run_group_id)
         else:
             self._remove_run_ids_from_group(run_group_id, deleted_ids)
         self._conn.commit()
@@ -2854,31 +5395,14 @@ class AgentRuntimeService:
         }
 
     def _pending_approval_json(self, run_id: str) -> str:
-        self._ensure_row_factory()
-        row = self._conn.execute("SELECT pending_approval_json FROM runs WHERE run_id=?", (run_id,)).fetchone()
-        if row is None:
-            raise KeyError(run_id)
-        return str(row["pending_approval_json"] or "{}")
+        return self.runs.pending_approval_json(run_id)
 
     def _pending_approval_private(self, run_id: str) -> dict[str, Any]:
         pending = _json_load(self._pending_approval_json(run_id), {})
         return pending if isinstance(pending, dict) else {}
 
     def read_run_artifact(self, run_id: str, artifact_path: str) -> dict[str, Any]:
-        run = self.get_run(run_id)
-        rel = _safe_rel_path(artifact_path)
-        root = self.agent_artifacts_dir / run_id if run["kind"] == "agent_run" else self.workflow_artifacts_dir / run_id
-        target = (root / rel).resolve()
-        if not _is_within(target, root) or not target.is_file():
-            raise KeyError(rel)
-        content = _read_text(target, limit=300_000)
-        return {
-            "ok": True,
-            "run_id": run_id,
-            "path": rel,
-            "content": redact_secrets(content),
-            "truncated": target.stat().st_size > 300_000,
-        }
+        return self.run_artifacts.read(run_id, artifact_path)
 
     def _insert_run_group(
         self,
@@ -2887,36 +5411,22 @@ class AgentRuntimeService:
         source: str,
         workspace_dir: str = "",
     ) -> dict[str, Any]:
-        run_group_id = f"run_group_{uuid4().hex[:12]}"
-        now = _now()
-        self._conn.execute(
-            """
-            INSERT INTO run_groups (
-                run_group_id, title, source, workspace_dir, status, summary,
-                child_run_ids_json, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (run_group_id, title[:180], source[:80], workspace_dir, "running", "", "[]", now, now),
-        )
-        self._conn.commit()
-        return self.get_run_group(run_group_id)
+        return self.run_groups.insert(title=title, source=source, workspace_dir=workspace_dir)
 
     def _append_run_to_group(self, run_group_id: str, run_id: str) -> None:
-        if not run_group_id:
-            return
-        group = self.get_run_group(run_group_id)
-        child_run_ids = [str(item) for item in group.get("child_run_ids") or [] if str(item)]
-        if run_id not in child_run_ids:
-            child_run_ids.append(run_id)
-        self._conn.execute(
-            """
-            UPDATE run_groups
-               SET child_run_ids_json=?, updated_at=?
-             WHERE run_group_id=?
-            """,
-            (_json_dump(child_run_ids), _now(), run_group_id),
-        )
-        self._conn.commit()
+        self.run_groups.append_run(run_group_id, run_id)
+
+    @staticmethod
+    def _client_request_id_from_payload(payload: dict[str, Any]) -> str:
+        return str(
+            payload.get("client_run_id")
+            or payload.get("client_request_id")
+            or payload.get("idempotency_key")
+            or ""
+        ).strip()[:128]
+
+    def _run_by_client_request_id(self, client_request_id: str) -> dict[str, Any] | None:
+        return self.runs.by_client_request_id(client_request_id)
 
     def _update_run_group(
         self,
@@ -2925,39 +5435,24 @@ class AgentRuntimeService:
         status: str | None = None,
         summary: str | None = None,
     ) -> None:
-        if not run_group_id:
-            return
-        current = self.get_run_group(run_group_id)
-        self._conn.execute(
-            """
-            UPDATE run_groups
-               SET status=?, summary=?, updated_at=?
-             WHERE run_group_id=?
-            """,
-            (
-                status or current["status"],
-                summary if summary is not None else current["summary"],
-                _now(),
-                run_group_id,
-            ),
-        )
-        self._conn.commit()
+        self.run_groups.update(run_group_id, status=status, summary=summary)
 
-    def _insert_run(self, *, kind: str, runnable_id: str, user_goal: str, run_group_id: str = "") -> dict[str, Any]:
-        run_id = f"{kind}_{uuid4().hex[:12]}"
-        now = _now()
-        self._conn.execute(
-            """
-            INSERT INTO runs (
-                run_id, run_group_id, kind, runnable_id, status, user_goal, result,
-                timeline_json, artifacts_json, pending_approval_json, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (run_id, run_group_id, kind, runnable_id, "running", user_goal, "", "[]", "[]", "{}", now, now),
+    def _insert_run(
+        self,
+        *,
+        kind: str,
+        runnable_id: str,
+        user_goal: str,
+        run_group_id: str = "",
+        client_request_id: str = "",
+    ) -> dict[str, Any]:
+        return self.runs.insert(
+            kind=kind,
+            runnable_id=runnable_id,
+            user_goal=user_goal,
+            run_group_id=run_group_id,
+            client_request_id=client_request_id,
         )
-        self._conn.commit()
-        self._append_run_to_group(run_group_id, run_id)
-        return self.get_run(run_id)
 
     def _update_run(
         self,
@@ -2969,33 +5464,444 @@ class AgentRuntimeService:
         artifacts: list[dict[str, Any]] | None = None,
         pending_approval: dict[str, Any] | None | object = _UNSET,
     ) -> dict[str, Any]:
-        current = self.get_run(run_id)
-        if pending_approval is _UNSET:
-            pending_approval_json = self._pending_approval_json(run_id)
-        else:
-            pending_approval_json = _json_dump(pending_approval or {})
-        self._conn.execute(
-            """
-            UPDATE runs
-               SET status=?, result=?, timeline_json=?, artifacts_json=?, pending_approval_json=?, updated_at=?
-             WHERE run_id=?
-            """,
-            (
-                status or current["status"],
-                result if result is not None else current["result"],
-                _json_dump(timeline if timeline is not None else current["timeline"]),
-                _json_dump(artifacts if artifacts is not None else current["artifacts"]),
-                pending_approval_json,
-                _now(),
-                run_id,
-            ),
+        return self.runs.update(
+            run_id,
+            status=status,
+            result=result,
+            timeline=timeline,
+            artifacts=artifacts,
+            pending_approval=pending_approval,
         )
-        self._conn.commit()
-        return self.get_run(run_id)
+
+    def _terminal_run_or_none(self, run_id: str) -> dict[str, Any] | None:
+        try:
+            run = self.get_run(run_id)
+        except KeyError:
+            return None
+        status = str(run.get("status") or "").strip()
+        return run if status in _FINAL_RUN_STATUSES else None
+
+    def _sync_run_projections(
+        self,
+        run_id: str,
+        *,
+        status: str,
+        artifacts: Any,
+        pending_approval: dict[str, Any],
+    ) -> None:
+        self._sync_run_artifacts(run_id, artifacts)
+        self._sync_run_approval(run_id, status=status, pending_approval=pending_approval)
+
+    def _sync_run_artifacts(self, run_id: str, artifacts: Any) -> None:
+        self.run_artifacts.sync(run_id, artifacts)
+
+    def _sync_run_approval(self, run_id: str, *, status: str, pending_approval: dict[str, Any]) -> None:
+        self.run_approvals.sync(run_id, status=status, pending_approval=pending_approval)
 
     @staticmethod
     def _timeline(event: str, detail: str = "", **extra: Any) -> dict[str, Any]:
-        return {"time": _now(), "event": event, "detail": redact_secrets(detail), **extra}
+        return {
+            "time": _now(),
+            "event": event,
+            "detail": redact_secrets(detail),
+            **_redact_json_value(extra),
+        }
+
+    def _run_budget(self, run_id: str, timeline: list[dict[str, Any]]) -> _RunBudget:
+        try:
+            run = self.get_run(run_id) if run_id else {}
+        except KeyError:
+            run = {}
+        model_calls = 0
+        tool_calls = 0
+        terminal_calls = 0
+        for event in timeline:
+            if not isinstance(event, dict):
+                continue
+            event_name = str(event.get("event") or "")
+            if event_name in {"agent.model.response", "model.output.completed"}:
+                model_calls += 1
+            if event_name in {"agent.tool.call", "agent.tool.skipped", "agent.tool.denied"}:
+                tool_calls += 1
+            if event_name == "agent.tool.call" and str(event.get("detail") or "") == "terminal.run":
+                result = event.get("result") if isinstance(event.get("result"), dict) else {}
+                if not result.get("approval_required"):
+                    terminal_calls += 1
+        return _RunBudget(
+            limits=self.runtime_limits,
+            started_at_epoch=_iso_epoch(run.get("created_at")),
+            model_calls_used=model_calls,
+            tool_calls_used=tool_calls,
+            terminal_calls_used=terminal_calls,
+        )
+
+    def _check_context_budget(self, budget: _RunBudget, messages: list[dict[str, Any]]) -> None:
+        budget.check_context(_json_chars(_redact_json_value(messages)))
+
+    def _limit_model_output(self, value: Any) -> tuple[str, bool]:
+        safe = redact_secrets(value)
+        return _truncate_text(safe, self.runtime_limits.max_model_output_chars)
+
+    def _limit_tool_result(self, result: dict[str, Any]) -> dict[str, Any]:
+        limited, truncated = _limit_json_strings(_redact_json_value(result), self.runtime_limits.max_tool_output_chars)
+        if isinstance(limited, dict) and truncated:
+            return {**limited, "truncated": True}
+        return limited if isinstance(limited, dict) else {"ok": False, "error": str(limited)}
+
+    def start_main_chat_run(
+        self,
+        *,
+        task_id: str,
+        session_id: str,
+        user_goal: str,
+    ) -> dict[str, Any]:
+        run = self._insert_run(
+            kind="main_chat_run",
+            runnable_id=_MAIN_CHAT_AGENT_ID,
+            user_goal=redact_secrets(user_goal),
+        )
+        self.link_task_run(task_id=task_id, run_id=run["run_id"], session_id=session_id)
+        timeline = [
+            self._timeline(
+                "run.started",
+                "Native main chat run started",
+                task_id=str(task_id or ""),
+                session_id=str(session_id or ""),
+            ),
+            self._timeline("task.linked", str(task_id or ""), task_id=str(task_id or "")),
+        ]
+        run = self._update_run(run["run_id"], timeline=timeline)
+        self.append_run_event(
+            run["run_id"],
+            "run.started",
+            {"task_id": str(task_id or ""), "session_id": str(session_id or "")},
+        )
+        self.append_run_event(
+            run["run_id"],
+            "task.linked",
+            {"task_id": str(task_id or ""), "session_id": str(session_id or "")},
+        )
+        return run
+
+    def call_main_chat_model(
+        self,
+        run_id: str,
+        messages: list[dict[str, Any]],
+        *,
+        profile_id: str = "",
+        capability: str = "chat",
+    ) -> str:
+        run = self.get_run(run_id)
+        if str(run.get("kind") or "") != "main_chat_run":
+            raise AgentRuntimeError("Run 不是主聊天 Native Run")
+        default_profile_id = str(
+            profile_id or get_model_profile_service().get_defaults().get(capability) or ""
+        ).strip()
+        if not default_profile_id:
+            raise AgentRuntimeError(f"native_agent_not_ready:{capability}_model_profile_required")
+        model_config = self._model_profile_config_private(default_profile_id, capability=capability)
+        timeline = list(run.get("timeline") or [])
+        budget = self._run_budget(run_id, timeline)
+        self._check_context_budget(budget, messages)
+        budget.claim_model_call()
+        timeline.append(
+            self._timeline(
+                "model.request.started",
+                str(model_config.get("model") or ""),
+                profile_id=default_profile_id,
+                capability=capability,
+            )
+        )
+        self._update_run(run_id, timeline=timeline)
+        self.append_run_event(
+            run_id,
+            "model.request.started",
+            {
+                "profile_id": default_profile_id,
+                "model": str(model_config.get("model") or ""),
+                "capability": capability,
+                "message_count": len(messages),
+            },
+        )
+        try:
+            message = _coalesce_model_message(
+                openai_compatible_chat_message(
+                    str(model_config.get("base_url") or ""),
+                    str(model_config.get("model") or ""),
+                    str(model_config.get("api_key") or ""),
+                    messages,
+                )
+            )
+            content, output_truncated = self._limit_model_output(_message_content_text(message))
+            content = content.strip()
+            if not content:
+                raise AgentRuntimeError("Native Agent 模型返回了空回复")
+        except Exception as exc:
+            terminal = self._terminal_run_or_none(run_id)
+            if terminal is not None:
+                return str(terminal.get("result") or "")
+            safe_error = redact_secrets(exc)
+            timeline.append(self._timeline("model.request.failed", safe_error))
+            self._update_run(run_id, timeline=timeline)
+            self.append_run_event(run_id, "model.request.failed", {"error": safe_error})
+            raise
+        terminal = self._terminal_run_or_none(run_id)
+        if terminal is not None:
+            return str(terminal.get("result") or "")
+        timeline.append(
+            self._timeline(
+                "model.output.completed",
+                content[:500],
+                output_chars=len(content),
+                truncated=output_truncated,
+            )
+        )
+        self._update_run(run_id, timeline=timeline)
+        self.append_run_event(
+            run_id,
+            "model.output.completed",
+            {"content": content, "output_chars": len(content), "truncated": output_truncated},
+        )
+        return content
+
+    def _main_chat_workspace_policy(self, policy: dict[str, Any] | None = None) -> dict[str, Any]:
+        if isinstance(policy, dict):
+            compiled = self._compile_workspace_policy(policy)
+        else:
+            workspace = get_workspace_status()
+            dirs = workspace.get("dirs") if isinstance(workspace.get("dirs"), dict) else {}
+            if workspace.get("initialized") and dirs.get("projects"):
+                workdir = Path(str(dirs["projects"]))
+            else:
+                workdir = self.agent_workspaces_dir / "builtin-yachiyo-main"
+            workdir.mkdir(parents=True, exist_ok=True)
+            compiled = self._compile_workspace_policy(
+                {
+                    "default_workdir": str(workdir),
+                    "readable_scopes": ["."],
+                    "writable_scopes": [],
+                }
+            )
+        if not str(compiled.get("default_workdir") or "").strip():
+            workdir = self.agent_workspaces_dir / "builtin-yachiyo-main"
+            workdir.mkdir(parents=True, exist_ok=True)
+            compiled = {**compiled, "default_workdir": str(workdir)}
+        self._trust_workspace_from_policy(compiled, source="main_chat", commit=True)
+        return compiled
+
+    def _main_chat_tool_policy(self, policy: dict[str, Any] | None = None) -> dict[str, Any]:
+        raw = policy if isinstance(policy, dict) else {"allowed_tools": ["workspace.list", "workspace.read", "artifact.write"]}
+        return self._compile_tool_policy("custom", raw)
+
+    def _main_chat_agent_config(
+        self,
+        *,
+        model_profile_id: str,
+        tool_policy: dict[str, Any] | None = None,
+        workspace_policy: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "agent_id": _MAIN_CHAT_AGENT_ID,
+            "name": "Yachiyo",
+            "nickname": "Yachiyo",
+            "category": "orchestrator",
+            "instructions": "Main chat native agent.",
+            "persona_prompt": "",
+            "model_mode": "profile",
+            "execution_backend": "native_profile",
+            "model_profile_id": str(model_profile_id or "").strip(),
+            "vision_model_profile_id": "",
+            "model_config": {},
+            "tool_policy": self._main_chat_tool_policy(tool_policy),
+            "workspace_policy": self._main_chat_workspace_policy(workspace_policy),
+            "skill_ids": [],
+            "output_contract": "chat",
+            "enabled": True,
+        }
+
+    @staticmethod
+    def _main_chat_pending_approval(
+        pending_approval: dict[str, Any],
+        *,
+        model_profile_id: str,
+        tool_policy: dict[str, Any],
+        workspace_policy: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            **pending_approval,
+            "resume_kind": "main_chat",
+            "model_profile_id": str(model_profile_id or "").strip(),
+            "tool_policy": tool_policy,
+            "workspace_policy": workspace_policy,
+        }
+
+    def execute_main_chat_model_loop(
+        self,
+        run_id: str,
+        messages: list[dict[str, Any]],
+        *,
+        profile_id: str = "",
+        tool_policy: dict[str, Any] | None = None,
+        workspace_policy: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        run = self.get_run(run_id)
+        if str(run.get("kind") or "") != "main_chat_run":
+            raise AgentRuntimeError("Run 不是主聊天 Native Run")
+        default_profile_id = str(
+            profile_id or get_model_profile_service().get_defaults().get("chat") or ""
+        ).strip()
+        if not default_profile_id:
+            raise AgentRuntimeError("native_agent_not_ready:chat_model_profile_required")
+        model_config = self._model_profile_config_private(default_profile_id, capability="chat")
+        agent = self._main_chat_agent_config(
+            model_profile_id=default_profile_id,
+            tool_policy=tool_policy,
+            workspace_policy=workspace_policy,
+        )
+        runtime = self._compile_agent_runtime(agent)
+        timeline = [event for event in run.get("timeline") or [] if isinstance(event, dict)]
+        budget = self._run_budget(run_id, timeline)
+        self._check_context_budget(budget, messages)
+        timeline.append(
+            self._timeline(
+                "agent.runtime.compiled",
+                "Main chat NativeRunEngine compiled tools and workspace policy",
+                allowed_tools=runtime["tool_policy"].get("allowed_tools") or [],
+            )
+        )
+        timeline.append(
+            self._timeline(
+                "model.request.started",
+                str(model_config.get("model") or ""),
+                profile_id=default_profile_id,
+                capability="chat",
+            )
+        )
+        self._update_run(run_id, status="running", timeline=timeline)
+        self.append_run_event(
+            run_id,
+            "model.request.started",
+            {
+                "profile_id": default_profile_id,
+                "model": str(model_config.get("model") or ""),
+                "capability": "chat",
+                "message_count": len(messages),
+            },
+        )
+        broker = ToolBroker(runtime["workspace_policy"], self.agent_artifacts_dir / run_id)
+        artifacts = [item for item in run.get("artifacts") or [] if isinstance(item, dict)]
+        try:
+            result_text = self._run_custom_api_agent(
+                agent,
+                "",
+                broker,
+                timeline,
+                artifacts,
+                messages=messages,
+                run_id=run_id,
+                budget=budget,
+            )
+        except AgentApprovalRequired as exc:
+            pending = self._main_chat_pending_approval(
+                exc.pending_approval,
+                model_profile_id=default_profile_id,
+                tool_policy=runtime["tool_policy"],
+                workspace_policy=runtime["workspace_policy"],
+            )
+            timeline.append(
+                self._timeline(
+                    "agent.tool.approval_required",
+                    str(pending.get("tool") or ""),
+                    pending_approval=_public_pending_approval(pending),
+                )
+            )
+            self.append_run_event(
+                run_id,
+                "agent.tool.approval_required",
+                _public_pending_approval(pending),
+            )
+            return self._update_run(
+                run_id,
+                status="approval_required",
+                result=f"等待审批：{pending.get('tool') or 'tool'}",
+                timeline=timeline,
+                artifacts=artifacts,
+                pending_approval=pending,
+            )
+        except Exception as exc:
+            terminal = self._terminal_run_or_none(run_id)
+            if terminal is not None:
+                return terminal
+            safe_error = redact_secrets(exc)
+            timeline.append(self._timeline("model.request.failed", safe_error))
+            self._update_run(run_id, status="failed", result=safe_error, timeline=timeline, artifacts=artifacts, pending_approval=None)
+            self.append_run_event(run_id, "model.request.failed", {"error": safe_error})
+            raise
+        terminal = self._terminal_run_or_none(run_id)
+        if terminal is not None:
+            return terminal
+
+        timeline.append(
+            self._timeline(
+                "model.output.ready",
+                result_text[:500],
+                output_chars=len(result_text),
+                truncated=len(result_text) >= self.runtime_limits.max_model_output_chars,
+            )
+        )
+        self.append_run_event(
+            run_id,
+            "model.output.completed",
+            {"content": result_text, "output_chars": len(result_text)},
+        )
+        return self._update_run(
+            run_id,
+            status="running",
+            result=result_text,
+            timeline=timeline,
+            artifacts=artifacts,
+            pending_approval=None,
+        )
+
+    def complete_main_chat_run(self, run_id: str, result: str) -> dict[str, Any]:
+        run = self.get_run(run_id)
+        terminal = run if str(run.get("status") or "").strip() in _FINAL_RUN_STATUSES else None
+        if terminal is not None:
+            return terminal
+        safe_result = redact_secrets(result)
+        timeline = [
+            *[event for event in run.get("timeline") or [] if isinstance(event, dict)],
+            self._timeline("run.completed", "Native main chat run completed"),
+        ]
+        completed = self._update_run(
+            run_id,
+            status="completed",
+            result=safe_result,
+            timeline=timeline,
+            pending_approval=None,
+        )
+        self.append_run_event(run_id, "run.completed", {"result": safe_result})
+        return completed
+
+    def fail_main_chat_run(self, run_id: str, error: Any) -> dict[str, Any]:
+        run = self.get_run(run_id)
+        terminal = run if str(run.get("status") or "").strip() in _FINAL_RUN_STATUSES else None
+        if terminal is not None:
+            return terminal
+        safe_error = redact_secrets(error)
+        timeline = [
+            *[event for event in run.get("timeline") or [] if isinstance(event, dict)],
+            self._timeline("run.failed", safe_error),
+        ]
+        failed = self._update_run(
+            run_id,
+            status="failed",
+            result=safe_error,
+            timeline=timeline,
+            pending_approval=None,
+        )
+        self.append_run_event(run_id, "run.failed", {"error": safe_error})
+        return failed
 
     def _load_agent_skills(self, skill_ids: list[str]) -> list[dict[str, Any]]:
         skills = []
@@ -3071,18 +5977,32 @@ class AgentRuntimeService:
         agent = self._get_agent_private(agent_id)
         self._validate_agent_run_readiness(agent)
         run_group_id = str(payload.get("run_group_id") or "").strip()
+        client_request_id = self._client_request_id_from_payload(payload)
+        existing = self._run_by_client_request_id(client_request_id)
+        if existing is not None:
+            return existing
         root_group = False
-        if run_group_id:
-            self.get_run_group(run_group_id)
-        else:
-            group = self._insert_run_group(
-                title=f"{agent['name']}: {user_goal[:80]}",
-                source=str(payload.get("source") or "agent"),
-                workspace_dir=self._agent_workspace_dir(agent),
+        with self._db_lock:
+            existing = self._run_by_client_request_id(client_request_id)
+            if existing is not None:
+                return existing
+            if run_group_id:
+                self.get_run_group(run_group_id)
+            else:
+                group = self._insert_run_group(
+                    title=f"{agent['name']}: {user_goal[:80]}",
+                    source=str(payload.get("source") or "agent"),
+                    workspace_dir=self._agent_workspace_dir(agent),
+                )
+                run_group_id = group["run_group_id"]
+                root_group = True
+            run = self._insert_run(
+                kind="agent_run",
+                runnable_id=agent_id,
+                user_goal=user_goal,
+                run_group_id=run_group_id,
+                client_request_id=client_request_id,
             )
-            run_group_id = group["run_group_id"]
-            root_group = True
-        run = self._insert_run(kind="agent_run", runnable_id=agent_id, user_goal=user_goal, run_group_id=run_group_id)
         result = self._execute_agent_run(
             run["run_id"],
             agent,
@@ -3162,12 +6082,14 @@ class AgentRuntimeService:
                 logging.getLogger(__name__).error(
                     "异步 Agent Run 执行失败: %s", exc, exc_info=True
                 )
+                safe_error = redact_secrets(exc)
                 # 更新 run 状态为 failed
+                self.append_run_event(run["run_id"], "agent.run.failed", {"error": safe_error})
                 self._update_run(
                     run["run_id"],
                     status="failed",
-                    result=str(exc),
-                    timeline=[self._timeline("agent.run.failed", str(exc))],
+                    result=safe_error,
+                    timeline=[self._timeline("agent.run.failed", safe_error)],
                     artifacts=[],
                     pending_approval=None,
                 )
@@ -3175,7 +6097,7 @@ class AgentRuntimeService:
                     on_complete({
                         **run,
                         "status": "failed",
-                        "result": str(exc),
+                        "result": safe_error,
                     })
 
         thread = threading.Thread(
@@ -3191,6 +6113,16 @@ class AgentRuntimeService:
         backend = _normalize_execution_backend(agent.get("execution_backend"), model_mode=str(agent.get("model_mode") or "profile"))
         runtime = self._compile_agent_runtime(agent)
         timeline = [self._timeline("agent.run.started", f"{agent['name']} started", backend=backend, runtime=runtime["runtime"])]
+        self.append_run_event(
+            run_id,
+            "agent.run.started",
+            {
+                "agent_id": str(agent.get("agent_id") or ""),
+                "agent_name": str(agent.get("name") or ""),
+                "backend": backend,
+                "runtime": runtime["runtime"],
+            },
+        )
         timeline.append(
             self._timeline(
                 "agent.runtime.compiled",
@@ -3206,8 +6138,9 @@ class AgentRuntimeService:
             artifact = broker.artifact_write("agent-context.md", context)
             artifacts.append({"kind": "context", **artifact})
             timeline.append(self._timeline("agent.artifact.write", "agent-context.md", artifact=artifact))
-            result = self._run_custom_api_agent(agent, context, broker, timeline, artifacts)
+            result = self._run_custom_api_agent(agent, context, broker, timeline, artifacts, run_id=run_id)
             timeline.append(self._timeline("agent.run.completed", "Agent run completed"))
+            self.append_run_event(run_id, "agent.run.completed", {"result": result})
             return self._update_run(
                 run_id,
                 status="completed",
@@ -3224,6 +6157,11 @@ class AgentRuntimeService:
                     pending_approval=_public_pending_approval(exc.pending_approval),
                 )
             )
+            self.append_run_event(
+                run_id,
+                "agent.tool.approval_required",
+                _public_pending_approval(exc.pending_approval),
+            )
             return self._update_run(
                 run_id,
                 status="approval_required",
@@ -3233,11 +6171,13 @@ class AgentRuntimeService:
                 pending_approval=exc.pending_approval,
             )
         except Exception as exc:
-            timeline.append(self._timeline("agent.run.failed", str(exc)))
+            safe_error = redact_secrets(exc)
+            timeline.append(self._timeline("agent.run.failed", safe_error))
+            self.append_run_event(run_id, "agent.run.failed", {"error": safe_error})
             return self._update_run(
                 run_id,
                 status="failed",
-                result=str(exc),
+                result=safe_error,
                 timeline=timeline,
                 artifacts=artifacts,
                 pending_approval=None,
@@ -3253,6 +6193,8 @@ class AgentRuntimeService:
         *,
         messages: list[dict[str, Any]] | None = None,
         start_iteration: int = 0,
+        run_id: str = "",
+        budget: _RunBudget | None = None,
     ) -> str:
         model_config = self._agent_model_config_private(agent)
         base_url = str(model_config.get("base_url") or "").rstrip("/")
@@ -3264,7 +6206,7 @@ class AgentRuntimeService:
         if messages is None:
             allowed_tool_text = ", ".join(allowed_tools) or "none"
             system_prompt = (
-                "You are running inside Hermes-Yachiyo Agent Runtime. "
+                "You are running inside Oha-Yachiyo Agent Runtime. "
                 "Follow the Agent functional instructions, persona prompt, user goal, and exact output requests. "
                 "If those instructions require an exact phrase or format, return exactly that final output. "
                 "Return concise final output unless the Agent instructions require otherwise. "
@@ -3288,15 +6230,22 @@ class AgentRuntimeService:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": context},
             ]
+        budget = budget or self._run_budget(run_id, timeline)
+        self._check_context_budget(budget, messages)
         tools = self._tool_schemas(allowed_tools)
         for iteration in range(max(0, int(start_iteration or 0)), _MAX_AGENT_TOOL_ITERATIONS):
-            message = openai_compatible_chat_message(base_url, model, api_key, messages, tools=tools)
+            self._check_context_budget(budget, messages)
+            budget.claim_model_call()
+            message = _coalesce_model_message(
+                openai_compatible_chat_message(base_url, model, api_key, messages, tools=tools)
+            )
             content = _message_content_text(message)
             tool_requests = self._tool_requests_from_message(message, content)
             detail = content[:500] if content else ", ".join(request["tool"] for request in tool_requests)[:500]
             timeline.append(self._timeline("agent.model.response", detail))
             if not tool_requests:
-                return content
+                result_text, _truncated = self._limit_model_output(content)
+                return result_text
 
             if tool_requests[0].get("protocol") == "tool_calls":
                 messages.append(self._assistant_message_for_history(message))
@@ -3310,6 +6259,8 @@ class AgentRuntimeService:
                 timeline,
                 artifacts,
                 next_iteration=iteration + 1,
+                run_id=run_id,
+                budget=budget,
             )
         artifact_completion = self._tool_loop_limit_artifact_completion(timeline, artifacts)
         if artifact_completion:
@@ -3378,7 +6329,7 @@ class AgentRuntimeService:
         return (
             "已写入产物，但模型在工具循环上限前没有返回最终总结。\n"
             f"产物：{', '.join(paths)}\n"
-            f"{AgentRuntimeService._tool_loop_limit_detail(timeline)}"
+            f"{NativeRunEngine._tool_loop_limit_detail(timeline)}"
         )
 
     @staticmethod
@@ -3438,7 +6389,10 @@ class AgentRuntimeService:
         artifacts: list[dict[str, Any]],
         *,
         next_iteration: int,
+        run_id: str = "",
+        budget: _RunBudget | None = None,
     ) -> None:
+        budget = budget or self._run_budget(run_id, timeline)
         user_goal = _user_goal_from_agent_messages(messages)
         for index, tool_request in enumerate(tool_requests):
             tool_name = _normalize_tool_name(tool_request.get("tool"))
@@ -3446,6 +6400,7 @@ class AgentRuntimeService:
             input_preview = _tool_input_preview(raw_input)
             goal_block_reason = _agent_goal_disallows_tool(user_goal, tool_name)
             if goal_block_reason:
+                budget.claim_tool_call(tool_name)
                 tool_result = {
                     "ok": False,
                     "blocked_by_user_goal": True,
@@ -3454,9 +6409,23 @@ class AgentRuntimeService:
                     "hint": "Do not ask for approval. Continue with an inline answer that follows the user's stated constraint.",
                 }
                 timeline.append(self._timeline("agent.tool.skipped", tool_name, input_preview=input_preview, result=tool_result))
+                if run_id:
+                    self.append_run_event(
+                        run_id,
+                        "agent.tool.skipped",
+                        {"tool": tool_name, "input_preview": input_preview, "result": tool_result},
+                    )
                 self._append_tool_result_message(messages, {**tool_request, "tool": tool_name}, tool_result)
                 continue
-            tool_result = self._call_agent_tool(tool_request, allowed_tools, broker, timeline, artifacts=artifacts)
+            tool_result = self._call_agent_tool(
+                tool_request,
+                allowed_tools,
+                broker,
+                timeline,
+                artifacts=artifacts,
+                run_id=run_id,
+                budget=budget,
+            )
             if tool_result.get("approval_required"):
                 raise AgentApprovalRequired(
                     self._make_pending_approval(
@@ -3489,13 +6458,25 @@ class AgentRuntimeService:
         *,
         artifacts: list[dict[str, Any]] | None = None,
         approved: bool = False,
+        run_id: str = "",
+        budget: _RunBudget | None = None,
     ) -> dict[str, Any]:
         tool_name = _normalize_tool_name(tool_request.get("tool"))
         payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
         input_preview = _tool_input_preview(payload)
-        if tool_name not in allowed_tools:
+        budget = budget or self._run_budget(run_id, timeline)
+        if not PolicyGate.allows_tool(tool_name, allowed_tools):
+            budget.claim_tool_call(tool_name)
             timeline.append(self._timeline("agent.tool.denied", tool_name, input_preview=input_preview))
+            if run_id:
+                self.append_run_event(
+                    run_id,
+                    "agent.tool.denied",
+                    {"tool": tool_name, "input_preview": input_preview},
+                )
             raise AgentRuntimeError(f"Agent 试图调用未授权工具：{tool_name}")
+        self._validate_tool_payload(tool_name, payload)
+        budget.claim_tool_call(tool_name, terminal_execution=tool_name == "terminal.run" and approved)
         try:
             tool_result = broker.call(tool_name, payload, approved=approved)
         except AgentRuntimeError as exc:
@@ -3509,7 +6490,7 @@ class AgentRuntimeService:
             tool_result = {
                 "ok": False,
                 "tool": tool_name,
-                "error": str(exc),
+                "error": redact_api_error_text(exc),
                 "hint": (
                     "Workspace tools only accept relative paths within the configured Default Workdir. "
                     "Use a valid relative path and do not retry the same invalid path."
@@ -3517,12 +6498,28 @@ class AgentRuntimeService:
                 ),
                 **({"suggested_tool": "terminal.run"} if "terminal.run" in allowed_tools else {}),
             }
+        tool_result = self._limit_tool_result(tool_result)
         timeline.append(self._timeline("agent.tool.call", tool_name, input_preview=input_preview, result=tool_result))
+        if run_id:
+            self.append_run_event(
+                run_id,
+                "agent.tool.call",
+                {
+                    "tool": tool_name,
+                    "input_preview": input_preview,
+                    "result": tool_result,
+                    "approved": bool(approved),
+                },
+            )
         if artifacts is not None and tool_name == "artifact.write" and tool_result.get("ok"):
             artifact = {"kind": "tool_artifact", **tool_result}
             if artifact not in artifacts:
                 artifacts.append(artifact)
         return tool_result
+
+    @staticmethod
+    def _validate_tool_payload(tool_name: str, payload: dict[str, Any]) -> None:
+        ToolDescriptorRegistry.validate_payload(tool_name, payload)
 
     @staticmethod
     def _make_pending_approval(
@@ -3588,7 +6585,7 @@ class AgentRuntimeService:
         return requests
 
     @staticmethod
-    def _chat_profile_model_config_private(profile_id: str) -> dict[str, Any]:
+    def _model_profile_config_private(profile_id: str, *, capability: str) -> dict[str, Any]:
         try:
             profile = get_model_profile_service().get_profile_private(profile_id)
         except KeyError as exc:
@@ -3599,14 +6596,18 @@ class AgentRuntimeService:
             raise AgentRuntimeError("Agent 引用的模型 Profile 尚未通过连接测试")
         if not supports_openai_compatible_api(str(profile.get("provider") or "openai_compatible")):
             raise AgentRuntimeError("Agent Runtime 首版仅支持 OpenAI-compatible 模型 Profile")
-        if str(profile.get("capability") or "chat") != "chat":
-            raise AgentRuntimeError("Agent 文本推理需要 chat 模型 Profile")
+        if str(profile.get("capability") or "chat") != capability:
+            raise AgentRuntimeError(f"Agent 推理需要 {capability} 模型 Profile")
         return {
             "provider": profile.get("provider") or "openai_compatible",
             "base_url": profile.get("base_url") or "",
             "model": profile.get("model") or "",
             "api_key": profile.get("api_key") or "",
         }
+
+    @staticmethod
+    def _chat_profile_model_config_private(profile_id: str) -> dict[str, Any]:
+        return NativeRunEngine._model_profile_config_private(profile_id, capability="chat")
 
     def _agent_model_config_private(self, agent: dict[str, Any]) -> dict[str, Any]:
         profile_id = str(agent.get("model_profile_id") or "").strip()
@@ -3720,7 +6721,7 @@ class AgentRuntimeService:
                 [{"role": "user", "content": "Reply with OK."}],
             )
         except AgentRuntimeError as exc:
-            return {"ok": False, "message": str(exc)}
+            return {"ok": False, "message": redact_api_error_text(exc)}
         return {
             "ok": True,
             "latency_ms": int((time.time() - started) * 1000),
@@ -3742,18 +6743,32 @@ class AgentRuntimeService:
         self._validate_workflow_runnable_steps(workflow["nodes"])
         self._validate_workflow_agent_run_readiness(workflow["nodes"])
         run_group_id = str(payload.get("run_group_id") or "").strip()
+        client_request_id = self._client_request_id_from_payload(payload)
+        existing = self._run_by_client_request_id(client_request_id)
+        if existing is not None:
+            return existing
         root_group = False
-        if run_group_id:
-            self.get_run_group(run_group_id)
-        else:
-            group = self._insert_run_group(
-                title=f"{workflow['name']}: {user_goal[:80]}",
-                source=str(payload.get("source") or "workflow"),
-                workspace_dir="",
+        with self._db_lock:
+            existing = self._run_by_client_request_id(client_request_id)
+            if existing is not None:
+                return existing
+            if run_group_id:
+                self.get_run_group(run_group_id)
+            else:
+                group = self._insert_run_group(
+                    title=f"{workflow['name']}: {user_goal[:80]}",
+                    source=str(payload.get("source") or "workflow"),
+                    workspace_dir="",
+                )
+                run_group_id = group["run_group_id"]
+                root_group = True
+            run = self._insert_run(
+                kind="workflow_run",
+                runnable_id=workflow_id,
+                user_goal=user_goal,
+                run_group_id=run_group_id,
+                client_request_id=client_request_id,
             )
-            run_group_id = group["run_group_id"]
-            root_group = True
-        run = self._insert_run(kind="workflow_run", runnable_id=workflow_id, user_goal=user_goal, run_group_id=run_group_id)
         timeline = [
             self._timeline(
                 "workflow.run.started",
@@ -3762,6 +6777,15 @@ class AgentRuntimeService:
                 workflow_snapshot=self._workflow_runtime_snapshot(workflow),
             )
         ]
+        self.append_run_event(
+            run["run_id"],
+            "workflow.run.started",
+            {
+                "workflow_id": workflow_id,
+                "workflow_name": workflow["name"],
+                "workflow_path": self._workflow_path_snapshot(workflow),
+            },
+        )
         artifacts: list[dict[str, Any]] = []
         context = user_goal
         return self._continue_workflow_run(
@@ -3815,6 +6839,15 @@ class AgentRuntimeService:
                 workflow_snapshot=self._workflow_runtime_snapshot(workflow),
             )
         ]
+        self.append_run_event(
+            run["run_id"],
+            "workflow.run.started",
+            {
+                "workflow_id": workflow_id,
+                "workflow_name": workflow["name"],
+                "workflow_path": self._workflow_path_snapshot(workflow),
+            },
+        )
         run = self._update_run(
             run["run_id"],
             status="running",
@@ -3847,16 +6880,22 @@ class AgentRuntimeService:
                 logging.getLogger(__name__).error(
                     "异步 Workflow Run 执行失败: %s", exc, exc_info=True
                 )
+                safe_error = redact_secrets(exc)
                 failed = self._update_run(
                     run["run_id"],
                     status="failed",
-                    result=str(exc),
-                    timeline=[*timeline, self._timeline("workflow.run.failed", str(exc), status="failed")],
+                    result=safe_error,
+                    timeline=[*timeline, self._timeline("workflow.run.failed", safe_error, status="failed")],
                     artifacts=[],
                     pending_approval=None,
                 )
+                self.append_run_event(
+                    run["run_id"],
+                    "workflow.run.failed",
+                    {"error": safe_error},
+                )
                 if root_group:
-                    self._update_run_group(run_group_id, status="failed", summary=str(exc))
+                    self._update_run_group(run_group_id, status="failed", summary=safe_error)
                 if on_complete:
                     on_complete(failed)
 
@@ -4065,164 +7104,17 @@ class AgentRuntimeService:
         return candidate
 
     def _resume_parent_workflows_after_child_update(self, child_run: dict[str, Any]) -> None:
-        for workflow_run in self._workflow_parent_runs_waiting_for_child(child_run):
-            self._resume_parent_workflow_after_child_update(workflow_run, child_run)
+        self.workflow_parent_resume.resume_after_child_update(child_run)
 
     def _mark_parent_workflows_child_running(self, child_run: dict[str, Any]) -> None:
-        for workflow_run in self._workflow_parent_runs_waiting_for_child(child_run):
-            root_group = self._workflow_run_is_group_root(workflow_run)
-            timeline = [
-                event
-                for event in workflow_run.get("timeline") or []
-                if isinstance(event, dict)
-            ]
-            artifacts = [item for item in workflow_run.get("artifacts") or [] if isinstance(item, dict)]
-            child_label, child_node_info = self._workflow_child_node_context(timeline, child_run)
-            child_run_id = str(child_run.get("run_id") or "")
-            self._merge_workflow_child_run_outcome(timeline, artifacts, child_run, child_label)
-            if not any(
-                event.get("event") == "workflow.run.child_resumed"
-                and str(event.get("child_run_id") or "") == child_run_id
-                for event in timeline
-                if isinstance(event, dict)
-            ):
-                timeline.append(
-                    self._timeline(
-                        "workflow.run.child_resumed",
-                        f"{child_label} approved and resumed",
-                        child_run_id=child_run_id,
-                        status="running",
-                        **child_node_info,
-                    )
-                )
-            result_text = f"{child_label} 已批准，正在继续执行"
-            result = self._update_run(
-                str(workflow_run["run_id"]),
-                status="running",
-                result=result_text,
-                timeline=timeline,
-                artifacts=artifacts,
-                pending_approval=None,
-            )
-            if root_group:
-                self._update_run_group(
-                    str(result.get("run_group_id") or ""),
-                    status="running",
-                    summary=result_text,
-                )
+        self.workflow_parent_resume.mark_child_running(child_run)
 
     def _resume_parent_workflow_after_child_update(
         self,
         workflow_run: dict[str, Any],
         child_run: dict[str, Any],
     ) -> dict[str, Any]:
-        root_group = self._workflow_run_is_group_root(workflow_run)
-        timeline = [
-            event
-            for event in workflow_run.get("timeline") or []
-            if isinstance(event, dict)
-        ]
-        artifacts = [item for item in workflow_run.get("artifacts") or [] if isinstance(item, dict)]
-        child_status = str(child_run.get("status") or "")
-        child_result = str(child_run.get("result") or "")
-        child_run_id = str(child_run.get("run_id") or "")
-        run_group_id = str(workflow_run.get("run_group_id") or "")
-        child_label, child_node_info = self._workflow_child_node_context(timeline, child_run)
-        self._merge_workflow_child_run_outcome(timeline, artifacts, child_run, child_label)
-        if child_status == "approval_required":
-            timeline.append(
-                self._timeline(
-                    "workflow.run.approval_required",
-                    child_label,
-                    child_run_id=child_run_id,
-                    status="approval_required",
-                    **child_node_info,
-                )
-            )
-            result = self._update_run(
-                str(workflow_run["run_id"]),
-                status="approval_required",
-                result=child_result,
-                timeline=timeline,
-                artifacts=artifacts,
-            )
-            if root_group:
-                self._update_run_group(
-                    run_group_id,
-                    status="approval_required",
-                    summary=child_result,
-                )
-            return result
-        if child_status != "completed":
-            status = "cancelled" if child_status == "cancelled" else "failed"
-            detail = (
-                f"{child_run.get('runnable_name') or child_run.get('runnable_id')}: "
-                f"{child_result}"
-            )
-            timeline.append(
-                self._timeline(
-                    f"workflow.run.{status}",
-                    detail,
-                    child_run_id=child_run_id,
-                    status=child_status,
-                    **child_node_info,
-                )
-            )
-            result = self._update_run(
-                str(workflow_run["run_id"]),
-                status=status,
-                result=child_result,
-                timeline=timeline,
-                artifacts=artifacts,
-            )
-            if root_group:
-                self._update_run_group(run_group_id, status=status, summary=child_result)
-            return result
-        try:
-            workflow = self._workflow_for_run_resume(workflow_run)
-            start_index = self._workflow_resume_start_index(workflow, workflow_run, child_run_id)
-            if start_index is None:
-                return workflow_run
-            timeline.append(
-                self._timeline(
-                    "workflow.run.resumed",
-                    "Workflow resumed after child Agent approval",
-                    child_run_id=child_run_id,
-                )
-            )
-            return self._continue_workflow_run(
-                workflow_run,
-                workflow,
-                context=child_result,
-                timeline=timeline,
-                artifacts=artifacts,
-                start_index=start_index,
-                root_group=root_group,
-            )
-        except Exception as exc:
-            failed_event_extra = dict(child_node_info)
-            if child_run_id:
-                failed_event_extra["child_run_id"] = child_run_id
-            if child_status:
-                failed_event_extra["child_run_status"] = child_status
-            timeline.append(
-                self._timeline(
-                    "workflow.run.failed",
-                    str(exc),
-                    status="failed",
-                    **failed_event_extra,
-                )
-            )
-            result = self._update_run(
-                str(workflow_run["run_id"]),
-                status="failed",
-                result=str(exc),
-                timeline=timeline,
-                artifacts=artifacts,
-            )
-            if root_group:
-                self._update_run_group(run_group_id, status="failed", summary=str(exc))
-            return result
+        return self.workflow_parent_resume.resume_parent_after_child_update(workflow_run, child_run)
 
     def _continue_workflow_run(
         self,
@@ -4235,222 +7127,15 @@ class AgentRuntimeService:
         start_index: int,
         root_group: bool,
     ) -> dict[str, Any]:
-        run_group_id = str(run.get("run_group_id") or "")
-        current_node_info: dict[str, str] = {}
-        try:
-            workflow_goal = str(run.get("user_goal") or context)
-            has_agent_upstream = max(0, start_index) > 0
-            path = self._workflow_path(workflow)
-            for index, node in enumerate(path[max(0, start_index) :], start=max(0, start_index)):
-                kind = self._node_kind(node)
-                label = str((node.get("data") or {}).get("label") or node.get("id"))
-                current_node_info = {
-                    "workflow_node_id": str(node.get("id") or ""),
-                    "workflow_node_kind": kind,
-                    "workflow_node_label": label,
-                }
-                if kind == "start":
-                    timeline.append(
-                        self._timeline(
-                            "workflow.node.start",
-                            label,
-                            workflow_node_id=str(node.get("id") or ""),
-                            status="completed",
-                        )
-                    )
-                    continue
-                if kind == "agent":
-                    data = node.get("data") or {}
-                    agent = self._workflow_agent_for_node(node)
-                    agent_id = str(agent.get("agent_id") or data.get("agent_id") or data.get("agentId") or "")
-                    step_task = self._workflow_node_task(node)
-                    child_goal = self._workflow_child_goal(workflow_goal, step_task)
-                    agent_upstream = context if has_agent_upstream else ""
-                    child = self._insert_run(
-                        kind="agent_run",
-                        runnable_id=agent_id,
-                        user_goal=child_goal,
-                        run_group_id=run_group_id,
-                    )
-                    child = self._execute_agent_run(
-                        child["run_id"],
-                        agent,
-                        child_goal,
-                        upstream=agent_upstream,
-                    )
-                    context = child["result"]
-                    has_agent_upstream = True
-                    timeline.append(
-                        self._timeline(
-                            "workflow.node.agent",
-                            label,
-                            workflow_node_id=str(node.get("id") or ""),
-                            workflow_node_kind=kind,
-                            workflow_node_label=label,
-                            workflow_node_task=step_task,
-                            child_run_id=child["run_id"],
-                            status=child["status"],
-                            result=_tool_input_preview(child.get("result") or "", limit=1800),
-                            artifact_count=len(self._workflow_child_artifact_refs(child, label)),
-                        )
-                    )
-                    self._merge_workflow_child_run_outcome(timeline, artifacts, child, label)
-                    if child["status"] == "approval_required":
-                        timeline.append(
-                            self._timeline(
-                                "workflow.run.approval_required",
-                                label,
-                                workflow_node_id=str(node.get("id") or ""),
-                                workflow_node_kind=kind,
-                                workflow_node_label=label,
-                                child_run_id=child["run_id"],
-                            )
-                        )
-                        result = self._update_run(
-                            str(run["run_id"]),
-                            status="approval_required",
-                            result=context,
-                            timeline=timeline,
-                            artifacts=artifacts,
-                        )
-                        if root_group:
-                            self._update_run_group(
-                                run_group_id,
-                                status="approval_required",
-                                summary=context,
-                            )
-                            result = self.get_run(result["run_id"])
-                        return result
-                    if child["status"] != "completed":
-                        status = "cancelled" if child["status"] == "cancelled" else "failed"
-                        detail = f"{label}: {context or child['status']}"
-                        timeline.append(
-                            self._timeline(
-                                f"workflow.run.{status}",
-                                detail,
-                                workflow_node_id=str(node.get("id") or ""),
-                                workflow_node_kind=kind,
-                                workflow_node_label=label,
-                                child_run_id=child["run_id"],
-                                status=child["status"],
-                            )
-                        )
-                        result = self._update_run(
-                            str(run["run_id"]),
-                            status=status,
-                            result=context,
-                            timeline=timeline,
-                            artifacts=artifacts,
-                        )
-                        if root_group:
-                            self._update_run_group(run_group_id, status=status, summary=context)
-                            result = self.get_run(result["run_id"])
-                        return result
-                    continue
-                if kind == "approval":
-                    criteria = self._workflow_approval_criteria(node)
-                    pending = {
-                        "approval_id": f"approval_{uuid4().hex[:12]}",
-                        "tool": "workflow.approval",
-                        "input_preview": {
-                            "checkpoint": label,
-                            "context": _tool_input_preview(context),
-                            **({"criteria": criteria} if criteria else {}),
-                        },
-                        "requested_at": _now(),
-                        "workflow_context": context,
-                        "workflow_next_index": index + 1,
-                        "workflow_node_id": str(node.get("id") or ""),
-                        "workflow_node_label": label,
-                        "workflow_node_approval_criteria": criteria,
-                    }
-                    timeline.append(
-                            self._timeline(
-                                "workflow.node.approval_required",
-                                label,
-                                workflow_node_id=str(node.get("id") or ""),
-                                workflow_node_kind=kind,
-                                workflow_node_label=label,
-                                workflow_node_approval_criteria=criteria,
-                                status="approval_required",
-                                pending_approval=_public_pending_approval(pending),
-                            )
-                        )
-                    result = self._update_run(
-                        str(run["run_id"]),
-                        status="approval_required",
-                        result=f"等待审批：{label}",
-                        timeline=timeline,
-                        artifacts=artifacts,
-                        pending_approval=pending,
-                    )
-                    if root_group:
-                        self._update_run_group(
-                            run_group_id,
-                            status="approval_required",
-                            summary=f"等待审批：{label}",
-                        )
-                        result = self.get_run(result["run_id"])
-                    return result
-                if kind == "artifact":
-                    data = node.get("data") or {}
-                    broker = ToolBroker(
-                        self._default_workspace_policy(),
-                        self.workflow_artifacts_dir / str(run["run_id"]),
-                    )
-                    workflow_node_id = str(node.get("id") or "")
-                    artifact_path = self._workflow_artifact_path(
-                        label,
-                        artifacts,
-                        str(data.get("artifact_path") or data.get("artifactPath") or ""),
-                    )
-                    artifact = broker.artifact_write(artifact_path, context)
-                    artifacts.append(
-                        {
-                            "kind": "workflow_artifact",
-                            "workflow_node_id": workflow_node_id,
-                            "workflow_node_label": label,
-                            **artifact,
-                        }
-                    )
-                    timeline.append(
-                        self._timeline(
-                            "workflow.node.artifact",
-                            label,
-                            workflow_node_id=workflow_node_id,
-                            workflow_node_kind=kind,
-                            workflow_node_label=label,
-                            status="completed",
-                            artifact=artifact,
-                        )
-                    )
-                    continue
-                raise AgentRuntimeError(f"未知 Workflow 节点类型：{kind}")
-            timeline.append(self._timeline("workflow.run.completed", "Workflow run completed"))
-            result = self._update_run(
-                str(run["run_id"]),
-                status="completed",
-                result=context,
-                timeline=timeline,
-                artifacts=artifacts,
-            )
-            if root_group:
-                self._update_run_group(run_group_id, status="completed", summary=context)
-                result = self.get_run(result["run_id"])
-            return result
-        except Exception as exc:
-            timeline.append(self._timeline("workflow.run.failed", str(exc), status="failed", **current_node_info))
-            result = self._update_run(
-                str(run["run_id"]),
-                status="failed",
-                result=str(exc),
-                timeline=timeline,
-                artifacts=artifacts,
-            )
-            if root_group:
-                self._update_run_group(run_group_id, status="failed", summary=str(exc))
-                result = self.get_run(result["run_id"])
-            return result
+        return self.workflow_continuation.continue_run(
+            run,
+            workflow,
+            context=context,
+            timeline=timeline,
+            artifacts=artifacts,
+            start_index=start_index,
+            root_group=root_group,
+        )
 
     def _workflow_path(self, workflow: dict[str, Any]) -> list[dict[str, Any]]:
         nodes = {str(node["id"]): node for node in workflow["nodes"]}
@@ -4552,6 +7237,18 @@ class AgentRuntimeService:
         return self.get_workflow(str(workflow_run["runnable_id"]))
 
     def cancel_run(self, run_id: str) -> dict[str, Any]:
+        clean_run_id = str(run_id or "").strip()
+        with self._run_cancel_locks_guard:
+            lock = self._run_cancel_locks.setdefault(clean_run_id, threading.RLock())
+        try:
+            with lock:
+                return self._cancel_run_once(clean_run_id)
+        finally:
+            with self._run_cancel_locks_guard:
+                if self._run_cancel_locks.get(clean_run_id) is lock:
+                    self._run_cancel_locks.pop(clean_run_id, None)
+
+    def _cancel_run_once(self, run_id: str) -> dict[str, Any]:
         run = self.get_run(run_id)
         if run["status"] in _FINAL_RUN_STATUSES:
             return run
@@ -4608,6 +7305,11 @@ class AgentRuntimeService:
                             if isinstance(event, dict)
                         ]
                         child_timeline.append(self._timeline("run.cancelled", "Parent Workflow cancelled"))
+                        self.append_run_event(
+                            child_run_id,
+                            "run.cancelled",
+                            {"reason": "Parent Workflow cancelled", "parent_run_id": run_id},
+                        )
                         child_run = self._update_run(
                             child_run_id,
                             status="cancelled",
@@ -4638,6 +7340,16 @@ class AgentRuntimeService:
             artifacts=artifacts,
             pending_approval=None,
         )
+        cancel_event_type = "workflow.run.cancelled" if result.get("kind") == "workflow_run" else "run.cancelled"
+        self.append_run_event(
+            run_id,
+            cancel_event_type,
+            {
+                "kind": result.get("kind"),
+                "result": result.get("result") or "",
+                "status": "cancelled",
+            },
+        )
         if result.get("kind") == "workflow_run" and self._workflow_run_is_group_root(result):
             self._update_run_group(
                 str(result.get("run_group_id") or ""),
@@ -4650,12 +7362,69 @@ class AgentRuntimeService:
         self._resume_parent_workflows_after_child_update(result)
         return result
 
+    def _tool_approval_resume_context(
+        self,
+        run: dict[str, Any],
+        pending: dict[str, Any],
+        *,
+        runtime: dict[str, Any],
+    ) -> ToolApprovalResumeContext:
+        run_id = str(run["run_id"])
+        messages = pending.get("messages") if isinstance(pending.get("messages"), list) else []
+        tool_request = pending.get("tool_request") if isinstance(pending.get("tool_request"), dict) else {}
+        if not messages or not tool_request:
+            raise AgentRuntimeError("Run 待审批上下文不完整，无法恢复")
+        timeline = [
+            event
+            for event in run.get("timeline") or []
+            if isinstance(event, dict)
+        ]
+        artifacts = [item for item in run.get("artifacts") or [] if isinstance(item, dict)]
+        remaining = pending.get("remaining_tool_requests")
+        remaining_requests = [item for item in remaining if isinstance(item, dict)] if isinstance(remaining, list) else []
+        try:
+            next_iteration = int(pending.get("next_iteration") or 0)
+        except (TypeError, ValueError):
+            next_iteration = 0
+        tool_name = str(tool_request.get("tool") or pending.get("tool") or "").strip()
+        return ToolApprovalResumeContext(
+            run_id=run_id,
+            timeline=timeline,
+            artifacts=artifacts,
+            broker=ToolBroker(runtime["workspace_policy"], self.agent_artifacts_dir / run_id),
+            allowed_tools=runtime["tool_policy"].get("allowed_tools") or [],
+            budget=self._run_budget(run_id, timeline),
+            messages=messages,
+            tool_request=tool_request,
+            tool_name=tool_name,
+            input_preview=_tool_input_preview(tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}),
+            remaining_requests=remaining_requests,
+            next_iteration=next_iteration,
+        )
+
     def approve_run_approval(self, run_id: str) -> dict[str, Any]:
-        run = self.get_run(run_id)
+        clean_run_id = str(run_id or "").strip()
+        with self._approval_execution_lock:
+            run = self.get_run(clean_run_id)
+            if run["status"] != "approval_required":
+                return run
+            if clean_run_id in self._approval_execution_in_progress:
+                return run
+            self._approval_execution_in_progress.add(clean_run_id)
+        try:
+            return self._approve_run_approval_once(run)
+        finally:
+            with self._approval_execution_lock:
+                self._approval_execution_in_progress.discard(clean_run_id)
+
+    def _approve_run_approval_once(self, run: dict[str, Any]) -> dict[str, Any]:
+        run_id = str(run["run_id"])
         if run["status"] != "approval_required":
-            raise AgentRuntimeError("Run 当前不在待审批状态")
+            return run
         if run["kind"] == "workflow_run":
             return self._approve_workflow_run_approval(run)
+        if run["kind"] == "main_chat_run":
+            return self._approve_main_chat_run_approval(run)
         if run["kind"] != "agent_run":
             raise AgentRuntimeError("当前只支持恢复 Agent Run 的工具审批")
         pending = self._pending_approval_private(run_id)
@@ -4663,113 +7432,181 @@ class AgentRuntimeService:
             raise AgentRuntimeError("Run 缺少待审批工具信息")
         agent = self._get_agent_private(str(run["runnable_id"]))
         runtime = self._compile_agent_runtime(agent)
-        broker = ToolBroker(runtime["workspace_policy"], self.agent_artifacts_dir / run_id)
-        allowed_tools = runtime["tool_policy"].get("allowed_tools") or []
-        timeline = [*run["timeline"]]
-        artifacts = [item for item in run.get("artifacts") or [] if isinstance(item, dict)]
-        messages = pending.get("messages") if isinstance(pending.get("messages"), list) else []
-        tool_request = pending.get("tool_request") if isinstance(pending.get("tool_request"), dict) else {}
-        if not messages or not tool_request:
-            raise AgentRuntimeError("Run 待审批上下文不完整，无法恢复")
-        tool_name = str(tool_request.get("tool") or pending.get("tool") or "").strip()
-        tool_input_preview = _tool_input_preview(tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {})
-        timeline.append(
-            self._timeline(
-                "agent.tool.approval_approved",
-                tool_name or "tool",
-                input_preview=tool_input_preview,
-                status="completed",
-            )
-        )
-        timeline.append(
-            self._timeline(
-                "agent.run.resumed",
-                "Agent resumed after approval",
-                status="running",
-            )
-        )
-        running = self._update_run(
+        resume_context = self._tool_approval_resume_context(run, pending, runtime=runtime)
+        if not self.run_approvals.claim_pending_approval(run_id, pending):
+            return self.get_run(run_id)
+        running = self.approvals.approve_tool_run(
             run_id,
-            status="running",
-            result="已批准，Agent 正在继续执行",
-            timeline=timeline,
-            artifacts=artifacts,
-            pending_approval=None,
+            timeline=resume_context.timeline,
+            artifacts=resume_context.artifacts,
+            tool_name=resume_context.tool_name,
+            input_preview=resume_context.input_preview,
+            resumed_detail="Agent resumed after approval",
+            running_result="已批准，Agent 正在继续执行",
         )
         self._update_agent_run_group_if_root(running)
         self._mark_parent_workflows_child_running(running)
         try:
-            tool_result = self._call_agent_tool(tool_request, allowed_tools, broker, timeline, artifacts=artifacts, approved=True)
-            fatal_failure = self._fatal_tool_failure_detail(tool_name, tool_request, tool_result)
-            if fatal_failure:
-                timeline.append(
-                    self._timeline(
-                        "agent.tool.failed",
-                        tool_name or "tool",
-                        input_preview=tool_input_preview,
-                        result=tool_result,
-                        status="failed",
-                    )
-                )
-                raise AgentRuntimeError(fatal_failure)
-            self._append_tool_result_message(messages, tool_request, tool_result)
-            remaining = pending.get("remaining_tool_requests")
-            remaining_requests = [item for item in remaining if isinstance(item, dict)] if isinstance(remaining, list) else []
-            self._run_tool_requests(
-                remaining_requests,
-                allowed_tools,
-                broker,
-                messages,
-                timeline,
-                artifacts,
-                next_iteration=int(pending.get("next_iteration") or 0),
-            )
+            self.approval_resume.execute_approved_tool(resume_context)
             result_text = self._run_custom_api_agent(
                 agent,
                 "",
-                broker,
-                timeline,
-                artifacts,
-                messages=messages,
-                start_iteration=int(pending.get("next_iteration") or 0),
+                resume_context.broker,
+                resume_context.timeline,
+                resume_context.artifacts,
+                messages=resume_context.messages,
+                start_iteration=resume_context.next_iteration,
+                run_id=run_id,
+                budget=resume_context.budget,
             )
-            timeline.append(self._timeline("agent.run.completed", "Agent run completed"))
+            resume_context.timeline.append(self._timeline("agent.run.completed", "Agent run completed"))
+            self.append_run_event(run_id, "agent.run.completed", {"result": result_text})
             result = self._update_run(
                 run_id,
                 status="completed",
                 result=result_text,
-                timeline=timeline,
-                artifacts=artifacts,
+                timeline=resume_context.timeline,
+                artifacts=resume_context.artifacts,
                 pending_approval=None,
             )
         except AgentApprovalRequired as exc:
-            timeline.append(
+            resume_context.timeline.append(
                 self._timeline(
                     "agent.tool.approval_required",
                     str(exc.pending_approval.get("tool") or ""),
                     pending_approval=_public_pending_approval(exc.pending_approval),
                 )
             )
+            self.append_run_event(
+                run_id,
+                "agent.tool.approval_required",
+                _public_pending_approval(exc.pending_approval),
+            )
             result = self._update_run(
                 run_id,
                 status="approval_required",
                 result=f"等待审批：{exc.pending_approval.get('tool') or 'tool'}",
-                timeline=timeline,
-                artifacts=artifacts,
+                timeline=resume_context.timeline,
+                artifacts=resume_context.artifacts,
                 pending_approval=exc.pending_approval,
             )
         except Exception as exc:
-            timeline.append(self._timeline("agent.run.failed", str(exc)))
+            safe_error = redact_secrets(exc)
+            resume_context.timeline.append(self._timeline("agent.run.failed", safe_error))
+            self.append_run_event(run_id, "agent.run.failed", {"error": safe_error})
             result = self._update_run(
                 run_id,
                 status="failed",
-                result=str(exc),
-                timeline=timeline,
-                artifacts=artifacts,
+                result=safe_error,
+                timeline=resume_context.timeline,
+                artifacts=resume_context.artifacts,
                 pending_approval=None,
             )
         self._update_agent_run_group_if_root(result)
         self._resume_parent_workflows_after_child_update(result)
+        return result
+
+    def _approve_main_chat_run_approval(self, run: dict[str, Any]) -> dict[str, Any]:
+        run_id = str(run["run_id"])
+        pending = self._pending_approval_private(run_id)
+        if not pending:
+            raise AgentRuntimeError("Run 缺少待审批工具信息")
+        model_profile_id = str(pending.get("model_profile_id") or "").strip()
+        if not model_profile_id:
+            model_profile_id = str(get_model_profile_service().get_defaults().get("chat") or "").strip()
+        if not model_profile_id:
+            raise AgentRuntimeError("native_agent_not_ready:chat_model_profile_required")
+        tool_policy = pending.get("tool_policy") if isinstance(pending.get("tool_policy"), dict) else {"allowed_tools": []}
+        workspace_policy = pending.get("workspace_policy") if isinstance(pending.get("workspace_policy"), dict) else None
+        agent = self._main_chat_agent_config(
+            model_profile_id=model_profile_id,
+            tool_policy=tool_policy,
+            workspace_policy=workspace_policy,
+        )
+        runtime = self._compile_agent_runtime(agent)
+        resume_context = self._tool_approval_resume_context(run, pending, runtime=runtime)
+        if not self.run_approvals.claim_pending_approval(run_id, pending):
+            return self.get_run(run_id)
+        self.approvals.approve_tool_run(
+            run_id,
+            timeline=resume_context.timeline,
+            artifacts=resume_context.artifacts,
+            tool_name=resume_context.tool_name,
+            input_preview=resume_context.input_preview,
+            resumed_detail="Main chat resumed after approval",
+            running_result="已批准，Yachiyo 正在继续执行",
+        )
+        try:
+            self.approval_resume.execute_approved_tool(resume_context)
+            result_text = self._run_custom_api_agent(
+                agent,
+                "",
+                resume_context.broker,
+                resume_context.timeline,
+                resume_context.artifacts,
+                messages=resume_context.messages,
+                start_iteration=resume_context.next_iteration,
+                run_id=run_id,
+                budget=resume_context.budget,
+            )
+            resume_context.timeline.append(
+                self._timeline(
+                    "model.output.ready",
+                    result_text[:500],
+                    output_chars=len(result_text),
+                )
+            )
+            self.append_run_event(
+                run_id,
+                "model.output.completed",
+                {"content": result_text, "output_chars": len(result_text)},
+            )
+            result = self._update_run(
+                run_id,
+                status="running",
+                result=result_text,
+                timeline=resume_context.timeline,
+                artifacts=resume_context.artifacts,
+                pending_approval=None,
+            )
+        except AgentApprovalRequired as exc:
+            pending_next = self._main_chat_pending_approval(
+                exc.pending_approval,
+                model_profile_id=model_profile_id,
+                tool_policy=runtime["tool_policy"],
+                workspace_policy=runtime["workspace_policy"],
+            )
+            resume_context.timeline.append(
+                self._timeline(
+                    "agent.tool.approval_required",
+                    str(pending_next.get("tool") or ""),
+                    pending_approval=_public_pending_approval(pending_next),
+                )
+            )
+            self.append_run_event(
+                run_id,
+                "agent.tool.approval_required",
+                _public_pending_approval(pending_next),
+            )
+            result = self._update_run(
+                run_id,
+                status="approval_required",
+                result=f"等待审批：{pending_next.get('tool') or 'tool'}",
+                timeline=resume_context.timeline,
+                artifacts=resume_context.artifacts,
+                pending_approval=pending_next,
+            )
+        except Exception as exc:
+            safe_error = redact_api_error_text(exc)
+            resume_context.timeline.append(self._timeline("agent.run.failed", safe_error))
+            result = self._update_run(
+                run_id,
+                status="failed",
+                result=safe_error,
+                timeline=resume_context.timeline,
+                artifacts=resume_context.artifacts,
+                pending_approval=None,
+            )
         return result
 
     def _approve_workflow_run_approval(self, run: dict[str, Any]) -> dict[str, Any]:
@@ -4792,27 +7629,19 @@ class AgentRuntimeService:
         workflow_node_id = str(pending.get("workflow_node_id") or "")
         criteria = str(pending.get("workflow_node_approval_criteria") or "").strip()
         approval_preview = pending.get("input_preview") if isinstance(pending.get("input_preview"), dict) else {}
-        timeline.append(
-            self._timeline(
-                "workflow.node.approval_approved",
-                label,
-                workflow_node_id=workflow_node_id,
-                workflow_node_kind="approval",
-                workflow_node_label=label,
-                workflow_node_approval_criteria=criteria,
-                input_preview=approval_preview,
-                status="completed",
-            )
-        )
         artifacts = [item for item in run.get("artifacts") or [] if isinstance(item, dict)]
         root_group = self._workflow_run_is_group_root(run)
-        running = self._update_run(
+        if not self.run_approvals.claim_pending_approval(run_id, pending):
+            return self.get_run(run_id)
+        running = self.approvals.approve_workflow_node(
             run_id,
-            status="running",
-            result=context,
             timeline=timeline,
             artifacts=artifacts,
-            pending_approval=None,
+            result_context=context,
+            workflow_node_id=workflow_node_id,
+            label=label,
+            criteria=criteria,
+            input_preview=approval_preview,
         )
         if root_group:
             self._update_run_group(str(run.get("run_group_id") or ""), status="running", summary=context)
@@ -4830,7 +7659,7 @@ class AgentRuntimeService:
     def reject_run_approval(self, run_id: str, reason: str = "") -> dict[str, Any]:
         run = self.get_run(run_id)
         if run["status"] != "approval_required":
-            raise AgentRuntimeError("Run 当前不在待审批状态")
+            return run
         if run["kind"] == "workflow_run":
             pending = self._pending_approval_private(run_id)
             if not pending or str(pending.get("tool") or "") != "workflow.approval":
@@ -4838,36 +7667,14 @@ class AgentRuntimeService:
             label = str(pending.get("workflow_node_label") or "Approval")
             criteria = str(pending.get("workflow_node_approval_criteria") or "").strip()
             approval_preview = pending.get("input_preview") if isinstance(pending.get("input_preview"), dict) else {}
-            detail = redact_secrets(reason).strip() or f"{label} approval rejected"
-            timeline = [
-                *run["timeline"],
-                self._timeline(
-                    "workflow.node.approval_rejected",
-                    detail,
-                    workflow_node_id=str(pending.get("workflow_node_id") or ""),
-                    workflow_node_kind="approval",
-                    workflow_node_label=label,
-                    workflow_node_approval_criteria=criteria,
-                    input_preview=approval_preview,
-                    status="cancelled",
-                ),
-                self._timeline(
-                    "workflow.run.cancelled",
-                    detail,
-                    workflow_node_id=str(pending.get("workflow_node_id") or ""),
-                    workflow_node_kind="approval",
-                    workflow_node_label=label,
-                    workflow_node_approval_criteria=criteria,
-                    input_preview=approval_preview,
-                    status="cancelled",
-                ),
-            ]
-            result = self._update_run(
+            result = self.approvals.reject_workflow_node(
                 run_id,
-                status="cancelled",
-                result=f"Workflow 审批已拒绝：{detail}",
-                timeline=timeline,
-                pending_approval=None,
+                timeline=[*run["timeline"]],
+                reason=reason,
+                workflow_node_id=str(pending.get("workflow_node_id") or ""),
+                label=label,
+                criteria=criteria,
+                input_preview=approval_preview,
             )
             if self._workflow_run_is_group_root(run):
                 self._update_run_group(
@@ -4881,23 +7688,55 @@ class AgentRuntimeService:
         tool_request = pending.get("tool_request") if isinstance(pending.get("tool_request"), dict) else {}
         tool_name = str(tool_request.get("tool") or pending.get("tool") or "").strip()
         tool_input_preview = _tool_input_preview(tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {})
-        detail = redact_secrets(reason).strip() or "Tool approval rejected"
-        timeline = [
-            *run["timeline"],
-            self._timeline(
-                "agent.tool.approval_rejected",
-                detail,
-                tool=tool_name,
-                input_preview=tool_input_preview,
-                status="cancelled",
-            ),
-        ]
-        result = self._update_run(
+        result = self.approvals.reject_tool_run(
             run_id,
-            status="cancelled",
-            result=f"工具审批已拒绝：{detail}",
-            timeline=timeline,
-            pending_approval=None,
+            timeline=[*run["timeline"]],
+            reason=reason,
+            tool_name=tool_name,
+            input_preview=tool_input_preview,
+        )
+        self._update_agent_run_group_if_root(result)
+        self._resume_parent_workflows_after_child_update(result)
+        return result
+
+    def timeout_run_approval(self, run_id: str, reason: str = "approval_wait_timeout") -> dict[str, Any]:
+        run = self.get_run(run_id)
+        if run["status"] != "approval_required":
+            return run
+        if run["kind"] == "workflow_run":
+            pending = self._pending_approval_private(run_id)
+            if not pending or str(pending.get("tool") or "") != "workflow.approval":
+                return self.cancel_run(run_id)
+            label = str(pending.get("workflow_node_label") or "Approval")
+            criteria = str(pending.get("workflow_node_approval_criteria") or "").strip()
+            approval_preview = pending.get("input_preview") if isinstance(pending.get("input_preview"), dict) else {}
+            result = self.approvals.timeout_workflow_node(
+                run_id,
+                timeline=[*run["timeline"]],
+                reason=reason,
+                workflow_node_id=str(pending.get("workflow_node_id") or ""),
+                label=label,
+                criteria=criteria,
+                input_preview=approval_preview,
+            )
+            if self._workflow_run_is_group_root(run):
+                self._update_run_group(
+                    str(run.get("run_group_id") or ""),
+                    status="cancelled",
+                    summary=str(result.get("result") or ""),
+                )
+                result = self.get_run(run_id)
+            return result
+        pending = self._pending_approval_private(run_id)
+        tool_request = pending.get("tool_request") if isinstance(pending.get("tool_request"), dict) else {}
+        tool_name = str(tool_request.get("tool") or pending.get("tool") or "").strip()
+        tool_input_preview = _tool_input_preview(tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {})
+        result = self.approvals.timeout_tool_run(
+            run_id,
+            timeline=[*run["timeline"]],
+            reason=reason,
+            tool_name=tool_name,
+            input_preview=tool_input_preview,
         )
         self._update_agent_run_group_if_root(result)
         self._resume_parent_workflows_after_child_update(result)
@@ -4998,7 +7837,7 @@ class AgentRuntimeService:
                 "output_contract": agent.get("output_contract") or "chat",
             }
             for agent in self.list_agents()["agents"]
-            if agent.get("enabled", True)
+            if agent.get("enabled", True) and not agent.get("system")
         ]
         workflows = [
             {
@@ -5016,6 +7855,9 @@ class AgentRuntimeService:
 
     def resolve_runnable(self, *, runnable_id: str = "", name: str = "") -> dict[str, Any] | None:
         self._ensure_row_factory()
+        clean_id = str(runnable_id or "").strip()
+        if clean_id == _MAIN_CHAT_AGENT_ID:
+            return self._agent_runnable_summary(self._main_chat_virtual_agent())
         if runnable_id:
             agent = self._conn.execute("SELECT * FROM agents WHERE agent_id=?", (runnable_id,)).fetchone()
             if agent:
@@ -5025,6 +7867,8 @@ class AgentRuntimeService:
                 return self._workflow_runnable_summary(self._row_to_workflow(workflow))
         clean_name = (name or "").strip()
         if clean_name:
+            if clean_name.lower() == "yachiyo":
+                return self._agent_runnable_summary(self._main_chat_virtual_agent())
             agents = self._conn.execute(
                 "SELECT * FROM agents WHERE LOWER(name)=LOWER(?) OR LOWER(nickname)=LOWER(?)",
                 (clean_name, clean_name),
@@ -5047,12 +7891,15 @@ class AgentRuntimeService:
         user_goal: str = "",
         run_group_id: str = "",
         upstream: str = "",
+        client_run_id: str = "",
+        client_request_id: str = "",
     ) -> dict[str, Any]:
         runnable = self.resolve_runnable(runnable_id=runnable_id, name=name)
         if runnable is None:
             raise AgentRuntimeError("未找到指定 Agent 或 Workflow")
         if not runnable.get("enabled", True):
             raise AgentRuntimeError("指定 Agent 或 Workflow 已停用")
+        request_id = client_run_id or client_request_id
         if runnable["kind"] == "agent":
             run = self.create_agent_run({
                 "agent_id": runnable["id"],
@@ -5060,6 +7907,7 @@ class AgentRuntimeService:
                 "source": "agent",
                 "run_group_id": run_group_id,
                 "upstream": upstream,
+                "client_run_id": request_id,
             })
             run["agent_run_id"] = run["run_id"]
             run["runnable"] = runnable
@@ -5069,6 +7917,7 @@ class AgentRuntimeService:
             "user_goal": user_goal,
             "source": "workflow",
             "run_group_id": run_group_id,
+            "client_run_id": request_id,
         })
         run["workflow_run_id"] = run["run_id"]
         run["runnable"] = runnable
@@ -5247,7 +8096,7 @@ class AgentRuntimeService:
     @staticmethod
     def parse_chat_runnable(text: str) -> tuple[str, str] | None:
         value = (text or "").strip()
-        mention = AgentRuntimeService._chat_mention_parts(value)
+        mention = NativeRunEngine._chat_mention_parts(value)
         if mention is None:
             return None
         prefix, body, remaining_lines = mention
@@ -5256,7 +8105,7 @@ class AgentRuntimeService:
             return None
         raw_name = match.group("name").strip("\"'")
         rest = match.group("body")
-        return raw_name, AgentRuntimeService._chat_mention_goal(prefix, rest, remaining_lines)
+        return raw_name, NativeRunEngine._chat_mention_goal(prefix, rest, remaining_lines)
 
     @staticmethod
     def _chat_mention_parts(text: str) -> tuple[str, str, list[str]] | None:
@@ -5279,14 +8128,97 @@ class AgentRuntimeService:
         return "\n".join([first_line, *remaining_lines]).strip()
 
 
-_global_agent_runtime_service: AgentRuntimeService | None = None
+AgentRuntimeService = NativeRunEngine
+
+_global_agent_runtime_service: NativeRunEngine | None = None
 
 
-def get_agent_runtime_service() -> AgentRuntimeService:
+def get_native_agent_readiness() -> dict[str, Any]:
+    """Return native main-agent readiness."""
+    try:
+        profile_service = get_model_profile_service()
+        profile_id = str(profile_service.get_defaults().get("chat") or "").strip()
+        if not profile_id:
+            return {
+                "ready": False,
+                "code": "native_agent_not_ready",
+                "reason": "model_profile_required",
+                "message": "请先配置并选择默认对话模型。",
+                "capabilities": {
+                    "model": False,
+                    "image_input": False,
+                    "tools": False,
+                    "approval": False,
+                },
+            }
+        profile = profile_service.get_profile_private(profile_id)
+    except KeyError:
+        return {
+            "ready": False,
+            "code": "native_agent_not_ready",
+            "reason": "model_profile_required",
+            "message": "默认对话模型不存在，请重新选择。",
+            "capabilities": {
+                "model": False,
+                "image_input": False,
+                "tools": False,
+                "approval": False,
+            },
+        }
+    except Exception as exc:
+        return {
+            "ready": False,
+            "code": "native_agent_not_ready",
+            "reason": "model_profile_unavailable",
+            "message": redact_secrets(exc),
+            "capabilities": {
+                "model": False,
+                "image_input": False,
+                "tools": False,
+                "approval": False,
+            },
+        }
+
+    reason = ""
+    if not profile.get("enabled", True):
+        reason = "默认对话模型已停用。"
+    elif str(profile.get("status") or "") != "available":
+        reason = "默认对话模型尚未通过连接测试。"
+    elif str(profile.get("capability") or "") != "chat":
+        reason = "默认模型不是对话模型。"
+    elif not supports_openai_compatible_api(str(profile.get("provider") or "openai_compatible")):
+        reason = "Native Agent 当前仅支持 OpenAI-compatible 对话模型。"
+    elif not all(str(profile.get(key) or "").strip() for key in ("base_url", "model", "api_key")):
+        reason = "默认对话模型配置不完整。"
+
+    ready = not reason
+    return {
+        "ready": ready,
+        "code": "" if ready else "native_agent_not_ready",
+        "reason": "" if ready else "model_profile_unavailable",
+        "message": reason,
+        "profile_id": profile_id,
+        "model": str(profile.get("model") or ""),
+        "provider": str(profile.get("provider") or ""),
+        "capabilities": {
+            "model": ready,
+            "image_input": ready,
+            "tools": False,
+            "approval": False,
+        },
+    }
+
+
+def get_native_run_engine() -> NativeRunEngine:
     global _global_agent_runtime_service
     if _global_agent_runtime_service is None:
-        _global_agent_runtime_service = AgentRuntimeService()
+        _global_agent_runtime_service = NativeRunEngine()
     return _global_agent_runtime_service
+
+
+def get_agent_runtime_service() -> NativeRunEngine:
+    """Compatibility accessor for existing AppState, TaskRunner, and routes."""
+    return get_native_run_engine()
 
 
 def close_agent_runtime_service() -> None:

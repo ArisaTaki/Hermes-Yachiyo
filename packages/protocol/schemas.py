@@ -13,11 +13,11 @@ from .enums import RiskLevel, TaskStatus, TaskType
 class StatusResponse(BaseModel):
     """GET /status 响应"""
 
-    service: str = "hermes-yachiyo"
-    version: str = "0.1.0"
+    service: str = "oha-yachiyo"
+    version: str = "0.4.0"
     uptime_seconds: float
     task_counts: dict[TaskStatus, int] = Field(default_factory=dict)
-    hermes_ready: bool = False
+    native_agent_ready: bool = False
 
 
 # ── 任务 ──────────────────────────────────────────────

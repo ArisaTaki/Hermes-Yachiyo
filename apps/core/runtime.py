@@ -1,10 +1,9 @@
-"""Hermes Agent 运行时生命周期管理
+"""Application runtime lifecycle management.
 
 Core Runtime 职责：
-- Hermes Agent 封装与生命周期
+- Native Agent 执行适配与生命周期
 - 任务编排与状态管理
 - 聊天会话管理
-- Hermes 安装检测与引导
 - TaskRunner 启动与停止
 - 不直接暴露 HTTP 路由（由 apps/bridge 负责）
 """
@@ -16,15 +15,11 @@ import concurrent.futures
 import logging
 import threading
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from apps.core.chat_session import ChatSession, get_chat_session
 from apps.core.state import AppState
 from apps.core.version import get_app_version
-from apps.installer.hermes_check import check_hermes_command
-from apps.installer.hermes_check import check_hermes_installation
-from packages.protocol.enums import HermesInstallStatus
-from packages.protocol.install import HermesInstallInfo
 
 if TYPE_CHECKING:
     from apps.core.task_runner import TaskRunner
@@ -33,11 +28,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class HermesRuntime:
-    """Hermes Agent 运行时
-
-    管理应用生命周期、任务状态、聊天会话、Hermes Agent 集成。
-    """
+class AppRuntime:
+    """Manage application services while preserving the product task contract."""
 
     def __init__(self, config: "AppConfig") -> None:
         self._config = config
@@ -45,7 +37,6 @@ class HermesRuntime:
         self._chat_session: ChatSession = get_chat_session()
         self._start_time: float | None = None
         self._running = False
-        self._hermes_install_info: HermesInstallInfo | None = None
         self._task_runner: "TaskRunner | None" = None
         self._task_runner_thread: threading.Thread | None = None
         self._task_runner_loop: asyncio.AbstractEventLoop | None = None
@@ -75,46 +66,22 @@ class HermesRuntime:
         return time.time() - self._start_time
 
     @property
-    def hermes_install_info(self) -> HermesInstallInfo | None:
-        """Hermes Agent 安装检测信息"""
-        return self._hermes_install_info
-
-    @property
     def task_runner(self) -> "TaskRunner | None":
         """任务调度器（启动后才有）"""
         return self._task_runner
 
-    def start(self, install_info: HermesInstallInfo | None = None) -> None:
+    def start(self) -> None:
         """启动运行时"""
         if self._running:
             return
 
-        logger.info("正在启动 Hermes Runtime...")
-
-        # 1. 检测 Hermes Agent 安装状态
-        self._hermes_install_info = install_info or check_hermes_installation()
-        logger.info(
-            "Hermes 安装检测完成: status=%s, platform=%s",
-            self._hermes_install_info.status,
-            self._hermes_install_info.platform
-        )
-
-        # 2. 根据安装状态决定启动策略
-        if self._hermes_install_info.status != HermesInstallStatus.READY:
-            logger.warning(
-                "Hermes Agent 未正确安装: %s",
-                self._hermes_install_info.status
-            )
-            # 注意：不阻止启动，允许用户在 UI 中查看安装指导
-
-        # 3. 启动核心服务
+        logger.info("正在启动 App Runtime...")
         self._start_time = time.time()
         self._running = True
 
-        # 4. 启动 TaskRunner（在独立线程的事件循环中）
         self._start_task_runner()
 
-        logger.info("Hermes Runtime 已启动 (uptime=%.2fs)", self.uptime)
+        logger.info("App Runtime 已启动 (uptime=%.2fs)", self.uptime)
 
     def stop(self) -> None:
         """停止运行时"""
@@ -123,9 +90,24 @@ class HermesRuntime:
 
         # 停止 TaskRunner
         self._stop_task_runner()
+        self._stop_native_runtime()
 
         self._running = False
-        logger.info("Hermes Runtime 已停止")
+        logger.info("App Runtime 已停止")
+
+    def _stop_native_runtime(self) -> None:
+        service = getattr(self, "agent_runtime_service", None)
+        if service is not None and hasattr(service, "close"):
+            try:
+                service.close()
+            except Exception as exc:
+                logger.warning("Injected Native Runtime shutdown 异常: %s", exc)
+        try:
+            from apps.shell.agent_runtime import close_agent_runtime_service
+
+            close_agent_runtime_service()
+        except Exception as exc:
+            logger.warning("Native Runtime shutdown 异常: %s", exc)
 
     def _start_task_runner(self) -> None:
         """在独立线程中启动 TaskRunner 事件循环"""
@@ -196,98 +178,67 @@ class HermesRuntime:
 
     def get_status(self) -> dict:
         """获取运行时状态摘要"""
-        self._refresh_if_ready_cache_is_stale()
+        native_readiness = self.native_agent_readiness()
         status = {
-            "service": "hermes-yachiyo",
+            "service": "oha-yachiyo",
             "version": get_app_version(),
             "running": self._running,
             "uptime_seconds": self.uptime,
             "task_counts": self._state.get_task_counts(),
+            "native_agent": native_readiness,
+            "native_agent_ready": bool(native_readiness.get("ready")),
         }
-
-        # 添加 Hermes 安装状态
-        if self._hermes_install_info:
-            status["hermes"] = {
-                "install_status": self._hermes_install_info.status,
-                "platform": self._hermes_install_info.platform,
-                "command_exists": self._hermes_install_info.command_exists,
-                "version": (
-                    self._hermes_install_info.version_info.version
-                    if self._hermes_install_info.version_info
-                    else None
-                ),
-                "release_date": (
-                    self._hermes_install_info.version_info.build_date
-                    if self._hermes_install_info.version_info
-                    else None
-                ),
-                "hermes_home": self._hermes_install_info.hermes_home,
-                "readiness_level": self._hermes_install_info.readiness_level,
-                "available_tools": self._hermes_install_info.available_tools,
-                "limited_tools": self._hermes_install_info.limited_tools,
-                "limited_tool_details": self._hermes_install_info.limited_tool_details,
-                "doctor_issues_count": self._hermes_install_info.doctor_issues_count,
-            }
 
         return status
 
-    def is_hermes_ready(self) -> bool:
-        """检查 Hermes Agent 是否就绪可用"""
-        if not self._hermes_install_info:
-            return False
-        return (
-            self._hermes_install_info.status == HermesInstallStatus.READY
-            and self._hermes_install_info.command_exists
-        )
+    def is_native_agent_ready(self) -> bool:
+        return bool(self.native_agent_readiness().get("ready"))
+
+    def native_agent_readiness(self) -> dict:
+        from apps.shell.agent_runtime import get_native_agent_readiness
+
+        return get_native_agent_readiness()
+
+    def main_chat_tool_policy(self) -> dict[str, Any]:
+        """Tool policy used by the builtin main-chat Native Agent path."""
+        return {
+            "allowed_tools": [
+                "workspace.list",
+                "workspace.read",
+                "workspace.write_patch",
+                "terminal.run",
+                "artifact.write",
+            ],
+            "approval_required": {
+                "workspace.write_patch": True,
+                "terminal.run": True,
+            },
+        }
+
+    def main_chat_workspace_policy(self) -> dict[str, Any]:
+        """Workspace policy for the builtin main-chat Native Agent path."""
+        workdir = ""
+        try:
+            from apps.installer.workspace_init import get_workspace_status
+
+            workspace = get_workspace_status()
+            dirs = workspace.get("dirs") if isinstance(workspace.get("dirs"), dict) else {}
+            if workspace.get("initialized") and dirs.get("projects"):
+                workdir = str(dirs.get("projects") or "")
+        except Exception:
+            logger.debug("读取主聊天 workspace policy 失败", exc_info=True)
+        return {
+            "default_workdir": workdir,
+            "readable_scopes": ["."],
+            "writable_scopes": ["."],
+        }
 
     def _refresh_if_ready_cache_is_stale(self) -> None:
-        """Refresh cached READY state if the hermes command disappeared.
-
-        The dashboard polls cached runtime status frequently. If a user removes
-        Hermes Agent or an incomplete installer leaves only ``~/.hermes`` while
-        the desktop backend is still running, the old READY cache can otherwise
-        keep the main window in a contradictory state.
-        """
-        if not self._hermes_install_info:
-            return
-        if self._hermes_install_info.status != HermesInstallStatus.READY:
-            return
-        if not self._hermes_install_info.command_exists:
-            logger.warning("Hermes READY cache is inconsistent: command_exists=false")
-            self.refresh_hermes_installation()
-            return
-
-        now = time.monotonic()
-        if now - self._last_ready_command_probe_at < 15.0:
-            return
-        self._last_ready_command_probe_at = now
-
-        command_ok, error_message = check_hermes_command()
-        if command_ok:
-            return
-
-        logger.warning(
-            "Hermes READY cache is stale; hermes command probe failed: %s",
-            error_message,
-        )
-        self.refresh_hermes_installation()
-        try:
-            self.refresh_task_runner_executor()
-        except Exception as exc:
-            logger.warning("刷新 Hermes executor 失败: %s", exc)
-
-    def refresh_hermes_installation(self) -> HermesInstallInfo:
-        """重新检测 Hermes Agent 状态并写回运行时缓存。"""
-        self._hermes_install_info = check_hermes_installation()
-        logger.info(
-            "Hermes 安装状态已刷新: status=%s, platform=%s",
-            self._hermes_install_info.status,
-            self._hermes_install_info.platform,
-        )
-        return self._hermes_install_info
+        """Deprecated compatibility hook; Native Agent readiness is live data."""
+        return
 
     def refresh_task_runner_executor(self) -> dict:
-        """根据最新 Hermes 状态切换 TaskRunner 后续任务使用的执行器。
+        """根据最新 Native Agent 状态切换 TaskRunner 后续任务使用的执行器。
 
         仅替换 executor，不重启 TaskRunner，避免已有 RUNNING 任务被取消后
         留在不可收敛状态。
@@ -412,11 +363,3 @@ class HermesRuntime:
             return result["cancelled"]
 
         return cancel_task()
-
-    def get_hermes_install_guidance(self) -> dict | None:
-        """获取 Hermes 安装引导信息"""
-        if not self._hermes_install_info:
-            return None
-
-        from apps.installer.hermes_install import HermesInstallGuide
-        return HermesInstallGuide.get_install_instructions(self._hermes_install_info)

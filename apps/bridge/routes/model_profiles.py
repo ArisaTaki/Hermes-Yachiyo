@@ -15,6 +15,7 @@ from apps.shell.provider_catalog_sync import (
     load_provider_catalog_cache,
     sync_provider_catalogs,
 )
+from packages.security import redact_api_error_detail
 
 router = APIRouter(prefix="/ui", tags=["Model Profiles"])
 
@@ -75,7 +76,7 @@ def _payload(model: BaseModel) -> dict[str, Any]:
 
 
 def _bad_request(exc: Exception) -> HTTPException:
-    return HTTPException(status_code=400, detail=str(exc))
+    return HTTPException(status_code=400, detail=redact_api_error_detail(exc))
 
 
 @router.get("/model-profiles")

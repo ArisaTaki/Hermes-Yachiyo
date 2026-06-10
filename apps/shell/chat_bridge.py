@@ -22,10 +22,11 @@ from typing import TYPE_CHECKING, Any, Dict
 
 from apps.core.activity_store import get_activity_store
 from apps.shell.chat_api import ChatAPI
+from packages.security import redact_api_error_text
 from packages.protocol.enums import TaskStatus
 
 if TYPE_CHECKING:
-    from apps.core.runtime import HermesRuntime
+    from apps.core.runtime import AppRuntime
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +156,7 @@ def _latest_activity_for_session(session_id: str) -> dict[str, Any]:
         return {}
 
 
-def _session_is_processing(runtime: "HermesRuntime", session_id: str, messages: list[Any]) -> bool:
+def _session_is_processing(runtime: "AppRuntime", session_id: str, messages: list[Any]) -> bool:
     for task in runtime.state.list_tasks():
         if getattr(task, "chat_session_id", None) != session_id:
             continue
@@ -210,7 +211,7 @@ class ChatBridge:
     内部持有 ChatAPI 实例，避免各模式各写一份消息读取逻辑。
     """
 
-    def __init__(self, runtime: "HermesRuntime") -> None:
+    def __init__(self, runtime: "AppRuntime") -> None:
         self._runtime = runtime
         self._chat_api = ChatAPI(runtime)
 
@@ -287,7 +288,13 @@ class ChatBridge:
             }
         except Exception as exc:
             logger.error("获取消息摘要失败: %s", exc)
-            return {"ok": False, "error": str(exc), "messages": [], "empty": True, "status_label": "错误"}
+            return {
+                "ok": False,
+                "error": redact_api_error_text(exc),
+                "messages": [],
+                "empty": True,
+                "status_label": "错误",
+            }
 
     def get_session_status(self) -> Dict[str, Any]:
         """获取当前会话状态（不含消息内容）"""
@@ -314,7 +321,7 @@ class ChatBridge:
             logger.error("获取会话状态失败: %s", exc)
             return {
                 "ok": False,
-                "error": str(exc),
+                "error": redact_api_error_text(exc),
                 "session_id": "",
                 "message_count": 0,
                 "is_processing": False,
@@ -375,7 +382,7 @@ class ChatBridge:
             logger.error("获取最近会话失败: %s", exc)
             return {
                 "ok": False,
-                "error": str(exc),
+                "error": redact_api_error_text(exc),
                 "current_session_id": "",
                 "sessions": [],
             }

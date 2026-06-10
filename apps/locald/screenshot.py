@@ -92,8 +92,8 @@ def capture_screenshot_to_file(target_path: Path) -> dict[str, object]:
         if _looks_like_screen_permission_error(output):
             raise ScreenCapturePermissionError(
                 "当前后端进程没有 macOS 屏幕录制权限，无法读取桌面截图。"
-                "请在系统设置的“隐私与安全性 / 屏幕与系统音频录制”中允许启动 Hermes-Yachiyo 的 Electron、Python 或终端进程，"
-                "然后重启 Hermes-Yachiyo 或 Bridge。"
+                "请在系统设置的“隐私与安全性 / 屏幕与系统音频录制”中允许启动 Oha-Yachiyo 的 Electron、Python 或终端进程，"
+                "然后重启 Oha-Yachiyo 或 Bridge。"
                 f"{_screen_permission_process_hint()}"
                 f"原始信息{detail}"
             )

@@ -9,8 +9,9 @@ from pathlib import Path
 from typing import Any
 
 from apps.shell.assets import TTS_RELEASES_URL, get_user_tts_assets_dir, project_display_path
+from packages.security import redact_api_error_text
 
-TTS_PRESET_KIND = "hermes-yachiyo-gpt-sovits-voice"
+TTS_PRESET_KIND = "oha-yachiyo-gpt-sovits-voice"
 TTS_PRESET_MANIFEST_NAMES = ("yachiyo-tts-preset.json", "tts-preset.json")
 
 
@@ -42,7 +43,7 @@ def import_tts_voice_archive_draft(archive_path: Path) -> dict[str, Any]:
         imported_dir, manifest = import_tts_voice_archive(archive_path)
         settings = tts_settings_from_manifest(imported_dir, manifest)
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}
+        return {"ok": False, "error": redact_api_error_text(exc)}
 
     draft_changes = {f"tts.{key}": value for key, value in settings.items()}
     return {
@@ -67,7 +68,7 @@ def import_tts_voice_archive(
     target_root = (assets_root or get_user_tts_assets_dir()).expanduser().resolve()
     target_root.mkdir(parents=True, exist_ok=True)
 
-    with tempfile.TemporaryDirectory(prefix="hermes-tts-import-") as tmp_dir:
+    with tempfile.TemporaryDirectory(prefix="oha-tts-import-") as tmp_dir:
         try:
             shutil.unpack_archive(str(resolved_archive), tmp_dir)
         except (shutil.ReadError, ValueError) as exc:

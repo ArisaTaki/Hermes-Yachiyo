@@ -14,39 +14,39 @@ ASSETS_DIR = SHELL_DIR / "assets"
 DEFAULT_BUBBLE_AVATAR_PATH = ASSETS_DIR / "avatars" / "yachiyo-default.jpg"
 PROGRAM_LIVE2D_ASSETS_DIR = ASSETS_DIR / "live2d"
 LEGACY_BUNDLED_LIVE2D_MODEL_DIR = PROGRAM_LIVE2D_ASSETS_DIR / "yachiyo"
-DEFAULT_LIVE2D_MODEL_DIR = Path.home() / ".hermes" / "yachiyo" / "assets" / "live2d"
+DEFAULT_LIVE2D_MODEL_DIR = Path.home() / ".oha-yachiyo" / "assets" / "live2d"
 DEFAULT_LIVE2D_PREVIEW_PATH = DEFAULT_BUBBLE_AVATAR_PATH
-PROJECT_RELEASES_URL = "https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo/releases"
+PROJECT_RELEASES_URL = "https://github.com/kuguya-AI-app-develop/oha-yachiyo/releases"
 LIVE2D_RELEASES_URL = f"{PROJECT_RELEASES_URL}/tag/live2d-assets-20260423"
 TTS_RELEASES_URL = f"{PROJECT_RELEASES_URL}/tag/tts-assets-yachiyo-gpt-sovits-v4"
 
 
-def get_hermes_home_dir() -> Path:
-    """Return Hermes home directory, honoring HERMES_HOME when set."""
-    hermes_home = os.getenv("HERMES_HOME")
-    if hermes_home:
-        return Path(hermes_home).expanduser()
-    return Path.home() / ".hermes"
+def get_oha_yachiyo_home_dir() -> Path:
+    """Return Oha-Yachiyo home directory, honoring OHA_YACHIYO_HOME when set."""
+    root = os.getenv("OHA_YACHIYO_HOME")
+    if root:
+        return Path(root).expanduser()
+    return Path.home() / ".oha-yachiyo"
 
 
-def get_yachiyo_workspace_dir() -> Path:
-    """Return Yachiyo user workspace directory."""
-    return get_hermes_home_dir() / "yachiyo"
+def get_oha_workspace_dir() -> Path:
+    """Return Oha-Yachiyo user workspace directory."""
+    return get_oha_yachiyo_home_dir()
 
 
 def get_user_live2d_assets_dir() -> Path:
     """Return the default user-scoped Live2D asset import directory."""
-    return get_yachiyo_workspace_dir() / "assets" / "live2d"
+    return get_oha_workspace_dir() / "assets" / "live2d"
 
 
 def get_user_tts_assets_dir() -> Path:
     """Return the default user-scoped TTS voice preset import directory."""
-    return get_yachiyo_workspace_dir() / "assets" / "tts"
+    return get_oha_workspace_dir() / "assets" / "tts"
 
 
 def get_user_avatar_assets_dir() -> Path:
     """Return the default user-scoped avatar import directory."""
-    return get_yachiyo_workspace_dir() / "assets" / "avatars"
+    return get_oha_workspace_dir() / "assets" / "avatars"
 
 
 def iter_live2d_candidate_dirs(root: str | Path | None = None) -> Iterator[Path]:

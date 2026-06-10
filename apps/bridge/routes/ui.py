@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlencode
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -37,7 +37,6 @@ from apps.shell.gpt_sovits_service import (
     install_gpt_sovits_launch_agent,
     uninstall_gpt_sovits_launch_agent,
 )
-from apps.shell.installer_api import InstallerWebViewAPI
 from apps.shell.launcher_notifications import LauncherNotificationTracker
 from apps.shell.live2d_resources import import_live2d_archive_draft, prepare_live2d_model_path_draft
 from apps.shell.main_api import MainWindowAPI
@@ -45,6 +44,7 @@ from apps.shell.mode_settings import apply_settings_changes, serialize_mode_wind
 from apps.shell.proactive import ProactiveDesktopService, get_proactive_chat_session
 from apps.shell.tts import TTSService
 from apps.shell.tts_resources import get_tts_voice_resource_info, import_tts_voice_archive_draft
+from packages.security import redact_api_error_text
 
 router = APIRouter(prefix="/ui", tags=["UI"])
 _launcher_notifications: dict[str, LauncherNotificationTracker] = {}
@@ -59,6 +59,7 @@ class SendChatMessageRequest(BaseModel):
     text: str
     attachments: list[dict[str, Any]] = Field(default_factory=list)
     runnable_id: str = ""
+    client_message_id: str = ""
 
 
 class RetryChatMessageRequest(BaseModel):
@@ -127,7 +128,7 @@ class TerminalCommandRequest(BaseModel):
     command: str
 
 
-class HermesConfigUpdateRequest(BaseModel):
+class NativeConfigUpdateRequest(BaseModel):
     chat_profile_id: str | None = None
     vision_profile_id: str | None = None
     provider: str = ""
@@ -141,16 +142,16 @@ class HermesConfigUpdateRequest(BaseModel):
     vision_api_key: str | None = None
 
 
-class HermesToolConfigUpdateRequest(BaseModel):
+class NativeToolConfigUpdateRequest(BaseModel):
     tool_id: str
     changes: dict[str, Any] = Field(default_factory=dict)
 
 
-class HermesToolConfigTestRequest(BaseModel):
+class NativeToolConfigTestRequest(BaseModel):
     tool_id: str
 
 
-class HermesUpdateRunRequest(BaseModel):
+class NativeUpdateRunRequest(BaseModel):
     backup: bool = False
 
 
@@ -181,7 +182,7 @@ class BackupPathRequest(BaseModel):
 
 
 class UninstallRunRequest(BaseModel):
-    scope: str = "yachiyo_only"
+    scope: str = "oha_only"
     keep_config: bool = True
     include_gpt_sovits: bool = False
     confirm_text: str = ""
@@ -218,7 +219,7 @@ async def copy_clipboard_text(request: ClipboardTextRequest) -> dict[str, Any]:
     try:
         await asyncio.to_thread(_copy_text_to_system_clipboard, request.text)
     except Exception as exc:
-        return {"ok": False, "error": str(exc) or "系统剪贴板不可用"}
+        return {"ok": False, "error": redact_api_error_text(exc, fallback="系统剪贴板不可用")}
     return {"ok": True}
 
 
@@ -342,118 +343,118 @@ async def check_proactive_screen_permission(request: ScreenPermissionRequest) ->
     return await asyncio.to_thread(_check)
 
 
-@router.post("/hermes/terminal-command")
-async def open_hermes_terminal_command(request: TerminalCommandRequest) -> dict[str, Any]:
+@router.post("/native-agent/terminal-command")
+async def open_native_terminal_command(request: TerminalCommandRequest) -> dict[str, Any]:
     runtime = get_runtime()
     return MainWindowAPI(runtime, runtime.config).open_terminal_command(request.command)
 
 
-@router.post("/hermes/diagnostic-command")
-async def run_hermes_diagnostic_command(request: TerminalCommandRequest) -> dict[str, Any]:
+@router.post("/native-agent/diagnostic-command")
+async def run_native_diagnostic_command(request: TerminalCommandRequest) -> dict[str, Any]:
     runtime = get_runtime()
     return await asyncio.to_thread(
-        MainWindowAPI(runtime, runtime.config).run_hermes_diagnostic_command,
+        MainWindowAPI(runtime, runtime.config).run_native_diagnostic_command,
         request.command,
     )
 
 
-@router.get("/hermes/diagnostics/cache")
-async def get_hermes_diagnostic_cache() -> dict[str, Any]:
+@router.get("/native-agent/diagnostics/cache")
+async def get_native_diagnostic_cache() -> dict[str, Any]:
     runtime = get_runtime()
     return await asyncio.to_thread(
-        MainWindowAPI(runtime, runtime.config).get_hermes_diagnostic_cache
+        MainWindowAPI(runtime, runtime.config).get_native_diagnostic_cache
     )
 
 
-@router.post("/hermes/connection-test")
-async def test_hermes_connection() -> dict[str, Any]:
+@router.post("/native-agent/connection-test")
+async def test_native_connection() -> dict[str, Any]:
     runtime = get_runtime()
     return await asyncio.to_thread(
-        MainWindowAPI(runtime, runtime.config).test_hermes_connection
+        MainWindowAPI(runtime, runtime.config).test_native_connection
     )
 
 
-@router.post("/hermes/image-connection-test")
-async def test_hermes_image_connection() -> dict[str, Any]:
+@router.post("/native-agent/image-connection-test")
+async def test_native_image_connection() -> dict[str, Any]:
     runtime = get_runtime()
     return await asyncio.to_thread(
-        MainWindowAPI(runtime, runtime.config).test_hermes_image_connection
+        MainWindowAPI(runtime, runtime.config).test_native_image_connection
     )
 
 
-@router.get("/hermes/config")
-async def get_hermes_configuration() -> dict[str, Any]:
+@router.get("/native-agent/config")
+async def get_native_configuration() -> dict[str, Any]:
     runtime = get_runtime()
     return await asyncio.to_thread(
-        MainWindowAPI(runtime, runtime.config).get_hermes_configuration
+        MainWindowAPI(runtime, runtime.config).get_native_configuration
     )
 
 
-@router.post("/hermes/config")
-async def update_hermes_configuration(request: HermesConfigUpdateRequest) -> dict[str, Any]:
+@router.post("/native-agent/config")
+async def update_native_configuration(request: NativeConfigUpdateRequest) -> dict[str, Any]:
     runtime = get_runtime()
     return await asyncio.to_thread(
-        MainWindowAPI(runtime, runtime.config).update_hermes_configuration,
+        MainWindowAPI(runtime, runtime.config).update_native_configuration,
         request.model_dump(exclude_none=True),
     )
 
 
-@router.get("/hermes/tools/config")
-async def get_hermes_tool_config() -> dict[str, Any]:
+@router.get("/native-agent/tools/config")
+async def get_native_tool_config() -> dict[str, Any]:
     runtime = get_runtime()
     return await asyncio.to_thread(
-        MainWindowAPI(runtime, runtime.config).get_hermes_tool_config
+        MainWindowAPI(runtime, runtime.config).get_native_tool_config
     )
 
 
-@router.post("/hermes/tools/config")
-async def update_hermes_tool_config(request: HermesToolConfigUpdateRequest) -> dict[str, Any]:
+@router.post("/native-agent/tools/config")
+async def update_native_tool_config(request: NativeToolConfigUpdateRequest) -> dict[str, Any]:
     runtime = get_runtime()
     return await asyncio.to_thread(
-        MainWindowAPI(runtime, runtime.config).update_hermes_tool_config,
+        MainWindowAPI(runtime, runtime.config).update_native_tool_config,
         request.tool_id,
         request.changes,
     )
 
 
-@router.post("/hermes/tools/config/test")
-async def test_hermes_tool_config(request: HermesToolConfigTestRequest) -> dict[str, Any]:
+@router.post("/native-agent/tools/config/test")
+async def test_native_tool_config(request: NativeToolConfigTestRequest) -> dict[str, Any]:
     runtime = get_runtime()
     return await asyncio.to_thread(
-        MainWindowAPI(runtime, runtime.config).test_hermes_tool_config,
+        MainWindowAPI(runtime, runtime.config).test_native_tool_config,
         request.tool_id,
     )
 
 
-@router.post("/hermes/update/check")
-async def check_hermes_update() -> dict[str, Any]:
+@router.post("/native-agent/update/check")
+async def check_native_agent_update() -> dict[str, Any]:
     runtime = get_runtime()
     return await asyncio.to_thread(
-        MainWindowAPI(runtime, runtime.config).check_hermes_update
+        MainWindowAPI(runtime, runtime.config).check_native_agent_update
     )
 
 
-@router.post("/hermes/update/run")
-async def update_hermes_agent(request: HermesUpdateRunRequest | None = None) -> dict[str, Any]:
+@router.post("/native-agent/update/run")
+async def update_native_agent(request: NativeUpdateRunRequest | None = None) -> dict[str, Any]:
     runtime = get_runtime()
     return await asyncio.to_thread(
-        MainWindowAPI(runtime, runtime.config).update_hermes_agent,
+        MainWindowAPI(runtime, runtime.config).update_native_agent,
         bool(request.backup) if request else False,
     )
 
 
-@router.post("/hermes/tools/browser-cdp/launch")
-async def launch_hermes_browser_cdp() -> dict[str, Any]:
+@router.post("/native-agent/tools/browser-cdp/launch")
+async def launch_native_browser_cdp() -> dict[str, Any]:
     runtime = get_runtime()
     return await asyncio.to_thread(
         MainWindowAPI(runtime, runtime.config).launch_browser_cdp
     )
 
 
-@router.post("/hermes/recheck")
-async def recheck_hermes() -> dict[str, Any]:
+@router.post("/native-agent/recheck")
+async def recheck_native_agent() -> dict[str, Any]:
     runtime = get_runtime()
-    return MainWindowAPI(runtime, runtime.config).recheck_hermes()
+    return MainWindowAPI(runtime, runtime.config).recheck_native_agent()
 
 
 @router.post("/bridge/restart")
@@ -494,7 +495,7 @@ async def open_backup_location(request: BackupPathRequest) -> dict[str, Any]:
 
 @router.get("/uninstall/preview")
 async def get_uninstall_preview(
-    scope: str = "yachiyo_only",
+    scope: str = "oha_only",
     keep_config: bool = True,
     include_gpt_sovits: bool = False,
 ) -> dict[str, Any]:
@@ -517,53 +518,6 @@ async def run_uninstall(request: UninstallRunRequest) -> dict[str, Any]:
     )
 
 
-@router.post("/installer/install")
-async def start_hermes_install() -> dict[str, Any]:
-    return InstallerWebViewAPI().install_hermes()
-
-
-@router.get("/installer/install/progress")
-async def get_hermes_install_progress() -> dict[str, Any]:
-    return InstallerWebViewAPI().get_install_progress()
-
-
-@router.post("/installer/workspace/initialize")
-async def initialize_workspace() -> dict[str, Any]:
-    return InstallerWebViewAPI().initialize_workspace()
-
-
-@router.get("/installer/backup/status")
-async def get_installer_backup_status() -> dict[str, Any]:
-    return InstallerWebViewAPI().get_backup_status()
-
-
-@router.post("/installer/backup/import")
-async def import_installer_backup() -> dict[str, Any]:
-    return InstallerWebViewAPI().import_backup()
-
-
-@router.post("/installer/hermes/setup-terminal")
-async def open_installer_setup_terminal() -> dict[str, Any]:
-    return InstallerWebViewAPI().open_hermes_setup_terminal()
-
-
-@router.get("/installer/hermes/setup-process")
-async def get_installer_setup_process() -> dict[str, Any]:
-    return InstallerWebViewAPI().check_setup_process()
-
-
-@router.post("/installer/status/recheck")
-async def recheck_installer_status() -> dict[str, Any]:
-    runtime = get_runtime()
-    result = InstallerWebViewAPI().recheck_status()
-    try:
-        runtime.refresh_hermes_installation()
-        result["executor_refresh"] = runtime.refresh_task_runner_executor()
-    except Exception as exc:
-        result["refresh_error"] = str(exc)
-    return result
-
-
 @router.post("/live2d/model-path/prepare")
 async def prepare_live2d_model_path(request: Live2DResourcePathRequest) -> dict[str, Any]:
     runtime = get_runtime()
@@ -582,8 +536,20 @@ async def get_chat_messages(limit: int = 0, anchor_message_id: str = "") -> dict
 
 
 @router.post("/chat/messages")
-async def send_chat_message(request: SendChatMessageRequest) -> dict[str, Any]:
-    return ChatAPI(get_runtime()).send_message(request.text, request.attachments, runnable_id=request.runnable_id)
+async def send_chat_message(
+    request: SendChatMessageRequest,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    idempotency_key = request.client_message_id
+    headers = getattr(http_request, "headers", None)
+    if not idempotency_key and headers is not None:
+        idempotency_key = str(headers.get("idempotency-key", "") or "")
+    return ChatAPI(get_runtime()).send_message(
+        request.text,
+        request.attachments,
+        runnable_id=request.runnable_id,
+        client_message_id=idempotency_key,
+    )
 
 
 @router.post("/chat/messages/retry")

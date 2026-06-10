@@ -208,11 +208,16 @@ def import_assistant_avatar(req: AssistantAvatarImportRequest) -> AssistantProfi
 def _format_status() -> str:
     rt = get_runtime()
     status = rt.get_status()
-    hermes_ready = rt.is_hermes_ready()
+    readiness = getattr(rt, "native_agent_readiness", None)
+    native_ready = (
+        bool(readiness().get("ready"))
+        if callable(readiness)
+        else bool(rt.is_native_agent_ready())
+    )
     counts = status.get("task_counts", {})
     return (
-        "Hermes-Yachiyo 正在运行；"
-        f"Hermes {'已就绪' if hermes_ready else '未就绪'}；"
+        "Oha-Yachiyo 正在运行；"
+        f"Native Agent {'已就绪' if native_ready else '未就绪'}；"
         f"任务 pending={counts.get('pending', 0)} running={counts.get('running', 0)} completed={counts.get('completed', 0)}"
     )
 
@@ -263,7 +268,7 @@ async def assistant_intent(req: AssistantIntentRequest) -> AssistantIntentRespon
         return AssistantIntentResponse(
             ok=True,
             action="create_low_risk_task",
-            message="将创建 RiskLevel.LOW 的 Hermes 自然语言任务",
+            message="将创建 RiskLevel.LOW 的 Native Agent 自然语言任务",
         )
 
     runtime = get_runtime()
@@ -271,7 +276,7 @@ async def assistant_intent(req: AssistantIntentRequest) -> AssistantIntentRespon
     if unavailable_reason:
         return AssistantIntentResponse(
             ok=False,
-            action="hermes_unavailable",
+            action="native_agent_not_ready",
             message=unavailable_reason,
         )
 
@@ -284,5 +289,5 @@ async def assistant_intent(req: AssistantIntentRequest) -> AssistantIntentRespon
         ok=True,
         action="create_low_risk_task",
         task_id=task.task_id,
-        message="已创建低风险 Hermes 任务",
+        message="已创建低风险 Native Agent 任务",
     )

@@ -61,8 +61,8 @@ def test_activity_store_finalizes_in_flight_task_events(tmp_path):
     db_path = tmp_path / "activity.db"
     store = ActivityStore(db_path=str(db_path))
     try:
-        store.record_event(task_id="t1", title="Hermes 正在推理", status="running")
-        store.record_event(task_id="t1", title="Hermes 正在整理推理", status="progress")
+        store.record_event(task_id="t1", title="Native Agent 正在推理", status="running")
+        store.record_event(task_id="t1", title="Native Agent 正在整理推理", status="progress")
         store.record_event(task_id="t1", title="已失败的旧事件", status="failed")
 
         updated = store.finalize_task_events("t1", status="completed")
@@ -79,8 +79,8 @@ def test_activity_store_key_only_filters_noisy_reasoning(tmp_path):
     db_path = tmp_path / "activity.db"
     store = ActivityStore(db_path=str(db_path))
     try:
-        store.record_event(task_id="t1", phase="reasoning", title="Hermes 正在推理", status="running")
-        store.record_event(task_id="t1", phase="reasoning", title="Hermes 已整理推理", status="completed")
+        store.record_event(task_id="t1", phase="reasoning", title="Native Agent 正在推理", status="running")
+        store.record_event(task_id="t1", phase="reasoning", title="Native Agent 已整理推理", status="completed")
         store.record_event(task_id="t1", phase="tool_progress", title="正在执行终端", status="running")
         store.record_event(task_id="t1", phase="task_complete", title="Yachiyo 回复完成", status="completed")
 
@@ -248,7 +248,7 @@ def test_activity_detail_returns_unfiltered_task_trace(tmp_path, monkeypatch):
         reasoning = store.record_event(
             task_id="t1",
             phase="reasoning",
-            title="Hermes 正在推理",
+            title="Native Agent 正在推理",
             status="running",
         )
         complete = store.record_event(

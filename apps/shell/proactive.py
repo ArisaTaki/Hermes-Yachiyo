@@ -8,18 +8,18 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from apps.core.chat_session import ChatSession, MessageStatus
-from apps.core.executor import HermesExecutor
+from apps.core.executor import execution_capabilities
 from apps.core.special_sessions import PROACTIVE_CHAT_SESSION_ID, PROACTIVE_CHAT_SESSION_TITLE
 from apps.locald.screenshot import capture_screenshot_to_file
 from apps.shell.chat_api import (
     allocate_chat_attachment_path,
     chat_attachment_record,
 )
-from apps.shell.hermes_capabilities import get_current_hermes_image_input_capability
+from apps.shell.native_capabilities import get_native_image_input_capability
 from packages.protocol.enums import RiskLevel, TaskStatus, TaskType
 
 if TYPE_CHECKING:
-    from apps.core.runtime import HermesRuntime
+    from apps.core.runtime import AppRuntime
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +90,7 @@ def build_proactive_desktop_prompt(runtime: Any | None = None) -> str:
 class ProactiveDesktopService:
     """Bubble / Live2D 共享的主动桌面观察状态机。"""
 
-    def __init__(self, runtime: "HermesRuntime", mode_config: Any) -> None:
+    def __init__(self, runtime: "AppRuntime", mode_config: Any) -> None:
         self._runtime = runtime
         self._mode_config = mode_config
         self._last_check_at = time.monotonic()
@@ -349,21 +349,27 @@ class ProactiveDesktopService:
 
     def _desktop_watch_blocker(self) -> str | None:
         try:
-            if not self._runtime.is_hermes_ready():
-                return "主动桌面观察需要 Hermes Agent 就绪"
+            readiness = getattr(self._runtime, "native_agent_readiness", None)
+            ready = (
+                bool(readiness().get("ready"))
+                if callable(readiness)
+                else bool(self._runtime.is_native_agent_ready())
+            )
+            if not ready:
+                return "主动桌面观察需要 Native Agent 就绪"
         except Exception:
-            return "主动桌面观察需要 Hermes Agent 就绪"
+            return "主动桌面观察需要 Native Agent 就绪"
 
         runner = getattr(self._runtime, "task_runner", None)
         if runner is None:
             return "任务执行器尚未启动，暂时无法进行主动桌面观察"
 
         executor = getattr(runner, "executor", None)
-        if not isinstance(executor, HermesExecutor) and getattr(executor, "name", "") != "HermesExecutor":
-            return "主动桌面观察需要 Hermes 执行器；当前执行器不支持读取桌面截图"
+        if not execution_capabilities(executor).get("image_input"):
+            return "主动桌面观察需要支持图片输入的 Native Agent 执行器"
 
         try:
-            image_input = get_current_hermes_image_input_capability()
+            image_input = get_native_image_input_capability()
         except Exception:
             logger.debug("主动桌面观察读取 Yachiyo 图片链路能力失败", exc_info=True)
             return None

@@ -18,6 +18,7 @@ from apps.shell.config import (
 )
 from apps.shell.effect_policy import build_effects_summary
 from apps.shell.mode_catalog import get_mode_descriptor, list_mode_options
+from packages.security import redact_api_error_text
 _MIN_LAUNCHER_SIZE = 80
 _MAX_LAUNCHER_SIZE = 192
 _TTS_PROVIDERS = {"none", "http", "command", "gpt-sovits"}
@@ -568,7 +569,7 @@ def apply_settings_changes(
             save_config(config)
         except Exception as exc:
             logger.error("配置保存失败: %s", exc)
-            return {"ok": False, "error": f"保存失败: {exc}", "applied": applied}
+            return {"ok": False, "error": redact_api_error_text(f"保存失败: {exc}"), "applied": applied}
 
     if errors and not applied:
         result: dict[str, Any] = {

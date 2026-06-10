@@ -17,6 +17,7 @@ from apps.shell.config import check_live2d_model_dir
 from apps.shell.config import scan_live2d_model_dir
 from apps.shell.mode_settings import apply_settings_changes
 from apps.shell.mode_settings import serialize_mode_window_data
+from packages.security import redact_api_error_text
 
 if TYPE_CHECKING:
     from apps.shell.config import AppConfig
@@ -168,7 +169,7 @@ def import_live2d_archive(archive_path: Path, assets_root: Path | None = None) -
     if not resolved_archive.exists() or not resolved_archive.is_file():
         raise FileNotFoundError("未找到要导入的资源包文件")
 
-    with tempfile.TemporaryDirectory(prefix="hermes-live2d-import-") as tmp_dir:
+    with tempfile.TemporaryDirectory(prefix="oha-live2d-import-") as tmp_dir:
         try:
             _unpack_live2d_archive(resolved_archive, tmp_dir)
         except (shutil.ReadError, ValueError) as exc:
@@ -203,7 +204,7 @@ def import_live2d_archive_draft(config: "AppConfig", archive_path: Path) -> dict
     try:
         imported_path = import_live2d_archive(archive_path)
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}
+        return {"ok": False, "error": redact_api_error_text(exc)}
     return _build_live2d_model_path_draft(
         config,
         imported_path,

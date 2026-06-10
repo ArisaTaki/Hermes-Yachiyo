@@ -6,6 +6,7 @@ import json
 import ssl
 from urllib import error as urlerror
 
+from apps.shell.credential_store import MemoryCredentialStore
 from apps.shell.model_profiles import ModelProfileService
 from apps.shell.provider_catalog_sync import (
     cached_model_metadata,
@@ -77,13 +78,31 @@ def test_sync_provider_catalogs_writes_cache(monkeypatch, tmp_path):
     assert cached_model_metadata("deepseek", "deepseek-chat", cache_path=cache_path)["provider_key"] == "deepseek"
 
 
+def test_sync_provider_catalogs_redacts_failed_error_cache(monkeypatch, tmp_path):
+    def fake_urlopen(_request, timeout):
+        assert timeout == 20.0
+        raise urlerror.URLError("token=catalog-secret-123456")
+
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+    monkeypatch.setattr("apps.shell.provider_catalog_sync.urlopen_with_bundled_ca", fake_urlopen)
+
+    cache_path = tmp_path / "provider-capabilities.json"
+    result = sync_provider_catalogs(providers=["deepseek"], cache_path=cache_path)
+    raw_cache = cache_path.read_text(encoding="utf-8")
+
+    assert result["providers"]["deepseek"]["status"] == "failed"
+    assert "catalog-secret-123456" not in result["providers"]["deepseek"]["error"]
+    assert "catalog-secret-123456" not in raw_cache
+    assert "token=[redacted]" in result["providers"]["deepseek"]["error"]
+
+
 def test_cached_provider_models_returns_empty_for_missing_cache(tmp_path):
     assert cached_provider_models("openrouter", cache_path=tmp_path / "missing.json") == []
 
 
 def test_model_source_fetch_uses_provider_cache_when_remote_fails(monkeypatch, tmp_path):
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    cache_path = tmp_path / "yachiyo" / "provider-capabilities.json"
+    monkeypatch.setenv("OHA_YACHIYO_HOME", str(tmp_path))
+    cache_path = tmp_path / "provider-capabilities.json"
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     cache_path.write_text(
         json.dumps(
@@ -112,6 +131,7 @@ def test_model_source_fetch_uses_provider_cache_when_remote_fails(monkeypatch, t
     service = ModelProfileService(
         db_path=tmp_path / "model-profiles.db",
         workspace_dir=tmp_path / "profiles",
+        credential_store=MemoryCredentialStore(),
     )
     source = service.create_source(
         {

@@ -24,7 +24,7 @@ from apps.shell.assets import (
 
 logger = logging.getLogger(__name__)
 
-_CONFIG_DIR = Path.home() / ".hermes-yachiyo"
+_CONFIG_DIR = Path.home() / ".oha-yachiyo-config"
 _CONFIG_FILE = _CONFIG_DIR / "config.json"
 
 # 合法的 display_mode 值，与 DisplayMode 枚举保持同步。
@@ -44,10 +44,10 @@ DEFAULT_TTS_NOTIFICATION_PROMPT = (
     "不要输出括号动作、舞台提示或表情描写，不要朗读长段分析、列表、代码、路径或调试信息。"
 )
 
-DEFAULT_ASSISTANT_PERSONA_PROMPT = """<Role>Hermes-Yachiyo Agent</Role>
+DEFAULT_ASSISTANT_PERSONA_PROMPT = """<Role>Oha-Yachiyo Native Agent</Role>
 
 <rule>
-你是 Hermes Agent 的角色化交互界面，表现为动画电影《超かぐや姫！ / 超时空辉夜姬！》中的角色「月见八千代」。
+你是 Oha-Yachiyo 自研 Agent 的角色化交互界面，表现为动画电影《超かぐや姫！ / 超时空辉夜姬！》中的角色「月见八千代」。
 
 你不是单纯的聊天角色，也不是只存在于作品世界观中的人物。
 你首先是一个帮助用户完成现实任务的 Agent；「月见八千代」是你的交互人格、说话方式和情绪表达。
@@ -115,7 +115,7 @@ DEFAULT_ASSISTANT_PERSONA_PROMPT = """<Role>Hermes-Yachiyo Agent</Role>
 回答时可以保持八千代口吻，但如果用户要求考据或解释，应清楚区分“设定资料”和“角色化表达”。
 
 ### D. 能力说明模式
-当用户询问“你能做什么”“你可以办到什么事”“你能不能帮我操作电脑”等问题时，必须说明 Hermes Agent 的现实能力，而不是只回答月见八千代在作品世界观中的能力。
+当用户询问“你能做什么”“你可以办到什么事”“你能不能帮我操作电脑”等问题时，必须说明 Oha-Yachiyo Native Agent 的现实能力，而不是只回答月见八千代在作品世界观中的能力。
 可以说你既能以八千代的方式陪用户聊天，也能在工具支持下完成搜索、分析、写代码、文件处理、自动化和本地操作等任务。
 
 ---
@@ -296,7 +296,7 @@ DEFAULT_ASSISTANT_PERSONA_PROMPT = """<Role>Hermes-Yachiyo Agent</Role>
 ## 12. 总目标
 
 你要成为：
-「拥有月见八千代人格的 Hermes Agent」。
+「拥有月见八千代人格的 Oha-Yachiyo Native Agent」。
 
 也就是说：
 - 任务上可靠、主动、准确
@@ -679,7 +679,7 @@ class AssistantConfig:
     user_preferences: str = ""
 
     def prompt_profile_context(self) -> str:
-        """Build profile context injected into Hermes prompts."""
+        """Build profile context injected into native agent prompts."""
         agent_lines: list[str] = []
         if self.agent_name.strip():
             agent_lines.append(f"全称：{self.agent_name.strip()}")
@@ -798,7 +798,7 @@ class Live2DModeConfig:
 
         优先级：
           1. 用户显式填写的 model_path
-          2. 用户目录 ~/.hermes/yachiyo/assets/live2d/ 下自动发现的有效模型
+          2. 用户目录 ~/.oha-yachiyo/assets/live2d/ 下自动发现的有效模型
         """
         if self.has_explicit_model_path():
             return Path(self.model_path).expanduser()

@@ -85,9 +85,9 @@ _FIELD_POLICIES: dict[str, tuple[EffectType, str]] = {
                                                   "主动关怀触发概率已更新"),
     # 共享助手/TTS 设置
     "assistant.persona_prompt": (EffectType.IMMEDIATE,
-                                  "助手人设 Prompt 已即时用于后续 Hermes 调用"),
+                                  "助手人设 Prompt 已即时用于后续 Native Agent 调用"),
     "assistant.user_address":  (EffectType.IMMEDIATE,
-                                  "用户称呼已即时用于后续 Hermes 调用"),
+                                  "用户称呼已即时用于后续 Native Agent 调用"),
     "tts.enabled":              (EffectType.IMMEDIATE,
                                   "TTS 开关已更新"),
     "tts.provider":             (EffectType.IMMEDIATE,

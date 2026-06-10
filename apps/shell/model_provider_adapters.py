@@ -1,8 +1,8 @@
-"""Provider adapter metadata shared by Model Profile and Hermes config code.
+"""Provider adapter metadata shared by Native Model Profile code.
 
 Yachiyo keeps user-facing source names separate from the provider identifier
-that Hermes CLI can actually execute.  OpenRouter model vendors are only
-catalog groups; the executable provider remains ``openrouter``.
+that the native runtime can execute. OpenRouter model vendors are only catalog
+groups; the executable provider remains ``openrouter``.
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import urlparse
 
-HERMES_RUNTIME_PROVIDER_IDS = {
+NATIVE_RUNTIME_PROVIDER_IDS = {
     "ai-gateway",
     "alibaba",
     "alibaba-coding-plan",
@@ -43,7 +43,7 @@ HERMES_RUNTIME_PROVIDER_IDS = {
     "zai",
 }
 
-HERMES_PROVIDER_LABELS = {
+NATIVE_PROVIDER_LABELS = {
     "ai-gateway": "Vercel AI Gateway",
     "alibaba": "Alibaba DashScope",
     "alibaba-coding-plan": "Alibaba Coding Plan",
@@ -51,7 +51,7 @@ HERMES_PROVIDER_LABELS = {
     "arcee": "Arcee",
     "azure-foundry": "Azure Foundry",
     "bedrock": "AWS Bedrock",
-    "custom": "Hermes Custom",
+    "custom": "Native Custom",
     "deepseek": "DeepSeek",
     "gemini": "Google Gemini",
     "gmi": "GMI",
@@ -76,7 +76,7 @@ HERMES_PROVIDER_LABELS = {
     "zai": "Z.AI",
 }
 
-HERMES_PROVIDER_API_KEY_NAMES = {
+NATIVE_PROVIDER_API_KEY_NAMES = {
     "ai-gateway": ("AI_GATEWAY_API_KEY",),
     "alibaba": ("DASHSCOPE_API_KEY", "ALIBABA_CODING_PLAN_API_KEY"),
     "alibaba-coding-plan": ("ALIBABA_CODING_PLAN_API_KEY", "DASHSCOPE_API_KEY"),
@@ -107,7 +107,7 @@ HERMES_PROVIDER_API_KEY_NAMES = {
     "zai": ("GLM_API_KEY", "ZAI_API_KEY", "Z_AI_API_KEY"),
 }
 
-HERMES_PROVIDER_ALIASES = {
+NATIVE_PROVIDER_ALIASES = {
     "302ai": "custom",
     "aihubmix": "custom",
     "azure_openai": "azure-foundry",
@@ -132,7 +132,7 @@ HERMES_PROVIDER_ALIASES = {
     "zhipu": "zai",
 }
 
-HERMES_PROVIDER_HOST_HINTS: tuple[tuple[str, str], ...] = (
+NATIVE_PROVIDER_HOST_HINTS: tuple[tuple[str, str], ...] = (
     ("openrouter.ai", "openrouter"),
     ("api.openai.com", "openai"),
     ("api.anthropic.com", "anthropic"),
@@ -179,19 +179,19 @@ def normalize_provider_id(provider: str) -> str:
 
 def provider_api_key_names(provider: str) -> tuple[str, ...]:
     normalized = normalize_provider_id(provider)
-    return HERMES_PROVIDER_API_KEY_NAMES.get(
+    return NATIVE_PROVIDER_API_KEY_NAMES.get(
         normalized,
         (f"{normalized.upper().replace('-', '_').replace('.', '_')}_API_KEY",) if normalized else (),
     )
 
 
-def infer_hermes_provider(provider: str, base_url: str = "", model: str = "") -> str:
+def infer_native_provider(provider: str, base_url: str = "", model: str = "") -> str:
     normalized = normalize_provider_id(provider)
     if normalized and normalized not in AUTO_PROVIDER_VALUES:
-        return HERMES_PROVIDER_ALIASES.get(normalized, normalized)
+        return NATIVE_PROVIDER_ALIASES.get(normalized, normalized)
 
     host = (urlparse(base_url or "").hostname or "").lower()
-    for suffix, provider_id in HERMES_PROVIDER_HOST_HINTS:
+    for suffix, provider_id in NATIVE_PROVIDER_HOST_HINTS:
         if host == suffix or host.endswith(f".{suffix}"):
             return provider_id
 
@@ -204,26 +204,26 @@ def infer_hermes_provider(provider: str, base_url: str = "", model: str = "") ->
 def resolve_provider_adapter(provider: str, base_url: str = "", model: str = "") -> dict[str, Any]:
     source_provider = (provider or "openai_compatible").strip()
     normalized = normalize_provider_id(source_provider)
-    inferred = infer_hermes_provider(source_provider, base_url, model)
+    inferred = infer_native_provider(source_provider, base_url, model)
 
-    if inferred in HERMES_RUNTIME_PROVIDER_IDS:
-        hermes_provider = inferred
+    if inferred in NATIVE_RUNTIME_PROVIDER_IDS:
+        native_provider = inferred
     elif normalized in AUTO_PROVIDER_VALUES:
-        hermes_provider = "custom"
+        native_provider = "custom"
     elif base_url:
-        hermes_provider = "custom"
+        native_provider = "custom"
     else:
-        hermes_provider = ""
+        native_provider = ""
 
-    can_use_as_hermes = bool(hermes_provider in HERMES_RUNTIME_PROVIDER_IDS)
-    api_key_names = provider_api_key_names(hermes_provider) if hermes_provider else ()
+    can_use_as_native = bool(native_provider in NATIVE_RUNTIME_PROVIDER_IDS)
+    api_key_names = provider_api_key_names(native_provider) if native_provider else ()
     return {
         "source_provider": source_provider,
-        "hermes_provider": hermes_provider,
-        "hermes_provider_label": HERMES_PROVIDER_LABELS.get(hermes_provider, hermes_provider),
+        "native_provider": native_provider,
+        "native_provider_label": NATIVE_PROVIDER_LABELS.get(native_provider, native_provider),
         "api_key_name": api_key_names[0] if api_key_names else "",
         "api_key_names": list(api_key_names),
-        "runtime_scope": "hermes" if can_use_as_hermes else "unsupported",
-        "can_use_as_hermes": can_use_as_hermes,
-        "note": "写入 Hermes custom provider" if hermes_provider == "custom" else "",
+        "runtime_scope": "native" if can_use_as_native else "unsupported",
+        "can_use_as_native": can_use_as_native,
+        "note": "写入 Native custom provider" if native_provider == "custom" else "",
     }

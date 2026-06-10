@@ -1,4 +1,4 @@
-"""Hermes-Yachiyo Tasking — 任务生命周期管理（占位）
+"""Oha-Yachiyo Tasking — 任务生命周期管理（占位）
 
 后续实现：
 - 任务持久化存储

@@ -3,6 +3,7 @@
 from fastapi import APIRouter
 
 from apps.bridge.deps import get_runtime
+from apps.core.version import get_app_version
 from packages.protocol.schemas import StatusResponse
 
 router = APIRouter(tags=["状态"])
@@ -12,21 +13,13 @@ router = APIRouter(tags=["状态"])
 async def get_status() -> StatusResponse:
     rt = get_runtime()
     return StatusResponse(
+        version=get_app_version(),
         uptime_seconds=rt.uptime,
         task_counts=rt.state.get_task_counts(),
-        hermes_ready=rt.is_hermes_ready(),
+        native_agent_ready=rt.is_native_agent_ready(),
     )
 
 
-@router.get("/hermes/install-info")
-async def get_hermes_install_info() -> dict:
-    """获取 Hermes Agent 安装信息和引导"""
-    rt = get_runtime()
-    
-    result = {
-        "hermes_ready": rt.is_hermes_ready(),
-        "install_info": rt.hermes_install_info.model_dump() if rt.hermes_install_info else None,
-        "install_guidance": rt.get_hermes_install_guidance()
-    }
-    
-    return result
+@router.get("/native-agent/readiness")
+async def get_native_agent_readiness() -> dict:
+    return get_runtime().native_agent_readiness()

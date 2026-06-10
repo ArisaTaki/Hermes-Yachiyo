@@ -126,8 +126,8 @@ def test_tts_command_invocation_uses_text_voice_and_timeout(monkeypatch):
     assert result["message"] == "TTS 已完成"
     assert calls[0][0] == ["say", "--voice", "Kyoko", "你好"]
     assert calls[0][1]["timeout"] == 7
-    assert calls[0][1]["env"]["HERMES_YACHIYO_TTS_TEXT"] == "你好"
-    assert calls[0][1]["env"]["HERMES_YACHIYO_TTS_VOICE"] == "Kyoko"
+    assert calls[0][1]["env"]["OHA_YACHIYO_TTS_TEXT"] == "你好"
+    assert calls[0][1]["env"]["OHA_YACHIYO_TTS_VOICE"] == "Kyoko"
 
 
 def test_tts_sync_test_returns_final_status(monkeypatch):
@@ -326,7 +326,7 @@ def test_gpt_sovits_service_status_uses_unsaved_draft_and_expands_env(monkeypatc
             {
                 "label": "com.example.gsv-api",
                 "running": True,
-                "managed_by_hermes": False,
+                "managed_by_oha": False,
             }
         ],
     )
@@ -398,7 +398,7 @@ def test_gpt_sovits_launch_agent_install_validates_workdir(monkeypatch):
 def test_gpt_sovits_launch_agent_install_writes_plist(monkeypatch, tmp_path):
     workdir = tmp_path / "GPT-SoVITS"
     workdir.mkdir()
-    plist_path = tmp_path / "LaunchAgents" / "com.hermes-yachiyo.gpt-sovits.plist"
+    plist_path = tmp_path / "LaunchAgents" / "com.oha-yachiyo.gpt-sovits.plist"
     launchctl_calls = []
 
     class _Result:
@@ -447,7 +447,7 @@ def test_gpt_sovits_launch_agent_adopt_disables_external_user_agent(monkeypatch,
             }
         )
     )
-    hermes_plist = tmp_path / "LaunchAgents" / "com.hermes-yachiyo.gpt-sovits.plist"
+    oha_plist = tmp_path / "LaunchAgents" / "com.oha-yachiyo.gpt-sovits.plist"
     launchctl_calls = []
 
     class _Result:
@@ -456,7 +456,7 @@ def test_gpt_sovits_launch_agent_adopt_disables_external_user_agent(monkeypatch,
         stderr = ""
 
     monkeypatch.setattr(gsv_service.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(gsv_service, "_launch_agent_path", lambda: hermes_plist)
+    monkeypatch.setattr(gsv_service, "_launch_agent_path", lambda: oha_plist)
     monkeypatch.setattr(gsv_service, "_launchctl_domain", lambda: "gui/501")
     monkeypatch.setattr(gsv_service, "_log_path", lambda kind: tmp_path / f"gsv-{kind}.log")
     monkeypatch.setattr(gsv_service, "_is_user_launch_agent_path", lambda _path: True)
@@ -471,7 +471,7 @@ def test_gpt_sovits_launch_agent_adopt_disables_external_user_agent(monkeypatch,
                 "label": "com.example.gsv-api",
                 "path": str(external_plist),
                 "path_display": str(external_plist),
-                "managed_by_hermes": False,
+                "managed_by_oha": False,
                 "running": True,
             }
         ],
@@ -491,17 +491,17 @@ def test_gpt_sovits_launch_agent_adopt_disables_external_user_agent(monkeypatch,
     )
 
     assert result["ok"] is True
-    assert "交由 Hermes-Yachiyo 管理" in result["message"]
+    assert "交由 Oha-Yachiyo 管理" in result["message"]
     assert external_plist.exists() is False
-    disabled_path = external_plist.with_name(f"{external_plist.name}.hermes-yachiyo-disabled")
+    disabled_path = external_plist.with_name(f"{external_plist.name}.oha-yachiyo-disabled")
     assert disabled_path.exists()
-    assert hermes_plist.exists()
+    assert oha_plist.exists()
     assert result["disabled_launch_agents"][0]["label"] == "com.example.gsv-api"
     assert any(
         call[:1] == ["bootout"] and "com.example.gsv-api" in call[-1]
         for call in launchctl_calls
     )
-    assert any(call[0] == "bootstrap" and str(hermes_plist) in call for call in launchctl_calls)
+    assert any(call[0] == "bootstrap" and str(oha_plist) in call for call in launchctl_calls)
 
 
 def test_tts_http_posts_text_voice_and_timeout(monkeypatch):

@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException
 
 from apps.bridge.deps import get_runtime
 from apps.core.executor import user_task_unavailable_reason
+from packages.security import redact_api_error_text
 from packages.protocol.enums import ErrorCode
 from packages.protocol.errors import ErrorResponse
 from packages.protocol.schemas import (
@@ -50,7 +51,7 @@ async def create_task(req: TaskCreateRequest) -> TaskCreateResponse:
         raise HTTPException(
             status_code=503,
             detail=ErrorResponse(
-                error=ErrorCode.HERMES_NOT_INSTALLED,
+                error=ErrorCode.NATIVE_AGENT_NOT_READY,
                 message=unavailable_reason,
             ).model_dump(),
         )
@@ -86,7 +87,7 @@ async def cancel_task(task_id: str) -> TaskCancelResponse:
             status_code=409,
             detail=ErrorResponse(
                 error=ErrorCode.TASK_NOT_CANCELLABLE,
-                message=str(e),
+                message=redact_api_error_text(e),
             ).model_dump(),
         )
     return TaskCancelResponse(task=task)

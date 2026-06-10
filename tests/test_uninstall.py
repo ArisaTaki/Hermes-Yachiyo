@@ -1,4 +1,4 @@
-"""Hermes-Yachiyo 卸载功能测试。"""
+"""Oha-Yachiyo 卸载功能测试。"""
 
 from __future__ import annotations
 
@@ -26,31 +26,30 @@ from apps.installer.uninstall import (
     execute_uninstall,
 )
 from apps.shell.config import AppConfig
-from apps.shell.installer_api import InstallerWebViewAPI
 from apps.shell.main_api import MainWindowAPI
 
 
 def _prepare_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
-    hermes_home = home / ".hermes"
-    config_dir = home / ".hermes-yachiyo"
+    native_home = home / ".oha-yachiyo"
+    config_dir = home / ".oha-yachiyo-config"
 
     monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+    monkeypatch.setenv("OHA_YACHIYO_HOME", str(native_home))
     monkeypatch.setattr(config_mod, "_CONFIG_DIR", config_dir)
     monkeypatch.setattr(config_mod, "_CONFIG_FILE", config_dir / "config.json")
 
-    return home, hermes_home, config_dir
+    return home, native_home, config_dir
 
 
 def _write_importable_backup_archive(archive_path: Path, files: dict[str, bytes]) -> None:
     manifest = {
         "schema_version": backup_mod.BACKUP_SCHEMA_VERSION,
-        "kind": "hermes-yachiyo-backup",
+        "kind": "oha-yachiyo-backup",
         "format": "zip",
         "created_at": "2026-04-28T00:00:00+00:00",
-        "entries": [{"id": "app_config", "label": "Hermes-Yachiyo 应用配置"}],
+        "entries": [{"id": "app_config", "label": "Oha-Yachiyo 应用配置"}],
     }
     with zipfile.ZipFile(archive_path, "w") as archive:
         archive.writestr("manifest.json", json.dumps(manifest))
@@ -58,23 +57,23 @@ def _write_importable_backup_archive(archive_path: Path, files: dict[str, bytes]
             archive.writestr(name, payload)
 
 
-def test_yachiyo_only_plan_includes_config_and_workspace(tmp_path, monkeypatch):
-    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+def test_oha_only_plan_includes_config_and_workspace(tmp_path, monkeypatch):
+    home, native_home, config_dir = _prepare_home(tmp_path, monkeypatch)
     config_dir.mkdir(parents=True)
     (config_dir / "config.json").write_text("{}", encoding="utf-8")
-    workspace = hermes_home / "yachiyo"
+    workspace = native_home
     workspace.mkdir(parents=True)
-    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+    (workspace / ".oha_yachiyo_init").write_text("{}", encoding="utf-8")
 
     plan = build_uninstall_plan(
-        UninstallScope.YACHIYO_ONLY,
+        UninstallScope.OHA_ONLY,
         keep_config_snapshot=True,
         backup_root=home / "backups",
     )
 
     target_ids = {target.id for target in plan.targets}
-    assert target_ids == {"app_config_dir", "yachiyo_workspace"}
-    assert "hermes_home" not in target_ids
+    assert target_ids == {"app_config_dir", "oha_workspace"}
+    assert "native_home" not in target_ids
     assert plan.backup.enabled is True
     assert plan.to_dict()["existing_count"] == 2
     assert plan.to_dict()["removable_count"] == 2
@@ -83,17 +82,17 @@ def test_yachiyo_only_plan_includes_config_and_workspace(tmp_path, monkeypatch):
 
 
 def test_uninstall_plan_can_include_gpt_sovits_service(tmp_path, monkeypatch):
-    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    home, native_home, config_dir = _prepare_home(tmp_path, monkeypatch)
     config_dir.mkdir(parents=True)
-    workspace = hermes_home / "yachiyo"
+    workspace = native_home
     workspace.mkdir(parents=True)
-    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+    (workspace / ".oha_yachiyo_init").write_text("{}", encoding="utf-8")
     workdir = home / "AI" / "GPT-SoVITS"
     (workdir / "GPT_SoVITS").mkdir(parents=True)
     pretrained_model = workdir / "GPT_SoVITS" / "pretrained_models" / "s1v3.ckpt"
     pretrained_model.parent.mkdir(parents=True)
     pretrained_model.write_text("model", encoding="utf-8")
-    plist = home / "Library" / "LaunchAgents" / "com.hermes-yachiyo.gpt-sovits.plist"
+    plist = home / "Library" / "LaunchAgents" / "com.oha-yachiyo.gpt-sovits.plist"
     plist.parent.mkdir(parents=True)
     plist.write_text("<plist />", encoding="utf-8")
     (config_dir / "config.json").write_text(
@@ -102,12 +101,12 @@ def test_uninstall_plan_can_include_gpt_sovits_service(tmp_path, monkeypatch):
     )
 
     keep_plan = build_uninstall_plan(
-        UninstallScope.YACHIYO_ONLY,
+        UninstallScope.OHA_ONLY,
         keep_config_snapshot=False,
         backup_root=home / "backups",
     )
     delete_plan = build_uninstall_plan(
-        UninstallScope.YACHIYO_ONLY,
+        UninstallScope.OHA_ONLY,
         keep_config_snapshot=False,
         include_gpt_sovits=True,
         backup_root=home / "backups",
@@ -121,17 +120,17 @@ def test_uninstall_plan_can_include_gpt_sovits_service(tmp_path, monkeypatch):
 
 
 def test_execute_uninstall_removes_selected_gpt_sovits_service(tmp_path, monkeypatch):
-    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    home, native_home, config_dir = _prepare_home(tmp_path, monkeypatch)
     config_dir.mkdir(parents=True)
-    workspace = hermes_home / "yachiyo"
+    workspace = native_home
     workspace.mkdir(parents=True)
-    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+    (workspace / ".oha_yachiyo_init").write_text("{}", encoding="utf-8")
     workdir = home / "AI" / "GPT-SoVITS"
     (workdir / "GPT_SoVITS").mkdir(parents=True)
     pretrained_model = workdir / "GPT_SoVITS" / "pretrained_models" / "s1v3.ckpt"
     pretrained_model.parent.mkdir(parents=True)
     pretrained_model.write_text("model", encoding="utf-8")
-    plist = home / "Library" / "LaunchAgents" / "com.hermes-yachiyo.gpt-sovits.plist"
+    plist = home / "Library" / "LaunchAgents" / "com.oha-yachiyo.gpt-sovits.plist"
     plist.parent.mkdir(parents=True)
     plist.write_text("<plist />", encoding="utf-8")
     (config_dir / "config.json").write_text(
@@ -148,7 +147,7 @@ def test_execute_uninstall_removes_selected_gpt_sovits_service(tmp_path, monkeyp
     monkeypatch.setattr(uninstall_mod.gpt_sovits_service, "uninstall_gpt_sovits_launch_agent", fake_uninstall_launch_agent)
 
     result = execute_uninstall(
-        UninstallScope.YACHIYO_ONLY,
+        UninstallScope.OHA_ONLY,
         keep_config_snapshot=False,
         include_gpt_sovits=True,
         confirm_text=UNINSTALL_CONFIRM_PHRASE,
@@ -165,14 +164,14 @@ def test_execute_uninstall_removes_selected_gpt_sovits_service(tmp_path, monkeyp
     assert calls
 
 
-def test_execute_yachiyo_only_creates_backup_and_removes_targets(tmp_path, monkeypatch):
-    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+def test_execute_oha_only_creates_backup_and_removes_targets(tmp_path, monkeypatch):
+    home, native_home, config_dir = _prepare_home(tmp_path, monkeypatch)
     config_dir.mkdir(parents=True)
     (config_dir / "config.json").write_text('{"display_mode":"bubble"}', encoding="utf-8")
 
-    workspace = hermes_home / "yachiyo"
+    workspace = native_home
     (workspace / "configs").mkdir(parents=True)
-    (workspace / "configs" / "yachiyo.json").write_text("{}", encoding="utf-8")
+    (workspace / "configs" / "oha-yachiyo.json").write_text("{}", encoding="utf-8")
     (workspace / "templates").mkdir()
     (workspace / "templates" / "default.json").write_text("{}", encoding="utf-8")
     (workspace / "cache").mkdir()
@@ -181,11 +180,11 @@ def test_execute_yachiyo_only_creates_backup_and_removes_targets(tmp_path, monke
     (workspace / "logs" / "app.log").write_text("log", encoding="utf-8")
     (workspace / "assets" / "live2d").mkdir(parents=True)
     (workspace / "assets" / "live2d" / "model.model3.json").write_text("{}", encoding="utf-8")
-    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+    (workspace / ".oha_yachiyo_init").write_text("{}", encoding="utf-8")
     (workspace / "chat.db").write_text("chat", encoding="utf-8")
 
     result = execute_uninstall(
-        UninstallScope.YACHIYO_ONLY,
+        UninstallScope.OHA_ONLY,
         keep_config_snapshot=True,
         confirm_text=UNINSTALL_CONFIRM_PHRASE,
         backup_root=home / "backups",
@@ -208,30 +207,30 @@ def test_execute_yachiyo_only_creates_backup_and_removes_targets(tmp_path, monke
     assert "entries" in manifest
     assert "copied" not in manifest
     assert "source_app_config_dir" not in manifest
-    assert "source_hermes_home" not in manifest
-    assert "source_yachiyo_workspace" not in manifest
+    assert "source_native_home" not in manifest
+    assert "source_oha_workspace" not in manifest
     assert all("source" not in entry for entry in manifest["entries"])
     assert "app-config/config.json" in names
-    assert "yachiyo-workspace/configs/yachiyo.json" in names
-    assert "yachiyo-workspace/templates/default.json" in names
-    assert "yachiyo-workspace/cache/state.json" in names
-    assert "yachiyo-workspace/logs/app.log" in names
-    assert "yachiyo-workspace/assets/live2d/model.model3.json" in names
-    assert "yachiyo-workspace/chat.db" in names
+    assert "oha-workspace/configs/oha-yachiyo.json" in names
+    assert "oha-workspace/templates/default.json" in names
+    assert "oha-workspace/cache/state.json" in names
+    assert "oha-workspace/logs/app.log" in names
+    assert "oha-workspace/assets/live2d/model.model3.json" in names
+    assert "oha-workspace/chat.db" in names
 
 
 def test_create_uninstall_backup_uses_plan_backup_root_by_default(tmp_path, monkeypatch):
-    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    home, native_home, config_dir = _prepare_home(tmp_path, monkeypatch)
     config_dir.mkdir(parents=True)
     (config_dir / "config.json").write_text("{}", encoding="utf-8")
-    workspace = hermes_home / "yachiyo"
+    workspace = native_home
     workspace.mkdir(parents=True)
-    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+    (workspace / ".oha_yachiyo_init").write_text("{}", encoding="utf-8")
 
     backup_root = home / "planned-backups"
     override_root = home / "override-backups"
     plan = build_uninstall_plan(
-        UninstallScope.YACHIYO_ONLY,
+        UninstallScope.OHA_ONLY,
         keep_config_snapshot=True,
         backup_root=backup_root,
     )
@@ -244,11 +243,11 @@ def test_create_uninstall_backup_uses_plan_backup_root_by_default(tmp_path, monk
 
 
 def test_create_backup_is_available_without_uninstall(tmp_path, monkeypatch):
-    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    home, native_home, config_dir = _prepare_home(tmp_path, monkeypatch)
     config_dir.mkdir(parents=True)
     (config_dir / "config.json").write_text('{"display_mode":"bubble"}', encoding="utf-8")
 
-    workspace = hermes_home / "yachiyo"
+    workspace = native_home
     (workspace / "projects").mkdir(parents=True)
     (workspace / "projects" / "demo.json").write_text("{}", encoding="utf-8")
     (workspace / "chat.db").write_text("chat", encoding="utf-8")
@@ -262,12 +261,12 @@ def test_create_backup_is_available_without_uninstall(tmp_path, monkeypatch):
     with zipfile.ZipFile(backup.path) as archive:
         names = set(archive.namelist())
     assert "app-config/config.json" in names
-    assert "yachiyo-workspace/projects/demo.json" in names
-    assert "yachiyo-workspace/chat.db" in names
+    assert "oha-workspace/projects/demo.json" in names
+    assert "oha-workspace/chat.db" in names
 
 
 def test_create_backup_skips_top_level_and_nested_symlinks(tmp_path, monkeypatch):
-    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    home, native_home, config_dir = _prepare_home(tmp_path, monkeypatch)
     real_config_dir = home / "real-config"
     real_config_dir.mkdir(parents=True)
     (real_config_dir / "config.json").write_text('{"from":"symlink"}', encoding="utf-8")
@@ -279,9 +278,9 @@ def test_create_backup_skips_top_level_and_nested_symlinks(tmp_path, monkeypatch
     outside_file.write_text("secret", encoding="utf-8")
     (outside_dir / "nested-secret.txt").write_text("nested", encoding="utf-8")
 
-    workspace = hermes_home / "yachiyo"
+    workspace = native_home
     workspace.mkdir(parents=True)
-    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+    (workspace / ".oha_yachiyo_init").write_text("{}", encoding="utf-8")
     (workspace / "linked-secret.txt").symlink_to(outside_file)
     (workspace / "linked-dir").symlink_to(outside_dir, target_is_directory=True)
     (workspace / "normal.txt").write_text("normal", encoding="utf-8")
@@ -297,20 +296,20 @@ def test_create_backup_skips_top_level_and_nested_symlinks(tmp_path, monkeypatch
         )
 
     assert "app-config/config.json" not in names
-    assert "yachiyo-workspace/linked-secret.txt" not in names
-    assert not any(name.startswith("yachiyo-workspace/linked-dir") for name in names)
-    assert "yachiyo-workspace/normal.txt" in names
+    assert "oha-workspace/linked-secret.txt" not in names
+    assert not any(name.startswith("oha-workspace/linked-dir") for name in names)
+    assert "oha-workspace/normal.txt" in names
     assert b"secret" not in payload
     assert b"nested" not in payload
 
 
 def test_create_backup_cleans_up_old_backups_by_count(tmp_path, monkeypatch):
-    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    home, native_home, config_dir = _prepare_home(tmp_path, monkeypatch)
     config_dir.mkdir(parents=True)
     (config_dir / "config.json").write_text("{}", encoding="utf-8")
-    workspace = hermes_home / "yachiyo"
+    workspace = native_home
     workspace.mkdir(parents=True)
-    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+    (workspace / ".oha_yachiyo_init").write_text("{}", encoding="utf-8")
 
     backup_root = home / "backups"
     created_paths = []
@@ -326,12 +325,12 @@ def test_create_backup_cleans_up_old_backups_by_count(tmp_path, monkeypatch):
 
 
 def test_create_backup_cleans_partial_temp_archive_when_zip_write_fails(tmp_path, monkeypatch):
-    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    home, native_home, config_dir = _prepare_home(tmp_path, monkeypatch)
     config_dir.mkdir(parents=True)
     (config_dir / "config.json").write_text("{}", encoding="utf-8")
-    workspace = hermes_home / "yachiyo"
+    workspace = native_home
     workspace.mkdir(parents=True)
-    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+    (workspace / ".oha_yachiyo_init").write_text("{}", encoding="utf-8")
 
     backup_root = home / "backups"
     temp_archives = []
@@ -353,12 +352,12 @@ def test_create_backup_cleans_partial_temp_archive_when_zip_write_fails(tmp_path
 
 
 def test_create_backup_removes_published_archive_when_cleanup_fails(tmp_path, monkeypatch):
-    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    home, native_home, config_dir = _prepare_home(tmp_path, monkeypatch)
     config_dir.mkdir(parents=True)
     (config_dir / "config.json").write_text("{}", encoding="utf-8")
-    workspace = hermes_home / "yachiyo"
+    workspace = native_home
     workspace.mkdir(parents=True)
-    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+    (workspace / ".oha_yachiyo_init").write_text("{}", encoding="utf-8")
 
     backup_root = home / "backups"
 
@@ -378,9 +377,9 @@ def test_cleanup_old_backups_counts_invalid_managed_backups(tmp_path):
     backup_root = tmp_path / "backups"
     backup_root.mkdir()
     names = [
-        "hermes-yachiyo-backup-20260428-101500.zip",
-        "hermes-yachiyo-backup-20260428-101501.zip",
-        "hermes-yachiyo-backup-20260428-101502.zip",
+        "oha-yachiyo-backup-20260428-101500.zip",
+        "oha-yachiyo-backup-20260428-101501.zip",
+        "oha-yachiyo-backup-20260428-101502.zip",
     ]
     for index, name in enumerate(names):
         path = backup_root / name
@@ -400,9 +399,9 @@ def test_cleanup_old_backups_skips_unmanageable_delete_errors(tmp_path, monkeypa
     backup_root = tmp_path / "backups"
     backup_root.mkdir()
     names = [
-        "hermes-yachiyo-backup-20260428-101500.zip",
-        "hermes-yachiyo-backup-20260428-101501.zip",
-        "hermes-yachiyo-backup-20260428-101502.zip",
+        "oha-yachiyo-backup-20260428-101500.zip",
+        "oha-yachiyo-backup-20260428-101501.zip",
+        "oha-yachiyo-backup-20260428-101502.zip",
     ]
     for index, name in enumerate(names):
         path = backup_root / name
@@ -433,8 +432,8 @@ def test_cleanup_old_backups_skips_unmanageable_delete_errors(tmp_path, monkeypa
 def test_find_backups_ignores_noncanonical_prefixed_zip_names(tmp_path):
     backup_root = tmp_path / "backups"
     backup_root.mkdir()
-    canonical = backup_root / "hermes-yachiyo-backup-20260428-101500.zip"
-    noncanonical = backup_root / "hermes-yachiyo-backup-20260428-101500-draft.zip"
+    canonical = backup_root / "oha-yachiyo-backup-20260428-101500.zip"
+    noncanonical = backup_root / "oha-yachiyo-backup-20260428-101500-draft.zip"
     canonical.write_bytes(b"not a zip")
     noncanonical.write_bytes(b"not a zip")
 
@@ -446,17 +445,17 @@ def test_find_backups_ignores_noncanonical_prefixed_zip_names(tmp_path):
 def test_backup_filename_order_parses_only_extra_numeric_suffix(tmp_path):
     assert (
         backup_mod._filename_order(
-            tmp_path / "hermes-yachiyo-backup-20260428-101531.zip"
+            tmp_path / "oha-yachiyo-backup-20260428-101531.zip"
         )
         == 1
     )
     assert (
         backup_mod._filename_order(
-            tmp_path / "hermes-yachiyo-backup-20260428-101531-2.zip"
+            tmp_path / "oha-yachiyo-backup-20260428-101531-2.zip"
         )
         == 2
     )
-    assert backup_mod._filename_order(tmp_path / "hermes-yachiyo-backup-20260428.zip") == 0
+    assert backup_mod._filename_order(tmp_path / "oha-yachiyo-backup-20260428.zip") == 0
 
 
 def test_unique_backup_archive_uses_dash_two_for_same_second(tmp_path, monkeypatch):
@@ -468,12 +467,12 @@ def test_unique_backup_archive_uses_dash_two_for_same_second(tmp_path, monkeypat
     monkeypatch.setattr(backup_mod, "datetime", FixedDateTime)
     backup_root = tmp_path / "backups"
     backup_root.mkdir()
-    base = backup_root / "hermes-yachiyo-backup-20260428-101531.zip"
+    base = backup_root / "oha-yachiyo-backup-20260428-101531.zip"
     base.write_text("base", encoding="utf-8")
 
     candidate = backup_mod._unique_backup_archive(backup_root)
 
-    assert candidate.name == "hermes-yachiyo-backup-20260428-101531-2.zip"
+    assert candidate.name == "oha-yachiyo-backup-20260428-101531-2.zip"
 
 
 def test_unique_backup_archive_ignores_invalid_same_second_matches(tmp_path, monkeypatch):
@@ -485,22 +484,22 @@ def test_unique_backup_archive_ignores_invalid_same_second_matches(tmp_path, mon
     monkeypatch.setattr(backup_mod, "datetime", FixedDateTime)
     backup_root = tmp_path / "backups"
     backup_root.mkdir()
-    invalid = backup_root / "hermes-yachiyo-backup-20260428-101531-draft.zip"
+    invalid = backup_root / "oha-yachiyo-backup-20260428-101531-draft.zip"
     invalid.write_text("invalid", encoding="utf-8")
 
     candidate = backup_mod._unique_backup_archive(backup_root)
 
-    assert candidate.name == "hermes-yachiyo-backup-20260428-101531.zip"
+    assert candidate.name == "oha-yachiyo-backup-20260428-101531.zip"
     assert not candidate.name.endswith("-1.zip")
 
 
 def test_create_backup_can_overwrite_latest_backup(tmp_path, monkeypatch):
-    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    home, native_home, config_dir = _prepare_home(tmp_path, monkeypatch)
     config_dir.mkdir(parents=True)
     (config_dir / "config.json").write_text("{}", encoding="utf-8")
-    workspace = hermes_home / "yachiyo"
+    workspace = native_home
     workspace.mkdir(parents=True)
-    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+    (workspace / ".oha_yachiyo_init").write_text("{}", encoding="utf-8")
 
     backup_root = home / "backups"
     first = create_backup(backup_root=backup_root, auto_cleanup=False)
@@ -516,19 +515,19 @@ def test_create_backup_can_overwrite_latest_backup(tmp_path, monkeypatch):
 
 
 def test_import_backup_restores_config_and_workspace(tmp_path, monkeypatch):
-    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    home, native_home, config_dir = _prepare_home(tmp_path, monkeypatch)
     config_dir.mkdir(parents=True)
     (config_dir / "config.json").write_text('{"display_mode":"live2d"}', encoding="utf-8")
 
-    workspace = hermes_home / "yachiyo"
+    workspace = native_home
     (workspace / "configs").mkdir(parents=True)
-    (workspace / "configs" / "yachiyo.json").write_text("{}", encoding="utf-8")
-    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+    (workspace / "configs" / "oha-yachiyo.json").write_text("{}", encoding="utf-8")
+    (workspace / ".oha_yachiyo_init").write_text("{}", encoding="utf-8")
     (workspace / "chat.db").write_text("chat", encoding="utf-8")
 
     backup_root = home / "backups"
     uninstall_result = execute_uninstall(
-        UninstallScope.YACHIYO_ONLY,
+        UninstallScope.OHA_ONLY,
         keep_config_snapshot=True,
         confirm_text=UNINSTALL_CONFIRM_PHRASE,
         backup_root=backup_root,
@@ -542,15 +541,15 @@ def test_import_backup_restores_config_and_workspace(tmp_path, monkeypatch):
 
     assert import_result.ok is True
     assert (config_dir / "config.json").read_text(encoding="utf-8") == '{"display_mode":"live2d"}'
-    assert (workspace / ".yachiyo_init").exists()
-    assert (workspace / "configs" / "yachiyo.json").exists()
+    assert (workspace / ".oha_yachiyo_init").exists()
+    assert (workspace / "configs" / "oha-yachiyo.json").exists()
     assert (workspace / "chat.db").exists()
     assert import_result.restored
 
 
 def test_import_backup_rejects_zip_entry_over_size_limit(tmp_path, monkeypatch):
-    home, _hermes_home, _config_dir = _prepare_home(tmp_path, monkeypatch)
-    archive_path = home / "hermes-yachiyo-backup-20260428-101531.zip"
+    home, _native_home, _config_dir = _prepare_home(tmp_path, monkeypatch)
+    archive_path = home / "oha-yachiyo-backup-20260428-101531.zip"
     _write_importable_backup_archive(archive_path, {"app-config/config.json": b"x" * 300})
     monkeypatch.setattr(backup_mod, "MAX_BACKUP_IMPORT_ENTRY_BYTES", 256)
     monkeypatch.setattr(backup_mod, "MAX_BACKUP_IMPORT_TOTAL_BYTES", 1024)
@@ -560,8 +559,8 @@ def test_import_backup_rejects_zip_entry_over_size_limit(tmp_path, monkeypatch):
 
 
 def test_import_backup_rejects_zip_total_uncompressed_size_limit(tmp_path, monkeypatch):
-    home, _hermes_home, _config_dir = _prepare_home(tmp_path, monkeypatch)
-    archive_path = home / "hermes-yachiyo-backup-20260428-101531.zip"
+    home, _native_home, _config_dir = _prepare_home(tmp_path, monkeypatch)
+    archive_path = home / "oha-yachiyo-backup-20260428-101531.zip"
     _write_importable_backup_archive(
         archive_path,
         {
@@ -663,14 +662,14 @@ def test_extract_zip_safely_limits_actual_written_total_bytes(tmp_path, monkeypa
 
 
 def test_import_backup_rejects_duplicate_zip_entries(tmp_path, monkeypatch):
-    home, _hermes_home, _config_dir = _prepare_home(tmp_path, monkeypatch)
-    archive_path = home / "hermes-yachiyo-backup-20260428-101531.zip"
+    home, _native_home, _config_dir = _prepare_home(tmp_path, monkeypatch)
+    archive_path = home / "oha-yachiyo-backup-20260428-101531.zip"
     manifest = {
         "schema_version": backup_mod.BACKUP_SCHEMA_VERSION,
-        "kind": "hermes-yachiyo-backup",
+        "kind": "oha-yachiyo-backup",
         "format": "zip",
         "created_at": "2026-04-28T00:00:00+00:00",
-        "entries": [{"id": "app_config", "label": "Hermes-Yachiyo 应用配置"}],
+        "entries": [{"id": "app_config", "label": "Oha-Yachiyo 应用配置"}],
     }
     with zipfile.ZipFile(archive_path, "w") as archive:
         archive.writestr("manifest.json", json.dumps(manifest))
@@ -682,16 +681,16 @@ def test_import_backup_rejects_duplicate_zip_entries(tmp_path, monkeypatch):
 
 
 def test_import_backup_skips_file_app_config_source(tmp_path, monkeypatch):
-    home, _hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    home, _native_home, config_dir = _prepare_home(tmp_path, monkeypatch)
     config_dir.mkdir(parents=True)
     (config_dir / "config.json").write_text('{"display_mode":"bubble"}', encoding="utf-8")
-    archive_path = home / "hermes-yachiyo-backup-20260428-101531.zip"
+    archive_path = home / "oha-yachiyo-backup-20260428-101531.zip"
     manifest = {
         "schema_version": backup_mod.BACKUP_SCHEMA_VERSION,
-        "kind": "hermes-yachiyo-backup",
+        "kind": "oha-yachiyo-backup",
         "format": "zip",
         "created_at": "2026-04-28T00:00:00+00:00",
-        "entries": [{"id": "app_config", "label": "Hermes-Yachiyo 应用配置"}],
+        "entries": [{"id": "app_config", "label": "Oha-Yachiyo 应用配置"}],
     }
     with zipfile.ZipFile(archive_path, "w") as archive:
         archive.writestr("manifest.json", json.dumps(manifest))
@@ -709,28 +708,28 @@ def test_import_backup_skips_file_app_config_source(tmp_path, monkeypatch):
 
 
 def test_import_backup_skips_file_workspace_source(tmp_path, monkeypatch):
-    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    home, native_home, config_dir = _prepare_home(tmp_path, monkeypatch)
     config_dir.mkdir(parents=True)
-    workspace = hermes_home / "yachiyo"
+    workspace = native_home
     workspace.mkdir(parents=True)
-    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
-    archive_path = home / "hermes-yachiyo-backup-20260428-101531.zip"
+    (workspace / ".oha_yachiyo_init").write_text("{}", encoding="utf-8")
+    archive_path = home / "oha-yachiyo-backup-20260428-101531.zip"
     manifest = {
         "schema_version": backup_mod.BACKUP_SCHEMA_VERSION,
-        "kind": "hermes-yachiyo-backup",
+        "kind": "oha-yachiyo-backup",
         "format": "zip",
         "created_at": "2026-04-28T00:00:00+00:00",
-        "entries": [{"id": "yachiyo_workspace", "label": "Yachiyo 工作空间"}],
+        "entries": [{"id": "oha_workspace", "label": "Oha-Yachiyo 工作空间"}],
     }
     with zipfile.ZipFile(archive_path, "w") as archive:
         archive.writestr("manifest.json", json.dumps(manifest))
-        archive.writestr("yachiyo-workspace", b"not a directory")
+        archive.writestr("oha-workspace", b"not a directory")
 
     result = import_backup(archive_path)
 
     assert result.ok is True
     assert workspace.is_dir()
-    assert (workspace / ".yachiyo_init").exists()
+    assert (workspace / ".oha_yachiyo_init").exists()
     assert any("工作空间不是目录" in item["reason"] for item in result.skipped)
 
 
@@ -758,66 +757,66 @@ def test_replace_path_rolls_back_when_move_to_target_fails(tmp_path, monkeypatch
 
 
 def test_import_backup_skips_workspace_restore_outside_home(tmp_path, monkeypatch):
-    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    home, native_home, config_dir = _prepare_home(tmp_path, monkeypatch)
     config_dir.mkdir(parents=True)
     (config_dir / "config.json").write_text('{"display_mode":"live2d"}', encoding="utf-8")
 
-    workspace = hermes_home / "yachiyo"
+    workspace = native_home
     workspace.mkdir(parents=True)
-    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+    (workspace / ".oha_yachiyo_init").write_text("{}", encoding="utf-8")
     (workspace / "state.json").write_text('{"safe":true}', encoding="utf-8")
 
     backup = create_backup(backup_root=home / "backups")
-    outside_hermes_home = tmp_path / "outside-hermes"
-    monkeypatch.setenv("HERMES_HOME", str(outside_hermes_home))
+    outside_native_home = tmp_path / "outside-home" / ".oha-yachiyo"
+    monkeypatch.setenv("OHA_YACHIYO_HOME", str(outside_native_home))
 
     result = import_backup(backup.path)
 
     assert result.ok is True
-    assert not (outside_hermes_home / "yachiyo").exists()
+    assert not (outside_native_home).exists()
     assert any("不在当前用户目录" in item["reason"] for item in result.skipped)
 
 
-def test_yachiyo_workspace_outside_home_is_not_removable(tmp_path, monkeypatch):
-    home, _hermes_home, _config_dir = _prepare_home(tmp_path, monkeypatch)
-    outside_hermes_home = tmp_path / "outside-hermes"
-    workspace = outside_hermes_home / "yachiyo"
+def test_oha_workspace_outside_home_is_not_removable(tmp_path, monkeypatch):
+    home, _native_home, _config_dir = _prepare_home(tmp_path, monkeypatch)
+    outside_native_home = tmp_path / "outside-home" / ".oha-yachiyo"
+    workspace = outside_native_home
     workspace.mkdir(parents=True)
-    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
-    monkeypatch.setenv("HERMES_HOME", str(outside_hermes_home))
+    (workspace / ".oha_yachiyo_init").write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("OHA_YACHIYO_HOME", str(outside_native_home))
 
     plan = build_uninstall_plan(
-        UninstallScope.YACHIYO_ONLY,
+        UninstallScope.OHA_ONLY,
         keep_config_snapshot=False,
         backup_root=home / "backups",
     )
 
-    target = next(item for item in plan.targets if item.id == "yachiyo_workspace")
+    target = next(item for item in plan.targets if item.id == "oha_workspace")
     assert target.exists is True
     assert target.removable is False
     assert "不在当前用户目录" in target.reason
 
 
-def test_yachiyo_workspace_without_marker_is_not_removable(tmp_path, monkeypatch):
-    home, hermes_home, _config_dir = _prepare_home(tmp_path, monkeypatch)
-    workspace = hermes_home / "yachiyo"
+def test_oha_workspace_without_marker_is_not_removable(tmp_path, monkeypatch):
+    home, native_home, _config_dir = _prepare_home(tmp_path, monkeypatch)
+    workspace = native_home
     workspace.mkdir(parents=True)
     (workspace / "state.json").write_text("{}", encoding="utf-8")
 
     plan = build_uninstall_plan(
-        UninstallScope.YACHIYO_ONLY,
+        UninstallScope.OHA_ONLY,
         keep_config_snapshot=False,
         backup_root=home / "backups",
     )
 
-    target = next(item for item in plan.targets if item.id == "yachiyo_workspace")
+    target = next(item for item in plan.targets if item.id == "oha_workspace")
     assert target.exists is True
     assert target.removable is False
     assert "初始化标识" in target.reason
 
 
 def test_public_path_safety_helpers_preserve_strict_rules(tmp_path, monkeypatch):
-    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    home, native_home, config_dir = _prepare_home(tmp_path, monkeypatch)
     assert backup_mod.protected_paths()
     assert backup_mod.is_protected_path(home) is True
 
@@ -826,21 +825,21 @@ def test_public_path_safety_helpers_preserve_strict_rules(tmp_path, monkeypatch)
     assert safe is True
     assert reason == ""
 
-    wrong_config = home / "not-hermes-yachiyo"
+    wrong_config = home / "not-oha-yachiyo"
     wrong_config.mkdir()
     safe, reason = backup_mod.is_safe_app_config_dir(wrong_config)
     assert safe is False
     assert "配置目录名称" in reason
 
-    workspace = hermes_home / "yachiyo"
+    workspace = native_home
     workspace.mkdir(parents=True)
 
-    safe, reason = backup_mod.is_safe_yachiyo_workspace(workspace)
+    safe, reason = backup_mod.is_safe_oha_workspace(workspace)
     assert safe is False
     assert "初始化标识" in reason
 
-    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
-    safe, reason = backup_mod.is_safe_yachiyo_workspace(workspace)
+    (workspace / ".oha_yachiyo_init").write_text("{}", encoding="utf-8")
+    safe, reason = backup_mod.is_safe_oha_workspace(workspace)
     assert safe is True
     assert reason == ""
 
@@ -874,7 +873,7 @@ def test_protected_paths_cache_is_scoped_by_home(tmp_path, monkeypatch):
 
 
 def test_public_path_safety_helpers_allow_symlink_paths_under_home(tmp_path, monkeypatch):
-    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    home, native_home, config_dir = _prepare_home(tmp_path, monkeypatch)
 
     real_config_dir = home / "real-config"
     real_config_dir.mkdir(parents=True)
@@ -882,7 +881,7 @@ def test_public_path_safety_helpers_allow_symlink_paths_under_home(tmp_path, mon
 
     workspace_target = tmp_path / "workspace-target"
     workspace_target.mkdir(parents=True)
-    workspace = hermes_home / "yachiyo"
+    workspace = native_home
     workspace.parent.mkdir(parents=True, exist_ok=True)
     workspace.symlink_to(workspace_target, target_is_directory=True)
 
@@ -890,23 +889,23 @@ def test_public_path_safety_helpers_allow_symlink_paths_under_home(tmp_path, mon
     assert safe is True
     assert reason == ""
 
-    safe, reason = backup_mod.is_safe_yachiyo_workspace(workspace)
+    safe, reason = backup_mod.is_safe_oha_workspace(workspace)
     assert safe is True
     assert reason == ""
 
 
 def test_backup_import_and_uninstall_use_public_path_safety_helpers(tmp_path, monkeypatch):
-    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    home, native_home, config_dir = _prepare_home(tmp_path, monkeypatch)
     config_dir.mkdir(parents=True)
     (config_dir / "config.json").write_text("{}", encoding="utf-8")
-    workspace = hermes_home / "yachiyo"
+    workspace = native_home
     workspace.mkdir(parents=True)
-    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+    (workspace / ".oha_yachiyo_init").write_text("{}", encoding="utf-8")
     backup = create_backup(backup_root=home / "backups")
 
     calls: list[str] = []
     original_app_config = backup_mod.is_safe_app_config_dir
-    original_workspace = backup_mod.is_safe_yachiyo_workspace
+    original_workspace = backup_mod.is_safe_oha_workspace
 
     def track_app_config(path):
         calls.append("app_config")
@@ -917,31 +916,31 @@ def test_backup_import_and_uninstall_use_public_path_safety_helpers(tmp_path, mo
         return original_workspace(path)
 
     monkeypatch.setattr(backup_mod, "is_safe_app_config_dir", track_app_config)
-    monkeypatch.setattr(backup_mod, "is_safe_yachiyo_workspace", track_workspace)
+    monkeypatch.setattr(backup_mod, "is_safe_oha_workspace", track_workspace)
 
     import_result = import_backup(backup.path)
     assert import_result.ok is True
 
     plan = build_uninstall_plan(
-        UninstallScope.YACHIYO_ONLY,
+        UninstallScope.OHA_ONLY,
         keep_config_snapshot=False,
         backup_root=home / "backups",
     )
 
     assert any(target.id == "app_config_dir" and target.removable for target in plan.targets)
-    assert any(target.id == "yachiyo_workspace" and target.removable for target in plan.targets)
+    assert any(target.id == "oha_workspace" and target.removable for target in plan.targets)
     assert calls.count("app_config") >= 2
     assert calls.count("workspace") >= 2
 
 
 def test_execute_requires_confirm_phrase(tmp_path, monkeypatch):
-    _home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    _home, native_home, config_dir = _prepare_home(tmp_path, monkeypatch)
     config_dir.mkdir(parents=True)
-    workspace = hermes_home / "yachiyo"
+    workspace = native_home
     workspace.mkdir(parents=True)
 
     result = execute_uninstall(
-        UninstallScope.YACHIYO_ONLY,
+        UninstallScope.OHA_ONLY,
         keep_config_snapshot=False,
         confirm_text="",
     )
@@ -953,14 +952,14 @@ def test_execute_requires_confirm_phrase(tmp_path, monkeypatch):
 
 
 def test_execute_accepts_confirm_phrase_with_outer_whitespace(tmp_path, monkeypatch):
-    _home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    _home, native_home, config_dir = _prepare_home(tmp_path, monkeypatch)
     config_dir.mkdir(parents=True)
-    workspace = hermes_home / "yachiyo"
+    workspace = native_home
     workspace.mkdir(parents=True)
-    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+    (workspace / ".oha_yachiyo_init").write_text("{}", encoding="utf-8")
 
     result = execute_uninstall(
-        UninstallScope.YACHIYO_ONLY,
+        UninstallScope.OHA_ONLY,
         keep_config_snapshot=False,
         confirm_text=f"  {UNINSTALL_CONFIRM_PHRASE}\n",
     )
@@ -970,62 +969,11 @@ def test_execute_accepts_confirm_phrase_with_outer_whitespace(tmp_path, monkeypa
     assert not workspace.exists()
 
 
-def test_include_hermes_named_home_without_markers_is_not_removable(tmp_path, monkeypatch):
-    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
-    config_dir.mkdir(parents=True)
-    hermes_home.mkdir(parents=True)
-
-    plan = build_uninstall_plan(
-        UninstallScope.INCLUDE_HERMES,
-        keep_config_snapshot=False,
-        backup_root=home / "backups",
-    )
-
-    target = next(item for item in plan.targets if item.id == "hermes_home")
-    assert target.exists is True
-    assert target.removable is False
-    assert "不像 Hermes Home" in target.reason
-
-
-def test_include_hermes_removes_hermes_home_and_safe_user_binary(tmp_path, monkeypatch):
-    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
-    config_dir.mkdir(parents=True)
-    (hermes_home / "yachiyo").mkdir(parents=True)
-    (hermes_home / "config.yaml").write_text("model: test", encoding="utf-8")
-    (hermes_home / "bin").mkdir()
-    nested_hermes_bin = hermes_home / "bin" / "hermes"
-    nested_hermes_bin.write_text("#!/bin/sh\n", encoding="utf-8")
-    nested_hermes_bin.chmod(0o755)
-
-    bin_dir = home / ".local" / "bin"
-    bin_dir.mkdir(parents=True)
-    hermes_bin = bin_dir / "hermes"
-    hermes_bin.write_text("#!/bin/sh\n", encoding="utf-8")
-    hermes_bin.chmod(0o755)
-    monkeypatch.setenv("PATH", str(bin_dir))
-
-    result = execute_uninstall(
-        UninstallScope.INCLUDE_HERMES,
-        keep_config_snapshot=False,
-        confirm_text=UNINSTALL_CONFIRM_PHRASE,
-    )
-
-    removed_paths = {item["path"] for item in result.removed}
-    assert result.ok is True
-    assert not config_dir.exists()
-    assert not hermes_home.exists()
-    assert not hermes_bin.exists()
-    assert str(hermes_home) in removed_paths
-    assert str(hermes_bin) in removed_paths
-    assert result.failed == []
-    assert any(item["path"] == str(nested_hermes_bin) for item in result.skipped)
-
-
 def test_main_window_api_exposes_uninstall_preview(monkeypatch):
     class RuntimeStub:
         pass
 
-    fake_plan = SimpleNamespace(to_dict=lambda: {"scope": "yachiyo_only", "targets": []})
+    fake_plan = SimpleNamespace(to_dict=lambda: {"scope": "oha_only", "targets": []})
     calls = []
 
     def fake_build(scope, keep_config_snapshot, include_gpt_sovits=False):
@@ -1035,16 +983,16 @@ def test_main_window_api_exposes_uninstall_preview(monkeypatch):
     monkeypatch.setattr(uninstall_mod, "build_uninstall_plan", fake_build)
 
     api = MainWindowAPI(RuntimeStub(), AppConfig())
-    result = api.get_uninstall_preview("yachiyo_only", True)
+    result = api.get_uninstall_preview("oha_only", True)
 
-    assert result == {"ok": True, "plan": {"scope": "yachiyo_only", "targets": []}}
-    assert calls == [("yachiyo_only", True, False)]
+    assert result == {"ok": True, "plan": {"scope": "oha_only", "targets": []}}
+    assert calls == [("oha_only", True, False)]
 
 
 def test_main_window_api_uninstall_requests_desktop_quit(monkeypatch):
     fake_result = SimpleNamespace(ok=True, to_dict=lambda: {"ok": True})
 
-    monkeypatch.delenv("HERMES_YACHIYO_DESKTOP_BACKEND", raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_DESKTOP_BACKEND", raising=False)
     monkeypatch.setattr(
         uninstall_mod,
         "execute_uninstall",
@@ -1052,7 +1000,7 @@ def test_main_window_api_uninstall_requests_desktop_quit(monkeypatch):
     )
 
     api = MainWindowAPI(SimpleNamespace(), AppConfig())
-    result = api.run_uninstall("yachiyo_only", True, UNINSTALL_CONFIRM_PHRASE)
+    result = api.run_uninstall("oha_only", True, UNINSTALL_CONFIRM_PHRASE)
 
     assert result["ok"] is True
     assert result["exit_scheduled"] is False
@@ -1062,7 +1010,7 @@ def test_main_window_api_uninstall_requests_desktop_quit(monkeypatch):
 def test_main_window_api_uninstall_defers_quit_to_electron(monkeypatch):
     fake_result = SimpleNamespace(ok=True, to_dict=lambda: {"ok": True})
 
-    monkeypatch.setenv("HERMES_YACHIYO_DESKTOP_BACKEND", "1")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_BACKEND", "1")
     monkeypatch.setattr(
         uninstall_mod,
         "execute_uninstall",
@@ -1070,7 +1018,7 @@ def test_main_window_api_uninstall_defers_quit_to_electron(monkeypatch):
     )
 
     api = MainWindowAPI(SimpleNamespace(), AppConfig())
-    result = api.run_uninstall("yachiyo_only", True, UNINSTALL_CONFIRM_PHRASE)
+    result = api.run_uninstall("oha_only", True, UNINSTALL_CONFIRM_PHRASE)
 
     assert result["ok"] is True
     assert result["exit_scheduled"] is False
@@ -1078,25 +1026,25 @@ def test_main_window_api_uninstall_defers_quit_to_electron(monkeypatch):
 
 
 def test_main_window_api_creates_backup_without_uninstall(tmp_path, monkeypatch):
-    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    home, native_home, config_dir = _prepare_home(tmp_path, monkeypatch)
     config_dir.mkdir(parents=True)
     (config_dir / "config.json").write_text("{}", encoding="utf-8")
-    workspace = hermes_home / "yachiyo"
+    workspace = native_home
     workspace.mkdir(parents=True)
-    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+    (workspace / ".oha_yachiyo_init").write_text("{}", encoding="utf-8")
 
     api = MainWindowAPI(SimpleNamespace(), AppConfig())
     result = api.create_backup()
 
     assert result["ok"] is True
     assert result["backup_path"].endswith(".zip")
-    assert (home / "Hermes-Yachiyo-backups").exists()
+    assert (home / "Oha-Yachiyo-backups").exists()
     assert config_dir.exists()
     assert workspace.exists()
 
 
 def test_main_window_api_update_backup_settings_uses_common_settings_path(tmp_path, monkeypatch):
-    _home, _hermes_home, _config_dir = _prepare_home(tmp_path, monkeypatch)
+    _home, _native_home, _config_dir = _prepare_home(tmp_path, monkeypatch)
     config = AppConfig()
     calls = []
     original_apply = main_api_mod.apply_settings_changes
@@ -1122,7 +1070,7 @@ def test_main_window_api_update_backup_settings_rejects_invalid_count_without_pa
     tmp_path,
     monkeypatch,
 ):
-    _home, _hermes_home, _config_dir = _prepare_home(tmp_path, monkeypatch)
+    _home, _native_home, _config_dir = _prepare_home(tmp_path, monkeypatch)
     config = AppConfig()
     config.backup.auto_cleanup_enabled = True
     config.backup.retention_count = 5
@@ -1137,19 +1085,19 @@ def test_main_window_api_update_backup_settings_rejects_invalid_count_without_pa
 
 
 def test_main_window_api_overwrites_and_deletes_backup(tmp_path, monkeypatch):
-    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    home, native_home, config_dir = _prepare_home(tmp_path, monkeypatch)
     config_dir.mkdir(parents=True)
     (config_dir / "config.json").write_text("{}", encoding="utf-8")
-    workspace = hermes_home / "yachiyo"
+    workspace = native_home
     workspace.mkdir(parents=True)
-    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+    (workspace / ".oha_yachiyo_init").write_text("{}", encoding="utf-8")
 
     api = MainWindowAPI(SimpleNamespace(), AppConfig())
     first = api.create_backup()
     second = api.create_backup(True)
     assert first["ok"] is True
     assert second["ok"] is True
-    assert len(list((home / "Hermes-Yachiyo-backups").glob("*.zip"))) == 1
+    assert len(list((home / "Oha-Yachiyo-backups").glob("*.zip"))) == 1
 
     deleted = api.delete_backup(second["backup_path"])
     assert deleted["ok"] is True
@@ -1157,12 +1105,12 @@ def test_main_window_api_overwrites_and_deletes_backup(tmp_path, monkeypatch):
 
 
 def test_main_window_api_restores_backup(tmp_path, monkeypatch):
-    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    home, native_home, config_dir = _prepare_home(tmp_path, monkeypatch)
     config_dir.mkdir(parents=True)
     (config_dir / "config.json").write_text('{"display_mode":"live2d"}', encoding="utf-8")
-    workspace = hermes_home / "yachiyo"
+    workspace = native_home
     workspace.mkdir(parents=True)
-    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+    (workspace / ".oha_yachiyo_init").write_text("{}", encoding="utf-8")
 
     backup = create_backup()
     (config_dir / "config.json").write_text('{"display_mode":"bubble"}', encoding="utf-8")
@@ -1176,12 +1124,12 @@ def test_main_window_api_restores_backup(tmp_path, monkeypatch):
 
 
 def test_main_window_api_open_backup_location_allows_only_managed_backups(tmp_path, monkeypatch):
-    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    home, native_home, config_dir = _prepare_home(tmp_path, monkeypatch)
     config_dir.mkdir(parents=True)
     (config_dir / "config.json").write_text("{}", encoding="utf-8")
-    workspace = hermes_home / "yachiyo"
+    workspace = native_home
     workspace.mkdir(parents=True)
-    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+    (workspace / ".oha_yachiyo_init").write_text("{}", encoding="utf-8")
 
     calls = []
 
@@ -1195,14 +1143,14 @@ def test_main_window_api_open_backup_location_allows_only_managed_backups(tmp_pa
     api = MainWindowAPI(SimpleNamespace(), AppConfig())
     root_result = api.open_backup_location("")
     assert root_result["ok"] is True
-    assert calls[-1] == ["open", str(home / "Hermes-Yachiyo-backups")]
+    assert calls[-1] == ["open", str(home / "Oha-Yachiyo-backups")]
 
     backup = create_backup()
     backup_result = api.open_backup_location(backup.path)
     assert backup_result["ok"] is True
     assert calls[-1] == ["open", "-R", backup.path]
 
-    external_backup = home / "hermes-yachiyo-backup-external.zip"
+    external_backup = home / "oha-yachiyo-backup-external.zip"
     external_backup.write_text("not managed", encoding="utf-8")
     call_count = len(calls)
     rejected = api.open_backup_location(str(external_backup))
@@ -1211,16 +1159,16 @@ def test_main_window_api_open_backup_location_allows_only_managed_backups(tmp_pa
 
 
 def test_resolve_managed_backup_path_rejects_noncanonical_name_in_backup_root(tmp_path, monkeypatch):
-    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    home, native_home, config_dir = _prepare_home(tmp_path, monkeypatch)
     config_dir.mkdir(parents=True)
     (config_dir / "config.json").write_text("{}", encoding="utf-8")
-    workspace = hermes_home / "yachiyo"
+    workspace = native_home
     workspace.mkdir(parents=True)
-    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+    (workspace / ".oha_yachiyo_init").write_text("{}", encoding="utf-8")
 
-    backup_root = home / "Hermes-Yachiyo-backups"
+    backup_root = home / "Oha-Yachiyo-backups"
     backup_root.mkdir(parents=True)
-    fake_backup = backup_root / "hermes-yachiyo-backup-manual.zip"
+    fake_backup = backup_root / "oha-yachiyo-backup-manual.zip"
     fake_backup.write_text("manual", encoding="utf-8")
 
     with pytest.raises(ValueError, match="名称不符合预期"):
@@ -1228,12 +1176,12 @@ def test_resolve_managed_backup_path_rejects_noncanonical_name_in_backup_root(tm
 
 
 def test_main_window_api_open_backup_location_supports_windows(tmp_path, monkeypatch):
-    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    home, native_home, config_dir = _prepare_home(tmp_path, monkeypatch)
     config_dir.mkdir(parents=True)
     (config_dir / "config.json").write_text("{}", encoding="utf-8")
-    workspace = hermes_home / "yachiyo"
+    workspace = native_home
     workspace.mkdir(parents=True)
-    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+    (workspace / ".oha_yachiyo_init").write_text("{}", encoding="utf-8")
 
     calls = []
     startfile_calls = []
@@ -1249,32 +1197,9 @@ def test_main_window_api_open_backup_location_supports_windows(tmp_path, monkeyp
     api = MainWindowAPI(SimpleNamespace(), AppConfig())
     root_result = api.open_backup_location("")
     assert root_result["ok"] is True
-    assert startfile_calls == [str(home / "Hermes-Yachiyo-backups")]
+    assert startfile_calls == [str(home / "Oha-Yachiyo-backups")]
 
     backup = create_backup()
     backup_result = api.open_backup_location(backup.path)
     assert backup_result["ok"] is True
     assert calls[-1] == ["explorer.exe", "/select,", backup.path]
-
-
-def test_installer_api_exposes_backup_status_and_import(tmp_path, monkeypatch):
-    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
-    config_dir.mkdir(parents=True)
-    (config_dir / "config.json").write_text('{"display_mode":"live2d"}', encoding="utf-8")
-    workspace = hermes_home / "yachiyo"
-    workspace.mkdir(parents=True)
-    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
-
-    backup = create_backup()
-    (config_dir / "config.json").unlink()
-
-    api = InstallerWebViewAPI()
-    status = api.get_backup_status()
-
-    assert status["success"] is True
-    assert status["has_backup"] is True
-    assert status["latest"]["path"] == backup.path
-
-    result = api.import_backup()
-    assert result["ok"] is True
-    assert (config_dir / "config.json").read_text(encoding="utf-8") == '{"display_mode":"live2d"}'

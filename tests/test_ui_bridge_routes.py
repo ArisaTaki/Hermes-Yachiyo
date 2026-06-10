@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -107,6 +108,19 @@ async def test_clipboard_route_reports_system_failure(monkeypatch):
     }
 
 
+def test_clipboard_route_redacts_secret_failure(monkeypatch):
+    def fail_copy(_text: str) -> None:
+        raise RuntimeError("pbcopy failed token=clipboard-secret-123456")
+
+    monkeypatch.setattr(ui, "_copy_text_to_system_clipboard", fail_copy)
+
+    result = asyncio.run(ui.copy_clipboard_text(ui.ClipboardTextRequest(text="047e43ac")))
+
+    assert result["ok"] is False
+    assert "clipboard-secret-123456" not in result["error"]
+    assert "token=[redacted]" in result["error"]
+
+
 @pytest.mark.asyncio
 async def test_settings_operation_routes_use_main_api(monkeypatch):
     runtime = SimpleNamespace(config=SimpleNamespace())
@@ -120,44 +134,44 @@ async def test_settings_operation_routes_use_main_api(monkeypatch):
         def open_terminal_command(self, command):
             return {"success": True, "command": command}
 
-        def run_hermes_diagnostic_command(self, command):
+        def run_native_diagnostic_command(self, command):
             return {"success": True, "command": command, "output": "ok"}
 
-        def get_hermes_diagnostic_cache(self):
+        def get_native_diagnostic_cache(self):
             return {"commands": {"doctor": {"success": True}}}
 
-        def test_hermes_connection(self):
+        def test_native_connection(self):
             return {"success": True, "message": "ok"}
 
-        def test_hermes_image_connection(self):
+        def test_native_image_connection(self):
             return {"success": True, "message": "image ok"}
 
-        def get_hermes_configuration(self):
+        def get_native_configuration(self):
             return {"ok": True, "model": {"provider": "openai"}}
 
-        def update_hermes_configuration(self, changes):
+        def update_native_configuration(self, changes):
             return {"ok": True, "changes": changes}
 
-        def get_hermes_tool_config(self):
+        def get_native_tool_config(self):
             return {"ok": True, "tools": [{"id": "web"}]}
 
-        def update_hermes_tool_config(self, tool_id, changes):
+        def update_native_tool_config(self, tool_id, changes):
             return {"ok": True, "tool_id": tool_id, "changes": changes}
 
-        def test_hermes_tool_config(self, tool_id):
+        def test_native_tool_config(self, tool_id):
             return {"ok": True, "tool_id": tool_id, "status": "pass"}
 
-        def check_hermes_update(self):
+        def check_native_agent_update(self):
             return {"ok": True, "update_available": True}
 
-        def update_hermes_agent(self, full_backup=False):
+        def update_native_agent(self, full_backup=False):
             return {"ok": True, "message": "updated", "full_backup": full_backup}
 
         def launch_browser_cdp(self):
             return {"ok": True, "url": "http://127.0.0.1:9222"}
 
-        def recheck_hermes(self):
-            return {"hermes": {"ready": True}}
+        def recheck_native_agent(self):
+            return {"native_agent": {"ready": True}}
 
         def restart_bridge(self):
             return {"ok": True, "bridge": "restarted"}
@@ -196,69 +210,69 @@ async def test_settings_operation_routes_use_main_api(monkeypatch):
 
     monkeypatch.setattr(ui, "MainWindowAPI", FakeMainWindowAPI)
 
-    assert await ui.open_hermes_terminal_command(ui.TerminalCommandRequest(command="hermes doctor")) == {
+    assert await ui.open_native_terminal_command(ui.TerminalCommandRequest(command="native doctor")) == {
         "success": True,
-        "command": "hermes doctor",
+        "command": "native doctor",
     }
-    diagnostic_request = ui.TerminalCommandRequest(command="hermes doctor")
-    assert await ui.run_hermes_diagnostic_command(diagnostic_request) == {
+    diagnostic_request = ui.TerminalCommandRequest(command="native doctor")
+    assert await ui.run_native_diagnostic_command(diagnostic_request) == {
         "success": True,
-        "command": "hermes doctor",
+        "command": "native doctor",
         "output": "ok",
     }
-    assert await ui.get_hermes_diagnostic_cache() == {"commands": {"doctor": {"success": True}}}
-    assert await ui.test_hermes_connection() == {"success": True, "message": "ok"}
-    assert await ui.test_hermes_image_connection() == {"success": True, "message": "image ok"}
-    assert await ui.get_hermes_configuration() == {"ok": True, "model": {"provider": "openai"}}
-    assert await ui.update_hermes_configuration(ui.HermesConfigUpdateRequest(provider="openai", model="gpt-4.1")) == {
+    assert await ui.get_native_diagnostic_cache() == {"commands": {"doctor": {"success": True}}}
+    assert await ui.test_native_connection() == {"success": True, "message": "ok"}
+    assert await ui.test_native_image_connection() == {"success": True, "message": "image ok"}
+    assert await ui.get_native_configuration() == {"ok": True, "model": {"provider": "openai"}}
+    assert await ui.update_native_configuration(ui.NativeConfigUpdateRequest(provider="openai", model="gpt-4.1")) == {
         "ok": True,
         "changes": {"provider": "openai", "model": "gpt-4.1", "base_url": "", "api_key": ""},
     }
-    assert await ui.get_hermes_tool_config() == {"ok": True, "tools": [{"id": "web"}]}
-    assert await ui.update_hermes_tool_config(
-        ui.HermesToolConfigUpdateRequest(tool_id="web", changes={"web.backend": "exa"})
+    assert await ui.get_native_tool_config() == {"ok": True, "tools": [{"id": "web"}]}
+    assert await ui.update_native_tool_config(
+        ui.NativeToolConfigUpdateRequest(tool_id="web", changes={"web.backend": "exa"})
     ) == {
         "ok": True,
         "tool_id": "web",
         "changes": {"web.backend": "exa"},
     }
-    assert await ui.test_hermes_tool_config(ui.HermesToolConfigTestRequest(tool_id="web")) == {
+    assert await ui.test_native_tool_config(ui.NativeToolConfigTestRequest(tool_id="web")) == {
         "ok": True,
         "tool_id": "web",
         "status": "pass",
     }
-    assert await ui.check_hermes_update() == {"ok": True, "update_available": True}
-    assert await ui.update_hermes_agent() == {"ok": True, "message": "updated", "full_backup": False}
-    assert await ui.update_hermes_agent(ui.HermesUpdateRunRequest(backup=True)) == {
+    assert await ui.check_native_agent_update() == {"ok": True, "update_available": True}
+    assert await ui.update_native_agent() == {"ok": True, "message": "updated", "full_backup": False}
+    assert await ui.update_native_agent(ui.NativeUpdateRunRequest(backup=True)) == {
         "ok": True,
         "message": "updated",
         "full_backup": True,
     }
-    assert await ui.launch_hermes_browser_cdp() == {
+    assert await ui.launch_native_browser_cdp() == {
         "ok": True,
         "url": "http://127.0.0.1:9222",
     }
-    assert await ui.recheck_hermes() == {"hermes": {"ready": True}}
+    assert await ui.recheck_native_agent() == {"native_agent": {"ready": True}}
     assert await ui.restart_bridge() == {"ok": True, "bridge": "restarted"}
     assert await ui.get_backup_status() == {"ok": True, "backups": []}
     assert await ui.create_backup(ui.BackupCreateRequest(overwrite_latest=True)) == {"ok": True, "overwrite_latest": True}
     assert await ui.restore_backup(ui.BackupPathRequest(backup_path="backup.zip")) == {"ok": True, "restore": "backup.zip"}
     assert await ui.delete_backup(ui.BackupPathRequest(backup_path="backup.zip")) == {"ok": True, "delete": "backup.zip"}
     assert await ui.open_backup_location(ui.BackupPathRequest(backup_path="backup.zip")) == {"ok": True, "open": "backup.zip"}
-    assert await ui.get_uninstall_preview(scope="include_hermes", keep_config=False, include_gpt_sovits=True) == {
+    assert await ui.get_uninstall_preview(scope="oha_only", keep_config=False, include_gpt_sovits=True) == {
         "ok": True,
-        "scope": "include_hermes",
+        "scope": "oha_only",
         "keep_config": False,
         "include_gpt_sovits": True,
     }
     assert await ui.run_uninstall(ui.UninstallRunRequest(
-        scope="yachiyo_only",
+        scope="oha_only",
         keep_config=True,
         include_gpt_sovits=True,
         confirm_text="UNINSTALL",
     )) == {
         "ok": True,
-        "scope": "yachiyo_only",
+        "scope": "oha_only",
         "keep_config": True,
         "include_gpt_sovits": True,
         "confirm_text": "UNINSTALL",
@@ -293,11 +307,25 @@ async def test_chat_routes_use_shared_chat_api(monkeypatch):
         def get_messages(self, limit, anchor_message_id=""):
             return {"messages": [], "limit": limit, "anchor_message_id": anchor_message_id}
 
-        def send_message(self, text, attachments=None, runnable_id=""):
-            return {"ok": True, "text": text, "attachments": attachments or [], "runnable_id": runnable_id}
+        def send_message(self, text, attachments=None, runnable_id="", client_message_id=""):
+            return {
+                "ok": True,
+                "text": text,
+                "attachments": attachments or [],
+                "runnable_id": runnable_id,
+                "client_message_id": client_message_id,
+            }
 
         def retry_message(self, message_id):
             return {"ok": True, "message_id": message_id}
+
+        def summarize_delegated_run(self, run_id):
+            return {
+                "ok": True,
+                "summary_created": True,
+                "run_id": run_id,
+                "task_id": "summary-task-1",
+            }
 
         def create_group_session(self, *, name="", avatar_url="", participant_ids=None):
             return {"ok": True, "name": name, "avatar_url": avatar_url, "participant_ids": participant_ids or []}
@@ -330,7 +358,7 @@ async def test_chat_routes_use_shared_chat_api(monkeypatch):
             return {"ok": True, "session_id": session_id}
 
         def get_executor_info(self):
-            return {"executor": "HermesExecutor", "available": True}
+            return {"executor": "NativeAgentExecutor", "available": True}
 
     monkeypatch.setattr(ui, "ChatAPI", FakeChatAPI)
 
@@ -344,6 +372,24 @@ async def test_chat_routes_use_shared_chat_api(monkeypatch):
         "text": "hello",
         "attachments": [],
         "runnable_id": "",
+        "client_message_id": "",
+    }
+    assert await ui.send_chat_message(ui.SendChatMessageRequest(text="hello", client_message_id="client-1")) == {
+        "ok": True,
+        "text": "hello",
+        "attachments": [],
+        "runnable_id": "",
+        "client_message_id": "client-1",
+    }
+    assert await ui.send_chat_message(
+        ui.SendChatMessageRequest(text="hello"),
+        SimpleNamespace(headers={"idempotency-key": "header-1"}),
+    ) == {
+        "ok": True,
+        "text": "hello",
+        "attachments": [],
+        "runnable_id": "",
+        "client_message_id": "header-1",
     }
     image_attachment = {
         "id": "pending-image",
@@ -358,10 +404,17 @@ async def test_chat_routes_use_shared_chat_api(monkeypatch):
         "text": "给 Design 看这张图",
         "attachments": [image_attachment],
         "runnable_id": "agent_design",
+        "client_message_id": "",
     }
     assert await ui.retry_chat_message(ui.RetryChatMessageRequest(message_id="m1")) == {
         "ok": True,
         "message_id": "m1",
+    }
+    assert await ui.summarize_delegated_run(ui.SummarizeDelegatedRunRequest(run_id="run_delegate_1")) == {
+        "ok": True,
+        "summary_created": True,
+        "run_id": "run_delegate_1",
+        "task_id": "summary-task-1",
     }
     assert await ui.create_chat_group(ui.CreateChatGroupRequest(name="demo", avatar_url="https://example.test/g.png", participant_ids=["a1"])) == {
         "ok": True,
@@ -404,7 +457,7 @@ async def test_chat_routes_use_shared_chat_api(monkeypatch):
         "session_id": "s2",
     }
     assert await ui.get_chat_executor() == {
-        "executor": "HermesExecutor",
+        "executor": "NativeAgentExecutor",
         "available": True,
     }
 
@@ -509,76 +562,6 @@ async def test_activity_route_forwards_filters(monkeypatch):
         "task_id": "t1",
         "limit": 25,
     }]
-
-
-@pytest.mark.asyncio
-async def test_installer_routes_use_legacy_installer_api(monkeypatch):
-    calls = []
-
-    class FakeInstallerAPI:
-        def install_hermes(self):
-            calls.append("install")
-            return {"started": True}
-
-        def get_install_progress(self):
-            calls.append("progress")
-            return {"running": False, "success": True}
-
-        def initialize_workspace(self):
-            calls.append("init")
-            return {"success": True, "created_items": ["configs"]}
-
-        def get_backup_status(self):
-            calls.append("backup_status")
-            return {"success": True, "has_backup": True}
-
-        def import_backup(self):
-            calls.append("backup_import")
-            return {"ok": True, "restored": ["config"]}
-
-        def open_hermes_setup_terminal(self):
-            calls.append("setup_terminal")
-            return {"success": True, "already_running": False}
-
-        def check_setup_process(self):
-            calls.append("setup_process")
-            return {"running": False}
-
-        def recheck_status(self):
-            calls.append("recheck")
-            return {"ready": True, "status": "ready"}
-
-    runtime = SimpleNamespace(
-        refresh_hermes_installation=lambda: calls.append("runtime_refresh"),
-        refresh_task_runner_executor=lambda: {"updated": True},
-    )
-    monkeypatch.setattr(ui, "InstallerWebViewAPI", FakeInstallerAPI)
-    monkeypatch.setattr(ui, "get_runtime", lambda: runtime)
-
-    assert await ui.start_hermes_install() == {"started": True}
-    assert await ui.get_hermes_install_progress() == {"running": False, "success": True}
-    assert await ui.initialize_workspace() == {"success": True, "created_items": ["configs"]}
-    assert await ui.get_installer_backup_status() == {"success": True, "has_backup": True}
-    assert await ui.import_installer_backup() == {"ok": True, "restored": ["config"]}
-    assert await ui.open_installer_setup_terminal() == {"success": True, "already_running": False}
-    assert await ui.get_installer_setup_process() == {"running": False}
-    assert await ui.recheck_installer_status() == {
-        "ready": True,
-        "status": "ready",
-        "executor_refresh": {"updated": True},
-    }
-    assert calls == [
-        "install",
-        "progress",
-        "init",
-        "backup_status",
-        "backup_import",
-        "setup_terminal",
-        "setup_process",
-        "recheck",
-        "runtime_refresh",
-    ]
-
 
 @pytest.mark.asyncio
 async def test_launcher_routes_reuse_chat_bridge_and_notification_tracker(monkeypatch):

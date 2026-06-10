@@ -9,6 +9,7 @@ import ssl
 import pytest
 
 from apps.shell.agent_runtime import AgentRuntimeService
+from apps.shell.credential_store import MemoryCredentialStore
 from apps.shell.model_profiles import (
     OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS,
     ModelProfileError,
@@ -17,12 +18,14 @@ from apps.shell.model_profiles import (
     openai_compatible_chat_message,
     read_openai_compatible_chat_timeout,
 )
+from scripts.verify_secret_redaction import verify_secret_redaction
 
 
 def make_profile_service(tmp_path) -> ModelProfileService:
     return ModelProfileService(
         db_path=tmp_path / "model-profiles.db",
         workspace_dir=tmp_path / "profiles",
+        credential_store=MemoryCredentialStore(),
     )
 
 
@@ -63,6 +66,19 @@ def test_model_profile_crud_redacts_and_preserves_api_key(tmp_path):
         assert updated["base_url"] == "https://gateway.example.test/v1"
         assert updated["api_key_configured"] is True
         assert private["api_key"] == "sk-secret"
+
+        conn = sqlite3.connect(tmp_path / "model-profiles.db")
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute(
+                "SELECT api_key, credential_ref FROM model_profiles WHERE profile_id=?",
+                (profile["profile_id"],),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row is not None
+        assert row["api_key"] == ""
+        assert row["credential_ref"] == f"model_profile:{profile['profile_id']}:api_key"
     finally:
         service.close()
 
@@ -111,6 +127,26 @@ def test_model_source_owns_credentials_and_models_reference_it(tmp_path):
         assert private_profile["api_key"] == "sk-source-secret"
         assert service.get_profile_private(profile["profile_id"])["api_key"] == "sk-source-secret"
         assert updated["model"] == "MiniMax-M2.8"
+
+        conn = sqlite3.connect(tmp_path / "model-profiles.db")
+        conn.row_factory = sqlite3.Row
+        try:
+            source_row = conn.execute(
+                "SELECT api_key, credential_ref FROM model_sources WHERE source_id=?",
+                (source["source_id"],),
+            ).fetchone()
+            profile_row = conn.execute(
+                "SELECT api_key, credential_ref FROM model_profiles WHERE profile_id=?",
+                (profile["profile_id"],),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert source_row is not None
+        assert profile_row is not None
+        assert source_row["api_key"] == ""
+        assert source_row["credential_ref"] == f"model_source:{source['source_id']}:api_key"
+        assert profile_row["api_key"] == ""
+        assert profile_row["credential_ref"] == ""
     finally:
         service.close()
 
@@ -241,7 +277,7 @@ def test_legacy_shared_source_is_split_by_profile_capability(tmp_path):
         );
         INSERT INTO model_sources VALUES (
             'source_shared', 'Gateway', 'openai_compatible', 'https://api.example.test/v1',
-            'sk-source', '{}', 1, 'available', 'now', '', 'now', 'now'
+            'sk-source-secret123456', '{}', 1, 'available', 'now', '', 'now', 'now'
         );
         INSERT INTO model_profiles VALUES (
             'profile_chat', 'source_shared', 'Gateway Chat', 'chat', 'openai_compatible',
@@ -265,11 +301,96 @@ def test_legacy_shared_source_is_split_by_profile_capability(tmp_path):
         assert by_capability["vision"]["name"] == "Gateway"
         assert service.get_profile("profile_chat")["source_id"] == by_capability["chat"]["source_id"]
         assert service.get_profile("profile_vision")["source_id"] == by_capability["vision"]["source_id"]
+        assert service.get_source_private(by_capability["chat"]["source_id"])["api_key"] == "sk-source-secret123456"
+
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute("SELECT api_key, credential_ref FROM model_sources ORDER BY capability").fetchall()
+        finally:
+            conn.close()
+        assert [row["api_key"] for row in rows] == ["", ""]
+        assert all(row["credential_ref"] for row in rows)
+        assert verify_secret_redaction(paths=[tmp_path]) == []
     finally:
         service.close()
 
 
-def test_model_source_reports_hermes_provider_adapter(tmp_path):
+def test_legacy_model_profile_api_key_migration_vacuums_plaintext_secret(tmp_path):
+    db_path = tmp_path / "model-profiles.db"
+    legacy_secret = "sk-legacy-profile-secret123456"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        f"""
+        CREATE TABLE model_sources (
+            source_id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            capability TEXT NOT NULL DEFAULT 'chat',
+            provider TEXT NOT NULL DEFAULT 'openai_compatible',
+            base_url TEXT NOT NULL DEFAULT '',
+            api_key TEXT NOT NULL DEFAULT '',
+            options_json TEXT NOT NULL DEFAULT '{{}}',
+            enabled INTEGER NOT NULL DEFAULT 1,
+            status TEXT NOT NULL DEFAULT 'untested',
+            last_tested_at TEXT NOT NULL DEFAULT '',
+            last_error TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(capability, name)
+        );
+        CREATE TABLE model_profiles (
+            profile_id TEXT PRIMARY KEY,
+            source_id TEXT NOT NULL DEFAULT '',
+            name TEXT NOT NULL UNIQUE,
+            capability TEXT NOT NULL DEFAULT 'chat',
+            provider TEXT NOT NULL DEFAULT 'openai_compatible',
+            base_url TEXT NOT NULL DEFAULT '',
+            model TEXT NOT NULL DEFAULT '',
+            api_key TEXT NOT NULL DEFAULT '',
+            options_json TEXT NOT NULL DEFAULT '{{}}',
+            enabled INTEGER NOT NULL DEFAULT 1,
+            status TEXT NOT NULL DEFAULT 'untested',
+            last_tested_at TEXT NOT NULL DEFAULT '',
+            last_error TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE model_profile_defaults (
+            capability TEXT PRIMARY KEY,
+            profile_id TEXT NOT NULL DEFAULT ''
+        );
+        INSERT INTO model_profiles VALUES (
+            'profile_legacy_secret', '', 'Legacy Chat', 'chat', 'openai_compatible',
+            'https://api.example.test/v1', 'demo-model', '{legacy_secret}', '{{}}',
+            1, 'available', 'now', '', 'now', 'now'
+        );
+        """
+    )
+    conn.close()
+
+    service = make_profile_service(tmp_path)
+    try:
+        profile = service.get_profile_private("profile_legacy_secret")
+        assert profile["api_key"] == legacy_secret
+
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute(
+                "SELECT api_key, credential_ref FROM model_profiles WHERE profile_id=?",
+                ("profile_legacy_secret",),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row is not None
+        assert row["api_key"] == ""
+        assert row["credential_ref"] == "model_profile:profile_legacy_secret:api_key"
+        assert verify_secret_redaction(paths=[tmp_path]) == []
+    finally:
+        service.close()
+
+
+def test_model_source_reports_native_provider_adapter(tmp_path):
     service = make_profile_service(tmp_path)
     try:
         source = service.create_source(
@@ -291,11 +412,11 @@ def test_model_source_reports_hermes_provider_adapter(tmp_path):
         public_source = service.get_source(source["source_id"])
         public_profile = service.get_profile(profile["profile_id"])
 
-        assert public_source["hermes_provider"] == "xiaomi"
+        assert public_source["native_provider"] == "xiaomi"
         assert public_source["api_key_name"] == "XIAOMI_API_KEY"
-        assert public_source["can_use_as_hermes"] is True
-        assert public_profile["hermes_provider"] == "xiaomi"
-        assert public_profile["runtime_scope"] == "hermes"
+        assert public_source["can_use_as_native"] is True
+        assert public_profile["native_provider"] == "xiaomi"
+        assert public_profile["runtime_scope"] == "native"
     finally:
         service.close()
 
@@ -322,7 +443,7 @@ def test_openrouter_profile_keeps_openrouter_as_runtime_provider(tmp_path):
 
         public_profile = service.get_profile(profile["profile_id"])
 
-        assert public_profile["hermes_provider"] == "openrouter"
+        assert public_profile["native_provider"] == "openrouter"
         assert public_profile["api_key_name"] == "OPENROUTER_API_KEY"
     finally:
         service.close()
@@ -416,19 +537,19 @@ def test_openai_compatible_chat_reads_reasoning_content_and_xiaomi_api_key_heade
 
 
 def test_openai_compatible_chat_timeout_is_configurable(monkeypatch):
-    monkeypatch.delenv("HERMES_YACHIYO_MODEL_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_MODEL_TIMEOUT_SECONDS", raising=False)
     assert OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS == 180
     assert read_openai_compatible_chat_timeout() == 180
 
-    monkeypatch.setenv("HERMES_YACHIYO_MODEL_TIMEOUT_SECONDS", "240.5")
+    monkeypatch.setenv("OHA_YACHIYO_MODEL_TIMEOUT_SECONDS", "240.5")
     assert read_openai_compatible_chat_timeout() == 240.5
 
-    monkeypatch.setenv("HERMES_YACHIYO_MODEL_TIMEOUT_SECONDS", "invalid")
+    monkeypatch.setenv("OHA_YACHIYO_MODEL_TIMEOUT_SECONDS", "invalid")
     assert read_openai_compatible_chat_timeout() == 180
 
 
 def test_openai_compatible_chat_timeout_error_reports_limit(monkeypatch):
-    monkeypatch.setenv("HERMES_YACHIYO_MODEL_TIMEOUT_SECONDS", "12")
+    monkeypatch.setenv("OHA_YACHIYO_MODEL_TIMEOUT_SECONDS", "12")
     monkeypatch.setattr(
         "apps.shell.model_profiles.urlrequest.urlopen",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(TimeoutError("read operation timed out")),
@@ -833,6 +954,7 @@ def test_agent_runtime_uses_model_profile(monkeypatch, tmp_path):
     runtime = AgentRuntimeService(
         db_path=tmp_path / "agent-runtime.db",
         workspace_dir=tmp_path / "runtime",
+        credential_store=MemoryCredentialStore(),
         seed_templates=False,
     )
     profile = profile_service.create_profile(
@@ -869,6 +991,7 @@ def test_agent_runtime_uses_openai_compatible_provider_source_profile(monkeypatc
     runtime = AgentRuntimeService(
         db_path=tmp_path / "agent-runtime.db",
         workspace_dir=tmp_path / "runtime",
+        credential_store=MemoryCredentialStore(),
         seed_templates=False,
     )
     source = profile_service.create_source(

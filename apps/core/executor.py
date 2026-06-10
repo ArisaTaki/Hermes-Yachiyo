@@ -1,27 +1,20 @@
-"""任务执行策略
+"""Task execution strategies.
 
-定义任务执行的抽象接口（ExecutionStrategy），以及主要实现：
-  - SimulatedExecutor:  MVP 阶段模拟执行（sleep + 占位结果），始终可用
-  - HermesExecutor:     Hermes Agent subprocess CLI 真实调用
-  - HermesUnavailableExecutor: Hermes 不可用时明确失败，不生成模拟回复
-
-工厂函数 select_executor(runtime) 根据运行时状态自动选择执行器。
-Hermes 就绪时工厂自动选用 HermesExecutor，无需修改其他代码。
+TaskRunner owns the product Task lifecycle. ExecutionStrategy implementations
+only decide how a Task is executed; the default product path is Native Agent.
 """
 
 from __future__ import annotations
 
 import asyncio
-import dataclasses
+import base64
+from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
 import logging
+import mimetypes
 import os
 import re
-import shutil
-import shlex
-import subprocess
-import sys
 import time
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -29,6 +22,7 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from packages.protocol.schemas import TaskInfo
+from packages.security import redact_api_error_text
 from apps.core.special_sessions import is_proactive_chat_session
 from apps.core.title_generator import (
     build_session_title_prompt as build_direct_session_title_prompt,
@@ -38,101 +32,58 @@ from apps.core.title_generator import (
 
 if TYPE_CHECKING:
     from apps.core.chat_session import ChatSession
-    from apps.core.runtime import HermesRuntime
+    from apps.core.runtime import AppRuntime
 
 logger = logging.getLogger(__name__)
 
-HERMES_UNAVAILABLE_MESSAGE = (
-    "Hermes Agent 当前不可用，无法处理聊天任务。请在设置中完成 Hermes 安装、"
-    "配置或重新检测后再试。"
-)
+NATIVE_AGENT_NOT_READY_MESSAGE = "Native Agent 当前未就绪，请先配置并选择默认对话模型。"
 
 
-# ── 自定义异常 ────────────────────────────────────────────────────────────────
+class NativeAgentError(RuntimeError):
+    """Native Agent execution failure with a stable machine-readable reason."""
 
-class HermesCallError(RuntimeError):
-    """Hermes Agent 调用失败
-
-    携带结构化信息便于上层统一处理或写入 TaskInfo.error。
-    """
-
-    def __init__(self, message: str, returncode: int = -1, stderr: str = "") -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "native_agent_error",
+        reason: str = "execution_failed",
+    ) -> None:
         super().__init__(message)
-        self.returncode = returncode
-        self.stderr = stderr
+        self.code = code
+        self.reason = reason
 
     def to_error_string(self) -> str:
-        """格式化为可写入 TaskInfo.error 的简洁字符串"""
-        parts = [str(self)]
-        if self.returncode != -1:
-            parts.append(f"exit={self.returncode}")
-        if self.stderr:
-            stderr_detail = _compact_error_detail(self.stderr, max_chars=120)
-            if stderr_detail and stderr_detail not in str(self):
-                parts.append(f"stderr: {stderr_detail}")
-        return " | ".join(parts)
+        return str(self)
 
 
-# ── 结构化调用结果 ─────────────────────────────────────────────────────────────
+@dataclass(frozen=True)
+class DelegationDirective:
+    """Structured internal contract for Native Agent delegation."""
 
-@dataclasses.dataclass
-class HermesInvokeResult:
-    """hermes CLI 调用的结构化结果
-
-    无论成功或失败都返回此结构，由调用方决定如何处理。
-    避免用裸字符串传递结果，便于日志、测试和后续字段扩展。
-    """
-
-    success: bool
-    stdout: str = ""
-    stderr: str = ""
-    returncode: int = -1
-    error_message: str = ""
-    hermes_session_id: Optional[str] = None  # 从 stdout 解析的 Hermes session ID
-    hermes_title: Optional[str] = None       # 从 stdout 解析的 Hermes 自动标题
+    kind: str
+    name: str = ""
+    runnable_id: str = ""
+    goal: str = ""
 
     @property
-    def output(self) -> str:
-        """任务结果：成功时为 stdout（去除 session_id 行），失败时为空串"""
-        return self.stdout if self.success else ""
+    def target_label(self) -> str:
+        return self.name or self.runnable_id or "Yachiyo Agent"
 
-    def to_task_error(self) -> str:
-        """格式化为可写入 TaskInfo.error 的字符串"""
-        parts = [self.error_message] if self.error_message else []
-        if self.returncode not in (-1, 0):
-            parts.append(f"exit={self.returncode}")
-        if self.stderr:
-            parts.append(f"stderr: {self.stderr[:120]}")
-        return " | ".join(parts) if parts else "未知错误"
+    def as_request(self) -> dict[str, str]:
+        return {
+            "kind": self.kind,
+            "name": self.name,
+            "runnable_id": self.runnable_id,
+            "goal": self.goal,
+        }
 
 
-# ── 独立 CLI 调用函数 ─────────────────────────────────────────────────────────
-
-# Hermes CLI 命令前缀。
-# hermes chat -q "<query>" -Q --source tool
-#   -q: 非交互单次查询
-#   -Q: 安静模式（仅输出最终结果）
-#   --source tool: 标记为第三方集成调用
-_HERMES_CMD: list[str] = ["hermes", "chat", "-q"]
-_HERMES_FLAGS: list[str] = ["-Q", "--source", "tool"]
-
-_EXEC_TIMEOUT_ENV = "HERMES_YACHIYO_EXEC_TIMEOUT_SECONDS"
-_DEFAULT_EXEC_TIMEOUT: float = 30 * 60.0
-_PROBE_TIMEOUT: float = 5.0   # hermes --version 探测超时（秒）
-_STREAM_UPDATE_INTERVAL: float = 0.05
-_STREAM_BRIDGE_DONE_EXIT_GRACE: float = 2.0
-_ERROR_DETAIL_MAX_CHARS = 500
-_ERROR_DETAIL_MAX_LINES = 12
-_ATTACHED_IMAGE_GUARD = (
-    "本轮用户已经附加图片。请先依据这些附加图片理解用户问题；"
-    "不要沿用历史消息里对旧图片的描述来回答本轮图片；"
-    "如果完成任务需要调用浏览器、桌面、文件、终端或其它 Agent 工具，可以继续调用。"
-)
-_TITLE_GENERATION_ENABLED_ENV = "HERMES_YACHIYO_TITLE_GENERATION"
-_TITLE_CONTEXT_MESSAGES_ENV = "HERMES_YACHIYO_TITLE_CONTEXT_MESSAGES"
-_TITLE_INTERVAL_TURNS_ENV = "HERMES_YACHIYO_TITLE_INTERVAL_TURNS"
-_TITLE_INTERVAL_MESSAGES_ENV = "HERMES_YACHIYO_TITLE_INTERVAL_MESSAGES"
-_TITLE_TIMEOUT_ENV = "HERMES_YACHIYO_TITLE_TIMEOUT_SECONDS"
+_TITLE_GENERATION_ENABLED_ENV = "OHA_YACHIYO_TITLE_GENERATION"
+_TITLE_CONTEXT_MESSAGES_ENV = "OHA_YACHIYO_TITLE_CONTEXT_MESSAGES"
+_TITLE_INTERVAL_TURNS_ENV = "OHA_YACHIYO_TITLE_INTERVAL_TURNS"
+_TITLE_INTERVAL_MESSAGES_ENV = "OHA_YACHIYO_TITLE_INTERVAL_MESSAGES"
+_TITLE_TIMEOUT_ENV = "OHA_YACHIYO_TITLE_TIMEOUT_SECONDS"
 _DEFAULT_TITLE_CONTEXT_MESSAGES = 8
 _DEFAULT_TITLE_INTERVAL_TURNS = 4
 _DEFAULT_TITLE_TIMEOUT_SECONDS = 8.0
@@ -167,65 +118,6 @@ _MEMORY_MARKERS = (
 )
 
 
-def resolve_hermes_stream_bridge_script() -> Path:
-    """Locate the bridge script in source and PyInstaller onefile builds."""
-    candidates: list[Path] = []
-    meipass = getattr(sys, "_MEIPASS", "")
-    if meipass:
-        candidates.append(Path(str(meipass)) / "apps" / "core" / "hermes_stream_bridge.py")
-    candidates.append(Path(__file__).with_name("hermes_stream_bridge.py"))
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    return candidates[0] if candidates else Path(__file__).with_name("hermes_stream_bridge.py")
-
-
-_BRIDGE_SCRIPT = resolve_hermes_stream_bridge_script()
-
-
-def _read_exec_timeout() -> float:
-    raw_value = os.getenv(_EXEC_TIMEOUT_ENV, "").strip()
-    if not raw_value:
-        return _DEFAULT_EXEC_TIMEOUT
-    try:
-        timeout = float(raw_value)
-    except ValueError:
-        logger.warning(
-            "%s=%r 不是有效数字，使用默认 Hermes 执行超时 %.0fs",
-            _EXEC_TIMEOUT_ENV,
-            raw_value,
-            _DEFAULT_EXEC_TIMEOUT,
-        )
-        return _DEFAULT_EXEC_TIMEOUT
-    if timeout <= 0:
-        logger.warning(
-            "%s=%r 必须大于 0，使用默认 Hermes 执行超时 %.0fs",
-            _EXEC_TIMEOUT_ENV,
-            raw_value,
-            _DEFAULT_EXEC_TIMEOUT,
-        )
-        return _DEFAULT_EXEC_TIMEOUT
-    return timeout
-
-
-def _format_exec_timeout(timeout: float) -> str:
-    if timeout >= 60 and timeout % 60 == 0:
-        return f"{int(timeout // 60)}min"
-    return f"{timeout:.0f}s"
-
-
-def _with_attached_image_guard(description: str, image_paths: list[str]) -> str:
-    if not image_paths:
-        return description
-    return (
-        "[Yachiyo 附件图片上下文]\n"
-        f"{_ATTACHED_IMAGE_GUARD}\n"
-        f"附加图片数量：{len(image_paths)}\n\n"
-        f"{description}"
-    )
-
-
-_EXEC_TIMEOUT: float = _read_exec_timeout()  # hermes chat -q 执行超时（秒）
 _WEEKDAY_NAMES = (
     "星期一",
     "星期二",
@@ -236,130 +128,11 @@ _WEEKDAY_NAMES = (
     "星期日",
 )
 
-# 从 hermes 输出中解析 session id。quiet 模式输出 session_id，非 quiet 模式输出 Session。
-_SESSION_ID_RE = re.compile(
-    r"^(?:session_id|Session(?: ID)?):\s*(\S+)",
-    re.IGNORECASE | re.MULTILINE,
-)
-_TITLE_RE = re.compile(r"^Title:\s*(.+)$", re.IGNORECASE | re.MULTILINE)
 _ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
-_BOX_BORDER_RE = re.compile(
-    r"^[╭╮╰╯┌┐└┘├┤┬┴┼╔╗╚╝╠╣╟╢╤╧╪│┃─━═\s]+$"
-)
-_HERMES_META_PREFIXES = (
-    "Query:",
-    "Source:",
-    "Title:",
-    "Duration:",
-    "Messages:",
-    "Resume this session",
-    "hermes --resume",
-)
-_STREAM_BRIDGE_FALLBACK_MARKERS = (
-    "无法定位 Hermes Python 解释器",
-    "Hermes streaming bridge 文件不存在",
-    "Hermes Python 解释器不存在",
-    "启动 Hermes streaming bridge 失败",
-    "ModuleNotFoundError",
-    "ImportError",
-    "No module named",
-    "cannot import",
-)
-
-
-def _utf8_subprocess_env() -> dict[str, str]:
-    """Return a child-process environment that keeps tool output UTF-8.
-
-    GUI-launched macOS apps can inherit a sparse locale.  Python subprocesses
-    using text=True then decode tools such as osascript with ASCII/C locale,
-    which corrupts Japanese and other non-ASCII text before it reaches chat.
-    """
-    env = dict(os.environ)
-    env["PYTHONUTF8"] = "1"
-    env["PYTHONIOENCODING"] = "utf-8"
-
-    preferred_lang = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
-    preferred_ctype = "UTF-8" if sys.platform == "darwin" else "C.UTF-8"
-
-    def is_broken_locale(value: str | None) -> bool:
-        normalized = (value or "").strip().lower()
-        return normalized in {"", "c", "posix", "ascii", "us-ascii"}
-
-    if is_broken_locale(env.get("LC_ALL")):
-        env.pop("LC_ALL", None)
-    if is_broken_locale(env.get("LANG")):
-        env["LANG"] = preferred_lang
-    if is_broken_locale(env.get("LC_CTYPE")):
-        env["LC_CTYPE"] = preferred_ctype
-    return env
-
-# bridge 内部原始异常模式 → 用户友好描述
-# 这些异常由 hermes_stream_bridge.py 的 main() 捕获后以 "ExcType: msg" 格式输出，
-# 在显示给用户前需要转换为可读提示。
-_BRIDGE_RAW_EXCEPTION_TO_FRIENDLY: dict[str, str] = {
-    "KeyError:": "Hermes provider 配置字段缺失",
-    "AttributeError:": "Hermes API 结构不兼容",
-    "TypeError:": "Hermes API 参数不兼容",
-    "RuntimeError:": "Hermes 运行时错误",
-    "ValueError:": "Hermes 配置值错误",
-    "AssertionError:": "Hermes 断言失败",
-}
-_EMPTY_ERROR_DETAILS = {"", "none", "null"}
-_AGENT_FAILURE_WITHOUT_DETAIL = (
-    "Hermes 对话执行失败，但 Hermes Agent 没有返回错误详情。"
-    "通常是模型/provider 配置、API Key、base URL 或网络请求失败；"
-    "请运行 hermes setup 或 hermes config 检查当前模型配置。"
-)
-
-
-def _humanize_bridge_error(message: str) -> str:
-    """把 bridge 输出的原始 Python 异常消息转换为用户可读提示。
-
-    例：'KeyError: 'label'' → 'Hermes provider 配置字段缺失（KeyError: 'label'）'
-    若不匹配任何已知异常前缀，原样返回。
-    """
-    if not message:
-        return message
-    for pattern, friendly in _BRIDGE_RAW_EXCEPTION_TO_FRIENDLY.items():
-        if message.startswith(pattern):
-            return f"{friendly}（{message}）"
-    return message
-
-
-def _is_empty_error_detail(value: str) -> bool:
-    return value.strip().lower() in _EMPTY_ERROR_DETAILS
-
-
-def _compact_error_detail(text: str, *, max_chars: int = _ERROR_DETAIL_MAX_CHARS) -> str:
-    """压缩错误细节，保留末尾最有诊断价值的内容。"""
-    cleaned = _ANSI_RE.sub("", text or "").replace("\r\n", "\n").replace("\r", "\n")
-    lines = [line.rstrip() for line in cleaned.split("\n") if line.strip()]
-    if not lines:
-        return ""
-    detail = "\n".join(lines[-_ERROR_DETAIL_MAX_LINES:])
-    if len(detail) > max_chars:
-        detail = "..." + detail[-max_chars:]
-    return detail
-
-
-def _bridge_failure_message(
-    error_message: str,
-    *,
-    returncode: int,
-    stderr: str,
-) -> str:
-    """为 bridge 进程级失败补充 stderr 摘要。"""
-    message = error_message.strip()
-    if not message:
-        if returncode not in (-1, 0):
-            message = f"Hermes streaming bridge 执行失败（exit={returncode}）"
-        else:
-            message = "Hermes streaming bridge 执行失败"
-
-    stderr_detail = _compact_error_detail(stderr)
-    if stderr_detail and "Hermes streaming bridge 执行失败" in message:
-        return f"{message}\n{stderr_detail}"
-    return message
+_MAIN_CHAT_HISTORY_MESSAGE_LIMIT = 20
+_MAIN_CHAT_HISTORY_CHAR_LIMIT = 32_000
+_MAIN_CHAT_IMAGE_ATTACHMENT_LIMIT = 4
+_MAIN_CHAT_IMAGE_MAX_BYTES = 12 * 1024 * 1024
 
 
 def format_persona_description(
@@ -389,13 +162,13 @@ def format_persona_description(
     return "\n\n".join(parts)
 
 
-def _yachiyo_delegation_catalog_context() -> str:
+def _oha_delegation_catalog_context() -> str:
     try:
         from apps.shell.agent_runtime import get_agent_runtime_service
 
         targets = get_agent_runtime_service().list_delegation_targets()
     except Exception:
-        logger.debug("读取 Yachiyo 委派目标失败", exc_info=True)
+        logger.debug("读取 OHA 委派目标失败", exc_info=True)
         return ""
     entries: list[str] = []
     for agent in targets.get("agents") or []:
@@ -414,13 +187,13 @@ def _yachiyo_delegation_catalog_context() -> str:
     if not entries:
         return ""
     return (
-        "[Yachiyo 持久 Agent 委派]\n"
+        "[Oha-Yachiyo 持久 Agent 委派]\n"
         "你可以把明确的子任务委派给 Agent Studio 中已保存的持久 Agent 或 Workflow。"
-        "这些不是 Hermes 临时 delegate_task 子 Agent，而是有固定职责、Skills、模型和审计记录的岗位。\n"
+        "这些不是一次性临时 delegate_task 子 Agent，而是有固定职责、Skills、模型和审计记录的岗位。\n"
         "当你需要委派时，只输出一个 JSON 对象，不要附加其他正文：\n"
-        '{"action":"run_yachiyo_agent","agent":"Agent 名称","goal":"自包含任务目标"}\n'
+        '{"action":"run_oha_agent","agent":"Agent 名称","goal":"自包含任务目标"}\n'
         "或：\n"
-        '{"action":"run_yachiyo_workflow","workflow":"Workflow 名称","goal":"自包含任务目标"}\n'
+        '{"action":"run_oha_workflow","workflow":"Workflow 名称","goal":"自包含任务目标"}\n'
         "委派结果会返回给你，然后你再继续整合最终回复。每轮最多委派 3 次。\n"
         "可用目标：\n"
         + "\n".join(entries[:40])
@@ -431,25 +204,23 @@ def _is_yachiyo_group_coordinator_task(description: str) -> bool:
     return "[Yachiyo 群组上下文]" in (description or "")
 
 
-def _yachiyo_group_dispatch_context() -> str:
+def _oha_group_dispatch_context() -> str:
     return (
-        "[Yachiyo 群组派活]\n"
+        "[Oha-Yachiyo 群组派活]\n"
         "当前会话是群组。你是默认协调者，不要默认让所有 Agent 参与。"
         "如果用户没有明确 @ 某个 Agent，请先判断应该由你直接回答，还是派给群组上下文里列出的一个或多个 Agent。"
         "只有当用户表达“大家/所有人/分别做”等意图时，才派给多个 Agent。\n"
         "派活不是终端命令，也不是工具调用；不要调用 shell/terminal 来 echo、模拟或包装派活指令。\n"
-        "如果需要派活，请先用自然语言向用户说明你的安排，再附加一个机器可读派活块，格式如下：\n"
-        "<yachiyo_group_dispatch>\n"
-        '{"tasks":[{"action":"dispatch_group_agent","agent":"Agent 名称或昵称","goal":"自包含任务目标"}]}\n'
-        "</yachiyo_group_dispatch>\n"
+        "如果需要派活，请先用自然语言向用户说明你的安排，再附加一个机器可读 native 派活 JSON，格式如下：\n"
+        '{"tool":"oha.group_dispatch","input":{"tasks":[{"kind":"agent","target":"Agent 名称或昵称","goal":"自包含任务目标"}]}}\n'
         "可以一次派给多个 Agent，但每个 goal 都要独立完整，不能用“同上”“继续”等省略说法。\n"
-        "不要使用 run_yachiyo_agent 或 run_yachiyo_workflow；不要把 JSON 包进 Markdown 代码块。"
+        "不要使用旧委派 action 或旧标签；不要把 JSON 包进 Markdown 代码块。"
         "群组派活会由聊天层接管、隐藏内部 JSON，并显示各 Agent 的执行状态。"
     )
 
 
-def _append_yachiyo_delegation_context(profile_context: str, *, group_coordinator: bool = False) -> str:
-    catalog = _yachiyo_group_dispatch_context() if group_coordinator else _yachiyo_delegation_catalog_context()
+def _append_oha_delegation_context(profile_context: str, *, group_coordinator: bool = False) -> str:
+    catalog = _oha_group_dispatch_context() if group_coordinator else _oha_delegation_catalog_context()
     if not catalog:
         return profile_context
     base = (profile_context or "").strip()
@@ -491,7 +262,13 @@ def _json_objects_from_text(text: str) -> list[dict[str, Any]]:
     text = (text or "").strip()
     if not text:
         return []
-    match = re.search(r"<yachiyo_delegation>\s*(.*?)\s*</yachiyo_delegation>", text, re.DOTALL | re.IGNORECASE)
+    text = re.sub(
+        r"<\s*(?!oha[\s_-]*delegation\b)[a-z][\w\s_-]*delegation\b[^>]*>.*?</\s*[a-z][\w\s_-]*delegation\s*>",
+        "",
+        text,
+        flags=re.DOTALL | re.IGNORECASE,
+    ).strip()
+    match = re.search(r"<oha_delegation>\s*(.*?)\s*</oha_delegation>", text, re.DOTALL | re.IGNORECASE)
     if match:
         text = match.group(1).strip()
     if text.startswith("```"):
@@ -521,7 +298,7 @@ def _json_objects_from_text(text: str) -> list[dict[str, Any]]:
     return payloads
 
 
-def _normalize_yachiyo_delegation_action(value: str) -> str:
+def _normalize_oha_delegation_action(value: str) -> str:
     compact = re.sub(r"[\s_\-./]+", "", str(value or "").strip().lower())
     if compact in {
         "agent",
@@ -530,8 +307,10 @@ def _normalize_yachiyo_delegation_action(value: str) -> str:
         "delegateagent",
         "delegatetoagent",
         "assignagent",
-        "runyachiyoagent",
-        "yachiyoagent",
+        "runohaagent",
+        "ohaagent",
+        "runnativeagent",
+        "nativeagent",
     }:
         return "agent"
     if compact in {
@@ -541,23 +320,30 @@ def _normalize_yachiyo_delegation_action(value: str) -> str:
         "delegateworkflow",
         "delegatetoworkflow",
         "assignworkflow",
-        "runyachiyoworkflow",
-        "yachiyoworkflow",
+        "runohaworkflow",
+        "ohaworkflow",
+        "runnativeworkflow",
+        "nativeworkflow",
     }:
         return "workflow"
     return ""
 
 
-def _parse_yachiyo_delegation_request(content: str) -> dict[str, str] | None:
+def _parse_oha_delegation_directive(content: str) -> DelegationDirective | None:
     for payload in _json_objects_from_text(content):
-        request = _yachiyo_delegation_request_from_payload(payload)
-        if request:
-            return request
+        directive = _oha_delegation_directive_from_payload(payload)
+        if directive:
+            return directive
     return None
 
 
-def _yachiyo_delegation_request_from_payload(payload: dict[str, Any]) -> dict[str, str] | None:
-    action = _normalize_yachiyo_delegation_action(str(
+def _parse_oha_delegation_request(content: str) -> dict[str, str] | None:
+    directive = _parse_oha_delegation_directive(content)
+    return directive.as_request() if directive else None
+
+
+def _oha_delegation_directive_from_payload(payload: dict[str, Any]) -> DelegationDirective | None:
+    action = _normalize_oha_delegation_action(str(
         _payload_value(payload, "action", "tool", "kind", "type", "target_kind", "runnable_kind")
         or ""
     ))
@@ -621,21 +407,35 @@ def _yachiyo_delegation_request_from_payload(payload: dict[str, Any]) -> dict[st
         kind = "workflow"
     if not name and not runnable_id:
         return None
-    return {"kind": kind, "name": name, "runnable_id": runnable_id, "goal": goal}
+    return DelegationDirective(kind=kind, name=name, runnable_id=runnable_id, goal=goal)
 
 
-def _run_yachiyo_delegation(request: dict[str, str]) -> dict[str, Any]:
-    from apps.shell.agent_runtime import get_agent_runtime_service
-
-    return get_agent_runtime_service().delegate_runnable(
-        kind=request.get("kind", ""),
-        name=request.get("name", ""),
-        runnable_id=request.get("runnable_id", ""),
-        user_goal=request.get("goal", ""),
+def _coerce_oha_delegation_directive(value: DelegationDirective | dict[str, str]) -> DelegationDirective:
+    if isinstance(value, DelegationDirective):
+        return value
+    return DelegationDirective(
+        kind=str(value.get("kind") or ""),
+        name=str(value.get("name") or ""),
+        runnable_id=str(value.get("runnable_id") or ""),
+        goal=str(value.get("goal") or ""),
     )
 
 
-def _format_yachiyo_delegation_result(result: dict[str, Any]) -> str:
+def _run_oha_delegation(request: DelegationDirective | dict[str, str], service: Any | None = None) -> dict[str, Any]:
+    directive = _coerce_oha_delegation_directive(request)
+    if service is None:
+        from apps.shell.agent_runtime import get_agent_runtime_service
+
+        service = get_agent_runtime_service()
+    return service.delegate_runnable(
+        kind=directive.kind,
+        name=directive.name,
+        runnable_id=directive.runnable_id,
+        user_goal=directive.goal,
+    )
+
+
+def _format_oha_delegation_result(result: dict[str, Any]) -> str:
     runnable = result.get("runnable") or {}
     lines = [
         f"Runnable: {runnable.get('kind') or ''} {runnable.get('name') or runnable.get('id') or ''}",
@@ -659,30 +459,30 @@ def _format_yachiyo_delegation_result(result: dict[str, Any]) -> str:
     return "\n".join(lines).strip()
 
 
-def _yachiyo_delegation_activity_status(result: dict[str, Any]) -> str:
+def _oha_delegation_activity_status(result: dict[str, Any]) -> str:
     status = str(result.get("status") or "").strip()
     if status == "approval_required":
         return "approval_required"
     return "completed" if result.get("ok") else "failed"
 
 
-def _yachiyo_delegation_activity_title(target: str, result: dict[str, Any]) -> str:
+def _oha_delegation_activity_title(target: str, result: dict[str, Any]) -> str:
     status = str(result.get("status") or "").strip()
     if status == "approval_required":
         return f"{target} 等待审批"
     return f"{target} 委派完成" if result.get("ok") else f"{target} 委派失败"
 
 
-def _build_yachiyo_delegation_followup(
+def _build_oha_delegation_followup(
     original_prompt: str,
     delegation_request_text: str,
     delegation_result: str,
 ) -> str:
     return (
         f"{original_prompt}\n\n"
-        "[Yachiyo 委派请求]\n"
+        "[OHA 委派请求]\n"
         f"{delegation_request_text.strip()[:4000]}\n\n"
-        "[Yachiyo 委派结果]\n"
+        "[OHA 委派结果]\n"
         f"{delegation_result[:12000]}\n\n"
         "请基于以上委派结果继续处理用户请求。若仍需委派，可再次输出同样 JSON；"
         "否则直接给出最终回复，不要重复委派 JSON。"
@@ -781,7 +581,7 @@ def build_cross_session_memory_context(
     return _format_memory_context(candidates, current_session_id)
 
 
-def build_runtime_profile_context(runtime: "HermesRuntime") -> str:
+def build_runtime_profile_context(runtime: "AppRuntime") -> str:
     """Combine configured profile fields with lightweight cross-session memory."""
     parts: list[str] = []
     try:
@@ -1006,51 +806,11 @@ def _sanitize_generated_session_title(value: str | None) -> str:
 async def _generate_session_title(prompt: str) -> str:
     """Generate a compact chat title with direct model API.
 
-    Do not fall back to `hermes chat` here: when the model config is unavailable
-    or Hermes is busy, the CLI can summarize the title-generation prompt itself
-    and accidentally write that prompt into the session title.
+    Title generation is a product projection, so it must use the configured
+    native model path and must not invoke an external execution kernel.
     """
     title = await generate_title_with_direct_api(prompt, timeout=_read_title_timeout())
     return _sanitize_generated_session_title(title)
-
-
-async def _generate_session_title_with_hermes_cli(prompt: str) -> str:
-    """Generate a compact chat title through an isolated Hermes tool query."""
-    if not shutil.which(_HERMES_CMD[0]):
-        return ""
-    cmd = [
-        *_HERMES_CMD,
-        prompt,
-        "-Q",
-        "--source",
-        "tool",
-        "--max-turns",
-        "1",
-    ]
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=_utf8_subprocess_env(),
-        )
-    except Exception:
-        logger.debug("启动会话标题生成失败", exc_info=True)
-        return ""
-    try:
-        stdout_bytes, _stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=_read_title_timeout())
-    except asyncio.TimeoutError:
-        await _terminate_process(proc)
-        logger.debug("会话标题生成超时")
-        return ""
-    except asyncio.CancelledError:
-        await _terminate_process(proc)
-        raise
-    if proc.returncode not in (0, None):
-        logger.debug("会话标题生成失败: exit=%s", proc.returncode)
-        return ""
-    content, _session_id = _parse_hermes_output(stdout_bytes.decode(errors="replace"))
-    return _sanitize_generated_session_title(content)
 
 
 async def _refresh_session_title_from_recent_messages(
@@ -1100,771 +860,6 @@ def _schedule_session_title_refresh(
     task.add_done_callback(_log_title_task)
 
 
-def _clean_hermes_line(line: str, strip_stream_padding: bool = False) -> Optional[str]:
-    """过滤 Hermes CLI 的 Rich 边框和摘要行，保留真实回复文本。"""
-    raw = _ANSI_RE.sub("", line).rstrip()
-    stripped = raw.strip()
-    if not stripped:
-        return ""
-
-    if stripped[0] in "╭╰┌└╔╚":
-        return None
-    if _BOX_BORDER_RE.fullmatch(stripped):
-        return None
-
-    border_wrapped = False
-    if stripped.startswith(("│", "┃")):
-        stripped = stripped.strip("│┃ ").rstrip()
-        border_wrapped = True
-    if stripped.endswith(("│", "┃")):
-        stripped = stripped.rstrip("│┃ ").rstrip()
-        border_wrapped = True
-    if not stripped:
-        return ""
-
-    if stripped in {"$ Hermes", "⚕ Hermes", "Hermes"}:
-        return None
-    if any(stripped.startswith(prefix) for prefix in _HERMES_META_PREFIXES):
-        return None
-    if border_wrapped:
-        return stripped
-
-    if strip_stream_padding and raw.startswith("    "):
-        raw = raw[4:]
-        stripped = raw.strip()
-        if any(stripped.startswith(prefix) for prefix in _HERMES_META_PREFIXES):
-            return None
-    return raw.rstrip()
-
-
-def _dedupe_repeated_paragraphs(text: str) -> str:
-    """去掉 CLI/渲染层导致的完全重复段落。"""
-    text = re.sub(r"\n{3,}", "\n\n", text.strip())
-    if not text:
-        return ""
-
-    paragraphs = re.split(r"\n\s*\n", text)
-    seen: set[str] = set()
-    unique: list[str] = []
-    for paragraph in paragraphs:
-        paragraph = paragraph.strip()
-        if not paragraph:
-            continue
-        normalized = re.sub(r"\s+", " ", paragraph).strip()
-        if normalized in seen:
-            continue
-        seen.add(normalized)
-        unique.append(paragraph)
-    return "\n\n".join(unique)
-
-
-def _normalized_response_text(text: str) -> str:
-    return re.sub(r"\s+", " ", (text or "").strip())
-
-
-def _select_bridge_response(final_response: str, streamed_response: str) -> str:
-    """Choose the most complete bridge response without discarding streamed text."""
-    final_response = (final_response or "").strip()
-    streamed_response = (streamed_response or "").strip()
-    if not final_response:
-        return streamed_response
-    if not streamed_response:
-        return final_response
-
-    final_norm = _normalized_response_text(final_response)
-    streamed_norm = _normalized_response_text(streamed_response)
-    if not final_norm:
-        return streamed_response
-    if not streamed_norm:
-        return final_response
-    if final_norm == streamed_norm:
-        return final_response
-    if final_norm in streamed_norm:
-        return streamed_response
-    if streamed_norm in final_norm:
-        return final_response
-
-    final_len = len(final_norm)
-    streamed_len = len(streamed_norm)
-    if streamed_len >= max(final_len + 120, int(final_len * 1.25)):
-        return streamed_response
-    if final_len >= max(streamed_len + 120, int(streamed_len * 1.25)):
-        return final_response
-    return final_response
-
-
-def _sanitize_hermes_response(stdout: str) -> str:
-    """清理 Hermes CLI 输出中的 UI 噪声和重复内容。"""
-    text = _ANSI_RE.sub("", stdout).replace("\r\n", "\n").replace("\r", "\n")
-    strip_stream_padding = (
-        any(ch in text for ch in "╭╰┌└╔╚│┃")
-        or "Resume this session with:" in text
-    )
-    cleaned_lines: list[str] = []
-    for line in text.splitlines():
-        cleaned = _clean_hermes_line(line, strip_stream_padding=strip_stream_padding)
-        if cleaned is None:
-            continue
-        cleaned_lines.append(cleaned)
-    cleaned_text = "\n".join(cleaned_lines)
-    cleaned_text = re.sub(r"\n{3,}", "\n\n", cleaned_text)
-    return _dedupe_repeated_paragraphs(cleaned_text)
-
-
-def _parse_hermes_output(stdout: str) -> tuple[str, Optional[str]]:
-    """从 hermes stdout 中分离回复内容和 session id。
-
-    hermes chat -Q 的输出格式：
-      <回复内容>
-      session_id: <ID>
-
-    非 quiet 模式会额外输出 Rich 边框和会话摘要，此函数会清理这些噪声。
-
-    Returns:
-        (content, hermes_session_id)
-    """
-    matches = list(_SESSION_ID_RE.finditer(stdout))
-    session_id = matches[-1].group(1) if matches else None
-    content = _SESSION_ID_RE.sub("", stdout)
-    return _sanitize_hermes_response(content), session_id
-
-
-def _parse_hermes_title(stdout: str) -> Optional[str]:
-    """从 Hermes 非 quiet 输出中解析自动生成的会话标题。"""
-    matches = list(_TITLE_RE.finditer(_ANSI_RE.sub("", stdout)))
-    if not matches:
-        return None
-    title = matches[-1].group(1).strip()
-    return title or None
-
-
-def _resolve_shell_exec_target(launcher: str) -> Optional[str]:
-    try:
-        with open(launcher, "r", encoding="utf-8") as fh:
-            lines = fh.readlines()
-    except OSError:
-        return None
-    launcher_dir = os.path.dirname(os.path.abspath(launcher))
-    for raw_line in lines[1:]:
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        try:
-            parts = shlex.split(line)
-        except ValueError:
-            continue
-        if len(parts) < 2 or parts[0] != "exec":
-            continue
-        target = parts[1]
-        if not target or "$" in target or "`" in target:
-            continue
-        if not os.path.isabs(target):
-            target = os.path.abspath(os.path.join(launcher_dir, target))
-        return target if os.path.exists(target) else None
-    return None
-
-
-def _resolve_hermes_python(hermes_cmd: Optional[str] = None, _seen: Optional[set[str]] = None) -> Optional[str]:
-    """从 hermes launcher shebang 找到 Hermes 自己的 Python 解释器。"""
-    if hermes_cmd:
-        launcher = shutil.which(hermes_cmd) if os.path.sep not in hermes_cmd else hermes_cmd
-    else:
-        launcher = shutil.which("hermes")
-    if not launcher:
-        return None
-    launcher = os.path.realpath(launcher)
-    seen = _seen or set()
-    if launcher in seen:
-        return None
-    seen.add(launcher)
-    try:
-        with open(launcher, "r", encoding="utf-8") as fh:
-            first_line = fh.readline().strip()
-    except OSError:
-        return None
-    if not first_line.startswith("#!"):
-        return None
-    shebang = first_line[2:].strip()
-    if not shebang:
-        return None
-    try:
-        parts = shlex.split(shebang)
-    except ValueError:
-        parts = shebang.split()
-    if not parts:
-        return None
-
-    executable = parts[0]
-    if os.path.basename(executable) == "env":
-        args = parts[1:]
-        if args[:1] == ["-S"]:
-            try:
-                args = shlex.split(" ".join(args[1:]))
-            except ValueError:
-                args = args[1:]
-        while args and args[0].startswith("-"):
-            args = args[1:]
-        if not args:
-            return None
-        executable = args[0]
-
-    executable_name = os.path.basename(executable)
-    if executable_name in {"bash", "sh", "zsh"}:
-        target = _resolve_shell_exec_target(launcher)
-        if target:
-            return _resolve_hermes_python(target, seen)
-        return None
-    if executable_name not in {"python", "python3"} and not executable_name.startswith("python3."):
-        return None
-
-    resolved = shutil.which(executable) if os.path.sep not in executable else executable
-    return resolved if resolved and os.path.exists(resolved) else None
-
-
-def _parse_bridge_event(line: str) -> Optional[dict[str, Any]]:
-    """解析 Hermes streaming bridge 输出的一行 NDJSON。"""
-    line = (line or "").strip()
-    if not line:
-        return None
-    try:
-        event = json.loads(line)
-    except json.JSONDecodeError:
-        logger.debug("忽略非 JSON bridge 输出: %s", line[:160])
-        return None
-    return event if isinstance(event, dict) else None
-
-
-def _emit_stream_update(on_update: Callable[[str], None], content: str) -> None:
-    """把流式内容写回聊天会话，隔离 UI 回写异常。"""
-    if not content:
-        return
-    try:
-        on_update(content)
-    except Exception:
-        logger.debug("Hermes 流式内容回写失败", exc_info=True)
-
-
-def _emit_activity_update(on_activity: Callable[[dict[str, Any]], None] | None, event: dict[str, Any]) -> None:
-    """Forward one structured activity event to the caller without breaking streaming."""
-    if on_activity is None:
-        return
-    try:
-        on_activity(event)
-    except Exception:
-        logger.debug("Hermes 活动事件回写失败", exc_info=True)
-
-
-async def _terminate_process(proc: asyncio.subprocess.Process) -> None:
-    """取消/超时时终止子进程并回收管道资源。"""
-    if proc.returncode is not None:
-        return
-    try:
-        proc.terminate()
-    except ProcessLookupError:
-        return
-    try:
-        await asyncio.wait_for(proc.communicate(), timeout=3.0)
-    except asyncio.TimeoutError:
-        proc.kill()
-        await proc.communicate()
-
-
-async def _terminate_process_after_done(proc: asyncio.subprocess.Process) -> None:
-    """Terminate a bridge process after a definitive done event without reading pipes twice."""
-    if proc.returncode is not None:
-        return
-    try:
-        proc.terminate()
-    except ProcessLookupError:
-        return
-    try:
-        await asyncio.wait_for(proc.wait(), timeout=3.0)
-    except asyncio.TimeoutError:
-        proc.kill()
-        await proc.wait()
-
-
-async def _wait_for_bridge_exit_after_done(proc: asyncio.subprocess.Process) -> int:
-    """Give bridge cleanup a short grace period once the final answer is known."""
-    try:
-        return await asyncio.wait_for(proc.wait(), timeout=_STREAM_BRIDGE_DONE_EXIT_GRACE)
-    except asyncio.TimeoutError:
-        logger.warning(
-            "[Hermes bridge] done 后进程未退出，按已收到的最终回复收尾"
-        )
-        await _terminate_process_after_done(proc)
-        return proc.returncode if proc.returncode is not None else 0
-
-
-async def _consume_stream_bridge(
-    proc: asyncio.subprocess.Process,
-    payload: dict[str, Any],
-    on_update: Callable[[str], None],
-    on_activity: Callable[[dict[str, Any]], None] | None = None,
-) -> HermesInvokeResult:
-    """消费 bridge 的 delta/done/error 事件并转换为 HermesInvokeResult。"""
-    assert proc.stdin is not None
-    assert proc.stdout is not None
-    assert proc.stderr is not None
-
-    proc.stdin.write((json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8"))
-    await proc.stdin.drain()
-    proc.stdin.close()
-
-    stderr_task = asyncio.create_task(proc.stderr.read())
-    parts: list[str] = []
-    last_emitted = ""
-    last_emit_at = 0.0
-    final_response = ""
-    error_message = ""
-    hermes_session_id: Optional[str] = None
-    hermes_title: Optional[str] = None
-    failed = False
-    saw_done_event = False
-    started_at = time.monotonic()
-    first_event_logged = False
-    first_delta_logged = False
-
-    try:
-        while True:
-            raw_line = await proc.stdout.readline()
-            if not raw_line:
-                break
-            event = _parse_bridge_event(raw_line.decode(errors="replace"))
-            if event is None:
-                continue
-
-            event_type = event.get("type")
-            if not first_event_logged and event_type is not None:
-                logger.info(
-                    "[Hermes bridge] 首个事件: type=%s, elapsed=%.2fs",
-                    event_type,
-                    time.monotonic() - started_at,
-                )
-                first_event_logged = True
-            if event_type == "delta":
-                delta = event.get("delta")
-                if not isinstance(delta, str) or not delta:
-                    continue
-                if not first_delta_logged:
-                    logger.info(
-                        "[Hermes bridge] 首个输出片段: elapsed=%.2fs",
-                        time.monotonic() - started_at,
-                    )
-                    first_delta_logged = True
-                parts.append(delta)
-                content = "".join(parts)
-                now = time.monotonic()
-                if now - last_emit_at >= _STREAM_UPDATE_INTERVAL:
-                    _emit_stream_update(on_update, content)
-                    last_emitted = content
-                    last_emit_at = now
-            elif event_type == "done":
-                saw_done_event = True
-                response = event.get("response")
-                final_response = response if isinstance(response, str) else ""
-                sid = event.get("session_id")
-                hermes_session_id = sid if isinstance(sid, str) and sid else hermes_session_id
-                title = event.get("title")
-                hermes_title = title if isinstance(title, str) and title else hermes_title
-                failed = bool(event.get("failed"))
-                if failed and _is_empty_error_detail(final_response):
-                    final_response = ""
-                raw_error = event.get("error") or event.get("message")
-                if failed and isinstance(raw_error, str) and not _is_empty_error_detail(raw_error):
-                    error_message = _humanize_bridge_error(raw_error.strip())
-                logger.info(
-                    "[Hermes bridge] 完成事件: elapsed=%.2fs, response_len=%d, failed=%s",
-                    time.monotonic() - started_at,
-                    len(final_response),
-                    failed,
-                )
-                break
-            elif event_type == "error":
-                raw_message = event.get("message")
-                raw_message = raw_message if isinstance(raw_message, str) else "Hermes streaming bridge 调用失败"
-                error_message = _humanize_bridge_error(raw_message)
-                failed = True
-            elif event_type == "boundary":
-                # 流内边界标记，不含有效内容，直接忽略
-                pass
-            elif event_type == "activity":
-                _emit_activity_update(on_activity, event)
-            elif event_type is not None:
-                # 未知事件类型：不崩溃，仅记录 debug 日志
-                logger.debug("忽略未知 bridge 事件类型: %s", event_type)
-
-        if saw_done_event:
-            rc = await _wait_for_bridge_exit_after_done(proc)
-        else:
-            rc = await proc.wait()
-        stderr_bytes = await stderr_task
-        stderr = stderr_bytes.decode(errors="replace").strip()
-    finally:
-        if not stderr_task.done():
-            stderr_task.cancel()
-
-    content = _select_bridge_response(final_response, "".join(parts))
-    content = _dedupe_repeated_paragraphs(content)
-    if content and content != last_emitted:
-        _emit_stream_update(on_update, content)
-
-    if failed and saw_done_event and not error_message:
-        response_detail = _compact_error_detail(content)
-        error_message = (
-            f"Hermes 对话执行失败：{response_detail}"
-            if response_detail
-            else _AGENT_FAILURE_WITHOUT_DETAIL
-        )
-
-    logger.info(
-        "[Hermes bridge] 进程结束: exit=%s, elapsed=%.2fs, stdout_len=%d, stderr_len=%d",
-        rc,
-        time.monotonic() - started_at,
-        len(content),
-        len(stderr),
-    )
-
-    effective_rc = 0 if saw_done_event and not failed else rc
-    if effective_rc != 0 or failed:
-        return HermesInvokeResult(
-            success=False,
-            stdout=content,
-            stderr=stderr,
-            returncode=effective_rc,
-            error_message=_bridge_failure_message(
-                error_message,
-                returncode=effective_rc,
-                stderr=stderr,
-            ),
-            hermes_session_id=hermes_session_id,
-            hermes_title=hermes_title,
-        )
-
-    return HermesInvokeResult(
-        success=True,
-        stdout=content or f"[Hermes 执行完毕，无输出] {payload.get('description', '')[:60]}",
-        stderr=stderr,
-        returncode=effective_rc,
-        hermes_session_id=hermes_session_id,
-        hermes_title=hermes_title,
-    )
-
-
-async def _invoke_hermes_stream_bridge(
-    description: str,
-    hermes_session_id: Optional[str],
-    on_update: Callable[[str], None],
-    on_activity: Callable[[dict[str, Any]], None] | None = None,
-    image_paths: Optional[list[str]] = None,
-) -> HermesInvokeResult:
-    """通过 Hermes agent callback 层获取真实 token 流，避免 CLI 终端 UI 噪声。"""
-    started_at = time.monotonic()
-    hermes_python = _resolve_hermes_python()
-    if not hermes_python:
-        return HermesInvokeResult(
-            success=False,
-            returncode=-1,
-            error_message="无法定位 Hermes Python 解释器，不能启用流式 bridge",
-        )
-    if not _BRIDGE_SCRIPT.exists():
-        return HermesInvokeResult(
-            success=False,
-            returncode=-1,
-            error_message="Hermes streaming bridge 文件不存在",
-        )
-
-    payload = {
-        "description": description,
-        "resume": hermes_session_id,
-        "image_paths": list(image_paths or []),
-    }
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            hermes_python,
-            str(_BRIDGE_SCRIPT),
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=os.getcwd(),
-            env=_utf8_subprocess_env(),
-        )
-    except FileNotFoundError:
-        return HermesInvokeResult(
-            success=False,
-            returncode=-1,
-            error_message="Hermes Python 解释器不存在，不能启用流式 bridge",
-        )
-    except Exception as exc:
-        return HermesInvokeResult(
-            success=False,
-            returncode=-1,
-            error_message=f"启动 Hermes streaming bridge 失败: {exc}",
-        )
-
-    logger.info(
-        "[Hermes bridge] 进程已启动: elapsed=%.2fs, resume=%s",
-        time.monotonic() - started_at,
-        bool(hermes_session_id),
-    )
-
-    try:
-        return await asyncio.wait_for(
-            _consume_stream_bridge(proc, payload, on_update, on_activity),
-            timeout=_EXEC_TIMEOUT,
-        )
-    except asyncio.CancelledError:
-        await _terminate_process(proc)
-        raise
-    except asyncio.TimeoutError:
-        await _terminate_process(proc)
-        logger.warning(
-            "[Hermes bridge] 执行超时: elapsed=%.2fs",
-            time.monotonic() - started_at,
-        )
-        return HermesInvokeResult(
-            success=False,
-            returncode=-1,
-            error_message=f"Hermes 执行超时（{_format_exec_timeout(_EXEC_TIMEOUT)}），进程已终止",
-        )
-
-
-def _should_fallback_from_stream_bridge(result: HermesInvokeResult) -> bool:
-    """判断 stream bridge 失败是否应回退到普通 CLI。"""
-    if result.success:
-        return False
-    detail = "\n".join(part for part in (result.error_message, result.stderr) if part)
-    if any(marker in detail for marker in _STREAM_BRIDGE_FALLBACK_MARKERS):
-        return True
-    return (
-        result.returncode not in (-1, 0)
-        and "Hermes streaming bridge 执行失败" in detail
-    )
-
-
-async def invoke_hermes_cli(
-    description: str,
-    hermes_session_id: Optional[str] = None,
-    on_update: Optional[Callable[[str], None]] = None,
-    on_activity: Optional[Callable[[dict[str, Any]], None]] = None,
-    image_paths: Optional[list[str]] = None,
-) -> HermesInvokeResult:
-    """向 Hermes Agent 发起一次 CLI 调用，返回结构化结果。
-
-    此函数是 Hermes 调用的最小单元，职责单一：
-      - 构造命令
-      - 启动 subprocess
-      - 等待结束（带超时）
-      - 解析 session_id
-      - 返回 HermesInvokeResult（成功或失败均返回，不抛出）
-
-    调用命令：hermes chat -q "<query>" -Q --source tool [--resume SESSION_ID]
-    若传入 on_update，则优先使用 Hermes streaming bridge 读取 agent token 回调；
-    bridge 不可用时回退普通 CLI，仍返回最终结果。
-
-    Args:
-        description: 用户查询字符串，直接作为 -q 参数传入
-        hermes_session_id: 若提供，附加 --resume 以延续上一次 Hermes 会话
-        on_update: 流式内容更新回调，参数为清理后的当前完整回复
-
-    Returns:
-        HermesInvokeResult（不抛出异常，失败信息写入 result.error_message）
-    """
-    started_at = time.monotonic()
-    image_paths = [path for path in (image_paths or []) if isinstance(path, str) and path]
-    if on_update is not None:
-        stream_result = await _invoke_hermes_stream_bridge(
-            description,
-            hermes_session_id,
-            on_update,
-            on_activity=on_activity,
-            image_paths=image_paths,
-        )
-        logger.info(
-            "[Hermes] streaming bridge 返回: success=%s, elapsed=%.2fs",
-            stream_result.success,
-            time.monotonic() - started_at,
-        )
-        if stream_result.success or not _should_fallback_from_stream_bridge(stream_result):
-            return stream_result
-
-        logger.warning(
-            "Hermes streaming bridge 不可用，回退普通 CLI: %s",
-            stream_result.error_message,
-        )
-        return await invoke_hermes_cli(
-            description,
-            hermes_session_id=hermes_session_id,
-            on_update=None,
-            on_activity=on_activity,
-            image_paths=image_paths,
-        )
-
-    description_for_cli = _with_attached_image_guard(description, image_paths)
-    cmd = [*_HERMES_CMD, description_for_cli, *_HERMES_FLAGS]
-    if image_paths:
-        cmd.extend(["--image", image_paths[0]])
-    if hermes_session_id:
-        cmd.extend(["--resume", hermes_session_id])
-    logger.debug("[Hermes CLI] 执行: %s", " ".join(cmd))
-
-    # ① 启动 subprocess
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=_utf8_subprocess_env(),
-        )
-    except FileNotFoundError:
-        _emit_activity_update(on_activity, {
-            "tool_name": "hermes_cli",
-            "phase": "status",
-            "title": "Hermes 命令未找到",
-            "detail": "请确认 Hermes Agent 已正确安装",
-            "status": "failed",
-        })
-        return HermesInvokeResult(
-            success=False,
-            returncode=-1,
-            error_message="hermes 命令未找到，请确认 Hermes Agent 已正确安装",
-        )
-    except Exception as exc:
-        _emit_activity_update(on_activity, {
-            "tool_name": "hermes_cli",
-            "phase": "status",
-            "title": "Hermes 进程启动失败",
-            "detail": str(exc),
-            "status": "failed",
-        })
-        return HermesInvokeResult(
-            success=False,
-            returncode=-1,
-            error_message=f"启动 hermes 进程失败: {exc}",
-        )
-    _emit_activity_update(on_activity, {
-        "tool_name": "hermes_cli",
-        "phase": "status",
-        "title": "Hermes CLI 已启动",
-        "detail": "正在执行非流式 Hermes 调用",
-        "status": "running",
-    })
-
-    # ② 等待结束，带超时
-    try:
-        stdout_bytes, stderr_bytes = await asyncio.wait_for(
-            proc.communicate(), timeout=_EXEC_TIMEOUT
-        )
-        stdout = stdout_bytes.decode(errors="replace").strip()
-        stderr = stderr_bytes.decode(errors="replace").strip()
-    except asyncio.CancelledError:
-        await _terminate_process(proc)
-        raise
-    except asyncio.TimeoutError:
-        await _terminate_process(proc)
-        logger.warning(
-            "[Hermes CLI] 执行超时: elapsed=%.2fs",
-            time.monotonic() - started_at,
-        )
-        _emit_activity_update(on_activity, {
-            "tool_name": "hermes_cli",
-            "phase": "status",
-            "title": "Hermes CLI 执行超时",
-            "detail": _format_exec_timeout(_EXEC_TIMEOUT),
-            "status": "failed",
-            "duration_seconds": time.monotonic() - started_at,
-        })
-        return HermesInvokeResult(
-            success=False,
-            returncode=-1,
-            error_message=f"Hermes 执行超时（{_format_exec_timeout(_EXEC_TIMEOUT)}），进程已终止",
-        )
-
-    rc = proc.returncode if proc.returncode is not None else -1
-
-    # ③ 判断成功
-    if rc != 0:
-        # 对 exit=2（argparse usage error）给出友好提示而非原始 stderr
-        if rc == 2:
-            err_msg = "Hermes 命令调用失败，请检查 Hermes Agent 版本是否兼容"
-        else:
-            err_msg = f"Hermes 执行失败（exit={rc}）"
-        _emit_activity_update(on_activity, {
-            "tool_name": "hermes_cli",
-            "phase": "status",
-            "title": "Hermes CLI 执行失败",
-            "detail": stderr or err_msg,
-            "status": "failed",
-            "duration_seconds": time.monotonic() - started_at,
-        })
-        return HermesInvokeResult(
-            success=False,
-            stdout=_sanitize_hermes_response(stdout),
-            stderr=stderr,
-            returncode=rc,
-            error_message=err_msg,
-        )
-
-    # ④ 解析回复内容和 session_id
-    content, parsed_session_id = _parse_hermes_output(stdout)
-    parsed_title = _parse_hermes_title(stdout)
-    logger.info(
-        "[Hermes CLI] 执行完成: exit=%s, elapsed=%.2fs, stdout_len=%d, stderr_len=%d",
-        rc,
-        time.monotonic() - started_at,
-        len(stdout),
-        len(stderr),
-    )
-    _emit_activity_update(on_activity, {
-        "tool_name": "hermes_cli",
-        "phase": "status",
-        "title": "Hermes CLI 执行完成",
-        "detail": content[:180] if content else "",
-        "status": "completed",
-        "duration_seconds": time.monotonic() - started_at,
-    })
-
-    return HermesInvokeResult(
-        success=True,
-        stdout=content or f"[Hermes 执行完毕，无输出] {description[:60]}",
-        stderr=stderr,
-        returncode=rc,
-        hermes_session_id=parsed_session_id,
-        hermes_title=parsed_title,
-    )
-
-
-def probe_hermes_available() -> bool:
-    """同步探测 hermes 命令是否可用（供 is_available() 使用）。
-
-    独立函数便于单独测试，不依赖类实例。
-    """
-    try:
-        result = subprocess.run(
-            ["hermes", "--version"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=_PROBE_TIMEOUT,
-            env=_utf8_subprocess_env(),
-        )
-        if result.returncode != 0:
-            logger.warning(
-                "probe_hermes_available: --version 返回非零 (%d)", result.returncode
-            )
-        return result.returncode == 0
-    except FileNotFoundError:
-        logger.info("probe_hermes_available: hermes 命令未找到")
-        return False
-    except subprocess.TimeoutExpired:
-        logger.warning("probe_hermes_available: 超时（%.1fs）", _PROBE_TIMEOUT)
-        return False
-    except Exception as exc:
-        logger.warning("probe_hermes_available: 异常: %s", exc)
-        return False
-
-
 # ── 抽象接口 ─────────────────────────────────────────────────────────────────
 
 class ExecutionStrategy(ABC):
@@ -1878,6 +873,24 @@ class ExecutionStrategy(ABC):
     @property
     def name(self) -> str:
         return type(self).__name__
+
+
+def execution_capabilities(executor: Any) -> dict[str, bool]:
+    """Normalize executor capabilities behind the TaskRunner boundary."""
+    capabilities = getattr(executor, "capabilities", None)
+    if isinstance(capabilities, dict):
+        return {
+            "model": bool(capabilities.get("model")),
+            "image_input": bool(capabilities.get("image_input")),
+            "tools": bool(capabilities.get("tools")),
+            "approval": bool(capabilities.get("approval")),
+        }
+    return {
+        "model": False,
+        "image_input": False,
+        "tools": False,
+        "approval": False,
+    }
 
 
 # ── MVP 模拟执行器 ────────────────────────────────────────────────────────────
@@ -1896,283 +909,470 @@ class SimulatedExecutor(ExecutionStrategy):
         return f"[模拟结果] {task.description[:80]}"
 
 
-class HermesUnavailableExecutor(ExecutionStrategy):
-    """Hermes 不可用时的用户任务执行器。
-
-    这个执行器只负责让任务进入失败态，避免正常用户链路把模拟回复
-    当成真实 Hermes 结果写回聊天或任务查询。
-    """
-
-    def __init__(self, reason: str | None = None) -> None:
-        self.reason = str(reason or HERMES_UNAVAILABLE_MESSAGE)
-
-    async def run(self, task: TaskInfo) -> str:
-        logger.warning("[HermesUnavailable] 拒绝执行任务: %s | %s", task.task_id, self.reason)
-        raise HermesCallError(self.reason)
-
-
-# ── Hermes 执行器 ─────────────────────────────────────────────────────────────
-
-class HermesExecutor(ExecutionStrategy):
-    """Hermes Agent 执行器（委托 invoke_hermes_cli() 做实际调用）
-
-    调用链：
-      run(task)
-        └─ _call_hermes(description)
-             └─ invoke_hermes_cli(description, hermes_session_id) → HermesInvokeResult
-                  ├─ success=True  → 返回 result.output + 存储 session_id
-                  └─ success=False → 抛出 HermesCallError
-
-    多轮对话：
-      通过 chat_session.hermes_session_id 传递给 --resume，
-      成功后将返回的新 session_id 写回 chat_session。
-    """
+class NativeAgentUnavailableExecutor(ExecutionStrategy):
+    """Explicitly rejects user tasks until the native main model is ready."""
 
     def __init__(
         self,
-        fallback_to_simulated: bool = False,
+        message: str | None = None,
+        *,
+        reason: str = "model_profile_required",
+    ) -> None:
+        self.reason = str(message or NATIVE_AGENT_NOT_READY_MESSAGE)
+        self.code = "native_agent_not_ready"
+        self.reason_code = str(reason or "model_profile_required")
+
+    @property
+    def capabilities(self) -> dict[str, bool]:
+        return {
+            "model": False,
+            "image_input": False,
+            "tools": False,
+            "approval": False,
+        }
+
+    async def run(self, task: TaskInfo) -> str:
+        logger.warning("[NativeAgentUnavailable] 拒绝执行任务: %s | %s", task.task_id, self.reason)
+        raise NativeAgentError(
+            self.reason,
+            code=self.code,
+            reason=self.reason_code,
+        )
+
+
+class NativeAgentExecutor(ExecutionStrategy):
+    """TaskRunner adapter for the persistent native Agent runtime."""
+
+    def __init__(
+        self,
         chat_session: Optional["ChatSession"] = None,
         persona_prompt_getter: Optional[Callable[[], str]] = None,
         user_address_getter: Optional[Callable[[], str]] = None,
         profile_context_getter: Optional[Callable[[], str]] = None,
+        runtime_service_getter: Optional[Callable[[], Any]] = None,
+        tool_policy_getter: Optional[Callable[[], dict[str, Any]]] = None,
+        workspace_policy_getter: Optional[Callable[[], dict[str, Any]]] = None,
     ) -> None:
-        self._fallback = fallback_to_simulated
-        self._sim = SimulatedExecutor()
         self._chat_session = chat_session
         self._persona_prompt_getter = persona_prompt_getter
         self._user_address_getter = user_address_getter
         self._profile_context_getter = profile_context_getter
+        self._runtime_service_getter = runtime_service_getter
+        self._tool_policy_getter = tool_policy_getter
+        self._workspace_policy_getter = workspace_policy_getter
+
+    @property
+    def capabilities(self) -> dict[str, bool]:
+        return {
+            "model": True,
+            "image_input": True,
+            "tools": True,
+            "approval": True,
+        }
 
     def set_chat_session(self, chat_session: Optional["ChatSession"]) -> None:
-        """更新后续任务使用的聊天会话引用。"""
         self._chat_session = chat_session
 
     def is_available(self) -> bool:
-        """探测 Hermes Agent 是否可用（委托 probe_hermes_available()）"""
-        return probe_hermes_available()
+        return True
+
+    def _runtime_service(self) -> Any:
+        if self._runtime_service_getter is not None:
+            return self._runtime_service_getter()
+        from apps.shell.agent_runtime import get_native_run_engine
+
+        return get_native_run_engine()
 
     async def run(self, task: TaskInfo) -> str:
-        logger.info("[Hermes] 开始执行任务: %s", task.task_id)
+        service = self._runtime_service()
+        chat_session = self._chat_session_for_task(task)
+        run_id = ""
         try:
-            result = await self._call_hermes(task)
-            logger.info("[Hermes] 任务执行完成: %s", task.task_id)
-            return result
-        except HermesCallError as exc:
-            if self._fallback:
-                logger.warning(
-                    "[Hermes] 调用失败，回退 SimulatedExecutor: %s | %s",
-                    task.task_id, exc,
+            run = await asyncio.to_thread(
+                service.start_main_chat_run,
+                task_id=task.task_id,
+                session_id=str(getattr(task, "chat_session_id", "") or ""),
+                user_goal=task.description,
+            )
+            run_id = str(run.get("run_id") or "")
+            image_paths = _task_image_paths(task)
+            messages = self._messages_for_task(task, chat_session, image_paths=image_paths)
+            if image_paths:
+                from apps.shell.native_capabilities import get_native_image_input_capability
+
+                image_capability = get_native_image_input_capability()
+                if not image_capability.get("can_attach_images"):
+                    raise NativeAgentError(
+                        str(image_capability.get("reason") or "Native Agent 图片输入不可用"),
+                        reason="vision_model_profile_required",
+                    )
+                if image_capability.get("route") == "vision_text":
+                    vision_result = await asyncio.to_thread(
+                        service.call_main_chat_model,
+                        run_id,
+                        [
+                            {
+                                "role": "user",
+                                "content": self._task_user_content(
+                                    "请准确分析这些图片，并输出供另一个对话模型继续回答用户请求的详细文字描述。",
+                                    image_paths,
+                                ),
+                            }
+                        ],
+                        profile_id=str(image_capability.get("profile_id") or ""),
+                        capability="vision",
+                    )
+                    messages = self._messages_for_task(task, chat_session, image_paths=[])
+                    messages[-1]["content"] = (
+                        f"{task.description}\n\n[图片识别结果]\n{vision_result}"
+                    )
+            group_coordinator = _is_yachiyo_group_coordinator_task(task.description)
+            delegation_count = 0
+            while True:
+                output = await self._call_main_chat_model_loop(
+                    service,
+                    run_id,
+                    messages,
+                    chat_session,
+                    task,
                 )
-                return await self._sim.run(task)
+                self._update_processing_message(chat_session, task.task_id, output)
+                delegation_directive = None if group_coordinator else _parse_oha_delegation_directive(output)
+                if delegation_directive is None:
+                    await asyncio.to_thread(service.complete_main_chat_run, run_id, output)
+                    _schedule_session_title_refresh(chat_session, assistant_text=output)
+                    return output
+                if delegation_count >= 3:
+                    result = "OHA 自动委派已达到 3 次上限，已停止以避免循环调用。"
+                    self._record_activity(
+                        task,
+                        "OHA 委派已停止",
+                        "单轮自动委派超过 3 次上限",
+                        "failed",
+                    )
+                    await asyncio.to_thread(service.complete_main_chat_run, run_id, result)
+                    return result
+                delegation_count += 1
+                target = delegation_directive.target_label
+                self._record_activity(
+                    task,
+                    f"正在委派给 {target}",
+                    delegation_directive.goal,
+                    "running",
+                )
+                try:
+                    delegated = await asyncio.to_thread(_run_oha_delegation, delegation_directive, service)
+                    delegated_text = _format_oha_delegation_result(delegated)
+                    self._record_activity(
+                        task,
+                        _oha_delegation_activity_title(target, delegated),
+                        delegated_text[:500],
+                        _oha_delegation_activity_status(delegated),
+                        metadata={
+                            "run_id": delegated.get("run_id", ""),
+                            "run_group_id": delegated.get("run_group_id", ""),
+                            "run_status": delegated.get("status", ""),
+                            "pending_approval": delegated.get("pending_approval", {}),
+                        },
+                    )
+                except Exception as exc:
+                    safe_error = redact_api_error_text(exc)
+                    delegated_text = f"OHA delegation failed: {safe_error}"
+                    self._record_activity(task, f"{target} 委派失败", safe_error, "failed")
+                messages.append({"role": "assistant", "content": output})
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": _build_oha_delegation_followup(
+                            task.description,
+                            output,
+                            delegated_text,
+                        ),
+                    }
+                )
+        except asyncio.CancelledError:
+            if run_id:
+                try:
+                    service.cancel_run(run_id)
+                except Exception:
+                    logger.debug("取消 Native Run 失败: %s", run_id, exc_info=True)
             raise
+        except Exception as exc:
+            skip_run_failure = False
+            if isinstance(exc, NativeAgentError) and exc.reason == "approval_timeout" and run_id:
+                try:
+                    current_run = await asyncio.to_thread(service.get_run, run_id)
+                    skip_run_failure = str(current_run.get("status") or "") in {
+                        "cancelled",
+                        "failed",
+                        "completed",
+                    }
+                except Exception:
+                    logger.debug("检查 Native Run 超时终态失败: %s", run_id, exc_info=True)
+            if run_id and not skip_run_failure:
+                try:
+                    await asyncio.to_thread(service.fail_main_chat_run, run_id, exc)
+                except Exception:
+                    logger.debug("记录 Native Run 失败状态失败: %s", run_id, exc_info=True)
+            if isinstance(exc, NativeAgentError):
+                raise
+            raise NativeAgentError(redact_api_error_text(exc)) from exc
 
-    async def _call_hermes(self, task: TaskInfo) -> str:
-        """调用 invoke_hermes_cli()，将 HermesInvokeResult 映射为结果字符串或异常。
-
-        成功 → 返回 result.output + 记录 hermes_session_id
-        失败 → 抛出 HermesCallError
-        """
-        # 获取当前 hermes session id 用于 --resume
-        persona_prompt = ""
-        if self._persona_prompt_getter is not None:
-            try:
-                persona_prompt = self._persona_prompt_getter()
-            except Exception:
-                logger.debug("读取助手人设 Prompt 失败", exc_info=True)
-        user_address = ""
-        if self._user_address_getter is not None:
-            try:
-                user_address = self._user_address_getter()
-            except Exception:
-                logger.debug("读取用户称呼失败", exc_info=True)
-        profile_context = ""
-        if self._profile_context_getter is not None:
-            try:
-                profile_context = self._profile_context_getter()
-            except Exception:
-                logger.debug("读取助手/用户资料失败", exc_info=True)
-        group_coordinator = _is_yachiyo_group_coordinator_task(task.description)
-        profile_context = _append_yachiyo_delegation_context(
+    def _messages_for_task(
+        self,
+        task: TaskInfo,
+        chat_session: Optional["ChatSession"],
+        *,
+        image_paths: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        persona_prompt = self._safe_get(self._persona_prompt_getter)
+        user_address = self._safe_get(self._user_address_getter)
+        profile_context = self._safe_get(self._profile_context_getter)
+        profile_context = _append_oha_delegation_context(
             profile_context,
-            group_coordinator=group_coordinator,
+            group_coordinator=_is_yachiyo_group_coordinator_task(task.description),
         )
-        description = format_persona_description(
-            task.description,
+        system_prompt = format_persona_description(
+            "请直接处理当前用户请求，并返回适合展示给用户的最终回复。",
             persona_prompt,
             user_address,
             format_environment_context(),
             profile_context,
         )
-        chat_session = self._chat_session_for_task(task)
-        hermes_sid = None
+        messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
+        history_chars = 0
         if chat_session is not None:
-            hermes_sid = chat_session.hermes_session_id
-        image_paths = _task_image_paths(task)
+            history: list[dict[str, str]] = []
+            for message in reversed(chat_session.get_all_messages()):
+                if str(getattr(message, "task_id", "") or "") == task.task_id:
+                    continue
+                role = str(getattr(getattr(message, "role", ""), "value", getattr(message, "role", "")))
+                content = str(getattr(message, "content", "") or "").strip()
+                if role not in {"user", "assistant"} or not content:
+                    continue
+                if history_chars + len(content) > _MAIN_CHAT_HISTORY_CHAR_LIMIT:
+                    break
+                history.append({"role": role, "content": content})
+                history_chars += len(content)
+                if len(history) >= _MAIN_CHAT_HISTORY_MESSAGE_LIMIT:
+                    break
+            messages.extend(reversed(history))
+        messages.append(
+            {
+                "role": "user",
+                "content": self._task_user_content(
+                    task.description,
+                    _task_image_paths(task) if image_paths is None else image_paths,
+                ),
+            }
+        )
+        return messages
 
-        def on_update(content: str) -> None:
-            if chat_session is None:
-                return
+    @staticmethod
+    def _safe_get(getter: Optional[Callable[[], str]]) -> str:
+        if getter is None:
+            return ""
+        try:
+            return str(getter() or "")
+        except Exception:
+            logger.debug("读取 Native Agent 上下文失败", exc_info=True)
+            return ""
+
+    async def _call_main_chat_model_loop(
+        self,
+        service: Any,
+        run_id: str,
+        messages: list[dict[str, Any]],
+        chat_session: Optional["ChatSession"],
+        task: TaskInfo,
+    ) -> str:
+        execute_loop = getattr(service, "execute_main_chat_model_loop", None)
+        if not callable(execute_loop):
+            return await asyncio.to_thread(service.call_main_chat_model, run_id, messages)
+        kwargs = self._main_chat_runtime_policy_kwargs()
+        run = await asyncio.to_thread(execute_loop, run_id, messages, **kwargs)
+        status = str(run.get("status") or "").strip()
+        result = str(run.get("result") or "").strip()
+        if status == "approval_required":
+            self._update_processing_message(
+                chat_session,
+                task.task_id,
+                self._approval_required_content(run),
+            )
+            return await self._wait_for_main_chat_run_output(
+                service,
+                run_id,
+                chat_session,
+                task,
+                previous_result=result,
+            )
+        if status in {"failed", "cancelled"}:
+            raise NativeAgentError(
+                result or f"Native Run {status}",
+                reason=status,
+            )
+        if result:
+            return result
+        return await asyncio.to_thread(service.call_main_chat_model, run_id, messages)
+
+    def _main_chat_runtime_policy_kwargs(self) -> dict[str, dict[str, Any]]:
+        kwargs: dict[str, dict[str, Any]] = {}
+        tool_policy = self._safe_policy_get(self._tool_policy_getter)
+        if tool_policy is not None:
+            kwargs["tool_policy"] = tool_policy
+        workspace_policy = self._safe_policy_get(self._workspace_policy_getter)
+        if workspace_policy is not None:
+            kwargs["workspace_policy"] = workspace_policy
+        return kwargs
+
+    @staticmethod
+    def _safe_policy_get(getter: Optional[Callable[[], dict[str, Any]]]) -> dict[str, Any] | None:
+        if getter is None:
+            return None
+        try:
+            value = getter()
+        except Exception:
+            logger.debug("读取 Native Agent runtime policy 失败", exc_info=True)
+            return None
+        return dict(value) if isinstance(value, dict) else None
+
+    async def _wait_for_main_chat_run_output(
+        self,
+        service: Any,
+        run_id: str,
+        chat_session: Optional["ChatSession"],
+        task: TaskInfo,
+        *,
+        previous_result: str = "",
+    ) -> str:
+        timeout_seconds = self._approval_wait_timeout_seconds()
+        deadline = time.monotonic() + timeout_seconds
+        last_status = ""
+        while time.monotonic() < deadline:
+            run = await asyncio.to_thread(service.get_run, run_id)
+            status = str(run.get("status") or "").strip()
+            result = str(run.get("result") or "").strip()
+            if status != last_status:
+                last_status = status
+                if status == "approval_required":
+                    self._update_processing_message(
+                        chat_session,
+                        task.task_id,
+                        self._approval_required_content(run),
+                    )
+            if status == "approval_required":
+                await asyncio.sleep(0.5)
+                continue
+            if status in {"failed", "cancelled"}:
+                raise NativeAgentError(result or f"Native Run {status}", reason=status)
+            if status in {"running", "processing"} and result and result != previous_result and not result.startswith("已批准，"):
+                return result
+            if status == "completed" and result:
+                return result
+            await asyncio.sleep(0.5)
+        try:
+            timeout_approval = getattr(service, "timeout_run_approval", None)
+            if callable(timeout_approval):
+                await asyncio.to_thread(timeout_approval, run_id, reason="approval_wait_timeout")
+            else:
+                await asyncio.to_thread(service.cancel_run, run_id)
+        except Exception:
+            logger.debug("Native Run 审批等待超时后取消失败: %s", run_id, exc_info=True)
+        raise NativeAgentError("Native Agent 等待工具审批超时", reason="approval_timeout")
+
+    @staticmethod
+    def _approval_wait_timeout_seconds() -> float:
+        raw = os.getenv("OHA_YACHIYO_MAIN_CHAT_APPROVAL_TIMEOUT_SECONDS", "").strip()
+        if not raw:
+            return 600.0
+        try:
+            value = float(raw)
+        except ValueError:
+            return 600.0
+        return max(1.0, value)
+
+    @staticmethod
+    def _approval_required_content(run: dict[str, Any]) -> str:
+        pending = run.get("pending_approval") if isinstance(run.get("pending_approval"), dict) else {}
+        tool = str(pending.get("tool") or "tool").strip()
+        lines = [f"等待审批：{tool}"]
+        preview = pending.get("input_preview")
+        if preview:
+            try:
+                preview_text = json.dumps(preview, ensure_ascii=False, indent=2)
+            except TypeError:
+                preview_text = str(preview)
+            lines.append(preview_text[:2000])
+        return "\n".join(lines).strip()
+
+    @staticmethod
+    def _task_user_content(description: str, image_paths: list[str]) -> Any:
+        if not image_paths:
+            return description
+        content: list[dict[str, Any]] = [{"type": "text", "text": description}]
+        for raw_path in image_paths[:_MAIN_CHAT_IMAGE_ATTACHMENT_LIMIT]:
+            path = Path(raw_path)
+            try:
+                data = path.read_bytes()
+            except OSError:
+                logger.debug("Native Agent 无法读取图片附件: %s", path, exc_info=True)
+                continue
+            if len(data) > _MAIN_CHAT_IMAGE_MAX_BYTES:
+                logger.warning("Native Agent 跳过过大图片附件: %s", path)
+                continue
+            mime = mimetypes.guess_type(path.name)[0] or "image/png"
+            encoded = base64.b64encode(data).decode("ascii")
+            content.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{mime};base64,{encoded}"},
+                }
+            )
+        return content
+
+    @staticmethod
+    def _update_processing_message(
+        chat_session: Optional["ChatSession"],
+        task_id: str,
+        content: str,
+    ) -> None:
+        if chat_session is None:
+            return
+        try:
             from apps.core.chat_session import MessageStatus
 
             chat_session.upsert_assistant_message(
-                task_id=task.task_id,
+                task_id=task_id,
                 content=content,
                 status=MessageStatus.PROCESSING,
             )
+        except Exception:
+            logger.debug("Native Agent processing 消息更新失败", exc_info=True)
 
-        def on_activity(event: dict[str, Any]) -> None:
-            session_id = str(
-                getattr(task, "chat_session_id", "")
-                or getattr(chat_session, "session_id", "")
-                or ""
+    @staticmethod
+    def _record_activity(
+        task: TaskInfo,
+        title: str,
+        detail: str,
+        status: str,
+        *,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        try:
+            from apps.core.activity_store import get_activity_store
+
+            get_activity_store().record_event(
+                session_id=str(getattr(task, "chat_session_id", "") or ""),
+                task_id=task.task_id,
+                tool_name="oha.delegation",
+                phase="subagent",
+                title=title,
+                detail=detail,
+                status=status,
+                metadata=metadata or {},
             )
-            activity_payload = {
-                "session_id": session_id,
-                "task_id": task.task_id,
-                "tool_name": str(event.get("tool_name") or ""),
-                "phase": str(event.get("phase") or "activity"),
-                "title": str(event.get("title") or "Hermes 正在处理"),
-                "detail": str(event.get("detail") or ""),
-                "status": str(event.get("status") or "running"),
-                "duration_seconds": event.get("duration_seconds"),
-                "metadata": event.get("metadata")
-                if isinstance(event.get("metadata"), dict)
-                else {},
-            }
-            label = activity_payload["title"] or activity_payload["detail"]
-            try:
-                from apps.core.activity_store import get_activity_store
-
-                stored = get_activity_store().record_event(**activity_payload)
-                if _is_key_activity_event(activity_payload):
-                    label = stored.title or stored.detail
-            except Exception:
-                logger.debug("Hermes 活动事件持久化失败", exc_info=True)
-            if label:
-                task.progress_label = label
-                task.progress_updated_at = datetime.now(timezone.utc)
-                task.updated_at = task.progress_updated_at
-            if chat_session is not None:
-                try:
-                    from apps.core.chat_session import MessageStatus
-
-                    assistant = chat_session.get_assistant_message_for_task(task.task_id)
-                    chat_session.upsert_assistant_message(
-                        task_id=task.task_id,
-                        content=assistant.content if assistant is not None else "",
-                        status=MessageStatus.PROCESSING,
-                        error=assistant.error if assistant is not None else None,
-                        attachments=assistant.attachments if assistant is not None else None,
-                    )
-                except Exception:
-                    logger.debug("Hermes 活动占位消息更新失败", exc_info=True)
-
-        max_delegations = 3
-        delegation_count = 0
-        current_description = description
-        while True:
-            started_at = time.monotonic()
-            invoke_result = await invoke_hermes_cli(
-                current_description,
-                hermes_session_id=hermes_sid,
-                on_update=on_update if chat_session is not None else None,
-                on_activity=on_activity,
-                image_paths=image_paths,
-            )
-            elapsed = time.monotonic() - started_at
-
-            if invoke_result.success:
-                logger.debug(
-                    "[Hermes] 调用成功: returncode=%d, elapsed=%.2fs, stdout_len=%d, session=%s",
-                    invoke_result.returncode,
-                    elapsed,
-                    len(invoke_result.stdout),
-                    invoke_result.hermes_session_id,
-                )
-                if invoke_result.hermes_session_id:
-                    hermes_sid = invoke_result.hermes_session_id
-                    if chat_session is not None:
-                        chat_session.set_hermes_session_id(invoke_result.hermes_session_id)
-                output = invoke_result.output
-                delegation_request = None if group_coordinator else _parse_yachiyo_delegation_request(output)
-                if delegation_request:
-                    if delegation_count >= max_delegations:
-                        on_activity(
-                            {
-                                "phase": "subagent",
-                                "title": "Yachiyo 委派已停止",
-                                "detail": "单轮自动委派超过 3 次上限",
-                                "status": "failed",
-                                "tool_name": "yachiyo.delegation",
-                            }
-                        )
-                        return "Yachiyo 自动委派已达到 3 次上限，已停止以避免循环调用。"
-                    delegation_count += 1
-                    target = delegation_request.get("name") or delegation_request.get("runnable_id") or "Yachiyo Agent"
-                    on_activity(
-                        {
-                            "phase": "subagent",
-                            "title": f"正在委派给 {target}",
-                            "detail": delegation_request.get("goal", ""),
-                            "status": "running",
-                            "tool_name": "yachiyo.delegation",
-                        }
-                    )
-                    try:
-                        delegation_result = _run_yachiyo_delegation(delegation_request)
-                    except Exception as exc:
-                        delegation_text = f"Yachiyo delegation failed: {exc}"
-                        on_activity(
-                            {
-                                "phase": "subagent",
-                                "title": f"{target} 委派失败",
-                                "detail": str(exc),
-                                "status": "failed",
-                                "tool_name": "yachiyo.delegation",
-                            }
-                        )
-                    else:
-                        delegation_text = _format_yachiyo_delegation_result(delegation_result)
-                        activity_status = _yachiyo_delegation_activity_status(delegation_result)
-                        on_activity(
-                            {
-                                "phase": "subagent",
-                                "title": _yachiyo_delegation_activity_title(target, delegation_result),
-                                "detail": delegation_text[:500],
-                                "status": activity_status,
-                                "tool_name": "yachiyo.delegation",
-                                "metadata": {
-                                    "run_id": delegation_result.get("run_id", ""),
-                                    "run_group_id": delegation_result.get("run_group_id", ""),
-                                    "run_status": delegation_result.get("status", ""),
-                                    "pending_approval": delegation_result.get("pending_approval", {}),
-                                },
-                            }
-                        )
-                    current_description = _build_yachiyo_delegation_followup(
-                        description,
-                        output,
-                        delegation_text,
-                    )
-                    continue
-                _schedule_session_title_refresh(
-                    chat_session,
-                    assistant_text=output,
-                )
-                return output
-
-            # 失败：结构化日志 + 结构化异常
-            logger.warning(
-                "[Hermes] 调用失败: returncode=%d, elapsed=%.2fs | %s",
-                invoke_result.returncode,
-                elapsed,
-                invoke_result.error_message,
-            )
-            raise HermesCallError(
-                invoke_result.error_message,
-                returncode=invoke_result.returncode,
-                stderr=invoke_result.stderr,
-            )
+        except Exception:
+            logger.debug("Native Agent 委派活动写入失败", exc_info=True)
 
     def _chat_session_for_task(self, task: TaskInfo) -> Optional["ChatSession"]:
         session_id = str(getattr(task, "chat_session_id", "") or "")
@@ -2193,7 +1393,7 @@ class HermesExecutor(ExecutionStrategy):
             )
             return session
         except Exception:
-            logger.debug("无法为任务加载指定聊天会话: %s", session_id, exc_info=True)
+            logger.debug("无法为 Native Agent 任务加载聊天会话: %s", session_id, exc_info=True)
             return current
 
 
@@ -2217,48 +1417,71 @@ def _is_key_activity_event(event: dict[str, Any]) -> bool:
 
 # ── 执行器选择工厂 ────────────────────────────────────────────────────────────
 
-def select_executor(runtime: "HermesRuntime | None" = None) -> ExecutionStrategy:
-    """根据运行时状态选择最优执行器
+def select_executor(runtime: "AppRuntime | None" = None) -> ExecutionStrategy:
+    """Select the native TaskRunner adapter."""
+    try:
+        if runtime is not None and hasattr(runtime, "native_agent_readiness"):
+            readiness = runtime.native_agent_readiness()
+        else:
+            from apps.shell.agent_runtime import get_native_agent_readiness
 
-    1. runtime 已就绪 且 probe_hermes_available() → HermesExecutor（附带 ChatSession）
-    2. 其他 → HermesUnavailableExecutor（用户可见失败，不模拟成功）
-    """
-    if runtime is not None and runtime.is_hermes_ready():
-        if probe_hermes_available():
-            logger.info("select_executor: 选用 HermesExecutor（hermes chat -q）")
-            return HermesExecutor(
-                chat_session=runtime.chat_session,
-                persona_prompt_getter=lambda: runtime.config.assistant.persona_prompt,
-                user_address_getter=lambda: runtime.config.assistant.user_address,
-                profile_context_getter=lambda: build_runtime_profile_context(runtime),
-            )
-        logger.info(
-            "select_executor: Hermes 报告就绪但命令不可用，使用 HermesUnavailableExecutor"
+            readiness = get_native_agent_readiness()
+    except Exception as exc:
+        logger.warning("select_executor: Native Agent readiness 检查失败: %s", exc)
+        readiness = {
+            "ready": False,
+            "reason": "model_profile_unavailable",
+            "message": redact_api_error_text(exc),
+        }
+
+    if readiness.get("ready"):
+        logger.info("select_executor: 选用 NativeAgentExecutor")
+        return NativeAgentExecutor(
+            chat_session=getattr(runtime, "chat_session", None),
+            persona_prompt_getter=(
+                (lambda: runtime.config.assistant.persona_prompt)
+                if runtime is not None and hasattr(runtime, "config")
+                else None
+            ),
+            user_address_getter=(
+                (lambda: runtime.config.assistant.user_address)
+                if runtime is not None and hasattr(runtime, "config")
+                else None
+            ),
+            profile_context_getter=(
+                (lambda: build_runtime_profile_context(runtime))
+                if runtime is not None and hasattr(runtime, "config")
+                else None
+            ),
+            tool_policy_getter=(
+                (lambda: runtime.main_chat_tool_policy())
+                if runtime is not None and hasattr(runtime, "main_chat_tool_policy")
+                else None
+            ),
+            workspace_policy_getter=(
+                (lambda: runtime.main_chat_workspace_policy())
+                if runtime is not None and hasattr(runtime, "main_chat_workspace_policy")
+                else None
+            ),
         )
-        return HermesUnavailableExecutor(
-            "Hermes Agent 报告就绪，但 hermes 命令当前不可用。请重新检测或重启应用后再试。"
-        )
-    else:
-        logger.info("select_executor: Hermes 未就绪，使用 HermesUnavailableExecutor")
 
-    return HermesUnavailableExecutor(describe_hermes_unavailable(runtime))
+    return NativeAgentUnavailableExecutor(
+        str(readiness.get("message") or NATIVE_AGENT_NOT_READY_MESSAGE),
+        reason=str(readiness.get("reason") or "model_profile_required"),
+    )
 
 
-def describe_hermes_unavailable(runtime: "HermesRuntime | None" = None) -> str:
-    """返回适合展示给用户的 Hermes 不可用原因。"""
-    if runtime is None:
-        return HERMES_UNAVAILABLE_MESSAGE
-
-    install_info = getattr(runtime, "hermes_install_info", None)
-    error_message = str(getattr(install_info, "error_message", "") or "").strip()
-    if error_message:
-        return f"Hermes Agent 当前不可用：{error_message}。请在设置中完成配置或重新检测后再试。"
-
-    status = str(getattr(install_info, "status", "") or "").strip()
-    if status:
-        return f"Hermes Agent 当前不可用（状态：{status}）。请在设置中完成配置或重新检测后再试。"
-
-    return HERMES_UNAVAILABLE_MESSAGE
+def describe_native_agent_unavailable(runtime: "AppRuntime | None" = None) -> str:
+    """返回适合展示给用户的 Native Agent 未就绪原因。"""
+    if runtime is not None and hasattr(runtime, "native_agent_readiness"):
+        try:
+            readiness = runtime.native_agent_readiness()
+            message = str(readiness.get("message") or "").strip()
+            if message:
+                return message
+        except Exception:
+            logger.debug("读取 Native Agent readiness 失败", exc_info=True)
+    return NATIVE_AGENT_NOT_READY_MESSAGE
 
 
 def user_task_unavailable_reason(runtime: Any) -> str | None:
@@ -2267,10 +1490,22 @@ def user_task_unavailable_reason(runtime: Any) -> str | None:
         return None
     runner = getattr(runtime, "task_runner", None)
     executor = getattr(runner, "executor", None)
-    if getattr(executor, "name", "") == "HermesExecutor":
+    if execution_capabilities(executor).get("model"):
         return None
-
     reason = str(getattr(executor, "reason", "") or "").strip()
     if reason:
         return reason
-    return describe_hermes_unavailable(runtime)
+    return NATIVE_AGENT_NOT_READY_MESSAGE
+
+
+def user_task_unavailable_payload(runtime: Any) -> dict[str, str] | None:
+    reason = user_task_unavailable_reason(runtime)
+    if reason is None:
+        return None
+    runner = getattr(runtime, "task_runner", None)
+    executor = getattr(runner, "executor", None)
+    return {
+        "code": str(getattr(executor, "code", "") or "native_agent_not_ready"),
+        "reason": str(getattr(executor, "reason_code", "") or "model_profile_required"),
+        "error": reason,
+    }

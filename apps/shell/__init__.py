@@ -1,1 +1,1 @@
-"""Hermes-Yachiyo App Shell — 桌面应用壳"""
+"""Oha-Yachiyo App Shell — 桌面应用壳"""

@@ -7,7 +7,6 @@ TaskRunner 只负责：
   - 将具体"如何执行"委托给 ExecutionStrategy
 
 默认使用 SimulatedExecutor（MVP 占位）。
-切换到真实 Hermes 只需在 __init__ 传入 HermesExecutor()。
 不直接暴露 HTTP，不依赖 Bridge 层。
 """
 
@@ -34,7 +33,6 @@ class TaskRunner:
     Args:
         state:    AppState 实例（由 Core Runtime 持有）
         executor: 执行策略，默认 SimulatedExecutor。
-                  传入 HermesExecutor() 即可切换到真实 Hermes 执行。
     """
 
     def __init__(
@@ -149,7 +147,7 @@ class TaskRunner:
             self._record_task_activity(task_id, "task_start", "Yachiyo 开始处理", "running")
             logger.info("任务开始执行: %s [%s]", task_id, type(self._executor).__name__)
 
-            # ② 委托给执行策略（模拟 or Hermes）
+            # ② 委托给执行策略（模拟 or Native Agent）
             result = await self._executor.run(task)
 
             # ③ 标记 COMPLETED
@@ -172,17 +170,12 @@ class TaskRunner:
             logger.debug("任务状态跳过 (%s): %s", task_id, exc)
 
         except Exception as exc:
-            # 若是 HermesCallError，使用结构化错误字符串，且不输出应用 traceback。
-            # Hermes 退出码错误属于外部 agent 调用失败，不是 TaskRunner 自身崩溃。
-            try:
-                from apps.core.executor import HermesCallError
-                if isinstance(exc, HermesCallError):
-                    error_str = exc.to_error_string()
-                    logger.warning("任务执行失败: %s | %s", task_id, error_str)
-                else:
-                    error_str = f"{type(exc).__name__}: {exc}"
-                    logger.exception("任务执行失败: %s", task_id)
-            except ImportError:
+            # Agent adapters may expose a concise user-safe error formatter.
+            formatter = getattr(exc, "to_error_string", None)
+            if callable(formatter):
+                error_str = str(formatter())
+                logger.warning("任务执行失败: %s | %s", task_id, error_str)
+            else:
                 error_str = f"{type(exc).__name__}: {exc}"
                 logger.exception("任务执行失败: %s", task_id)
             try:
@@ -260,7 +253,7 @@ class TaskRunner:
             get_activity_store().record_event(
                 session_id=str(getattr(task, "chat_session_id", "") or ""),
                 task_id=task_id,
-                tool_name="hermes",
+                tool_name="native_agent",
                 phase=phase,
                 title=title,
                 detail=str(getattr(task, "description", "") or ""),

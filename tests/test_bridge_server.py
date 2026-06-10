@@ -1,17 +1,64 @@
 """Bridge Server 测试。"""
 
+import asyncio
+import importlib.util
+import inspect
 import json
+import re
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+import apps.locald.screenshot as screenshot_mod
+from apps.bridge.routes import agents as agent_routes
 from apps.bridge.routes import live2d as live2d_route
+from apps.bridge.routes import model_profiles as model_profile_routes
+from apps.bridge.routes import ui as ui_routes
 from apps.bridge.server import (
     _bridge_access_log_enabled,
     app,
+    bridge_request_violation,
+    debug_routes_enabled,
     get_live2d_asset_token,
     regenerate_live2d_asset_token,
 )
+from apps.shell.agent_runtime import AgentRuntimeService
+from apps.shell.credential_store import MemoryCredentialStore
+
+
+def _load_status_route_module():
+    path = Path(__file__).resolve().parents[1] / "apps" / "bridge" / "routes" / "status.py"
+    spec = importlib.util.spec_from_file_location("_oha_status_route_under_test", path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _module_matches_prefix(name: str, prefixes: tuple[str, ...]) -> bool:
+    return any(name == prefix or name.startswith(f"{prefix}.") for prefix in prefixes)
+
+
+def _unload_module_prefixes(prefixes: tuple[str, ...]) -> dict[str, object]:
+    saved = {
+        name: module
+        for name, module in list(sys.modules.items())
+        if _module_matches_prefix(name, prefixes)
+    }
+    for name in list(sys.modules):
+        if _module_matches_prefix(name, prefixes):
+            sys.modules.pop(name, None)
+    return saved
+
+
+def _restore_module_prefixes(prefixes: tuple[str, ...], saved: dict[str, object]) -> None:
+    for name in list(sys.modules):
+        if _module_matches_prefix(name, prefixes):
+            sys.modules.pop(name, None)
+    sys.modules.update(saved)
 
 
 def test_bridge_app_enables_local_webview_cors():
@@ -28,6 +75,438 @@ def test_bridge_app_enables_local_webview_cors():
     assert cors_entry.options["allow_headers"] == ["*"]
 
 
+def test_bridge_registers_redacting_http_exception_handler():
+    try:
+        from fastapi import HTTPException
+    except ModuleNotFoundError:
+        pytest.skip("FastAPI is not installed")
+
+    handlers = getattr(app, "exception_handlers", None)
+    if handlers is None:
+        pytest.skip("FastAPI test double does not expose exception handler registry")
+
+    assert HTTPException in handlers
+
+
+def test_bridge_bad_request_helpers_redact_secret_details():
+    secret_error = RuntimeError("provider failed api_key=sk-route-secret123456")
+
+    agent_exc = agent_routes._bad_request(secret_error)
+    model_exc = model_profile_routes._bad_request(secret_error)
+
+    assert "sk-route-secret123456" not in agent_exc.detail
+    assert "api_key=[redacted]" in agent_exc.detail
+    assert "sk-route-secret123456" not in model_exc.detail
+    assert "api_key=[redacted]" in model_exc.detail
+
+
+def test_run_events_http_route_paginates_and_hides_non_user_events(tmp_path, monkeypatch):
+    saved_modules = _unload_module_prefixes(("fastapi",))
+    try:
+        try:
+            from fastapi import FastAPI
+            from fastapi.testclient import TestClient
+        except ModuleNotFoundError as exc:
+            pytest.skip(f"FastAPI/TestClient dependency is not installed: {exc.name}")
+
+        route_path = Path(__file__).resolve().parents[1] / "apps" / "bridge" / "routes" / "runs.py"
+        spec = importlib.util.spec_from_file_location("_oha_runs_route_http_under_test", route_path)
+        assert spec is not None
+        assert spec.loader is not None
+        run_route_module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = run_route_module
+        spec.loader.exec_module(run_route_module)
+
+        service = AgentRuntimeService(
+            db_path=tmp_path / "agent-runtime.db",
+            workspace_dir=tmp_path / "runtime",
+            credential_store=MemoryCredentialStore(),
+            seed_templates=False,
+        )
+        monkeypatch.setattr(run_route_module, "get_native_run_engine", lambda: service)
+        route_app = FastAPI()
+        route_app.include_router(run_route_module.router)
+        try:
+            run = service._insert_run(kind="main_chat_run", runnable_id="builtin:yachiyo-main", user_goal="http replay")
+            service.append_run_event(run["run_id"], "public.one", {"value": "one"})
+            service.append_run_event(run["run_id"], "internal.hidden", {"value": "two"}, visibility="internal")
+            service.append_run_event(
+                run["run_id"],
+                "secret.hidden",
+                {"value": "sk-route-secret123456"},
+                sensitivity="secret",
+            )
+            service.append_run_event(run["run_id"], "public.two", {"value": "three"})
+
+            with TestClient(route_app) as client:
+                page = client.get(f"/runs/{run['run_id']}/events?after_sequence=1&limit=1")
+                clamped = client.get(f"/runs/{run['run_id']}/events?after_sequence=-10&limit=5000")
+
+            assert page.status_code == 200
+            assert page.json()["limit"] == 1
+            assert [event["event_type"] for event in page.json()["events"]] == ["public.two"]
+            assert clamped.status_code == 200
+            assert clamped.json()["after_sequence"] == 0
+            assert clamped.json()["limit"] == 1000
+            assert [event["event_type"] for event in clamped.json()["events"]] == ["public.one", "public.two"]
+            assert "sk-route-secret123456" not in json.dumps(clamped.json(), ensure_ascii=False)
+        finally:
+            service.close()
+    finally:
+        sys.modules.pop("_oha_runs_route_http_under_test", None)
+        _restore_module_prefixes(("fastapi",), saved_modules)
+
+
+def test_post_runs_http_route_maps_idempotency_key(monkeypatch):
+    saved_modules = _unload_module_prefixes(("fastapi",))
+    try:
+        try:
+            from fastapi import FastAPI
+            from fastapi.testclient import TestClient
+        except ModuleNotFoundError as exc:
+            pytest.skip(f"FastAPI/TestClient dependency is not installed: {exc.name}")
+
+        route_path = Path(__file__).resolve().parents[1] / "apps" / "bridge" / "routes" / "runs.py"
+        spec = importlib.util.spec_from_file_location("_oha_runs_create_route_http_under_test", route_path)
+        assert spec is not None
+        assert spec.loader is not None
+        run_route_module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = run_route_module
+        spec.loader.exec_module(run_route_module)
+
+        recorded: dict[str, str] = {}
+
+        class FakeRunEngine:
+            def create_run_for_runnable(self, **kwargs):
+                recorded.update({key: str(value) for key, value in kwargs.items()})
+                return {
+                    "ok": True,
+                    "run_id": "run_post_runs_http",
+                    "client_request_id": kwargs.get("client_run_id") or kwargs.get("client_request_id") or "",
+                }
+
+        monkeypatch.setattr(run_route_module, "get_native_run_engine", lambda: FakeRunEngine())
+        route_app = FastAPI()
+        route_app.include_router(run_route_module.router)
+
+        with TestClient(route_app) as client:
+            response = client.post(
+                "/runs",
+                json={"runnable_id": "agent_coding", "user_goal": "Run from HTTP"},
+                headers={"Idempotency-Key": "post-runs-http-client-1"},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["run_id"] == "run_post_runs_http"
+        assert response.json()["client_request_id"] == "post-runs-http-client-1"
+        assert recorded["runnable_id"] == "agent_coding"
+        assert recorded["user_goal"] == "Run from HTTP"
+        assert recorded["client_run_id"] == "post-runs-http-client-1"
+    finally:
+        sys.modules.pop("_oha_runs_create_route_http_under_test", None)
+        _restore_module_prefixes(("fastapi",), saved_modules)
+
+
+def test_screen_current_http_route_returns_structured_permission_error(monkeypatch):
+    saved_modules = _unload_module_prefixes(("fastapi",))
+    try:
+        try:
+            from fastapi import FastAPI
+            from fastapi.testclient import TestClient
+        except ModuleNotFoundError as exc:
+            pytest.skip(f"FastAPI/TestClient dependency is not installed: {exc.name}")
+
+        route_path = Path(__file__).resolve().parents[1] / "apps" / "bridge" / "routes" / "screen.py"
+        spec = importlib.util.spec_from_file_location("_oha_screen_route_http_under_test", route_path)
+        assert spec is not None
+        assert spec.loader is not None
+        screen_route_module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = screen_route_module
+        spec.loader.exec_module(screen_route_module)
+
+        async def fake_capture():
+            raise screenshot_mod.ScreenCapturePermissionError("没有屏幕录制权限，请授权")
+
+        monkeypatch.setattr(screenshot_mod, "capture_screenshot", fake_capture)
+        route_app = FastAPI()
+        route_app.include_router(screen_route_module.router)
+
+        with TestClient(route_app) as client:
+            response = client.get("/screen/current")
+
+        assert response.status_code == 403
+        detail = response.json()["detail"]
+        assert detail["error"] == "screen_capture_permission_denied"
+        assert detail["message"].startswith("屏幕录制权限不足")
+        assert "授权" in detail["detail"]
+    finally:
+        sys.modules.pop("_oha_screen_route_http_under_test", None)
+        _restore_module_prefixes(("fastapi",), saved_modules)
+
+
+def test_bridge_http_middleware_enforces_host_origin_and_session_token(monkeypatch):
+    saved_modules = _unload_module_prefixes(("fastapi", "uvicorn"))
+    monkeypatch.setenv("OHA_YACHIYO_BRIDGE_TOKEN", "token-123")
+    try:
+        try:
+            from fastapi.testclient import TestClient
+        except ModuleNotFoundError as exc:
+            pytest.skip(f"FastAPI/TestClient dependency is not installed: {exc.name}")
+
+        server_path = Path(__file__).resolve().parents[1] / "apps" / "bridge" / "server.py"
+        spec = importlib.util.spec_from_file_location("_oha_bridge_server_http_under_test", server_path)
+        assert spec is not None
+        assert spec.loader is not None
+        bridge_server = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = bridge_server
+        spec.loader.exec_module(bridge_server)
+
+        @bridge_server.app.get("/probe")
+        async def get_probe():
+            return {"ok": True}
+
+        @bridge_server.app.post("/probe")
+        async def post_probe():
+            return {"ok": True}
+
+        trusted_headers = {"host": "127.0.0.1:8420", "origin": "http://localhost:5174"}
+        token_headers = {**trusted_headers, "X-Oha-Yachiyo-Bridge-Token": "token-123"}
+        with TestClient(bridge_server.app) as client:
+            get_response = client.get("/probe", headers=trusted_headers)
+            bad_host_response = client.get(
+                "/probe",
+                headers={"host": "0.0.0.0:8420", "origin": "http://localhost:5174"},
+            )
+            bad_origin_response = client.get(
+                "/probe",
+                headers={"host": "127.0.0.1:8420", "origin": "https://evil.example"},
+            )
+            blocked_response = client.post("/probe", headers=trusted_headers)
+            allowed_response = client.post("/probe", headers=token_headers)
+
+        assert get_response.status_code == 200
+        assert get_response.json() == {"ok": True}
+        assert get_response.headers["access-control-allow-origin"] == "http://localhost:5174"
+        assert bad_host_response.status_code == 403
+        assert bad_host_response.json() == {"ok": False, "error": "untrusted_host"}
+        assert bad_origin_response.status_code == 403
+        assert bad_origin_response.json() == {"ok": False, "error": "untrusted_origin"}
+        assert blocked_response.status_code == 403
+        assert blocked_response.json() == {"ok": False, "error": "invalid_bridge_token"}
+        assert allowed_response.status_code == 200
+        assert allowed_response.json() == {"ok": True}
+    finally:
+        sys.modules.pop("_oha_bridge_server_http_under_test", None)
+        _restore_module_prefixes(("fastapi", "uvicorn"), saved_modules)
+
+
+def test_all_registered_mutating_routes_require_bridge_token(monkeypatch):
+    saved_modules = _unload_module_prefixes(("fastapi", "uvicorn", "apps.bridge.routes"))
+    monkeypatch.setenv("OHA_YACHIYO_BRIDGE_TOKEN", "token-123")
+    try:
+        try:
+            from fastapi.testclient import TestClient
+        except ModuleNotFoundError as exc:
+            pytest.skip(f"FastAPI/TestClient dependency is not installed: {exc.name}")
+
+        server_path = Path(__file__).resolve().parents[1] / "apps" / "bridge" / "server.py"
+        spec = importlib.util.spec_from_file_location("_oha_bridge_server_routes_under_test", server_path)
+        assert spec is not None
+        assert spec.loader is not None
+        bridge_server = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = bridge_server
+        spec.loader.exec_module(bridge_server)
+        bridge_server._register_routes()
+
+        mutating_methods = {"POST", "PUT", "PATCH", "DELETE"}
+        trusted_headers = {"host": "127.0.0.1:8420", "origin": "http://localhost:5174"}
+        checked: list[tuple[str, str]] = []
+        failures: list[tuple[str, str, int, object]] = []
+
+        with TestClient(bridge_server.app) as client:
+            for route in bridge_server.app.routes:
+                methods = sorted((getattr(route, "methods", None) or set()) & mutating_methods)
+                path = getattr(route, "path", "")
+                if not methods or not path:
+                    continue
+                sample_path = re.sub(r"\{[^{}]+?\}", "test-id", path)
+                for method in methods:
+                    response = client.request(method, sample_path, headers=trusted_headers)
+                    checked.append((method, path))
+                    if response.status_code != 403 or response.json().get("error") != "invalid_bridge_token":
+                        failures.append((method, path, response.status_code, response.json()))
+
+        assert len(checked) >= 80
+        assert failures == []
+    finally:
+        sys.modules.pop("_oha_bridge_server_routes_under_test", None)
+        _restore_module_prefixes(("fastapi", "uvicorn", "apps.bridge.routes"), saved_modules)
+
+
+def test_chat_message_http_route_maps_idempotency_key_header(monkeypatch):
+    saved_modules = _unload_module_prefixes(("fastapi",))
+    try:
+        try:
+            from fastapi import FastAPI
+            from fastapi.testclient import TestClient
+        except ModuleNotFoundError as exc:
+            pytest.skip(f"FastAPI/TestClient dependency is not installed: {exc.name}")
+
+        route_path = Path(__file__).resolve().parents[1] / "apps" / "bridge" / "routes" / "ui.py"
+        spec = importlib.util.spec_from_file_location("_oha_ui_route_http_under_test", route_path)
+        assert spec is not None
+        assert spec.loader is not None
+        ui_route_module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = ui_route_module
+        spec.loader.exec_module(ui_route_module)
+
+        class FakeChatAPI:
+            def __init__(self, runtime):
+                assert runtime is fake_runtime
+
+            def send_message(self, text, attachments=None, runnable_id="", client_message_id=""):
+                return {
+                    "ok": True,
+                    "text": text,
+                    "attachments": attachments or [],
+                    "runnable_id": runnable_id,
+                    "client_message_id": client_message_id,
+                }
+
+        fake_runtime = SimpleNamespace()
+        monkeypatch.setattr(ui_route_module, "get_runtime", lambda: fake_runtime)
+        monkeypatch.setattr(ui_route_module, "ChatAPI", FakeChatAPI)
+        route_app = FastAPI()
+        route_app.include_router(ui_route_module.router)
+
+        with TestClient(route_app) as client:
+            response = client.post(
+                "/ui/chat/messages",
+                json={"text": "hello"},
+                headers={"Idempotency-Key": "header-message-1"},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["client_message_id"] == "header-message-1"
+    finally:
+        sys.modules.pop("_oha_ui_route_http_under_test", None)
+        _restore_module_prefixes(("fastapi",), saved_modules)
+
+
+def test_agent_and_workflow_run_http_routes_map_idempotency_key_header(monkeypatch):
+    saved_modules = _unload_module_prefixes(("fastapi",))
+    try:
+        try:
+            from fastapi import FastAPI
+            from fastapi.testclient import TestClient
+        except ModuleNotFoundError as exc:
+            pytest.skip(f"FastAPI/TestClient dependency is not installed: {exc.name}")
+
+        route_path = Path(__file__).resolve().parents[1] / "apps" / "bridge" / "routes" / "agents.py"
+        spec = importlib.util.spec_from_file_location("_oha_agent_route_http_under_test", route_path)
+        assert spec is not None
+        assert spec.loader is not None
+        agent_route_module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = agent_route_module
+        spec.loader.exec_module(agent_route_module)
+
+        class FakeRuntimeService:
+            def create_agent_run(self, payload):
+                return {"ok": True, "client_run_id": payload.get("client_run_id", "")}
+
+            def create_workflow_run(self, payload):
+                return {"ok": True, "client_run_id": payload.get("client_run_id", "")}
+
+        monkeypatch.setattr(agent_route_module, "get_agent_runtime_service", lambda: FakeRuntimeService())
+        route_app = FastAPI()
+        route_app.include_router(agent_route_module.router)
+
+        with TestClient(route_app) as client:
+            agent_response = client.post(
+                "/ui/agent-runs",
+                json={"agent_id": "agent-1", "user_goal": "hello"},
+                headers={"Idempotency-Key": "header-run-1"},
+            )
+            workflow_response = client.post(
+                "/ui/workflow-runs",
+                json={"workflow_id": "workflow-1", "user_goal": "hello"},
+                headers={"Idempotency-Key": "header-workflow-run-1"},
+            )
+
+        assert agent_response.status_code == 200
+        assert agent_response.json()["client_run_id"] == "header-run-1"
+        assert workflow_response.status_code == 200
+        assert workflow_response.json()["client_run_id"] == "header-workflow-run-1"
+    finally:
+        sys.modules.pop("_oha_agent_route_http_under_test", None)
+        _restore_module_prefixes(("fastapi",), saved_modules)
+
+
+def test_run_cancel_route_handler_is_idempotent(tmp_path, monkeypatch):
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime.db",
+        workspace_dir=tmp_path / "runtime",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    monkeypatch.setattr(agent_routes, "get_agent_runtime_service", lambda: service)
+    try:
+        run = service._insert_run(
+            kind="main_chat_run",
+            runnable_id="builtin:yachiyo-main",
+            user_goal="cancel via http",
+        )
+
+        first = asyncio.run(agent_routes.cancel_run(run["run_id"]))
+        second = asyncio.run(agent_routes.cancel_run(run["run_id"]))
+
+        assert first["status"] == "cancelled"
+        assert second["status"] == "cancelled"
+
+        stored = service.get_run(run["run_id"])
+        events = service.list_run_events(run["run_id"])["events"]
+        cancel_facts = [event for event in events if event["event_type"] == "run.cancelled"]
+        cancel_timeline = [event for event in stored["timeline"] if event["event"] == "run.cancelled"]
+
+        assert len(cancel_facts) == 1
+        assert len(cancel_timeline) == 1
+    finally:
+        service.close()
+
+
+def test_fastapi_request_parameters_do_not_use_optional_union_annotations():
+    endpoints = [
+        agent_routes.create_agent_run,
+        agent_routes.create_workflow_run,
+        ui_routes.send_chat_message,
+    ]
+
+    for endpoint in endpoints:
+        parameter = inspect.signature(endpoint).parameters["http_request"]
+        assert parameter.annotation in {"Request", agent_routes.Request, ui_routes.Request}
+
+
+@pytest.mark.asyncio
+async def test_status_route_uses_app_version(monkeypatch):
+    status_route = _load_status_route_module()
+    monkeypatch.setattr(status_route, "get_app_version", lambda: "9.8.7")
+    monkeypatch.setattr(
+        status_route,
+        "get_runtime",
+        lambda: SimpleNamespace(
+            uptime=1.25,
+            state=SimpleNamespace(get_task_counts=lambda: {}),
+            is_native_agent_ready=lambda: True,
+        ),
+    )
+
+    response = await status_route.get_status()
+
+    assert response.version == "9.8.7"
+    assert response.service == "oha-yachiyo"
+    assert response.native_agent_ready is True
+
+
 def test_live2d_asset_token_can_rotate():
     first = get_live2d_asset_token()
     second = regenerate_live2d_asset_token()
@@ -37,15 +516,102 @@ def test_live2d_asset_token_can_rotate():
 
 
 def test_bridge_access_log_is_disabled_by_default(monkeypatch):
-    monkeypatch.delenv("HERMES_YACHIYO_BRIDGE_ACCESS_LOG", raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_BRIDGE_ACCESS_LOG", raising=False)
 
     assert _bridge_access_log_enabled() is False
 
 
 def test_bridge_access_log_can_be_enabled_for_http_debug(monkeypatch):
-    monkeypatch.setenv("HERMES_YACHIYO_BRIDGE_ACCESS_LOG", "1")
+    monkeypatch.setenv("OHA_YACHIYO_BRIDGE_ACCESS_LOG", "1")
 
     assert _bridge_access_log_enabled() is True
+
+
+def test_bridge_start_and_restart_reject_non_loopback_host_before_binding(monkeypatch):
+    saved_modules = _unload_module_prefixes(("fastapi", "uvicorn"))
+    try:
+        server_path = Path(__file__).resolve().parents[1] / "apps" / "bridge" / "server.py"
+        spec = importlib.util.spec_from_file_location("_oha_bridge_server_host_guard_under_test", server_path)
+        assert spec is not None
+        assert spec.loader is not None
+        bridge_server = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = bridge_server
+        spec.loader.exec_module(bridge_server)
+
+        with pytest.raises(ValueError, match="回环地址"):
+            bridge_server.start_bridge(host="0.0.0.0", port=8420)
+        assert bridge_server.get_bridge_state() == "failed"
+
+        class ExistingThread:
+            def is_alive(self):
+                return True
+
+            def join(self, timeout=None):
+                raise AssertionError("invalid host must be rejected before stopping the current bridge")
+
+        class NewThread:
+            def __init__(self, *args, **kwargs):
+                raise AssertionError("invalid host must be rejected before starting a bridge thread")
+
+        running_server = SimpleNamespace(should_exit=False)
+        bridge_server._server = running_server
+        bridge_server._state = "running"
+        bridge_server._bridge_thread = ExistingThread()
+        monkeypatch.setattr(bridge_server.threading, "Thread", NewThread)
+
+        result = bridge_server.restart_bridge(host="192.168.1.20", port=8420)
+
+        assert result == {"ok": False, "error": "Bridge 只允许监听回环地址"}
+        assert running_server.should_exit is False
+        assert bridge_server.get_bridge_state() == "running"
+    finally:
+        sys.modules.pop("_oha_bridge_server_host_guard_under_test", None)
+        _restore_module_prefixes(("fastapi", "uvicorn"), saved_modules)
+
+
+@pytest.mark.parametrize("channel", ["release", "alpha", "stable"])
+def test_bridge_debug_routes_are_disabled_for_release_metadata(monkeypatch, tmp_path, channel):
+    metadata_path = tmp_path / "oha-yachiyo-build.json"
+    metadata_path.write_text(json.dumps({"channel": channel}), encoding="utf-8")
+    monkeypatch.setenv("OHA_YACHIYO_DEV", "1")
+    monkeypatch.setenv("OHA_YACHIYO_BUILD_METADATA", str(metadata_path))
+
+    assert debug_routes_enabled() is False
+
+
+def test_bridge_security_accepts_loopback_without_token_when_disabled(monkeypatch):
+    monkeypatch.delenv("OHA_YACHIYO_BRIDGE_TOKEN", raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_BRIDGE_TOKEN", raising=False)
+
+    assert bridge_request_violation(
+        "POST",
+        {"host": "127.0.0.1:8420", "origin": "http://localhost:5174"},
+    ) == ""
+
+
+def test_bridge_security_rejects_untrusted_host(monkeypatch):
+    monkeypatch.delenv("OHA_YACHIYO_BRIDGE_TOKEN", raising=False)
+
+    assert bridge_request_violation("GET", {"host": "0.0.0.0:8420"}) == "untrusted_host"
+
+
+def test_bridge_security_rejects_untrusted_origin(monkeypatch):
+    monkeypatch.delenv("OHA_YACHIYO_BRIDGE_TOKEN", raising=False)
+
+    assert bridge_request_violation(
+        "GET",
+        {"host": "127.0.0.1:8420", "origin": "https://evil.example"},
+    ) == "untrusted_origin"
+
+
+def test_bridge_security_requires_token_for_mutating_requests(monkeypatch):
+    monkeypatch.setenv("OHA_YACHIYO_BRIDGE_TOKEN", "token-123")
+
+    assert bridge_request_violation("POST", {"host": "127.0.0.1:8420"}) == "invalid_bridge_token"
+    assert bridge_request_violation(
+        "POST",
+        {"host": "127.0.0.1:8420", "x-oha-yachiyo-bridge-token": "token-123"},
+    ) == ""
 
 
 def test_rewrite_live2d_manifest_paths_appends_token():

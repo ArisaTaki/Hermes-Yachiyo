@@ -14,5 +14,5 @@ class AuditEvent(BaseModel):
     action: AuditAction
     risk_level: RiskLevel
     timestamp: datetime = Field(default_factory=datetime.now)
-    source: str = "hermes-yachiyo"
+    source: str = "oha-yachiyo"
     detail: dict | None = None

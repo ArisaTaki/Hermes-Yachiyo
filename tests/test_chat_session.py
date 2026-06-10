@@ -1,5 +1,6 @@
 """ChatSession 测试 — 会话恢复与清空后的持久化闭环"""
 
+import json
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -70,6 +71,48 @@ def test_add_assistant_message_with_error_updates_user_error(tmp_path):
         assert session.messages[0].status == MessageStatus.FAILED
         assert session.messages[0].error == "boom"
         assert store.load_messages("s1")[0].error == "boom"
+    finally:
+        store.close()
+
+
+def test_chat_session_redacts_secrets_before_memory_and_persistence(tmp_path):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    try:
+        session = ChatSession(session_id="s1")
+        session.attach_store(store, load_existing=False)
+
+        user_id = session.add_user_message(
+            "第一行\napi_key=sk-secret123456789\n第二行",
+            attachments=[{"kind": "image", "token": "ghp_secretsecretsecret"}],
+            metadata={"password": "secret123", "safe": "保留\n换行"},
+        )
+        session.link_message_to_task(user_id, "t1")
+        session.upsert_assistant_message(
+            "t1",
+            "完成 sk-assistantsecret",
+            MessageStatus.FAILED,
+            error="token=abc123456",
+            metadata={"authorization": "Bearer assistant-token-123456"},
+        )
+
+        snapshot = session.to_dict()
+        raw_snapshot = json.dumps(snapshot, ensure_ascii=False)
+        stored_raw = json.dumps([message.__dict__ for message in store.load_messages("s1", limit=0)], ensure_ascii=False)
+
+        assert "sk-secret" not in raw_snapshot
+        assert "sk-assistantsecret" not in raw_snapshot
+        assert "ghp_secretsecretsecret" not in raw_snapshot
+        assert "abc123456" not in raw_snapshot
+        assert "assistant-token-123456" not in raw_snapshot
+        assert "sk-secret" not in stored_raw
+        assert "sk-assistantsecret" not in stored_raw
+        assert snapshot["messages"][0]["content"] == "第一行\napi_key=[redacted]\n第二行"
+        assert snapshot["messages"][0]["attachments"][0]["token"] == "[redacted]"
+        assert snapshot["messages"][0]["metadata"]["password"] == "[redacted]"
+        assert snapshot["messages"][0]["metadata"]["safe"] == "保留\n换行"
+        assert snapshot["messages"][1]["content"] == "完成 [redacted]"
+        assert snapshot["messages"][1]["error"] == "token=[redacted]"
+        assert snapshot["messages"][1]["metadata"]["authorization"] == "[redacted]"
     finally:
         store.close()
 
@@ -347,47 +390,47 @@ def test_session_restore_no_duplicate_assistant(tmp_path):
         store.close()
 
 
-def test_set_hermes_session_id_persists(tmp_path):
-    """set_hermes_session_id 应同时更新内存和数据库"""
+def test_set_execution_session_id_persists(tmp_path):
+    """set_execution_session_id 应同时更新内存和数据库"""
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
     try:
         session = ChatSession(session_id="s1")
         session.attach_store(store, load_existing=False)
-        session.set_hermes_session_id("hermes_abc")
-        assert session.hermes_session_id == "hermes_abc"
+        session.set_execution_session_id("native_abc")
+        assert session.execution_session_id == "native_abc"
 
         # 从 DB 验证
         stored = store.get_session("s1")
         assert stored is not None
-        assert stored.hermes_session_id == "hermes_abc"
+        assert stored.execution_session_id == "native_abc"
     finally:
         store.close()
 
 
-def test_hermes_session_id_restored_on_attach(tmp_path):
-    """attach_store(load_existing=True) 恢复 hermes_session_id"""
+def test_execution_session_id_restored_on_attach(tmp_path):
+    """attach_store(load_existing=True) 恢复 execution_session_id"""
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
     try:
         session = ChatSession(session_id="s1")
         session.attach_store(store, load_existing=False)
-        session.set_hermes_session_id("hermes_xyz")
+        session.set_execution_session_id("native_xyz")
 
         restored = ChatSession(session_id="s1")
         restored.attach_store(store, load_existing=True)
-        assert restored.hermes_session_id == "hermes_xyz"
+        assert restored.execution_session_id == "native_xyz"
     finally:
         store.close()
 
 
-def test_clear_resets_hermes_session_id(tmp_path):
-    """clear() 应重置 hermes_session_id"""
+def test_clear_resets_execution_session_id(tmp_path):
+    """clear() 应重置 execution_session_id"""
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
     try:
         session = ChatSession(session_id="s1")
         session.attach_store(store, load_existing=False)
-        session.set_hermes_session_id("hermes_old")
+        session.set_execution_session_id("native_old")
         session.clear()
-        assert session.hermes_session_id is None
+        assert session.execution_session_id is None
     finally:
         store.close()
 
@@ -436,18 +479,18 @@ def test_chat_session_persists_user_attachments(tmp_path):
 
 
 def test_set_session_title_overrides_summary_title(tmp_path):
-    """Hermes 自动标题可覆盖首条用户消息兜底标题。"""
+    """Native Agent 自动标题可覆盖首条用户消息兜底标题。"""
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
     try:
         session = ChatSession(session_id="s1")
         session.attach_store(store, load_existing=False)
 
         session.add_user_message("请帮我看看这个项目")
-        session.set_session_title("Hermes 自动摘要标题")
+        session.set_session_title("Native Agent 自动摘要标题")
 
         stored = store.get_session("s1")
         assert stored is not None
-        assert stored.title == "Hermes 自动摘要标题"
+        assert stored.title == "Native Agent 自动摘要标题"
     finally:
         store.close()
 
@@ -495,7 +538,7 @@ def test_switch_chat_session(tmp_path):
         s1 = ChatSession(session_id="s1")
         s1.attach_store(store, load_existing=False)
         s1.add_user_message("会话1消息")
-        s1.set_hermes_session_id("hid_1")
+        s1.set_execution_session_id("hid_1")
 
         s2 = ChatSession(session_id="s2")
         s2.attach_store(store, load_existing=False)
@@ -509,7 +552,7 @@ def test_switch_chat_session(tmp_path):
             switched = _cs_mod.switch_chat_session("s1")
             assert switched.session_id == "s1"
             assert switched.message_count() == 1
-            assert switched.hermes_session_id == "hid_1"
+            assert switched.execution_session_id == "hid_1"
 
             switched2 = _cs_mod.switch_chat_session("s2")
             assert switched2.session_id == "s2"
@@ -529,7 +572,7 @@ def test_switch_chat_session_preserves_live_processing_messages(tmp_path):
             message_id="m1",
             session_id="s1",
             role="assistant",
-            content="Hermes 正在推理",
+            content="Native Agent 正在推理",
             status="processing",
             task_id="t1",
             error=None,

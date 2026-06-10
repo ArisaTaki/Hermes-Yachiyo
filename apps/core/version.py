@@ -1,4 +1,4 @@
-"""Hermes-Yachiyo application version helpers."""
+"""Oha-Yachiyo application version helpers."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import tomllib
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
-_PACKAGE_NAME = "hermes-yachiyo"
+_PACKAGE_NAME = "oha-yachiyo"
 _FALLBACK_VERSION = "0.4.0"
 
 
@@ -57,7 +57,7 @@ def get_git_revision() -> str:
 
 
 def get_app_version(*, include_git: bool = True) -> str:
-    """Return the visible Hermes-Yachiyo version.
+    """Return the visible Oha-Yachiyo version.
 
     Source checkouts expose ``<package-version>+<git-sha>`` so users can tell
     exactly which local build is running. Packaged releases still work without

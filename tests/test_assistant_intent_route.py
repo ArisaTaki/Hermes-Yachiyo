@@ -13,9 +13,14 @@ from packages.protocol.schemas import AssistantIntentRequest
 class _RuntimeStub:
     def __init__(self) -> None:
         self.state = AppState()
-        self.task_runner = SimpleNamespace(executor=SimpleNamespace(name="HermesExecutor"))
+        self.task_runner = SimpleNamespace(
+            executor=SimpleNamespace(
+                name="NativeAgentExecutor",
+                capabilities={"model": True, "image_input": True, "tools": False, "approval": False},
+            )
+        )
 
-    def is_hermes_ready(self) -> bool:
+    def is_native_agent_ready(self) -> bool:
         return True
 
     def get_status(self) -> dict:
@@ -33,7 +38,7 @@ async def test_assistant_intent_returns_status(monkeypatch):
 
     assert result.ok is True
     assert result.action == "status"
-    assert "Hermes" in result.message
+    assert "Native Agent" in result.message
     assert result.task_id is None
 
 

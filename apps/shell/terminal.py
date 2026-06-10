@@ -9,6 +9,8 @@ import tempfile
 import time
 from pathlib import Path
 
+from packages.security import redact_api_error_text
+
 
 def open_terminal_command(command: str) -> tuple[bool, str | None]:
     """Open a system terminal and run an interactive command."""
@@ -17,7 +19,7 @@ def open_terminal_command(command: str) -> tuple[bool, str | None]:
         return _open_macos_terminal_command(command)
     if system == "Linux":
         return _open_linux_terminal_command(command)
-    return False, f"当前平台（{system}）不支持自动打开终端，请手动运行：{command}"
+    return False, redact_api_error_text(f"当前平台（{system}）不支持自动打开终端，请手动运行：{command}")
 
 
 def _open_macos_terminal_command(command: str) -> tuple[bool, str | None]:
@@ -31,31 +33,31 @@ def _open_macos_terminal_command(command: str) -> tuple[bool, str | None]:
             check=False,
         )
     except Exception as exc:
-        return False, str(exc)
+        return False, redact_api_error_text(exc)
     if result.returncode != 0:
-        detail = (result.stderr or result.stdout or "").strip()
+        detail = redact_api_error_text(result.stderr or result.stdout or "")
         return False, detail or "Terminal 打开失败"
     return True, None
 
 
 def _write_macos_command_file(command: str) -> Path:
-    script_dir = Path(tempfile.gettempdir()) / "hermes-yachiyo-terminal"
+    script_dir = Path(tempfile.gettempdir()) / "oha-yachiyo-terminal"
     script_dir.mkdir(parents=True, exist_ok=True)
-    script_path = script_dir / f"hermes-yachiyo-{int(time.time() * 1000)}.command"
+    script_path = script_dir / f"oha-yachiyo-{int(time.time() * 1000)}.command"
     script_path.write_text(
         "\n".join([
             "#!/bin/zsh",
             "clear",
             command,
-            "hermes_status=$?",
+            "oha_status=$?",
             "echo",
-            'if [ "$hermes_status" -eq 0 ]; then',
-            '  echo "Hermes-Yachiyo：命令已完成。"',
+            'if [ "$oha_status" -eq 0 ]; then',
+            '  echo "Oha-Yachiyo：命令已完成。"',
             "else",
-            '  echo "Hermes-Yachiyo：命令退出码 $hermes_status。"',
+            '  echo "Oha-Yachiyo：命令退出码 $oha_status。"',
             "fi",
             'echo "完成后可以关闭此窗口。"',
-            "exit $hermes_status",
+            "exit $oha_status",
             "",
         ]),
         encoding="utf-8",
@@ -82,5 +84,5 @@ def _open_linux_terminal_command(command: str) -> tuple[bool, str | None]:
         except FileNotFoundError:
             continue
         except Exception as exc:
-            return False, str(exc)
+            return False, redact_api_error_text(exc)
     return False, "未找到可用的终端模拟器，请手动打开终端"

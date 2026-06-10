@@ -37,10 +37,10 @@ class ErrorCode(StrEnum):
     INVALID_REQUEST = "invalid_request"
     TASK_NOT_CANCELLABLE = "task_not_cancellable"
     RISK_DENIED = "risk_denied"
+    NATIVE_AGENT_NOT_READY = "native_agent_not_ready"
     INTERNAL_ERROR = "internal_error"
     ADAPTER_ERROR = "adapter_error"
-    HERMES_NOT_INSTALLED = "hermes_not_installed"
-    HERMES_INCOMPATIBLE = "hermes_incompatible"
+    SCREEN_CAPTURE_PERMISSION_DENIED = "screen_capture_permission_denied"
     PLATFORM_UNSUPPORTED = "platform_unsupported"
 
 
@@ -54,38 +54,6 @@ class AuditAction(StrEnum):
     SCREEN_CAPTURED = "screen_captured"
     WINDOW_QUERIED = "window_queried"
     RISK_DENIED = "risk_denied"
-    HERMES_INSTALL_CHECK = "hermes_install_check"
-    HERMES_INSTALL_ATTEMPT = "hermes_install_attempt"
-
-
-class HermesReadinessLevel(StrEnum):
-    """Hermes Agent 能力就绪等级（仅在 HermesInstallStatus.READY 时有意义）
-
-    描述 Hermes 自身的能力完整程度，与安装状态正交：
-    - 安装状态用于控制启动路由（安装向导 / 初始化 / 正常模式）
-    - 就绪等级用于在正常模式 UI 中向用户展示能力细节
-    """
-
-    UNKNOWN = "unknown"          # 未检测 or 检测失败（不阻塞正常运行）
-    BASIC_READY = "basic_ready"  # 基础可用：至少一个 auth 工作，部分工具受限
-    FULL_READY = "full_ready"    # 完整就绪：无遗留 issue，所有推荐能力均已配置
-
-
-class HermesInstallStatus(StrEnum):
-    """Hermes Agent 安装状态"""
-
-    NOT_CHECKED = "not_checked"              # 尚未检测
-    NOT_INSTALLED = "not_installed"          # Hermes Agent 未安装
-    INSTALLING = "installing"                # 正在安装中
-    INSTALL_FAILED = "install_failed"        # 安装失败
-    INCOMPATIBLE_VERSION = "incompatible_version"  # 版本不兼容
-    PLATFORM_UNSUPPORTED = "platform_unsupported"  # 平台不支持
-    WSL2_REQUIRED = "wsl2_required"          # Windows 用户需要 WSL2
-    INSTALLED_NEEDS_SETUP = "installed_needs_setup"  # Hermes 已安装但未完成 setup 配置
-    SETUP_IN_PROGRESS = "setup_in_progress"          # hermes setup 进程正在运行中
-    INSTALLED_NOT_INITIALIZED = "installed_not_initialized"  # Hermes 已安装，但 Yachiyo 工作空间未初始化
-    INITIALIZING = "initializing"            # Yachiyo 工作空间正在初始化
-    READY = "ready"                          # Hermes 已安装且 Yachiyo 工作空间已初始化
 
 
 class Platform(StrEnum):

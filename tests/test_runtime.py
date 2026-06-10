@@ -1,15 +1,13 @@
-"""Runtime 测试 — TaskRunner 执行器热切换"""
+"""Runtime tests for the native TaskRunner adapter."""
 
-from apps.core.executor import HermesExecutor, SimulatedExecutor
-from apps.core.runtime import HermesRuntime
+from apps.core.executor import NativeAgentExecutor, SimulatedExecutor
+from apps.core.runtime import AppRuntime
 from apps.core.task_runner import TaskRunner
 from apps.shell.config import AppConfig
-from packages.protocol.enums import HermesInstallStatus, Platform
-from packages.protocol.install import HermesInstallInfo
 
 
 def _make_runtime(tmp_path, monkeypatch):
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
+    monkeypatch.setenv("OHA_YACHIYO_HOME", str(tmp_path / "oha-yachiyo"))
 
     import apps.core.chat_session as chat_session_mod
     import apps.core.chat_store as chat_store_mod
@@ -19,7 +17,7 @@ def _make_runtime(tmp_path, monkeypatch):
     chat_store_mod._global_store = None
     chat_session_mod._global_session = None
 
-    return HermesRuntime(AppConfig())
+    return AppRuntime(AppConfig())
 
 
 def test_refresh_task_runner_executor_updates_existing_runner(tmp_path, monkeypatch):
@@ -29,35 +27,46 @@ def test_refresh_task_runner_executor_updates_existing_runner(tmp_path, monkeypa
 
     monkeypatch.setattr(
         "apps.core.executor.select_executor",
-        lambda rt: HermesExecutor(),
+        lambda rt: NativeAgentExecutor(),
     )
 
     result = runtime.refresh_task_runner_executor()
 
     assert result["updated"] is True
     assert result["previous_executor"] == "SimulatedExecutor"
-    assert result["executor"] == "HermesExecutor"
-    assert runner.executor.name == "HermesExecutor"
+    assert result["executor"] == "NativeAgentExecutor"
+    assert runner.executor.name == "NativeAgentExecutor"
 
 
-def test_start_accepts_prechecked_install_info(tmp_path, monkeypatch):
+def test_start_does_not_require_native_agent_readiness(tmp_path, monkeypatch):
     runtime = _make_runtime(tmp_path, monkeypatch)
-    install_info = HermesInstallInfo(
-        status=HermesInstallStatus.READY,
-        platform=Platform.MACOS,
-        command_exists=True,
-    )
-
-    monkeypatch.setattr(
-        "apps.core.runtime.check_hermes_installation",
-        lambda: (_ for _ in ()).throw(AssertionError("unexpected install check")),
-    )
+    monkeypatch.setattr(runtime, "native_agent_readiness", lambda: {"ready": False, "reason": "model_profile_required"})
     monkeypatch.setattr(runtime, "_start_task_runner", lambda: None)
 
-    runtime.start(install_info=install_info)
+    runtime.start()
 
     assert runtime.running is True
-    assert runtime.hermes_install_info is install_info
+
+
+def test_stop_closes_injected_native_runtime_service(tmp_path, monkeypatch):
+    runtime = _make_runtime(tmp_path, monkeypatch)
+    closed = []
+    closed_global = []
+
+    class FakeNativeRuntime:
+        def close(self):
+            closed.append(True)
+
+    runtime.agent_runtime_service = FakeNativeRuntime()
+    runtime._running = True
+    monkeypatch.setattr(runtime, "_stop_task_runner", lambda: None)
+    monkeypatch.setattr("apps.shell.agent_runtime.close_agent_runtime_service", lambda: closed_global.append(True))
+
+    runtime.stop()
+
+    assert runtime.running is False
+    assert closed == [True]
+    assert closed_global == [True]
 
 
 def test_refresh_task_runner_executor_without_runner_is_noop(tmp_path, monkeypatch):
@@ -69,81 +78,46 @@ def test_refresh_task_runner_executor_without_runner_is_noop(tmp_path, monkeypat
     assert result["reason"] == "task_runner_not_started"
 
 
-def test_is_hermes_ready_requires_command_exists(tmp_path, monkeypatch):
+def test_is_native_agent_ready_uses_native_readiness(tmp_path, monkeypatch):
     runtime = _make_runtime(tmp_path, monkeypatch)
-    runtime._hermes_install_info = HermesInstallInfo(
-        status=HermesInstallStatus.READY,
-        platform=Platform.MACOS,
-        command_exists=False,
-    )
+    monkeypatch.setattr(runtime, "native_agent_readiness", lambda: {"ready": False})
 
-    assert runtime.is_hermes_ready() is False
+    assert runtime.is_native_agent_ready() is False
 
 
-def test_get_status_refreshes_inconsistent_ready_cache(tmp_path, monkeypatch):
+def test_get_status_reports_native_readiness_without_native_agent_probe(tmp_path, monkeypatch):
     runtime = _make_runtime(tmp_path, monkeypatch)
-    runtime._hermes_install_info = HermesInstallInfo(
-        status=HermesInstallStatus.READY,
-        platform=Platform.MACOS,
-        command_exists=False,
-    )
-    refreshed_info = HermesInstallInfo(
-        status=HermesInstallStatus.NOT_INSTALLED,
-        platform=Platform.MACOS,
-        command_exists=False,
-    )
-
-    monkeypatch.setattr(
-        "apps.core.runtime.check_hermes_installation",
-        lambda: refreshed_info,
-    )
-    monkeypatch.setattr(
-        "apps.core.runtime.check_hermes_command",
-        lambda: (_ for _ in ()).throw(AssertionError("unexpected command probe")),
-    )
+    monkeypatch.setattr(runtime, "native_agent_readiness", lambda: {"ready": True, "profile_id": "p1"})
 
     status = runtime.get_status()
 
-    assert runtime.hermes_install_info is refreshed_info
-    assert status["hermes"]["install_status"] == HermesInstallStatus.NOT_INSTALLED
+    assert status["service"] == "oha-yachiyo"
+    assert status["native_agent"]["ready"] is True
+    assert status["native_agent_ready"] is True
 
 
-def test_get_status_refreshes_stale_ready_cache_when_command_disappears(tmp_path, monkeypatch):
+def test_main_chat_runtime_policies_enable_native_tools_with_approval(tmp_path, monkeypatch):
     runtime = _make_runtime(tmp_path, monkeypatch)
-    runtime._hermes_install_info = HermesInstallInfo(
-        status=HermesInstallStatus.READY,
-        platform=Platform.MACOS,
-        command_exists=True,
-    )
-    refreshed_info = HermesInstallInfo(
-        status=HermesInstallStatus.NOT_INSTALLED,
-        platform=Platform.MACOS,
-        command_exists=False,
-        error_message="hermes 命令未找到",
-    )
-    calls: list[str] = []
 
-    monkeypatch.setattr(
-        "apps.core.runtime.check_hermes_command",
-        lambda: (False, "hermes 命令未找到"),
-    )
-    monkeypatch.setattr(
-        "apps.core.runtime.check_hermes_installation",
-        lambda: calls.append("refresh") or refreshed_info,
-    )
+    tool_policy = runtime.main_chat_tool_policy()
+    workspace_policy = runtime.main_chat_workspace_policy()
 
-    status = runtime.get_status()
-
-    assert calls == ["refresh"]
-    assert runtime.hermes_install_info is refreshed_info
-    assert runtime.is_hermes_ready() is False
-    assert status["hermes"]["install_status"] == HermesInstallStatus.NOT_INSTALLED
-    assert status["hermes"]["command_exists"] is False
+    assert set(tool_policy["allowed_tools"]) == {
+        "workspace.list",
+        "workspace.read",
+        "workspace.write_patch",
+        "terminal.run",
+        "artifact.write",
+    }
+    assert tool_policy["approval_required"]["workspace.write_patch"] is True
+    assert tool_policy["approval_required"]["terminal.run"] is True
+    assert workspace_policy["readable_scopes"] == ["."]
+    assert workspace_policy["writable_scopes"] == ["."]
 
 
 def test_switch_session_syncs_executor_via_public_method(tmp_path, monkeypatch):
     runtime = _make_runtime(tmp_path, monkeypatch)
-    executor = HermesExecutor(chat_session=runtime.chat_session)
+    executor = NativeAgentExecutor(chat_session=runtime.chat_session)
     runtime._task_runner = TaskRunner(runtime.state, executor=executor)
 
     runtime.switch_session("next-session")

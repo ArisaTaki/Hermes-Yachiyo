@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 from urllib.request import Request, urlopen
 
-from apps.shell.assets import get_yachiyo_workspace_dir
+from apps.shell.assets import get_oha_workspace_dir
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ _LIVE2D_RUNTIME_DEPENDENCY_STATE: dict[str, object] = {
 
 
 def get_live2d_runtime_dependency_specs() -> dict[str, tuple[str, Path]]:
-    cache_dir = get_yachiyo_workspace_dir() / "cache" / "live2d-web"
+    cache_dir = get_oha_workspace_dir() / "cache" / "live2d-web"
     return {
         "pixi_js": (_PIXI_JS_CDN, cache_dir / "pixi.min.js"),
         "live2d_cubism_core": (
@@ -44,7 +44,7 @@ def runtime_dependency_files_ready() -> bool:
 
 def _download_live2d_runtime_dependency(url: str, target: Path) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
-    request = Request(url, headers={"User-Agent": "Hermes-Yachiyo/0.1"})
+    request = Request(url, headers={"User-Agent": "Oha-Yachiyo/0.1"})
     with urlopen(request, timeout=20) as response:
         payload = response.read()
     if not payload:

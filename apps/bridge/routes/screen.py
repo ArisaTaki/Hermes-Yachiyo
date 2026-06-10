@@ -12,13 +12,22 @@ router = APIRouter(tags=["屏幕"])
 @router.get(
     "/screen/current",
     response_model=ScreenshotResponse,
-    responses={500: {"model": ErrorResponse}},
+    responses={403: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
 )
 async def get_screen_current() -> ScreenshotResponse:
     try:
-        from apps.locald.screenshot import capture_screenshot
+        from apps.locald.screenshot import ScreenCapturePermissionError, capture_screenshot
 
         return await capture_screenshot()
+    except ScreenCapturePermissionError as e:
+        raise HTTPException(
+            status_code=403,
+            detail=ErrorResponse(
+                error=ErrorCode.SCREEN_CAPTURE_PERMISSION_DENIED,
+                message="屏幕录制权限不足，请在系统设置中授权 Oha-Yachiyo 后重启 Bridge。",
+                detail=str(e),
+            ).model_dump(),
+        )
     except Exception as e:
         raise HTTPException(
             status_code=500,

@@ -5,10 +5,11 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from apps.shell.agent_runtime import AgentRuntimeError, get_agent_runtime_service
+from packages.security import redact_api_error_detail
 
 router = APIRouter(prefix="/ui", tags=["Agent Studio"])
 
@@ -77,6 +78,7 @@ class AgentRunRequest(BaseModel):
     agent_id: str | None = Field(default=None, max_length=160)
     runnable_id: str | None = Field(default=None, max_length=160)
     run_group_id: str | None = Field(default=None, max_length=160)
+    client_run_id: str | None = Field(default=None, max_length=160)
     source: str | None = Field(default=None, max_length=80)
     user_goal: str | None = Field(default=None, max_length=60000)
     goal: str | None = Field(default=None, max_length=60000)
@@ -86,6 +88,7 @@ class WorkflowRunRequest(BaseModel):
     workflow_id: str | None = Field(default=None, max_length=160)
     runnable_id: str | None = Field(default=None, max_length=160)
     run_group_id: str | None = Field(default=None, max_length=160)
+    client_run_id: str | None = Field(default=None, max_length=160)
     source: str | None = Field(default=None, max_length=80)
     user_goal: str | None = Field(default=None, max_length=60000)
     goal: str | None = Field(default=None, max_length=60000)
@@ -99,8 +102,18 @@ def _payload(model: BaseModel) -> dict[str, Any]:
     return model.model_dump(exclude_unset=True, exclude_none=True, by_alias=True)
 
 
+def _payload_with_idempotency(model: BaseModel, request: Request | None) -> dict[str, Any]:
+    payload = _payload(model)
+    headers = getattr(request, "headers", None)
+    if not payload.get("client_run_id") and headers is not None:
+        key = str(headers.get("idempotency-key", "") or "").strip()
+        if key:
+            payload["client_run_id"] = key
+    return payload
+
+
 def _bad_request(exc: Exception) -> HTTPException:
-    return HTTPException(status_code=400, detail=str(exc))
+    return HTTPException(status_code=400, detail=redact_api_error_detail(exc))
 
 
 @router.get("/agents")
@@ -187,7 +200,7 @@ async def import_skill(request: SkillImportRequest) -> dict[str, Any]:
 
 @router.get("/skills/sources")
 async def list_skill_sources() -> dict[str, Any]:
-    return await asyncio.to_thread(get_agent_runtime_service().list_hermes_skill_sources)
+    return await asyncio.to_thread(get_agent_runtime_service().list_native_skill_sources)
 
 
 @router.get("/skill-folders")
@@ -226,9 +239,9 @@ async def delete_skill_folder(folder_id: str, delete_skills: bool = False) -> di
 
 
 @router.post("/skills/sync")
-async def sync_hermes_skills() -> dict[str, Any]:
+async def sync_native_skills() -> dict[str, Any]:
     try:
-        return await asyncio.to_thread(get_agent_runtime_service().sync_hermes_skills)
+        return await asyncio.to_thread(get_agent_runtime_service().sync_native_skills)
     except AgentRuntimeError as exc:
         raise _bad_request(exc) from exc
 
@@ -347,9 +360,12 @@ async def get_run_artifact(run_id: str, artifact_path: str) -> dict[str, Any]:
 
 
 @router.post("/agent-runs")
-async def create_agent_run(request: AgentRunRequest) -> dict[str, Any]:
+async def create_agent_run(
+    request: AgentRunRequest,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
     try:
-        return await asyncio.to_thread(get_agent_runtime_service().create_agent_run, _payload(request))
+        return await asyncio.to_thread(get_agent_runtime_service().create_agent_run, _payload_with_idempotency(request, http_request))
     except (AgentRuntimeError, KeyError) as exc:
         raise _bad_request(exc) from exc
 
@@ -360,9 +376,12 @@ async def get_agent_run(run_id: str) -> dict[str, Any]:
 
 
 @router.post("/workflow-runs")
-async def create_workflow_run(request: WorkflowRunRequest) -> dict[str, Any]:
+async def create_workflow_run(
+    request: WorkflowRunRequest,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
     try:
-        return await asyncio.to_thread(get_agent_runtime_service().create_workflow_run, _payload(request))
+        return await asyncio.to_thread(get_agent_runtime_service().create_workflow_run, _payload_with_idempotency(request, http_request))
     except (AgentRuntimeError, KeyError) as exc:
         raise _bad_request(exc) from exc
 

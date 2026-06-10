@@ -1,7 +1,7 @@
 """聊天持久化层
 
 SQLite 存储聊天会话与消息，供 ChatSession 消费。
-数据库位置：~/.hermes/yachiyo/chat.db
+数据库位置：~/.oha-yachiyo/chat.db
 
 表结构：
   - chat_sessions: 会话元信息（id、创建时间、标题）
@@ -15,6 +15,7 @@ SQLite 存储聊天会话与消息，供 ChatSession 消费。
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -24,10 +25,14 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import List, Optional
 
+from packages.security import redact_sensitive_text, sanitize_sensitive_value
+
 logger = logging.getLogger(__name__)
 
 _DB_FILENAME = "chat.db"
 _SESSION_TITLE_MAX_CHARS = 36
+_CHAT_TEXT_REDACTION_LIMIT = 0
+_CHAT_JSON_MAX_ITEMS = 200
 _TITLE_SENTENCE_BOUNDARY_RE = re.compile(r"[。.!！?？\n\r]")
 _LEADING_MENTION_RE = re.compile(
     r"^\s*@(?:\"[^\"]+\"|'[^']+'|“[^”]+”|‘[^’]+’|[^\s@:：，。！？、；;,.!?]+)"
@@ -36,11 +41,10 @@ _LEADING_MENTION_RE = re.compile(
 
 
 def _get_db_path() -> str:
-    """获取数据库文件路径：~/.hermes/yachiyo/chat.db"""
-    hermes_home = os.getenv("HERMES_HOME", os.path.expanduser("~/.hermes"))
-    yachiyo_dir = os.path.join(hermes_home, "yachiyo")
-    os.makedirs(yachiyo_dir, exist_ok=True)
-    return os.path.join(yachiyo_dir, _DB_FILENAME)
+    """获取数据库文件路径：~/.oha-yachiyo/chat.db"""
+    root = os.getenv("OHA_YACHIYO_HOME", os.path.expanduser("~/.oha-yachiyo"))
+    os.makedirs(root, exist_ok=True)
+    return os.path.join(root, _DB_FILENAME)
 
 
 def make_session_title(content: str, max_chars: int = _SESSION_TITLE_MAX_CHARS) -> str:
@@ -81,7 +85,7 @@ class StoredSession:
     title: str
     created_at: str  # ISO 格式
     message_count: int = 0
-    hermes_session_id: Optional[str] = None
+    execution_session_id: Optional[str] = None
     conversation_kind: str = "main"
     runnable_id: str = ""
     runnable_name: str = ""
@@ -131,6 +135,7 @@ class ChatStore:
             self._conn.row_factory = sqlite3.Row
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA foreign_keys=ON")
+            self._conn.execute("PRAGMA secure_delete=ON")
         return self._conn
 
     def _init_db(self) -> None:
@@ -142,7 +147,7 @@ class ChatStore:
                     session_id TEXT PRIMARY KEY,
                     title      TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL,
-                    hermes_session_id TEXT,
+                    execution_session_id TEXT,
                     conversation_kind TEXT NOT NULL DEFAULT 'main',
                     runnable_id TEXT NOT NULL DEFAULT '',
                     runnable_name TEXT NOT NULL DEFAULT '',
@@ -168,7 +173,7 @@ class ChatStore:
             """)
             # 兼容旧表结构升级
             try:
-                conn.execute("ALTER TABLE chat_sessions ADD COLUMN hermes_session_id TEXT")
+                conn.execute("ALTER TABLE chat_sessions ADD COLUMN execution_session_id TEXT")
             except sqlite3.OperationalError:
                 pass  # 列已存在
             try:
@@ -191,8 +196,111 @@ class ChatStore:
                 conn.execute("ALTER TABLE chat_messages ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'")
             except sqlite3.OperationalError:
                 pass  # 列已存在
+            scrubbed_rows = self._scrub_existing_sensitive_data_locked(conn)
             conn.commit()
+        if scrubbed_rows:
+            self._vacuum_after_secret_scrub()
+            logger.info("ChatStore 已清洗历史聊天敏感字段: rows=%d", scrubbed_rows)
         logger.info("ChatStore 初始化完成: %s", self._db_path)
+
+    def _vacuum_after_secret_scrub(self) -> None:
+        with self._lock:
+            conn = self._get_conn()
+            try:
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                conn.execute("VACUUM")
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            except sqlite3.Error:
+                logger.debug("ChatStore secret scrub vacuum failed", exc_info=True)
+
+    def _scrub_existing_sensitive_data_locked(self, conn: sqlite3.Connection) -> int:
+        """Redact obvious secrets from legacy rows before they are read."""
+        scrubbed_rows = 0
+        message_rows = conn.execute(
+            """
+            SELECT message_id, content, error, attachments_json, metadata_json
+            FROM chat_messages
+            """
+        ).fetchall()
+        for row in message_rows:
+            next_content = _redact_chat_text(row["content"])
+            next_error = _redact_optional_chat_text(row["error"])
+            next_attachments_json = _redact_existing_chat_json_text(row["attachments_json"], fallback="[]")
+            next_metadata_json = _redact_existing_chat_json_text(row["metadata_json"], fallback="{}")
+            if (
+                next_content != row["content"]
+                or next_error != row["error"]
+                or next_attachments_json != (row["attachments_json"] or "[]")
+                or next_metadata_json != (row["metadata_json"] or "{}")
+            ):
+                conn.execute(
+                    """
+                    UPDATE chat_messages
+                       SET content = ?,
+                           error = ?,
+                           attachments_json = ?,
+                           metadata_json = ?
+                     WHERE message_id = ?
+                    """,
+                    (
+                        next_content,
+                        next_error,
+                        next_attachments_json,
+                        next_metadata_json,
+                        row["message_id"],
+                    ),
+                )
+                scrubbed_rows += 1
+
+        session_rows = conn.execute(
+            """
+            SELECT session_id, title, execution_session_id, runnable_id, runnable_name,
+                   run_group_id, participants_json, avatar_url
+            FROM chat_sessions
+            """
+        ).fetchall()
+        for row in session_rows:
+            next_title = _redact_chat_text(row["title"]).strip()
+            next_execution_session_id = _redact_optional_chat_text(row["execution_session_id"])
+            next_runnable_id = _redact_chat_text(row["runnable_id"]).strip()
+            next_runnable_name = _redact_chat_text(row["runnable_name"]).strip()
+            next_run_group_id = _redact_chat_text(row["run_group_id"]).strip()
+            next_participants_json = _redact_existing_chat_json_text(row["participants_json"], fallback="[]")
+            next_avatar_url = _redact_chat_text(row["avatar_url"]).strip()
+            if (
+                next_title != (row["title"] or "")
+                or next_execution_session_id != row["execution_session_id"]
+                or next_runnable_id != (row["runnable_id"] or "")
+                or next_runnable_name != (row["runnable_name"] or "")
+                or next_run_group_id != (row["run_group_id"] or "")
+                or next_participants_json != (row["participants_json"] or "[]")
+                or next_avatar_url != (row["avatar_url"] or "")
+            ):
+                conn.execute(
+                    """
+                    UPDATE chat_sessions
+                       SET title = ?,
+                           execution_session_id = ?,
+                           runnable_id = ?,
+                           runnable_name = ?,
+                           run_group_id = ?,
+                           participants_json = ?,
+                           avatar_url = ?
+                     WHERE session_id = ?
+                    """,
+                    (
+                        next_title,
+                        next_execution_session_id,
+                        next_runnable_id,
+                        next_runnable_name,
+                        next_run_group_id,
+                        next_participants_json,
+                        next_avatar_url,
+                        row["session_id"],
+                    ),
+                )
+                scrubbed_rows += 1
+        return scrubbed_rows
 
     # ── 会话 CRUD ─────────────────────────────────────────────────────────────
 
@@ -216,7 +324,7 @@ class ChatStore:
             conn = self._get_conn()
             rows = conn.execute(
                 """
-                SELECT s.session_id, s.title, s.created_at, s.hermes_session_id,
+                SELECT s.session_id, s.title, s.created_at, s.execution_session_id,
                        s.conversation_kind, s.runnable_id, s.runnable_name,
                        s.run_group_id, s.participants_json, s.avatar_url,
                        MAX(m.created_at) AS last_message_at,
@@ -244,7 +352,7 @@ class ChatStore:
                 title=r["title"] or make_session_title(r["first_user_content"] or ""),
                 created_at=r["created_at"],
                 message_count=r["message_count"],
-                hermes_session_id=r["hermes_session_id"],
+                execution_session_id=r["execution_session_id"],
                 conversation_kind=r["conversation_kind"] or "main",
                 runnable_id=r["runnable_id"] or "",
                 runnable_name=r["runnable_name"] or "",
@@ -256,7 +364,7 @@ class ChatStore:
         ]
 
     def search_sessions(self, query: str, limit: int = 50) -> List[StoredSessionSearchResult]:
-        """按标题、会话 ID、Hermes ID 或消息内容搜索会话。"""
+        """按标题、会话 ID、execution session ID 或消息内容搜索会话。"""
         normalized_query = " ".join((query or "").split()).strip()
         if not normalized_query:
             return [
@@ -274,7 +382,7 @@ class ChatStore:
             rows = conn.execute(
                 """
                 WITH visible_sessions AS (
-                    SELECT s.session_id, s.title, s.created_at, s.hermes_session_id,
+                    SELECT s.session_id, s.title, s.created_at, s.execution_session_id,
                            s.conversation_kind, s.runnable_id, s.runnable_name,
                            s.run_group_id, s.participants_json, s.avatar_url,
                            MAX(m.created_at) AS last_message_at,
@@ -292,7 +400,7 @@ class ChatStore:
                     GROUP BY s.session_id
                     HAVING COUNT(m.message_id) > 0 OR s.conversation_kind = 'group'
                 )
-                SELECT vs.session_id, vs.title, vs.created_at, vs.hermes_session_id,
+                SELECT vs.session_id, vs.title, vs.created_at, vs.execution_session_id,
                        vs.conversation_kind, vs.runnable_id, vs.runnable_name,
                        vs.run_group_id, vs.participants_json, vs.avatar_url,
                        vs.first_user_content, vs.message_count, vs.last_message_at,
@@ -317,7 +425,7 @@ class ChatStore:
                 )
                 WHERE vs.session_id LIKE ? ESCAPE '\\'
                    OR COALESCE(vs.title, '') LIKE ? ESCAPE '\\'
-                   OR COALESCE(vs.hermes_session_id, '') LIKE ? ESCAPE '\\'
+                   OR COALESCE(vs.execution_session_id, '') LIKE ? ESCAPE '\\'
                    OR COALESCE(vs.runnable_name, '') LIKE ? ESCAPE '\\'
                    OR EXISTS (
                        SELECT 1
@@ -338,7 +446,7 @@ class ChatStore:
                     title=r["title"] or make_session_title(r["first_user_content"] or ""),
                     created_at=r["created_at"],
                     message_count=r["message_count"],
-                    hermes_session_id=r["hermes_session_id"],
+                    execution_session_id=r["execution_session_id"],
                     conversation_kind=r["conversation_kind"] or "main",
                     runnable_id=r["runnable_id"] or "",
                     runnable_name=r["runnable_name"] or "",
@@ -379,7 +487,7 @@ class ChatStore:
             conn = self._get_conn()
             row = conn.execute(
                 """
-                SELECT s.session_id, s.title, s.created_at, s.hermes_session_id,
+                SELECT s.session_id, s.title, s.created_at, s.execution_session_id,
                        s.conversation_kind, s.runnable_id, s.runnable_name,
                        s.run_group_id, s.participants_json, s.avatar_url,
                        COUNT(m.message_id) AS message_count
@@ -397,7 +505,7 @@ class ChatStore:
             title=row["title"],
             created_at=row["created_at"],
             message_count=row["message_count"],
-            hermes_session_id=row["hermes_session_id"],
+            execution_session_id=row["execution_session_id"],
             conversation_kind=row["conversation_kind"] or "main",
             runnable_id=row["runnable_id"] or "",
             runnable_name=row["runnable_name"] or "",
@@ -406,19 +514,19 @@ class ChatStore:
             avatar_url=row["avatar_url"] or "",
         )
 
-    def update_hermes_session_id(self, session_id: str, hermes_session_id: str) -> None:
-        """更新会话的 Hermes session ID"""
+    def update_execution_session_id(self, session_id: str, execution_session_id: str) -> None:
+        """更新会话的 execution session ID"""
         with self._lock:
             conn = self._get_conn()
             conn.execute(
-                "UPDATE chat_sessions SET hermes_session_id = ? WHERE session_id = ?",
-                (hermes_session_id, session_id),
+                "UPDATE chat_sessions SET execution_session_id = ? WHERE session_id = ?",
+                (_redact_chat_text(execution_session_id), session_id),
             )
             conn.commit()
 
     def update_session_title(self, session_id: str, title: str) -> None:
         """更新会话标题。"""
-        title = (title or "").strip()
+        title = _redact_chat_text(title).strip()
         with self._lock:
             conn = self._get_conn()
             conn.execute(
@@ -454,11 +562,11 @@ class ChatStore:
                 """,
                 (
                     (conversation_kind or "main").strip() or "main",
-                    (runnable_id or "").strip(),
-                    (runnable_name or "").strip(),
-                    (run_group_id or "").strip(),
-                    participants_json or "[]",
-                    (avatar_url or "").strip(),
+                    _redact_chat_text(runnable_id).strip(),
+                    _redact_chat_text(runnable_name).strip(),
+                    _redact_chat_text(run_group_id).strip(),
+                    _redact_chat_json_text(participants_json or "[]", fallback="[]"),
+                    _redact_chat_text(avatar_url).strip(),
                     session_id,
                 ),
             )
@@ -466,7 +574,7 @@ class ChatStore:
 
     def set_session_title_if_empty(self, session_id: str, title: str) -> bool:
         """仅当标题为空时写入标题，返回是否发生更新。"""
-        title = (title or "").strip()
+        title = _redact_chat_text(title).strip()
         if not title:
             return False
         with self._lock:
@@ -495,6 +603,10 @@ class ChatStore:
 
     def save_message(self, msg: StoredMessage) -> None:
         """保存单条消息（INSERT OR REPLACE）"""
+        safe_content = _redact_chat_text(msg.content)
+        safe_error = _redact_optional_chat_text(msg.error)
+        safe_attachments_json = _redact_chat_json_text(msg.attachments_json, fallback="[]")
+        safe_metadata_json = _redact_chat_json_text(msg.metadata_json, fallback="{}")
         with self._lock:
             conn = self._get_conn()
             conn.execute(
@@ -507,13 +619,13 @@ class ChatStore:
                     msg.message_id,
                     msg.session_id,
                     msg.role,
-                    msg.content,
+                    safe_content,
                     msg.status,
                     msg.task_id,
-                    msg.error,
+                    safe_error,
                     msg.created_at,
-                    msg.attachments_json,
-                    msg.metadata_json,
+                    safe_attachments_json,
+                    safe_metadata_json,
                 ),
             )
             conn.commit()
@@ -522,11 +634,12 @@ class ChatStore:
         self, message_id: str, status: str, error: Optional[str] = None
     ) -> None:
         """更新消息状态"""
+        safe_error = _redact_optional_chat_text(error)
         with self._lock:
             conn = self._get_conn()
             conn.execute(
                 "UPDATE chat_messages SET status = ?, error = ? WHERE message_id = ?",
-                (status, error, message_id),
+                (status, safe_error, message_id),
             )
             conn.commit()
 
@@ -712,6 +825,52 @@ class ChatStore:
                     logger.debug("ChatStore WAL checkpoint failed", exc_info=True)
                 self._conn.close()
                 self._conn = None
+
+
+def _redact_chat_text(value: object) -> str:
+    return redact_sensitive_text(
+        value,
+        limit=_CHAT_TEXT_REDACTION_LIMIT,
+        collapse_whitespace=False,
+        trim=False,
+    )
+
+
+def _redact_optional_chat_text(value: object | None) -> str | None:
+    if value is None:
+        return None
+    return _redact_chat_text(value)
+
+
+def _redact_chat_json_text(value: str | None, *, fallback: str) -> str:
+    try:
+        payload = json.loads(value or fallback)
+    except (TypeError, json.JSONDecodeError):
+        payload = json.loads(fallback)
+    sanitized = sanitize_sensitive_value(
+        payload,
+        text_limit=_CHAT_TEXT_REDACTION_LIMIT,
+        max_items=_CHAT_JSON_MAX_ITEMS,
+        collapse_whitespace=False,
+        trim=False,
+    )
+    return json.dumps(sanitized, ensure_ascii=False, sort_keys=True)
+
+
+def _redact_existing_chat_json_text(value: str | None, *, fallback: str) -> str:
+    raw = value or fallback
+    try:
+        payload = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return _redact_chat_text(raw)
+    sanitized = sanitize_sensitive_value(
+        payload,
+        text_limit=_CHAT_TEXT_REDACTION_LIMIT,
+        max_items=_CHAT_JSON_MAX_ITEMS,
+        collapse_whitespace=False,
+        trim=False,
+    )
+    return json.dumps(sanitized, ensure_ascii=False, sort_keys=True)
 
 
 # ── 全局实例 ──────────────────────────────────────────────────────────────────

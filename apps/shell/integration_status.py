@@ -119,7 +119,7 @@ def get_bridge_status(config: "AppConfig", boot_config: dict[str, Any]) -> Bridg
 
 # AstrBot 接入四状态
 ASTRBOT_STATES = {
-    "not_configured":             ("⚪ 未配置", "需在 AstrBot 中安装并配置 Hermes-Yachiyo 插件"),
+    "not_configured":             ("⚪ 未配置", "需在 AstrBot 中安装并配置 Oha-Yachiyo 插件"),
     "configured_not_connected":   ("⏳ 已配置但未连接", "AstrBot 插件已配置，但尚未建立连接"),
     "connected":                  ("✅ 已连接", "AstrBot 正在通过 Bridge 转发 QQ 消息"),
     "unknown":                    ("❓ 状态未知", "无法确定 AstrBot 连接状态"),

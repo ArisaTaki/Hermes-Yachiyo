@@ -7,7 +7,6 @@ from pydantic import ValidationError
 
 from packages.protocol.enums import (
     ErrorCode,
-    HermesInstallStatus,
     RiskLevel,
     TaskStatus,
     TaskType,
@@ -41,11 +40,7 @@ class TestEnums:
     def test_error_code_includes_key_codes(self):
         assert "not_found" in set(ErrorCode)
         assert "task_not_cancellable" in set(ErrorCode)
-
-    def test_install_status_has_ready(self):
-        assert HermesInstallStatus.READY == "ready"
-        assert HermesInstallStatus.NOT_INSTALLED == "not_installed"
-
+        assert "screen_capture_permission_denied" in set(ErrorCode)
 
 # ── TaskInfo ───────────────────────────────────────────────
 
@@ -104,17 +99,17 @@ class TestTaskCreateRequest:
 class TestStatusResponse:
     def test_defaults(self):
         resp = StatusResponse(uptime_seconds=10.5)
-        assert resp.service == "hermes-yachiyo"
-        assert resp.version == "0.1.0"
-        assert resp.hermes_ready is False
+        assert resp.service == "oha-yachiyo"
+        assert resp.version == "0.4.0"
+        assert resp.native_agent_ready is False
 
     def test_with_task_counts(self):
         resp = StatusResponse(
             uptime_seconds=60,
             task_counts={TaskStatus.PENDING: 3, TaskStatus.RUNNING: 1},
-            hermes_ready=True,
+            native_agent_ready=True,
         )
-        assert resp.hermes_ready is True
+        assert resp.native_agent_ready is True
         assert resp.task_counts[TaskStatus.PENDING] == 3
 
 

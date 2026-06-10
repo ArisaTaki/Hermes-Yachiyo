@@ -22,10 +22,11 @@ from urllib.parse import urlparse
 
 from apps.core.tls import urlopen_with_bundled_ca
 from apps.shell.model_provider_adapters import (
-    HERMES_PROVIDER_API_KEY_NAMES,
-    HERMES_PROVIDER_LABELS,
+    NATIVE_PROVIDER_API_KEY_NAMES,
+    NATIVE_PROVIDER_LABELS,
     resolve_provider_adapter,
 )
+from packages.security import redact_api_error_text
 
 CACHE_SCHEMA = 1
 CACHE_FILE_NAME = "provider-capabilities.json"
@@ -65,15 +66,14 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _hermes_yachiyo_home() -> Path:
-    hermes_home = os.getenv("HERMES_HOME", os.path.expanduser("~/.hermes"))
-    root = Path(hermes_home) / "yachiyo"
+def _oha_yachiyo_home() -> Path:
+    root = Path(os.getenv("OHA_YACHIYO_HOME", os.path.expanduser("~/.oha-yachiyo")))
     root.mkdir(parents=True, exist_ok=True)
     return root
 
 
 def default_provider_catalog_cache_path() -> Path:
-    return _hermes_yachiyo_home() / CACHE_FILE_NAME
+    return _oha_yachiyo_home() / CACHE_FILE_NAME
 
 
 def _adapter_map() -> dict[str, ProviderCatalogAdapter]:
@@ -100,7 +100,7 @@ def list_provider_catalog_adapters() -> list[dict[str, Any]]:
 def _api_key_names(adapter: ProviderCatalogAdapter) -> tuple[str, ...]:
     if adapter.api_key_names:
         return adapter.api_key_names
-    return tuple(HERMES_PROVIDER_API_KEY_NAMES.get(adapter.provider, ()))
+    return tuple(NATIVE_PROVIDER_API_KEY_NAMES.get(adapter.provider, ()))
 
 
 def _configured_api_key(adapter: ProviderCatalogAdapter) -> tuple[str, str]:
@@ -328,7 +328,7 @@ def sync_provider_catalogs(
             adapters.append(
                 ProviderCatalogAdapter(
                     provider=provider,
-                    label=HERMES_PROVIDER_LABELS.get(provider, provider),
+                    label=NATIVE_PROVIDER_LABELS.get(provider, provider),
                     base_url="",
                     requires_api_key=True,
                     enabled_by_default=False,
@@ -357,7 +357,7 @@ def sync_provider_catalogs(
                 "label": adapter.label,
                 "base_url": adapter.base_url,
                 "status": "failed",
-                "error": str(exc),
+                "error": redact_api_error_text(exc),
                 "models": [],
                 "count": 0,
                 "synced_at": _now(),
@@ -392,7 +392,7 @@ def cached_provider_models(
     cache_path: Path | str | None = None,
 ) -> list[dict[str, Any]]:
     adapter = resolve_provider_adapter(provider, base_url)
-    provider_id = str(adapter.get("hermes_provider") or provider or "").strip().lower()
+    provider_id = str(adapter.get("native_provider") or provider or "").strip().lower()
     cache = load_provider_catalog_cache(cache_path)
     providers = cache.get("providers")
     if not isinstance(providers, dict):

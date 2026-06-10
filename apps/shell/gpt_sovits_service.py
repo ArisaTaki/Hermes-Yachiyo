@@ -15,7 +15,9 @@ from urllib.error import HTTPError
 from urllib.parse import urljoin, urlparse
 from urllib.request import Request, urlopen
 
-LAUNCH_AGENT_LABEL = "com.hermes-yachiyo.gpt-sovits"
+from packages.security import redact_api_error_text
+
+LAUNCH_AGENT_LABEL = "com.oha-yachiyo.gpt-sovits"
 
 
 def get_gpt_sovits_service_status(config: Any) -> dict[str, Any]:
@@ -126,7 +128,7 @@ def install_gpt_sovits_launch_agent(config: Any) -> dict[str, Any]:
 
 
 def adopt_gpt_sovits_launch_agent(config: Any) -> dict[str, Any]:
-    """Disable user-level third-party GPT-SoVITS agents and install the Hermes agent."""
+    """Disable user-level third-party GPT-SoVITS agents and install the managed agent."""
     if platform.system() != "Darwin":
         return {"ok": False, "error": "GPT-SoVITS 后台/开机自启目前仅支持 macOS LaunchAgent"}
 
@@ -140,7 +142,7 @@ def adopt_gpt_sovits_launch_agent(config: Any) -> dict[str, Any]:
         return {"ok": False, "error": "请先填写 GPT-SoVITS 服务启动命令"}
 
     external_agents = [
-        agent for agent in _related_launch_agents(workdir) if not agent["managed_by_hermes"]
+        agent for agent in _related_launch_agents(workdir) if not agent["managed_by_oha"]
     ]
     if not external_agents:
         return {
@@ -182,7 +184,7 @@ def adopt_gpt_sovits_launch_agent(config: Any) -> dict[str, Any]:
             "ok": False,
             "error": (
                 "外部 GPT-SoVITS 服务仍占用 API 端口，已停用自启项；"
-                "请停止该进程后再启动 Hermes-Yachiyo 后台服务"
+                "请停止该进程后再启动 Oha-Yachiyo 后台服务"
             ),
             "disabled_launch_agents": disabled_agents,
             "status": get_gpt_sovits_service_status(config),
@@ -191,7 +193,7 @@ def adopt_gpt_sovits_launch_agent(config: Any) -> dict[str, Any]:
     install_result = install_gpt_sovits_launch_agent(config)
     install_result["disabled_launch_agents"] = disabled_agents
     if install_result.get("ok") is True:
-        install_result["message"] = "已停用外部 GPT-SoVITS 自启项，并交由 Hermes-Yachiyo 管理"
+        install_result["message"] = "已停用外部 GPT-SoVITS 自启项，并交由 Oha-Yachiyo 管理"
     return install_result
 
 
@@ -233,7 +235,7 @@ def _service_reachable(base_url: str) -> dict[str, Any]:
     except HTTPError:
         return {"ok": True}
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}
+        return {"ok": False, "error": redact_api_error_text(exc)}
 
 
 def _launch_agent_path() -> Path:
@@ -387,7 +389,7 @@ def _launch_agent_info(plist_path: Path, workdir_text: str) -> dict[str, Any] | 
         "path": str(plist_path),
         "path_display": _display_path(plist_path),
         "working_directory": working_directory,
-        "managed_by_hermes": label == LAUNCH_AGENT_LABEL,
+        "managed_by_oha": label == LAUNCH_AGENT_LABEL,
         "running": _launch_agent_label_running(label),
     }
 
@@ -449,14 +451,14 @@ def _is_user_launch_agent_path(path: Path) -> bool:
 
 
 def _disabled_launch_agent_path(plist_path: Path) -> Path:
-    base = plist_path.with_name(f"{plist_path.name}.hermes-yachiyo-disabled")
+    base = plist_path.with_name(f"{plist_path.name}.oha-yachiyo-disabled")
     if not base.exists():
         return base
     for index in range(2, 100):
-        candidate = plist_path.with_name(f"{plist_path.name}.hermes-yachiyo-disabled-{index}")
+        candidate = plist_path.with_name(f"{plist_path.name}.oha-yachiyo-disabled-{index}")
         if not candidate.exists():
             return candidate
-    return plist_path.with_name(f"{plist_path.name}.hermes-yachiyo-disabled-{int(time.time())}")
+    return plist_path.with_name(f"{plist_path.name}.oha-yachiyo-disabled-{int(time.time())}")
 
 
 def _looks_like_related_gpt_sovits_agent(haystack: str, workdir_text: str) -> bool:
@@ -470,7 +472,8 @@ def _looks_like_related_gpt_sovits_agent(haystack: str, workdir_text: str) -> bo
 
 def _log_path(kind: str) -> Path:
     suffix = "out.log" if kind == "out" else "err.log"
-    return Path.home() / ".hermes" / "yachiyo" / "logs" / f"gpt-sovits-{suffix}"
+    root = Path(os.getenv("OHA_YACHIYO_HOME", "~/.oha-yachiyo")).expanduser()
+    return root / "logs" / f"gpt-sovits-{suffix}"
 
 
 def _expand_path(value: str) -> Path | None:

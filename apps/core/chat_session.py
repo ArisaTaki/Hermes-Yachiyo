@@ -29,10 +29,14 @@ from enum import Enum
 from typing import TYPE_CHECKING, List, Optional
 from uuid import uuid4
 
+from packages.security import redact_sensitive_text, sanitize_sensitive_value
+
 if TYPE_CHECKING:
     from apps.core.chat_store import ChatStore
 
 logger = logging.getLogger(__name__)
+_CHAT_TEXT_REDACTION_LIMIT = 0
+_CHAT_JSON_MAX_ITEMS = 200
 
 
 class MessageRole(str, Enum):
@@ -73,7 +77,7 @@ class ChatSession:
     """
     session_id: str = field(default_factory=lambda: uuid4().hex[:8])
     messages: List[ChatMessage] = field(default_factory=list)
-    hermes_session_id: Optional[str] = field(default=None)
+    execution_session_id: Optional[str] = field(default=None)
     _pending_message_id: Optional[str] = field(default=None, repr=False)
     _store: Optional["ChatStore"] = field(default=None, repr=False)
     _lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
@@ -90,10 +94,10 @@ class ChatSession:
             store.create_session(self.session_id)
             if load_existing:
                 self._load_messages_from_store(fail_active_messages=fail_active_messages)
-                # 恢复 hermes_session_id
+                # 恢复 execution_session_id
                 stored_session = store.get_session(self.session_id)
-                if stored_session and stored_session.hermes_session_id:
-                    self.hermes_session_id = stored_session.hermes_session_id
+                if stored_session and stored_session.execution_session_id:
+                    self.execution_session_id = stored_session.execution_session_id
 
     def _load_messages_from_store(self, *, fail_active_messages: bool = True) -> None:
         """从持久化层恢复当前会话消息。"""
@@ -121,13 +125,13 @@ class ChatSession:
             restored.append(ChatMessage(
                 message_id=stored.message_id,
                 role=role,
-                content=stored.content,
+                content=_redact_chat_text(stored.content),
                 status=status,
                 created_at=created_at,
                 task_id=stored.task_id,
-                error=error,
-                attachments=attachments,
-                metadata=metadata,
+                error=_redact_optional_chat_text(error),
+                attachments=_redact_chat_attachments(attachments),
+                metadata=_redact_chat_metadata(metadata),
             ))
 
         self.messages = restored
@@ -148,13 +152,13 @@ class ChatSession:
             message_id=msg.message_id,
             session_id=self.session_id,
             role=msg.role.value,
-            content=msg.content,
+            content=_redact_chat_text(msg.content),
             status=msg.status.value,
             task_id=msg.task_id,
-            error=msg.error,
+            error=_redact_optional_chat_text(msg.error),
             created_at=msg.created_at.isoformat(),
-            attachments_json=json.dumps(msg.attachments or [], ensure_ascii=False),
-            metadata_json=json.dumps(msg.metadata or {}, ensure_ascii=False),
+            attachments_json=json.dumps(_redact_chat_attachments(msg.attachments), ensure_ascii=False),
+            metadata_json=json.dumps(_redact_chat_metadata(msg.metadata), ensure_ascii=False),
         ))
 
     def _ensure_summary_title_locked(self, content: str, attachments: list[dict] | None = None) -> None:
@@ -176,23 +180,25 @@ class ChatSession:
         metadata: dict | None = None,
     ) -> str:
         """添加用户消息，返回 message_id"""
-        normalized_attachments = list(attachments or [])
+        safe_content = _redact_chat_text(content)
+        normalized_attachments = _redact_chat_attachments(attachments or [])
+        safe_metadata = _redact_chat_metadata(metadata or {})
         with self._lock:
             msg_id = uuid4().hex[:12]
             msg = ChatMessage(
                 message_id=msg_id,
                 role=MessageRole.USER,
-                content=content,
+                content=safe_content,
                 status=MessageStatus.PENDING,
                 created_at=datetime.now(timezone.utc),
                 attachments=normalized_attachments,
-                metadata=dict(metadata or {}),
+                metadata=safe_metadata,
             )
             self.messages.append(msg)
             self._pending_message_id = msg_id
             self._persist_message(msg)
-            self._ensure_summary_title_locked(content, normalized_attachments)
-        logger.info("用户消息已添加: %s (len=%d, attachments=%d)", msg_id, len(content), len(normalized_attachments))
+            self._ensure_summary_title_locked(safe_content, normalized_attachments)
+        logger.info("用户消息已添加: %s (len=%d, attachments=%d)", msg_id, len(safe_content), len(normalized_attachments))
         return msg_id
     
     def link_message_to_task(self, message_id: str, task_id: str) -> bool:
@@ -222,18 +228,21 @@ class ChatSession:
         注意：对于 task 关联的 assistant 消息，应优先使用
         upsert_assistant_message() 以保证幂等性。
         """
+        safe_content = _redact_chat_text(content)
+        safe_error = _redact_optional_chat_text(error)
+        safe_metadata = _redact_chat_metadata(metadata or {})
         with self._lock:
             msg_id = uuid4().hex[:12]
-            status = MessageStatus.FAILED if error else MessageStatus.COMPLETED
+            status = MessageStatus.FAILED if safe_error else MessageStatus.COMPLETED
             msg = ChatMessage(
                 message_id=msg_id,
                 role=MessageRole.ASSISTANT,
-                content=content,
+                content=safe_content,
                 status=status,
                 created_at=datetime.now(timezone.utc),
                 task_id=task_id,
-                error=error,
-                metadata=dict(metadata or {}),
+                error=safe_error,
+                metadata=safe_metadata,
             )
             self.messages.append(msg)
 
@@ -242,8 +251,8 @@ class ChatSession:
                 for m in self.messages:
                     if m.task_id == task_id and m.role == MessageRole.USER:
                         m.status = status
-                        if error:
-                            m.error = error
+                        if safe_error:
+                            m.error = safe_error
                         self._persist_message(m)
                         break
 
@@ -270,6 +279,10 @@ class ChatSession:
         幂等：多次调用相同参数不会产生重复消息。
         线程安全：check + create/update 在同一把锁内完成。
         """
+        safe_content = _redact_chat_text(content)
+        safe_error = _redact_optional_chat_text(error)
+        safe_attachments = _redact_chat_attachments(attachments or []) if attachments is not None else None
+        safe_metadata = _redact_chat_metadata(metadata or {}) if metadata is not None else None
         with self._lock:
             candidates = self._assistant_candidates_for_task_locked(task_id)
             existing = self._select_assistant_candidate(candidates, status)
@@ -285,13 +298,13 @@ class ChatSession:
                     self._sync_user_status_for_task_locked(task_id, existing.status, existing.error)
                     self._pending_message_id = self._find_active_message_id_locked()
                     return existing.message_id
-                existing.content = content
+                existing.content = safe_content
                 existing.status = status
-                existing.error = error
-                if attachments is not None:
-                    existing.attachments = list(attachments)
-                if metadata is not None:
-                    existing.metadata = dict(metadata)
+                existing.error = safe_error
+                if safe_attachments is not None:
+                    existing.attachments = safe_attachments
+                if safe_metadata is not None:
+                    existing.metadata = safe_metadata
                 self._persist_message(existing)
                 msg_id = existing.message_id
                 logger.debug(
@@ -303,13 +316,13 @@ class ChatSession:
                 new_msg = ChatMessage(
                     message_id=msg_id,
                     role=MessageRole.ASSISTANT,
-                    content=content,
+                    content=safe_content,
                     status=status,
                     created_at=datetime.now(timezone.utc),
                     task_id=task_id,
-                    error=error,
-                    attachments=list(attachments or []),
-                    metadata=dict(metadata or {}),
+                    error=safe_error,
+                    attachments=safe_attachments or [],
+                    metadata=safe_metadata or {},
                 )
                 self.messages.append(new_msg)
                 self._persist_message(new_msg)
@@ -318,7 +331,7 @@ class ChatSession:
                     msg_id, task_id, status.value,
                 )
 
-            self._sync_user_status_for_task_locked(task_id, status, error)
+            self._sync_user_status_for_task_locked(task_id, status, safe_error)
             self._pending_message_id = self._find_active_message_id_locked()
             return msg_id
 
@@ -429,7 +442,7 @@ class ChatSession:
             if msg.task_id == task_id and msg.role == MessageRole.USER:
                 msg.status = status
                 if status == MessageStatus.FAILED and error:
-                    msg.error = error
+                    msg.error = _redact_chat_text(error)
                 elif status != MessageStatus.FAILED:
                     msg.error = None
                 self._persist_message(msg)
@@ -437,15 +450,17 @@ class ChatSession:
     
     def add_system_message(self, content: str, metadata: dict | None = None) -> str:
         """添加系统消息（提示、状态更新等）"""
+        safe_content = _redact_chat_text(content)
+        safe_metadata = _redact_chat_metadata(metadata or {})
         with self._lock:
             msg_id = uuid4().hex[:12]
             msg = ChatMessage(
                 message_id=msg_id,
                 role=MessageRole.SYSTEM,
-                content=content,
+                content=safe_content,
                 status=MessageStatus.COMPLETED,
                 created_at=datetime.now(timezone.utc),
-                metadata=dict(metadata or {}),
+                metadata=safe_metadata,
             )
             self.messages.append(msg)
             self._persist_message(msg)
@@ -453,11 +468,12 @@ class ChatSession:
     
     def mark_message_failed(self, message_id: str, error: str) -> bool:
         """标记消息处理失败"""
+        safe_error = _redact_chat_text(error)
         with self._lock:
             for msg in self.messages:
                 if msg.message_id == message_id:
                     msg.status = MessageStatus.FAILED
-                    msg.error = error
+                    msg.error = safe_error
                     self._pending_message_id = self._find_active_message_id_locked()
                     self._persist_message(msg)
                     return True
@@ -499,14 +515,17 @@ class ChatSession:
 
         用于异步 Agent Run 完成后更新消息。
         """
+        safe_content = _redact_chat_text(content)
+        safe_error = _redact_optional_chat_text(error)
+        safe_metadata = _redact_chat_metadata(metadata or {}) if metadata else None
         with self._lock:
             for msg in self.messages:
                 if msg.message_id == message_id:
-                    msg.content = content
+                    msg.content = safe_content
                     msg.status = status
-                    msg.error = error
-                    if metadata:
-                        for key, value in metadata.items():
+                    msg.error = safe_error
+                    if safe_metadata:
+                        for key, value in safe_metadata.items():
                             if value is None:
                                 msg.metadata.pop(key, None)
                             else:
@@ -577,23 +596,23 @@ class ChatSession:
         with self._lock:
             self.messages.clear()
             self._pending_message_id = None
-            self.hermes_session_id = None
+            self.execution_session_id = None
             self.session_id = uuid4().hex[:8]
             if self._store is not None:
                 self._store.create_session(self.session_id)
         logger.info("会话已清空，新 session_id=%s", self.session_id)
 
-    def set_hermes_session_id(self, hermes_id: str) -> None:
-        """记录 Hermes CLI 返回的 session ID，用于后续 --resume。"""
+    def set_execution_session_id(self, execution_id: str) -> None:
+        """记录外部执行会话 ID；Native Run 使用 TaskRunLink 关联。"""
         with self._lock:
-            self.hermes_session_id = hermes_id
+            self.execution_session_id = execution_id
             if self._store is not None:
-                self._store.update_hermes_session_id(self.session_id, hermes_id)
-        logger.info("Hermes session ID 已设置: %s", hermes_id)
+                self._store.update_execution_session_id(self.session_id, execution_id)
+        logger.info("Execution session ID 已设置: %s", execution_id)
 
     def set_session_title(self, title: str) -> None:
         """更新当前会话标题。"""
-        title = (title or "").strip()
+        title = _redact_chat_text(title).strip()
         if not title:
             return
         from apps.core.title_generator import looks_like_title_prompt_echo
@@ -617,13 +636,13 @@ class ChatSession:
                     {
                         "id": m.message_id,
                         "role": m.role.value,
-                        "content": m.content,
+                        "content": _redact_chat_text(m.content),
                         "status": m.status.value,
                         "task_id": m.task_id,
-                        "error": m.error,
+                        "error": _redact_optional_chat_text(m.error),
                         "created_at": m.created_at.isoformat(),
-                        "attachments": m.attachments,
-                        "metadata": m.metadata,
+                        "attachments": _redact_chat_attachments(m.attachments),
+                        "metadata": _redact_chat_metadata(m.metadata),
                     }
                     for m in self.messages
                 ],
@@ -673,7 +692,7 @@ def get_chat_session() -> ChatSession:
 def switch_chat_session(session_id: str) -> ChatSession:
     """切换到指定历史会话，返回新的 ChatSession 实例。
 
-    会从数据库加载该会话的消息和 hermes_session_id。
+    会从数据库加载该会话的消息和 execution_session_id。
     若 session_id 不存在则创建空会话。
     """
     global _global_session
@@ -700,13 +719,13 @@ def _chat_message_from_stored(stored, *, fail_active_message: bool = True) -> Ch
     return ChatMessage(
         message_id=stored.message_id,
         role=role,
-        content=stored.content,
+        content=_redact_chat_text(stored.content),
         status=status,
         created_at=datetime.fromisoformat(stored.created_at),
         task_id=stored.task_id,
-        error=error,
-        attachments=_parse_attachments_json(stored.attachments_json),
-        metadata=_parse_metadata_json(getattr(stored, "metadata_json", "{}")),
+        error=_redact_optional_chat_text(error),
+        attachments=_redact_chat_attachments(_parse_attachments_json(stored.attachments_json)),
+        metadata=_redact_chat_metadata(_parse_metadata_json(getattr(stored, "metadata_json", "{}"))),
     )
 
 
@@ -730,6 +749,45 @@ def _parse_metadata_json(value: str | None) -> dict:
     except (TypeError, json.JSONDecodeError):
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def _redact_chat_text(value: object) -> str:
+    return redact_sensitive_text(
+        value,
+        limit=_CHAT_TEXT_REDACTION_LIMIT,
+        collapse_whitespace=False,
+        trim=False,
+    )
+
+
+def _redact_optional_chat_text(value: object | None) -> str | None:
+    if value is None:
+        return None
+    return _redact_chat_text(value)
+
+
+def _redact_chat_attachments(value: list[dict] | object) -> list[dict]:
+    sanitized = sanitize_sensitive_value(
+        list(value or []) if isinstance(value, list) else [],
+        text_limit=_CHAT_TEXT_REDACTION_LIMIT,
+        max_items=_CHAT_JSON_MAX_ITEMS,
+        collapse_whitespace=False,
+        trim=False,
+    )
+    if not isinstance(sanitized, list):
+        return []
+    return [item for item in sanitized if isinstance(item, dict)]
+
+
+def _redact_chat_metadata(value: dict | object) -> dict:
+    sanitized = sanitize_sensitive_value(
+        dict(value or {}) if isinstance(value, dict) else {},
+        text_limit=_CHAT_TEXT_REDACTION_LIMIT,
+        max_items=_CHAT_JSON_MAX_ITEMS,
+        collapse_whitespace=False,
+        trim=False,
+    )
+    return sanitized if isinstance(sanitized, dict) else {}
 
 
 def reset_chat_session() -> ChatSession:

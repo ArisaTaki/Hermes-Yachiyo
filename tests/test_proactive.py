@@ -15,7 +15,8 @@ from packages.protocol.enums import RiskLevel, TaskStatus, TaskType
 
 
 class _ExecutorStub:
-    name = "HermesExecutor"
+    name = "NativeAgentExecutor"
+    capabilities = {"model": True, "image_input": True, "tools": False, "approval": False}
 
 
 class _RunnerStub:
@@ -31,18 +32,18 @@ class _RuntimeStub:
         self.ready = True
         self.limited_tools: list[str] = []
 
-    def is_hermes_ready(self) -> bool:
+    def is_native_agent_ready(self) -> bool:
         return self.ready
 
     def get_status(self) -> dict:
-        return {"hermes": {"limited_tools": self.limited_tools}}
+        return {"native_agent": {"limited_tools": self.limited_tools}}
 
 
 @pytest.fixture(autouse=True)
 def _allow_image_input(monkeypatch):
     monkeypatch.setattr(
         proactive_mod,
-        "get_current_hermes_image_input_capability",
+        "get_native_image_input_capability",
         lambda: {"can_attach_images": True, "route": "vision_text"},
     )
 
@@ -79,7 +80,7 @@ def test_proactive_service_disabled():
     assert runtime.state.list_tasks() == []
 
 
-def test_proactive_service_blocks_when_hermes_not_ready():
+def test_proactive_service_blocks_when_native_agent_not_ready():
     runtime = _RuntimeStub()
     runtime.ready = False
     config = AppConfig()
@@ -90,11 +91,11 @@ def test_proactive_service_blocks_when_hermes_not_ready():
     state = service.get_state()
 
     assert state["status"] == "blocked"
-    assert "Hermes Agent" in state["error"]
+    assert "Native Agent" in state["error"]
     assert runtime.state.list_tasks() == []
 
 
-def test_proactive_service_ignores_hermes_vision_tool_limit():
+def test_proactive_service_ignores_native_vision_tool_limit():
     runtime = _RuntimeStub()
     runtime.limited_tools = ["vision"]
     config = AppConfig()
@@ -111,7 +112,7 @@ def test_proactive_service_ignores_hermes_vision_tool_limit():
 def test_proactive_service_blocks_when_image_chain_unavailable(monkeypatch):
     monkeypatch.setattr(
         proactive_mod,
-        "get_current_hermes_image_input_capability",
+        "get_native_image_input_capability",
         lambda: {"can_attach_images": False, "reason": "当前主模型未声明图片输入能力"},
     )
     runtime = _RuntimeStub()
@@ -275,7 +276,7 @@ def test_proactive_service_uses_dedicated_session_when_store_is_available(monkey
         store.close()
 
 
-def test_proactive_service_records_local_screenshot_failure_without_running_hermes(monkeypatch):
+def test_proactive_service_records_local_screenshot_failure_without_running_native_agent(monkeypatch):
     now = _advance_to_first_check(monkeypatch)
 
     def fake_capture(_target_path):

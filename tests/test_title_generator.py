@@ -19,8 +19,8 @@ def test_resolve_title_llm_config_reads_openai_compatible_config(tmp_path, monke
         encoding="utf-8",
     )
     env_path.write_text("DEEPSEEK_API_KEY=sk-test\n", encoding="utf-8")
-    monkeypatch.setenv("HERMES_CONFIG_FILE", str(config_path))
-    monkeypatch.setenv("HERMES_ENV_FILE", str(env_path))
+    monkeypatch.setenv("OHA_YACHIYO_CONFIG_FILE", str(config_path))
+    monkeypatch.setenv("OHA_YACHIYO_ENV_FILE", str(env_path))
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
 
     config = resolve_title_llm_config()
@@ -43,8 +43,8 @@ def test_resolve_title_llm_config_skips_unsupported_direct_provider(tmp_path, mo
         encoding="utf-8",
     )
     env_path.write_text("ANTHROPIC_API_KEY=sk-test\n", encoding="utf-8")
-    monkeypatch.setenv("HERMES_CONFIG_FILE", str(config_path))
-    monkeypatch.setenv("HERMES_ENV_FILE", str(env_path))
+    monkeypatch.setenv("OHA_YACHIYO_CONFIG_FILE", str(config_path))
+    monkeypatch.setenv("OHA_YACHIYO_ENV_FILE", str(env_path))
 
     assert resolve_title_llm_config() is None
 

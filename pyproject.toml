@@ -1,7 +1,7 @@
 [project]
-name = "hermes-yachiyo"
+name = "oha-yachiyo"
 version = "0.4.0"
-description = "Hermes-Yachiyo: 桌面优先本地个人 agent 应用"
+description = "Oha-Yachiyo: 桌面优先本地个人 agent 应用"
 requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.6.0",
@@ -23,8 +23,8 @@ packaging = [
 ]
 
 [project.scripts]
-hermes-yachiyo = "apps.desktop_launcher:main"
-hermes-yachiyo-backend = "apps.desktop_backend.app:main"
+oha-yachiyo = "apps.desktop_launcher:main"
+oha-yachiyo-backend = "apps.desktop_backend.app:main"
 
 [tool.ruff]
 target-version = "py311"

@@ -2,11 +2,24 @@
 
 from __future__ import annotations
 
+import asyncio
+import importlib.util
 import subprocess
+from pathlib import Path
 
 import pytest
 
 import apps.locald.screenshot as screenshot_mod
+
+
+def _load_screen_route_module():
+    path = Path(__file__).resolve().parents[1] / "apps" / "bridge" / "routes" / "screen.py"
+    spec = importlib.util.spec_from_file_location("_oha_screen_route_under_test", path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_capture_screenshot_to_file_rejects_empty_output(monkeypatch, tmp_path):
@@ -40,7 +53,7 @@ def test_capture_screenshot_to_file_reports_screen_recording_permission(monkeypa
 
     message = str(exc_info.value)
     assert "屏幕录制权限" in message
-    assert "重启 Hermes-Yachiyo 或 Bridge" in message
+    assert "重启 Oha-Yachiyo 或 Bridge" in message
     assert "could not create image from display" in message
 
 
@@ -61,6 +74,24 @@ def test_check_screen_capture_permission_opens_settings_on_permission_error(monk
     assert result["permission_denied"] is True
     assert result["settings_opened"] is True
     assert opened == [True]
+
+
+def test_screen_current_route_returns_structured_permission_error(monkeypatch):
+    screen_route = _load_screen_route_module()
+
+    async def fake_capture():
+        raise screenshot_mod.ScreenCapturePermissionError("没有屏幕录制权限，请授权")
+
+    monkeypatch.setattr(screenshot_mod, "capture_screenshot", fake_capture)
+
+    with pytest.raises(screen_route.HTTPException) as exc_info:
+        asyncio.run(screen_route.get_screen_current())
+
+    detail = exc_info.value.detail
+    assert exc_info.value.status_code == 403
+    assert detail["error"] == "screen_capture_permission_denied"
+    assert detail["message"].startswith("屏幕录制权限不足")
+    assert "授权" in detail["detail"]
 
 
 def test_check_screen_capture_permission_reports_allowed(monkeypatch):

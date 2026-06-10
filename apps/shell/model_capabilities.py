@@ -1,25 +1,22 @@
-"""Hermes capability helpers shared by shell APIs."""
+"""Native model capability helpers shared by shell APIs."""
 
 from __future__ import annotations
 
 import json
 import logging
 import re
-import subprocess
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from apps.installer.hermes_check import locate_hermes_binary
 from apps.shell.model_provider_adapters import (
-    HERMES_PROVIDER_ALIASES as _PROVIDER_ALIASES,
-    HERMES_PROVIDER_HOST_HINTS as _PROVIDER_HOST_HINTS,
+    NATIVE_PROVIDER_ALIASES as _PROVIDER_ALIASES,
+    NATIVE_PROVIDER_HOST_HINTS as _PROVIDER_HOST_HINTS,
     OPENROUTER_MODEL_PREFIXES as _OPENROUTER_MODEL_PREFIXES,
 )
 
 logger = logging.getLogger(__name__)
 
-_HERMES_CONFIG_TIMEOUT = 5.0
 _VALID_IMAGE_INPUT_MODES = {"auto", "native", "text"}
 
 _XIAOMI_NATIVE_IMAGE_MODELS = {
@@ -51,20 +48,15 @@ _PROVIDER_TO_MODELS_DEV = {
 _AUTO_PROVIDER_VALUES = {"", "auto", "main"}
 
 
-def get_current_hermes_image_input_capability() -> dict[str, Any]:
-    """Return the current Hermes image-input capability summary."""
-    hermes_path, _ = locate_hermes_binary()
-    config_path = _run_config_path_command(hermes_path or "hermes", "path")
-    model = read_hermes_model_config(config_path)
-    return build_hermes_image_input_capability(
-        provider=model.get("provider", ""),
-        model=model.get("default", ""),
-        config_path=config_path,
-    )
+def get_current_native_image_input_capability() -> dict[str, Any]:
+    """Compatibility wrapper for the native image-input capability resolver."""
+    from apps.shell.native_capabilities import get_native_image_input_capability
+
+    return get_native_image_input_capability()
 
 
-def infer_effective_hermes_provider(provider: str, base_url: str = "", model: str = "") -> str:
-    """Infer the concrete provider behind Hermes' ``auto`` provider setting."""
+def infer_effective_native_provider(provider: str, base_url: str = "", model: str = "") -> str:
+    """Infer the concrete provider behind the native ``auto`` provider setting."""
     normalized = (provider or "").strip().lower()
     if normalized not in _AUTO_PROVIDER_VALUES:
         return _PROVIDER_ALIASES.get(normalized, normalized)
@@ -80,22 +72,22 @@ def infer_effective_hermes_provider(provider: str, base_url: str = "", model: st
     return ""
 
 
-def build_hermes_image_input_capability(
+def build_native_image_input_capability(
     *,
     provider: str,
     model: str,
     config_path: Path,
 ) -> dict[str, Any]:
-    """Summarize whether chat can submit images for the active Hermes model.
+    """Summarize whether chat can submit images for the active native model.
 
     Yachiyo intentionally routes every image through its own vision pre-analysis
-    path.  Hermes native multimodal input and Hermes' ``vision_analyze`` tool
-    are not advertised as available routes here.
+    path. Native multimodal input and tool routes are not advertised as separate
+    user-facing routes here.
     """
-    image_config = read_hermes_image_input_config(config_path)
-    model_config = read_hermes_model_config(config_path)
+    image_config = read_native_image_input_config(config_path)
+    model_config = read_native_model_config(config_path)
     effective_provider = (
-        infer_effective_hermes_provider(
+        infer_effective_native_provider(
             provider,
             model_config.get("base_url", ""),
             model or model_config.get("default", ""),
@@ -114,7 +106,7 @@ def build_hermes_image_input_capability(
             route="blocked",
             can_attach=False,
             requires_vision_pipeline=True,
-            reason="Hermes 模型配置未完成，暂不能提交图片。",
+            reason="Native 模型配置未完成，暂不能提交图片。",
         )
 
     if explicit_aux_vision:
@@ -153,7 +145,7 @@ def build_hermes_image_input_capability(
             route="vision_text",
             can_attach=True,
             requires_vision_pipeline=True,
-            reason="当前主模型支持图片；Yachiyo 会直接调用它做 vision 预分析，不再走 Hermes 原生图片输入。",
+            reason="当前主模型支持图片；Yachiyo 会直接调用它做 vision 预分析。",
         )
 
     if supports_vision is False:
@@ -217,7 +209,7 @@ def _image_input_payload(
     }
 
 
-def read_hermes_model_config(config_path: Path) -> dict[str, str]:
+def read_native_model_config(config_path: Path) -> dict[str, str]:
     values = _read_yaml_paths(config_path, {("model", "provider"), ("model", "default"), ("model", "base_url")})
     return {
         "provider": values.get(("model", "provider"), ""),
@@ -226,7 +218,7 @@ def read_hermes_model_config(config_path: Path) -> dict[str, str]:
     }
 
 
-def read_hermes_image_input_config(config_path: Path) -> dict[str, Any]:
+def read_native_image_input_config(config_path: Path) -> dict[str, Any]:
     values = _read_yaml_paths(
         config_path,
         {
@@ -307,33 +299,12 @@ def _lookup_models_dev_supports_vision(provider_id: str, model_id: str) -> bool 
 
 
 def _load_models_dev_cache() -> dict[str, Any]:
-    cache_path = Path.home() / ".hermes" / "models_dev_cache.json"
+    cache_path = Path.home() / ".oha-yachiyo" / "models_dev_cache.json"
     try:
         data = json.loads(cache_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
     return data if isinstance(data, dict) else {}
-
-
-def _run_config_path_command(hermes_path: str, subcommand: str) -> Path:
-    fallback_name = "config.yaml" if subcommand == "path" else ".env"
-    fallback = Path.home() / ".hermes" / fallback_name
-    try:
-        result = subprocess.run(
-            [hermes_path, "config", subcommand],
-            capture_output=True,
-            text=True,
-            timeout=_HERMES_CONFIG_TIMEOUT,
-            check=False,
-        )
-    except Exception:
-        return fallback
-    if result.returncode != 0:
-        return fallback
-    path = (result.stdout or "").strip().splitlines()
-    if not path:
-        return fallback
-    return Path(path[-1]).expanduser()
 
 
 def _read_yaml_paths(path: Path, wanted: set[tuple[str, ...]]) -> dict[tuple[str, ...], str]:
@@ -342,7 +313,7 @@ def _read_yaml_paths(path: Path, wanted: set[tuple[str, ...]]) -> dict[tuple[str
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except OSError as exc:
-        logger.debug("读取 Hermes 配置失败: %s", exc)
+        logger.debug("读取 Native 模型配置失败: %s", exc)
         return {}
 
     values: dict[tuple[str, ...], str] = {}

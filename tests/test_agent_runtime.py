@@ -3,23 +3,39 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import sqlite3
 import subprocess
+import threading
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from apps.shell.agent_runtime import AgentRuntimeError, AgentRuntimeService, ToolBroker
+from apps.shell.credential_store import MemoryCredentialStore
+from apps.shell.agent_runtime import (
+    AgentRuntimeError,
+    AgentRuntimeService,
+    NativeRunEngine,
+    ToolApprovalResumeContext,
+    ToolBroker,
+)
+from scripts.verify_secret_redaction import verify_secret_redaction
 
 
 def make_service(tmp_path, *, seed_templates: bool = False) -> AgentRuntimeService:
     return AgentRuntimeService(
         db_path=tmp_path / "agent-runtime.db",
         workspace_dir=tmp_path / "runtime",
+        credential_store=MemoryCredentialStore(),
         seed_templates=seed_templates,
     )
+
+
+def test_agent_runtime_service_is_native_run_engine_compatibility_name():
+    assert AgentRuntimeService is NativeRunEngine
 
 
 class FakeDefaultProfileService:
@@ -79,6 +95,1272 @@ def test_runtime_migrates_legacy_runs_before_index_creation(tmp_path):
         service.close()
 
 
+def test_runtime_sqlite_enables_required_database_guards(tmp_path):
+    service = make_service(tmp_path)
+    try:
+        metadata = {
+            row["key"]: row["value"]
+            for row in service._conn.execute("SELECT key, value FROM runtime_schema_metadata").fetchall()
+        }
+        assert metadata["schema_version"] == "1"
+        assert service._conn.execute("PRAGMA foreign_keys").fetchone()["foreign_keys"] == 1
+        assert service._conn.execute("PRAGMA journal_mode").fetchone()["journal_mode"].lower() == "wal"
+        assert service._conn.execute("PRAGMA busy_timeout").fetchone()["timeout"] == 5000
+
+        run = service.start_main_chat_run(task_id="task-db-guard", session_id="session-db-guard", user_goal="db guard")
+        assert service.get_task_run_link("task-db-guard")["run_id"] == run["run_id"]
+
+        service._conn.execute("DELETE FROM runs WHERE run_id=?", (run["run_id"],))
+        service._conn.commit()
+
+        with pytest.raises(KeyError):
+            service.get_task_run_link("task-db-guard")
+    finally:
+        service.close()
+
+
+def test_main_chat_run_links_task_and_records_replayable_events(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: {"role": "assistant", "content": "完成 sk-secret-value"},
+    )
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-1",
+            session_id="session-main-1",
+            user_goal="请处理",
+        )
+        result = service.call_main_chat_model(
+            run["run_id"],
+            [{"role": "user", "content": "请处理"}],
+        )
+        completed = service.complete_main_chat_run(run["run_id"], result)
+        link = service.get_task_run_link("task-main-1")
+        events = service.list_run_events(run["run_id"])["events"]
+
+        assert link["run_id"] == run["run_id"]
+        assert link["session_id"] == "session-main-1"
+        assert completed["kind"] == "main_chat_run"
+        assert completed["runnable_name"] == "Yachiyo"
+        assert completed["status"] == "completed"
+        assert completed["result"] == "完成 [redacted]"
+        assert completed["task_id"] == "task-main-1"
+        assert completed["session_id"] == "session-main-1"
+        listed_run = next(item for item in service.list_runs()["runs"] if item["run_id"] == run["run_id"])
+        assert listed_run["task_id"] == "task-main-1"
+        assert listed_run["session_id"] == "session-main-1"
+        assert [event["sequence"] for event in events] == list(range(1, len(events) + 1))
+        assert [event["event_type"] for event in events] == [
+            "run.started",
+            "task.linked",
+            "model.request.started",
+            "model.output.completed",
+            "run.completed",
+        ]
+    finally:
+        service.close()
+
+
+def test_main_chat_cancelled_run_ignores_late_model_output(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+    run = service.start_main_chat_run(
+        task_id="task-main-cancel",
+        session_id="session-main-cancel",
+        user_goal="cancel me",
+    )
+
+    def fake_chat(*_args, **_kwargs):
+        service.cancel_run(run["run_id"])
+        return {"role": "assistant", "content": "late model output should not win"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+
+    try:
+        cancelled = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [{"role": "user", "content": "cancel me"}],
+        )
+        completed_after_cancel = service.complete_main_chat_run(
+            run["run_id"],
+            "late model output should not win",
+        )
+        failed_after_cancel = service.fail_main_chat_run(
+            run["run_id"],
+            "late failure should not win",
+        )
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        stored = service.get_run(run["run_id"])
+
+        assert cancelled["status"] == "cancelled"
+        assert completed_after_cancel["status"] == "cancelled"
+        assert failed_after_cancel["status"] == "cancelled"
+        assert stored["status"] == "cancelled"
+        assert "late model output should not win" not in stored["result"]
+        assert "model.output.completed" not in event_types
+        assert "run.completed" not in event_types
+        assert "run.failed" not in event_types
+        assert event_types[-1] == "run.cancelled"
+    finally:
+        service.close()
+
+
+def test_main_chat_model_output_is_truncated_by_runtime_budget(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    service.runtime_limits = service.runtime_limits.__class__(max_model_output_chars=20)
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: {"role": "assistant", "content": "x" * 60},
+    )
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-budget",
+            session_id="session-main-budget",
+            user_goal="请处理",
+        )
+        result = service.call_main_chat_model(
+            run["run_id"],
+            [{"role": "user", "content": "请处理"}],
+        )
+        events = service.list_run_events(run["run_id"])["events"]
+        output_event = next(event for event in events if event["event_type"] == "model.output.completed")
+
+        assert len(result) <= 20
+        assert "[truncated]" in result
+        assert output_event["payload"]["content"] == result
+        assert output_event["payload"]["truncated"] is True
+    finally:
+        service.close()
+
+
+def test_main_chat_model_persists_batched_output_event_not_token_deltas(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    model_output = "chunk-" * 1000
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: {"role": "assistant", "content": model_output},
+    )
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-batched-output",
+            session_id="session-main-batched-output",
+            user_goal="请处理长输出",
+        )
+        result = service.call_main_chat_model(
+            run["run_id"],
+            [{"role": "user", "content": "请处理长输出"}],
+        )
+        rows = service._conn.execute(
+            "SELECT event_type, payload_json FROM run_events WHERE run_id=? ORDER BY sequence",
+            (run["run_id"],),
+        ).fetchall()
+        output_rows = [row for row in rows if row["event_type"] == "model.output.completed"]
+
+        assert result == model_output
+        assert len(output_rows) == 1
+        assert json.loads(output_rows[0]["payload_json"])["content"] == model_output
+        assert not any(str(row["event_type"]).endswith(".delta") for row in rows)
+    finally:
+        service.close()
+
+
+def test_main_chat_model_loop_coalesces_stream_chunks_before_persisting(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    chunks = [f"chunk-{index};" for index in range(300)]
+    expected = "".join(chunks)
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    def fake_chat(_base_url, _model, _api_key, _messages, *, tools=None):
+        assert tools is not None
+
+        def stream():
+            for chunk in chunks:
+                yield {"choices": [{"delta": {"content": chunk}}]}
+
+        return stream()
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-stream-batched-output",
+            session_id="session-main-stream-batched-output",
+            user_goal="请处理 streaming 输出",
+        )
+        updated = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [{"role": "user", "content": "请处理 streaming 输出"}],
+        )
+        rows = service._conn.execute(
+            "SELECT event_type, payload_json FROM run_events WHERE run_id=? ORDER BY sequence",
+            (run["run_id"],),
+        ).fetchall()
+        output_rows = [row for row in rows if row["event_type"] == "model.output.completed"]
+
+        assert updated["result"] == expected
+        assert len(output_rows) == 1
+        assert json.loads(output_rows[0]["payload_json"])["content"] == expected
+        assert not any(str(row["event_type"]).endswith(".delta") for row in rows)
+    finally:
+        service.close()
+
+
+def test_main_chat_model_loop_coalesces_openai_sdk_object_stream_before_persisting(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    chunks = [f"sdk-object-chunk-{index};" for index in range(180)]
+    expected = "".join(chunks)
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    def fake_chat(_base_url, _model, _api_key, _messages, *, tools=None):
+        assert tools is not None
+
+        def stream():
+            for chunk in chunks:
+                yield SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            delta=SimpleNamespace(content=chunk),
+                            finish_reason=None,
+                        )
+                    ]
+                )
+            yield SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=""))])
+
+        return stream()
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-sdk-object-stream-batched-output",
+            session_id="session-main-sdk-object-stream-batched-output",
+            user_goal="请处理 OpenAI SDK 对象 streaming 输出",
+        )
+        updated = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [{"role": "user", "content": "请处理 OpenAI SDK 对象 streaming 输出"}],
+        )
+        rows = service._conn.execute(
+            "SELECT event_type, payload_json FROM run_events WHERE run_id=? ORDER BY sequence",
+            (run["run_id"],),
+        ).fetchall()
+        output_rows = [row for row in rows if row["event_type"] == "model.output.completed"]
+
+        assert updated["result"] == expected
+        assert len(output_rows) == 1
+        assert json.loads(output_rows[0]["payload_json"])["content"] == expected
+        assert not any(str(row["event_type"]).endswith(".delta") for row in rows)
+        assert len(rows) < 10
+    finally:
+        service.close()
+
+
+def test_main_chat_provider_exception_is_redacted_from_run_events_and_storage(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    leaked_secret = "sk-provider-exception123456"
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    def fake_chat(_base_url, _model, _api_key, _messages, *, tools=None):
+        raise RuntimeError(f"provider failed api_key={leaked_secret}")
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-provider-leak",
+            session_id="session-provider-leak",
+            user_goal=f"handle request token={leaked_secret}",
+        )
+
+        with pytest.raises(RuntimeError):
+            service.execute_main_chat_model_loop(
+                run["run_id"],
+                [{"role": "user", "content": "trigger provider failure"}],
+            )
+
+        failed = service.get_run(run["run_id"])
+        events = service.list_run_events(run["run_id"])["events"]
+        persisted_projection = json.dumps({"run": failed, "events": events}, ensure_ascii=False)
+
+        assert failed["status"] == "failed"
+        assert leaked_secret not in persisted_projection
+        assert "[redacted]" in persisted_projection
+        assert any(event["event_type"] == "model.request.failed" for event in events)
+    finally:
+        service.close()
+
+    assert verify_secret_redaction(paths=[tmp_path]) == []
+
+
+def test_main_chat_model_loop_executes_native_tool_call(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    (workdir / "out.txt").write_text("before\n", encoding="utf-8")
+    (workdir / "README.md").write_text("hello main chat tools", encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        if len(calls) == 1:
+            assert any((tool.get("function") or {}).get("name") == "workspace_read" for tool in tools or [])
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_read",
+                        "type": "function",
+                        "function": {"name": "workspace_read", "arguments": json.dumps({"path": "README.md"})},
+                    }
+                ],
+            }
+        assert messages[-1]["role"] == "tool"
+        assert "hello main chat tools" in messages[-1]["content"]
+        return {"content": "Main chat read complete"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        run = service.start_main_chat_run(task_id="task-main-tools", session_id="session-main-tools", user_goal="Read")
+        result = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [{"role": "user", "content": "Read README"}],
+            tool_policy={"allowed_tools": ["workspace.read"]},
+            workspace_policy={"default_workdir": str(workdir), "readable_scopes": ["."]},
+        )
+
+        assert result["status"] == "running"
+        assert result["result"] == "Main chat read complete"
+        tool_event = next(event for event in result["timeline"] if event["event"] == "agent.tool.call")
+        assert tool_event["detail"] == "workspace.read"
+        assert tool_event["result"]["ok"] is True
+    finally:
+        service.close()
+
+
+def test_main_chat_tool_exception_is_redacted_from_tool_messages_events_and_storage(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    calls = []
+    leaked_secret = "sk-tool-exception123456"
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        if len(calls) == 1:
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_read",
+                        "type": "function",
+                        "function": {"name": "workspace_read", "arguments": json.dumps({"path": "README.md"})},
+                    }
+                ],
+            }
+        assert messages[-1]["role"] == "tool"
+        assert leaked_secret not in messages[-1]["content"]
+        assert "[redacted]" in messages[-1]["content"]
+        return {"content": "Recovered from redacted tool failure"}
+
+    def failing_tool_call(self, name, payload, *, approved=False):
+        assert name == "workspace.read"
+        raise AgentRuntimeError(f"workspace failed token={leaked_secret}")
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    monkeypatch.setattr(ToolBroker, "call", failing_tool_call)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-tool-exception-leak",
+            session_id="session-tool-exception-leak",
+            user_goal="Read README and recover",
+        )
+        result = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [{"role": "user", "content": "Read README"}],
+            tool_policy={"allowed_tools": ["workspace.read"]},
+            workspace_policy={"default_workdir": str(workdir), "readable_scopes": ["."]},
+        )
+
+        events = service.list_run_events(run["run_id"])["events"]
+        persisted_projection = json.dumps({"run": result, "events": events}, ensure_ascii=False)
+        tool_event = next(event for event in events if event["event_type"] == "agent.tool.call")
+
+        assert result["status"] == "running"
+        assert result["result"] == "Recovered from redacted tool failure"
+        assert tool_event["payload"]["result"]["ok"] is False
+        assert leaked_secret not in persisted_projection
+        assert "[redacted]" in persisted_projection
+    finally:
+        service.close()
+
+    assert verify_secret_redaction(paths=[tmp_path]) == []
+
+
+def test_main_chat_default_tools_use_trusted_product_workspace(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    product_workspace = tmp_path / "oha-workspace"
+    projects = product_workspace / "projects"
+    projects.mkdir(parents=True)
+    (projects / "README.md").write_text("trusted product workspace", encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_workspace_status",
+        lambda: {
+            "initialized": True,
+            "workspace_path": str(product_workspace),
+            "dirs": {"projects": str(projects)},
+        },
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append({"messages": messages, "tools": tools or []})
+        if len(calls) == 1:
+            tool_names = {(tool.get("function") or {}).get("name") for tool in tools or []}
+            assert {"workspace_list", "workspace_read", "artifact_write"} <= tool_names
+            assert "workspace_write_patch" not in tool_names
+            assert "terminal_run" not in tool_names
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_read",
+                        "type": "function",
+                        "function": {"name": "workspace_read", "arguments": json.dumps({"path": "README.md"})},
+                    }
+                ],
+            }
+        assert "trusted product workspace" in messages[-1]["content"]
+        return {"content": "Default workspace read complete"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        run = service.start_main_chat_run(task_id="task-default-workspace", session_id="session-default-workspace", user_goal="Read")
+        result = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [{"role": "user", "content": "Read README"}],
+        )
+        trusted = service.list_trusted_workspaces()["workspaces"]
+
+        assert result["status"] == "running"
+        assert result["result"] == "Default workspace read complete"
+        assert any(item["path"] == str(projects.resolve()) and item["source"] == "main_chat" for item in trusted)
+    finally:
+        service.close()
+
+
+def test_main_chat_model_loop_pauses_and_resumes_approved_tool(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    target = workdir / "out.txt"
+    target.write_text("before\n", encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        if len(calls) == 1:
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_write",
+                        "type": "function",
+                        "function": {
+                            "name": "workspace_write_patch",
+                            "arguments": json.dumps(
+                                {
+                                    "path": "out.txt",
+                                    "patch": "--- out.txt\n+++ out.txt\n@@ -1 +1 @@\n-before\n+approved\n",
+                                }
+                            ),
+                        },
+                    }
+                ],
+            }
+        assert messages[-1]["role"] == "tool"
+        assert "out.txt" in messages[-1]["content"]
+        return {"content": "Main chat write complete"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        resume_contexts: list[ToolApprovalResumeContext] = []
+        original_resume = service.approval_resume.execute_approved_tool
+
+        def spy_resume(context: ToolApprovalResumeContext) -> None:
+            resume_contexts.append(context)
+            original_resume(context)
+
+        monkeypatch.setattr(service.approval_resume, "execute_approved_tool", spy_resume)
+        run = service.start_main_chat_run(task_id="task-main-approval", session_id="session-main-approval", user_goal="Write")
+        waiting = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [{"role": "user", "content": "Write out.txt"}],
+            tool_policy={"allowed_tools": ["workspace.write_patch"]},
+            workspace_policy={"default_workdir": str(workdir), "readable_scopes": ["."], "writable_scopes": ["."]},
+        )
+
+        assert waiting["status"] == "approval_required"
+        assert waiting["pending_approval"]["tool"] == "workspace.write_patch"
+        assert target.read_text(encoding="utf-8") == "before\n"
+
+        resumed = service.approve_run_approval(run["run_id"])
+
+        assert resumed["status"] == "running"
+        assert resumed["pending_approval"] == {}
+        assert resumed["result"] == "Main chat write complete"
+        assert target.read_text(encoding="utf-8") == "approved\n"
+        assert len(resume_contexts) == 1
+        assert resume_contexts[0].run_id == run["run_id"]
+        assert resume_contexts[0].tool_name == "workspace.write_patch"
+        assert resume_contexts[0].input_preview["path"] == "out.txt"
+        approval_row = service._conn.execute(
+            "SELECT status FROM run_approvals WHERE run_id=?",
+            (run["run_id"],),
+        ).fetchone()
+        assert approval_row["status"] == "approved"
+    finally:
+        service.close()
+
+
+def test_main_chat_approval_timeout_records_replayable_fact_and_is_idempotent(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    def fake_chat(_base_url, _model, _api_key, _messages, *, tools=None):
+        return {
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_write",
+                    "type": "function",
+                    "function": {
+                        "name": "workspace_write_patch",
+                        "arguments": json.dumps(
+                            {
+                                "path": "out.txt",
+                                "patch": "--- out.txt\n+++ out.txt\n@@ -1 +1 @@\n-before\n+timed out\n",
+                            }
+                        ),
+                    },
+                }
+            ],
+        }
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-approval-timeout",
+            session_id="session-main-approval-timeout",
+            user_goal="Write",
+        )
+        waiting = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [{"role": "user", "content": "Write out.txt"}],
+            tool_policy={"allowed_tools": ["workspace.write_patch"]},
+            workspace_policy={
+                "default_workdir": str(workdir),
+                "readable_scopes": ["."],
+                "writable_scopes": ["."],
+            },
+        )
+
+        assert waiting["status"] == "approval_required"
+
+        timed_out = service.timeout_run_approval(run["run_id"], reason="approval_wait_timeout")
+        events_after_timeout = service.list_run_events(run["run_id"])["events"]
+        timeout_events = [event for event in events_after_timeout if event["event_type"] == "approval.timeout"]
+
+        assert timed_out["status"] == "cancelled"
+        assert timed_out["pending_approval"] == {}
+        assert "审批已超时" in timed_out["result"]
+        assert any(event["event"] == "agent.tool.approval_timeout" for event in timed_out["timeline"])
+        assert len(timeout_events) == 1
+        assert timeout_events[0]["payload"]["tool"] == "workspace.write_patch"
+        assert timeout_events[0]["payload"]["reason"] == "approval_wait_timeout"
+        assert timeout_events[0]["payload"]["status"] == "cancelled"
+
+        approval_row = service._conn.execute(
+            "SELECT status FROM run_approvals WHERE run_id=?",
+            (run["run_id"],),
+        ).fetchone()
+        assert approval_row["status"] == "cancelled"
+
+        repeated = service.timeout_run_approval(run["run_id"], reason="approval_wait_timeout")
+        events_after_repeat = service.list_run_events(run["run_id"])["events"]
+
+        assert repeated["status"] == "cancelled"
+        assert len([event for event in events_after_repeat if event["event_type"] == "approval.timeout"]) == 1
+    finally:
+        service.close()
+
+
+def test_main_chat_repeated_approval_does_not_execute_tool_twice(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+    workdir = tmp_path / "repo"
+    (workdir / "src").mkdir(parents=True)
+    target = workdir / "src" / "app.txt"
+    target.write_text("before\n", encoding="utf-8")
+    model_calls = 0
+    resume_model_started = threading.Event()
+    release_resume_model = threading.Event()
+
+    def fake_chat(_base_url, _model, _api_key, _messages, *, tools=None):
+        nonlocal model_calls
+        model_calls += 1
+        if model_calls == 1:
+            return {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_patch",
+                        "type": "function",
+                        "function": {
+                            "name": "workspace_write_patch",
+                            "arguments": json.dumps(
+                                {
+                                    "path": "src/app.txt",
+                                    "patch": "--- src/app.txt\n+++ src/app.txt\n@@ -1 +1 @@\n-before\n+after\n",
+                                },
+                                ensure_ascii=False,
+                            ),
+                        },
+                    }
+                ],
+            }
+        resume_model_started.set()
+        assert release_resume_model.wait(timeout=3)
+        return {"role": "assistant", "content": "Patched once"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-approve-idempotent",
+            session_id="session-main-approve-idempotent",
+            user_goal="Patch once",
+        )
+        waiting = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [{"role": "user", "content": "Patch once"}],
+            tool_policy={"allowed_tools": ["workspace.write_patch"]},
+            workspace_policy={
+                "default_workdir": str(workdir),
+                "readable_scopes": ["."],
+                "writable_scopes": ["."],
+            },
+        )
+
+        assert waiting["status"] == "approval_required"
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(service.approve_run_approval, run["run_id"])
+            assert resume_model_started.wait(timeout=3)
+            second = pool.submit(service.approve_run_approval, run["run_id"]).result(timeout=3)
+            assert second["run_id"] == run["run_id"]
+            release_resume_model.set()
+            first_result = first.result(timeout=3)
+
+        repeated_after = service.approve_run_approval(run["run_id"])
+
+        assert first_result["status"] == "running"
+        assert repeated_after["run_id"] == run["run_id"]
+        assert model_calls == 2
+        assert target.read_text(encoding="utf-8") == "after\n"
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        assert event_types.count("agent.tool.approval_approved") == 1
+        tool_calls = [
+            event for event in events
+            if event["event_type"] == "agent.tool.call"
+            and event["payload"].get("tool") == "workspace.write_patch"
+            and event["payload"].get("approved") is True
+        ]
+        assert len(tool_calls) == 1
+    finally:
+        release_resume_model.set()
+        service.close()
+
+
+def test_main_chat_durable_approval_claim_blocks_duplicate_execution(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    claiming_service = None
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    target = workdir / "out.txt"
+    target.write_text("before\n", encoding="utf-8")
+    model_calls = 0
+
+    def fake_chat(_base_url, _model, _api_key, _messages, *, tools=None):
+        nonlocal model_calls
+        model_calls += 1
+        if model_calls == 1:
+            return {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_patch",
+                        "type": "function",
+                        "function": {
+                            "name": "workspace_write_patch",
+                            "arguments": json.dumps(
+                                {
+                                    "path": "out.txt",
+                                    "patch": "--- out.txt\n+++ out.txt\n@@ -1 +1 @@\n-before\n+approved once\n",
+                                },
+                                ensure_ascii=False,
+                            ),
+                        },
+                    }
+                ],
+            }
+        raise AssertionError("durably claimed approval must not resume model again")
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-approve-durable-claim",
+            session_id="session-main-approve-durable-claim",
+            user_goal="Patch once",
+        )
+        waiting = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [{"role": "user", "content": "Patch once"}],
+            tool_policy={"allowed_tools": ["workspace.write_patch"]},
+            workspace_policy={
+                "default_workdir": str(workdir),
+                "readable_scopes": ["."],
+                "writable_scopes": ["."],
+            },
+        )
+
+        assert waiting["status"] == "approval_required"
+        pending = service._pending_approval_private(run["run_id"])
+        claiming_service = make_service(tmp_path)
+        assert claiming_service.run_approvals.claim_pending_approval(run["run_id"], pending) is True
+        assert claiming_service.run_approvals.claim_pending_approval(run["run_id"], pending) is False
+
+        duplicate = service.approve_run_approval(run["run_id"])
+
+        assert duplicate["status"] == "approval_required"
+        assert model_calls == 1
+        assert target.read_text(encoding="utf-8") == "before\n"
+        events = service.list_run_events(run["run_id"])["events"]
+        assert "agent.tool.approval_approved" not in [event["event_type"] for event in events]
+        approved_tool_calls = [
+            event for event in events
+            if event["event_type"] == "agent.tool.call"
+            and event["payload"].get("tool") == "workspace.write_patch"
+            and event["payload"].get("approved") is True
+        ]
+        assert approved_tool_calls == []
+        approval_row = service._conn.execute(
+            "SELECT status, resolved_at FROM run_approvals WHERE run_id=?",
+            (run["run_id"],),
+        ).fetchone()
+        assert approval_row["status"] == "approved"
+        assert approval_row["resolved_at"]
+    finally:
+        if claiming_service is not None:
+            claiming_service.close()
+        service.close()
+
+
+def test_agent_explicit_workspace_is_recorded_as_trusted(tmp_path):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "external-workspace"
+    workdir.mkdir()
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Trusted Writer",
+                "workspace_policy": {
+                    "default_workdir": str(workdir),
+                    "readable_scopes": ["."],
+                    "writable_scopes": [],
+                },
+            }
+        )
+        trusted = service.list_trusted_workspaces()["workspaces"]
+
+        assert agent["workspace_policy"]["default_workdir"] == str(workdir)
+        assert any(item["path"] == str(workdir.resolve()) and item["source"] == f"agent:{agent['agent_id']}" for item in trusted)
+    finally:
+        service.close()
+
+
+def test_run_events_hide_internal_and_secret_by_default(tmp_path):
+    service = make_service(tmp_path)
+    try:
+        run = service._insert_run(kind="main_chat_run", runnable_id="builtin:yachiyo-main", user_goal="test")
+        service.append_run_event(run["run_id"], "user.visible", {"value": "ok"})
+        service.append_run_event(run["run_id"], "user.token", {"token": "plain-token-value", "safe": "ok"})
+        service.append_run_event(run["run_id"], "internal.fact", {"value": "hidden"}, visibility="internal")
+        service.append_run_event(run["run_id"], "secret.fact", {"value": "sk-secret-value"}, sensitivity="secret")
+
+        public = service.list_run_events(run["run_id"])["events"]
+        debug = service.list_run_events(run["run_id"], include_internal=True)["events"]
+
+        assert [event["event_type"] for event in public] == ["user.visible", "user.token"]
+        assert [event["event_type"] for event in debug] == ["user.visible", "user.token", "internal.fact", "secret.fact"]
+        assert public[1]["payload"]["token"] == "[redacted]"
+        assert public[1]["payload"]["safe"] == "ok"
+        assert debug[-1]["payload"]["value"] == "[redacted]"
+    finally:
+        service.close()
+
+
+def test_run_event_repository_allocates_sequences_under_concurrent_writers(tmp_path):
+    service = make_service(tmp_path)
+    try:
+        run = service._insert_run(kind="main_chat_run", runnable_id="builtin:yachiyo-main", user_goal="test")
+
+        def append_event(index: int):
+            return service.append_run_event(run["run_id"], "concurrent.fact", {"index": index})
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            written = list(pool.map(append_event, range(40)))
+
+        events = service.list_run_events(run["run_id"], limit=100)["events"]
+
+        assert len(written) == 40
+        assert [event["sequence"] for event in events] == list(range(1, 41))
+        assert sorted(event["payload"]["index"] for event in events) == list(range(40))
+    finally:
+        service.close()
+
+
+@pytest.mark.asyncio
+async def test_run_events_route_paginates_user_visible_events(tmp_path, monkeypatch):
+    from apps.bridge.routes import runs as run_routes
+
+    service = make_service(tmp_path)
+    monkeypatch.setattr(run_routes, "get_native_run_engine", lambda: service)
+    try:
+        run = service._insert_run(kind="main_chat_run", runnable_id="builtin:yachiyo-main", user_goal="test")
+        service.append_run_event(run["run_id"], "first", {"value": 1})
+        service.append_run_event(run["run_id"], "internal", {"value": 2}, visibility="internal")
+        service.append_run_event(run["run_id"], "secret", {"value": "sk-secret-value"}, sensitivity="secret")
+        service.append_run_event(run["run_id"], "third", {"value": 3})
+
+        clamped = await run_routes.list_run_events(run["run_id"], after_sequence=-10, limit=5000)
+        response = await run_routes.list_run_events(run["run_id"], after_sequence=1, limit=1)
+
+        assert clamped["after_sequence"] == 0
+        assert clamped["limit"] == 1000
+        assert [event["event_type"] for event in clamped["events"]] == ["first", "third"]
+        assert "sk-secret-value" not in json.dumps(clamped, ensure_ascii=False)
+        assert response["limit"] == 1
+        assert [event["event_type"] for event in response["events"]] == ["third"]
+        assert response["events"][0]["sequence"] == 4
+    finally:
+        service.close()
+
+
+@pytest.mark.asyncio
+async def test_run_events_route_returns_404_for_missing_run(tmp_path, monkeypatch):
+    from apps.bridge.routes import runs as run_routes
+
+    service = make_service(tmp_path)
+    monkeypatch.setattr(run_routes, "get_native_run_engine", lambda: service)
+    try:
+        with pytest.raises(run_routes.HTTPException) as exc_info:
+            await run_routes.list_run_events("missing-run")
+
+        assert exc_info.value.status_code == 404
+        assert exc_info.value.detail == "Run 不存在"
+    finally:
+        service.close()
+
+
+@pytest.mark.asyncio
+async def test_post_runs_route_maps_idempotency_key_to_runnable_run(monkeypatch):
+    from apps.bridge.routes import runs as run_routes
+
+    recorded: dict[str, str] = {}
+
+    class FakeRunEngine:
+        def create_run_for_runnable(self, **kwargs):
+            recorded.update({key: str(value) for key, value in kwargs.items()})
+            return {
+                "ok": True,
+                "run_id": "run_post_runs",
+                "client_request_id": kwargs.get("client_run_id") or kwargs.get("client_request_id") or "",
+            }
+
+    monkeypatch.setattr(run_routes, "get_native_run_engine", lambda: FakeRunEngine())
+
+    response = await run_routes.create_run(
+        run_routes.RunCreateRequest(runnable_id="agent_coding", user_goal="Run from generic API"),
+        SimpleNamespace(headers={"idempotency-key": "post-runs-client-1"}),
+    )
+
+    assert response["run_id"] == "run_post_runs"
+    assert response["client_request_id"] == "post-runs-client-1"
+    assert recorded == {
+        "runnable_id": "agent_coding",
+        "name": "",
+        "user_goal": "Run from generic API",
+        "run_group_id": "",
+        "upstream": "",
+        "client_run_id": "post-runs-client-1",
+        "client_request_id": "",
+    }
+
+
+def test_runtime_shutdown_cancels_active_runs_rejects_new_runs_and_records_fact(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    cancelled_process_groups = []
+    monkeypatch.setattr("apps.shell.agent_runtime.cancel_terminal_process_groups", lambda: cancelled_process_groups.append(True))
+    try:
+        run = service._insert_run(kind="main_chat_run", runnable_id="builtin:yachiyo-main", user_goal="test")
+
+        service.shutdown(close_db=False)
+
+        assert cancelled_process_groups == [True]
+        assert service.get_run(run["run_id"])["status"] == "cancelled"
+        events = service.list_run_events(run["run_id"])["events"]
+        assert events[-1]["event_type"] == "run.cancelled"
+        with pytest.raises(AgentRuntimeError):
+            service.start_main_chat_run(task_id="t2", session_id="s2", user_goal="blocked")
+    finally:
+        service.close()
+
+
+def test_concurrent_cancel_run_is_idempotent(tmp_path):
+    service = make_service(tmp_path)
+    try:
+        run = service._insert_run(kind="main_chat_run", runnable_id="builtin:yachiyo-main", user_goal="cancel once")
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            results = list(executor.map(lambda _index: service.cancel_run(run["run_id"]), range(20)))
+
+        stored = service.get_run(run["run_id"])
+        events = service.list_run_events(run["run_id"])["events"]
+        cancel_facts = [event for event in events if event["event_type"] == "run.cancelled"]
+        cancel_timeline = [event for event in stored["timeline"] if event["event"] == "run.cancelled"]
+
+        assert {result["run_id"] for result in results} == {run["run_id"]}
+        assert {result["status"] for result in results} == {"cancelled"}
+        assert stored["status"] == "cancelled"
+        assert len(cancel_facts) == 1
+        assert len(cancel_timeline) == 1
+    finally:
+        service.close()
+
+
+def test_runtime_shutdown_close_db_closes_runtime_resources(tmp_path):
+    service = make_service(tmp_path)
+
+    service.shutdown(close_db=True)
+
+    with pytest.raises(sqlite3.ProgrammingError):
+        service._conn.execute("SELECT 1")
+
+
+def test_agent_run_client_run_id_is_idempotent(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    model_calls = 0
+
+    def fake_chat(*_args, **_kwargs):
+        nonlocal model_calls
+        model_calls += 1
+        return {"content": "Done"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Idempotent Agent",
+                "model_mode": "custom_api",
+                "model_config": {
+                    "base_url": "https://api.example.test/v1",
+                    "model": "demo-model",
+                    "api_key": "sk-secret",
+                },
+            }
+        )
+
+        first = service.create_agent_run(
+            {"agent_id": agent["agent_id"], "user_goal": "Finish", "client_run_id": "run-client-1"}
+        )
+        second = service.create_agent_run(
+            {"agent_id": agent["agent_id"], "user_goal": "Finish", "client_run_id": "run-client-1"}
+        )
+
+        assert second["idempotent"] is True
+        assert second["run_id"] == first["run_id"]
+        assert model_calls == 1
+        rows = service._conn.execute("SELECT run_id FROM runs WHERE client_request_id='run-client-1'").fetchall()
+        assert len(rows) == 1
+    finally:
+        service.close()
+
+
+def test_create_run_for_runnable_propagates_client_run_id(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    model_calls = 0
+
+    def fake_chat(*_args, **_kwargs):
+        nonlocal model_calls
+        model_calls += 1
+        return {"content": "Runnable done"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Runnable Idempotent Agent",
+                "model_mode": "custom_api",
+                "model_config": {
+                    "base_url": "https://api.example.test/v1",
+                    "model": "demo-model",
+                    "api_key": "sk-secret",
+                },
+            }
+        )
+
+        first = service.create_run_for_runnable(
+            runnable_id=agent["agent_id"],
+            user_goal="Finish through runnable",
+            client_run_id="runnable-client-1",
+        )
+        second = service.create_run_for_runnable(
+            runnable_id=agent["agent_id"],
+            user_goal="Finish through runnable",
+            client_run_id="runnable-client-1",
+        )
+
+        assert first["runnable"]["id"] == agent["agent_id"]
+        assert second["idempotent"] is True
+        assert second["run_id"] == first["run_id"]
+        assert model_calls == 1
+        rows = service._conn.execute("SELECT run_id FROM runs WHERE client_request_id='runnable-client-1'").fetchall()
+        assert len(rows) == 1
+    finally:
+        service.close()
+
+
+def test_run_repository_redacts_and_syncs_approval_projection(tmp_path):
+    service = make_service(tmp_path)
+    try:
+        run = service.runs.insert(
+            kind="main_chat_run",
+            runnable_id="builtin:yachiyo-main",
+            user_goal="Use sk-secret-value",
+            client_request_id="repo-client-1",
+        )
+        pending = {
+            "approval_id": "approval_repo_1",
+            "tool": "terminal.run",
+            "input_preview": {"command": "printf ok"},
+            "requested_at": "2026-06-09T00:00:00+00:00",
+        }
+
+        updated = service.runs.update(
+            run["run_id"],
+            result="Done sk-secret-value",
+            timeline=[{"event": "test", "detail": "sk-secret-value"}],
+            pending_approval=pending,
+        )
+        by_client_id = service.runs.by_client_request_id("repo-client-1")
+        approval = service._conn.execute(
+            "SELECT status, tool, input_preview_json FROM run_approvals WHERE approval_id='approval_repo_1'"
+        ).fetchone()
+
+        assert run["user_goal"] == "Use [redacted]"
+        assert updated["result"] == "Done [redacted]"
+        assert updated["timeline"][0]["detail"] == "[redacted]"
+        assert by_client_id is not None
+        assert by_client_id["idempotent"] is True
+        assert by_client_id["run_id"] == run["run_id"]
+        assert approval is not None
+        assert approval["status"] == "pending"
+        assert approval["tool"] == "terminal.run"
+        assert json.loads(approval["input_preview_json"])["command"] == "printf ok"
+    finally:
+        service.close()
+
+
+def test_run_artifact_repository_redacts_projection_and_reads_files(tmp_path):
+    service = make_service(tmp_path)
+    try:
+        run = service.runs.insert(
+            kind="agent_run",
+            runnable_id="agent_artifact_test",
+            user_goal="Write artifact",
+        )
+        artifact_dir = service.agent_artifacts_dir / run["run_id"]
+        artifact_dir.mkdir(parents=True)
+        (artifact_dir / "notes.md").write_text("artifact sk-secret-value", encoding="utf-8")
+
+        service.runs.update(
+            run["run_id"],
+            artifacts=[
+                {
+                    "kind": "tool_artifact",
+                    "path": "notes.md",
+                    "source_run_id": "source_run_1",
+                    "token": "sk-secret-value",
+                }
+            ],
+        )
+        row = service._conn.execute(
+            "SELECT kind, path, source_run_id, payload_json FROM run_artifacts WHERE run_id=?",
+            (run["run_id"],),
+        ).fetchone()
+        artifact = service.read_run_artifact(run["run_id"], "notes.md")
+
+        assert row is not None
+        assert row["kind"] == "tool_artifact"
+        assert row["path"] == "notes.md"
+        assert row["source_run_id"] == "source_run_1"
+        assert json.loads(row["payload_json"])["token"] == "[redacted]"
+        assert artifact["content"] == "artifact [redacted]"
+    finally:
+        service.close()
+
+
+def test_run_group_repository_manages_membership_and_cleanup(tmp_path):
+    service = make_service(tmp_path)
+    try:
+        group = service.run_groups.insert(title="Grouped Runs", source="agent")
+        first = service.runs.insert(
+            kind="agent_run",
+            runnable_id="agent_group_first",
+            user_goal="First",
+            run_group_id=group["run_group_id"],
+        )
+        second = service.runs.insert(
+            kind="agent_run",
+            runnable_id="agent_group_second",
+            user_goal="Second",
+            run_group_id=group["run_group_id"],
+        )
+
+        service.run_groups.append_run(group["run_group_id"], first["run_id"])
+        service.run_groups.update(group["run_group_id"], status="completed", summary="done")
+        grouped = service.get_run_group(group["run_group_id"])
+        listed = service.list_run_groups()["run_groups"]
+        group_runs = service._runs_in_group(group["run_group_id"])
+
+        assert grouped["source"] == "agent"
+        assert grouped["status"] == "completed"
+        assert grouped["summary"] == "done"
+        assert grouped["child_run_ids"] == [first["run_id"], second["run_id"]]
+        assert any(item["run_group_id"] == group["run_group_id"] for item in listed)
+        assert [run["run_id"] for run in group_runs] == [first["run_id"], second["run_id"]]
+
+        service.runs.update(first["run_id"], status="completed")
+        service.runs.update(second["run_id"], status="completed")
+        service.delete_run(first["run_id"])
+        assert service.get_run_group(group["run_group_id"])["child_run_ids"] == [second["run_id"]]
+        service.delete_run(second["run_id"])
+        with pytest.raises(KeyError):
+            service.get_run_group(group["run_group_id"])
+    finally:
+        service.close()
+
+
+def test_agent_run_route_maps_idempotency_key_header():
+    from apps.bridge.routes import agents as agent_routes
+
+    payload = agent_routes._payload_with_idempotency(
+        agent_routes.AgentRunRequest(agent_id="a1", user_goal="Run"),
+        SimpleNamespace(headers={"idempotency-key": "header-run-1"}),
+    )
+
+    assert payload["client_run_id"] == "header-run-1"
+
+
+def test_terminal_run_defaults_to_argv_and_requires_explicit_shell(tmp_path):
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    marker = workdir / "shell-marker"
+    broker = ToolBroker(
+        {"default_workdir": str(workdir), "readable_scopes": ["."], "writable_scopes": ["."]},
+        tmp_path / "artifacts",
+    )
+
+    argv_result = broker.terminal_run(f"printf safe; touch {marker}", approved=True)
+    assert marker.exists() is False
+    shell_result = broker.terminal_run(f"printf safe; touch {marker}", approved=True, shell=True)
+
+    assert argv_result["shell"] is False
+    assert marker.exists() is True
+    assert shell_result["shell"] is True
+
+
+def test_terminal_run_shell_mode_requires_approval_and_shows_full_command(tmp_path):
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    marker = workdir / "shell-marker"
+    command = f"printf safe; touch {marker}"
+    broker = ToolBroker(
+        {"default_workdir": str(workdir), "readable_scopes": ["."], "writable_scopes": ["."]},
+        tmp_path / "artifacts",
+    )
+
+    result = broker.terminal_run(command, shell=True)
+
+    assert result["approval_required"] is True
+    assert result["tool"] == "terminal.run"
+    assert result["input_preview"] == {"command": command, "shell": True}
+    assert marker.exists() is False
+
+
 def test_runtime_restores_row_factory_before_listing_runnables(tmp_path):
     service = make_service(tmp_path, seed_templates=True)
     try:
@@ -123,6 +1405,44 @@ def test_runtime_agent_studio_reads_are_safe_under_parallel_refresh(tmp_path):
             assert any(agent["agent_id"] == "agent_coding" for agent in agents)
             assert "skill_count" in uncategorized
             assert any(item["id"] == "agent_coding" for item in runnables)
+    finally:
+        service.close()
+
+
+def test_builtin_yachiyo_main_is_virtual_system_agent_not_delegation_target(tmp_path):
+    service = make_service(tmp_path, seed_templates=True)
+    try:
+        agents = service.list_agents()["agents"]
+        main = next(agent for agent in agents if agent["agent_id"] == "builtin:yachiyo-main")
+
+        assert main["name"] == "Yachiyo"
+        assert main["system"] is True
+        assert main["virtual"] is True
+        assert main["deletable"] is False
+        assert main["editable"] is False
+        assert main["execution_backend"] == "native_profile"
+        assert "workspace.read" in main["tool_policy"]["allowed_tools"]
+
+        row = service._conn.execute(
+            "SELECT 1 FROM agents WHERE agent_id=?",
+            ("builtin:yachiyo-main",),
+        ).fetchone()
+        assert row is None
+        assert service.get_agent("builtin:yachiyo-main")["system"] is True
+        assert service.resolve_runnable(runnable_id="builtin:yachiyo-main")["id"] == "builtin:yachiyo-main"
+        assert service.resolve_runnable(name="Yachiyo")["id"] == "builtin:yachiyo-main"
+        assert any(item["id"] == "builtin:yachiyo-main" for item in service.list_runnables()["runnables"])
+        assert all(
+            item["id"] != "builtin:yachiyo-main"
+            for item in service.list_delegation_targets()["agents"]
+        )
+
+        with pytest.raises(AgentRuntimeError, match="系统 Agent 不能删除"):
+            service.delete_agent("builtin:yachiyo-main")
+        with pytest.raises(AgentRuntimeError, match="系统 Agent 不能创建或覆盖"):
+            service.create_agent({"agent_id": "builtin:yachiyo-main", "name": "Main"})
+        with pytest.raises(AgentRuntimeError, match="系统 Agent 不能修改"):
+            service.update_agent("builtin:yachiyo-main", {"description": "mutate"})
     finally:
         service.close()
 
@@ -246,6 +1566,83 @@ def test_agent_crud_and_api_key_redaction(tmp_path):
         assert updated["nickname"] == "Private Ops"
         assert updated["model_config"]["base_url"] == "https://gateway.example.test/v1"
         assert updated["model_config"]["api_key_configured"] is True
+
+        conn = sqlite3.connect(tmp_path / "agent-runtime.db")
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute(
+                "SELECT model_api_key, model_credential_ref FROM agents WHERE agent_id=?",
+                (agent["agent_id"],),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row is not None
+        assert row["model_api_key"] == ""
+        assert row["model_credential_ref"] == f"agent:{agent['agent_id']}:model_api_key"
+        assert verify_secret_redaction(paths=[tmp_path]) == []
+    finally:
+        service.close()
+
+
+def test_legacy_agent_model_api_key_migration_vacuums_plaintext_secret(tmp_path):
+    db_path = tmp_path / "agent-runtime.db"
+    legacy_secret = "sk-legacy-agent-secret123456"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        f"""
+        CREATE TABLE agents (
+            agent_id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            nickname TEXT NOT NULL DEFAULT '',
+            description TEXT NOT NULL DEFAULT '',
+            avatar_url TEXT NOT NULL DEFAULT '',
+            category TEXT NOT NULL DEFAULT 'custom',
+            instructions TEXT NOT NULL DEFAULT '',
+            persona_prompt TEXT NOT NULL DEFAULT '',
+            model_mode TEXT NOT NULL DEFAULT 'custom_api',
+            execution_backend TEXT NOT NULL DEFAULT 'native_profile',
+            model_profile_id TEXT NOT NULL DEFAULT '',
+            vision_model_profile_id TEXT NOT NULL DEFAULT '',
+            model_provider TEXT NOT NULL DEFAULT 'openai_compatible',
+            model_base_url TEXT NOT NULL DEFAULT 'https://api.example.test/v1',
+            model_name TEXT NOT NULL DEFAULT 'demo-model',
+            model_api_key TEXT NOT NULL DEFAULT '',
+            tool_policy_json TEXT NOT NULL DEFAULT '{{}}',
+            workspace_policy_json TEXT NOT NULL DEFAULT '{{}}',
+            skill_ids_json TEXT NOT NULL DEFAULT '[]',
+            output_contract TEXT NOT NULL DEFAULT 'chat',
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        INSERT INTO agents (
+            agent_id, name, model_api_key, created_at, updated_at
+        ) VALUES (
+            'agent_legacy_secret', 'Legacy Secret Agent', '{legacy_secret}', 'now', 'now'
+        );
+        """
+    )
+    conn.close()
+    credential_store = MemoryCredentialStore()
+
+    service = AgentRuntimeService(
+        db_path=db_path,
+        workspace_dir=tmp_path / "runtime",
+        credential_store=credential_store,
+        seed_templates=False,
+    )
+    try:
+        agent = service.get_agent("agent_legacy_secret")
+        assert agent["model_config"]["api_key_configured"] is True
+        assert credential_store.get("agent:agent_legacy_secret:model_api_key") == legacy_secret
+
+        row = service._conn.execute(
+            "SELECT model_api_key, model_credential_ref FROM agents WHERE agent_id=?",
+            ("agent_legacy_secret",),
+        ).fetchone()
+        assert row["model_api_key"] == ""
+        assert row["model_credential_ref"] == "agent:agent_legacy_secret:model_api_key"
+        assert verify_secret_redaction(paths=[tmp_path]) == []
     finally:
         service.close()
 
@@ -468,31 +1865,31 @@ def test_import_skill_zip_uses_frontmatter_source_when_available(tmp_path):
         service.close()
 
 
-def test_sync_hermes_skills_imports_skips_and_updates(tmp_path):
+def test_sync_native_skills_imports_skips_and_updates(tmp_path):
     service = make_service(tmp_path)
-    hermes_root = tmp_path / ".hermes" / "skills"
-    skill_root = hermes_root / "research" / "demo-skill"
+    native_root = tmp_path / ".oha-yachiyo" / "skill-library" / "skills"
+    skill_root = native_root / "research" / "demo-skill"
     skill_root.mkdir(parents=True)
     (skill_root / "SKILL.md").write_text(
         "---\nname: demo-sync\ndescription: Synced skill.\n---\n\n# Demo Sync\n\nUse carefully.",
         encoding="utf-8",
     )
-    (hermes_root / "not-a-skill").mkdir(parents=True)
+    (native_root / "not-a-skill").mkdir(parents=True)
     try:
-        first = service.sync_hermes_skills(roots=[{"path": str(hermes_root), "source_type": "hermes_global"}])
+        first = service.sync_native_skills(roots=[{"path": str(native_root), "source_type": "native_global"}])
         assert first["summary"]["imported"] == 1
         assert first["summary"]["skipped"] == 1
         skill = service.list_skills()["skills"][0]
         assert skill["name"] == "demo-sync"
         assert skill["description"] == "Synced skill."
-        assert skill["source_type"] == "hermes_global"
+        assert skill["source_type"] == "native_global"
         assert skill["origin_path"] == str(skill_root.resolve())
         assert skill["local_path"] == str(skill_root.resolve())
         assert skill["source_ref"] == "research/demo-skill"
         assert skill["content_hash"]
         assert skill["last_synced_at"]
 
-        second = service.sync_hermes_skills(roots=[{"path": str(hermes_root), "source_type": "hermes_global"}])
+        second = service.sync_native_skills(roots=[{"path": str(native_root), "source_type": "native_global"}])
         assert second["summary"]["imported"] == 0
         assert second["summary"]["skipped"] >= 1
         assert len(service.list_skills()["skills"]) == 1
@@ -501,7 +1898,7 @@ def test_sync_hermes_skills_imports_skips_and_updates(tmp_path):
             "---\nname: demo-sync\ndescription: Updated skill.\n---\n\n# Demo Sync\n\nUpdated instruction.",
             encoding="utf-8",
         )
-        updated = service.sync_hermes_skills(roots=[{"path": str(hermes_root), "source_type": "hermes_global"}])
+        updated = service.sync_native_skills(roots=[{"path": str(native_root), "source_type": "native_global"}])
         assert updated["summary"]["updated"] == 1
         skills = service.list_skills()["skills"]
         assert len(skills) == 1
@@ -515,15 +1912,15 @@ def test_sync_hermes_skills_imports_skips_and_updates(tmp_path):
 
 
 def test_deleted_synced_skill_stays_deleted_after_restart_and_sync(tmp_path):
-    hermes_root = tmp_path / ".hermes" / "skills"
-    skill_root = hermes_root / "research" / "deleted-skill"
+    native_root = tmp_path / ".oha-yachiyo" / "skill-library" / "skills"
+    skill_root = native_root / "research" / "deleted-skill"
     skill_root.mkdir(parents=True)
     (skill_root / "SKILL.md").write_text("# Deleted Skill\n\nDo not restore automatically.", encoding="utf-8")
 
     service = make_service(tmp_path)
     try:
-        synced = service.sync_hermes_skills(
-            roots=[{"path": str(hermes_root), "source_type": "hermes_global"}]
+        synced = service.sync_native_skills(
+            roots=[{"path": str(native_root), "source_type": "native_global"}]
         )
         skill_id = synced["results"][0]["skill_id"]
         service.delete_skill(skill_id)
@@ -532,8 +1929,8 @@ def test_deleted_synced_skill_stays_deleted_after_restart_and_sync(tmp_path):
 
     service = make_service(tmp_path, seed_templates=True)
     try:
-        synced = service.sync_hermes_skills(
-            roots=[{"path": str(hermes_root), "source_type": "hermes_global"}]
+        synced = service.sync_native_skills(
+            roots=[{"path": str(native_root), "source_type": "native_global"}]
         )
 
         assert service.list_skills()["skills"] == []
@@ -545,15 +1942,15 @@ def test_deleted_synced_skill_stays_deleted_after_restart_and_sync(tmp_path):
 
 
 def test_explicit_skill_import_restores_deleted_synced_skill(tmp_path):
-    hermes_root = tmp_path / ".hermes" / "skills"
-    skill_root = hermes_root / "research" / "restored-skill"
+    native_root = tmp_path / ".oha-yachiyo" / "skill-library" / "skills"
+    skill_root = native_root / "research" / "restored-skill"
     skill_root.mkdir(parents=True)
     (skill_root / "SKILL.md").write_text("# Restored Skill\n\nRestore explicitly.", encoding="utf-8")
 
     service = make_service(tmp_path)
     try:
-        synced = service.sync_hermes_skills(
-            roots=[{"path": str(hermes_root), "source_type": "hermes_global"}]
+        synced = service.sync_native_skills(
+            roots=[{"path": str(native_root), "source_type": "native_global"}]
         )
         service.delete_skill(synced["results"][0]["skill_id"])
 
@@ -566,16 +1963,16 @@ def test_explicit_skill_import_restores_deleted_synced_skill(tmp_path):
 
 
 def test_failed_skill_reimport_keeps_deletion_record(tmp_path):
-    hermes_root = tmp_path / ".hermes" / "skills"
-    skill_root = hermes_root / "research" / "failed-restore-skill"
+    native_root = tmp_path / ".oha-yachiyo" / "skill-library" / "skills"
+    skill_root = native_root / "research" / "failed-restore-skill"
     skill_root.mkdir(parents=True)
     skill_md = skill_root / "SKILL.md"
     skill_md.write_text("# Failed Restore Skill\n\nKeep deletion.", encoding="utf-8")
 
     service = make_service(tmp_path)
     try:
-        synced = service.sync_hermes_skills(
-            roots=[{"path": str(hermes_root), "source_type": "hermes_global"}]
+        synced = service.sync_native_skills(
+            roots=[{"path": str(native_root), "source_type": "native_global"}]
         )
         service.delete_skill(synced["results"][0]["skill_id"])
         skill_md.unlink()
@@ -584,8 +1981,8 @@ def test_failed_skill_reimport_keeps_deletion_record(tmp_path):
             service.import_skill(str(skill_root))
 
         skill_md.write_text("# Failed Restore Skill\n\nKeep deletion.", encoding="utf-8")
-        resynced = service.sync_hermes_skills(
-            roots=[{"path": str(hermes_root), "source_type": "hermes_global"}]
+        resynced = service.sync_native_skills(
+            roots=[{"path": str(native_root), "source_type": "native_global"}]
         )
 
         assert resynced["summary"]["imported"] == 0
@@ -596,24 +1993,24 @@ def test_failed_skill_reimport_keeps_deletion_record(tmp_path):
 
 def test_explicit_skill_reinstall_restores_deleted_installed_skill(tmp_path):
     service = make_service(tmp_path)
-    skill_root = service.skill_installs_hermes_home / "skills" / "restored-installed-skill"
+    skill_root = service.skill_installs_native_home / "skills" / "restored-installed-skill"
     skill_root.mkdir(parents=True)
     (skill_root / "SKILL.md").write_text(
         "# Restored Installed Skill\n\nRestore through reinstall.",
         encoding="utf-8",
     )
     try:
-        synced = service.sync_yachiyo_installed_skills()
+        synced = service.sync_installed_skills()
         synced_skill = next(result for result in synced["results"] if result.get("skill_id"))
         service.delete_skill(synced_skill["skill_id"])
 
-        skipped = service.sync_yachiyo_installed_skills()
+        skipped = service.sync_installed_skills()
         skill_root.mkdir(parents=True)
         (skill_root / "SKILL.md").write_text(
             "# Restored Installed Skill\n\nRestore through reinstall.",
             encoding="utf-8",
         )
-        restored = service.sync_yachiyo_installed_skills(restore_deleted=True)
+        restored = service.sync_installed_skills(restore_deleted=True)
 
         assert skipped["summary"]["imported"] == 0
         assert restored["summary"]["imported"] == 1
@@ -638,37 +2035,39 @@ def test_skill_install_command_validation_accepts_latest_and_source_shortcuts(tm
     try:
         argv, installer = service._validated_skill_install_argv("skills@latest add owner/repo")
         assert installer == "npx_skills"
-        assert argv == ["npx", "skills@latest", "add", "owner/repo", "-a", "hermes-agent", "--copy", "-y"]
+        assert argv == ["npx", "skills@latest", "add", "owner/repo", "-a", "oha-yachiyo", "--copy", "-y"]
 
         argv, installer = service._validated_skill_install_argv("npx -y skills@latest add owner/repo")
         assert installer == "npx_skills"
-        assert argv == ["npx", "-y", "skills@latest", "add", "owner/repo", "-a", "hermes-agent", "--copy"]
+        assert argv == ["npx", "-y", "skills@latest", "add", "owner/repo", "-a", "oha-yachiyo", "--copy"]
 
         argv, installer = service._validated_skill_install_argv("owner/repo --skill docs")
         assert installer == "npx_skills"
-        assert argv == ["npx", "skills@latest", "add", "owner/repo", "--skill", "docs", "-a", "hermes-agent", "--copy", "-y"]
+        assert argv == ["npx", "skills@latest", "add", "owner/repo", "--skill", "docs", "-a", "oha-yachiyo", "--copy", "-y"]
 
-        with pytest.raises(AgentRuntimeError, match="hermes-agent"):
+        with pytest.raises(AgentRuntimeError, match="oha-yachiyo"):
             service._validated_skill_install_argv("npx skills@latest add owner/repo -a codex")
     finally:
         service.close()
 
 
-def test_skill_dedup_is_scoped_to_yachiyo_or_hermes_library(tmp_path):
+def test_skill_dedup_is_scoped_to_yachiyo_or_native_library(tmp_path):
     service = make_service(tmp_path)
-    hermes_root = tmp_path / ".hermes" / "skills" / "dev" / "shared"
+    native_root = tmp_path / ".oha-yachiyo" / "skill-library" / "skills" / "dev" / "shared"
     yachiyo_root = tmp_path / "local-shared"
     content = "# Shared Skill\n\nSame instructions."
-    hermes_root.mkdir(parents=True)
+    native_root.mkdir(parents=True)
     yachiyo_root.mkdir()
-    (hermes_root / "SKILL.md").write_text(content, encoding="utf-8")
+    (native_root / "SKILL.md").write_text(content, encoding="utf-8")
     (yachiyo_root / "SKILL.md").write_text(content, encoding="utf-8")
     try:
-        service.sync_hermes_skills(roots=[{"path": str(tmp_path / ".hermes" / "skills"), "source_type": "hermes_global"}])
+        service.sync_native_skills(
+            roots=[{"path": str(tmp_path / ".oha-yachiyo" / "skill-library" / "skills"), "source_type": "native_global"}]
+        )
         service.import_skill(str(yachiyo_root))
         skills = service.list_skills()["skills"]
         assert len(skills) == 2
-        assert {skill["source_type"] for skill in skills} == {"hermes_global", "local_dir"}
+        assert {skill["source_type"] for skill in skills} == {"native_global", "local_dir"}
     finally:
         service.close()
 
@@ -687,7 +2086,7 @@ def test_skill_folders_assign_move_and_delete_without_moving_files(tmp_path):
         folders = service.list_skill_folders()
         listed = next(item for item in folders["folders"] if item["folder_id"] == folder["folder_id"])
         assert listed["skill_count"] == 1
-        assert listed["yachiyo_count"] == 1
+        assert listed["installed_count"] == 1
 
         moved = service.update_skill(skill["skill_id"], {"folder_id": ""})
         assert moved["folder_id"] == ""
@@ -751,13 +2150,15 @@ def test_skill_folder_validation_rejects_duplicate_and_long_names(tmp_path):
         service.close()
 
 
-def test_hermes_skill_list_repairs_old_managed_copy_path(tmp_path):
+def test_native_skill_list_repairs_old_managed_copy_path(tmp_path):
     service = make_service(tmp_path)
-    hermes_root = tmp_path / ".hermes" / "skills" / "productivity" / "powerpoint"
-    hermes_root.mkdir(parents=True)
-    (hermes_root / "SKILL.md").write_text("# Powerpoint\n\nCreate decks.", encoding="utf-8")
+    native_root = tmp_path / ".oha-yachiyo" / "skill-library" / "skills" / "productivity" / "powerpoint"
+    native_root.mkdir(parents=True)
+    (native_root / "SKILL.md").write_text("# Powerpoint\n\nCreate decks.", encoding="utf-8")
     try:
-        skill = service.sync_hermes_skills(roots=[{"path": str(tmp_path / ".hermes" / "skills"), "source_type": "hermes_global"}])["results"][0]
+        skill = service.sync_native_skills(
+            roots=[{"path": str(tmp_path / ".oha-yachiyo" / "skill-library" / "skills"), "source_type": "native_global"}]
+        )["results"][0]
         skill_id = skill["skill_id"]
         old_copy = service.skills_dir / skill_id
         old_copy.mkdir(parents=True, exist_ok=True)
@@ -766,8 +2167,8 @@ def test_hermes_skill_list_repairs_old_managed_copy_path(tmp_path):
         service._conn.commit()
 
         repaired = service.list_skills()["skills"][0]
-        assert repaired["local_path"] == str(hermes_root.resolve())
-        assert repaired["origin_path"] == str(hermes_root.resolve())
+        assert repaired["local_path"] == str(native_root.resolve())
+        assert repaired["origin_path"] == str(native_root.resolve())
         assert not old_copy.exists()
     finally:
         service.close()
@@ -775,12 +2176,16 @@ def test_hermes_skill_list_repairs_old_managed_copy_path(tmp_path):
 
 def test_skill_install_command_runs_whitelisted_npx_and_syncs(tmp_path, monkeypatch):
     service = make_service(tmp_path)
-    hermes_home = tmp_path / ".hermes"
-    recorded: dict[str, list[str]] = {}
+    recorded: dict[str, object] = {}
+    monkeypatch.setenv("SSH_AUTH_SOCK", "ssh-secret")
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_skill_secret")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "aws-skill-secret")
+    monkeypatch.setenv("CUSTOM_API_KEY", "custom-skill-secret")
 
     def fake_run(argv, **_kwargs):
         recorded["argv"] = list(argv)
-        skill_root = Path(_kwargs["cwd"]) / ".hermes" / "skills" / "dev" / "installed-skill"
+        recorded["env"] = dict(_kwargs["env"])
+        skill_root = Path(_kwargs["cwd"]) / ".skills" / "skills" / "dev" / "installed-skill"
         skill_root.mkdir(parents=True)
         (skill_root / "SKILL.md").write_text("# Installed Skill\n\nInstalled by npx.", encoding="utf-8")
         (Path(_kwargs["cwd"]) / "skills-lock.json").write_text(
@@ -800,19 +2205,25 @@ def test_skill_install_command_runs_whitelisted_npx_and_syncs(tmp_path, monkeypa
         )
         return subprocess.CompletedProcess(argv, 0, stdout="installed", stderr="")
 
-    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
     monkeypatch.setattr("apps.shell.agent_runtime.subprocess.run", fake_run)
     try:
         result = service.install_skill_command("npx skills add owner/repo")
         assert result["ok"] is True
         assert result["installer"] == "npx_skills"
-        assert recorded["argv"] == ["npx", "skills", "add", "owner/repo", "-a", "hermes-agent", "--copy", "-y"]
+        assert recorded["argv"] == ["npx", "skills", "add", "owner/repo", "-a", "oha-yachiyo", "--copy", "-y"]
+        env = recorded["env"]
+        assert isinstance(env, dict)
+        assert env["OHA_YACHIYO_HOME"] == str(service.skill_installs_native_home)
+        assert "SSH_AUTH_SOCK" not in env
+        assert "GITHUB_TOKEN" not in env
+        assert "AWS_SECRET_ACCESS_KEY" not in env
+        assert "CUSTOM_API_KEY" not in env
         assert result["sync"]["summary"]["imported"] == 1
         skill = service.list_skills()["skills"][0]
         assert skill["name"] == "Installed Skill"
         assert skill["source_type"] == "npx_skills"
         assert skill["source_ref"] == "https://github.com/owner/repo/blob/main/skills/dev/installed-skill/SKILL.md"
-        assert "/skill-installs/.hermes/skills/" in skill["local_path"]
+        assert "/skill-installs/.skills/skills/" in skill["local_path"]
     finally:
         service.close()
 
@@ -955,6 +2366,14 @@ def test_linear_workflow_executes_agent_nodes_in_order(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", lambda *_args, **_kwargs: {"content": "Profile result"})
     try:
+        continuation_calls: list[dict] = []
+        original_continue = service.workflow_continuation.continue_run
+
+        def spy_continue(run, workflow, **kwargs):
+            continuation_calls.append({"run_id": run.get("run_id"), "workflow_id": workflow.get("workflow_id")})
+            return original_continue(run, workflow, **kwargs)
+
+        monkeypatch.setattr(service.workflow_continuation, "continue_run", spy_continue)
         model_config = {
             "base_url": "https://api.example.test/v1",
             "model": "demo-model",
@@ -978,6 +2397,7 @@ def test_linear_workflow_executes_agent_nodes_in_order(tmp_path, monkeypatch):
         )
         run = service.create_workflow_run({"workflow_id": workflow["workflow_id"], "user_goal": "Ship it"})
 
+        assert continuation_calls == [{"run_id": run["run_id"], "workflow_id": workflow["workflow_id"]}]
         assert run["status"] == "completed"
         assert run["run_group_id"]
         assert [event["event"] for event in run["timeline"]].count("workflow.node.agent") == 2
@@ -1360,6 +2780,15 @@ def test_workflow_approval_node_pauses_and_resumes(tmp_path, monkeypatch):
         assert approval_event["workflow_node_id"] == "gate"
         assert approval_event["workflow_node_approval_criteria"] == "确认设计输出已经覆盖验收点，再继续编码。"
         assert approval_event["status"] == "approval_required"
+        replay_before = service.list_run_events(run["run_id"])["events"]
+        approval_required_fact = next(
+            event for event in replay_before
+            if event["event_type"] == "workflow.node.approval_required"
+        )
+        assert approval_required_fact["payload"]["workflow_node_id"] == "gate"
+        assert approval_required_fact["payload"]["workflow_node_label"] == "人工确认"
+        assert approval_required_fact["payload"]["workflow_node_approval_criteria"] == "确认设计输出已经覆盖验收点，再继续编码。"
+        assert approval_required_fact["payload"]["pending_approval"]["tool"] == "workflow.approval"
         assert service.get_run_group(run["run_group_id"])["status"] == "approval_required"
 
         resumed = service.approve_run_approval(run["run_id"])
@@ -1382,6 +2811,12 @@ def test_workflow_approval_node_pauses_and_resumes(tmp_path, monkeypatch):
         assert artifact_event["status"] == "completed"
         assert artifact_event["artifact"]["path"] == "summary.md"
         assert any(artifact.get("kind") == "workflow_artifact" for artifact in resumed["artifacts"])
+        replay_after_types = [
+            event["event_type"] for event in service.list_run_events(run["run_id"])["events"]
+        ]
+        assert replay_after_types.count("workflow.node.approval_required") == 1
+        assert "workflow.node.approval_approved" in replay_after_types
+        assert "workflow.run.completed" in replay_after_types
         assert service.get_run_group(run["run_group_id"])["status"] == "completed"
     finally:
         service.close()
@@ -1442,6 +2877,11 @@ def test_cancel_workflow_approval_updates_group_and_step_info(tmp_path, monkeypa
         assert cancelled_event["workflow_node_kind"] == "approval"
         assert cancelled_event["workflow_node_label"] == "人工确认"
         assert cancelled_event["status"] == "cancelled"
+        run_events = service.list_run_events(run["run_id"])["events"]
+        assert any(event["event_type"] == "workflow.run.started" for event in run_events)
+        cancelled_fact = next(event for event in run_events if event["event_type"] == "workflow.run.cancelled")
+        assert cancelled_fact["payload"]["kind"] == "workflow_run"
+        assert cancelled_fact["payload"]["status"] == "cancelled"
         group = service.get_run_group(run["run_group_id"])
         assert group["status"] == "cancelled"
         assert group["summary"] == "Workflow 已取消：人工确认"
@@ -1613,11 +3053,24 @@ def test_workflow_duplicate_artifact_labels_write_unique_paths(tmp_path):
         artifacts = [artifact for artifact in run["artifacts"] if artifact.get("kind") == "workflow_artifact"]
         assert [artifact["path"] for artifact in artifacts] == ["summary.md", "summary-2.md"]
         assert [artifact["workflow_node_id"] for artifact in artifacts] == ["summary-a", "summary-b"]
+        artifact_rows = service._conn.execute(
+            "SELECT kind, path, sequence, payload_json FROM run_artifacts WHERE run_id=? ORDER BY sequence",
+            (run["run_id"],),
+        ).fetchall()
+        assert [(row["kind"], row["path"], row["sequence"]) for row in artifact_rows] == [
+            ("workflow_artifact", "summary.md", 0),
+            ("workflow_artifact", "summary-2.md", 1),
+        ]
+        assert json.loads(artifact_rows[0]["payload_json"])["workflow_node_id"] == "summary-a"
         assert service.read_run_artifact(run["run_id"], "summary.md")["content"] == "Write duplicate artifacts"
         assert service.read_run_artifact(run["run_id"], "summary-2.md")["content"] == "Write duplicate artifacts"
         artifact_events = [event for event in run["timeline"] if event["event"] == "workflow.node.artifact"]
         assert [event["artifact"]["path"] for event in artifact_events] == ["summary.md", "summary-2.md"]
         assert [event["workflow_node_id"] for event in artifact_events] == ["summary-a", "summary-b"]
+        run_events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in run_events]
+        assert "workflow.run.started" in event_types
+        assert "workflow.run.completed" in event_types
     finally:
         service.close()
 
@@ -1998,20 +3451,23 @@ def test_workflow_stops_when_child_agent_fails(tmp_path, monkeypatch):
         service.close()
 
 
-def test_agent_execution_backend_legacy_values_normalize_to_yachiyo(tmp_path):
+def test_agent_execution_backend_legacy_values_normalize_to_native(tmp_path):
     service = make_service(tmp_path)
     try:
-        hermes_agent = service.create_agent({"name": "Hermes Agent"})
-        assert hermes_agent["execution_backend"] == "yachiyo_profile"
-        run = service.create_agent_run({"agent_id": hermes_agent["agent_id"], "user_goal": "Plan"})
+        native_agent = service.create_agent({"name": "Native Agent"})
+        assert native_agent["execution_backend"] == "native_profile"
+        run = service.create_agent_run({"agent_id": native_agent["agent_id"], "user_goal": "Plan"})
         assert run["status"] == "failed"
         assert "Chat Profile" in run["result"]
 
         external = service.create_agent({"name": "CLI Agent", "execution_backend": "external_cli"})
-        assert external["execution_backend"] == "yachiyo_profile"
+        assert external["execution_backend"] == "native_profile"
         external_run = service.create_agent_run({"agent_id": external["agent_id"], "user_goal": "Review"})
         assert external_run["status"] == "failed"
         assert "Chat Profile" in external_run["result"]
+
+        with pytest.raises(AgentRuntimeError, match="不再支持 legacy"):
+            service.create_agent({"name": "Legacy Agent", "execution_backend": "hermes_profile"})
     finally:
         service.close()
 
@@ -2088,6 +3544,232 @@ def test_agent_run_executes_native_tool_call_and_continues(tmp_path, monkeypatch
         tool_event = next(event for event in run["timeline"] if event["event"] == "agent.tool.call" and event["detail"] == "workspace.read")
         assert tool_event["input_preview"]["path"] == "README.md"
         assert tool_event["result"]["ok"] is True
+        run_events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in run_events]
+        assert "agent.run.started" in event_types
+        assert "agent.run.completed" in event_types
+        tool_fact = next(event for event in run_events if event["event_type"] == "agent.tool.call")
+        assert tool_fact["payload"]["tool"] == "workspace.read"
+        assert tool_fact["payload"]["input_preview"]["path"] == "README.md"
+        assert tool_fact["payload"]["result"]["ok"] is True
+    finally:
+        service.close()
+
+
+def test_agent_tool_output_is_truncated_by_runtime_budget(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    service.runtime_limits = service.runtime_limits.__class__(max_tool_output_chars=30)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    (workdir / "long.txt").write_text("x" * 120, encoding="utf-8")
+    calls = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        if len(calls) == 1:
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_read",
+                        "type": "function",
+                        "function": {"name": "workspace_read", "arguments": json.dumps({"path": "long.txt"})},
+                    }
+                ],
+            }
+        assert "[truncated]" in messages[-1]["content"]
+        assert "x" * 60 not in messages[-1]["content"]
+        return {"content": "Read truncated"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Truncating Reader",
+                "model_mode": "custom_api",
+                "model_config": {"base_url": "https://api.example.test/v1", "model": "demo-model", "api_key": "sk-secret"},
+                "tool_policy": {"allowed_tools": ["workspace.read"]},
+                "workspace_policy": {"default_workdir": str(workdir), "readable_scopes": ["."]},
+            }
+        )
+        run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Read long file"})
+        tool_event = next(event for event in run["timeline"] if event["event"] == "agent.tool.call")
+
+        assert run["status"] == "completed"
+        assert run["result"] == "Read truncated"
+        assert tool_event["result"]["truncated"] is True
+        assert len(tool_event["result"]["content"]) <= 30
+    finally:
+        service.close()
+
+
+def test_agent_run_fails_when_tool_call_budget_is_exceeded(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    service.runtime_limits = service.runtime_limits.__class__(max_tool_calls=1)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        return {
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_list_1",
+                    "type": "function",
+                    "function": {"name": "workspace_list", "arguments": json.dumps({"path": "."})},
+                },
+                {
+                    "id": "call_list_2",
+                    "type": "function",
+                    "function": {"name": "workspace_list", "arguments": json.dumps({"path": "."})},
+                },
+            ],
+        }
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Budgeted Reader",
+                "model_mode": "custom_api",
+                "model_config": {"base_url": "https://api.example.test/v1", "model": "demo-model", "api_key": "sk-secret"},
+                "tool_policy": {"allowed_tools": ["workspace.list"]},
+                "workspace_policy": {"default_workdir": str(workdir), "readable_scopes": ["."]},
+            }
+        )
+        run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "List twice"})
+
+        assert run["status"] == "failed"
+        assert "max_tool_calls=1" in run["result"]
+        tool_events = [event for event in run["timeline"] if event["event"] == "agent.tool.call"]
+        assert len(tool_events) == 1
+    finally:
+        service.close()
+
+
+def test_agent_run_fails_when_model_call_budget_is_exceeded(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    service.runtime_limits = service.runtime_limits.__class__(max_model_calls=1)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    calls = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        return {
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_list",
+                    "type": "function",
+                    "function": {"name": "workspace_list", "arguments": json.dumps({"path": "."})},
+                }
+            ],
+        }
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Model Budget Agent",
+                "model_mode": "custom_api",
+                "model_config": {"base_url": "https://api.example.test/v1", "model": "demo-model", "api_key": "sk-secret"},
+                "tool_policy": {"allowed_tools": ["workspace.list"]},
+                "workspace_policy": {"default_workdir": str(workdir), "readable_scopes": ["."]},
+            }
+        )
+        run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Loop once"})
+
+        assert run["status"] == "failed"
+        assert "max_model_calls=1" in run["result"]
+        assert len(calls) == 1
+    finally:
+        service.close()
+
+
+def test_agent_run_fails_when_run_duration_budget_is_exceeded(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    service.runtime_limits = service.runtime_limits.__class__(max_run_duration_seconds=1)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    clock = {"now": 1000.0}
+    calls = []
+
+    def fake_time():
+        return clock["now"]
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        clock["now"] = 1002.0
+        return {
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_list",
+                    "type": "function",
+                    "function": {"name": "workspace_list", "arguments": json.dumps({"path": "."})},
+                }
+            ],
+        }
+
+    monkeypatch.setattr("apps.shell.agent_runtime.time.time", fake_time)
+    monkeypatch.setattr("apps.shell.agent_runtime._iso_epoch", lambda _value: 1000.0)
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Duration Budget Agent",
+                "model_mode": "custom_api",
+                "model_config": {"base_url": "https://api.example.test/v1", "model": "demo-model", "api_key": "sk-secret"},
+                "tool_policy": {"allowed_tools": ["workspace.list"]},
+                "workspace_policy": {"default_workdir": str(workdir), "readable_scopes": ["."]},
+            }
+        )
+        run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "List until timeout"})
+
+        assert run["status"] == "failed"
+        assert "max_run_duration_seconds=1" in run["result"]
+        assert len(calls) == 1
+        assert [event["event"] for event in run["timeline"]].count("agent.model.response") == 1
+        assert [event["event"] for event in run["timeline"]].count("agent.tool.call") == 0
+    finally:
+        service.close()
+
+
+def test_agent_run_fails_when_terminal_budget_is_exceeded_after_approval(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    service.runtime_limits = service.runtime_limits.__class__(max_terminal_calls=0)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: {
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_terminal",
+                    "type": "function",
+                    "function": {"name": "terminal_run", "arguments": json.dumps({"command": "printf blocked"})},
+                }
+            ],
+        },
+    )
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Terminal Budget Agent",
+                "model_mode": "custom_api",
+                "model_config": {"base_url": "https://api.example.test/v1", "model": "demo-model", "api_key": "sk-secret"},
+                "tool_policy": {"allowed_tools": ["terminal.run"]},
+                "workspace_policy": {"default_workdir": str(workdir), "readable_scopes": ["."]},
+            }
+        )
+        run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Run command"})
+        resumed = service.approve_run_approval(run["run_id"])
+
+        assert run["status"] == "approval_required"
+        assert resumed["status"] == "failed"
+        assert "max_terminal_calls=0" in resumed["result"]
     finally:
         service.close()
 
@@ -2306,6 +3988,20 @@ def test_agent_tool_loop_limit_after_artifact_write_completes_with_artifact(tmp_
         service.close()
 
 
+def test_artifact_write_redacts_file_content_and_passes_secret_scan(tmp_path):
+    artifact_root = tmp_path / "artifacts"
+    broker = ToolBroker({}, artifact_root)
+
+    result = broker.artifact_write("reports/secret-report.md", "api_key=sk-artifact-secret123456\nsafe")
+    artifact_path = artifact_root / "reports" / "secret-report.md"
+    content = artifact_path.read_text(encoding="utf-8")
+
+    assert result["ok"] is True
+    assert "sk-artifact-secret123456" not in content
+    assert "api_key=[redacted]" in content
+    assert verify_secret_redaction(paths=[artifact_root]) == []
+
+
 def test_agent_run_json_fallback_writes_artifact(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     calls = []
@@ -2386,7 +4082,12 @@ def test_agent_run_skips_write_tool_when_user_goal_forbids_file_changes(tmp_path
                         "type": "function",
                         "function": {
                             "name": "workspace_write_patch",
-                            "arguments": json.dumps({"path": "scripts/demo.py", "content": "print('demo')"}),
+                            "arguments": json.dumps(
+                                {
+                                    "path": "scripts/demo.py",
+                                    "patch": "--- scripts/demo.py\n+++ scripts/demo.py\n@@ -1 +1 @@\n-print('old')\n+print('demo')\n",
+                                }
+                            ),
                         },
                     }
                 ],
@@ -2540,7 +4241,7 @@ def test_agent_run_explicit_terminal_goal_not_blocked_by_downstream_no_execute_t
                     "type": "function",
                     "function": {
                         "name": "terminal_run",
-                        "arguments": json.dumps({"command": "printf terminal-explicit-smoke; exit 7"}),
+                        "arguments": json.dumps({"command": "printf terminal-explicit-smoke; exit 7", "shell": True}),
                     },
                 }
             ],
@@ -2705,6 +4406,14 @@ def test_agent_run_pauses_for_terminal_approval_and_resumes(tmp_path, monkeypatc
 
     monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
     try:
+        resume_contexts: list[ToolApprovalResumeContext] = []
+        original_resume = service.approval_resume.execute_approved_tool
+
+        def spy_resume(context: ToolApprovalResumeContext) -> None:
+            resume_contexts.append(context)
+            original_resume(context)
+
+        monkeypatch.setattr(service.approval_resume, "execute_approved_tool", spy_resume)
         agent = service.create_agent(
             {
                 "name": "Terminal Agent",
@@ -2719,14 +4428,44 @@ def test_agent_run_pauses_for_terminal_approval_and_resumes(tmp_path, monkeypatc
         assert run["status"] == "approval_required"
         assert run["pending_approval"]["tool"] == "terminal.run"
         assert "messages" not in run["pending_approval"]
+        approval_row = service._conn.execute(
+            "SELECT status, tool, input_preview_json, payload_json FROM run_approvals WHERE run_id=?",
+            (run["run_id"],),
+        ).fetchone()
+        assert approval_row is not None
+        assert approval_row["status"] == "pending"
+        assert approval_row["tool"] == "terminal.run"
+        assert json.loads(approval_row["input_preview_json"])["command"] == "printf approved"
+        assert "messages" not in json.loads(approval_row["payload_json"])
         resumed = service.approve_run_approval(run["run_id"])
 
         assert resumed["status"] == "completed"
         assert resumed["result"] == "Command complete"
+        assert len(resume_contexts) == 1
+        assert resume_contexts[0].run_id == run["run_id"]
+        assert resume_contexts[0].tool_name == "terminal.run"
+        assert resume_contexts[0].input_preview["command"] == "printf approved"
+        approval_after = service._conn.execute(
+            "SELECT status, resolved_at FROM run_approvals WHERE run_id=?",
+            (run["run_id"],),
+        ).fetchone()
+        assert approval_after is not None
+        assert approval_after["status"] == "approved"
+        assert approval_after["resolved_at"]
         approved_event = next(event for event in resumed["timeline"] if event["event"] == "agent.tool.approval_approved")
         assert approved_event["detail"] == "terminal.run"
         assert approved_event["input_preview"]["command"] == "printf approved"
         assert approved_event["status"] == "completed"
+        run_events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in run_events]
+        assert "agent.tool.approval_required" in event_types
+        assert "agent.tool.approval_approved" in event_types
+        approved_fact = next(event for event in run_events if event["event_type"] == "agent.tool.approval_approved")
+        assert approved_fact["payload"]["tool"] == "terminal.run"
+        assert approved_fact["payload"]["input_preview"]["command"] == "printf approved"
+        tool_facts = [event for event in run_events if event["event_type"] == "agent.tool.call"]
+        assert tool_facts[-1]["payload"]["tool"] == "terminal.run"
+        assert tool_facts[-1]["payload"]["approved"] is True
         assert service.get_run_group(resumed["run_group_id"])["status"] == "completed"
     finally:
         service.close()
@@ -2874,7 +4613,7 @@ def test_agent_run_fails_when_approved_terminal_returns_nonzero(tmp_path, monkey
                     "type": "function",
                     "function": {
                         "name": "terminal_run",
-                        "arguments": json.dumps({"command": "printf terminal-failure-smoke; exit 7"}),
+                            "arguments": json.dumps({"command": "printf terminal-failure-smoke; exit 7", "shell": True}),
                     },
                 }
             ],
@@ -3019,6 +4758,22 @@ def test_workflow_resumes_after_child_agent_approval(tmp_path, monkeypatch):
         child = service.get_run(child_run_ids[0])
         assert child["status"] == "approval_required"
 
+        child_running_calls: list[str] = []
+        parent_resume_calls: list[str] = []
+        original_mark_child_running = service.workflow_parent_resume.mark_child_running
+        original_resume_after_child_update = service.workflow_parent_resume.resume_after_child_update
+
+        def spy_mark_child_running(child_run: dict) -> None:
+            child_running_calls.append(str(child_run.get("run_id") or ""))
+            original_mark_child_running(child_run)
+
+        def spy_resume_after_child_update(child_run: dict) -> None:
+            parent_resume_calls.append(str(child_run.get("run_id") or ""))
+            original_resume_after_child_update(child_run)
+
+        monkeypatch.setattr(service.workflow_parent_resume, "mark_child_running", spy_mark_child_running)
+        monkeypatch.setattr(service.workflow_parent_resume, "resume_after_child_update", spy_resume_after_child_update)
+
         service.update_workflow(
             workflow["workflow_id"],
             {
@@ -3054,6 +4809,8 @@ def test_workflow_resumes_after_child_agent_approval(tmp_path, monkeypatch):
         assert resuming_statuses == [
             ("running", "running", "running", "Needs Approval 已批准，正在继续执行")
         ]
+        assert child_running_calls == [child["run_id"]]
+        assert parent_resume_calls == [child["run_id"]]
         assert approved_child["status"] == "completed"
         assert any(event["event"] == "agent.run.resumed" for event in approved_child["timeline"])
         resumed_parent = service.get_run(run["run_id"])
@@ -3095,7 +4852,7 @@ def test_workflow_fails_when_child_terminal_returns_nonzero_after_approval(tmp_p
                     "type": "function",
                     "function": {
                         "name": "terminal_run",
-                        "arguments": json.dumps({"command": "printf workflow-child-failure-smoke; exit 7"}),
+                        "arguments": json.dumps({"command": "printf workflow-child-failure-smoke; exit 7", "shell": True}),
                     },
                 }
             ],
@@ -3409,11 +5166,35 @@ def test_agent_run_rejects_pending_tool(tmp_path, monkeypatch):
         assert rejected_event["tool"] == "terminal.run"
         assert rejected_event["input_preview"]["command"] == "echo blocked"
         assert rejected_event["status"] == "cancelled"
+        run_events = service.list_run_events(run["run_id"])["events"]
+        rejected_fact = next(event for event in run_events if event["event_type"] == "agent.tool.approval_rejected")
+        assert rejected_fact["payload"]["tool"] == "terminal.run"
+        assert rejected_fact["payload"]["input_preview"]["command"] == "echo blocked"
+        assert rejected_fact["payload"]["status"] == "cancelled"
     finally:
         service.close()
 
 
-def test_model_payload_approved_flag_does_not_bypass_write_approval(tmp_path, monkeypatch):
+def test_tool_descriptor_schema_and_validation_share_patch_contract():
+    schema = NativeRunEngine._tool_schemas(["workspace.write_patch"])[0]
+    properties = schema["function"]["parameters"]["properties"]
+
+    assert "patch" in properties
+    assert "content" not in properties
+    assert schema["function"]["parameters"]["required"] == ["path"]
+
+    NativeRunEngine._validate_tool_payload("workspace.write_patch", {"path": "src/out.txt", "patch": "*** patch"})
+    with pytest.raises(AgentRuntimeError, match="未声明字段：approved"):
+        NativeRunEngine._validate_tool_payload("workspace.write_patch", {"path": "src/out.txt", "patch": "*** patch", "approved": True})
+    with pytest.raises(AgentRuntimeError, match="未声明字段：content"):
+        NativeRunEngine._validate_tool_payload("workspace.write_patch", {"path": "src/out.txt", "content": "bad"})
+    with pytest.raises(AgentRuntimeError, match="patch 必须是非空字符串"):
+        NativeRunEngine._validate_tool_payload("workspace.write_patch", {"path": "src/out.txt"})
+    with pytest.raises(AgentRuntimeError, match="敏感凭据"):
+        NativeRunEngine._validate_tool_payload("artifact.write", {"path": "notes.md", "content": "sk-secret-token"})
+
+
+def test_model_payload_approved_flag_is_rejected_by_tool_schema(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     workdir = tmp_path / "repo"
     (workdir / "src").mkdir(parents=True)
@@ -3427,7 +5208,13 @@ def test_model_payload_approved_flag_does_not_bypass_write_approval(tmp_path, mo
                     "type": "function",
                     "function": {
                         "name": "workspace_write_patch",
-                        "arguments": json.dumps({"path": "src/out.txt", "content": "bad", "approved": True}),
+                        "arguments": json.dumps(
+                            {
+                                "path": "src/out.txt",
+                                "patch": "--- src/out.txt\n+++ src/out.txt\n@@ -1 +1 @@\n-before\n+bad\n",
+                                "approved": True,
+                            }
+                        ),
                     },
                 }
             ],
@@ -3445,7 +5232,8 @@ def test_model_payload_approved_flag_does_not_bypass_write_approval(tmp_path, mo
         )
         run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Write file"})
 
-        assert run["status"] == "approval_required"
+        assert run["status"] == "failed"
+        assert "未声明字段：approved" in run["result"]
         assert not (workdir / "src" / "out.txt").exists()
     finally:
         service.close()
@@ -3472,9 +5260,363 @@ def test_tool_broker_blocks_out_of_scope_and_unapproved_terminal(tmp_path):
     assert file_list["ok"] is False
     assert file_list["suggested_tool"] == "workspace.read"
     with pytest.raises(AgentRuntimeError):
-        broker.workspace_write_patch("../escape.txt", "bad", approved=True)
+        broker.workspace_write_patch(
+            "../escape.txt",
+            patch="--- ../escape.txt\n+++ ../escape.txt\n@@ -1 +1 @@\n-old\n+bad\n",
+            approved=True,
+        )
     assert broker.terminal_run("echo should-not-run")["approval_required"] is True
     assert broker.call("terminal.run", {"command": "echo should-not-run", "approved": True})["approval_required"] is True
+
+
+def test_agent_run_validates_write_patch_workspace_boundary_before_approval(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside\n", encoding="utf-8")
+    calls = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        if len(calls) == 1:
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_escape_write",
+                        "type": "function",
+                        "function": {
+                            "name": "workspace_write_patch",
+                            "arguments": json.dumps(
+                                {
+                                    "path": "../outside.txt",
+                                    "patch": "--- ../outside.txt\n+++ ../outside.txt\n@@ -1 +1 @@\n-outside\n+modified\n",
+                                }
+                            ),
+                        },
+                    }
+                ],
+            }
+        assert messages[-1]["role"] == "tool"
+        tool_result = json.loads(messages[-1]["content"])
+        assert tool_result["ok"] is False
+        assert "越界" in tool_result["error"]
+        assert "Workspace tools only accept relative paths" in tool_result["hint"]
+        assert tool_result["suggested_tool"] == "terminal.run"
+        return {"content": "Handled boundary refusal"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Boundary Writer",
+                "model_mode": "custom_api",
+                "model_config": {"base_url": "https://api.example.test/v1", "model": "demo-model", "api_key": "sk-secret"},
+                "tool_policy": {"allowed_tools": ["workspace.write_patch", "terminal.run"]},
+                "workspace_policy": {
+                    "default_workdir": str(workdir),
+                    "readable_scopes": ["."],
+                    "writable_scopes": ["."],
+                },
+            }
+        )
+
+        run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Try outside write"})
+        events = service.list_run_events(run["run_id"])["events"]
+
+        assert run["status"] == "completed"
+        assert run["result"] == "Handled boundary refusal"
+        assert run["pending_approval"] == {}
+        assert outside.read_text(encoding="utf-8") == "outside\n"
+        assert not any(event["event"] == "agent.tool.approval_required" for event in run["timeline"])
+        assert not any(event["event_type"] == "agent.tool.approval_required" for event in events)
+        tool_event = next(event for event in events if event["event_type"] == "agent.tool.call")
+        assert tool_event["payload"]["tool"] == "workspace.write_patch"
+        assert tool_event["payload"]["result"]["ok"] is False
+    finally:
+        service.close()
+
+
+def test_tool_broker_rejects_symlink_workspace_escape(tmp_path):
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    secret_file = outside / "secret.txt"
+    secret_file.write_text("secret", encoding="utf-8")
+    outside_dir = outside / "nested"
+    outside_dir.mkdir()
+    try:
+        (workdir / "secret-link.txt").symlink_to(secret_file)
+        (workdir / "dir-link").symlink_to(outside_dir, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"symlink unavailable on this filesystem: {exc}")
+    broker = ToolBroker(
+        {
+            "default_workdir": str(workdir),
+            "readable_scopes": ["."],
+            "writable_scopes": ["."],
+        },
+        tmp_path / "artifacts",
+    )
+
+    with pytest.raises(AgentRuntimeError, match="工作区范围"):
+        broker.workspace_read("secret-link.txt")
+    with pytest.raises(AgentRuntimeError, match="工作区范围"):
+        broker.workspace_list("dir-link")
+    with pytest.raises(AgentRuntimeError, match="工作区范围"):
+        broker.workspace_write_patch(
+            "secret-link.txt",
+            patch="--- secret-link.txt\n+++ secret-link.txt\n@@ -1 +1 @@\n-secret\n+modified\n",
+            approved=True,
+        )
+    assert secret_file.read_text(encoding="utf-8") == "secret"
+
+
+def test_terminal_run_uses_workspace_argv_and_scrubbed_environment(tmp_path, monkeypatch):
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    captured: dict[str, object] = {}
+
+    monkeypatch.setenv("SAFE_ENV", "kept")
+    monkeypatch.setenv("SSH_AUTH_SOCK", "ssh-secret")
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_secretsecretsecret")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "aws-secret")
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", "google-secret")
+    monkeypatch.setenv("AZURE_TOKEN", "azure-secret")
+    monkeypatch.setenv("CUSTOM_API_KEY", "custom-secret")
+    monkeypatch.setenv("CUSTOM_PASSWORD", "password-secret")
+
+    class FakeProcess:
+        pid = 4242
+        returncode = 0
+
+        def __init__(self, argv, **kwargs):
+            captured["argv"] = argv
+            captured.update(kwargs)
+
+        def communicate(self, *, timeout):
+            captured["timeout"] = timeout
+            return (
+                "OPENAI_API_KEY=sk-output-secret123456789",
+                "Authorization: Bearer stderr-secret-123456",
+            )
+
+    monkeypatch.setattr("apps.shell.agent_runtime.subprocess.Popen", FakeProcess)
+    broker = ToolBroker(
+        {
+            "default_workdir": str(workdir),
+            "readable_scopes": ["."],
+            "writable_scopes": ["."],
+        },
+        tmp_path / "artifacts",
+    )
+
+    result = broker.terminal_run("python -c 'print(123)'", approved=True, timeout_seconds=999)
+
+    assert captured["argv"] == ["python", "-c", "print(123)"]
+    assert captured["cwd"] == workdir
+    assert captured["shell"] is False
+    assert captured["start_new_session"] is True
+    assert captured["timeout"] == 120
+    env = captured["env"]
+    assert env["SAFE_ENV"] == "kept"
+    for key in (
+        "SSH_AUTH_SOCK",
+        "GITHUB_TOKEN",
+        "AWS_SECRET_ACCESS_KEY",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "AZURE_TOKEN",
+        "CUSTOM_API_KEY",
+        "CUSTOM_PASSWORD",
+    ):
+        assert key not in env
+    assert result["ok"] is True
+    assert result["shell"] is False
+    assert "sk-output-secret123456789" not in result["stdout"]
+    assert "stderr-secret-123456" not in result["stderr"]
+
+
+def test_terminal_run_truncates_and_sanitizes_outputs(tmp_path, monkeypatch):
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+
+    class FakeProcess:
+        pid = 4243
+        returncode = 0
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def communicate(self, *, timeout):
+            stdout = f"{'x' * 9000}OPENAI_API_KEY=sk-stdout-secret123456789\nstdout-tail"
+            stderr = f"{'y' * 9000}Authorization: Bearer stderr-secret-123456\nstderr-tail"
+            return stdout, stderr
+
+    monkeypatch.setattr("apps.shell.agent_runtime.subprocess.Popen", FakeProcess)
+    broker = ToolBroker(
+        {
+            "default_workdir": str(workdir),
+            "readable_scopes": ["."],
+            "writable_scopes": ["."],
+        },
+        tmp_path / "artifacts",
+    )
+
+    result = broker.terminal_run("printf long-output", approved=True)
+
+    assert result["ok"] is True
+    assert len(result["stdout"]) <= 8000
+    assert len(result["stderr"]) <= 8000
+    assert "sk-stdout-secret123456789" not in result["stdout"]
+    assert "stderr-secret-123456" not in result["stderr"]
+    assert result["stdout"].endswith("stdout-tail")
+    assert result["stderr"].endswith("stderr-tail")
+
+
+def test_terminal_run_timeout_kills_process_group(tmp_path, monkeypatch):
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    killed: list[tuple[int, int]] = []
+
+    class FakeProcess:
+        pid = 4343
+        returncode = -9
+
+        def __init__(self, argv, **_kwargs):
+            self.argv = argv
+            self.calls = 0
+
+        def communicate(self, *, timeout=None):
+            self.calls += 1
+            if self.calls == 1:
+                raise subprocess.TimeoutExpired(self.argv, timeout)
+            return ("late stdout", "late stderr")
+
+    monkeypatch.setattr("apps.shell.agent_runtime.subprocess.Popen", FakeProcess)
+    monkeypatch.setattr("apps.shell.agent_runtime.os.killpg", lambda pid, sig: killed.append((pid, sig)))
+    broker = ToolBroker(
+        {
+            "default_workdir": str(workdir),
+            "readable_scopes": ["."],
+            "writable_scopes": ["."],
+        },
+        tmp_path / "artifacts",
+    )
+
+    result = broker.terminal_run("sleep 30", approved=True, timeout_seconds=1)
+
+    assert result["ok"] is False
+    assert result["timed_out"] is True
+    assert result["returncode"] == -9
+    assert killed == [(4343, 9)]
+
+
+def test_workspace_write_patch_applies_single_file_unified_diff_with_hash(tmp_path):
+    workdir = tmp_path / "repo"
+    (workdir / "src").mkdir(parents=True)
+    target = workdir / "src" / "app.txt"
+    target.write_text("one\ntwo\nthree\n", encoding="utf-8")
+    before_sha = hashlib.sha256(target.read_bytes()).hexdigest()
+    broker = ToolBroker(
+        {
+            "default_workdir": str(workdir),
+            "readable_scopes": ["."],
+            "writable_scopes": ["src"],
+        },
+        tmp_path / "artifacts",
+    )
+    patch = """--- a/src/app.txt
++++ b/src/app.txt
+@@ -1,3 +1,3 @@
+ one
+-two
++TWO
+ three
+"""
+
+    result = broker.call(
+        "workspace.write_patch",
+        {"path": "src/app.txt", "patch": patch, "expected_sha256": before_sha},
+        approved=True,
+    )
+
+    assert result["ok"] is True
+    assert result["mode"] == "patch"
+    assert result["sha256_before"] == before_sha
+    assert result["sha256_after"] == hashlib.sha256(target.read_bytes()).hexdigest()
+    assert target.read_text(encoding="utf-8") == "one\nTWO\nthree\n"
+
+
+def test_workspace_write_patch_rejects_hash_or_context_mismatch_without_writing(tmp_path):
+    workdir = tmp_path / "repo"
+    (workdir / "src").mkdir(parents=True)
+    target = workdir / "src" / "app.txt"
+    target.write_text("one\ntwo\nthree\n", encoding="utf-8")
+    broker = ToolBroker(
+        {
+            "default_workdir": str(workdir),
+            "readable_scopes": ["."],
+            "writable_scopes": ["src"],
+        },
+        tmp_path / "artifacts",
+    )
+    context_mismatch_patch = """--- a/src/app.txt
++++ b/src/app.txt
+@@ -1,3 +1,3 @@
+ one
+-missing
++TWO
+ three
+"""
+
+    hash_result = broker.call(
+        "workspace.write_patch",
+        {"path": "src/app.txt", "patch": context_mismatch_patch, "expected_sha256": "0" * 64},
+        approved=True,
+    )
+
+    assert hash_result["ok"] is False
+    assert "hash" in hash_result["error"]
+    assert target.read_text(encoding="utf-8") == "one\ntwo\nthree\n"
+    with pytest.raises(AgentRuntimeError, match="hunk context"):
+        broker.call(
+            "workspace.write_patch",
+            {"path": "src/app.txt", "patch": context_mismatch_patch},
+            approved=True,
+        )
+    assert target.read_text(encoding="utf-8") == "one\ntwo\nthree\n"
+
+
+def test_workspace_write_patch_rejects_multifile_or_binary_patch(tmp_path):
+    workdir = tmp_path / "repo"
+    (workdir / "src").mkdir(parents=True)
+    (workdir / "src" / "app.txt").write_text("one\n", encoding="utf-8")
+    broker = ToolBroker(
+        {
+            "default_workdir": str(workdir),
+            "readable_scopes": ["."],
+            "writable_scopes": ["src"],
+        },
+        tmp_path / "artifacts",
+    )
+    multifile_patch = """--- a/src/app.txt
++++ b/src/app.txt
+@@ -1 +1 @@
+-one
++two
+--- a/src/other.txt
++++ b/src/other.txt
+@@ -1 +1 @@
+-x
++y
+"""
+
+    with pytest.raises(AgentRuntimeError, match="单文件"):
+        broker.call("workspace.write_patch", {"path": "src/app.txt", "patch": multifile_patch}, approved=True)
+    with pytest.raises(AgentRuntimeError, match="二进制"):
+        broker.call("workspace.write_patch", {"path": "src/app.txt", "patch": "GIT binary patch\n"}, approved=True)
 
 
 def test_explicit_empty_tool_policy_disables_model_tools(tmp_path, monkeypatch):
@@ -3514,14 +5656,21 @@ def test_explicit_empty_tool_policy_disables_model_tools(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_run_approval_routes_return_404_and_400(tmp_path, monkeypatch):
+async def test_run_approval_routes_return_404_and_are_idempotent(tmp_path, monkeypatch):
     from fastapi import HTTPException
 
     from apps.bridge.routes import agents as agent_routes
 
     service = make_service(tmp_path)
     monkeypatch.setattr(agent_routes, "get_agent_runtime_service", lambda: service)
-    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", lambda *_args, **_kwargs: {"content": "Done"})
+    model_calls = 0
+
+    def fake_chat(*_args, **_kwargs):
+        nonlocal model_calls
+        model_calls += 1
+        return {"content": "Done"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
     try:
         with pytest.raises(HTTPException) as missing:
             await agent_routes.approve_run_approval("run_missing")
@@ -3535,9 +5684,72 @@ async def test_run_approval_routes_return_404_and_400(tmp_path, monkeypatch):
             }
         )
         run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Finish"})
-        with pytest.raises(HTTPException) as invalid:
-            await agent_routes.approve_run_approval(run["run_id"])
-        assert invalid.value.status_code == 400
+        repeated = await agent_routes.approve_run_approval(run["run_id"])
+        assert repeated["run_id"] == run["run_id"]
+        assert repeated["status"] == "completed"
+        assert model_calls == 1
+    finally:
+        service.close()
+
+
+@pytest.mark.asyncio
+async def test_run_approval_reject_route_is_idempotent(tmp_path, monkeypatch):
+    from apps.bridge.routes import agents as agent_routes
+
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    monkeypatch.setattr(agent_routes, "get_agent_runtime_service", lambda: service)
+
+    def fake_chat(*_args, **_kwargs):
+        return {
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_terminal_reject",
+                    "type": "function",
+                    "function": {
+                        "name": "terminal_run",
+                        "arguments": json.dumps({"command": "printf should-not-run"}),
+                    },
+                }
+            ],
+        }
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Reject Route Agent",
+                "model_mode": "custom_api",
+                "model_config": {"base_url": "https://api.example.test/v1", "model": "demo-model", "api_key": "sk-secret"},
+                "tool_policy": {"allowed_tools": ["terminal.run"]},
+                "workspace_policy": {"default_workdir": str(workdir), "readable_scopes": ["."]},
+            }
+        )
+        run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Request terminal then reject"})
+        assert run["status"] == "approval_required"
+
+        first = await agent_routes.reject_run_approval(
+            run["run_id"],
+            agent_routes.ApprovalRejectRequest(reason="not allowed"),
+        )
+        second = await agent_routes.reject_run_approval(
+            run["run_id"],
+            agent_routes.ApprovalRejectRequest(reason="not allowed again"),
+        )
+        events = service.list_run_events(run["run_id"])["events"]
+        rejection_facts = [
+            event
+            for event in events
+            if event["event_type"] == "agent.tool.approval_rejected"
+        ]
+
+        assert first["status"] == "cancelled"
+        assert second["status"] == "cancelled"
+        assert len(rejection_facts) == 1
+        assert rejection_facts[0]["payload"]["reason"] == "not allowed"
+        assert "should-not-run" in json.dumps(rejection_facts[0]["payload"], ensure_ascii=False)
     finally:
         service.close()
 
@@ -4014,6 +6226,7 @@ async def test_workflow_cancel_route_cancels_child_agent_approval(tmp_path, monk
 @pytest.mark.asyncio
 async def test_workflow_child_approval_route_approve_resumes_parent_workflow(tmp_path, monkeypatch):
     from apps.bridge.routes import agents as agent_routes
+    from apps.bridge.routes import runs as run_routes
 
     service = make_service(tmp_path)
     workdir = tmp_path / "repo"
@@ -4042,6 +6255,7 @@ async def test_workflow_child_approval_route_approve_resumes_parent_workflow(tmp
         return {"content": "Route child approved result"}
 
     monkeypatch.setattr(agent_routes, "get_agent_runtime_service", lambda: service)
+    monkeypatch.setattr(run_routes, "get_native_run_engine", lambda: service)
     monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
     try:
         agent = service.create_agent(
@@ -4088,9 +6302,47 @@ async def test_workflow_child_approval_route_approve_resumes_parent_workflow(tmp
         assert child["pending_approval"]["tool"] == "terminal.run"
         assert child["pending_approval"]["input_preview"]["command"] == "printf route-approved"
 
+        listed = await agent_routes.list_runs(limit=20)
+        parent_detail = await agent_routes.get_any_run(run["run_id"])
+        child_detail = await agent_routes.get_any_run(child_run_id)
+        parent_replay = await run_routes.list_run_events(run["run_id"], after_sequence=0, limit=200)
+        child_replay = await run_routes.list_run_events(child_run_id, after_sequence=0, limit=200)
+        parent_replay_types = [event["event_type"] for event in parent_replay["events"]]
+        child_replay_types = [event["event_type"] for event in child_replay["events"]]
+
+        assert any(item["run_id"] == run["run_id"] for item in listed["runs"])
+        assert not any(item["run_id"] == child_run_id for item in listed["runs"])
+        assert parent_detail["status"] == "approval_required"
+        assert parent_detail["pending_approval"] == {}
+        parent_wait_event = next(
+            event for event in parent_detail["timeline"]
+            if event["event"] == "workflow.run.approval_required"
+        )
+        assert parent_wait_event["child_run_id"] == child_run_id
+        assert parent_wait_event["workflow_node_id"] == "agent"
+        assert child_detail["status"] == "approval_required"
+        assert child_detail["pending_approval"]["tool"] == "terminal.run"
+        replay_agent_before = [
+            event for event in parent_replay["events"]
+            if event["event_type"] == "workflow.node.agent"
+            and event["payload"].get("child_run_id") == child_run_id
+        ]
+        assert [event["payload"].get("status") for event in replay_agent_before] == ["approval_required"]
+        assert replay_agent_before[0]["payload"]["workflow_node_id"] == "agent"
+        assert "workflow.run.approval_required" in parent_replay_types
+        replay_wait_event = next(
+            event for event in parent_replay["events"]
+            if event["event_type"] == "workflow.run.approval_required"
+        )
+        assert replay_wait_event["payload"]["child_run_id"] == child_run_id
+        assert replay_wait_event["payload"]["workflow_node_id"] == "agent"
+        assert "agent.tool.approval_required" in child_replay_types
+
         approved_child = await agent_routes.approve_run_approval(child_run_id)
         parent = await agent_routes.get_workflow_run(run["run_id"])
         completed_group = await agent_routes.get_run_group(run["run_group_id"])
+        parent_replay_after = await run_routes.list_run_events(run["run_id"], after_sequence=0, limit=200)
+        parent_replay_after_types = [event["event_type"] for event in parent_replay_after["events"]]
 
         assert approved_child["status"] == "completed"
         assert approved_child["pending_approval"] == {}
@@ -4109,6 +6361,29 @@ async def test_workflow_child_approval_route_approve_resumes_parent_workflow(tmp
         assert artifact_event["workflow_node_id"] == "summary"
         assert artifact_event["status"] == "completed"
         assert artifact_event["artifact"]["path"] == "summary.md"
+        assert parent_replay_after_types.count("workflow.run.approval_required") == 1
+        assert parent_replay_after_types.count("workflow.run.child_resumed") == 1
+        assert parent_replay_after_types.count("workflow.run.resumed") == 1
+        assert "workflow.run.completed" in parent_replay_after_types
+        replay_agent_after = [
+            event for event in parent_replay_after["events"]
+            if event["event_type"] == "workflow.node.agent"
+            and event["payload"].get("child_run_id") == child_run_id
+        ]
+        assert [event["payload"].get("status") for event in replay_agent_after] == [
+            "approval_required",
+            "running",
+            "completed",
+        ]
+        assert replay_agent_after[-1]["payload"]["workflow_node_id"] == "agent"
+        assert replay_agent_after[-1]["payload"]["artifact_count"] == 0
+        assert replay_agent_after[-1]["payload"]["result"] == "Route child approved result"
+        replay_resumed_event = next(
+            event for event in parent_replay_after["events"]
+            if event["event_type"] == "workflow.run.resumed"
+        )
+        assert replay_resumed_event["payload"]["child_run_id"] == child_run_id
+        assert replay_resumed_event["payload"]["workflow_node_id"] == "agent"
     finally:
         service.close()
 
@@ -4248,6 +6523,7 @@ async def test_workflow_child_consecutive_approvals_keep_parent_waiting(tmp_path
 @pytest.mark.asyncio
 async def test_workflow_child_approval_route_reject_cancels_parent_workflow(tmp_path, monkeypatch):
     from apps.bridge.routes import agents as agent_routes
+    from apps.bridge.routes import runs as run_routes
 
     service = make_service(tmp_path)
     workdir = tmp_path / "repo"
@@ -4270,6 +6546,7 @@ async def test_workflow_child_approval_route_reject_cancels_parent_workflow(tmp_
         }
 
     monkeypatch.setattr(agent_routes, "get_agent_runtime_service", lambda: service)
+    monkeypatch.setattr(run_routes, "get_native_run_engine", lambda: service)
     monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
     try:
         agent = service.create_agent(
@@ -4320,6 +6597,7 @@ async def test_workflow_child_approval_route_reject_cancels_parent_workflow(tmp_
         )
         parent = await agent_routes.get_workflow_run(run["run_id"])
         cancelled_group = await agent_routes.get_run_group(run["run_group_id"])
+        parent_replay = await run_routes.list_run_events(run["run_id"], after_sequence=0, limit=200)
 
         assert rejected_child["status"] == "cancelled"
         assert rejected_child["pending_approval"] == {}
@@ -4336,6 +6614,21 @@ async def test_workflow_child_approval_route_reject_cancels_parent_workflow(tmp_
         assert cancelled_event["workflow_node_kind"] == "agent"
         assert cancelled_event["workflow_node_label"] == "Route Reject Child"
         assert cancelled_event["child_run_id"] == child_run_id
+        replay_agent_events = [
+            event for event in parent_replay["events"]
+            if event["event_type"] == "workflow.node.agent"
+            and event["payload"].get("child_run_id") == child_run_id
+        ]
+        assert [event["payload"].get("status") for event in replay_agent_events] == [
+            "approval_required",
+            "cancelled",
+        ]
+        replay_cancelled = next(
+            event for event in parent_replay["events"]
+            if event["event_type"] == "workflow.run.cancelled"
+        )
+        assert replay_cancelled["payload"]["child_run_id"] == child_run_id
+        assert replay_cancelled["payload"]["workflow_node_id"] == "agent"
     finally:
         service.close()
 
@@ -4421,6 +6714,7 @@ async def test_workflow_child_artifact_route_reads_source_run_artifact(tmp_path,
 @pytest.mark.asyncio
 async def test_workflow_artifact_review_route_exposes_outputs_and_reruns(tmp_path, monkeypatch):
     from apps.bridge.routes import agents as agent_routes
+    from apps.bridge.routes import runs as run_routes
 
     service = make_service(tmp_path)
     calls: list[list[dict]] = []
@@ -4446,6 +6740,7 @@ async def test_workflow_artifact_review_route_exposes_outputs_and_reruns(tmp_pat
         return {"content": f"Code final result run {1 if len(calls) == 3 else 2}"}
 
     monkeypatch.setattr(agent_routes, "get_agent_runtime_service", lambda: service)
+    monkeypatch.setattr(run_routes, "get_native_run_engine", lambda: service)
     monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
     try:
         model_config = {
@@ -4520,6 +6815,36 @@ async def test_workflow_artifact_review_route_exposes_outputs_and_reruns(tmp_pat
             ("workflow.node.agent", "code", "completed"),
             ("workflow.node.artifact", "report", "completed"),
         ]
+        replay = await run_routes.list_run_events(parent["run_id"], after_sequence=0, limit=200)
+        replay_steps = [
+            event for event in replay["events"]
+            if str(event.get("event_type") or "").startswith("workflow.node.")
+        ]
+        assert [
+            (
+                event["event_type"],
+                event["payload"].get("workflow_node_id"),
+                event["payload"].get("status"),
+            )
+            for event in replay_steps
+        ] == [
+            ("workflow.node.start", "start", "completed"),
+            ("workflow.node.agent", "design", "completed"),
+            ("workflow.node.agent", "code", "completed"),
+            ("workflow.node.artifact", "report", "completed"),
+        ]
+        replay_design = next(
+            event for event in replay_steps
+            if event["event_type"] == "workflow.node.agent"
+            and event["payload"].get("workflow_node_id") == "design"
+        )
+        replay_artifact = next(
+            event for event in replay_steps
+            if event["event_type"] == "workflow.node.artifact"
+        )
+        assert replay_design["payload"]["child_run_id"] == child_ref["source_run_id"]
+        assert replay_design["payload"]["artifact_count"] == 1
+        assert replay_artifact["payload"]["artifact"]["path"] == "reports/final.md"
 
         rerun = await agent_routes.rerun_run(parent["run_id"])
         rerun_artifact = await agent_routes.get_run_artifact(rerun["run_id"], "reports/final.md")
@@ -4620,20 +6945,20 @@ async def test_skill_sync_and_install_routes(tmp_path, monkeypatch):
     from apps.bridge.routes import agents as agent_routes
 
     service = make_service(tmp_path)
-    hermes_home = tmp_path / ".hermes"
+    native_home = tmp_path / ".oha-yachiyo" / "skill-library"
 
     def fake_run(argv, **_kwargs):
-        skill_root = Path(_kwargs["cwd"]) / ".hermes" / "skills" / "office" / "route-installed"
+        skill_root = Path(_kwargs["cwd"]) / ".skills" / "skills" / "office" / "route-installed"
         skill_root.mkdir(parents=True)
         (skill_root / "SKILL.md").write_text("# Route Installed\n\nRoute install.", encoding="utf-8")
         return subprocess.CompletedProcess(argv, 0, stdout="installed", stderr="")
 
-    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+    monkeypatch.setenv("OHA_YACHIYO_HOME", str(tmp_path / ".oha-yachiyo"))
     monkeypatch.setattr(agent_routes, "get_agent_runtime_service", lambda: service)
     monkeypatch.setattr("apps.shell.agent_runtime.subprocess.run", fake_run)
     try:
         sources = await agent_routes.list_skill_sources()
-        assert sources["roots"][0]["path"] == str(hermes_home / "skills")
+        assert sources["roots"][0]["path"] == str(native_home / "skills")
 
         folder = await agent_routes.create_skill_folder(agent_routes.SkillFolderRequest(name="Office"))
         installed = await agent_routes.install_skill(
@@ -4645,7 +6970,7 @@ async def test_skill_sync_and_install_routes(tmp_path, monkeypatch):
         assert skills[0]["folder_id"] == folder["folder_id"]
         assert skills[0]["folder_name"] == "Office"
 
-        synced = await agent_routes.sync_hermes_skills()
+        synced = await agent_routes.sync_native_skills()
         assert synced["summary"]["skipped"] >= 1
     finally:
         service.close()

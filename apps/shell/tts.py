@@ -19,6 +19,8 @@ from urllib.parse import quote, urljoin, urlparse, urlunparse
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from packages.security import redact_api_error_text
+
 if TYPE_CHECKING:
     from apps.shell.config import TTSConfig
 
@@ -206,7 +208,7 @@ class TTSService:
                 "provider": self._config.provider,
                 "ok": False,
                 "success": False,
-                "error": str(exc),
+                "error": redact_api_error_text(exc),
                 "message": "TTS 测试失败",
                 "spoken_text": spoken_text,
             }
@@ -256,7 +258,7 @@ class TTSService:
                 "enabled": True,
                 "provider": self._config.provider,
                 "ok": False,
-                "error": str(exc),
+                "error": redact_api_error_text(exc),
                 "message": "TTS 触发失败",
                 "spoken_text": text,
             }
@@ -323,8 +325,8 @@ class TTSService:
                 argv.append(voice)
 
         env = dict(os.environ)
-        env["HERMES_YACHIYO_TTS_TEXT"] = text
-        env["HERMES_YACHIYO_TTS_VOICE"] = voice
+        env["OHA_YACHIYO_TTS_TEXT"] = text
+        env["OHA_YACHIYO_TTS_VOICE"] = voice
         result = subprocess.run(
             argv,
             env=env,
@@ -348,7 +350,7 @@ class TTSService:
                     output_path=output_path,
                 )
             except RuntimeError as exc:
-                errors.append(str(exc))
+                errors.append(redact_api_error_text(exc))
                 logger.info("GPT-SoVITS 请求失败，尝试下一个候选地址: %s", exc)
         if errors:
             raise RuntimeError(errors[-1])
@@ -495,7 +497,7 @@ class TTSService:
             keep_file = True
         else:
             inferred_suffix = _suffix_for_audio_response(content_type, suffix)
-            with tempfile.NamedTemporaryFile(prefix="hermes-yachiyo-gsv-", suffix=inferred_suffix, delete=False) as tmp:
+            with tempfile.NamedTemporaryFile(prefix="oha-yachiyo-gsv-", suffix=inferred_suffix, delete=False) as tmp:
                 tmp.write(body)
                 audio_path = tmp.name
             keep_file = False
@@ -609,9 +611,9 @@ def _mime_type_for_audio_path(path: str, configured_media_type: str | None = Non
 def _network_error_message(action: str, url: str, exc: BaseException) -> str:
     detail = ""
     if isinstance(exc, URLError) and getattr(exc, "reason", None):
-        detail = str(exc.reason)
+        detail = redact_api_error_text(exc.reason)
     if not detail:
-        detail = str(exc)
+        detail = redact_api_error_text(exc)
     if not detail:
         detail = exc.__class__.__name__
 

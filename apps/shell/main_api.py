@@ -15,21 +15,18 @@ import shutil
 import socket
 import struct
 import subprocess
+import sys
 import tempfile
 import threading
 import time
 import zlib
 from copy import deepcopy
 from datetime import datetime, timezone
-from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional
 from urllib.parse import urlparse
 
-from apps.core.executor import resolve_hermes_stream_bridge_script
 import apps.shell.config as shell_config
-from apps.installer.hermes_check import locate_hermes_binary
-from apps.installer.hermes_check import parse_hermes_doctor_output
 from apps.installer.workspace_init import get_workspace_status
 from apps.shell.assets import DEFAULT_BUBBLE_AVATAR_PATH, data_uri
 from apps.shell.chat_api import ChatAPI
@@ -37,13 +34,7 @@ from apps.shell.chat_bridge import ChatBridge
 from apps.shell.activity_api import list_activity_events
 from apps.shell.config import ModelSummary
 from apps.shell.effect_policy import build_effects_summary
-from apps.shell.hermes_capabilities import (
-    build_hermes_image_input_capability,
-    get_current_hermes_image_input_capability,
-    infer_effective_hermes_provider,
-    lookup_model_supports_vision,
-    read_hermes_image_input_config,
-)
+from apps.shell.model_capabilities import lookup_model_supports_vision
 from apps.shell.integration_status import get_integration_snapshot
 from apps.shell.mode_catalog import list_mode_options
 from apps.shell.mode_settings import (
@@ -52,32 +43,31 @@ from apps.shell.mode_settings import (
     effective_display_mode,
     serialize_mode_settings,
 )
+from apps.shell.model_profiles import ModelProfileError, get_model_profile_service
+from apps.shell.native_capabilities import get_native_image_input_capability
 from apps.shell.model_provider_adapters import provider_api_key_names, resolve_provider_adapter
+from packages.security import redact_api_error_text
 
 if TYPE_CHECKING:
-    from apps.core.runtime import HermesRuntime
+    from apps.core.runtime import AppRuntime
     from apps.shell.config import AppConfig
 
 logger = logging.getLogger(__name__)
-_HERMES_CONNECTION_TEST_TIMEOUT = 45.0
-_HERMES_CONNECTION_TEST_PROMPT = (
-    "This is a Hermes-Yachiyo provider connectivity check. "
+_NATIVE_CONNECTION_TEST_TIMEOUT = 45.0
+_NATIVE_CONNECTION_TEST_PROMPT = (
+    "This is an Oha-Yachiyo Native provider connectivity check. "
     "Reply with exactly: OK"
 )
-_HERMES_CONFIG_TIMEOUT = 20.0
-_HERMES_TOOLS_LIST_TIMEOUT = 10.0
-_HERMES_TOOL_TEST_TIMEOUT = 60.0
-_HERMES_UPDATE_CHECK_TIMEOUT = 45.0
-_HERMES_UPDATE_RUN_TIMEOUT = 300.0
-_HERMES_CONNECTION_CACHE_SCHEMA = 1
-_HERMES_CONNECTION_CACHE_FILE = "hermes_connection.json"
-_HERMES_IMAGE_CONNECTION_TEST_TIMEOUT = 90.0
-_HERMES_IMAGE_CONNECTION_CACHE_SCHEMA = 1
-_HERMES_IMAGE_CONNECTION_CACHE_FILE = "hermes_image_connection.json"
-_HERMES_DIAGNOSTIC_CACHE_SCHEMA = 1
-_HERMES_DIAGNOSTIC_CACHE_FILE = "hermes_diagnostics.json"
-_HERMES_IMAGE_INPUT_MODES = {"auto", "native", "text"}
-_HERMES_IMAGE_INPUT_MODE_ALIASES = {
+_NATIVE_CONNECTION_CACHE_SCHEMA = 1
+_NATIVE_CONNECTION_CACHE_FILE = "native_connection.json"
+_NATIVE_IMAGE_CONNECTION_TEST_TIMEOUT = 90.0
+_NATIVE_IMAGE_CONNECTION_CACHE_SCHEMA = 1
+_NATIVE_IMAGE_CONNECTION_CACHE_FILE = "native_image_connection.json"
+_NATIVE_DIAGNOSTIC_CACHE_SCHEMA = 1
+_NATIVE_DIAGNOSTIC_CACHE_FILE = "native_diagnostics.json"
+_NATIVE_TOOL_CONFIG_FILE = "native_tool_config.json"
+_NATIVE_IMAGE_INPUT_MODES = {"auto", "native", "text"}
+_NATIVE_IMAGE_INPUT_MODE_ALIASES = {
     "vision": "text",
     "yachiyo_vision": "text",
 }
@@ -86,7 +76,7 @@ _SECRET_REDACTIONS = (
     re.compile(r"(?i)(api[_-]?key|token|secret|password)(\s*[:=]\s*)([^\s,;]+)"),
     re.compile(r"\b(sk-[A-Za-z0-9_-]{12,})\b"),
 )
-_HERMES_PROVIDER_PRESETS: tuple[dict[str, Any], ...] = (
+_NATIVE_PROVIDER_PRESETS: tuple[dict[str, Any], ...] = (
     {
         "id": "xiaomi",
         "label": "Xiaomi MiMo",
@@ -188,7 +178,7 @@ _HERMES_PROVIDER_PRESETS: tuple[dict[str, Any], ...] = (
         "models": (),
     },
 )
-_PROVIDER_PRESET_BY_ID = {str(item["id"]): item for item in _HERMES_PROVIDER_PRESETS}
+_PROVIDER_PRESET_BY_ID = {str(item["id"]): item for item in _NATIVE_PROVIDER_PRESETS}
 _PREFERRED_AUXILIARY_VISION_MODELS = {
     "xiaomi": "mimo-v2.5",
 }
@@ -215,7 +205,7 @@ _IMAGE_GEN_MODEL_OPTIONS = {
     "openai-codex": _OPENAI_IMAGE_GEN_MODELS,
     "xai": _XAI_IMAGE_GEN_MODELS,
 }
-_HERMES_TOOL_ALIASES: dict[str, tuple[str, ...]] = {
+_NATIVE_TOOL_ALIASES: dict[str, tuple[str, ...]] = {
     "web": ("web", "search", "web_search", "web_extract"),
     "browser": ("browser", "browser_navigate", "browser_click"),
     "browser-cdp": ("browser", "browser_cdp", "browser-cdp"),
@@ -238,18 +228,18 @@ _HERMES_TOOL_ALIASES: dict[str, tuple[str, ...]] = {
         "ha_call_service",
     ),
     "spotify": ("spotify",),
-    "yuanbao": ("yuanbao", "hermes-yuanbao"),
+    "yuanbao": ("yuanbao"),
     "moa": ("moa", "mixture_of_agents"),
     "rl": ("rl",),
     "tts": ("tts", "text_to_speech"),
     "clarify": ("clarify",),
     "delegation": ("delegation", "delegate_task"),
 }
-_HERMES_TOOL_CONFIG_CATALOG: tuple[dict[str, Any], ...] = (
+_NATIVE_TOOL_CONFIG_CATALOG: tuple[dict[str, Any], ...] = (
     {
         "id": "web",
         "title": "联网与网页读取",
-        "summary": "配置 Hermes web_search / web_extract 使用的搜索与网页读取后端。",
+        "summary": "配置 Native web_search / web_extract 使用的搜索与网页读取后端。",
         "fields": (
             {
                 "key": "web.backend",
@@ -386,7 +376,7 @@ _HERMES_TOOL_CONFIG_CATALOG: tuple[dict[str, Any], ...] = (
     {
         "id": "image_gen",
         "title": "图片生成",
-        "summary": "配置 Hermes image_generate 工具；内置路径使用 FAL，插件路径使用 image_gen.provider。",
+        "summary": "配置 Native image_generate 工具；内置路径使用 FAL，插件路径使用 image_gen.provider。",
         "fields": (
             {
                 "key": "image_gen.provider",
@@ -394,7 +384,7 @@ _HERMES_TOOL_CONFIG_CATALOG: tuple[dict[str, Any], ...] = (
                 "label": "Image Provider",
                 "kind": "select",
                 "default": "fal",
-                "help": "保持和当前 Hermes 已安装 image_gen provider 一致。",
+                "help": "保持和当前 Native image_gen provider 一致。",
                 "options_factory": "image_gen_provider_options",
             },
             {
@@ -475,7 +465,7 @@ _HERMES_TOOL_CONFIG_CATALOG: tuple[dict[str, Any], ...] = (
     {
         "id": "moa",
         "title": "MoA",
-        "summary": "Hermes mixture_of_agents 目前依赖 OpenRouter。",
+        "summary": "Native mixture_of_agents 目前依赖 OpenRouter。",
         "fields": (
             {
                 "key": "OPENROUTER_API_KEY",
@@ -509,24 +499,24 @@ _HERMES_TOOL_CONFIG_CATALOG: tuple[dict[str, Any], ...] = (
         "title": "消息通知",
         "summary": "跨平台消息发送涉及 Telegram/Slack/Matrix/Webhook 等多组凭据，第一版保留原生向导入口。",
         "fields": (),
-        "terminal_command": "hermes setup",
+        "terminal_command": "native setup",
     },
     {
         "id": "spotify",
         "title": "Spotify",
-        "summary": "Spotify 使用 OAuth 流程，第一版请通过 Hermes 原生 tools/setup 向导完成授权。",
+        "summary": "Spotify 使用 OAuth 流程，第一版请通过 Native 原生 tools/setup 向导完成授权。",
         "fields": (),
-        "terminal_command": "hermes setup",
+        "terminal_command": "native setup",
     },
     {
         "id": "yuanbao",
         "title": "腾讯元宝",
-        "summary": "元宝扩展配置由 hermes-yuanbao 工具维护，第一版只提供状态与原生向导入口。",
+        "summary": "元宝扩展配置由 Native yuanbao 工具维护，第一版只提供状态与原生向导入口。",
         "fields": (),
-        "terminal_command": "hermes setup",
+        "terminal_command": "native setup",
     },
 )
-_HERMES_TOOL_CONFIG_BY_ID = {str(item["id"]): item for item in _HERMES_TOOL_CONFIG_CATALOG}
+_NATIVE_TOOL_CONFIG_BY_ID = {str(item["id"]): item for item in _NATIVE_TOOL_CONFIG_CATALOG}
 _TERMINAL_COMMAND_THROTTLE_SECONDS = 1.2
 _TERMINAL_COMMAND_LOCK = threading.Lock()
 _LAST_TERMINAL_COMMAND_AT = 0.0
@@ -629,48 +619,71 @@ def _public_command(argv: list[str]) -> str:
     return " ".join(argv[: index + 1] + ["<connectivity-check>"] + argv[index + 2:])
 
 
-def _resolve_hermes_python_from_launcher(hermes_path: str) -> str | None:
-    launcher = shutil.which(hermes_path) if hermes_path else None
-    if launcher is None:
-        launcher = hermes_path
-    try:
-        from apps.core.executor import _resolve_hermes_python
-
-        resolved = _resolve_hermes_python(launcher)
-        if resolved:
-            return resolved
-    except Exception:
-        pass
-    try:
-        with open(launcher, "r", encoding="utf-8") as fh:
-            first_line = fh.readline().strip()
-    except OSError:
-        return None
-    if not first_line.startswith("#!"):
-        return None
-    python = first_line[2:].strip().split(" ", 1)[0]
-    python_name = Path(python).name
-    if python_name == "env":
-        return None
-    if python_name not in {"python", "python3"} and not python_name.startswith("python3."):
-        return None
-    return python if python and Path(python).exists() else None
-
-
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
 def _connection_cache_path() -> Path:
-    return Path(shell_config._CONFIG_DIR) / _HERMES_CONNECTION_CACHE_FILE
+    return Path(shell_config._CONFIG_DIR) / _NATIVE_CONNECTION_CACHE_FILE
 
 
 def _image_connection_cache_path() -> Path:
-    return Path(shell_config._CONFIG_DIR) / _HERMES_IMAGE_CONNECTION_CACHE_FILE
+    return Path(shell_config._CONFIG_DIR) / _NATIVE_IMAGE_CONNECTION_CACHE_FILE
 
 
 def _diagnostic_cache_path() -> Path:
-    return Path(shell_config._CONFIG_DIR) / _HERMES_DIAGNOSTIC_CACHE_FILE
+    return Path(shell_config._CONFIG_DIR) / _NATIVE_DIAGNOSTIC_CACHE_FILE
+
+
+def _native_tool_config_path() -> Path:
+    return Path(shell_config._CONFIG_DIR) / _NATIVE_TOOL_CONFIG_FILE
+
+
+def _load_native_tool_config_projection() -> dict[str, Any]:
+    path = _native_tool_config_path()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"schema_version": 1, "config": {}, "env_configured": {}}
+    if not isinstance(data, dict):
+        return {"schema_version": 1, "config": {}, "env_configured": {}}
+    config = data.get("config") if isinstance(data.get("config"), dict) else {}
+    env_configured = data.get("env_configured") if isinstance(data.get("env_configured"), dict) else {}
+    return {
+        "schema_version": 1,
+        "config": {str(key): value for key, value in config.items()},
+        "env_configured": {str(key): bool(value) for key, value in env_configured.items()},
+    }
+
+
+def _store_native_tool_config_projection(projection: dict[str, Any]) -> None:
+    record = {
+        "schema_version": 1,
+        "updated_at": _utc_now_iso(),
+        "config": projection.get("config") if isinstance(projection.get("config"), dict) else {},
+        "env_configured": (
+            projection.get("env_configured") if isinstance(projection.get("env_configured"), dict) else {}
+        ),
+    }
+    path = _native_tool_config_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    except OSError as exc:
+        logger.warning("写入 Native 工具配置投影失败: %s", exc)
+        raise
+
+
+def _tool_projection_values(projection: dict[str, Any]) -> tuple[dict[tuple[str, ...], str], dict[str, str]]:
+    config = projection.get("config") if isinstance(projection.get("config"), dict) else {}
+    env_configured = projection.get("env_configured") if isinstance(projection.get("env_configured"), dict) else {}
+    config_values = {
+        tuple(str(key).split(".")): str(value)
+        for key, value in config.items()
+        if str(key).strip()
+    }
+    env_values = {str(key): "[configured]" for key, value in env_configured.items() if bool(value)}
+    return config_values, env_values
 
 
 def _connection_fingerprint_payload(configuration: dict[str, Any]) -> dict[str, Any]:
@@ -769,7 +782,7 @@ def _load_connection_validation(configuration: dict[str, Any]) -> dict[str, Any]
         data = json.loads(cache_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return base
-    if not isinstance(data, dict) or data.get("schema_version") != _HERMES_CONNECTION_CACHE_SCHEMA:
+    if not isinstance(data, dict) or data.get("schema_version") != _NATIVE_CONNECTION_CACHE_SCHEMA:
         return base
     if data.get("fingerprint") != fingerprint and not _connection_cache_matches_configuration(data, configuration):
         return {
@@ -807,7 +820,7 @@ def _store_connection_validation(
     api_key = configuration.get("api_key") if isinstance(configuration.get("api_key"), dict) else {}
     now = _utc_now_iso()
     record: dict[str, Any] = {
-        "schema_version": _HERMES_CONNECTION_CACHE_SCHEMA,
+        "schema_version": _NATIVE_CONNECTION_CACHE_SCHEMA,
         "fingerprint": _connection_fingerprint(configuration),
         "verified": success,
         "provider": str(model.get("provider") or ""),
@@ -826,7 +839,7 @@ def _store_connection_validation(
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
     except OSError as exc:
-        logger.warning("写入 Hermes 连接验证缓存失败: %s", exc)
+        logger.warning("写入 Native 连接验证缓存失败: %s", exc)
     return _load_connection_validation(configuration)
 
 
@@ -843,7 +856,7 @@ def _load_image_connection_validation(configuration: dict[str, Any]) -> dict[str
         data = json.loads(cache_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return base
-    if not isinstance(data, dict) or data.get("schema_version") != _HERMES_IMAGE_CONNECTION_CACHE_SCHEMA:
+    if not isinstance(data, dict) or data.get("schema_version") != _NATIVE_IMAGE_CONNECTION_CACHE_SCHEMA:
         return base
     if data.get("fingerprint") != fingerprint and not _image_connection_cache_matches_configuration(data, configuration):
         return {
@@ -880,7 +893,7 @@ def _store_image_connection_validation(
     image_input = configuration.get("image_input") if isinstance(configuration.get("image_input"), dict) else {}
     now = _utc_now_iso()
     record: dict[str, Any] = {
-        "schema_version": _HERMES_IMAGE_CONNECTION_CACHE_SCHEMA,
+        "schema_version": _NATIVE_IMAGE_CONNECTION_CACHE_SCHEMA,
         "fingerprint": _image_connection_fingerprint(configuration),
         "verified": success,
         "route": str(image_input.get("route") or ""),
@@ -898,7 +911,7 @@ def _store_image_connection_validation(
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
     except OSError as exc:
-        logger.warning("写入 Hermes 图片链路验证缓存失败: %s", exc)
+        logger.warning("写入 Native 图片链路验证缓存失败: %s", exc)
     return _load_image_connection_validation(configuration)
 
 
@@ -971,7 +984,7 @@ def _load_diagnostic_cache(configuration: dict[str, Any]) -> dict[str, Any]:
     cache_path = _diagnostic_cache_path()
     fingerprint = _diagnostic_fingerprint(configuration)
     base: dict[str, Any] = {
-        "schema_version": _HERMES_DIAGNOSTIC_CACHE_SCHEMA,
+        "schema_version": _NATIVE_DIAGNOSTIC_CACHE_SCHEMA,
         "fingerprint": fingerprint,
         "cache_path": str(cache_path),
         "stale": False,
@@ -981,7 +994,7 @@ def _load_diagnostic_cache(configuration: dict[str, Any]) -> dict[str, Any]:
         data = json.loads(cache_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return base
-    if not isinstance(data, dict) or data.get("schema_version") != _HERMES_DIAGNOSTIC_CACHE_SCHEMA:
+    if not isinstance(data, dict) or data.get("schema_version") != _NATIVE_DIAGNOSTIC_CACHE_SCHEMA:
         return base
 
     stale = data.get("fingerprint") != fingerprint
@@ -1016,7 +1029,7 @@ def _store_diagnostic_result(
         data = json.loads(cache_path.read_text(encoding="utf-8"))
         if (
             isinstance(data, dict)
-            and data.get("schema_version") == _HERMES_DIAGNOSTIC_CACHE_SCHEMA
+            and data.get("schema_version") == _NATIVE_DIAGNOSTIC_CACHE_SCHEMA
             and data.get("fingerprint") == fingerprint
             and isinstance(data.get("commands"), dict)
         ):
@@ -1031,7 +1044,7 @@ def _store_diagnostic_result(
     cached_payload["stale"] = False
     commands[str(action["id"])] = cached_payload
     record = {
-        "schema_version": _HERMES_DIAGNOSTIC_CACHE_SCHEMA,
+        "schema_version": _NATIVE_DIAGNOSTIC_CACHE_SCHEMA,
         "fingerprint": fingerprint,
         "updated_at": now,
         "commands": commands,
@@ -1040,63 +1053,69 @@ def _store_diagnostic_result(
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         cache_path.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
     except OSError as exc:
-        logger.warning("写入 Hermes 诊断缓存失败: %s", exc)
+        logger.warning("写入 Native 诊断缓存失败: %s", exc)
     return _load_diagnostic_cache(configuration)
 
 
 def _parse_doctor_diagnostic_output(output: str) -> dict[str, Any]:
-    return parse_hermes_doctor_output(output)
+    return {
+        "readiness_level": "native",
+        "available_tools": [],
+        "limited_tools": [],
+        "limited_tool_details": {},
+        "doctor_issues_count": 0 if output else 1,
+    }
 
 
-def _hermes_command_catalog() -> list[dict[str, str]]:
+def _native_command_catalog() -> list[dict[str, str]]:
     return [
         {
             "id": "setup",
-            "label": "重新配置向导",
-            "command": "hermes setup",
-            "description": "重新选择模型、provider、API Key 与工具开关。",
+            "label": "打开模型配置",
+            "command": "native setup",
+            "description": "兼容入口：模型与密钥现在由 Model Profile 管理。",
         },
         {
             "id": "model",
-            "label": "选择模型",
-            "command": "hermes model",
-            "description": "只调整默认 provider 与模型，不重走完整 setup。",
+            "label": "选择默认模型",
+            "command": "native model",
+            "description": "兼容入口：选择默认 Chat/Vision Model Profile。",
         },
         {
             "id": "config-edit",
-            "label": "编辑配置文件",
-            "command": "hermes config edit",
-            "description": "用 Hermes 原生命令打开配置文件，适合修正 base URL 等高级项。",
+            "label": "编辑 Native 配置",
+            "command": "native config edit",
+            "description": "兼容入口：Native Runtime 不再依赖 Native 配置文件。",
         },
         {
             "id": "config-check",
-            "label": "检查配置结构",
-            "command": "hermes config check",
-            "description": "检查缺失或过期配置，不会发起模型请求。",
+            "label": "检查 Native 配置",
+            "command": "native config check",
+            "description": "检查默认模型、工具投影与桌面运行时状态，不发起模型请求。",
         },
         {
             "id": "doctor",
-            "label": "运行诊断",
-            "command": "hermes doctor",
-            "description": "检查 Hermes 依赖、配置和运行环境。",
+            "label": "运行 Native 诊断",
+            "command": "native doctor",
+            "description": "检查 Native Agent readiness、工作区和工具配置投影。",
         },
         {
             "id": "auth-list",
-            "label": "查看凭据池",
-            "command": "hermes auth list",
-            "description": "查看 Hermes 记录的 provider 凭据状态，不在 Yachiyo 中显示密钥内容。",
+            "label": "查看凭据状态",
+            "command": "native auth list",
+            "description": "查看 Model Profile 凭据配置状态，不显示密钥内容。",
         },
     ]
 
 
 def _allowed_terminal_commands() -> set[str]:
-    return {item["command"] for item in _hermes_command_catalog()}
+    return {item["command"] for item in _native_command_catalog()}
 
 
 def _diagnostic_command_catalog() -> list[dict[str, str]]:
     return [
         item
-        for item in _hermes_command_catalog()
+        for item in _native_command_catalog()
         if item.get("id") in {"config-check", "doctor", "auth-list"}
     ]
 
@@ -1111,16 +1130,16 @@ def _diagnostic_command_by_command(command: str) -> dict[str, str] | None:
 
 def _is_macos_prerequisite_command(cmd: str) -> bool:
     return (
-        "Hermes-Yachiyo macOS 基础工具检查" in cmd
+        "Oha-Yachiyo macOS 基础工具检查" in cmd
         and "xcode-select --install" in cmd
         and "brew install git curl" in cmd
     )
 
 
 def _is_gpt_sovits_service_command(cmd: str) -> bool:
-    if "Hermes-Yachiyo GPT-SoVITS 服务启动" in cmd:
+    if "Oha-Yachiyo GPT-SoVITS 服务启动" in cmd:
         return "cd " in cmd and ("api_v2.py" in cmd or "api.py" in cmd)
-    if "Hermes-Yachiyo GPT-SoVITS 一键部署" in cmd:
+    if "Oha-Yachiyo GPT-SoVITS 一键部署" in cmd:
         return (
             "github.com/RVC-Boss/GPT-SoVITS" in cmd
             and "git clone" in cmd
@@ -1146,7 +1165,7 @@ def _strip_yaml_scalar(raw: str) -> str:
     return value.split(" #", 1)[0].strip()
 
 
-def _read_hermes_yaml_paths(config_path: Path, wanted: set[tuple[str, ...]]) -> dict[tuple[str, ...], str]:
+def _read_yaml_paths(config_path: Path, wanted: set[tuple[str, ...]]) -> dict[tuple[str, ...], str]:
     if not config_path.exists():
         return {}
     try:
@@ -1171,37 +1190,6 @@ def _read_hermes_yaml_paths(config_path: Path, wanted: set[tuple[str, ...]]) -> 
         if flat_path_key in wanted:
             values[flat_path_key] = _strip_yaml_scalar(raw_value)
     return values
-
-
-def _read_hermes_model_config(config_path: Path) -> dict[str, str]:
-    if not config_path.exists():
-        return {"provider": "", "default": "", "base_url": ""}
-    try:
-        lines = config_path.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return {"provider": "", "default": "", "base_url": ""}
-
-    model: dict[str, str] = {"provider": "", "default": "", "base_url": ""}
-    in_model_block = False
-    for line in lines:
-        if not line.strip() or line.lstrip().startswith("#"):
-            continue
-        if not line.startswith((" ", "\t")):
-            in_model_block = line.startswith("model:")
-            if in_model_block:
-                inline = line.split(":", 1)[1].strip()
-                if inline and not inline.startswith(("{", "[")):
-                    model["default"] = _strip_yaml_scalar(inline)
-            continue
-        if not in_model_block:
-            continue
-        match = re.match(r"\s+([A-Za-z0-9_-]+):\s*(.*)$", line)
-        if not match:
-            continue
-        key, raw_value = match.groups()
-        if key in model:
-            model[key] = _strip_yaml_scalar(raw_value)
-    return model
 
 
 def _read_user_provider_overrides(config_path: Path) -> dict[str, dict[str, str]]:
@@ -1236,73 +1224,11 @@ def _read_user_provider_overrides(config_path: Path) -> dict[str, dict[str, str]
     return providers
 
 
-@lru_cache(maxsize=1)
-def _load_installed_hermes_provider_models() -> dict[str, list[str]]:
-    """Best-effort read of Hermes' own static provider model catalog.
-
-    Hermes can update provider/model catalogs independently from Yachiyo.  The
-    installed source is optional here; if it is unavailable or contains dynamic
-    expressions we safely fall back to the bundled presets.
-    """
-    candidates = [
-        Path.home() / ".hermes" / "hermes-agent" / "hermes_cli" / "models.py",
-    ]
-    catalog: dict[str, list[str]] = {}
-    for path in candidates:
-        if not path.exists():
-            continue
-        try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-        for node in tree.body:
-            value_node = None
-            if (
-                isinstance(node, ast.Assign)
-                and any(
-                    isinstance(target, ast.Name) and target.id == "_PROVIDER_MODELS"
-                    for target in node.targets
-                )
-            ):
-                value_node = node.value
-            elif (
-                isinstance(node, ast.AnnAssign)
-                and isinstance(node.target, ast.Name)
-                and node.target.id == "_PROVIDER_MODELS"
-            ):
-                value_node = node.value
-            if not isinstance(value_node, ast.Dict):
-                continue
-            for key_node, provider_models_node in zip(value_node.keys, value_node.values):
-                if key_node is None:
-                    continue
-                try:
-                    provider = ast.literal_eval(key_node)
-                except Exception:
-                    continue
-                if not isinstance(provider, str) or not isinstance(provider_models_node, ast.List):
-                    continue
-                models: list[str] = []
-                for item in provider_models_node.elts:
-                    try:
-                        value = ast.literal_eval(item)
-                    except Exception:
-                        continue
-                    if isinstance(value, str) and value:
-                        models.append(value)
-                if models:
-                    catalog[provider] = models
-        if catalog:
-            return catalog
-    return {}
-
-
 def _preset_models(provider_id: str, preset: dict[str, Any]) -> list[str]:
-    installed = _load_installed_hermes_provider_models().get(provider_id, [])
     fallback = [str(item) for item in preset.get("models", ()) if item]
     merged: list[str] = []
     seen: set[str] = set()
-    for item in [*installed, *fallback]:
+    for item in fallback:
         if item in seen:
             continue
         seen.add(item)
@@ -1365,7 +1291,7 @@ def _provider_api_key_name(provider: str) -> str:
     return names[0] if names else ""
 
 
-def _model_profile_config_for_hermes(profile_id: str, capability: str) -> dict[str, str]:
+def _model_profile_config_for_native(profile_id: str, capability: str) -> dict[str, str]:
     from apps.shell.model_profiles import get_model_profile_service
 
     profile = get_model_profile_service().get_profile_private(profile_id)
@@ -1387,9 +1313,9 @@ def _model_profile_config_for_hermes(profile_id: str, capability: str) -> dict[s
     ]
     if missing:
         raise ValueError(f"模型 Profile 配置不完整：缺少 {', '.join(missing)}")
-    provider = _model_profile_provider_for_hermes(provider, base_url, model)
+    provider = _model_profile_provider_for_native(provider, base_url, model)
     if not provider:
-        raise ValueError("当前模型源不能映射到 Hermes 支持的 Provider")
+        raise ValueError("当前模型源不能映射到 Native Runtime 支持的 Provider")
     return {
         "provider": provider,
         "model": model,
@@ -1408,9 +1334,9 @@ def _provider_api_key_names(provider: str) -> tuple[str, ...]:
     return provider_api_key_names(normalized)
 
 
-def _model_profile_provider_for_hermes(provider: str, base_url: str = "", model: str = "") -> str:
+def _model_profile_provider_for_native(provider: str, base_url: str = "", model: str = "") -> str:
     adapter = resolve_provider_adapter(provider, base_url, model)
-    return str(adapter.get("hermes_provider") or "")
+    return str(adapter.get("native_provider") or "")
 
 
 def _configured_api_key_name(
@@ -1427,16 +1353,14 @@ def _configured_api_key_name(
 
 
 def _effective_provider_id(provider: str, base_url: str = "", model: str = "") -> str:
-    return (
-        infer_effective_hermes_provider(provider, base_url, model)
-        or (provider or "").strip().lower()
-    )
+    adapter = resolve_provider_adapter(provider, base_url, model)
+    return str(adapter.get("native_provider") or (provider or "").strip().lower())
 
 
 def _normalize_image_input_mode(mode: Any) -> str:
     normalized = str(mode or "auto").strip().lower()
-    normalized = _HERMES_IMAGE_INPUT_MODE_ALIASES.get(normalized, normalized)
-    return normalized if normalized in _HERMES_IMAGE_INPUT_MODES else "auto"
+    normalized = _NATIVE_IMAGE_INPUT_MODE_ALIASES.get(normalized, normalized)
+    return normalized if normalized in _NATIVE_IMAGE_INPUT_MODES else "auto"
 
 
 def _provider_options(
@@ -1448,7 +1372,7 @@ def _provider_options(
     overrides = _read_user_provider_overrides(config_path)
     options: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for preset in _HERMES_PROVIDER_PRESETS:
+    for preset in _NATIVE_PROVIDER_PRESETS:
         provider_id = str(preset["id"])
         override = overrides.get(provider_id, {})
         base_url_env = str(preset.get("base_url_env") or "")
@@ -1478,7 +1402,7 @@ def _provider_options(
                 "api_key_name": configured_key or (api_key_names[0] if api_key_names else ""),
                 "api_key_configured": configured,
                 "auth_type": str(preset.get("auth_type") or "api_key"),
-                "source": "hermes",
+                "source": "native",
                 "is_current": provider_id == current_provider,
             }
         )
@@ -1548,11 +1472,11 @@ def _vision_configuration_summary(
     chat_model: str,
     chat_base_url: str,
 ) -> dict[str, Any]:
-    image_config = read_hermes_image_input_config(config_path)
-    configured_provider = str(image_config.get("auxiliary_vision_provider") or "").strip()
+    image_config: dict[str, Any] = {}
+    configured_provider = ""
     effective_chat_provider = _effective_provider_id(chat_provider, chat_base_url, chat_model)
-    configured_base_url = str(image_config.get("auxiliary_vision_base_url") or "")
-    configured_model = str(image_config.get("auxiliary_vision_model") or "")
+    configured_base_url = ""
+    configured_model = ""
     provider = configured_provider if configured_provider and configured_provider != "auto" else ""
     provider_for_key = (
         _effective_provider_id(configured_provider, configured_base_url or chat_base_url, configured_model or chat_model)
@@ -1567,107 +1491,24 @@ def _vision_configuration_summary(
     api_key_names = _provider_api_key_names(provider_for_key)
     configured_key = _configured_api_key_name(api_key_names, env_values, provider_for_key)
     return {
-        "configured": bool(image_config.get("auxiliary_vision_configured")),
+        "configured": False,
         "provider": provider,
         "model": configured_model,
         "base_url": configured_base_url,
         "api_key_name": configured_key or (api_key_names[0] if api_key_names else ""),
-        "api_key_configured": bool(configured_key or image_config.get("auxiliary_vision_api_key_configured")),
+        "api_key_configured": bool(configured_key),
         "effective_provider": effective_provider,
         "effective_model": effective_model,
         "effective_base_url": str(configured_base_url or chat_base_url or ""),
     }
 
 
-def _run_config_path_command(hermes_path: str, subcommand: str) -> Path:
-    fallback_name = "config.yaml" if subcommand == "path" else ".env"
-    fallback = Path.home() / ".hermes" / fallback_name
-    try:
-        result = subprocess.run(
-            [hermes_path, "config", subcommand],
-            capture_output=True,
-            text=True,
-            timeout=_HERMES_CONFIG_TIMEOUT,
-            check=False,
-        )
-    except Exception:
-        return fallback
-    if result.returncode != 0:
-        return fallback
-    path = (result.stdout or "").strip().splitlines()
-    if not path:
-        return fallback
-    return Path(path[-1]).expanduser()
-
-
 def _canonical_tool_name(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", (value or "").strip().lower()).strip("_")
 
 
-def _parse_hermes_tools_list_output(output: str) -> list[dict[str, Any]]:
-    text = _ANSI_RE.sub("", output or "")
-    items: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for line in text.splitlines():
-        match = re.match(r"\s*(?:✓|✔|✅|✗|❌)\s+(enabled|disabled)\s+([A-Za-z0-9_.-]+)\s*(.*)$", line)
-        if not match:
-            continue
-        state, tool_id, raw_label = match.groups()
-        label = re.sub(r"^[^\w\u4e00-\u9fff]+", "", raw_label.strip()).strip() or tool_id
-        canonical = _canonical_tool_name(tool_id)
-        if not canonical or canonical in seen:
-            continue
-        seen.add(canonical)
-        items.append(
-            {
-                "id": tool_id,
-                "canonical_id": canonical,
-                "label": label,
-                "enabled": state == "enabled",
-            }
-        )
-    return items
-
-
-def _hermes_tools_manifest(hermes_path: str) -> list[dict[str, Any]]:
-    try:
-        result = subprocess.run(
-            [hermes_path, "tools", "list"],
-            capture_output=True,
-            text=True,
-            timeout=_HERMES_TOOLS_LIST_TIMEOUT,
-            check=False,
-        )
-    except Exception as exc:
-        logger.info("读取 Hermes tools list 失败: %s", exc)
-        return []
-    if result.returncode != 0:
-        logger.info("Hermes tools list 返回非零状态: %s", result.returncode)
-        return []
-    return _parse_hermes_tools_list_output(result.stdout or result.stderr or "")
-
-
 def _read_image_gen_plugin_options() -> tuple[dict[str, str], ...]:
-    plugin_root = Path.home() / ".hermes" / "hermes-agent" / "plugins" / "image_gen"
-    if not plugin_root.exists():
-        return ()
-    options: list[dict[str, str]] = []
-    for plugin_yaml in sorted(plugin_root.glob("*/plugin.yaml")):
-        try:
-            text = plugin_yaml.read_text(encoding="utf-8")
-        except OSError:
-            continue
-        name_match = re.search(r"(?m)^name:\s*['\"]?([^'\"\n]+)['\"]?\s*$", text)
-        name = (name_match.group(1).strip() if name_match else plugin_yaml.parent.name).strip()
-        if not name:
-            continue
-        label = {
-            "openai": "OpenAI plugin",
-            "openai-codex": "OpenAI Codex plugin",
-            "xai": "xAI plugin",
-        }.get(name, f"{name} plugin")
-        options.append({"value": name, "label": label})
-    return tuple(options)
+    return ()
 
 
 def _image_gen_provider_options() -> tuple[dict[str, str], ...]:
@@ -1679,7 +1520,7 @@ def _image_gen_provider_options() -> tuple[dict[str, str], ...]:
             continue
         seen.add(value)
         options.append(option)
-    # If Hermes source is unavailable, keep the known bundled plugin choices.
+    # Keep the known bundled plugin choices when no plugin source is available.
     if len(options) == 1:
         for value, label in (
             ("openai", "OpenAI plugin"),
@@ -1721,7 +1562,7 @@ def _field_dynamic_option_groups(field: dict[str, Any]) -> dict[str, Any]:
 
 def _tool_aliases(tool_id: str) -> tuple[str, ...]:
     normalized = str(tool_id or "").strip()
-    aliases = _HERMES_TOOL_ALIASES.get(normalized)
+    aliases = _NATIVE_TOOL_ALIASES.get(normalized)
     if aliases:
         return aliases
     return (normalized,)
@@ -1734,7 +1575,7 @@ def _tool_matches(names: list[str] | tuple[str, ...], tool_id: str) -> bool:
 
 def _all_tool_config_paths() -> set[tuple[str, ...]]:
     paths: set[tuple[str, ...]] = set()
-    for tool in _HERMES_TOOL_CONFIG_CATALOG:
+    for tool in _NATIVE_TOOL_CONFIG_CATALOG:
         for field in tool.get("fields", ()):
             config_key = str(field.get("config_key") or "")
             if config_key:
@@ -1756,10 +1597,10 @@ def _bool_config_value(raw: Any, default: bool = False) -> bool:
 
 
 def _tool_config_state(config_path: Path, env_values: dict[str, str]) -> dict[str, Any]:
-    config_values = _read_hermes_yaml_paths(config_path, _all_tool_config_paths())
+    config_values = _read_yaml_paths(config_path, _all_tool_config_paths())
     safe_config: dict[str, Any] = {}
     env_configured: dict[str, bool] = {}
-    for tool in _HERMES_TOOL_CONFIG_CATALOG:
+    for tool in _NATIVE_TOOL_CONFIG_CATALOG:
         for field in tool.get("fields", ()):
             config_key = str(field.get("config_key") or "")
             env_key = str(field.get("env_key") or "")
@@ -1911,26 +1752,6 @@ def _field_options(field: dict[str, Any]) -> set[str]:
     return {str(item.get("value") or "") for item in options if item.get("value") is not None}
 
 
-def _run_hermes_config_set(hermes_path: str, key: str, value: Any) -> tuple[bool, str]:
-    text_value = "true" if value is True else "false" if value is False else str(value)
-    try:
-        result = subprocess.run(
-            [hermes_path, "config", "set", key, text_value],
-            capture_output=True,
-            text=True,
-            timeout=_HERMES_CONFIG_TIMEOUT,
-            check=False,
-        )
-    except subprocess.TimeoutExpired:
-        return False, f"写入 Hermes 配置超时：{key}"
-    except Exception as exc:
-        return False, f"写入 Hermes 配置失败：{key}，{exc}"
-    if result.returncode != 0:
-        detail = _compact_command_output(result.stderr or result.stdout)
-        return False, f"写入 Hermes 配置失败：{key}{'，' + detail if detail else ''}"
-    return True, ""
-
-
 def _test_browser_cdp_endpoint(config_state: dict[str, Any]) -> dict[str, str]:
     config_values = config_state.get("config") if isinstance(config_state.get("config"), dict) else {}
     raw_url = str(config_values.get("browser.cdp_url") or "").strip()
@@ -1964,20 +1785,6 @@ def _doctor_status_for_tool(summary: dict[str, Any], tool_id: str) -> tuple[str,
                 return "fail", f"Doctor 标记受限：{match}"
         return "fail", "Doctor 标记该工具受限"
     return "warn", "Doctor 输出未包含该工具的明确结论"
-
-
-def _parse_hermes_version_output(output: str) -> dict[str, Any]:
-    text = _ANSI_RE.sub("", output or "")
-    first_line = next((line.strip() for line in text.splitlines() if line.strip()), "")
-    version_match = re.search(r"Hermes Agent\s+v?([0-9][^\s(]*)\s*(?:\(([^)]+)\))?", text)
-    behind_match = re.search(r"(\d+)\s+commits?\s+behind", text, re.I)
-    return {
-        "summary": first_line,
-        "version": version_match.group(1) if version_match else "",
-        "release_date": version_match.group(2).strip() if version_match and version_match.group(2) else "",
-        "update_available": bool(re.search(r"update available", text, re.I) or behind_match),
-        "behind_commits": int(behind_match.group(1)) if behind_match else 0,
-    }
 
 
 def _toolset_delta(before: list[dict[str, Any]], after: list[dict[str, Any]]) -> dict[str, Any]:
@@ -2033,7 +1840,7 @@ def _assistant_settings_payload(config: "AppConfig") -> dict[str, Any]:
 class MainWindowAPI:
     """Control Center 主控台 API。"""
 
-    def __init__(self, runtime: "HermesRuntime", config: "AppConfig") -> None:
+    def __init__(self, runtime: "AppRuntime", config: "AppConfig") -> None:
         self._runtime = runtime
         self._config = config
         self._chat_api = ChatAPI(runtime)
@@ -2054,6 +1861,42 @@ class MainWindowAPI:
         """获取集成服务统一快照。"""
         return get_integration_snapshot(self._config, self._bridge_boot_config)
 
+    def _native_runtime_compat_status(self, status: dict[str, Any] | None = None) -> dict[str, Any]:
+        status = status or self._runtime.get_status()
+        readiness = status.get("native_agent") if isinstance(status.get("native_agent"), dict) else None
+        if readiness is None:
+            try:
+                readiness = self._runtime.native_agent_readiness()
+            except Exception as exc:
+                readiness = {
+                    "ready": False,
+                    "code": "native_agent_not_ready",
+                    "reason": "model_profile_unavailable",
+                    "message": redact_api_error_text(exc),
+                    "capabilities": {},
+                }
+        capabilities = readiness.get("capabilities") if isinstance(readiness.get("capabilities"), dict) else {}
+        ready = bool(readiness.get("ready"))
+        limited_tools = [] if capabilities.get("tools") else ["tools"]
+        limited_tool_details = {} if capabilities.get("tools") else {
+            "tools": "Native ToolBroker/Approval 尚未全部接入；不再回退到 Native 工具。"
+        }
+        return {
+            "status": "ready" if ready else "needs_configuration",
+            "version": status.get("version", "0.4.0"),
+            "release_date": None,
+            "platform": "native",
+            "command_exists": True,
+            "ready": ready,
+            "readiness_level": "full_ready" if ready else str(readiness.get("reason") or "model_profile_required"),
+            "available_tools": ["model"] if capabilities.get("model") else [],
+            "limited_tools": limited_tools,
+            "limited_tool_details": limited_tool_details,
+            "doctor_issues_count": 0 if ready else 1,
+            "configuration_actions": _native_command_catalog(),
+            "native_agent": readiness,
+        }
+
     def get_dashboard_data(self) -> Dict[str, Any]:
         """获取仪表盘数据"""
         try:
@@ -2061,7 +1904,7 @@ class MainWindowAPI:
             workspace = get_workspace_status()
             snap = self._get_snapshot()
 
-            hermes_info = status.get("hermes", {})
+            native_status = self._native_runtime_compat_status(status)
 
             return {
                 "app": {
@@ -2069,21 +1912,7 @@ class MainWindowAPI:
                     "running": status.get("running", False),
                     "uptime_seconds": round(status.get("uptime_seconds", 0), 1),
                 },
-                "hermes": {
-                    "status": hermes_info.get("install_status", "unknown"),
-                    "version": hermes_info.get("version"),
-                    "release_date": hermes_info.get("release_date"),
-                    "platform": hermes_info.get("platform", "unknown"),
-                    "command_exists": hermes_info.get("command_exists", False),
-                    "hermes_home": hermes_info.get("hermes_home", ""),
-                    "ready": self._runtime.is_hermes_ready(),
-                    "readiness_level": hermes_info.get("readiness_level", "unknown"),
-                    "available_tools": hermes_info.get("available_tools", []),
-                    "limited_tools": hermes_info.get("limited_tools", []),
-                    "limited_tool_details": hermes_info.get("limited_tool_details", {}),
-                    "doctor_issues_count": hermes_info.get("doctor_issues_count", 0),
-                    "configuration_actions": _hermes_command_catalog(),
-                },
+                "native_agent": native_status,
                 "workspace": {
                     "path": workspace.get("workspace_path", ""),
                     "initialized": workspace.get("initialized", False),
@@ -2108,11 +1937,19 @@ class MainWindowAPI:
                     summary_count=self._config.window_mode.recent_messages_limit,
                     session_limit=self._config.window_mode.recent_sessions_limit,
                 ),
-                "activities": list_activity_events(limit=8).get("events", []),
+                "activities": self._dashboard_activity_events(limit=8),
             }
         except Exception as e:
             logger.error("获取仪表盘数据失败: %s", e)
-            return {"error": str(e)}
+            return {"error": redact_api_error_text(e)}
+
+    @staticmethod
+    def _dashboard_activity_events(limit: int = 8) -> list[dict[str, Any]]:
+        try:
+            return list_activity_events(limit=limit).get("events", [])
+        except Exception as exc:
+            logger.debug("读取仪表盘活动流失败: %s", exc, exc_info=True)
+            return []
 
     def get_settings_data(self) -> Dict[str, Any]:
         """获取设置页数据"""
@@ -2120,24 +1957,10 @@ class MainWindowAPI:
             status = self._runtime.get_status()
             workspace = get_workspace_status()
             snap = self._get_snapshot()
-            hermes_info = status.get("hermes", {})
+            native_status = self._native_runtime_compat_status(status)
 
             return {
-                "hermes": {
-                    "status": hermes_info.get("install_status", "unknown"),
-                    "version": hermes_info.get("version"),
-                    "release_date": hermes_info.get("release_date"),
-                    "platform": hermes_info.get("platform", "unknown"),
-                    "command_exists": hermes_info.get("command_exists", False),
-                    "hermes_home": hermes_info.get("hermes_home", ""),
-                    "ready": self._runtime.is_hermes_ready(),
-                    "readiness_level": hermes_info.get("readiness_level", "unknown"),
-                    "available_tools": hermes_info.get("available_tools", []),
-                    "limited_tools": hermes_info.get("limited_tools", []),
-                    "limited_tool_details": hermes_info.get("limited_tool_details", {}),
-                    "doctor_issues_count": hermes_info.get("doctor_issues_count", 0),
-                    "configuration_actions": _hermes_command_catalog(),
-                },
+                "native_agent": native_status,
                 "workspace": {
                     "path": workspace.get("workspace_path", ""),
                     "initialized": workspace.get("initialized", False),
@@ -2211,7 +2034,7 @@ class MainWindowAPI:
             }
         except Exception as e:
             logger.error("获取设置数据失败: %s", e)
-            return {"error": str(e)}
+            return {"error": redact_api_error_text(e)}
 
     def update_settings(self, changes: Dict[str, Any]) -> Dict[str, Any]:
         """修改配置项并持久化。"""
@@ -2309,7 +2132,7 @@ class MainWindowAPI:
 
         host = self._config.bridge_host
         port = self._config.bridge_port
-        if os.getenv("HERMES_YACHIYO_DESKTOP_BACKEND") == "1":
+        if os.getenv("OHA_YACHIYO_DESKTOP_BACKEND") == "1":
             return {
                 "ok": True,
                 "pending": True,
@@ -2356,7 +2179,7 @@ class MainWindowAPI:
         Linux：按优先级尝试 gnome-terminal / xfce4-terminal / xterm。
 
         Args:
-            cmd: 要在终端中运行的命令字符串，如 "hermes setup"
+            cmd: 要在终端中运行的命令字符串，如 "native setup"
 
         Returns:
             {"success": bool, "error": str | None}
@@ -2367,14 +2190,17 @@ class MainWindowAPI:
         logger.info("open_terminal_command: cmd=%r", cmd)
         if not cmd:
             return {"success": False, "error": "终端命令为空"}
-        if (
-            cmd not in _allowed_terminal_commands()
-            and not _is_macos_prerequisite_command(cmd)
-            and not _is_gpt_sovits_service_command(cmd)
-        ):
+        if cmd in _allowed_terminal_commands():
             return {
                 "success": False,
-                "error": "不支持的 Hermes 终端命令",
+                "error": "Native Runtime 不再通过外部终端向导配置模型；请在模型配置页管理 Model Profile。",
+                "unsupported": True,
+                "code": "native_configuration_required",
+            }
+        if not _is_macos_prerequisite_command(cmd) and not _is_gpt_sovits_service_command(cmd):
+            return {
+                "success": False,
+                "error": "不支持的终端命令",
                 "unsupported": True,
             }
 
@@ -2383,7 +2209,7 @@ class MainWindowAPI:
             if now - _LAST_TERMINAL_COMMAND_AT < _TERMINAL_COMMAND_THROTTLE_SECONDS:
                 return {
                     "success": False,
-                    "error": "上一个 Hermes 操作还在打开中，请稍后再试",
+                    "error": "上一个终端操作还在打开中，请稍后再试",
                     "throttled": True,
                 }
             _LAST_TERMINAL_COMMAND_AT = now
@@ -2401,224 +2227,164 @@ class MainWindowAPI:
         except Exception as exc:
             _reset_terminal_command_gate()
             logger.error("open_terminal_command 失败: %s", exc)
-            return {"success": False, "error": str(exc)}
+            return {"success": False, "error": redact_api_error_text(exc)}
 
-    def run_hermes_diagnostic_command(self, cmd: str) -> Dict[str, Any]:
-        """Run a safe Hermes diagnostic command and return redacted output for UI display."""
+    def run_native_diagnostic_command(self, cmd: str) -> Dict[str, Any]:
+        """Compatibility diagnostic entry point backed by Native Runtime state."""
         action = _diagnostic_command_by_command(cmd)
         if action is None:
             return {
                 "ok": False,
                 "success": False,
-                "error": "不支持的 Hermes 诊断命令",
+                "error": "不支持的诊断命令",
                 "unsupported": True,
             }
 
-        hermes_path, needs_env_refresh = locate_hermes_binary()
-        if hermes_path is None:
-            return {
-                "ok": False,
-                "success": False,
-                "error": "hermes 命令未找到，请先安装 Hermes Agent",
-                "command": action["command"],
-                "needs_env_refresh": needs_env_refresh,
-            }
-
-        argv = [hermes_path, *action["command"].split()[1:]]
         started_at = time.monotonic()
-        try:
-            result = subprocess.run(
-                argv,
-                capture_output=True,
-                text=True,
-                timeout=60.0,
-                check=False,
-            )
-        except subprocess.TimeoutExpired as exc:
-            stdout = _sanitize_command_output(str(exc.stdout or ""))
-            stderr = _sanitize_command_output(str(exc.stderr or ""))
-            payload = {
-                "ok": False,
-                "success": False,
-                "error": f"{action['label']} 超时",
-                "action_id": action.get("id"),
-                "label": action.get("label"),
-                "command": action["command"],
-                "stdout": stdout,
-                "stderr": stderr,
-                "output": "\n".join(part for part in (stdout, stderr) if part),
-                "elapsed_seconds": round(time.monotonic() - started_at, 2),
-                "needs_env_refresh": needs_env_refresh,
-            }
-            payload["diagnostic_cache"] = self._record_diagnostic_result(action, payload)
-            return payload
-        except FileNotFoundError:
-            return {
-                "ok": False,
-                "success": False,
-                "error": "hermes 命令未找到，请先安装 Hermes Agent",
-                "command": action["command"],
-                "needs_env_refresh": needs_env_refresh,
-            }
+        runtime_status = self._native_runtime_compat_status()
+        readiness = runtime_status.get("native_agent") if isinstance(runtime_status.get("native_agent"), dict) else {}
+        configuration = self.get_native_configuration()
+        tool_config = self.get_native_tool_config()
+        profiles = get_model_profile_service().list_profiles()
+        defaults = profiles.get("defaults") if isinstance(profiles.get("defaults"), dict) else {}
+        output_lines = [
+            f"Native Agent ready: {bool(readiness.get('ready'))}",
+            f"Readiness reason: {readiness.get('reason') or 'ok'}",
+            f"Default chat profile: {defaults.get('chat') or '<missing>'}",
+            f"Default vision profile: {defaults.get('vision') or '<optional>'}",
+            f"Tool config projection: {tool_config.get('config_path')}",
+        ]
+        if action.get("id") == "auth-list":
+            configured = [
+                {
+                    "profile_id": profile.get("profile_id"),
+                    "capability": profile.get("capability"),
+                    "name": profile.get("name"),
+                    "api_key_configured": bool(profile.get("api_key_configured")),
+                }
+                for profile in profiles.get("profiles", [])
+                if isinstance(profile, dict)
+            ]
+            output_lines = [json.dumps({"model_profiles": configured}, ensure_ascii=False, indent=2)]
 
-        elapsed = round(time.monotonic() - started_at, 2)
-        stdout = _sanitize_command_output(result.stdout)
-        stderr = _sanitize_command_output(result.stderr)
-        output = "\n".join(part for part in (stdout, stderr) if part)
+        output = _sanitize_command_output("\n".join(output_lines))
+        success = bool(readiness.get("ready")) if action.get("id") in {"doctor", "config-check"} else True
         payload: Dict[str, Any] = {
-            "ok": result.returncode == 0,
-            "success": result.returncode == 0,
+            "ok": True,
+            "success": success,
             "action_id": action.get("id"),
             "label": action.get("label"),
             "description": action.get("description"),
             "command": action["command"],
-            "returncode": result.returncode,
-            "stdout": stdout,
-            "stderr": stderr,
+            "returncode": 0,
+            "stdout": output,
+            "stderr": "",
             "output": output,
-            "elapsed_seconds": elapsed,
-            "needs_env_refresh": needs_env_refresh,
+            "elapsed_seconds": round(time.monotonic() - started_at, 2),
+            "needs_env_refresh": False,
+            "configuration": configuration,
         }
-        if result.returncode == 0:
+        if success:
             payload["message"] = f"{action['label']} 完成"
         else:
-            payload["error"] = f"{action['label']} 失败（exit={result.returncode}）"
+            payload["error"] = str(readiness.get("message") or "Native Agent 尚未就绪")
+            payload["code"] = str(readiness.get("code") or "native_agent_not_ready")
+            payload["reason"] = str(readiness.get("reason") or "model_profile_required")
 
         if action.get("id") == "doctor":
-            payload["doctor_summary"] = _parse_doctor_diagnostic_output(output)
-            try:
-                self._runtime.refresh_hermes_installation()
-                payload["dashboard"] = self.get_dashboard_data()
-            except Exception as exc:
-                logger.warning("诊断后刷新 Hermes 状态失败: %s", exc)
-                payload["refresh_error"] = str(exc)
+            payload["doctor_summary"] = {
+                "readiness_level": runtime_status.get("readiness_level", "unknown"),
+                "available_tools": runtime_status.get("available_tools", []),
+                "limited_tools": runtime_status.get("limited_tools", []),
+                "limited_tool_details": runtime_status.get("limited_tool_details", {}),
+                "doctor_issues_count": runtime_status.get("doctor_issues_count", 0),
+            }
+            payload["dashboard"] = self.get_dashboard_data()
 
         payload["diagnostic_cache"] = self._record_diagnostic_result(action, payload)
         return payload
 
     def _record_diagnostic_result(self, action: dict[str, str], result: dict[str, Any]) -> dict[str, Any]:
         try:
-            configuration = self.get_hermes_configuration()
+            configuration = self.get_native_configuration()
         except Exception as exc:
-            logger.warning("读取 Hermes 配置以记录诊断缓存失败: %s", exc)
-            return {"stale": False, "commands": {}, "error": str(exc)}
+            logger.warning("读取 Native 配置以记录诊断缓存失败: %s", exc)
+            return {"stale": False, "commands": {}, "error": redact_api_error_text(exc)}
         return _store_diagnostic_result(configuration, action, result)
 
-    def get_hermes_diagnostic_cache(self) -> dict[str, Any]:
+    def get_native_diagnostic_cache(self) -> dict[str, Any]:
         try:
-            configuration = self.get_hermes_configuration()
+            configuration = self.get_native_configuration()
         except Exception as exc:
-            logger.warning("读取 Hermes 配置以获取诊断缓存失败: %s", exc)
+            logger.warning("读取 Native 配置以获取诊断缓存失败: %s", exc)
             return {
-                "schema_version": _HERMES_DIAGNOSTIC_CACHE_SCHEMA,
+                "schema_version": _NATIVE_DIAGNOSTIC_CACHE_SCHEMA,
                 "stale": False,
                 "commands": {},
-                "error": str(exc),
+                "error": redact_api_error_text(exc),
             }
         return _load_diagnostic_cache(configuration)
 
-    def test_hermes_connection(self) -> Dict[str, Any]:
-        """用一次轻量 Hermes oneshot 调用验证当前 provider/API Key 是否可用。
-
-        ``hermes doctor`` 和 ``hermes config check`` 更偏静态检查；真正的 API Key、
-        provider、base URL 是否能工作，只有发起一次模型请求才可靠。
-        """
-        hermes_path, needs_env_refresh = locate_hermes_binary()
-        if hermes_path is None:
-            hermes_path = "hermes"
-
-        argv = [hermes_path, "-z", _HERMES_CONNECTION_TEST_PROMPT]
-        started_at = time.monotonic()
-        try:
-            result = subprocess.run(
-                argv,
-                capture_output=True,
-                text=True,
-                timeout=_HERMES_CONNECTION_TEST_TIMEOUT,
-                check=False,
-            )
-        except FileNotFoundError:
-            return {
-                "ok": False,
-                "success": False,
-                "error": "hermes 命令未找到，请先安装 Hermes Agent",
-                "command": "hermes -z <connectivity-check>",
-                "needs_env_refresh": needs_env_refresh,
-            }
-        except subprocess.TimeoutExpired as exc:
-            detail = _compact_command_output(
-                "\n".join(part for part in (exc.stdout or "", exc.stderr or "") if part)
-            )
-            return {
-                "ok": False,
-                "success": False,
-                "error": "Hermes 模型连接测试超时，请检查网络、provider 或 base URL",
-                "detail": detail,
-                "command": _public_command(argv),
-                "elapsed_seconds": round(time.monotonic() - started_at, 2),
-                "needs_env_refresh": needs_env_refresh,
-            }
-
-        elapsed = round(time.monotonic() - started_at, 2)
-        stdout = _compact_command_output(result.stdout)
-        stderr = _compact_command_output(result.stderr)
-        combined_output = f"{stdout}\n{stderr}".lower()
-        output_error_indicators = [
-            "429", "rate_limit", "too many requests",
-            "500", "502", "503", "504",
-            "error:", "apierror", "httperror",
-            "connectionerror", "timeouterror",
-        ]
-        has_output_error = any(indicator in combined_output for indicator in output_error_indicators)
-
-        if result.returncode == 0 and stdout and not has_output_error:
+    def test_native_connection(self) -> Dict[str, Any]:
+        """Validate the default Native Chat ModelProfile."""
+        service = get_model_profile_service()
+        profile_id = str(service.get_defaults().get("chat") or "").strip()
+        if not profile_id:
             payload = {
-                "ok": True,
-                "success": True,
-                "message": "Hermes provider/API Key 连接测试通过",
-                "output_preview": stdout,
-                "command": _public_command(argv),
-                "elapsed_seconds": elapsed,
-                "needs_env_refresh": needs_env_refresh,
+                "ok": False,
+                "success": False,
+                "code": "native_agent_not_ready",
+                "reason": "model_profile_required",
+                "error": "请先配置并选择默认对话模型。",
+                "command": "native:model-profile:test:chat",
+                "needs_env_refresh": False,
             }
             payload["connection_validation"] = self._record_connection_validation(payload)
             return payload
 
-        detail = stderr or stdout
-        error = (
-            f"Hermes 模型连接测试失败：{detail}"
-            if detail
-            else f"Hermes 模型连接测试失败（exit={result.returncode}）"
-        )
+        started_at = time.monotonic()
+        try:
+            result = service.test_profile(profile_id)
+        except (KeyError, ModelProfileError) as exc:
+            result = {"ok": False, "success": False, "message": redact_api_error_text(exc)}
+
+        elapsed = round(time.monotonic() - started_at, 2)
+        message = _compact_command_output(str(result.get("message") or ""))
+        if bool(result.get("success") or result.get("ok")):
+            payload = {
+                "ok": True,
+                "success": True,
+                "message": "Native Chat ModelProfile 连接测试通过",
+                "output_preview": message,
+                "command": "native:model-profile:test:chat",
+                "elapsed_seconds": elapsed,
+                "needs_env_refresh": False,
+                "profile": result.get("profile"),
+            }
+            payload["connection_validation"] = self._record_connection_validation(payload)
+            return payload
+
+        error = f"Native Chat ModelProfile 连接测试失败：{message}" if message else "Native Chat ModelProfile 连接测试失败"
         payload = {
             "ok": False,
             "success": False,
             "error": error,
-            "output_preview": stdout,
-            "stderr_preview": stderr,
-            "returncode": result.returncode,
-            "command": _public_command(argv),
+            "output_preview": message,
+            "stderr_preview": "",
+            "returncode": 1,
+            "command": "native:model-profile:test:chat",
             "elapsed_seconds": elapsed,
-            "needs_env_refresh": needs_env_refresh,
+            "needs_env_refresh": False,
+            "profile": result.get("profile"),
         }
         payload["connection_validation"] = self._record_connection_validation(payload)
         return payload
 
-    def test_hermes_image_connection(self) -> Dict[str, Any]:
-        """验证当前图片输入链路。
-
-        文本 provider/API Key 通过不代表图片输入可用；所有图片都会先经过
-        Yachiyo vision 预分析，再把文字结果交给 Hermes 主模型。
-        """
-        configuration = self.get_hermes_configuration()
+    def test_native_image_connection(self) -> Dict[str, Any]:
+        """Validate the Native image-input route."""
+        configuration = self.get_native_configuration()
         image_input = configuration.get("image_input") if isinstance(configuration.get("image_input"), dict) else {}
         route = str(image_input.get("route") or "").strip()
-        if configuration.get("command_exists") is False:
-            return {
-                "ok": False,
-                "success": False,
-                "error": "hermes 命令未找到，请先安装 Hermes Agent",
-            }
         if route == "blocked":
             payload = {
                 "ok": False,
@@ -2633,91 +2399,49 @@ class MainWindowAPI:
                 error=str(payload["error"]),
             )
             return payload
-        hermes_path, needs_env_refresh = locate_hermes_binary()
-        if hermes_path is None:
-            return {
+        service = get_model_profile_service()
+        defaults = service.get_defaults()
+        profile_id = str(image_input.get("profile_id") or "").strip()
+        if not profile_id:
+            profile_id = str(defaults.get("vision") or defaults.get("chat") or "").strip()
+        if not profile_id:
+            payload = {
                 "ok": False,
                 "success": False,
-                "error": "hermes 命令未找到，请先安装 Hermes Agent",
-                "needs_env_refresh": needs_env_refresh,
-            }
-        hermes_python = _resolve_hermes_python_from_launcher(hermes_path)
-        if not hermes_python:
-            return {
-                "ok": False,
-                "success": False,
-                "error": "无法定位 Hermes Agent 的 Python 环境，无法测试 Yachiyo 图片链路",
-                "needs_env_refresh": needs_env_refresh,
-            }
-
-        bridge_script = resolve_hermes_stream_bridge_script()
-        if not bridge_script.exists():
-            return {
-                "ok": False,
-                "success": False,
-                "error": "无法定位 Hermes-Yachiyo 图片桥接脚本，无法测试 Yachiyo 图片链路",
+                "code": "native_agent_not_ready",
+                "reason": "vision_model_profile_required",
+                "error": "请先配置默认图片识别模型或支持图片输入的默认对话模型。",
                 "route": route,
                 "image_input": image_input,
-                "needs_env_refresh": needs_env_refresh,
+                "needs_env_refresh": False,
             }
-        probe_prompt = (
-            "Hermes-Yachiyo 图片链路自检。请查看附件测试图片，并且只回答图片右上角色块的颜色。"
-            "不要解释，不要猜测；如果没有看到图片，请直接回答“看不到图片”。"
-        )
+            payload["image_connection_validation"] = _store_image_connection_validation(
+                configuration,
+                success=False,
+                error=str(payload["error"]),
+            )
+            return payload
+
         started_at = time.monotonic()
-        with tempfile.TemporaryDirectory(prefix="yachiyo-vision-test-") as tmpdir:
-            image_path = Path(tmpdir) / "vision-test.png"
-            image_path.write_bytes(_VISION_TEST_PNG)
-            probe_payload = {
-                "description": probe_prompt,
-                "image_paths": [str(image_path)],
-            }
-            try:
-                result = subprocess.run(
-                    [hermes_python, str(bridge_script)],
-                    input=json.dumps(probe_payload, ensure_ascii=False),
-                    capture_output=True,
-                    text=True,
-                    timeout=_HERMES_IMAGE_CONNECTION_TEST_TIMEOUT,
-                    check=False,
-                )
-            except subprocess.TimeoutExpired as exc:
-                detail = _compact_command_output(
-                    "\n".join(part for part in (exc.stdout or "", exc.stderr or "") if part)
-                )
-                payload = {
-                    "ok": False,
-                    "success": False,
-                    "error": "Yachiyo 图片链路测试超时，请检查 vision provider、Base URL 或网络",
-                    "detail": detail,
-                    "route": route,
-                    "image_input": image_input,
-                    "elapsed_seconds": round(time.monotonic() - started_at, 2),
-                    "needs_env_refresh": needs_env_refresh,
-                }
-                payload["image_connection_validation"] = _store_image_connection_validation(
-                    configuration,
-                    success=False,
-                    error=str(payload["error"]),
-                    elapsed_seconds=payload["elapsed_seconds"],
-                )
-                return payload
+        try:
+            result = service.test_profile(profile_id)
+        except (KeyError, ModelProfileError) as exc:
+            result = {"ok": False, "success": False, "message": redact_api_error_text(exc)}
 
         elapsed = round(time.monotonic() - started_at, 2)
-        stdout = _compact_command_output(result.stdout)
-        stderr = _compact_command_output(result.stderr)
-        response, bridge_error, bridge_failed = _parse_stream_bridge_probe(result.stdout)
-        if result.returncode == 0 and not bridge_failed and _image_probe_response_ok(response):
+        message = _compact_command_output(str(result.get("message") or ""))
+        if bool(result.get("success") or result.get("ok")):
             payload = {
                 "ok": True,
                 "success": True,
-                "message": "Yachiyo 图片链路测试通过，测试图片已被实际识别",
-                "output_preview": stdout,
-                "stderr_preview": stderr,
+                "message": "Native 图片链路测试通过",
+                "output_preview": message,
+                "stderr_preview": "",
                 "route": route,
                 "image_input": image_input,
                 "elapsed_seconds": elapsed,
-                "needs_env_refresh": needs_env_refresh,
+                "needs_env_refresh": False,
+                "profile": result.get("profile"),
             }
             payload["image_connection_validation"] = _store_image_connection_validation(
                 configuration,
@@ -2727,25 +2451,19 @@ class MainWindowAPI:
             )
             return payload
 
-        detail = bridge_error or stderr or stdout
-        if result.returncode == 0 and not bridge_failed and response:
-            detail = f"图片链路没有识别出测试图右上角的绿色色块，模型返回：{response[:500]}"
-        error = (
-            f"Yachiyo 图片链路测试失败：{detail}"
-            if detail
-            else f"Yachiyo 图片链路测试失败（exit={result.returncode}）"
-        )
+        error = f"Native 图片链路测试失败：{message}" if message else "Native 图片链路测试失败"
         payload = {
             "ok": False,
             "success": False,
             "error": error,
-            "output_preview": stdout,
-            "stderr_preview": stderr,
-            "returncode": result.returncode,
+            "output_preview": message,
+            "stderr_preview": "",
+            "returncode": 1,
             "route": route,
             "image_input": image_input,
             "elapsed_seconds": elapsed,
-            "needs_env_refresh": needs_env_refresh,
+            "needs_env_refresh": False,
+            "profile": result.get("profile"),
         }
         payload["image_connection_validation"] = _store_image_connection_validation(
             configuration,
@@ -2757,10 +2475,10 @@ class MainWindowAPI:
 
     def _record_connection_validation(self, result: dict[str, Any]) -> dict[str, Any]:
         try:
-            configuration = self.get_hermes_configuration()
+            configuration = self.get_native_configuration()
         except Exception as exc:
-            logger.warning("读取 Hermes 配置以记录连接验证状态失败: %s", exc)
-            return {"verified": False, "success": False, "error": str(exc)}
+            logger.warning("读取 Native 配置以记录连接验证状态失败: %s", exc)
+            return {"verified": False, "success": False, "error": redact_api_error_text(exc)}
         return _store_connection_validation(
             configuration,
             success=bool(result.get("success")),
@@ -2769,45 +2487,76 @@ class MainWindowAPI:
             elapsed_seconds=result.get("elapsed_seconds"),
         )
 
-    def get_hermes_configuration(self) -> Dict[str, Any]:
-        """读取 Hermes provider/model 配置摘要。不会返回密钥明文。"""
-        hermes_path, needs_env_refresh = locate_hermes_binary()
-        command_exists = hermes_path is not None
-        if hermes_path is None:
-            hermes_path = "hermes"
-
-        config_path = _run_config_path_command(hermes_path, "path")
-        env_path = _run_config_path_command(hermes_path, "env-path")
-        model = _read_hermes_model_config(config_path)
-        raw_provider = model.get("provider", "")
-        default_model = str(model.get("default") or "")
-        base_url = str(model.get("base_url") or "")
+    def get_native_configuration(self) -> Dict[str, Any]:
+        """Read Native ModelProfile configuration through the legacy endpoint shape."""
+        service = get_model_profile_service()
+        profiles_payload = service.list_profiles()
+        defaults = profiles_payload.get("defaults") if isinstance(profiles_payload.get("defaults"), dict) else {}
+        profile_rows = [item for item in profiles_payload.get("profiles", []) if isinstance(item, dict)]
+        chat_profile_id = str(defaults.get("chat") or "").strip()
+        vision_profile_id = str(defaults.get("vision") or "").strip()
+        chat_profile = next((item for item in profile_rows if str(item.get("profile_id")) == chat_profile_id), {})
+        vision_profile = next((item for item in profile_rows if str(item.get("profile_id")) == vision_profile_id), {})
+        raw_provider = str(chat_profile.get("provider") or "")
+        default_model = str(chat_profile.get("model") or "")
+        base_url = str(chat_profile.get("base_url") or "")
         provider = _effective_provider_id(raw_provider, base_url, default_model)
-        env_values = _read_env_values(env_path)
         provider_options = _provider_options(
             current_provider=provider,
-            config_path=config_path,
-            env_values=env_values,
+            config_path=Path(),
+            env_values={},
         )
-        selected_provider = next(
-            (option for option in provider_options if option.get("id") == provider),
-            provider_options[0] if provider_options else {},
-        )
-        api_key_name = str(
-            selected_provider.get("api_key_name") or _provider_api_key_name(provider)
-        )
-        api_key_configured = bool(selected_provider.get("api_key_configured"))
+        for profile in profile_rows:
+            if str(profile.get("capability") or "chat") != "chat":
+                continue
+            profile_provider = _effective_provider_id(
+                str(profile.get("provider") or ""),
+                str(profile.get("base_url") or ""),
+                str(profile.get("model") or ""),
+            )
+            if not profile_provider:
+                continue
+            option = next((item for item in provider_options if item.get("id") == profile_provider), None)
+            if option is None:
+                option = {
+                    "id": profile_provider,
+                    "label": profile_provider,
+                    "base_url": str(profile.get("base_url") or ""),
+                    "default_model": str(profile.get("model") or ""),
+                    "default_vision_model": "",
+                    "models": [],
+                    "vision_models": [],
+                    "api_key_names": list(_provider_api_key_names(profile_provider)),
+                    "api_key_name": _provider_api_key_name(profile_provider),
+                    "api_key_configured": False,
+                    "auth_type": "api_key",
+                    "source": "model-profile",
+                    "is_current": profile_provider == provider,
+                }
+                provider_options.append(option)
+            option["api_key_configured"] = bool(option.get("api_key_configured") or profile.get("api_key_configured"))
+            option["is_current"] = bool(option.get("is_current") or profile_provider == provider)
+            models = option.setdefault("models", [])
+            if isinstance(models, list) and profile.get("model") and profile.get("model") not in models:
+                models.append(str(profile["model"]))
+        selected_provider = next((option for option in provider_options if option.get("id") == provider), {})
+        api_key_name = str(chat_profile.get("api_key_name") or selected_provider.get("api_key_name") or _provider_api_key_name(provider))
+        api_key_configured = bool(chat_profile.get("api_key_configured"))
+        projection = _load_native_tool_config_projection()
+        config_values, env_values = _tool_projection_values(projection)
         configuration = {
             "ok": True,
-            "command_exists": command_exists,
-            "needs_env_refresh": needs_env_refresh,
-            "config_path": str(config_path),
-            "env_path": str(env_path),
+            "command_exists": True,
+            "needs_env_refresh": False,
+            "config_path": str(_native_tool_config_path()),
+            "env_path": "",
             "model": {
                 "provider": provider,
                 "raw_provider": raw_provider,
                 "default": default_model,
                 "base_url": base_url,
+                "profile_id": chat_profile_id,
+                "status": str(chat_profile.get("status") or ""),
             },
             "provider_options": provider_options,
             "api_key": {
@@ -2815,28 +2564,37 @@ class MainWindowAPI:
                 "configured": api_key_configured,
                 "display": "已配置" if api_key_configured else "未配置",
             },
-            "vision": _vision_configuration_summary(
-                config_path=config_path,
-                env_values=env_values,
-                chat_provider=provider,
-                chat_model=default_model,
-                chat_base_url=base_url,
-            ),
+            "vision": {
+                "configured": bool(vision_profile),
+                "provider": str(vision_profile.get("provider") or ""),
+                "model": str(vision_profile.get("model") or ""),
+                "base_url": str(vision_profile.get("base_url") or ""),
+                "api_key_name": str(vision_profile.get("api_key_name") or ""),
+                "api_key_configured": bool(vision_profile.get("api_key_configured")),
+                "effective_provider": _effective_provider_id(
+                    str(vision_profile.get("provider") or provider),
+                    str(vision_profile.get("base_url") or base_url),
+                    str(vision_profile.get("model") or default_model),
+                ),
+                "effective_model": str(vision_profile.get("model") or default_model),
+                "effective_base_url": str(vision_profile.get("base_url") or base_url),
+                "profile_id": vision_profile_id,
+                "status": str(vision_profile.get("status") or ""),
+            },
         }
-        configuration["tool_config_state"] = _tool_config_state(config_path, env_values)
-        configuration["image_input"] = build_hermes_image_input_capability(
-            provider=provider,
-            model=default_model,
-            config_path=config_path,
+        configuration["tool_config_state"] = _tool_config_state(Path(), env_values)
+        configuration["tool_config_state"]["config"].update(
+            {".".join(path): value for path, value in config_values.items()}
         )
+        configuration["image_input"] = get_native_image_input_capability()
         configuration["connection_validation"] = _load_connection_validation(configuration)
         configuration["image_connection_validation"] = _load_image_connection_validation(configuration)
         if isinstance(configuration["image_input"], dict):
             configuration["image_input"]["validation"] = configuration["image_connection_validation"]
         return configuration
 
-    def update_hermes_configuration(self, changes: Dict[str, Any]) -> Dict[str, Any]:
-        """用 Hermes CLI 写入 provider/model/API Key 配置。"""
+    def update_native_configuration(self, changes: Dict[str, Any]) -> Dict[str, Any]:
+        """Update Native ModelProfile defaults through the legacy endpoint shape."""
         provider = str(changes.get("provider") or "").strip()
         model = str(changes.get("model") or "").strip()
         base_url = str(changes.get("base_url") or "").strip()
@@ -2848,44 +2606,62 @@ class MainWindowAPI:
         vision_model = str(changes.get("vision_model") or "").strip()
         vision_base_url = str(changes.get("vision_base_url") or "").strip()
         vision_api_key = str(changes.get("vision_api_key") or "").strip()
+        service = get_model_profile_service()
         try:
             if chat_profile_id:
-                profile_config = _model_profile_config_for_hermes(chat_profile_id, "chat")
-                provider = profile_config["provider"]
-                model = profile_config["model"]
-                base_url = profile_config["base_url"]
-                api_key = profile_config["api_key"]
+                profile = service.get_profile(chat_profile_id)
+                if str(profile.get("capability") or "") != "chat":
+                    raise ValueError("chat Profile 类型不匹配")
+                if not profile.get("enabled", True):
+                    raise ValueError("不能选择已暂停的模型 Profile")
+                service.set_defaults({"chat": chat_profile_id})
             if vision_profile_id:
-                profile_config = _model_profile_config_for_hermes(vision_profile_id, "vision")
-                vision_provider = profile_config["provider"]
-                vision_model = profile_config["model"]
-                vision_base_url = profile_config["base_url"]
-                vision_api_key = profile_config["api_key"]
+                profile = service.get_profile(vision_profile_id)
+                if str(profile.get("capability") or "") != "vision":
+                    raise ValueError("vision Profile 类型不匹配")
+                if not profile.get("enabled", True):
+                    raise ValueError("不能选择已暂停的图片识别 Profile")
+                service.set_defaults({"vision": vision_profile_id})
         except (KeyError, ValueError) as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": redact_api_error_text(exc)}
 
-        hermes_path, needs_env_refresh = locate_hermes_binary()
-        if hermes_path is None:
-            return {
-                "ok": False,
-                "error": "hermes 命令未找到，请先安装 Hermes Agent",
-                "needs_env_refresh": needs_env_refresh,
-            }
-        if not provider or not model:
-            current_config_path = _run_config_path_command(hermes_path, "path")
-            current_model = _read_hermes_model_config(current_config_path)
-            current_provider = _effective_provider_id(
-                str(current_model.get("provider") or ""),
-                str(current_model.get("base_url") or ""),
-                str(current_model.get("default") or ""),
-            )
-            provider = provider or current_provider or str(current_model.get("provider") or "")
-            model = model or str(current_model.get("default") or "")
-            base_url = base_url or str(current_model.get("base_url") or "")
-        if not provider:
-            return {"ok": False, "error": "Provider 不能为空"}
-        if not model:
-            return {"ok": False, "error": "模型名称不能为空"}
+        defaults = service.get_defaults()
+        if provider or model or base_url or api_key:
+            existing_id = str(defaults.get("chat") or "").strip()
+            if existing_id:
+                try:
+                    existing = service.get_profile(existing_id)
+                except KeyError:
+                    existing = {}
+                payload = {
+                    "name": str(existing.get("name") or "Default Chat"),
+                    "capability": "chat",
+                    "provider": provider or str(existing.get("provider") or "openai_compatible"),
+                    "base_url": base_url or str(existing.get("base_url") or ""),
+                    "model": model or str(existing.get("model") or ""),
+                    "enabled": True,
+                }
+                if api_key:
+                    payload["api_key"] = api_key
+                profile = service.update_profile(existing_id, payload)
+            else:
+                if not provider:
+                    return {"ok": False, "error": "Provider 不能为空"}
+                if not model:
+                    return {"ok": False, "error": "模型名称不能为空"}
+                profile = service.create_profile(
+                    {
+                        "name": "Default Chat",
+                        "capability": "chat",
+                        "provider": provider,
+                        "base_url": base_url,
+                        "model": model,
+                        "api_key": api_key,
+                        "enabled": True,
+                    }
+                )
+            service.set_defaults({"chat": str(profile["profile_id"])})
+
         has_vision_changes = any(
             key in changes
             for key in ("vision_profile_id", "vision_provider", "vision_model", "vision_base_url", "vision_api_key")
@@ -2895,111 +2671,100 @@ class MainWindowAPI:
         ):
             return {"ok": False, "error": "vision 预分析需要可用的 Provider"}
         if has_vision_changes:
-            vision_provider_for_model = _effective_provider_id(
-                vision_provider or provider,
-                vision_base_url or base_url,
-                vision_model or model,
-            )
-            if vision_provider_for_model:
-                vision_model = _normalize_auxiliary_vision_model(
-                    vision_provider_for_model,
-                    vision_model,
-                )
-
-        effective_provider = _effective_provider_id(provider, base_url, model)
-        provider_for_config = (
-            effective_provider
-            if provider.strip().lower() in {"auto", "main"} and effective_provider
-            else provider
-        )
-        commands: list[tuple[str, str]] = [
-            ("model.provider", provider_for_config),
-            ("model.default", model),
-            ("model.base_url", base_url),
-        ]
-        if "image_input_mode" in changes:
-            commands.append(("agent.image_input_mode", image_input_mode))
-        api_key_name = _provider_api_key_name(effective_provider or provider)
-        if api_key:
-            commands.append((api_key_name, api_key))
-        if "vision_provider" in changes or vision_profile_id:
-            commands.append(("auxiliary.vision.provider", vision_provider))
-        if "vision_model" in changes or vision_profile_id:
-            commands.append(("auxiliary.vision.model", vision_model))
-        if "vision_base_url" in changes or vision_profile_id:
-            commands.append(("auxiliary.vision.base_url", vision_base_url))
-        if vision_api_key:
-            vision_key_provider = _effective_provider_id(
-                vision_provider or provider,
-                vision_base_url or base_url,
-                vision_model or model,
-            )
-            vision_key_name = _provider_api_key_name(vision_key_provider or effective_provider or provider)
-            if vision_key_name:
-                commands.append((vision_key_name, vision_api_key))
-
-        for key, value in commands:
-            try:
-                result = subprocess.run(
-                    [hermes_path, "config", "set", key, value],
-                    capture_output=True,
-                    text=True,
-                    timeout=_HERMES_CONFIG_TIMEOUT,
-                    check=False,
-                )
-            except subprocess.TimeoutExpired:
-                return {"ok": False, "error": f"写入 Hermes 配置超时：{key}"}
-            except Exception as exc:
-                return {"ok": False, "error": f"写入 Hermes 配置失败：{exc}"}
-            if result.returncode != 0:
-                detail = _compact_command_output(result.stderr or result.stdout)
-                return {
-                    "ok": False,
-                    "error": f"写入 Hermes 配置失败：{key}{'，' + detail if detail else ''}",
-                    "returncode": result.returncode,
+            existing_id = str(service.get_defaults().get("vision") or "").strip()
+            if existing_id:
+                try:
+                    existing = service.get_profile(existing_id)
+                except KeyError:
+                    existing = {}
+                payload = {
+                    "name": str(existing.get("name") or "Default Vision"),
+                    "capability": "vision",
+                    "provider": vision_provider or provider or str(existing.get("provider") or "openai_compatible"),
+                    "base_url": vision_base_url or base_url or str(existing.get("base_url") or ""),
+                    "model": vision_model or str(existing.get("model") or ""),
+                    "enabled": True,
                 }
+                if vision_api_key:
+                    payload["api_key"] = vision_api_key
+                profile = service.update_profile(existing_id, payload)
+            else:
+                if not (vision_provider or provider):
+                    return {"ok": False, "error": "vision Provider 不能为空"}
+                if not vision_model:
+                    return {"ok": False, "error": "vision 模型名称不能为空"}
+                profile = service.create_profile(
+                    {
+                        "name": "Default Vision",
+                        "capability": "vision",
+                        "provider": vision_provider or provider,
+                        "base_url": vision_base_url or base_url,
+                        "model": vision_model,
+                        "api_key": vision_api_key,
+                        "enabled": True,
+                    }
+                )
+            service.set_defaults({"vision": str(profile["profile_id"])})
+
+        if "image_input_mode" in changes:
+            projection = _load_native_tool_config_projection()
+            config = projection.get("config") if isinstance(projection.get("config"), dict) else {}
+            config["agent.image_input_mode"] = image_input_mode
+            projection["config"] = config
+            try:
+                _store_native_tool_config_projection(projection)
+            except OSError as exc:
+                return {"ok": False, "error": redact_api_error_text(f"写入 Native 配置失败：{exc}")}
 
         return {
             "ok": True,
-            "message": "Hermes 配置已保存",
-            "configuration": self.get_hermes_configuration(),
+            "message": "Native 模型配置已保存",
+            "configuration": self.get_native_configuration(),
         }
 
-    def get_hermes_tool_config(self) -> Dict[str, Any]:
+    def get_native_tool_config(self) -> Dict[str, Any]:
         """读取工具配置目录与安全状态。
 
         返回值只包含配置项值、环境变量名和“是否已配置”的布尔值；所有 env
         字段都不会返回明文内容，避免把 token/key 暴露给 renderer。
         """
-        hermes_path, needs_env_refresh = locate_hermes_binary()
-        command_exists = hermes_path is not None
-        if hermes_path is None:
-            hermes_path = "hermes"
-
-        config_path = _run_config_path_command(hermes_path, "path")
-        env_path = _run_config_path_command(hermes_path, "env-path")
-        env_values = _read_env_values(env_path)
-        config_values = _read_hermes_yaml_paths(config_path, _all_tool_config_paths())
-        hermes_toolsets = _hermes_tools_manifest(hermes_path) if command_exists else []
+        projection = _load_native_tool_config_projection()
+        config_values, env_values = _tool_projection_values(projection)
+        config_path = _native_tool_config_path()
+        native_toolsets = [
+            {
+                "id": str(tool["id"]),
+                "canonical_id": _canonical_tool_name(str(tool["id"])),
+                "label": str(tool.get("title") or tool["id"]),
+                "enabled": True,
+            }
+            for tool in _NATIVE_TOOL_CONFIG_CATALOG
+        ]
         tools = [
             _tool_config_payload(tool, config_values=config_values, env_values=env_values)
-            for tool in _HERMES_TOOL_CONFIG_CATALOG
+            for tool in _NATIVE_TOOL_CONFIG_CATALOG
         ]
         return {
             "ok": True,
-            "command_exists": command_exists,
-            "needs_env_refresh": needs_env_refresh,
+            "command_exists": True,
+            "needs_env_refresh": False,
             "config_path": str(config_path),
-            "env_path": str(env_path),
-            "hermes_toolsets": hermes_toolsets,
+            "env_path": "",
+            "native_toolsets": native_toolsets,
             "tools": tools,
-            "tool_config_state": _tool_config_state(config_path, env_values),
+            "tool_config_state": {
+                "config": {
+                    ".".join(path): value
+                    for path, value in config_values.items()
+                },
+                "env_configured": {key: True for key in env_values},
+            },
         }
 
-    def update_hermes_tool_config(self, tool_id: str, changes: Dict[str, Any]) -> Dict[str, Any]:
+    def update_native_tool_config(self, tool_id: str, changes: Dict[str, Any]) -> Dict[str, Any]:
         """保存单个工具的配置项，响应不回显 secret 值。"""
         normalized_tool_id = str(tool_id or "").strip()
-        tool = _HERMES_TOOL_CONFIG_BY_ID.get(normalized_tool_id)
+        tool = _NATIVE_TOOL_CONFIG_BY_ID.get(normalized_tool_id)
         if not tool:
             return {"ok": False, "error": "未知工具配置项", "tool_id": normalized_tool_id}
         if not isinstance(changes, dict):
@@ -3018,15 +2783,9 @@ class MainWindowAPI:
                 "fields": unknown,
             }
 
-        hermes_path, needs_env_refresh = locate_hermes_binary()
-        if hermes_path is None:
-            return {
-                "ok": False,
-                "error": "hermes 命令未找到，请先安装 Hermes Agent",
-                "tool_id": normalized_tool_id,
-                "needs_env_refresh": needs_env_refresh,
-            }
-
+        projection = _load_native_tool_config_projection()
+        config_projection = projection.get("config") if isinstance(projection.get("config"), dict) else {}
+        env_configured = projection.get("env_configured") if isinstance(projection.get("env_configured"), dict) else {}
         applied: list[dict[str, str]] = []
         skipped: list[dict[str, str]] = []
         for key, raw_value in changes.items():
@@ -3057,15 +2816,22 @@ class MainWindowAPI:
                     "field": key,
                 }
 
-            ok, error = _run_hermes_config_set(hermes_path, target_key, value)
-            if not ok:
-                return {
-                    "ok": False,
-                    "error": error,
-                    "tool_id": normalized_tool_id,
-                    "field": key,
-                }
+            if env_key:
+                env_configured[env_key] = True
+            elif config_key:
+                config_projection[config_key] = value
             applied.append({"key": key, "target": "env" if env_key else "config"})
+
+        projection["config"] = config_projection
+        projection["env_configured"] = env_configured
+        try:
+            _store_native_tool_config_projection(projection)
+        except OSError as exc:
+            return {
+                "ok": False,
+                "error": redact_api_error_text(f"保存工具配置失败：{exc}"),
+                "tool_id": normalized_tool_id,
+            }
 
         return {
             "ok": True,
@@ -3073,31 +2839,23 @@ class MainWindowAPI:
             "tool_id": normalized_tool_id,
             "applied": applied,
             "skipped": skipped,
-            "needs_env_refresh": needs_env_refresh,
-            "tool_config": self.get_hermes_tool_config(),
+            "needs_env_refresh": False,
+            "tool_config": self.get_native_tool_config(),
         }
 
-    def test_hermes_tool_config(self, tool_id: str) -> Dict[str, Any]:
-        """Run a safe validation pass for a single Hermes tool configuration."""
+    def test_native_tool_config(self, tool_id: str) -> Dict[str, Any]:
+        """Run a safe validation pass for a single Native tool configuration."""
         normalized_tool_id = str(tool_id or "").strip()
-        tool = _HERMES_TOOL_CONFIG_BY_ID.get(normalized_tool_id)
+        tool = _NATIVE_TOOL_CONFIG_BY_ID.get(normalized_tool_id)
         if not tool:
             return {"ok": False, "success": False, "error": "未知工具配置项", "tool_id": normalized_tool_id}
 
-        hermes_path, needs_env_refresh = locate_hermes_binary()
-        if hermes_path is None:
-            return {
-                "ok": False,
-                "success": False,
-                "error": "hermes 命令未找到，请先安装 Hermes Agent",
-                "tool_id": normalized_tool_id,
-                "needs_env_refresh": needs_env_refresh,
-            }
-
-        config_path = _run_config_path_command(hermes_path, "path")
-        env_path = _run_config_path_command(hermes_path, "env-path")
-        env_values = _read_env_values(env_path)
-        state = _tool_config_state(config_path, env_values)
+        projection = _load_native_tool_config_projection()
+        config_values, env_values = _tool_projection_values(projection)
+        state = {
+            "config": {".".join(path): value for path, value in config_values.items()},
+            "env_configured": {key: True for key in env_values},
+        }
         checks: list[dict[str, str]] = []
 
         missing_fields: list[str] = []
@@ -3117,15 +2875,15 @@ class MainWindowAPI:
                         "label": str(field.get("label") or field.get("key")),
                         "status": "fail",
                         "detail": "缺少必需配置",
-                    }
-                )
+                }
+            )
 
         if not tool.get("fields"):
             checks.append(
                 {
                     "label": "配置入口",
                     "status": "warn",
-                    "detail": "此工具主要由 Hermes 原生向导或外部授权流程配置",
+                    "detail": "此工具的 Native 配置入口尚未接入，执行时会返回 native_agent_not_ready。",
                 }
             )
 
@@ -3133,44 +2891,13 @@ class MainWindowAPI:
             checks.append(_test_browser_cdp_endpoint(state))
 
         started_at = time.monotonic()
-        try:
-            result = subprocess.run(
-                [hermes_path, "doctor"],
-                capture_output=True,
-                text=True,
-                timeout=_HERMES_TOOL_TEST_TIMEOUT,
-                check=False,
-            )
-        except subprocess.TimeoutExpired:
-            checks.append({"label": "Hermes Doctor", "status": "fail", "detail": "doctor 执行超时"})
-            return {
-                "ok": True,
-                "success": False,
-                "tool_id": normalized_tool_id,
-                "status": "fail",
-                "message": "配置静态检查完成，但 Doctor 超时",
-                "checks": checks,
-                "missing_fields": missing_fields,
-                "elapsed_seconds": round(time.monotonic() - started_at, 2),
-                "needs_env_refresh": needs_env_refresh,
-                "tool_config": self.get_hermes_tool_config(),
+        checks.append(
+            {
+                "label": "Native ToolBroker",
+                "status": "warn",
+                "detail": "工具执行链路仍需通过 ToolDescriptor、PolicyGate 与审批接入。",
             }
-        except FileNotFoundError:
-            return {
-                "ok": False,
-                "success": False,
-                "error": "hermes 命令未找到，请先安装 Hermes Agent",
-                "tool_id": normalized_tool_id,
-                "needs_env_refresh": needs_env_refresh,
-            }
-
-        output = "\n".join(part for part in (result.stdout, result.stderr) if part)
-        doctor_summary = parse_hermes_doctor_output(output)
-        doctor_status, doctor_detail = _doctor_status_for_tool(doctor_summary, normalized_tool_id)
-        if result.returncode != 0 and doctor_status == "warn":
-            doctor_status = "fail"
-            doctor_detail = _compact_command_output(result.stderr or result.stdout) or "doctor 返回非零状态"
-        checks.append({"label": "Hermes Doctor", "status": doctor_status, "detail": doctor_detail})
+        )
 
         if any(check["status"] == "fail" for check in checks):
             status = "fail"
@@ -3182,11 +2909,6 @@ class MainWindowAPI:
             status = "pass"
             message = "配置测试通过"
 
-        try:
-            self._runtime.refresh_hermes_installation()
-        except Exception as exc:
-            logger.warning("工具配置测试后刷新 Hermes 状态失败: %s", exc)
-
         return {
             "ok": True,
             "success": status == "pass",
@@ -3195,256 +2917,117 @@ class MainWindowAPI:
             "message": message,
             "checks": checks,
             "missing_fields": missing_fields,
-            "doctor_summary": doctor_summary,
             "elapsed_seconds": round(time.monotonic() - started_at, 2),
-            "needs_env_refresh": needs_env_refresh,
-            "tool_config": self.get_hermes_tool_config(),
+            "needs_env_refresh": False,
+            "tool_config": self.get_native_tool_config(),
         }
 
-    def check_hermes_update(self) -> Dict[str, Any]:
-        """Check whether the installed Hermes Agent reports an available update."""
-        hermes_path, needs_env_refresh = locate_hermes_binary()
-        if hermes_path is None:
-            return {
-                "ok": False,
-                "success": False,
-                "error": "hermes 命令未找到，请先安装 Hermes Agent",
-                "needs_env_refresh": needs_env_refresh,
-            }
-
-        try:
-            version_result = subprocess.run(
-                [hermes_path, "version"],
-                capture_output=True,
-                text=True,
-                timeout=_HERMES_UPDATE_CHECK_TIMEOUT,
-                check=False,
-            )
-        except subprocess.TimeoutExpired:
-            return {
-                "ok": False,
-                "success": False,
-                "error": "Hermes 版本检查超时",
-                "needs_env_refresh": needs_env_refresh,
-            }
-        except FileNotFoundError:
-            return {
-                "ok": False,
-                "success": False,
-                "error": "hermes 命令未找到，请先安装 Hermes Agent",
-                "needs_env_refresh": needs_env_refresh,
-            }
-
-        version_output = _sanitize_command_output((version_result.stdout or "") + (version_result.stderr or ""))
-        parsed = _parse_hermes_version_output(version_output)
-        check_output = ""
-        check_returncode: int | None = None
-        try:
-            check_result = subprocess.run(
-                [hermes_path, "update", "--check"],
-                capture_output=True,
-                text=True,
-                timeout=_HERMES_UPDATE_CHECK_TIMEOUT,
-                check=False,
-            )
-            check_returncode = check_result.returncode
-            check_output = _sanitize_command_output((check_result.stdout or "") + (check_result.stderr or ""))
-            check_parsed = _parse_hermes_version_output(check_output)
-            parsed["update_available"] = bool(parsed["update_available"] or check_parsed["update_available"])
-            parsed["behind_commits"] = max(int(parsed.get("behind_commits") or 0), int(check_parsed.get("behind_commits") or 0))
-        except subprocess.TimeoutExpired:
-            check_output = "hermes update --check 超时，已保留 hermes version 的结果"
-        except Exception as exc:
-            check_output = f"hermes update --check 失败：{exc}"
-
+    def check_native_agent_update(self) -> Dict[str, Any]:
+        """Return native runtime update status; external execution-kernel updater is removed."""
+        version = str(self._runtime.get_status().get("version") or "0.4.0")
         return {
-            "ok": version_result.returncode == 0,
-            "success": version_result.returncode == 0,
-            "message": "Hermes 更新检查完成",
-            "update_available": bool(parsed["update_available"]),
-            "behind_commits": int(parsed["behind_commits"]),
-            "version": parsed["version"],
-            "release_date": parsed.get("release_date", ""),
-            "summary": parsed["summary"],
-            "version_output": version_output,
-            "check_output": check_output,
-            "check_returncode": check_returncode,
-            "needs_env_refresh": needs_env_refresh,
-        }
-
-    def update_hermes_agent(self, full_backup: bool = False) -> Dict[str, Any]:
-        """Run Hermes' native updater, then refresh Yachiyo state."""
-        hermes_path, needs_env_refresh = locate_hermes_binary()
-        if hermes_path is None:
-            return {
-                "ok": False,
-                "success": False,
-                "error": "hermes 命令未找到，请先安装 Hermes Agent",
-                "needs_env_refresh": needs_env_refresh,
-            }
-
-        before_toolsets = _hermes_tools_manifest(hermes_path)
-        started_at = time.monotonic()
-        backup_flag = "--backup" if full_backup else "--no-backup"
-        try:
-            result = subprocess.run(
-                [hermes_path, "update", "--gateway", "--yes", backup_flag],
-                capture_output=True,
-                text=True,
-                timeout=_HERMES_UPDATE_RUN_TIMEOUT,
-                check=False,
-            )
-        except subprocess.TimeoutExpired as exc:
-            output = _sanitize_command_output(str(exc.stdout or "") + str(exc.stderr or ""))
-            return {
-                "ok": False,
-                "success": False,
-                "error": f"Hermes 更新超过 5 分钟未完成；已停止等待。可以在终端运行 hermes update --gateway --yes {backup_flag} 查看完整输出。",
-                "output": output,
-                "elapsed_seconds": round(time.monotonic() - started_at, 2),
-                "needs_env_refresh": needs_env_refresh,
-            }
-        except FileNotFoundError:
-            return {
-                "ok": False,
-                "success": False,
-                "error": "hermes 命令未找到，请先安装 Hermes Agent",
-                "needs_env_refresh": needs_env_refresh,
-            }
-
-        output = _sanitize_command_output((result.stdout or "") + (result.stderr or ""))
-        try:
-            self._runtime.refresh_hermes_installation()
-        except Exception as exc:
-            logger.warning("Hermes 更新后刷新安装状态失败: %s", exc)
-
-        after_toolsets = _hermes_tools_manifest(hermes_path)
-        version = self.check_hermes_update()
-        doctor = self.run_hermes_diagnostic_command("hermes doctor") if result.returncode == 0 else None
-        return {
-            "ok": result.returncode == 0,
-            "success": result.returncode == 0,
-            "message": "Hermes 更新完成" if result.returncode == 0 else f"Hermes 更新失败（exit={result.returncode}）",
-            "returncode": result.returncode,
-            "output": output,
-            "elapsed_seconds": round(time.monotonic() - started_at, 2),
-            "needs_env_refresh": needs_env_refresh,
+            "ok": True,
+            "success": True,
+            "message": "Native Runtime 不再使用外部执行内核更新器；应用更新请走桌面应用更新入口。",
+            "update_available": False,
+            "behind_commits": 0,
             "version": version,
-            "toolset_delta": _toolset_delta(before_toolsets, after_toolsets),
-            "tool_config": self.get_hermes_tool_config(),
-            "diagnostic_cache": doctor.get("diagnostic_cache") if isinstance(doctor, dict) else None,
+            "release_date": "",
+            "summary": f"oha-yachiyo {version}",
+            "version_output": "",
+            "check_output": "external_execution_kernel_removed",
+            "check_returncode": 0,
+            "needs_env_refresh": False,
+        }
+
+    def update_native_agent(self, full_backup: bool = False) -> Dict[str, Any]:
+        """Compatibility endpoint; external execution-kernel updater is removed."""
+        return {
+            "ok": False,
+            "success": False,
+            "unsupported": True,
+            "code": "external_execution_kernel_removed",
+            "message": "Native Runtime 不再支持外部执行内核更新；请使用应用更新入口更新 oha-yachiyo。",
+            "returncode": 0,
+            "output": "",
+            "elapsed_seconds": 0,
+            "needs_env_refresh": False,
+            "version": self.check_native_agent_update(),
+            "toolset_delta": {"added": [], "removed": [], "changed": []},
+            "tool_config": self.get_native_tool_config(),
+            "diagnostic_cache": self.get_native_diagnostic_cache(),
             "dashboard": self.get_dashboard_data(),
         }
 
     def launch_browser_cdp(self) -> Dict[str, Any]:
         """Best-effort 启动/连接本机 Chrome CDP，并写入 browser.cdp_url。"""
-        hermes_path, needs_env_refresh = locate_hermes_binary()
-        if hermes_path is None:
-            return {
-                "ok": False,
-                "success": False,
-                "error": "hermes 命令未找到，请先安装 Hermes Agent",
-                "needs_env_refresh": needs_env_refresh,
-            }
-
-        hermes_python = _resolve_hermes_python_from_launcher(hermes_path)
-        if not hermes_python:
-            return {
-                "ok": False,
-                "success": False,
-                "error": "无法定位 Hermes Agent 的 Python 环境，无法自动启动 Chrome 调试端口",
-                "manual_command": (
-                    'open -a "Google Chrome" --args --remote-debugging-port=9222 '
-                    '--user-data-dir="$HOME/.hermes/chrome-debug" --no-first-run '
-                    "--no-default-browser-check"
-                ),
-                "needs_env_refresh": needs_env_refresh,
-            }
-
-        script = (
-            "import json, platform, socket, time\n"
-            "from hermes_cli.browser_connect import DEFAULT_BROWSER_CDP_PORT, DEFAULT_BROWSER_CDP_URL, manual_chrome_debug_command, try_launch_chrome_debug\n"
-            "host = '127.0.0.1'\n"
-            "port = DEFAULT_BROWSER_CDP_PORT\n"
-            "system = platform.system()\n"
-            "def reachable():\n"
-            "    try:\n"
-            "        with socket.create_connection((host, port), timeout=0.3):\n"
-            "            return True\n"
-            "    except OSError:\n"
-            "        return False\n"
-            "already = reachable()\n"
-            "launched = False\n"
-            "if not already:\n"
-            "    launched = try_launch_chrome_debug(port, system)\n"
-            "    for _ in range(12):\n"
-            "        if reachable():\n"
-            "            already = True\n"
-            "            break\n"
-            "        time.sleep(0.5)\n"
-            "print(json.dumps({\n"
-            "    'ok': already,\n"
-            "    'url': DEFAULT_BROWSER_CDP_URL,\n"
-            "    'launched': launched,\n"
-            "    'manual_command': manual_chrome_debug_command(port, system) or '',\n"
-            "}, ensure_ascii=False))\n"
+        host = "127.0.0.1"
+        port = 9222
+        url = f"http://{host}:{port}"
+        manual_command = (
+            'open -a "Google Chrome" --args --remote-debugging-port=9222 '
+            '--user-data-dir="$HOME/.oha-yachiyo/chrome-debug" --no-first-run '
+            "--no-default-browser-check"
         )
-        try:
-            result = subprocess.run(
-                [hermes_python, "-c", script],
-                capture_output=True,
-                text=True,
-                timeout=12.0,
-                check=False,
-            )
-        except subprocess.TimeoutExpired:
-            return {
-                "ok": False,
-                "success": False,
-                "error": "启动 Chrome 调试端口超时",
-                "url": "http://127.0.0.1:9222",
-                "manual_command": "",
-                "needs_env_refresh": needs_env_refresh,
-            }
-        except Exception as exc:
-            return {
-                "ok": False,
-                "success": False,
-                "error": f"启动 Chrome 调试端口失败：{exc}",
-                "url": "http://127.0.0.1:9222",
-                "manual_command": "",
-                "needs_env_refresh": needs_env_refresh,
-            }
 
-        output = (result.stdout or "").strip().splitlines()
-        launch_data: dict[str, Any] = {}
-        if output:
+        def reachable() -> bool:
             try:
-                launch_data = json.loads(output[-1])
-            except json.JSONDecodeError:
-                launch_data = {}
-        url = str(launch_data.get("url") or "http://127.0.0.1:9222")
-        manual_command = str(launch_data.get("manual_command") or "")
-        if result.returncode != 0 or not launch_data.get("ok"):
-            detail = _compact_command_output(result.stderr or result.stdout)
+                with socket.create_connection((host, port), timeout=0.3):
+                    return True
+            except OSError:
+                return False
+
+        launched = False
+        if not reachable() and sys.platform == "darwin" and shutil.which("open"):
+            try:
+                subprocess.run(
+                    [
+                        "open",
+                        "-a",
+                        "Google Chrome",
+                        "--args",
+                        "--remote-debugging-port=9222",
+                        f"--user-data-dir={Path.home() / '.oha-yachiyo' / 'chrome-debug'}",
+                        "--no-first-run",
+                        "--no-default-browser-check",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=8.0,
+                    check=False,
+                )
+                launched = True
+            except Exception as exc:
+                logger.info("启动 Chrome 调试端口失败: %s", exc)
+            for _ in range(12):
+                if reachable():
+                    break
+                time.sleep(0.5)
+
+        if not reachable():
             return {
                 "ok": False,
                 "success": False,
-                "error": detail or "未能自动启动或连接 Chrome 调试端口",
+                "error": "未能自动启动或连接 Chrome 调试端口",
                 "url": url,
                 "manual_command": manual_command,
-                "needs_env_refresh": needs_env_refresh,
+                "needs_env_refresh": False,
             }
 
-        ok, error = _run_hermes_config_set(hermes_path, "browser.cdp_url", url)
-        if not ok:
+        projection = _load_native_tool_config_projection()
+        config_projection = projection.get("config") if isinstance(projection.get("config"), dict) else {}
+        config_projection["browser.cdp_url"] = url
+        projection["config"] = config_projection
+        try:
+            _store_native_tool_config_projection(projection)
+        except OSError as exc:
             return {
                 "ok": False,
                 "success": False,
-                "error": error,
+                "error": redact_api_error_text(f"保存 browser.cdp_url 失败：{exc}"),
                 "url": url,
                 "manual_command": manual_command,
-                "needs_env_refresh": needs_env_refresh,
+                "needs_env_refresh": False,
             }
 
         return {
@@ -3452,21 +3035,15 @@ class MainWindowAPI:
             "success": True,
             "message": "已连接 Chrome 调试端口并写入 browser.cdp_url",
             "url": url,
-            "launched": bool(launch_data.get("launched")),
+            "launched": launched,
             "manual_command": manual_command,
-            "needs_env_refresh": needs_env_refresh,
-            "tool_config": self.get_hermes_tool_config(),
+            "needs_env_refresh": False,
+            "tool_config": self.get_native_tool_config(),
         }
 
-    def recheck_hermes(self) -> Dict[str, Any]:
-        """重新检测 Hermes 安装 / 就绪状态，并刷新仪表盘数据。
-
-        用于用户完成 hermes setup / hermes doctor 后手动触发重新检测。
-
-        Returns:
-            get_dashboard_data() 的最新结果（包含 hermes.readiness_level 等字段）
-        """
-        logger.info("手动触发 Hermes 就绪状态重检...")
+    def recheck_native_agent(self) -> Dict[str, Any]:
+        """Compatibility recheck endpoint for Native Agent readiness."""
+        logger.info("手动触发 Native Agent 就绪状态重检...")
         executor_refresh = {
             "updated": False,
             "executor": "unknown",
@@ -3474,10 +3051,9 @@ class MainWindowAPI:
             "reason": "refresh_failed",
         }
         try:
-            self._runtime.refresh_hermes_installation()
             executor_refresh = self._runtime.refresh_task_runner_executor()
         except Exception as exc:
-            logger.warning("重新检测 Hermes 状态失败: %s", exc)
+            logger.warning("重新检测 Native Agent 状态失败: %s", exc)
 
         data = self.get_dashboard_data()
         data["executor_refresh"] = executor_refresh
@@ -3530,7 +3106,7 @@ class MainWindowAPI:
 
     def get_uninstall_preview(
         self,
-        scope: str = "yachiyo_only",
+        scope: str = "oha_only",
         keep_config: bool = True,
         include_gpt_sovits: bool = False,
     ) -> Dict[str, Any]:
@@ -3546,16 +3122,16 @@ class MainWindowAPI:
             return {"ok": True, "plan": plan.to_dict()}
         except Exception as exc:
             logger.error("生成卸载预览失败: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": redact_api_error_text(exc)}
 
     def run_uninstall(
         self,
-        scope: str = "yachiyo_only",
+        scope: str = "oha_only",
         keep_config: bool = True,
         confirm_text: str = "",
         include_gpt_sovits: bool = False,
     ) -> Dict[str, Any]:
-        """执行 Hermes-Yachiyo 卸载，并在成功后安排应用退出。"""
+        """执行 Oha-Yachiyo 卸载，并在成功后安排应用退出。"""
         try:
             from apps.installer.uninstall import execute_uninstall
 
@@ -3572,20 +3148,20 @@ class MainWindowAPI:
             return payload
         except Exception as exc:
             logger.error("执行卸载失败: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": redact_api_error_text(exc)}
 
     def get_backup_status(self) -> Dict[str, Any]:
-        """获取 Hermes-Yachiyo 备份状态。"""
+        """获取 Oha-Yachiyo 备份状态。"""
         try:
             from apps.installer.backup import get_backup_status
 
             return {"ok": True, **get_backup_status()}
         except Exception as exc:
             logger.error("读取备份状态失败: %s", exc)
-            return {"ok": False, "error": str(exc), "has_backup": False}
+            return {"ok": False, "error": redact_api_error_text(exc), "has_backup": False}
 
     def create_backup(self, overwrite_latest: bool = False) -> Dict[str, Any]:
-        """主动生成 Hermes-Yachiyo 本地资料备份。"""
+        """主动生成 Oha-Yachiyo 本地资料备份。"""
         try:
             from apps.installer.backup import create_backup, get_backup_status
 
@@ -3604,7 +3180,7 @@ class MainWindowAPI:
             }
         except Exception as exc:
             logger.error("创建备份失败: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": redact_api_error_text(exc)}
 
     def update_backup_settings(
         self,
@@ -3644,7 +3220,7 @@ class MainWindowAPI:
             }
         except Exception as exc:
             logger.error("保存备份设置失败: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": redact_api_error_text(exc)}
 
     def restore_backup(self, backup_path: str = "") -> Dict[str, Any]:
         """恢复最近或指定版本备份，并安排应用重启。"""
@@ -3659,7 +3235,7 @@ class MainWindowAPI:
             return payload
         except Exception as exc:
             logger.error("恢复备份失败: %s", exc)
-            return {"ok": False, "errors": [str(exc)]}
+            return {"ok": False, "errors": [redact_api_error_text(exc)]}
 
     def delete_backup(self, backup_path: str) -> Dict[str, Any]:
         """删除指定备份。"""
@@ -3670,7 +3246,7 @@ class MainWindowAPI:
             return {"ok": True, "deleted": deleted.to_dict(), "status": get_backup_status()}
         except Exception as exc:
             logger.error("删除备份失败: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": redact_api_error_text(exc)}
 
     def open_backup_location(self, backup_path: str = "") -> Dict[str, Any]:
         """在系统文件管理器中打开备份位置。"""
@@ -3703,4 +3279,4 @@ class MainWindowAPI:
             return {"ok": True}
         except Exception as exc:
             logger.error("打开备份位置失败: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": redact_api_error_text(exc)}

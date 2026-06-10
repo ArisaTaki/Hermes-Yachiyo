@@ -1,5 +1,8 @@
 """ChatStore 测试 — SQLite 持久化层"""
 
+import json
+import sqlite3
+
 import pytest
 
 from apps.core.chat_store import ChatStore, StoredMessage, make_session_title
@@ -85,6 +88,166 @@ class TestChatStore:
         assert len(loaded) == 1
         assert loaded[0].content == "你好"
         assert loaded[0].role == "user"
+
+    def test_save_message_redacts_sensitive_content_error_and_json_payloads(self, store: ChatStore):
+        store.create_session("s1")
+
+        store.save_message(StoredMessage(
+            message_id="m1",
+            session_id="s1",
+            role="user",
+            content="第一行\nOPENAI_API_KEY=sk-secret123456789\n第二行",
+            status="failed",
+            task_id="t1",
+            error="Authorization: Bearer secret-value-123456",
+            created_at="2026-01-01T00:00:00+00:00",
+            attachments_json=json.dumps([{
+                "kind": "image",
+                "name": "截图\n原始",
+                "token": "ghp_secretsecretsecret",
+            }], ensure_ascii=False),
+            metadata_json=json.dumps({
+                "api_key": "sk-secret987654321",
+                "nested": {
+                    "safe": "保留\n换行",
+                    "detail": "token=abc123456",
+                },
+            }, ensure_ascii=False),
+        ))
+
+        loaded = store.load_messages("s1")[0]
+        attachments = json.loads(loaded.attachments_json)
+        metadata = json.loads(loaded.metadata_json)
+        raw = json.dumps(loaded.__dict__, ensure_ascii=False)
+
+        assert "sk-secret" not in raw
+        assert "ghp_secretsecretsecret" not in raw
+        assert "secret-value-123456" not in raw
+        assert loaded.content == "第一行\nOPENAI_API_KEY=[redacted]\n第二行"
+        assert loaded.error == "Authorization=[redacted]"
+        assert attachments[0]["name"] == "截图\n原始"
+        assert attachments[0]["token"] == "[redacted]"
+        assert metadata["api_key"] == "[redacted]"
+        assert metadata["nested"]["safe"] == "保留\n换行"
+        assert metadata["nested"]["detail"] == "token=[redacted]"
+
+    def test_update_message_status_redacts_error(self, store: ChatStore):
+        store.create_session("s1")
+        store.save_message(StoredMessage(
+            message_id="m1",
+            session_id="s1",
+            role="user",
+            content="test",
+            status="pending",
+            task_id="t1",
+            error=None,
+            created_at="2026-01-01T00:00:00+00:00",
+        ))
+
+        store.update_message_status("m1", "failed", error="password:secret123")
+
+        assert store.load_messages("s1")[0].error == "password=[redacted]"
+
+    def test_init_redacts_sensitive_legacy_rows_before_load(self, tmp_path):
+        db_path = tmp_path / "legacy_chat.db"
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.executescript(
+                """
+                CREATE TABLE chat_sessions (
+                    session_id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    execution_session_id TEXT,
+                    conversation_kind TEXT NOT NULL DEFAULT 'main',
+                    runnable_id TEXT NOT NULL DEFAULT '',
+                    runnable_name TEXT NOT NULL DEFAULT '',
+                    run_group_id TEXT NOT NULL DEFAULT '',
+                    participants_json TEXT NOT NULL DEFAULT '[]',
+                    avatar_url TEXT NOT NULL DEFAULT ''
+                );
+                CREATE TABLE chat_messages (
+                    message_id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'completed',
+                    task_id TEXT,
+                    error TEXT,
+                    created_at TEXT NOT NULL,
+                    attachments_json TEXT NOT NULL DEFAULT '[]',
+                    metadata_json TEXT NOT NULL DEFAULT '{}'
+                );
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO chat_sessions (
+                    session_id, title, created_at, execution_session_id, runnable_name,
+                    participants_json, avatar_url
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "s1",
+                    "OPENAI_API_KEY=sk-title-secret",
+                    "2026-01-01T00:00:00+00:00",
+                    "token=session-token-123456",
+                    "Agent token=plain-agent-token",
+                    json.dumps([{"name": "成员", "token": "ghp_secretsecretsecret"}], ensure_ascii=False),
+                    "https://example.test/avatar.png?token=avatar-token-123456",
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO chat_messages (
+                    message_id, session_id, role, content, status, task_id, error,
+                    created_at, attachments_json, metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "m1",
+                    "s1",
+                    "user",
+                    "第一行\napi_key=sk-legacy-secret\n第二行",
+                    "failed",
+                    "t1",
+                    "password:legacy-password",
+                    "2026-01-01T00:00:01+00:00",
+                    json.dumps([{"kind": "image", "token": "ghp_oldoldoldoldold"}], ensure_ascii=False),
+                    json.dumps({"nested": {"secret": "legacy-secret-value", "safe": "保留\n换行"}}, ensure_ascii=False),
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        migrated = ChatStore(db_path=str(db_path))
+        try:
+            session = migrated.get_session("s1")
+            message = migrated.load_messages("s1")[0]
+            participants = json.loads(session.participants_json if session else "[]")
+            attachments = json.loads(message.attachments_json)
+            metadata = json.loads(message.metadata_json)
+            raw_db = db_path.read_bytes().decode("utf-8", errors="ignore")
+
+            assert session is not None
+            assert "sk-title-secret" not in raw_db
+            assert "sk-legacy-secret" not in raw_db
+            assert "session-token-123456" not in raw_db
+            assert "ghp_secretsecretsecret" not in raw_db
+            assert "ghp_oldoldoldoldold" not in raw_db
+            assert session.title == "OPENAI_API_KEY=[redacted]"
+            assert session.execution_session_id == "token=[redacted]"
+            assert session.runnable_name == "Agent token=[redacted]"
+            assert participants[0]["token"] == "[redacted]"
+            assert "avatar-token-123456" not in session.avatar_url
+            assert message.content == "第一行\napi_key=[redacted]\n第二行"
+            assert message.error == "password=[redacted]"
+            assert attachments[0]["token"] == "[redacted]"
+            assert metadata["nested"]["secret"] == "[redacted]"
+            assert metadata["nested"]["safe"] == "保留\n换行"
+        finally:
+            migrated.close()
 
     def test_load_messages_limit_returns_latest_in_time_order(self, store: ChatStore):
         store.create_session("s1")
@@ -225,23 +388,23 @@ class TestChatStore:
         result = store.get_session("nonexistent")
         assert result is None
 
-    def test_update_hermes_session_id(self, store: ChatStore):
+    def test_update_execution_session_id(self, store: ChatStore):
         store.create_session("s1")
-        store.update_hermes_session_id("s1", "hermes_abc")
+        store.update_execution_session_id("s1", "native_abc")
         session = store.get_session("s1")
         assert session is not None
-        assert session.hermes_session_id == "hermes_abc"
+        assert session.execution_session_id == "native_abc"
 
-    def test_hermes_session_id_in_list_sessions(self, store: ChatStore):
+    def test_execution_session_id_in_list_sessions(self, store: ChatStore):
         store.create_session("s1")
         store.save_message(StoredMessage(
             message_id="m1", session_id="s1", role="user",
             content="hi", status="completed", task_id=None,
             error=None, created_at="2026-01-01T00:00:00+00:00",
         ))
-        store.update_hermes_session_id("s1", "hermes_xyz")
+        store.update_execution_session_id("s1", "native_xyz")
         sessions = store.list_sessions()
-        assert sessions[0].hermes_session_id == "hermes_xyz"
+        assert sessions[0].execution_session_id == "native_xyz"
 
     def test_set_session_title_if_empty(self, store: ChatStore):
         store.create_session("s1")

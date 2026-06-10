@@ -1,14 +1,15 @@
 """Reusable model profile storage and validation.
 
 Model profiles are shared configuration records for Agent Studio, Workflow
-Studio, and the app-level model configuration page. Secrets stay in the local
-backend database; public payloads only expose configured state.
+Studio, and the app-level model configuration page. Secrets are stored behind
+credential references; public payloads only expose configured state.
 """
 
 from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
 import re
 import secrets
@@ -25,16 +26,20 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 from apps.core.tls import urlopen_with_bundled_ca
-from apps.shell.hermes_capabilities import lookup_model_supports_vision
+from apps.shell.credential_store import CredentialStore, CredentialStoreError, create_credential_store
+from apps.shell.model_capabilities import lookup_model_supports_vision
 from apps.shell.model_provider_adapters import resolve_provider_adapter
 from apps.shell.provider_catalog_sync import cached_model_metadata, cached_provider_models
+from packages.security import redact_api_error_text
+
+logger = logging.getLogger(__name__)
 
 
 class ModelProfileError(RuntimeError):
     """Raised when a model profile operation cannot be completed."""
 
 
-_OPENAI_COMPATIBLE_CHAT_TIMEOUT_ENV = "HERMES_YACHIYO_MODEL_TIMEOUT_SECONDS"
+_OPENAI_COMPATIBLE_CHAT_TIMEOUT_ENV = "OHA_YACHIYO_MODEL_TIMEOUT_SECONDS"
 OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS = 180
 
 
@@ -57,9 +62,8 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _hermes_yachiyo_home() -> Path:
-    hermes_home = os.getenv("HERMES_HOME", os.path.expanduser("~/.hermes"))
-    root = Path(hermes_home) / "yachiyo"
+def _oha_yachiyo_home() -> Path:
+    root = Path(os.getenv("OHA_YACHIYO_HOME", os.path.expanduser("~/.oha-yachiyo")))
     root.mkdir(parents=True, exist_ok=True)
     return root
 
@@ -257,7 +261,7 @@ def _remote_model_supports_vision(remote_model: dict[str, Any], model_id: str) -
 
 def _effective_provider_id(provider: str, base_url: str = "", model: str = "") -> str:
     adapter = resolve_provider_adapter(provider, base_url, model)
-    return str(adapter.get("hermes_provider") or provider or "").strip().lower()
+    return str(adapter.get("native_provider") or provider or "").strip().lower()
 
 
 def _provider_capability_model_id(provider: str, model: str) -> str:
@@ -431,18 +435,26 @@ def _vision_test_passed(response: str, expected: tuple[str, ...]) -> bool:
 class ModelProfileService:
     """Persistent model profile registry."""
 
-    def __init__(self, db_path: Path | str | None = None, workspace_dir: Path | str | None = None) -> None:
+    def __init__(
+        self,
+        db_path: Path | str | None = None,
+        workspace_dir: Path | str | None = None,
+        *,
+        credential_store: CredentialStore | None = None,
+    ) -> None:
         import threading
-        root = Path(workspace_dir) if workspace_dir is not None else _hermes_yachiyo_home()
+        root = Path(workspace_dir) if workspace_dir is not None else _oha_yachiyo_home()
         root.mkdir(parents=True, exist_ok=True)
         self.workspace_dir = root
         self.db_path = Path(db_path) if db_path is not None else root / "model-profiles.db"
+        self._credential_store = credential_store or create_credential_store(root)
         self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._lock = threading.RLock()
         self._init_db()
 
     def close(self) -> None:
+        self._credential_store.close()
         self._conn.close()
 
     def _init_db(self) -> None:
@@ -455,6 +467,7 @@ class ModelProfileService:
                 provider TEXT NOT NULL DEFAULT 'openai_compatible',
                 base_url TEXT NOT NULL DEFAULT '',
                 api_key TEXT NOT NULL DEFAULT '',
+                credential_ref TEXT NOT NULL DEFAULT '',
                 options_json TEXT NOT NULL DEFAULT '{}',
                 enabled INTEGER NOT NULL DEFAULT 1,
                 status TEXT NOT NULL DEFAULT 'untested',
@@ -473,6 +486,7 @@ class ModelProfileService:
                 base_url TEXT NOT NULL DEFAULT '',
                 model TEXT NOT NULL DEFAULT '',
                 api_key TEXT NOT NULL DEFAULT '',
+                credential_ref TEXT NOT NULL DEFAULT '',
                 options_json TEXT NOT NULL DEFAULT '{}',
                 enabled INTEGER NOT NULL DEFAULT 1,
                 status TEXT NOT NULL DEFAULT 'untested',
@@ -487,14 +501,32 @@ class ModelProfileService:
             );
             """
         )
-        self._ensure_columns()
+        scrubbed_credentials = self._ensure_columns()
         self._conn.commit()
+        if scrubbed_credentials:
+            self._vacuum_after_secret_scrub()
 
-    def _ensure_columns(self) -> None:
+    def _ensure_columns(self) -> bool:
         columns = {str(row["name"]) for row in self._conn.execute("PRAGMA table_info(model_profiles)").fetchall()}
         if "source_id" not in columns:
             self._conn.execute("ALTER TABLE model_profiles ADD COLUMN source_id TEXT NOT NULL DEFAULT ''")
         self._ensure_source_schema()
+        self._ensure_table_column("model_sources", "credential_ref", "TEXT NOT NULL DEFAULT ''")
+        self._ensure_table_column("model_profiles", "credential_ref", "TEXT NOT NULL DEFAULT ''")
+        return self._migrate_legacy_credentials()
+
+    def _vacuum_after_secret_scrub(self) -> None:
+        try:
+            self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            self._conn.execute("VACUUM")
+            self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except sqlite3.Error:
+            logger.debug("ModelProfileService secret scrub vacuum failed", exc_info=True)
+
+    def _ensure_table_column(self, table: str, column: str, definition: str) -> None:
+        columns = {str(row["name"]) for row in self._conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        if column not in columns:
+            self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     def _ensure_source_schema(self) -> None:
         columns = {str(row["name"]) for row in self._conn.execute("PRAGMA table_info(model_sources)").fetchall()}
@@ -516,6 +548,7 @@ class ModelProfileService:
                 provider TEXT NOT NULL DEFAULT 'openai_compatible',
                 base_url TEXT NOT NULL DEFAULT '',
                 api_key TEXT NOT NULL DEFAULT '',
+                credential_ref TEXT NOT NULL DEFAULT '',
                 options_json TEXT NOT NULL DEFAULT '{}',
                 enabled INTEGER NOT NULL DEFAULT 1,
                 status TEXT NOT NULL DEFAULT 'untested',
@@ -558,9 +591,9 @@ class ModelProfileService:
                 self._conn.execute(
                     """
                     INSERT INTO model_sources (
-                        source_id, name, capability, provider, base_url, api_key, options_json,
+                        source_id, name, capability, provider, base_url, api_key, credential_ref, options_json,
                         enabled, status, last_tested_at, last_error, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         next_source_id,
@@ -569,6 +602,7 @@ class ModelProfileService:
                         str(row["provider"]),
                         str(row["base_url"]),
                         str(row["api_key"]),
+                        str(row["credential_ref"]) if "credential_ref" in legacy_columns else "",
                         str(row["options_json"]),
                         int(row["enabled"]),
                         str(row["status"]),
@@ -584,6 +618,62 @@ class ModelProfileService:
                         (next_source_id, source_id, capability),
                     )
         self._conn.execute(f"DROP TABLE {legacy_table}")
+
+    def _credential_ref(self, table: str, row_id: str) -> str:
+        kind = "model_source" if table == "model_sources" else "model_profile"
+        return f"{kind}:{row_id}:api_key"
+
+    def _store_credential(self, ref: str, secret: str) -> None:
+        secret = str(secret or "").strip()
+        if not secret:
+            return
+        try:
+            self._credential_store.set(ref, secret)
+        except CredentialStoreError as exc:
+            raise ModelProfileError(redact_api_error_text(exc)) from exc
+
+    def _read_credential(self, ref: str) -> str:
+        ref = str(ref or "").strip()
+        if not ref:
+            return ""
+        try:
+            return self._credential_store.get(ref)
+        except CredentialStoreError as exc:
+            raise ModelProfileError(redact_api_error_text(exc)) from exc
+
+    def _delete_credential(self, ref: str) -> None:
+        ref = str(ref or "").strip()
+        if not ref:
+            return
+        try:
+            self._credential_store.delete(ref)
+        except CredentialStoreError:
+            pass
+
+    def _row_secret_configured(self, row: sqlite3.Row) -> bool:
+        return bool(str(row["credential_ref"] or "").strip() or str(row["api_key"] or "").strip())
+
+    def _migrate_legacy_credentials(self) -> bool:
+        scrubbed = False
+        for table, id_column in (("model_sources", "source_id"), ("model_profiles", "profile_id")):
+            rows = self._conn.execute(
+                f"SELECT {id_column}, api_key, credential_ref FROM {table} WHERE api_key<>''"
+            ).fetchall()
+            for row in rows:
+                secret = str(row["api_key"] or "").strip()
+                if not secret:
+                    continue
+                credential_ref = str(row["credential_ref"] or "").strip() or self._credential_ref(table, str(row[id_column]))
+                try:
+                    self._credential_store.set(credential_ref, secret)
+                except CredentialStoreError:
+                    continue
+                self._conn.execute(
+                    f"UPDATE {table} SET credential_ref=?, api_key='' WHERE {id_column}=?",
+                    (credential_ref, str(row[id_column])),
+                )
+                scrubbed = True
+        return scrubbed
 
     @staticmethod
     def _unique_source_name(name: str, capability: str, used_names: set[tuple[str, str]]) -> str:
@@ -606,7 +696,7 @@ class ModelProfileService:
             "capability": row["capability"],
             "provider": row["provider"],
             "base_url": row["base_url"],
-            "api_key_configured": bool(row["api_key"]),
+            "api_key_configured": self._row_secret_configured(row),
             "options": _json_load(row["options_json"], {}),
             "enabled": bool(row["enabled"]),
             "status": row["status"],
@@ -616,12 +706,14 @@ class ModelProfileService:
             "updated_at": row["updated_at"],
             "runtime": adapter,
             "runtime_scope": adapter["runtime_scope"],
-            "hermes_provider": adapter["hermes_provider"],
-            "can_use_as_hermes": adapter["can_use_as_hermes"],
+            "native_provider": adapter["native_provider"],
+            "native_provider_label": adapter["native_provider_label"],
+            "can_use_as_native": adapter["can_use_as_native"],
             "api_key_name": adapter["api_key_name"],
         }
         if include_secret:
-            source["api_key"] = row["api_key"]
+            source["credential_ref"] = row["credential_ref"]
+            source["api_key"] = self._read_credential(str(row["credential_ref"] or "")) or str(row["api_key"] or "")
         return source
 
     def _row_to_profile(self, row: sqlite3.Row, *, include_secret: bool = False) -> dict[str, Any]:
@@ -648,7 +740,7 @@ class ModelProfileService:
             "provider": source["provider"] if source else row["provider"],
             "base_url": source["base_url"] if source else row["base_url"],
             "model": row["model"],
-            "api_key_configured": bool(source.get("api_key") or source.get("api_key_configured")) if source else bool(row["api_key"]),
+            "api_key_configured": bool(source.get("api_key_configured")) if source else self._row_secret_configured(row),
             "source_name": source["name"] if source else "",
             "source_provider": source["provider"] if source else "",
             "options": _json_load(row["options_json"], {}),
@@ -662,12 +754,20 @@ class ModelProfileService:
             "updated_at": row["updated_at"],
             "runtime": adapter,
             "runtime_scope": adapter["runtime_scope"],
-            "hermes_provider": adapter["hermes_provider"],
-            "can_use_as_hermes": adapter["can_use_as_hermes"],
+            "native_provider": adapter["native_provider"],
+            "native_provider_label": adapter["native_provider_label"],
+            "can_use_as_native": adapter["can_use_as_native"],
             "api_key_name": adapter["api_key_name"],
         }
         if include_secret:
-            profile["api_key"] = source.get("api_key", "") if source else row["api_key"]
+            profile["credential_ref"] = row["credential_ref"]
+            if source:
+                profile["source_credential_ref"] = source.get("credential_ref", "")
+            profile["api_key"] = (
+                source.get("api_key", "")
+                if source
+                else self._read_credential(str(row["credential_ref"] or "")) or str(row["api_key"] or "")
+            )
         return profile
 
     def list_profiles(self) -> dict[str, Any]:
@@ -715,29 +815,38 @@ class ModelProfileService:
         self._ensure_source_id_available(name, capability)
         now = _now()
         source_id = str(payload.get("source_id") or _source_id())
-        self._conn.execute(
-            """
-            INSERT INTO model_sources (
-                source_id, name, capability, provider, base_url, api_key, options_json,
-                enabled, status, last_tested_at, last_error, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                source_id,
-                name,
-                capability,
-                str(payload.get("provider") or "openai_compatible"),
-                str(payload.get("base_url") or ""),
-                str(payload.get("api_key") or ""),
-                _json_dump(payload.get("options") or {}),
-                1 if payload.get("enabled", True) else 0,
-                "untested",
-                "",
-                "",
-                now,
-                now,
-            ),
-        )
+        api_key = str(payload.get("api_key") or "").strip()
+        credential_ref = self._credential_ref("model_sources", source_id) if api_key else ""
+        if api_key:
+            self._store_credential(credential_ref, api_key)
+        try:
+            self._conn.execute(
+                """
+                INSERT INTO model_sources (
+                    source_id, name, capability, provider, base_url, api_key, credential_ref, options_json,
+                    enabled, status, last_tested_at, last_error, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    source_id,
+                    name,
+                    capability,
+                    str(payload.get("provider") or "openai_compatible"),
+                    str(payload.get("base_url") or ""),
+                    "",
+                    credential_ref,
+                    _json_dump(payload.get("options") or {}),
+                    1 if payload.get("enabled", True) else 0,
+                    "untested",
+                    "",
+                    "",
+                    now,
+                    now,
+                ),
+            )
+        except sqlite3.Error:
+            self._delete_credential(credential_ref)
+            raise
         self._conn.commit()
         return self.get_source(source_id)
 
@@ -778,14 +887,15 @@ class ModelProfileService:
             ).fetchone()
             if mismatched is not None:
                 raise ModelProfileError("提供商源类型不能与已登记模型类型不一致")
-            api_key = str(current.get("api_key") or "")
+            credential_ref = str(current.get("credential_ref") or "").strip()
             if "api_key" in payload and str(payload.get("api_key") or "").strip():
-                api_key = str(payload.get("api_key") or "").strip()
+                credential_ref = credential_ref or self._credential_ref("model_sources", source_id)
+                self._store_credential(credential_ref, str(payload.get("api_key") or "").strip())
             now = _now()
             self._conn.execute(
                 """
                 UPDATE model_sources
-                   SET name=?, capability=?, provider=?, base_url=?, api_key=?, options_json=?, enabled=?, updated_at=?
+                   SET name=?, capability=?, provider=?, base_url=?, api_key='', credential_ref=?, options_json=?, enabled=?, updated_at=?
                 WHERE source_id=?
                 """,
                 (
@@ -793,7 +903,7 @@ class ModelProfileService:
                     next_capability,
                     str(next_source.get("provider") or "openai_compatible"),
                     str(next_source.get("base_url") or ""),
-                    api_key,
+                    credential_ref,
                     _json_dump(next_source.get("options") or {}),
                     1 if next_source.get("enabled", True) else 0,
                     now,
@@ -818,11 +928,25 @@ class ModelProfileService:
                 str(row["profile_id"])
                 for row in self._conn.execute("SELECT profile_id FROM model_profiles WHERE source_id=?", (source_id,)).fetchall()
             ]
+            credential_refs = [
+                str(row["credential_ref"] or "")
+                for row in self._conn.execute(
+                    """
+                    SELECT credential_ref FROM model_sources WHERE source_id=?
+                    UNION ALL
+                    SELECT credential_ref FROM model_profiles WHERE source_id=?
+                    """,
+                    (source_id, source_id),
+                ).fetchall()
+                if str(row["credential_ref"] or "").strip()
+            ]
             self._conn.execute("DELETE FROM model_sources WHERE source_id=?", (source_id,))
             self._conn.execute("DELETE FROM model_profiles WHERE source_id=?", (source_id,))
             for profile_id in model_ids:
                 self._conn.execute("UPDATE model_profile_defaults SET profile_id='' WHERE profile_id=?", (profile_id,))
             self._conn.commit()
+            for credential_ref in credential_refs:
+                self._delete_credential(credential_ref)
             return {"ok": True}
 
     def list_source_profiles(self, source_id: str) -> dict[str, Any]:
@@ -885,7 +1009,7 @@ class ModelProfileService:
                 [{"role": "user", "content": "Reply with OK."}],
             )
         except ModelProfileError as exc:
-            return self._record_source_test_result(source_id, ok=False, message=str(exc))
+            return self._record_source_test_result(source_id, ok=False, message=redact_api_error_text(exc))
         return self._record_source_test_result(
             source_id,
             ok=True,
@@ -1041,8 +1165,6 @@ class ModelProfileService:
                     raise ModelProfileError(f"{capability} 默认 Profile 类型不匹配")
                 if not profile.get("enabled", True):
                     raise ModelProfileError(f"{capability} 默认 Profile 已暂停")
-                if not profile.get("can_use_as_hermes", True):
-                    raise ModelProfileError(f"{capability} 默认 Profile 不能映射到 Hermes Provider")
             self._conn.execute(
                 """
                 INSERT INTO model_profile_defaults (capability, profile_id)
@@ -1189,31 +1311,40 @@ class ModelProfileService:
                 raise ModelProfileError("模型类型必须与提供商源类型一致")
         now = _now()
         profile_id = str(payload.get("profile_id") or _profile_id())
-        self._conn.execute(
-            """
-            INSERT INTO model_profiles (
-                profile_id, source_id, name, capability, provider, base_url, model, api_key,
-                options_json, enabled, status, last_tested_at, last_error, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                profile_id,
-                source_id,
-                name,
-                capability,
-                str(payload.get("provider") or "openai_compatible"),
-                str(payload.get("base_url") or ""),
-                str(payload.get("model") or ""),
-                "" if source_id else str(payload.get("api_key") or ""),
-                _json_dump(payload.get("options") or {}),
-                1 if payload.get("enabled", True) else 0,
-                "untested",
-                "",
-                "",
-                now,
-                now,
-            ),
-        )
+        api_key = "" if source_id else str(payload.get("api_key") or "").strip()
+        credential_ref = self._credential_ref("model_profiles", profile_id) if api_key else ""
+        if api_key:
+            self._store_credential(credential_ref, api_key)
+        try:
+            self._conn.execute(
+                """
+                INSERT INTO model_profiles (
+                    profile_id, source_id, name, capability, provider, base_url, model, api_key, credential_ref,
+                    options_json, enabled, status, last_tested_at, last_error, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    profile_id,
+                    source_id,
+                    name,
+                    capability,
+                    str(payload.get("provider") or "openai_compatible"),
+                    str(payload.get("base_url") or ""),
+                    str(payload.get("model") or ""),
+                    "",
+                    credential_ref,
+                    _json_dump(payload.get("options") or {}),
+                    1 if payload.get("enabled", True) else 0,
+                    "untested",
+                    "",
+                    "",
+                    now,
+                    now,
+                ),
+            )
+        except sqlite3.Error:
+            self._delete_credential(credential_ref)
+            raise
         self._conn.commit()
         return self.get_profile(profile_id)
 
@@ -1293,9 +1424,15 @@ class ModelProfileService:
                 source = self._get_source_locked(next_source_id)
                 if str(source.get("capability") or "chat") != str(next_profile.get("capability") or "chat"):
                     raise ModelProfileError("模型类型必须与提供商源类型一致")
-            api_key = "" if next_source_id else str(current.get("api_key") or "")
+            credential_ref = "" if next_source_id else str(current.get("credential_ref") or "").strip()
+            current_api_key = "" if next_source_id else str(current.get("api_key") or "").strip()
             if not next_source_id and "api_key" in payload and str(payload.get("api_key") or "").strip():
-                api_key = str(payload.get("api_key") or "").strip()
+                current_api_key = str(payload.get("api_key") or "").strip()
+            if not next_source_id and current_api_key:
+                credential_ref = credential_ref or self._credential_ref("model_profiles", profile_id)
+                self._store_credential(credential_ref, current_api_key)
+            if next_source_id and str(current.get("credential_ref") or "").strip():
+                self._delete_credential(str(current.get("credential_ref") or ""))
             profile_enabled = next_profile.get("enabled", True)
             if "enabled" not in payload and "profile_enabled" in current:
                 profile_enabled = current.get("profile_enabled", True)
@@ -1303,7 +1440,7 @@ class ModelProfileService:
             self._conn.execute(
                 """
                 UPDATE model_profiles
-                   SET source_id=?, name=?, capability=?, provider=?, base_url=?, model=?, api_key=?,
+                   SET source_id=?, name=?, capability=?, provider=?, base_url=?, model=?, api_key='', credential_ref=?,
                        options_json=?, enabled=?, updated_at=?
                  WHERE profile_id=?
                 """,
@@ -1314,7 +1451,7 @@ class ModelProfileService:
                     str(next_profile.get("provider") or "openai_compatible"),
                     str(next_profile.get("base_url") or ""),
                     str(next_profile.get("model") or ""),
-                    api_key,
+                    credential_ref,
                     _json_dump(next_profile.get("options") or {}),
                     1 if profile_enabled else 0,
                     now,
@@ -1325,12 +1462,15 @@ class ModelProfileService:
             return self._get_profile_locked(profile_id)
 
     def delete_profile(self, profile_id: str) -> dict[str, Any]:
+        row = self._conn.execute("SELECT credential_ref FROM model_profiles WHERE profile_id=?", (profile_id,)).fetchone()
         self._conn.execute("DELETE FROM model_profiles WHERE profile_id=?", (profile_id,))
         self._conn.execute(
             "UPDATE model_profile_defaults SET profile_id='' WHERE profile_id=?",
             (profile_id,),
         )
         self._conn.commit()
+        if row is not None:
+            self._delete_credential(str(row["credential_ref"] or ""))
         return {"ok": True}
 
     def test_profile(self, profile_id: str) -> dict[str, Any]:
@@ -1394,7 +1534,7 @@ class ModelProfileService:
                 messages,
             )
         except ModelProfileError as exc:
-            message = str(exc)
+            message = redact_api_error_text(exc)
             if capability == "vision":
                 hint = _vision_route_failure_hint(provider, base_url, model, message)
                 if hint:
@@ -1567,3 +1707,10 @@ def get_model_profile_service() -> ModelProfileService:
     if _model_profile_service is None:
         _model_profile_service = ModelProfileService()
     return _model_profile_service
+
+
+def close_model_profile_service() -> None:
+    global _model_profile_service
+    if _model_profile_service is not None:
+        _model_profile_service.close()
+        _model_profile_service = None

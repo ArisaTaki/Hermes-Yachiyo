@@ -8,18 +8,18 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from apps.core.runtime import HermesRuntime
+    from apps.core.runtime import AppRuntime
 
-_runtime: HermesRuntime | None = None
+_runtime: AppRuntime | None = None
 
 
-def set_runtime(runtime: "HermesRuntime") -> None:
+def set_runtime(runtime: "AppRuntime") -> None:
     """由 Shell 启动时注入 Core Runtime 实例"""
     global _runtime
     _runtime = runtime
 
 
-def get_runtime() -> "HermesRuntime":
+def get_runtime() -> "AppRuntime":
     """供 Bridge 路由获取 Core Runtime（必须先调用 set_runtime）"""
     if _runtime is None:
         raise RuntimeError("Bridge: Runtime 尚未注入，请先调用 set_runtime()")

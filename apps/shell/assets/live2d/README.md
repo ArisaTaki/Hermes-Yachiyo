@@ -12,11 +12,11 @@
 - 用户下载后，解压到本机目录：
 
 ```text
-~/.hermes/yachiyo/assets/live2d/
+~/.oha-yachiyo/assets/live2d/
 ```
 
 - 程序运行时会优先从用户目录中自动检测模型资源。
 
 发布说明见：
 
-- https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo/releases
+- https://github.com/kuguya-AI-app-develop/Oha-Yachiyo/releases

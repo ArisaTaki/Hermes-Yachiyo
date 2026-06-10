@@ -106,11 +106,11 @@ class TestAppStateUpdateStatus:
             app_state.update_task_status(
                 task.task_id,
                 TaskStatus.FAILED,
-                error="Hermes streaming bridge 执行失败\nexit=1",
+                error="Native Agent execution 执行失败\nexit=1",
             )
         assert (
             f"任务状态已更新: {task.task_id} → failed | "
-            "error=Hermes streaming bridge 执行失败 exit=1"
+            "error=Native Agent execution 执行失败 exit=1"
         ) in caplog.text
 
     def test_terminal_state_raises(self, app_state):

@@ -16,8 +16,10 @@ from apps.core.special_sessions import PROACTIVE_CHAT_SESSION_ID
 from apps.core.state import AppState
 import apps.shell.chat_api as chat_api_mod
 from apps.shell.agent_runtime import AgentRuntimeError, AgentRuntimeService
-from apps.shell.chat_api import ChatAPI
+from apps.shell.chat_api import ChatAPI, GroupDispatchDirective
+from apps.shell.credential_store import MemoryCredentialStore
 from packages.protocol.enums import TaskStatus
+from scripts.verify_secret_redaction import verify_secret_redaction
 
 
 class _RuntimeStub:
@@ -50,6 +52,15 @@ def _make_api(tmp_path):
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
     runtime = _RuntimeStub(store)
     return ChatAPI(runtime), runtime, store
+
+
+def _make_agent_runtime_service(tmp_path) -> AgentRuntimeService:
+    return AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime.db",
+        workspace_dir=tmp_path / "agent-runtime",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
 
 
 def _wait_for_agent_run(service: AgentRuntimeService, run_id: str, timeout: float = 5.0) -> dict:
@@ -132,31 +143,170 @@ def test_send_message_creates_task_and_links_user_message(tmp_path):
         store.close()
 
 
-def test_send_message_rejects_when_hermes_unavailable(tmp_path):
+def test_send_message_is_idempotent_for_client_message_id(tmp_path):
+    api, runtime, store = _make_api(tmp_path)
+    try:
+        first = api.send_message("你好", client_message_id="client-msg-1")
+        second = api.send_message("你好", client_message_id="client-msg-1")
+
+        assert first["ok"] is True
+        assert second["ok"] is True
+        assert second["idempotent"] is True
+        assert second["message_id"] == first["message_id"]
+        assert second["task_id"] == first["task_id"]
+        assert len(runtime.state.list_tasks()) == 1
+        assert len(runtime.chat_session.get_messages()) == 1
+        assert runtime.chat_session.get_messages()[0].metadata["client_message_id"] == "client-msg-1"
+    finally:
+        store.close()
+
+
+def test_send_message_rejects_when_native_agent_unavailable(tmp_path):
     api, runtime, store = _make_api(tmp_path)
     runtime.task_runner = SimpleNamespace(
         executor=SimpleNamespace(
-            name="HermesUnavailableExecutor",
-            reason="Hermes Agent 当前不可用",
+            name="NativeAgentUnavailableExecutor",
+            reason="Native Agent 当前未就绪，请先配置并选择默认对话模型。",
+            code="native_agent_not_ready",
+            reason_code="model_profile_required",
         )
     )
     try:
         result = api.send_message("你好")
 
-        assert result == {"ok": False, "error": "Hermes Agent 当前不可用"}
+        assert result == {
+            "ok": False,
+            "code": "native_agent_not_ready",
+            "reason": "model_profile_required",
+            "error": "Native Agent 当前未就绪，请先配置并选择默认对话模型。",
+        }
         assert runtime.state.list_tasks() == []
         assert runtime.chat_session.get_messages() == []
     finally:
         store.close()
 
 
+def test_running_main_chat_task_projects_native_tool_approval(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
+    task = runtime.state.create_task(
+        "需要修改文件",
+        chat_session_id=runtime.chat_session.session_id,
+    )
+    runtime.state.update_task_status(task.task_id, TaskStatus.RUNNING)
+    user_message_id = runtime.chat_session.add_user_message("需要修改文件")
+    runtime.chat_session.link_message_to_task(user_message_id, task.task_id)
+
+    class FakeNativeRunService:
+        def get_task_run_link(self, task_id):
+            assert task_id == task.task_id
+            return {"task_id": task_id, "run_id": "main_chat_run_approval", "session_id": runtime.chat_session.session_id}
+
+        def get_run(self, run_id):
+            assert run_id == "main_chat_run_approval"
+            return {
+                "run_id": run_id,
+                "kind": "main_chat_run",
+                "status": "approval_required",
+                "run_group_id": "run_group_main",
+                "result": "等待审批：workspace.write_patch",
+                "pending_approval": {
+                    "approval_id": "approval_patch",
+                    "tool": "workspace.write_patch",
+                    "input_preview": {"path": "src/app.py", "patch": "@@ demo"},
+                },
+            }
+
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: FakeNativeRunService())
+    monkeypatch.setattr(chat_api_mod, "get_activity_store", lambda: activity_store)
+    try:
+        payload = api.get_messages()
+
+        assistant = next(message for message in payload["messages"] if message["role"] == "assistant")
+        assert assistant["status"] == "processing"
+        assert assistant["metadata"]["run_status"] == "approval_required"
+        assert assistant["metadata"]["run_id"] == "main_chat_run_approval"
+        assert assistant["metadata"]["pending_approval"]["tool"] == "workspace.write_patch"
+        assert assistant["metadata"]["pending_approval"]["input_preview"]["path"] == "src/app.py"
+        assert "需要你确认一次工具调用" in assistant["content"]
+        assert "工具：workspace.write_patch" in assistant["content"]
+        assert "关联任务：需要修改文件" in assistant["content"]
+        assert "请求摘要" in assistant["content"]
+        assert payload["approval_count"] == 1
+        assert assistant["activity_events"][0]["event_id"] == f"{task.task_id}-main-chat-approval-required"
+        assert assistant["activity_events"][0]["status"] == "approval_required"
+        assert assistant["activity_events"][0]["metadata"]["pending_approval"]["tool"] == "workspace.write_patch"
+    finally:
+        activity_store.close()
+        store.close()
+
+
+def test_running_main_chat_task_clears_approval_projection_after_resume(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
+    task = runtime.state.create_task(
+        "需要运行命令",
+        chat_session_id=runtime.chat_session.session_id,
+    )
+    runtime.state.update_task_status(task.task_id, TaskStatus.RUNNING)
+    user_message_id = runtime.chat_session.add_user_message("需要运行命令")
+    runtime.chat_session.link_message_to_task(user_message_id, task.task_id)
+
+    class FakeNativeRunService:
+        status = "approval_required"
+
+        def get_task_run_link(self, task_id):
+            assert task_id == task.task_id
+            return {"task_id": task_id, "run_id": "main_chat_run_resume", "session_id": runtime.chat_session.session_id}
+
+        def get_run(self, run_id):
+            assert run_id == "main_chat_run_resume"
+            pending = (
+                {
+                    "approval_id": "approval_terminal",
+                    "tool": "terminal.run",
+                    "input_preview": {"command": "python -V"},
+                }
+                if self.status == "approval_required"
+                else {}
+            )
+            return {
+                "run_id": run_id,
+                "kind": "main_chat_run",
+                "status": self.status,
+                "run_group_id": "run_group_main",
+                "result": "等待审批：terminal.run" if pending else "",
+                "pending_approval": pending,
+            }
+
+    service = FakeNativeRunService()
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: service)
+    monkeypatch.setattr(chat_api_mod, "get_activity_store", lambda: activity_store)
+    try:
+        first = api.get_messages()
+        approval = next(message for message in first["messages"] if message["role"] == "assistant")
+        assert approval["metadata"]["run_status"] == "approval_required"
+        assert approval["metadata"]["pending_approval"]["tool"] == "terminal.run"
+
+        service.status = "running"
+        resumed = api.get_messages()
+
+        assistant = next(message for message in resumed["messages"] if message["role"] == "assistant")
+        assert assistant["status"] == "processing"
+        assert assistant["content"] == ""
+        assert assistant["metadata"]["run_status"] == "processing"
+        assert assistant["metadata"]["pending_approval"] == {}
+        assert assistant["metadata"]["run_progress_title"] == "审批已通过"
+        events = activity_store.list_events(task_id=task.task_id, limit=5, key_only=False)
+        assert len(events) == 1
+    finally:
+        activity_store.close()
+        store.close()
+
+
 def test_agent_mention_creates_agent_run_without_general_task(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
-    service = AgentRuntimeService(
-        db_path=tmp_path / "agent-runtime.db",
-        workspace_dir=tmp_path / "agent-runtime",
-        seed_templates=False,
-    )
+    service = _make_agent_runtime_service(tmp_path)
     agent = service.create_agent(
         {
             "name": "Helper",
@@ -208,11 +358,7 @@ def test_agent_mention_creates_agent_run_without_general_task(tmp_path, monkeypa
 
 def test_agent_scoped_session_continues_without_new_mention(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
-    service = AgentRuntimeService(
-        db_path=tmp_path / "agent-runtime.db",
-        workspace_dir=tmp_path / "agent-runtime",
-        seed_templates=False,
-    )
+    service = _make_agent_runtime_service(tmp_path)
     agent = service.create_agent(
         {
             "name": "Helper",
@@ -262,11 +408,7 @@ def test_agent_scoped_session_continues_without_new_mention(tmp_path, monkeypatc
 
 def test_workflow_mention_creates_workflow_run_from_chat(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
-    service = AgentRuntimeService(
-        db_path=tmp_path / "agent-runtime.db",
-        workspace_dir=tmp_path / "agent-runtime",
-        seed_templates=False,
-    )
+    service = _make_agent_runtime_service(tmp_path)
     responses = iter(["Design output", "Code output"])
 
     def fake_chat(_base_url, _model, _api_key, _messages, **_kwargs):
@@ -622,11 +764,7 @@ def test_workflow_failed_summary_message_includes_failed_node_hint(tmp_path):
 
 def test_workflow_tool_failure_writes_child_and_parent_failure_hints(tmp_path, monkeypatch):
     api, _runtime, store = _make_api(tmp_path)
-    service = AgentRuntimeService(
-        db_path=tmp_path / "agent-runtime.db",
-        workspace_dir=tmp_path / "agent-runtime",
-        seed_templates=False,
-    )
+    service = _make_agent_runtime_service(tmp_path)
 
     def fake_chat(_base_url, _model, _api_key, _messages, *, tools=None):
         assert any((tool.get("function") or {}).get("name") == "workspace_read" for tool in tools or [])
@@ -791,11 +929,7 @@ def test_workflow_chat_messages_carry_artifact_metadata(tmp_path):
 
 def test_workflow_approval_chat_message_carries_pending_details(tmp_path, monkeypatch):
     api, _runtime, store = _make_api(tmp_path)
-    service = AgentRuntimeService(
-        db_path=tmp_path / "agent-runtime.db",
-        workspace_dir=tmp_path / "agent-runtime",
-        seed_templates=False,
-    )
+    service = _make_agent_runtime_service(tmp_path)
 
     def fake_chat(_base_url, _model, _api_key, _messages, **_kwargs):
         return {"content": "Design checkpoint ready"}
@@ -852,11 +986,7 @@ def test_workflow_approval_chat_message_carries_pending_details(tmp_path, monkey
 
 def test_workflow_waiting_for_child_agent_approval_counts_only_child(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
-    service = AgentRuntimeService(
-        db_path=tmp_path / "agent-runtime.db",
-        workspace_dir=tmp_path / "agent-runtime",
-        seed_templates=False,
-    )
+    service = _make_agent_runtime_service(tmp_path)
     workdir = tmp_path / "repo"
     workdir.mkdir()
 
@@ -997,11 +1127,7 @@ def test_workflow_waiting_for_child_agent_approval_counts_only_child(tmp_path, m
 
 def test_workflow_child_consecutive_approvals_keep_chat_prompt_visible(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
-    service = AgentRuntimeService(
-        db_path=tmp_path / "agent-runtime.db",
-        workspace_dir=tmp_path / "agent-runtime",
-        seed_templates=False,
-    )
+    service = _make_agent_runtime_service(tmp_path)
     workdir = tmp_path / "repo"
     workdir.mkdir()
     calls: list[list[dict]] = []
@@ -1263,11 +1389,7 @@ def test_get_messages_limit_zero_returns_complete_current_session(tmp_path):
 
 def test_selected_runnable_creates_agent_run_without_mention(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
-    service = AgentRuntimeService(
-        db_path=tmp_path / "agent-runtime.db",
-        workspace_dir=tmp_path / "agent-runtime",
-        seed_templates=False,
-    )
+    service = _make_agent_runtime_service(tmp_path)
     agent = service.create_agent(
         {
             "name": "Draft Agent",
@@ -1577,7 +1699,7 @@ def test_manual_group_session_keeps_context_for_agent_mentions(tmp_path, monkeyp
         assert "审批：workspace.write_patch、terminal.run" in task.description
         assert "派发时请根据每个 Agent 的类别、职责、工具权限、审批边界和交付偏好选择最合适的成员" in task.description
         assert "不要默认派给所有 Agent" in task.description
-        assert "<yachiyo_group_dispatch>" in task.description
+        assert "<oha_group_dispatch>" in task.description
         assert '"action":"dispatch_group_agent"' in task.description
         assert "完整、可执行、不可省略的任务说明" in task.description
         stored = store.get_session(runtime.chat_session.session_id)
@@ -2282,11 +2404,7 @@ def test_create_group_session_default_name_uses_main_and_agent_nicknames(tmp_pat
 
 def test_manual_group_generic_workflow_mention_stays_plain_message(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
-    service = AgentRuntimeService(
-        db_path=tmp_path / "agent-runtime.db",
-        workspace_dir=tmp_path / "agent-runtime",
-        seed_templates=False,
-    )
+    service = _make_agent_runtime_service(tmp_path)
     design = service.create_agent(
         {
             "agent_id": "agent_design",
@@ -3007,7 +3125,7 @@ def test_group_main_model_dispatch_result_creates_agent_run_messages(tmp_path, m
         assert sent["ok"] is True
         result_text = (
             "我来派活。\n"
-            '{"action":"runyachiyoagent","agent":"@Design","goal":"做视觉测试"}\n'
+            '{"action":"runohaagent","agent":"@Design","goal":"做视觉测试"}\n'
             '{"action":"dispatch_group_agent","agent":"Code","goal":"做代码测试"}'
         )
         runtime.state.update_task_status(
@@ -3024,7 +3142,7 @@ def test_group_main_model_dispatch_result_creates_agent_run_messages(tmp_path, m
         messages = payload["messages"]
         assistant_messages = [message for message in messages if message["role"] == "assistant"]
         assert assistant_messages[0]["content"] == "我来派活。\n\n我把 2 个任务分别派给 Design、Code 了。"
-        assert "runyachiyoagent" not in assistant_messages[0]["content"]
+        assert "runohaagent" not in assistant_messages[0]["content"]
         assert "dispatch_group_agent" not in assistant_messages[0]["content"]
         assert assistant_messages[0]["metadata"]["group_dispatch_handled"] is True
         assert [message["metadata"]["sender"]["nickname"] for message in assistant_messages[1:3]] == [
@@ -3312,7 +3430,7 @@ def test_plain_group_message_can_dispatch_agents_via_main_model_result(tmp_path,
         assert main_task is not None
         assert main_task.description.startswith("我想让群里合适的 Agent 做个视觉测试")
         assert "[Yachiyo 群组上下文]" in main_task.description
-        assert "<yachiyo_group_dispatch>" in main_task.description
+        assert "<oha_group_dispatch>" in main_task.description
 
         runtime.state.update_task_status(
             sent["task_id"],
@@ -3429,12 +3547,12 @@ def test_plain_group_goal_dispatches_two_agents_and_summarizes(tmp_path, monkeyp
             TaskStatus.COMPLETED,
             result=(
                 "我会把 UI 验收交给 Design，把验证脚本方案交给 Coding。\n"
-                "<yachiyo_group_dispatch>\n"
+                "<oha_group_dispatch>\n"
                 '{"tasks":['
                 '{"action":"dispatch_group_agent","agent":"Design","goal":"整理 UI 验收点"},'
                 '{"action":"dispatch_group_agent","agent":"Coding","goal":"整理验证脚本方案"}'
                 "]}\n"
-                "</yachiyo_group_dispatch>"
+                "</oha_group_dispatch>"
             ),
         )
 
@@ -3461,7 +3579,7 @@ def test_plain_group_goal_dispatches_two_agents_and_summarizes(tmp_path, monkeyp
         assert parent["metadata"]["group_dispatch_count"] == 2
         assert parent["metadata"]["group_agent_summary_pending"] is True
         assert "我把 2 个任务分别派给 Design、Coding 了。" in parent["content"]
-        assert "yachiyo_group_dispatch" not in parent["content"]
+        assert "oha_group_dispatch" not in parent["content"]
         assert "dispatch_group_agent" not in parent["content"]
         assert [message["metadata"]["delegated_goal"] for message in delegated] == [
             "整理 UI 验收点",
@@ -3617,12 +3735,12 @@ def test_plain_group_goal_mixed_agent_outcomes_waits_and_summarizes(tmp_path, mo
             TaskStatus.COMPLETED,
             result=(
                 "我会让 Design 整理验收点，让 Coding 运行验证脚本。\n"
-                "<yachiyo_group_dispatch>\n"
+                "<oha_group_dispatch>\n"
                 '{"tasks":['
                 '{"action":"dispatch_group_agent","agent":"Design","goal":"整理 UI 验收点"},'
                 '{"action":"dispatch_group_agent","agent":"Coding","goal":"运行验证脚本"}'
                 "]}\n"
-                "</yachiyo_group_dispatch>"
+                "</oha_group_dispatch>"
             ),
         )
 
@@ -4089,9 +4207,9 @@ def test_group_dispatch_workflow_request_guides_to_studio(tmp_path, monkeypatch)
             sent["task_id"],
             TaskStatus.COMPLETED,
             result=(
-                "<yachiyo_group_dispatch>"
+                "<oha_group_dispatch>"
                 '{"tasks":[{"action":"dispatch_group_workflow","workflow":"Web Flow","goal":"运行发布流程"}]}'
-                "</yachiyo_group_dispatch>"
+                "</oha_group_dispatch>"
             ),
         )
 
@@ -4234,9 +4352,9 @@ def test_group_main_model_dispatch_tagged_tasks_block_is_hidden_and_dispatched(t
             TaskStatus.COMPLETED,
             result=(
                 "我会先让 Design 做视觉测试。\n"
-                "<yachiyo_group_dispatch>\n"
+                "<oha_group_dispatch>\n"
                 '{"tasks":[{"action":"dispatch_group_agent","agent":"Design","goal":"做视觉测试"}]}\n'
-                "</yachiyo_group_dispatch>"
+                "</oha_group_dispatch>"
             ),
         )
 
@@ -4247,7 +4365,7 @@ def test_group_main_model_dispatch_tagged_tasks_block_is_hidden_and_dispatched(t
         assert calls[0]["runnable_id"] == "agent_design"
         assert calls[0]["user_goal"] == "做视觉测试"
         assert assistant_messages[0]["content"] == "我会先让 Design 做视觉测试。\n\n我把这个任务派给 Design 了。"
-        assert "yachiyo_group_dispatch" not in assistant_messages[0]["content"]
+        assert "oha_group_dispatch" not in assistant_messages[0]["content"]
         assert "dispatch_group_agent" not in assistant_messages[0]["content"]
         assert assistant_messages[1]["content"] == (
             "Design 已完成，并把结果交给主模型汇总。\n"
@@ -4395,13 +4513,13 @@ def test_group_main_model_dispatch_multiple_tagged_blocks_are_all_dispatched(tmp
             TaskStatus.COMPLETED,
             result=(
                 "我来分两段派活。\n"
-                "<yachiyo_group_dispatch>\n"
+                "<oha_group_dispatch>\n"
                 '{"action":"dispatch_group_agent","agent":"Design","goal":"整理界面验收点"}\n'
-                "</yachiyo_group_dispatch>\n"
+                "</oha_group_dispatch>\n"
                 "然后再安排编码。\n"
-                "<yachiyo_group_dispatch>\n"
+                "<oha_group_dispatch>\n"
                 '{"action":"dispatch_group_agent","agent":"Code","goal":"写验证脚本"}\n'
-                "</yachiyo_group_dispatch>"
+                "</oha_group_dispatch>"
             ),
         )
 
@@ -4416,7 +4534,7 @@ def test_group_main_model_dispatch_multiple_tagged_blocks_are_all_dispatched(tmp
         assert parent["metadata"]["group_dispatch_count"] == 2
         assert parent["metadata"]["group_dispatch_run_group_id"] == "run_group_dispatch"
         assert "我把 2 个任务分别派给 Design、Code 了。" in parent["content"]
-        assert "yachiyo_group_dispatch" not in parent["content"]
+        assert "oha_group_dispatch" not in parent["content"]
         assert "dispatch_group_agent" not in parent["content"]
         delegated = [
             message
@@ -4426,6 +4544,42 @@ def test_group_main_model_dispatch_multiple_tagged_blocks_are_all_dispatched(tmp
         assert [message["metadata"]["delegated_goal"] for message in delegated] == ["整理界面验收点", "写验证脚本"]
     finally:
         store.close()
+
+
+def test_group_dispatch_parser_exposes_structured_directives_and_legacy_requests():
+    content = (
+        "我会按工具输入格式安排。\n"
+        "<oha_group_dispatch>\n"
+        '{"tool":"dispatch_group_agent","input":{"agent":"Design","goal":"整理验收点"}}\n'
+        "</oha_group_dispatch>\n"
+        "<oha_group_dispatch>\n"
+        '{"action":"oha.group_dispatch","input":{"kind":"agent","target":"Code","goal":"写验证脚本"}}\n'
+        "</oha_group_dispatch>"
+    )
+
+    directives = ChatAPI._parse_group_dispatch_directives(content)
+    legacy_requests = ChatAPI._parse_group_dispatch_requests(content)
+    native_directives = ChatAPI._parse_group_dispatch_directives(
+        '{"tool":"oha.group_dispatch","input":{"tasks":[{"kind":"agent","target":"QA","goal":"列验收清单"}]}}'
+    )
+    old_tag_directives = ChatAPI._parse_group_dispatch_directives(
+        '<yachiyo_group_dispatch>{"tool":"oha.group_dispatch","input":{"tasks":[{"target":"Legacy","goal":"旧协议"}]}}</yachiyo_group_dispatch>'
+    )
+    old_tag_visible = ChatAPI._strip_group_dispatch_payloads(
+        '旧协议块前缀\n<yachiyo_group_dispatch>{"tool":"oha.group_dispatch","input":{"tasks":[{"target":"Legacy","goal":"旧协议"}]}}</yachiyo_group_dispatch>\n旧协议块后缀'
+    )
+
+    assert all(isinstance(directive, GroupDispatchDirective) for directive in directives)
+    assert [directive.target for directive in directives] == ["Design", "Code"]
+    assert [directive.goal for directive in directives] == ["整理验收点", "写验证脚本"]
+    assert [directive.target for directive in native_directives] == ["QA"]
+    assert [directive.goal for directive in native_directives] == ["列验收清单"]
+    assert old_tag_directives == []
+    assert "Legacy" not in old_tag_visible
+    assert "旧协议块前缀" in old_tag_visible
+    assert "旧协议块后缀" in old_tag_visible
+    assert legacy_requests == [directive.as_request() for directive in directives]
+    assert all(isinstance(request, dict) for request in legacy_requests)
 
 
 def test_group_main_model_dispatch_accepts_model_field_variants(tmp_path, monkeypatch):
@@ -4490,12 +4644,12 @@ def test_group_main_model_dispatch_accepts_model_field_variants(tmp_path, monkey
             TaskStatus.COMPLETED,
             result=(
                 "我会分别安排设计和编码。\n"
-                "<yachiyo_group_dispatch>\n"
+                "<oha_group_dispatch>\n"
                 '{"Delegations":['
                 '{"type":"agent","agentName":"Design","taskGoal":"整理验收点"},'
                 '{"kind":"agent","runnableId":"agent_coding","objective":"写验证脚本"}'
                 "]}\n"
-                "</yachiyo_group_dispatch>"
+                "</oha_group_dispatch>"
             ),
         )
 
@@ -4577,12 +4731,10 @@ def test_group_main_model_dispatch_accepts_tool_input_envelopes(tmp_path, monkey
             TaskStatus.COMPLETED,
             result=(
                 "我会按工具输入格式安排。\n"
-                "<yachiyo_group_dispatch>\n"
-                '{"tool":"dispatch_group_agent","input":{"agent":"Design","goal":"整理验收点"}}\n'
-                "</yachiyo_group_dispatch>\n"
-                "<yachiyo_group_dispatch>\n"
-                '{"action":"dispatch_group_agent","arguments":"{\\"agent\\":\\"Code\\",\\"goal\\":\\"写验证脚本\\"}"}\n'
-                "</yachiyo_group_dispatch>"
+                '{"tool":"oha.group_dispatch","input":{"tasks":['
+                '{"kind":"agent","target":"Design","goal":"整理验收点"},'
+                '{"type":"agent","target":"Code","goal":"写验证脚本"}'
+                "]}}"
             ),
         )
 
@@ -4596,8 +4748,8 @@ def test_group_main_model_dispatch_accepts_tool_input_envelopes(tmp_path, monkey
         assert calls[1]["run_group_id"] == "run_group_dispatch"
         assert parent["metadata"]["group_dispatch_count"] == 2
         assert "我把 2 个任务分别派给 Design、Code 了。" in parent["content"]
-        assert "dispatch_group_agent" not in parent["content"]
-        assert "arguments" not in parent["content"]
+        assert "oha.group_dispatch" not in parent["content"]
+        assert "tasks" not in parent["content"]
     finally:
         store.close()
 
@@ -4664,9 +4816,9 @@ def test_group_main_model_dispatch_accepts_agent_target_lists(tmp_path, monkeypa
             TaskStatus.COMPLETED,
             result=(
                 "我会把同一个目标交给两个 Agent。\n"
-                "<yachiyo_group_dispatch>\n"
+                "<oha_group_dispatch>\n"
                 '{"action":"dispatch_group_agent","agents":["Design","Code"],"goal":"分别给出验收建议"}\n'
-                "</yachiyo_group_dispatch>"
+                "</oha_group_dispatch>"
             ),
         )
 
@@ -5923,9 +6075,9 @@ def test_plain_group_goal_approval_flow_continues_to_main_summary(tmp_path, monk
             TaskStatus.COMPLETED,
             result=(
                 "我会让 Coding 运行验证脚本。\n"
-                "<yachiyo_group_dispatch>\n"
+                "<oha_group_dispatch>\n"
                 '{"action":"dispatch_group_agent","agent":"Coding","goal":"运行验证脚本"}\n'
-                "</yachiyo_group_dispatch>"
+                "</oha_group_dispatch>"
             ),
         )
 
@@ -5943,7 +6095,7 @@ def test_plain_group_goal_approval_flow_continues_to_main_summary(tmp_path, monk
             message["metadata"].get("group_agent_summary_for_task_id") == sent["task_id"]
             for message in approval_messages
         )
-        assert "yachiyo_group_dispatch" not in parent["content"]
+        assert "oha_group_dispatch" not in parent["content"]
         assert agent_message["status"] == "processing"
         assert agent_message["metadata"]["run_status"] == "approval_required"
         assert agent_message["metadata"]["pending_approval"]["tool"] == "terminal.run"
@@ -6039,6 +6191,102 @@ def test_plain_group_goal_approval_flow_continues_to_main_summary(tmp_path, monk
         assert final_parent["metadata"]["group_agent_summary_status"] == "completed"
         assert final_summary["content"] == "验证脚本已经跑完，可以继续下一步。"
     finally:
+        store.close()
+
+
+def test_group_dispatch_uses_runtime_native_service_end_to_end(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    captured_contexts: list[str] = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, **_kwargs):
+        context = str(messages[-1]["content"])
+        captured_contexts.append(context)
+        assert "# Agent\nName: Coding Agent" in context
+        assert "# User Goal\n做真实 Native 群聊派发验证" in context
+        assert "[Yachiyo 群组执行约定]" in context
+        assert "你在群内身份是：Coding" in context
+        return {"content": "Coding native dispatch result"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        coding = service.create_agent(
+            {
+                "name": "Coding Agent",
+                "nickname": "Coding",
+                "description": "runs native group dispatch tests",
+                "model_mode": "custom_api",
+                "model_config": {
+                    "base_url": "https://api.example.test/v1",
+                    "model": "demo-model",
+                    "api_key": "sk-secret",
+                },
+            }
+        )
+
+        created = api.create_group_session(name="Native Dispatch Group", participant_ids=[coding["agent_id"]])
+        assert created["ok"] is True
+        assert created["session_context"]["conversation_kind"] == "group"
+        assert created["session_context"]["participants"][1]["id"] == coding["agent_id"]
+
+        sent = api.send_message("@主模型 请安排 Coding 做真实 Native 群聊派发验证")
+        assert sent["ok"] is True
+        runtime.state.update_task_status(
+            sent["task_id"],
+            TaskStatus.COMPLETED,
+            result=(
+                "我会让 Coding 处理这件事。\n"
+                '{"tool":"oha.group_dispatch","input":{"tasks":[{"kind":"agent","target":"Coding",'
+                '"goal":"做真实 Native 群聊派发验证"}]}}'
+            ),
+        )
+
+        dispatch_payload = api.get_messages()
+        parent = next(
+            message
+            for message in dispatch_payload["messages"]
+            if message["role"] == "assistant" and message["task_id"] == sent["task_id"]
+        )
+        agent_message = next(
+            message
+            for message in dispatch_payload["messages"]
+            if message["role"] == "assistant"
+            and message["metadata"].get("sender", {}).get("nickname") == "Coding"
+        )
+        run_id = agent_message["metadata"]["run_id"]
+        assert parent["metadata"]["group_dispatch_count"] == 1
+        assert parent["metadata"]["group_dispatch_run_group_id"] == agent_message["metadata"]["run_group_id"]
+        assert agent_message["status"] == "processing"
+        assert agent_message["metadata"]["runnable_id"] == coding["agent_id"]
+        assert agent_message["metadata"]["delegated_by_task_id"] == sent["task_id"]
+        assert agent_message["metadata"]["delegated_goal"] == "做真实 Native 群聊派发验证"
+
+        run = _wait_for_agent_run(service, run_id)
+        assert run["status"] == "completed"
+        assert run["runnable_id"] == coding["agent_id"]
+        assert run["result"] == "Coding native dispatch result"
+        assert captured_contexts
+
+        completed_agent = _wait_for_assistant_content_contains(api, "Coding native dispatch result")
+        assert completed_agent["metadata"]["run_id"] == run_id
+        assert completed_agent["metadata"]["run_status"] == "completed"
+        assert completed_agent["metadata"]["agent_report"] == "Coding native dispatch result"
+
+        final_payload = api.get_messages()
+        summary_message = next(
+            message
+            for message in final_payload["messages"]
+            if message["metadata"].get("group_agent_summary_for_task_id") == sent["task_id"]
+        )
+        summary_task = runtime.state.get_task(summary_message["task_id"])
+        assert summary_message["status"] == "processing"
+        assert summary_task is not None
+        assert summary_task.chat_session_id == runtime.chat_session.session_id
+        assert "Coding：已完成" in summary_task.description
+        assert "汇报：Coding native dispatch result" in summary_task.description
+    finally:
+        service.close()
         store.close()
 
 
@@ -7112,9 +7360,9 @@ def test_group_followup_dispatch_payload_is_ignored_and_stays_in_current_summary
             TaskStatus.COMPLETED,
             result=(
                 "我会交给 Design 做移动端验收方案。\n"
-                "<yachiyo_group_dispatch>\n"
+                "<oha_group_dispatch>\n"
                 '{"action":"dispatch_group_agent","agent":"Design","goal":"整理移动端验收方案"}\n'
-                "</yachiyo_group_dispatch>"
+                "</oha_group_dispatch>"
             ),
         )
         api.get_messages()
@@ -7136,9 +7384,9 @@ def test_group_followup_dispatch_payload_is_ignored_and_stays_in_current_summary
             TaskStatus.COMPLETED,
             result=(
                 "明白，我把补充重新派给 Design。\n"
-                "<yachiyo_group_dispatch>\n"
+                "<oha_group_dispatch>\n"
                 '{"action":"dispatch_group_agent","agent":"Design","goal":"补充不要暴露 JSON"}\n'
-                "</yachiyo_group_dispatch>"
+                "</oha_group_dispatch>"
             ),
         )
         followup_payload = api.get_messages()
@@ -7232,9 +7480,9 @@ def test_plain_group_followup_during_running_agent_enters_main_summary(tmp_path,
             TaskStatus.COMPLETED,
             result=(
                 "我会交给 Design 做移动端验收方案。\n"
-                "<yachiyo_group_dispatch>\n"
+                "<oha_group_dispatch>\n"
                 '{"action":"dispatch_group_agent","agent":"Design","goal":"整理移动端验收方案"}\n'
-                "</yachiyo_group_dispatch>"
+                "</oha_group_dispatch>"
             ),
         )
         running_payload = api.get_messages()
@@ -7493,11 +7741,7 @@ def test_manual_group_workflow_mention_runs_workflow_and_stays_in_group(tmp_path
 
 def test_agent_mention_supports_multiword_names(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
-    service = AgentRuntimeService(
-        db_path=tmp_path / "agent-runtime.db",
-        workspace_dir=tmp_path / "agent-runtime",
-        seed_templates=False,
-    )
+    service = _make_agent_runtime_service(tmp_path)
     agent = service.create_agent(
         {
             "name": "Draft Agent",
@@ -7528,11 +7772,7 @@ def test_agent_mention_supports_multiword_names(tmp_path, monkeypatch):
 
 def test_agent_mention_can_appear_inline_without_catching_email(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
-    service = AgentRuntimeService(
-        db_path=tmp_path / "agent-runtime.db",
-        workspace_dir=tmp_path / "agent-runtime",
-        seed_templates=False,
-    )
+    service = _make_agent_runtime_service(tmp_path)
     agent = service.create_agent(
         {
             "name": "Design Agent",
@@ -7657,14 +7897,14 @@ def test_summarize_delegated_run_creates_main_followup_task(tmp_path, monkeypatc
             task_id=task_id,
             content=(
                 "我会交给 Coding Agent 处理。\n"
-                '<yachiyo_delegation>{"action":"run_yachiyo_agent","agent":"Coding Agent","goal":"写一个 CLI 工具"}</yachiyo_delegation>'
+                '<oha_delegation>{"action":"run_oha_agent","agent":"Coding Agent","goal":"写一个 CLI 工具"}</oha_delegation>'
             ),
             status=MessageStatus.COMPLETED,
         )
         activity_store.record_event(
             session_id=runtime.chat_session.session_id,
             task_id=task_id,
-            tool_name="yachiyo.delegation",
+            tool_name="oha.delegation",
             phase="subagent",
             title="Coding Agent 等待审批",
             detail="Status: approval_required",
@@ -7692,10 +7932,10 @@ def test_summarize_delegated_run_creates_main_followup_task(tmp_path, monkeypatc
         assert summary_message.metadata["sender"]["kind"] == "main"
         assert summary_message.metadata["delegated_run_source_task_id"] == task_id
         assert summary_task is not None
-        assert "[Yachiyo 自动委派 Run 汇总]" in summary_task.description
+        assert "[Oha-Yachiyo 自动委派 Run 汇总]" in summary_task.description
         assert "用户原始请求：帮我派一个 Agent 写脚本" in summary_task.description
         assert "我会交给 Coding Agent 处理。" in summary_task.description
-        assert "run_yachiyo_agent" not in summary_task.description
+        assert "run_oha_agent" not in summary_task.description
         assert "Coding Agent：已完成" in summary_task.description
         assert "任务：写一个 CLI 工具" in summary_task.description
         assert "汇报：CLI 工具已经完成。" in summary_task.description
@@ -7734,7 +7974,7 @@ def test_summarize_delegated_run_waits_for_terminal_status(tmp_path, monkeypatch
         activity_store.record_event(
             session_id=runtime.chat_session.session_id,
             task_id=sent["task_id"],
-            tool_name="yachiyo.delegation",
+            tool_name="oha.delegation",
             phase="subagent",
             title="Coding Agent 等待审批",
             status="approval_required",
@@ -7762,20 +8002,20 @@ def test_get_messages_hides_internal_reasoning_activity(tmp_path, monkeypatch):
     try:
         result = api.send_message("普通回复")
         task_id = result["task_id"]
-        runtime.state.update_task_progress(task_id, "Hermes 正在推理")
+        runtime.state.update_task_progress(task_id, "Native Agent 正在推理")
         activity_store.record_event(
             session_id=runtime.chat_session.session_id,
             task_id=task_id,
             tool_name="",
             phase="reasoning",
-            title="Hermes 正在推理",
+            title="Native Agent 正在推理",
             detail="内部思考片段",
             status="running",
         )
         activity_store.record_event(
             session_id=runtime.chat_session.session_id,
             task_id=task_id,
-            tool_name="hermes",
+            tool_name="native_agent",
             phase="task_start",
             title="Yachiyo 开始处理",
             detail="普通回复",
@@ -7787,7 +8027,7 @@ def test_get_messages_hides_internal_reasoning_activity(tmp_path, monkeypatch):
             tool_name="send_message",
             phase="tool_start",
             title="正在调用send message",
-            detail='to ?: "<yachiyo_group_dispatch>{\\"tasks\\":[]}"',
+            detail='to ?: "<oha_group_dispatch>{\\"tasks\\":[]}"',
             status="running",
         )
         activity_store.record_event(
@@ -7981,8 +8221,8 @@ def test_sort_messages_dedupes_repeated_assistant_for_same_user_task():
 
 
 def test_send_message_accepts_pasted_image_attachment(tmp_path, monkeypatch):
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
-    monkeypatch.setenv("HERMES_YACHIYO_BRIDGE_URL", "http://127.0.0.1:9999")
+    monkeypatch.setenv("OHA_YACHIYO_HOME", str(tmp_path / "oha-yachiyo-home"))
+    monkeypatch.setenv("OHA_YACHIYO_BRIDGE_URL", "http://127.0.0.1:9999")
     api, runtime, store = _make_api(tmp_path)
     try:
         data_url = "data:image/png;base64," + base64.b64encode(b"fake-png").decode("ascii")
@@ -8010,7 +8250,7 @@ def test_send_message_accepts_pasted_image_attachment(tmp_path, monkeypatch):
 
 
 def test_proactive_session_followup_attaches_fresh_desktop_snapshot(tmp_path, monkeypatch):
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
+    monkeypatch.setenv("OHA_YACHIYO_HOME", str(tmp_path / "oha-yachiyo-home"))
     captures = []
 
     def fake_capture(target_path: Path):
@@ -8041,7 +8281,7 @@ def test_proactive_session_followup_attaches_fresh_desktop_snapshot(tmp_path, mo
 
 
 def test_user_requested_desktop_snapshot_attaches_in_normal_chat(tmp_path, monkeypatch):
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
+    monkeypatch.setenv("OHA_YACHIYO_HOME", str(tmp_path / "oha-yachiyo-home"))
     captures = []
 
     def fake_capture(target_path: Path):
@@ -8068,8 +8308,71 @@ def test_user_requested_desktop_snapshot_attaches_in_normal_chat(tmp_path, monke
         store.close()
 
 
+def test_user_requested_desktop_snapshot_permission_error_is_structured(tmp_path, monkeypatch):
+    monkeypatch.setenv("OHA_YACHIYO_HOME", str(tmp_path / "oha-yachiyo-home"))
+    captures = []
+    activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
+    leaked_secret = "sk-screen-secret123456"
+
+    def fake_capture(target_path: Path):
+        captures.append(target_path)
+        raise chat_api_mod.ScreenCapturePermissionError(f"没有屏幕录制权限，请授权 api_key={leaked_secret}")
+
+    monkeypatch.setattr(chat_api_mod, "capture_screenshot_to_file", fake_capture)
+    monkeypatch.setattr(chat_api_mod, "get_activity_store", lambda: activity_store)
+    api, runtime, store = _make_api(tmp_path)
+    try:
+        result = api.send_message("帮我看看我的桌面情况", client_message_id="screen-permission-1")
+        replay = api.send_message("帮我看看我的桌面情况", client_message_id="screen-permission-1")
+
+        assert result["ok"] is True
+        assert len(captures) == 1
+        assert result["attachments"] == []
+        error = result["desktop_snapshot_error"]
+        assert error["code"] == "screen_capture_permission_denied"
+        assert error["permission_denied"] is True
+        assert "系统设置" in error["message"]
+        assert "授权" in error["detail"]
+        assert leaked_secret not in json.dumps(result, ensure_ascii=False)
+        assert "api_key=[redacted]" in error["detail"]
+        assert replay["idempotent"] is True
+        assert replay["desktop_snapshot_error"] == error
+        assert leaked_secret not in json.dumps(replay, ensure_ascii=False)
+
+        user = runtime.chat_session.get_messages()[0]
+        assert user.attachments == []
+        assert user.metadata["desktop_snapshot_error"] == error
+        user_payload = {
+            "content": user.content,
+            "metadata": user.metadata,
+            "attachments": user.attachments,
+            "error": user.error,
+        }
+        assert leaked_secret not in json.dumps(user_payload, ensure_ascii=False)
+        task = runtime.state.get_task(result["task_id"])
+        assert task is not None
+        assert task.attachments == []
+        assert "无法读取桌面截图" in task.description
+        assert "没有屏幕录制权限" in task.description
+        assert leaked_secret not in task.description
+        assert "api_key=[redacted]" in task.description
+        events = activity_store.list_events(task_id=result["task_id"], limit=5, key_only=False)
+        assert len(events) == 1
+        activity = events[0].to_dict()
+        assert activity["tool_name"] == "desktop_snapshot"
+        assert activity["phase"] == "desktop_snapshot"
+        assert activity["title"] == "无法读取桌面截图"
+        assert activity["status"] == "failed"
+        assert activity["metadata"]["desktop_snapshot_error"] == error
+        assert leaked_secret not in json.dumps(activity, ensure_ascii=False)
+        assert verify_secret_redaction(paths=[tmp_path]) == []
+    finally:
+        activity_store.close()
+        store.close()
+
+
 def test_user_implicit_current_activity_request_does_not_attach_desktop_snapshot(tmp_path, monkeypatch):
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
+    monkeypatch.setenv("OHA_YACHIYO_HOME", str(tmp_path / "oha-yachiyo-home"))
     captures = []
 
     def fake_capture(target_path: Path):
@@ -8123,7 +8426,7 @@ def test_design_feedback_with_plain_screen_word_does_not_attach_desktop_snapshot
 
 
 def test_explicit_agent_desktop_request_still_attaches_snapshot(tmp_path, monkeypatch):
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
+    monkeypatch.setenv("OHA_YACHIYO_HOME", str(tmp_path / "oha-yachiyo-home"))
     captures = []
 
     def fake_capture(target_path: Path):
@@ -8164,11 +8467,11 @@ def test_plain_message_does_not_attach_desktop_snapshot(tmp_path, monkeypatch):
 
 
 def test_attachment_cache_cleanup_prunes_old_files(tmp_path, monkeypatch):
-    hermes_home = tmp_path / "hermes-home"
-    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+    oha_home = tmp_path / "oha-yachiyo-home"
+    monkeypatch.setenv("OHA_YACHIYO_HOME", str(oha_home))
     monkeypatch.setattr("apps.shell.chat_api._MAX_ATTACHMENT_CACHE_AGE_SECONDS", 1)
     monkeypatch.setattr("apps.shell.chat_api._MAX_ATTACHMENT_CACHE_BYTES", 1024 * 1024)
-    old_dir = hermes_home / "yachiyo" / "attachments" / "deadbeef"
+    old_dir = oha_home / "attachments" / "deadbeef"
     old_dir.mkdir(parents=True)
     old_file = old_dir / "old.png"
     old_file.write_bytes(b"old")
@@ -8192,7 +8495,7 @@ def test_attachment_cache_cleanup_prunes_old_files(tmp_path, monkeypatch):
 
 
 def test_delete_current_session_removes_attachment_directory(tmp_path, monkeypatch):
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
+    monkeypatch.setenv("OHA_YACHIYO_HOME", str(tmp_path / "oha-yachiyo-home"))
     api, runtime, store = _make_api(tmp_path)
     runtime.chat_session = ChatSession(session_id="deadbeef")
     runtime.chat_session.attach_store(store, load_existing=False)
@@ -8276,8 +8579,8 @@ def test_failed_task_marks_user_failed_and_adds_error_reply(tmp_path):
 
 
 def test_retry_failed_message_reuses_saved_image_attachments(tmp_path, monkeypatch):
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
-    monkeypatch.setenv("HERMES_YACHIYO_BRIDGE_URL", "http://127.0.0.1:9999")
+    monkeypatch.setenv("OHA_YACHIYO_HOME", str(tmp_path / "oha-yachiyo-home"))
+    monkeypatch.setenv("OHA_YACHIYO_BRIDGE_URL", "http://127.0.0.1:9999")
     api, runtime, store = _make_api(tmp_path)
     try:
         data_url = "data:image/png;base64," + base64.b64encode(b"fake-png").decode("ascii")
@@ -8305,7 +8608,7 @@ def test_retry_failed_message_reuses_saved_image_attachments(tmp_path, monkeypat
         store.close()
 
 
-def test_retry_failed_message_rejects_when_hermes_unavailable(tmp_path):
+def test_retry_failed_message_rejects_when_native_agent_unavailable(tmp_path):
     api, runtime, store = _make_api(tmp_path)
     try:
         sent = api.send_message("失败任务")
@@ -8314,14 +8617,21 @@ def test_retry_failed_message_rejects_when_hermes_unavailable(tmp_path):
         failed_messages = api.get_messages()["messages"]
         runtime.task_runner = SimpleNamespace(
             executor=SimpleNamespace(
-                name="HermesUnavailableExecutor",
-                reason="Hermes Agent 当前不可用",
+                name="NativeAgentUnavailableExecutor",
+                reason="Native Agent 当前未就绪，请先配置并选择默认对话模型。",
+                code="native_agent_not_ready",
+                reason_code="model_profile_required",
             )
         )
 
         retry = api.retry_message(failed_messages[1]["id"])
 
-        assert retry == {"ok": False, "error": "Hermes Agent 当前不可用"}
+        assert retry == {
+            "ok": False,
+            "code": "native_agent_not_ready",
+            "reason": "model_profile_required",
+            "error": "Native Agent 当前未就绪，请先配置并选择默认对话模型。",
+        }
         assert len(runtime.state.list_tasks()) == 1
     finally:
         store.close()

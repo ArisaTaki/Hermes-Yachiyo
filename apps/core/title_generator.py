@@ -7,7 +7,6 @@ import json
 import logging
 import os
 import re
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -19,7 +18,6 @@ from apps.core.tls import urlopen_with_bundled_ca
 
 logger = logging.getLogger(__name__)
 
-_CONFIG_TIMEOUT_SECONDS = 3.0
 _DIRECT_TITLE_MAX_TOKENS = 80
 _OPENAI_COMPATIBLE_PROVIDERS = {
     "custom",
@@ -199,10 +197,12 @@ async def generate_title_with_direct_api(prompt: str, *, timeout: float) -> str:
 
 
 def resolve_title_llm_config() -> TitleLLMConfig | None:
-    model_cfg = _read_model_config()
+    model_cfg = _read_default_chat_model_profile() or _read_model_config()
     raw_provider = str(model_cfg.get("provider") or "").strip()
     model = str(model_cfg.get("default") or "").strip()
     configured_base_url = str(model_cfg.get("base_url") or "").strip()
+    configured_api_key = str(model_cfg.get("api_key") or "").strip()
+    configured_api_key_name = str(model_cfg.get("api_key_name") or "").strip()
     provider = _effective_provider(raw_provider, configured_base_url, model) or raw_provider.strip().lower()
     if not provider or not model:
         return None
@@ -210,7 +210,7 @@ def resolve_title_llm_config() -> TitleLLMConfig | None:
     if provider not in _OPENAI_COMPATIBLE_PROVIDERS:
         return None
 
-    env_values = _read_hermes_env_values()
+    env_values = _read_oha_env_values()
     base_url = (
         configured_base_url
         or _env_value(_PROVIDER_BASE_URL_ENV.get(provider, ""), env_values)
@@ -218,7 +218,11 @@ def resolve_title_llm_config() -> TitleLLMConfig | None:
     ).rstrip("/")
     if not base_url:
         return None
-    api_key_name, api_key = _configured_provider_api_key(provider, env_values)
+    api_key_name, api_key = (
+        (configured_api_key_name, configured_api_key)
+        if configured_api_key
+        else _configured_provider_api_key(provider, env_values)
+    )
     if not api_key and _provider_requires_api_key(provider, base_url):
         return None
     return TitleLLMConfig(
@@ -299,25 +303,34 @@ def _compact_title_context(value: str, limit: int = 420) -> str:
     return f"{text[:limit - 3].rstrip()}..."
 
 
+def _read_default_chat_model_profile() -> dict[str, str] | None:
+    try:
+        from apps.shell.model_profiles import get_model_profile_service
+
+        service = get_model_profile_service()
+        profiles = service.list_profiles()
+        defaults = profiles.get("defaults") if isinstance(profiles.get("defaults"), dict) else {}
+        profile_id = str(defaults.get("chat") or "").strip()
+        if not profile_id:
+            return None
+        profile = service.get_profile_private(profile_id)
+    except Exception:
+        return None
+
+    return {
+        "provider": str(profile.get("provider") or ""),
+        "default": str(profile.get("model") or ""),
+        "base_url": str(profile.get("base_url") or ""),
+        "api_key": str(profile.get("api_key") or ""),
+        "api_key_name": str(profile.get("api_key_name") or ""),
+    }
+
+
 def _read_model_config() -> dict[str, str]:
-    explicit_config_path = os.getenv("HERMES_CONFIG_FILE", "").strip() or os.getenv("HERMES_CONFIG_PATH", "").strip()
+    explicit_config_path = os.getenv("OHA_YACHIYO_CONFIG_FILE", "").strip() or os.getenv("OHA_YACHIYO_CONFIG_PATH", "").strip()
     if explicit_config_path:
         return _read_model_config_from_path(Path(explicit_config_path).expanduser())
-
-    try:
-        from hermes_cli.config import load_config
-
-        cfg = load_config()
-        model_cfg = cfg.get("model") if isinstance(cfg, dict) and isinstance(cfg.get("model"), dict) else {}
-        return {
-            "provider": str(model_cfg.get("provider") or ""),
-            "default": str(model_cfg.get("default") or ""),
-            "base_url": str(model_cfg.get("base_url") or ""),
-        }
-    except Exception:
-        pass
-
-    return _read_model_config_from_path(_hermes_config_path("path", "config.yaml"))
+    return _read_model_config_from_path(_oha_config_path("config.yaml"))
 
 
 def _read_model_config_from_path(config_path: Path) -> dict[str, str]:
@@ -329,32 +342,8 @@ def _read_model_config_from_path(config_path: Path) -> dict[str, str]:
     }
 
 
-def _hermes_config_path(subcommand: str, fallback_name: str) -> Path:
-    env_key = "HERMES_CONFIG_FILE" if subcommand == "path" else "HERMES_ENV_FILE"
-    env_value = os.getenv(env_key, "").strip()
-    if subcommand == "path":
-        env_value = env_value or os.getenv("HERMES_CONFIG_PATH", "").strip()
-    if env_value:
-        return Path(env_value).expanduser()
-    if subcommand != "path":
-        alt = os.getenv("HERMES_AGENT_ENV_FILE", "").strip()
-        if alt:
-            return Path(alt).expanduser()
-    try:
-        result = subprocess.run(
-            ["hermes", "config", subcommand],
-            capture_output=True,
-            text=True,
-            timeout=_CONFIG_TIMEOUT_SECONDS,
-            check=False,
-        )
-    except Exception:
-        result = None
-    if result is not None and result.returncode == 0:
-        lines = (result.stdout or "").strip().splitlines()
-        if lines:
-            return Path(lines[-1]).expanduser()
-    return Path.home() / ".hermes" / fallback_name
+def _oha_config_path(fallback_name: str) -> Path:
+    return Path.home() / ".oha-yachiyo" / fallback_name
 
 
 def _read_yaml_paths(path: Path, wanted: set[tuple[str, ...]]) -> dict[tuple[str, ...], str]:
@@ -392,9 +381,10 @@ def _strip_yaml_scalar(raw: str) -> str:
     return value.split(" #", 1)[0].strip()
 
 
-def _read_hermes_env_values() -> dict[str, str]:
+def _read_oha_env_values() -> dict[str, str]:
     values: dict[str, str] = {}
-    env_path = _hermes_config_path("env-path", ".env")
+    explicit_env_path = os.getenv("OHA_YACHIYO_ENV_FILE", "").strip()
+    env_path = Path(explicit_env_path).expanduser() if explicit_env_path else _oha_config_path(".env")
     try:
         lines = env_path.read_text(encoding="utf-8").splitlines()
     except OSError:

@@ -10,13 +10,14 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
 import sqlite3
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
+
+from packages.security import redact_sensitive_text, sanitize_sensitive_value
 
 logger = logging.getLogger(__name__)
 
@@ -49,28 +50,14 @@ _DEFAULT_TRACE_RETENTION_DAYS = 30
 _DEFAULT_MAX_DB_BYTES = 50 * 1024 * 1024
 _DEFAULT_CLEANUP_INTERVAL_WRITES = 500
 _SIZE_CLEANUP_BATCH = 1000
-_SECRET_PATTERNS: tuple[re.Pattern[str], ...] = (
-    re.compile(
-        r"(?i)\b(api[_-]?key|token|password|passwd|secret|authorization|bearer)\b"
-        r"\s*[:=]\s*([^\s,;\"']{6,})"
-    ),
-    re.compile(r"\b(sk-[A-Za-z0-9_\-]{8,})\b"),
-    re.compile(r"\b(gh[pousr]_[A-Za-z0-9_]{12,})\b"),
-    re.compile(r"\b(xox[baprs]-[A-Za-z0-9\-]{12,})\b"),
-)
-_TOOL_CALL_SNIPPET_RE = re.compile(r"<tool_call\b.*?</tool_call>", re.IGNORECASE | re.DOTALL)
-_TOOL_CALL_TAIL_RE = re.compile(r"<tool_call\b.*", re.IGNORECASE | re.DOTALL)
-
-
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
 def _get_db_path() -> str:
-    hermes_home = os.getenv("HERMES_HOME", os.path.expanduser("~/.hermes"))
-    yachiyo_dir = os.path.join(hermes_home, "yachiyo")
-    os.makedirs(yachiyo_dir, exist_ok=True)
-    return os.path.join(yachiyo_dir, _DB_FILENAME)
+    root = os.getenv("OHA_YACHIYO_HOME", os.path.expanduser("~/.oha-yachiyo"))
+    os.makedirs(root, exist_ok=True)
+    return os.path.join(root, _DB_FILENAME)
 
 
 def _read_int_env(name: str, default: int, *, minimum: int, maximum: int) -> int:
@@ -85,41 +72,15 @@ def _read_int_env(name: str, default: int, *, minimum: int, maximum: int) -> int
     return max(minimum, min(value, maximum))
 
 
-def redact_sensitive_text(value: Any, *, limit: int = _DETAIL_MAX_CHARS) -> str:
-    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n").strip()
-    text = _redact_tool_call_markup(text)
-    text = re.sub(r"\s+", " ", text)
-    for pattern in _SECRET_PATTERNS:
-        text = pattern.sub(lambda match: f"{match.group(1)}=[redacted]" if match.lastindex and match.lastindex > 1 else "[redacted]", text)
-    if len(text) > limit:
-        text = text[: limit - 1].rstrip() + "…"
-    return text
-
-
-def _redact_tool_call_markup(text: str) -> str:
-    if "<tool_call" not in text.lower():
-        return text
-    text = _TOOL_CALL_SNIPPET_RE.sub("[工具调用草稿已隐藏]", text)
-    return _TOOL_CALL_TAIL_RE.sub("[工具调用草稿已隐藏]", text)
-
-
 def _sanitize_metadata(value: Any, *, depth: int = 0) -> Any:
-    if depth > 3:
-        return redact_sensitive_text(value, limit=160)
-    if isinstance(value, dict):
-        result: dict[str, Any] = {}
-        for key, item in list(value.items())[:40]:
-            key_text = redact_sensitive_text(key, limit=80)
-            if re.search(r"(?i)(key|token|password|secret|authorization)", key_text):
-                result[key_text] = "[redacted]"
-            else:
-                result[key_text] = _sanitize_metadata(item, depth=depth + 1)
-        return result
-    if isinstance(value, (list, tuple)):
-        return [_sanitize_metadata(item, depth=depth + 1) for item in list(value)[:40]]
-    if isinstance(value, (int, float, bool)) or value is None:
-        return value
-    return redact_sensitive_text(value, limit=_METADATA_VALUE_MAX_CHARS)
+    return sanitize_sensitive_value(
+        value,
+        depth=depth,
+        max_depth=3,
+        text_limit=_METADATA_VALUE_MAX_CHARS,
+        key_limit=80,
+        max_items=40,
+    )
 
 
 def _metadata_json(value: Any) -> str:
@@ -179,31 +140,31 @@ class ActivityRetentionPolicy:
     def from_env(cls) -> "ActivityRetentionPolicy":
         return cls(
             key_event_limit=_read_int_env(
-                "HERMES_ACTIVITY_KEY_LIMIT",
+                "OHA_YACHIYO_ACTIVITY_KEY_LIMIT",
                 _DEFAULT_KEY_RETENTION_COUNT,
                 minimum=100,
                 maximum=200_000,
             ),
             trace_event_limit=_read_int_env(
-                "HERMES_ACTIVITY_TRACE_LIMIT",
+                "OHA_YACHIYO_ACTIVITY_TRACE_LIMIT",
                 _DEFAULT_TRACE_RETENTION_COUNT,
                 minimum=100,
                 maximum=1_000_000,
             ),
             key_retention_days=_read_int_env(
-                "HERMES_ACTIVITY_KEY_DAYS",
+                "OHA_YACHIYO_ACTIVITY_KEY_DAYS",
                 _DEFAULT_KEY_RETENTION_DAYS,
                 minimum=1,
                 maximum=3650,
             ),
             trace_retention_days=_read_int_env(
-                "HERMES_ACTIVITY_TRACE_DAYS",
+                "OHA_YACHIYO_ACTIVITY_TRACE_DAYS",
                 _DEFAULT_TRACE_RETENTION_DAYS,
                 minimum=1,
                 maximum=3650,
             ),
             max_db_bytes=_read_int_env(
-                "HERMES_ACTIVITY_MAX_MB",
+                "OHA_YACHIYO_ACTIVITY_MAX_MB",
                 _DEFAULT_MAX_DB_BYTES // (1024 * 1024),
                 minimum=1,
                 maximum=4096,
@@ -211,7 +172,7 @@ class ActivityRetentionPolicy:
             * 1024
             * 1024,
             cleanup_interval_writes=_read_int_env(
-                "HERMES_ACTIVITY_CLEANUP_INTERVAL",
+                "OHA_YACHIYO_ACTIVITY_CLEANUP_INTERVAL",
                 _DEFAULT_CLEANUP_INTERVAL_WRITES,
                 minimum=0,
                 maximum=100_000,
@@ -294,7 +255,7 @@ class ActivityStore:
             task_id=redact_sensitive_text(task_id, limit=80),
             tool_name=redact_sensitive_text(tool_name, limit=80),
             phase=redact_sensitive_text(phase, limit=80),
-            title=redact_sensitive_text(title or detail or tool_name or "Hermes 活动", limit=_TITLE_MAX_CHARS),
+            title=redact_sensitive_text(title or detail or tool_name or "Native 活动", limit=_TITLE_MAX_CHARS),
             detail=redact_sensitive_text(detail, limit=_DETAIL_MAX_CHARS),
             status=redact_sensitive_text(status or "running", limit=40),
             duration_seconds=duration_seconds if isinstance(duration_seconds, (int, float)) else None,
