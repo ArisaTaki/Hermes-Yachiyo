@@ -8,6 +8,7 @@ credential references; public payloads only expose configured state.
 from __future__ import annotations
 
 import base64
+import codecs
 import json
 import logging
 import os
@@ -1710,9 +1711,10 @@ def _openai_compatible_chat_stream(request: Any, timeout: float) -> Iterator[dic
 
 def _iter_openai_sse_payloads(response: Any) -> Iterator[dict[str, Any]]:
     buffer = ""
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
     for raw_chunk in response:
         if isinstance(raw_chunk, bytes):
-            buffer += raw_chunk.decode("utf-8", errors="replace")
+            buffer += decoder.decode(raw_chunk)
         else:
             buffer += str(raw_chunk)
         buffer = buffer.replace("\r\n", "\n").replace("\r", "\n")
@@ -1723,6 +1725,8 @@ def _iter_openai_sse_payloads(response: Any) -> Iterator[dict[str, Any]]:
                 return
             if payload is not None:
                 yield payload
+    buffer += decoder.decode(b"", final=True)
+    buffer = buffer.replace("\r\n", "\n").replace("\r", "\n")
     if buffer.strip():
         payload, done = _openai_compatible_sse_event_payload(buffer)
         if not done and payload is not None:
