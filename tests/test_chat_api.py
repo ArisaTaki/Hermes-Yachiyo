@@ -1588,7 +1588,7 @@ def test_manual_group_session_keeps_context_for_agent_mentions(tmp_path, monkeyp
         )
         first_summary_task = runtime.state.get_task(first_summary["task_id"])
         assert first_summary_task is not None
-        assert "[Yachiyo 群组直接 Agent 汇总]" in first_summary_task.description
+        assert "[Oha-Yachiyo 群组直接 Agent 汇总]" in first_summary_task.description
         assert "用户原始请求：@Design 做一版视觉方向" in first_summary_task.description
         assert "Design：已完成" in first_summary_task.description
         assert "汇报：Design result" in first_summary_task.description
@@ -1699,8 +1699,8 @@ def test_manual_group_session_keeps_context_for_agent_mentions(tmp_path, monkeyp
         assert "审批：workspace.write_patch、terminal.run" in task.description
         assert "派发时请根据每个 Agent 的类别、职责、工具权限、审批边界和交付偏好选择最合适的成员" in task.description
         assert "不要默认派给所有 Agent" in task.description
-        assert "<oha_group_dispatch>" in task.description
-        assert '"action":"dispatch_group_agent"' in task.description
+        assert '"tool":"oha.group_dispatch"' in task.description
+        assert '"tasks":[{"kind":"agent","target":"群成员昵称或名称","goal":"完整、可执行、不可省略的任务说明"}]' in task.description
         assert "完整、可执行、不可省略的任务说明" in task.description
         stored = store.get_session(runtime.chat_session.session_id)
         assert stored is not None
@@ -3171,7 +3171,7 @@ def test_group_main_model_dispatch_result_creates_agent_run_messages(tmp_path, m
         assert assistant_messages[0]["metadata"]["group_agent_summary_pending"] is True
         summary_task = runtime.state.get_task(summary_message["task_id"])
         assert summary_task is not None
-        assert "[Yachiyo 群组 Agent 汇总]" in summary_task.description
+        assert "[Oha-Yachiyo 群组 Agent 汇总]" in summary_task.description
         assert "不要再派发新的 Agent 任务" in summary_task.description
         assert "汇报：Design done" in summary_task.description
         assert "产物：design-01.md (tool_artifact)" in summary_task.description
@@ -3430,7 +3430,7 @@ def test_plain_group_message_can_dispatch_agents_via_main_model_result(tmp_path,
         assert main_task is not None
         assert main_task.description.startswith("我想让群里合适的 Agent 做个视觉测试")
         assert "[Yachiyo 群组上下文]" in main_task.description
-        assert "<oha_group_dispatch>" in main_task.description
+        assert '"tool":"oha.group_dispatch"' in main_task.description
 
         runtime.state.update_task_status(
             sent["task_id"],

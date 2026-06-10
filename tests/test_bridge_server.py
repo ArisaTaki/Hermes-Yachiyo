@@ -921,7 +921,7 @@ def test_chat_group_dispatch_bridge_route_runs_native_summary(tmp_path, monkeypa
     def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
         model_calls.append(messages)
         last_content = str(messages[-1]["content"])
-        if "[Yachiyo 群组 Agent 汇总]" in last_content:
+        if "[Oha-Yachiyo 群组 Agent 汇总]" in last_content:
             assert "Coding：已完成" in last_content
             assert "汇报：Coding bridge dispatch result" in last_content
             return {"role": "assistant", "content": "群组总结：Coding 已完成 Bridge route Native 派发。"}
@@ -1084,7 +1084,7 @@ def test_chat_group_dispatch_bridge_route_runs_native_summary(tmp_path, monkeypa
         assert summary_message["status"] == "processing"
         assert summary_task is not None
         assert summary_task.chat_session_id == runtime.chat_session.session_id
-        assert "[Yachiyo 群组 Agent 汇总]" in summary_task.description
+        assert "[Oha-Yachiyo 群组 Agent 汇总]" in summary_task.description
         assert "Coding：已完成" in summary_task.description
         assert "汇报：Coding bridge dispatch result" in summary_task.description
 

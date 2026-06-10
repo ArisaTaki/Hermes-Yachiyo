@@ -73,6 +73,10 @@ _TASK_TERMINAL_PROGRESS_METADATA_KEYS: tuple[str, ...] = (
     "run_progress_title",
     "run_progress_detail",
 )
+_GROUP_SUMMARY_METADATA_KEYS: tuple[str, ...] = (
+    "group_agent_summary_for_task_id",
+    "group_direct_agent_summary_for_message_id",
+)
 
 
 def _terminal_task_message_metadata(metadata: dict[str, Any], run_status: str) -> dict[str, Any] | None:
@@ -85,6 +89,15 @@ def _terminal_task_message_metadata(metadata: dict[str, Any], run_status: str) -
     next_metadata.pop("run_progress_title", None)
     next_metadata.pop("run_progress_detail", None)
     return next_metadata
+
+
+def _terminal_or_group_summary_metadata(metadata: dict[str, Any], run_status: str) -> dict[str, Any] | None:
+    terminal_metadata = _terminal_task_message_metadata(metadata, run_status)
+    if terminal_metadata is not None:
+        return terminal_metadata
+    if any(key in metadata for key in _GROUP_SUMMARY_METADATA_KEYS):
+        return dict(metadata)
+    return None
 
 
 @dataclass(frozen=True)
@@ -3433,7 +3446,7 @@ class ChatAPI:
                     task_id=msg.task_id,
                     content=result,
                     status=MessageStatus.COMPLETED,
-                    metadata=_terminal_task_message_metadata(assistant_metadata, "completed"),
+                    metadata=_terminal_or_group_summary_metadata(assistant_metadata, "completed"),
                 )
 
             elif task.status == TaskStatus.FAILED:
@@ -3445,7 +3458,7 @@ class ChatAPI:
                     content=f"❌ {error}",
                     status=MessageStatus.FAILED,
                     error=error,
-                    metadata=_terminal_task_message_metadata(assistant_metadata, "failed"),
+                    metadata=_terminal_or_group_summary_metadata(assistant_metadata, "failed"),
                 )
 
             elif task.status == TaskStatus.CANCELLED:
@@ -3457,7 +3470,7 @@ class ChatAPI:
                     content=f"⚠️ {error}",
                     status=MessageStatus.FAILED,
                     error=error,
-                    metadata=_terminal_task_message_metadata(assistant_metadata, "cancelled"),
+                    metadata=_terminal_or_group_summary_metadata(assistant_metadata, "cancelled"),
                 )
 
             elif task.status == TaskStatus.RUNNING:
@@ -5384,7 +5397,7 @@ class ChatAPI:
         )
 
         lines = [
-            "[Yachiyo 群组直接 Agent 汇总]",
+            "[Oha-Yachiyo 群组直接 Agent 汇总]",
             "你是这个群组的主模型。用户刚刚直接点名了某个 Agent，Agent 已把执行结果交给你，请由你整理后回复用户。",
             "不要再派发新的 Agent 任务，不要输出 oha.group_dispatch / oha_group_dispatch 或任何机器可读派活 JSON。",
             "回复必须明确区分：成功项、失败/取消/拒绝项、失败原因、可验收内容/产物、用户下一步可选动作。",
@@ -5449,7 +5462,7 @@ class ChatAPI:
             task_id=parent.task_id or "",
         )
         lines = [
-            "[Yachiyo 群组 Agent 汇总]",
+            "[Oha-Yachiyo 群组 Agent 汇总]",
             "你是这个群组的主模型。群内 Agent 已把执行结果交给你，请由你整合后回复用户。",
             "不要再派发新的 Agent 任务，不要输出 oha.group_dispatch / oha_group_dispatch 或任何机器可读派活 JSON。",
             "回复必须明确区分：成功项、失败/取消/拒绝项、失败原因、未执行派活、可验收内容/产物、用户下一步可选动作。",
