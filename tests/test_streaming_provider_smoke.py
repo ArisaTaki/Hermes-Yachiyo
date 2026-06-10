@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import ssl
+from types import SimpleNamespace
 
 import pytest
 
@@ -357,6 +358,70 @@ def test_stream_smoke_summarizes_message_level_tool_calls():
         }
     ]
     assert "README.md" not in json.dumps(summary)
+
+
+def test_stream_smoke_summarizes_openai_sdk_object_tool_call_deltas():
+    chunks = [
+        SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    index=0,
+                    delta=SimpleNamespace(
+                        content="checking ",
+                        reasoning_content="private plan ",
+                        tool_calls=[
+                            SimpleNamespace(
+                                index=0,
+                                id="call_sdk_read",
+                                type="function",
+                                function=SimpleNamespace(
+                                    name="workspace_",
+                                    arguments='{"path":"READ',
+                                ),
+                            )
+                        ],
+                    ),
+                )
+            ]
+        ),
+        SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    index=0,
+                    delta=SimpleNamespace(
+                        reasoning="kept private",
+                        tool_calls=[
+                            SimpleNamespace(
+                                index=0,
+                                function=SimpleNamespace(
+                                    name="read",
+                                    arguments='ME.md"}',
+                                ),
+                            )
+                        ],
+                    ),
+                    finish_reason="tool_calls",
+                )
+            ]
+        ),
+    ]
+
+    summary = smoke.summarize_stream_chunks(chunks, include_tool_arguments=True)
+
+    assert summary["ok"] is True
+    assert summary["content_chars"] == len("checking ")
+    assert summary["reasoning_chars"] == len("private plan kept private")
+    assert summary["finish_reasons"] == ["tool_calls"]
+    assert summary["tool_call_delta_count"] == 2
+    assert summary["tool_call_count"] == 1
+    assert summary["tool_calls"] == [
+        {
+            "id": "call_sdk_read",
+            "name": "workspace_read",
+            "argument_chars": len('{"path":"README.md"}'),
+            "arguments": '{"path":"README.md"}',
+        }
+    ]
 
 
 def test_stream_smoke_fails_when_expected_content_or_tool_is_missing(monkeypatch):
