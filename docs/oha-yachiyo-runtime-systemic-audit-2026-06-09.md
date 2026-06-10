@@ -411,7 +411,7 @@ model.output.completed
 run.completed
 ```
 
-本轮同时发现 `/ui/runs` 列表没有顶层暴露 `task_id/session_id`，只能从 timeline 的 `task.linked` 反推 Task↔Run。已将 `task_run_links` 投影到 Run API 顶层：`task_id`、`session_id`、`task_run_link_created_at`，并用 `tests/test_agent_runtime.py::test_main_chat_run_links_task_and_records_replayable_events` 锁定 `get_run()` 与 `list_runs()` 都能直接读取映射。
+本轮同时发现 `/ui/runs` 列表没有顶层暴露 `task_id/session_id`，只能从 timeline 的 `task.linked` 反推 Task↔Run。已将 `task_run_links` 投影到 Run API 顶层：`task_id`、`session_id`、`task_run_link_created_at`，并用 `tests/test_agent_runtime.py::test_main_chat_run_links_task_and_records_replayable_events` 锁定 `get_run()` 与 `list_runs()` 都能直接读取映射。后续又按设计书建议扩展 TaskRunLink 投影字段：`run_status`、`last_event_sequence`、`updated_at`，并在 Run 状态更新和 RunEvent append 时同步，避免诊断入口继续从 timeline 或 replay 列表反推最新状态。
 
 ### Chat UI interaction guard and Browser blocker
 
@@ -1246,7 +1246,7 @@ Info.plist uses Oha-Yachiyo identifiers and permission strings
 - Hermes 执行内核入口已有源码级 guard：`apps` / `integrations` / `packages` / `scripts` / `pyproject.toml` 不得重新出现 `HermesExecutor`、Hermes CLI/stream/installer/readiness、`hermes_profile`、旧 `run_yachiyo*` / `yachiyo_delegation` / `yachiyo_group_dispatch` 和旧 workspace/product token。
 - `builtin:yachiyo-main` 已作为系统虚拟 Agent 暴露给 Runtime / Agent Studio 读取面，使用默认 Chat ModelProfile，不落普通 agents 表，不可作为普通 Agent 创建、修改或删除，并被排除出自动委派目标。
 - RunRepository、RunGroupRepository、RunEvent、approval projection、ApprovalCoordinator、ApprovalResumeCoordinator、WorkflowParentResumeCoordinator、WorkflowContinuationCoordinator、RunArtifactRepository、tool descriptor 和 policy gate 已开始从 `NativeRunEngine` 中显式拆边界。
-- Agent runtime SQLite 已有 runs、run_events、run_approvals、run_artifacts、agents、workflows、model_profiles 等核心表；初始化启用 schema metadata、foreign keys、WAL 和 busy timeout，并已有 FK cascade 回归覆盖 TaskRunLink。
+- Agent runtime SQLite 已有 runs、run_events、run_approvals、run_artifacts、agents、workflows、model_profiles 等核心表；初始化启用 schema metadata、foreign keys、WAL 和 busy timeout，并已有 FK cascade 回归覆盖 TaskRunLink；TaskRunLink 也已扩展 `run_status`、`last_event_sequence`、`updated_at` 投影并带旧库迁移回填。
 - `GET /runs/{run_id}/events` 已具备 service、route function 和真实 FastAPI/TestClient HTTP 层回归，覆盖 `after_sequence`、limit clamp、默认 user-visible 过滤和 secret redaction。
 - Bridge localhost、token、CORS/Host 约束已实现，并已有真实 FastAPI/TestClient middleware 回归覆盖可信 Origin CORS、非 loopback Host 阻断、非可信 Origin 阻断、GET 放行、POST 缺 token 阻断和 POST 带 token 放行；当前已注册的全部 mutating routes 也已枚举验证缺 token 时统一返回 `invalid_bridge_token`；`start_bridge()` / `restart_bridge()` 拒绝非回环 host，非法 restart 不会先停止当前 Bridge。
 - Desktop backend 直接启动时会生成临时 Bridge session token；Electron 正常启动会注入 session token，前端 mutating requests 会自动携带 token header。
@@ -1278,7 +1278,7 @@ Info.plist uses Oha-Yachiyo identifiers and permission strings
 - Chat 取消 late-output 已加固，并已补可重复 pytest 级 Bridge route 回归：慢模型返回前通过 `/ui/chat/session/cancel` 取消任务后，Run 可靠进入 `cancelled`，late model response 不再写 `model.output.completed` 或把 Run 覆盖回 running/completed，且 `/ui/runs` Run Detail projection 可读取同一 cancelled Native main_chat_run 的 Task↔Run 映射与 `run.cancelled` fact。
 - Chat 图片附件已有 live source Bridge E2E，并已补可重复 pytest 级 Bridge route 回归：`/ui/chat/messages` 提交 image data URL attachment，ChatSession 只暴露公共 attachment URL，TaskRunner / NativeAgentExecutor 将图片传给 NativeRunEngine fake model，并可通过 `/runs/{run_id}/events` 读取 `model.output.completed` / `run.completed` replay。
 - Chat 审批已有 live source Bridge E2E，并已补可重复 pytest 级 Bridge route 回归：真实 `/ui/chat/messages` 触发 `workspace.write_patch` approval，`/ui/runs/{run_id}/approval/approve` 批准后实际修改 workspace 文件，恢复模型并完成 `agent.tool.approval_required` / `agent.tool.approval_approved` / approved `agent.tool.call` / `model.output.completed` / `run.completed` replay。
-- Run API 现在直接投影 `task_id`、`session_id`、`task_run_link_created_at`，让 Task↔Run 映射不必从 timeline 反推。
+- Run API 现在直接投影 `task_id`、`session_id`、`task_run_link_created_at`、`task_run_link_updated_at`、`task_run_link_run_status` 和 `task_run_link_last_event_sequence`，让 Task↔Run 映射、当前状态和 replay 游标不必从 timeline 反推。
 - Chat 图片附件产品路径已有 TaskRunner/route 级集成回归：真实 ChatAPI 保存 pasted image、TaskRunner 执行、NativeAgentExecutor 传递 OpenAI-compatible `image_url` data URL、NativeRunEngine 完成 RunEvent 和 ChatSession 投影，并且 `/ui/runs` Run Detail projection 与 `/runs/{run_id}/events` replay API 均可读取同一 Native main_chat_run。
 - 主聊天工具审批等待已有 Chat API 级投影兜底：RUNNING Task 可通过当前 runtime service 的 Task↔Run link 投影 `approval_required` 到 ChatSession metadata、ActivityStore 和 `approval_count`，审批恢复后会清空旧 `pending_approval`；TaskRunner 和 ChatAPI 的终态投影均会移除过期审批进度，避免 completed assistant message 继续显示旧审批卡。
 - 主聊天工具审批往返已有 TaskRunner 级集成回归：真实 TaskRunner / NativeAgentExecutor / NativeRunEngine 可让 main_chat_run 暂停审批、批准后执行 `workspace.write_patch`、恢复模型、完成 Task 与 ChatSession；并发重复 approval 和跨 NativeRunEngine 实例的重复 claim 不会重复执行工具。

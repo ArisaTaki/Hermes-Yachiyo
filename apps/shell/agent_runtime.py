@@ -3207,7 +3207,10 @@ class NativeRunEngine:
                 task_id TEXT PRIMARY KEY,
                 run_id TEXT NOT NULL UNIQUE,
                 session_id TEXT NOT NULL DEFAULT '',
+                run_status TEXT NOT NULL DEFAULT '',
+                last_event_sequence INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT '',
                 FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
             );
             CREATE TABLE IF NOT EXISTS run_events (
@@ -3333,6 +3336,41 @@ class NativeRunEngine:
             self._conn.execute("ALTER TABLE runs ADD COLUMN client_request_id TEXT NOT NULL DEFAULT ''")
         if "pending_approval_json" not in run_columns:
             self._conn.execute("ALTER TABLE runs ADD COLUMN pending_approval_json TEXT NOT NULL DEFAULT '{}'")
+        task_run_link_columns = {
+            str(row["name"]) for row in self._conn.execute("PRAGMA table_info(task_run_links)").fetchall()
+        }
+        if "run_status" not in task_run_link_columns:
+            self._conn.execute("ALTER TABLE task_run_links ADD COLUMN run_status TEXT NOT NULL DEFAULT ''")
+        if "last_event_sequence" not in task_run_link_columns:
+            self._conn.execute(
+                "ALTER TABLE task_run_links ADD COLUMN last_event_sequence INTEGER NOT NULL DEFAULT 0"
+            )
+        if "updated_at" not in task_run_link_columns:
+            self._conn.execute("ALTER TABLE task_run_links ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''")
+        self._conn.execute(
+            """
+            UPDATE task_run_links
+               SET run_status=COALESCE((SELECT status FROM runs WHERE runs.run_id=task_run_links.run_id), '')
+             WHERE run_status=''
+            """
+        )
+        self._conn.execute(
+            """
+            UPDATE task_run_links
+               SET last_event_sequence=COALESCE(
+                    (SELECT MAX(sequence) FROM run_events WHERE run_events.run_id=task_run_links.run_id),
+                    0
+               )
+             WHERE last_event_sequence=0
+            """
+        )
+        self._conn.execute(
+            """
+            UPDATE task_run_links
+               SET updated_at=created_at
+             WHERE updated_at=''
+            """
+        )
         self._migrate_native_execution_and_skill_sources()
         return self._migrate_agent_model_credentials()
 
@@ -4037,7 +4075,7 @@ class NativeRunEngine:
         )
         task_link = self._conn.execute(
             """
-            SELECT task_id, session_id, created_at
+            SELECT task_id, session_id, run_status, last_event_sequence, created_at, updated_at
               FROM task_run_links
              WHERE run_id=?
              ORDER BY created_at DESC
@@ -4050,6 +4088,11 @@ class NativeRunEngine:
             "task_id": str(task_link["task_id"] or "") if task_link is not None else "",
             "session_id": str(task_link["session_id"] or "") if task_link is not None else "",
             "task_run_link_created_at": str(task_link["created_at"] or "") if task_link is not None else "",
+            "task_run_link_updated_at": str(task_link["updated_at"] or "") if task_link is not None else "",
+            "task_run_link_run_status": str(task_link["run_status"] or "") if task_link is not None else "",
+            "task_run_link_last_event_sequence": (
+                int(task_link["last_event_sequence"] or 0) if task_link is not None else 0
+            ),
             "run_group_id": run_group_id,
             "run_group_source": run_group_source,
             "client_request_id": str(row["client_request_id"] or "") if "client_request_id" in row_keys else "",
@@ -5501,16 +5544,30 @@ class NativeRunEngine:
         clean_run_id = str(run_id or "").strip()
         if not clean_task_id or not clean_run_id:
             raise AgentRuntimeError("Task 与 Run 映射缺少 task_id 或 run_id")
-        self.get_run(clean_run_id)
+        run = self.get_run(clean_run_id)
+        latest_sequence = self._latest_run_event_sequence(clean_run_id)
+        now = _now()
         self._conn.execute(
             """
-            INSERT INTO task_run_links (task_id, run_id, session_id, created_at)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO task_run_links (
+                task_id, run_id, session_id, run_status, last_event_sequence, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(task_id) DO UPDATE SET
                 run_id=excluded.run_id,
-                session_id=excluded.session_id
+                session_id=excluded.session_id,
+                run_status=excluded.run_status,
+                last_event_sequence=excluded.last_event_sequence,
+                updated_at=excluded.updated_at
             """,
-            (clean_task_id, clean_run_id, str(session_id or ""), _now()),
+            (
+                clean_task_id,
+                clean_run_id,
+                str(session_id or ""),
+                str(run.get("status") or ""),
+                latest_sequence,
+                now,
+                now,
+            ),
         )
         self._conn.commit()
         return self.get_task_run_link(clean_task_id)
@@ -5518,7 +5575,11 @@ class NativeRunEngine:
     def get_task_run_link(self, task_id: str) -> dict[str, Any]:
         self._ensure_row_factory()
         row = self._conn.execute(
-            "SELECT task_id, run_id, session_id, created_at FROM task_run_links WHERE task_id=?",
+            """
+            SELECT task_id, run_id, session_id, run_status, last_event_sequence, created_at, updated_at
+              FROM task_run_links
+             WHERE task_id=?
+            """,
             (str(task_id or "").strip(),),
         ).fetchone()
         if row is None:
@@ -5527,8 +5588,47 @@ class NativeRunEngine:
             "task_id": str(row["task_id"]),
             "run_id": str(row["run_id"]),
             "session_id": str(row["session_id"] or ""),
+            "run_status": str(row["run_status"] or ""),
+            "last_event_sequence": int(row["last_event_sequence"] or 0),
             "created_at": str(row["created_at"]),
+            "updated_at": str(row["updated_at"] or row["created_at"]),
         }
+
+    def _latest_run_event_sequence(self, run_id: str) -> int:
+        row = self._conn.execute(
+            "SELECT COALESCE(MAX(sequence), 0) AS last_sequence FROM run_events WHERE run_id=?",
+            (str(run_id or "").strip(),),
+        ).fetchone()
+        return int(row["last_sequence"] if row is not None else 0)
+
+    def _sync_task_run_link_projection(
+        self,
+        run_id: str,
+        *,
+        status: str | None = None,
+        last_event_sequence: int | None = None,
+    ) -> None:
+        clean_run_id = str(run_id or "").strip()
+        if not clean_run_id:
+            return
+        updates: list[str] = []
+        params: list[Any] = []
+        if status is not None:
+            updates.append("run_status=?")
+            params.append(str(status or ""))
+        if last_event_sequence is not None:
+            updates.append("last_event_sequence=MAX(last_event_sequence, ?)")
+            params.append(max(0, int(last_event_sequence or 0)))
+        if not updates:
+            return
+        updates.append("updated_at=?")
+        params.append(_now())
+        params.append(clean_run_id)
+        self._conn.execute(
+            f"UPDATE task_run_links SET {', '.join(updates)} WHERE run_id=?",
+            tuple(params),
+        )
+        self._conn.commit()
 
     def append_run_event(
         self,
@@ -5540,7 +5640,7 @@ class NativeRunEngine:
         visibility: str = "user",
         sensitivity: str = "public",
     ) -> dict[str, Any]:
-        return self.run_events.append(
+        event = self.run_events.append(
             run_id,
             event_type,
             payload,
@@ -5548,6 +5648,8 @@ class NativeRunEngine:
             visibility=visibility,
             sensitivity=sensitivity,
         )
+        self._sync_task_run_link_projection(run_id, last_event_sequence=int(event.get("sequence") or 0))
+        return event
 
     def list_run_events(
         self,
@@ -5680,7 +5782,7 @@ class NativeRunEngine:
         artifacts: list[dict[str, Any]] | None = None,
         pending_approval: dict[str, Any] | None | object = _UNSET,
     ) -> dict[str, Any]:
-        return self.runs.update(
+        run = self.runs.update(
             run_id,
             status=status,
             result=result,
@@ -5688,6 +5790,8 @@ class NativeRunEngine:
             artifacts=artifacts,
             pending_approval=pending_approval,
         )
+        self._sync_task_run_link_projection(run_id, status=str(run.get("status") or ""))
+        return run
 
     def _terminal_run_or_none(self, run_id: str) -> dict[str, Any] | None:
         try:

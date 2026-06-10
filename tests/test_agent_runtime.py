@@ -837,6 +837,83 @@ def test_runtime_migrates_legacy_runs_before_index_creation(tmp_path):
         service.close()
 
 
+def test_runtime_migrates_task_run_link_projection_columns(tmp_path):
+    db_path = tmp_path / "agent-runtime.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        PRAGMA foreign_keys=ON;
+        CREATE TABLE runs (
+            run_id TEXT PRIMARY KEY,
+            run_group_id TEXT NOT NULL DEFAULT '',
+            client_request_id TEXT NOT NULL DEFAULT '',
+            kind TEXT NOT NULL,
+            runnable_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            user_goal TEXT NOT NULL DEFAULT '',
+            result TEXT NOT NULL DEFAULT '',
+            timeline_json TEXT NOT NULL DEFAULT '[]',
+            artifacts_json TEXT NOT NULL DEFAULT '[]',
+            pending_approval_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE task_run_links (
+            task_id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL UNIQUE,
+            session_id TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
+        );
+        CREATE TABLE run_events (
+            event_id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            sequence INTEGER NOT NULL,
+            schema_version INTEGER NOT NULL DEFAULT 1,
+            event_type TEXT NOT NULL,
+            actor TEXT NOT NULL DEFAULT 'native_runtime',
+            visibility TEXT NOT NULL DEFAULT 'user',
+            sensitivity TEXT NOT NULL DEFAULT 'public',
+            payload_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE,
+            UNIQUE (run_id, sequence)
+        );
+        INSERT INTO runs (
+            run_id, kind, runnable_id, status, user_goal, result,
+            timeline_json, artifacts_json, pending_approval_json, created_at, updated_at
+        ) VALUES (
+            'main_chat_run_legacy_link', 'main_chat_run', 'builtin:yachiyo-main', 'completed',
+            'legacy task', 'done', '[]', '[]', '{}', '2026-06-09T00:00:00+00:00',
+            '2026-06-09T00:00:01+00:00'
+        );
+        INSERT INTO task_run_links (task_id, run_id, session_id, created_at)
+        VALUES (
+            'task-legacy-link', 'main_chat_run_legacy_link', 'session-legacy-link',
+            '2026-06-09T00:00:00+00:00'
+        );
+        INSERT INTO run_events (
+            event_id, run_id, sequence, event_type, payload_json, created_at
+        ) VALUES
+            ('event_legacy_1', 'main_chat_run_legacy_link', 1, 'run.started', '{}', '2026-06-09T00:00:00+00:00'),
+            ('event_legacy_2', 'main_chat_run_legacy_link', 2, 'run.completed', '{}', '2026-06-09T00:00:01+00:00');
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    service = make_service(tmp_path)
+    try:
+        link_columns = {row["name"] for row in service._conn.execute("PRAGMA table_info(task_run_links)").fetchall()}
+        assert {"run_status", "last_event_sequence", "updated_at"}.issubset(link_columns)
+        link = service.get_task_run_link("task-legacy-link")
+        assert link["run_status"] == "completed"
+        assert link["last_event_sequence"] == 2
+        assert link["updated_at"] == "2026-06-09T00:00:00+00:00"
+    finally:
+        service.close()
+
+
 def test_runtime_sqlite_enables_required_database_guards(tmp_path):
     service = make_service(tmp_path)
     try:
@@ -848,9 +925,14 @@ def test_runtime_sqlite_enables_required_database_guards(tmp_path):
         assert service._conn.execute("PRAGMA foreign_keys").fetchone()["foreign_keys"] == 1
         assert service._conn.execute("PRAGMA journal_mode").fetchone()["journal_mode"].lower() == "wal"
         assert service._conn.execute("PRAGMA busy_timeout").fetchone()["timeout"] == 5000
+        link_columns = {row["name"] for row in service._conn.execute("PRAGMA table_info(task_run_links)").fetchall()}
+        assert {"run_status", "last_event_sequence", "updated_at"}.issubset(link_columns)
 
         run = service.start_main_chat_run(task_id="task-db-guard", session_id="session-db-guard", user_goal="db guard")
-        assert service.get_task_run_link("task-db-guard")["run_id"] == run["run_id"]
+        link = service.get_task_run_link("task-db-guard")
+        assert link["run_id"] == run["run_id"]
+        assert link["run_status"] == "running"
+        assert link["last_event_sequence"] == 2
 
         service._conn.execute("DELETE FROM runs WHERE run_id=?", (run["run_id"],))
         service._conn.commit()
@@ -887,6 +969,8 @@ def test_main_chat_run_links_task_and_records_replayable_events(tmp_path, monkey
 
         assert link["run_id"] == run["run_id"]
         assert link["session_id"] == "session-main-1"
+        assert link["run_status"] == "completed"
+        assert link["last_event_sequence"] == len(events)
         assert completed["kind"] == "main_chat_run"
         assert completed["runnable_name"] == "Yachiyo"
         assert completed["status"] == "completed"
@@ -896,6 +980,8 @@ def test_main_chat_run_links_task_and_records_replayable_events(tmp_path, monkey
         listed_run = next(item for item in service.list_runs()["runs"] if item["run_id"] == run["run_id"])
         assert listed_run["task_id"] == "task-main-1"
         assert listed_run["session_id"] == "session-main-1"
+        assert listed_run["task_run_link_run_status"] == "completed"
+        assert listed_run["task_run_link_last_event_sequence"] == len(events)
         assert [event["sequence"] for event in events] == list(range(1, len(events) + 1))
         assert [event["event_type"] for event in events] == [
             "run.started",
