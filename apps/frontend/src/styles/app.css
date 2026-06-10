@@ -16077,6 +16077,31 @@ button.activity-item {
   list-style: none;
 }
 
+.run-replay-status {
+  margin: 8px 0 0;
+  color: var(--hy-faint);
+  font-size: 11px;
+}
+
+.run-replay-more {
+  display: flex;
+  justify-content: center;
+  padding-top: 8px;
+}
+
+.run-replay-more button {
+  min-height: 30px;
+  border-color: var(--hy-border-soft);
+  background: oklch(255 0 0 / 0.025);
+  color: var(--hy-subtle);
+  font-size: 12px;
+}
+
+.run-replay-more button:not(:disabled):hover {
+  border-color: oklch(66% 0.12 188 / 0.32);
+  background: oklch(66% 0.12 188 / 0.06);
+}
+
 .run-execution-step {
   display: grid;
   grid-template-columns: 22px minmax(0, 1fr);

@@ -101,6 +101,14 @@ type RunHistoryGroup = {
   runs: RunSpec[];
 };
 
+type RunEventReplayState = {
+  events: RunEventSpec[];
+  limit: number;
+  hasMore: boolean;
+  loading: boolean;
+  error?: string;
+};
+
 type StudioRefreshOptions = {
   selectedAgentId?: string;
   selectFirstAgent?: boolean;
@@ -117,6 +125,7 @@ type ApprovedApprovalGuard = {
   staleUntil: number;
 };
 
+const RUN_EVENT_REPLAY_PAGE_SIZE = 200;
 const approvedApprovalStaleWindowMs = 6000;
 const runApprovalPollAttempts = 100;
 const runApprovalPollIntervalMs = 1200;
@@ -1268,6 +1277,13 @@ function runEventReplayToTimelineEvent(event: RunEventSpec): Record<string, unkn
   };
 }
 
+function mergeRunEventReplayPages(current: RunEventSpec[], incoming: RunEventSpec[]): RunEventSpec[] {
+  const bySequence = new Map<number, RunEventSpec>();
+  current.forEach((event) => bySequence.set(Number(event.sequence) || 0, event));
+  incoming.forEach((event) => bySequence.set(Number(event.sequence) || 0, event));
+  return Array.from(bySequence.values()).sort((left, right) => (Number(left.sequence) || 0) - (Number(right.sequence) || 0));
+}
+
 function payloadLineCount(value: string): number {
   if (!value) return 0;
   return value.split(/\r?\n/).length;
@@ -1811,7 +1827,7 @@ export function AgentStudioView() {
   const [runs, setRuns] = useState<RunSpec[]>([]);
   const [runGroups, setRunGroups] = useState<RunGroupSpec[]>([]);
   const [runDetailCache, setRunDetailCache] = useState<RunSpec[]>([]);
-  const [runEventsByRunId, setRunEventsByRunId] = useState<Record<string, RunEventSpec[]>>({});
+  const [runEventReplayByRunId, setRunEventReplayByRunId] = useState<Record<string, RunEventReplayState>>({});
   const approvedApprovalGuardsRef = useRef<Map<string, ApprovedApprovalGuard>>(new Map());
   const [selectedAgentId, setSelectedAgentId] = useState('');
   const [selectedWorkflowId, setSelectedWorkflowId] = useState('');
@@ -1949,10 +1965,17 @@ export function AgentStudioView() {
     () => selectedRunId ? runById.get(selectedRunId) || null : null,
     [runById, selectedRunId],
   );
-  const selectedRunReplayEvents = useMemo(
-    () => selectedRunId ? runEventsByRunId[selectedRunId] || [] : [],
-    [runEventsByRunId, selectedRunId],
+  const selectedRunReplayState = useMemo(
+    () => selectedRunId ? runEventReplayByRunId[selectedRunId] || null : null,
+    [runEventReplayByRunId, selectedRunId],
   );
+  const selectedRunReplayEvents = useMemo(
+    () => selectedRunReplayState?.events || [],
+    [selectedRunReplayState],
+  );
+  const selectedRunReplayHasMore = Boolean(selectedRunReplayState?.hasMore);
+  const selectedRunReplayLoading = Boolean(selectedRunReplayState?.loading);
+  const selectedRunReplayError = selectedRunReplayState?.error || '';
   const selectedRunExecutionEvents = useMemo(
     () => selectedRunReplayEvents.length
       ? selectedRunReplayEvents.map(runEventReplayToTimelineEvent)
@@ -2543,13 +2566,47 @@ export function AgentStudioView() {
   useEffect(() => {
     if (!selectedRunId) return;
     let disposed = false;
-    getRunEvents(selectedRunId)
+    setRunEventReplayByRunId((current) => ({
+      ...current,
+      [selectedRunId]: {
+        events: current[selectedRunId]?.events || [],
+        limit: RUN_EVENT_REPLAY_PAGE_SIZE,
+        hasMore: current[selectedRunId]?.hasMore || false,
+        loading: true,
+        error: '',
+      },
+    }));
+    getRunEvents(selectedRunId, 0, RUN_EVENT_REPLAY_PAGE_SIZE)
       .then((page) => {
         if (!disposed) {
-          setRunEventsByRunId((current) => ({ ...current, [selectedRunId]: page.events || [] }));
+          const events = page.events || [];
+          const limit = page.limit || RUN_EVENT_REPLAY_PAGE_SIZE;
+          setRunEventReplayByRunId((current) => ({
+            ...current,
+            [selectedRunId]: {
+              events,
+              limit,
+              hasMore: events.length >= limit,
+              loading: false,
+              error: '',
+            },
+          }));
         }
       })
-      .catch(() => undefined);
+      .catch((err: unknown) => {
+        if (!disposed) {
+          setRunEventReplayByRunId((current) => ({
+            ...current,
+            [selectedRunId]: {
+              events: current[selectedRunId]?.events || [],
+              limit: current[selectedRunId]?.limit || RUN_EVENT_REPLAY_PAGE_SIZE,
+              hasMore: current[selectedRunId]?.hasMore || false,
+              loading: false,
+              error: err instanceof Error ? err.message : '读取 RunEvent replay 失败',
+            },
+          }));
+        }
+      });
     return () => {
       disposed = true;
     };
@@ -3382,6 +3439,54 @@ export function AgentStudioView() {
       setStatus('Artifact 已读取');
     } catch (err) {
       setError(err instanceof Error ? err.message : '读取 artifact 失败');
+    }
+  }
+
+  async function loadMoreSelectedRunEvents() {
+    if (!selectedRunId) return;
+    const currentState = runEventReplayByRunId[selectedRunId];
+    const currentEvents = currentState?.events || [];
+    const afterSequence = currentEvents.reduce((max, event) => Math.max(max, Number(event.sequence) || 0), 0);
+    setRunEventReplayByRunId((current) => ({
+      ...current,
+      [selectedRunId]: {
+        events: current[selectedRunId]?.events || currentEvents,
+        limit: current[selectedRunId]?.limit || RUN_EVENT_REPLAY_PAGE_SIZE,
+        hasMore: current[selectedRunId]?.hasMore ?? true,
+        loading: true,
+        error: '',
+      },
+    }));
+    try {
+      const page = await getRunEvents(selectedRunId, afterSequence, RUN_EVENT_REPLAY_PAGE_SIZE);
+      const incomingEvents = page.events || [];
+      const limit = page.limit || RUN_EVENT_REPLAY_PAGE_SIZE;
+      setRunEventReplayByRunId((current) => {
+        const previous = current[selectedRunId];
+        const events = mergeRunEventReplayPages(previous?.events || currentEvents, incomingEvents);
+        return {
+          ...current,
+          [selectedRunId]: {
+            events,
+            limit,
+            hasMore: incomingEvents.length >= limit,
+            loading: false,
+            error: '',
+          },
+        };
+      });
+      setStatus(incomingEvents.length ? `已加载 ${incomingEvents.length} 条 RunEvent replay` : '没有更多 RunEvent replay');
+    } catch (err) {
+      setRunEventReplayByRunId((current) => ({
+        ...current,
+        [selectedRunId]: {
+          events: current[selectedRunId]?.events || currentEvents,
+          limit: current[selectedRunId]?.limit || RUN_EVENT_REPLAY_PAGE_SIZE,
+          hasMore: current[selectedRunId]?.hasMore ?? true,
+          loading: false,
+          error: err instanceof Error ? err.message : '读取更多 RunEvent replay 失败',
+        },
+      }));
     }
   }
 
@@ -4849,6 +4954,18 @@ export function AgentStudioView() {
                       );
                     })}
                   </ol>
+                  {selectedRunReplayError ? <p className="run-replay-status">{selectedRunReplayError}</p> : null}
+                  {selectedRunReplayEvents.length && selectedRunReplayHasMore ? (
+                    <div className="run-replay-more">
+                      <button
+                        type="button"
+                        disabled={selectedRunReplayLoading}
+                        onClick={() => void loadMoreSelectedRunEvents()}
+                      >
+                        {selectedRunReplayLoading ? '加载中...' : '加载更多 RunEvent'}
+                      </button>
+                    </div>
+                  ) : null}
                 </details>
                 <details className="run-detail-block run-detail-fold" open>
                   <summary className="run-detail-section-head">
