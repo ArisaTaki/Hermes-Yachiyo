@@ -3563,13 +3563,32 @@ export function AgentStudioView() {
     return rejectRunById(selectedRun.run_id);
   }
 
+  async function cancelRunById(runId: string, nextSelectedRunId?: string): Promise<StudioRefreshOptions> {
+    if (!runId) throw new Error('请选择要取消的 Run');
+    const currentRun = runById.get(runId) || null;
+    if (currentRun && !isActiveRunStatus(currentRun.status)) throw new Error('只能取消进行中或待审批的 Run');
+    const run = await cancelRun(runId);
+    const selectedAfterAction = nextSelectedRunId || run.run_id;
+    const updatedRuns = [run];
+    if (nextSelectedRunId && nextSelectedRunId !== run.run_id) {
+      try {
+        updatedRuns.push(await getRun(nextSelectedRunId));
+      } catch {
+        // The normal refresh/polling path will retry; cancellation already succeeded.
+      }
+    }
+    upsertRunDetailCache(updatedRuns);
+    await refreshRunGroupsForRuns(updatedRuns);
+    setSelectedRunId(selectedAfterAction);
+    return {
+      selectedRunId: selectedAfterAction,
+      statusMessage: nextSelectedRunId ? '已取消子 Run，Workflow 已终止。' : 'Run 已取消。',
+    };
+  }
+
   async function cancelSelectedRun(): Promise<StudioRefreshOptions> {
     if (!selectedRun) throw new Error('请选择要取消的 Run');
-    if (!isActiveRunStatus(selectedRun.status)) throw new Error('只能取消进行中或待审批的 Run');
-    const run = await cancelRun(selectedRun.run_id);
-    upsertRunDetailCache([run]);
-    setSelectedRunId(run.run_id);
-    return { selectedRunId: run.run_id };
+    return cancelRunById(selectedRun.run_id);
   }
 
   function requestCancelSelectedRun() {
@@ -4774,6 +4793,17 @@ export function AgentStudioView() {
                             )}
                           >
                             拒绝子 Agent
+                          </button>
+                          <button
+                            type="button"
+                            className="danger-action"
+                            disabled={busy}
+                            onClick={() => void runAction(
+                              () => cancelRunById(selectedWorkflowApprovalChildRunId, selectedRun.run_id),
+                              '取消子 Agent Run',
+                            )}
+                          >
+                            取消子 Run
                           </button>
                           <button type="button" className="run-timeline-child" onClick={() => openRunDetail(selectedWorkflowApprovalChildRunId)}>
                             打开子 Run

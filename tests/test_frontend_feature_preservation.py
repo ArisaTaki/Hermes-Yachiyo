@@ -444,8 +444,13 @@ def test_agent_studio_preserves_workflow_child_approval_refresh_wiring() -> None
             "const run = await rejectRunApproval(runId);",
             "upsertRunDetailCache(updatedRuns);",
             "setSelectedRunId(selectedAfterAction);",
+            "async function cancelRunById(runId: string, nextSelectedRunId?: string): Promise<StudioRefreshOptions>",
+            "const run = await cancelRun(runId);",
+            "statusMessage: nextSelectedRunId ? '已取消子 Run，Workflow 已终止。' : 'Run 已取消。'",
             "() => approveRunById(selectedWorkflowApprovalChildRunId, selectedRun.run_id)",
             "() => rejectRunById(selectedWorkflowApprovalChildRunId, selectedRun.run_id)",
+            "() => cancelRunById(selectedWorkflowApprovalChildRunId, selectedRun.run_id)",
+            "取消子 Run",
             "openRunDetail(selectedWorkflowApprovalChildRunId)",
         ],
     )
