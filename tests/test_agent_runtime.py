@@ -3911,6 +3911,74 @@ def test_main_chat_model_loop_pauses_and_resumes_approved_tool(tmp_path, monkeyp
         service.close()
 
 
+def test_main_chat_records_failed_run_event_when_approved_tool_fails(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    calls = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        assert any((tool.get("function") or {}).get("name") == "terminal_run" for tool in tools or [])
+        return {
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_terminal_failure",
+                    "type": "function",
+                    "function": {
+                        "name": "terminal_run",
+                        "arguments": json.dumps(
+                            {
+                                "command": "printf main-chat-terminal-failure; exit 7",
+                                "shell": True,
+                            }
+                        ),
+                    },
+                }
+            ],
+        }
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-chat-terminal-failure",
+            session_id="session-main-chat-terminal-failure",
+            user_goal="Run failing command",
+        )
+        waiting = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [{"role": "user", "content": "Run failing command"}],
+            tool_policy={"allowed_tools": ["terminal.run"]},
+            workspace_policy={"default_workdir": str(workdir), "readable_scopes": ["."]},
+        )
+
+        assert waiting["status"] == "approval_required"
+        resumed = service.approve_run_approval(run["run_id"])
+
+        assert resumed["status"] == "failed"
+        assert "terminal.run 执行失败" in resumed["result"]
+        assert "退出码：7" in resumed["result"]
+        assert "main-chat-terminal-failure" in resumed["result"]
+        events = service.list_run_events(run["run_id"])["events"]
+        failed_event = next(event for event in events if event["event_type"] == "agent.run.failed")
+        assert "terminal.run 执行失败" in failed_event["payload"]["error"]
+        assert any(
+            event["event_type"] == "agent.tool.call"
+            and event["payload"]["tool"] == "terminal.run"
+            and event["payload"]["result"]["ok"] is False
+            and event["payload"]["approved"] is True
+            for event in events
+        )
+        assert len(calls) == 1
+    finally:
+        service.close()
+
+
 def test_main_chat_approval_timeout_records_replayable_fact_and_is_idempotent(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     workdir = tmp_path / "repo"

@@ -8068,6 +8068,7 @@ class NativeRunEngine:
         except Exception as exc:
             safe_error = redact_api_error_text(exc)
             resume_context.timeline.append(self._timeline("agent.run.failed", safe_error))
+            self.append_run_event(run_id, "agent.run.failed", {"error": safe_error})
             result = self._update_run(
                 run_id,
                 status="failed",
