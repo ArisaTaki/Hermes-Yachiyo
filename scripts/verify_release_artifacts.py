@@ -261,6 +261,14 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover OpenAI-compatible streaming provider contracts",
     ),
     (
+        "tests/test_legacy_kernel_removal.py",
+        "macOS release workflow smoke tests must cover legacy Hermes kernel removal",
+    ),
+    (
+        "tests/test_runtime_injection_boundary.py",
+        "macOS release workflow smoke tests must cover Native runtime injection boundary",
+    ),
+    (
         "tests/test_screenshot.py",
         "macOS release workflow smoke tests must cover screenshot behavior",
     ),
