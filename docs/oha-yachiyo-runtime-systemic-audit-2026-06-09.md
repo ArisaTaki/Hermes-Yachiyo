@@ -1243,6 +1243,7 @@ Info.plist uses Oha-Yachiyo identifiers and permission strings
 - 成熟业务层没有被删除或 Run-only 重写。
 - `NativeAgentExecutor` 维护 Task 到 Run 的映射。
 - `NativeRunEngine` 承载模型、RunEvent、工具、审批、取消和预算。
+- Hermes 执行内核入口已有源码级 guard：`apps` / `integrations` / `packages` / `scripts` / `pyproject.toml` 不得重新出现 `HermesExecutor`、Hermes CLI/stream/installer/readiness、`hermes_profile`、旧 `run_yachiyo*` / `yachiyo_delegation` / `yachiyo_group_dispatch` 和旧 workspace/product token。
 - `builtin:yachiyo-main` 已作为系统虚拟 Agent 暴露给 Runtime / Agent Studio 读取面，使用默认 Chat ModelProfile，不落普通 agents 表，不可作为普通 Agent 创建、修改或删除，并被排除出自动委派目标。
 - RunRepository、RunGroupRepository、RunEvent、approval projection、ApprovalCoordinator、ApprovalResumeCoordinator、WorkflowParentResumeCoordinator、WorkflowContinuationCoordinator、RunArtifactRepository、tool descriptor 和 policy gate 已开始从 `NativeRunEngine` 中显式拆边界。
 - Agent runtime SQLite 已有 runs、run_events、run_approvals、run_artifacts、agents、workflows、model_profiles 等核心表；初始化启用 schema metadata、foreign keys、WAL 和 busy timeout，并已有 FK cascade 回归覆盖 TaskRunLink。
