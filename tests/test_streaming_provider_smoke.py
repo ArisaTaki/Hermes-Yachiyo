@@ -71,6 +71,72 @@ def test_stream_smoke_summarizes_split_tool_call_without_secrets(monkeypatch):
     assert "README.md" not in json.dumps(summary)
 
 
+def test_stream_smoke_validates_multiline_sse_tool_call_without_leaking_arguments(monkeypatch):
+    leaked_secret = "sk-stream-multiline-secret123456"
+    requests: list[dict] = []
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            yield (
+                b"id: smoke-tool-1\r\n"
+                b"event: completion.chunk\r\n"
+                b'data: {"choices":[{"delta":{"content":"checking multiline "}}]}\r\n\r\n'
+            )
+            yield (
+                b"id: smoke-tool-2\r\n"
+                b"event: completion.chunk\r\n"
+                b'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_multiline",\r\n'
+                b'data: "type":"function","function":{"name":"workspace_read","arguments":"{\\"path\\":\\"README.md\\"}"}}]},\r\n'
+                b'data: "finish_reason":"tool_calls"}]}\r\n\r\n'
+            )
+            yield b"data: [DONE]\r\n\r\n"
+
+    def fake_urlopen(request, timeout, context):
+        requests.append(json.loads(request.data.decode("utf-8")))
+        assert timeout == 180
+        assert isinstance(context, ssl.SSLContext)
+        assert request.get_header("Accept") == "text/event-stream"
+        return FakeResponse()
+
+    monkeypatch.setattr("apps.shell.model_profiles.urlrequest.urlopen", fake_urlopen)
+
+    summary = smoke.run_stream_smoke(
+        base_url="https://api.example.test/v1",
+        model="demo-model",
+        api_key=leaked_secret,
+        require_content=True,
+        require_tool_call=True,
+        expect_tool_name="workspace_read",
+        expect_tool_argument_substrings=["README.md"],
+        expect_finish_reasons=["tool_calls"],
+    )
+
+    summary_json = json.dumps(summary)
+    assert requests[0]["stream"] is True
+    assert requests[0]["tools"][0]["function"]["name"] == "workspace_read"
+    assert summary["ok"] is True
+    assert summary["chunk_count"] == 2
+    assert summary["content_chars"] == len("checking multiline ")
+    assert summary["finish_reasons"] == ["tool_calls"]
+    assert summary["tool_call_delta_count"] == 1
+    assert summary["tool_call_count"] == 1
+    assert summary["tool_calls"] == [
+        {
+            "id": "call_multiline",
+            "name": "workspace_read",
+            "argument_chars": len('{"path":"README.md"}'),
+        }
+    ]
+    assert leaked_secret not in summary_json
+    assert "README.md" not in summary_json
+
+
 def test_stream_smoke_requires_content_and_expected_tool_name(monkeypatch):
     requests: list[dict] = []
 
