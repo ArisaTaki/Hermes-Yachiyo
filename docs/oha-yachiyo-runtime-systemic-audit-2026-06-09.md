@@ -1298,6 +1298,26 @@ Info.plist uses Oha-Yachiyo identifiers and permission strings
 1 passed
 ```
 
+### Approved terminal failure output redaction
+
+本轮补 NativeRunEngine 审批恢复后的 terminal 失败清洗回归：custom_api Agent 请求 `terminal.run`，用户批准后命令以非零退出，并在 stdout / stderr 真实打印 API key / Authorization bearer 形态敏感值。Runtime 会将 Run 标记为 failed，但 Run projection、`agent.tool.call` RunEvent、`agent.tool.failed` timeline 和 raw SQLite 扫描都只能看到 redacted 输出，不保留原始 stdout / stderr secret。
+
+这条覆盖的是 ToolBroker 低层 stdout/stderr 清洗与 ApprovalResumeCoordinator fatal tool failure 路径的组合，防止“工具返回值已清洗，但失败摘要或 replay 重新落下原文”的回归。
+
+已运行：
+
+```text
+.venv/bin/python -m pytest tests/test_agent_runtime.py::test_agent_run_redacts_approved_terminal_failure_output_from_projection_and_storage -q
+.venv/bin/python -m pytest tests/test_agent_runtime.py::test_agent_run_fails_when_approved_terminal_returns_nonzero tests/test_agent_runtime.py::test_agent_run_redacts_approved_terminal_failure_output_from_projection_and_storage tests/test_agent_runtime.py::test_workflow_fails_when_child_terminal_returns_nonzero_after_approval tests/test_agent_runtime.py::test_terminal_run_truncates_and_sanitizes_outputs -q
+```
+
+结果：
+
+```text
+1 passed
+4 passed
+```
+
 ## 设计书差距
 
 ### 已基本满足
@@ -1360,7 +1380,7 @@ Info.plist uses Oha-Yachiyo identifiers and permission strings
 - ApprovalCoordinator 已承接 approve/reject/timeout 的通用状态转换；主聊天工具审批、standalone Agent 工具审批和 Workflow approval node 的 reject / timeout 现在都有边界 spy 回归，确认 `NativeRunEngine.reject_run_approval()` / `timeout_run_approval()` 继续委托 ApprovalCoordinator 完成状态转换与 replay fact 写入；ApprovalResumeCoordinator 已承接批准后的工具执行和 custom-api 模型循环恢复入口，并已有 coordinator 级成功续跑 / fatal tool failure 阻断 / 工具后继续模型顺序回归；WorkflowParentResumeCoordinator 已承接父子 Run 联动，并已有 completed child replay / continuation handoff 的 coordinator 级回归，且重复 child approval_required / cancelled / failed update 不会重复投影父 Workflow replay fact 或重复更新父 Run；WorkflowContinuationCoordinator 已承接具体 Workflow step continuation，并已有 approval node pause / approved continuation handoff / public pending projection / RunGroup handoff、artifact node write / completion handoff、failure replay payload secret 清洗的 coordinator 级回归。
 - 主聊天自动委派和群聊派活都已引入内部结构化 directive；自动委派已收敛到 `run_oha_agent` / `run_oha_workflow`，并已有 TaskRunner 级 NativeRunEngine 闭环回归，群聊主提示与 parser 已收敛到 `oha.group_dispatch` / `<oha_group_dispatch>` / native 命名，并已有 ChatAPI + 真实 NativeRunEngine 闭环回归；旧 `run_yachiyo_*`、`<yachiyo_delegation>` 和 `<yachiyo_group_dispatch>` 不再作为有效入口。
 - Workflow 与主聊天共享 NativeRunEngine 的路径已存在，已有 focused 回归、UI 入口 guard、同步 UI flow contract、浏览器级 route smoke、部分按钮级 smoke、无模型 Chat readiness 浏览器 E2E、可用 fake 模型 Chat 浏览器 E2E、Vite Browser DOM selector smoke，以及 slow fake model 的 Chat 取消 late-output Bridge 复验；主聊天多轮/图片已补 executor/API/Bridge 合同、TaskRunner 级图片 roundtrip、live source Bridge 图片 E2E、HTTP route 图片附件发送 / attachment FileResponse roundtrip 和 Run Detail/RunEvent route projection，主聊天审批等待、approval roundtrip、live source Bridge 审批 E2E 和重复 approval 防重复执行已补回归，Chat 图片粘贴/上传/移除、停止生成、消息审批卡与 composer 审批卡、Chat 审批卡到 Agent Studio Run Detail 的 route/replay handoff、委派 Run 结束后 summary task processing 状态已补 source-level UI wiring guard，Chat 图片/取消/审批/Run Detail、Agent Studio Run Detail/approval/replay/artifact、Workflow Studio 编辑/节点配置/保存并运行路径已暴露稳定 `data-testid` 选择器并由 source guard 锁定，Workflow 节点执行与审批等待 facts 已接入 RunEvent replay，并新增真实 HTTP route roundtrip 覆盖 Agent/Workflow approval、Run Detail、RunEvent replay 和 artifact 读取；但仍需要恢复浏览器 runner 后补图片/审批/取消按钮级 E2E，以及群聊/委派/Workflow/Run Detail 的完整交互 E2E。
-- Secret 清洗已补主路径回归、旧 chat.db 迁移清洗、标准 logging、桌面后端 excepthook、crash 文件生成扫描、HTTPException detail、UI JSON error/message、provider catalog 失败缓存、artifact 文件清洗、artifact.write secret payload 写入前拒绝与落盘扫描、provider/tool exception 端到端落盘扫描、terminal / workspace.write_patch approval secret payload 审批前拒绝与落盘扫描、approval reject/cancelled RunEvent payload 清洗、Workflow continuation failure replay payload 清洗和默认 runtime 落盘扫描；仍建议继续补真实 provider / terminal / tool 集成环境下的异常日志联调。
+- Secret 清洗已补主路径回归、旧 chat.db 迁移清洗、标准 logging、桌面后端 excepthook、crash 文件生成扫描、HTTPException detail、UI JSON error/message、provider catalog 失败缓存、artifact 文件清洗、artifact.write secret payload 写入前拒绝与落盘扫描、provider/tool exception 端到端落盘扫描、terminal / workspace.write_patch approval secret payload 审批前拒绝与落盘扫描、approved terminal 非零退出 stdout/stderr 失败投影与落盘扫描、approval reject/cancelled RunEvent payload 清洗、Workflow continuation failure replay payload 清洗和默认 runtime 落盘扫描；仍建议继续补真实 provider / 外部工具集成环境下的异常日志联调。
 - `workspace.write_patch` 已收敛为单文件 UTF-8 unified diff patch；content 全量写入已从 tool schema 移除，并在 validator / ToolBroker direct 入口拒绝。
 - Runtime 发起的 skill 安装子进程已复用敏感环境变量清洗，避免 `SSH_AUTH_SOCK`、`GITHUB_TOKEN`、云厂商凭据和 `*_API_KEY` / `*_TOKEN` / `*_SECRET` / `*_PASSWORD` 从旁路传入外部命令；`terminal.run` 与 skill install 现在使用同一套 env scrub helper。
 - release/alpha/stable 源码级 guard、release-facing verifier、packaged app resources scan、签名导入/签名构建 workflow guard、签名脚本 runtime options / entitlements / verify guard、Gatekeeper 首启说明/当前 notarization 状态/屏幕录制权限 release notes guard、macOS hardened runtime / entitlements / usage descriptions guard、release metadata JSON 发布 guard、latest JSON 更新字段 guard、release DMG/SHA staging/upload guard、关键 smoke tests 构建前执行顺序 guard 与 release 目录 binary-safe artifact scan 已覆盖；workflow 会排除本地 `node-pty/build` native artifact 并只打包 clean prebuilds，release verifier 也会阻断 tracked `.vite` cache、`apps/frontend/dist`、`apps/frontend/dist-electron`、release workflow 丢失 Task API protocol/AppState task lifecycle/TaskRunner native approval roundtrip/OpenAI-compatible streaming provider contracts/legacy Hermes kernel removal/Native runtime injection boundary/desktop backend Native startup/release-like build metadata guards/release-like CredentialStore guards/runtime secret redaction verifier/security logging redaction/截图/主动关怀/ChatSession/ChatBridge session summary/Chat API/ActivityStore feed and redaction/UI Bridge/成熟 UI preservation/UI flow contract/Bridge Host Origin session token guard/Bridge loopback bind guard/mutating Bridge token guard/Chat image HTTP roundtrip/Agent approval Run Detail HTTP roundtrip/Workflow approval Run Detail HTTP roundtrip/Workflow child approval Run Detail HTTP roundtrip/Workflow rerun artifact replay HTTP roundtrip/group chat Native summary flow/auto delegation Native summary flow/TTS/Live2D smoke 覆盖和 packaging config 丢失 `.vite` 排除；本地 unsigned `.app` / DMG 产物已验证不包含旧产品身份 token。Electron Framework 内部自带的通用 `Hermes` 字符串不属于本项目产品身份或执行内核残留。

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import hashlib
+import shlex
 import sqlite3
 import subprocess
+import sys
 import threading
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
@@ -8207,6 +8209,82 @@ def test_agent_run_fails_when_approved_terminal_returns_nonzero(tmp_path, monkey
         assert service.get_run_group(resumed["run_group_id"])["status"] == "failed"
     finally:
         service.close()
+
+
+def test_agent_run_redacts_approved_terminal_failure_output_from_projection_and_storage(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    stdout_secret = "sk-stdout-secret123456789"
+    stderr_secret = "stderr-token-secret123456789"
+    code = (
+        'import sys; '
+        'print("OPENAI_" + "API_KEY=" + "sk-" + "stdout-" + "secret123456789"); '
+        'print("Author" + "ization: Bearer " + "stderr-token-" + "secret123456789", file=sys.stderr); '
+        'sys.exit(7)'
+    )
+    command = f"{shlex.quote(sys.executable)} -c {shlex.quote(code)}"
+    calls = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        return {
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_terminal_secret_output",
+                    "type": "function",
+                    "function": {
+                        "name": "terminal_run",
+                        "arguments": json.dumps({"command": command}),
+                    },
+                }
+            ],
+        }
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Failing Terminal Redaction Agent",
+                "model_mode": "custom_api",
+                "model_config": {"base_url": "https://api.example.test/v1", "model": "demo-model", "api_key": "sk-secret"},
+                "tool_policy": {"allowed_tools": ["terminal.run"]},
+                "workspace_policy": {"default_workdir": str(workdir), "readable_scopes": ["."]},
+            }
+        )
+        run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Run failing command"})
+
+        assert run["status"] == "approval_required"
+        resumed = service.approve_run_approval(run["run_id"])
+
+        assert resumed["status"] == "failed"
+        assert "terminal.run 执行失败" in resumed["result"]
+        assert "退出码：7" in resumed["result"]
+        assert len(calls) == 1
+        failed_event = next(event for event in resumed["timeline"] if event["event"] == "agent.tool.failed")
+        assert failed_event["status"] == "failed"
+        assert failed_event["result"]["returncode"] == 7
+        assert "[redacted]" in failed_event["result"]["stdout"]
+        assert "[redacted]" in failed_event["result"]["stderr"]
+
+        run_events = service.list_run_events(run["run_id"])["events"]
+        projection = json.dumps({"run": resumed, "events": run_events}, ensure_ascii=False)
+        assert stdout_secret not in projection
+        assert stderr_secret not in projection
+        assert "[redacted]" in projection
+        tool_call_fact = next(
+            event
+            for event in run_events
+            if event["event_type"] == "agent.tool.call" and event["payload"].get("approved") is True
+        )
+        assert tool_call_fact["payload"]["result"]["returncode"] == 7
+        assert stdout_secret not in json.dumps(tool_call_fact, ensure_ascii=False)
+        assert stderr_secret not in json.dumps(tool_call_fact, ensure_ascii=False)
+    finally:
+        service.close()
+
+    assert verify_secret_redaction(paths=[tmp_path]) == []
 
 
 def test_workflow_resumes_after_child_agent_approval(tmp_path, monkeypatch):
