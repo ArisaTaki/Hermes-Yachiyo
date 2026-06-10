@@ -7948,6 +7948,103 @@ def test_summarize_delegated_run_creates_main_followup_task(tmp_path, monkeypatc
         store.close()
 
 
+def test_summarize_delegated_run_uses_native_run_projection(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
+    native_service = _make_agent_runtime_service(tmp_path)
+    monkeypatch.setattr(chat_api_mod, "get_activity_store", lambda: activity_store)
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: native_service)
+
+    try:
+        run_group = native_service._insert_run_group(
+            title="Native delegated summary",
+            source="delegation",
+        )
+        run = native_service._insert_run(
+            kind="agent_run",
+            runnable_id="agent_native_coding",
+            user_goal="整理 NativeRunEngine evidence",
+            run_group_id=run_group["run_group_id"],
+        )
+        native_service._update_run(
+            run["run_id"],
+            status="completed",
+            result="NativeRunEngine delegation finished.",
+            timeline=[
+                {
+                    "event": "agent.tool.call",
+                    "detail": "artifact.write",
+                    "input_preview": {"path": "reports/native-summary.md"},
+                    "result": {"ok": True, "path": "reports/native-summary.md"},
+                },
+                {
+                    "event": "agent.run.completed",
+                    "detail": "done",
+                    "result": "NativeRunEngine delegation finished.",
+                },
+            ],
+            artifacts=[
+                {"path": "agent-context.md", "kind": "context"},
+                {"path": "reports/native-summary.md", "kind": "report"},
+            ],
+        )
+
+        sent = api.send_message("请自动委派一个 Agent 整理 evidence")
+        task_id = sent["task_id"]
+        runtime.chat_session.upsert_assistant_message(
+            task_id=task_id,
+            content=(
+                "我会交给 Native Coding Agent 处理。\n"
+                '<oha_delegation>{"action":"run_oha_agent","agent":"Native Coding Agent","goal":"整理 evidence"}</oha_delegation>'
+            ),
+            status=MessageStatus.COMPLETED,
+        )
+        activity_store.record_event(
+            session_id=runtime.chat_session.session_id,
+            task_id=task_id,
+            tool_name="oha.delegation",
+            phase="subagent",
+            title="Native Coding Agent completed",
+            detail=f"run_id={run['run_id']}",
+            status="completed",
+            metadata={
+                "run_id": run["run_id"],
+                "run_group_id": run_group["run_group_id"],
+                "run_status": "completed",
+            },
+        )
+
+        result = api.summarize_delegated_run(run["run_id"])
+        summary_message = next(
+            message for message in runtime.chat_session.get_all_messages()
+            if message.metadata.get("delegated_run_summary_for_run_id") == run["run_id"]
+        )
+        summary_task = runtime.state.get_task(result["task_id"])
+
+        assert result["ok"] is True
+        assert result["summary_created"] is True
+        assert result["run_id"] == run["run_id"]
+        assert summary_message.metadata["run_id"] == run["run_id"]
+        assert summary_message.metadata["run_group_id"] == run_group["run_group_id"]
+        assert summary_message.metadata["delegated_run_source_task_id"] == task_id
+        assert summary_task is not None
+        assert "[Oha-Yachiyo 自动委派 Run 汇总]" in summary_task.description
+        assert "用户原始请求：请自动委派一个 Agent 整理 evidence" in summary_task.description
+        assert "run_oha_agent" not in summary_task.description
+        assert "agent_native_coding：已完成" in summary_task.description
+        assert "任务：整理 NativeRunEngine evidence" in summary_task.description
+        assert "汇报：NativeRunEngine delegation finished." in summary_task.description
+        assert "执行线索：" in summary_task.description
+        assert "artifact.write" in summary_task.description
+        assert "reports/native-summary.md" in summary_task.description
+        assert "产物：reports/native-summary.md (report)" in summary_task.description
+        assert "agent-context.md" not in summary_task.description
+    finally:
+        native_service.close()
+        activity_store.close()
+        store.close()
+
+
 def test_summarize_delegated_run_waits_for_terminal_status(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
