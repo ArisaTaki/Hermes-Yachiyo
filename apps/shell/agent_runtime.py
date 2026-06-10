@@ -2035,6 +2035,14 @@ class ApprovalCoordinator:
                 "status": "cancelled",
             },
         )
+        self._append_run_event(
+            run_id,
+            "agent.run.cancelled",
+            {
+                "reason": detail,
+                "result": str(result.get("result") or ""),
+            },
+        )
         return result
 
     def timeout_workflow_node(

@@ -5973,6 +5973,9 @@ def test_agent_run_rejects_pending_tool(tmp_path, monkeypatch):
         assert rejected_fact["payload"]["tool"] == "terminal.run"
         assert rejected_fact["payload"]["input_preview"]["command"] == "echo blocked"
         assert rejected_fact["payload"]["status"] == "cancelled"
+        cancelled_fact = next(event for event in run_events if event["event_type"] == "agent.run.cancelled")
+        assert "not now" in cancelled_fact["payload"]["reason"]
+        assert "not now" in cancelled_fact["payload"]["result"]
     finally:
         service.close()
 
@@ -7458,11 +7461,32 @@ async def test_workflow_child_approval_route_reject_cancels_parent_workflow(tmp_
         )
         parent = await agent_routes.get_workflow_run(run["run_id"])
         cancelled_group = await agent_routes.get_run_group(run["run_group_id"])
+        child_detail_after = await agent_routes.get_any_run(child_run_id)
+        child_replay_after = await run_routes.list_run_events(child_run_id, after_sequence=0, limit=200)
         parent_replay = await run_routes.list_run_events(run["run_id"], after_sequence=0, limit=200)
+        child_replay_after_types = [event["event_type"] for event in child_replay_after["events"]]
 
         assert rejected_child["status"] == "cancelled"
         assert rejected_child["pending_approval"] == {}
         assert "not now" in rejected_child["result"]
+        assert child_detail_after["status"] == "cancelled"
+        assert child_detail_after["pending_approval"] == {}
+        assert "not now" in child_detail_after["result"]
+        assert any(event["event"] == "agent.tool.approval_rejected" for event in child_detail_after["timeline"])
+        assert child_replay_after_types.count("agent.tool.approval_required") == 1
+        assert child_replay_after_types.count("agent.tool.approval_rejected") == 1
+        assert "agent.run.cancelled" in child_replay_after_types
+        rejected_fact = next(
+            event for event in child_replay_after["events"]
+            if event["event_type"] == "agent.tool.approval_rejected"
+        )
+        cancelled_fact = next(
+            event for event in child_replay_after["events"]
+            if event["event_type"] == "agent.run.cancelled"
+        )
+        assert rejected_fact["payload"]["tool"] == "terminal.run"
+        assert rejected_fact["payload"]["reason"] == "not now"
+        assert "not now" in cancelled_fact["payload"]["result"]
         assert parent["status"] == "cancelled"
         assert cancelled_group["status"] == "cancelled"
         agent_event = next(event for event in parent["timeline"] if event["event"] == "workflow.node.agent")
