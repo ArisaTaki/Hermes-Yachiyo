@@ -7870,6 +7870,27 @@ class NativeRunEngine:
             next_iteration=next_iteration,
         )
 
+    def _claim_and_project_approved_tool(
+        self,
+        run_id: str,
+        pending: dict[str, Any],
+        resume_context: ToolApprovalResumeContext,
+        *,
+        resumed_detail: str,
+        running_result: str,
+    ) -> dict[str, Any] | None:
+        if not self.run_approvals.claim_pending_approval(run_id, pending):
+            return None
+        return self.approvals.approve_tool_run(
+            run_id,
+            timeline=resume_context.timeline,
+            artifacts=resume_context.artifacts,
+            tool_name=resume_context.tool_name,
+            input_preview=resume_context.input_preview,
+            resumed_detail=resumed_detail,
+            running_result=running_result,
+        )
+
     def approve_run_approval(self, run_id: str) -> dict[str, Any]:
         clean_run_id = str(run_id or "").strip()
         with self._approval_execution_lock:
@@ -7901,17 +7922,15 @@ class NativeRunEngine:
         agent = self._get_agent_private(str(run["runnable_id"]))
         runtime = self._compile_agent_runtime(agent)
         resume_context = self._tool_approval_resume_context(run, pending, runtime=runtime)
-        if not self.run_approvals.claim_pending_approval(run_id, pending):
-            return self.get_run(run_id)
-        running = self.approvals.approve_tool_run(
+        running = self._claim_and_project_approved_tool(
             run_id,
-            timeline=resume_context.timeline,
-            artifacts=resume_context.artifacts,
-            tool_name=resume_context.tool_name,
-            input_preview=resume_context.input_preview,
+            pending,
+            resume_context,
             resumed_detail="Agent resumed after approval",
             running_result="已批准，Agent 正在继续执行",
         )
+        if running is None:
+            return self.get_run(run_id)
         self._update_agent_run_group_if_root(running)
         self._mark_parent_workflows_child_running(running)
         try:
@@ -7985,17 +8004,15 @@ class NativeRunEngine:
         )
         runtime = self._compile_agent_runtime(agent)
         resume_context = self._tool_approval_resume_context(run, pending, runtime=runtime)
-        if not self.run_approvals.claim_pending_approval(run_id, pending):
-            return self.get_run(run_id)
-        self.approvals.approve_tool_run(
+        running = self._claim_and_project_approved_tool(
             run_id,
-            timeline=resume_context.timeline,
-            artifacts=resume_context.artifacts,
-            tool_name=resume_context.tool_name,
-            input_preview=resume_context.input_preview,
+            pending,
+            resume_context,
             resumed_detail="Main chat resumed after approval",
             running_result="已批准，Yachiyo 正在继续执行",
         )
+        if running is None:
+            return self.get_run(run_id)
         try:
             result_text = self.approval_resume.continue_custom_api_agent_after_approved_tool(
                 agent,
