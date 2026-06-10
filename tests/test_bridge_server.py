@@ -469,6 +469,63 @@ def test_chat_message_http_route_maps_idempotency_key_header(monkeypatch):
         _restore_module_prefixes(("fastapi",), saved_modules)
 
 
+def test_chat_retry_http_route_returns_retry_projection(monkeypatch):
+    saved_modules = _unload_module_prefixes(("fastapi",))
+    try:
+        try:
+            from fastapi import FastAPI
+            from fastapi.testclient import TestClient
+        except ModuleNotFoundError as exc:
+            pytest.skip(f"FastAPI/TestClient dependency is not installed: {exc.name}")
+
+        route_path = Path(__file__).resolve().parents[1] / "apps" / "bridge" / "routes" / "ui.py"
+        spec = importlib.util.spec_from_file_location("_oha_ui_retry_route_http_under_test", route_path)
+        assert spec is not None
+        assert spec.loader is not None
+        ui_route_module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = ui_route_module
+        spec.loader.exec_module(ui_route_module)
+
+        calls: list[tuple[str, str]] = []
+
+        class FakeChatAPI:
+            def __init__(self, runtime):
+                assert runtime is fake_runtime
+
+            def retry_message(self, message_id):
+                calls.append(("retry_message", message_id))
+                return {
+                    "ok": True,
+                    "message_id": message_id,
+                    "task_id": "retry-task-1",
+                    "status": "processing",
+                }
+
+        fake_runtime = SimpleNamespace()
+        monkeypatch.setattr(ui_route_module, "get_runtime", lambda: fake_runtime)
+        monkeypatch.setattr(ui_route_module, "ChatAPI", FakeChatAPI)
+        route_app = FastAPI()
+        route_app.include_router(ui_route_module.router)
+
+        with TestClient(route_app) as client:
+            response = client.post(
+                "/ui/chat/messages/retry",
+                json={"message_id": "failed-message-1"},
+            )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "ok": True,
+            "message_id": "failed-message-1",
+            "task_id": "retry-task-1",
+            "status": "processing",
+        }
+        assert calls == [("retry_message", "failed-message-1")]
+    finally:
+        sys.modules.pop("_oha_ui_retry_route_http_under_test", None)
+        _restore_module_prefixes(("fastapi",), saved_modules)
+
+
 def test_chat_cancel_http_route_returns_ui_cancel_projection(monkeypatch):
     saved_modules = _unload_module_prefixes(("fastapi",))
     try:
