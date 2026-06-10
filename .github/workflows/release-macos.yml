@@ -143,7 +143,8 @@ jobs:
           python scripts/smoke_openai_compatible_stream.py \
             --tool-call \
             --require-tool-call \
-            --expect-tool-name workspace_read
+            --expect-tool-name workspace_read \
+            --expect-tool-argument-substring README.md
 
       - name: Build packaged backend
         run: python scripts/build_backend.py --clean

@@ -240,6 +240,10 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "--expect-tool-name workspace_read",
         "macOS release workflow provider smoke must assert the workspace_read tool call",
     ),
+    (
+        "--expect-tool-argument-substring README.md",
+        "macOS release workflow provider smoke must assert the workspace_read README argument",
+    ),
 )
 RELEASE_WORKFLOW_METADATA_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
