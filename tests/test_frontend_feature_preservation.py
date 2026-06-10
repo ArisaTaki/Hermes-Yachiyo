@@ -118,6 +118,42 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
     )
 
 
+def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> None:
+    _assert_contains(
+        "apps/frontend/src/views/ChatView.tsx",
+        [
+            "const [attachments, setAttachments] = useState<PendingAttachment[]>(() => [...retainedComposerDraft.attachments]);",
+            "const fileInputRef = useRef<HTMLInputElement>(null);",
+            "if (attachments.length > 0 && !canAttachImages(executor))",
+            "const outgoingAttachments = attachments;",
+            "retainComposerDraft(text, outgoingAttachments);",
+            "setAttachments(outgoingAttachments);",
+            "onClick={() => fileInputRef.current?.click()}",
+            "const files = Array.from(event.target.files || []);",
+            "event.target.value = '';",
+            "void addImageFiles(files);",
+            "aria-label={`移除 ${attachment.name}`}",
+            "onClick={() => removeAttachment(attachment.id)}",
+            "const result = await apiPost<MessagesPayload & { cancelled_tasks?: number }>('/ui/chat/session/cancel');",
+            "setMessages(result.messages || []);",
+            "setProcessingCount(nextProcessingCount);",
+            "onClick={() => void cancelProcessing()}",
+            "const approvalPromise = approveRunApproval(runId);",
+            "const run = await rejectRunApproval(runId, 'Rejected from chat');",
+            "pollAgentRunInBackground(runId, { summarizeDelegatedRun, ignoreInitialApprovalRequired: true });",
+            "onApprove={() => void resolveApprovalMessage(message, 'approve')}",
+            "onReject={() => void resolveApprovalMessage(message, 'reject')}",
+            "onApprove={() => void resolveApprovalItem(composerApprovalItem, 'approve')}",
+            "onReject={() => void resolveApprovalItem(composerApprovalItem, 'reject')}",
+            "onOpenDetails={() => openRunDetails(composerApprovalItem.runId)}",
+            "onReveal={() => revealMessage(composerApprovalItem.messageId)}",
+            "className=\"composer-approval-nav\"",
+            "className=\"chat-stop-btn\"",
+            "aria-label={processingCount > 1 ? `停止当前 ${processingCount} 项任务` : '停止当前任务'}",
+        ],
+    )
+
+
 def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None:
     _assert_contains(
         "apps/frontend/src/lib/agents.ts",
