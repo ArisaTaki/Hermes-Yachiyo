@@ -273,6 +273,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover mature UI flow contracts",
     ),
     (
+        "tests/test_bridge_server.py::test_chat_message_image_attachment_http_roundtrip_maps_idempotency_and_file_response",
+        "macOS release workflow smoke tests must cover Chat image HTTP roundtrip",
+    ),
+    (
         "tests/test_tts.py",
         "macOS release workflow smoke tests must cover manual TTS",
     ),
