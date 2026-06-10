@@ -10,6 +10,7 @@ build/
 .venv/
 venv/
 node_modules/
+.vite/
 apps/frontend/node_modules/
 apps/frontend/dist/
 apps/frontend/dist-electron/
