@@ -744,6 +744,7 @@ def test_chat_cancel_bridge_route_cancels_native_run_and_ignores_late_output(tmp
     monkeypatch.setattr(activity_store_mod, "get_activity_store", lambda: activity_store)
     monkeypatch.setattr(chat_api_mod, "get_activity_store", lambda: activity_store)
     monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: service)
+    monkeypatch.setattr(agent_routes, "get_agent_runtime_service", lambda: service)
     monkeypatch.setattr(run_routes, "get_native_run_engine", lambda: service)
     monkeypatch.setattr(
         "apps.shell.agent_runtime.get_model_profile_service",
@@ -819,6 +820,22 @@ def test_chat_cancel_bridge_route_cancels_native_run_and_ignores_late_output(tmp
             assert "run.cancelled" in event_types
             assert "model.output.completed" not in event_types
             assert "run.completed" not in event_types
+
+            listed_runs = await agent_routes.list_runs(limit=20)
+            detail = await agent_routes.get_any_run(run["run_id"])
+            listed = next(item for item in listed_runs["runs"] if item["run_id"] == run["run_id"])
+            assert listed["kind"] == "main_chat_run"
+            assert listed["status"] == "cancelled"
+            assert listed["task_id"] == task.task_id
+            assert listed["session_id"] == session.session_id
+            assert listed["task_run_link_created_at"]
+            assert detail["run_id"] == run["run_id"]
+            assert detail["kind"] == "main_chat_run"
+            assert detail["status"] == "cancelled"
+            assert detail["task_id"] == task.task_id
+            assert detail["session_id"] == session.session_id
+            assert detail["task_run_link_created_at"]
+            assert any(event.get("event") == "run.cancelled" for event in detail["timeline"])
 
             final_messages = await ui_routes.get_chat_messages()
             final_assistant = next(message for message in final_messages["messages"] if message["role"] == "assistant")
