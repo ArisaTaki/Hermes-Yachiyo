@@ -427,6 +427,28 @@ def test_agent_frontend_run_helpers_preserve_native_run_bridge_contract() -> Non
         "cancelRun",
         ["apiPost(`/ui/runs/${encodeURIComponent(runId)}/cancel`, {})"],
     )
+
+
+def test_agent_studio_preserves_workflow_child_approval_refresh_wiring() -> None:
+    agents_lib = "apps/frontend/src/lib/agents.ts"
+    _assert_contains(
+        "apps/frontend/src/views/AgentStudioView.tsx",
+        [
+            "async function approveRunById(runId: string, nextSelectedRunId?: string): Promise<StudioRefreshOptions>",
+            "const selectedAfterAction = nextSelectedRunId || runId;",
+            "const approvalRequest = approveRunApproval(runId);",
+            "void pollApprovedRunProgress(runId, selectedAfterAction)",
+            "updatedRuns.push(await getRun(nextSelectedRunId));",
+            "await refreshRunGroupsForRuns(updatedRuns);",
+            "async function rejectRunById(runId: string, nextSelectedRunId?: string): Promise<StudioRefreshOptions>",
+            "const run = await rejectRunApproval(runId);",
+            "upsertRunDetailCache(updatedRuns);",
+            "setSelectedRunId(selectedAfterAction);",
+            "() => approveRunById(selectedWorkflowApprovalChildRunId, selectedRun.run_id)",
+            "() => rejectRunById(selectedWorkflowApprovalChildRunId, selectedRun.run_id)",
+            "openRunDetail(selectedWorkflowApprovalChildRunId)",
+        ],
+    )
     _assert_function_contains(
         agents_lib,
         "approveRunApproval",
