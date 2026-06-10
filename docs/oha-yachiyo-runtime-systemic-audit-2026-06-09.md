@@ -754,6 +754,70 @@ run_group:
 
 这一步把此前“Workflow Studio 编辑/节点配置/保存并运行路径已暴露稳定 selector”和 HTTP route roundtrip 推进到一次真实 Browser UI 操作：Workflow Studio 保存定义、创建 Workflow Run、父子 RunGroup 投影、Run Detail 自动打开、Workflow Steps 与 RunEvent replay 都在同一 source Bridge 环境下闭环。
 
+### Browser Workflow child approval Run Detail E2E
+
+本轮继续用 in-app Browser + source Vite + source Bridge + 本地 OpenAI-compatible SSE fake provider 补 Workflow 子 Agent 审批的 Run Detail 跨 Run 验证：
+
+```text
+./node_modules/.bin/vite --host 127.0.0.1 --port 5174 --strictPort  # cwd=apps/frontend
+source Bridge: http://127.0.0.1:8420  # isolated OHA_YACHIYO_HOME, no session token for source Browser
+fake provider: http://127.0.0.1:18776/v1  # profile test returns OK, first Agent stream requests terminal_run, approval resume returns final content
+Browser route: http://127.0.0.1:5174/#/agents/workflow_run_0c852178a12a
+```
+
+验证内容：
+
+- 在隔离 `OHA_YACHIYO_HOME=/tmp/oha-yachiyo-browser-workflow-child-approval-20260611-050603` 中创建并测试默认 Chat ModelProfile；Bridge 启动后 `/ui/chat/executor` 为 `NativeAgentExecutor` / `available=true`。
+- 通过 source Bridge API 创建 `Browser Workflow Child Approval Smoke`，节点为 Start → `Coding Agent` → Artifact `summary.md`；启动 `workflow_run_0c852178a12a` 后，父 Workflow 和子 `agent_run_ef2028a3a752` 同时进入 `approval_required`，RunGroup `run_group_162b33403050` source 为 `workflow`。
+- Browser 打开父 Workflow Run Detail 后真实展示 `agent-run-detail-workflow-child-approval`：`Workflow 正在等待子 Agent 审批`、子 Run `agent_run_ef2028a3a752`、工具 `terminal.run`、命令 `printf workflow-child-browser-approved`、`批准子 Agent` / `拒绝子 Agent` / `取消子 Run` / `打开子 Run`。
+- Browser 点击 `agent-run-detail-workflow-child-approve` 后，子 Run 执行已批准的 `terminal.run`，父 Workflow 自动刷新为 completed；父 Run Detail 展示 `Workflow child browser approval complete`、`Workflow Steps · 3`、`summary.md` artifact、Execution replay 中的 `workflow.run.child_resumed` / `workflow.run.resumed` / `workflow.node.artifact` / `workflow.run.completed`。
+- Browser 再点击 Workflow Steps 的 `Open Run` 进入 `http://127.0.0.1:5174/#/agents/agent_run_ef2028a3a752`；子 Run Detail 展示 completed、返回父 Workflow 入口、`agent.tool.approval_required` / `agent.tool.approval_approved` / approved `agent.tool.call` / `agent.run.completed` replay，以及最终结果 `Workflow child browser approval complete`。
+- Browser console error 为空。
+
+Bridge API / replay 复核：
+
+```text
+workflow_run:
+  run_id: workflow_run_0c852178a12a
+  status: completed
+  result: Workflow child browser approval complete
+  artifacts: summary.md
+child_run:
+  run_id: agent_run_ef2028a3a752
+  runnable_id: agent_coding
+  status: completed
+  result: Workflow child browser approval complete
+  approved_tool: terminal.run
+  stdout: workflow-child-browser-approved
+run_group:
+  run_group_id: run_group_162b33403050
+  source: workflow
+  status: completed
+  child_run_ids:
+    workflow_run_0c852178a12a
+    agent_run_ef2028a3a752
+parent_run_events:
+  workflow.run.started
+  workflow.node.start
+  workflow.node.agent            # approval_required
+  workflow.run.approval_required
+  workflow.node.agent            # running after approve
+  workflow.run.child_resumed
+  workflow.node.agent            # completed
+  workflow.run.resumed
+  workflow.node.artifact
+  workflow.run.completed
+child_run_events:
+  agent.run.started
+  agent.tool.call                # initial terminal.run request
+  agent.tool.approval_required
+  agent.tool.approval_approved
+  agent.tool.call                # approved terminal.run execution
+  agent.run.completed
+```
+
+这一步把此前 route-level Workflow child approval 回归推进到真实 Browser Run Detail 操作：父 Workflow Run Detail 的子审批桥接、批准后父/子 Run cache 刷新、RunGroup 完成态、Workflow Steps、父子 RunEvent replay、子 Run Detail 跳转和返回父 Workflow 入口都在同一 source Bridge 环境下闭环。
+
 ### Browser group chat dispatch and summary E2E
 
 本轮继续补群聊 / 自动派发 / 会话总结的 source Browser 跨 UI 证据：从真实 Chat 页面创建群组，选择 Coding Agent，向主模型发送群聊派发请求，确认主模型 `oha.group_dispatch`、Coding Agent Run、群组总结 Task 和 Chat transcript 都在同一 Native runtime 下收敛。
@@ -1792,7 +1856,7 @@ Info.plist uses Oha-Yachiyo identifiers and permission strings
 - 模型输出 durable persistence 已有 batched completed-event 回归、dict-style stream iterator delta 合并压力测试、OpenAI SDK object-style content chunk 合并回归、OpenAI-style streaming tool_call delta 合并回归、OpenAI-compatible SSE stream parser / NativeRunEngine `stream=True` contract 回归、OpenAI-compatible SSE parser split UTF-8 chunk 回归、fake HTTP provider SSE 闭环回归、fake HTTP provider split UTF-8 SSE frame 到 NativeRunEngine completed RunEvent 的闭环回归、fake HTTP provider message-level content / reasoning SSE frame 到 NativeRunEngine completed RunEvent 的闭环回归、fake HTTP provider content-part array SSE frame 到 NativeRunEngine completed RunEvent 的闭环回归、content-part array 中 `reasoning` / `thinking` 私有片段不作为可见 output 落盘回归、streaming reasoning-only delta 不作为可见 output 落盘回归、fake HTTP provider coalesced/split/multiline `data:` SSE frame 到 NativeRunEngine completed RunEvent 的闭环回归、fake HTTP provider SSE tool-call、message-level SSE tool-call、split-frame SSE tool-call、indexless SSE tool-call delta、缺 `index` 但带稳定 tool-call `id` 的 interleaved delta、multiline `data:` SSE tool-call 闭环回归、fake HTTP provider legacy `delta.function_call` 帧透传回归，以及 fake HTTP provider SSE / multiline `data:` SSE error frame 失败/清洗闭环回归；现在也有 opt-in `scripts/smoke_openai_compatible_stream.py` 可用真实 provider 做 streaming / tool-call smoke，支持要求流式文本内容、content-part array、message-level content / reasoning frame、reasoning delta、content-part array 中 reasoning/thinking 私有片段、指定工具名、tool-call arguments substring 和 `finish_reason`，脚本自身已有 fake transport、role-only 首包、usage-only 尾包、多 choice 同 index tool-call delta、indexless tool-call delta、缺 `index` 但带稳定 tool-call `id` 的 interleaved delta、OpenAI SDK object-style tool_call / reasoning delta、multiline `data:` SSE tool_call、legacy streamed `function_call` delta、message-level content / reasoning frame、content-part array frame、reasoning 只统计长度不打印原文、finish_reason 断言和错误 secret 清洗回归，且摘要不打印 raw tool arguments；实际凭据环境下的真实外部 provider 联调仍需做。
 - ApprovalCoordinator 已承接 approve/reject/timeout 的通用状态转换；主聊天工具审批、standalone Agent 工具审批和 Workflow approval node 的 reject / timeout 现在都有边界 spy 回归，确认 `NativeRunEngine.reject_run_approval()` / `timeout_run_approval()` 继续委托 ApprovalCoordinator 完成状态转换与 replay fact 写入；ApprovalResumeCoordinator 已承接批准后的工具执行和 custom-api 模型循环恢复入口，并已有 coordinator 级成功续跑 / fatal tool failure 阻断 / 工具后继续模型顺序回归；WorkflowParentResumeCoordinator 已承接父子 Run 联动，并已有 completed child replay / continuation handoff 的 coordinator 级回归，且重复 child approval_required / cancelled / failed update 不会重复投影父 Workflow replay fact 或重复更新父 Run；WorkflowContinuationCoordinator 已承接具体 Workflow step continuation，并已有 approval node pause / approved continuation handoff / public pending projection / RunGroup handoff、artifact node write / completion handoff、failure replay payload secret 清洗的 coordinator 级回归。
 - 主聊天自动委派和群聊派活都已引入内部结构化 directive；自动委派已收敛到 `run_oha_agent` / `run_oha_workflow`，并已有 TaskRunner 级 NativeRunEngine 闭环回归，群聊主提示与 parser 已收敛到 `oha.group_dispatch` / `<oha_group_dispatch>` / native 命名，并已有 ChatAPI + 真实 NativeRunEngine 闭环回归；旧 `run_yachiyo_*`、`<yachiyo_delegation>` 和 `<yachiyo_group_dispatch>` 不再作为有效入口。
-- Workflow 与主聊天共享 NativeRunEngine 的路径已存在，已有 focused 回归、UI 入口 guard、同步 UI flow contract、浏览器级 route smoke、部分按钮级 smoke、无模型 Chat readiness Browser E2E、可用 fake 模型 Chat Browser E2E、Vite Browser DOM selector smoke、source Bridge Run Detail approval 浏览器点击 E2E、slow fake model 的 Chat 取消 late-output Bridge 复验与 Chat 停止按钮 Browser smoke、Chat approval-card approve Browser smoke、Chat composer approval reject Browser smoke，以及 Chat message approval reject Browser smoke；主聊天多轮/图片已补 executor/API/Bridge 合同、TaskRunner 级图片 roundtrip、live source Bridge 图片 E2E、HTTP route 图片附件发送 / attachment FileResponse roundtrip 和 Run Detail/RunEvent route projection，主聊天审批等待、approval roundtrip、live source Bridge 审批 E2E 和重复 approval 防重复执行已补回归，Chat 图片粘贴/上传/移除、停止生成、消息审批卡与 composer 审批卡、Chat 审批卡到 Agent Studio Run Detail 的 route/replay handoff、委派 Run 结束后 summary task processing 状态已补 source-level UI wiring guard，Chat 图片/取消/审批/Run Detail、Agent Studio Run Detail/approval/replay/artifact、Workflow Studio 编辑/节点配置/保存并运行路径已暴露稳定 `data-testid` 选择器并由 source guard 锁定，Workflow 节点执行与审批等待 facts 已接入 RunEvent replay，并新增真实 HTTP route roundtrip 覆盖 Agent/Workflow approval、Run Detail、RunEvent replay 和 artifact 读取；群聊派发和主聊天自动委派已有 source Bridge Browser smoke；但仍需要补 Chat 图片 file upload 浏览器 E2E（当前 Browser 虚拟剪贴板、缺少 `setInputFiles()` 和 in-app file picker 限制阻断真实上传），以及 Workflow 子审批、Run Detail 更完整跨页面交互和桌面 `.app` 内完整成熟功能 E2E。
+- Workflow 与主聊天共享 NativeRunEngine 的路径已存在，已有 focused 回归、UI 入口 guard、同步 UI flow contract、浏览器级 route smoke、部分按钮级 smoke、无模型 Chat readiness Browser E2E、可用 fake 模型 Chat Browser E2E、Vite Browser DOM selector smoke、source Bridge Run Detail approval 浏览器点击 E2E、slow fake model 的 Chat 取消 late-output Bridge 复验与 Chat 停止按钮 Browser smoke、Chat approval-card approve Browser smoke、Chat composer approval reject Browser smoke，以及 Chat message approval reject Browser smoke；主聊天多轮/图片已补 executor/API/Bridge 合同、TaskRunner 级图片 roundtrip、live source Bridge 图片 E2E、HTTP route 图片附件发送 / attachment FileResponse roundtrip 和 Run Detail/RunEvent route projection，主聊天审批等待、approval roundtrip、live source Bridge 审批 E2E 和重复 approval 防重复执行已补回归，Chat 图片粘贴/上传/移除、停止生成、消息审批卡与 composer 审批卡、Chat 审批卡到 Agent Studio Run Detail 的 route/replay handoff、委派 Run 结束后 summary task processing 状态已补 source-level UI wiring guard，Chat 图片/取消/审批/Run Detail、Agent Studio Run Detail/approval/replay/artifact、Workflow Studio 编辑/节点配置/保存并运行路径已暴露稳定 `data-testid` 选择器并由 source guard 锁定，Workflow 节点执行与审批等待 facts 已接入 RunEvent replay，并新增真实 HTTP route roundtrip 覆盖 Agent/Workflow approval、Run Detail、RunEvent replay 和 artifact 读取；群聊派发、主聊天自动委派和 Workflow 子审批已有 source Bridge Browser smoke；但仍需要补 Chat 图片 file upload 浏览器 E2E（当前 Browser 虚拟剪贴板、缺少 `setInputFiles()` 和 in-app file picker 限制阻断真实上传），以及 Run Detail 更完整跨页面交互和桌面 `.app` 内完整成熟功能 E2E。
 - Secret 清洗已补主路径回归、旧 chat.db 迁移清洗、标准 logging、桌面后端 excepthook、crash 文件生成扫描、HTTPException detail、UI JSON error/message、provider catalog 失败缓存、artifact 文件清洗、artifact.write secret payload 写入前拒绝与落盘扫描、provider/tool exception 端到端落盘扫描、terminal / workspace.write_patch approval secret payload 审批前拒绝与落盘扫描、approved terminal 非零退出 stdout/stderr 失败投影与落盘扫描、approval reject/cancelled RunEvent payload 清洗、Workflow continuation failure replay payload 清洗和默认 runtime 落盘扫描；仍建议继续补真实 provider / 外部工具集成环境下的异常日志联调。
 - `workspace.write_patch` 已收敛为单文件 UTF-8 unified diff patch；content 全量写入已从 tool schema 移除，并在 validator / ToolBroker direct 入口拒绝。
 - Runtime 发起的 skill 安装子进程已复用敏感环境变量清洗，避免 `SSH_AUTH_SOCK`、`GITHUB_TOKEN`、云厂商凭据和 `*_API_KEY` / `*_TOKEN` / `*_SECRET` / `*_PASSWORD` 从旁路传入外部命令；`terminal.run` 与 skill install 现在使用同一套 env scrub helper。

@@ -2509,7 +2509,11 @@ class WorkflowParentResumeCoordinator:
             "workflow.run.approval_required",
             child_run_id,
         ):
-            return workflow_run
+            if (
+                str(workflow_run.get("status") or "") == "approval_required"
+                and str(workflow_run.get("result") or "") == child_result
+            ):
+                return workflow_run
         terminal_child_status = "cancelled" if child_status == "cancelled" else "failed"
         if child_status not in {"completed", "approval_required"} and self._timeline_has_child_event(
             timeline,
