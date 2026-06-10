@@ -147,6 +147,14 @@ type MessagesPayload = {
   session_context?: ChatSessionContext;
 };
 
+type DelegatedRunSummaryResult = {
+  created: boolean;
+  error: string;
+  taskId: string;
+  isProcessing: boolean;
+  processingCount: number;
+};
+
 type SessionSearchMatch = {
   kind?: string;
   query?: string;
@@ -1179,7 +1187,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     }
   }
 
-  async function createDelegatedRunSummary(runId: string) {
+  async function createDelegatedRunSummary(runId: string): Promise<DelegatedRunSummaryResult> {
     try {
       const summary = await apiPost<{
         ok?: boolean;
@@ -1190,17 +1198,27 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       if (summary.ok === false) throw new Error(summary.error || '创建主模型整理任务失败');
       const taskId = String(summary.task_id || '');
       const created = Boolean(summary.summary_created && taskId);
+      let refreshed: Awaited<ReturnType<typeof refreshMessages>> | undefined;
       if (created) {
         expectPendingAssistantReply(taskId);
-        await refreshMessages();
+        refreshed = await refreshMessages();
         await loadSessions();
       }
-      return { created, error: '', taskId };
+      const refreshedProcessingCount = Math.max(0, Number(refreshed?.processing_count || 0));
+      return {
+        created,
+        error: '',
+        taskId,
+        isProcessing: created ? (refreshed ? Boolean(refreshed.is_processing || refreshedProcessingCount > 0) : true) : false,
+        processingCount: created ? (refreshed ? refreshedProcessingCount : 1) : 0,
+      };
     } catch (error) {
       return {
         created: false,
         error: error instanceof Error ? error.message : '创建主模型整理任务失败',
         taskId: '',
+        isProcessing: false,
+        processingCount: 0,
       };
     }
   }
@@ -1233,11 +1251,12 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
             forgetRunApprovalDetails(runId);
             const delegatedSummary = options.summarizeDelegatedRun
               ? await createDelegatedRunSummary(runId)
-              : { created: false, error: '', taskId: '' };
-            const nextProcessing = chatStillProcessing || delegatedSummary.created;
+              : { created: false, error: '', taskId: '', isProcessing: false, processingCount: 0 };
+            const nextProcessing = delegatedSummary.created ? delegatedSummary.isProcessing : chatStillProcessing;
+            const nextProcessingCount = delegatedSummary.created ? delegatedSummary.processingCount : chatProcessingCount;
             isProcessingRef.current = nextProcessing;
             setIsProcessing(nextProcessing);
-            setProcessingCount(delegatedSummary.created ? Math.max(1, chatProcessingCount) : chatProcessingCount);
+            setProcessingCount(nextProcessingCount);
             if (delegatedSummary.created) {
               setStatus(`${runLabel} 已结束，等待主模型整理委派结果...`);
             } else if (delegatedSummary.error) {
@@ -1524,12 +1543,14 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       const runStatus = normalizeRunStatus(run.status);
       let delegatedSummaryCreated = false;
       let delegatedSummaryError = '';
-      let delegatedSummaryTaskId = '';
+      let delegatedSummaryIsProcessing = false;
+      let delegatedSummaryProcessingCount = 0;
       if (summarizeDelegatedRun && ['completed', 'failed', 'cancelled'].includes(runStatus)) {
         const summary = await createDelegatedRunSummary(runId);
         delegatedSummaryCreated = summary.created;
         delegatedSummaryError = summary.error;
-        delegatedSummaryTaskId = summary.taskId;
+        delegatedSummaryIsProcessing = summary.isProcessing;
+        delegatedSummaryProcessingCount = summary.processingCount;
       }
       if (composerItemId && runStatus !== 'approval_required') {
         setResolvedComposerApprovalIds((current) => (
@@ -1550,10 +1571,11 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         }
       } else {
         forgetRunApprovalDetails(runId);
-        const nextProcessing = chatStillProcessing || delegatedSummaryCreated;
+        const nextProcessing = delegatedSummaryCreated ? delegatedSummaryIsProcessing : chatStillProcessing;
+        const nextProcessingCount = delegatedSummaryCreated ? delegatedSummaryProcessingCount : chatProcessingCount;
         setIsProcessing(nextProcessing);
         isProcessingRef.current = nextProcessing;
-        setProcessingCount(delegatedSummaryCreated ? Math.max(1, chatProcessingCount) : chatProcessingCount);
+        setProcessingCount(nextProcessingCount);
         if (delegatedSummaryCreated) {
           setStatus('Agent 已结束，等待主模型整理委派结果...');
         } else if (delegatedSummaryError) {

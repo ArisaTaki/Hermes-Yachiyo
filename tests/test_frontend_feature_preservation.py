@@ -154,6 +154,29 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
     )
 
 
+def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
+    _assert_contains(
+        "apps/frontend/src/views/ChatView.tsx",
+        [
+            "type DelegatedRunSummaryResult = {",
+            "async function createDelegatedRunSummary(runId: string): Promise<DelegatedRunSummaryResult>",
+            "let refreshed: Awaited<ReturnType<typeof refreshMessages>> | undefined;",
+            "refreshed = await refreshMessages();",
+            "const refreshedProcessingCount = Math.max(0, Number(refreshed?.processing_count || 0));",
+            "isProcessing: created ? (refreshed ? Boolean(refreshed.is_processing || refreshedProcessingCount > 0) : true) : false,",
+            "processingCount: created ? (refreshed ? refreshedProcessingCount : 1) : 0,",
+            "const nextProcessing = delegatedSummary.created ? delegatedSummary.isProcessing : chatStillProcessing;",
+            "const nextProcessingCount = delegatedSummary.created ? delegatedSummary.processingCount : chatProcessingCount;",
+            "let delegatedSummaryIsProcessing = false;",
+            "let delegatedSummaryProcessingCount = 0;",
+            "delegatedSummaryIsProcessing = summary.isProcessing;",
+            "delegatedSummaryProcessingCount = summary.processingCount;",
+            "const nextProcessing = delegatedSummaryCreated ? delegatedSummaryIsProcessing : chatStillProcessing;",
+            "const nextProcessingCount = delegatedSummaryCreated ? delegatedSummaryProcessingCount : chatProcessingCount;",
+        ],
+    )
+
+
 def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None:
     _assert_contains(
         "apps/frontend/src/lib/agents.ts",
