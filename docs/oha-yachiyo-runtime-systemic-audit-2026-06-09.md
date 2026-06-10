@@ -1282,7 +1282,7 @@ Info.plist uses Oha-Yachiyo identifiers and permission strings
 - 主聊天自动委派已有 TaskRunner 级集成回归：真实 TaskRunner / NativeAgentExecutor / NativeRunEngine 可解析 `run_oha_agent` directive、创建 delegation Agent Run、记录 ActivityStore 委派活动、把 delegated result 回填给主模型并完成最终 ChatSession 回复；自动委派路径已修正为使用当前注入 runtime service，不再隐式打开全局 NativeRunEngine。
 - 群聊派活已有 ChatAPI + 真实 NativeRunEngine 级集成回归：runtime 注入 `AgentRuntimeService` 后，主模型 `oha.group_dispatch` 输出会创建真实 Agent Run，群组 upstream 进入 Agent context，Agent 完成后回写群聊消息并创建主模型群总结 Task；ChatAPI 的 Agent/Workflow/Run 状态读取入口现在统一经 `_agent_runtime_service()`，避免成熟业务路径直接绕过 runtime 注入边界。
 - Workflow start / agent / artifact 节点执行、Workflow approval node、Workflow 等待子 Agent 审批、子 Agent 审批恢复/拒绝现在都有 replayable RunEvent：`workflow.node.start` / `workflow.node.agent` / `workflow.node.artifact` / `workflow.node.approval_required` / `workflow.run.approval_required` / `workflow.run.child_resumed` / `workflow.run.resumed` / `workflow.run.cancelled` 已接入 `/runs/{run_id}/events`，并有 route 级 Run Detail projection 回归。
-- Agent Studio Run Detail 已接入 `/runs/{run_id}/events` replay API，Execution 区优先展示 replayable RunEvent facts，保留旧 timeline 回退，并有 source-level preservation guard 与 route contract 覆盖。
+- Agent Studio Run Detail 已接入 `/runs/{run_id}/events` replay API，Execution 区优先展示 replayable RunEvent facts，选中 Run 的状态/更新时间/timeline 变化时会刷新 replay，保留旧 timeline 回退，并有 source-level preservation guard 与 route contract 覆盖。
 - AppRuntime 已提供主聊天默认 tool/workspace policy 并接入 `select_executor()`；主聊天产品路径默认进入同一套 ToolDescriptor / PolicyGate / approval / workspace boundary 体系，ToolBroker 已有 realpath/symlink 越界回归。
 - 未配置模型时返回结构化 native readiness 错误，不再引导安装旧执行内核。
 

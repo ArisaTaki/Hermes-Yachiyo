@@ -1944,6 +1944,17 @@ export function AgentStudioView() {
       : selectedRun?.timeline || [],
     [selectedRun, selectedRunReplayEvents],
   );
+  const selectedRunReplayRefreshKey = useMemo(
+    () => selectedRunId
+      ? [
+          selectedRunId,
+          selectedRun?.updated_at || '',
+          selectedRun?.status || '',
+          selectedRun?.timeline?.length || 0,
+        ].join('|')
+      : '',
+    [selectedRun, selectedRunId],
+  );
   const selectedRunTarget = useMemo(
     () => runTarget ? runnables.find((item) => item.id === runTarget) || null : null,
     [runTarget, runnables],
@@ -2515,7 +2526,7 @@ export function AgentStudioView() {
   }, [selectedRun, selectedRunId]);
 
   useEffect(() => {
-    if (!selectedRunId || runEventsByRunId[selectedRunId]) return;
+    if (!selectedRunId) return;
     let disposed = false;
     getRunEvents(selectedRunId)
       .then((page) => {
@@ -2527,7 +2538,7 @@ export function AgentStudioView() {
     return () => {
       disposed = true;
     };
-  }, [runEventsByRunId, selectedRunId]);
+  }, [selectedRunId, selectedRunReplayRefreshKey]);
 
   useEffect(() => {
     if (!isPotentialWorkflowChildAgentRun(selectedRun)) return;

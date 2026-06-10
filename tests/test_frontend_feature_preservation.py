@@ -160,6 +160,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "getRunEvents",
             "runEventReplayToTimelineEvent",
             "selectedRunExecutionEvents",
+            "selectedRunReplayRefreshKey",
             "RunEvent replay facts",
             "<h2>Run Detail</h2>",
             "Approval Required",
