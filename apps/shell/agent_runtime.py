@@ -673,6 +673,34 @@ def _message_content_text(content: Any) -> str:
     return ""
 
 
+def _message_visible_content_text(content: Any) -> str:
+    if isinstance(content, dict):
+        nested = _message_visible_content_text(content.get("content"))
+        if nested:
+            return nested
+        text = content.get("text")
+        return str(text) if text is not None else ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict) and isinstance(item.get("text"), str):
+                parts.append(item["text"])
+            elif isinstance(getattr(item, "text", None), str):
+                parts.append(item.text)
+        return "\n".join(parts)
+    nested = _message_field(content, "content")
+    if nested is not None:
+        text = _message_visible_content_text(nested)
+        if text:
+            return text
+    text = _message_field(content, "text")
+    if text is not None:
+        return str(text)
+    return ""
+
+
 def _stream_chunk_text(chunk: Any) -> str:
     if isinstance(chunk, str):
         return chunk
@@ -682,10 +710,10 @@ def _stream_chunk_text(chunk: Any) -> str:
         for choice in choices:
             delta = _message_field(choice, "delta")
             if delta is not None:
-                parts.append(_message_content_text(delta))
+                parts.append(_message_visible_content_text(delta))
             message = _message_field(choice, "message")
             if message is not None:
-                parts.append(_message_content_text(message))
+                parts.append(_message_visible_content_text(message))
             text = _message_field(choice, "text")
             if text is not None:
                 parts.append(str(text))
@@ -693,8 +721,8 @@ def _stream_chunk_text(chunk: Any) -> str:
             return "".join(parts)
     delta = _message_field(chunk, "delta")
     if delta is not None:
-        return _message_content_text(delta)
-    return _message_content_text(chunk)
+        return _message_visible_content_text(delta)
+    return _message_visible_content_text(chunk)
 
 
 def _stream_choice_index(choice: Any, fallback: int) -> int:
