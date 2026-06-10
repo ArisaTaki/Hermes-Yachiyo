@@ -208,6 +208,38 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         '"release/${LATEST_JSON}"',
         "macOS release workflow must publish latest channel JSON metadata",
     ),
+    (
+        "Run opt-in real provider streaming smoke",
+        "macOS release workflow must expose opt-in real provider streaming smoke",
+    ),
+    (
+        "OHA_YACHIYO_SMOKE_BASE_URL",
+        "macOS release workflow must wire opt-in provider smoke base URL secret",
+    ),
+    (
+        "OHA_YACHIYO_SMOKE_MODEL",
+        "macOS release workflow must wire opt-in provider smoke model secret",
+    ),
+    (
+        "OHA_YACHIYO_SMOKE_API_KEY",
+        "macOS release workflow must wire opt-in provider smoke API key secret",
+    ),
+    (
+        "python scripts/smoke_openai_compatible_stream.py",
+        "macOS release workflow must run the real provider streaming smoke helper when configured",
+    ),
+    (
+        "--require-content",
+        "macOS release workflow provider smoke must require streamed content",
+    ),
+    (
+        "--require-tool-call",
+        "macOS release workflow provider smoke must require streamed tool calls",
+    ),
+    (
+        "--expect-tool-name workspace_read",
+        "macOS release workflow provider smoke must assert the workspace_read tool call",
+    ),
 )
 RELEASE_WORKFLOW_METADATA_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
@@ -739,6 +771,7 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
         )
     signing_import = workflow.find("Import macOS self-signing certificate")
     smoke_tests = workflow.find("Run smoke tests")
+    provider_smoke = workflow.find("Run opt-in real provider streaming smoke")
     build_backend = workflow.find("Build packaged backend")
     build_dmg = workflow.find("Build Electron DMG")
     if (
@@ -752,6 +785,19 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
             Finding(
                 workflow_path,
                 "macOS release workflow must run smoke tests before packaged backend and DMG builds",
+            )
+        )
+    if (
+        provider_smoke < 0
+        or build_backend < 0
+        or build_dmg < 0
+        or provider_smoke > build_backend
+        or provider_smoke > build_dmg
+    ):
+        findings.append(
+            Finding(
+                workflow_path,
+                "macOS release workflow must run opt-in real provider streaming smoke before packaged backend and DMG builds",
             )
         )
     if signing_import >= 0 and build_dmg >= 0 and signing_import > build_dmg:

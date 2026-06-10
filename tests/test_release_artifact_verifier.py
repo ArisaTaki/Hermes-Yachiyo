@@ -395,6 +395,18 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow smoke tests must cover provider reasoning privacy for direct chat calls" in messages
     assert "macOS release workflow smoke tests must cover provider reasoning privacy for main chat loop" in messages
     assert "macOS release workflow smoke tests must cover OpenAI-compatible streaming provider contracts" in messages
+    assert "macOS release workflow must expose opt-in real provider streaming smoke" in messages
+    assert "macOS release workflow must wire opt-in provider smoke base URL secret" in messages
+    assert "macOS release workflow must wire opt-in provider smoke model secret" in messages
+    assert "macOS release workflow must wire opt-in provider smoke API key secret" in messages
+    assert "macOS release workflow must run the real provider streaming smoke helper when configured" in messages
+    assert "macOS release workflow provider smoke must require streamed content" in messages
+    assert "macOS release workflow provider smoke must require streamed tool calls" in messages
+    assert "macOS release workflow provider smoke must assert the workspace_read tool call" in messages
+    assert (
+        "macOS release workflow must run opt-in real provider streaming smoke before packaged backend and DMG builds"
+        in messages
+    )
     assert "macOS release workflow smoke tests must cover legacy Hermes kernel removal" in messages
     assert "macOS release workflow smoke tests must cover Native runtime injection boundary" in messages
     assert "macOS release workflow smoke tests must cover desktop backend Native startup" in messages

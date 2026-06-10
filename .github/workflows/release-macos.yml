@@ -117,6 +117,28 @@ jobs:
             tests/test_tts.py \
             tests/test_mode_settings.py
 
+      - name: Run opt-in real provider streaming smoke
+        shell: bash
+        env:
+          OHA_YACHIYO_SMOKE_BASE_URL: ${{ secrets.OHA_YACHIYO_SMOKE_BASE_URL }}
+          OHA_YACHIYO_SMOKE_MODEL: ${{ secrets.OHA_YACHIYO_SMOKE_MODEL }}
+          OHA_YACHIYO_SMOKE_API_KEY: ${{ secrets.OHA_YACHIYO_SMOKE_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${OHA_YACHIYO_SMOKE_BASE_URL}" || -z "${OHA_YACHIYO_SMOKE_MODEL}" || -z "${OHA_YACHIYO_SMOKE_API_KEY}" ]]; then
+            echo "Skipping opt-in real provider streaming smoke; OHA_YACHIYO_SMOKE_* secrets are not fully configured."
+            exit 0
+          fi
+
+          python scripts/smoke_openai_compatible_stream.py \
+            --require-content \
+            --expect-finish-reason stop
+
+          python scripts/smoke_openai_compatible_stream.py \
+            --tool-call \
+            --require-tool-call \
+            --expect-tool-name workspace_read
+
       - name: Build packaged backend
         run: python scripts/build_backend.py --clean
 
