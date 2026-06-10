@@ -1740,11 +1740,16 @@ def _iter_openai_sse_payloads(response: Any) -> Iterator[dict[str, Any]]:
 
 def _openai_compatible_sse_event_payload(raw_event: str) -> tuple[dict[str, Any] | None, bool]:
     data_lines: list[str] = []
+    event_name = ""
     for raw_line in raw_event.splitlines():
         line = raw_line.strip()
-        if not line or line.startswith(":") or not line.startswith("data:"):
+        if not line or line.startswith(":"):
             continue
-        data_lines.append(line[5:].strip())
+        if line.startswith("event:"):
+            event_name = line[6:].strip().lower()
+            continue
+        if line.startswith("data:"):
+            data_lines.append(line[5:].strip())
     if not data_lines:
         return None, False
     data = "\n".join(data_lines).strip()
@@ -1755,14 +1760,21 @@ def _openai_compatible_sse_event_payload(raw_event: str) -> tuple[dict[str, Any]
     payload = json.loads(data)
     if not isinstance(payload, dict):
         return None, False
-    error_message = _openai_compatible_payload_error(payload)
+    error_message = _openai_compatible_payload_error(payload, event_name=event_name)
     if error_message:
         raise ModelProfileError(f"OpenAI-compatible Profile 调用失败：{error_message}")
     return payload, False
 
 
-def _openai_compatible_payload_error(payload: dict[str, Any]) -> str:
+def _openai_compatible_payload_error(payload: dict[str, Any], *, event_name: str = "") -> str:
     error = payload.get("error")
+    if not error and _openai_compatible_payload_is_error_event(payload, event_name=event_name):
+        message = payload.get("message") or payload.get("detail") or payload.get("error_message")
+        error = {
+            "message": message or payload,
+            "type": payload.get("type") or event_name,
+            "code": payload.get("code") or payload.get("error_code") or payload.get("status"),
+        }
     if not error:
         return ""
     if isinstance(error, dict):
@@ -1780,6 +1792,14 @@ def _openai_compatible_payload_error(payload: dict[str, Any]) -> str:
     else:
         detail = str(error)
     return redact_api_error_text(detail, fallback="provider stream error")
+
+
+def _openai_compatible_payload_is_error_event(payload: dict[str, Any], *, event_name: str = "") -> bool:
+    marker = str(event_name or "").strip().lower()
+    if marker in {"error", "response.error", "chat.completion.error"}:
+        return True
+    payload_type = str(payload.get("type") or payload.get("object") or "").strip().lower()
+    return payload_type in {"error", "response.error", "chat.completion.error"}
 
 
 def openai_compatible_chat_message(

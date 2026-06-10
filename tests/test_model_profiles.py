@@ -952,6 +952,56 @@ def test_openai_compatible_chat_message_stream_raises_provider_error(monkeypatch
     assert "[redacted]" in error_text
 
 
+@pytest.mark.parametrize(
+    "error_frame",
+    [
+        "event: error\n"
+        'data: {"message":"gateway rejected api_key=sk-stream-event-error123456","code":"bad_api_key"}\n\n',
+        'data: {"type":"error","message":"gateway rejected api_key=sk-stream-event-error123456","code":"bad_api_key"}\n\n',
+    ],
+)
+def test_openai_compatible_chat_message_stream_raises_provider_error_event(monkeypatch, error_frame):
+    leaked_secret = "sk-stream-event-error123456"
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            yield b'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'
+            yield error_frame.encode("utf-8")
+
+    def fake_urlopen(request, timeout, context):
+        body = json.loads(request.data.decode("utf-8"))
+        assert body["stream"] is True
+        assert timeout == OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS
+        assert isinstance(context, ssl.SSLContext)
+        assert request.get_header("Accept") == "text/event-stream"
+        return FakeResponse()
+
+    monkeypatch.setattr("apps.shell.model_profiles.urlrequest.urlopen", fake_urlopen)
+
+    with pytest.raises(ModelProfileError) as excinfo:
+        list(
+            openai_compatible_chat_message(
+                "https://api.example.test/v1",
+                "demo-model",
+                "sk-demo",
+                [{"role": "user", "content": "hello"}],
+                stream=True,
+            )
+        )
+
+    error_text = str(excinfo.value)
+    assert "OpenAI-compatible Profile 调用失败" in error_text
+    assert "bad_api_key" in error_text
+    assert leaked_secret not in error_text
+    assert "[redacted]" in error_text
+
+
 def test_test_and_save_profile_failure_does_not_persist(monkeypatch, tmp_path):
     service = make_profile_service(tmp_path)
     source = service.create_source(
