@@ -1915,7 +1915,13 @@ def test_chat_delegated_summary_bridge_route_runs_native_followup(tmp_path, monk
             assert summary["ok"] is True
             assert summary["summary_created"] is True
             assert summary["run_status"] == "completed"
+            assert summary["run_group_id"] == run_group["run_group_id"]
+            assert summary["source_task_id"] == source_task.task_id
             assert repeat["summary_created"] is False
+            assert repeat["message_id"] == summary["message_id"]
+            assert repeat["task_id"] == summary["task_id"]
+            assert repeat["run_group_id"] == run_group["run_group_id"]
+            assert repeat["source_task_id"] == source_task.task_id
             summary_task = state.get_task(summary["task_id"])
             assert summary_task is not None
             assert summary_task.chat_session_id == session.session_id
@@ -1932,17 +1938,25 @@ def test_chat_delegated_summary_bridge_route_runs_native_followup(tmp_path, monk
             assert completed_task is not None
             assert completed_task.status == TaskStatus.COMPLETED
             assert completed_task.result == "主模型总结：Native delegated route result 已整理。"
-            summary_run = service.get_run(service.get_task_run_link(summary_task.task_id)["run_id"])
+            summary_link = service.get_task_run_link(summary_task.task_id)
+            summary_run = service.get_run(summary_link["run_id"])
             detail = await agent_routes.get_any_run(summary_run["run_id"])
             replay = await run_routes.list_run_events(summary_run["run_id"], after_sequence=0, limit=200)
+            replay_last_sequence = max(event["sequence"] for event in replay["events"])
             event_types = [event["event_type"] for event in replay["events"]]
 
+            assert summary_link["task_id"] == summary_task.task_id
+            assert summary_link["session_id"] == session.session_id
+            assert summary_link["run_status"] == "completed"
+            assert summary_link["last_event_sequence"] == replay_last_sequence
             assert summary_run["run_id"] != delegated["run_id"]
             assert detail["kind"] == "main_chat_run"
             assert detail["status"] == "completed"
             assert detail["task_id"] == summary_task.task_id
             assert detail["session_id"] == session.session_id
             assert detail["task_run_link_created_at"]
+            assert detail["task_run_link_run_status"] == "completed"
+            assert detail["task_run_link_last_event_sequence"] == replay_last_sequence
             assert event_types.count("model.output.completed") == 1
             assert "task.linked" in event_types
             assert "run.completed" in event_types
@@ -1956,6 +1970,8 @@ def test_chat_delegated_summary_bridge_route_runs_native_followup(tmp_path, monk
             assert final_summary["status"] == "completed"
             assert final_summary["content"] == "主模型总结：Native delegated route result 已整理。"
             assert final_summary["metadata"]["delegated_run_summary_for_run_id"] == delegated["run_id"]
+            assert final_summary["metadata"]["delegated_run_source_task_id"] == source_task.task_id
+            assert final_summary["metadata"]["run_group_id"] == run_group["run_group_id"]
             assert final_summary["metadata"]["run_status"] == "completed"
 
         asyncio.run(scenario())
