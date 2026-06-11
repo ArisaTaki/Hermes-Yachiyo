@@ -567,6 +567,24 @@ async function main() {
   await win.webContents.executeJavaScript("fetch(" + JSON.stringify(bridgeUrl + '/__smoke/reset') + ", { method: 'POST' })", true);
   await win.loadURL('about:blank');
   await win.loadURL(chatUrl);
+  console.log('[electron-smoke] chat loaded for message reject');
+  await waitForApproval(win, 'message approval card after reset');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-message-approval-reject\\"]').click()", true);
+  await waitForRejected(win, 'message approval reject projection');
+  console.log('[electron-smoke] message approval rejected');
+
+  await win.webContents.executeJavaScript("fetch(" + JSON.stringify(bridgeUrl + '/__smoke/reset') + ", { method: 'POST' })", true);
+  await win.loadURL('about:blank');
+  await win.loadURL(chatUrl);
+  console.log('[electron-smoke] chat loaded for composer approve');
+  await waitForApproval(win, 'composer approval notice before approve');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-composer-approval-approve\\"]').click()", true);
+  await waitForApproved(win, 'composer approval approve projection');
+  console.log('[electron-smoke] composer approval approved');
+
+  await win.webContents.executeJavaScript("fetch(" + JSON.stringify(bridgeUrl + '/__smoke/reset') + ", { method: 'POST' })", true);
+  await win.loadURL('about:blank');
+  await win.loadURL(chatUrl);
   console.log('[electron-smoke] chat loaded for composer reject');
   await waitForApproval(win, 'composer approval notice after reset');
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-composer-approval-open-run-detail\\"]').click()", true);
@@ -626,11 +644,11 @@ async function main() {
     const devUrl = `http://127.0.0.1:${vitePort}`;
     await waitForHttp(devUrl);
     await runElectronSmoke(devUrl, bridge.url);
-    if (bridgeState.approveCalls !== 1) {
-      fail(`expected one chat approval approve call, got ${bridgeState.approveCalls}`);
+    if (bridgeState.approveCalls !== 2) {
+      fail(`expected two chat approval approve calls, got ${bridgeState.approveCalls}`);
     }
-    if (bridgeState.rejectCalls !== 1) {
-      fail(`expected one chat approval reject call, got ${bridgeState.rejectCalls}`);
+    if (bridgeState.rejectCalls !== 2) {
+      fail(`expected two chat approval reject calls, got ${bridgeState.rejectCalls}`);
     }
     log('passed');
   } finally {
