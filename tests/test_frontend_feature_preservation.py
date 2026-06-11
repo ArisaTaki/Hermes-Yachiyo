@@ -367,6 +367,9 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
             "delegatedSummaryProcessingCount = summary.processingCount;",
             "const nextProcessing = delegatedSummaryCreated ? delegatedSummaryIsProcessing : chatStillProcessing;",
             "const nextProcessingCount = delegatedSummaryCreated ? delegatedSummaryProcessingCount : chatProcessingCount;",
+            'data-testid="chat-message-summary-status"',
+            "data-summary-tone={summaryNotice.tone}",
+            'data-testid="chat-message-followup-status"',
         ],
     )
 

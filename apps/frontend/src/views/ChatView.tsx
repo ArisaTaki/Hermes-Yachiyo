@@ -2986,7 +2986,15 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
             </div>
           ) : null}
           {message.error && !duplicateError ? <div className="message-error">{message.error}</div> : null}
-          {summaryNotice ? <div className={`message-summary-status ${summaryNotice.tone}`}>{summaryNotice.text}</div> : null}
+          {summaryNotice ? (
+            <div
+              className={`message-summary-status ${summaryNotice.tone}`}
+              data-testid="chat-message-summary-status"
+              data-summary-tone={summaryNotice.tone}
+            >
+              {summaryNotice.text}
+            </div>
+          ) : null}
         </div>
         <MessageActivityList
           events={message.activity_events || []}
@@ -2994,7 +3002,11 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
           onOpenRunDetails={onOpenRunDetails}
           progressLabel={message.progress_label}
         />
-        {followupNotice ? <div className="message-followup-status">{followupNotice}</div> : null}
+        {followupNotice ? (
+          <div className="message-followup-status" data-testid="chat-message-followup-status">
+            {followupNotice}
+          </div>
+        ) : null}
         {showApprovalActions ? (
           <div className="message-approval-actions" data-testid="chat-message-approval-actions">
             <button type="button" className="message-approval-approve" data-testid="chat-message-approval-approve" disabled={approvalBusy} onClick={onApprove}>
