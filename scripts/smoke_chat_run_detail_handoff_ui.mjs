@@ -17,6 +17,8 @@ const SESSION_ID = 'session-chat-run-detail-handoff-ui-smoke';
 const RUN_GROUP_ID = 'group-chat-run-detail-handoff-ui-smoke';
 const RUN_GOAL = 'Open completed Chat message Run Detail from Electron UI smoke';
 const RUN_RESULT = 'Chat completed message Run Detail handoff smoke completed';
+const CODE_BLOCK = "console.log('oha code copy smoke');";
+const ASSISTANT_CONTENT = `${RUN_RESULT}\n\n\`\`\`js\n${CODE_BLOCK}\n\`\`\``;
 const now = new Date().toISOString();
 
 const agent = {
@@ -117,7 +119,7 @@ const messages = [
   {
     id: 'assistant-chat-run-detail-handoff-message',
     role: 'assistant',
-    content: RUN_RESULT,
+    content: ASSISTANT_CONTENT,
     status: 'completed',
     task_id: TASK_ID,
     created_at: now,
@@ -366,6 +368,7 @@ function waitFor(win, predicate, label, timeout = 15000) {
               hash: window.location.hash,
               chatButton: document.querySelector('[data-testid="chat-message-open-run-detail"]')?.outerHTML || '',
               copyButton: document.querySelector('[data-testid="chat-message-copy"]')?.outerHTML || '',
+              codeCopyButton: document.querySelector('[data-testid="chat-code-copy"]')?.outerHTML || '',
               detail: document.querySelector('[data-testid="agent-run-detail"]')?.outerHTML || '',
               task: document.querySelector('[data-testid="agent-run-detail-task"]')?.textContent || '',
               result: document.querySelector('[data-testid="agent-run-detail-result"]')?.textContent || '',
@@ -411,6 +414,7 @@ async function main() {
     return Boolean(button)
       && button.textContent.includes('运行详情')
       && document.querySelector('[data-testid="chat-message-copy"]')
+      && document.querySelector('[data-testid="chat-code-copy"]')
       && document.body.textContent.includes(${JSON.stringify(RUN_RESULT)});
   }, 'completed Chat message Run Detail action');
   await win.webContents.executeJavaScript(\`
@@ -429,10 +433,17 @@ async function main() {
   \`, true);
   await waitFor(win, () => (
     Array.isArray(window.__ohaChatCopiedText)
-    && window.__ohaChatCopiedText[0] === ${JSON.stringify(RUN_RESULT)}
+    && window.__ohaChatCopiedText[0] === ${JSON.stringify(ASSISTANT_CONTENT)}
     && document.querySelector('[data-testid="chat-message-copy"].copied')
   ), 'completed Chat message copied');
   console.log('[electron-smoke] completed Chat message copied');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-code-copy\\"]').click()", true);
+  await waitFor(win, () => (
+    Array.isArray(window.__ohaChatCopiedText)
+    && window.__ohaChatCopiedText[1] === ${JSON.stringify(CODE_BLOCK)}
+    && document.querySelector('[data-testid="chat-code-copy"].copied')
+  ), 'completed Chat code block copied');
+  console.log('[electron-smoke] completed Chat code block copied');
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-message-open-run-detail\\"]').click()", true);
   await waitFor(win, () => (
     window.location.hash.includes('/agents')

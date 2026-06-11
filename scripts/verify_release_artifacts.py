@@ -120,6 +120,7 @@ PACKAGED_UI_E2E_REQUIRED_SELECTORS: tuple[str, ...] = (
     "chat-header-stop-button",
     "chat-composer-stop-button",
     "chat-message-copy",
+    "chat-code-copy",
     "chat-message-summary-status",
     "chat-message-followup-status",
     "chat-message-activity-row",
