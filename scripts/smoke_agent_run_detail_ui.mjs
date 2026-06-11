@@ -14,9 +14,15 @@ const RUN_ID = 'agent_run_detail_ui_smoke';
 const APPROVAL_RUN_ID = 'agent_run_detail_ui_smoke_approval';
 const WORKFLOW_RUN_ID = 'workflow_run_detail_ui_smoke_child_approval';
 const WORKFLOW_CHILD_RUN_ID = 'agent_run_detail_ui_smoke_workflow_child';
+const WORKFLOW_REJECT_RUN_ID = 'workflow_run_detail_ui_smoke_child_reject';
+const WORKFLOW_REJECT_CHILD_RUN_ID = 'agent_run_detail_ui_smoke_workflow_child_reject';
+const WORKFLOW_CANCEL_RUN_ID = 'workflow_run_detail_ui_smoke_child_cancel';
+const WORKFLOW_CANCEL_CHILD_RUN_ID = 'agent_run_detail_ui_smoke_workflow_child_cancel';
 const RERUN_RUN_ID = 'agent_run_detail_ui_smoke_rerun';
 const RUN_GROUP_ID = 'run_group_detail_ui_smoke';
 const WORKFLOW_RUN_GROUP_ID = 'run_group_detail_ui_workflow_child_smoke';
+const WORKFLOW_REJECT_RUN_GROUP_ID = 'run_group_detail_ui_workflow_child_reject_smoke';
+const WORKFLOW_CANCEL_RUN_GROUP_ID = 'run_group_detail_ui_workflow_child_cancel_smoke';
 const WORKFLOW_ID = 'workflow-detail-child-approval-smoke';
 const ARTIFACT_PATH = 'summary.md';
 const WORKFLOW_ARTIFACT_PATH = 'workflow-summary.md';
@@ -25,6 +31,8 @@ const now = new Date().toISOString();
 let rerunCreated = false;
 let approvalApproved = false;
 let workflowChildApproved = false;
+let workflowChildRejected = false;
+let workflowChildCancelled = false;
 
 const run = {
   run_id: RUN_ID,
@@ -223,6 +231,222 @@ function workflowRunGroup() {
     status: workflowChildApproved ? 'completed' : 'approval_required',
     summary: workflowChildApproved ? 'Workflow child approval completed' : 'Workflow waiting for child approval',
     child_run_ids: [WORKFLOW_RUN_ID, WORKFLOW_CHILD_RUN_ID],
+    created_at: now,
+    updated_at: now,
+  };
+}
+
+function workflowRejectChildRun() {
+  return {
+    run_id: WORKFLOW_REJECT_CHILD_RUN_ID,
+    run_group_id: WORKFLOW_REJECT_RUN_GROUP_ID,
+    run_group_source: 'workflow',
+    task_id: 'task-run-detail-ui-smoke-workflow-child-reject',
+    session_id: 'session-run-detail-ui-smoke-workflow-child-reject',
+    task_run_link_run_status: workflowChildRejected ? 'cancelled' : 'approval_required',
+    task_run_link_last_event_sequence: workflowChildRejected ? 4 : 2,
+    kind: 'agent_run',
+    runnable_id: 'agent-run-detail-smoke',
+    runnable_name: 'Coding Agent',
+    status: workflowChildRejected ? 'cancelled' : 'approval_required',
+    user_goal: 'Reject child Agent approval from Workflow Run Detail smoke',
+    result: workflowChildRejected ? 'Workflow child approval rejected from Electron smoke' : '',
+    pending_approval: workflowChildRejected ? undefined : {
+      approval_id: 'approval-workflow-child-reject-detail-ui-smoke',
+      tool: 'terminal.run',
+      input_preview: {
+        command: 'printf workflow-child-electron-rejected',
+        cwd: '/workspace',
+        checkpoint: 'Workflow child reject smoke',
+      },
+    },
+    timeline: [],
+    artifacts: [],
+    created_at: now,
+    updated_at: now,
+    agent_run_id: WORKFLOW_REJECT_CHILD_RUN_ID,
+  };
+}
+
+function workflowRejectRun() {
+  const baseTimeline = [
+    {
+      event: 'workflow.node.start',
+      detail: 'Start',
+      status: 'completed',
+      workflow_node_id: 'start',
+      time: now,
+    },
+    {
+      event: 'workflow.node.agent',
+      detail: 'Coding Agent',
+      status: workflowChildRejected ? 'cancelled' : 'approval_required',
+      child_run_id: WORKFLOW_REJECT_CHILD_RUN_ID,
+      workflow_node_id: 'agent-reject',
+      workflow_node_task: 'Reject child Agent approval from Workflow Run Detail smoke',
+      artifact_count: 0,
+      time: now,
+    },
+  ];
+  return {
+    run_id: WORKFLOW_REJECT_RUN_ID,
+    run_group_id: WORKFLOW_REJECT_RUN_GROUP_ID,
+    run_group_source: 'workflow',
+    task_id: 'task-run-detail-ui-smoke-workflow-reject',
+    session_id: 'session-run-detail-ui-smoke-workflow-reject',
+    task_run_link_run_status: workflowChildRejected ? 'cancelled' : 'approval_required',
+    task_run_link_last_event_sequence: 3,
+    kind: 'workflow_run',
+    runnable_id: WORKFLOW_ID,
+    runnable_name: 'Run Detail Child Reject Workflow',
+    status: workflowChildRejected ? 'cancelled' : 'approval_required',
+    user_goal: 'Reject Workflow child from Run Detail smoke',
+    result: workflowChildRejected ? 'Workflow child approval rejected from Electron smoke' : '',
+    timeline: workflowChildRejected
+      ? [
+          ...baseTimeline,
+          {
+            event: 'workflow.run.cancelled',
+            detail: 'Workflow child approval rejected from Electron smoke',
+            status: 'cancelled',
+            child_run_id: WORKFLOW_REJECT_CHILD_RUN_ID,
+            time: now,
+          },
+        ]
+      : [
+          ...baseTimeline,
+          {
+            event: 'workflow.run.approval_required',
+            detail: 'Child Agent approval required',
+            status: 'approval_required',
+            child_run_id: WORKFLOW_REJECT_CHILD_RUN_ID,
+            pending_approval: workflowRejectChildRun().pending_approval,
+            time: now,
+          },
+        ],
+    artifacts: [],
+    created_at: now,
+    updated_at: now,
+    workflow_run_id: WORKFLOW_REJECT_RUN_ID,
+  };
+}
+
+function workflowRejectRunGroup() {
+  return {
+    run_group_id: WORKFLOW_REJECT_RUN_GROUP_ID,
+    title: 'Run Detail Workflow Child Reject Smoke',
+    source: 'workflow',
+    status: workflowChildRejected ? 'cancelled' : 'approval_required',
+    summary: workflowChildRejected ? 'Workflow child approval rejected' : 'Workflow waiting for child rejection smoke',
+    child_run_ids: [WORKFLOW_REJECT_RUN_ID, WORKFLOW_REJECT_CHILD_RUN_ID],
+    created_at: now,
+    updated_at: now,
+  };
+}
+
+function workflowCancelChildRun() {
+  return {
+    run_id: WORKFLOW_CANCEL_CHILD_RUN_ID,
+    run_group_id: WORKFLOW_CANCEL_RUN_GROUP_ID,
+    run_group_source: 'workflow',
+    task_id: 'task-run-detail-ui-smoke-workflow-child-cancel',
+    session_id: 'session-run-detail-ui-smoke-workflow-child-cancel',
+    task_run_link_run_status: workflowChildCancelled ? 'cancelled' : 'approval_required',
+    task_run_link_last_event_sequence: workflowChildCancelled ? 3 : 2,
+    kind: 'agent_run',
+    runnable_id: 'agent-run-detail-smoke',
+    runnable_name: 'Coding Agent',
+    status: workflowChildCancelled ? 'cancelled' : 'approval_required',
+    user_goal: 'Cancel child Agent from Workflow Run Detail smoke',
+    result: workflowChildCancelled ? 'Workflow child run cancelled from Electron smoke' : '',
+    pending_approval: workflowChildCancelled ? undefined : {
+      approval_id: 'approval-workflow-child-cancel-detail-ui-smoke',
+      tool: 'terminal.run',
+      input_preview: {
+        command: 'printf workflow-child-electron-cancelled',
+        cwd: '/workspace',
+        checkpoint: 'Workflow child cancel smoke',
+      },
+    },
+    timeline: [],
+    artifacts: [],
+    created_at: now,
+    updated_at: now,
+    agent_run_id: WORKFLOW_CANCEL_CHILD_RUN_ID,
+  };
+}
+
+function workflowCancelRun() {
+  const baseTimeline = [
+    {
+      event: 'workflow.node.start',
+      detail: 'Start',
+      status: 'completed',
+      workflow_node_id: 'start',
+      time: now,
+    },
+    {
+      event: 'workflow.node.agent',
+      detail: 'Coding Agent',
+      status: workflowChildCancelled ? 'cancelled' : 'approval_required',
+      child_run_id: WORKFLOW_CANCEL_CHILD_RUN_ID,
+      workflow_node_id: 'agent-cancel',
+      workflow_node_task: 'Cancel child Agent from Workflow Run Detail smoke',
+      artifact_count: 0,
+      time: now,
+    },
+  ];
+  return {
+    run_id: WORKFLOW_CANCEL_RUN_ID,
+    run_group_id: WORKFLOW_CANCEL_RUN_GROUP_ID,
+    run_group_source: 'workflow',
+    task_id: 'task-run-detail-ui-smoke-workflow-cancel',
+    session_id: 'session-run-detail-ui-smoke-workflow-cancel',
+    task_run_link_run_status: workflowChildCancelled ? 'cancelled' : 'approval_required',
+    task_run_link_last_event_sequence: 3,
+    kind: 'workflow_run',
+    runnable_id: WORKFLOW_ID,
+    runnable_name: 'Run Detail Child Cancel Workflow',
+    status: workflowChildCancelled ? 'cancelled' : 'approval_required',
+    user_goal: 'Cancel Workflow child from Run Detail smoke',
+    result: workflowChildCancelled ? 'Workflow child run cancelled from Electron smoke' : '',
+    timeline: workflowChildCancelled
+      ? [
+          ...baseTimeline,
+          {
+            event: 'workflow.run.cancelled',
+            detail: 'Workflow child run cancelled from Electron smoke',
+            status: 'cancelled',
+            child_run_id: WORKFLOW_CANCEL_CHILD_RUN_ID,
+            time: now,
+          },
+        ]
+      : [
+          ...baseTimeline,
+          {
+            event: 'workflow.run.approval_required',
+            detail: 'Child Agent approval required',
+            status: 'approval_required',
+            child_run_id: WORKFLOW_CANCEL_CHILD_RUN_ID,
+            pending_approval: workflowCancelChildRun().pending_approval,
+            time: now,
+          },
+        ],
+    artifacts: [],
+    created_at: now,
+    updated_at: now,
+    workflow_run_id: WORKFLOW_CANCEL_RUN_ID,
+  };
+}
+
+function workflowCancelRunGroup() {
+  return {
+    run_group_id: WORKFLOW_CANCEL_RUN_GROUP_ID,
+    title: 'Run Detail Workflow Child Cancel Smoke',
+    source: 'workflow',
+    status: workflowChildCancelled ? 'cancelled' : 'approval_required',
+    summary: workflowChildCancelled ? 'Workflow child run cancelled' : 'Workflow waiting for child cancel smoke',
+    child_run_ids: [WORKFLOW_CANCEL_RUN_ID, WORKFLOW_CANCEL_CHILD_RUN_ID],
     created_at: now,
     updated_at: now,
   };
@@ -564,6 +788,240 @@ function workflowChildRunEvents() {
   ];
 }
 
+function workflowRejectRunEvents() {
+  const events = [
+    {
+      event_id: 'event-workflow-child-reject-smoke-1',
+      run_id: WORKFLOW_REJECT_RUN_ID,
+      sequence: 1,
+      schema_version: 1,
+      event_type: 'workflow.node.start',
+      actor: 'workflow',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: { workflow_node_id: 'start', workflow_node_label: 'Start', status: 'completed' },
+      created_at: now,
+    },
+    {
+      event_id: 'event-workflow-child-reject-smoke-2',
+      run_id: WORKFLOW_REJECT_RUN_ID,
+      sequence: 2,
+      schema_version: 1,
+      event_type: 'workflow.node.agent',
+      actor: 'workflow',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: {
+        workflow_node_id: 'agent-reject',
+        workflow_node_label: 'Coding Agent',
+        status: workflowChildRejected ? 'cancelled' : 'approval_required',
+        child_run_id: WORKFLOW_REJECT_CHILD_RUN_ID,
+      },
+      created_at: now,
+    },
+  ];
+  if (!workflowChildRejected) {
+    return [
+      ...events,
+      {
+        event_id: 'event-workflow-child-reject-smoke-3',
+        run_id: WORKFLOW_REJECT_RUN_ID,
+        sequence: 3,
+        schema_version: 1,
+        event_type: 'workflow.run.approval_required',
+        actor: 'workflow',
+        visibility: 'user',
+        sensitivity: 'normal',
+        payload: { status: 'approval_required', child_run_id: WORKFLOW_REJECT_CHILD_RUN_ID },
+        created_at: now,
+      },
+    ];
+  }
+  return [
+    ...events,
+    {
+      event_id: 'event-workflow-child-reject-smoke-3',
+      run_id: WORKFLOW_REJECT_RUN_ID,
+      sequence: 3,
+      schema_version: 1,
+      event_type: 'workflow.run.cancelled',
+      actor: 'workflow',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: { status: 'cancelled', child_run_id: WORKFLOW_REJECT_CHILD_RUN_ID },
+      created_at: now,
+    },
+  ];
+}
+
+function workflowRejectChildRunEvents() {
+  const events = [
+    {
+      event_id: 'event-workflow-child-reject-agent-smoke-1',
+      run_id: WORKFLOW_REJECT_CHILD_RUN_ID,
+      sequence: 1,
+      schema_version: 1,
+      event_type: 'agent.run.started',
+      actor: 'agent',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: { goal: 'Reject child Agent approval from Workflow Run Detail smoke' },
+      created_at: now,
+    },
+    {
+      event_id: 'event-workflow-child-reject-agent-smoke-2',
+      run_id: WORKFLOW_REJECT_CHILD_RUN_ID,
+      sequence: 2,
+      schema_version: 1,
+      event_type: 'agent.tool.approval_required',
+      actor: 'agent',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: { tool: 'terminal.run', command: 'printf workflow-child-electron-rejected' },
+      created_at: now,
+    },
+  ];
+  if (!workflowChildRejected) return events;
+  return [
+    ...events,
+    {
+      event_id: 'event-workflow-child-reject-agent-smoke-3',
+      run_id: WORKFLOW_REJECT_CHILD_RUN_ID,
+      sequence: 3,
+      schema_version: 1,
+      event_type: 'agent.tool.approval_rejected',
+      actor: 'user',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: { tool: 'terminal.run', approval_id: 'approval-workflow-child-reject-detail-ui-smoke' },
+      created_at: now,
+    },
+    {
+      event_id: 'event-workflow-child-reject-agent-smoke-4',
+      run_id: WORKFLOW_REJECT_CHILD_RUN_ID,
+      sequence: 4,
+      schema_version: 1,
+      event_type: 'agent.run.cancelled',
+      actor: 'agent',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: { result: 'Workflow child approval rejected from Electron smoke' },
+      created_at: now,
+    },
+  ];
+}
+
+function workflowCancelRunEvents() {
+  const events = [
+    {
+      event_id: 'event-workflow-child-cancel-smoke-1',
+      run_id: WORKFLOW_CANCEL_RUN_ID,
+      sequence: 1,
+      schema_version: 1,
+      event_type: 'workflow.node.start',
+      actor: 'workflow',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: { workflow_node_id: 'start', workflow_node_label: 'Start', status: 'completed' },
+      created_at: now,
+    },
+    {
+      event_id: 'event-workflow-child-cancel-smoke-2',
+      run_id: WORKFLOW_CANCEL_RUN_ID,
+      sequence: 2,
+      schema_version: 1,
+      event_type: 'workflow.node.agent',
+      actor: 'workflow',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: {
+        workflow_node_id: 'agent-cancel',
+        workflow_node_label: 'Coding Agent',
+        status: workflowChildCancelled ? 'cancelled' : 'approval_required',
+        child_run_id: WORKFLOW_CANCEL_CHILD_RUN_ID,
+      },
+      created_at: now,
+    },
+  ];
+  if (!workflowChildCancelled) {
+    return [
+      ...events,
+      {
+        event_id: 'event-workflow-child-cancel-smoke-3',
+        run_id: WORKFLOW_CANCEL_RUN_ID,
+        sequence: 3,
+        schema_version: 1,
+        event_type: 'workflow.run.approval_required',
+        actor: 'workflow',
+        visibility: 'user',
+        sensitivity: 'normal',
+        payload: { status: 'approval_required', child_run_id: WORKFLOW_CANCEL_CHILD_RUN_ID },
+        created_at: now,
+      },
+    ];
+  }
+  return [
+    ...events,
+    {
+      event_id: 'event-workflow-child-cancel-smoke-3',
+      run_id: WORKFLOW_CANCEL_RUN_ID,
+      sequence: 3,
+      schema_version: 1,
+      event_type: 'workflow.run.cancelled',
+      actor: 'workflow',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: { status: 'cancelled', child_run_id: WORKFLOW_CANCEL_CHILD_RUN_ID },
+      created_at: now,
+    },
+  ];
+}
+
+function workflowCancelChildRunEvents() {
+  const events = [
+    {
+      event_id: 'event-workflow-child-cancel-agent-smoke-1',
+      run_id: WORKFLOW_CANCEL_CHILD_RUN_ID,
+      sequence: 1,
+      schema_version: 1,
+      event_type: 'agent.run.started',
+      actor: 'agent',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: { goal: 'Cancel child Agent from Workflow Run Detail smoke' },
+      created_at: now,
+    },
+    {
+      event_id: 'event-workflow-child-cancel-agent-smoke-2',
+      run_id: WORKFLOW_CANCEL_CHILD_RUN_ID,
+      sequence: 2,
+      schema_version: 1,
+      event_type: 'agent.tool.approval_required',
+      actor: 'agent',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: { tool: 'terminal.run', command: 'printf workflow-child-electron-cancelled' },
+      created_at: now,
+    },
+  ];
+  if (!workflowChildCancelled) return events;
+  return [
+    ...events,
+    {
+      event_id: 'event-workflow-child-cancel-agent-smoke-3',
+      run_id: WORKFLOW_CANCEL_CHILD_RUN_ID,
+      sequence: 3,
+      schema_version: 1,
+      event_type: 'agent.run.cancelled',
+      actor: 'agent',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: { result: 'Workflow child run cancelled from Electron smoke' },
+      created_at: now,
+    },
+  ];
+}
+
 function log(message) {
   process.stdout.write(`[agent-run-detail-ui-smoke] ${message}\n`);
 }
@@ -684,7 +1142,8 @@ async function startMockBridge() {
         return;
       }
       if (request.method === 'GET' && url.pathname === '/ui/runs') {
-        sendJson(response, 200, { runs: rerunCreated ? [rerun, workflowRun(), run, approvalRun()] : [workflowRun(), run, approvalRun()] });
+        const runs = [workflowCancelRun(), workflowRejectRun(), workflowRun(), run, approvalRun()];
+        sendJson(response, 200, { runs: rerunCreated ? [rerun, ...runs] : runs });
         return;
       }
       if (request.method === 'GET' && url.pathname === `/ui/runs/${WORKFLOW_RUN_ID}`) {
@@ -693,6 +1152,22 @@ async function startMockBridge() {
       }
       if (request.method === 'GET' && url.pathname === `/ui/runs/${WORKFLOW_CHILD_RUN_ID}`) {
         sendJson(response, 200, workflowChildRun());
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/ui/runs/${WORKFLOW_REJECT_RUN_ID}`) {
+        sendJson(response, 200, workflowRejectRun());
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/ui/runs/${WORKFLOW_REJECT_CHILD_RUN_ID}`) {
+        sendJson(response, 200, workflowRejectChildRun());
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/ui/runs/${WORKFLOW_CANCEL_RUN_ID}`) {
+        sendJson(response, 200, workflowCancelRun());
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/ui/runs/${WORKFLOW_CANCEL_CHILD_RUN_ID}`) {
+        sendJson(response, 200, workflowCancelChildRun());
         return;
       }
       if (request.method === 'GET' && url.pathname === `/ui/runs/${APPROVAL_RUN_ID}`) {
@@ -711,6 +1186,16 @@ async function startMockBridge() {
       if (request.method === 'POST' && url.pathname === `/ui/runs/${WORKFLOW_CHILD_RUN_ID}/approval/approve`) {
         workflowChildApproved = true;
         sendJson(response, 200, workflowChildRun());
+        return;
+      }
+      if (request.method === 'POST' && url.pathname === `/ui/runs/${WORKFLOW_REJECT_CHILD_RUN_ID}/approval/reject`) {
+        workflowChildRejected = true;
+        sendJson(response, 200, workflowRejectChildRun());
+        return;
+      }
+      if (request.method === 'POST' && url.pathname === `/ui/runs/${WORKFLOW_CANCEL_CHILD_RUN_ID}/cancel`) {
+        workflowChildCancelled = true;
+        sendJson(response, 200, workflowCancelChildRun());
         return;
       }
       if (request.method === 'GET' && url.pathname === `/ui/runs/${RERUN_RUN_ID}`) {
@@ -741,11 +1226,19 @@ async function startMockBridge() {
         return;
       }
       if (request.method === 'GET' && url.pathname === '/ui/run-groups') {
-        sendJson(response, 200, { run_groups: [workflowRunGroup(), runGroup] });
+        sendJson(response, 200, { run_groups: [workflowCancelRunGroup(), workflowRejectRunGroup(), workflowRunGroup(), runGroup] });
         return;
       }
       if (request.method === 'GET' && url.pathname === `/ui/run-groups/${WORKFLOW_RUN_GROUP_ID}`) {
         sendJson(response, 200, workflowRunGroup());
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/ui/run-groups/${WORKFLOW_REJECT_RUN_GROUP_ID}`) {
+        sendJson(response, 200, workflowRejectRunGroup());
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/ui/run-groups/${WORKFLOW_CANCEL_RUN_GROUP_ID}`) {
+        sendJson(response, 200, workflowCancelRunGroup());
         return;
       }
       if (request.method === 'GET' && url.pathname === `/ui/run-groups/${RUN_GROUP_ID}`) {
@@ -782,6 +1275,50 @@ async function startMockBridge() {
           after_sequence: Math.max(0, afterSequence),
           limit,
           events: workflowChildRunEvents().filter((event) => event.sequence > afterSequence).slice(0, limit),
+        });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/runs/${WORKFLOW_REJECT_RUN_ID}/events`) {
+        const afterSequence = Number(url.searchParams.get('after_sequence') || '0');
+        const limit = Math.max(1, Number(url.searchParams.get('limit') || '200'));
+        sendJson(response, 200, {
+          run_id: WORKFLOW_REJECT_RUN_ID,
+          after_sequence: Math.max(0, afterSequence),
+          limit,
+          events: workflowRejectRunEvents().filter((event) => event.sequence > afterSequence).slice(0, limit),
+        });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/runs/${WORKFLOW_REJECT_CHILD_RUN_ID}/events`) {
+        const afterSequence = Number(url.searchParams.get('after_sequence') || '0');
+        const limit = Math.max(1, Number(url.searchParams.get('limit') || '200'));
+        sendJson(response, 200, {
+          run_id: WORKFLOW_REJECT_CHILD_RUN_ID,
+          after_sequence: Math.max(0, afterSequence),
+          limit,
+          events: workflowRejectChildRunEvents().filter((event) => event.sequence > afterSequence).slice(0, limit),
+        });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/runs/${WORKFLOW_CANCEL_RUN_ID}/events`) {
+        const afterSequence = Number(url.searchParams.get('after_sequence') || '0');
+        const limit = Math.max(1, Number(url.searchParams.get('limit') || '200'));
+        sendJson(response, 200, {
+          run_id: WORKFLOW_CANCEL_RUN_ID,
+          after_sequence: Math.max(0, afterSequence),
+          limit,
+          events: workflowCancelRunEvents().filter((event) => event.sequence > afterSequence).slice(0, limit),
+        });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/runs/${WORKFLOW_CANCEL_CHILD_RUN_ID}/events`) {
+        const afterSequence = Number(url.searchParams.get('after_sequence') || '0');
+        const limit = Math.max(1, Number(url.searchParams.get('limit') || '200'));
+        sendJson(response, 200, {
+          run_id: WORKFLOW_CANCEL_CHILD_RUN_ID,
+          after_sequence: Math.max(0, afterSequence),
+          limit,
+          events: workflowCancelChildRunEvents().filter((event) => event.sequence > afterSequence).slice(0, limit),
         });
         return;
       }
@@ -866,6 +1403,8 @@ const bridgeUrl = ${JSON.stringify(bridgeUrl)};
 const runId = ${JSON.stringify(RUN_ID)};
 const approvalRunId = ${JSON.stringify(APPROVAL_RUN_ID)};
 const workflowRunId = ${JSON.stringify(WORKFLOW_RUN_ID)};
+const workflowRejectRunId = ${JSON.stringify(WORKFLOW_REJECT_RUN_ID)};
+const workflowCancelRunId = ${JSON.stringify(WORKFLOW_CANCEL_RUN_ID)};
 const watchdog = setTimeout(() => {
   console.error('electron smoke timed out');
   app.exit(1);
@@ -959,6 +1498,68 @@ async function main() {
   }, 'approved run detail replay');
   console.log('[electron-smoke] approval action completed');
 
+  await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '#/agents/' + encodeURIComponent(workflowRejectRunId));
+  console.log('[electron-smoke] workflow child reject run detail loaded');
+  await waitFor(win, () => document.querySelector('[data-testid="agent-run-detail"]')?.getAttribute('data-run-id') === ${JSON.stringify(WORKFLOW_REJECT_RUN_ID)}, 'workflow child reject parent run detail article');
+  await waitFor(win, () => {
+    const childApproval = document.querySelector('[data-testid="agent-run-detail-workflow-child-approval"]');
+    const request = childApproval?.querySelector('[data-testid="agent-run-approval-request"]');
+    const reject = document.querySelector('[data-testid="agent-run-detail-workflow-child-reject"]');
+    return childApproval
+      && childApproval.textContent.includes(${JSON.stringify(WORKFLOW_REJECT_CHILD_RUN_ID)})
+      && request?.textContent.includes('terminal.run')
+      && request?.textContent.includes('printf workflow-child-electron-rejected')
+      && reject
+      && !reject.disabled;
+  }, 'workflow child reject bridge');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"agent-run-detail-workflow-child-reject\\"]').click()", true);
+  await waitFor(win, () => {
+    const detail = document.querySelector('[data-testid="agent-run-detail"]');
+    const result = document.querySelector('[data-testid="agent-run-detail-result"]');
+    const steps = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-workflow-step"]'));
+    const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
+    const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
+    const runIds = events.map((node) => node.getAttribute('data-run-event-run-id'));
+    return detail?.getAttribute('data-run-id') === ${JSON.stringify(WORKFLOW_REJECT_RUN_ID)}
+      && !document.querySelector('[data-testid="agent-run-detail-workflow-child-approval"]')
+      && result?.textContent.includes('Workflow child approval rejected from Electron smoke')
+      && steps.some((node) => node.getAttribute('data-child-run-id') === ${JSON.stringify(WORKFLOW_REJECT_CHILD_RUN_ID)} && node.getAttribute('data-workflow-step-status') === 'cancelled')
+      && eventTypes.includes('workflow.run.cancelled')
+      && runIds.every((id) => id === ${JSON.stringify(WORKFLOW_REJECT_RUN_ID)});
+  }, 'workflow child reject completed parent detail');
+  console.log('[electron-smoke] workflow child reject action completed');
+
+  await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '#/agents/' + encodeURIComponent(workflowCancelRunId));
+  console.log('[electron-smoke] workflow child cancel run detail loaded');
+  await waitFor(win, () => document.querySelector('[data-testid="agent-run-detail"]')?.getAttribute('data-run-id') === ${JSON.stringify(WORKFLOW_CANCEL_RUN_ID)}, 'workflow child cancel parent run detail article');
+  await waitFor(win, () => {
+    const childApproval = document.querySelector('[data-testid="agent-run-detail-workflow-child-approval"]');
+    const request = childApproval?.querySelector('[data-testid="agent-run-approval-request"]');
+    const cancel = document.querySelector('[data-testid="agent-run-detail-workflow-child-cancel"]');
+    return childApproval
+      && childApproval.textContent.includes(${JSON.stringify(WORKFLOW_CANCEL_CHILD_RUN_ID)})
+      && request?.textContent.includes('terminal.run')
+      && request?.textContent.includes('printf workflow-child-electron-cancelled')
+      && cancel
+      && !cancel.disabled;
+  }, 'workflow child cancel bridge');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"agent-run-detail-workflow-child-cancel\\"]').click()", true);
+  await waitFor(win, () => {
+    const detail = document.querySelector('[data-testid="agent-run-detail"]');
+    const result = document.querySelector('[data-testid="agent-run-detail-result"]');
+    const steps = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-workflow-step"]'));
+    const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
+    const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
+    const runIds = events.map((node) => node.getAttribute('data-run-event-run-id'));
+    return detail?.getAttribute('data-run-id') === ${JSON.stringify(WORKFLOW_CANCEL_RUN_ID)}
+      && !document.querySelector('[data-testid="agent-run-detail-workflow-child-approval"]')
+      && result?.textContent.includes('Workflow child run cancelled from Electron smoke')
+      && steps.some((node) => node.getAttribute('data-child-run-id') === ${JSON.stringify(WORKFLOW_CANCEL_CHILD_RUN_ID)} && node.getAttribute('data-workflow-step-status') === 'cancelled')
+      && eventTypes.includes('workflow.run.cancelled')
+      && runIds.every((id) => id === ${JSON.stringify(WORKFLOW_CANCEL_RUN_ID)});
+  }, 'workflow child cancel completed parent detail');
+  console.log('[electron-smoke] workflow child cancel action completed');
+
   await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '#/agents/' + encodeURIComponent(workflowRunId));
   console.log('[electron-smoke] workflow child approval run detail loaded');
   await waitFor(win, () => document.querySelector('[data-testid="agent-run-detail"]')?.getAttribute('data-run-id') === ${JSON.stringify(WORKFLOW_RUN_ID)}, 'workflow parent run detail article');
@@ -1004,6 +1605,8 @@ async function main() {
   }, 'workflow child approval completed parent detail');
   console.log('[electron-smoke] workflow child approval completed parent detail');
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"agent-run-detail-workflow-step-open-run\\"]').click()", true);
+  await waitFor(win, () => window.location.hash.includes(${JSON.stringify(WORKFLOW_CHILD_RUN_ID)}), 'workflow child route hash');
+  await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '#/agents/' + encodeURIComponent(${JSON.stringify(WORKFLOW_CHILD_RUN_ID)}));
   await waitFor(win, () => {
     const detail = document.querySelector('[data-testid="agent-run-detail"]');
     const result = document.querySelector('[data-testid="agent-run-detail-result"]');
@@ -1135,6 +1738,8 @@ async function main() {
     const devUrl = `http://127.0.0.1:${vitePort}`;
     await waitForHttp(devUrl);
     await runElectronSmoke(devUrl, bridge.url);
+    if (!workflowChildRejected) throw new Error('workflow child reject action was not called');
+    if (!workflowChildCancelled) throw new Error('workflow child cancel action was not called');
     log('passed');
   } finally {
     killProcess(vite);
