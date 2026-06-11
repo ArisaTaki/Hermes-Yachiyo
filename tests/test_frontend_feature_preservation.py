@@ -807,6 +807,8 @@ def test_chat_agent_progress_ui_smoke_uses_running_run_detail_handoff() -> None:
             "`/ui/runs/${RUN_ID}`",
             "`/runs/${RUN_ID}/events`",
             "agent.run.started",
+            "startedEvent.textContent.includes(smoke.taskId)",
+            "startedEvent.textContent.includes(smoke.runGoal)",
             "Chat Agent progress opened matching running Run Detail",
         ],
     )

@@ -414,10 +414,13 @@ async function main() {
   await waitFor(win, () => {
     const smoke = window.__ohaSmoke || {};
     const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
+    const startedEvent = events[0];
     return events.length === 1
-      && events[0].getAttribute('data-run-event') === 'agent.run.started'
-      && events[0].getAttribute('data-run-event-sequence') === '1'
-      && events[0].getAttribute('data-run-event-run-id') === smoke.runId;
+      && startedEvent.getAttribute('data-run-event') === 'agent.run.started'
+      && startedEvent.getAttribute('data-run-event-sequence') === '1'
+      && startedEvent.getAttribute('data-run-event-run-id') === smoke.runId
+      && startedEvent.textContent.includes(smoke.taskId)
+      && startedEvent.textContent.includes(smoke.runGoal);
   }, 'running Run Detail replay events');
   console.log('[electron-smoke] Chat Agent progress opened matching running Run Detail');
   clearTimeout(watchdog);
