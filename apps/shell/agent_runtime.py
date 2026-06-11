@@ -2126,6 +2126,18 @@ class RunRepository:
         self._conn.commit()
         return self.get(run_id)
 
+    def delete_rows(self, runs: list[dict[str, Any]], *, delete_artifacts: Any) -> list[str]:
+        deleted_run_ids: list[str] = []
+        for run in runs:
+            run_id = str(run.get("run_id") or "")
+            if not run_id:
+                continue
+            if callable(delete_artifacts):
+                delete_artifacts(run)
+            self._conn.execute("DELETE FROM runs WHERE run_id=?", (run_id,))
+            deleted_run_ids.append(run_id)
+        return deleted_run_ids
+
 
 class ApprovalCoordinator:
     """Coordinates approval lifecycle transitions and replayable facts."""
@@ -5895,26 +5907,6 @@ class NativeRunEngine:
             include_internal=include_internal,
         )
 
-    def _delete_run_artifacts(self, run: dict[str, Any]) -> None:
-        self.run_artifacts.delete_files(run)
-
-    def _runs_in_group(self, run_group_id: str) -> list[dict[str, Any]]:
-        return self.run_groups.runs(run_group_id)
-
-    def _delete_run_rows(self, runs: list[dict[str, Any]]) -> list[str]:
-        deleted_run_ids: list[str] = []
-        for run in runs:
-            run_id = str(run.get("run_id") or "")
-            if not run_id:
-                continue
-            self._delete_run_artifacts(run)
-            self._conn.execute("DELETE FROM runs WHERE run_id=?", (run_id,))
-            deleted_run_ids.append(run_id)
-        return deleted_run_ids
-
-    def _remove_run_ids_from_group(self, run_group_id: str, run_ids: set[str]) -> None:
-        self.run_groups.remove_run_ids(run_group_id, run_ids)
-
     def delete_run(self, run_id: str) -> dict[str, Any]:
         run = self.get_run(run_id)
         if _is_active_run_status(str(run.get("status") or "")):
@@ -5923,17 +5915,17 @@ class NativeRunEngine:
         targets = [run]
         delete_group = False
         if run.get("kind") == "workflow_run" and run_group_id:
-            group_runs = self._runs_in_group(run_group_id)
+            group_runs = self.run_groups.runs(run_group_id)
             if any(_is_active_run_status(str(item.get("status") or "")) for item in group_runs):
                 raise AgentRuntimeError("这个 Workflow Run 仍有进行中或待审批的子 Run，取消或完成后才能删除")
             targets = group_runs or [run]
             delete_group = True
-        deleted_run_ids = self._delete_run_rows(targets)
+        deleted_run_ids = self.runs.delete_rows(targets, delete_artifacts=self.run_artifacts.delete_files)
         deleted_ids = set(deleted_run_ids)
         if delete_group and run_group_id:
             self.run_groups.delete(run_group_id)
         else:
-            self._remove_run_ids_from_group(run_group_id, deleted_ids)
+            self.run_groups.remove_run_ids(run_group_id, deleted_ids)
         self._conn.commit()
         return {
             "ok": True,

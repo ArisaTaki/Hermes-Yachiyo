@@ -5143,7 +5143,7 @@ def test_run_group_repository_manages_membership_and_cleanup(tmp_path):
         service.run_groups.update(group["run_group_id"], status="completed", summary="done")
         grouped = service.get_run_group(group["run_group_id"])
         listed = service.list_run_groups()["run_groups"]
-        group_runs = service._runs_in_group(group["run_group_id"])
+        group_runs = service.run_groups.runs(group["run_group_id"])
 
         assert grouped["source"] == "agent"
         assert grouped["status"] == "completed"
@@ -5159,6 +5159,29 @@ def test_run_group_repository_manages_membership_and_cleanup(tmp_path):
         service.delete_run(second["run_id"])
         with pytest.raises(KeyError):
             service.get_run_group(group["run_group_id"])
+    finally:
+        service.close()
+
+
+def test_run_repository_deletes_rows_and_artifacts(tmp_path):
+    service = make_service(tmp_path)
+    try:
+        run = service.runs.insert(
+            kind="agent_run",
+            runnable_id="agent_delete_repo",
+            user_goal="Delete through repository",
+        )
+        artifact_root = service.agent_artifacts_dir / run["run_id"]
+        artifact_root.mkdir(parents=True)
+        (artifact_root / "result.md").write_text("artifact", encoding="utf-8")
+
+        deleted = service.runs.delete_rows([run], delete_artifacts=service.run_artifacts.delete_files)
+        service._conn.commit()
+
+        assert deleted == [run["run_id"]]
+        assert not artifact_root.exists()
+        with pytest.raises(KeyError):
+            service.get_run(run["run_id"])
     finally:
         service.close()
 
