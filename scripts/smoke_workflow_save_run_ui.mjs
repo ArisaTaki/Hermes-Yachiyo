@@ -15,6 +15,8 @@ const WORKFLOW_ID = 'workflow_save_run_ui_smoke_persisted';
 const RUN_ID = 'workflow_save_run_ui_smoke_run';
 const RUN_GROUP_ID = 'workflow_save_run_ui_smoke_group';
 const RUN_GOAL = 'Run saved Workflow from Electron UI smoke';
+const WORKFLOW_ARTIFACT_PATH = 'workflow-save-run-summary.md';
+const WORKFLOW_ARTIFACT_CONTENT = '# Workflow Save Run UI Smoke\n\nArtifact node output preview.';
 const now = new Date().toISOString();
 
 let savedWorkflow = null;
@@ -52,7 +54,7 @@ const workflowRun = {
   task_id: 'task-workflow-save-run-ui-smoke',
   session_id: 'session-workflow-save-run-ui-smoke',
   task_run_link_run_status: 'completed',
-  task_run_link_last_event_sequence: 3,
+  task_run_link_last_event_sequence: 4,
   kind: 'workflow_run',
   runnable_id: WORKFLOW_ID,
   runnable_name: 'Workflow Save Run UI Smoke',
@@ -62,9 +64,15 @@ const workflowRun = {
   timeline: [
     { event: 'workflow.run.started', status: 'running', workflow_id: WORKFLOW_ID },
     { event: 'workflow.node.agent.completed', status: 'completed', agent_id: AGENT_ID },
+    { event: 'workflow.node.artifact', status: 'completed', artifact: { path: WORKFLOW_ARTIFACT_PATH } },
     { event: 'workflow.run.completed', status: 'completed' },
   ],
-  artifacts: [],
+  artifacts: [{
+    path: WORKFLOW_ARTIFACT_PATH,
+    kind: 'markdown',
+    source_run_id: RUN_ID,
+    source_runnable_name: 'Workflow Save Run UI Smoke',
+  }],
   created_at: now,
   updated_at: now,
   workflow_run_id: RUN_ID,
@@ -110,6 +118,23 @@ const runEvents = [
     event_id: 'event-workflow-save-run-smoke-3',
     run_id: RUN_ID,
     sequence: 3,
+    schema_version: 1,
+    event_type: 'workflow.node.artifact',
+    actor: 'workflow',
+    visibility: 'user',
+    sensitivity: 'normal',
+    payload: {
+      workflow_id: WORKFLOW_ID,
+      workflow_node_id: 'artifact-1',
+      workflow_node_label: WORKFLOW_ARTIFACT_PATH,
+      artifact: { path: WORKFLOW_ARTIFACT_PATH },
+    },
+    created_at: now,
+  },
+  {
+    event_id: 'event-workflow-save-run-smoke-4',
+    run_id: RUN_ID,
+    sequence: 4,
     schema_version: 1,
     event_type: 'workflow.run.completed',
     actor: 'workflow',
@@ -233,6 +258,15 @@ async function startMockBridge() {
       }
       if (request.method === 'GET' && url.pathname === `/ui/runs/${RUN_ID}`) {
         sendJson(response, createdWorkflowRunRequest ? 200 : 404, createdWorkflowRunRequest ? workflowRun : { ok: false, error: 'run not created' });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/ui/runs/${RUN_ID}/artifacts/${WORKFLOW_ARTIFACT_PATH}`) {
+        sendJson(response, 200, {
+          ok: true,
+          path: WORKFLOW_ARTIFACT_PATH,
+          content: WORKFLOW_ARTIFACT_CONTENT,
+          truncated: false,
+        });
         return;
       }
       if (request.method === 'POST' && url.pathname === '/ui/workflow-runs') {
@@ -384,8 +418,9 @@ async function main() {
   await waitFor(win, () => document.querySelector('[data-testid="workflow-studio"]'), 'workflow studio');
   await waitFor(win, () => document.querySelectorAll('[data-testid="workflow-agent-palette-item"]').length === 1, 'workflow agent palette');
   await win.webContents.executeJavaScript(\`
-  (() => {
+  (async () => {
     const setNativeValue = (element, value) => {
+      if (!element) throw new Error('missing input for value ' + value);
       const prototype = element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
       Object.getOwnPropertyDescriptor(prototype, 'value').set.call(element, value);
       element.dispatchEvent(new Event('input', { bubbles: true }));
@@ -402,6 +437,30 @@ async function main() {
     return rows.length === 1
       && rows[0].textContent.includes('Workflow Save Run Agent')
       && previewSteps.some((node) => node.textContent.includes('Workflow Save Run Agent'));
+  }, 'workflow agent draft ready');
+  await win.webContents.executeJavaScript(\`
+  (async () => {
+    const setNativeValue = (element, value) => {
+      if (!element) throw new Error('missing input for value ' + value);
+      const prototype = element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      Object.getOwnPropertyDescriptor(prototype, 'value').set.call(element, value);
+      element.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    document.querySelector('[data-testid="workflow-add-artifact-node"]').click();
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    const artifactPathInput = document.querySelector('[data-testid="workflow-node-artifact-path-input"]');
+    setNativeValue(artifactPathInput, ${JSON.stringify(WORKFLOW_ARTIFACT_PATH)});
+  })();
+  \`, true);
+  await waitFor(win, () => {
+    const rows = Array.from(document.querySelectorAll('[data-testid="workflow-node-setting-row"]'));
+    const previewSteps = Array.from(document.querySelectorAll('[data-testid="workflow-run-preview-step"]'));
+    const artifactInput = document.querySelector('[data-testid="workflow-node-artifact-path-input"]');
+    return rows.length === 2
+      && rows.some((row) => row.textContent.includes('Workflow Save Run Agent'))
+      && artifactInput?.value === ${JSON.stringify(WORKFLOW_ARTIFACT_PATH)}
+      && previewSteps.some((node) => node.textContent.includes('Workflow Save Run Agent'))
+      && previewSteps.some((node) => node.textContent.includes(${JSON.stringify(WORKFLOW_ARTIFACT_PATH)}));
   }, 'workflow draft ready');
   console.log('[electron-smoke] workflow draft ready');
   await win.webContents.executeJavaScript(\`
@@ -427,13 +486,27 @@ async function main() {
     const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
     const sequences = events.map((node) => node.getAttribute('data-run-event-sequence'));
     const runIds = events.map((node) => node.getAttribute('data-run-event-run-id'));
-    return events.length === 3
+    return events.length === 4
       && eventTypes.includes('workflow.run.started')
       && eventTypes.includes('workflow.node.agent.completed')
+      && eventTypes.includes('workflow.node.artifact')
       && eventTypes.includes('workflow.run.completed')
-      && sequences.join(',') === '1,2,3'
+      && sequences.join(',') === '1,2,3,4'
       && runIds.every((id) => id === ${JSON.stringify(RUN_ID)});
   }, 'workflow run replay events');
+  await waitFor(win, () => {
+    const artifact = document.querySelector('[data-testid="agent-run-detail-artifact"]');
+    return artifact
+      && artifact.getAttribute('data-artifact-path') === ${JSON.stringify(WORKFLOW_ARTIFACT_PATH)}
+      && artifact.getAttribute('data-artifact-source-run-id') === ${JSON.stringify(RUN_ID)};
+  }, 'workflow artifact item');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"agent-run-detail-artifact\\"]').click()", true);
+  await waitFor(win, () => {
+    const preview = document.querySelector('[data-testid="agent-run-detail-artifact-preview"]');
+    return preview
+      && preview.textContent.includes(${JSON.stringify(WORKFLOW_ARTIFACT_PATH)})
+      && preview.textContent.includes('Artifact node output preview.');
+  }, 'workflow artifact preview');
   console.log('[electron-smoke] workflow save-and-run detail rendered');
   clearTimeout(watchdog);
   await win.close();
@@ -482,6 +555,10 @@ function assertMockBridgeContract() {
   const agentNode = (createdWorkflowRequest.nodes || []).find((node) => node.data?.kind === 'agent');
   if (!agentNode || agentNode.data?.agent_id !== AGENT_ID) {
     throw new Error('saved workflow did not include the selected agent node');
+  }
+  const artifactNode = (createdWorkflowRequest.nodes || []).find((node) => node.data?.kind === 'artifact');
+  if (!artifactNode || artifactNode.data?.artifact_path !== WORKFLOW_ARTIFACT_PATH) {
+    throw new Error(`saved workflow did not include artifact node path ${WORKFLOW_ARTIFACT_PATH}`);
   }
   if (createdWorkflowRunRequest.workflow_id !== WORKFLOW_ID) {
     throw new Error(`workflow run used ${createdWorkflowRunRequest.workflow_id} instead of saved workflow id ${WORKFLOW_ID}`);
