@@ -22,6 +22,7 @@ from apps.shell.agent_runtime import (
     AgentRuntimeService,
     ApprovalResumeCoordinator,
     NativeRunEngine,
+    TaskRunLinkRepository,
     ToolApprovalResumeContext,
     ToolBroker,
     WorkflowContinuationCoordinator,
@@ -1304,6 +1305,34 @@ def test_runtime_sqlite_enables_required_database_guards(tmp_path):
 
         with pytest.raises(KeyError):
             service.get_task_run_link("task-db-guard")
+    finally:
+        service.close()
+
+
+def test_task_run_link_repository_tracks_run_projection(tmp_path):
+    service = make_service(tmp_path)
+    try:
+        assert isinstance(service.task_run_links, TaskRunLinkRepository)
+
+        run = service.start_main_chat_run(
+            task_id="task-link-repo",
+            session_id="session-link-repo",
+            user_goal="link repository",
+        )
+        link = service.task_run_links.get("task-link-repo")
+        assert link["run_id"] == run["run_id"]
+        assert link["session_id"] == "session-link-repo"
+        assert link["run_status"] == "running"
+        assert link["last_event_sequence"] == 2
+        assert service.task_run_links.for_run(run["run_id"])["task_id"] == "task-link-repo"
+
+        event = service.append_run_event(run["run_id"], "repo.projection.checked", {"ok": True})
+        link = service.task_run_links.get("task-link-repo")
+        assert link["last_event_sequence"] == event["sequence"]
+
+        service._update_run(run["run_id"], status="completed", result="done")
+        link = service.task_run_links.get("task-link-repo")
+        assert link["run_status"] == "completed"
     finally:
         service.close()
 

@@ -1259,6 +1259,10 @@ RunEvent sequence:
   - 默认 list 只返回 user-visible 且非 secret events。
   - limit clamp 保持默认 200、最大 1000。
 
+- `TaskRunLinkRepository`
+  - 负责 `task_run_links` 的 Task↔Run 映射、按 Run 读取、Run status projection 和 replay `last_event_sequence` projection。
+  - 保留 `NativeRunEngine.link_task_run()` / `get_task_run_link()` 作为 TaskRunner、ChatAPI 和路由兼容入口。
+
 - `ApprovalRepository`
   - 负责 `run_approvals` pending / resolved 投影同步。
   - 保留 approve / reject 现有幂等业务语义。
