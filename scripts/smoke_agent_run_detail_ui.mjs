@@ -1615,6 +1615,9 @@ async function main() {
     const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
     const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
     const runIds = events.map((node) => node.getAttribute('data-run-event-run-id'));
+    const childResumedEvent = events.find((node) => node.getAttribute('data-run-event') === 'workflow.run.child_resumed');
+    const artifactEvent = events.find((node) => node.getAttribute('data-run-event') === 'workflow.node.artifact');
+    const completedEvent = events.find((node) => node.getAttribute('data-run-event') === 'workflow.run.completed');
     return detail?.getAttribute('data-run-id') === ${JSON.stringify(WORKFLOW_RUN_ID)}
       && !document.querySelector('[data-testid="agent-run-detail-workflow-child-approval"]')
       && result?.textContent.includes('Workflow child approval Electron smoke complete')
@@ -1626,6 +1629,9 @@ async function main() {
       && eventTypes.includes('workflow.run.resumed')
       && eventTypes.includes('workflow.node.artifact')
       && eventTypes.includes('workflow.run.completed')
+      && childResumedEvent?.textContent.includes(${JSON.stringify(WORKFLOW_CHILD_RUN_ID)})
+      && artifactEvent?.textContent.includes(${JSON.stringify(WORKFLOW_ARTIFACT_PATH)})
+      && completedEvent?.textContent.includes('Workflow child approval Electron smoke complete')
       && runIds.every((id) => id === ${JSON.stringify(WORKFLOW_RUN_ID)});
   }, 'workflow child approval completed parent detail');
   console.log('[electron-smoke] workflow child approval completed parent detail');
