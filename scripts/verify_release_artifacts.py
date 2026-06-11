@@ -353,6 +353,7 @@ PACKAGED_UI_E2E_FORBIDDEN_TEXT: tuple[str, ...] = (
 DATA_TESTID_SELECTOR_RE = re.compile(
     r"""data-testid=(?:\\)?(?P<quote>["'])(?P<selector>[^"'\\]+)(?:\\)?(?P=quote)"""
 )
+DATA_ATTRIBUTE_RE = re.compile(r"\bdata-[a-z][a-z0-9-]*\b")
 PACKAGED_INFO_REQUIRED_VALUES: tuple[tuple[str, str, str], ...] = (
     (
         "LSApplicationCategoryType",
@@ -1502,6 +1503,22 @@ def _release_electron_ui_smoke_selectors(root: Path) -> tuple[str, ...]:
     return tuple(sorted(selectors))
 
 
+def _release_electron_ui_smoke_data_attributes(root: Path) -> tuple[str, ...]:
+    attributes: set[str] = set()
+    for script in _release_electron_ui_smoke_scripts(root):
+        script_path = _resolve(root, script)
+        try:
+            text = script_path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for match in DATA_ATTRIBUTE_RE.finditer(text):
+            attribute = match.group(0)
+            if attribute == "data-testid":
+                continue
+            attributes.add(attribute)
+    return tuple(sorted(attributes))
+
+
 def _packaged_ui_e2e_required_selectors(root: Path) -> tuple[str, ...]:
     selectors: list[str] = []
     seen: set[str] = set()
@@ -1514,6 +1531,10 @@ def _packaged_ui_e2e_required_selectors(root: Path) -> tuple[str, ...]:
         seen.add(selector)
         selectors.append(selector)
     return tuple(selectors)
+
+
+def _packaged_ui_e2e_required_data_attributes(root: Path) -> tuple[str, ...]:
+    return _release_electron_ui_smoke_data_attributes(root)
 
 
 def verify_release_artifacts(
@@ -1841,6 +1862,14 @@ def _verify_packaged_app_bundle(root: Path) -> list[Finding]:
                             Finding(
                                 asar_path,
                                 f"packaged Electron app.asar must include UI E2E selector {selector!r}",
+                            )
+                        )
+                for attribute in _packaged_ui_e2e_required_data_attributes(root):
+                    if attribute.encode("utf-8") not in asar_bytes:
+                        findings.append(
+                            Finding(
+                                asar_path,
+                                f"packaged Electron app.asar must include UI E2E data attribute {attribute!r}",
                             )
                         )
                 for forbidden in PACKAGED_UI_E2E_FORBIDDEN_TEXT:

@@ -50,6 +50,18 @@ def _explicit_smoke_selectors() -> set[str]:
     return selectors
 
 
+def _explicit_smoke_data_attributes() -> set[str]:
+    attributes: set[str] = set()
+    for script in _release_workflow_electron_smoke_scripts():
+        text = (verifier.ROOT / script).read_text(encoding="utf-8")
+        for match in verifier.DATA_ATTRIBUTE_RE.finditer(text):
+            attribute = match.group(0)
+            if attribute == "data-testid":
+                continue
+            attributes.add(attribute)
+    return attributes
+
+
 def test_verifier_accepts_current_release_files():
     assert verifier.verify_release_artifacts() == []
 
@@ -423,6 +435,15 @@ def test_dynamic_packaged_selector_gate_covers_release_electron_smoke_selectors(
     missing = sorted(
         _explicit_smoke_selectors()
         - set(verifier._packaged_ui_e2e_required_selectors(verifier.ROOT))
+    )
+
+    assert missing == []
+
+
+def test_dynamic_packaged_attribute_gate_covers_release_electron_smoke_attributes():
+    missing = sorted(
+        _explicit_smoke_data_attributes()
+        - set(verifier._packaged_ui_e2e_required_data_attributes(verifier.ROOT))
     )
 
     assert missing == []
@@ -857,6 +878,34 @@ def test_verifier_reports_packaged_app_missing_dynamic_smoke_selector(tmp_path):
     assert verifier.Finding(
         app_dir / verifier.PACKAGED_ASAR_RELATIVE_PATH,
         "packaged Electron app.asar must include UI E2E selector 'new-mature-surface-delete'",
+    ) in findings
+
+
+def test_verifier_reports_packaged_app_missing_dynamic_smoke_data_attribute(tmp_path):
+    app_dir = _write_packaged_app_bundle(tmp_path)
+    smoke = tmp_path / "scripts" / "smoke_new_mature_surface_ui.mjs"
+    smoke.parent.mkdir(parents=True)
+    smoke.write_text(
+        "document.querySelector('[data-mature-surface-id]')?.getAttribute('data-mature-surface-state');\n",
+        encoding="utf-8",
+    )
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[],
+        check_required_files=False,
+        check_release_security_guards=False,
+        check_packaged_app_bundle=True,
+        allow_binary_targets=True,
+    )
+
+    assert verifier.Finding(
+        app_dir / verifier.PACKAGED_ASAR_RELATIVE_PATH,
+        "packaged Electron app.asar must include UI E2E data attribute 'data-mature-surface-id'",
+    ) in findings
+    assert verifier.Finding(
+        app_dir / verifier.PACKAGED_ASAR_RELATIVE_PATH,
+        "packaged Electron app.asar must include UI E2E data attribute 'data-mature-surface-state'",
     ) in findings
 
 
