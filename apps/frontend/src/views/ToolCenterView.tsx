@@ -798,7 +798,7 @@ export function ToolCenterView() {
 
   async function startNativeUpdateTerminal() {
     if (updateTerminalIdRef.current) {
-      setActionStatus('Native Runtime终端已经在运行，请先等待完成或停止当前任务。');
+      setActionStatus('外部执行内核更新终端已经在运行，请先等待完成或停止当前任务。');
       scrollToNativeUpdateTerminal();
       return;
     }
@@ -806,14 +806,14 @@ export function ToolCenterView() {
     setUpdateMode(null);
     setUpdateStartedAt(null);
     setUpdateTerminalStatus('error');
-    setUpdateTerminalMessage('Native updater 已移除；Oha-Yachiyo 使用内置 Native Runtime，不再启动 Native Runtime。');
-    setActionStatus('Native updater 已移除；请使用模型配置与 Native Runtime readiness。');
+    setUpdateTerminalMessage('外部执行内核 updater 已移除；Oha-Yachiyo 使用内置 Native Runtime 继续执行任务。');
+    setActionStatus('外部执行内核 updater 已移除；请使用应用更新、模型配置与 Native Runtime readiness。');
   }
 
   async function stopNativeUpdateTerminalNow() {
     const id = updateTerminalIdRef.current;
     if (!id) return;
-    setUpdateTerminalMessage('正在停止 Native Runtime终端...');
+    setUpdateTerminalMessage('正在停止外部执行内核更新终端...');
     await killDesktopTerminal(id);
   }
 
@@ -823,8 +823,8 @@ export function ToolCenterView() {
       return;
     }
     requestConfirm({
-      title: '停止 Native Runtime终端？',
-      description: 'Native Runtime仍在运行。停止终端会中断 Native Runtime。',
+      title: '停止外部执行内核更新终端？',
+      description: '外部执行内核更新终端仍在运行。停止终端会中断该更新进程。',
       confirmLabel: '停止终端',
       variant: 'danger',
       onConfirm: () => void stopNativeUpdateTerminalNow(),
@@ -1802,7 +1802,7 @@ function NativeUpdatePanel({
             工具清单变化：新增 {delta?.added?.length || 0}，移除 {delta?.removed?.length || 0}，状态变化 {delta?.changed?.length || 0}
           </small>
         ) : null}
-        <small>更新通道：Native 官方 updater 使用当前 checkout 的 origin/main；Release tag 仅作为保守参考，Yachiyo 暂不自动切换 tag。</small>
+        <small>更新通道：外部 Native updater 已移除；Release tag 仅作为应用发布参考，Yachiyo 暂不自动切换 tag。</small>
         <label className="settings-field checkbox-field native-update-backup-option">
           <input
             type="checkbox"
@@ -1811,8 +1811,8 @@ function NativeUpdatePanel({
             onChange={(event) => onFullBackupChange(event.currentTarget.checked)}
           />
           <span>
-            Native Runtime 无需外部 updater
-            <small>Oha-Yachiyo 不再运行 Native Runtime 更新；后续能力通过应用更新和模型配置生效。</small>
+            Native Runtime 由应用内置
+            <small>Oha-Yachiyo 不再运行外部执行内核更新器；后续能力通过应用更新和模型配置生效。</small>
           </span>
         </label>
         {busy ? (

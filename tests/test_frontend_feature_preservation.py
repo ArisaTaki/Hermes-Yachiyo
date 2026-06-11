@@ -24,6 +24,12 @@ def _assert_contains(relative_path: str, fragments: list[str]) -> None:
     assert not missing, f"{relative_path} is missing preserved feature fragments: {missing!r}"
 
 
+def _assert_not_contains(relative_path: str, fragments: list[str]) -> None:
+    text = _read(relative_path)
+    present = [fragment for fragment in fragments if fragment in text]
+    assert not present, f"{relative_path} contains forbidden fragments: {present!r}"
+
+
 def _assert_occurs(relative_path: str, fragment: str, expected_count: int) -> None:
     text = _read(relative_path)
     actual = text.count(fragment)
@@ -874,6 +880,27 @@ def test_desktop_presence_features_preserve_live2d_screenshot_and_tts_entrypoint
             "ipcMain.handle('oha:chooseTtsVoiceArchive'",
             "导入 GPT-SoVITS 音色包 ZIP",
             "{ name: 'TTS 音色包', extensions: ['zip'] }",
+        ],
+    )
+
+
+def test_tool_center_copy_preserves_builtin_native_runtime_boundary() -> None:
+    tool_center = "apps/frontend/src/views/ToolCenterView.tsx"
+    _assert_contains(
+        tool_center,
+        [
+            "外部执行内核 updater 已移除；Oha-Yachiyo 使用内置 Native Runtime 继续执行任务。",
+            "外部执行内核 updater 已移除；请使用应用更新、模型配置与 Native Runtime readiness。",
+            "Native Runtime 由应用内置",
+            "Oha-Yachiyo 不再运行外部执行内核更新器；后续能力通过应用更新和模型配置生效。",
+        ],
+    )
+    _assert_not_contains(
+        tool_center,
+        [
+            "不再启动 Native Runtime",
+            "不再运行 Native Runtime 更新",
+            "Native Runtime仍在运行。停止终端会中断 Native Runtime。",
         ],
     )
 
