@@ -5159,6 +5159,16 @@ def test_bridge_debug_routes_are_disabled_for_release_metadata(monkeypatch, tmp_
     assert debug_routes_enabled() is False
 
 
+def test_bridge_debug_routes_are_disabled_for_packaged_build_env(monkeypatch, tmp_path):
+    metadata_path = tmp_path / "oha-yachiyo-build.json"
+    metadata_path.write_text(json.dumps({"channel": "experimental"}), encoding="utf-8")
+    monkeypatch.setenv("OHA_YACHIYO_DEV", "1")
+    monkeypatch.setenv("OHA_YACHIYO_PACKAGED_BUILD", "1")
+    monkeypatch.setenv("OHA_YACHIYO_BUILD_METADATA", str(metadata_path))
+
+    assert debug_routes_enabled() is False
+
+
 def test_bridge_security_accepts_loopback_without_token_when_disabled(monkeypatch):
     monkeypatch.delenv("OHA_YACHIYO_BRIDGE_TOKEN", raising=False)
     monkeypatch.delenv("OHA_YACHIYO_BRIDGE_TOKEN", raising=False)

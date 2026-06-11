@@ -58,3 +58,12 @@ def test_development_features_disabled_by_packaged_build(monkeypatch, tmp_path):
 
     assert build_metadata.is_packaged_build() is True
     assert build_metadata.development_features_enabled() is False
+
+
+def test_development_features_disabled_by_packaged_build_env(monkeypatch, tmp_path):
+    _clear_build_env(monkeypatch)
+    monkeypatch.setenv("OHA_YACHIYO_DEV", "1")
+    monkeypatch.setenv("OHA_YACHIYO_PACKAGED_BUILD", "1")
+    monkeypatch.setenv("OHA_YACHIYO_BUILD_METADATA", _write_metadata(tmp_path, channel="experimental"))
+
+    assert build_metadata.development_features_enabled() is False

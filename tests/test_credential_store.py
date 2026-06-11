@@ -52,6 +52,17 @@ def test_dev_file_credential_store_is_disabled_by_release_metadata(monkeypatch, 
         DevFileCredentialStore(tmp_path / "credentials.dev.json")
 
 
+def test_dev_file_credential_store_is_disabled_by_packaged_build_env(monkeypatch, tmp_path):
+    _clear_build_env(monkeypatch)
+    monkeypatch.setenv("OHA_YACHIYO_DEV", "1")
+    monkeypatch.setenv("OHA_YACHIYO_PACKAGED_BUILD", "1")
+    monkeypatch.setenv("OHA_YACHIYO_BUILD_METADATA", _write_metadata(tmp_path, channel="experimental"))
+
+    assert development_credential_fallback_enabled() is False
+    with pytest.raises(CredentialStoreError, match="disabled"):
+        DevFileCredentialStore(tmp_path / "credentials.dev.json")
+
+
 @pytest.mark.parametrize("channel", ["release", "alpha", "stable"])
 def test_credential_store_factory_does_not_use_dev_fallback_for_release_like_build(
     monkeypatch, tmp_path, channel

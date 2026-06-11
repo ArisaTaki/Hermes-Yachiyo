@@ -789,13 +789,15 @@ def verify_release_artifacts(
 
 
 @contextmanager
-def _release_guard_env(metadata_path: Path):
+def _release_guard_env(metadata_path: Path, *, packaged: bool = False):
     saved = {key: os.environ.get(key) for key in _BUILD_GUARD_ENV_KEYS}
     try:
         for key in _BUILD_GUARD_ENV_KEYS:
             os.environ.pop(key, None)
         os.environ["OHA_YACHIYO_DEV"] = "1"
         os.environ["OHA_YACHIYO_BUILD_METADATA"] = str(metadata_path)
+        if packaged:
+            os.environ["OHA_YACHIYO_PACKAGED_BUILD"] = "1"
         yield
     finally:
         for key, value in saved.items():
@@ -873,6 +875,42 @@ def _verify_release_security_guards(root: Path) -> list[Finding]:
                             f"{channel} metadata must not allow DevFileCredentialStore",
                         )
                     )
+        packaged_metadata = temp_root / "packaged.json"
+        packaged_metadata.write_text(json.dumps({"channel": "experimental"}), encoding="utf-8")
+        with _release_guard_env(packaged_metadata, packaged=True):
+            if build_metadata.development_features_enabled():
+                findings.append(
+                    Finding(
+                        root / "apps" / "core" / "build_metadata.py",
+                        "packaged build env must disable development features even when OHA_YACHIYO_DEV=1",
+                    )
+                )
+            if bridge_server.debug_routes_enabled():
+                findings.append(
+                    Finding(
+                        root / "apps" / "bridge" / "server.py",
+                        "packaged build env must disable debug routes even when OHA_YACHIYO_DEV=1",
+                    )
+                )
+            if credential_store.development_credential_fallback_enabled():
+                findings.append(
+                    Finding(
+                        root / "apps" / "shell" / "credential_store.py",
+                        "packaged build env must disable development credential fallback",
+                    )
+                )
+            try:
+                store = credential_store.DevFileCredentialStore(temp_root / "packaged" / "credentials.dev.json")
+            except credential_store.CredentialStoreError:
+                pass
+            else:
+                store.close()
+                findings.append(
+                    Finding(
+                        root / "apps" / "shell" / "credential_store.py",
+                        "packaged build env must not allow DevFileCredentialStore",
+                    )
+                )
     return findings
 
 
