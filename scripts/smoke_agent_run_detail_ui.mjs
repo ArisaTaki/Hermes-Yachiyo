@@ -12,6 +12,8 @@ const ELECTRON = path.join(FRONTEND, 'node_modules', '.bin', process.platform ==
 const VITE = path.join(FRONTEND, 'node_modules', '.bin', process.platform === 'win32' ? 'vite.cmd' : 'vite');
 const RUN_ID = 'agent_run_detail_ui_smoke';
 const RUN_GROUP_ID = 'run_group_detail_ui_smoke';
+const ARTIFACT_PATH = 'summary.md';
+const ARTIFACT_CONTENT = '# Run Detail UI Smoke\n\nArtifact preview loaded from mock Bridge.';
 const now = new Date().toISOString();
 
 const run = {
@@ -29,7 +31,12 @@ const run = {
   user_goal: 'Inspect Native RunEvent replay from Agent Studio smoke',
   result: 'Run Detail UI smoke completed through replay facts',
   timeline: [],
-  artifacts: [],
+  artifacts: [{
+    path: ARTIFACT_PATH,
+    kind: 'markdown',
+    source_run_id: RUN_ID,
+    source_runnable_name: 'Run Detail Smoke Agent',
+  }],
   created_at: now,
   updated_at: now,
   agent_run_id: RUN_ID,
@@ -189,6 +196,15 @@ async function startMockBridge() {
       }
       if (request.method === 'GET' && url.pathname === `/ui/runs/${RUN_ID}`) {
         sendJson(response, 200, run);
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/ui/runs/${RUN_ID}/artifacts/${ARTIFACT_PATH}`) {
+        sendJson(response, 200, {
+          ok: true,
+          path: ARTIFACT_PATH,
+          content: ARTIFACT_CONTENT,
+          truncated: false,
+        });
         return;
       }
       if (request.method === 'GET' && url.pathname === '/ui/run-groups') {
@@ -357,6 +373,20 @@ async function main() {
       && !document.querySelector('[data-testid="agent-run-detail-load-more-events"]');
   }, 'loaded more run event replay page');
   console.log('[electron-smoke] replay pagination loaded');
+  await waitFor(win, () => {
+    const artifact = document.querySelector('[data-testid="agent-run-detail-artifact"]');
+    return artifact
+      && artifact.getAttribute('data-artifact-path') === ${JSON.stringify(ARTIFACT_PATH)}
+      && artifact.getAttribute('data-artifact-source-run-id') === ${JSON.stringify(RUN_ID)};
+  }, 'run detail artifact item');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"agent-run-detail-artifact\\"]').click()", true);
+  await waitFor(win, () => {
+    const preview = document.querySelector('[data-testid="agent-run-detail-artifact-preview"]');
+    return preview
+      && preview.textContent.includes(${JSON.stringify(ARTIFACT_PATH)})
+      && preview.textContent.includes('Artifact preview loaded from mock Bridge.');
+  }, 'run detail artifact preview');
+  console.log('[electron-smoke] artifact preview rendered');
   clearTimeout(watchdog);
   await win.close();
   app.quit();
