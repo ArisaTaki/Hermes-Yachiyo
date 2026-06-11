@@ -3110,7 +3110,7 @@ function MessageActivityList({ events, messageStatus, onOpenRunDetails, progress
   }
 
   return (
-    <div className="message-activity-list" aria-label="执行活动">
+    <div className="message-activity-list" data-testid="chat-message-activity-list" aria-label="执行活动">
       {visibleRows.map((event, index) => {
         const displayStatus = activityDisplayStatus(event.status, messageStatus);
         const runId = activityRunId(event);
@@ -3119,7 +3119,13 @@ function MessageActivityList({ events, messageStatus, onOpenRunDetails, progress
         const canExpand = Boolean(event.detail || metadataText);
         const expanded = expandedEventIds.has(eventKey);
         return (
-          <div className={`message-activity-row ${activityStatusClass(displayStatus)}${runId ? ' has-detail' : ''}${expanded ? ' expanded' : ''}`} key={eventKey}>
+          <div
+            className={`message-activity-row ${activityStatusClass(displayStatus)}${runId ? ' has-detail' : ''}${expanded ? ' expanded' : ''}`}
+            data-activity-status={displayStatus || ''}
+            data-activity-tool={event.tool_name || ''}
+            data-testid="chat-message-activity-row"
+            key={eventKey}
+          >
             <span className="message-activity-icon" aria-hidden="true">{activityStatusIcon(displayStatus)}</span>
             <div className="message-activity-text">
               <div className="message-activity-heading">
@@ -3128,6 +3134,7 @@ function MessageActivityList({ events, messageStatus, onOpenRunDetails, progress
                   <button
                     type="button"
                     className="message-activity-link"
+                    data-testid="chat-message-activity-open"
                     title="打开活动详情"
                     aria-label="打开活动详情"
                     onClick={() => openActivity(event)}
@@ -3140,6 +3147,7 @@ function MessageActivityList({ events, messageStatus, onOpenRunDetails, progress
                   <button
                     type="button"
                     className="message-activity-link"
+                    data-testid="chat-message-activity-toggle"
                     title={expanded ? '收起调用记录' : '展开调用记录'}
                     aria-label={expanded ? '收起调用记录' : '展开调用记录'}
                     onClick={() => toggleExpanded(eventKey)}
@@ -3159,7 +3167,7 @@ function MessageActivityList({ events, messageStatus, onOpenRunDetails, progress
             </div>
             <time>{formatShortTime(event.created_at)}</time>
             {runId ? (
-              <button type="button" className="message-activity-detail-button" onClick={() => onOpenRunDetails(runId)}>
+              <button type="button" className="message-activity-detail-button" data-testid="chat-message-activity-open-run-detail" onClick={() => onOpenRunDetails(runId)}>
                 详情
               </button>
             ) : null}
