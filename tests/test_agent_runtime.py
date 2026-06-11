@@ -2690,6 +2690,143 @@ def test_main_chat_model_loop_uses_responses_output_text_done_snapshot(tmp_path,
         service.close()
 
 
+def test_main_chat_model_loop_persists_streaming_refusal_delta(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    expected = "I cannot help with that request."
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    def fake_chat(_base_url, _model, _api_key, _messages, *, tools=None, stream=False):
+        assert tools is not None
+        assert stream is True
+
+        def stream():
+            yield {"choices": [{"delta": {"refusal": "I cannot help "}}]}
+            yield {"choices": [{"delta": {"refusal": "with that request."}, "finish_reason": "stop"}]}
+
+        return stream()
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-streaming-refusal",
+            session_id="session-main-streaming-refusal",
+            user_goal="Use streaming refusal",
+        )
+        updated = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [{"role": "user", "content": "Use streaming refusal"}],
+        )
+        rows = service._conn.execute(
+            "SELECT event_type, payload_json FROM run_events WHERE run_id=? ORDER BY sequence",
+            (run["run_id"],),
+        ).fetchall()
+        output_rows = [row for row in rows if row["event_type"] == "model.output.completed"]
+
+        assert updated["result"] == expected
+        assert len(output_rows) == 1
+        assert json.loads(output_rows[0]["payload_json"])["content"] == expected
+        assert not any(str(row["event_type"]).endswith(".delta") for row in rows)
+    finally:
+        service.close()
+
+
+def test_main_chat_model_loop_accepts_refusal_message_field(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    expected = "I cannot help with that request."
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    def fake_chat(_base_url, _model, _api_key, _messages, *, tools=None, stream=False):
+        assert tools is not None
+        assert stream is True
+        return {"role": "assistant", "content": None, "refusal": expected}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-message-refusal",
+            session_id="session-main-message-refusal",
+            user_goal="Use message refusal",
+        )
+        updated = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [{"role": "user", "content": "Use message refusal"}],
+        )
+        events = service.list_run_events(run["run_id"])["events"]
+        output_events = [event for event in events if event["event_type"] == "model.output.completed"]
+
+        assert updated["result"] == expected
+        assert len(output_events) == 1
+        assert output_events[0]["payload"]["content"] == expected
+    finally:
+        service.close()
+
+
+def test_main_chat_model_loop_uses_responses_refusal_done_snapshot(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    expected = "Final Responses refusal"
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    def fake_chat(_base_url, _model, _api_key, _messages, *, tools=None, stream=False):
+        assert tools is not None
+        assert stream is True
+
+        def stream():
+            yield {
+                "type": "response.refusal.delta",
+                "output_index": 0,
+                "content_index": 0,
+                "delta": "draft refusal",
+            }
+            yield {
+                "type": "response.refusal.done",
+                "output_index": 0,
+                "content_index": 0,
+                "refusal": expected,
+            }
+            yield {
+                "type": "response.completed",
+                "response": {
+                    "status": "completed",
+                    "output": [{"type": "message", "finish_reason": "stop"}],
+                },
+            }
+
+        return stream()
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-responses-refusal-done",
+            session_id="session-main-responses-refusal-done",
+            user_goal="Use Responses refusal.done",
+        )
+        updated = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [{"role": "user", "content": "Use Responses refusal.done"}],
+        )
+        rows = service._conn.execute(
+            "SELECT event_type, payload_json FROM run_events WHERE run_id=? ORDER BY sequence",
+            (run["run_id"],),
+        ).fetchall()
+        output_rows = [row for row in rows if row["event_type"] == "model.output.completed"]
+
+        assert updated["result"] == expected
+        assert len(output_rows) == 1
+        assert json.loads(output_rows[0]["payload_json"])["content"] == expected
+        assert not any(str(row["event_type"]).endswith(".delta") for row in rows)
+    finally:
+        service.close()
+
+
 def test_main_chat_model_consumes_openai_compatible_sse_stream(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     chunks = ["native ", "http ", "sse"]

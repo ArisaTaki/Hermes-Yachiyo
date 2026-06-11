@@ -41,6 +41,8 @@ def _responses_stream_text_delta(chunk: Any) -> str | None:
     event_type = _responses_stream_event_type(chunk)
     if event_type in {"response.output_text.delta", "output_text.delta"}:
         return _text_value(_field(chunk, "delta"))
+    if event_type in {"response.refusal.delta", "refusal.delta"}:
+        return _text_value(_field(chunk, "delta"))
     if event_type in {
         "response.function_call_arguments.delta",
         "response.function_call_arguments.done",
@@ -57,9 +59,9 @@ def _responses_stream_text_delta(chunk: Any) -> str | None:
 
 def _responses_stream_text_done(chunk: Any) -> str | None:
     event_type = _responses_stream_event_type(chunk)
-    if event_type not in {"response.output_text.done", "output_text.done"}:
+    if event_type not in {"response.output_text.done", "output_text.done", "response.refusal.done", "refusal.done"}:
         return None
-    for field_name in ("text", "content", "delta"):
+    for field_name in ("text", "refusal", "content", "delta"):
         value = _field(chunk, field_name)
         if value is not None:
             return _text_value(value)
@@ -223,7 +225,9 @@ def _content_text(value: Any) -> str:
         if text:
             return text
     text = _field(value, "text")
-    return _text_value(text)
+    if text is not None:
+        return _text_value(text)
+    return _text_value(_field(value, "refusal"))
 
 
 def _reasoning_text(value: Any) -> str:

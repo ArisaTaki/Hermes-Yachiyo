@@ -639,6 +639,8 @@ def _responses_stream_text_delta(chunk: Any) -> str | None:
     event_type = _responses_stream_event_type(chunk)
     if event_type in {"response.output_text.delta", "output_text.delta"}:
         return _message_text_value(_message_field(chunk, "delta"))
+    if event_type in {"response.refusal.delta", "refusal.delta"}:
+        return _message_text_value(_message_field(chunk, "delta"))
     if event_type in {
         "response.function_call_arguments.delta",
         "response.function_call_arguments.done",
@@ -655,9 +657,9 @@ def _responses_stream_text_delta(chunk: Any) -> str | None:
 
 def _responses_stream_text_done(chunk: Any) -> str | None:
     event_type = _responses_stream_event_type(chunk)
-    if event_type not in {"response.output_text.done", "output_text.done"}:
+    if event_type not in {"response.output_text.done", "output_text.done", "response.refusal.done", "refusal.done"}:
         return None
-    for field_name in ("text", "content", "delta"):
+    for field_name in ("text", "refusal", "content", "delta"):
         value = _message_field(chunk, field_name)
         if value is not None:
             return _message_text_value(value)
@@ -815,7 +817,9 @@ def _message_visible_content_text(content: Any) -> str:
         if nested:
             return nested
         text = content.get("text")
-        return _message_text_value(text)
+        if text is not None:
+            return _message_text_value(text)
+        return _message_text_value(content.get("refusal"))
     if isinstance(content, str):
         return content
     if isinstance(content, list):
@@ -835,6 +839,9 @@ def _message_visible_content_text(content: Any) -> str:
     text = _message_field(content, "text")
     if text is not None:
         return _message_text_value(text)
+    refusal = _message_field(content, "refusal")
+    if refusal is not None:
+        return _message_text_value(refusal)
     return ""
 
 
