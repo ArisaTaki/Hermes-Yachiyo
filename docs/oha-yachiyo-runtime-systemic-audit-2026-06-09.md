@@ -2030,6 +2030,7 @@ compileall passed
 - release workflow smoke 现在也强制包含 approved terminal failure output redaction 回归，确保批准后的 `terminal.run` 非零退出不会把 stdout / stderr secret 写入 Run projection、RunEvent 或 runtime SQLite。
 - release workflow smoke 现在也强制包含主聊天 provider exception / tool exception redaction 回归，避免异常文本中的 secret 进入 Run projection、RunEvent、tool result message 或 runtime SQLite。
 - release workflow smoke 现在也强制包含 `TaskRunLinkRepository` projection boundary 回归，确保 Task↔Run link、Run status projection 和 replay `last_event_sequence` 继续由显式边界维护。
+- release workflow smoke 现在也强制包含 RunEvent 并发写入 sequence / replay cursor projection 回归，确保 `RunEventRepository.append()` 与 TaskRunLink cursor projection 在共享 SQLite connection 上不会重新出现并发事务交错。
 - release workflow smoke 现在也强制包含 runtime SQLite database guard，确保 schema metadata、foreign keys、WAL、busy timeout 和 Run 删除后的 TaskRunLink cascade 不从发布路径回退。
 - 新 Agent Run 的 runtime metadata / prompt / compiled timeline 已从旧 `yachiyo_agent` / `Yachiyo Agent Runtime` 收敛为 `oha_agent` / `Oha Agent Runtime`；源码级 legacy kernel guard 和 release artifact verifier 的 binary scan 都会阻断 `yachiyo_agent` / 旧 context artifact runtime 标记回归。
 - Electron 桌面 Bridge 重启会轮换 session token；前端 `restartDesktopBridge()` 现在会清空 renderer 侧 cached Bridge token，确保重启后的 mutating request 重新从 preload 读取新 token。
