@@ -231,6 +231,7 @@ def _write_packaged_app_bundle(
     executable_mode=0o755,
     backend_mode=0o755,
     include_asar=True,
+    include_permission_copy=True,
 ):
     app_dir = root / verifier.PACKAGED_APP_OUTPUT_DIR / "mac-arm64" / verifier.PACKAGED_APP_NAME
     contents = app_dir / "Contents"
@@ -238,16 +239,23 @@ def _write_packaged_app_bundle(
     resources_dir = contents / "Resources"
     macos_dir.mkdir(parents=True)
     resources_dir.mkdir(parents=True)
-    (contents / "Info.plist").write_bytes(
-        plistlib.dumps(
+    info = {
+        "CFBundleName": "Oha-Yachiyo",
+        "CFBundleDisplayName": "Oha-Yachiyo",
+        "CFBundleExecutable": "Oha-Yachiyo",
+        "CFBundleIdentifier": identifier,
+        "LSApplicationCategoryType": "public.app-category.productivity",
+    }
+    if include_permission_copy:
+        info.update(
             {
-                "CFBundleName": "Oha-Yachiyo",
-                "CFBundleDisplayName": "Oha-Yachiyo",
-                "CFBundleExecutable": "Oha-Yachiyo",
-                "CFBundleIdentifier": identifier,
+                "NSAppleEventsUsageDescription": "Oha-Yachiyo 需要读取当前窗口标题和应用名称。",
+                "NSDocumentsFolderUsageDescription": "Oha-Yachiyo 需要访问用户选择的项目文件。",
+                "NSDownloadsFolderUsageDescription": "Oha-Yachiyo 需要访问用户选择导入的下载资源。",
+                "NSMicrophoneUsageDescription": "Oha-Yachiyo 的语音相关功能可能需要访问麦克风输入。",
             }
         )
-    )
+    (contents / "Info.plist").write_bytes(plistlib.dumps(info))
     executable = macos_dir / "Oha-Yachiyo"
     executable.write_bytes(b"#!/bin/sh\nexit 0\n")
     executable.chmod(executable_mode)
@@ -302,6 +310,47 @@ def test_verifier_reports_incomplete_packaged_app_bundle(tmp_path):
     assert verifier.Finding(
         app_dir / verifier.PACKAGED_ASAR_RELATIVE_PATH,
         "packaged Electron app.asar is missing from app resources",
+    ) in findings
+
+
+def test_verifier_reports_packaged_app_missing_permission_copy(tmp_path):
+    _write_packaged_app_bundle(tmp_path, include_permission_copy=False)
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[],
+        check_required_files=False,
+        check_release_security_guards=False,
+        check_packaged_app_bundle=True,
+        allow_binary_targets=True,
+    )
+    messages = [finding.message for finding in findings]
+
+    assert "packaged app Info.plist must include Apple Events permission copy" in messages
+    assert "packaged app Info.plist must include Documents folder permission copy" in messages
+    assert "packaged app Info.plist must include Downloads folder permission copy" in messages
+    assert "packaged app Info.plist must include microphone permission copy" in messages
+
+
+def test_verifier_reports_packaged_app_wrong_category(tmp_path):
+    app_dir = _write_packaged_app_bundle(tmp_path)
+    info_path = app_dir / "Contents" / "Info.plist"
+    info = plistlib.loads(info_path.read_bytes())
+    info["LSApplicationCategoryType"] = "public.app-category.games"
+    info_path.write_bytes(plistlib.dumps(info))
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[],
+        check_required_files=False,
+        check_release_security_guards=False,
+        check_packaged_app_bundle=True,
+        allow_binary_targets=True,
+    )
+
+    assert verifier.Finding(
+        info_path,
+        "packaged app Info.plist must keep the productivity app category",
     ) in findings
 
 

@@ -97,6 +97,19 @@ PACKAGED_APP_NAME = "Oha-Yachiyo.app"
 PACKAGED_APP_IDENTIFIER = "io.github.arisataki.oha-yachiyo"
 PACKAGED_BACKEND_RELATIVE_PATH = Path("Contents/Resources/backend/oha-yachiyo-backend")
 PACKAGED_ASAR_RELATIVE_PATH = Path("Contents/Resources/app.asar")
+PACKAGED_INFO_REQUIRED_VALUES: tuple[tuple[str, str, str], ...] = (
+    (
+        "LSApplicationCategoryType",
+        "public.app-category.productivity",
+        "packaged app Info.plist must keep the productivity app category",
+    ),
+)
+PACKAGED_INFO_REQUIRED_PERMISSION_KEYS: tuple[tuple[str, str], ...] = (
+    ("NSAppleEventsUsageDescription", "packaged app Info.plist must include Apple Events permission copy"),
+    ("NSDocumentsFolderUsageDescription", "packaged app Info.plist must include Documents folder permission copy"),
+    ("NSDownloadsFolderUsageDescription", "packaged app Info.plist must include Downloads folder permission copy"),
+    ("NSMicrophoneUsageDescription", "packaged app Info.plist must include microphone permission copy"),
+)
 TRACKED_GENERATED_PATHS: tuple[str, ...] = (
     "apps/frontend/.vite",
     "apps/frontend/dist",
@@ -1099,6 +1112,13 @@ def _verify_packaged_app_bundle(root: Path) -> list[Finding]:
                 executable_name = str(info.get("CFBundleExecutable") or "").strip()
                 if not executable_name:
                     findings.append(Finding(info_path, "packaged app Info.plist must declare CFBundleExecutable"))
+                for key, expected, message in PACKAGED_INFO_REQUIRED_VALUES:
+                    if info.get(key) != expected:
+                        findings.append(Finding(info_path, message))
+                for key, message in PACKAGED_INFO_REQUIRED_PERMISSION_KEYS:
+                    value = str(info.get(key) or "").strip()
+                    if not value or "Oha-Yachiyo" not in value:
+                        findings.append(Finding(info_path, message))
 
         if executable_name:
             executable_path = app_dir / "Contents" / "MacOS" / executable_name
