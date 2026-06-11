@@ -171,6 +171,7 @@ jobs:
 
           node scripts/smoke_chat_image_attachment_ui.mjs
           node scripts/smoke_agent_run_detail_ui.mjs
+          node scripts/smoke_workflow_save_run_ui.mjs
 
       - name: Run opt-in real provider streaming smoke
         shell: bash

@@ -1,0 +1,516 @@
+#!/usr/bin/env node
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const FRONTEND = path.join(ROOT, 'apps', 'frontend');
+const ELECTRON = path.join(FRONTEND, 'node_modules', '.bin', process.platform === 'win32' ? 'electron.cmd' : 'electron');
+const VITE = path.join(FRONTEND, 'node_modules', '.bin', process.platform === 'win32' ? 'vite.cmd' : 'vite');
+const AGENT_ID = 'workflow-save-run-agent';
+const WORKFLOW_ID = 'workflow_save_run_ui_smoke_persisted';
+const RUN_ID = 'workflow_save_run_ui_smoke_run';
+const RUN_GROUP_ID = 'workflow_save_run_ui_smoke_group';
+const RUN_GOAL = 'Run saved Workflow from Electron UI smoke';
+const now = new Date().toISOString();
+
+let savedWorkflow = null;
+let createdWorkflowRequest = null;
+let createdWorkflowRunRequest = null;
+
+const agent = {
+  agent_id: AGENT_ID,
+  name: 'Workflow Save Run Agent',
+  model_mode: 'follow_main',
+  execution_backend: 'native_profile',
+  model_config: {},
+  enabled: true,
+  editable: true,
+  deletable: true,
+};
+
+function savedWorkflowSpec(request = {}) {
+  return {
+    workflow_id: WORKFLOW_ID,
+    name: request.name || 'Workflow Save Run UI Smoke',
+    description: request.description || '',
+    nodes: request.nodes || [],
+    edges: request.edges || [],
+    enabled: request.enabled !== false,
+    created_at: now,
+    updated_at: now,
+  };
+}
+
+const workflowRun = {
+  run_id: RUN_ID,
+  run_group_id: RUN_GROUP_ID,
+  run_group_source: 'workflow',
+  task_id: 'task-workflow-save-run-ui-smoke',
+  session_id: 'session-workflow-save-run-ui-smoke',
+  task_run_link_run_status: 'completed',
+  task_run_link_last_event_sequence: 3,
+  kind: 'workflow_run',
+  runnable_id: WORKFLOW_ID,
+  runnable_name: 'Workflow Save Run UI Smoke',
+  status: 'completed',
+  user_goal: RUN_GOAL,
+  result: 'Workflow save-and-run UI smoke completed',
+  timeline: [
+    { event: 'workflow.run.started', status: 'running', workflow_id: WORKFLOW_ID },
+    { event: 'workflow.node.agent.completed', status: 'completed', agent_id: AGENT_ID },
+    { event: 'workflow.run.completed', status: 'completed' },
+  ],
+  artifacts: [],
+  created_at: now,
+  updated_at: now,
+  workflow_run_id: RUN_ID,
+};
+
+const runGroup = {
+  run_group_id: RUN_GROUP_ID,
+  title: 'Workflow Save Run UI Smoke',
+  source: 'workflow',
+  status: 'completed',
+  summary: 'Workflow save-and-run completed from UI',
+  child_run_ids: [RUN_ID],
+  created_at: now,
+  updated_at: now,
+};
+
+const runEvents = [
+  {
+    event_id: 'event-workflow-save-run-smoke-1',
+    run_id: RUN_ID,
+    sequence: 1,
+    schema_version: 1,
+    event_type: 'workflow.run.started',
+    actor: 'workflow',
+    visibility: 'user',
+    sensitivity: 'normal',
+    payload: { workflow_id: WORKFLOW_ID, goal: RUN_GOAL },
+    created_at: now,
+  },
+  {
+    event_id: 'event-workflow-save-run-smoke-2',
+    run_id: RUN_ID,
+    sequence: 2,
+    schema_version: 1,
+    event_type: 'workflow.node.agent.completed',
+    actor: 'agent',
+    visibility: 'user',
+    sensitivity: 'normal',
+    payload: { workflow_id: WORKFLOW_ID, agent_id: AGENT_ID },
+    created_at: now,
+  },
+  {
+    event_id: 'event-workflow-save-run-smoke-3',
+    run_id: RUN_ID,
+    sequence: 3,
+    schema_version: 1,
+    event_type: 'workflow.run.completed',
+    actor: 'workflow',
+    visibility: 'user',
+    sensitivity: 'normal',
+    payload: { result: workflowRun.result },
+    created_at: now,
+  },
+];
+
+function log(message) {
+  process.stdout.write(`[workflow-save-run-ui-smoke] ${message}\n`);
+}
+
+function pickPort() {
+  return new Promise((resolve, reject) => {
+    const server = http.createServer();
+    server.on('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      server.close(() => {
+        if (!address || typeof address === 'string') reject(new Error('could not allocate local port'));
+        else resolve(address.port);
+      });
+    });
+  });
+}
+
+function readJson(request) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    request.on('data', (chunk) => chunks.push(chunk));
+    request.on('error', reject);
+    request.on('end', () => {
+      const body = Buffer.concat(chunks).toString('utf8').trim();
+      if (!body) {
+        resolve({});
+        return;
+      }
+      try {
+        resolve(JSON.parse(body));
+      } catch (error) {
+        reject(error);
+      }
+    });
+  });
+}
+
+function sendJson(response, statusCode, payload) {
+  response.writeHead(statusCode, {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'content-type,x-oha-yachiyo-bridge-token',
+    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS,PATCH,DELETE',
+    'Content-Type': 'application/json; charset=utf-8',
+  });
+  response.end(JSON.stringify(payload));
+}
+
+async function startMockBridge() {
+  const server = http.createServer(async (request, response) => {
+    try {
+      if (request.method === 'OPTIONS') {
+        sendJson(response, 204, {});
+        return;
+      }
+      const url = new URL(request.url || '/', 'http://127.0.0.1');
+      if (request.method === 'GET' && url.pathname === '/ui/agents') {
+        sendJson(response, 200, { agents: [agent] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/skills') {
+        sendJson(response, 200, { skills: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/skills/sources') {
+        sendJson(response, 200, { roots: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/skill-folders') {
+        sendJson(response, 200, { folders: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/model-profiles') {
+        sendJson(response, 200, {
+          ok: true,
+          profiles: [{
+            profile_id: 'profile-workflow-save-run-smoke',
+            name: 'Workflow Save Run Smoke Chat Profile',
+            capability: 'chat',
+            provider: 'openai_compatible',
+            enabled: true,
+            api_key_configured: true,
+            status: 'available',
+          }],
+          defaults: { chat: 'profile-workflow-save-run-smoke' },
+        });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/workflows') {
+        sendJson(response, 200, { workflows: savedWorkflow ? [savedWorkflow] : [] });
+        return;
+      }
+      if (request.method === 'POST' && url.pathname === '/ui/workflows') {
+        createdWorkflowRequest = await readJson(request);
+        savedWorkflow = savedWorkflowSpec(createdWorkflowRequest);
+        sendJson(response, 200, savedWorkflow);
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/runnables') {
+        sendJson(response, 200, {
+          runnables: [
+            { id: AGENT_ID, name: agent.name, kind: 'agent', enabled: true, output_contract: 'report' },
+            ...(savedWorkflow ? [{ id: WORKFLOW_ID, name: savedWorkflow.name, kind: 'workflow', enabled: true, output_contract: 'workflow' }] : []),
+          ],
+        });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/runs') {
+        sendJson(response, 200, { runs: createdWorkflowRunRequest ? [workflowRun] : [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/ui/runs/${RUN_ID}`) {
+        sendJson(response, createdWorkflowRunRequest ? 200 : 404, createdWorkflowRunRequest ? workflowRun : { ok: false, error: 'run not created' });
+        return;
+      }
+      if (request.method === 'POST' && url.pathname === '/ui/workflow-runs') {
+        createdWorkflowRunRequest = await readJson(request);
+        if (createdWorkflowRunRequest.workflow_id !== WORKFLOW_ID) {
+          sendJson(response, 409, { ok: false, error: `wrong workflow_id: ${createdWorkflowRunRequest.workflow_id}` });
+          return;
+        }
+        sendJson(response, 200, workflowRun);
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/run-groups') {
+        sendJson(response, 200, { run_groups: createdWorkflowRunRequest ? [runGroup] : [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/ui/run-groups/${RUN_GROUP_ID}`) {
+        sendJson(response, 200, runGroup);
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/runs/${RUN_ID}/events`) {
+        const afterSequence = Number(url.searchParams.get('after_sequence') || '0');
+        const limit = Math.max(1, Number(url.searchParams.get('limit') || '200'));
+        sendJson(response, 200, {
+          run_id: RUN_ID,
+          after_sequence: Math.max(0, afterSequence),
+          limit,
+          events: runEvents.filter((event) => event.sequence > afterSequence).slice(0, limit),
+        });
+        return;
+      }
+      sendJson(response, 404, { ok: false, error: `not found: ${request.method} ${url.pathname}` });
+    } catch (error) {
+      sendJson(response, 500, { ok: false, error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  const port = await pickPort();
+  await new Promise((resolve, reject) => {
+    server.on('error', reject);
+    server.listen(port, '127.0.0.1', resolve);
+  });
+  return { server, url: `http://127.0.0.1:${port}` };
+}
+
+function waitForHttp(url, timeoutMs = 15_000) {
+  const started = Date.now();
+  return new Promise((resolve, reject) => {
+    const attempt = () => {
+      http.get(url, (response) => {
+        response.resume();
+        if (response.statusCode && response.statusCode < 500) {
+          resolve();
+        } else if (Date.now() - started > timeoutMs) {
+          reject(new Error(`timed out waiting for ${url}`));
+        } else {
+          setTimeout(attempt, 250);
+        }
+      }).on('error', (error) => {
+        if (Date.now() - started > timeoutMs) reject(error);
+        else setTimeout(attempt, 250);
+      });
+    };
+    attempt();
+  });
+}
+
+function startVite(port) {
+  const child = spawn(VITE, ['--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
+    cwd: FRONTEND,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, FORCE_COLOR: '0' },
+  });
+  child.stdout.on('data', (chunk) => process.stdout.write(chunk));
+  child.stderr.on('data', (chunk) => process.stderr.write(chunk));
+  return child;
+}
+
+function killProcess(child) {
+  if (!child || child.killed) return;
+  child.kill('SIGTERM');
+}
+
+function runElectronSmoke(devUrl, bridgeUrl) {
+  const script = `
+const { app, BrowserWindow } = require('electron');
+const devUrl = ${JSON.stringify(devUrl)};
+const bridgeUrl = ${JSON.stringify(bridgeUrl)};
+const runId = ${JSON.stringify(RUN_ID)};
+const runGoal = ${JSON.stringify(RUN_GOAL)};
+const watchdog = setTimeout(() => {
+  console.error('electron smoke timed out');
+  app.exit(1);
+}, 30000);
+function waitFor(win, predicate, label, timeout = 15000) {
+  const started = Date.now();
+  return new Promise((resolve, reject) => {
+    const tick = async () => {
+      try {
+        const result = await win.webContents.executeJavaScript('(' + predicate.toString() + ')()', true);
+        if (result) {
+          resolve(result);
+          return;
+        }
+      } catch {}
+      if (Date.now() - started > timeout) {
+        let debug = '';
+        try {
+          debug = await win.webContents.executeJavaScript(\`
+            JSON.stringify({
+              hash: window.location.hash,
+              workflow: document.querySelector('[data-testid="workflow-studio"]')?.textContent || '',
+              detail: document.querySelector('[data-testid="agent-run-detail"]')?.textContent || '',
+              events: Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]')).map((node) => ({
+                type: node.getAttribute('data-run-event'),
+                sequence: node.getAttribute('data-run-event-sequence'),
+                runId: node.getAttribute('data-run-event-run-id'),
+                text: node.textContent,
+              })),
+              bodyText: document.body.textContent.slice(-1600),
+            })
+          \`, true);
+        } catch {}
+        reject(new Error('timeout waiting for ' + label + (debug ? ': ' + debug : '')));
+      } else {
+        setTimeout(tick, 120);
+      }
+    };
+    tick();
+  });
+}
+async function main() {
+  await app.whenReady();
+  console.log('[electron-smoke] app ready');
+  const win = new BrowserWindow({
+    width: 1360,
+    height: 920,
+    show: true,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      backgroundThrottling: false,
+    },
+  });
+  win.webContents.on('console-message', (_event, level, message) => {
+    if (level >= 2) console.error('[renderer]', message);
+  });
+  await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '#/agents/workflows');
+  console.log('[electron-smoke] workflow studio loaded');
+  await waitFor(win, () => document.querySelector('[data-testid="workflow-studio"]'), 'workflow studio');
+  await waitFor(win, () => document.querySelectorAll('[data-testid="workflow-agent-palette-item"]').length === 1, 'workflow agent palette');
+  await win.webContents.executeJavaScript(\`
+  (() => {
+    const setNativeValue = (element, value) => {
+      const prototype = element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      Object.getOwnPropertyDescriptor(prototype, 'value').set.call(element, value);
+      element.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    document.querySelector('[data-testid="workflow-new"]').click();
+    setNativeValue(document.querySelector('[data-testid="workflow-name-input"]'), 'Workflow Save Run UI Smoke');
+    setNativeValue(document.querySelector('[data-testid="workflow-description-input"]'), 'Created by Electron save-and-run smoke');
+    document.querySelector('[data-testid="workflow-agent-palette-item"]').click();
+  })();
+  \`, true);
+  await waitFor(win, () => {
+    const rows = Array.from(document.querySelectorAll('[data-testid="workflow-node-setting-row"]'));
+    const previewSteps = Array.from(document.querySelectorAll('[data-testid="workflow-run-preview-step"]'));
+    return rows.length === 1
+      && rows[0].textContent.includes('Workflow Save Run Agent')
+      && previewSteps.some((node) => node.textContent.includes('Workflow Save Run Agent'));
+  }, 'workflow draft ready');
+  console.log('[electron-smoke] workflow draft ready');
+  await win.webContents.executeJavaScript(\`
+  (() => {
+    const setNativeValue = (element, value) => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(element, value);
+      element.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    const goal = document.querySelector('[data-testid="workflow-run-goal-input"]');
+    setNativeValue(goal, ${JSON.stringify(RUN_GOAL)});
+  })();
+  \`, true);
+  await waitFor(win, () => !document.querySelector('[data-testid="workflow-save-and-run"]')?.disabled, 'enabled save and run');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"workflow-save-and-run\\"]').click()", true);
+  await waitFor(win, () => (
+    window.location.hash.includes(${JSON.stringify(RUN_ID)})
+    && document.querySelector('[data-testid="agent-run-detail"]')?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
+    && document.querySelector('[data-testid="agent-run-detail-task"]')?.textContent.includes(${JSON.stringify(RUN_GOAL)})
+    && document.querySelector('[data-testid="agent-run-detail-result"]')?.textContent.includes('Workflow save-and-run UI smoke completed')
+  ), 'workflow run detail');
+  await waitFor(win, () => {
+    const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
+    const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
+    const sequences = events.map((node) => node.getAttribute('data-run-event-sequence'));
+    const runIds = events.map((node) => node.getAttribute('data-run-event-run-id'));
+    return events.length === 3
+      && eventTypes.includes('workflow.run.started')
+      && eventTypes.includes('workflow.node.agent.completed')
+      && eventTypes.includes('workflow.run.completed')
+      && sequences.join(',') === '1,2,3'
+      && runIds.every((id) => id === ${JSON.stringify(RUN_ID)});
+  }, 'workflow run replay events');
+  console.log('[electron-smoke] workflow save-and-run detail rendered');
+  clearTimeout(watchdog);
+  await win.close();
+  app.quit();
+}
+main().catch((error) => {
+  console.error(error && error.stack ? error.stack : error);
+  app.exit(1);
+});
+`;
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oha-workflow-save-run-smoke-'));
+  const mainPath = path.join(tempDir, 'main.cjs');
+  fs.writeFileSync(mainPath, script, 'utf8');
+  return new Promise((resolve, reject) => {
+    const child = spawn(ELECTRON, [mainPath], {
+      cwd: FRONTEND,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, ELECTRON_ENABLE_LOGGING: '1' },
+    });
+    const timeout = setTimeout(() => {
+      child.kill('SIGTERM');
+      reject(new Error('electron smoke child timed out'));
+    }, 45_000);
+    child.stdout.on('data', (chunk) => process.stdout.write(chunk));
+    child.stderr.on('data', (chunk) => process.stderr.write(chunk));
+    child.on('error', (error) => {
+      clearTimeout(timeout);
+      fs.rmSync(tempDir, { recursive: true, force: true });
+      reject(error);
+    });
+    child.on('exit', (code, signal) => {
+      clearTimeout(timeout);
+      fs.rmSync(tempDir, { recursive: true, force: true });
+      if (code === 0) resolve();
+      else reject(new Error(`electron smoke failed with code=${code} signal=${signal || ''}`));
+    });
+  });
+}
+
+function assertMockBridgeContract() {
+  if (!createdWorkflowRequest) throw new Error('workflow was not saved');
+  if (!createdWorkflowRunRequest) throw new Error('workflow run was not created');
+  if (createdWorkflowRequest.name !== 'Workflow Save Run UI Smoke') {
+    throw new Error(`unexpected saved workflow name: ${createdWorkflowRequest.name}`);
+  }
+  const agentNode = (createdWorkflowRequest.nodes || []).find((node) => node.data?.kind === 'agent');
+  if (!agentNode || agentNode.data?.agent_id !== AGENT_ID) {
+    throw new Error('saved workflow did not include the selected agent node');
+  }
+  if (createdWorkflowRunRequest.workflow_id !== WORKFLOW_ID) {
+    throw new Error(`workflow run used ${createdWorkflowRunRequest.workflow_id} instead of saved workflow id ${WORKFLOW_ID}`);
+  }
+  if (createdWorkflowRunRequest.user_goal !== RUN_GOAL) {
+    throw new Error(`workflow run used unexpected goal: ${createdWorkflowRunRequest.user_goal}`);
+  }
+  if (!createdWorkflowRunRequest.client_run_id) {
+    throw new Error('workflow run request did not include client_run_id');
+  }
+}
+
+async function main() {
+  const bridge = await startMockBridge();
+  const vitePort = await pickPort();
+  const vite = startVite(vitePort);
+  try {
+    const devUrl = `http://127.0.0.1:${vitePort}`;
+    await waitForHttp(devUrl);
+    await runElectronSmoke(devUrl, bridge.url);
+    assertMockBridgeContract();
+    log('passed');
+  } finally {
+    killProcess(vite);
+    await new Promise((resolve) => bridge.server.close(resolve));
+  }
+}
+
+main().catch((error) => {
+  console.error(error && error.stack ? error.stack : error);
+  process.exit(1);
+});

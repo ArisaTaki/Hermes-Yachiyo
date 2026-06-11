@@ -842,6 +842,32 @@ def test_workflow_studio_save_and_run_uses_persisted_workflow_id() -> None:
     )
 
 
+def test_workflow_save_run_ui_smoke_uses_studio_route_and_saved_workflow_id() -> None:
+    smoke_script = "scripts/smoke_workflow_save_run_ui.mjs"
+    _assert_contains(
+        smoke_script,
+        [
+            "#/agents/workflows",
+            "data-testid=\"workflow-studio\"",
+            "data-testid=\"workflow-new\"",
+            "data-testid=\"workflow-agent-palette-item\"",
+            "data-testid=\"workflow-run-goal-input\"",
+            "data-testid=\"workflow-save-and-run\"",
+            "request.method === 'POST' && url.pathname === '/ui/workflows'",
+            "request.method === 'POST' && url.pathname === '/ui/workflow-runs'",
+            "createdWorkflowRunRequest.workflow_id !== WORKFLOW_ID",
+            "createdWorkflowRunRequest.client_run_id",
+            "assertMockBridgeContract",
+            "`/ui/runs/${RUN_ID}`",
+            "`/runs/${RUN_ID}/events`",
+            "workflow.run.started",
+            "workflow.node.agent.completed",
+            "workflow.run.completed",
+            "Workflow save-and-run UI smoke completed",
+        ],
+    )
+
+
 def test_agent_frontend_run_helpers_preserve_native_run_bridge_contract() -> None:
     agents_lib = "apps/frontend/src/lib/agents.ts"
     _assert_function_contains(
