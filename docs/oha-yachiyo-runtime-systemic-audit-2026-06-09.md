@@ -1266,7 +1266,8 @@ RunEvent sequence:
 
 - `RunProjectionCoordinator`
   - 负责 Run update 后同步 `run_artifacts`、`run_approvals` 和 `task_run_links` status projection。
-  - `RunRepository.update()` 直接调用该边界，`NativeRunEngine` 不再保留单独的 Run projection 同步 helper。
+  - 负责 RunEvent append 后同步 `task_run_links.last_event_sequence` replay cursor projection。
+  - `RunRepository.update()` 和 `NativeRunEngine.append_run_event()` 直接调用该边界，`NativeRunEngine` 不再保留单独的 Run projection / TaskRunLink projection 同步 helper。
 
 - `ApprovalRepository`
   - 负责 `run_approvals` pending / resolved 投影同步。

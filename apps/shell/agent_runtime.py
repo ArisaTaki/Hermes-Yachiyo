@@ -1824,7 +1824,7 @@ class RunArtifactRepository:
 
 
 class RunProjectionCoordinator:
-    """Synchronizes secondary projections after a run row changes."""
+    """Synchronizes secondary projections after run rows or facts change."""
 
     def __init__(
         self,
@@ -1848,6 +1848,12 @@ class RunProjectionCoordinator:
         self._run_artifacts.sync(run_id, artifacts)
         self._run_approvals.sync(run_id, status=status, pending_approval=pending_approval)
         self._task_run_links.sync_projection(run_id, status=status)
+
+    def sync_event_cursor(self, run_id: str, *, sequence: int) -> None:
+        self._task_run_links.sync_projection(
+            run_id,
+            last_event_sequence=int(sequence or 0),
+        )
 
 
 class RunGroupRepository:
@@ -5894,19 +5900,6 @@ class NativeRunEngine:
     def get_task_run_link(self, task_id: str) -> dict[str, Any]:
         return self.task_run_links.get(task_id)
 
-    def _sync_task_run_link_projection(
-        self,
-        run_id: str,
-        *,
-        status: str | None = None,
-        last_event_sequence: int | None = None,
-    ) -> None:
-        self.task_run_links.sync_projection(
-            run_id,
-            status=status,
-            last_event_sequence=last_event_sequence,
-        )
-
     def append_run_event(
         self,
         run_id: str,
@@ -5925,7 +5918,7 @@ class NativeRunEngine:
             visibility=visibility,
             sensitivity=sensitivity,
         )
-        self._sync_task_run_link_projection(run_id, last_event_sequence=int(event.get("sequence") or 0))
+        self.run_projections.sync_event_cursor(run_id, sequence=int(event.get("sequence") or 0))
         return event
 
     def list_run_events(

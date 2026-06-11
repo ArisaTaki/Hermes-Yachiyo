@@ -72,6 +72,7 @@ def test_run_projection_coordinator_syncs_run_projections():
         artifacts=artifacts,
         pending_approval=pending_approval,
     )
+    coordinator.sync_event_cursor("run-projection", sequence=7)
 
     assert calls == [
         ("artifacts", "run-projection", (artifacts,)),
@@ -81,6 +82,7 @@ def test_run_projection_coordinator_syncs_run_projections():
             {"status": "approval_required", "pending_approval": pending_approval},
         ),
         ("task_links", "run-projection", {"status": "approval_required"}),
+        ("task_links", "run-projection", {"last_event_sequence": 7}),
     ]
 
 
