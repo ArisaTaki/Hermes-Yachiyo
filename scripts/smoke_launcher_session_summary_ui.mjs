@@ -21,6 +21,7 @@ const STATUS_LABEL = '2 recent sessions';
 const now = new Date().toISOString();
 
 const bridgeState = {
+  ackPayloads: [],
   modeRequests: [],
   quickMessagePayload: null,
 };
@@ -67,7 +68,7 @@ function launcherPayload(mode) {
       recent_sessions: recentSessions,
     },
     notification: {
-      has_unread: live2d,
+      has_unread: true,
       latest_message: live2d ? { status: 'completed', content: LIVE2D_REPLY } : { status: 'completed', content: '' },
     },
     proactive: {
@@ -171,13 +172,25 @@ async function startMockBridge() {
         return;
       }
       if (request.method === 'POST' && url.pathname === '/ui/launcher/ack') {
-        await readRequestJson(request);
-        sendJson(response, 200, { ok: true, session_id: GROUP_SESSION_ID });
+        const body = await readRequestJson(request);
+        bridgeState.ackPayloads.push(body);
+        sendJson(response, 200, {
+          ok: true,
+          session_id: body.mode === 'live2d' ? DELEGATED_SESSION_ID : GROUP_SESSION_ID,
+        });
         return;
       }
       if (request.method === 'POST' && url.pathname === '/ui/launcher/quick-message') {
         bridgeState.quickMessagePayload = await readRequestJson(request);
         sendJson(response, 200, { ok: true, task_id: 'launcher-session-summary-quick-message' });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/__smoke/state') {
+        sendJson(response, 200, {
+          ackPayloads: bridgeState.ackPayloads,
+          modeRequests: bridgeState.modeRequests,
+          quickMessagePayload: bridgeState.quickMessagePayload,
+        });
         return;
       }
       sendJson(response, 404, { ok: false, error: `not found: ${request.method} ${url.pathname}` });
@@ -234,6 +247,7 @@ function killProcess(child) {
 function runElectronSmoke(devUrl, bridgeUrl) {
   const script = `
 const { app, BrowserWindow } = require('electron');
+const http = require('node:http');
 const devUrl = ${JSON.stringify(devUrl)};
 const bridgeUrl = ${JSON.stringify(bridgeUrl)};
 const bubbleSummary = ${JSON.stringify(BUBBLE_SUMMARY)};
@@ -246,6 +260,48 @@ const watchdog = setTimeout(() => {
   console.error('electron smoke timed out');
   app.exit(1);
 }, 30000);
+function requestBridgeJson(pathname) {
+  return new Promise((resolve, reject) => {
+    const request = http.request(bridgeUrl + pathname, { method: 'GET' }, (response) => {
+      const chunks = [];
+      response.on('data', (chunk) => chunks.push(chunk));
+      response.on('end', () => {
+        const body = Buffer.concat(chunks).toString('utf8');
+        if (!response.statusCode || response.statusCode < 200 || response.statusCode >= 300) {
+          reject(new Error('GET ' + pathname + ' failed with status ' + response.statusCode + ': ' + body));
+          return;
+        }
+        try {
+          resolve(body ? JSON.parse(body) : {});
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+    request.on('error', reject);
+    request.end();
+  });
+}
+function waitForBridgeState(predicate, label, timeout = 15000) {
+  const started = Date.now();
+  return new Promise((resolve, reject) => {
+    const tick = async () => {
+      try {
+        const state = await requestBridgeJson('/__smoke/state');
+        if (predicate(state)) {
+          resolve(state);
+          return;
+        }
+      } catch {}
+      if (Date.now() - started > timeout) {
+        reject(new Error('timeout waiting for bridge state: ' + label));
+      } else {
+        setTimeout(tick, 120);
+      }
+    };
+    tick();
+  });
+}
 function waitFor(win, predicate, label, timeout = 15000) {
   const started = Date.now();
   return new Promise((resolve, reject) => {
@@ -299,6 +355,7 @@ async function main() {
   win.webContents.on('console-message', (_event, level, message) => {
     if (level >= 2) console.error('[renderer]', message);
   });
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
   await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '&surface=desktop#/bubble');
   console.log('[electron-smoke] bubble loaded');
@@ -321,6 +378,16 @@ async function main() {
       && sessions[1].textContent.includes(${JSON.stringify(DELEGATED_SUMMARY)});
   }, 'bubble summary and recent sessions');
   console.log('[electron-smoke] bubble summary rendered');
+  await win.webContents.executeJavaScript(\`
+    const button = document.querySelector('[data-testid="bubble-launcher-button"]');
+    if (!button) throw new Error('missing bubble launcher button');
+    button.click();
+  \`, true);
+  await waitForBridgeState((state) => (
+    Array.isArray(state.ackPayloads)
+    && state.ackPayloads.some((payload) => payload?.mode === 'bubble')
+  ), 'bubble launcher ack');
+  console.log('[electron-smoke] bubble launcher ack verified');
 
   await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '&surface=desktop#/live2d');
   console.log('[electron-smoke] live2d loaded');
@@ -372,6 +439,16 @@ async function main() {
     return !quickInput && reply && reply.textContent.includes(${JSON.stringify(LIVE2D_REPLY)});
   }, 'live2d quick input submitted and reply restored');
   console.log('[electron-smoke] live2d quick input submitted: ' + live2dQuickText);
+  await win.webContents.executeJavaScript(\`
+    const stage = document.querySelector('[data-testid="live2d-launcher-stage"]');
+    if (!stage) throw new Error('missing live2d launcher stage');
+    stage.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  \`, true);
+  await waitForBridgeState((state) => (
+    Array.isArray(state.ackPayloads)
+    && state.ackPayloads.some((payload) => payload?.mode === 'live2d')
+  ), 'live2d launcher stage ack');
+  console.log('[electron-smoke] live2d launcher ack verified');
   clearTimeout(watchdog);
   await win.close();
   app.quit();
@@ -416,6 +493,13 @@ function assertMockBridgeContract() {
   }
   if (!bridgeState.modeRequests.includes('live2d')) {
     throw new Error('live2d launcher payload was not requested');
+  }
+  const ackModes = bridgeState.ackPayloads.map((payload) => payload?.mode);
+  if (!ackModes.includes('bubble')) {
+    throw new Error(`bubble launcher ack was not called: ${JSON.stringify(bridgeState.ackPayloads)}`);
+  }
+  if (!ackModes.includes('live2d')) {
+    throw new Error(`live2d launcher ack was not called: ${JSON.stringify(bridgeState.ackPayloads)}`);
   }
   const quickPayload = bridgeState.quickMessagePayload;
   if (!quickPayload) {
