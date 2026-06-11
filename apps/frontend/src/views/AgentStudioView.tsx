@@ -1260,7 +1260,9 @@ function runEventReplayToTimelineEvent(event: RunEventSpec): Record<string, unkn
         ? payload.result
         : typeof payload.error === 'string'
           ? payload.error
-          : '';
+          : typeof payload.workflow_node_label === 'string'
+            ? payload.workflow_node_label
+            : '';
   return {
     event: event.event_type,
     detail,
