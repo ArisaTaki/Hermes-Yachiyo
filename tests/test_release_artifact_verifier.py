@@ -422,6 +422,22 @@ def test_verifier_reports_packaged_app_missing_ui_e2e_selector(tmp_path):
         asar_path,
         "packaged Electron app.asar must include UI E2E selector 'agent-run-detail-workflow-child-cancel'",
     ) in findings
+    assert verifier.Finding(
+        asar_path,
+        "packaged Electron app.asar must include UI E2E selector 'agent-run-detail-result'",
+    ) in findings
+    assert verifier.Finding(
+        asar_path,
+        "packaged Electron app.asar must include UI E2E selector 'workflow-studio'",
+    ) in findings
+    assert verifier.Finding(
+        asar_path,
+        "packaged Electron app.asar must include UI E2E selector 'workflow-agent-palette-item'",
+    ) in findings
+    assert verifier.Finding(
+        asar_path,
+        "packaged Electron app.asar must include UI E2E selector 'workflow-run-preview-step'",
+    ) in findings
 
 
 def test_verifier_reports_packaged_app_development_only_ui_e2e_hook(tmp_path):
