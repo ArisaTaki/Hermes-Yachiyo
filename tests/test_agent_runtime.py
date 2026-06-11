@@ -1357,6 +1357,7 @@ def test_task_run_link_repository_tracks_run_projection(tmp_path):
         assert isinstance(service.task_run_links, TaskRunLinkRepository)
         assert isinstance(service.run_projections, RunProjectionCoordinator)
         assert service.runs._sync_projections.__self__ is service.run_projections
+        assert service.run_events._sync_event_cursor.__self__ is service.run_projections
 
         run = service.start_main_chat_run(
             task_id="task-link-repo",

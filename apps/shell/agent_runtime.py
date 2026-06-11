@@ -1395,10 +1395,18 @@ class ToolBroker:
 class RunEventRepository:
     """Durable, replayable execution fact log for native runs."""
 
-    def __init__(self, conn: _LockedConnection, db_lock: threading.RLock, *, ensure_run_exists: Any | None = None) -> None:
+    def __init__(
+        self,
+        conn: _LockedConnection,
+        db_lock: threading.RLock,
+        *,
+        ensure_run_exists: Any | None = None,
+        sync_event_cursor: Any | None = None,
+    ) -> None:
         self._conn = conn
         self._db_lock = db_lock
         self._ensure_run_exists = ensure_run_exists
+        self._sync_event_cursor = sync_event_cursor
 
     def append(
         self,
@@ -1452,8 +1460,10 @@ class RunEventRepository:
             except Exception:
                 self._conn.rollback()
                 raise
+            if callable(self._sync_event_cursor):
+                self._sync_event_cursor(clean_run_id, sequence=sequence)
 
-        return {
+        event = {
             "event_id": event_id,
             "run_id": clean_run_id,
             "sequence": sequence,
@@ -1465,6 +1475,7 @@ class RunEventRepository:
             "payload": safe_payload,
             "created_at": created_at,
         }
+        return event
 
     def list(
         self,
@@ -3376,7 +3387,12 @@ class NativeRunEngine:
             sync_projections=self.run_projections.sync,
             append_run_to_group=self._append_run_to_group,
         )
-        self.run_events = RunEventRepository(self._conn, self._db_lock, ensure_run_exists=self.get_run)
+        self.run_events = RunEventRepository(
+            self._conn,
+            self._db_lock,
+            ensure_run_exists=self.get_run,
+            sync_event_cursor=self.run_projections.sync_event_cursor,
+        )
         self.approvals = ApprovalCoordinator(
             timeline_factory=self._timeline,
             append_run_event=self.append_run_event,
@@ -5910,7 +5926,7 @@ class NativeRunEngine:
         visibility: str = "user",
         sensitivity: str = "public",
     ) -> dict[str, Any]:
-        event = self.run_events.append(
+        return self.run_events.append(
             run_id,
             event_type,
             payload,
@@ -5918,8 +5934,6 @@ class NativeRunEngine:
             visibility=visibility,
             sensitivity=sensitivity,
         )
-        self.run_projections.sync_event_cursor(run_id, sequence=int(event.get("sequence") or 0))
-        return event
 
     def list_run_events(
         self,

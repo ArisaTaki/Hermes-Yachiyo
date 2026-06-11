@@ -1257,6 +1257,7 @@ RunEvent sequence:
 - `RunEventRepository`
   - 负责 RunEvent durable append / replay list。
   - sequence 分配在 `BEGIN IMMEDIATE` 事务内完成。
+  - append 成功后通过注入的 projection callback 同步 replay cursor，避免 `NativeRunEngine.append_run_event()` 直接维护 TaskRunLink 投影字段。
   - 默认 list 只返回 user-visible 且非 secret events。
   - limit clamp 保持默认 200、最大 1000。
 
@@ -1267,7 +1268,7 @@ RunEvent sequence:
 - `RunProjectionCoordinator`
   - 负责 Run update 后同步 `run_artifacts`、`run_approvals` 和 `task_run_links` status projection。
   - 负责 RunEvent append 后同步 `task_run_links.last_event_sequence` replay cursor projection。
-  - `RunRepository.update()` 和 `NativeRunEngine.append_run_event()` 直接调用该边界，`NativeRunEngine` 不再保留单独的 Run projection / TaskRunLink projection 同步 helper。
+  - `RunRepository.update()` 和 `RunEventRepository.append()` 直接调用该边界，`NativeRunEngine` 不再保留单独的 Run projection / TaskRunLink projection 同步 helper。
 
 - `ApprovalRepository`
   - 负责 `run_approvals` pending / resolved 投影同步。
