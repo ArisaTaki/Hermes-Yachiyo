@@ -104,6 +104,31 @@ def test_verifier_scans_release_artifact_paths_for_legacy_kernel_entrypoints(tmp
     ]
 
 
+def test_verifier_scans_legacy_protocol_and_workspace_tokens(tmp_path):
+    resources = tmp_path / "Oha-Yachiyo.app" / "Contents" / "Resources"
+    bundle = resources / "app.asar"
+    old_workspace_config = resources / "configs" / "yachiyo.json"
+    bundle.parent.mkdir(parents=True)
+    old_workspace_config.parent.mkdir(parents=True)
+    bundle.write_bytes(b"\x00run_yachiyo\x00yachiyo_group_dispatch\xff")
+    old_workspace_config.write_bytes(b'{"name":"Oha-Yachiyo"}')
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[resources],
+        check_required_files=False,
+        check_release_security_guards=False,
+        allow_binary_targets=True,
+    )
+
+    messages_by_path: dict = {}
+    for finding in findings:
+        messages_by_path.setdefault(finding.path, []).append(finding.message)
+    assert "contains legacy product token 'run_yachiyo'" in messages_by_path[bundle]
+    assert "contains legacy product token 'yachiyo_group_dispatch'" in messages_by_path[bundle]
+    assert "path contains legacy product token 'configs/yachiyo.json'" in messages_by_path[old_workspace_config]
+
+
 def test_verifier_binary_mode_scans_nested_directories(tmp_path):
     resources = tmp_path / "Oha-Yachiyo.app" / "Contents" / "Resources"
     backend = resources / "backend" / "oha-yachiyo-backend"

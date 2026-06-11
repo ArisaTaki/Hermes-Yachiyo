@@ -23,6 +23,7 @@ _OLD_ENV = "HER" "MES_YACHIYO"
 _OLD_MODULE = "her" "mes_yachiyo"
 _OLD_KERNEL_NAME = "Her" "mes"
 _OLD_KERNEL_LOWER = "her" "mes"
+_OLD_PROTOCOL_PRODUCT = "yachi" "yo"
 _LEGACY_KERNEL_TOKENS: tuple[str, ...] = (
     f"{_OLD_KERNEL_NAME}Executor",
     f"{_OLD_KERNEL_NAME}UnavailableExecutor",
@@ -47,6 +48,18 @@ _LEGACY_KERNEL_TOKENS: tuple[str, ...] = (
     f"{_OLD_KERNEL_LOWER}_cli",
     f"{_OLD_KERNEL_LOWER}-cli",
 )
+_LEGACY_PROTOCOL_TOKENS: tuple[str, ...] = (
+    f"run_{_OLD_PROTOCOL_PRODUCT}",
+    f"{_OLD_PROTOCOL_PRODUCT}_delegation",
+    f"{_OLD_PROTOCOL_PRODUCT}_group_dispatch",
+    f"{_OLD_PROTOCOL_PRODUCT}_only",
+    f"{_OLD_PROTOCOL_PRODUCT.upper()}_ONLY",
+    f"get_{_OLD_PROTOCOL_PRODUCT}_workspace_dir",
+    f"{_OLD_PROTOCOL_PRODUCT}_workspace",
+    f"{_OLD_PROTOCOL_PRODUCT}-workspace",
+    f".{_OLD_PROTOCOL_PRODUCT}_init",
+    f"configs/{_OLD_PROTOCOL_PRODUCT}.json",
+)
 
 FORBIDDEN_TOKENS: tuple[str, ...] = (
     _OLD_CAPITALIZED,
@@ -55,6 +68,7 @@ FORBIDDEN_TOKENS: tuple[str, ...] = (
     _OLD_MODULE,
     f"{_OLD_LOWER}-build.json",
     *_LEGACY_KERNEL_TOKENS,
+    *_LEGACY_PROTOCOL_TOKENS,
 )
 
 DEFAULT_SCAN_PATHS: tuple[Path, ...] = (
