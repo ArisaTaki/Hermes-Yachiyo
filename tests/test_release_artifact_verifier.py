@@ -85,6 +85,25 @@ def test_verifier_binary_mode_scans_legacy_kernel_entrypoints(tmp_path):
     assert "contains legacy product token 'hermes-cli'" in messages
 
 
+def test_verifier_scans_release_artifact_paths_for_legacy_kernel_entrypoints(tmp_path):
+    resources = tmp_path / "Oha-Yachiyo.app" / "Contents" / "Resources"
+    legacy_cli = resources / "bin" / "hermes-cli"
+    legacy_cli.parent.mkdir(parents=True)
+    legacy_cli.write_bytes(b"\xff\x00Oha-Yachiyo\xfe")
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[resources],
+        check_required_files=False,
+        check_release_security_guards=False,
+        allow_binary_targets=True,
+    )
+
+    assert findings == [
+        verifier.Finding(legacy_cli, "path contains legacy product token 'hermes-cli'")
+    ]
+
+
 def test_verifier_binary_mode_scans_nested_directories(tmp_path):
     resources = tmp_path / "Oha-Yachiyo.app" / "Contents" / "Resources"
     backend = resources / "backend" / "oha-yachiyo-backend"

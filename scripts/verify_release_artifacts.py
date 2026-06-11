@@ -628,6 +628,13 @@ def verify_release_artifacts(
             findings.append(Finding(path, "release verification target is missing"))
             continue
         try:
+            relative_path = str(path.resolve().relative_to(root_path.resolve()))
+        except ValueError:
+            relative_path = str(path)
+        for token in FORBIDDEN_TOKENS:
+            if token in relative_path:
+                findings.append(Finding(path, f"path contains legacy product token {token!r}"))
+        try:
             content_bytes = path.read_bytes()
         except OSError as exc:
             findings.append(Finding(path, f"release verification target could not be read: {exc}"))
