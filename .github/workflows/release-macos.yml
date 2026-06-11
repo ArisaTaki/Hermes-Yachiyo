@@ -134,6 +134,7 @@ jobs:
             tests/test_agent_runtime.py::test_main_chat_model_loop_executes_split_openai_compatible_sse_tool_call_frames \
             tests/test_agent_runtime.py::test_main_chat_model_loop_coalesces_indexless_streaming_tool_call_deltas \
             tests/test_agent_runtime.py::test_main_chat_model_loop_coalesces_indexless_interleaved_tool_call_deltas_by_id \
+            tests/test_agent_runtime.py::test_main_chat_model_loop_executes_legacy_streaming_function_call \
             tests/test_agent_runtime.py::test_main_chat_model_loop_executes_responses_style_streaming_tool_call \
             tests/test_streaming_provider_smoke.py \
             tests/test_legacy_kernel_removal.py \

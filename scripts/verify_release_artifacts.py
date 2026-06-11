@@ -856,6 +856,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover NativeRunEngine indexless interleaved SSE tool-call deltas",
     ),
     (
+        "tests/test_agent_runtime.py::test_main_chat_model_loop_executes_legacy_streaming_function_call",
+        "macOS release workflow smoke tests must cover NativeRunEngine legacy streaming function_call frames",
+    ),
+    (
         "tests/test_agent_runtime.py::test_main_chat_model_loop_executes_responses_style_streaming_tool_call",
         "macOS release workflow smoke tests must cover NativeRunEngine Responses-style streaming tool calls",
     ),
