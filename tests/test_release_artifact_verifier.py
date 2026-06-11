@@ -396,6 +396,18 @@ def test_verifier_reports_packaged_app_missing_ui_e2e_selector(tmp_path):
     ) in findings
     assert verifier.Finding(
         asar_path,
+        "packaged Electron app.asar must include UI E2E selector 'proactive-tts-runtime-status'",
+    ) in findings
+    assert verifier.Finding(
+        asar_path,
+        "packaged Electron app.asar must include UI E2E selector 'proactive-test-result'",
+    ) in findings
+    assert verifier.Finding(
+        asar_path,
+        "packaged Electron app.asar must include UI E2E selector 'tts-test-text-page'",
+    ) in findings
+    assert verifier.Finding(
+        asar_path,
         "packaged Electron app.asar must include UI E2E selector 'agent-run-detail-approval'",
     ) in findings
     assert verifier.Finding(
