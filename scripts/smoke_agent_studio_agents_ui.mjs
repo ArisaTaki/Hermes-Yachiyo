@@ -347,6 +347,22 @@ async function main() {
   if (avatarPickerCalls !== 1) {
     throw new Error('expected Agent avatar picker to be called once, got ' + avatarPickerCalls);
   }
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"agent-avatar-clear\\"]').click()", true);
+  await waitFor(win, () => (
+    !document.querySelector('[data-testid="agent-avatar-clear"]')
+    && !document.querySelector('.agent-avatar.has-image img')
+  ), 'agent avatar cleared');
+  console.log('[electron-smoke] agent avatar cleared');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"agent-avatar-select\\"]').click()", true);
+  await waitFor(win, () => (
+    document.querySelector('[data-testid="agent-avatar-clear"]')
+    && document.querySelector('.agent-avatar.has-image img')?.getAttribute('src')?.startsWith('data:image/png;base64,')
+  ), 'agent avatar reselected');
+  const avatarPickerCallsAfterReselect = await win.webContents.executeJavaScript('window.__ohaAgentAvatarPickerCalls || 0', true);
+  if (avatarPickerCallsAfterReselect !== 2) {
+    throw new Error('expected Agent avatar picker to be called twice after reselect, got ' + avatarPickerCallsAfterReselect);
+  }
+  console.log('[electron-smoke] agent avatar reselected');
   await win.webContents.executeJavaScript(\`
   (() => {
     document.querySelector('[data-testid="agent-save"]').click();
