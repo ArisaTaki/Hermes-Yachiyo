@@ -24,6 +24,7 @@ const now = new Date().toISOString();
 
 const bridgeState = {
   ackPayloads: [],
+  live2dClickAction: 'toggle_reply',
   modeRequests: [],
   quickMessagePayload: null,
 };
@@ -87,7 +88,7 @@ function launcherPayload(mode) {
           latest_reply_full: LIVE2D_REPLY,
           show_reply_bubble: true,
           enable_quick_input: true,
-          click_action: 'toggle_reply',
+          click_action: bridgeState.live2dClickAction,
           default_open_behavior: 'chat_input',
           position_anchor: 'bottom-right',
           preview_url: `data:image/svg+xml;base64,${previewSvg}`,
@@ -192,9 +193,15 @@ async function startMockBridge() {
       if (request.method === 'GET' && url.pathname === '/__smoke/state') {
         sendJson(response, 200, {
           ackPayloads: bridgeState.ackPayloads,
+          live2dClickAction: bridgeState.live2dClickAction,
           modeRequests: bridgeState.modeRequests,
           quickMessagePayload: bridgeState.quickMessagePayload,
         });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/__smoke/live2d-open-chat') {
+        bridgeState.live2dClickAction = 'open_chat';
+        sendJson(response, 200, { ok: true, live2dClickAction: bridgeState.live2dClickAction });
         return;
       }
       sendJson(response, 404, { ok: false, error: `not found: ${request.method} ${url.pathname}` });
@@ -472,15 +479,49 @@ async function main() {
   }, 'live2d quick input submitted and reply restored');
   console.log('[electron-smoke] live2d quick input submitted: ' + live2dQuickText);
   await win.webContents.executeJavaScript(\`
-    const stage = document.querySelector('[data-testid="live2d-launcher-stage"]');
-    if (!stage) throw new Error('missing live2d launcher stage');
-    stage.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    (() => {
+      const stage = document.querySelector('[data-testid="live2d-launcher-stage"]');
+      if (!stage) throw new Error('missing live2d launcher stage');
+      stage.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    })();
   \`, true);
   await waitForBridgeState((state) => (
     Array.isArray(state.ackPayloads)
     && state.ackPayloads.some((payload) => payload?.mode === 'live2d')
   ), 'live2d launcher stage ack');
   console.log('[electron-smoke] live2d launcher ack verified');
+
+  await requestBridgeJson('/__smoke/live2d-open-chat');
+  const launcherRequestCountBeforeOpenChat = (await requestBridgeJson('/__smoke/state')).modeRequests.length;
+  await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '&surface=desktop#/live2d');
+  await installOpenViewProbe(win);
+  await waitFor(win, () => document.querySelector('[data-testid="live2d-launcher-shell"]'), 'live2d open-chat shell');
+  await waitForBridgeState((state) => (
+    state.live2dClickAction === 'open_chat'
+    && Array.isArray(state.modeRequests)
+    && state.modeRequests.length > launcherRequestCountBeforeOpenChat
+  ), 'live2d open-chat launcher payload');
+  const live2dAckCountBeforeOpenChat = (await requestBridgeJson('/__smoke/state')).ackPayloads
+    .filter((payload) => payload?.mode === 'live2d').length;
+  await win.webContents.executeJavaScript(\`
+    (() => {
+      const stage = document.querySelector('[data-testid="live2d-launcher-stage"]');
+      if (!stage) throw new Error('missing live2d launcher stage for open chat');
+      stage.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    })();
+  \`, true);
+  await waitForBridgeState((state) => (
+    Array.isArray(state.ackPayloads)
+    && state.ackPayloads.filter((payload) => payload?.mode === 'live2d').length > live2dAckCountBeforeOpenChat
+  ), 'live2d open-chat ack');
+  await waitFor(win, () => (
+    Array.isArray(window.__ohaLauncherOpenViewCalls)
+    && window.__ohaLauncherOpenViewCalls.some((call) => (
+      call?.view === 'chat'
+      && call?.params?.session_id === ${JSON.stringify(DELEGATED_SESSION_ID)}
+    ))
+  ), 'live2d launcher opened delegated chat session');
+  console.log('[electron-smoke] live2d open-chat session handoff verified');
   clearTimeout(watchdog);
   await win.close();
   app.quit();
