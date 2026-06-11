@@ -311,8 +311,13 @@ def test_chat_ui_exposes_stable_e2e_selectors_for_image_cancel_approval_flow() -
             "data-testid=\"chat-image-viewer-modal\"",
             "data-testid=\"chat-image-viewer-stage\"",
             "data-testid=\"chat-image-viewer-close\"",
+            "data-attachment-id={attachment.id || ''}",
+            "data-attachment-kind={kind}",
+            "data-attachment-mime={mimeType}",
+            "data-attachment-name={name}",
         ],
     )
+    _assert_occurs("apps/frontend/src/components/ImageAttachmentViewer.tsx", "data-attachment-id={attachment.id || ''}", 2)
 
 
 def test_chat_approval_run_detail_handoff_preserves_route_and_replay_wiring() -> None:

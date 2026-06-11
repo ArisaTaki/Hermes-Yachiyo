@@ -27,6 +27,8 @@ function ImagePreviewAttachment({ attachment, testId }: Props) {
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState(false);
   const name = attachment.name || '图片';
+  const kind = attachment.kind || 'image';
+  const mimeType = attachment.mime_type || 'image';
   const sizeText = formatBytes(attachment.size);
   const canPreview = Boolean(attachment.url) && !failed;
   const viewer = open && canPreview ? (
@@ -77,6 +79,10 @@ function ImagePreviewAttachment({ attachment, testId }: Props) {
         className={`message-attachment ${failed ? 'is-broken' : ''}`}
         type="button"
         data-testid={testId}
+        data-attachment-id={attachment.id || ''}
+        data-attachment-kind={kind}
+        data-attachment-mime={mimeType}
+        data-attachment-name={name}
         disabled={!attachment.url}
         title={`${name} · ${sizeText} · 点击查看大图`}
         onClick={(event) => {
@@ -100,12 +106,21 @@ function ImagePreviewAttachment({ attachment, testId }: Props) {
 
 function AudioAttachmentViewer({ attachment, testId }: Props) {
   const name = attachment.name || '语音';
+  const kind = attachment.kind || 'audio';
+  const mimeType = attachment.mime_type || 'audio';
   const sizeText = formatBytes(attachment.size);
   return (
-    <div className="message-audio-attachment" data-testid={testId}>
+    <div
+      className="message-audio-attachment"
+      data-testid={testId}
+      data-attachment-id={attachment.id || ''}
+      data-attachment-kind={kind}
+      data-attachment-mime={mimeType}
+      data-attachment-name={name}
+    >
       <div className="message-audio-meta">
         <strong>{name}</strong>
-        <span>{attachment.mime_type || 'audio'} · {sizeText}</span>
+        <span>{mimeType} · {sizeText}</span>
       </div>
       {attachment.url ? (
         <audio controls preload="none" src={attachment.url}>
