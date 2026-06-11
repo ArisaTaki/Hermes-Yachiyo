@@ -4305,6 +4305,24 @@ def test_main_chat_records_failed_run_event_when_approved_tool_fails(tmp_path, m
 
     monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
     try:
+        failed_projection_calls: list[dict[str, object]] = []
+        original_failed_projection = service._project_approval_resume_failed
+
+        def spy_project_approval_resume_failed(context, safe_error):
+            failed_projection_calls.append(
+                {
+                    "run_id": context.run_id,
+                    "tool_name": context.tool_name,
+                    "safe_error": safe_error,
+                }
+            )
+            return original_failed_projection(context, safe_error)
+
+        monkeypatch.setattr(
+            service,
+            "_project_approval_resume_failed",
+            spy_project_approval_resume_failed,
+        )
         run = service.start_main_chat_run(
             task_id="task-main-chat-terminal-failure",
             session_id="session-main-chat-terminal-failure",
@@ -4324,6 +4342,13 @@ def test_main_chat_records_failed_run_event_when_approved_tool_fails(tmp_path, m
         assert "terminal.run 执行失败" in resumed["result"]
         assert "退出码：7" in resumed["result"]
         assert "main-chat-terminal-failure" in resumed["result"]
+        assert failed_projection_calls == [
+            {
+                "run_id": run["run_id"],
+                "tool_name": "terminal.run",
+                "safe_error": resumed["result"],
+            }
+        ]
         events = service.list_run_events(run["run_id"])["events"]
         failed_event = next(event for event in events if event["event_type"] == "agent.run.failed")
         assert "terminal.run 执行失败" in failed_event["payload"]["error"]
@@ -9211,6 +9236,24 @@ def test_agent_run_fails_when_approved_terminal_returns_nonzero(tmp_path, monkey
 
     monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
     try:
+        failed_projection_calls: list[dict[str, object]] = []
+        original_failed_projection = service._project_approval_resume_failed
+
+        def spy_project_approval_resume_failed(context, safe_error):
+            failed_projection_calls.append(
+                {
+                    "run_id": context.run_id,
+                    "tool_name": context.tool_name,
+                    "safe_error": safe_error,
+                }
+            )
+            return original_failed_projection(context, safe_error)
+
+        monkeypatch.setattr(
+            service,
+            "_project_approval_resume_failed",
+            spy_project_approval_resume_failed,
+        )
         agent = service.create_agent(
             {
                 "name": "Failing Terminal Agent",
@@ -9229,6 +9272,13 @@ def test_agent_run_fails_when_approved_terminal_returns_nonzero(tmp_path, monkey
         assert "terminal.run 执行失败" in resumed["result"]
         assert "退出码：7" in resumed["result"]
         assert "terminal-failure-smoke" in resumed["result"]
+        assert failed_projection_calls == [
+            {
+                "run_id": run["run_id"],
+                "tool_name": "terminal.run",
+                "safe_error": resumed["result"],
+            }
+        ]
         assert len(calls) == 1
         failed_event = next(event for event in resumed["timeline"] if event["event"] == "agent.tool.failed")
         assert failed_event["status"] == "failed"

@@ -8106,15 +8106,9 @@ class NativeRunEngine:
             )
         except Exception as exc:
             safe_error = redact_secrets(exc)
-            resume_context.timeline.append(self._timeline("agent.run.failed", safe_error))
-            self.append_run_event(run_id, "agent.run.failed", {"error": safe_error})
-            result = self._update_run(
-                run_id,
-                status="failed",
-                result=safe_error,
-                timeline=resume_context.timeline,
-                artifacts=resume_context.artifacts,
-                pending_approval=None,
+            result = self._project_approval_resume_failed(
+                resume_context,
+                safe_error,
             )
         return self._project_child_run_transition(result)
 
@@ -8188,6 +8182,22 @@ class NativeRunEngine:
             pending_approval=pending_approval,
         )
 
+    def _project_approval_resume_failed(
+        self,
+        context: ToolApprovalResumeContext,
+        safe_error: str,
+    ) -> dict[str, Any]:
+        context.timeline.append(self._timeline("agent.run.failed", safe_error))
+        self.append_run_event(context.run_id, "agent.run.failed", {"error": safe_error})
+        return self._update_run(
+            context.run_id,
+            status="failed",
+            result=safe_error,
+            timeline=context.timeline,
+            artifacts=context.artifacts,
+            pending_approval=None,
+        )
+
     def _approve_main_chat_run_approval(self, run: dict[str, Any]) -> dict[str, Any]:
         run_id = str(run["run_id"])
         pending = self.runs.pending_approval_private(run_id)
@@ -8238,15 +8248,9 @@ class NativeRunEngine:
             )
         except Exception as exc:
             safe_error = redact_api_error_text(exc)
-            resume_context.timeline.append(self._timeline("agent.run.failed", safe_error))
-            self.append_run_event(run_id, "agent.run.failed", {"error": safe_error})
-            result = self._update_run(
-                run_id,
-                status="failed",
-                result=safe_error,
-                timeline=resume_context.timeline,
-                artifacts=resume_context.artifacts,
-                pending_approval=None,
+            result = self._project_approval_resume_failed(
+                resume_context,
+                safe_error,
             )
         return result
 
