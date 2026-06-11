@@ -187,6 +187,8 @@ PACKAGED_UI_E2E_REQUIRED_SELECTORS: tuple[str, ...] = (
     "chat-message-approval-reject",
     "chat-message-approval-open-run-detail",
     "chat-message-open-run-detail",
+    "chat-agent-run-progress-card",
+    "chat-agent-run-progress-open-run-detail",
     "chat-composer-approval-notice",
     "chat-composer-approval-approve",
     "chat-composer-approval-reject",
@@ -882,6 +884,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "node scripts/smoke_chat_run_detail_handoff_ui.mjs",
         "macOS release workflow smoke tests must cover Chat completed Run Detail handoff Electron UI smoke",
+    ),
+    (
+        "node scripts/smoke_chat_agent_progress_ui.mjs",
+        "macOS release workflow smoke tests must cover Chat Agent progress Electron UI smoke",
     ),
     (
         "node scripts/smoke_chat_cancel_ui.mjs",

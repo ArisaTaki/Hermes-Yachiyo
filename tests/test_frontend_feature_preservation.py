@@ -668,6 +668,31 @@ def test_chat_run_detail_handoff_ui_smoke_uses_completed_message_run_metadata() 
     )
 
 
+def test_chat_agent_progress_ui_smoke_uses_running_run_detail_handoff() -> None:
+    smoke_script = "scripts/smoke_chat_agent_progress_ui.mjs"
+    _assert_contains(
+        smoke_script,
+        [
+            "#/chat",
+            "status: 'processing'",
+            "run_id: RUN_ID",
+            "run_status: 'running'",
+            "runnable_kind: 'agent'",
+            "run_progress_title: PROGRESS_TITLE",
+            "data-testid=\"chat-agent-run-progress-card\"",
+            "data-testid=\"chat-agent-run-progress-open-run-detail\"",
+            "data-testid=\\\"chat-agent-run-progress-open-run-detail\\\"",
+            "data-testid=\"agent-run-detail\"",
+            "data-testid=\"agent-run-detail-task\"",
+            "data-testid=\"agent-run-detail-execution-event\"",
+            "`/ui/runs/${RUN_ID}`",
+            "`/runs/${RUN_ID}/events`",
+            "agent.run.started",
+            "Chat Agent progress opened matching running Run Detail",
+        ],
+    )
+
+
 def test_chat_cancel_ui_smoke_uses_stop_buttons_and_cancel_route() -> None:
     smoke_script = "scripts/smoke_chat_cancel_ui.mjs"
     _assert_contains(

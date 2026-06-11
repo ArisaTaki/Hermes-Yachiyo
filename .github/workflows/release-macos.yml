@@ -171,6 +171,7 @@ jobs:
 
           node scripts/smoke_chat_image_attachment_ui.mjs
           node scripts/smoke_chat_run_detail_handoff_ui.mjs
+          node scripts/smoke_chat_agent_progress_ui.mjs
           node scripts/smoke_chat_cancel_ui.mjs
           node scripts/smoke_chat_approval_ui.mjs
           node scripts/smoke_chat_delegated_summary_ui.mjs
