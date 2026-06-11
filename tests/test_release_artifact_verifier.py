@@ -919,6 +919,8 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow smoke tests must cover packaged backend build command guards" in messages
     assert "macOS release workflow smoke tests must cover release-like build metadata guards" in messages
     assert "macOS release workflow smoke tests must cover release-like CredentialStore guards" in messages
+    assert "macOS release workflow smoke tests must cover Bridge debug routes release metadata guard" in messages
+    assert "macOS release workflow smoke tests must cover Bridge debug routes packaged build guard" in messages
     assert "macOS release workflow smoke tests must cover runtime secret redaction verifier" in messages
     assert "macOS release workflow smoke tests must cover security logging redaction" in messages
     assert "macOS release workflow smoke tests must cover screenshot behavior" in messages

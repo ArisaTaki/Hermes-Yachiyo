@@ -2086,6 +2086,7 @@ compileall passed
 - release workflow 的 opt-in 真实 provider tool-call smoke 现在也要求 `finish_reason=tool_calls`，release verifier 会阻断丢失该断言的 workflow，避免真实 provider 只回内容但未完成 tool-call 协议时误过发布门禁。
 - NativeRunEngine 与 opt-in streaming smoke helper 现在也接受 OpenAI-compatible gateway 预处理后的单数 `tool_call` frame：`choices[].delta.tool_call` / `choices[].message.tool_call` 会和既有 `tool_calls[]` 分片一样归并，进入 `workspace.read` 执行与 tool-result provider history，仍只落 `agent.tool.call` / `model.output.completed` 完成态 facts，不写 token 级 delta；smoke helper 摘要继续不打印 raw arguments。
 - release verifier 现在除了 release / alpha / stable metadata，也会模拟 `OHA_YACHIYO_PACKAGED_BUILD=1`，确认 packaged build env 即使带 `OHA_YACHIYO_DEV=1` 也不能启用 development features、Bridge debug routes 或 `DevFileCredentialStore` fallback。
+- release workflow smoke 现在也强制包含 Bridge debug routes release metadata / packaged build guard，直接覆盖 `debug_routes_enabled()` 在 release-like metadata 与 packaged env 下不会因 `OHA_YACHIYO_DEV=1` 被重新打开。
 - release workflow smoke 现在也强制包含 approved terminal failure output redaction 回归，确保批准后的 `terminal.run` 非零退出不会把 stdout / stderr secret 写入 Run projection、RunEvent 或 runtime SQLite。
 - release workflow smoke 现在也强制包含 skill install env scrub 回归，确保 Runtime 发起的 Skill 安装子进程不会继承 `SSH_AUTH_SOCK`、`GITHUB_TOKEN`、云厂商凭据或 `*_API_KEY` / `*_TOKEN` / `*_SECRET` / `*_PASSWORD`。
 - release workflow smoke 现在也强制包含主聊天 provider exception / tool exception redaction 回归，以及 Workflow child Agent provider exception redaction 回归，避免异常文本中的 secret 进入 Run projection、父 Workflow projection、RunEvent、tool result message 或 runtime SQLite。

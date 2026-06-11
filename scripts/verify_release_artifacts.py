@@ -879,6 +879,14 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover release-like CredentialStore guards",
     ),
     (
+        "tests/test_bridge_server.py::test_bridge_debug_routes_are_disabled_for_release_metadata",
+        "macOS release workflow smoke tests must cover Bridge debug routes release metadata guard",
+    ),
+    (
+        "tests/test_bridge_server.py::test_bridge_debug_routes_are_disabled_for_packaged_build_env",
+        "macOS release workflow smoke tests must cover Bridge debug routes packaged build guard",
+    ),
+    (
         "tests/test_secret_redaction_verifier.py",
         "macOS release workflow smoke tests must cover runtime secret redaction verifier",
     ),
