@@ -438,6 +438,27 @@ def test_chat_image_attachment_ui_smoke_uses_file_input_path() -> None:
     _assert_not_contains(smoke_script, ["oha-chat-e2e-add-image"])
 
 
+def test_chat_cancel_ui_smoke_uses_stop_buttons_and_cancel_route() -> None:
+    smoke_script = "scripts/smoke_chat_cancel_ui.mjs"
+    _assert_contains(
+        smoke_script,
+        [
+            "/ui/chat/session/cancel",
+            "document.querySelector('[data-testid=\"chat-composer-stop-button\"]')",
+            "document.querySelector('[data-testid=\"chat-header-stop-button\"]')",
+            r'''document.querySelector('[data-testid=\\"chat-composer-stop-button\\"]').click()''',
+            r'''document.querySelector('[data-testid=\\"chat-header-stop-button\\"]').click()''',
+            "assistant-cancel-ui-smoke-processing",
+            "assistant-cancel-ui-smoke-cancelled",
+            "Still running cancel smoke.",
+            "Cancelled by user from Chat UI smoke.",
+            "expected two chat cancel calls",
+            "composer stop cancelled chat",
+            "header stop cancelled chat",
+        ],
+    )
+
+
 def test_agent_run_detail_ui_smoke_uses_replay_route_and_dom_attributes() -> None:
     smoke_script = "scripts/smoke_agent_run_detail_ui.mjs"
     _assert_contains(

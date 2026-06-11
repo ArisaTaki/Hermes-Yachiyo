@@ -107,6 +107,8 @@ PACKAGED_UI_E2E_REQUIRED_SELECTORS: tuple[str, ...] = (
     "chat-group-dialog",
     "chat-composer-input",
     "chat-composer-send",
+    "chat-header-stop-button",
+    "chat-composer-stop-button",
     "chat-message-summary-status",
     "bubble-launcher-session-summary-probe",
     "bubble-launcher-recent-session",
@@ -723,6 +725,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "node scripts/smoke_chat_image_attachment_ui.mjs",
         "macOS release workflow smoke tests must cover Chat image Electron UI smoke",
+    ),
+    (
+        "node scripts/smoke_chat_cancel_ui.mjs",
+        "macOS release workflow smoke tests must cover Chat cancel Electron UI smoke",
     ),
     (
         "node scripts/smoke_chat_group_summary_ui.mjs",
