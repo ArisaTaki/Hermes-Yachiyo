@@ -12,6 +12,8 @@ const ELECTRON = path.join(FRONTEND, 'node_modules', '.bin', process.platform ==
 const VITE = path.join(FRONTEND, 'node_modules', '.bin', process.platform === 'win32' ? 'vite.cmd' : 'vite');
 const ACTIVITY_EVENT_ID = 'activity_ui_smoke_event';
 const OTHER_EVENT_ID = 'activity_ui_smoke_other';
+const RUN_ID = 'activity_ui_smoke_run';
+const RUN_GROUP_ID = 'activity_ui_smoke_run_group';
 const TASK_ID = 'task-activity-ui-smoke';
 const SESSION_ID = 'session-activity-ui-smoke';
 const ACTIVITY_TITLE = 'Activity UI smoke workspace read';
@@ -23,6 +25,8 @@ const bridgeState = {
   deletedEventIds: [],
   detailRequests: [],
   listRequests: [],
+  runDetailRequests: [],
+  runEventRequests: [],
 };
 
 function log(message) {
@@ -44,8 +48,8 @@ function activityEvent() {
     duration_seconds: 1.25,
     created_at: now,
     metadata: {
-      run_id: 'activity_ui_smoke_run',
-      run_group_id: 'activity_ui_smoke_run_group',
+      run_id: RUN_ID,
+      run_group_id: RUN_GROUP_ID,
       path: 'README.md',
     },
   };
@@ -85,6 +89,71 @@ function activityTrace() {
     {
       ...activityEvent(),
       detail: TRACE_DETAIL,
+    },
+  ];
+}
+
+function activityRun() {
+  return {
+    run_id: RUN_ID,
+    run_group_id: RUN_GROUP_ID,
+    run_group_source: 'agent',
+    task_id: TASK_ID,
+    session_id: SESSION_ID,
+    task_run_link_run_status: 'completed',
+    task_run_link_last_event_sequence: 2,
+    kind: 'agent_run',
+    runnable_id: 'activity-ui-smoke-agent',
+    runnable_name: 'Activity UI Smoke Agent',
+    status: 'completed',
+    user_goal: 'Open ActivityStore event Run Detail handoff',
+    result: 'Activity UI smoke opened the linked NativeRunEngine Run Detail',
+    timeline: [],
+    artifacts: [],
+    created_at: now,
+    updated_at: now,
+    agent_run_id: RUN_ID,
+  };
+}
+
+function activityRunGroup() {
+  return {
+    run_group_id: RUN_GROUP_ID,
+    title: 'Activity UI Smoke Run',
+    source: 'agent',
+    status: 'completed',
+    summary: 'Activity Run Detail handoff',
+    child_run_ids: [RUN_ID],
+    created_at: now,
+    updated_at: now,
+  };
+}
+
+function activityRunEvents() {
+  return [
+    {
+      event_id: 'activity-ui-smoke-run-started',
+      run_id: RUN_ID,
+      sequence: 1,
+      schema_version: 1,
+      event_type: 'agent.run.started',
+      actor: 'runtime',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: { status: 'running', task_id: TASK_ID },
+      created_at: now,
+    },
+    {
+      event_id: 'activity-ui-smoke-run-completed',
+      run_id: RUN_ID,
+      sequence: 2,
+      schema_version: 1,
+      event_type: 'run.completed',
+      actor: 'runtime',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: { status: 'completed', result: 'Activity UI smoke opened Run Detail' },
+      created_at: now,
     },
   ];
 }
@@ -185,6 +254,81 @@ async function startMockBridge() {
         await readRequestJson(request);
         bridgeState.deletedEventIds.push(ACTIVITY_EVENT_ID);
         sendJson(response, 200, { ok: true, deleted: 1 });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/agents') {
+        sendJson(response, 200, {
+          agents: [{
+            agent_id: 'activity-ui-smoke-agent',
+            name: 'Activity UI Smoke Agent',
+            enabled: true,
+            model_mode: 'follow_main',
+            execution_backend: 'native_profile',
+            model_config: {},
+            output_contract: 'report',
+          }],
+        });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/skills') {
+        sendJson(response, 200, { skills: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/skills/sources') {
+        sendJson(response, 200, { roots: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/skill-folders') {
+        sendJson(response, 200, { folders: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/model-profiles') {
+        sendJson(response, 200, { ok: true, profiles: [], defaults: {} });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/workflows') {
+        sendJson(response, 200, { workflows: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/runnables') {
+        sendJson(response, 200, {
+          runnables: [{
+            id: 'activity-ui-smoke-agent',
+            name: 'Activity UI Smoke Agent',
+            kind: 'agent',
+            enabled: true,
+            output_contract: 'report',
+          }],
+        });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/runs') {
+        sendJson(response, 200, { runs: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/ui/runs/${RUN_ID}`) {
+        bridgeState.runDetailRequests.push(RUN_ID);
+        sendJson(response, 200, activityRun());
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/run-groups') {
+        sendJson(response, 200, { run_groups: [activityRunGroup()] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/ui/run-groups/${RUN_GROUP_ID}`) {
+        sendJson(response, 200, activityRunGroup());
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/runs/${RUN_ID}/events`) {
+        const afterSequence = Number(url.searchParams.get('after_sequence') || '0');
+        const limit = Math.max(1, Number(url.searchParams.get('limit') || '200'));
+        bridgeState.runEventRequests.push({ after_sequence: Math.max(0, afterSequence), limit });
+        sendJson(response, 200, {
+          run_id: RUN_ID,
+          after_sequence: Math.max(0, afterSequence),
+          limit,
+          events: activityRunEvents().filter((event) => event.sequence > afterSequence).slice(0, limit),
+        });
         return;
       }
       sendJson(response, 404, { ok: false, error: `not found: ${request.method} ${url.pathname}` });
@@ -339,12 +483,49 @@ async function main() {
     const traceRows = Array.from(document.querySelectorAll('[data-testid="activity-trace-row"]'));
     return window.location.hash.includes(${JSON.stringify(ACTIVITY_EVENT_ID)})
       && detail?.getAttribute('data-activity-event-id') === ${JSON.stringify(ACTIVITY_EVENT_ID)}
+      && detail?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
+      && detail?.getAttribute('data-task-id') === ${JSON.stringify(TASK_ID)}
+      && detail?.getAttribute('data-session-id') === ${JSON.stringify(SESSION_ID)}
       && summary?.textContent.includes('workspace.read')
+      && document.querySelector('[data-testid="activity-detail-open-run"]')
       && body?.textContent.includes(${JSON.stringify(ACTIVITY_DETAIL)})
       && traceRows.length === 2
       && traceRows.some((node) => node.getAttribute('data-activity-event-id') === ${JSON.stringify(ACTIVITY_EVENT_ID)});
   }, 'activity detail loaded');
   console.log('[electron-smoke] activity detail verified');
+  await win.webContents.executeJavaScript(\`
+    (() => {
+      const button = document.querySelector('[data-testid="activity-detail-open-run"]');
+      if (!button) throw new Error('missing activity open run button');
+      button.click();
+    })();
+  \`, true);
+  await waitFor(win, () => {
+    const detail = document.querySelector('[data-testid="agent-run-detail"]');
+    const task = document.querySelector('[data-testid="agent-run-detail-task"]');
+    const result = document.querySelector('[data-testid="agent-run-detail-result"]');
+    const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
+    const runIds = events.map((node) => node.getAttribute('data-run-event-run-id'));
+    const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
+    return window.location.hash.includes('/agents/' + encodeURIComponent(${JSON.stringify(RUN_ID)}))
+      && detail?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
+      && detail?.getAttribute('data-task-id') === ${JSON.stringify(TASK_ID)}
+      && detail?.getAttribute('data-session-id') === ${JSON.stringify(SESSION_ID)}
+      && task?.textContent.includes('Open ActivityStore event Run Detail handoff')
+      && result?.textContent.includes('Activity UI smoke opened the linked NativeRunEngine Run Detail')
+      && events.length === 2
+      && eventTypes.includes('agent.run.started')
+      && eventTypes.includes('run.completed')
+      && runIds.every((id) => id === ${JSON.stringify(RUN_ID)});
+  }, 'activity run detail handoff');
+  console.log('[electron-smoke] activity run detail handoff verified');
+  await win.webContents.executeJavaScript('window.history.back()', true);
+  await waitFor(win, () => (
+    window.location.hash.includes(${JSON.stringify(ACTIVITY_EVENT_ID)})
+    && document.querySelector('[data-testid="activity-detail-page"]')?.getAttribute('data-activity-event-id') === ${JSON.stringify(ACTIVITY_EVENT_ID)}
+    && document.querySelector('[data-testid="activity-detail-delete"]')
+    && document.querySelector('[data-testid="activity-trace-row"][data-activity-event-id="${ACTIVITY_EVENT_ID}"]')
+  ), 'returned to activity detail');
   await win.webContents.executeJavaScript(\`
     const expand = document.querySelector('[data-testid="activity-trace-row"][data-activity-event-id="${ACTIVITY_EVENT_ID}"] [data-testid="activity-trace-expand"]');
     if (!expand) throw new Error('missing activity trace expand button');
@@ -356,9 +537,11 @@ async function main() {
   ), 'activity trace expanded');
   console.log('[electron-smoke] activity trace expanded');
   await win.webContents.executeJavaScript(\`
-    const button = document.querySelector('[data-testid="activity-detail-delete"]');
-    if (!button) throw new Error('missing activity delete button');
-    button.click();
+    (() => {
+      const button = document.querySelector('[data-testid="activity-detail-delete"]');
+      if (!button) throw new Error('missing activity delete button');
+      button.click();
+    })();
   \`, true);
   await waitFor(win, () => document.querySelector('[data-testid="confirm-dialog"]'), 'activity delete confirm dialog');
   await win.webContents.executeJavaScript(\`
@@ -422,6 +605,12 @@ function assertMockBridgeContract() {
   }
   if (!bridgeState.detailRequests.includes(ACTIVITY_EVENT_ID)) {
     throw new Error(`activity detail was not requested: ${JSON.stringify(bridgeState.detailRequests)}`);
+  }
+  if (!bridgeState.runDetailRequests.includes(RUN_ID)) {
+    throw new Error(`linked run detail was not requested: ${JSON.stringify(bridgeState.runDetailRequests)}`);
+  }
+  if (!bridgeState.runEventRequests.some((request) => request.after_sequence === 0 && request.limit === 200)) {
+    throw new Error(`linked run replay was not requested: ${JSON.stringify(bridgeState.runEventRequests)}`);
   }
   if (!bridgeState.deletedEventIds.includes(ACTIVITY_EVENT_ID)) {
     throw new Error(`activity event was not deleted: ${JSON.stringify(bridgeState.deletedEventIds)}`);

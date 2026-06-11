@@ -1949,6 +1949,7 @@ export function ActivityDetailPage() {
   const event = payload?.event || null;
   const trace = compactActivityTrace(activityTraceSource(payload?.trace || [], event));
   const metadataText = formatMetadata(event?.metadata);
+  const activityRunId = metadataString(event?.metadata, 'run_id');
   const detailLoading = !error && !payload;
   usePageLoading(detailLoading);
 
@@ -2007,7 +2008,14 @@ export function ActivityDetailPage() {
   }
 
   return (
-    <section className="hy-route-page activity-detail-page" data-activity-event-id={eventId} data-testid="activity-detail-page">
+    <section
+      className="hy-route-page activity-detail-page"
+      data-activity-event-id={eventId}
+      data-run-id={activityRunId}
+      data-session-id={event?.session_id || ''}
+      data-task-id={event?.task_id || ''}
+      data-testid="activity-detail-page"
+    >
       <header className="hy-page-header activity-detail-header">
         <div className="activity-detail-titlebar">
           <button type="button" className="page-back-link" onClick={returnFromActivityDetail}>← 返回上一页</button>
@@ -2058,6 +2066,19 @@ export function ActivityDetailPage() {
               <span>时间</span>
               <strong>{formatFullDateTime(event.created_at)}</strong>
             </div>
+            {activityRunId ? (
+              <div>
+                <span>Run</span>
+                <button
+                  type="button"
+                  className="hy-btn hy-btn-ghost activity-run-link"
+                  data-testid="activity-detail-open-run"
+                  onClick={() => navigateTo('agents', { run: activityRunId }, ['tab', 'target', 'goal'])}
+                >
+                  打开 Run
+                </button>
+              </div>
+            ) : null}
           </section>
 
           <section className="activity-detail-body" data-testid="activity-detail-body">
@@ -2712,6 +2733,11 @@ function formatMetadata(metadata?: Record<string, unknown>) {
   } catch {
     return '';
   }
+}
+
+function metadataString(metadata: Record<string, unknown> | undefined, key: string) {
+  const value = metadata?.[key];
+  return typeof value === 'string' ? value.trim() : '';
 }
 
 type ActivityRowData = {
