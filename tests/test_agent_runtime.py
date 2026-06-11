@@ -36,6 +36,7 @@ from apps.shell.agent_runtime import (
     WorkflowChildOutcomeCoordinator,
     WorkflowCancellationProjectionCoordinator,
     WorkflowContinuationCoordinator,
+    WorkflowParentRunLocator,
     WorkflowParentResumeCoordinator,
 )
 from scripts.verify_secret_redaction import verify_secret_redaction
@@ -209,6 +210,92 @@ def test_workflow_child_outcome_coordinator_projects_child_artifacts_and_timelin
             "artifact_kind": "agent_artifact",
         },
     ]
+
+
+def test_workflow_parent_run_locator_finds_waiting_parents_and_root_groups():
+    waiting_parent = {
+        "run_id": "workflow_waiting",
+        "kind": "workflow_run",
+        "run_group_id": "group",
+        "status": "approval_required",
+        "timeline": [
+            {
+                "event": "workflow.run.approval_required",
+                "child_run_id": "child_run",
+            }
+        ],
+    }
+    running_unrelated = {
+        "run_id": "workflow_unrelated",
+        "kind": "workflow_run",
+        "run_group_id": "group",
+        "status": "running",
+        "timeline": [
+            {
+                "event": "workflow.run.approval_required",
+                "child_run_id": "other_child",
+            }
+        ],
+    }
+    completed_parent = {
+        "run_id": "workflow_completed",
+        "kind": "workflow_run",
+        "run_group_id": "group",
+        "status": "completed",
+        "timeline": [
+            {
+                "event": "workflow.run.approval_required",
+                "child_run_id": "child_run",
+            }
+        ],
+    }
+    runs = {
+        "workflow_waiting": waiting_parent,
+        "workflow_unrelated": running_unrelated,
+        "workflow_completed": completed_parent,
+        "child_run": {"run_id": "child_run", "kind": "agent_run"},
+        "not_workflow": {"run_id": "not_workflow", "kind": "agent_run", "status": "approval_required"},
+    }
+    groups = {
+        "group": {
+            "run_group_id": "group",
+            "source": "chat",
+            "child_run_ids": [
+                "workflow_waiting",
+                "child_run",
+                "workflow_unrelated",
+                "missing_run",
+                "workflow_completed",
+                "not_workflow",
+            ],
+        },
+        "workflow_group": {
+            "run_group_id": "workflow_group",
+            "source": "workflow",
+            "child_run_ids": ["workflow_external"],
+        },
+    }
+
+    locator = WorkflowParentRunLocator(
+        get_run_group=lambda group_id: groups[group_id],
+        get_run=lambda run_id: runs[run_id],
+    )
+
+    parents = locator.parent_runs_waiting_for_child(
+        {
+            "run_id": "child_run",
+            "kind": "agent_run",
+            "run_group_id": "group",
+        }
+    )
+
+    assert parents == [waiting_parent]
+    assert locator.parent_runs_waiting_for_child({"kind": "workflow_run", "run_group_id": "group"}) == []
+    assert locator.parent_runs_waiting_for_child({"kind": "agent_run", "run_group_id": "missing"}) == []
+    assert locator.workflow_run_is_group_root(waiting_parent) is True
+    assert locator.workflow_run_is_group_root({"run_id": "workflow_external", "run_group_id": "workflow_group"}) is True
+    assert locator.workflow_run_is_group_root({"run_id": "workflow_missing", "run_group_id": "missing"}) is False
+    assert locator.workflow_run_is_group_root({"run_id": "workflow_without_group"}) is False
 
 
 def test_workflow_approval_resume_context_parses_pending_payload():

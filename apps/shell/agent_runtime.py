@@ -3174,6 +3174,67 @@ class WorkflowChildOutcomeCoordinator:
                 existing_refs.add(key)
 
 
+class WorkflowParentRunLocator:
+    """Locates parent Workflow Runs waiting on a child Agent Run."""
+
+    def __init__(
+        self,
+        *,
+        get_run_group: Any,
+        get_run: Any,
+    ) -> None:
+        self._get_run_group = get_run_group
+        self._get_run = get_run
+
+    def parent_runs_waiting_for_child(
+        self,
+        child_run: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        if child_run.get("kind") != "agent_run" or not child_run.get("run_group_id"):
+            return []
+        try:
+            group = self._get_run_group(str(child_run["run_group_id"]))
+        except KeyError:
+            return []
+        parents: list[dict[str, Any]] = []
+        child_run_id = str(child_run.get("run_id") or "")
+        for run_id in [str(item) for item in group.get("child_run_ids") or [] if str(item)]:
+            if run_id == child_run_id:
+                continue
+            try:
+                candidate = self._get_run(run_id)
+            except KeyError:
+                continue
+            candidate_status = str(candidate.get("status") or "")
+            if (
+                candidate.get("kind") != "workflow_run"
+                or candidate_status not in {"approval_required", "running", "processing"}
+            ):
+                continue
+            if any(
+                event.get("event") == "workflow.run.approval_required"
+                and str(event.get("child_run_id") or "") == child_run_id
+                for event in candidate.get("timeline") or []
+                if isinstance(event, dict)
+            ):
+                parents.append(candidate)
+        return parents
+
+    def workflow_run_is_group_root(self, workflow_run: dict[str, Any]) -> bool:
+        run_group_id = str(workflow_run.get("run_group_id") or "")
+        if not run_group_id:
+            return False
+        try:
+            group = self._get_run_group(run_group_id)
+        except KeyError:
+            return False
+        child_run_ids = [str(item) for item in group.get("child_run_ids") or [] if str(item)]
+        return (
+            group.get("source") == "workflow"
+            or child_run_ids[:1] == [workflow_run.get("run_id")]
+        )
+
+
 class WorkflowParentResumeCoordinator:
     """Coordinates parent Workflow updates after a child Run changes state."""
 
@@ -4206,6 +4267,10 @@ class NativeRunEngine:
             update_run=lambda run_id, **kwargs: self._update_run(run_id, **kwargs),
         )
         self.workflow_child_outcomes = WorkflowChildOutcomeCoordinator()
+        self.workflow_parent_locator = WorkflowParentRunLocator(
+            get_run_group=self.get_run_group,
+            get_run=self.get_run,
+        )
         self.workflow_parent_resume = WorkflowParentResumeCoordinator(
             parent_runs_waiting_for_child=lambda child_run: self._workflow_parent_runs_waiting_for_child(child_run),
             workflow_run_is_group_root=lambda workflow_run: self._workflow_run_is_group_root(workflow_run),
@@ -8272,35 +8337,7 @@ class NativeRunEngine:
         self,
         child_run: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        if child_run.get("kind") != "agent_run" or not child_run.get("run_group_id"):
-            return []
-        try:
-            group = self.get_run_group(str(child_run["run_group_id"]))
-        except KeyError:
-            return []
-        parents: list[dict[str, Any]] = []
-        child_run_id = str(child_run.get("run_id") or "")
-        for run_id in [str(item) for item in group.get("child_run_ids") or [] if str(item)]:
-            if run_id == child_run_id:
-                continue
-            try:
-                candidate = self.get_run(run_id)
-            except KeyError:
-                continue
-            candidate_status = str(candidate.get("status") or "")
-            if (
-                candidate.get("kind") != "workflow_run"
-                or candidate_status not in {"approval_required", "running", "processing"}
-            ):
-                continue
-            if any(
-                event.get("event") == "workflow.run.approval_required"
-                and str(event.get("child_run_id") or "") == child_run_id
-                for event in candidate.get("timeline") or []
-                if isinstance(event, dict)
-            ):
-                parents.append(candidate)
-        return parents
+        return self.workflow_parent_locator.parent_runs_waiting_for_child(child_run)
 
     def _workflow_resume_start_index(
         self,
@@ -8327,18 +8364,7 @@ class NativeRunEngine:
         return None
 
     def _workflow_run_is_group_root(self, workflow_run: dict[str, Any]) -> bool:
-        run_group_id = str(workflow_run.get("run_group_id") or "")
-        if not run_group_id:
-            return False
-        try:
-            group = self.get_run_group(run_group_id)
-        except KeyError:
-            return False
-        child_run_ids = [str(item) for item in group.get("child_run_ids") or [] if str(item)]
-        return (
-            group.get("source") == "workflow"
-            or child_run_ids[:1] == [workflow_run.get("run_id")]
-        )
+        return self.workflow_parent_locator.workflow_run_is_group_root(workflow_run)
 
     @staticmethod
     def _workflow_child_artifact_refs(child_run: dict[str, Any], label: str) -> list[dict[str, Any]]:
