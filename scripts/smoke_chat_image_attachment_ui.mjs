@@ -451,6 +451,7 @@ async function main() {
     const payload = bridgeState.postPayloads[0];
     if (!payload) fail('Chat UI did not send a message');
     if (payload.text !== 'browser image attachment smoke') fail(`unexpected submitted text: ${payload.text}`);
+    if (!payload.client_message_id) fail('Chat UI did not submit client_message_id for image message idempotency');
     if (!Array.isArray(payload.attachments) || payload.attachments.length !== 1) {
       fail('Chat UI did not submit exactly one attachment');
     }
