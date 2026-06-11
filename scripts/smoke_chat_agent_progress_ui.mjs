@@ -16,9 +16,15 @@ const TASK_ID = 'task-chat-agent-progress-ui-smoke';
 const SESSION_ID = 'session-chat-agent-progress-ui-smoke';
 const RUN_GROUP_ID = 'group-chat-agent-progress-ui-smoke';
 const RUN_GOAL = 'Open running Chat Agent progress Run Detail from Electron UI smoke';
+const RUN_RESULT = 'Chat Agent progress Native Run completed after Run Detail polling.';
 const PROGRESS_TITLE = 'Chat Agent progress smoke is running';
 const PROGRESS_DETAIL = 'Native Run is still active for the Chat progress card.';
 const now = new Date().toISOString();
+const completedAt = new Date(Date.now() + 1000).toISOString();
+
+const bridgeState = {
+  runCompleted: false,
+};
 
 const agent = {
   agent_id: AGENT_ID,
@@ -51,6 +57,23 @@ const run = {
   updated_at: now,
 };
 
+function currentRun() {
+  if (!bridgeState.runCompleted) return run;
+  return {
+    ...run,
+    task_run_link_run_status: 'completed',
+    task_run_link_last_event_sequence: 3,
+    status: 'completed',
+    result: RUN_RESULT,
+    timeline: [
+      { event: 'agent.run.started', status: 'running', task_id: TASK_ID },
+      { event: 'model.output.completed', status: 'completed', output: RUN_RESULT },
+      { event: 'agent.run.completed', status: 'completed', result: RUN_RESULT },
+    ],
+    updated_at: completedAt,
+  };
+}
+
 const runGroup = {
   run_group_id: RUN_GROUP_ID,
   title: 'Chat Agent Progress Smoke',
@@ -62,20 +85,60 @@ const runGroup = {
   updated_at: now,
 };
 
-const runEvents = [
+function currentRunGroup() {
+  if (!bridgeState.runCompleted) return runGroup;
+  return {
+    ...runGroup,
+    status: 'completed',
+    summary: RUN_RESULT,
+    updated_at: completedAt,
+  };
+}
+
+const startedRunEvent = {
+  event_id: 'event-chat-agent-progress-smoke-1',
+  run_id: RUN_ID,
+  sequence: 1,
+  schema_version: 1,
+  event_type: 'agent.run.started',
+  actor: 'agent',
+  visibility: 'user',
+  sensitivity: 'normal',
+  payload: { task_id: TASK_ID, goal: RUN_GOAL },
+  created_at: now,
+};
+
+const completedRunEvents = [
+  startedRunEvent,
   {
-    event_id: 'event-chat-agent-progress-smoke-1',
+    event_id: 'event-chat-agent-progress-smoke-2',
     run_id: RUN_ID,
-    sequence: 1,
+    sequence: 2,
     schema_version: 1,
-    event_type: 'agent.run.started',
+    event_type: 'model.output.completed',
+    actor: 'model',
+    visibility: 'user',
+    sensitivity: 'normal',
+    payload: { output: RUN_RESULT },
+    created_at: completedAt,
+  },
+  {
+    event_id: 'event-chat-agent-progress-smoke-3',
+    run_id: RUN_ID,
+    sequence: 3,
+    schema_version: 1,
+    event_type: 'agent.run.completed',
     actor: 'agent',
     visibility: 'user',
     sensitivity: 'normal',
-    payload: { task_id: TASK_ID, goal: RUN_GOAL },
-    created_at: now,
+    payload: { result: RUN_RESULT },
+    created_at: completedAt,
   },
 ];
+
+function currentRunEvents() {
+  return bridgeState.runCompleted ? completedRunEvents : [startedRunEvent];
+}
 
 const messages = [
   {
@@ -143,7 +206,7 @@ function runEventsPage(url) {
     run_id: RUN_ID,
     after_sequence: afterSequence,
     limit,
-    events: runEvents.filter((event) => event.sequence > afterSequence).slice(0, limit),
+    events: currentRunEvents().filter((event) => event.sequence > afterSequence).slice(0, limit),
   };
 }
 
@@ -239,23 +302,28 @@ async function startMockBridge() {
         return;
       }
       if (request.method === 'GET' && url.pathname === '/ui/runs') {
-        sendJson(response, 200, { runs: [run] });
+        sendJson(response, 200, { runs: [currentRun()] });
         return;
       }
       if (request.method === 'GET' && url.pathname === `/ui/runs/${RUN_ID}`) {
-        sendJson(response, 200, run);
+        sendJson(response, 200, currentRun());
         return;
       }
       if (request.method === 'GET' && url.pathname === '/ui/run-groups') {
-        sendJson(response, 200, { run_groups: [runGroup] });
+        sendJson(response, 200, { run_groups: [currentRunGroup()] });
         return;
       }
       if (request.method === 'GET' && url.pathname === `/ui/run-groups/${RUN_GROUP_ID}`) {
-        sendJson(response, 200, runGroup);
+        sendJson(response, 200, currentRunGroup());
         return;
       }
       if (request.method === 'GET' && url.pathname === `/runs/${RUN_ID}/events`) {
         sendJson(response, 200, runEventsPage(url));
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/__smoke/complete-run') {
+        bridgeState.runCompleted = true;
+        sendJson(response, 200, { ok: true, run: currentRun() });
         return;
       }
       sendJson(response, 404, { ok: false, error: `not found: ${request.method} ${url.pathname}` });
@@ -319,6 +387,7 @@ const taskId = process.env.OHA_YACHIYO_SMOKE_TASK_ID;
 const sessionId = process.env.OHA_YACHIYO_SMOKE_SESSION_ID;
 const runGroupId = process.env.OHA_YACHIYO_SMOKE_RUN_GROUP_ID;
 const runGoal = process.env.OHA_YACHIYO_SMOKE_RUN_GOAL;
+const runResult = process.env.OHA_YACHIYO_SMOKE_RUN_RESULT;
 const progressTitle = process.env.OHA_YACHIYO_SMOKE_PROGRESS_TITLE;
 const watchdog = setTimeout(() => {
   console.error('electron smoke timed out');
@@ -382,6 +451,7 @@ async function main() {
     sessionId,
     runGroupId,
     runGoal,
+    runResult,
     progressTitle,
   }), true);
   console.log('[electron-smoke] chat loaded');
@@ -423,6 +493,36 @@ async function main() {
       && startedEvent.textContent.includes(smoke.runGoal);
   }, 'running Run Detail replay events');
   console.log('[electron-smoke] Chat Agent progress opened matching running Run Detail');
+  await win.webContents.executeJavaScript(
+    "fetch(" + JSON.stringify(bridgeUrl + '/__smoke/complete-run') + ").then((response) => {" +
+      "if (!response.ok) throw new Error('complete-run failed: ' + response.status);" +
+      "return response.json();" +
+    "})",
+    true
+  );
+  await waitFor(win, () => {
+    const smoke = window.__ohaSmoke || {};
+    const detail = document.querySelector('[data-testid="agent-run-detail"]');
+    const result = document.querySelector('[data-testid="agent-run-detail-result"]');
+    const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
+    const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
+    const outputEvent = events.find((node) => node.getAttribute('data-run-event') === 'model.output.completed');
+    const completedEvent = events.find((node) => node.getAttribute('data-run-event') === 'agent.run.completed');
+    return detail?.getAttribute('data-run-id') === smoke.runId
+      && detail?.getAttribute('data-run-status') === 'completed'
+      && detail?.getAttribute('data-task-id') === smoke.taskId
+      && result?.textContent.includes(smoke.runResult)
+      && events.length === 3
+      && eventTypes.includes('agent.run.started')
+      && eventTypes.includes('model.output.completed')
+      && eventTypes.includes('agent.run.completed')
+      && outputEvent?.getAttribute('data-run-event-sequence') === '2'
+      && completedEvent?.getAttribute('data-run-event-sequence') === '3'
+      && outputEvent?.textContent.includes(smoke.runResult)
+      && completedEvent?.textContent.includes(smoke.runResult)
+      && events.every((node) => node.getAttribute('data-run-event-run-id') === smoke.runId);
+  }, 'completed Run Detail polling and replay refresh', 8000);
+  console.log('[electron-smoke] Chat Agent progress completed Run Detail replay verified');
   clearTimeout(watchdog);
   await win.close();
   app.quit();
@@ -449,6 +549,7 @@ main().catch((error) => {
         OHA_YACHIYO_SMOKE_SESSION_ID: SESSION_ID,
         OHA_YACHIYO_SMOKE_RUN_GROUP_ID: RUN_GROUP_ID,
         OHA_YACHIYO_SMOKE_RUN_GOAL: RUN_GOAL,
+        OHA_YACHIYO_SMOKE_RUN_RESULT: RUN_RESULT,
         OHA_YACHIYO_SMOKE_PROGRESS_TITLE: PROGRESS_TITLE,
       },
     });

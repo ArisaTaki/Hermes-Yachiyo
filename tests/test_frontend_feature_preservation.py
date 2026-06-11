@@ -808,7 +808,7 @@ def test_chat_run_detail_handoff_ui_smoke_uses_completed_message_run_metadata() 
     )
 
 
-def test_chat_agent_progress_ui_smoke_uses_running_run_detail_handoff() -> None:
+def test_chat_agent_progress_ui_smoke_uses_run_detail_polling_and_replay() -> None:
     smoke_script = "scripts/smoke_chat_agent_progress_ui.mjs"
     _assert_contains(
         smoke_script,
@@ -819,6 +819,7 @@ def test_chat_agent_progress_ui_smoke_uses_running_run_detail_handoff() -> None:
             "run_status: 'running'",
             "runnable_kind: 'agent'",
             "run_progress_title: PROGRESS_TITLE",
+            "RUN_RESULT",
             "data-testid=\"chat-agent-run-progress-card\"",
             "data-testid=\"chat-agent-run-progress-open-run-detail\"",
             "data-testid=\\\"chat-agent-run-progress-open-run-detail\\\"",
@@ -827,10 +828,18 @@ def test_chat_agent_progress_ui_smoke_uses_running_run_detail_handoff() -> None:
             "data-testid=\"agent-run-detail-execution-event\"",
             "`/ui/runs/${RUN_ID}`",
             "`/runs/${RUN_ID}/events`",
+            "url.pathname === '/__smoke/complete-run'",
             "agent.run.started",
+            "model.output.completed",
+            "agent.run.completed",
             "startedEvent.textContent.includes(smoke.taskId)",
             "startedEvent.textContent.includes(smoke.runGoal)",
             "Chat Agent progress opened matching running Run Detail",
+            "detail?.getAttribute('data-run-status') === 'completed'",
+            "result?.textContent.includes(smoke.runResult)",
+            "outputEvent?.getAttribute('data-run-event-sequence') === '2'",
+            "completedEvent?.getAttribute('data-run-event-sequence') === '3'",
+            "Chat Agent progress completed Run Detail replay verified",
         ],
     )
 
