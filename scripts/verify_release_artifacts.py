@@ -1041,6 +1041,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover NativeRunEngine Agent Run message-level HTTP SSE tool calls",
     ),
     (
+        "tests/test_agent_runtime.py::test_agent_run_executes_legacy_streaming_function_call",
+        "macOS release workflow smoke tests must cover NativeRunEngine Agent Run legacy streaming function_call frames",
+    ),
+    (
         "tests/test_agent_runtime.py::test_agent_run_uses_responses_call_id_without_item_id",
         "macOS release workflow smoke tests must cover NativeRunEngine Responses call_id Agent Run history",
     ),
