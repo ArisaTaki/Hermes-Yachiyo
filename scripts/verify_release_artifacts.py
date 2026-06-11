@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import plistlib
 import subprocess
 import sys
 import tempfile
@@ -91,6 +92,11 @@ FORBIDDEN_FILES: tuple[Path, ...] = (
 
 RELEASE_SECURITY_CHANNELS: tuple[str, ...] = ("release", "alpha", "stable")
 PACKAGING_CONFIG_FILE = Path("apps/frontend/electron-builder.yml")
+PACKAGED_APP_OUTPUT_DIR = Path("dist/electron")
+PACKAGED_APP_NAME = "Oha-Yachiyo.app"
+PACKAGED_APP_IDENTIFIER = "io.github.arisataki.oha-yachiyo"
+PACKAGED_BACKEND_RELATIVE_PATH = Path("Contents/Resources/backend/oha-yachiyo-backend")
+PACKAGED_ASAR_RELATIVE_PATH = Path("Contents/Resources/app.asar")
 TRACKED_GENERATED_PATHS: tuple[str, ...] = (
     "apps/frontend/.vite",
     "apps/frontend/dist",
@@ -215,8 +221,12 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow must discover packaged app resource directories",
     ),
     (
-        'python scripts/verify_release_artifacts.py --allow-binary "${package_scan_paths[@]}"',
+        'python scripts/verify_release_artifacts.py --allow-binary --check-packaged-app "${package_scan_paths[@]}"',
         "macOS release workflow must binary-scan packaged app resources",
+    ),
+    (
+        "--check-packaged-app",
+        "macOS release workflow must validate packaged app bundle structure",
     ),
     (
         "python scripts/verify_release_artifacts.py --allow-binary release",
@@ -806,6 +816,7 @@ def verify_release_artifacts(
     paths: Sequence[Path | str] | None = None,
     check_required_files: bool = True,
     check_release_security_guards: bool = True,
+    check_packaged_app_bundle: bool = False,
     allow_binary_targets: bool = False,
 ) -> list[Finding]:
     root_path = Path(root)
@@ -853,6 +864,9 @@ def verify_release_artifacts(
         findings.extend(_verify_release_packaging_guards(root_path))
         findings.extend(_verify_macos_signing_guards(root_path))
         findings.extend(_verify_release_workflow_guards(root_path))
+
+    if check_packaged_app_bundle:
+        findings.extend(_verify_packaged_app_bundle(root_path))
 
     return findings
 
@@ -1043,6 +1057,69 @@ def _verify_macos_signing_guards(root: Path) -> list[Finding]:
     return findings
 
 
+def _verify_packaged_app_bundle(root: Path) -> list[Finding]:
+    findings: list[Finding] = []
+    output_dir = _resolve(root, PACKAGED_APP_OUTPUT_DIR)
+    app_dirs = sorted(output_dir.rglob(PACKAGED_APP_NAME)) if output_dir.exists() else []
+    if not app_dirs:
+        return [
+            Finding(
+                output_dir / PACKAGED_APP_NAME,
+                "packaged app bundle must exist under dist/electron",
+            )
+        ]
+
+    for app_dir in app_dirs:
+        info_path = app_dir / "Contents" / "Info.plist"
+        executable_name = ""
+        if not info_path.is_file():
+            findings.append(Finding(info_path, "packaged app Info.plist is missing"))
+        else:
+            try:
+                info = plistlib.loads(info_path.read_bytes())
+            except Exception as exc:
+                findings.append(
+                    Finding(info_path, f"packaged app Info.plist could not be parsed: {exc.__class__.__name__}")
+                )
+            else:
+                bundle_names = {
+                    str(info.get("CFBundleName") or "").strip(),
+                    str(info.get("CFBundleDisplayName") or "").strip(),
+                    str(info.get("CFBundleExecutable") or "").strip(),
+                }
+                if "Oha-Yachiyo" not in bundle_names:
+                    findings.append(Finding(info_path, "packaged app Info.plist must identify Oha-Yachiyo"))
+                if info.get("CFBundleIdentifier") != PACKAGED_APP_IDENTIFIER:
+                    findings.append(
+                        Finding(
+                            info_path,
+                            f"packaged app bundle identifier must be {PACKAGED_APP_IDENTIFIER}",
+                        )
+                    )
+                executable_name = str(info.get("CFBundleExecutable") or "").strip()
+                if not executable_name:
+                    findings.append(Finding(info_path, "packaged app Info.plist must declare CFBundleExecutable"))
+
+        if executable_name:
+            executable_path = app_dir / "Contents" / "MacOS" / executable_name
+            if not executable_path.is_file():
+                findings.append(Finding(executable_path, "packaged app main executable is missing"))
+            elif not os.access(executable_path, os.X_OK):
+                findings.append(Finding(executable_path, "packaged app main executable is not executable"))
+
+        backend_path = app_dir / PACKAGED_BACKEND_RELATIVE_PATH
+        if not backend_path.is_file():
+            findings.append(Finding(backend_path, "packaged backend executable is missing from app resources"))
+        elif not os.access(backend_path, os.X_OK):
+            findings.append(Finding(backend_path, "packaged backend executable is not executable"))
+
+        asar_path = app_dir / PACKAGED_ASAR_RELATIVE_PATH
+        if not asar_path.is_file():
+            findings.append(Finding(asar_path, "packaged Electron app.asar is missing from app resources"))
+
+    return findings
+
+
 def _verify_release_workflow_guards(root: Path) -> list[Finding]:
     findings: list[Finding] = []
     workflow_path = _resolve(root, RELEASE_WORKFLOW_FILE)
@@ -1077,6 +1154,8 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
     provider_smoke = workflow.find("Run opt-in real provider streaming smoke")
     build_backend = workflow.find("Build packaged backend")
     build_dmg = workflow.find("Build Electron DMG")
+    verify_packaged_resources = workflow.find("Verify packaged app resources")
+    prepare_release = workflow.find("Prepare release metadata")
     if (
         smoke_tests < 0
         or build_backend < 0
@@ -1103,6 +1182,19 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
                 "macOS release workflow must run opt-in real provider streaming smoke before packaged backend and DMG builds",
             )
         )
+    if (
+        verify_packaged_resources < 0
+        or build_dmg < 0
+        or prepare_release < 0
+        or verify_packaged_resources < build_dmg
+        or verify_packaged_resources > prepare_release
+    ):
+        findings.append(
+            Finding(
+                workflow_path,
+                "macOS release workflow must verify packaged app resources after DMG build before release metadata",
+            )
+        )
     if signing_import >= 0 and build_dmg >= 0 and signing_import > build_dmg:
         findings.append(
             Finding(
@@ -1110,7 +1202,6 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
                 "macOS release workflow must import signing material before building the DMG",
             )
         )
-    prepare_release = workflow.find("Prepare release metadata")
     verify_release = workflow.find("Verify packaged release artifacts")
     if prepare_release < 0 or verify_release < 0 or verify_release < prepare_release:
         findings.append(
@@ -1139,9 +1230,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="Allow binary artifact targets and scan their raw bytes for legacy product tokens.",
     )
+    parser.add_argument(
+        "--check-packaged-app",
+        action="store_true",
+        help="Verify the built macOS .app bundle structure under dist/electron.",
+    )
     args = parser.parse_args(argv)
 
-    findings = verify_release_artifacts(paths=args.paths or None, allow_binary_targets=args.allow_binary)
+    findings = verify_release_artifacts(
+        paths=args.paths or None,
+        allow_binary_targets=args.allow_binary,
+        check_packaged_app_bundle=args.check_packaged_app,
+    )
     if not findings:
         print("release artifact verification passed")
         return 0

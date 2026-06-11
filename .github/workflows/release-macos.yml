@@ -362,7 +362,7 @@ jobs:
           fi
 
           package_scan_paths+=("${app_resource_dirs[@]}")
-          python scripts/verify_release_artifacts.py --allow-binary "${package_scan_paths[@]}"
+          python scripts/verify_release_artifacts.py --allow-binary --check-packaged-app "${package_scan_paths[@]}"
 
       - name: Prepare release metadata
         id: meta

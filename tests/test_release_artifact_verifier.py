@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import plistlib
+
 from scripts import verify_release_artifacts as verifier
 
 
@@ -222,6 +224,105 @@ def test_verifier_requires_macos_signing_script_and_entitlements(tmp_path):
     assert "macOS entitlements must disable library validation for packaged native modules" in messages
 
 
+def _write_packaged_app_bundle(
+    root,
+    *,
+    identifier=verifier.PACKAGED_APP_IDENTIFIER,
+    executable_mode=0o755,
+    backend_mode=0o755,
+    include_asar=True,
+):
+    app_dir = root / verifier.PACKAGED_APP_OUTPUT_DIR / "mac-arm64" / verifier.PACKAGED_APP_NAME
+    contents = app_dir / "Contents"
+    macos_dir = contents / "MacOS"
+    resources_dir = contents / "Resources"
+    macos_dir.mkdir(parents=True)
+    resources_dir.mkdir(parents=True)
+    (contents / "Info.plist").write_bytes(
+        plistlib.dumps(
+            {
+                "CFBundleName": "Oha-Yachiyo",
+                "CFBundleDisplayName": "Oha-Yachiyo",
+                "CFBundleExecutable": "Oha-Yachiyo",
+                "CFBundleIdentifier": identifier,
+            }
+        )
+    )
+    executable = macos_dir / "Oha-Yachiyo"
+    executable.write_bytes(b"#!/bin/sh\nexit 0\n")
+    executable.chmod(executable_mode)
+    backend = app_dir / verifier.PACKAGED_BACKEND_RELATIVE_PATH
+    backend.parent.mkdir(parents=True, exist_ok=True)
+    backend.write_bytes(b"#!/bin/sh\nexit 0\n")
+    backend.chmod(backend_mode)
+    if include_asar:
+        asar = app_dir / verifier.PACKAGED_ASAR_RELATIVE_PATH
+        asar.parent.mkdir(parents=True, exist_ok=True)
+        asar.write_bytes(b"asar")
+    return app_dir
+
+
+def test_verifier_accepts_packaged_app_bundle_structure(tmp_path):
+    _write_packaged_app_bundle(tmp_path)
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[],
+        check_required_files=False,
+        check_release_security_guards=False,
+        check_packaged_app_bundle=True,
+        allow_binary_targets=True,
+    )
+
+    assert findings == []
+
+
+def test_verifier_reports_incomplete_packaged_app_bundle(tmp_path):
+    app_dir = _write_packaged_app_bundle(
+        tmp_path,
+        identifier="io.github.arisataki.old-yachiyo",
+        executable_mode=0o644,
+        backend_mode=0o644,
+        include_asar=False,
+    )
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[],
+        check_required_files=False,
+        check_release_security_guards=False,
+        check_packaged_app_bundle=True,
+        allow_binary_targets=True,
+    )
+    messages = [finding.message for finding in findings]
+
+    assert f"packaged app bundle identifier must be {verifier.PACKAGED_APP_IDENTIFIER}" in messages
+    assert "packaged app main executable is not executable" in messages
+    assert "packaged backend executable is not executable" in messages
+    assert verifier.Finding(
+        app_dir / verifier.PACKAGED_ASAR_RELATIVE_PATH,
+        "packaged Electron app.asar is missing from app resources",
+    ) in findings
+
+
+def test_verifier_reports_missing_packaged_app_bundle(tmp_path):
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[],
+        check_required_files=False,
+        check_release_security_guards=False,
+        check_packaged_app_bundle=True,
+        allow_binary_targets=True,
+    )
+
+    assert findings == [
+        verifier.Finding(
+            tmp_path / verifier.PACKAGED_APP_OUTPUT_DIR / verifier.PACKAGED_APP_NAME,
+            "packaged app bundle must exist under dist/electron",
+        )
+    ]
+
+
 def test_verifier_reports_tracked_frontend_generated_artifacts(monkeypatch, tmp_path):
     git_dir = tmp_path / ".git"
     git_dir.mkdir()
@@ -289,6 +390,7 @@ def test_verifier_requires_release_workflow_binary_scans_packaged_outputs(tmp_pa
     assert "macOS release workflow must scan the packaged backend binary" in messages
     assert "macOS release workflow must discover packaged app resource directories" in messages
     assert "macOS release workflow must binary-scan packaged app resources" in messages
+    assert "macOS release workflow must validate packaged app bundle structure" in messages
     assert "macOS release workflow must binary-scan final release artifacts" in messages
 
 
