@@ -10,6 +10,13 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FRONTEND = path.join(ROOT, 'apps', 'frontend');
 const ELECTRON = path.join(FRONTEND, 'node_modules', '.bin', process.platform === 'win32' ? 'electron.cmd' : 'electron');
 const VITE = path.join(FRONTEND, 'node_modules', '.bin', process.platform === 'win32' ? 'vite.cmd' : 'vite');
+const SESSION_ID = 'session-chat-image-smoke';
+const TASK_ID = 'task-chat-image-ui-smoke';
+const RUN_ID = 'main_chat_run_image_ui_smoke';
+const RUN_GROUP_ID = 'group-chat-image-ui-smoke';
+const RUN_GOAL = 'browser image attachment smoke';
+const RUN_RESULT = 'Browser image attachment NativeRunEngine reply saw image attachment.';
+const now = new Date().toISOString();
 const TEST_IMAGE_DATA_URL = `data:image/svg+xml;base64,${Buffer.from(
   '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><rect width="24" height="24" fill="#0ea5e9"/><circle cx="12" cy="12" r="7" fill="#fff"/></svg>',
 ).toString('base64')}`;
@@ -73,13 +80,85 @@ function sendJson(response, statusCode, payload) {
 function messagePayload() {
   return {
     ok: true,
-    session_id: 'session-chat-image-smoke',
+    session_id: SESSION_ID,
     messages: bridgeState.messages,
     session_context: { conversation_kind: 'main' },
     is_processing: false,
     processing_count: 0,
     approval_count: 0,
     token_count: 0,
+  };
+}
+
+const run = {
+  run_id: RUN_ID,
+  run_group_id: RUN_GROUP_ID,
+  run_group_source: 'main_chat',
+  task_id: TASK_ID,
+  session_id: SESSION_ID,
+  task_run_link_run_status: 'completed',
+  task_run_link_last_event_sequence: 2,
+  kind: 'main_chat_run',
+  runnable_id: 'builtin:yachiyo-main',
+  runnable_name: 'Oha-Yachiyo',
+  status: 'completed',
+  user_goal: RUN_GOAL,
+  result: RUN_RESULT,
+  timeline: [
+    { event: 'model.output.completed', status: 'completed', output: RUN_RESULT },
+    { event: 'run.completed', status: 'completed', result: RUN_RESULT },
+  ],
+  artifacts: [],
+  created_at: now,
+  updated_at: now,
+};
+
+const runGroup = {
+  run_group_id: RUN_GROUP_ID,
+  title: 'Chat Image Attachment Smoke',
+  source: 'main_chat',
+  status: 'completed',
+  summary: RUN_RESULT,
+  child_run_ids: [RUN_ID],
+  created_at: now,
+  updated_at: now,
+};
+
+const runEvents = [
+  {
+    event_id: 'event-chat-image-smoke-1',
+    run_id: RUN_ID,
+    sequence: 1,
+    schema_version: 1,
+    event_type: 'model.output.completed',
+    actor: 'model',
+    visibility: 'user',
+    sensitivity: 'normal',
+    payload: { output: RUN_RESULT },
+    created_at: now,
+  },
+  {
+    event_id: 'event-chat-image-smoke-2',
+    run_id: RUN_ID,
+    sequence: 2,
+    schema_version: 1,
+    event_type: 'run.completed',
+    actor: 'runtime',
+    visibility: 'user',
+    sensitivity: 'normal',
+    payload: { result: RUN_RESULT },
+    created_at: now,
+  },
+];
+
+function runEventsPage(url) {
+  const afterSequence = Math.max(0, Number(url.searchParams.get('after_sequence') || '0'));
+  const limit = Math.max(1, Number(url.searchParams.get('limit') || '200'));
+  return {
+    run_id: RUN_ID,
+    after_sequence: afterSequence,
+    limit,
+    events: runEvents.filter((event) => event.sequence > afterSequence).slice(0, limit),
   };
 }
 
@@ -107,16 +186,62 @@ async function startMockBridge() {
         return;
       }
       if (request.method === 'GET' && url.pathname === '/ui/runnables') {
-        sendJson(response, 200, { runnables: [] });
+        sendJson(response, 200, {
+          runnables: [{ id: 'builtin:yachiyo-main', name: 'Oha-Yachiyo', kind: 'agent', enabled: true, output_contract: 'chat' }],
+        });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/agents') {
+        sendJson(response, 200, { agents: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/skills') {
+        sendJson(response, 200, { skills: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/skills/sources') {
+        sendJson(response, 200, { roots: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/skill-folders') {
+        sendJson(response, 200, { folders: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/model-profiles') {
+        sendJson(response, 200, { ok: true, profiles: [], defaults: {} });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/workflows') {
+        sendJson(response, 200, { workflows: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/runs') {
+        sendJson(response, 200, { runs: [run] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/ui/runs/${RUN_ID}`) {
+        sendJson(response, 200, run);
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/run-groups') {
+        sendJson(response, 200, { run_groups: [runGroup] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/ui/run-groups/${RUN_GROUP_ID}`) {
+        sendJson(response, 200, runGroup);
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/runs/${RUN_ID}/events`) {
+        sendJson(response, 200, runEventsPage(url));
         return;
       }
       if (request.method === 'GET' && url.pathname === '/ui/chat/sessions') {
         sendJson(response, 200, {
           ok: true,
-          current_session_id: 'session-chat-image-smoke',
+          current_session_id: SESSION_ID,
           sessions: [
             {
-              session_id: 'session-chat-image-smoke',
+              session_id: SESSION_ID,
               title: 'Chat image UI smoke',
               conversation_kind: 'main',
             },
@@ -150,8 +275,25 @@ async function startMockBridge() {
             })),
             metadata: {},
           },
+          {
+            id: 'assistant-chat-image-ui-smoke-reply',
+            role: 'assistant',
+            content: RUN_RESULT,
+            status: 'completed',
+            task_id: TASK_ID,
+            created_at: new Date().toISOString(),
+            metadata: {
+              task_id: TASK_ID,
+              run_id: RUN_ID,
+              run_status: 'completed',
+              runnable_id: 'builtin:yachiyo-main',
+              runnable_kind: 'agent',
+              run_group_id: RUN_GROUP_ID,
+              source: 'main_chat',
+            },
+          },
         ];
-        sendJson(response, 200, { ok: true, task_id: 'task-chat-image-ui-smoke' });
+        sendJson(response, 200, { ok: true, task_id: TASK_ID, run_id: RUN_ID, run_status: 'completed' });
         return;
       }
       sendJson(response, 404, { ok: false, error: `not found: ${request.method} ${url.pathname}` });
@@ -400,6 +542,38 @@ async function main() {
     && !document.querySelector('[data-testid="chat-image-viewer-stage"]')
   ), 'closed image viewer modal');
   console.log('[electron-smoke] image viewer closed');
+  await waitFor(win, () => {
+    const reply = document.querySelector('[data-message-id="assistant-chat-image-ui-smoke-reply"]');
+    const openRun = reply?.querySelector('[data-testid="chat-message-open-run-detail"]');
+    return reply?.textContent.includes(${JSON.stringify(RUN_RESULT)})
+      && openRun
+      && openRun.textContent.includes('运行详情');
+  }, 'image assistant reply Run Detail action');
+  await win.webContents.executeJavaScript("document.querySelector('[data-message-id=\\"assistant-chat-image-ui-smoke-reply\\"] [data-testid=\\"chat-message-open-run-detail\\"]').click()", true);
+  await waitFor(win, () => {
+    const detail = document.querySelector('[data-testid="agent-run-detail"]');
+    const result = document.querySelector('[data-testid="agent-run-detail-result"]');
+    const task = document.querySelector('[data-testid="agent-run-detail-task"]');
+    const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
+    const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
+    const outputEvent = events.find((node) => node.getAttribute('data-run-event') === 'model.output.completed');
+    const completedEvent = events.find((node) => node.getAttribute('data-run-event') === 'run.completed');
+    return window.location.hash.includes(${JSON.stringify(RUN_ID)})
+      && detail?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
+      && detail?.getAttribute('data-run-kind') === 'main_chat_run'
+      && detail?.getAttribute('data-run-status') === 'completed'
+      && detail?.getAttribute('data-task-id') === ${JSON.stringify(TASK_ID)}
+      && detail?.getAttribute('data-session-id') === ${JSON.stringify(SESSION_ID)}
+      && task?.textContent.includes(${JSON.stringify(RUN_GOAL)})
+      && result?.textContent.includes(${JSON.stringify(RUN_RESULT)})
+      && events.length === 2
+      && eventTypes.includes('model.output.completed')
+      && eventTypes.includes('run.completed')
+      && outputEvent?.textContent.includes(${JSON.stringify(RUN_RESULT)})
+      && completedEvent?.textContent.includes(${JSON.stringify(RUN_RESULT)})
+      && events.every((node) => node.getAttribute('data-run-event-run-id') === ${JSON.stringify(RUN_ID)});
+  }, 'image message Run Detail replay handoff');
+  console.log('[electron-smoke] image message Run Detail replay verified');
   clearTimeout(watchdog);
   await win.close();
   app.quit();
