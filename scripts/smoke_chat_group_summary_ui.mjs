@@ -16,7 +16,10 @@ const AGENT_ID = 'chat-group-ui-agent';
 const GROUP_NAME = 'Chat Group UI Smoke';
 const GROUP_GOAL = 'Coordinate the group UI smoke';
 const RUN_GROUP_ID = 'run_group_chat_group_ui_smoke';
+const GROUP_AGENT_RUN_ID = 'agent_run_chat_group_ui_smoke';
 const SUMMARY_TASK_ID = 'task-chat-group-summary-ui-smoke';
+const GROUP_AGENT_TASK_ID = 'task-chat-group-agent-ui-smoke';
+const GROUP_AGENT_RESULT = 'Group UI Agent completed Native group dispatch.';
 const now = new Date().toISOString();
 
 const bridgeState = {
@@ -144,11 +147,12 @@ function createGroupMessages(text) {
       activity_events: [
         {
           event_id: 'activity-chat-group-ui-smoke',
-          task_id: 'task-chat-group-agent-ui-smoke',
+          task_id: GROUP_AGENT_TASK_ID,
           title: 'Group UI Agent',
           detail: 'NativeRunEngine group dispatch is linked to this RunGroup.',
           status: 'completed',
           metadata: {
+            run_id: GROUP_AGENT_RUN_ID,
             run_group_id: RUN_GROUP_ID,
             run_status: 'completed',
           },
@@ -157,6 +161,91 @@ function createGroupMessages(text) {
       ],
     },
   ];
+}
+
+function groupAgentRun() {
+  return {
+    run_id: GROUP_AGENT_RUN_ID,
+    kind: 'agent_run',
+    status: 'completed',
+    runnable_id: AGENT_ID,
+    runnable_name: agentRunnable.name,
+    session_id: GROUP_SESSION_ID,
+    task_id: GROUP_AGENT_TASK_ID,
+    run_group_id: RUN_GROUP_ID,
+    user_goal: GROUP_GOAL,
+    result: GROUP_AGENT_RESULT,
+    task_run_link_run_status: 'completed',
+    task_run_link_last_event_sequence: 4,
+    timeline: [
+      { event: 'agent.run.started', status: 'running', detail: 'Started Native group dispatch.' },
+      { event: 'agent.tool.call', status: 'completed', tool: 'workspace.read', detail: 'Read workspace context.' },
+      { event: 'model.output.completed', status: 'completed', detail: GROUP_AGENT_RESULT },
+      { event: 'agent.run.completed', status: 'completed', detail: GROUP_AGENT_RESULT },
+    ],
+    artifacts: [],
+    created_at: now,
+    updated_at: now,
+  };
+}
+
+function groupAgentRunEvents() {
+  return [
+    {
+      run_id: GROUP_AGENT_RUN_ID,
+      sequence: 1,
+      event_type: 'agent.run.started',
+      actor: 'agent',
+      visibility: 'public',
+      sensitivity: 'normal',
+      payload: { goal: GROUP_GOAL, run_group_id: RUN_GROUP_ID },
+      created_at: now,
+    },
+    {
+      run_id: GROUP_AGENT_RUN_ID,
+      sequence: 2,
+      event_type: 'agent.tool.call',
+      actor: 'tool',
+      visibility: 'public',
+      sensitivity: 'normal',
+      payload: { tool: 'workspace.read', status: 'completed' },
+      created_at: now,
+    },
+    {
+      run_id: GROUP_AGENT_RUN_ID,
+      sequence: 3,
+      event_type: 'model.output.completed',
+      actor: 'model',
+      visibility: 'public',
+      sensitivity: 'normal',
+      payload: { content: GROUP_AGENT_RESULT },
+      created_at: now,
+    },
+    {
+      run_id: GROUP_AGENT_RUN_ID,
+      sequence: 4,
+      event_type: 'agent.run.completed',
+      actor: 'agent',
+      visibility: 'public',
+      sensitivity: 'normal',
+      payload: { result: GROUP_AGENT_RESULT },
+      created_at: now,
+    },
+  ];
+}
+
+function groupRunGroup() {
+  return {
+    run_group_id: RUN_GROUP_ID,
+    kind: 'group_chat',
+    status: 'completed',
+    title: GROUP_NAME,
+    summary: GROUP_AGENT_RESULT,
+    root_run_id: GROUP_AGENT_RUN_ID,
+    child_run_ids: [GROUP_AGENT_RUN_ID],
+    created_at: now,
+    updated_at: now,
+  };
 }
 
 function pickPort() {
@@ -229,6 +318,69 @@ async function startMockBridge() {
       }
       if (request.method === 'GET' && url.pathname === '/ui/runnables') {
         sendJson(response, 200, { runnables: [agentRunnable] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/agents') {
+        sendJson(response, 200, {
+          agents: [{
+            agent_id: AGENT_ID,
+            name: agentRunnable.name,
+            nickname: agentRunnable.nickname,
+            model_mode: 'follow_main',
+            execution_backend: 'native_profile',
+            model_config: {},
+            enabled: true,
+            editable: true,
+            deletable: true,
+          }],
+        });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/skills') {
+        sendJson(response, 200, { skills: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/skills/sources') {
+        sendJson(response, 200, { roots: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/skill-folders') {
+        sendJson(response, 200, { folders: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/model-profiles') {
+        sendJson(response, 200, { ok: true, profiles: [], defaults: {} });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/workflows') {
+        sendJson(response, 200, { workflows: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/runs') {
+        sendJson(response, 200, { runs: [groupAgentRun()] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/ui/runs/${GROUP_AGENT_RUN_ID}`) {
+        sendJson(response, 200, groupAgentRun());
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/run-groups') {
+        sendJson(response, 200, { run_groups: [groupRunGroup()] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/ui/run-groups/${RUN_GROUP_ID}`) {
+        sendJson(response, 200, groupRunGroup());
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/runs/${GROUP_AGENT_RUN_ID}/events`) {
+        const afterSequence = Number(url.searchParams.get('after_sequence') || '0');
+        const limit = Math.max(1, Number(url.searchParams.get('limit') || '200'));
+        sendJson(response, 200, {
+          run_id: GROUP_AGENT_RUN_ID,
+          after_sequence: Math.max(0, afterSequence),
+          limit,
+          events: groupAgentRunEvents().filter((event) => event.sequence > afterSequence).slice(0, limit),
+        });
         return;
       }
       if (request.method === 'GET' && url.pathname === '/ui/chat/sessions') {
@@ -364,6 +516,17 @@ function waitFor(win, predicate, label, timeout = 15000) {
                 runGroup: node.getAttribute('data-run-group-id'),
                 text: node.textContent,
               })),
+              activity: Array.from(document.querySelectorAll('[data-testid="chat-message-activity-row"]')).map((node) => ({
+                status: node.getAttribute('data-activity-status'),
+                tool: node.getAttribute('data-activity-tool'),
+                text: node.textContent,
+              })),
+              runDetail: document.querySelector('[data-testid="agent-run-detail"]')?.outerHTML || '',
+              runEvents: Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]')).map((node) => ({
+                event: node.getAttribute('data-run-event'),
+                run: node.getAttribute('data-run-event-run-id'),
+                text: node.textContent,
+              })),
               bodyText: document.body.textContent.slice(-1600),
             })
           \`, true);
@@ -444,6 +607,32 @@ async function main() {
       && document.body.textContent.includes(${JSON.stringify(GROUP_GOAL)});
   }, 'group summary status');
   console.log('[electron-smoke] group summary rendered');
+  await waitFor(win, () => {
+    const row = document.querySelector('[data-testid="chat-message-activity-row"]');
+    const openRun = document.querySelector('[data-testid="chat-message-activity-open-run-detail"]');
+    return row?.getAttribute('data-activity-status') === 'completed'
+      && row.textContent.includes('Group UI Agent')
+      && openRun;
+  }, 'group activity Run Detail action');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-message-activity-open-run-detail\\"]').click()", true);
+  await waitFor(win, () => {
+    const detail = document.querySelector('[data-testid="agent-run-detail"]');
+    const result = document.querySelector('[data-testid="agent-run-detail-result"]');
+    const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
+    const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
+    return window.location.hash.includes(${JSON.stringify(GROUP_AGENT_RUN_ID)})
+      && detail?.getAttribute('data-run-id') === ${JSON.stringify(GROUP_AGENT_RUN_ID)}
+      && detail?.getAttribute('data-run-kind') === 'agent_run'
+      && detail?.getAttribute('data-run-status') === 'completed'
+      && detail?.getAttribute('data-run-group-id') === ${JSON.stringify(RUN_GROUP_ID)}
+      && result?.textContent.includes(${JSON.stringify(GROUP_AGENT_RESULT)})
+      && eventTypes.includes('agent.run.started')
+      && eventTypes.includes('model.output.completed')
+      && eventTypes.includes('agent.run.completed')
+      && events.length >= 4
+      && events.every((node) => node.getAttribute('data-run-event-run-id') === ${JSON.stringify(GROUP_AGENT_RUN_ID)});
+  }, 'group activity Run Detail handoff');
+  console.log('[electron-smoke] group Run Detail handoff verified');
   clearTimeout(watchdog);
   await win.close();
   app.quit();
