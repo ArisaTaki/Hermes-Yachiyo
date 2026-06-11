@@ -1050,6 +1050,28 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow smoke tests must cover Live2D and mode settings" in messages
 
 
+def test_verifier_requires_individual_smoke_guards_before_packaging(tmp_path):
+    workflow = tmp_path / verifier.RELEASE_WORKFLOW_FILE
+    workflow.parent.mkdir(parents=True)
+    current_workflow = (verifier.ROOT / verifier.RELEASE_WORKFLOW_FILE).read_text(
+        encoding="utf-8"
+    )
+    late_smoke = "node scripts/smoke_workflow_management_ui.mjs"
+    workflow.write_text(
+        current_workflow.replace(f"          {late_smoke}\n", "")
+        + f"\n      - name: Late workflow management smoke\n        run: {late_smoke}\n",
+        encoding="utf-8",
+    )
+
+    findings = verifier._verify_release_workflow_guards(tmp_path)
+    messages = [finding.message for finding in findings]
+
+    assert (
+        "macOS release workflow smoke guard must run before packaged backend and DMG builds: "
+        "macOS release workflow smoke tests must cover Workflow management Electron UI smoke"
+    ) in messages
+
+
 def test_verifier_requires_release_workflow_to_publish_metadata_json(tmp_path):
     workflow = tmp_path / verifier.RELEASE_WORKFLOW_FILE
     workflow.parent.mkdir(parents=True)

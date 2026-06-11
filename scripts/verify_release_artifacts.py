@@ -1633,6 +1633,19 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
                 "macOS release workflow must run smoke tests before packaged backend and DMG builds",
             )
         )
+    if build_backend >= 0 and build_dmg >= 0:
+        for required_text, message in RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT:
+            required_index = workflow.find(required_text)
+            if (
+                required_index >= 0
+                and (required_index > build_backend or required_index > build_dmg)
+            ):
+                findings.append(
+                    Finding(
+                        workflow_path,
+                        f"macOS release workflow smoke guard must run before packaged backend and DMG builds: {message}",
+                    )
+                )
     if (
         provider_smoke < 0
         or build_backend < 0
