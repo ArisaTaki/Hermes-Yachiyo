@@ -581,6 +581,12 @@ def test_agent_studio_exposes_stable_e2e_selectors_for_run_detail_and_approval_f
         "apps/frontend/src/views/AgentStudioView.tsx",
         [
             "data-testid=\"agent-run-detail\"",
+            "data-run-id={selectedRun.run_id}",
+            "data-run-kind={selectedRun.kind}",
+            "data-run-status={selectedRun.status}",
+            "data-run-group-id={selectedRun.run_group_id || ''}",
+            "data-session-id={selectedRun.session_id || ''}",
+            "data-task-id={selectedRun.task_id || ''}",
             "data-testid=\"agent-run-detail-hero\"",
             "data-testid=\"agent-run-detail-meta\"",
             "data-testid=\"agent-run-detail-prepare-rerun\"",
@@ -624,7 +630,14 @@ def test_agent_studio_exposes_stable_e2e_selectors_for_run_detail_and_approval_f
             "data-testid=\"agent-run-history-clear-selection\"",
             "data-testid=\"agent-run-history-delete-selected\"",
             "data-testid=\"agent-run-history-finish-management\"",
+            "data-testid=\"agent-run-history-row\"",
+            "data-testid=\"agent-run-history-open-run\"",
             "data-testid=\"agent-run-history-select-run\"",
+            "data-run-id={run.run_id}",
+            "data-run-kind={run.kind}",
+            "data-run-status={run.status}",
+            "data-run-group-id={run.run_group_id || ''}",
+            "data-task-id={run.task_id || ''}",
         ],
     )
 

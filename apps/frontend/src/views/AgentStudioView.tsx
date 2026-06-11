@@ -4692,6 +4692,12 @@ export function AgentStudioView() {
                     {group.runs.map((run) => (
                       <div
                         className={run.run_id === selectedRunId ? 'run-list-row active' : 'run-list-row'}
+                        data-run-group-id={run.run_group_id || ''}
+                        data-run-id={run.run_id}
+                        data-run-kind={run.kind}
+                        data-run-status={run.status}
+                        data-task-id={run.task_id || ''}
+                        data-testid="agent-run-history-row"
                         key={run.run_id}
                       >
                         <label className="run-list-select" aria-label={`选择 Run ${run.run_id}`}>
@@ -4706,6 +4712,7 @@ export function AgentStudioView() {
                         <button
                           type="button"
                           className={run.run_id === selectedRunId ? 'run-list-item active' : 'run-list-item'}
+                          data-testid="agent-run-history-open-run"
                           onClick={() => openRunDetail(run.run_id)}
                         >
                           <span className={`run-list-status-dot ${runStatusTone(run.status)}`} aria-hidden="true" />
@@ -4732,7 +4739,16 @@ export function AgentStudioView() {
           <div className="agent-studio-panel">
             <div className="section-heading-row"><h2>Run Detail</h2></div>
             {selectedRun ? (
-              <article className="run-detail" data-testid="agent-run-detail">
+              <article
+                className="run-detail"
+                data-run-group-id={selectedRun.run_group_id || ''}
+                data-run-id={selectedRun.run_id}
+                data-run-kind={selectedRun.kind}
+                data-run-status={selectedRun.status}
+                data-session-id={selectedRun.session_id || ''}
+                data-task-id={selectedRun.task_id || ''}
+                data-testid="agent-run-detail"
+              >
                 <header className="run-detail-hero" data-testid="agent-run-detail-hero">
                   <AgentAvatar avatarUrl={selectedRunAvatarUrl} name={selectedRun.runnable_name || selectedRun.runnable_id || 'Run'} />
                   <div className="run-detail-title">
