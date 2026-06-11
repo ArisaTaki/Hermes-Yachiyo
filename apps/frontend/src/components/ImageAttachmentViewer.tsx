@@ -32,11 +32,13 @@ function ImagePreviewAttachment({ attachment, testId }: Props) {
   const viewer = open && canPreview ? (
     <div
       className="image-viewer-backdrop"
+      data-testid="chat-image-viewer-backdrop"
       role="presentation"
       onClick={() => setOpen(false)}
     >
       <section
         className="image-viewer-modal"
+        data-testid="chat-image-viewer-modal"
         role="dialog"
         aria-modal="true"
         aria-label={name}
@@ -48,10 +50,12 @@ function ImagePreviewAttachment({ attachment, testId }: Props) {
             <p>{attachment.mime_type || 'image'} · {sizeText}</p>
           </div>
           <div className="image-viewer-actions">
-            <button type="button" onClick={() => setOpen(false)}>关闭</button>
+            <button type="button" data-testid="chat-image-viewer-close" onClick={() => setOpen(false)}>
+              关闭
+            </button>
           </div>
         </header>
-        <div className="image-viewer-stage">
+        <div className="image-viewer-stage" data-testid="chat-image-viewer-stage">
           <img src={attachment.url} alt={name} />
         </div>
       </section>

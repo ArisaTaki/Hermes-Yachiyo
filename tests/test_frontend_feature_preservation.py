@@ -265,6 +265,15 @@ def test_chat_ui_exposes_stable_e2e_selectors_for_image_cancel_approval_flow() -
             "data-testid=\"chat-composer-approval-next\"",
         ],
     )
+    _assert_contains(
+        "apps/frontend/src/components/ImageAttachmentViewer.tsx",
+        [
+            "data-testid=\"chat-image-viewer-backdrop\"",
+            "data-testid=\"chat-image-viewer-modal\"",
+            "data-testid=\"chat-image-viewer-stage\"",
+            "data-testid=\"chat-image-viewer-close\"",
+        ],
+    )
 
 
 def test_chat_approval_run_detail_handoff_preserves_route_and_replay_wiring() -> None:
