@@ -519,6 +519,7 @@ def test_diagnostics_screenshot_ui_smoke_uses_local_screen_probe_path() -> None:
             "apiGet<ScreenshotProbe>('/screen/current')",
             "apiPost<DiagnosticResult>('/ui/native-agent/diagnostic-command'",
             "await copyText(text);",
+            "setScreenProbe(null);",
             'data-testid="diagnostics-status"',
             'data-testid="diagnostics-run-command"',
             'data-testid="diagnostics-output"',
@@ -530,11 +531,21 @@ def test_diagnostics_screenshot_ui_smoke_uses_local_screen_probe_path() -> None:
         ],
     )
     _assert_contains(
+        "apps/frontend/src/lib/bridge.ts",
+        [
+            "const detail = data?.detail;",
+            "typeof detail?.message === 'string'",
+            "typeof detail?.error === 'string'",
+        ],
+    )
+    _assert_contains(
         smoke_script,
         [
             "#/diagnostics",
             "request.method === 'GET' && url.pathname === '/screen/current'",
             "request.method === 'POST' && url.pathname === '/ui/native-agent/diagnostic-command'",
+            "SCREENSHOT_PERMISSION_MESSAGE",
+            "screen_capture_permission_denied",
             "data-testid=\"diagnostics-run-command\"",
             "data-testid=\"diagnostics-output\"",
             "data-testid=\"diagnostics-copy-output\"",
@@ -542,7 +553,10 @@ def test_diagnostics_screenshot_ui_smoke_uses_local_screen_probe_path() -> None:
             "data-testid=\"diagnostics-screen-probe-card\"",
             "data-testid=\"diagnostics-screen-probe-summary\"",
             "data-testid=\"diagnostics-screen-probe-image\"",
-            "bridgeState.screenRequests !== 1",
+            "diagnostics screenshot permission error clears stale preview",
+            "summary?.textContent.includes('未探测')",
+            "&& !image",
+            "bridgeState.screenRequests !== 2",
             "window.__ohaDiagnosticsCopiedText",
             "copyText: async (text)",
             "window.__ohaDiagnosticsCopiedText[0] ===",

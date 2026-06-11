@@ -620,11 +620,16 @@ async function parseResponse<T>(response: Response): Promise<T> {
   const text = await response.text();
   const data = text ? JSON.parse(text) : null;
   if (!response.ok) {
-    const message = typeof data?.detail === 'string'
-      ? data.detail
-      : typeof data?.error === 'string'
-        ? data.error
-        : `HTTP ${response.status}`;
+    const detail = data?.detail;
+    const message = typeof detail === 'string'
+      ? detail
+      : typeof detail?.message === 'string'
+        ? detail.message
+        : typeof detail?.error === 'string'
+          ? detail.error
+          : typeof data?.error === 'string'
+            ? data.error
+            : `HTTP ${response.status}`;
     throw new Error(message.includes(`HTTP ${response.status}`) ? message : `HTTP ${response.status}: ${message}`);
   }
   return data as T;

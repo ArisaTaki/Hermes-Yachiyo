@@ -15,6 +15,7 @@ const SCREENSHOT_WIDTH = 320;
 const SCREENSHOT_HEIGHT = 200;
 const DIAGNOSTIC_COMMAND = 'native config check';
 const DIAGNOSTIC_OUTPUT = 'Diagnostics copy smoke output\\nNative runtime ready';
+const SCREENSHOT_PERMISSION_MESSAGE = '屏幕录制权限不足，请在系统设置中授权 Oha-Yachiyo 后重启 Bridge。';
 
 const bridgeState = {
   screenRequests: 0,
@@ -190,7 +191,16 @@ async function startMockBridge() {
       }
       if (request.method === 'GET' && url.pathname === '/screen/current') {
         bridgeState.screenRequests += 1;
-        sendJson(response, 200, screenshotPayload());
+        if (bridgeState.screenRequests === 1) {
+          sendJson(response, 200, screenshotPayload());
+        } else {
+          sendJson(response, 403, {
+            detail: {
+              error: 'screen_capture_permission_denied',
+              message: SCREENSHOT_PERMISSION_MESSAGE,
+            },
+          });
+        }
         return;
       }
       if (request.method === 'POST' && url.pathname === '/ui/native-agent/diagnostic-command') {
@@ -331,6 +341,16 @@ async function main() {
       && image.naturalWidth > 0;
   }, 'diagnostics screenshot preview');
   console.log('[electron-smoke] diagnostics screenshot preview verified');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"diagnostics-screen-probe\\"]').click()", true);
+  await waitFor(win, () => {
+    const status = document.querySelector('[data-testid="diagnostics-status"]');
+    const summary = document.querySelector('[data-testid="diagnostics-screen-probe-summary"]');
+    const image = document.querySelector('[data-testid="diagnostics-screen-probe-image"]');
+    return status?.textContent.includes(${JSON.stringify(`HTTP 403: ${SCREENSHOT_PERMISSION_MESSAGE}`)})
+      && summary?.textContent.includes('未探测')
+      && !image;
+  }, 'diagnostics screenshot permission error clears stale preview');
+  console.log('[electron-smoke] diagnostics screenshot permission error verified');
   await win.webContents.executeJavaScript(\`
   (() => {
     window.__ohaDiagnosticsCopiedText = [];
@@ -394,8 +414,8 @@ main().catch((error) => {
 }
 
 function assertMockBridgeContract() {
-  if (bridgeState.screenRequests !== 1) {
-    throw new Error(`expected exactly one /screen/current request, got ${bridgeState.screenRequests}`);
+  if (bridgeState.screenRequests !== 2) {
+    throw new Error(`expected exactly two /screen/current requests, got ${bridgeState.screenRequests}`);
   }
   if (bridgeState.diagnosticRequests.length !== 1) {
     throw new Error(`expected one diagnostic command request, got ${bridgeState.diagnosticRequests.length}`);

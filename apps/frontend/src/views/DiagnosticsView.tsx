@@ -624,6 +624,7 @@ export function DiagnosticsView() {
       setScreenProbe(result);
       setStatus(`已获取屏幕截图摘要：${result.width || '—'}×${result.height || '—'}`);
     } catch (err) {
+      setScreenProbe(null);
       setStatus(err instanceof Error ? err.message : '截图探测失败');
     } finally {
       setRuntimeBusy('');
