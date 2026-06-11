@@ -2036,6 +2036,7 @@ compileall passed
 - release workflow smoke 现在也强制包含 approved terminal failure output redaction 回归，确保批准后的 `terminal.run` 非零退出不会把 stdout / stderr secret 写入 Run projection、RunEvent 或 runtime SQLite。
 - release workflow smoke 现在也强制包含主聊天 provider exception / tool exception redaction 回归，避免异常文本中的 secret 进入 Run projection、RunEvent、tool result message 或 runtime SQLite。
 - release workflow smoke 现在也强制包含 ApprovalResumeCoordinator claim projection boundary 回归，确保批准后的 pending approval claim 与 running projection 不回退到 NativeRunEngine 私有分支。
+- release workflow smoke 现在也强制包含 NativeRunEngine approval resume claim boundary 回归，确认 standalone Agent approval resume 通过 `ApprovalResumeCoordinator.claim_and_project_approved_tool()` 进入 approved-tool claim/projection 边界。
 - release workflow smoke 现在也强制包含 `TaskRunLinkRepository` projection boundary 回归，确保 Task↔Run link、Run status projection 和 replay `last_event_sequence` 继续由显式边界维护。
 - release workflow smoke 现在也强制包含 RunEvent 并发写入 sequence / replay cursor projection 回归，确保 `RunEventRepository.append()` 与 TaskRunLink cursor projection 在共享 SQLite connection 上不会重新出现并发事务交错。
 - release workflow smoke 现在也强制包含 RunEvent HTTP replay pagination/filtering 回归，确保 `/runs/{run_id}/events` 的 `after_sequence`、limit clamp、user-visible 默认过滤和 secret hiding 不从发布路径回退。

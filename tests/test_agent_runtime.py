@@ -8471,6 +8471,81 @@ def test_agent_run_pauses_for_terminal_approval_and_resumes(tmp_path, monkeypatc
         service.close()
 
 
+def test_agent_run_approval_uses_resume_coordinator_claim_boundary(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    calls = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        if len(calls) == 1:
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_terminal",
+                        "type": "function",
+                        "function": {
+                            "name": "terminal_run",
+                            "arguments": json.dumps({"command": "printf approved"}),
+                        },
+                    }
+                ],
+            }
+        assert messages[-1]["role"] == "tool"
+        return {"content": "Claim boundary complete"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        claim_calls: list[dict[str, object]] = []
+        original_claim = service.approval_resume.claim_and_project_approved_tool
+
+        def spy_claim(run_id, pending, context, **kwargs):
+            claim_calls.append(
+                {
+                    "run_id": run_id,
+                    "tool": pending.get("tool"),
+                    "context_run_id": context.run_id,
+                    "context_tool_name": context.tool_name,
+                    "resumed_detail": kwargs.get("resumed_detail"),
+                    "running_result": kwargs.get("running_result"),
+                }
+            )
+            return original_claim(run_id, pending, context, **kwargs)
+
+        monkeypatch.setattr(service.approval_resume, "claim_and_project_approved_tool", spy_claim)
+        agent = service.create_agent(
+            {
+                "name": "Claim Boundary Agent",
+                "model_mode": "custom_api",
+                "model_config": {"base_url": "https://api.example.test/v1", "model": "demo-model", "api_key": "sk-secret"},
+                "tool_policy": {"allowed_tools": ["terminal.run"]},
+                "workspace_policy": {"default_workdir": str(workdir), "readable_scopes": ["."]},
+            }
+        )
+        run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Run command"})
+
+        assert run["status"] == "approval_required"
+
+        resumed = service.approve_run_approval(run["run_id"])
+
+        assert resumed["status"] == "completed"
+        assert resumed["result"] == "Claim boundary complete"
+        assert claim_calls == [
+            {
+                "run_id": run["run_id"],
+                "tool": "terminal.run",
+                "context_run_id": run["run_id"],
+                "context_tool_name": "terminal.run",
+                "resumed_detail": "Agent resumed after approval",
+                "running_result": "已批准，Agent 正在继续执行",
+            }
+        ]
+    finally:
+        service.close()
+
+
 def test_agent_run_consecutive_terminal_approvals_update_pending_request(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     workdir = tmp_path / "repo"
