@@ -34,6 +34,7 @@ let workflowChildApproved = false;
 let workflowChildRejected = false;
 let workflowChildCancelled = false;
 const runEventRequests = [];
+const deletedRunIds = [];
 
 const run = {
   run_id: RUN_ID,
@@ -1045,7 +1046,7 @@ function sendJson(response, statusCode, payload) {
   response.writeHead(statusCode, {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'content-type,x-oha-yachiyo-bridge-token',
-    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS,DELETE',
     'Content-Type': 'application/json; charset=utf-8',
   });
   response.end(JSON.stringify(payload));
@@ -1144,7 +1145,9 @@ async function startMockBridge() {
       }
       if (request.method === 'GET' && url.pathname === '/ui/runs') {
         const runs = [workflowCancelRun(), workflowRejectRun(), workflowRun(), run, approvalRun()];
-        sendJson(response, 200, { runs: rerunCreated ? [rerun, ...runs] : runs });
+        sendJson(response, 200, {
+          runs: (rerunCreated ? [rerun, ...runs] : runs).filter((item) => !deletedRunIds.includes(item.run_id)),
+        });
         return;
       }
       if (request.method === 'GET' && url.pathname === `/ui/runs/${WORKFLOW_RUN_ID}`) {
@@ -1206,6 +1209,16 @@ async function startMockBridge() {
       if (request.method === 'POST' && url.pathname === `/ui/runs/${RUN_ID}/rerun`) {
         rerunCreated = true;
         sendJson(response, 200, rerun);
+        return;
+      }
+      if (request.method === 'DELETE' && url.pathname.startsWith('/ui/runs/')) {
+        const runId = decodeURIComponent(url.pathname.slice('/ui/runs/'.length));
+        deletedRunIds.push(runId);
+        sendJson(response, 200, {
+          ok: true,
+          deleted_run_ids: [runId],
+          deleted_run_count: 1,
+        });
         return;
       }
       if (request.method === 'GET' && url.pathname === `/ui/runs/${RUN_ID}/artifacts/${ARTIFACT_PATH}`) {
@@ -1608,6 +1621,7 @@ async function main() {
   console.log('[electron-smoke] workflow child approval completed parent detail');
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"agent-run-detail-workflow-step-open-run\\"]').click()", true);
   await waitFor(win, () => window.location.hash.includes(${JSON.stringify(WORKFLOW_CHILD_RUN_ID)}), 'workflow child route hash');
+  await win.loadURL('about:blank');
   await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '#/agents/' + encodeURIComponent(${JSON.stringify(WORKFLOW_CHILD_RUN_ID)}));
   await waitFor(win, () => {
     const detail = document.querySelector('[data-testid="agent-run-detail"]');
@@ -1633,6 +1647,65 @@ async function main() {
   await waitFor(win, () => document.querySelector('[data-testid="agent-run-detail"]')?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}, 'run detail article');
   await waitFor(win, () => document.querySelector('[data-testid="agent-run-detail-task"]')?.textContent.includes('Inspect Native RunEvent replay'), 'run task block');
   await waitFor(win, () => document.querySelector('[data-testid="agent-run-detail-result"]')?.textContent.includes('Run Detail UI smoke completed through replay facts'), 'run result block');
+  await waitFor(win, () => {
+    const manage = document.querySelector('[data-testid="agent-run-history-manage"]');
+    const rows = Array.from(document.querySelectorAll('[data-testid="agent-run-history-row"]'));
+    return manage
+      && !manage.disabled
+      && rows.some((row) => row.getAttribute('data-run-id') === ${JSON.stringify(APPROVAL_RUN_ID)})
+      && rows.some((row) => row.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)});
+  }, 'agent run history management controls');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"agent-run-history-manage\\"]').click()", true);
+  await waitFor(win, () => {
+    const bulk = document.querySelector('[data-testid="agent-run-history-bulk-actions"]');
+    const checkboxes = Array.from(document.querySelectorAll('[data-testid="agent-run-history-select-run"]'));
+    return Boolean(bulk) && checkboxes.length >= 5 && checkboxes.every((input) => !input.disabled);
+  }, 'agent run history management mode');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"agent-run-history-select-all\\"]').click()", true);
+  await waitFor(win, () => {
+    const bulk = document.querySelector('[data-testid="agent-run-history-bulk-actions"]');
+    const checkboxes = Array.from(document.querySelectorAll('[data-testid="agent-run-history-select-run"]'));
+    const deleteSelected = document.querySelector('[data-testid="agent-run-history-delete-selected"]');
+    return checkboxes.length >= 5
+      && bulk?.textContent.includes('已选择 ' + checkboxes.length + ' / ' + checkboxes.length)
+      && checkboxes.every((input) => input.checked)
+      && Boolean(deleteSelected)
+      && !deleteSelected.disabled;
+  }, 'agent run history select all');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"agent-run-history-clear-selection\\"]').click()", true);
+  await waitFor(win, () => {
+    const bulk = document.querySelector('[data-testid="agent-run-history-bulk-actions"]');
+    const checkboxes = Array.from(document.querySelectorAll('[data-testid="agent-run-history-select-run"]'));
+    const deleteSelected = document.querySelector('[data-testid="agent-run-history-delete-selected"]');
+    return checkboxes.length >= 5
+      && bulk?.textContent.includes(checkboxes.length + ' runs')
+      && checkboxes.every((input) => !input.checked)
+      && Boolean(deleteSelected)
+      && deleteSelected.disabled;
+  }, 'agent run history clear selection');
+  await win.webContents.executeJavaScript(\`
+    document
+      .querySelector('[data-testid="agent-run-history-row"][data-run-id="${APPROVAL_RUN_ID}"] [data-testid="agent-run-history-select-run"]')
+      .click();
+  \`, true);
+  await waitFor(win, () => {
+    const bulk = document.querySelector('[data-testid="agent-run-history-bulk-actions"]');
+    const checkbox = document.querySelector('[data-testid="agent-run-history-row"][data-run-id="${APPROVAL_RUN_ID}"] [data-testid="agent-run-history-select-run"]');
+    const deleteSelected = document.querySelector('[data-testid="agent-run-history-delete-selected"]');
+    return checkbox?.checked
+      && bulk?.textContent.includes('已选择 1 /')
+      && Boolean(deleteSelected)
+      && !deleteSelected.disabled;
+  }, 'agent run history selected completed run');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"agent-run-history-delete-selected\\"]').click()", true);
+  await waitFor(win, () => document.querySelector('[data-testid="confirm-dialog"]')?.textContent.includes('删除 1 条 Run History'), 'agent run history delete confirm');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"confirm-action\\"]').click()", true);
+  await waitFor(win, () => (
+    document.querySelector('[data-testid="agent-run-detail"]')?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
+    && !document.querySelector('[data-testid="agent-run-history-row"][data-run-id="${APPROVAL_RUN_ID}"]')
+    && document.querySelector('[data-testid="agent-run-history-bulk-actions"]')
+  ), 'agent run history bulk delete completed');
+  console.log('[electron-smoke] run history selection controls and bulk delete verified');
   await waitFor(win, () => {
     const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
     const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
@@ -1742,6 +1815,7 @@ async function main() {
     await runElectronSmoke(devUrl, bridge.url);
     if (!workflowChildRejected) throw new Error('workflow child reject action was not called');
     if (!workflowChildCancelled) throw new Error('workflow child cancel action was not called');
+    if (!deletedRunIds.includes(APPROVAL_RUN_ID)) throw new Error('agent run history delete route was not called');
     const initialReplayRequest = runEventRequests.some((request) => request.after_sequence === 0 && request.limit === 200);
     const loadMoreReplayRequest = runEventRequests.some((request) => request.after_sequence === 200 && request.limit === 200);
     if (!initialReplayRequest) {
