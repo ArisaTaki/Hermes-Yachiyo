@@ -6,8 +6,9 @@ dependency-free so every persistence boundary can use the same scrubber.
 
 from __future__ import annotations
 
-import re
 import logging
+import os
+import re
 import sys
 import traceback
 from typing import Any
@@ -31,9 +32,28 @@ _SECRET_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\b(gh[pousr]_[A-Za-z0-9_]{12,})\b"),
     re.compile(r"\b(xox[baprs]-[A-Za-z0-9\-]{12,})\b"),
 )
+_SENSITIVE_ENV_KEY_RE = re.compile(
+    r"(?i)(^SSH_AUTH_SOCK$|^GITHUB_TOKEN$|^(AWS|GOOGLE|AZURE)_|(_API_KEY|_TOKEN|_SECRET|_PASSWORD)$)"
+)
 _SENSITIVE_KEY_RE = re.compile(r"(?i)(api[_-]?key|token|password|passwd|secret|authorization|bearer)")
 _TOOL_CALL_SNIPPET_RE = re.compile(r"<tool_call\b.*?</tool_call>", re.IGNORECASE | re.DOTALL)
 _TOOL_CALL_TAIL_RE = re.compile(r"<tool_call\b.*", re.IGNORECASE | re.DOTALL)
+
+
+def scrubbed_subprocess_env(extra: dict[str, str] | None = None) -> dict[str, str]:
+    """Return process env without credentials that should not reach child commands."""
+
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not _SENSITIVE_ENV_KEY_RE.search(key)
+    }
+    for key, value in (extra or {}).items():
+        clean_key = str(key)
+        if not clean_key or _SENSITIVE_ENV_KEY_RE.search(clean_key):
+            continue
+        env[clean_key] = str(value)
+    return env
 
 
 def redact_sensitive_text(

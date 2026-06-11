@@ -1074,6 +1074,7 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow smoke tests must cover group chat Native summary flow" in messages
     assert "macOS release workflow smoke tests must cover auto delegation Native summary flow" in messages
     assert "macOS release workflow smoke tests must cover manual TTS" in messages
+    assert "macOS release workflow smoke tests must cover TTS command env scrub" in messages
     assert "macOS release workflow smoke tests must cover desktop display mode normalization" in messages
     assert "macOS release workflow smoke tests must cover settings effect policy" in messages
     assert "macOS release workflow smoke tests must cover Live2D and mode settings" in messages

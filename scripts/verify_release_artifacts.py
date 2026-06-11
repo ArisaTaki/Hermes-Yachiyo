@@ -1219,6 +1219,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover manual TTS",
     ),
     (
+        "tests/test_tts.py::test_tts_command_invocation_uses_text_voice_and_timeout",
+        "macOS release workflow smoke tests must cover TTS command env scrub",
+    ),
+    (
         "tests/test_display_modes.py",
         "macOS release workflow smoke tests must cover desktop display mode normalization",
     ),

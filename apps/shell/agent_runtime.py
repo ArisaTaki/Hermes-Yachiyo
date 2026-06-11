@@ -33,7 +33,12 @@ from apps.shell.model_profiles import (
     read_openai_compatible_chat_timeout,
     supports_openai_compatible_api,
 )
-from packages.security import redact_api_error_text, redact_sensitive_text, sanitize_sensitive_value
+from packages.security import (
+    redact_api_error_text,
+    redact_sensitive_text,
+    sanitize_sensitive_value,
+    scrubbed_subprocess_env,
+)
 
 
 class AgentRuntimeError(RuntimeError):
@@ -72,9 +77,6 @@ _NATIVE_LIBRARY_SOURCE_TYPES = {"native_global", "native_project"}
 _SKILL_SOURCE_TYPES = {*_NATIVE_LIBRARY_SOURCE_TYPES, "npx_skills", "local_zip", "local_dir"}
 _SHELL_METACHARS = {"&&", "||", "&", ";", "|", ">", ">>", "<", "$(", "`", "\n", "\r"}
 _UNSET = object()
-_SENSITIVE_ENV_RE = re.compile(
-    r"(?i)(^SSH_AUTH_SOCK$|^GITHUB_TOKEN$|^(AWS|GOOGLE|AZURE)_|(_API_KEY|_TOKEN|_SECRET|_PASSWORD)$)"
-)
 _MAIN_CHAT_AGENT_ID = "builtin:yachiyo-main"
 _SYSTEM_AGENT_IDS = {_MAIN_CHAT_AGENT_ID}
 _DEFAULT_AGENT_IDS = {
@@ -159,20 +161,6 @@ def cancel_terminal_process_groups() -> None:
                 process.kill()
             except ProcessLookupError:
                 pass
-
-
-def _scrubbed_subprocess_env(extra: dict[str, str] | None = None) -> dict[str, str]:
-    env = {
-        key: value
-        for key, value in os.environ.items()
-        if not _SENSITIVE_ENV_RE.search(key)
-    }
-    for key, value in (extra or {}).items():
-        clean_key = str(key)
-        if _SENSITIVE_ENV_RE.search(clean_key):
-            continue
-        env[clean_key] = str(value)
-    return env
 
 
 def _is_active_run_status(status: str) -> bool:
@@ -1425,7 +1413,7 @@ class ToolBroker:
             return {"ok": False, "error": f"terminal.run 命令解析失败：{exc}"}
         if not shell and not argv:
             return {"ok": False, "error": "terminal.run 命令不能为空"}
-        env = _scrubbed_subprocess_env()
+        env = scrubbed_subprocess_env()
         try:
             process = subprocess.Popen(
                 argv,
@@ -5301,7 +5289,7 @@ class NativeRunEngine:
         target_folder_id = self._normalize_skill_folder_id(folder_id)
         source_ref = self._skill_install_source_ref(argv, installer)
         started_at = _now()
-        env = _scrubbed_subprocess_env({"OHA_YACHIYO_HOME": str(self.skill_installs_native_home)})
+        env = scrubbed_subprocess_env({"OHA_YACHIYO_HOME": str(self.skill_installs_native_home)})
         try:
             completed = subprocess.run(
                 argv,

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import platform
 import re
 import shlex
@@ -19,7 +18,7 @@ from urllib.parse import quote, urljoin, urlparse, urlunparse
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from packages.security import redact_api_error_text
+from packages.security import redact_api_error_text, scrubbed_subprocess_env
 
 if TYPE_CHECKING:
     from apps.shell.config import TTSConfig
@@ -324,9 +323,12 @@ class TTSService:
             if voice:
                 argv.append(voice)
 
-        env = dict(os.environ)
-        env["OHA_YACHIYO_TTS_TEXT"] = text
-        env["OHA_YACHIYO_TTS_VOICE"] = voice
+        env = scrubbed_subprocess_env(
+            {
+                "OHA_YACHIYO_TTS_TEXT": text,
+                "OHA_YACHIYO_TTS_VOICE": voice,
+            }
+        )
         result = subprocess.run(
             argv,
             env=env,

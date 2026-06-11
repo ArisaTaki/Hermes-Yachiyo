@@ -98,6 +98,14 @@ def test_tts_missing_command_config_is_reported_without_call(monkeypatch):
 
 def test_tts_command_invocation_uses_text_voice_and_timeout(monkeypatch):
     calls = []
+    monkeypatch.setenv("SAFE_ENV", "kept")
+    monkeypatch.setenv("SSH_AUTH_SOCK", "ssh-secret")
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_tts_secret")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "aws-tts-secret")
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", "google-tts-secret")
+    monkeypatch.setenv("AZURE_TOKEN", "azure-tts-secret")
+    monkeypatch.setenv("CUSTOM_API_KEY", "custom-tts-secret")
+    monkeypatch.setenv("CUSTOM_PASSWORD", "password-tts-secret")
 
     class _Result:
         returncode = 0
@@ -126,8 +134,20 @@ def test_tts_command_invocation_uses_text_voice_and_timeout(monkeypatch):
     assert result["message"] == "TTS 已完成"
     assert calls[0][0] == ["say", "--voice", "Kyoko", "你好"]
     assert calls[0][1]["timeout"] == 7
-    assert calls[0][1]["env"]["OHA_YACHIYO_TTS_TEXT"] == "你好"
-    assert calls[0][1]["env"]["OHA_YACHIYO_TTS_VOICE"] == "Kyoko"
+    env = calls[0][1]["env"]
+    assert env["SAFE_ENV"] == "kept"
+    assert env["OHA_YACHIYO_TTS_TEXT"] == "你好"
+    assert env["OHA_YACHIYO_TTS_VOICE"] == "Kyoko"
+    for key in (
+        "SSH_AUTH_SOCK",
+        "GITHUB_TOKEN",
+        "AWS_SECRET_ACCESS_KEY",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "AZURE_TOKEN",
+        "CUSTOM_API_KEY",
+        "CUSTOM_PASSWORD",
+    ):
+        assert key not in env
 
 
 def test_tts_sync_test_returns_final_status(monkeypatch):
