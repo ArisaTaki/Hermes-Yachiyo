@@ -523,10 +523,37 @@ async function waitForRunDetailHandoff(win, label) {
       && events.every((node) => node.getAttribute('data-run-event-run-id') === ${JSON.stringify(RUN_ID)});
   }, label);
 }
+async function waitForApprovedRunDetailHandoff(win, label) {
+  await waitFor(win, () => {
+    const detail = document.querySelector('[data-testid="agent-run-detail"]');
+    const result = document.querySelector('[data-testid="agent-run-detail-result"]');
+    const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
+    const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
+    const approvedEvent = events.find((node) => node.getAttribute('data-run-event') === 'agent.tool.approval_approved');
+    const toolCallEvent = events.find((node) => node.getAttribute('data-run-event') === 'agent.tool.call');
+    const completedEvent = events.find((node) => node.getAttribute('data-run-event') === 'run.completed');
+    return window.location.hash.includes(${JSON.stringify(RUN_ID)})
+      && detail?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
+      && detail?.getAttribute('data-run-kind') === 'main_chat_run'
+      && detail?.getAttribute('data-run-status') === 'completed'
+      && result?.textContent.includes('Approved from Chat approval UI smoke.')
+      && !document.querySelector('[data-testid="agent-run-detail-approval"]')
+      && eventTypes.includes('agent.tool.approval_required')
+      && eventTypes.includes('agent.tool.approval_approved')
+      && eventTypes.includes('agent.tool.call')
+      && eventTypes.includes('run.completed')
+      && approvedEvent?.textContent.includes(${JSON.stringify(APPROVAL_ID)})
+      && toolCallEvent?.textContent.includes('terminal.run')
+      && toolCallEvent?.textContent.includes(${JSON.stringify(APPROVAL_COMMAND)})
+      && completedEvent?.textContent.includes('completed')
+      && events.every((node) => node.getAttribute('data-run-event-run-id') === ${JSON.stringify(RUN_ID)});
+  }, label);
+}
 async function waitForApproved(win, label) {
   await waitFor(win, () => {
     const approved = document.querySelector('[data-message-id="assistant-chat-approval-ui-smoke-approved"]');
     return approved?.textContent.includes('Approved from Chat approval UI smoke.')
+      && approved?.querySelector('[data-testid="chat-message-open-run-detail"]')
       && !document.querySelector('[data-testid="chat-message-approval-card"]')
       && !document.querySelector('[data-testid="chat-composer-approval-notice"]');
   }, label);
@@ -568,6 +595,9 @@ async function main() {
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-message-approval-approve\\"]').click()", true);
   await waitForApproved(win, 'message approval approve projection');
   console.log('[electron-smoke] message approval approved');
+  await win.webContents.executeJavaScript("document.querySelector('[data-message-id=\\"assistant-chat-approval-ui-smoke-approved\\"] [data-testid=\\"chat-message-open-run-detail\\"]').click()", true);
+  await waitForApprovedRunDetailHandoff(win, 'approved message Run Detail handoff');
+  console.log('[electron-smoke] approved message Run Detail replay verified');
 
   await win.webContents.executeJavaScript("fetch(" + JSON.stringify(bridgeUrl + '/__smoke/reset') + ", { method: 'POST' })", true);
   await win.loadURL('about:blank');
