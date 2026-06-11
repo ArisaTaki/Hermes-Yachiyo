@@ -2408,9 +2408,11 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
           <form className="chat-input-area composer refined-composer" onSubmit={submit}>
             {composerApprovalItem && composerApprovalDetails ? (
               <ComposerApprovalNotice
+                approvalId={composerApprovalItem.approvalId}
                 busy={approvalActionMessageId === composerApprovalItem.id}
                 currentIndex={composerApprovalIndex}
                 details={composerApprovalDetails}
+                itemId={composerApprovalItem.id}
                 onApprove={() => void resolveApprovalItem(composerApprovalItem, 'approve')}
                 onReject={() => void resolveApprovalItem(composerApprovalItem, 'reject')}
                 onOpenDetails={() => openRunDetails(composerApprovalItem.runId)}
@@ -2418,6 +2420,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                 onReveal={() => revealMessage(composerApprovalItem.messageId)}
                 onNext={() => selectComposerApproval(1)}
                 runId={composerApprovalItem.runId}
+                source={composerApprovalItem.source}
                 total={composerApprovalCount}
               />
             ) : null}
@@ -2959,6 +2962,8 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
   const runId = messageRunId(message);
   const showApprovalActions = hasActionableApproval(message) && Boolean(runId);
   const approvalDetails = showApprovalActions ? approvalRequestDetails(message) : null;
+  const approvalId = approvalDetails ? approvalIdFromPending(message.metadata?.pending_approval) : '';
+  const approvalSignature = approvalDetails ? messageApprovalSignature(message) : '';
   const showAgentProgress = isProcessingEmpty && Boolean(runId || message.metadata?.runnable_kind === 'agent' || message.metadata?.runnable_kind === 'workflow');
   const showInlineRunDetails = role === 'assistant' && Boolean(runId) && !approvalDetails && !showAgentProgress;
   const artifactCount = Number(message.metadata?.run_artifact_count || 0);
@@ -2976,7 +2981,15 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
       <div className="message-stack">
         <div className="message-bubble">
           {approvalDetails ? (
-            <ApprovalRequestCard copiedCodeBlockKey={copiedCodeBlockKey} details={approvalDetails} messageId={message.id || ''} onOpenDetails={() => onOpenRunDetails(runId)} runId={runId} />
+            <ApprovalRequestCard
+              approvalId={approvalId}
+              approvalSignature={approvalSignature}
+              copiedCodeBlockKey={copiedCodeBlockKey}
+              details={approvalDetails}
+              messageId={message.id || ''}
+              onOpenDetails={() => onOpenRunDetails(runId)}
+              runId={runId}
+            />
           ) : showAgentProgress ? (
             <AgentRunProgressCard message={message} onOpenDetails={() => onOpenRunDetails(runId)} runId={runId} />
           ) : isProcessingEmpty ? (
@@ -3018,7 +3031,17 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
           </div>
         ) : null}
         {showApprovalActions ? (
-          <div className="message-approval-actions" data-testid="chat-message-approval-actions">
+          <div
+            className="message-approval-actions"
+            data-approval-id={approvalId}
+            data-approval-kind={approvalDetails && isWorkflowApprovalDetails(approvalDetails) ? 'workflow' : 'tool'}
+            data-approval-requester={approvalDetails?.requester || ''}
+            data-approval-signature={approvalSignature}
+            data-approval-source="message"
+            data-approval-tool={approvalDetails?.tool || ''}
+            data-run-id={runId}
+            data-testid="chat-message-approval-actions"
+          >
             <button type="button" className="message-approval-approve" data-testid="chat-message-approval-approve" disabled={approvalBusy} onClick={onApprove}>
               {approvalBusy ? '处理中...' : '批准'}
             </button>
@@ -3205,6 +3228,7 @@ type RunApprovalDetailOverride = {
 
 type ComposerApprovalItem = {
   id: string;
+  approvalId?: string;
   messageId?: string;
   runId: string;
   createdAt?: string;
@@ -3212,7 +3236,9 @@ type ComposerApprovalItem = {
   source: 'message' | 'activity' | 'workflow-child';
 };
 
-function ApprovalRequestCard({ copiedCodeBlockKey, details, messageId, onOpenDetails, runId }: {
+function ApprovalRequestCard({ approvalId, approvalSignature, copiedCodeBlockKey, details, messageId, onOpenDetails, runId }: {
+  approvalId?: string;
+  approvalSignature?: string;
   copiedCodeBlockKey: string;
   details: ApprovalRequestDetails;
   messageId: string;
@@ -3221,7 +3247,17 @@ function ApprovalRequestCard({ copiedCodeBlockKey, details, messageId, onOpenDet
 }) {
   const workflowApproval = isWorkflowApprovalDetails(details);
   return (
-    <div className="message-content message-approval-card" data-testid="chat-message-approval-card">
+    <div
+      className="message-content message-approval-card"
+      data-approval-id={approvalId || ''}
+      data-approval-kind={workflowApproval ? 'workflow' : 'tool'}
+      data-approval-requester={details.requester}
+      data-approval-signature={approvalSignature || ''}
+      data-approval-source="message"
+      data-approval-tool={details.tool}
+      data-run-id={runId}
+      data-testid="chat-message-approval-card"
+    >
       <div className="message-approval-card-header">
         <span className="message-approval-eyebrow">需要审批</span>
         <div>
@@ -3268,10 +3304,12 @@ function ApprovalRequestCard({ copiedCodeBlockKey, details, messageId, onOpenDet
   );
 }
 
-function ComposerApprovalNotice({ busy, currentIndex, details, onApprove, onNext, onOpenDetails, onPrevious, onReject, onReveal, runId, total }: {
+function ComposerApprovalNotice({ approvalId, busy, currentIndex, details, itemId, onApprove, onNext, onOpenDetails, onPrevious, onReject, onReveal, runId, source, total }: {
+  approvalId?: string;
   busy: boolean;
   currentIndex: number;
   details: ApprovalRequestDetails;
+  itemId?: string;
   onApprove: () => void;
   onNext: () => void;
   onOpenDetails: () => void;
@@ -3279,6 +3317,7 @@ function ComposerApprovalNotice({ busy, currentIndex, details, onApprove, onNext
   onReject: () => void;
   onReveal: () => void;
   runId?: string;
+  source?: ComposerApprovalItem['source'];
   total: number;
 }) {
   const preview = details.codeText || details.summary.map((item) => item.value).join(' ');
@@ -3288,7 +3327,17 @@ function ComposerApprovalNotice({ busy, currentIndex, details, onApprove, onNext
     ? workflowApprovalNoticeSubtitle(details, preview)
     : compactStatusText(preview, 86) || details.goal || '需要确认工具调用后继续执行';
   return (
-    <div className="composer-approval-notice" data-testid="chat-composer-approval-notice">
+    <div
+      className="composer-approval-notice"
+      data-approval-id={approvalId || ''}
+      data-approval-item-id={itemId || ''}
+      data-approval-kind={workflowApproval ? 'workflow' : 'tool'}
+      data-approval-requester={details.requester}
+      data-approval-source={source || ''}
+      data-approval-tool={details.tool}
+      data-run-id={runId || ''}
+      data-testid="chat-composer-approval-notice"
+    >
       <div className="composer-approval-main">
         <span className="composer-approval-badge">{hasMultiple ? `待审批 ${currentIndex + 1}/${total}` : '待审批'}</span>
         <div>
@@ -3534,6 +3583,10 @@ function approvalSignatureFromPending(pending: unknown) {
   return raw.replace(/[^A-Za-z0-9_.:-]+/g, '_').slice(0, 240);
 }
 
+function approvalIdFromPending(pending: unknown) {
+  return isRecord(pending) ? stringValue(pending.approval_id) : '';
+}
+
 function workflowWaitingChildApprovalSignature(message: ChatMessage) {
   const metadata = message.metadata || {};
   const raw = [
@@ -3738,6 +3791,7 @@ function approvalRequiredItems(
     const signature = override?.signature || messageApprovalSignature(message);
     return {
       id: `message:${message.id || ''}:${signature}`,
+      approvalId: approvalIdFromPending(message.metadata?.pending_approval),
       messageId: message.id,
       runId,
       createdAt: override?.createdAt || message.created_at,
@@ -3763,6 +3817,7 @@ function approvalRequiredItems(
       if (resolved.has(itemId)) continue;
       activityApprovals.push({
         id: itemId,
+        approvalId: approvalIdFromPending(event.metadata?.pending_approval),
         messageId: message.id,
         runId,
         createdAt: override?.createdAt || event.created_at || message.created_at,
@@ -3789,6 +3844,7 @@ function approvalRequiredItems(
     if (resolved.has(itemId)) continue;
     workflowChildApprovals.push({
       id: itemId,
+      approvalId: approvalIdFromPending(message.metadata?.workflow_waiting_pending_approval),
       messageId: message.id,
       runId,
       createdAt: override?.createdAt || message.created_at,
