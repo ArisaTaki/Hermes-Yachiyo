@@ -1968,6 +1968,7 @@ compileall passed
 - Backend import、route registration、standalone packaged backend startup、packaged desktop startup 均已验证；release smoke 现在也覆盖 desktop launcher 启动准备、shell app entrypoint 到 Electron launcher 的路由，以及桌面 MainWindow API modes。
 - `/status` 发布版本与产品版本已同步，版本同步脚本也覆盖该路径。
 - 成熟 UI 入口已有 pytest 级 feature-preservation guard，覆盖 Chat、群聊、Agent Studio、Workflow、Run Detail、approval、Activity、Proactive TTS、local screenshot、manual TTS、Live2D。
+- 手动 TTS 音色包导入已拥有独立桌面 picker：Electron main/preload 暴露 `oha:chooseTtsVoiceArchive` / `chooseTtsVoiceArchive()`，Proactive TTS 页面优先使用该入口，旧 preload 仅有 `chooseLive2DArchive()` 时保留兼容 fallback；source guard 锁定该链路，避免手动 TTS 继续耦合 Live2D 资源导入 API。
 - 本地截图权限不足时 `/screen/current` 返回结构化 `screen_capture_permission_denied` 并提示系统设置授权，且已有真实 FastAPI/TestClient HTTP 层回归；ChatAPI 用户请求桌面截图失败时返回/记录结构化且已清洗 secret 的 `desktop_snapshot_error`，同步 ActivityStore 用户可见失败事件，并通过 `verify_secret_redaction()` 扫描本次 ChatStore / ActivityStore SQLite 落盘目录；主动关怀屏幕权限检查继续返回 `permission_denied` / `settings_opened` 结构化结果。
 - 主动关怀桌面观察已有 TaskRunner 级集成回归：`ProactiveDesktopService` 创建低风险 Screenshot Task、写入专用主动关怀会话、复用图片附件链路传递 `image_url` data URL，并由 `NativeAgentExecutor` / `NativeRunEngine` 完成 main_chat_run、RunEvent replay 和 ChatSession 投影，不会污染当前可见聊天会话。
 - 成熟 UI 入口已有浏览器级 route smoke，覆盖主控台、Chat、Agent Studio、Workflow、Run history、Diagnostics、Settings、Proactive TTS、Live2D、Tool Center、Model Profiles、Resources、Workspace、Activity feed/detail、App Update。

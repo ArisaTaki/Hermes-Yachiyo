@@ -134,6 +134,7 @@ declare global {
       chooseAvatarImage?: () => Promise<AvatarImageSelection | string | null>;
       chooseLive2DArchive?: () => Promise<string | null>;
       chooseLive2DModelDirectory?: () => Promise<string | null>;
+      chooseTtsVoiceArchive?: () => Promise<string | null>;
       chooseSkillSources?: () => Promise<string[]>;
       checkAppUpdate?: () => Promise<AppUpdateCheckResult>;
       copyText?: (text: string) => Promise<void>;
@@ -371,6 +372,13 @@ export async function chooseLive2DArchive(): Promise<string | null> {
   return window.ohaDesktop.chooseLive2DArchive();
 }
 
+export async function chooseTtsVoiceArchive(): Promise<string | null> {
+  if (!window.ohaDesktop?.chooseTtsVoiceArchive) {
+    throw new Error('当前环境没有桌面文件选择器入口，请在页面中输入音色包 ZIP 路径');
+  }
+  return window.ohaDesktop.chooseTtsVoiceArchive();
+}
+
 export async function chooseSkillSources(): Promise<string[]> {
   if (!window.ohaDesktop?.chooseSkillSources) {
     throw new Error('当前环境没有桌面文件选择器入口，请在页面中输入 Skill 目录或 ZIP 路径');
@@ -384,6 +392,10 @@ export function hasDesktopAvatarPicker(): boolean {
 
 export function hasDesktopFilePicker(): boolean {
   return Boolean(window.ohaDesktop?.chooseLive2DArchive && window.ohaDesktop?.chooseLive2DModelDirectory);
+}
+
+export function hasDesktopTtsVoiceArchivePicker(): boolean {
+  return Boolean(window.ohaDesktop?.chooseTtsVoiceArchive);
 }
 
 export async function openPath(path: string): Promise<void> {

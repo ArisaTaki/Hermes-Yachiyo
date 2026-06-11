@@ -5,7 +5,9 @@ import {
   apiGet,
   apiPost,
   chooseLive2DArchive,
+  chooseTtsVoiceArchive,
   hasDesktopFilePicker,
+  hasDesktopTtsVoiceArchivePicker,
   openAppView,
   openExternalUrl,
   openPath,
@@ -405,11 +407,15 @@ export function ProactiveTtsSettingsView() {
     setResourceBusy(true);
     setStatus('正在导入八千代音色包...');
     try {
-      const selectedPath = hasDesktopFilePicker()
-        ? await chooseLive2DArchive()
-        : manualVoiceArchivePath.trim();
+      const voiceArchivePickerAvailable = hasDesktopTtsVoiceArchivePicker();
+      const legacyZipPickerAvailable = hasDesktopFilePicker();
+      const selectedPath = voiceArchivePickerAvailable
+        ? await chooseTtsVoiceArchive()
+        : legacyZipPickerAvailable
+          ? await chooseLive2DArchive()
+          : manualVoiceArchivePath.trim();
       if (!selectedPath) {
-        setStatus(hasDesktopFilePicker() ? '已取消导入音色包' : '请输入音色包 ZIP 路径');
+        setStatus((voiceArchivePickerAvailable || legacyZipPickerAvailable) ? '已取消导入音色包' : '请输入音色包 ZIP 路径');
         return;
       }
       const result = await apiPost<TtsVoiceImportResult>('/ui/tts/voice-resource/import', { path: selectedPath });
@@ -685,7 +691,7 @@ export function ProactiveTtsSettingsView() {
   const isGsvProvider = provider === 'gpt-sovits';
   const isDirty = JSON.stringify(form) !== JSON.stringify(savedForm);
   const proactiveDirty = JSON.stringify(proactiveForm) !== JSON.stringify(savedProactiveForm);
-  const filePickerAvailable = hasDesktopFilePicker();
+  const filePickerAvailable = hasDesktopTtsVoiceArchivePicker() || hasDesktopFilePicker();
   const busy = Boolean(busyAction);
   const interactionBusy = busy || loading || resourceBusy;
   const externalGsvServiceDetected = hasExternalGsvService(serviceStatus);

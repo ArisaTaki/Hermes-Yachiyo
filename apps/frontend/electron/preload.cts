@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('ohaDesktop', {
   chooseAvatarImage: () => ipcRenderer.invoke('oha:chooseAvatarImage') as Promise<AvatarImageSelection | null>,
   chooseLive2DArchive: () => ipcRenderer.invoke('oha:chooseLive2DArchive') as Promise<string | null>,
   chooseLive2DModelDirectory: () => ipcRenderer.invoke('oha:chooseLive2DModelDirectory') as Promise<string | null>,
+  chooseTtsVoiceArchive: () => ipcRenderer.invoke('oha:chooseTtsVoiceArchive') as Promise<string | null>,
   chooseSkillSources: () => ipcRenderer.invoke('oha:chooseSkillSources') as Promise<string[]>,
   copyText: (text: string) => ipcRenderer.invoke('oha:copyText', text) as Promise<void>,
   cancelAppUpdateDownload: () => ipcRenderer.invoke('oha:cancelAppUpdateDownload') as Promise<unknown>,

@@ -841,6 +841,9 @@ def test_desktop_presence_features_preserve_live2d_screenshot_and_tts_entrypoint
             "apiPost<ProactiveActionResult>('/ui/proactive/test'",
             "apiPost<TtsTestResult>('/ui/tts/test'",
             "apiPost<TtsVoiceImportResult>('/ui/tts/voice-resource/import'",
+            "chooseTtsVoiceArchive",
+            "hasDesktopTtsVoiceArchivePicker",
+            "const selectedPath = voiceArchivePickerAvailable",
             "'/ui/tts/gpt-sovits/service/install'",
             "'/ui/tts/gpt-sovits/service/adopt'",
             "'/ui/tts/gpt-sovits/service/uninstall'",
@@ -849,10 +852,28 @@ def test_desktop_presence_features_preserve_live2d_screenshot_and_tts_entrypoint
         ],
     )
     _assert_contains(
+        "apps/frontend/src/lib/bridge.ts",
+        [
+            "chooseTtsVoiceArchive?: () => Promise<string | null>;",
+            "export async function chooseTtsVoiceArchive(): Promise<string | null>",
+            "window.ohaDesktop.chooseTtsVoiceArchive()",
+            "export function hasDesktopTtsVoiceArchivePicker(): boolean",
+        ],
+    )
+    _assert_contains(
         "apps/frontend/electron/preload.cts",
         [
             "oha:chooseLive2DArchive",
             "oha:chooseLive2DModelDirectory",
+            "oha:chooseTtsVoiceArchive",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/electron/main.ts",
+        [
+            "ipcMain.handle('oha:chooseTtsVoiceArchive'",
+            "导入 GPT-SoVITS 音色包 ZIP",
+            "{ name: 'TTS 音色包', extensions: ['zip'] }",
         ],
     )
 

@@ -2729,6 +2729,15 @@ ipcMain.handle('oha:chooseLive2DArchive', (event) => showOpenDialogForSender(eve
     { name: '压缩包', extensions: ['zip'] },
   ],
 }));
+ipcMain.handle('oha:chooseTtsVoiceArchive', (event) => showOpenDialogForSender(event, {
+  title: '导入 GPT-SoVITS 音色包 ZIP',
+  defaultPath: app.getPath('home'),
+  properties: ['openFile'],
+  filters: [
+    { name: 'TTS 音色包', extensions: ['zip'] },
+    { name: '压缩包', extensions: ['zip'] },
+  ],
+}));
 ipcMain.handle('oha:chooseSkillSources', (event) => showOpenDialogPathsForSender(event, {
   title: '上传 Skills',
   defaultPath: app.getPath('home'),
