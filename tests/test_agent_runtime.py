@@ -9859,6 +9859,7 @@ def test_agent_run_uses_responses_call_id_without_item_id(tmp_path, monkeypatch)
         ]
         assert assistant_tool_messages[-1]["content"] is None
         assert assistant_tool_messages[-1]["tool_calls"][0]["id"] == "call_agent_response_only"
+        assert assistant_tool_messages[-1]["tool_calls"][0]["function"]["arguments"] == '{"path": "README.md"}'
         assert messages[-1]["role"] == "tool"
         assert messages[-1]["tool_call_id"] == "call_agent_response_only"
         assert "agent responses call id content" in messages[-1]["content"]
@@ -9945,6 +9946,7 @@ def test_agent_run_prefers_responses_call_id_over_item_id(tmp_path, monkeypatch)
         assert assistant_tool_messages[-1]["content"] is None
         assert assistant_tool_messages[-1]["tool_calls"][0]["id"] == "call_agent_response_item"
         assert assistant_tool_messages[-1]["tool_calls"][0]["id"] != "fc_agent_response_item"
+        assert assistant_tool_messages[-1]["tool_calls"][0]["function"]["arguments"] == '{"path": "README.md"}'
         assert messages[-1]["role"] == "tool"
         assert messages[-1]["tool_call_id"] == "call_agent_response_item"
         assert messages[-1]["tool_call_id"] != "fc_agent_response_item"
@@ -10027,6 +10029,10 @@ def test_agent_run_executes_multiple_responses_tool_calls(tmp_path, monkeypatch)
         assert [tool_call["id"] for tool_call in assistant_tool_messages[-1]["tool_calls"]] == [
             "call_agent_response_readme",
             "call_agent_response_notes",
+        ]
+        assert [tool_call["function"]["arguments"] for tool_call in assistant_tool_messages[-1]["tool_calls"]] == [
+            '{"path": "README.md"}',
+            '{"path": "NOTES.md"}',
         ]
         assert [message["tool_call_id"] for message in tool_messages] == [
             "call_agent_response_readme",
