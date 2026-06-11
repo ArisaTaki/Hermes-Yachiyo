@@ -816,6 +816,26 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover OpenAI SDK object stream completed-event persistence",
     ),
     (
+        "tests/test_agent_runtime.py::test_main_chat_model_consumes_openai_compatible_sse_stream",
+        "macOS release workflow smoke tests must cover NativeRunEngine canonical SSE content stream",
+    ),
+    (
+        "tests/test_agent_runtime.py::test_main_chat_model_consumes_coalesced_openai_compatible_sse_frames",
+        "macOS release workflow smoke tests must cover NativeRunEngine coalesced SSE content frames",
+    ),
+    (
+        "tests/test_agent_runtime.py::test_main_chat_model_consumes_split_openai_compatible_sse_frame_chunks",
+        "macOS release workflow smoke tests must cover NativeRunEngine split SSE content frames",
+    ),
+    (
+        "tests/test_agent_runtime.py::test_main_chat_model_consumes_split_utf8_openai_compatible_sse_frame_chunks",
+        "macOS release workflow smoke tests must cover NativeRunEngine split UTF-8 SSE content frames",
+    ),
+    (
+        "tests/test_agent_runtime.py::test_main_chat_model_consumes_multiline_openai_compatible_sse_data_event",
+        "macOS release workflow smoke tests must cover NativeRunEngine multiline SSE content data",
+    ),
+    (
         "tests/test_agent_runtime.py::test_main_chat_model_rejects_non_stream_reasoning_only_output",
         "macOS release workflow smoke tests must cover provider reasoning privacy for direct chat calls",
     ),
