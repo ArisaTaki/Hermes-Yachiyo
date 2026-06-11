@@ -1297,9 +1297,10 @@ RunEvent sequence:
 
 - `RunTransitionProjectionCoordinator`
   - 负责非 Workflow-root child Run 状态变化后的 Agent RunGroup 投影和父 Workflow 恢复通知。
+  - 负责 standalone/root Agent Run 创建完成后的 RunGroup status/summary 投影。
   - 普通 Run cancel、Agent approved-tool resume 结束、普通 Agent / 主聊天 tool approval reject / timeout 共享该边界，避免各分支各自维护相同结束投影。
   - 负责 Workflow approval reject / timeout 和 `cancel_run()` root Workflow 取消后的 root RunGroup cancelled 状态和 summary 投影。
-  - `NativeRunEngine._project_child_run_transition()` 和 `_project_cancelled_workflow_group_if_root()` 保留为薄 wrapper，成熟测试 spy 点不变。
+  - `NativeRunEngine._project_child_run_transition()`、`_project_agent_run_group_if_root()` 和 `_project_cancelled_workflow_group_if_root()` 保留为薄 wrapper，成熟测试 spy 点不变。
 
 - `WorkflowApprovalTransitionContext`
   - 统一解析 Workflow approval pending payload 中的 node id、label、criteria 和 input preview。

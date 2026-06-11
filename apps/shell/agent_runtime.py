@@ -2960,6 +2960,13 @@ class RunTransitionProjectionCoordinator:
         self._resume_parent_workflows_after_child_update(result)
         return result
 
+    def project_agent_run_group_if_root(self, result: dict[str, Any]) -> dict[str, Any]:
+        self._update_agent_run_group_if_root(result)
+        run_id = str(result.get("run_id") or "")
+        if not run_id:
+            return result
+        return self._get_run(run_id)
+
     def project_cancelled_workflow_group_if_root(
         self,
         run: dict[str, Any],
@@ -7146,8 +7153,7 @@ class NativeRunEngine:
             upstream=str(payload.get("upstream") or ""),
         )
         if root_group:
-            self._update_run_group(run_group_id, status=result["status"], summary=result.get("result") or "")
-            result = self.get_run(result["run_id"])
+            result = self._project_agent_run_group_if_root(result)
         return result
 
     def create_agent_run_async(
@@ -7206,11 +7212,7 @@ class NativeRunEngine:
                     upstream=str(payload.get("upstream") or ""),
                 )
                 if root_group:
-                    self._update_run_group(
-                        run_group_id,
-                        status=exec_result["status"],
-                        summary=exec_result.get("result") or "",
-                    )
+                    exec_result = self._project_agent_run_group_if_root(exec_result)
                 if on_complete:
                     on_complete(exec_result)
             except Exception as exc:
@@ -8643,6 +8645,9 @@ class NativeRunEngine:
 
     def _project_child_run_transition(self, result: dict[str, Any]) -> dict[str, Any]:
         return self.run_transition_projection.project_child_run_transition(result)
+
+    def _project_agent_run_group_if_root(self, result: dict[str, Any]) -> dict[str, Any]:
+        return self.run_transition_projection.project_agent_run_group_if_root(result)
 
     def reject_run_approval(self, run_id: str, reason: str = "") -> dict[str, Any]:
         run = self.get_run(run_id)

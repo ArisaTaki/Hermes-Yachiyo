@@ -101,7 +101,12 @@ def test_run_transition_projection_coordinator_projects_child_and_workflow_group
             "run_id": "workflow_root",
             "status": "cancelled",
             "result": "Workflow cancelled",
-        }
+        },
+        "agent_root": {
+            "run_id": "agent_root",
+            "status": "completed",
+            "result": "Agent complete",
+        },
     }
 
     coordinator = RunTransitionProjectionCoordinator(
@@ -115,15 +120,17 @@ def test_run_transition_projection_coordinator_projects_child_and_workflow_group
     )
 
     child = {"run_id": "agent_child", "kind": "agent_run", "status": "completed"}
+    agent_root = {"run_id": "agent_root", "kind": "agent_run", "status": "completed"}
     non_root_workflow = {"run_id": "workflow_child", "run_group_id": "group-child", "is_root": False}
     root_workflow = {"run_id": "workflow_root", "run_group_id": "group-root", "is_root": True}
     cancelled = {"run_id": "workflow_root", "status": "cancelled", "result": "Workflow cancelled"}
 
     assert coordinator.project_child_run_transition(child) is child
+    assert coordinator.project_agent_run_group_if_root(agent_root) == stored_runs["agent_root"]
     assert coordinator.project_cancelled_workflow_group_if_root(non_root_workflow, cancelled) is cancelled
     root_projection = coordinator.project_cancelled_workflow_group_if_root(root_workflow, cancelled)
 
-    assert agent_group_updates == [child]
+    assert agent_group_updates == [child, agent_root]
     assert parent_updates == [child]
     assert workflow_group_updates == [
         {
@@ -6105,6 +6112,25 @@ def test_agent_run_client_run_id_is_idempotent(tmp_path, monkeypatch):
             }
         )
 
+        projection_calls: list[dict[str, str]] = []
+        original_projection = service.run_transition_projection.project_agent_run_group_if_root
+
+        def spy_project_agent_run_group_if_root(result: dict[str, object]) -> dict[str, object]:
+            projection_calls.append(
+                {
+                    "run_id": str(result.get("run_id") or ""),
+                    "status": str(result.get("status") or ""),
+                    "result": str(result.get("result") or ""),
+                }
+            )
+            return original_projection(result)
+
+        monkeypatch.setattr(
+            service.run_transition_projection,
+            "project_agent_run_group_if_root",
+            spy_project_agent_run_group_if_root,
+        )
+
         first = service.create_agent_run(
             {"agent_id": agent["agent_id"], "user_goal": "Finish", "client_run_id": "run-client-1"}
         )
@@ -6115,6 +6141,16 @@ def test_agent_run_client_run_id_is_idempotent(tmp_path, monkeypatch):
         assert second["idempotent"] is True
         assert second["run_id"] == first["run_id"]
         assert model_calls == 1
+        assert projection_calls == [
+            {
+                "run_id": first["run_id"],
+                "status": "completed",
+                "result": "Done",
+            }
+        ]
+        group = service.get_run_group(first["run_group_id"])
+        assert group["status"] == "completed"
+        assert group["summary"] == "Done"
         rows = service._conn.execute("SELECT run_id FROM runs WHERE client_request_id='run-client-1'").fetchall()
         assert len(rows) == 1
     finally:
