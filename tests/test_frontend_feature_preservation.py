@@ -780,6 +780,8 @@ def test_chat_run_detail_handoff_ui_smoke_uses_completed_message_run_metadata() 
             "agent.run.started",
             "model.output.completed",
             "agent.run.completed",
+            'outputEvent?.textContent.includes(${JSON.stringify(`"output": "${RUN_RESULT}"`)})',
+            "completedEvent?.textContent.includes(${JSON.stringify(RUN_RESULT)})",
             "completed Chat message opened matching Run Detail",
         ],
     )

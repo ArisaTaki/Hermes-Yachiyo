@@ -459,12 +459,16 @@ async function main() {
     const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
     const sequences = events.map((node) => node.getAttribute('data-run-event-sequence'));
     const runIds = events.map((node) => node.getAttribute('data-run-event-run-id'));
+    const outputEvent = events.find((node) => node.getAttribute('data-run-event') === 'model.output.completed');
+    const completedEvent = events.find((node) => node.getAttribute('data-run-event') === 'agent.run.completed');
     return events.length === 3
       && eventTypes.includes('agent.run.started')
       && eventTypes.includes('model.output.completed')
       && eventTypes.includes('agent.run.completed')
       && sequences.join(',') === '1,2,3'
-      && runIds.every((id) => id === ${JSON.stringify(RUN_ID)});
+      && runIds.every((id) => id === ${JSON.stringify(RUN_ID)})
+      && outputEvent?.textContent.includes(${JSON.stringify(`"output": "${RUN_RESULT}"`)})
+      && completedEvent?.textContent.includes(${JSON.stringify(RUN_RESULT)});
   }, 'Run Detail replay events');
   console.log('[electron-smoke] completed Chat message opened matching Run Detail');
   clearTimeout(watchdog);
