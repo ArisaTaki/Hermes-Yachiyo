@@ -1000,7 +1000,9 @@ def test_chat_delegated_summary_http_route_returns_followup_projection(monkeypat
                     "ok": True,
                     "summary_created": True,
                     "run_id": run_id,
+                    "run_group_id": "run_group_delegate_http",
                     "run_status": "completed",
+                    "source_task_id": "source-task-http",
                     "task_id": "summary-task-http",
                 }
 
@@ -1022,7 +1024,9 @@ def test_chat_delegated_summary_http_route_returns_followup_projection(monkeypat
             "ok": True,
             "summary_created": True,
             "run_id": "run_delegate_http",
+            "run_group_id": "run_group_delegate_http",
             "run_status": "completed",
+            "source_task_id": "source-task-http",
             "task_id": "summary-task-http",
         }
     finally:

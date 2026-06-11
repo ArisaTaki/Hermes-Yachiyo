@@ -266,6 +266,9 @@ def test_chat_ui_bridge_contract_preserves_group_and_delegated_summary(monkeypat
                 "ok": True,
                 "summary_created": True,
                 "run_id": run_id,
+                "run_group_id": "run_group_delegate_1",
+                "run_status": "completed",
+                "source_task_id": "source-task-1",
                 "task_id": "summary-task-1",
             }
 
@@ -357,6 +360,9 @@ def test_chat_ui_bridge_contract_preserves_group_and_delegated_summary(monkeypat
         "ok": True,
         "summary_created": True,
         "run_id": "run_delegate_1",
+        "run_group_id": "run_group_delegate_1",
+        "run_status": "completed",
+        "source_task_id": "source-task-1",
         "task_id": "summary-task-1",
     }
     assert bubble_launcher["mode"] == "bubble"

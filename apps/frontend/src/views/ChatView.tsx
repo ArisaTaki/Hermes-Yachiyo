@@ -1192,8 +1192,13 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       const summary = await apiPost<{
         ok?: boolean;
         error?: string;
+        message_id?: string;
         summary_created?: boolean;
         task_id?: string;
+        run_id?: string;
+        run_group_id?: string;
+        run_status?: string;
+        source_task_id?: string;
       }>('/ui/chat/delegated-run-summary', { run_id: runId });
       if (summary.ok === false) throw new Error(summary.error || '创建主模型整理任务失败');
       const taskId = String(summary.task_id || '');

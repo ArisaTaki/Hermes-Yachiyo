@@ -8027,7 +8027,16 @@ def test_summarize_delegated_run_creates_main_followup_task(tmp_path, monkeypatc
 
         assert result["ok"] is True
         assert result["summary_created"] is True
+        assert result["message_id"] == summary_message.message_id
+        assert result["run_group_id"] == "run_group_delegated"
+        assert result["run_status"] == "completed"
+        assert result["source_task_id"] == task_id
         assert repeat["summary_created"] is False
+        assert repeat["message_id"] == summary_message.message_id
+        assert repeat["task_id"] == result["task_id"]
+        assert repeat["run_group_id"] == "run_group_delegated"
+        assert repeat["run_status"] == "completed"
+        assert repeat["source_task_id"] == task_id
         assert summary_message.status == MessageStatus.PROCESSING
         assert summary_message.metadata["sender"]["kind"] == "main"
         assert summary_message.metadata["delegated_run_source_task_id"] == task_id
@@ -8124,6 +8133,9 @@ def test_summarize_delegated_run_uses_native_run_projection(tmp_path, monkeypatc
         assert result["ok"] is True
         assert result["summary_created"] is True
         assert result["run_id"] == run["run_id"]
+        assert result["run_group_id"] == run_group["run_group_id"]
+        assert result["run_status"] == "completed"
+        assert result["source_task_id"] == task_id
         assert summary_message.metadata["run_id"] == run["run_id"]
         assert summary_message.metadata["run_group_id"] == run_group["run_group_id"]
         assert summary_message.metadata["delegated_run_source_task_id"] == task_id
@@ -8228,8 +8240,13 @@ def test_summarize_delegated_run_concurrent_calls_create_one_followup(tmp_path, 
         assert len(created) == 1
         assert len(reused) == 1
         assert reused[0]["reason"] == "already_exists"
+        assert reused[0]["task_id"] == created[0]["task_id"]
+        assert reused[0]["run_group_id"] == run["run_group_id"]
+        assert reused[0]["run_status"] == "completed"
+        assert reused[0]["source_task_id"] == sent["task_id"]
         assert create_task_calls == 1
         assert len(summary_messages) == 1
+        assert reused[0]["message_id"] == summary_messages[0].message_id
         assert len(runtime.state.list_tasks()) == 2
         assert runtime.state.get_task(created[0]["task_id"]) is not None
     finally:
@@ -8303,6 +8320,8 @@ def test_summarize_delegated_run_uses_runtime_injected_activity_store(tmp_path, 
 
         assert result["ok"] is True
         assert result["summary_created"] is True
+        assert result["run_group_id"] == run["run_group_id"]
+        assert result["source_task_id"] == task_id
         assert summary_task is not None
         assert "Injected Agent：已完成" in summary_task.description
         assert "Injected activity store was used." in summary_task.description
@@ -8349,6 +8368,8 @@ def test_summarize_delegated_run_waits_for_terminal_status(tmp_path, monkeypatch
         assert result["ok"] is True
         assert result["summary_created"] is False
         assert result["reason"] == "not_terminal"
+        assert result["run_group_id"] == "run_group_waiting"
+        assert result["run_status"] == "approval_required"
         assert not any(
             message.metadata.get("delegated_run_summary_for_run_id") == "agent_run_waiting"
             for message in runtime.chat_session.get_all_messages()

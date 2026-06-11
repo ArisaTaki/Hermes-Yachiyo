@@ -799,8 +799,20 @@ class ChatAPI:
         if not run_id:
             return {"ok": False, "error": "Run ID 不能为空"}
         with _DELEGATED_RUN_SUMMARY_LOCK:
-            if self._delegated_run_summary_message(run_id) is not None:
-                return {"ok": True, "summary_created": False, "run_id": run_id, "reason": "already_exists"}
+            existing_message = self._delegated_run_summary_message(run_id)
+            if existing_message is not None:
+                metadata = existing_message.metadata if isinstance(existing_message.metadata, dict) else {}
+                return {
+                    "ok": True,
+                    "summary_created": False,
+                    "message_id": existing_message.message_id,
+                    "task_id": existing_message.task_id or "",
+                    "run_id": run_id,
+                    "run_group_id": str(metadata.get("run_group_id") or ""),
+                    "run_status": str(metadata.get("run_status") or ""),
+                    "source_task_id": str(metadata.get("delegated_run_source_task_id") or ""),
+                    "reason": "already_exists",
+                }
             try:
                 run = self._agent_runtime_service().get_run(run_id)
             except KeyError:
@@ -809,18 +821,34 @@ class ChatAPI:
                 return {"ok": False, "error": redact_api_error_text(exc)}
 
             status = self._normalize_agent_run_status(str(run.get("status") or ""))
+            run_group_id = str(run.get("run_group_id") or "")
             if status not in {"completed", "failed", "cancelled"}:
-                return {"ok": True, "summary_created": False, "run_id": run_id, "run_status": status, "reason": "not_terminal"}
+                return {
+                    "ok": True,
+                    "summary_created": False,
+                    "run_id": run_id,
+                    "run_group_id": run_group_id,
+                    "run_status": status,
+                    "reason": "not_terminal",
+                }
 
             activity = self._delegated_run_activity(run_id)
             if activity is None:
-                return {"ok": True, "summary_created": False, "run_id": run_id, "run_status": status, "reason": "activity_not_found"}
+                return {
+                    "ok": True,
+                    "summary_created": False,
+                    "run_id": run_id,
+                    "run_group_id": run_group_id,
+                    "run_status": status,
+                    "reason": "activity_not_found",
+                }
 
             task = self._state.create_task(
                 task_type=TaskType.GENERAL,
                 description=self._delegated_run_summary_task_description(run, activity),
                 chat_session_id=self._session.session_id,
             )
+            source_task_id = str(activity.get("task_id") or "")
             message_id = self._session.upsert_assistant_message(
                 task_id=task.task_id,
                 content="",
@@ -828,9 +856,9 @@ class ChatAPI:
                 metadata={
                     "sender": self._main_model_sender_from_runtime(),
                     "delegated_run_summary_for_run_id": run_id,
-                    "delegated_run_source_task_id": activity.get("task_id", ""),
+                    "delegated_run_source_task_id": source_task_id,
                     "run_id": run_id,
-                    "run_group_id": run.get("run_group_id", ""),
+                    "run_group_id": run_group_id,
                     "run_status": status,
                 },
             )
@@ -840,7 +868,9 @@ class ChatAPI:
                 "message_id": message_id,
                 "task_id": task.task_id,
                 "run_id": run_id,
+                "run_group_id": run_group_id,
                 "run_status": status,
+                "source_task_id": source_task_id,
             }
 
     def _handle_runnable_command(
