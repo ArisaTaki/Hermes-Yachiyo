@@ -643,6 +643,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover ApprovalResumeCoordinator custom API resume flow",
     ),
     (
+        "tests/test_agent_runtime.py::test_workflow_parent_resume_coordinator_does_not_project_child_approval_twice",
+        "macOS release workflow smoke tests must cover WorkflowParentResumeCoordinator child approval replay idempotency",
+    ),
+    (
         "tests/test_agent_runtime.py::test_run_approval_routes_return_404_and_are_idempotent",
         "macOS release workflow smoke tests must cover approval approve route idempotency",
     ),
