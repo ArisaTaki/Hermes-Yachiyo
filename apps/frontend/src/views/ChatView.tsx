@@ -2426,7 +2426,17 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                 {attachments.length ? (
                   <div className="composer-attachments" aria-label="已添加图片附件">
                     {attachments.map((attachment) => (
-                      <figure className="composer-attachment" data-testid="chat-composer-attachment-preview" key={attachment.id}>
+                      <figure
+                        className="composer-attachment"
+                        data-testid="chat-composer-attachment-preview"
+                        data-attachment-id={attachment.id}
+                        data-attachment-mime={attachment.mime_type}
+                        data-attachment-name={attachment.name}
+                        data-attachment-size={attachment.size}
+                        data-attachment-width={attachment.width || ''}
+                        data-attachment-height={attachment.height || ''}
+                        key={attachment.id}
+                      >
                         <img src={attachment.data_url} alt={attachment.name} />
                         <figcaption>{attachment.name}</figcaption>
                         <button
