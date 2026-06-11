@@ -1770,6 +1770,8 @@ def _openai_compatible_sse_event_payload(raw_event: str) -> tuple[dict[str, Any]
     error_message = _openai_compatible_payload_error(payload, event_name=event_name)
     if error_message:
         raise ModelProfileError(f"OpenAI-compatible Profile 调用失败：{error_message}")
+    if _openai_compatible_payload_is_control_event(payload, event_name=event_name):
+        return None, False
     return payload, False
 
 
@@ -1807,6 +1809,16 @@ def _openai_compatible_payload_is_error_event(payload: dict[str, Any], *, event_
         return True
     payload_type = str(payload.get("type") or payload.get("object") or "").strip().lower()
     return payload_type in {"error", "response.error", "chat.completion.error"}
+
+
+def _openai_compatible_payload_is_control_event(payload: dict[str, Any], *, event_name: str = "") -> bool:
+    if isinstance(payload.get("choices"), list):
+        return False
+    marker = str(event_name or "").strip().lower().replace("_", "-")
+    if marker in {"ping", "keepalive", "keep-alive", "heartbeat"}:
+        return True
+    payload_type = str(payload.get("type") or payload.get("object") or "").strip().lower().replace("_", "-")
+    return payload_type in {"ping", "keepalive", "keep-alive", "heartbeat"}
 
 
 def openai_compatible_chat_message(

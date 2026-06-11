@@ -777,6 +777,51 @@ def test_openai_compatible_chat_message_streams_coalesced_sse_frames(monkeypatch
     assert [chunk["choices"][0]["delta"]["content"] for chunk in chunks] == ["hello ", "world"]
 
 
+def test_openai_compatible_chat_message_stream_ignores_control_events(monkeypatch):
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            first = json.dumps({"choices": [{"delta": {"content": "control "}}]})
+            second = json.dumps({"choices": [{"delta": {"content": "ignored"}}]})
+            yield (
+                b"event: ping\n"
+                b'data: {"type":"ping"}\n\n'
+                b'data: {"type":"heartbeat","created":123}\n\n'
+                b'data: {"object":"keepalive"}\n\n'
+                + f"data: {first}\n\n".encode("utf-8")
+                + b'event: heartbeat\n'
+                + f"data: {second}\n\n".encode("utf-8")
+                + b"data: [DONE]\n\n"
+            )
+
+    def fake_urlopen(request, timeout, context):
+        body = json.loads(request.data.decode("utf-8"))
+        assert body["stream"] is True
+        assert timeout == OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS
+        assert isinstance(context, ssl.SSLContext)
+        assert request.get_header("Accept") == "text/event-stream"
+        return FakeResponse()
+
+    monkeypatch.setattr("apps.shell.model_profiles.urlrequest.urlopen", fake_urlopen)
+
+    chunks = list(
+        openai_compatible_chat_message(
+            "https://api.example.test/v1",
+            "demo-model",
+            "sk-demo",
+            [{"role": "user", "content": "hello"}],
+            stream=True,
+        )
+    )
+
+    assert [chunk["choices"][0]["delta"]["content"] for chunk in chunks] == ["control ", "ignored"]
+
+
 def test_openai_compatible_chat_message_streams_multiline_sse_data_event(monkeypatch):
     class FakeResponse:
         def __enter__(self):
