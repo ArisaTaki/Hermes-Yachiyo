@@ -30,9 +30,17 @@ RELEASE_ELECTRON_SMOKE_SCRIPTS: tuple[str, ...] = (
 )
 
 
+def _release_workflow_electron_smoke_scripts() -> tuple[str, ...]:
+    workflow = (verifier.ROOT / verifier.RELEASE_WORKFLOW_FILE).read_text(
+        encoding="utf-8"
+    )
+    scripts = re.findall(r"node (scripts/smoke_[A-Za-z0-9_]+_ui\.mjs)", workflow)
+    return tuple(dict.fromkeys(scripts))
+
+
 def _explicit_smoke_selectors() -> set[str]:
     selectors: set[str] = set()
-    for script in RELEASE_ELECTRON_SMOKE_SCRIPTS:
+    for script in _release_workflow_electron_smoke_scripts():
         text = (verifier.ROOT / script).read_text(encoding="utf-8")
         for match in re.finditer(r'data-testid=(?:\\)?"([^"\\]+)(?:\\)?"', text):
             selector = match.group(1)
@@ -376,6 +384,10 @@ def test_packaged_selector_gate_covers_release_electron_smoke_selectors():
     assert missing == []
 
 
+def test_release_electron_smoke_script_list_matches_workflow():
+    assert _release_workflow_electron_smoke_scripts() == RELEASE_ELECTRON_SMOKE_SCRIPTS
+
+
 def test_release_workflow_guard_covers_release_electron_smoke_scripts():
     required_workflow_text = {
         required
@@ -383,7 +395,7 @@ def test_release_workflow_guard_covers_release_electron_smoke_scripts():
     }
     missing = sorted(
         f"node {script}"
-        for script in RELEASE_ELECTRON_SMOKE_SCRIPTS
+        for script in _release_workflow_electron_smoke_scripts()
         if f"node {script}" not in required_workflow_text
     )
 
