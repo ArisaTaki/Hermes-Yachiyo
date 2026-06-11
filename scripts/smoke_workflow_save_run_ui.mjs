@@ -17,11 +17,21 @@ const RUN_GROUP_ID = 'workflow_save_run_ui_smoke_group';
 const RUN_GOAL = 'Run saved Workflow from Electron UI smoke';
 const WORKFLOW_ARTIFACT_PATH = 'workflow-save-run-summary.md';
 const WORKFLOW_ARTIFACT_CONTENT = '# Workflow Save Run UI Smoke\n\nArtifact node output preview.';
+const APPROVAL_WORKFLOW_ID = 'workflow_save_run_ui_smoke_approval_persisted';
+const APPROVAL_RUN_ID = 'workflow_save_run_ui_smoke_approval_run';
+const APPROVAL_RUN_GROUP_ID = 'workflow_save_run_ui_smoke_approval_group';
+const APPROVAL_RUN_GOAL = 'Run approval Workflow from Electron UI smoke';
+const APPROVAL_CRITERIA = 'Approve this Workflow UI smoke before artifact handoff.';
+const APPROVAL_ARTIFACT_PATH = 'workflow-approval-node-summary.md';
+const APPROVAL_ARTIFACT_CONTENT = '# Workflow Approval UI Smoke\n\nApproved artifact preview.';
 const now = new Date().toISOString();
 
 let savedWorkflow = null;
 let createdWorkflowRequest = null;
+let createdApprovalWorkflowRequest = null;
 let createdWorkflowRunRequest = null;
+let createdApprovalWorkflowRunRequest = null;
+let approvalRunApproved = false;
 
 const agent = {
   agent_id: AGENT_ID,
@@ -34,9 +44,9 @@ const agent = {
   deletable: true,
 };
 
-function savedWorkflowSpec(request = {}) {
+function savedWorkflowSpec(request = {}, workflowId = WORKFLOW_ID) {
   return {
-    workflow_id: WORKFLOW_ID,
+    workflow_id: workflowId,
     name: request.name || 'Workflow Save Run UI Smoke',
     description: request.description || '',
     nodes: request.nodes || [],
@@ -145,6 +155,152 @@ const runEvents = [
   },
 ];
 
+function approvalWorkflowRun() {
+  return {
+    run_id: APPROVAL_RUN_ID,
+    run_group_id: APPROVAL_RUN_GROUP_ID,
+    run_group_source: 'workflow',
+    task_id: 'task-workflow-save-run-ui-smoke-approval',
+    session_id: 'session-workflow-save-run-ui-smoke-approval',
+    task_run_link_run_status: approvalRunApproved ? 'completed' : 'approval_required',
+    task_run_link_last_event_sequence: approvalRunApproved ? 5 : 2,
+    kind: 'workflow_run',
+    runnable_id: APPROVAL_WORKFLOW_ID,
+    runnable_name: 'Workflow Approval Save Run UI Smoke',
+    status: approvalRunApproved ? 'completed' : 'approval_required',
+    user_goal: APPROVAL_RUN_GOAL,
+    result: approvalRunApproved ? 'Workflow approval save-and-run UI smoke completed' : '',
+    pending_approval: approvalRunApproved ? undefined : {
+      approval_id: 'approval-workflow-save-run-ui-smoke',
+      tool: 'workflow.approval',
+      input_preview: {
+        node_id: 'approval-1',
+        label: 'Manual Approval',
+        criteria: APPROVAL_CRITERIA,
+      },
+    },
+    timeline: approvalRunApproved
+      ? [
+          { event: 'workflow.run.started', status: 'running', workflow_id: APPROVAL_WORKFLOW_ID },
+          { event: 'workflow.node.approval_required', status: 'approval_required', workflow_node_id: 'approval-1', detail: APPROVAL_CRITERIA },
+          { event: 'workflow.node.approval_approved', status: 'completed', workflow_node_id: 'approval-1', detail: APPROVAL_CRITERIA },
+          { event: 'workflow.node.artifact', status: 'completed', artifact: { path: APPROVAL_ARTIFACT_PATH } },
+          { event: 'workflow.run.completed', status: 'completed' },
+        ]
+      : [
+          { event: 'workflow.run.started', status: 'running', workflow_id: APPROVAL_WORKFLOW_ID },
+          { event: 'workflow.node.approval_required', status: 'approval_required', workflow_node_id: 'approval-1', detail: APPROVAL_CRITERIA },
+        ],
+    artifacts: approvalRunApproved ? [{
+      path: APPROVAL_ARTIFACT_PATH,
+      kind: 'markdown',
+      source_run_id: APPROVAL_RUN_ID,
+      source_runnable_name: 'Workflow Approval Save Run UI Smoke',
+    }] : [],
+    created_at: now,
+    updated_at: now,
+    workflow_run_id: APPROVAL_RUN_ID,
+  };
+}
+
+function approvalRunGroup() {
+  return {
+    run_group_id: APPROVAL_RUN_GROUP_ID,
+    title: 'Workflow Approval Save Run UI Smoke',
+    source: 'workflow',
+    status: approvalRunApproved ? 'completed' : 'approval_required',
+    summary: approvalRunApproved ? 'Workflow approval save-and-run completed from UI' : 'Workflow approval node waiting from UI',
+    child_run_ids: [APPROVAL_RUN_ID],
+    created_at: now,
+    updated_at: now,
+  };
+}
+
+function approvalRunEvents() {
+  const events = [
+    {
+      event_id: 'event-workflow-approval-save-run-smoke-1',
+      run_id: APPROVAL_RUN_ID,
+      sequence: 1,
+      schema_version: 1,
+      event_type: 'workflow.run.started',
+      actor: 'workflow',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: { workflow_id: APPROVAL_WORKFLOW_ID, goal: APPROVAL_RUN_GOAL },
+      created_at: now,
+    },
+    {
+      event_id: 'event-workflow-approval-save-run-smoke-2',
+      run_id: APPROVAL_RUN_ID,
+      sequence: 2,
+      schema_version: 1,
+      event_type: 'workflow.node.approval_required',
+      actor: 'workflow',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: {
+        workflow_id: APPROVAL_WORKFLOW_ID,
+        workflow_node_id: 'approval-1',
+        workflow_node_label: 'Manual Approval',
+        criteria: APPROVAL_CRITERIA,
+        pending_approval: approvalWorkflowRun().pending_approval,
+      },
+      created_at: now,
+    },
+  ];
+  if (!approvalRunApproved) return events;
+  return [
+    ...events,
+    {
+      event_id: 'event-workflow-approval-save-run-smoke-3',
+      run_id: APPROVAL_RUN_ID,
+      sequence: 3,
+      schema_version: 1,
+      event_type: 'workflow.node.approval_approved',
+      actor: 'user',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: {
+        workflow_id: APPROVAL_WORKFLOW_ID,
+        workflow_node_id: 'approval-1',
+        workflow_node_label: 'Manual Approval',
+        criteria: APPROVAL_CRITERIA,
+      },
+      created_at: now,
+    },
+    {
+      event_id: 'event-workflow-approval-save-run-smoke-4',
+      run_id: APPROVAL_RUN_ID,
+      sequence: 4,
+      schema_version: 1,
+      event_type: 'workflow.node.artifact',
+      actor: 'workflow',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: {
+        workflow_id: APPROVAL_WORKFLOW_ID,
+        workflow_node_id: 'artifact-approval',
+        workflow_node_label: APPROVAL_ARTIFACT_PATH,
+        artifact: { path: APPROVAL_ARTIFACT_PATH },
+      },
+      created_at: now,
+    },
+    {
+      event_id: 'event-workflow-approval-save-run-smoke-5',
+      run_id: APPROVAL_RUN_ID,
+      sequence: 5,
+      schema_version: 1,
+      event_type: 'workflow.run.completed',
+      actor: 'workflow',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: { result: approvalWorkflowRun().result },
+      created_at: now,
+    },
+  ];
+}
+
 function log(message) {
   process.stdout.write(`[workflow-save-run-ui-smoke] ${message}\n`);
 }
@@ -238,8 +394,16 @@ async function startMockBridge() {
         return;
       }
       if (request.method === 'POST' && url.pathname === '/ui/workflows') {
-        createdWorkflowRequest = await readJson(request);
-        savedWorkflow = savedWorkflowSpec(createdWorkflowRequest);
+        const body = await readJson(request);
+        const hasApprovalNode = Array.isArray(body.nodes)
+          && body.nodes.some((node) => node?.data?.kind === 'approval');
+        if (hasApprovalNode) {
+          createdApprovalWorkflowRequest = body;
+          savedWorkflow = savedWorkflowSpec(body, APPROVAL_WORKFLOW_ID);
+        } else {
+          createdWorkflowRequest = body;
+          savedWorkflow = savedWorkflowSpec(body, WORKFLOW_ID);
+        }
         sendJson(response, 200, savedWorkflow);
         return;
       }
@@ -253,11 +417,20 @@ async function startMockBridge() {
         return;
       }
       if (request.method === 'GET' && url.pathname === '/ui/runs') {
-        sendJson(response, 200, { runs: createdWorkflowRunRequest ? [workflowRun] : [] });
+        sendJson(response, 200, {
+          runs: [
+            ...(createdApprovalWorkflowRunRequest ? [approvalWorkflowRun()] : []),
+            ...(createdWorkflowRunRequest ? [workflowRun] : []),
+          ],
+        });
         return;
       }
       if (request.method === 'GET' && url.pathname === `/ui/runs/${RUN_ID}`) {
         sendJson(response, createdWorkflowRunRequest ? 200 : 404, createdWorkflowRunRequest ? workflowRun : { ok: false, error: 'run not created' });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/ui/runs/${APPROVAL_RUN_ID}`) {
+        sendJson(response, createdApprovalWorkflowRunRequest ? 200 : 404, createdApprovalWorkflowRunRequest ? approvalWorkflowRun() : { ok: false, error: 'approval run not created' });
         return;
       }
       if (request.method === 'GET' && url.pathname === `/ui/runs/${RUN_ID}/artifacts/${WORKFLOW_ARTIFACT_PATH}`) {
@@ -269,21 +442,51 @@ async function startMockBridge() {
         });
         return;
       }
+      if (request.method === 'GET' && url.pathname === `/ui/runs/${APPROVAL_RUN_ID}/artifacts/${APPROVAL_ARTIFACT_PATH}`) {
+        sendJson(response, approvalRunApproved ? 200 : 404, approvalRunApproved ? {
+          ok: true,
+          path: APPROVAL_ARTIFACT_PATH,
+          content: APPROVAL_ARTIFACT_CONTENT,
+          truncated: false,
+        } : { ok: false, error: 'approval artifact not created' });
+        return;
+      }
       if (request.method === 'POST' && url.pathname === '/ui/workflow-runs') {
-        createdWorkflowRunRequest = await readJson(request);
-        if (createdWorkflowRunRequest.workflow_id !== WORKFLOW_ID) {
-          sendJson(response, 409, { ok: false, error: `wrong workflow_id: ${createdWorkflowRunRequest.workflow_id}` });
+        const body = await readJson(request);
+        if (body.workflow_id === WORKFLOW_ID) {
+          createdWorkflowRunRequest = body;
+          sendJson(response, 200, workflowRun);
           return;
         }
-        sendJson(response, 200, workflowRun);
+        if (body.workflow_id === APPROVAL_WORKFLOW_ID) {
+          createdApprovalWorkflowRunRequest = body;
+          approvalRunApproved = false;
+          sendJson(response, 200, approvalWorkflowRun());
+          return;
+        }
+        sendJson(response, 409, { ok: false, error: `wrong workflow_id: ${body.workflow_id}` });
+        return;
+      }
+      if (request.method === 'POST' && url.pathname === `/ui/runs/${APPROVAL_RUN_ID}/approval/approve`) {
+        approvalRunApproved = true;
+        sendJson(response, 200, approvalWorkflowRun());
         return;
       }
       if (request.method === 'GET' && url.pathname === '/ui/run-groups') {
-        sendJson(response, 200, { run_groups: createdWorkflowRunRequest ? [runGroup] : [] });
+        sendJson(response, 200, {
+          run_groups: [
+            ...(createdApprovalWorkflowRunRequest ? [approvalRunGroup()] : []),
+            ...(createdWorkflowRunRequest ? [runGroup] : []),
+          ],
+        });
         return;
       }
       if (request.method === 'GET' && url.pathname === `/ui/run-groups/${RUN_GROUP_ID}`) {
         sendJson(response, 200, runGroup);
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/ui/run-groups/${APPROVAL_RUN_GROUP_ID}`) {
+        sendJson(response, 200, approvalRunGroup());
         return;
       }
       if (request.method === 'GET' && url.pathname === `/runs/${RUN_ID}/events`) {
@@ -294,6 +497,17 @@ async function startMockBridge() {
           after_sequence: Math.max(0, afterSequence),
           limit,
           events: runEvents.filter((event) => event.sequence > afterSequence).slice(0, limit),
+        });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/runs/${APPROVAL_RUN_ID}/events`) {
+        const afterSequence = Number(url.searchParams.get('after_sequence') || '0');
+        const limit = Math.max(1, Number(url.searchParams.get('limit') || '200'));
+        sendJson(response, 200, {
+          run_id: APPROVAL_RUN_ID,
+          after_sequence: Math.max(0, afterSequence),
+          limit,
+          events: approvalRunEvents().filter((event) => event.sequence > afterSequence).slice(0, limit),
         });
         return;
       }
@@ -355,6 +569,8 @@ const devUrl = ${JSON.stringify(devUrl)};
 const bridgeUrl = ${JSON.stringify(bridgeUrl)};
 const runId = ${JSON.stringify(RUN_ID)};
 const runGoal = ${JSON.stringify(RUN_GOAL)};
+const approvalRunId = ${JSON.stringify(APPROVAL_RUN_ID)};
+const approvalRunGoal = ${JSON.stringify(APPROVAL_RUN_GOAL)};
 const watchdog = setTimeout(() => {
   console.error('electron smoke timed out');
   app.exit(1);
@@ -508,6 +724,110 @@ async function main() {
       && preview.textContent.includes('Artifact node output preview.');
   }, 'workflow artifact preview');
   console.log('[electron-smoke] workflow save-and-run detail rendered');
+
+  await win.loadURL('about:blank');
+  await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '&approval=1#/agents/workflows');
+  await waitFor(win, () => document.querySelector('[data-testid="workflow-studio"]'), 'approval workflow studio');
+  await win.webContents.executeJavaScript(\`
+  (async () => {
+    const setNativeValue = (element, value) => {
+      if (!element) throw new Error('missing input for value ' + value);
+      const prototype = element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      Object.getOwnPropertyDescriptor(prototype, 'value').set.call(element, value);
+      element.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    document.querySelector('[data-testid="workflow-new"]').click();
+    setNativeValue(document.querySelector('[data-testid="workflow-name-input"]'), 'Workflow Approval Save Run UI Smoke');
+    setNativeValue(document.querySelector('[data-testid="workflow-description-input"]'), 'Approval node save-and-run smoke');
+    document.querySelector('[data-testid="workflow-add-approval-node"]').click();
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    setNativeValue(document.querySelector('[data-testid="workflow-node-approval-criteria-input"]'), ${JSON.stringify(APPROVAL_CRITERIA)});
+  })();
+  \`, true);
+  await waitFor(win, () => {
+    const rows = Array.from(document.querySelectorAll('[data-testid="workflow-node-setting-row"]'));
+    const criteria = document.querySelector('[data-testid="workflow-node-approval-criteria-input"]');
+    const previewSteps = Array.from(document.querySelectorAll('[data-testid="workflow-run-preview-step"]'));
+    return rows.length === 1
+      && criteria?.value === ${JSON.stringify(APPROVAL_CRITERIA)}
+      && previewSteps.some((node) => node.textContent.includes('Approval') || node.textContent.includes('审批'));
+  }, 'workflow approval draft ready');
+  await win.webContents.executeJavaScript(\`
+  (async () => {
+    const setNativeValue = (element, value) => {
+      if (!element) throw new Error('missing input for value ' + value);
+      const prototype = element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      Object.getOwnPropertyDescriptor(prototype, 'value').set.call(element, value);
+      element.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    document.querySelector('[data-testid="workflow-add-artifact-node"]').click();
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    setNativeValue(document.querySelector('[data-testid="workflow-node-artifact-path-input"]'), ${JSON.stringify(APPROVAL_ARTIFACT_PATH)});
+  })();
+  \`, true);
+  await waitFor(win, () => {
+    const rows = Array.from(document.querySelectorAll('[data-testid="workflow-node-setting-row"]'));
+    const artifactInput = document.querySelector('[data-testid="workflow-node-artifact-path-input"]');
+    const previewSteps = Array.from(document.querySelectorAll('[data-testid="workflow-run-preview-step"]'));
+    return rows.length === 2
+      && artifactInput?.value === ${JSON.stringify(APPROVAL_ARTIFACT_PATH)}
+      && previewSteps.some((node) => node.textContent.includes(${JSON.stringify(APPROVAL_ARTIFACT_PATH)}));
+  }, 'workflow approval artifact draft ready');
+  await win.webContents.executeJavaScript(\`
+  (() => {
+    const goal = document.querySelector('[data-testid="workflow-run-goal-input"]');
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(goal, ${JSON.stringify(APPROVAL_RUN_GOAL)});
+    goal.dispatchEvent(new Event('input', { bubbles: true }));
+  })();
+  \`, true);
+  await waitFor(win, () => !document.querySelector('[data-testid="workflow-save-and-run"]')?.disabled, 'enabled approval workflow save and run');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"workflow-save-and-run\\"]').click()", true);
+  await waitFor(win, () => {
+    const detail = document.querySelector('[data-testid="agent-run-detail"]');
+    const approval = document.querySelector('[data-testid="agent-run-detail-approval"]');
+    const request = document.querySelector('[data-testid="agent-run-approval-request"]');
+    const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
+    const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
+    return window.location.hash.includes(${JSON.stringify(APPROVAL_RUN_ID)})
+      && detail?.getAttribute('data-run-id') === ${JSON.stringify(APPROVAL_RUN_ID)}
+      && detail?.getAttribute('data-run-status') === 'approval_required'
+      && approval?.textContent.includes('workflow.approval')
+      && request?.textContent.includes(${JSON.stringify(APPROVAL_CRITERIA)})
+      && eventTypes.includes('workflow.node.approval_required');
+  }, 'workflow approval run detail');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"agent-run-detail-approval-approve\\"]').click()", true);
+  await waitFor(win, () => {
+    const detail = document.querySelector('[data-testid="agent-run-detail"]');
+    const result = document.querySelector('[data-testid="agent-run-detail-result"]');
+    const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
+    const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
+    const sequences = events.map((node) => node.getAttribute('data-run-event-sequence'));
+    const runIds = events.map((node) => node.getAttribute('data-run-event-run-id'));
+    return detail?.getAttribute('data-run-id') === ${JSON.stringify(APPROVAL_RUN_ID)}
+      && detail?.getAttribute('data-run-status') === 'completed'
+      && !document.querySelector('[data-testid="agent-run-detail-approval"]')
+      && result?.textContent.includes('Workflow approval save-and-run UI smoke completed')
+      && eventTypes.includes('workflow.node.approval_required')
+      && eventTypes.includes('workflow.node.approval_approved')
+      && eventTypes.includes('workflow.node.artifact')
+      && eventTypes.includes('workflow.run.completed')
+      && sequences.join(',') === '1,2,3,4,5'
+      && runIds.every((id) => id === ${JSON.stringify(APPROVAL_RUN_ID)});
+  }, 'approved workflow replay events');
+  await waitFor(win, () => {
+    const artifact = document.querySelector('[data-testid="agent-run-detail-artifact"]');
+    return artifact
+      && artifact.getAttribute('data-artifact-path') === ${JSON.stringify(APPROVAL_ARTIFACT_PATH)}
+      && artifact.getAttribute('data-artifact-source-run-id') === ${JSON.stringify(APPROVAL_RUN_ID)};
+  }, 'approved workflow artifact item');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"agent-run-detail-artifact\\"]').click()", true);
+  await waitFor(win, () => {
+    const preview = document.querySelector('[data-testid="agent-run-detail-artifact-preview"]');
+    return preview
+      && preview.textContent.includes(${JSON.stringify(APPROVAL_ARTIFACT_PATH)})
+      && preview.textContent.includes('Approved artifact preview.');
+  }, 'approved workflow artifact preview');
+  console.log('[electron-smoke] workflow approval save-and-run detail rendered');
   clearTimeout(watchdog);
   await win.close();
   app.quit();
@@ -549,6 +869,8 @@ main().catch((error) => {
 function assertMockBridgeContract() {
   if (!createdWorkflowRequest) throw new Error('workflow was not saved');
   if (!createdWorkflowRunRequest) throw new Error('workflow run was not created');
+  if (!createdApprovalWorkflowRequest) throw new Error('approval workflow was not saved');
+  if (!createdApprovalWorkflowRunRequest) throw new Error('approval workflow run was not created');
   if (createdWorkflowRequest.name !== 'Workflow Save Run UI Smoke') {
     throw new Error(`unexpected saved workflow name: ${createdWorkflowRequest.name}`);
   }
@@ -569,6 +891,24 @@ function assertMockBridgeContract() {
   if (!createdWorkflowRunRequest.client_run_id) {
     throw new Error('workflow run request did not include client_run_id');
   }
+  const approvalNode = (createdApprovalWorkflowRequest.nodes || []).find((node) => node.data?.kind === 'approval');
+  if (!approvalNode || approvalNode.data?.criteria !== APPROVAL_CRITERIA) {
+    throw new Error(`saved approval workflow did not include criteria ${APPROVAL_CRITERIA}`);
+  }
+  const approvalArtifactNode = (createdApprovalWorkflowRequest.nodes || []).find((node) => node.data?.kind === 'artifact');
+  if (!approvalArtifactNode || approvalArtifactNode.data?.artifact_path !== APPROVAL_ARTIFACT_PATH) {
+    throw new Error(`saved approval workflow did not include artifact node path ${APPROVAL_ARTIFACT_PATH}`);
+  }
+  if (createdApprovalWorkflowRunRequest.workflow_id !== APPROVAL_WORKFLOW_ID) {
+    throw new Error(`approval workflow run used ${createdApprovalWorkflowRunRequest.workflow_id} instead of saved workflow id ${APPROVAL_WORKFLOW_ID}`);
+  }
+  if (createdApprovalWorkflowRunRequest.user_goal !== APPROVAL_RUN_GOAL) {
+    throw new Error(`approval workflow run used unexpected goal: ${createdApprovalWorkflowRunRequest.user_goal}`);
+  }
+  if (!createdApprovalWorkflowRunRequest.client_run_id) {
+    throw new Error('approval workflow run request did not include client_run_id');
+  }
+  if (!approvalRunApproved) throw new Error('approval workflow approve route was not called');
 }
 
 async function main() {
