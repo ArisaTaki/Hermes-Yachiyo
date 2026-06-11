@@ -3407,6 +3407,42 @@ class WorkflowPathPlanner:
         }
 
 
+class WorkflowRunStartProjector:
+    """Builds the initial replay projection for a Workflow Run."""
+
+    def __init__(
+        self,
+        *,
+        timeline_factory: Any,
+        path_snapshot: Any,
+        runtime_snapshot: Any,
+    ) -> None:
+        self._timeline = timeline_factory
+        self._path_snapshot = path_snapshot
+        self._runtime_snapshot = runtime_snapshot
+
+    def started_projection(
+        self,
+        workflow_id: str,
+        workflow: dict[str, Any],
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        workflow_path = self._path_snapshot(workflow)
+        timeline = [
+            self._timeline(
+                "workflow.run.started",
+                workflow["name"],
+                workflow_path=workflow_path,
+                workflow_snapshot=self._runtime_snapshot(workflow),
+            )
+        ]
+        event_payload = {
+            "workflow_id": workflow_id,
+            "workflow_name": workflow["name"],
+            "workflow_path": _json_load(_json_dump(workflow_path), []),
+        }
+        return timeline, event_payload
+
+
 class WorkflowParentResumeCoordinator:
     """Coordinates parent Workflow updates after a child Run changes state."""
 
@@ -4444,6 +4480,11 @@ class NativeRunEngine:
             get_run=self.get_run,
         )
         self.workflow_path_planner = WorkflowPathPlanner(node_kind=self._node_kind)
+        self.workflow_run_start_projector = WorkflowRunStartProjector(
+            timeline_factory=self._timeline,
+            path_snapshot=self._workflow_path_snapshot,
+            runtime_snapshot=self._workflow_runtime_snapshot,
+        )
         self.workflow_resume_planner = WorkflowResumePlanner(
             get_workflow=self.get_workflow,
             workflow_path=self._workflow_path,
@@ -8382,22 +8423,11 @@ class NativeRunEngine:
                 run_group_id=run_group_id,
                 client_request_id=client_request_id,
             )
-        timeline = [
-            self._timeline(
-                "workflow.run.started",
-                workflow["name"],
-                workflow_path=self._workflow_path_snapshot(workflow),
-                workflow_snapshot=self._workflow_runtime_snapshot(workflow),
-            )
-        ]
+        timeline, started_payload = self.workflow_run_start_projector.started_projection(workflow_id, workflow)
         self.append_run_event(
             run["run_id"],
             "workflow.run.started",
-            {
-                "workflow_id": workflow_id,
-                "workflow_name": workflow["name"],
-                "workflow_path": self._workflow_path_snapshot(workflow),
-            },
+            started_payload,
         )
         artifacts: list[dict[str, Any]] = []
         context = user_goal
@@ -8444,22 +8474,11 @@ class NativeRunEngine:
             root_group = True
 
         run = self._insert_run(kind="workflow_run", runnable_id=workflow_id, user_goal=user_goal, run_group_id=run_group_id)
-        timeline = [
-            self._timeline(
-                "workflow.run.started",
-                workflow["name"],
-                workflow_path=self._workflow_path_snapshot(workflow),
-                workflow_snapshot=self._workflow_runtime_snapshot(workflow),
-            )
-        ]
+        timeline, started_payload = self.workflow_run_start_projector.started_projection(workflow_id, workflow)
         self.append_run_event(
             run["run_id"],
             "workflow.run.started",
-            {
-                "workflow_id": workflow_id,
-                "workflow_name": workflow["name"],
-                "workflow_path": self._workflow_path_snapshot(workflow),
-            },
+            started_payload,
         )
         run = self._update_run(
             run["run_id"],

@@ -40,6 +40,7 @@ from apps.shell.agent_runtime import (
     WorkflowParentResumeCoordinator,
     WorkflowPathPlanner,
     WorkflowResumePlanner,
+    WorkflowRunStartProjector,
 )
 from scripts.verify_secret_redaction import verify_secret_redaction
 
@@ -404,6 +405,34 @@ def test_workflow_path_planner_builds_path_snapshot_and_artifact_paths():
     }
     assert runtime_snapshot["nodes"] is not workflow["nodes"]
     assert runtime_snapshot["edges"] is not workflow["edges"]
+
+
+def test_workflow_run_start_projector_builds_timeline_and_replay_payload():
+    workflow = {"workflow_id": "workflow_run_start", "name": "Start Projection"}
+    workflow_path = [{"id": "start", "kind": "start"}, {"id": "agent", "kind": "agent"}]
+    runtime_snapshot = {"workflow_id": "workflow_run_start", "nodes": [{"id": "start"}], "edges": []}
+    projector = WorkflowRunStartProjector(
+        timeline_factory=lambda event, detail, **payload: {"event": event, "detail": detail, **payload},
+        path_snapshot=lambda received_workflow: workflow_path if received_workflow is workflow else [],
+        runtime_snapshot=lambda received_workflow: runtime_snapshot if received_workflow is workflow else {},
+    )
+
+    timeline, event_payload = projector.started_projection("workflow_run_start", workflow)
+
+    assert timeline == [
+        {
+            "event": "workflow.run.started",
+            "detail": "Start Projection",
+            "workflow_path": workflow_path,
+            "workflow_snapshot": runtime_snapshot,
+        }
+    ]
+    assert event_payload == {
+        "workflow_id": "workflow_run_start",
+        "workflow_name": "Start Projection",
+        "workflow_path": workflow_path,
+    }
+    assert event_payload["workflow_path"] is not workflow_path
 
 
 def test_workflow_approval_resume_context_parses_pending_payload():

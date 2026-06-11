@@ -737,6 +737,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover WorkflowPathPlanner path snapshot boundary",
     ),
     (
+        "tests/test_agent_runtime.py::test_workflow_run_start_projector_builds_timeline_and_replay_payload",
+        "macOS release workflow smoke tests must cover WorkflowRunStartProjector replay boundary",
+    ),
+    (
         "tests/test_agent_runtime.py::test_workflow_parent_resume_coordinator_continues_completed_child",
         "macOS release workflow smoke tests must cover WorkflowParentResumeCoordinator completed child handoff",
     ),
