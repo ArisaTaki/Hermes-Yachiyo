@@ -880,6 +880,14 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover NativeRunEngine legacy streaming function_call frames",
     ),
     (
+        "tests/test_agent_runtime.py::test_main_chat_model_loop_executes_provider_message_tool_calls",
+        "macOS release workflow smoke tests must cover NativeRunEngine provider message tool calls",
+    ),
+    (
+        "tests/test_agent_runtime.py::test_main_chat_model_loop_executes_openai_sdk_object_message_tool_calls",
+        "macOS release workflow smoke tests must cover NativeRunEngine OpenAI SDK object message tool calls",
+    ),
+    (
         "tests/test_agent_runtime.py::test_main_chat_model_loop_executes_responses_style_streaming_tool_call",
         "macOS release workflow smoke tests must cover NativeRunEngine Responses-style streaming tool calls",
     ),
