@@ -550,6 +550,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover proactive care",
     ),
     (
+        "tests/test_launcher_notifications.py",
+        "macOS release workflow smoke tests must cover launcher notifications and proactive attention",
+    ),
+    (
         "tests/test_chat_session.py",
         "macOS release workflow smoke tests must cover ChatSession persistence",
     ),

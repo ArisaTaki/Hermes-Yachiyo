@@ -116,6 +116,7 @@ jobs:
             tests/test_security_logging.py \
             tests/test_screenshot.py \
             tests/test_proactive.py \
+            tests/test_launcher_notifications.py \
             tests/test_chat_session.py \
             tests/test_chat_store.py \
             tests/test_chat_bridge.py \

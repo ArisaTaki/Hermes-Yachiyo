@@ -499,6 +499,7 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow smoke tests must cover security logging redaction" in messages
     assert "macOS release workflow smoke tests must cover screenshot behavior" in messages
     assert "macOS release workflow smoke tests must cover proactive care" in messages
+    assert "macOS release workflow smoke tests must cover launcher notifications and proactive attention" in messages
     assert "macOS release workflow smoke tests must cover ChatSession persistence" in messages
     assert "macOS release workflow smoke tests must cover ChatStore persistence and redaction" in messages
     assert "macOS release workflow smoke tests must cover ChatBridge session summary" in messages
