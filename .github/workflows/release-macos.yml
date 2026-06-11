@@ -66,6 +66,8 @@ jobs:
             tests/test_task_runner.py::test_task_runner_main_chat_approval_timeout_clears_chat_and_activity_projection \
             tests/test_task_runner.py::test_task_runner_main_chat_auto_delegation_uses_native_runtime \
             tests/test_task_runner.py::test_task_runner_group_dispatch_summary_uses_native_runtime \
+            tests/test_task_runner.py::test_task_runner_direct_group_agent_summary_uses_native_runtime \
+            tests/test_task_runner.py::test_task_runner_direct_group_agent_rejected_summary_uses_native_runtime \
             tests/test_task_runner.py::test_task_runner_proactive_screenshot_task_uses_native_runtime \
             tests/test_agent_runtime.py::test_main_chat_approval_timeout_records_replayable_fact_and_is_idempotent \
             tests/test_agent_runtime.py::test_main_chat_records_failed_run_event_when_approved_tool_fails \

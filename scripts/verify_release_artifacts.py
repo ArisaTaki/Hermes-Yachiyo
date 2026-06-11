@@ -350,6 +350,14 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover TaskRunner group dispatch summary Native runtime flow",
     ),
     (
+        "tests/test_task_runner.py::test_task_runner_direct_group_agent_summary_uses_native_runtime",
+        "macOS release workflow smoke tests must cover TaskRunner direct group summary Native runtime flow",
+    ),
+    (
+        "tests/test_task_runner.py::test_task_runner_direct_group_agent_rejected_summary_uses_native_runtime",
+        "macOS release workflow smoke tests must cover TaskRunner rejected direct group summary Native runtime flow",
+    ),
+    (
         "tests/test_task_runner.py::test_task_runner_proactive_screenshot_task_uses_native_runtime",
         "macOS release workflow smoke tests must cover TaskRunner proactive screenshot Native runtime flow",
     ),

@@ -435,6 +435,8 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow smoke tests must cover TaskRunner approval timeout projection" in messages
     assert "macOS release workflow smoke tests must cover TaskRunner auto delegation Native runtime flow" in messages
     assert "macOS release workflow smoke tests must cover TaskRunner group dispatch summary Native runtime flow" in messages
+    assert "macOS release workflow smoke tests must cover TaskRunner direct group summary Native runtime flow" in messages
+    assert "macOS release workflow smoke tests must cover TaskRunner rejected direct group summary Native runtime flow" in messages
     assert "macOS release workflow smoke tests must cover TaskRunner proactive screenshot Native runtime flow" in messages
     assert "macOS release workflow smoke tests must cover Native approval timeout replay idempotency" in messages
     assert "macOS release workflow smoke tests must cover main chat approved tool failure replay" in messages
