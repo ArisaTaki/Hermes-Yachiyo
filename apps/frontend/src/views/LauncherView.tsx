@@ -902,6 +902,7 @@ function LauncherSessionSummaryProbe({
         <span
           data-testid={`${mode}-launcher-recent-session`}
           data-session-id={session.session_id || ''}
+          data-task-id={session.latest_task_id || ''}
           data-conversation-kind={session.conversation_kind || ''}
           key={`${session.session_id || 'session'}-${index}`}
         >

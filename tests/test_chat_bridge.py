@@ -32,7 +32,7 @@ def test_chat_bridge_conversation_overview_preserves_session_summary(tmp_path, m
     monkeypatch.setattr(chat_bridge_mod, "get_activity_store", lambda: _EmptyActivityStore())
     try:
         runtime.chat_session.add_user_message("请分析 NativeRunEngine 迁移\n保留会话总结")
-        runtime.chat_session.add_assistant_message("已经保留 ChatBridge 会话概览。")
+        runtime.chat_session.add_assistant_message("已经保留 ChatBridge 会话概览。", task_id="session-task-1")
 
         bridge = ChatBridge(runtime)
         sessions = bridge.get_recent_sessions(limit=3)
@@ -46,10 +46,12 @@ def test_chat_bridge_conversation_overview_preserves_session_summary(tmp_path, m
         )
         assert current["latest_role"] == "assistant"
         assert current["latest_status"] == "completed"
+        assert current["latest_task_id"] == "session-task-1"
         assert overview["ok"] is True
         assert overview["latest_reply"] == "已经保留 ChatBridge 会话概览。"
         assert overview["latest_reply_full"] == "已经保留 ChatBridge 会话概览。"
         assert overview["recent_sessions"][0]["summary"] == current["summary"]
+        assert overview["recent_sessions"][0]["latest_task_id"] == "session-task-1"
     finally:
         store.close()
 

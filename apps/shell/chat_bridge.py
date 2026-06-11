@@ -147,6 +147,14 @@ def _session_activity(messages: list[Any], fallback: str = "") -> Dict[str, str]
     }
 
 
+def _latest_task_id(messages: list[Any]) -> str:
+    for message in reversed(messages):
+        task_id = str(_message_field(message, "task_id") or "").strip()
+        if task_id:
+            return task_id
+    return ""
+
+
 def _latest_activity_for_session(session_id: str) -> dict[str, Any]:
     try:
         events = get_activity_store().list_events(session_id=session_id, limit=1, key_only=True)
@@ -339,18 +347,20 @@ class ChatBridge:
             for item in sessions:
                 messages = store.load_messages(item.session_id, limit=240)
                 latest_activity = _latest_activity_for_session(item.session_id)
+                updated_at = _session_updated_at(item.session_id, messages, item.created_at)
                 items.append(
                     {
                         "session_id": item.session_id,
                         "title": item.title or "新对话",
                         "created_at": item.created_at,
-                        "updated_at": _session_updated_at(item.session_id, messages, item.created_at),
+                        "updated_at": updated_at,
                         "message_count": item.message_count,
                         "is_current": item.session_id == current_session_id,
                         "is_processing": _session_is_processing(self._runtime, item.session_id, messages),
                         "latest_activity": latest_activity,
+                        "latest_task_id": _latest_task_id(messages),
                         "summary": _session_summary(messages),
-                        **_session_activity(messages, _session_updated_at(item.session_id, messages, item.created_at)),
+                        **_session_activity(messages, updated_at),
                     }
                 )
             if not any(item["session_id"] == current_session_id for item in items):
@@ -358,19 +368,21 @@ class ChatBridge:
                 current_messages = store.load_messages(current_session_id, limit=240)
                 created_at = stored_current.created_at if stored_current else ""
                 latest_activity = _latest_activity_for_session(current_session_id)
+                updated_at = _session_updated_at(current_session_id, current_messages, created_at)
                 items.insert(
                     0,
                     {
                         "session_id": current_session_id,
                         "title": (stored_current.title if stored_current else "") or "当前会话",
                         "created_at": created_at,
-                        "updated_at": _session_updated_at(current_session_id, current_messages, created_at),
+                        "updated_at": updated_at,
                         "message_count": stored_current.message_count if stored_current else len(current_messages),
                         "is_current": True,
                         "is_processing": _session_is_processing(self._runtime, current_session_id, current_messages),
                         "latest_activity": latest_activity,
+                        "latest_task_id": _latest_task_id(current_messages),
                         "summary": _session_summary(current_messages),
-                        **_session_activity(current_messages, _session_updated_at(current_session_id, current_messages, created_at)),
+                        **_session_activity(current_messages, updated_at),
                     },
                 )
             return {

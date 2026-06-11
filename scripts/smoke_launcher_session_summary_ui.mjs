@@ -13,6 +13,8 @@ const VITE = path.join(FRONTEND, 'node_modules', '.bin', process.platform === 'w
 
 const GROUP_SESSION_ID = 'launcher_group_summary';
 const DELEGATED_SESSION_ID = 'launcher_delegated_summary';
+const GROUP_TASK_ID = 'launcher_group_summary_task';
+const DELEGATED_TASK_ID = 'launcher_delegated_summary_task';
 const BUBBLE_SUMMARY = 'Group summary: Design and Coding finished Native dispatch.';
 const DELEGATED_SUMMARY = 'Delegated summary: Coding finished Native delegated run.';
 const LIVE2D_REPLY = 'Live2D latest reply from launcher smoke';
@@ -32,6 +34,7 @@ const recentSessions = [
     conversation_kind: 'group',
     title: 'Launcher Group',
     summary: BUBBLE_SUMMARY,
+    latest_task_id: GROUP_TASK_ID,
     latest_status: 'completed',
     updated_at: now,
   },
@@ -40,6 +43,7 @@ const recentSessions = [
     conversation_kind: 'agent',
     title: 'Delegated Agent',
     summary: DELEGATED_SUMMARY,
+    latest_task_id: DELEGATED_TASK_ID,
     latest_status: 'completed',
     updated_at: now,
   },
@@ -256,6 +260,8 @@ const live2dReply = ${JSON.stringify(LIVE2D_REPLY)};
 const live2dQuickText = ${JSON.stringify(LIVE2D_QUICK_TEXT)};
 const groupSessionId = ${JSON.stringify(GROUP_SESSION_ID)};
 const delegatedSessionId = ${JSON.stringify(DELEGATED_SESSION_ID)};
+const groupTaskId = ${JSON.stringify(GROUP_TASK_ID)};
+const delegatedTaskId = ${JSON.stringify(DELEGATED_TASK_ID)};
 const watchdog = setTimeout(() => {
   console.error('electron smoke timed out');
   app.exit(1);
@@ -323,6 +329,7 @@ function waitFor(win, predicate, label, timeout = 15000) {
                 testid: node.getAttribute('data-testid'),
                 hidden: node.hidden,
                 session: node.getAttribute('data-session-id'),
+                task: node.getAttribute('data-task-id'),
                 kind: node.getAttribute('data-conversation-kind'),
                 text: (node.textContent || '').slice(0, 240),
               })),
@@ -371,9 +378,11 @@ async function main() {
       && status?.textContent.includes('2 recent sessions')
       && sessions.length === 2
       && sessions[0].getAttribute('data-session-id') === ${JSON.stringify(GROUP_SESSION_ID)}
+      && sessions[0].getAttribute('data-task-id') === ${JSON.stringify(GROUP_TASK_ID)}
       && sessions[0].getAttribute('data-conversation-kind') === 'group'
       && sessions[0].textContent.includes(${JSON.stringify(BUBBLE_SUMMARY)})
       && sessions[1].getAttribute('data-session-id') === ${JSON.stringify(DELEGATED_SESSION_ID)}
+      && sessions[1].getAttribute('data-task-id') === ${JSON.stringify(DELEGATED_TASK_ID)}
       && sessions[1].getAttribute('data-conversation-kind') === 'agent'
       && sessions[1].textContent.includes(${JSON.stringify(DELEGATED_SUMMARY)});
   }, 'bubble summary and recent sessions');
@@ -408,9 +417,11 @@ async function main() {
       && preview
       && sessions.length === 2
       && sessions[0].getAttribute('data-session-id') === ${JSON.stringify(GROUP_SESSION_ID)}
+      && sessions[0].getAttribute('data-task-id') === ${JSON.stringify(GROUP_TASK_ID)}
       && sessions[0].getAttribute('data-conversation-kind') === 'group'
       && sessions[0].textContent.includes(${JSON.stringify(BUBBLE_SUMMARY)})
       && sessions[1].getAttribute('data-session-id') === ${JSON.stringify(DELEGATED_SESSION_ID)}
+      && sessions[1].getAttribute('data-task-id') === ${JSON.stringify(DELEGATED_TASK_ID)}
       && sessions[1].getAttribute('data-conversation-kind') === 'agent'
       && sessions[1].textContent.includes(${JSON.stringify(DELEGATED_SUMMARY)});
   }, 'live2d quick input and recent sessions');

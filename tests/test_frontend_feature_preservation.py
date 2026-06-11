@@ -118,6 +118,7 @@ def test_launcher_views_expose_session_summary_e2e_selectors() -> None:
         [
             "export type LauncherRecentSession",
             "recent_sessions?: LauncherRecentSession[];",
+            "latest_task_id?: string;",
         ],
     )
     _assert_contains(
@@ -145,6 +146,7 @@ def test_launcher_views_expose_session_summary_e2e_selectors() -> None:
             'data-testid={`${mode}-launcher-latest-reply`}',
             'data-testid={`${mode}-launcher-status-label`}',
             'data-testid={`${mode}-launcher-recent-session`}',
+            "data-task-id={session.latest_task_id || ''}",
         ],
     )
 
@@ -330,6 +332,8 @@ def test_launcher_session_summary_ui_smoke_uses_bubble_and_live2d_summary_paths(
             "url.pathname === '/ui/launcher'",
             "BUBBLE_SUMMARY",
             "DELEGATED_SUMMARY",
+            "GROUP_TASK_ID",
+            "DELEGATED_TASK_ID",
             "LIVE2D_REPLY",
             "LIVE2D_QUICK_TEXT",
             "Group summary: Design and Coding finished Native dispatch.",
@@ -361,6 +365,7 @@ def test_launcher_session_summary_ui_smoke_uses_bubble_and_live2d_summary_paths(
             "quickPayload.text !== LIVE2D_QUICK_TEXT",
             "quickPayload.mode !== 'live2d'",
             "data-session-id",
+            "data-task-id",
             "data-conversation-kind",
             "assertMockBridgeContract",
             "bridgeState.modeRequests.includes('bubble')",

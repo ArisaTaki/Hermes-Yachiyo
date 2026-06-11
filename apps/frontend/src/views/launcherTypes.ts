@@ -2,6 +2,7 @@ export type LauncherRecentSession = {
   session_id?: string;
   title?: string;
   summary?: string;
+  latest_task_id?: string;
   latest_status?: string;
   conversation_kind?: string;
   updated_at?: string;
