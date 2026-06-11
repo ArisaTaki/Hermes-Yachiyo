@@ -506,6 +506,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover desktop MainWindow API modes",
     ),
     (
+        "tests/test_model_capabilities.py",
+        "macOS release workflow smoke tests must cover model capability and image input guards",
+    ),
+    (
         "tests/test_build_backend.py",
         "macOS release workflow smoke tests must cover packaged backend build command guards",
     ),
