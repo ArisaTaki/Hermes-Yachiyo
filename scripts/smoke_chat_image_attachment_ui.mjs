@@ -317,6 +317,27 @@ async function main() {
     return preview && preview.getAttribute('data-attachment-name') === 'smoke-image.svg';
   }, 'composer attachment preview');
   console.log('[electron-smoke] attachment preview rendered');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-composer-attachment-remove\\"]').click()", true);
+  await waitFor(win, () => !document.querySelector('[data-testid="chat-composer-attachment-preview"]'), 'removed composer attachment preview');
+  await waitFor(win, () => document.querySelector('button[aria-label="发送消息"]')?.disabled, 'disabled send button after attachment removal');
+  console.log('[electron-smoke] attachment preview removed');
+  await win.webContents.executeJavaScript(\`
+    (async () => {
+      const input = document.querySelector('[data-testid="chat-image-file-input"]');
+      if (!input) throw new Error('chat image file input not found');
+      const blob = await fetch(\${JSON.stringify(imageDataUrl)}).then((response) => response.blob());
+      const file = new File([blob], 'smoke-image.svg', { type: 'image/svg+xml' });
+      const transfer = new DataTransfer();
+      transfer.items.add(file);
+      Object.defineProperty(input, 'files', { configurable: true, value: transfer.files });
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    })();
+  \`, true);
+  await waitFor(win, () => {
+    const preview = document.querySelector('[data-testid="chat-composer-attachment-preview"]');
+    return preview && preview.getAttribute('data-attachment-name') === 'smoke-image.svg';
+  }, 'composer attachment preview after removal');
+  console.log('[electron-smoke] attachment preview rendered after removal');
   await win.webContents.executeJavaScript(\`
     const input = document.querySelector('textarea.chat-input');
     const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
