@@ -410,6 +410,8 @@ def test_stream_smoke_tolerates_role_and_usage_only_provider_chunks(monkeypatch)
         def __iter__(self):
             yield b'data: {"choices":[{"delta":{"role":"assistant"}}]}\n\n'
             yield b": provider heartbeat\n\n"
+            yield b'event: ping\ndata: {"type":"ping"}\n\n'
+            yield b'data: {"type":"heartbeat","created":123}\n\n'
             yield b'data: {"choices":[{"delta":{"content":"checking usage "}}]}\n\n'
             yield (
                 b'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_usage",'
