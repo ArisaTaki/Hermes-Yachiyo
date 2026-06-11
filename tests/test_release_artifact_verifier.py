@@ -366,6 +366,10 @@ def test_verifier_reports_packaged_app_missing_ui_e2e_selector(tmp_path):
         asar_path,
         "packaged Electron app.asar must include UI E2E selector 'agent-run-detail-approval'",
     ) in findings
+    assert verifier.Finding(
+        asar_path,
+        "packaged Electron app.asar must include UI E2E selector 'agent-run-detail-workflow-child-approval'",
+    ) in findings
 
 
 def test_verifier_reports_packaged_app_development_only_ui_e2e_hook(tmp_path):

@@ -12,13 +12,19 @@ const ELECTRON = path.join(FRONTEND, 'node_modules', '.bin', process.platform ==
 const VITE = path.join(FRONTEND, 'node_modules', '.bin', process.platform === 'win32' ? 'vite.cmd' : 'vite');
 const RUN_ID = 'agent_run_detail_ui_smoke';
 const APPROVAL_RUN_ID = 'agent_run_detail_ui_smoke_approval';
+const WORKFLOW_RUN_ID = 'workflow_run_detail_ui_smoke_child_approval';
+const WORKFLOW_CHILD_RUN_ID = 'agent_run_detail_ui_smoke_workflow_child';
 const RERUN_RUN_ID = 'agent_run_detail_ui_smoke_rerun';
 const RUN_GROUP_ID = 'run_group_detail_ui_smoke';
+const WORKFLOW_RUN_GROUP_ID = 'run_group_detail_ui_workflow_child_smoke';
+const WORKFLOW_ID = 'workflow-detail-child-approval-smoke';
 const ARTIFACT_PATH = 'summary.md';
+const WORKFLOW_ARTIFACT_PATH = 'workflow-summary.md';
 const ARTIFACT_CONTENT = '# Run Detail UI Smoke\n\nArtifact preview loaded from mock Bridge.';
 const now = new Date().toISOString();
 let rerunCreated = false;
 let approvalApproved = false;
+let workflowChildApproved = false;
 
 const run = {
   run_id: RUN_ID,
@@ -78,6 +84,126 @@ function approvalRun() {
   };
 }
 
+function workflowChildRun() {
+  return {
+    run_id: WORKFLOW_CHILD_RUN_ID,
+    run_group_id: WORKFLOW_RUN_GROUP_ID,
+    run_group_source: 'workflow',
+    task_id: 'task-run-detail-ui-smoke-workflow-child',
+    session_id: 'session-run-detail-ui-smoke-workflow-child',
+    task_run_link_run_status: workflowChildApproved ? 'completed' : 'approval_required',
+    task_run_link_last_event_sequence: workflowChildApproved ? 5 : 2,
+    kind: 'agent_run',
+    runnable_id: 'agent-run-detail-smoke',
+    runnable_name: 'Coding Agent',
+    status: workflowChildApproved ? 'completed' : 'approval_required',
+    user_goal: 'Approve child Agent from Workflow Run Detail smoke',
+    result: workflowChildApproved ? 'Workflow child approval Electron smoke complete' : '',
+    pending_approval: workflowChildApproved ? undefined : {
+      approval_id: 'approval-workflow-child-detail-ui-smoke',
+      tool: 'terminal.run',
+      input_preview: {
+        command: 'printf workflow-child-electron-approved',
+        cwd: '/workspace',
+        checkpoint: 'Workflow child approval smoke',
+      },
+    },
+    timeline: [],
+    artifacts: [],
+    created_at: now,
+    updated_at: now,
+    agent_run_id: WORKFLOW_CHILD_RUN_ID,
+  };
+}
+
+function workflowRun() {
+  const baseTimeline = [
+    {
+      event: 'workflow.node.start',
+      detail: 'Start',
+      status: 'completed',
+      workflow_node_id: 'start',
+      time: now,
+    },
+    {
+      event: 'workflow.node.agent',
+      detail: 'Coding Agent',
+      status: workflowChildApproved ? 'completed' : 'approval_required',
+      child_run_id: WORKFLOW_CHILD_RUN_ID,
+      workflow_node_id: 'agent-1',
+      workflow_node_task: 'Approve child Agent from Workflow Run Detail smoke',
+      artifact_count: workflowChildApproved ? 1 : 0,
+      time: now,
+    },
+  ];
+  return {
+    run_id: WORKFLOW_RUN_ID,
+    run_group_id: WORKFLOW_RUN_GROUP_ID,
+    run_group_source: 'workflow',
+    task_id: 'task-run-detail-ui-smoke-workflow',
+    session_id: 'session-run-detail-ui-smoke-workflow',
+    task_run_link_run_status: workflowChildApproved ? 'completed' : 'approval_required',
+    task_run_link_last_event_sequence: workflowChildApproved ? 6 : 3,
+    kind: 'workflow_run',
+    runnable_id: WORKFLOW_ID,
+    runnable_name: 'Run Detail Child Approval Workflow',
+    status: workflowChildApproved ? 'completed' : 'approval_required',
+    user_goal: 'Approve Workflow child from Run Detail smoke',
+    result: workflowChildApproved ? 'Workflow child approval Electron smoke complete' : '',
+    timeline: workflowChildApproved
+      ? [
+          ...baseTimeline,
+          {
+            event: 'workflow.run.child_resumed',
+            detail: 'Coding Agent resumed',
+            status: 'completed',
+            child_run_id: WORKFLOW_CHILD_RUN_ID,
+            time: now,
+          },
+          {
+            event: 'workflow.run.resumed',
+            detail: 'Workflow resumed after child approval',
+            status: 'completed',
+            time: now,
+          },
+          {
+            event: 'workflow.node.artifact',
+            detail: WORKFLOW_ARTIFACT_PATH,
+            status: 'completed',
+            workflow_node_id: 'artifact-1',
+            artifact: { path: WORKFLOW_ARTIFACT_PATH },
+            time: now,
+          },
+          {
+            event: 'workflow.run.completed',
+            detail: 'Workflow child approval Electron smoke complete',
+            status: 'completed',
+            time: now,
+          },
+        ]
+      : [
+          ...baseTimeline,
+          {
+            event: 'workflow.run.approval_required',
+            detail: 'Child Agent approval required',
+            status: 'approval_required',
+            child_run_id: WORKFLOW_CHILD_RUN_ID,
+            pending_approval: workflowChildRun().pending_approval,
+            time: now,
+          },
+        ],
+    artifacts: workflowChildApproved ? [{
+      path: WORKFLOW_ARTIFACT_PATH,
+      kind: 'markdown',
+      source_run_id: WORKFLOW_RUN_ID,
+      source_runnable_name: 'Run Detail Child Approval Workflow',
+    }] : [],
+    created_at: now,
+    updated_at: now,
+    workflow_run_id: WORKFLOW_RUN_ID,
+  };
+}
+
 const runGroup = {
   run_group_id: RUN_GROUP_ID,
   title: 'Run Detail UI Smoke',
@@ -88,6 +214,19 @@ const runGroup = {
   created_at: now,
   updated_at: now,
 };
+
+function workflowRunGroup() {
+  return {
+    run_group_id: WORKFLOW_RUN_GROUP_ID,
+    title: 'Run Detail Workflow Child Smoke',
+    source: 'workflow',
+    status: workflowChildApproved ? 'completed' : 'approval_required',
+    summary: workflowChildApproved ? 'Workflow child approval completed' : 'Workflow waiting for child approval',
+    child_run_ids: [WORKFLOW_RUN_ID, WORKFLOW_CHILD_RUN_ID],
+    created_at: now,
+    updated_at: now,
+  };
+}
 
 const rerun = {
   ...run,
@@ -249,6 +388,182 @@ function approvalRunEvents() {
   ];
 }
 
+function workflowRunEvents() {
+  const events = [
+    {
+      event_id: 'event-workflow-child-smoke-1',
+      run_id: WORKFLOW_RUN_ID,
+      sequence: 1,
+      schema_version: 1,
+      event_type: 'workflow.node.start',
+      actor: 'workflow',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: { workflow_node_id: 'start', workflow_node_label: 'Start', status: 'completed' },
+      created_at: now,
+    },
+    {
+      event_id: 'event-workflow-child-smoke-2',
+      run_id: WORKFLOW_RUN_ID,
+      sequence: 2,
+      schema_version: 1,
+      event_type: 'workflow.node.agent',
+      actor: 'workflow',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: {
+        workflow_node_id: 'agent-1',
+        workflow_node_label: 'Coding Agent',
+        status: workflowChildApproved ? 'completed' : 'approval_required',
+        child_run_id: WORKFLOW_CHILD_RUN_ID,
+      },
+      created_at: now,
+    },
+  ];
+  if (!workflowChildApproved) {
+    return [
+      ...events,
+      {
+        event_id: 'event-workflow-child-smoke-3',
+        run_id: WORKFLOW_RUN_ID,
+        sequence: 3,
+        schema_version: 1,
+        event_type: 'workflow.run.approval_required',
+        actor: 'workflow',
+        visibility: 'user',
+        sensitivity: 'normal',
+        payload: { status: 'approval_required', child_run_id: WORKFLOW_CHILD_RUN_ID },
+        created_at: now,
+      },
+    ];
+  }
+  return [
+    ...events,
+    {
+      event_id: 'event-workflow-child-smoke-3',
+      run_id: WORKFLOW_RUN_ID,
+      sequence: 3,
+      schema_version: 1,
+      event_type: 'workflow.run.child_resumed',
+      actor: 'workflow',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: { status: 'completed', child_run_id: WORKFLOW_CHILD_RUN_ID },
+      created_at: now,
+    },
+    {
+      event_id: 'event-workflow-child-smoke-4',
+      run_id: WORKFLOW_RUN_ID,
+      sequence: 4,
+      schema_version: 1,
+      event_type: 'workflow.run.resumed',
+      actor: 'workflow',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: { status: 'completed' },
+      created_at: now,
+    },
+    {
+      event_id: 'event-workflow-child-smoke-5',
+      run_id: WORKFLOW_RUN_ID,
+      sequence: 5,
+      schema_version: 1,
+      event_type: 'workflow.node.artifact',
+      actor: 'workflow',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: {
+        workflow_node_id: 'artifact-1',
+        workflow_node_label: WORKFLOW_ARTIFACT_PATH,
+        status: 'completed',
+        artifact: { path: WORKFLOW_ARTIFACT_PATH },
+      },
+      created_at: now,
+    },
+    {
+      event_id: 'event-workflow-child-smoke-6',
+      run_id: WORKFLOW_RUN_ID,
+      sequence: 6,
+      schema_version: 1,
+      event_type: 'workflow.run.completed',
+      actor: 'workflow',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: { result: 'Workflow child approval Electron smoke complete' },
+      created_at: now,
+    },
+  ];
+}
+
+function workflowChildRunEvents() {
+  const events = [
+    {
+      event_id: 'event-workflow-child-agent-smoke-1',
+      run_id: WORKFLOW_CHILD_RUN_ID,
+      sequence: 1,
+      schema_version: 1,
+      event_type: 'agent.run.started',
+      actor: 'agent',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: { goal: 'Approve child Agent from Workflow Run Detail smoke' },
+      created_at: now,
+    },
+    {
+      event_id: 'event-workflow-child-agent-smoke-2',
+      run_id: WORKFLOW_CHILD_RUN_ID,
+      sequence: 2,
+      schema_version: 1,
+      event_type: 'agent.tool.approval_required',
+      actor: 'agent',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: { tool: 'terminal.run', command: 'printf workflow-child-electron-approved' },
+      created_at: now,
+    },
+  ];
+  if (!workflowChildApproved) return events;
+  return [
+    ...events,
+    {
+      event_id: 'event-workflow-child-agent-smoke-3',
+      run_id: WORKFLOW_CHILD_RUN_ID,
+      sequence: 3,
+      schema_version: 1,
+      event_type: 'agent.tool.approval_approved',
+      actor: 'user',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: { tool: 'terminal.run', approval_id: 'approval-workflow-child-detail-ui-smoke' },
+      created_at: now,
+    },
+    {
+      event_id: 'event-workflow-child-agent-smoke-4',
+      run_id: WORKFLOW_CHILD_RUN_ID,
+      sequence: 4,
+      schema_version: 1,
+      event_type: 'agent.tool.call',
+      actor: 'tool',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: { tool: 'terminal.run', command: 'printf workflow-child-electron-approved' },
+      created_at: now,
+    },
+    {
+      event_id: 'event-workflow-child-agent-smoke-5',
+      run_id: WORKFLOW_CHILD_RUN_ID,
+      sequence: 5,
+      schema_version: 1,
+      event_type: 'agent.run.completed',
+      actor: 'agent',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: { result: 'Workflow child approval Electron smoke complete' },
+      created_at: now,
+    },
+  ];
+}
+
 function log(message) {
   process.stdout.write(`[agent-run-detail-ui-smoke] ${message}\n`);
 }
@@ -329,23 +644,55 @@ async function startMockBridge() {
         return;
       }
       if (request.method === 'GET' && url.pathname === '/ui/workflows') {
-        sendJson(response, 200, { workflows: [] });
-        return;
-      }
-      if (request.method === 'GET' && url.pathname === '/ui/runnables') {
         sendJson(response, 200, {
-          runnables: [{
-            id: 'agent-run-detail-smoke',
-            name: 'Run Detail Smoke Agent',
-            kind: 'agent',
+          workflows: [{
+            workflow_id: WORKFLOW_ID,
+            name: 'Run Detail Child Approval Workflow',
+            description: 'Workflow child approval smoke',
             enabled: true,
-            output_contract: 'report',
+            nodes: [
+              { id: 'start', type: 'input', data: { kind: 'start', label: 'Start' } },
+              { id: 'agent-1', type: 'default', data: { kind: 'agent', label: 'Coding Agent', agent_id: 'agent-run-detail-smoke', task: 'Approve child Agent from Workflow Run Detail smoke' } },
+              { id: 'artifact-1', type: 'output', data: { kind: 'artifact', label: WORKFLOW_ARTIFACT_PATH, path: WORKFLOW_ARTIFACT_PATH } },
+            ],
+            edges: [],
+            created_at: now,
+            updated_at: now,
           }],
         });
         return;
       }
+      if (request.method === 'GET' && url.pathname === '/ui/runnables') {
+        sendJson(response, 200, {
+          runnables: [
+            {
+              id: 'agent-run-detail-smoke',
+              name: 'Run Detail Smoke Agent',
+              kind: 'agent',
+              enabled: true,
+              output_contract: 'report',
+            },
+            {
+              id: WORKFLOW_ID,
+              name: 'Run Detail Child Approval Workflow',
+              kind: 'workflow',
+              enabled: true,
+              output_contract: 'report',
+            },
+          ],
+        });
+        return;
+      }
       if (request.method === 'GET' && url.pathname === '/ui/runs') {
-        sendJson(response, 200, { runs: rerunCreated ? [rerun, run, approvalRun()] : [run, approvalRun()] });
+        sendJson(response, 200, { runs: rerunCreated ? [rerun, workflowRun(), run, approvalRun()] : [workflowRun(), run, approvalRun()] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/ui/runs/${WORKFLOW_RUN_ID}`) {
+        sendJson(response, 200, workflowRun());
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/ui/runs/${WORKFLOW_CHILD_RUN_ID}`) {
+        sendJson(response, 200, workflowChildRun());
         return;
       }
       if (request.method === 'GET' && url.pathname === `/ui/runs/${APPROVAL_RUN_ID}`) {
@@ -359,6 +706,11 @@ async function startMockBridge() {
       if (request.method === 'POST' && url.pathname === `/ui/runs/${APPROVAL_RUN_ID}/approval/approve`) {
         approvalApproved = true;
         sendJson(response, 200, approvalRun());
+        return;
+      }
+      if (request.method === 'POST' && url.pathname === `/ui/runs/${WORKFLOW_CHILD_RUN_ID}/approval/approve`) {
+        workflowChildApproved = true;
+        sendJson(response, 200, workflowChildRun());
         return;
       }
       if (request.method === 'GET' && url.pathname === `/ui/runs/${RERUN_RUN_ID}`) {
@@ -379,8 +731,21 @@ async function startMockBridge() {
         });
         return;
       }
+      if (request.method === 'GET' && url.pathname === `/ui/runs/${WORKFLOW_RUN_ID}/artifacts/${WORKFLOW_ARTIFACT_PATH}`) {
+        sendJson(response, 200, {
+          ok: true,
+          path: WORKFLOW_ARTIFACT_PATH,
+          content: '# Workflow Child Approval Smoke\n\nWorkflow child approval artifact preview.',
+          truncated: false,
+        });
+        return;
+      }
       if (request.method === 'GET' && url.pathname === '/ui/run-groups') {
-        sendJson(response, 200, { run_groups: [runGroup] });
+        sendJson(response, 200, { run_groups: [workflowRunGroup(), runGroup] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/ui/run-groups/${WORKFLOW_RUN_GROUP_ID}`) {
+        sendJson(response, 200, workflowRunGroup());
         return;
       }
       if (request.method === 'GET' && url.pathname === `/ui/run-groups/${RUN_GROUP_ID}`) {
@@ -395,6 +760,28 @@ async function startMockBridge() {
           after_sequence: Math.max(0, afterSequence),
           limit,
           events: runEvents.filter((event) => event.sequence > afterSequence).slice(0, limit),
+        });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/runs/${WORKFLOW_RUN_ID}/events`) {
+        const afterSequence = Number(url.searchParams.get('after_sequence') || '0');
+        const limit = Math.max(1, Number(url.searchParams.get('limit') || '200'));
+        sendJson(response, 200, {
+          run_id: WORKFLOW_RUN_ID,
+          after_sequence: Math.max(0, afterSequence),
+          limit,
+          events: workflowRunEvents().filter((event) => event.sequence > afterSequence).slice(0, limit),
+        });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/runs/${WORKFLOW_CHILD_RUN_ID}/events`) {
+        const afterSequence = Number(url.searchParams.get('after_sequence') || '0');
+        const limit = Math.max(1, Number(url.searchParams.get('limit') || '200'));
+        sendJson(response, 200, {
+          run_id: WORKFLOW_CHILD_RUN_ID,
+          after_sequence: Math.max(0, afterSequence),
+          limit,
+          events: workflowChildRunEvents().filter((event) => event.sequence > afterSequence).slice(0, limit),
         });
         return;
       }
@@ -478,6 +865,7 @@ const devUrl = ${JSON.stringify(devUrl)};
 const bridgeUrl = ${JSON.stringify(bridgeUrl)};
 const runId = ${JSON.stringify(RUN_ID)};
 const approvalRunId = ${JSON.stringify(APPROVAL_RUN_ID)};
+const workflowRunId = ${JSON.stringify(WORKFLOW_RUN_ID)};
 const watchdog = setTimeout(() => {
   console.error('electron smoke timed out');
   app.exit(1);
@@ -570,6 +958,69 @@ async function main() {
       && runIds.every((id) => id === ${JSON.stringify(APPROVAL_RUN_ID)});
   }, 'approved run detail replay');
   console.log('[electron-smoke] approval action completed');
+
+  await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '#/agents/' + encodeURIComponent(workflowRunId));
+  console.log('[electron-smoke] workflow child approval run detail loaded');
+  await waitFor(win, () => document.querySelector('[data-testid="agent-run-detail"]')?.getAttribute('data-run-id') === ${JSON.stringify(WORKFLOW_RUN_ID)}, 'workflow parent run detail article');
+  await waitFor(win, () => {
+    const childApproval = document.querySelector('[data-testid="agent-run-detail-workflow-child-approval"]');
+    const request = childApproval?.querySelector('[data-testid="agent-run-approval-request"]');
+    const approve = document.querySelector('[data-testid="agent-run-detail-workflow-child-approve"]');
+    const reject = document.querySelector('[data-testid="agent-run-detail-workflow-child-reject"]');
+    const cancel = document.querySelector('[data-testid="agent-run-detail-workflow-child-cancel"]');
+    const openRun = document.querySelector('[data-testid="agent-run-detail-workflow-child-open-run"]');
+    return childApproval
+      && childApproval.textContent.includes(${JSON.stringify(WORKFLOW_CHILD_RUN_ID)})
+      && request?.textContent.includes('terminal.run')
+      && request?.textContent.includes('printf workflow-child-electron-approved')
+      && approve
+      && reject
+      && cancel
+      && openRun
+      && !approve.disabled;
+  }, 'workflow child approval bridge');
+  console.log('[electron-smoke] workflow child approval bridge rendered');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"agent-run-detail-workflow-child-approve\\"]').click()", true);
+  await waitFor(win, () => {
+    const detail = document.querySelector('[data-testid="agent-run-detail"]');
+    const result = document.querySelector('[data-testid="agent-run-detail-result"]');
+    const steps = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-workflow-step"]'));
+    const openStepRun = document.querySelector('[data-testid="agent-run-detail-workflow-step-open-run"]');
+    const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
+    const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
+    const runIds = events.map((node) => node.getAttribute('data-run-event-run-id'));
+    return detail?.getAttribute('data-run-id') === ${JSON.stringify(WORKFLOW_RUN_ID)}
+      && !document.querySelector('[data-testid="agent-run-detail-workflow-child-approval"]')
+      && result?.textContent.includes('Workflow child approval Electron smoke complete')
+      && steps.some((node) => node.getAttribute('data-child-run-id') === ${JSON.stringify(WORKFLOW_CHILD_RUN_ID)} && node.getAttribute('data-workflow-step-status') === 'completed')
+      && steps.some((node) => node.getAttribute('data-workflow-step-kind') === 'artifact' && node.textContent.includes(${JSON.stringify(WORKFLOW_ARTIFACT_PATH)}))
+      && openStepRun
+      && !openStepRun.disabled
+      && eventTypes.includes('workflow.run.child_resumed')
+      && eventTypes.includes('workflow.run.resumed')
+      && eventTypes.includes('workflow.node.artifact')
+      && eventTypes.includes('workflow.run.completed')
+      && runIds.every((id) => id === ${JSON.stringify(WORKFLOW_RUN_ID)});
+  }, 'workflow child approval completed parent detail');
+  console.log('[electron-smoke] workflow child approval completed parent detail');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"agent-run-detail-workflow-step-open-run\\"]').click()", true);
+  await waitFor(win, () => {
+    const detail = document.querySelector('[data-testid="agent-run-detail"]');
+    const result = document.querySelector('[data-testid="agent-run-detail-result"]');
+    const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
+    const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
+    const runIds = events.map((node) => node.getAttribute('data-run-event-run-id'));
+    return window.location.hash.includes(${JSON.stringify(WORKFLOW_CHILD_RUN_ID)})
+      && detail?.getAttribute('data-run-id') === ${JSON.stringify(WORKFLOW_CHILD_RUN_ID)}
+      && document.querySelector('[data-testid="agent-run-detail-open-parent-run"]')
+      && result?.textContent.includes('Workflow child approval Electron smoke complete')
+      && eventTypes.includes('agent.tool.approval_required')
+      && eventTypes.includes('agent.tool.approval_approved')
+      && eventTypes.includes('agent.tool.call')
+      && eventTypes.includes('agent.run.completed')
+      && runIds.every((id) => id === ${JSON.stringify(WORKFLOW_CHILD_RUN_ID)});
+  }, 'workflow child run detail replay');
+  console.log('[electron-smoke] workflow child run detail rendered');
 
   await win.loadURL('about:blank');
   await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '#/agents/' + encodeURIComponent(runId));
