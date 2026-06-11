@@ -392,11 +392,23 @@ def test_verifier_reports_packaged_app_missing_ui_e2e_selector(tmp_path):
     ) in findings
     assert verifier.Finding(
         asar_path,
+        "packaged Electron app.asar must include UI E2E selector 'chat-message-approval-actions'",
+    ) in findings
+    assert verifier.Finding(
+        asar_path,
         "packaged Electron app.asar must include UI E2E selector 'chat-message-approval-approve'",
     ) in findings
     assert verifier.Finding(
         asar_path,
+        "packaged Electron app.asar must include UI E2E selector 'chat-message-open-run-detail'",
+    ) in findings
+    assert verifier.Finding(
+        asar_path,
         "packaged Electron app.asar must include UI E2E selector 'chat-composer-approval-reject'",
+    ) in findings
+    assert verifier.Finding(
+        asar_path,
+        "packaged Electron app.asar must include UI E2E selector 'chat-composer-approval-reveal'",
     ) in findings
     assert verifier.Finding(
         asar_path,
