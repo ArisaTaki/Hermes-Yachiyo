@@ -254,6 +254,38 @@ def test_chat_group_summary_ui_smoke_uses_group_create_send_and_summary_status()
     )
 
 
+def test_launcher_session_summary_ui_smoke_uses_bubble_and_live2d_summary_paths() -> None:
+    smoke_script = "scripts/smoke_launcher_session_summary_ui.mjs"
+    _assert_contains(
+        smoke_script,
+        [
+            "#/bubble",
+            "#/live2d",
+            "surface=desktop",
+            "url.pathname === '/ui/launcher'",
+            "BUBBLE_SUMMARY",
+            "DELEGATED_SUMMARY",
+            "LIVE2D_REPLY",
+            "Group summary: Design and Coding finished Native dispatch.",
+            "Delegated summary: Coding finished Native delegated run.",
+            "Live2D latest reply from launcher smoke",
+            'data-testid="bubble-launcher-summary"',
+            'data-testid="bubble-launcher-session-summary-probe"',
+            'data-testid="bubble-launcher-status-label"',
+            'data-testid="bubble-launcher-recent-session"',
+            'data-testid="live2d-launcher-reply-text"',
+            'data-testid="live2d-launcher-latest-reply"',
+            'data-testid="live2d-launcher-session-summary-probe"',
+            'data-testid="live2d-launcher-recent-session"',
+            "data-session-id",
+            "data-conversation-kind",
+            "assertMockBridgeContract",
+            "bridgeState.modeRequests.includes('bubble')",
+            "bridgeState.modeRequests.includes('live2d')",
+        ],
+    )
+
+
 def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> None:
     chat_view = "apps/frontend/src/views/ChatView.tsx"
     _assert_contains(

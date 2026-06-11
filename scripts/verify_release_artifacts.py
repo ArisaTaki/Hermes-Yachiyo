@@ -108,6 +108,10 @@ PACKAGED_UI_E2E_REQUIRED_SELECTORS: tuple[str, ...] = (
     "chat-composer-input",
     "chat-composer-send",
     "chat-message-summary-status",
+    "bubble-launcher-session-summary-probe",
+    "bubble-launcher-recent-session",
+    "live2d-launcher-session-summary-probe",
+    "live2d-launcher-recent-session",
     "chat-message-approval-card",
     "chat-composer-approval-notice",
     "agent-run-detail",
@@ -713,6 +717,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "node scripts/smoke_chat_group_summary_ui.mjs",
         "macOS release workflow smoke tests must cover Chat group summary Electron UI smoke",
+    ),
+    (
+        "node scripts/smoke_launcher_session_summary_ui.mjs",
+        "macOS release workflow smoke tests must cover launcher session summary Electron UI smoke",
     ),
     (
         "node scripts/smoke_agent_run_detail_ui.mjs",
