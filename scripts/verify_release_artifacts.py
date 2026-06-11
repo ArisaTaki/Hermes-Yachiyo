@@ -494,6 +494,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover provider reasoning privacy for main chat loop",
     ),
     (
+        "tests/test_agent_runtime.py::test_main_chat_model_loop_executes_sse_delta_tool_call_object_arguments",
+        "macOS release workflow smoke tests must cover NativeRunEngine SSE object tool-call arguments",
+    ),
+    (
         "tests/test_streaming_provider_smoke.py",
         "macOS release workflow smoke tests must cover OpenAI-compatible streaming provider contracts",
     ),

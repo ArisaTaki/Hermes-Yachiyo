@@ -101,6 +101,7 @@ jobs:
             tests/test_agent_runtime.py::test_terminal_run_timeout_kills_process_group \
             tests/test_agent_runtime.py::test_main_chat_model_rejects_non_stream_reasoning_only_output \
             tests/test_agent_runtime.py::test_main_chat_model_loop_rejects_non_stream_reasoning_only_output \
+            tests/test_agent_runtime.py::test_main_chat_model_loop_executes_sse_delta_tool_call_object_arguments \
             tests/test_streaming_provider_smoke.py \
             tests/test_legacy_kernel_removal.py \
             tests/test_runtime_injection_boundary.py \
