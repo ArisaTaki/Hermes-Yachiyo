@@ -8974,9 +8974,11 @@ def test_agent_run_approval_uses_resume_coordinator_claim_boundary(tmp_path, mon
     monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
     try:
         claim_calls: list[dict[str, object]] = []
+        running_projection_calls: list[dict[str, object]] = []
         completed_projection_calls: list[dict[str, object]] = []
         projection_calls: list[dict[str, object]] = []
         original_claim = service.approval_resume.claim_and_project_approved_tool
+        original_running_projection = service._project_agent_approval_resume_running
         original_completed_projection = service._project_agent_approval_resume_completed
         original_projection = service._project_child_run_transition
 
@@ -8992,6 +8994,17 @@ def test_agent_run_approval_uses_resume_coordinator_claim_boundary(tmp_path, mon
                 }
             )
             return original_claim(run_id, pending, context, **kwargs)
+
+        def spy_project_agent_approval_resume_running(running):
+            running_projection_calls.append(
+                {
+                    "run_id": running.get("run_id"),
+                    "kind": running.get("kind"),
+                    "status": running.get("status"),
+                    "result": running.get("result"),
+                }
+            )
+            return original_running_projection(running)
 
         def spy_project_agent_approval_resume_completed(context, result_text):
             completed_projection_calls.append(
@@ -9014,6 +9027,11 @@ def test_agent_run_approval_uses_resume_coordinator_claim_boundary(tmp_path, mon
             return original_projection(result)
 
         monkeypatch.setattr(service.approval_resume, "claim_and_project_approved_tool", spy_claim)
+        monkeypatch.setattr(
+            service,
+            "_project_agent_approval_resume_running",
+            spy_project_agent_approval_resume_running,
+        )
         monkeypatch.setattr(
             service,
             "_project_agent_approval_resume_completed",
@@ -9045,6 +9063,14 @@ def test_agent_run_approval_uses_resume_coordinator_claim_boundary(tmp_path, mon
                 "context_tool_name": "terminal.run",
                 "resumed_detail": "Agent resumed after approval",
                 "running_result": "已批准，Agent 正在继续执行",
+            }
+        ]
+        assert running_projection_calls == [
+            {
+                "run_id": run["run_id"],
+                "kind": "agent_run",
+                "status": "running",
+                "result": "已批准，Agent 正在继续执行",
             }
         ]
         assert completed_projection_calls == [

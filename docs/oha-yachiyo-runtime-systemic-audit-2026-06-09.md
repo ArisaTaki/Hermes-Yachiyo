@@ -1283,6 +1283,7 @@ RunEvent sequence:
   - 负责批准后恢复时的已批准工具调用执行。
   - 主聊天和 Agent Run 的工具审批恢复共用同一个 resume context 和 coordinator。
   - 保留 `NativeRunEngine` 对最终模型继续执行和 Run 状态落库的编排职责。
+  - Agent approved-tool resume 的 running RunGroup / 父 Workflow 恢复通知已拆成 `_project_agent_approval_resume_running()`，避免 approve 分支直接维护 child Run running handoff。
   - Agent approved-tool resume 成功完成与主聊天 approved-tool resume 成功输出已拆成 `_project_agent_approval_resume_completed()` / `_project_main_chat_approval_resume_completed()`，避免 approve 分支直接维护 completed / model-output replay 投影。
   - Agent / 主聊天 approved-tool resume 后再次进入 tool approval 的 pending 投影已共用 `_project_approval_resume_required()`，避免两个 approve 分支各自维护 `agent.tool.approval_required` replay 和 pending payload 落库。
   - Agent / 主聊天 approved-tool resume 失败投影已共用 `_project_approval_resume_failed()`；各分支保留各自错误清洗入口，但不再各自维护 `agent.run.failed` replay 和 failed Run 落库。

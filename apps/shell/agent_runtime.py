@@ -8088,8 +8088,7 @@ class NativeRunEngine:
         )
         if running is None:
             return self.get_run(run_id)
-        self._update_agent_run_group_if_root(running)
-        self._mark_parent_workflows_child_running(running)
+        running = self._project_agent_approval_resume_running(running)
         try:
             result_text = self.approval_resume.continue_custom_api_agent_after_approved_tool(
                 agent,
@@ -8111,6 +8110,11 @@ class NativeRunEngine:
                 safe_error,
             )
         return self._project_child_run_transition(result)
+
+    def _project_agent_approval_resume_running(self, running: dict[str, Any]) -> dict[str, Any]:
+        self._update_agent_run_group_if_root(running)
+        self._mark_parent_workflows_child_running(running)
+        return running
 
     def _project_agent_approval_resume_completed(
         self,
