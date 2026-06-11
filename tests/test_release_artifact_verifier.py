@@ -116,7 +116,7 @@ def test_verifier_binary_mode_scans_legacy_kernel_entrypoints(tmp_path):
     artifact = tmp_path / "Oha-Yachiyo-kernel-legacy.dmg"
     artifact.write_bytes(
         b"\x00HermesRuntime\x00hermes_runtime\x00Hermes installer\x00"
-        b"Hermes setup\x00Hermes doctor\x00HERMES_HOME\x00"
+        b"Hermes setup\x00Hermes doctor\x00HERMES_HOME\x00HERMES_CONFIG\x00HERMES_PROFILE\x00"
         b"Hermes Agent\x00HermesCapability\x00hermes_capability\x00"
         b"hermes_stream_bridge\x00hermes-cli\xff"
     )
@@ -139,6 +139,8 @@ def test_verifier_binary_mode_scans_legacy_kernel_entrypoints(tmp_path):
     assert "contains legacy product token 'HermesCapability'" in messages
     assert "contains legacy product token 'hermes_capability'" in messages
     assert "contains legacy product token 'HERMES_HOME'" in messages
+    assert "contains legacy product token 'HERMES_CONFIG'" in messages
+    assert "contains legacy product token 'HERMES_PROFILE'" in messages
     assert "contains legacy product token 'hermes_stream_bridge'" in messages
     assert "contains legacy product token 'hermes-cli'" in messages
 
@@ -148,6 +150,8 @@ def test_verifier_scans_release_artifact_paths_for_legacy_kernel_entrypoints(tmp
     legacy_cli = (
         resources
         / "HERMES_HOME"
+        / "HERMES_CONFIG"
+        / "HERMES_PROFILE"
         / "hermes_runtime"
         / "hermes-agent"
         / "hermes-doctor"
@@ -166,6 +170,8 @@ def test_verifier_scans_release_artifact_paths_for_legacy_kernel_entrypoints(tmp
 
     messages = [finding.message for finding in findings]
     assert "path contains legacy product token 'HERMES_HOME'" in messages
+    assert "path contains legacy product token 'HERMES_CONFIG'" in messages
+    assert "path contains legacy product token 'HERMES_PROFILE'" in messages
     assert "path contains legacy product token 'hermes_runtime'" in messages
     assert "path contains legacy product token 'hermes-agent'" in messages
     assert "path contains legacy product token 'hermes-doctor'" in messages
