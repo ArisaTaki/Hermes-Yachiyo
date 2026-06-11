@@ -504,6 +504,10 @@ def test_chat_image_attachment_ui_smoke_uses_file_input_path() -> None:
             "DOM.setFileInputFiles",
             "smoke-image-cdp.svg",
             "attachment preview rendered through CDP file input",
+            "chat-image-viewer-modal",
+            "chat-image-viewer-close",
+            "closed image viewer modal",
+            "image viewer closed",
         ],
     )
     _assert_not_contains(smoke_script, ["oha-chat-e2e-add-image"])

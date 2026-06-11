@@ -372,6 +372,13 @@ async function main() {
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-message-attachment-item\\"]').click()", true);
   await waitFor(win, () => document.querySelector('[data-testid="chat-image-viewer-modal"]'), 'image viewer modal');
   console.log('[electron-smoke] image viewer opened');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-image-viewer-close\\"]').click()", true);
+  await waitFor(win, () => (
+    !document.querySelector('[data-testid="chat-image-viewer-backdrop"]')
+    && !document.querySelector('[data-testid="chat-image-viewer-modal"]')
+    && !document.querySelector('[data-testid="chat-image-viewer-stage"]')
+  ), 'closed image viewer modal');
+  console.log('[electron-smoke] image viewer closed');
   clearTimeout(watchdog);
   await win.close();
   app.quit();
