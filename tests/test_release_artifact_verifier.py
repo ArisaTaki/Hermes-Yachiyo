@@ -356,6 +356,22 @@ def test_verifier_reports_packaged_app_missing_ui_e2e_selector(tmp_path):
     ) in findings
     assert verifier.Finding(
         asar_path,
+        "packaged Electron app.asar must include UI E2E selector 'chat-session-tab-create'",
+    ) in findings
+    assert verifier.Finding(
+        asar_path,
+        "packaged Electron app.asar must include UI E2E selector 'chat-group-agent-member-checkbox'",
+    ) in findings
+    assert verifier.Finding(
+        asar_path,
+        "packaged Electron app.asar must include UI E2E selector 'chat-group-dialog-submit'",
+    ) in findings
+    assert verifier.Finding(
+        asar_path,
+        "packaged Electron app.asar must include UI E2E selector 'chat-message-activity-open-run-detail'",
+    ) in findings
+    assert verifier.Finding(
+        asar_path,
         "packaged Electron app.asar must include UI E2E selector 'chat-image-viewer-backdrop'",
     ) in findings
     assert verifier.Finding(
