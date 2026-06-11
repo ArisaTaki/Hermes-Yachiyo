@@ -205,6 +205,107 @@ def test_stream_smoke_requires_tool_result_followup_content_without_leaking(monk
     assert "synthetic workspace_read result" not in summary_json
 
 
+def test_stream_smoke_uses_responses_call_id_for_tool_result_followup(monkeypatch):
+    requests: list[dict] = []
+    leaked_secret = "sk-stream-responses-call-id-secret123456"
+
+    def event(payload: dict) -> bytes:
+        event_type = str(payload.get("type") or "")
+        return f"event: {event_type}\ndata: {json.dumps(payload)}\n\n".encode("utf-8")
+
+    class FakeResponsesToolCallResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            yield event(
+                {
+                    "type": "response.output_item.done",
+                    "output_index": 0,
+                    "item": {
+                        "type": "function_call",
+                        "call_id": "call_response_followup",
+                        "name": "workspace_read",
+                        "arguments": '{"path":"README.md"}',
+                    },
+                }
+            )
+            yield event(
+                {
+                    "type": "response.completed",
+                    "response": {
+                        "status": "completed",
+                        "output": [{"type": "function_call", "finish_reason": "tool_calls"}],
+                    },
+                }
+            )
+
+    class FakeFollowupResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            yield event(
+                {
+                    "type": "response.output_text.delta",
+                    "output_index": 0,
+                    "content_index": 0,
+                    "delta": "followup ok",
+                }
+            )
+            yield event(
+                {
+                    "type": "response.completed",
+                    "response": {
+                        "status": "completed",
+                        "output": [{"type": "message", "finish_reason": "stop"}],
+                    },
+                }
+            )
+
+    def fake_urlopen(request, timeout, context):
+        requests.append(json.loads(request.data.decode("utf-8")))
+        assert timeout == 180
+        assert isinstance(context, ssl.SSLContext)
+        return FakeResponsesToolCallResponse() if len(requests) == 1 else FakeFollowupResponse()
+
+    monkeypatch.setattr("apps.shell.model_profiles.urlrequest.urlopen", fake_urlopen)
+
+    summary = smoke.run_stream_smoke(
+        base_url="https://api.example.test/v1",
+        model="demo-responses-call-id-model",
+        api_key=leaked_secret,
+        require_tool_call=True,
+        require_tool_result_content=True,
+        expect_tool_name="workspace_read",
+        expect_tool_argument_json_fields=["path=README.md"],
+        expect_finish_reasons=["tool_calls"],
+        expect_tool_result_finish_reasons=["stop"],
+    )
+
+    summary_json = json.dumps(summary)
+    assert len(requests) == 2
+    assert requests[1]["messages"][1]["tool_calls"][0]["id"] == "call_response_followup"
+    assert requests[1]["messages"][2]["tool_call_id"] == "call_response_followup"
+    assert summary["finish_reasons"] == ["tool_calls"]
+    assert summary["tool_calls"] == [
+        {
+            "id": "call_response_followup",
+            "name": "workspace_read",
+            "argument_chars": len('{"path":"README.md"}'),
+        }
+    ]
+    assert summary["tool_result_followup_finish_reasons"] == ["stop"]
+    assert leaked_secret not in summary_json
+    assert "README.md" not in summary_json
+
+
 def test_stream_smoke_requires_tool_result_followup_finish_reason(monkeypatch):
     call_count = 0
 
