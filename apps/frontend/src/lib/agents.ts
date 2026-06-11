@@ -182,9 +182,14 @@ export type RunSpec = {
 };
 
 export type RunEventSpec = {
+  event_id?: string;
   run_id: string;
   sequence: number;
+  schema_version?: number;
   event_type: string;
+  actor?: string;
+  visibility?: string;
+  sensitivity?: string;
   payload?: Record<string, unknown>;
   created_at?: string;
 };

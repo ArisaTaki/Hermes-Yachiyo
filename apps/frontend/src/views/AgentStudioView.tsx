@@ -1274,7 +1274,13 @@ function runEventReplayToTimelineEvent(event: RunEventSpec): Record<string, unkn
             ? payload.workflow_node_label
             : '';
   return {
+    event_id: event.event_id || '',
+    run_id: event.run_id,
+    schema_version: event.schema_version || '',
     event: event.event_type,
+    actor: event.actor || '',
+    visibility: event.visibility || '',
+    sensitivity: event.sensitivity || '',
     detail,
     status: typeof payload.status === 'string' ? payload.status : '',
     time: event.created_at || '',
@@ -5042,14 +5048,26 @@ export function AgentStudioView() {
                       const eventTone = timelineEventTone(event);
                       const eventName = timelineEventName(event);
                       const eventSequence = timelineEventSequence(event);
+                      const eventId = String(event.event_id || '').trim();
+                      const eventRunId = String(event.run_id || '').trim();
+                      const eventActor = String(event.actor || '').trim();
+                      const eventVisibility = String(event.visibility || '').trim();
+                      const eventSensitivity = String(event.sensitivity || '').trim();
+                      const eventSchemaVersion = String(event.schema_version || '').trim();
                       return (
                         <li
                           className={`run-execution-step ${eventTone}`}
                           data-child-run-id={childRunId || ''}
                           data-run-event={eventName}
+                          data-run-event-actor={eventActor}
+                          data-run-event-id={eventId}
+                          data-run-event-run-id={eventRunId}
                           data-run-event-sequence={eventSequence}
+                          data-run-event-sensitivity={eventSensitivity}
+                          data-run-event-schema-version={eventSchemaVersion}
                           data-run-event-status={eventStatus || ''}
                           data-run-event-tone={eventTone}
+                          data-run-event-visibility={eventVisibility}
                           data-testid="agent-run-detail-execution-event"
                           key={`${eventName || 'event'}-${index}`}
                         >
