@@ -46,14 +46,14 @@ export function ConfirmDialog({
         if (event.target === event.currentTarget) onCancel();
       }}
     >
-      <section className={`hy-confirm-dialog ${variant}`} role="dialog" aria-modal="true" aria-labelledby="hy-confirm-title">
+      <section className={`hy-confirm-dialog ${variant}`} data-testid="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="hy-confirm-title">
         <div className="hy-confirm-copy">
           <h2 id="hy-confirm-title">{title}</h2>
           {description ? <div className="hy-confirm-description">{description}</div> : null}
         </div>
         <div className="hy-confirm-actions">
           <button type="button" onClick={onCancel}>{cancelLabel}</button>
-          <button type="button" className={variant === 'danger' ? 'danger-action' : 'primary-action'} onClick={onConfirm}>
+          <button type="button" className={variant === 'danger' ? 'danger-action' : 'primary-action'} data-testid="confirm-action" onClick={onConfirm}>
             {confirmLabel}
           </button>
         </div>

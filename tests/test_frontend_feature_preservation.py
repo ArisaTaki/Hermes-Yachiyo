@@ -350,6 +350,53 @@ def test_launcher_session_summary_ui_smoke_uses_bubble_and_live2d_summary_paths(
     )
 
 
+def test_activity_ui_smoke_uses_feed_detail_trace_and_delete_paths() -> None:
+    smoke_script = "scripts/smoke_activity_ui.mjs"
+    _assert_contains(
+        "apps/frontend/src/views/OpenDesignView.tsx",
+        [
+            'data-testid="activity-feed"',
+            'data-testid="activity-search-input"',
+            'data-testid="activity-list"',
+            'data-testid="activity-row"',
+            'data-testid="activity-row-open"',
+            'data-testid="activity-detail-page"',
+            'data-testid="activity-detail-summary"',
+            'data-testid="activity-detail-body"',
+            'data-testid="activity-trace"',
+            'data-testid="activity-trace-row"',
+            'data-testid="activity-trace-expand"',
+            'data-testid="activity-detail-delete"',
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/components/ConfirmDialog.tsx",
+        [
+            'data-testid="confirm-dialog"',
+            'data-testid="confirm-action"',
+        ],
+    )
+    _assert_contains(
+        smoke_script,
+        [
+            "#/activity-all",
+            "request.method === 'GET' && url.pathname === '/ui/activity'",
+            "request.method === 'GET' && url.pathname === `/ui/activity/${ACTIVITY_EVENT_ID}`",
+            "request.method === 'DELETE' && url.pathname === `/ui/activity/${ACTIVITY_EVENT_ID}`",
+            "data-testid=\"activity-search-input\"",
+            "data-testid=\"activity-row\"",
+            "data-testid=\"activity-row-open\"",
+            "data-testid=\"activity-detail-page\"",
+            "data-testid=\"activity-trace-expand\"",
+            "data-testid=\"activity-detail-delete\"",
+            "data-testid=\"confirm-action\"",
+            "bridgeState.listRequests.some((request) => request.query === 'workspace')",
+            "bridgeState.detailRequests.includes(ACTIVITY_EVENT_ID)",
+            "bridgeState.deletedEventIds.includes(ACTIVITY_EVENT_ID)",
+        ],
+    )
+
+
 def test_proactive_tts_ui_smoke_uses_screen_permission_tts_and_voice_import_paths() -> None:
     smoke_script = "scripts/smoke_proactive_tts_ui.mjs"
     _assert_contains(

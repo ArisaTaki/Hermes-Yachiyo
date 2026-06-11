@@ -1829,7 +1829,7 @@ export function ActivityAllPage() {
   }
 
   return (
-    <section className="hy-route-page">
+    <section className="hy-route-page" data-testid="activity-feed">
       <header className="hy-page-header">
         <button type="button" className="page-back-link" onClick={() => navigateTo('main')}>← 返回主控台</button>
         <div>
@@ -1840,19 +1840,20 @@ export function ActivityAllPage() {
       <div className="activity-controls">
         <div className="activity-filter-bar">
           <input
+            data-testid="activity-search-input"
             type="search"
             value={activityQuery}
             onChange={(event) => setActivityQuery(event.target.value)}
             placeholder="搜索日志、Session ID、任务 ID、工具或详情"
             aria-label="搜索活动"
           />
-          <select value={activityStatus} onChange={(event) => setActivityStatus(event.target.value)} aria-label="按状态筛选">
+          <select data-testid="activity-status-filter" value={activityStatus} onChange={(event) => setActivityStatus(event.target.value)} aria-label="按状态筛选">
             <option value="">全部状态</option>
             {availableStatuses.map((status) => (
               <option value={status} key={status}>{activityStatusLabel(status)}</option>
             ))}
           </select>
-          <select value={activityPhase} onChange={(event) => setActivityPhase(event.target.value)} aria-label="按类型筛选">
+          <select data-testid="activity-phase-filter" value={activityPhase} onChange={(event) => setActivityPhase(event.target.value)} aria-label="按类型筛选">
             <option value="">全部类型</option>
             {availablePhases.map((phase) => (
               <option value={phase} key={phase}>{activityPhaseLabel(phase)}</option>
@@ -1863,6 +1864,7 @@ export function ActivityAllPage() {
           <button
             type="button"
             className="hy-btn hy-btn-ghost"
+            data-testid="activity-select-all"
             disabled={!selectableActivityIds.length}
             onClick={toggleSelectAllVisible}
           >
@@ -1872,6 +1874,7 @@ export function ActivityAllPage() {
           <button
             type="button"
             className="hy-btn activity-danger-btn"
+            data-testid="activity-delete-selected"
             disabled={!selectedCount || bulkDeleting}
             onClick={requestDeleteSelectedActivities}
           >
@@ -1880,7 +1883,7 @@ export function ActivityAllPage() {
         </div>
       </div>
       {activityError ? <div className="notice danger">{activityError}</div> : null}
-      <div className="activity-list-full">
+      <div className="activity-list-full" data-testid="activity-list">
         {activityLoading ? (
           <ActivityListSkeleton />
         ) : grouped.map((group) => (
@@ -2004,7 +2007,7 @@ export function ActivityDetailPage() {
   }
 
   return (
-    <section className="hy-route-page activity-detail-page">
+    <section className="hy-route-page activity-detail-page" data-activity-event-id={eventId} data-testid="activity-detail-page">
       <header className="hy-page-header activity-detail-header">
         <div className="activity-detail-titlebar">
           <button type="button" className="page-back-link" onClick={returnFromActivityDetail}>← 返回上一页</button>
@@ -2024,6 +2027,7 @@ export function ActivityDetailPage() {
           <button
             type="button"
             className="hy-btn hy-btn-ghost activity-delete-btn danger-action"
+            data-testid="activity-detail-delete"
             disabled={deleting}
             onClick={requestDeleteCurrentEvent}
           >
@@ -2037,7 +2041,7 @@ export function ActivityDetailPage() {
 
       {event ? (
         <>
-          <section className="activity-detail-summary">
+          <section className="activity-detail-summary" data-testid="activity-detail-summary">
             <div>
               <span>状态</span>
               <strong>{activityStatusLabel(event.status) || '未标记'}</strong>
@@ -2056,7 +2060,7 @@ export function ActivityDetailPage() {
             </div>
           </section>
 
-          <section className="activity-detail-body">
+          <section className="activity-detail-body" data-testid="activity-detail-body">
             <h3>详细内容</h3>
             <dl>
               <div>
@@ -2081,7 +2085,7 @@ export function ActivityDetailPage() {
             ) : null}
           </section>
 
-          <section className="activity-detail-body">
+          <section className="activity-detail-body" data-testid="activity-trace">
             <h3>完整过程</h3>
             <div className="activity-trace-list">
               {trace.length ? trace.map((item, index) => {
@@ -2094,6 +2098,8 @@ export function ActivityDetailPage() {
                   <article
                     id={focused ? activityTraceDomId(eventId) : item.event_id ? activityTraceDomId(item.event_id) : undefined}
                     className={`activity-trace-row activity-item-${activityTone(item.status)}${expanded ? ' expanded' : ''}${focused ? ' focused' : ''}`}
+                    data-activity-event-id={item.event_id || ''}
+                    data-testid="activity-trace-row"
                     key={traceId}
                   >
                     <span className="activity-icon">{activityIcon(item)}</span>
@@ -2104,6 +2110,7 @@ export function ActivityDetailPage() {
                           <button
                             type="button"
                             className="activity-trace-expand"
+                            data-testid="activity-trace-expand"
                             title={expanded ? '收起全文' : '查看全文'}
                             aria-label={expanded ? '收起全文' : '查看全文'}
                             onClick={() => toggleTraceExpanded(traceId)}
@@ -2246,16 +2253,17 @@ function ActivityRow({
   );
   if (eventId && selectable) {
     return (
-      <article className={className}>
+      <article className={className} data-activity-event-id={eventId} data-testid="activity-row">
         <label className="activity-select">
           <input
+            data-testid="activity-select-checkbox"
             type="checkbox"
             checked={selected}
             aria-label={`选择日志：${title}`}
             onChange={(event) => onSelectionChange?.(eventId, event.target.checked)}
           />
         </label>
-        <button type="button" className="activity-row-main" onClick={() => navigateTo('activity-detail', { event_id: eventId })}>
+        <button type="button" className="activity-row-main" data-testid="activity-row-open" onClick={() => navigateTo('activity-detail', { event_id: eventId })}>
           {content}
         </button>
       </article>
@@ -2263,7 +2271,7 @@ function ActivityRow({
   }
   if (eventId) {
     return (
-      <button type="button" className={className} onClick={() => navigateTo('activity-detail', { event_id: eventId })}>
+      <button type="button" className={className} data-activity-event-id={eventId} data-testid="activity-row" onClick={() => navigateTo('activity-detail', { event_id: eventId })}>
         {content}
       </button>
     );
