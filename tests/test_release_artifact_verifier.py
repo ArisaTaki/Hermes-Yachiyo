@@ -24,6 +24,7 @@ RELEASE_ELECTRON_SMOKE_SCRIPTS: tuple[str, ...] = (
     "scripts/smoke_agent_studio_skill_folders_ui.mjs",
     "scripts/smoke_agent_run_detail_ui.mjs",
     "scripts/smoke_workflow_save_run_ui.mjs",
+    "scripts/smoke_workflow_management_ui.mjs",
 )
 
 

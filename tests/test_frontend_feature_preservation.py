@@ -1257,6 +1257,35 @@ def test_workflow_save_run_ui_smoke_uses_studio_route_and_saved_workflow_id() ->
     )
 
 
+def test_workflow_management_ui_smoke_uses_bulk_and_single_delete_paths() -> None:
+    smoke_script = "scripts/smoke_workflow_management_ui.mjs"
+    _assert_contains(
+        smoke_script,
+        [
+            "#/agents/workflows",
+            "data-testid=\"workflow-studio\"",
+            "data-testid=\"workflow-list\"",
+            "data-testid=\"workflow-list-item\"",
+            "data-testid=\"workflow-list-manage\"",
+            "data-testid=\"workflow-bulk-actions\"",
+            "data-testid=\"workflow-list-checkbox\"",
+            "data-testid=\"workflow-delete-selected\"",
+            "data-testid=\"workflow-finish-management\"",
+            "data-testid=\"workflow-list-open\"",
+            "data-testid=\"workflow-editor\"",
+            "data-testid=\"workflow-delete\"",
+            "data-testid=\"confirm-dialog\"",
+            "data-testid=\"confirm-action\"",
+            "request.method === 'DELETE' && url.pathname.startsWith('/ui/workflows/')",
+            "deletedWorkflowIds.push(workflowId)",
+            "Workflow Management Smoke A",
+            "Workflow Management Smoke B",
+            "assertMockBridgeContract",
+            "unexpected deleted workflow ids",
+        ],
+    )
+
+
 def test_agent_studio_agents_ui_smoke_uses_definition_crud_paths() -> None:
     smoke_script = "scripts/smoke_agent_studio_agents_ui.mjs"
     _assert_contains(
