@@ -4175,6 +4175,102 @@ def test_main_chat_model_loop_pauses_and_resumes_approved_tool(tmp_path, monkeyp
         service.close()
 
 
+def test_main_chat_consecutive_tool_approvals_use_resume_required_projection(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    calls = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        if len(calls) == 1:
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_first_terminal",
+                        "type": "function",
+                        "function": {
+                            "name": "terminal_run",
+                            "arguments": json.dumps({"command": "printf main-first-approved"}),
+                        },
+                    },
+                    {
+                        "id": "call_second_terminal",
+                        "type": "function",
+                        "function": {
+                            "name": "terminal_run",
+                            "arguments": json.dumps({"command": "printf main-second-approved"}),
+                        },
+                    },
+                ],
+            }
+        tool_messages = [message for message in messages if message.get("role") == "tool"]
+        assert any("main-first-approved" in message.get("content", "") for message in tool_messages)
+        assert any("main-second-approved" in message.get("content", "") for message in tool_messages)
+        return {"content": "Main chat terminal approvals completed"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        required_projection_calls: list[dict[str, object]] = []
+        original_required_projection = service._project_approval_resume_required
+
+        def spy_project_approval_resume_required(context, pending_approval):
+            required_projection_calls.append(
+                {
+                    "run_id": context.run_id,
+                    "tool_name": pending_approval.get("tool"),
+                    "command": (pending_approval.get("input_preview") or {}).get("command"),
+                    "model_profile_id": pending_approval.get("model_profile_id"),
+                }
+            )
+            return original_required_projection(context, pending_approval)
+
+        monkeypatch.setattr(
+            service,
+            "_project_approval_resume_required",
+            spy_project_approval_resume_required,
+        )
+        run = service.start_main_chat_run(
+            task_id="task-main-consecutive-approval",
+            session_id="session-main-consecutive-approval",
+            user_goal="Run both commands",
+        )
+        waiting = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [{"role": "user", "content": "Run both commands"}],
+            tool_policy={"allowed_tools": ["terminal.run"]},
+            workspace_policy={"default_workdir": str(workdir), "readable_scopes": ["."]},
+        )
+
+        assert waiting["status"] == "approval_required"
+        assert waiting["pending_approval"]["input_preview"]["command"] == "printf main-first-approved"
+
+        after_first = service.approve_run_approval(run["run_id"])
+        assert after_first["status"] == "approval_required"
+        assert after_first["pending_approval"]["input_preview"]["command"] == "printf main-second-approved"
+        assert required_projection_calls == [
+            {
+                "run_id": run["run_id"],
+                "tool_name": "terminal.run",
+                "command": "printf main-second-approved",
+                "model_profile_id": "profile_default",
+            }
+        ]
+
+        after_second = service.approve_run_approval(run["run_id"])
+        assert after_second["status"] == "running"
+        assert after_second["pending_approval"] == {}
+        assert after_second["result"] == "Main chat terminal approvals completed"
+        assert len(calls) == 2
+    finally:
+        service.close()
+
+
 def test_main_chat_records_failed_run_event_when_approved_tool_fails(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     workdir = tmp_path / "repo"
@@ -8977,6 +9073,24 @@ def test_agent_run_consecutive_terminal_approvals_update_pending_request(tmp_pat
 
     monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
     try:
+        required_projection_calls: list[dict[str, object]] = []
+        original_required_projection = service._project_approval_resume_required
+
+        def spy_project_approval_resume_required(context, pending_approval):
+            required_projection_calls.append(
+                {
+                    "run_id": context.run_id,
+                    "tool_name": pending_approval.get("tool"),
+                    "command": (pending_approval.get("input_preview") or {}).get("command"),
+                }
+            )
+            return original_required_projection(context, pending_approval)
+
+        monkeypatch.setattr(
+            service,
+            "_project_approval_resume_required",
+            spy_project_approval_resume_required,
+        )
         agent = service.create_agent(
             {
                 "name": "Consecutive Terminal Agent",
@@ -8997,6 +9111,13 @@ def test_agent_run_consecutive_terminal_approvals_update_pending_request(tmp_pat
         assert after_first["result"] == "等待审批：terminal.run"
         assert after_first["pending_approval"]["tool"] == "terminal.run"
         assert after_first["pending_approval"]["input_preview"]["command"] == "printf second-approved"
+        assert required_projection_calls == [
+            {
+                "run_id": run["run_id"],
+                "tool_name": "terminal.run",
+                "command": "printf second-approved",
+            }
+        ]
         assert len(calls) == 1
 
         after_second = service.approve_run_approval(run["run_id"])

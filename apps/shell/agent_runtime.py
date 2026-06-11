@@ -8100,25 +8100,9 @@ class NativeRunEngine:
                 result_text,
             )
         except AgentApprovalRequired as exc:
-            resume_context.timeline.append(
-                self._timeline(
-                    "agent.tool.approval_required",
-                    str(exc.pending_approval.get("tool") or ""),
-                    pending_approval=_public_pending_approval(exc.pending_approval),
-                )
-            )
-            self.append_run_event(
-                run_id,
-                "agent.tool.approval_required",
-                _public_pending_approval(exc.pending_approval),
-            )
-            result = self._update_run(
-                run_id,
-                status="approval_required",
-                result=f"等待审批：{exc.pending_approval.get('tool') or 'tool'}",
-                timeline=resume_context.timeline,
-                artifacts=resume_context.artifacts,
-                pending_approval=exc.pending_approval,
+            result = self._project_approval_resume_required(
+                resume_context,
+                exc.pending_approval,
             )
         except Exception as exc:
             safe_error = redact_secrets(exc)
@@ -8176,6 +8160,34 @@ class NativeRunEngine:
             pending_approval=None,
         )
 
+    def _project_approval_resume_required(
+        self,
+        context: ToolApprovalResumeContext,
+        pending_approval: dict[str, Any],
+    ) -> dict[str, Any]:
+        public_pending = _public_pending_approval(pending_approval)
+        tool_name = str(pending_approval.get("tool") or "")
+        context.timeline.append(
+            self._timeline(
+                "agent.tool.approval_required",
+                tool_name,
+                pending_approval=public_pending,
+            )
+        )
+        self.append_run_event(
+            context.run_id,
+            "agent.tool.approval_required",
+            public_pending,
+        )
+        return self._update_run(
+            context.run_id,
+            status="approval_required",
+            result=f"等待审批：{tool_name or 'tool'}",
+            timeline=context.timeline,
+            artifacts=context.artifacts,
+            pending_approval=pending_approval,
+        )
+
     def _approve_main_chat_run_approval(self, run: dict[str, Any]) -> dict[str, Any]:
         run_id = str(run["run_id"])
         pending = self.runs.pending_approval_private(run_id)
@@ -8220,25 +8232,9 @@ class NativeRunEngine:
                 tool_policy=runtime["tool_policy"],
                 workspace_policy=runtime["workspace_policy"],
             )
-            resume_context.timeline.append(
-                self._timeline(
-                    "agent.tool.approval_required",
-                    str(pending_next.get("tool") or ""),
-                    pending_approval=_public_pending_approval(pending_next),
-                )
-            )
-            self.append_run_event(
-                run_id,
-                "agent.tool.approval_required",
-                _public_pending_approval(pending_next),
-            )
-            result = self._update_run(
-                run_id,
-                status="approval_required",
-                result=f"等待审批：{pending_next.get('tool') or 'tool'}",
-                timeline=resume_context.timeline,
-                artifacts=resume_context.artifacts,
-                pending_approval=pending_next,
+            result = self._project_approval_resume_required(
+                resume_context,
+                pending_next,
             )
         except Exception as exc:
             safe_error = redact_api_error_text(exc)
