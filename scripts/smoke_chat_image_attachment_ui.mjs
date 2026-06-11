@@ -385,7 +385,13 @@ async function main() {
   }, 'rendered message attachment');
   console.log('[electron-smoke] message attachment rendered');
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-message-attachment-item\\"]').click()", true);
-  await waitFor(win, () => document.querySelector('[data-testid="chat-image-viewer-modal"]'), 'image viewer modal');
+  await waitFor(win, () => {
+    const modal = document.querySelector('[data-testid="chat-image-viewer-modal"]');
+    const image = document.querySelector('[data-testid="chat-image-viewer-stage"] img');
+    return modal
+      && image?.getAttribute('alt') === 'smoke-image-cdp.svg'
+      && image?.getAttribute('src')?.startsWith('data:image/svg+xml');
+  }, 'image viewer modal with rendered image');
   console.log('[electron-smoke] image viewer opened');
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-image-viewer-close\\"]').click()", true);
   await waitFor(win, () => (
