@@ -713,11 +713,17 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
         }}
       >
         <div ref={characterRef} className={characterClass} aria-label="Yachiyo Live2D 角色舞台">
-          <canvas ref={canvasRef} className={`live2d-canvas ${rendererReady ? 'active' : ''}`} aria-hidden="true" />
+          <canvas
+            ref={canvasRef}
+            className={`live2d-canvas ${rendererReady ? 'active' : ''}`}
+            data-testid="live2d-launcher-canvas"
+            aria-hidden="true"
+          />
           {launcher.preview_url ? (
             <img
               ref={previewRef}
               className={`live2d-preview-fallback ${rendererReady ? 'hidden' : ''}`}
+              data-testid="live2d-launcher-preview-fallback"
               src={launcher.preview_url}
               alt=""
               onLoad={() => reportLive2DRegions({
@@ -738,12 +744,20 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
             />
           ) : null}
           {showResourceHint ? (
-            <div ref={resourceHintRef} className={`live2d-resource-hint ${hintTone}`} onClick={(event) => event.stopPropagation()}>
-              <span className="live2d-resource-hint-text">{[resource?.status_label, resource?.help_text].filter(Boolean).join(' ')}</span>
+            <div
+              ref={resourceHintRef}
+              className={`live2d-resource-hint ${hintTone}`}
+              data-testid="live2d-launcher-resource-hint"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <span className="live2d-resource-hint-text" data-testid="live2d-launcher-resource-hint-text">
+                {[resource?.status_label, resource?.help_text].filter(Boolean).join(' ')}
+              </span>
               <button
                 className="live2d-resource-hint-close"
                 type="button"
                 aria-label="关闭资源提示"
+                data-testid="live2d-launcher-resource-hint-close"
                 onClick={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
