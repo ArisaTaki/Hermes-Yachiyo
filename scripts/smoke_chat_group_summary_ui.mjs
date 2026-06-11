@@ -717,6 +717,8 @@ async function waitForSummaryRunDetail(win) {
     const result = document.querySelector('[data-testid="agent-run-detail-result"]');
     const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
     const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
+    const outputEvent = events.find((node) => node.getAttribute('data-run-event') === 'model.output.completed');
+    const completedEvent = events.find((node) => node.getAttribute('data-run-event') === 'run.completed');
     return window.location.hash.includes(${JSON.stringify(GROUP_SUMMARY_RUN_ID)})
       && detail?.getAttribute('data-run-id') === ${JSON.stringify(GROUP_SUMMARY_RUN_ID)}
       && detail?.getAttribute('data-run-kind') === 'main_chat_run'
@@ -725,6 +727,8 @@ async function waitForSummaryRunDetail(win) {
       && result?.textContent.includes(${JSON.stringify(GROUP_SUMMARY_RESULT)})
       && eventTypes.includes('model.output.completed')
       && eventTypes.includes('run.completed')
+      && outputEvent?.textContent.includes(${JSON.stringify(GROUP_SUMMARY_RESULT)})
+      && completedEvent?.textContent.includes(${JSON.stringify(GROUP_SUMMARY_RESULT)})
       && events.every((node) => node.getAttribute('data-run-event-run-id') === ${JSON.stringify(GROUP_SUMMARY_RUN_ID)});
   }, 'group summary Run Detail replay');
 }
@@ -915,6 +919,8 @@ async function main() {
     const result = document.querySelector('[data-testid="agent-run-detail-result"]');
     const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
     const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
+    const outputEvent = events.find((node) => node.getAttribute('data-run-event') === 'model.output.completed');
+    const completedEvent = events.find((node) => node.getAttribute('data-run-event') === 'agent.run.completed');
     return window.location.hash.includes(${JSON.stringify(GROUP_AGENT_RUN_ID)})
       && detail?.getAttribute('data-run-id') === ${JSON.stringify(GROUP_AGENT_RUN_ID)}
       && detail?.getAttribute('data-run-kind') === 'agent_run'
@@ -924,6 +930,8 @@ async function main() {
       && eventTypes.includes('agent.run.started')
       && eventTypes.includes('model.output.completed')
       && eventTypes.includes('agent.run.completed')
+      && outputEvent?.textContent.includes(${JSON.stringify(GROUP_AGENT_RESULT)})
+      && completedEvent?.textContent.includes(${JSON.stringify(GROUP_AGENT_RESULT)})
       && events.length >= 4
       && events.every((node) => node.getAttribute('data-run-event-run-id') === ${JSON.stringify(GROUP_AGENT_RUN_ID)});
   }, 'group activity Run Detail handoff');
