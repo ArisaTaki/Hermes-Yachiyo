@@ -568,6 +568,7 @@ export async function restartDesktopBridge(bridgeUrl?: string): Promise<{ succes
     return { success: false, error: '当前环境不支持自动重启 Bridge，请重启 Oha-Yachiyo' };
   }
   const result = await window.ohaDesktop.restartBackend({ bridgeUrl });
+  cachedBridgeToken = null;
   if (result.bridgeUrl) cachedBridgeUrl = result.bridgeUrl.replace(/\/$/, '');
   return result;
 }

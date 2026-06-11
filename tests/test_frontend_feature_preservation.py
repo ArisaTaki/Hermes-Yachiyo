@@ -951,5 +951,7 @@ def test_desktop_bridge_token_is_generated_injected_and_sent_by_frontend() -> No
             "async function bridgeToken(): Promise<string>",
             "'X-Oha-Yachiyo-Bridge-Token': token",
             "headers = await bridgeJsonHeaders()",
+            "const result = await window.ohaDesktop.restartBackend({ bridgeUrl });",
+            "cachedBridgeToken = null;",
         ],
     )
