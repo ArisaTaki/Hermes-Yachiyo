@@ -344,6 +344,9 @@ def _chunk_finish_reasons(chunk: Any) -> list[str]:
     event_type = _responses_stream_event_type(chunk)
     if event_type in {"response.completed", "response.done"}:
         response = _field(chunk, "response")
+        reasons = _finish_reasons_from_value(response) + _finish_reasons_from_value(chunk)
+        if reasons:
+            return reasons
         status = _field(response, "status") if response is not None else None
         return [str(status or _field(chunk, "status") or "completed")]
     direct_reason = _field(chunk, "finish_reason")
@@ -357,6 +360,25 @@ def _chunk_finish_reasons(chunk: Any) -> list[str]:
         reason = _field(choice, "finish_reason")
         if reason:
             reasons.append(str(reason))
+    return reasons
+
+
+def _finish_reasons_from_value(value: Any) -> list[str]:
+    if value is None or isinstance(value, (str, bytes, bytearray)):
+        return []
+    reasons: list[str] = []
+    for field_name in ("finish_reason", "stop_reason"):
+        reason = _field(value, field_name)
+        if reason:
+            reasons.append(str(reason))
+    output = _field(value, "output")
+    if isinstance(output, list):
+        for item in output:
+            reasons.extend(_finish_reasons_from_value(item))
+    choices = _field(value, "choices")
+    if isinstance(choices, list):
+        for choice in choices:
+            reasons.extend(_finish_reasons_from_value(choice))
     return reasons
 
 
