@@ -227,6 +227,7 @@ def test_stream_smoke_uses_responses_call_id_for_tool_result_followup(monkeypatc
                     "output_index": 0,
                     "item": {
                         "type": "function_call",
+                        "id": "fc_response_followup",
                         "call_id": "call_response_followup",
                         "name": "workspace_read",
                         "arguments": '{"path":"README.md"}',
@@ -291,8 +292,11 @@ def test_stream_smoke_uses_responses_call_id_for_tool_result_followup(monkeypatc
 
     summary_json = json.dumps(summary)
     assert len(requests) == 2
+    assert requests[1]["messages"][1]["content"] is None
     assert requests[1]["messages"][1]["tool_calls"][0]["id"] == "call_response_followup"
+    assert requests[1]["messages"][1]["tool_calls"][0]["id"] != "fc_response_followup"
     assert requests[1]["messages"][2]["tool_call_id"] == "call_response_followup"
+    assert requests[1]["messages"][2]["tool_call_id"] != "fc_response_followup"
     assert summary["finish_reasons"] == ["tool_calls"]
     assert summary["tool_calls"] == [
         {
