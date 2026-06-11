@@ -186,6 +186,7 @@ def test_stream_smoke_requires_tool_result_followup_content_without_leaking(monk
         expect_tool_name="workspace_read",
         expect_tool_argument_json_fields=["path=README.md"],
         expect_finish_reasons=["tool_calls"],
+        expect_tool_result_finish_reasons=["stop"],
     )
 
     summary_json = json.dumps(summary)
@@ -201,6 +202,53 @@ def test_stream_smoke_requires_tool_result_followup_content_without_leaking(monk
     assert leaked_secret not in summary_json
     assert "README.md" not in summary_json
     assert "synthetic workspace_read result" not in summary_json
+
+
+def test_stream_smoke_requires_tool_result_followup_finish_reason(monkeypatch):
+    call_count = 0
+
+    class FakeToolCallResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            yield (
+                b'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_followup",'
+                b'"type":"function","function":{"name":"workspace_read","arguments":"{\\"path\\":\\"README.md\\"}"}}]},'
+                b'"finish_reason":"tool_calls"}]}\n\n'
+            )
+            yield b"data: [DONE]\n\n"
+
+    class FakeFollowupResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            yield b'data: {"choices":[{"delta":{"content":"followup ok"},"finish_reason":"length"}]}\n\n'
+            yield b"data: [DONE]\n\n"
+
+    def fake_urlopen(*_args, **_kwargs):
+        nonlocal call_count
+        call_count += 1
+        return FakeToolCallResponse() if call_count == 1 else FakeFollowupResponse()
+
+    monkeypatch.setattr("apps.shell.model_profiles.urlrequest.urlopen", fake_urlopen)
+
+    with pytest.raises(RuntimeError, match="tool-result follow-up completed without expected finish_reason 'stop'"):
+        smoke.run_stream_smoke(
+            base_url="https://api.example.test/v1",
+            model="demo-model",
+            api_key="sk-stream-smoke-secret123456",
+            require_tool_result_content=True,
+            expect_tool_name="workspace_read",
+            expect_tool_result_finish_reasons=["stop"],
+        )
 
 
 def test_stream_smoke_requires_content_and_expected_tool_name(monkeypatch):
@@ -1321,6 +1369,8 @@ def test_stream_smoke_main_expect_tool_name_requests_tool_call(monkeypatch, caps
             "path=README.md",
             "--expect-finish-reason",
             "tool_calls",
+            "--expect-tool-result-finish-reason",
+            "stop",
         ]
     )
 
@@ -1334,6 +1384,7 @@ def test_stream_smoke_main_expect_tool_name_requests_tool_call(monkeypatch, caps
     assert calls[0]["expect_tool_argument_substrings"] == ["README.md"]
     assert calls[0]["expect_tool_argument_json_fields"] == ["path=README.md"]
     assert calls[0]["expect_finish_reasons"] == ["tool_calls"]
+    assert calls[0]["expect_tool_result_finish_reasons"] == ["stop"]
     assert "sk-stream" not in captured.out
 
 

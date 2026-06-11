@@ -543,6 +543,7 @@ def run_stream_smoke(
     expect_tool_argument_substrings: Iterable[str] | None = None,
     expect_tool_argument_json_fields: Iterable[str] | None = None,
     expect_finish_reasons: Iterable[str] | None = None,
+    expect_tool_result_finish_reasons: Iterable[str] | None = None,
 ) -> dict[str, Any]:
     base_url = str(base_url or "").strip()
     model = str(model or "").strip()
@@ -571,10 +572,16 @@ def run_stream_smoke(
         for value in (expect_finish_reasons or [])
         if str(value or "").strip()
     ]
+    expected_tool_result_finish_reasons = [
+        str(value).strip()
+        for value in (expect_tool_result_finish_reasons or [])
+        if str(value or "").strip()
+    ]
+    require_tool_result_followup = require_tool_result_content or bool(expected_tool_result_finish_reasons)
     tool_call = (
         tool_call
         or require_tool_call
-        or require_tool_result_content
+        or require_tool_result_followup
         or bool(expected_name)
         or bool(expected_argument_substrings)
         or bool(expected_argument_json_fields)
@@ -596,7 +603,7 @@ def run_stream_smoke(
     summary = summarize_stream_chunks(
         chunks if not isinstance(chunks, dict) else [],
         include_tool_arguments=bool(
-            require_tool_result_content or expected_argument_substrings or expected_argument_json_fields
+            require_tool_result_followup or expected_argument_substrings or expected_argument_json_fields
         ),
     )
     if require_content and int(summary["content_chars"]) == 0:
@@ -619,7 +626,7 @@ def run_stream_smoke(
         for key, expected in expected_argument_json_fields:
             if not any(_argument_json_field_matches(argument, key, expected) for argument in arguments):
                 raise RuntimeError("stream completed without expected tool call JSON argument field")
-    if require_tool_result_content:
+    if require_tool_result_followup:
         tool_calls = [call for call in summary["tool_calls"] if not expected_name or call.get("name") == expected_name]
         if not tool_calls:
             raise RuntimeError("tool-result follow-up requires a matching tool call")
@@ -639,7 +646,14 @@ def run_stream_smoke(
         summary["tool_result_followup_chunk_count"] = followup_summary["chunk_count"]
         summary["tool_result_followup_content_chars"] = followup_summary["content_chars"]
         summary["tool_result_followup_finish_reasons"] = followup_summary["finish_reasons"]
-    if require_tool_result_content or expected_argument_substrings or expected_argument_json_fields:
+        if expected_tool_result_finish_reasons:
+            followup_finish_reasons = {str(reason) for reason in followup_summary["finish_reasons"]}
+            for expected_reason in expected_tool_result_finish_reasons:
+                if expected_reason not in followup_finish_reasons:
+                    raise RuntimeError(
+                        f"tool-result follow-up completed without expected finish_reason {expected_reason!r}"
+                    )
+    if require_tool_result_followup or expected_argument_substrings or expected_argument_json_fields:
         for call in summary["tool_calls"]:
             call.pop("arguments", None)
     if expected_finish_reasons:
@@ -694,6 +708,12 @@ def main(argv: list[str] | None = None) -> int:
         default=[],
         help="Fail unless the stream emits this finish_reason. May be repeated.",
     )
+    parser.add_argument(
+        "--expect-tool-result-finish-reason",
+        action="append",
+        default=[],
+        help="Fail unless the tool-result follow-up stream emits this finish_reason. May be repeated.",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -706,6 +726,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.tool_call
                 or args.require_tool_call
                 or args.require_tool_result_content
+                or bool(args.expect_tool_result_finish_reason)
                 or bool(args.expect_tool_name)
                 or bool(args.expect_tool_argument_substring)
                 or bool(args.expect_tool_argument_json_field)
@@ -718,6 +739,7 @@ def main(argv: list[str] | None = None) -> int:
             expect_tool_argument_substrings=args.expect_tool_argument_substring,
             expect_tool_argument_json_fields=args.expect_tool_argument_json_field,
             expect_finish_reasons=args.expect_finish_reason,
+            expect_tool_result_finish_reasons=args.expect_tool_result_finish_reason,
         )
     except ValueError as exc:
         print(str(exc), file=sys.stderr)

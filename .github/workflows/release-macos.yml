@@ -247,7 +247,8 @@ jobs:
             --expect-tool-name workspace_read \
             --expect-tool-argument-substring README.md \
             --expect-tool-argument-json-field path=README.md \
-            --expect-finish-reason tool_calls
+            --expect-finish-reason tool_calls \
+            --expect-tool-result-finish-reason stop
 
       - name: Build packaged backend
         run: python scripts/build_backend.py --clean

@@ -546,6 +546,10 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "--expect-finish-reason tool_calls",
         "macOS release workflow provider smoke must assert tool-call finish_reason",
     ),
+    (
+        "--expect-tool-result-finish-reason stop",
+        "macOS release workflow provider smoke must assert tool-result follow-up finish_reason",
+    ),
 )
 RELEASE_WORKFLOW_METADATA_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
