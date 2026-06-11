@@ -28,6 +28,7 @@ from apps.shell.agent_runtime import (
     ToolApprovalTransitionContext,
     ToolBroker,
     WorkflowApprovalTransitionContext,
+    WorkflowCancellationProjectionCoordinator,
     WorkflowContinuationCoordinator,
     WorkflowParentResumeCoordinator,
 )
@@ -710,6 +711,122 @@ def test_workflow_parent_resume_coordinator_does_not_project_child_cancel_twice(
             "workflow_node_id": "agent",
         },
     ]
+
+
+def test_workflow_cancellation_projection_coordinator_cancels_waiting_child_run():
+    child_runs = {
+        "child_run": {
+            "run_id": "child_run",
+            "status": "approval_required",
+            "result": "Waiting for approval",
+            "timeline": [{"event": "agent.tool.approval_required", "detail": "terminal.run"}],
+            "artifacts": [],
+        }
+    }
+    appended_events: list[tuple[str, str, dict[str, object]]] = []
+    updated_runs: list[dict[str, object]] = []
+    merged_children: list[dict[str, object]] = []
+
+    def update_run(run_id, **kwargs):
+        updated_runs.append({"run_id": run_id, **kwargs})
+        child_runs[run_id] = {**child_runs[run_id], **kwargs}
+        return child_runs[run_id]
+
+    def merge_child_outcome(timeline, artifacts, child_run, label):
+        merged_children.append(
+            {
+                "child_run_id": child_run["run_id"],
+                "child_status": child_run["status"],
+                "label": label,
+            }
+        )
+        timeline.append(
+            {
+                "event": "workflow.node.agent",
+                "detail": label,
+                "child_run_id": child_run["run_id"],
+                "status": child_run["status"],
+                "workflow_node_id": "agent",
+                "workflow_node_kind": "agent",
+                "workflow_node_label": label,
+            }
+        )
+        artifacts.append({"kind": "workflow_child_artifact", "source_run_id": child_run["run_id"]})
+
+    coordinator = WorkflowCancellationProjectionCoordinator(
+        pending_approval_private=lambda _run_id: None,
+        get_run=lambda run_id: child_runs[run_id],
+        merge_workflow_child_run_outcome=merge_child_outcome,
+        timeline_factory=lambda event, detail, **payload: {"event": event, "detail": detail, **payload},
+        append_run_event=lambda run_id, event_type, payload: appended_events.append((run_id, event_type, payload)),
+        update_run=update_run,
+    )
+
+    timeline = [
+        {
+            "event": "workflow.node.agent",
+            "detail": "Research Agent",
+            "child_run_id": "child_run",
+            "status": "approval_required",
+            "workflow_node_id": "agent",
+            "workflow_node_kind": "agent",
+            "workflow_node_label": "Research Agent",
+        },
+        {
+            "event": "workflow.run.approval_required",
+            "detail": "Research Agent",
+            "child_run_id": "child_run",
+            "status": "approval_required",
+        },
+    ]
+    run = {"run_id": "workflow_parent", "artifacts": [{"kind": "existing", "path": "summary.md"}]}
+
+    cancelled_timeline, artifacts, result_text = coordinator.project_cancelled_workflow_run(
+        "workflow_parent",
+        run,
+        timeline,
+    )
+
+    assert result_text == "Workflow 已取消：Research Agent"
+    assert updated_runs == [
+        {
+            "run_id": "child_run",
+            "status": "cancelled",
+            "result": "父 Workflow 已取消",
+            "timeline": [
+                {"event": "agent.tool.approval_required", "detail": "terminal.run"},
+                {"event": "run.cancelled", "detail": "Parent Workflow cancelled"},
+            ],
+            "pending_approval": None,
+        }
+    ]
+    assert appended_events == [
+        (
+            "child_run",
+            "run.cancelled",
+            {"reason": "Parent Workflow cancelled", "parent_run_id": "workflow_parent"},
+        )
+    ]
+    assert merged_children == [
+        {
+            "child_run_id": "child_run",
+            "child_status": "cancelled",
+            "label": "Research Agent",
+        }
+    ]
+    assert artifacts == [
+        {"kind": "existing", "path": "summary.md"},
+        {"kind": "workflow_child_artifact", "source_run_id": "child_run"},
+    ]
+    assert cancelled_timeline[-1] == {
+        "event": "workflow.run.cancelled",
+        "detail": "Research Agent cancelled",
+        "status": "cancelled",
+        "workflow_node_id": "agent",
+        "workflow_node_kind": "agent",
+        "workflow_node_label": "Research Agent",
+        "child_run_id": "child_run",
+    }
 
 
 def test_workflow_parent_resume_coordinator_does_not_project_child_failure_twice():
