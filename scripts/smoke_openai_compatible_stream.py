@@ -295,6 +295,9 @@ def _chunk_tool_calls(chunk: Any) -> list[tuple[int, int, Any]]:
     direct = _field(chunk, "tool_calls")
     if isinstance(direct, list):
         return [(0, index, call) for index, call in enumerate(direct)]
+    direct_single = _field(chunk, "tool_call")
+    if direct_single is not None:
+        return [(0, 0, direct_single)]
     direct_function = _field(chunk, "function_call")
     if direct_function is not None:
         return [(0, 0, {"index": 0, "type": "function", "function": direct_function})]
@@ -303,6 +306,9 @@ def _chunk_tool_calls(chunk: Any) -> list[tuple[int, int, Any]]:
         calls = _field(value, "tool_calls") if value is not None else None
         if isinstance(calls, list):
             return [(0, index, call) for index, call in enumerate(calls)]
+        single_call = _field(value, "tool_call") if value is not None else None
+        if single_call is not None:
+            return [(0, 0, single_call)]
         function_call = _field(value, "function_call") if value is not None else None
         if function_call is not None:
             return [(0, 0, {"index": 0, "type": "function", "function": function_call})]
@@ -315,6 +321,9 @@ def _chunk_tool_calls(chunk: Any) -> list[tuple[int, int, Any]]:
         delta_calls = _field(delta, "tool_calls") if delta is not None else None
         if isinstance(delta_calls, list):
             calls.extend((choice_index, index, call) for index, call in enumerate(delta_calls))
+        delta_single_call = _field(delta, "tool_call") if delta is not None else None
+        if delta_single_call is not None:
+            calls.append((choice_index, 0, delta_single_call))
         delta_function = _field(delta, "function_call") if delta is not None else None
         if delta_function is not None:
             calls.append((choice_index, 0, {"index": 0, "type": "function", "function": delta_function}))
@@ -322,6 +331,9 @@ def _chunk_tool_calls(chunk: Any) -> list[tuple[int, int, Any]]:
         message_calls = _field(message, "tool_calls") if message is not None else None
         if isinstance(message_calls, list):
             calls.extend((choice_index, index, call) for index, call in enumerate(message_calls))
+        message_single_call = _field(message, "tool_call") if message is not None else None
+        if message_single_call is not None:
+            calls.append((choice_index, 0, message_single_call))
         message_function = _field(message, "function_call") if message is not None else None
         if message_function is not None:
             calls.append((choice_index, 0, {"index": 0, "type": "function", "function": message_function}))

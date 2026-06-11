@@ -757,6 +757,61 @@ def test_stream_smoke_summarizes_top_level_delta_and_message_tool_calls():
     assert "README.md" not in json.dumps(public_summary)
 
 
+def test_stream_smoke_summarizes_singular_tool_call_frames():
+    chunks = [
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_call": {
+                            "index": 0,
+                            "id": "call_singular_delta",
+                            "type": "function",
+                            "function": {
+                                "name": "workspace_",
+                                "arguments": '{"path":"READ',
+                            },
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "choices": [
+                {
+                    "message": {
+                        "tool_call": {
+                            "index": 0,
+                            "function": {
+                                "name": "read",
+                                "arguments": 'ME.md"}',
+                            },
+                        }
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ]
+        },
+    ]
+
+    public_summary = smoke.summarize_stream_chunks(chunks)
+    summary = smoke.summarize_stream_chunks(chunks, include_tool_arguments=True)
+
+    assert summary["ok"] is True
+    assert summary["finish_reasons"] == ["tool_calls"]
+    assert summary["tool_call_delta_count"] == 2
+    assert summary["tool_call_count"] == 1
+    assert summary["tool_calls"] == [
+        {
+            "id": "call_singular_delta",
+            "name": "workspace_read",
+            "argument_chars": len('{"path":"README.md"}'),
+            "arguments": '{"path":"README.md"}',
+        }
+    ]
+    assert "README.md" not in json.dumps(public_summary)
+
+
 def test_stream_smoke_summarizes_responses_style_tool_call_chunks():
     chunks = [
         {"type": "response.output_text.delta", "delta": "checking responses "},

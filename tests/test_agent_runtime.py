@@ -2334,6 +2334,117 @@ def test_main_chat_model_loop_executes_openai_compatible_sse_tool_calls(tmp_path
         service.close()
 
 
+def test_main_chat_model_loop_executes_singular_sse_tool_call_frames(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    (workdir / "README.md").write_text("singular http sse tool content", encoding="utf-8")
+    requests = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    class FakeResponse:
+        def __init__(self, lines):
+            self._lines = lines
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            for line in self._lines:
+                yield line
+
+    def event(payload: dict) -> bytes:
+        return f"data: {json.dumps(payload)}\n\n".encode("utf-8")
+
+    first_response = FakeResponse(
+        [
+            event(
+                {
+                    "choices": [
+                        {
+                            "delta": {
+                                "tool_call": {
+                                    "index": 0,
+                                    "id": "call_http_sse_singular_read",
+                                    "type": "function",
+                                    "function": {"name": "workspace_", "arguments": '{"path": "READ'},
+                                }
+                            }
+                        }
+                    ]
+                }
+            ),
+            event(
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "tool_call": {
+                                    "index": 0,
+                                    "function": {"name": "read", "arguments": 'ME.md"}'},
+                                }
+                            },
+                            "finish_reason": "tool_calls",
+                        }
+                    ]
+                }
+            ),
+            b"data: [DONE]\n\n",
+        ]
+    )
+    second_response = FakeResponse(
+        [
+            event({"choices": [{"delta": {"content": "Singular HTTP SSE tool call complete"}}]}),
+            b"data: [DONE]\n\n",
+        ]
+    )
+    responses = [first_response, second_response]
+
+    def fake_urlopen(request, **kwargs):
+        body = json.loads(request.data.decode("utf-8"))
+        requests.append({"request": request, "body": body, "kwargs": kwargs})
+        assert request.full_url == "https://api.example.test/v1/chat/completions"
+        assert request.get_header("Accept") == "text/event-stream"
+        assert body["stream"] is True
+        return responses.pop(0)
+
+    monkeypatch.setattr("apps.core.tls.urlrequest.urlopen", fake_urlopen)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-http-sse-singular-tool-call",
+            session_id="session-main-http-sse-singular-tool-call",
+            user_goal="Read README through singular HTTP SSE tool call",
+        )
+        updated = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [{"role": "user", "content": "Read README"}],
+            tool_policy={"allowed_tools": ["workspace.read"]},
+            workspace_policy={"default_workdir": str(workdir), "readable_scopes": ["."]},
+        )
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        tool_event = next(event for event in events if event["event_type"] == "agent.tool.call")
+
+        assert updated["result"] == "Singular HTTP SSE tool call complete"
+        assert len(requests) == 2
+        assert requests[1]["body"]["messages"][-1]["role"] == "tool"
+        assert requests[1]["body"]["messages"][-1]["tool_call_id"] == "call_http_sse_singular_read"
+        assert "singular http sse tool content" in requests[1]["body"]["messages"][-1]["content"]
+        assert tool_event["payload"]["tool"] == "workspace.read"
+        assert tool_event["payload"]["input_preview"]["path"] == "README.md"
+        assert event_types.count("agent.tool.call") == 1
+        assert event_types.count("model.output.completed") == 1
+        assert not any(str(event_type).endswith(".delta") for event_type in event_types)
+    finally:
+        service.close()
+
+
 def test_main_chat_model_loop_executes_sse_delta_tool_call_object_arguments(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     workdir = tmp_path / "repo"
