@@ -856,7 +856,10 @@ async function main() {
       && summary.getAttribute('data-summary-status') === 'processing'
       && summary.textContent.includes('Waiting') === false
       && document.body.textContent.includes('Group UI Agent accepted the task')
-      && document.body.textContent.includes(${JSON.stringify(GROUP_GOAL)});
+      && document.body.textContent.includes(${JSON.stringify(GROUP_GOAL)})
+      && !document.body.textContent.includes('oha.group_dispatch')
+      && !document.body.textContent.includes('<oha_group_dispatch>')
+      && !document.body.textContent.includes('run_oha_agent');
   }, 'group summary status');
   console.log('[electron-smoke] group summary rendered');
   await requestBridgeJson('/__smoke/complete-group-summary', 'POST');
@@ -874,7 +877,10 @@ async function main() {
       && !summary.textContent.includes('等待主模型整理')
       && summaryMessage?.textContent.includes(${JSON.stringify(GROUP_SUMMARY_RESULT)})
       && openSummary
-      && document.body.textContent.includes('Group UI Agent accepted the task');
+      && document.body.textContent.includes('Group UI Agent accepted the task')
+      && !document.body.textContent.includes('oha.group_dispatch')
+      && !document.body.textContent.includes('<oha_group_dispatch>')
+      && !document.body.textContent.includes('run_oha_agent');
   }, 'group completed summary status');
   console.log('[electron-smoke] group summary completion rendered');
   await win.webContents.executeJavaScript("document.querySelector('[data-message-id=\\"chat-group-ui-main-summary-message\\"] [data-testid=\\"chat-message-open-run-detail\\"]').click()", true);
@@ -886,7 +892,10 @@ async function main() {
     const openSummary = summaryMessage?.querySelector('[data-testid="chat-message-open-run-detail"]');
     return summaryMessage?.textContent.includes(${JSON.stringify(GROUP_SUMMARY_RESULT)})
       && document.body.textContent.includes('Group UI Agent accepted the task')
-      && openSummary;
+      && openSummary
+      && !document.body.textContent.includes('oha.group_dispatch')
+      && !document.body.textContent.includes('<oha_group_dispatch>')
+      && !document.body.textContent.includes('run_oha_agent');
   }, 'group summary chat restored after Run Detail');
   await win.webContents.executeJavaScript(\`
     (() => {
