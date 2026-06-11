@@ -1711,6 +1711,8 @@ async function main() {
     const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
     const sequences = events.map((node) => node.getAttribute('data-run-event-sequence'));
     const runIds = events.map((node) => node.getAttribute('data-run-event-run-id'));
+    const toolEvent = events.find((node) => node.getAttribute('data-run-event') === 'agent.tool.call');
+    const modelEvent = events.find((node) => node.getAttribute('data-run-event') === 'model.output.completed');
     return events.length === 200
       && eventTypes.includes('agent.run.started')
       && eventTypes.includes('agent.tool.call')
@@ -1718,6 +1720,8 @@ async function main() {
       && sequences[0] === '1'
       && sequences[199] === '200'
       && runIds.every((id) => id === ${JSON.stringify(RUN_ID)})
+      && toolEvent?.textContent.includes('"path": "README.md"')
+      && modelEvent?.textContent.includes('Replay page smoke event 3')
       && document.querySelector('[data-testid="agent-run-detail-load-more-events"]');
   }, 'initial run event replay page');
   console.log('[electron-smoke] initial replay page rendered');
@@ -1727,10 +1731,12 @@ async function main() {
     const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
     const sequences = events.map((node) => node.getAttribute('data-run-event-sequence'));
     const runIds = events.map((node) => node.getAttribute('data-run-event-run-id'));
+    const completedEvent = events.find((node) => node.getAttribute('data-run-event') === 'agent.run.completed');
     return events.length === 201
       && eventTypes.includes('agent.run.completed')
       && sequences[200] === '201'
       && runIds.every((id) => id === ${JSON.stringify(RUN_ID)})
+      && completedEvent?.textContent.includes(${JSON.stringify(run.result)})
       && !document.querySelector('[data-testid="agent-run-detail-load-more-events"]');
   }, 'loaded more run event replay page');
   console.log('[electron-smoke] replay pagination loaded');
