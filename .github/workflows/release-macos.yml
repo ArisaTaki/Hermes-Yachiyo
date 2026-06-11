@@ -89,7 +89,10 @@ jobs:
             tests/test_agent_runtime.py::test_workflow_parent_resume_coordinator_does_not_project_child_approval_twice \
             tests/test_agent_runtime.py::test_workflow_parent_resume_coordinator_does_not_project_child_cancel_twice \
             tests/test_agent_runtime.py::test_workflow_parent_resume_coordinator_does_not_project_child_failure_twice \
+            tests/test_agent_runtime.py::test_workflow_continuation_coordinator_pauses_for_approval_node \
+            tests/test_agent_runtime.py::test_workflow_continuation_coordinator_resumes_after_approval_node \
             tests/test_agent_runtime.py::test_workflow_continuation_coordinator_fails_unknown_node_without_secret_leak \
+            tests/test_agent_runtime.py::test_workflow_continuation_coordinator_writes_artifact_node \
             tests/test_agent_runtime.py::test_run_approval_routes_return_404_and_are_idempotent \
             tests/test_agent_runtime.py::test_run_approval_reject_route_is_idempotent \
             tests/test_agent_runtime.py::test_concurrent_cancel_run_is_idempotent \

@@ -663,8 +663,20 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover WorkflowParentResumeCoordinator child failure replay idempotency",
     ),
     (
+        "tests/test_agent_runtime.py::test_workflow_continuation_coordinator_pauses_for_approval_node",
+        "macOS release workflow smoke tests must cover WorkflowContinuationCoordinator approval pause projection",
+    ),
+    (
+        "tests/test_agent_runtime.py::test_workflow_continuation_coordinator_resumes_after_approval_node",
+        "macOS release workflow smoke tests must cover WorkflowContinuationCoordinator approval resume handoff",
+    ),
+    (
         "tests/test_agent_runtime.py::test_workflow_continuation_coordinator_fails_unknown_node_without_secret_leak",
         "macOS release workflow smoke tests must cover WorkflowContinuationCoordinator failure redaction boundary",
+    ),
+    (
+        "tests/test_agent_runtime.py::test_workflow_continuation_coordinator_writes_artifact_node",
+        "macOS release workflow smoke tests must cover WorkflowContinuationCoordinator artifact node handoff",
     ),
     (
         "tests/test_agent_runtime.py::test_run_approval_routes_return_404_and_are_idempotent",

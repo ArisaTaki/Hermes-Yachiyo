@@ -850,7 +850,10 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
         "macOS release workflow smoke tests must cover WorkflowParentResumeCoordinator child failure replay idempotency"
         in messages
     )
+    assert "macOS release workflow smoke tests must cover WorkflowContinuationCoordinator approval pause projection" in messages
+    assert "macOS release workflow smoke tests must cover WorkflowContinuationCoordinator approval resume handoff" in messages
     assert "macOS release workflow smoke tests must cover WorkflowContinuationCoordinator failure redaction boundary" in messages
+    assert "macOS release workflow smoke tests must cover WorkflowContinuationCoordinator artifact node handoff" in messages
     assert "macOS release workflow smoke tests must cover approval approve route idempotency" in messages
     assert "macOS release workflow smoke tests must cover approval reject route idempotency" in messages
     assert "macOS release workflow smoke tests must cover concurrent Run cancellation idempotency" in messages

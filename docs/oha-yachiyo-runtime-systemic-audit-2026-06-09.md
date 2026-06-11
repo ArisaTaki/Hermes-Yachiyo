@@ -2097,6 +2097,7 @@ compileall passed
 - release workflow smoke 现在也强制包含 WorkflowParentResumeCoordinator completed child handoff / replay idempotency 回归，确保 completed child 只恢复父 Workflow 一次，并写入 child completed 与 workflow resumed replay facts。
 - release workflow smoke 现在也强制包含 WorkflowParentResumeCoordinator child approval replay idempotency 回归，确保重复 child approval_required update 不会重复投影父 Workflow replay fact 或重复更新父 Run / RunGroup。
 - release workflow smoke 现在也强制包含 WorkflowParentResumeCoordinator child cancellation / failure replay idempotency 回归，确保重复 child cancelled / failed update 不会重复投影父 Workflow replay fact 或重复更新父 Run / RunGroup。
+- release workflow smoke 现在也强制包含 WorkflowContinuationCoordinator approval pause / resume 与 artifact node handoff 回归，确保 Workflow approval node、批准后 continuation 和 artifact 写入继续走显式 step continuation 边界。
 - release workflow smoke 现在也强制包含 WorkflowContinuationCoordinator failure redaction boundary 回归，确保 Workflow continuation 未知节点失败不会把 node kind 中的 secret 写入 Run projection、RunEvent、timeline 或 RunGroup summary。
 - release workflow smoke 现在也强制包含 `TaskRunLinkRepository` projection boundary 回归，确保 Task↔Run link、Run status projection 和 replay `last_event_sequence` 继续由显式边界维护。
 - release workflow smoke 现在也强制包含 RunEvent 并发写入 sequence / replay cursor projection 回归，确保 `RunEventRepository.append()` 与 TaskRunLink cursor projection 在共享 SQLite connection 上不会重新出现并发事务交错。
