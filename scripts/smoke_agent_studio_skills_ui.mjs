@@ -11,6 +11,8 @@ const FRONTEND = path.join(ROOT, 'apps', 'frontend');
 const ELECTRON = path.join(FRONTEND, 'node_modules', '.bin', process.platform === 'win32' ? 'electron.cmd' : 'electron');
 const VITE = path.join(FRONTEND, 'node_modules', '.bin', process.platform === 'win32' ? 'vite.cmd' : 'vite');
 const SKILL_ID = 'agent-studio-skills-ui-smoke-skill';
+const PICKED_SKILL_ID = 'agent-studio-picked-skill-ui-smoke';
+const PICKED_SKILL_SOURCE = '/tmp/oha-yachiyo/picked-skill-source';
 const FOLDER_A_ID = 'agent-studio-skills-smoke-folder-a';
 const FOLDER_B_ID = 'agent-studio-skills-smoke-folder-b';
 const INSTALL_COMMAND = 'owner/repo --skill agent-studio-smoke';
@@ -18,6 +20,7 @@ const now = new Date().toISOString();
 
 let skills = [];
 let syncRequestCount = 0;
+const importSkillRequests = [];
 let installSkillRequest = null;
 const updateSkillRequests = [];
 let deletedSkillId = '';
@@ -118,6 +121,31 @@ function installedSkillSpec(request = {}) {
   };
 }
 
+function pickedSkillSpec(request = {}) {
+  const folderId = request.folder_id || '';
+  const folder = folders.find((item) => item.folder_id === folderId);
+  return {
+    skill_id: PICKED_SKILL_ID,
+    name: 'Picked Skill UI Smoke',
+    description: 'Imported through the Agent Studio desktop Skill source picker',
+    source_path: request.source_path || PICKED_SKILL_SOURCE,
+    local_path: '/tmp/oha-yachiyo/installed-skills/picked-skill-source',
+    folder_id: folderId,
+    folder_name: folder?.name || '',
+    source_type: 'installed',
+    source_ref: request.source_path || PICKED_SKILL_SOURCE,
+    content_hash: 'picked-skill-ui-smoke-hash',
+    last_synced_at: now,
+    sync_status: 'synced',
+    content_summary: 'Desktop picker import smoke summary',
+    skill_markdown: '# Picked Skill UI Smoke\\n\\nExercise desktop Skill source picker import paths.',
+    asset_paths: [],
+    enabled: true,
+    created_at: now,
+    updated_at: now,
+  };
+}
+
 async function startMockBridge() {
   const server = http.createServer(async (request, response) => {
     try {
@@ -170,6 +198,14 @@ async function startMockBridge() {
             message: 'Native Smoke Skill synced',
           }],
         });
+        return;
+      }
+      if (request.method === 'POST' && url.pathname === '/ui/skills/import') {
+        const importRequest = await readJson(request);
+        importSkillRequests.push(importRequest);
+        const imported = pickedSkillSpec(importRequest);
+        skills = [...skills.filter((skill) => skill.skill_id !== imported.skill_id), imported];
+        sendJson(response, 200, imported);
         return;
       }
       if (request.method === 'POST' && url.pathname === '/ui/skills/install') {
@@ -420,6 +456,36 @@ async function main() {
   \`, true);
   await waitFor(win, () => document.querySelectorAll('[data-testid="skill-card"]').length === 0, 'skill deleted');
   console.log('[electron-smoke] installed skill deleted');
+  await win.webContents.executeJavaScript(\`
+  (() => {
+    const setSelectValue = (element, value) => {
+      element.value = value;
+      element.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    setSelectValue(document.querySelector('[data-testid="skill-import-folder-select"]'), ${JSON.stringify(FOLDER_B_ID)});
+    window.__ohaSkillSourcesPickerCalls = 0;
+    window.ohaDesktop = {
+      ...(window.ohaDesktop || {}),
+      chooseSkillSources: async () => {
+        window.__ohaSkillSourcesPickerCalls += 1;
+        return [${JSON.stringify(PICKED_SKILL_SOURCE)}];
+      },
+    };
+    document.querySelector('[data-testid="skill-source-picker"]').click();
+  })();
+  \`, true);
+  await waitFor(win, () => {
+    const card = document.querySelector('[data-testid="skill-card"][data-skill-id="${PICKED_SKILL_ID}"]');
+    return card
+      && card.getAttribute('data-skill-folder-id') === ${JSON.stringify(FOLDER_B_ID)}
+      && card.textContent.includes('Picked Skill UI Smoke')
+      && document.querySelector('[data-testid="skill-import-result"]')?.textContent.includes('Picked Skill UI Smoke');
+  }, 'picked skill source import');
+  const skillPickerCalls = await win.webContents.executeJavaScript('window.__ohaSkillSourcesPickerCalls || 0', true);
+  if (skillPickerCalls !== 1) {
+    throw new Error('expected Skill source picker to be called once, got ' + skillPickerCalls);
+  }
+  console.log('[electron-smoke] picked skill source imported');
   clearTimeout(watchdog);
   await win.close();
   app.quit();
@@ -460,6 +526,16 @@ main().catch((error) => {
 
 function assertMockBridgeContract() {
   if (syncRequestCount !== 1) throw new Error(`expected one native skill sync request, got ${syncRequestCount}`);
+  if (importSkillRequests.length !== 1) {
+    throw new Error(`expected one picked skill import request, got ${importSkillRequests.length}`);
+  }
+  const importSkillRequest = importSkillRequests[0] || {};
+  if (importSkillRequest.source_path !== PICKED_SKILL_SOURCE) {
+    throw new Error(`unexpected picked skill source: ${importSkillRequest.source_path}`);
+  }
+  if (importSkillRequest.folder_id !== FOLDER_B_ID) {
+    throw new Error(`unexpected picked skill folder: ${importSkillRequest.folder_id}`);
+  }
   if (!installSkillRequest) throw new Error('skill install was not requested');
   if (installSkillRequest.command !== INSTALL_COMMAND) {
     throw new Error(`unexpected install command: ${installSkillRequest.command}`);

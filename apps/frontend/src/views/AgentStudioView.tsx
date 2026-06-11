@@ -4075,7 +4075,7 @@ export function AgentStudioView() {
             >
               <strong>拖拽 Skill 目录或 zip 到这里</strong>
               <span>也可以点击选择文件，选择后会立即校验并导入</span>
-              <button type="button" disabled={busy} onClick={() => void pickSkillSources()}>上传 Skills</button>
+              <button type="button" data-testid="skill-source-picker" disabled={busy} onClick={() => void pickSkillSources()}>上传 Skills</button>
             </div>
             <div className="section-heading-row">
               <h2>Native Skill Library</h2>
