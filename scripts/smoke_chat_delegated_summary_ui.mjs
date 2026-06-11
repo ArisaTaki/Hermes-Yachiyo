@@ -783,6 +783,8 @@ async function waitForCompletedRunDetail(win) {
     const result = document.querySelector('[data-testid="agent-run-detail-result"]');
     const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
     const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
+    const outputEvent = events.find((node) => node.getAttribute('data-run-event') === 'model.output.completed');
+    const completedEvent = events.find((node) => node.getAttribute('data-run-event') === 'agent.run.completed');
     return window.location.hash.includes(${JSON.stringify(DELEGATED_RUN_ID)})
       && detail?.getAttribute('data-run-id') === ${JSON.stringify(DELEGATED_RUN_ID)}
       && detail?.getAttribute('data-run-kind') === 'agent_run'
@@ -793,6 +795,8 @@ async function waitForCompletedRunDetail(win) {
       && eventTypes.includes('agent.tool.approval_approved')
       && eventTypes.includes('model.output.completed')
       && eventTypes.includes('agent.run.completed')
+      && outputEvent?.textContent.includes(${JSON.stringify(DELEGATED_RESULT)})
+      && completedEvent?.textContent.includes(${JSON.stringify(DELEGATED_RESULT)})
       && events.every((node) => node.getAttribute('data-run-event-run-id') === ${JSON.stringify(DELEGATED_RUN_ID)});
   }, 'delegated completed Run Detail replay');
 }
@@ -802,6 +806,8 @@ async function waitForSummaryRunDetail(win) {
     const result = document.querySelector('[data-testid="agent-run-detail-result"]');
     const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
     const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
+    const outputEvent = events.find((node) => node.getAttribute('data-run-event') === 'model.output.completed');
+    const completedEvent = events.find((node) => node.getAttribute('data-run-event') === 'run.completed');
     return window.location.hash.includes(${JSON.stringify(SUMMARY_RUN_ID)})
       && detail?.getAttribute('data-run-id') === ${JSON.stringify(SUMMARY_RUN_ID)}
       && detail?.getAttribute('data-run-kind') === 'main_chat_run'
@@ -810,6 +816,8 @@ async function waitForSummaryRunDetail(win) {
       && result?.textContent.includes(${JSON.stringify(SUMMARY_RESULT)})
       && eventTypes.includes('model.output.completed')
       && eventTypes.includes('run.completed')
+      && outputEvent?.textContent.includes(${JSON.stringify(SUMMARY_RESULT)})
+      && completedEvent?.textContent.includes(${JSON.stringify(SUMMARY_RESULT)})
       && events.every((node) => node.getAttribute('data-run-event-run-id') === ${JSON.stringify(SUMMARY_RUN_ID)});
   }, 'delegated summary Run Detail replay');
 }
