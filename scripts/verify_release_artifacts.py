@@ -828,6 +828,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover tool exception redaction",
     ),
     (
+        "tests/test_agent_runtime.py::test_main_chat_model_loop_executes_singular_sse_tool_call_frames",
+        "macOS release workflow smoke tests must cover NativeRunEngine singular SSE tool-call frames",
+    ),
+    (
         "tests/test_agent_runtime.py::test_main_chat_model_loop_executes_sse_delta_tool_call_object_arguments",
         "macOS release workflow smoke tests must cover NativeRunEngine SSE object tool-call arguments",
     ),
