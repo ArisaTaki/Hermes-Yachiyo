@@ -15,6 +15,7 @@ const GROUP_SESSION_ID = 'chat_group_ui_smoke_group';
 const AGENT_ID = 'chat-group-ui-agent';
 const GROUP_NAME = 'Chat Group UI Smoke';
 const GROUP_GOAL = 'Coordinate the group UI smoke';
+const GROUP_FOLLOWUP_TEXT = 'Add this follow-up to the current group task.';
 const RUN_GROUP_ID = 'run_group_chat_group_ui_smoke';
 const GROUP_AGENT_RUN_ID = 'agent_run_chat_group_ui_smoke';
 const SUMMARY_TASK_ID = 'task-chat-group-summary-ui-smoke';
@@ -28,6 +29,7 @@ const bridgeState = {
   groupCreated: false,
   groupCreatePayload: null,
   messagePayload: null,
+  followupPayload: null,
   groupSummaryStatus: 'idle',
   messagesBySession: new Map([[MAIN_SESSION_ID, []]]),
 };
@@ -184,6 +186,21 @@ function createGroupMessages(text) {
         group_agent_summary_for_task_id: GROUP_AGENT_TASK_ID,
         group_agent_summary_for_message_id: 'chat-group-ui-agent-summary-message',
         run_group_id: RUN_GROUP_ID,
+      },
+    });
+  }
+  if (bridgeState.followupPayload) {
+    messages.push({
+      id: 'chat-group-ui-followup-message',
+      role: 'user',
+      content: String(bridgeState.followupPayload.text || ''),
+      status: 'completed',
+      created_at: now,
+      metadata: {
+        sender: { kind: 'main', name: 'Oha-Yachiyo', nickname: 'Yachiyo' },
+        target: { kind: 'group', id: GROUP_SESSION_ID, name: GROUP_NAME },
+        group_followup_for_task_ids: [GROUP_AGENT_TASK_ID],
+        group_followup_for_agent_message_ids: ['chat-group-ui-agent-summary-message'],
       },
     });
   }
@@ -435,12 +452,19 @@ async function startMockBridge() {
       if (request.method === 'POST' && url.pathname === '/ui/chat/messages') {
         const body = await readRequestJson(request);
         log(`mock bridge group message text=${JSON.stringify(body.text || '')}`);
-        bridgeState.messagePayload = body;
-        bridgeState.groupSummaryStatus = 'processing';
-        bridgeState.messagesBySession.set(GROUP_SESSION_ID, createGroupMessages(String(body.text || '')));
+        if (bridgeState.groupSummaryStatus === 'completed' && bridgeState.messagePayload) {
+          bridgeState.followupPayload = body;
+        } else {
+          bridgeState.messagePayload = body;
+          bridgeState.groupSummaryStatus = 'processing';
+        }
+        bridgeState.messagesBySession.set(
+          GROUP_SESSION_ID,
+          createGroupMessages(String(bridgeState.messagePayload?.text || body.text || '')),
+        );
         sendJson(response, 200, {
           ok: true,
-          task_id: SUMMARY_TASK_ID,
+          task_id: bridgeState.followupPayload === body ? 'task-chat-group-followup-ui-smoke' : SUMMARY_TASK_ID,
         });
         return;
       }
@@ -579,6 +603,11 @@ function waitFor(win, predicate, label, timeout = 15000) {
                 runGroup: node.getAttribute('data-run-group-id'),
                 text: node.textContent,
               })),
+              followup: Array.from(document.querySelectorAll('[data-testid="chat-message-followup-status"]')).map((node) => ({
+                taskIds: node.getAttribute('data-followup-task-ids'),
+                agentMessageIds: node.getAttribute('data-followup-agent-message-ids'),
+                text: node.textContent,
+              })),
               activity: Array.from(document.querySelectorAll('[data-testid="chat-message-activity-row"]')).map((node) => ({
                 status: node.getAttribute('data-activity-status'),
                 tool: node.getAttribute('data-activity-tool'),
@@ -685,6 +714,24 @@ async function main() {
       && document.body.textContent.includes('Group UI Agent accepted the task');
   }, 'group completed summary status');
   console.log('[electron-smoke] group summary completion rendered');
+  await win.webContents.executeJavaScript(\`
+    (() => {
+      const input = document.querySelector('[data-testid="chat-composer-input"]');
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, ${JSON.stringify(GROUP_FOLLOWUP_TEXT)});
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    })();
+  \`, true);
+  await waitFor(win, () => !document.querySelector('[data-testid="chat-composer-send"]')?.disabled, 'enabled group follow-up send');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-composer-send\\"]').click()", true);
+  await waitFor(win, () => {
+    const followup = document.querySelector('[data-testid="chat-message-followup-status"]');
+    return followup
+      && followup.getAttribute('data-followup-task-ids') === ${JSON.stringify(GROUP_AGENT_TASK_ID)}
+      && followup.getAttribute('data-followup-agent-message-ids') === 'chat-group-ui-agent-summary-message'
+      && followup.textContent.includes('已作为当前群组任务补充')
+      && document.body.textContent.includes(${JSON.stringify(GROUP_FOLLOWUP_TEXT)});
+  }, 'group follow-up status');
+  console.log('[electron-smoke] group follow-up status rendered');
   await waitFor(win, () => {
     const row = document.querySelector('[data-testid="chat-message-activity-row"]');
     const openRun = document.querySelector('[data-testid="chat-message-activity-open-run-detail"]');
@@ -764,6 +811,12 @@ function assertMockBridgeContract() {
   if (Array.isArray(messagePayload.attachments) && messagePayload.attachments.length) {
     throw new Error('group message smoke unexpectedly sent attachments');
   }
+  const followupPayload = bridgeState.followupPayload;
+  if (!followupPayload) throw new Error('group follow-up message was not sent');
+  if (followupPayload.text !== GROUP_FOLLOWUP_TEXT) {
+    throw new Error(`unexpected group follow-up text: ${followupPayload.text}`);
+  }
+  if (!followupPayload.client_message_id) throw new Error('group follow-up message did not include client_message_id');
   if (bridgeState.currentSessionId !== GROUP_SESSION_ID) {
     throw new Error(`message was sent outside the created group: ${bridgeState.currentSessionId}`);
   }
