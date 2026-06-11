@@ -2017,6 +2017,7 @@ compileall passed
 - release workflow 的 opt-in 真实 provider tool-call smoke 现在也要求 `finish_reason=tool_calls`，release verifier 会阻断丢失该断言的 workflow，避免真实 provider 只回内容但未完成 tool-call 协议时误过发布门禁。
 - release verifier 现在除了 release / alpha / stable metadata，也会模拟 `OHA_YACHIYO_PACKAGED_BUILD=1`，确认 packaged build env 即使带 `OHA_YACHIYO_DEV=1` 也不能启用 development features、Bridge debug routes 或 `DevFileCredentialStore` fallback。
 - release workflow smoke 现在也强制包含 approved terminal failure output redaction 回归，确保批准后的 `terminal.run` 非零退出不会把 stdout / stderr secret 写入 Run projection、RunEvent 或 runtime SQLite。
+- release workflow smoke 现在也强制包含主聊天 provider exception / tool exception redaction 回归，避免异常文本中的 secret 进入 Run projection、RunEvent、tool result message 或 runtime SQLite。
 - Electron 桌面 Bridge 重启会轮换 session token；前端 `restartDesktopBridge()` 现在会清空 renderer 侧 cached Bridge token，确保重启后的 mutating request 重新从 preload 读取新 token。
 - 桌面 `.app` 已实际启动并验证 bridge；主要 UI 页面已有静态入口 guard、浏览器级 route smoke 和部分按钮级交互 smoke，但仍缺少完整成熟功能 E2E。
 
