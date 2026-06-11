@@ -18,6 +18,7 @@ const GROUP_GOAL = 'Coordinate the group UI smoke';
 const GROUP_FOLLOWUP_TEXT = 'Add this follow-up to the current group task.';
 const RUN_GROUP_ID = 'run_group_chat_group_ui_smoke';
 const GROUP_AGENT_RUN_ID = 'agent_run_chat_group_ui_smoke';
+const GROUP_SUMMARY_RUN_ID = 'main_chat_run_group_summary_ui_smoke';
 const SUMMARY_TASK_ID = 'task-chat-group-summary-ui-smoke';
 const GROUP_AGENT_TASK_ID = 'task-chat-group-agent-ui-smoke';
 const GROUP_AGENT_RESULT = 'Group UI Agent completed Native group dispatch.';
@@ -185,6 +186,8 @@ function createGroupMessages(text) {
         target: { kind: 'group', id: GROUP_SESSION_ID, name: GROUP_NAME },
         group_agent_summary_for_task_id: GROUP_AGENT_TASK_ID,
         group_agent_summary_for_message_id: 'chat-group-ui-agent-summary-message',
+        run_id: GROUP_SUMMARY_RUN_ID,
+        run_status: 'completed',
         run_group_id: RUN_GROUP_ID,
       },
     });
@@ -278,15 +281,64 @@ function groupAgentRunEvents() {
   ];
 }
 
+function groupSummaryRun() {
+  return {
+    run_id: GROUP_SUMMARY_RUN_ID,
+    kind: 'main_chat_run',
+    status: 'completed',
+    session_id: GROUP_SESSION_ID,
+    task_id: SUMMARY_TASK_ID,
+    run_group_id: RUN_GROUP_ID,
+    user_goal: `Summarize group agent task ${GROUP_AGENT_TASK_ID}`,
+    result: GROUP_SUMMARY_RESULT,
+    task_run_link_run_status: 'completed',
+    task_run_link_last_event_sequence: 2,
+    timeline: [
+      { event: 'model.output.completed', status: 'completed', detail: GROUP_SUMMARY_RESULT },
+      { event: 'run.completed', status: 'completed', detail: GROUP_SUMMARY_RESULT },
+    ],
+    artifacts: [],
+    created_at: now,
+    updated_at: now,
+  };
+}
+
+function groupSummaryRunEvents() {
+  return [
+    {
+      run_id: GROUP_SUMMARY_RUN_ID,
+      sequence: 1,
+      event_type: 'model.output.completed',
+      actor: 'model',
+      visibility: 'public',
+      sensitivity: 'normal',
+      payload: { content: GROUP_SUMMARY_RESULT },
+      created_at: now,
+    },
+    {
+      run_id: GROUP_SUMMARY_RUN_ID,
+      sequence: 2,
+      event_type: 'run.completed',
+      actor: 'runtime',
+      visibility: 'public',
+      sensitivity: 'normal',
+      payload: { result: GROUP_SUMMARY_RESULT },
+      created_at: now,
+    },
+  ];
+}
+
 function groupRunGroup() {
   return {
     run_group_id: RUN_GROUP_ID,
     kind: 'group_chat',
     status: 'completed',
     title: GROUP_NAME,
-    summary: GROUP_AGENT_RESULT,
+    summary: bridgeState.groupSummaryStatus === 'completed' ? GROUP_SUMMARY_RESULT : GROUP_AGENT_RESULT,
     root_run_id: GROUP_AGENT_RUN_ID,
-    child_run_ids: [GROUP_AGENT_RUN_ID],
+    child_run_ids: bridgeState.groupSummaryStatus === 'completed'
+      ? [GROUP_AGENT_RUN_ID, GROUP_SUMMARY_RUN_ID]
+      : [GROUP_AGENT_RUN_ID],
     created_at: now,
     updated_at: now,
   };
@@ -401,11 +453,25 @@ async function startMockBridge() {
         return;
       }
       if (request.method === 'GET' && url.pathname === '/ui/runs') {
-        sendJson(response, 200, { runs: [groupAgentRun()] });
+        sendJson(response, 200, {
+          runs: bridgeState.groupSummaryStatus === 'completed'
+            ? [groupSummaryRun(), groupAgentRun()]
+            : [groupAgentRun()],
+        });
         return;
       }
       if (request.method === 'GET' && url.pathname === `/ui/runs/${GROUP_AGENT_RUN_ID}`) {
         sendJson(response, 200, groupAgentRun());
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/ui/runs/${GROUP_SUMMARY_RUN_ID}`) {
+        sendJson(
+          response,
+          bridgeState.groupSummaryStatus === 'completed' ? 200 : 404,
+          bridgeState.groupSummaryStatus === 'completed'
+            ? groupSummaryRun()
+            : { ok: false, error: 'summary run not created' },
+        );
         return;
       }
       if (request.method === 'GET' && url.pathname === '/ui/run-groups') {
@@ -424,6 +490,17 @@ async function startMockBridge() {
           after_sequence: Math.max(0, afterSequence),
           limit,
           events: groupAgentRunEvents().filter((event) => event.sequence > afterSequence).slice(0, limit),
+        });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/runs/${GROUP_SUMMARY_RUN_ID}/events`) {
+        const afterSequence = Number(url.searchParams.get('after_sequence') || '0');
+        const limit = Math.max(1, Number(url.searchParams.get('limit') || '200'));
+        sendJson(response, 200, {
+          run_id: GROUP_SUMMARY_RUN_ID,
+          after_sequence: Math.max(0, afterSequence),
+          limit,
+          events: groupSummaryRunEvents().filter((event) => event.sequence > afterSequence).slice(0, limit),
         });
         return;
       }
@@ -631,6 +708,23 @@ function waitFor(win, predicate, label, timeout = 15000) {
     tick();
   });
 }
+async function waitForSummaryRunDetail(win) {
+  await waitFor(win, () => {
+    const detail = document.querySelector('[data-testid="agent-run-detail"]');
+    const result = document.querySelector('[data-testid="agent-run-detail-result"]');
+    const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
+    const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
+    return window.location.hash.includes(${JSON.stringify(GROUP_SUMMARY_RUN_ID)})
+      && detail?.getAttribute('data-run-id') === ${JSON.stringify(GROUP_SUMMARY_RUN_ID)}
+      && detail?.getAttribute('data-run-kind') === 'main_chat_run'
+      && detail?.getAttribute('data-run-status') === 'completed'
+      && detail?.getAttribute('data-run-group-id') === ${JSON.stringify(RUN_GROUP_ID)}
+      && result?.textContent.includes(${JSON.stringify(GROUP_SUMMARY_RESULT)})
+      && eventTypes.includes('model.output.completed')
+      && eventTypes.includes('run.completed')
+      && events.every((node) => node.getAttribute('data-run-event-run-id') === ${JSON.stringify(GROUP_SUMMARY_RUN_ID)});
+  }, 'group summary Run Detail replay');
+}
 async function main() {
   await app.whenReady();
   console.log('[electron-smoke] app ready');
@@ -703,6 +797,7 @@ async function main() {
   await waitFor(win, () => {
     const summary = document.querySelector('[data-testid="chat-message-summary-status"]');
     const summaryMessage = document.querySelector('[data-message-id="chat-group-ui-main-summary-message"]');
+    const openSummary = summaryMessage?.querySelector('[data-testid="chat-message-open-run-detail"]');
     return summary
       && summary.getAttribute('data-summary-task-id') === ${JSON.stringify(SUMMARY_TASK_ID)}
       && summary.getAttribute('data-run-group-id') === ${JSON.stringify(RUN_GROUP_ID)}
@@ -711,9 +806,21 @@ async function main() {
       && summary.textContent.includes('主模型已整理')
       && !summary.textContent.includes('等待主模型整理')
       && summaryMessage?.textContent.includes(${JSON.stringify(GROUP_SUMMARY_RESULT)})
+      && openSummary
       && document.body.textContent.includes('Group UI Agent accepted the task');
   }, 'group completed summary status');
   console.log('[electron-smoke] group summary completion rendered');
+  await win.webContents.executeJavaScript("document.querySelector('[data-message-id=\\"chat-group-ui-main-summary-message\\"] [data-testid=\\"chat-message-open-run-detail\\"]').click()", true);
+  await waitForSummaryRunDetail(win);
+  console.log('[electron-smoke] group summary Run Detail replay verified');
+  await loadChat(win);
+  await waitFor(win, () => {
+    const summaryMessage = document.querySelector('[data-message-id="chat-group-ui-main-summary-message"]');
+    const openSummary = summaryMessage?.querySelector('[data-testid="chat-message-open-run-detail"]');
+    return summaryMessage?.textContent.includes(${JSON.stringify(GROUP_SUMMARY_RESULT)})
+      && document.body.textContent.includes('Group UI Agent accepted the task')
+      && openSummary;
+  }, 'group summary chat restored after Run Detail');
   await win.webContents.executeJavaScript(\`
     (() => {
       const input = document.querySelector('[data-testid="chat-composer-input"]');
