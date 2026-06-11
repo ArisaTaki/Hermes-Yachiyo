@@ -5113,6 +5113,7 @@ def test_main_chat_model_loop_executes_provider_message_tool_calls(tmp_path, mon
             message for message in messages if message.get("role") == "assistant" and message.get("tool_calls")
         ]
         tool_messages = [message for message in messages if message.get("role") == "tool"]
+        assert assistant_tool_messages[-1]["content"] is None
         assert assistant_tool_messages[-1]["tool_calls"][0]["id"] == "call_provider_read"
         arguments = assistant_tool_messages[-1]["tool_calls"][0]["function"]["arguments"]
         assert isinstance(arguments, str)
@@ -5182,6 +5183,7 @@ def test_main_chat_model_loop_executes_openai_sdk_object_message_tool_calls(tmp_
             message for message in messages if message.get("role") == "assistant" and message.get("tool_calls")
         ]
         tool_messages = [message for message in messages if message.get("role") == "tool"]
+        assert assistant_tool_messages[-1]["content"] is None
         assert assistant_tool_messages[-1]["tool_calls"][0]["id"] == "call_sdk_object_read"
         arguments = assistant_tool_messages[-1]["tool_calls"][0]["function"]["arguments"]
         assert isinstance(arguments, str)
@@ -9687,6 +9689,11 @@ def test_agent_run_executes_native_tool_call_and_continues(tmp_path, monkeypatch
                 ],
             }
         assert messages[-1]["role"] == "tool"
+        assistant_tool_messages = [
+            message for message in messages if message.get("role") == "assistant" and message.get("tool_calls")
+        ]
+        assert assistant_tool_messages[-1]["content"] is None
+        assert assistant_tool_messages[-1]["tool_calls"][0]["id"] == "call_read"
         assert "hello native tools" in messages[-1]["content"]
         return {"content": "Read complete"}
 
