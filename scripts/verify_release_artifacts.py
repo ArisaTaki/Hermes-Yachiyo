@@ -723,6 +723,14 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover TaskRunLink repository projection boundary",
     ),
     (
+        "tests/test_agent_runtime.py::test_run_artifact_repository_redacts_projection_and_reads_files",
+        "macOS release workflow smoke tests must cover RunArtifactRepository redaction and file reads",
+    ),
+    (
+        "tests/test_agent_runtime.py::test_run_repository_deletes_rows_and_artifacts",
+        "macOS release workflow smoke tests must cover RunRepository artifact cleanup callback",
+    ),
+    (
         "tests/test_agent_runtime.py::test_run_event_repository_allocates_sequences_under_concurrent_writers",
         "macOS release workflow smoke tests must cover RunEvent concurrent replay cursor projection",
     ),

@@ -2100,6 +2100,7 @@ compileall passed
 - release workflow smoke 现在也强制包含 WorkflowContinuationCoordinator approval pause / resume 与 artifact node handoff 回归，确保 Workflow approval node、批准后 continuation 和 artifact 写入继续走显式 step continuation 边界。
 - release workflow smoke 现在也强制包含 WorkflowContinuationCoordinator failure redaction boundary 回归，确保 Workflow continuation 未知节点失败不会把 node kind 中的 secret 写入 Run projection、RunEvent、timeline 或 RunGroup summary。
 - release workflow smoke 现在也强制包含 `TaskRunLinkRepository` projection boundary 回归，确保 Task↔Run link、Run status projection 和 replay `last_event_sequence` 继续由显式边界维护。
+- release workflow smoke 现在也强制包含 `RunArtifactRepository` redaction / file read 和 `RunRepository` artifact cleanup callback 回归，确保 artifact 投影清洗、文件读取清洗和 Run 删除文件清理不从发布路径回退。
 - release workflow smoke 现在也强制包含 RunEvent 并发写入 sequence / replay cursor projection 回归，确保 `RunEventRepository.append()` 与 TaskRunLink cursor projection 在共享 SQLite connection 上不会重新出现并发事务交错。
 - release workflow smoke 现在也强制包含 RunEvent HTTP replay pagination/filtering 回归，确保 `/runs/{run_id}/events` 的 `after_sequence`、limit clamp、user-visible 默认过滤和 secret hiding 不从发布路径回退。
 - release workflow smoke 现在也强制包含 runtime SQLite database guard，确保 schema metadata、foreign keys、WAL、busy timeout 和 Run 删除后的 TaskRunLink cascade 不从发布路径回退。
