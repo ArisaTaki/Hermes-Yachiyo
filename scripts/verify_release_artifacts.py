@@ -689,6 +689,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover ApprovalResumeCoordinator claim projection boundary",
     ),
     (
+        "tests/test_agent_runtime.py::test_approval_resume_coordinator_orchestrates_resume_projection_states",
+        "macOS release workflow smoke tests must cover ApprovalResumeCoordinator resume orchestration states",
+    ),
+    (
         "tests/test_agent_runtime.py::test_agent_run_approval_uses_resume_coordinator_claim_boundary",
         "macOS release workflow smoke tests must cover NativeRunEngine approval resume claim boundary",
     ),

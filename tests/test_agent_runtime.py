@@ -18,6 +18,7 @@ import pytest
 
 from apps.shell.credential_store import MemoryCredentialStore
 from apps.shell.agent_runtime import (
+    AgentApprovalRequired,
     AgentRuntimeError,
     AgentRuntimeService,
     ApprovalResumeCoordinator,
@@ -386,6 +387,117 @@ def test_approval_resume_coordinator_claims_and_projects_approved_tool_once():
         "resumed_detail": "Agent resumed after approval",
         "running_result": "已批准，Agent 正在继续执行",
     }
+
+
+def test_approval_resume_coordinator_orchestrates_resume_projection_states():
+    calls: list[str] = []
+    mode = {"value": "completed"}
+
+    def continue_custom_api_agent(*_args, **_kwargs):
+        calls.append("continue_custom_api_agent")
+        if mode["value"] == "required":
+            raise AgentApprovalRequired({"tool": "terminal.run", "approval_id": "next"})
+        if mode["value"] == "failed":
+            raise RuntimeError("provider raw failure")
+        return "resumed output"
+
+    coordinator = ApprovalResumeCoordinator(
+        call_agent_tool=lambda *_args, **_kwargs: {"ok": True},
+        fatal_tool_failure_detail=lambda *_args: "",
+        append_tool_result_message=lambda *_args: calls.append("append_tool_result_message"),
+        run_tool_requests=lambda *_args, **_kwargs: calls.append("run_tool_requests"),
+        timeline_factory=lambda event, detail, **payload: {"event": event, "detail": detail, **payload},
+        claim_pending_approval=lambda *_args: calls.append("claim_pending_approval") or True,
+        approve_tool_run=lambda run_id, **_kwargs: calls.append("approve_tool_run") or {"run_id": run_id, "status": "running"},
+        continue_custom_api_agent=continue_custom_api_agent,
+    )
+    context = ToolApprovalResumeContext(
+        run_id="run_resume_projection",
+        timeline=[],
+        artifacts=[],
+        broker=SimpleNamespace(name="broker"),
+        allowed_tools=["terminal.run"],
+        budget=SimpleNamespace(name="budget"),
+        messages=[],
+        tool_request={"tool": "terminal.run", "input": {"command": "printf ok"}},
+        tool_name="terminal.run",
+        input_preview={"command": "printf ok"},
+        remaining_requests=[],
+        next_iteration=2,
+    )
+
+    def run_mode(value: str) -> dict[str, object]:
+        mode["value"] = value
+        return coordinator.resume_approved_tool_run(
+            run_id=context.run_id,
+            pending={"tool": "terminal.run"},
+            context=context,
+            agent={"agent_id": "agent_resume"},
+            resumed_detail="Agent resumed after approval",
+            running_result="已批准，Agent 正在继续执行",
+            project_running=lambda running: calls.append("project_running") or {**running, "projected_running": True},
+            project_completed=lambda _context, result_text: {
+                "status": "completed",
+                "result": result_text,
+                "projection": calls.append("project_completed") or "completed",
+            },
+            prepare_required=lambda pending: {"prepared": pending["tool"]},
+            project_required=lambda _context, pending: {
+                "status": "approval_required",
+                "pending": pending,
+                "projection": calls.append("project_required") or "required",
+            },
+            project_failed=lambda _context, safe_error: {
+                "status": "failed",
+                "error": safe_error,
+                "projection": calls.append("project_failed") or "failed",
+            },
+            get_current_run=lambda run_id: {"run_id": run_id, "status": "current"},
+            project_result=lambda result: {**result, "finalized": True},
+            redact_error=lambda exc: f"safe {type(exc).__name__}",
+        )
+
+    assert run_mode("completed") == {
+        "status": "completed",
+        "result": "resumed output",
+        "projection": "completed",
+        "finalized": True,
+    }
+    assert run_mode("required") == {
+        "status": "approval_required",
+        "pending": {"prepared": "terminal.run"},
+        "projection": "required",
+        "finalized": True,
+    }
+    assert run_mode("failed") == {
+        "status": "failed",
+        "error": "safe RuntimeError",
+        "projection": "failed",
+        "finalized": True,
+    }
+    assert calls == [
+        "claim_pending_approval",
+        "approve_tool_run",
+        "project_running",
+        "append_tool_result_message",
+        "run_tool_requests",
+        "continue_custom_api_agent",
+        "project_completed",
+        "claim_pending_approval",
+        "approve_tool_run",
+        "project_running",
+        "append_tool_result_message",
+        "run_tool_requests",
+        "continue_custom_api_agent",
+        "project_required",
+        "claim_pending_approval",
+        "approve_tool_run",
+        "project_running",
+        "append_tool_result_message",
+        "run_tool_requests",
+        "continue_custom_api_agent",
+        "project_failed",
+    ]
 
 
 def test_approval_resume_projection_coordinator_projects_resume_states():

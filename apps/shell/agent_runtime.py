@@ -2826,6 +2826,60 @@ class ApprovalResumeCoordinator:
             budget=context.budget,
         )
 
+    def resume_approved_tool_run(
+        self,
+        *,
+        run_id: str,
+        pending: dict[str, Any],
+        context: ToolApprovalResumeContext,
+        agent: dict[str, Any],
+        resumed_detail: str,
+        running_result: str,
+        project_completed: Any,
+        project_required: Any,
+        project_failed: Any,
+        get_current_run: Any,
+        project_running: Any | None = None,
+        prepare_required: Any | None = None,
+        project_result: Any | None = None,
+        redact_error: Any = redact_api_error_text,
+    ) -> dict[str, Any]:
+        running = self.claim_and_project_approved_tool(
+            run_id,
+            pending,
+            context,
+            resumed_detail=resumed_detail,
+            running_result=running_result,
+        )
+        if running is None:
+            return get_current_run(run_id)
+        if project_running is not None:
+            running = project_running(running)
+        try:
+            result_text = self.continue_custom_api_agent_after_approved_tool(
+                agent,
+                context,
+            )
+            result = project_completed(
+                context,
+                result_text,
+            )
+        except AgentApprovalRequired as exc:
+            pending_next = exc.pending_approval
+            if prepare_required is not None:
+                pending_next = prepare_required(pending_next)
+            result = project_required(
+                context,
+                pending_next,
+            )
+        except Exception as exc:
+            safe_error = redact_error(exc)
+            result = project_failed(
+                context,
+                safe_error,
+            )
+        return project_result(result) if project_result is not None else result
+
 
 class ApprovalResumeProjectionCoordinator:
     """Projects Run state changes produced by approved-tool resume."""
@@ -8532,39 +8586,22 @@ class NativeRunEngine:
         project_result: Any | None = None,
         redact_error: Any = redact_api_error_text,
     ) -> dict[str, Any]:
-        running = self.approval_resume.claim_and_project_approved_tool(
-            run_id,
-            pending,
-            resume_context,
+        return self.approval_resume.resume_approved_tool_run(
+            run_id=run_id,
+            pending=pending,
+            context=resume_context,
+            agent=agent,
             resumed_detail=resumed_detail,
             running_result=running_result,
+            project_completed=project_completed,
+            project_required=self._project_approval_resume_required,
+            project_failed=self._project_approval_resume_failed,
+            get_current_run=self.get_run,
+            project_running=project_running,
+            prepare_required=project_required,
+            project_result=project_result,
+            redact_error=redact_error,
         )
-        if running is None:
-            return self.get_run(run_id)
-        if project_running is not None:
-            running = project_running(running)
-        try:
-            result_text = self.approval_resume.continue_custom_api_agent_after_approved_tool(
-                agent,
-                resume_context,
-            )
-            result = project_completed(
-                resume_context,
-                result_text,
-            )
-        except AgentApprovalRequired as exc:
-            pending_next = project_required(exc.pending_approval) if project_required is not None else exc.pending_approval
-            result = self._project_approval_resume_required(
-                resume_context,
-                pending_next,
-            )
-        except Exception as exc:
-            safe_error = redact_error(exc)
-            result = self._project_approval_resume_failed(
-                resume_context,
-                safe_error,
-            )
-        return project_result(result) if project_result is not None else result
 
     def _project_agent_approval_resume_running(self, running: dict[str, Any]) -> dict[str, Any]:
         return self.approval_resume_projection.project_agent_running(running)
