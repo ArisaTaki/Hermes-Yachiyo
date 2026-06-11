@@ -196,6 +196,33 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
     )
 
 
+def test_chat_group_ui_exposes_stable_e2e_selectors() -> None:
+    _assert_contains(
+        "apps/frontend/src/views/ChatView.tsx",
+        [
+            'data-testid="chat-session-tab-agents"',
+            'data-testid="chat-session-tab-groups"',
+            'data-testid="chat-session-tab-create"',
+            'data-testid="chat-group-settings"',
+            'data-testid="chat-group-dialog"',
+            'data-testid="chat-group-dialog-close"',
+            'data-testid="chat-group-avatar-preview"',
+            'data-testid="chat-group-avatar-clear"',
+            'data-testid="chat-group-avatar-file-input"',
+            'data-testid="chat-group-name-input"',
+            'data-testid="chat-group-avatar-select"',
+            'data-testid="chat-group-avatar-clear-secondary"',
+            'data-testid="chat-group-dialog-error"',
+            'data-testid="chat-group-member-list"',
+            'data-testid="chat-group-main-member"',
+            'data-testid="chat-group-agent-member"',
+            'data-testid="chat-group-agent-member-checkbox"',
+            'data-testid="chat-group-dialog-cancel"',
+            'data-testid="chat-group-dialog-submit"',
+        ],
+    )
+
+
 def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> None:
     chat_view = "apps/frontend/src/views/ChatView.tsx"
     _assert_contains(

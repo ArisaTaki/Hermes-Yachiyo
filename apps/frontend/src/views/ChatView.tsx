@@ -2071,6 +2071,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
             <button
               type="button"
               className={`session-tab ${sessionTab === 'agents' ? 'active' : ''}`}
+              data-testid="chat-session-tab-agents"
               onClick={() => setSessionTab('agents')}
             >
               Agent
@@ -2078,6 +2079,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
             <button
               type="button"
               className={`session-tab ${sessionTab === 'groups' ? 'active' : ''}`}
+              data-testid="chat-session-tab-groups"
               onClick={() => setSessionTab('groups')}
             >
               群组
@@ -2085,6 +2087,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
             <button
               type="button"
               className="session-tab-create"
+              data-testid="chat-session-tab-create"
               title={sessionTab === 'groups' ? '创建群组' : '新建对话'}
               aria-label={sessionTab === 'groups' ? '创建群组' : '新建对话'}
               onClick={handleSessionTabCreate}
@@ -2311,6 +2314,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                 <button
                   type="button"
                   className="chat-action-btn"
+                  data-testid="chat-group-settings"
                   title="群组设置"
                   aria-label="群组设置"
                   disabled={!currentSessionId}
@@ -2718,13 +2722,13 @@ function CreateGroupDialog({ agentRunnables, assistantProfile, defaultGroupName,
     <div className="chat-modal-backdrop" role="presentation" onMouseDown={(event) => {
       if (event.target === event.currentTarget) onClose();
     }}>
-      <form className="chat-group-dialog" role="dialog" aria-modal="true" aria-label={dialogTitle} onSubmit={onSubmit}>
+      <form className="chat-group-dialog" data-testid="chat-group-dialog" role="dialog" aria-modal="true" aria-label={dialogTitle} onSubmit={onSubmit}>
         <header className="chat-group-dialog-header">
           <div>
             <strong>{dialogTitle}</strong>
             <span>{memberCount} 成员</span>
           </div>
-          <button type="button" className="chat-action-btn" aria-label="关闭" title="关闭" onClick={onClose}>
+          <button type="button" className="chat-action-btn" data-testid="chat-group-dialog-close" aria-label="关闭" title="关闭" onClick={onClose}>
             <UiIcon name="close" />
           </button>
         </header>
@@ -2733,6 +2737,7 @@ function CreateGroupDialog({ agentRunnables, assistantProfile, defaultGroupName,
             <button
               type="button"
               className="chat-group-avatar-preview"
+              data-testid="chat-group-avatar-preview"
               aria-label="选择群头像"
               title="选择群头像"
               onClick={() => void pickGroupAvatar()}
@@ -2746,6 +2751,7 @@ function CreateGroupDialog({ agentRunnables, assistantProfile, defaultGroupName,
             <button
               type="button"
               className="chat-group-avatar-clear"
+              data-testid="chat-group-avatar-clear"
               aria-label="清除群头像"
               title="清除群头像"
               disabled={!groupAvatarUrl.trim()}
@@ -2757,6 +2763,7 @@ function CreateGroupDialog({ agentRunnables, assistantProfile, defaultGroupName,
               ref={avatarInputRef}
               type="file"
               accept="image/*"
+              data-testid="chat-group-avatar-file-input"
               hidden
               onChange={(event) => {
                 const file = event.target.files?.[0];
@@ -2768,6 +2775,7 @@ function CreateGroupDialog({ agentRunnables, assistantProfile, defaultGroupName,
           <div className="chat-group-field-stack">
             <input
               className="chat-group-name-input"
+              data-testid="chat-group-name-input"
               value={groupName}
               onChange={(event) => onNameChange(event.target.value)}
               placeholder={defaultGroupName ? `默认：${defaultGroupName}` : '群组名称'}
@@ -2775,18 +2783,18 @@ function CreateGroupDialog({ agentRunnables, assistantProfile, defaultGroupName,
               aria-label="群组名称"
             />
             <div className="chat-group-avatar-actions">
-              <button type="button" className="chat-group-secondary-btn" onClick={() => void pickGroupAvatar()}>
+              <button type="button" className="chat-group-secondary-btn" data-testid="chat-group-avatar-select" onClick={() => void pickGroupAvatar()}>
                 选择头像
               </button>
-              <button type="button" className="chat-group-secondary-btn" disabled={!groupAvatarUrl.trim()} onClick={() => onAvatarUrlChange('')}>
+              <button type="button" className="chat-group-secondary-btn" data-testid="chat-group-avatar-clear-secondary" disabled={!groupAvatarUrl.trim()} onClick={() => onAvatarUrlChange('')}>
                 清除
               </button>
             </div>
           </div>
         </div>
-        {error ? <div className="chat-group-dialog-error">{error}</div> : null}
-        <div className="chat-group-member-list">
-          <label className="chat-group-member is-fixed">
+        {error ? <div className="chat-group-dialog-error" data-testid="chat-group-dialog-error">{error}</div> : null}
+        <div className="chat-group-member-list" data-testid="chat-group-member-list">
+          <label className="chat-group-member is-fixed" data-testid="chat-group-main-member">
             <input type="checkbox" checked readOnly />
             <span className="chat-group-member-avatar">{participantAvatarContent({ kind: 'main', name: mainName, nickname: mainNickname, avatar_url: assistantProfile?.agent_avatar_url }, '月')}</span>
             <span>
@@ -2804,9 +2812,10 @@ function CreateGroupDialog({ agentRunnables, assistantProfile, defaultGroupName,
               avatar_url: agent.avatar_url,
             };
             return (
-              <label className={`chat-group-member ${selected ? 'selected' : ''}`} key={agent.id}>
+              <label className={`chat-group-member ${selected ? 'selected' : ''}`} data-testid="chat-group-agent-member" key={agent.id}>
                 <input
                   type="checkbox"
+                  data-testid="chat-group-agent-member-checkbox"
                   checked={selected}
                   onChange={() => onToggleAgent(agent.id)}
                 />
@@ -2822,8 +2831,8 @@ function CreateGroupDialog({ agentRunnables, assistantProfile, defaultGroupName,
           })}
         </div>
         <footer className="chat-group-dialog-actions">
-          <button type="button" className="chat-group-secondary-btn" onClick={onClose}>取消</button>
-          <button type="submit" className="chat-group-primary-btn" disabled={isCreating || selectedAgentIds.length === 0}>
+          <button type="button" className="chat-group-secondary-btn" data-testid="chat-group-dialog-cancel" onClick={onClose}>取消</button>
+          <button type="submit" className="chat-group-primary-btn" data-testid="chat-group-dialog-submit" disabled={isCreating || selectedAgentIds.length === 0}>
             {isCreating ? submittingText : submitText}
           </button>
         </footer>
