@@ -121,6 +121,8 @@ PACKAGED_UI_E2E_REQUIRED_SELECTORS: tuple[str, ...] = (
     "agent-run-approval-request",
     "agent-run-detail-workflow-child-approval",
     "agent-run-detail-workflow-child-approve",
+    "agent-run-detail-workflow-child-reject",
+    "agent-run-detail-workflow-child-cancel",
     "agent-run-detail-workflow-child-open-run",
     "agent-run-detail-workflow-step-open-run",
     "agent-run-detail-execution-event",
