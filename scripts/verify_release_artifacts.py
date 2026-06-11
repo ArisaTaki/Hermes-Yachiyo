@@ -813,6 +813,14 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover Chat cancel late-output HTTP roundtrip",
     ),
     (
+        "tests/test_executor.py::TestNativeAgentUnavailableExecutor::test_run_fails_without_simulated_result",
+        "macOS release workflow smoke tests must cover missing-model executor structured failure",
+    ),
+    (
+        "tests/test_executor.py::TestNativeAgentUnavailableExecutor::test_select_executor_returns_native_unavailable_when_runtime_not_ready",
+        "macOS release workflow smoke tests must cover missing-model executor selection",
+    ),
+    (
         "tests/test_executor.py::TestNativeAgentExecutor::test_run_uses_native_run_and_returns_task_result",
         "macOS release workflow smoke tests must cover NativeAgentExecutor Task-to-Run boundary",
     ),
@@ -1085,6 +1093,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover shell app Electron entrypoint",
     ),
     (
+        "tests/test_main_api_modes.py::test_native_connection_missing_default_returns_structured_error",
+        "macOS release workflow smoke tests must cover missing-model MainWindow readiness",
+    ),
+    (
         "tests/test_main_api_modes.py",
         "macOS release workflow smoke tests must cover desktop MainWindow API modes",
     ),
@@ -1151,6 +1163,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "tests/test_chat_bridge.py",
         "macOS release workflow smoke tests must cover ChatBridge session summary",
+    ),
+    (
+        "tests/test_chat_api.py::test_send_message_rejects_when_native_agent_unavailable",
+        "macOS release workflow smoke tests must cover missing-model Chat API readiness",
     ),
     (
         "tests/test_chat_api.py",

@@ -1192,6 +1192,8 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     )
     assert "macOS release workflow smoke tests must cover UI Run cancel route idempotency" in messages
     assert "macOS release workflow smoke tests must cover Chat cancel late-output HTTP roundtrip" in messages
+    assert "macOS release workflow smoke tests must cover missing-model executor structured failure" in messages
+    assert "macOS release workflow smoke tests must cover missing-model executor selection" in messages
     assert "macOS release workflow smoke tests must cover NativeAgentExecutor Task-to-Run boundary" in messages
     assert "macOS release workflow smoke tests must cover NativeAgentExecutor multi-turn context filtering" in messages
     assert "macOS release workflow smoke tests must cover NativeAgentExecutor context size limit" in messages
@@ -1284,6 +1286,7 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow smoke tests must cover desktop backend Native startup" in messages
     assert "macOS release workflow smoke tests must cover desktop launcher startup wiring" in messages
     assert "macOS release workflow smoke tests must cover shell app Electron entrypoint" in messages
+    assert "macOS release workflow smoke tests must cover missing-model MainWindow readiness" in messages
     assert "macOS release workflow smoke tests must cover desktop MainWindow API modes" in messages
     assert "macOS release workflow smoke tests must cover model capability and image input guards" in messages
     assert "macOS release workflow smoke tests must cover model profile credentials and provider contracts" in messages
@@ -1301,6 +1304,7 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow smoke tests must cover ChatSession persistence" in messages
     assert "macOS release workflow smoke tests must cover ChatStore persistence and redaction" in messages
     assert "macOS release workflow smoke tests must cover ChatBridge session summary" in messages
+    assert "macOS release workflow smoke tests must cover missing-model Chat API readiness" in messages
     assert "macOS release workflow smoke tests must cover ActivityStore feed and redaction" in messages
     assert "macOS release workflow smoke tests must cover mature UI bridge routes" in messages
     assert "macOS release workflow smoke tests must cover mature frontend feature preservation" in messages
