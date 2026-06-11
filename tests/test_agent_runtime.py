@@ -9974,6 +9974,97 @@ def test_agent_run_prefers_responses_call_id_over_item_id(tmp_path, monkeypatch)
         service.close()
 
 
+def test_agent_run_executes_multiple_responses_tool_calls(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    (workdir / "README.md").write_text("agent responses README content", encoding="utf-8")
+    (workdir / "NOTES.md").write_text("agent responses NOTES content", encoding="utf-8")
+    calls = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        if len(calls) == 1:
+            assert any((tool.get("function") or {}).get("name") == "workspace_read" for tool in tools or [])
+
+            def stream():
+                yield {
+                    "type": "response.output_item.done",
+                    "output_index": 0,
+                    "item": {
+                        "id": "fc_agent_response_readme",
+                        "type": "function_call",
+                        "call_id": "call_agent_response_readme",
+                        "name": "workspace_read",
+                        "arguments": '{"path": "README.md"}',
+                    },
+                }
+                yield {
+                    "type": "response.output_item.done",
+                    "output_index": 1,
+                    "item": {
+                        "id": "fc_agent_response_notes",
+                        "type": "function_call",
+                        "call_id": "call_agent_response_notes",
+                        "name": "workspace_read",
+                        "arguments": '{"path": "NOTES.md"}',
+                    },
+                }
+                yield {
+                    "type": "response.completed",
+                    "response": {
+                        "status": "completed",
+                        "output": [{"type": "function_call", "finish_reason": "tool_calls"}],
+                    },
+                }
+
+            return stream()
+        assistant_tool_messages = [
+            message for message in messages if message.get("role") == "assistant" and message.get("tool_calls")
+        ]
+        tool_messages = [message for message in messages if message.get("role") == "tool"]
+        assert assistant_tool_messages[-1]["content"] is None
+        assert [tool_call["id"] for tool_call in assistant_tool_messages[-1]["tool_calls"]] == [
+            "call_agent_response_readme",
+            "call_agent_response_notes",
+        ]
+        assert [message["tool_call_id"] for message in tool_messages] == [
+            "call_agent_response_readme",
+            "call_agent_response_notes",
+        ]
+        assert "agent responses README content" in tool_messages[0]["content"]
+        assert "agent responses NOTES content" in tool_messages[1]["content"]
+        return {"content": "Agent Responses multiple tool calls complete"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Responses Multi Tool Agent",
+                "model_mode": "custom_api",
+                "model_config": {"base_url": "https://api.example.test/v1", "model": "demo-model", "api_key": "sk-secret"},
+                "tool_policy": {"allowed_tools": ["workspace.read"]},
+                "workspace_policy": {"default_workdir": str(workdir), "readable_scopes": ["."]},
+            }
+        )
+        run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Read README and NOTES"})
+        run_events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in run_events]
+        tool_facts = [event for event in run_events if event["event_type"] == "agent.tool.call"]
+
+        assert run["status"] == "completed"
+        assert run["result"] == "Agent Responses multiple tool calls complete"
+        assert [event["payload"]["input_preview"]["path"] for event in tool_facts] == [
+            "README.md",
+            "NOTES.md",
+        ]
+        assert event_types.count("agent.tool.call") == 2
+        assert event_types.count("agent.run.completed") == 1
+        assert len(calls) == 2
+    finally:
+        service.close()
+
+
 def test_agent_tool_output_is_truncated_by_runtime_budget(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     service.runtime_limits = service.runtime_limits.__class__(max_tool_output_chars=30)
