@@ -342,6 +342,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover TaskRunner approval timeout projection",
     ),
     (
+        "tests/test_task_runner.py::test_task_runner_main_chat_image_attachment_reaches_native_model",
+        "macOS release workflow smoke tests must cover TaskRunner image attachment Native runtime flow",
+    ),
+    (
         "tests/test_task_runner.py::test_task_runner_main_chat_auto_delegation_uses_native_runtime",
         "macOS release workflow smoke tests must cover TaskRunner auto delegation Native runtime flow",
     ),

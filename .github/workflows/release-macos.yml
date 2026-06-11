@@ -64,6 +64,7 @@ jobs:
             tests/test_state.py \
             tests/test_task_runner.py::test_task_runner_main_chat_native_tool_approval_roundtrip \
             tests/test_task_runner.py::test_task_runner_main_chat_approval_timeout_clears_chat_and_activity_projection \
+            tests/test_task_runner.py::test_task_runner_main_chat_image_attachment_reaches_native_model \
             tests/test_task_runner.py::test_task_runner_main_chat_auto_delegation_uses_native_runtime \
             tests/test_task_runner.py::test_task_runner_group_dispatch_summary_uses_native_runtime \
             tests/test_task_runner.py::test_task_runner_direct_group_agent_summary_uses_native_runtime \
