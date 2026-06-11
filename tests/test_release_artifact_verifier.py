@@ -460,6 +460,22 @@ def test_verifier_reports_packaged_app_missing_ui_e2e_selector(tmp_path):
     ) in findings
     assert verifier.Finding(
         asar_path,
+        "packaged Electron app.asar must include UI E2E selector 'diagnostics-copy-output'",
+    ) in findings
+    assert verifier.Finding(
+        asar_path,
+        "packaged Electron app.asar must include UI E2E selector 'agent-avatar-select'",
+    ) in findings
+    assert verifier.Finding(
+        asar_path,
+        "packaged Electron app.asar must include UI E2E selector 'skill-source-picker'",
+    ) in findings
+    assert verifier.Finding(
+        asar_path,
+        "packaged Electron app.asar must include UI E2E selector 'skill-card-open-location'",
+    ) in findings
+    assert verifier.Finding(
+        asar_path,
         "packaged Electron app.asar must include UI E2E selector 'chat-composer-approval-reject'",
     ) in findings
     assert verifier.Finding(
