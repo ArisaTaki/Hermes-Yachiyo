@@ -81,6 +81,75 @@ function runPayload() {
   };
 }
 
+function runEvents() {
+  if (bridgeState.status === 'approved') {
+    return [
+      {
+        run_id: RUN_ID,
+        sequence: 1,
+        event_type: 'agent.tool.approval_required',
+        payload: { tool: 'terminal.run', approval_id: APPROVAL_ID, input_preview: pendingApproval().input_preview },
+        created_at: now,
+      },
+      {
+        run_id: RUN_ID,
+        sequence: 2,
+        event_type: 'agent.tool.approval_approved',
+        payload: { tool: 'terminal.run', approval_id: APPROVAL_ID },
+        created_at: now,
+      },
+      {
+        run_id: RUN_ID,
+        sequence: 3,
+        event_type: 'agent.tool.call',
+        payload: { tool: 'terminal.run', command: APPROVAL_COMMAND },
+        created_at: now,
+      },
+      {
+        run_id: RUN_ID,
+        sequence: 4,
+        event_type: 'run.completed',
+        payload: { status: 'completed' },
+        created_at: now,
+      },
+    ];
+  }
+  if (bridgeState.status === 'rejected') {
+    return [
+      {
+        run_id: RUN_ID,
+        sequence: 1,
+        event_type: 'agent.tool.approval_required',
+        payload: { tool: 'terminal.run', approval_id: APPROVAL_ID, input_preview: pendingApproval().input_preview },
+        created_at: now,
+      },
+      {
+        run_id: RUN_ID,
+        sequence: 2,
+        event_type: 'agent.tool.approval_rejected',
+        payload: { tool: 'terminal.run', approval_id: APPROVAL_ID },
+        created_at: now,
+      },
+      {
+        run_id: RUN_ID,
+        sequence: 3,
+        event_type: 'agent.run.cancelled',
+        payload: { result: 'Rejected from chat' },
+        created_at: now,
+      },
+    ];
+  }
+  return [
+    {
+      run_id: RUN_ID,
+      sequence: 1,
+      event_type: 'agent.tool.approval_required',
+      payload: { tool: 'terminal.run', approval_id: APPROVAL_ID, input_preview: pendingApproval().input_preview },
+      created_at: now,
+    },
+  ];
+}
+
 function assistantMessage() {
   if (bridgeState.status === 'approved') {
     return {
@@ -232,6 +301,38 @@ async function startMockBridge() {
         sendJson(response, 200, { runnables: [] });
         return;
       }
+      if (request.method === 'GET' && url.pathname === '/ui/agents') {
+        sendJson(response, 200, { agents: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/skills') {
+        sendJson(response, 200, { skills: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/skills/sources') {
+        sendJson(response, 200, { roots: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/skill-folders') {
+        sendJson(response, 200, { folders: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/model-profiles') {
+        sendJson(response, 200, { ok: true, profiles: [], defaults: {} });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/workflows') {
+        sendJson(response, 200, { workflows: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/runs') {
+        sendJson(response, 200, { runs: [runPayload()] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/run-groups') {
+        sendJson(response, 200, { run_groups: [] });
+        return;
+      }
       if (request.method === 'GET' && url.pathname === '/ui/chat/sessions') {
         sendJson(response, 200, sessionsPayload());
         return;
@@ -242,6 +343,17 @@ async function startMockBridge() {
       }
       if (request.method === 'GET' && url.pathname === `/ui/runs/${RUN_ID}`) {
         sendJson(response, 200, runPayload());
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/runs/${RUN_ID}/events`) {
+        const afterSequence = Number(url.searchParams.get('after_sequence') || '0');
+        const limit = Math.max(1, Number(url.searchParams.get('limit') || '200'));
+        sendJson(response, 200, {
+          run_id: RUN_ID,
+          after_sequence: Math.max(0, afterSequence),
+          limit,
+          events: runEvents().filter((event) => event.sequence > afterSequence).slice(0, limit),
+        });
         return;
       }
       if (request.method === 'POST' && url.pathname === `/ui/runs/${RUN_ID}/approval/approve`) {
@@ -368,6 +480,7 @@ async function waitForApproval(win, label) {
     const composer = document.querySelector('[data-testid="chat-composer-approval-notice"]');
     const approve = document.querySelector('[data-testid="chat-message-approval-approve"]');
     const reject = document.querySelector('[data-testid="chat-message-approval-reject"]');
+    const openRun = document.querySelector('[data-testid="chat-message-approval-open-run-detail"]');
     const composerApprove = document.querySelector('[data-testid="chat-composer-approval-approve"]');
     const composerReject = document.querySelector('[data-testid="chat-composer-approval-reject"]');
     return document.querySelector('textarea.chat-input')
@@ -378,10 +491,29 @@ async function waitForApproval(win, label) {
       && actions?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
       && approve
       && reject
+      && openRun
       && composer?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
       && composer?.getAttribute('data-approval-id') === ${JSON.stringify(APPROVAL_ID)}
       && composerApprove
       && composerReject;
+  }, label);
+}
+async function waitForRunDetailHandoff(win, label) {
+  await waitFor(win, () => {
+    const detail = document.querySelector('[data-testid="agent-run-detail"]');
+    const approval = document.querySelector('[data-testid="agent-run-detail-approval"]');
+    const request = document.querySelector('[data-testid="agent-run-approval-request"]');
+    const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
+    const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
+    return window.location.hash.includes(${JSON.stringify(RUN_ID)})
+      && detail?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
+      && detail?.getAttribute('data-run-kind') === 'main_chat_run'
+      && detail?.getAttribute('data-run-status') === 'approval_required'
+      && approval
+      && request?.textContent.includes('terminal.run')
+      && request?.textContent.includes(${JSON.stringify(APPROVAL_COMMAND)})
+      && eventTypes.includes('agent.tool.approval_required')
+      && events.every((node) => node.getAttribute('data-run-event-run-id') === ${JSON.stringify(RUN_ID)});
   }, label);
 }
 async function waitForApproved(win, label) {
@@ -421,6 +553,11 @@ async function main() {
   await win.loadURL(chatUrl);
   console.log('[electron-smoke] chat loaded for message approval');
   await waitForApproval(win, 'message approval card and composer notice');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-message-approval-open-run-detail\\"]').click()", true);
+  await waitForRunDetailHandoff(win, 'message approval Run Detail handoff');
+  console.log('[electron-smoke] message approval opened Run Detail');
+  await win.loadURL(chatUrl);
+  await waitForApproval(win, 'message approval card after Run Detail handoff');
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-message-approval-approve\\"]').click()", true);
   await waitForApproved(win, 'message approval approve projection');
   console.log('[electron-smoke] message approval approved');
