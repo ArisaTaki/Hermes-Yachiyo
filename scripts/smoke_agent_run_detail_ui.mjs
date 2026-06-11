@@ -21,7 +21,7 @@ const run = {
   task_id: 'task-run-detail-ui-smoke',
   session_id: 'session-run-detail-ui-smoke',
   task_run_link_run_status: 'completed',
-  task_run_link_last_event_sequence: 3,
+  task_run_link_last_event_sequence: 201,
   kind: 'agent_run',
   runnable_id: 'agent-run-detail-smoke',
   runnable_name: 'Run Detail Smoke Agent',
@@ -71,10 +71,25 @@ const runEvents = [
     payload: { tool: 'workspace.read', path: 'README.md' },
     created_at: now,
   },
+  ...Array.from({ length: 198 }, (_, index) => {
+    const sequence = index + 3;
+    return {
+      event_id: `event-run-detail-smoke-${sequence}`,
+      run_id: RUN_ID,
+      sequence,
+      schema_version: 1,
+      event_type: 'model.output.completed',
+      actor: 'model',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: { chunk: sequence, content: `Replay page smoke event ${sequence}` },
+      created_at: now,
+    };
+  }),
   {
-    event_id: 'event-run-detail-smoke-3',
+    event_id: 'event-run-detail-smoke-201',
     run_id: RUN_ID,
-    sequence: 3,
+    sequence: 201,
     schema_version: 1,
     event_type: 'agent.run.completed',
     actor: 'agent',
@@ -319,14 +334,29 @@ async function main() {
     const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
     const sequences = events.map((node) => node.getAttribute('data-run-event-sequence'));
     const runIds = events.map((node) => node.getAttribute('data-run-event-run-id'));
-    return events.length === 3
+    return events.length === 200
       && eventTypes.includes('agent.run.started')
       && eventTypes.includes('agent.tool.call')
+      && !eventTypes.includes('agent.run.completed')
+      && sequences[0] === '1'
+      && sequences[199] === '200'
+      && runIds.every((id) => id === ${JSON.stringify(RUN_ID)})
+      && document.querySelector('[data-testid="agent-run-detail-load-more-events"]');
+  }, 'initial run event replay page');
+  console.log('[electron-smoke] initial replay page rendered');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"agent-run-detail-load-more-events\\"]').click()", true);
+  await waitFor(win, () => {
+    const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
+    const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
+    const sequences = events.map((node) => node.getAttribute('data-run-event-sequence'));
+    const runIds = events.map((node) => node.getAttribute('data-run-event-run-id'));
+    return events.length === 201
       && eventTypes.includes('agent.run.completed')
-      && sequences.join(',') === '1,2,3'
-      && runIds.every((id) => id === ${JSON.stringify(RUN_ID)});
-  }, 'run event replay DOM attributes');
-  console.log('[electron-smoke] replay events rendered');
+      && sequences[200] === '201'
+      && runIds.every((id) => id === ${JSON.stringify(RUN_ID)})
+      && !document.querySelector('[data-testid="agent-run-detail-load-more-events"]');
+  }, 'loaded more run event replay page');
+  console.log('[electron-smoke] replay pagination loaded');
   clearTimeout(watchdog);
   await win.close();
   app.quit();
