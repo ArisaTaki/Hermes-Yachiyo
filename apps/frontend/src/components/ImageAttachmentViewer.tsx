@@ -83,6 +83,7 @@ function ImagePreviewAttachment({ attachment, testId }: Props) {
         data-attachment-kind={kind}
         data-attachment-mime={mimeType}
         data-attachment-name={name}
+        data-attachment-size={attachment.size || 0}
         disabled={!attachment.url}
         title={`${name} · ${sizeText} · 点击查看大图`}
         onClick={(event) => {
@@ -117,6 +118,7 @@ function AudioAttachmentViewer({ attachment, testId }: Props) {
       data-attachment-kind={kind}
       data-attachment-mime={mimeType}
       data-attachment-name={name}
+      data-attachment-size={attachment.size || 0}
     >
       <div className="message-audio-meta">
         <strong>{name}</strong>

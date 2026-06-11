@@ -649,6 +649,7 @@ def test_chat_ui_exposes_stable_e2e_selectors_for_image_cancel_approval_flow() -
             "data-attachment-kind={kind}",
             "data-attachment-mime={mimeType}",
             "data-attachment-name={name}",
+            "data-attachment-size={attachment.size || 0}",
         ],
     )
     _assert_occurs("apps/frontend/src/components/ImageAttachmentViewer.tsx", "data-attachment-id={attachment.id || ''}", 2)
@@ -678,6 +679,12 @@ def test_chat_image_attachment_ui_smoke_uses_file_input_path() -> None:
             "DOM.setFileInputFiles",
             "smoke-image-cdp.svg",
             "attachment preview rendered through CDP file input",
+            "preview.getAttribute('data-attachment-width') === '24'",
+            "preview.getAttribute('data-attachment-height') === '24'",
+            "item.getAttribute('data-attachment-kind') === 'image'",
+            "Number(item.getAttribute('data-attachment-size') || 0) > 0",
+            "submitted attachment did not include a client attachment id",
+            "attachment.width !== 24 || attachment.height !== 24",
             "chat-image-viewer-modal",
             "chat-image-viewer-close",
             "closed image viewer modal",

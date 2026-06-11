@@ -335,7 +335,12 @@ async function main() {
   \`, true);
   await waitFor(win, () => {
     const preview = document.querySelector('[data-testid="chat-composer-attachment-preview"]');
-    return preview && preview.getAttribute('data-attachment-name') === 'smoke-image.svg';
+    return preview
+      && preview.getAttribute('data-attachment-name') === 'smoke-image.svg'
+      && preview.getAttribute('data-attachment-mime') === 'image/svg+xml'
+      && Number(preview.getAttribute('data-attachment-size') || 0) > 0
+      && preview.getAttribute('data-attachment-width') === '24'
+      && preview.getAttribute('data-attachment-height') === '24';
   }, 'composer attachment preview');
   console.log('[electron-smoke] attachment preview rendered');
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-composer-attachment-remove\\"]').click()", true);
@@ -353,7 +358,12 @@ async function main() {
   await setChatImageInputFileWithCdp(win, imageFilePath);
   await waitFor(win, () => {
     const preview = document.querySelector('[data-testid="chat-composer-attachment-preview"]');
-    return preview && preview.getAttribute('data-attachment-name') === 'smoke-image-cdp.svg';
+    return preview
+      && preview.getAttribute('data-attachment-name') === 'smoke-image-cdp.svg'
+      && preview.getAttribute('data-attachment-mime') === 'image/svg+xml'
+      && Number(preview.getAttribute('data-attachment-size') || 0) > 0
+      && preview.getAttribute('data-attachment-width') === '24'
+      && preview.getAttribute('data-attachment-height') === '24';
   }, 'composer attachment preview after removal');
   console.log('[electron-smoke] attachment preview rendered through CDP file input');
   await win.webContents.executeJavaScript(\`
@@ -366,7 +376,12 @@ async function main() {
   await win.webContents.executeJavaScript("document.querySelector('button[aria-label=\\"发送消息\\"]').closest('form').requestSubmit()", true);
   await waitFor(win, () => {
     const item = document.querySelector('[data-testid="chat-message-attachment-item"]');
-    return item && item.getAttribute('data-attachment-name') === 'smoke-image-cdp.svg';
+    return item
+      && item.getAttribute('data-attachment-id')
+      && item.getAttribute('data-attachment-kind') === 'image'
+      && item.getAttribute('data-attachment-mime') === 'image/svg+xml'
+      && item.getAttribute('data-attachment-name') === 'smoke-image-cdp.svg'
+      && Number(item.getAttribute('data-attachment-size') || 0) > 0;
   }, 'rendered message attachment');
   console.log('[electron-smoke] message attachment rendered');
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-message-attachment-item\\"]').click()", true);
@@ -434,7 +449,13 @@ async function main() {
       fail('Chat UI did not submit exactly one attachment');
     }
     const attachment = payload.attachments[0];
+    if (!attachment.id) fail('submitted attachment did not include a client attachment id');
     if (attachment.name !== 'smoke-image-cdp.svg') fail(`unexpected attachment name: ${attachment.name}`);
+    if (attachment.mime_type !== 'image/svg+xml') fail(`unexpected attachment mime: ${attachment.mime_type}`);
+    if (!(Number(attachment.size) > 0)) fail(`unexpected attachment size: ${attachment.size}`);
+    if (attachment.width !== 24 || attachment.height !== 24) {
+      fail(`unexpected attachment dimensions: ${attachment.width}x${attachment.height}`);
+    }
     if (!String(attachment.data_url || '').startsWith('data:image/svg+xml')) {
       fail('submitted attachment did not include image data URL');
     }
