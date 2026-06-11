@@ -491,6 +491,7 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow smoke tests must cover desktop MainWindow API modes" in messages
     assert "macOS release workflow smoke tests must cover model capability and image input guards" in messages
     assert "macOS release workflow smoke tests must cover model profile credentials and provider contracts" in messages
+    assert "macOS release workflow smoke tests must cover provider catalog metadata and cache redaction" in messages
     assert "macOS release workflow smoke tests must cover packaged backend build command guards" in messages
     assert "macOS release workflow smoke tests must cover release-like build metadata guards" in messages
     assert "macOS release workflow smoke tests must cover release-like CredentialStore guards" in messages
