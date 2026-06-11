@@ -349,6 +349,22 @@ def test_chat_ui_exposes_stable_e2e_selectors_for_image_cancel_approval_flow() -
     _assert_occurs("apps/frontend/src/components/ImageAttachmentViewer.tsx", "data-attachment-id={attachment.id || ''}", 2)
 
 
+def test_chat_image_attachment_ui_smoke_uses_file_input_path() -> None:
+    smoke_script = "scripts/smoke_chat_image_attachment_ui.mjs"
+    _assert_contains(
+        smoke_script,
+        [
+            "document.querySelector('[data-testid=\"chat-image-file-input\"]')",
+            "new File([blob], 'smoke-image.svg', { type: 'image/svg+xml' })",
+            "new DataTransfer()",
+            "transfer.items.add(file)",
+            "Object.defineProperty(input, 'files', { configurable: true, value: transfer.files })",
+            "input.dispatchEvent(new Event('change', { bubbles: true }))",
+        ],
+    )
+    _assert_not_contains(smoke_script, ["oha-chat-e2e-add-image"])
+
+
 def test_chat_approval_run_detail_handoff_preserves_route_and_replay_wiring() -> None:
     _assert_contains(
         "apps/frontend/src/views/ChatView.tsx",
