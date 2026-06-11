@@ -2059,6 +2059,7 @@ compileall passed
 - release workflow smoke 现在也强制包含 tool approval shared context boundary 回归，确保主聊天与 Agent Run 的 tool approval reject / timeout 继续共享 `ToolApprovalTransitionContext` 解析 pending tool request。
 - release workflow smoke 现在也强制包含 ApprovalResumeCoordinator claim projection boundary 回归，确保批准后的 pending approval claim 与 running projection 不回退到 NativeRunEngine 私有分支。
 - release workflow smoke 现在也强制包含 NativeRunEngine approval resume claim boundary 回归，确认 standalone Agent approval resume 通过 `ApprovalResumeCoordinator.claim_and_project_approved_tool()` 进入 approved-tool claim/projection 边界。
+- release workflow smoke 现在也强制包含 approved-tool resume wait / failure projection 边界回归，确认主聊天与 Agent Run 的连续审批、批准后失败投影不回退到 approve 分支私有实现。
 - release workflow smoke 现在也强制包含 `TaskRunLinkRepository` projection boundary 回归，确保 Task↔Run link、Run status projection 和 replay `last_event_sequence` 继续由显式边界维护。
 - release workflow smoke 现在也强制包含 RunEvent 并发写入 sequence / replay cursor projection 回归，确保 `RunEventRepository.append()` 与 TaskRunLink cursor projection 在共享 SQLite connection 上不会重新出现并发事务交错。
 - release workflow smoke 现在也强制包含 RunEvent HTTP replay pagination/filtering 回归，确保 `/runs/{run_id}/events` 的 `after_sequence`、limit clamp、user-visible 默认过滤和 secret hiding 不从发布路径回退。

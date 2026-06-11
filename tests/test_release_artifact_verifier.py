@@ -442,12 +442,15 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow smoke tests must cover TaskRunner proactive screenshot Native runtime flow" in messages
     assert "macOS release workflow smoke tests must cover Native approval timeout replay idempotency" in messages
     assert "macOS release workflow smoke tests must cover main chat approved tool failure replay" in messages
+    assert "macOS release workflow smoke tests must cover Agent approved tool failure projection" in messages
     assert "macOS release workflow smoke tests must cover main chat repeated approval idempotency" in messages
     assert "macOS release workflow smoke tests must cover main chat approval resume claim boundary" in messages
+    assert "macOS release workflow smoke tests must cover main chat approval resume wait projection" in messages
     assert "macOS release workflow smoke tests must cover tool approval shared context boundary" in messages
     assert "macOS release workflow smoke tests must cover durable approval claim across runtime instances" in messages
     assert "macOS release workflow smoke tests must cover ApprovalResumeCoordinator claim projection boundary" in messages
     assert "macOS release workflow smoke tests must cover NativeRunEngine approval resume claim boundary" in messages
+    assert "macOS release workflow smoke tests must cover Agent approval resume wait projection" in messages
     assert "macOS release workflow smoke tests must cover ApprovalResumeCoordinator approved tool resume flow" in messages
     assert "macOS release workflow smoke tests must cover ApprovalResumeCoordinator fatal tool failure boundary" in messages
     assert "macOS release workflow smoke tests must cover ApprovalResumeCoordinator custom API resume flow" in messages

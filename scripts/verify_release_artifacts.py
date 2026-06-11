@@ -379,12 +379,20 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover main chat approved tool failure replay",
     ),
     (
+        "tests/test_agent_runtime.py::test_agent_run_fails_when_approved_terminal_returns_nonzero",
+        "macOS release workflow smoke tests must cover Agent approved tool failure projection",
+    ),
+    (
         "tests/test_agent_runtime.py::test_main_chat_repeated_approval_does_not_execute_tool_twice",
         "macOS release workflow smoke tests must cover main chat repeated approval idempotency",
     ),
     (
         "tests/test_agent_runtime.py::test_main_chat_approval_uses_resume_coordinator_claim_boundary",
         "macOS release workflow smoke tests must cover main chat approval resume claim boundary",
+    ),
+    (
+        "tests/test_agent_runtime.py::test_main_chat_consecutive_tool_approvals_use_resume_required_projection",
+        "macOS release workflow smoke tests must cover main chat approval resume wait projection",
     ),
     (
         "tests/test_agent_runtime.py::test_tool_approval_transitions_use_shared_context_boundary",
@@ -401,6 +409,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "tests/test_agent_runtime.py::test_agent_run_approval_uses_resume_coordinator_claim_boundary",
         "macOS release workflow smoke tests must cover NativeRunEngine approval resume claim boundary",
+    ),
+    (
+        "tests/test_agent_runtime.py::test_agent_run_consecutive_terminal_approvals_update_pending_request",
+        "macOS release workflow smoke tests must cover Agent approval resume wait projection",
     ),
     (
         "tests/test_agent_runtime.py::test_approval_resume_coordinator_executes_approved_tool_and_remaining_requests",
