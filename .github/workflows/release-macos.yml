@@ -161,6 +161,7 @@ jobs:
             tests/test_agent_runtime.py::test_main_chat_model_loop_executes_responses_style_streaming_tool_call \
             tests/test_agent_runtime.py::test_main_chat_model_loop_uses_responses_call_id_without_item_id \
             tests/test_agent_runtime.py::test_agent_run_uses_responses_call_id_without_item_id \
+            tests/test_agent_runtime.py::test_agent_run_prefers_responses_call_id_over_item_id \
             tests/test_streaming_provider_smoke.py \
             tests/test_legacy_kernel_removal.py \
             tests/test_runtime_injection_boundary.py \

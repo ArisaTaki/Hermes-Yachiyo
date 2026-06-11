@@ -9791,6 +9791,93 @@ def test_agent_run_uses_responses_call_id_without_item_id(tmp_path, monkeypatch)
         service.close()
 
 
+def test_agent_run_prefers_responses_call_id_over_item_id(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    (workdir / "README.md").write_text("agent responses item id content", encoding="utf-8")
+    calls = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        if len(calls) == 1:
+            assert any((tool.get("function") or {}).get("name") == "workspace_read" for tool in tools or [])
+
+            def stream():
+                yield {
+                    "type": "response.output_item.added",
+                    "item": {
+                        "id": "fc_agent_response_item",
+                        "type": "function_call",
+                        "call_id": "call_agent_response_item",
+                        "name": "workspace_read",
+                        "arguments": "",
+                    },
+                }
+                yield {
+                    "type": "response.function_call_arguments.delta",
+                    "item_id": "fc_agent_response_item",
+                    "delta": '{"path": "READ',
+                }
+                yield {
+                    "type": "response.function_call_arguments.done",
+                    "item_id": "fc_agent_response_item",
+                    "arguments": '{"path": "README.md"}',
+                }
+                yield {
+                    "type": "response.output_item.done",
+                    "item": {
+                        "id": "fc_agent_response_item",
+                        "type": "function_call",
+                        "call_id": "call_agent_response_item",
+                        "name": "workspace_read",
+                        "arguments": '{"path": "README.md"}',
+                    },
+                }
+                yield {
+                    "type": "response.completed",
+                    "response": {
+                        "status": "completed",
+                        "output": [{"type": "function_call", "finish_reason": "tool_calls"}],
+                    },
+                }
+
+            return stream()
+        assistant_tool_messages = [
+            message for message in messages if message.get("role") == "assistant" and message.get("tool_calls")
+        ]
+        assert assistant_tool_messages[-1]["content"] is None
+        assert assistant_tool_messages[-1]["tool_calls"][0]["id"] == "call_agent_response_item"
+        assert assistant_tool_messages[-1]["tool_calls"][0]["id"] != "fc_agent_response_item"
+        assert messages[-1]["role"] == "tool"
+        assert messages[-1]["tool_call_id"] == "call_agent_response_item"
+        assert messages[-1]["tool_call_id"] != "fc_agent_response_item"
+        assert "agent responses item id content" in messages[-1]["content"]
+        return {"content": "Agent Responses item id complete"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Responses Item ID Agent",
+                "model_mode": "custom_api",
+                "model_config": {"base_url": "https://api.example.test/v1", "model": "demo-model", "api_key": "sk-secret"},
+                "tool_policy": {"allowed_tools": ["workspace.read"]},
+                "workspace_policy": {"default_workdir": str(workdir), "readable_scopes": ["."]},
+            }
+        )
+        run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Read README"})
+        tool_fact = next(event for event in service.list_run_events(run["run_id"])["events"] if event["event_type"] == "agent.tool.call")
+
+        assert run["status"] == "completed"
+        assert run["result"] == "Agent Responses item id complete"
+        assert tool_fact["payload"]["tool"] == "workspace.read"
+        assert tool_fact["payload"]["input_preview"]["path"] == "README.md"
+        assert len(calls) == 2
+    finally:
+        service.close()
+
+
 def test_agent_tool_output_is_truncated_by_runtime_budget(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     service.runtime_limits = service.runtime_limits.__class__(max_tool_output_chars=30)
