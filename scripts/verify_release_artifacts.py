@@ -21,6 +21,32 @@ _OLD_CAPITALIZED = "Her" "mes-Yachiyo"
 _OLD_LOWER = "her" "mes-yachiyo"
 _OLD_ENV = "HER" "MES_YACHIYO"
 _OLD_MODULE = "her" "mes_yachiyo"
+_OLD_KERNEL_NAME = "Her" "mes"
+_OLD_KERNEL_LOWER = "her" "mes"
+_LEGACY_KERNEL_TOKENS: tuple[str, ...] = (
+    f"{_OLD_KERNEL_NAME}Executor",
+    f"{_OLD_KERNEL_NAME}UnavailableExecutor",
+    f"{_OLD_KERNEL_NAME} CLI",
+    f"{_OLD_KERNEL_NAME} stream",
+    f"{_OLD_KERNEL_NAME} installer",
+    f"{_OLD_KERNEL_NAME} readiness",
+    f"/ui/{_OLD_KERNEL_LOWER}",
+    f"{_OLD_KERNEL_LOWER}/install",
+    f"{_OLD_KERNEL_LOWER}/status",
+    f"{_OLD_KERNEL_LOWER}/config",
+    f"{_OLD_KERNEL_LOWER}_profile",
+    f"{_OLD_KERNEL_LOWER}_provider",
+    f"{_OLD_KERNEL_LOWER}_toolsets",
+    f"can_use_as_{_OLD_KERNEL_LOWER}",
+    f"sync{_OLD_KERNEL_NAME}",
+    f"include_{_OLD_KERNEL_LOWER}",
+    f"INCLUDE_{_OLD_KERNEL_LOWER.upper()}",
+    f"{_OLD_KERNEL_LOWER}_home",
+    f"{_OLD_KERNEL_LOWER}_stream_bridge",
+    f"{_OLD_KERNEL_LOWER}-bridge",
+    f"{_OLD_KERNEL_LOWER}_cli",
+    f"{_OLD_KERNEL_LOWER}-cli",
+)
 
 FORBIDDEN_TOKENS: tuple[str, ...] = (
     _OLD_CAPITALIZED,
@@ -28,6 +54,7 @@ FORBIDDEN_TOKENS: tuple[str, ...] = (
     _OLD_ENV,
     _OLD_MODULE,
     f"{_OLD_LOWER}-build.json",
+    *_LEGACY_KERNEL_TOKENS,
 )
 
 DEFAULT_SCAN_PATHS: tuple[Path, ...] = (
