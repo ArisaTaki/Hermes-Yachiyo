@@ -116,6 +116,7 @@ def test_verifier_binary_mode_scans_legacy_kernel_entrypoints(tmp_path):
     artifact = tmp_path / "Oha-Yachiyo-kernel-legacy.dmg"
     artifact.write_bytes(
         b"\x00HermesRuntime\x00hermes_runtime\x00Hermes installer\x00"
+        b"Hermes setup\x00Hermes doctor\x00HERMES_HOME\x00"
         b"hermes_stream_bridge\x00hermes-cli\xff"
     )
 
@@ -131,13 +132,16 @@ def test_verifier_binary_mode_scans_legacy_kernel_entrypoints(tmp_path):
     assert "contains legacy product token 'HermesRuntime'" in messages
     assert "contains legacy product token 'hermes_runtime'" in messages
     assert "contains legacy product token 'Hermes installer'" in messages
+    assert "contains legacy product token 'Hermes setup'" in messages
+    assert "contains legacy product token 'Hermes doctor'" in messages
+    assert "contains legacy product token 'HERMES_HOME'" in messages
     assert "contains legacy product token 'hermes_stream_bridge'" in messages
     assert "contains legacy product token 'hermes-cli'" in messages
 
 
 def test_verifier_scans_release_artifact_paths_for_legacy_kernel_entrypoints(tmp_path):
     resources = tmp_path / "Oha-Yachiyo.app" / "Contents" / "Resources"
-    legacy_cli = resources / "bin" / "hermes_runtime" / "hermes-cli"
+    legacy_cli = resources / "HERMES_HOME" / "hermes_runtime" / "hermes-doctor" / "hermes-cli"
     legacy_cli.parent.mkdir(parents=True)
     legacy_cli.write_bytes(b"\xff\x00Oha-Yachiyo\xfe")
 
@@ -150,7 +154,9 @@ def test_verifier_scans_release_artifact_paths_for_legacy_kernel_entrypoints(tmp
     )
 
     messages = [finding.message for finding in findings]
+    assert "path contains legacy product token 'HERMES_HOME'" in messages
     assert "path contains legacy product token 'hermes_runtime'" in messages
+    assert "path contains legacy product token 'hermes-doctor'" in messages
     assert "path contains legacy product token 'hermes-cli'" in messages
 
 
