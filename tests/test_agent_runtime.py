@@ -9907,6 +9907,125 @@ def test_agent_run_executes_streaming_tool_call_and_continues(tmp_path, monkeypa
         service.close()
 
 
+def test_agent_run_executes_http_sse_tool_call_and_continues(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    (workdir / "README.md").write_text("agent http sse tool content", encoding="utf-8")
+    requests = []
+
+    class FakeResponse:
+        def __init__(self, lines):
+            self._lines = lines
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            for line in self._lines:
+                yield line
+
+    def event(payload: dict) -> bytes:
+        return f"data: {json.dumps(payload)}\n\n".encode("utf-8")
+
+    first_response = FakeResponse(
+        [
+            event(
+                {
+                    "choices": [
+                        {
+                            "delta": {
+                                "tool_calls": [
+                                    {
+                                        "index": 0,
+                                        "id": "call_agent_http_sse_read",
+                                        "type": "function",
+                                        "function": {"name": "workspace_", "arguments": '{"path": "READ'},
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            ),
+            event(
+                {
+                    "choices": [
+                        {
+                            "delta": {
+                                "tool_calls": [
+                                    {"index": 0, "function": {"name": "read", "arguments": 'ME.md"}'}}
+                                ]
+                            },
+                            "finish_reason": "tool_calls",
+                        }
+                    ]
+                }
+            ),
+            b"data: [DONE]\n\n",
+        ]
+    )
+    second_response = FakeResponse(
+        [
+            event({"choices": [{"delta": {"content": "Agent HTTP SSE tool call complete"}}]}),
+            b"data: [DONE]\n\n",
+        ]
+    )
+    responses = [first_response, second_response]
+
+    def fake_urlopen(request, **kwargs):
+        body = json.loads(request.data.decode("utf-8"))
+        requests.append({"request": request, "body": body, "kwargs": kwargs})
+        assert request.full_url == "https://api.example.test/v1/chat/completions"
+        assert request.get_header("Accept") == "text/event-stream"
+        assert body["stream"] is True
+        return responses.pop(0)
+
+    monkeypatch.setattr("apps.core.tls.urlrequest.urlopen", fake_urlopen)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "HTTP SSE Reader",
+                "model_mode": "custom_api",
+                "model_config": {"base_url": "https://api.example.test/v1", "model": "demo-model", "api_key": "sk-secret"},
+                "tool_policy": {"allowed_tools": ["workspace.read"]},
+                "workspace_policy": {"default_workdir": str(workdir), "readable_scopes": ["."]},
+            }
+        )
+        run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Read README"})
+        run_events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in run_events]
+        tool_fact = next(event for event in run_events if event["event_type"] == "agent.tool.call")
+        assistant_tool_messages = [
+            message
+            for message in requests[1]["body"]["messages"]
+            if message.get("role") == "assistant" and message.get("tool_calls")
+        ]
+
+        assert run["status"] == "completed"
+        assert run["result"] == "Agent HTTP SSE tool call complete"
+        assert len(requests) == 2
+        assert requests[0]["body"]["tools"][0]["function"]["name"] == "workspace_read"
+        assert assistant_tool_messages[-1]["content"] is None
+        assert assistant_tool_messages[-1]["tool_calls"][0]["id"] == "call_agent_http_sse_read"
+        assert assistant_tool_messages[-1]["tool_calls"][0]["function"]["name"] == "workspace_read"
+        assert assistant_tool_messages[-1]["tool_calls"][0]["function"]["arguments"] == '{"path": "README.md"}'
+        assert requests[1]["body"]["messages"][-1]["role"] == "tool"
+        assert requests[1]["body"]["messages"][-1]["tool_call_id"] == "call_agent_http_sse_read"
+        assert "agent http sse tool content" in requests[1]["body"]["messages"][-1]["content"]
+        assert tool_fact["payload"]["tool"] == "workspace.read"
+        assert tool_fact["payload"]["input_preview"]["path"] == "README.md"
+        assert tool_fact["payload"]["result"]["ok"] is True
+        assert event_types.count("agent.tool.call") == 1
+        assert event_types.count("agent.run.completed") == 1
+        assert not any(str(event_type).endswith(".delta") for event_type in event_types)
+    finally:
+        service.close()
+
+
 def test_agent_run_uses_responses_call_id_without_item_id(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     workdir = tmp_path / "repo"
