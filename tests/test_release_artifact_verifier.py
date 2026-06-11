@@ -331,6 +331,7 @@ def _write_packaged_app_bundle(
     backend_mode=0o755,
     include_asar=True,
     include_permission_copy=True,
+    include_backend_metadata=True,
 ):
     app_dir = root / verifier.PACKAGED_APP_OUTPUT_DIR / "mac-arm64" / verifier.PACKAGED_APP_NAME
     contents = app_dir / "Contents"
@@ -360,7 +361,10 @@ def _write_packaged_app_bundle(
     executable.chmod(executable_mode)
     backend = app_dir / verifier.PACKAGED_BACKEND_RELATIVE_PATH
     backend.parent.mkdir(parents=True, exist_ok=True)
-    backend.write_bytes(b"#!/bin/sh\nexit 0\n")
+    backend_bytes = b"#!/bin/sh\nexit 0\n"
+    if include_backend_metadata:
+        backend_bytes += b"\n" + verifier.PACKAGED_BACKEND_BUILD_METADATA_MARKER + b"\n"
+    backend.write_bytes(backend_bytes)
     backend.chmod(backend_mode)
     if include_asar:
         asar = app_dir / verifier.PACKAGED_ASAR_RELATIVE_PATH
@@ -429,6 +433,24 @@ def test_verifier_reports_packaged_app_missing_permission_copy(tmp_path):
     assert "packaged app Info.plist must include Documents folder permission copy" in messages
     assert "packaged app Info.plist must include Downloads folder permission copy" in messages
     assert "packaged app Info.plist must include microphone permission copy" in messages
+
+
+def test_verifier_reports_packaged_backend_missing_build_metadata(tmp_path):
+    app_dir = _write_packaged_app_bundle(tmp_path, include_backend_metadata=False)
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[],
+        check_required_files=False,
+        check_release_security_guards=False,
+        check_packaged_app_bundle=True,
+        allow_binary_targets=True,
+    )
+
+    assert verifier.Finding(
+        app_dir / verifier.PACKAGED_BACKEND_RELATIVE_PATH,
+        "packaged backend executable must include the app build metadata resource",
+    ) in findings
 
 
 def test_dynamic_packaged_selector_gate_covers_release_electron_smoke_selectors():

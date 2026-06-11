@@ -121,6 +121,7 @@ PACKAGED_APP_OUTPUT_DIR = Path("dist/electron")
 PACKAGED_APP_NAME = "Oha-Yachiyo.app"
 PACKAGED_APP_IDENTIFIER = "io.github.arisataki.oha-yachiyo"
 PACKAGED_BACKEND_RELATIVE_PATH = Path("Contents/Resources/backend/oha-yachiyo-backend")
+PACKAGED_BACKEND_BUILD_METADATA_MARKER = b"apps/frontend/public/oha-yachiyo-build.json"
 PACKAGED_ASAR_RELATIVE_PATH = Path("Contents/Resources/app.asar")
 PACKAGED_UI_E2E_REQUIRED_SELECTORS: tuple[str, ...] = (
     "chat-image-file-input",
@@ -1846,6 +1847,19 @@ def _verify_packaged_app_bundle(root: Path) -> list[Finding]:
             findings.append(Finding(backend_path, "packaged backend executable is missing from app resources"))
         elif not os.access(backend_path, os.X_OK):
             findings.append(Finding(backend_path, "packaged backend executable is not executable"))
+        else:
+            try:
+                backend_bytes = backend_path.read_bytes()
+            except OSError as exc:
+                findings.append(Finding(backend_path, f"packaged backend executable could not be read: {exc}"))
+            else:
+                if PACKAGED_BACKEND_BUILD_METADATA_MARKER not in backend_bytes:
+                    findings.append(
+                        Finding(
+                            backend_path,
+                            "packaged backend executable must include the app build metadata resource",
+                        )
+                    )
 
         asar_path = app_dir / PACKAGED_ASAR_RELATIVE_PATH
         if not asar_path.is_file():
