@@ -475,6 +475,76 @@ def test_approval_resume_projection_coordinator_projects_resume_states():
     ]
 
 
+def test_tool_approval_resume_context_parses_pending_payload():
+    broker = SimpleNamespace(name="broker")
+    budget = SimpleNamespace(name="budget")
+    run = {
+        "run_id": "agent_run_resume",
+        "timeline": [
+            {"event": "agent.tool.approval_required"},
+            "not-an-event",
+        ],
+        "artifacts": [
+            {"path": "report.md"},
+            "not-an-artifact",
+        ],
+    }
+    messages = [{"role": "user", "content": "run approved tool"}]
+    tool_request = {
+        "tool": "terminal.run",
+        "input": {"command": "printf ok"},
+    }
+    pending = {
+        "tool": "terminal.run",
+        "messages": messages,
+        "tool_request": tool_request,
+        "remaining_tool_requests": [
+            {"tool": "artifact.write", "input": {"path": "report.md"}},
+            "not-a-request",
+        ],
+        "next_iteration": "5",
+    }
+
+    context = ToolApprovalResumeContext.from_run(
+        run,
+        pending,
+        broker=broker,
+        allowed_tools=["terminal.run", "artifact.write"],
+        budget=budget,
+    )
+
+    assert context.run_id == "agent_run_resume"
+    assert context.timeline == [{"event": "agent.tool.approval_required"}]
+    assert context.artifacts == [{"path": "report.md"}]
+    assert context.broker is broker
+    assert context.allowed_tools == ["terminal.run", "artifact.write"]
+    assert context.budget is budget
+    assert context.messages is messages
+    assert context.tool_request is tool_request
+    assert context.tool_name == "terminal.run"
+    assert context.input_preview == {"command": "printf ok"}
+    assert context.remaining_requests == [{"tool": "artifact.write", "input": {"path": "report.md"}}]
+    assert context.next_iteration == 5
+
+    fallback_iteration = ToolApprovalResumeContext.from_run(
+        run,
+        {**pending, "next_iteration": "not-an-int"},
+        broker=broker,
+        allowed_tools=[],
+        budget=budget,
+    )
+    assert fallback_iteration.next_iteration == 0
+
+    with pytest.raises(AgentRuntimeError, match="Run 待审批上下文不完整，无法恢复"):
+        ToolApprovalResumeContext.from_run(
+            run,
+            {"tool": "terminal.run", "messages": [], "tool_request": tool_request},
+            broker=broker,
+            allowed_tools=[],
+            budget=budget,
+        )
+
+
 def test_approval_resume_coordinator_stops_on_fatal_tool_failure():
     calls: list[str] = []
     timeline: list[dict[str, object]] = []

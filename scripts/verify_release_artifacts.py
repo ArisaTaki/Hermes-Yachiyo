@@ -687,6 +687,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover ApprovalResumeProjectionCoordinator resume state projections",
     ),
     (
+        "tests/test_agent_runtime.py::test_tool_approval_resume_context_parses_pending_payload",
+        "macOS release workflow smoke tests must cover ToolApprovalResumeContext pending payload parsing",
+    ),
+    (
         "tests/test_agent_runtime.py::test_workflow_parent_resume_coordinator_continues_completed_child",
         "macOS release workflow smoke tests must cover WorkflowParentResumeCoordinator completed child handoff",
     ),

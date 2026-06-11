@@ -2579,6 +2579,49 @@ class ToolApprovalResumeContext:
     remaining_requests: list[dict[str, Any]]
     next_iteration: int
 
+    @classmethod
+    def from_run(
+        cls,
+        run: dict[str, Any],
+        pending: dict[str, Any],
+        *,
+        broker: ToolBroker,
+        allowed_tools: list[str],
+        budget: _RunBudget,
+    ) -> "ToolApprovalResumeContext":
+        run_id = str(run["run_id"])
+        messages = pending.get("messages") if isinstance(pending.get("messages"), list) else []
+        tool_request = pending.get("tool_request") if isinstance(pending.get("tool_request"), dict) else {}
+        if not messages or not tool_request:
+            raise AgentRuntimeError("Run 待审批上下文不完整，无法恢复")
+        timeline = [
+            event
+            for event in run.get("timeline") or []
+            if isinstance(event, dict)
+        ]
+        artifacts = [item for item in run.get("artifacts") or [] if isinstance(item, dict)]
+        remaining = pending.get("remaining_tool_requests")
+        remaining_requests = [item for item in remaining if isinstance(item, dict)] if isinstance(remaining, list) else []
+        try:
+            next_iteration = int(pending.get("next_iteration") or 0)
+        except (TypeError, ValueError):
+            next_iteration = 0
+        tool_name = str(tool_request.get("tool") or pending.get("tool") or "").strip()
+        return cls(
+            run_id=run_id,
+            timeline=timeline,
+            artifacts=artifacts,
+            broker=broker,
+            allowed_tools=allowed_tools,
+            budget=budget,
+            messages=messages,
+            tool_request=tool_request,
+            tool_name=tool_name,
+            input_preview=_tool_input_preview(tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}),
+            remaining_requests=remaining_requests,
+            next_iteration=next_iteration,
+        )
+
 
 @dataclass(frozen=True)
 class ToolApprovalTransitionContext:
@@ -8395,36 +8438,13 @@ class NativeRunEngine:
         runtime: dict[str, Any],
     ) -> ToolApprovalResumeContext:
         run_id = str(run["run_id"])
-        messages = pending.get("messages") if isinstance(pending.get("messages"), list) else []
-        tool_request = pending.get("tool_request") if isinstance(pending.get("tool_request"), dict) else {}
-        if not messages or not tool_request:
-            raise AgentRuntimeError("Run 待审批上下文不完整，无法恢复")
-        timeline = [
-            event
-            for event in run.get("timeline") or []
-            if isinstance(event, dict)
-        ]
-        artifacts = [item for item in run.get("artifacts") or [] if isinstance(item, dict)]
-        remaining = pending.get("remaining_tool_requests")
-        remaining_requests = [item for item in remaining if isinstance(item, dict)] if isinstance(remaining, list) else []
-        try:
-            next_iteration = int(pending.get("next_iteration") or 0)
-        except (TypeError, ValueError):
-            next_iteration = 0
-        tool_name = str(tool_request.get("tool") or pending.get("tool") or "").strip()
-        return ToolApprovalResumeContext(
-            run_id=run_id,
-            timeline=timeline,
-            artifacts=artifacts,
+        timeline = [event for event in run.get("timeline") or [] if isinstance(event, dict)]
+        return ToolApprovalResumeContext.from_run(
+            run,
+            pending,
             broker=ToolBroker(runtime["workspace_policy"], self.agent_artifacts_dir / run_id),
             allowed_tools=runtime["tool_policy"].get("allowed_tools") or [],
             budget=self._run_budget(run_id, timeline),
-            messages=messages,
-            tool_request=tool_request,
-            tool_name=tool_name,
-            input_preview=_tool_input_preview(tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}),
-            remaining_requests=remaining_requests,
-            next_iteration=next_iteration,
         )
 
     def approve_run_approval(self, run_id: str) -> dict[str, Any]:
