@@ -435,6 +435,24 @@ async function main() {
   }, 'installed skill card');
   console.log('[electron-smoke] installed skill rendered');
   await win.webContents.executeJavaScript(\`
+  (() => {
+    window.__ohaSkillOpenPathCalls = [];
+    window.ohaDesktop = {
+      ...(window.ohaDesktop || {}),
+      openPath: async (targetPath) => {
+        window.__ohaSkillOpenPathCalls.push(targetPath);
+      },
+    };
+    document.querySelector('[data-testid="skill-card-open-location"]').click();
+  })();
+  \`, true);
+  await waitFor(win, () => (
+    Array.isArray(window.__ohaSkillOpenPathCalls)
+    && window.__ohaSkillOpenPathCalls[0] === '/tmp/oha-yachiyo/skills/agent-studio-smoke'
+  ), 'skill open location path');
+  console.log('[electron-smoke] installed skill open location verified');
+  await waitFor(win, () => document.querySelector('[data-testid="skill-card-enabled-toggle"]')?.disabled === false, 'skill controls re-enabled after open location');
+  await win.webContents.executeJavaScript(\`
   document.querySelector('[data-testid="skill-card-enabled-toggle"]').click();
   \`, true);
   await waitFor(win, () => document.querySelector('[data-testid="skill-card"]')?.getAttribute('data-skill-enabled') === 'false', 'disabled skill card');
