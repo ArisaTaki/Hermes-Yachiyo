@@ -452,6 +452,66 @@ def test_release_workflow_guard_accepts_discovered_electron_smoke_script_before_
     ) not in messages
 
 
+def test_release_workflow_guard_reports_new_agent_run_provider_contract(tmp_path):
+    workflow = tmp_path / verifier.RELEASE_WORKFLOW_FILE
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text(
+        (verifier.ROOT / verifier.RELEASE_WORKFLOW_FILE).read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    test_file = tmp_path / "tests" / "test_agent_runtime.py"
+    test_file.parent.mkdir(parents=True)
+    test_file.write_text(
+        "def test_agent_run_executes_future_http_sse_tool_call():\n"
+        "    pass\n",
+        encoding="utf-8",
+    )
+
+    findings = verifier._verify_release_workflow_guards(tmp_path)
+    messages = [finding.message for finding in findings]
+
+    assert (
+        "macOS release workflow smoke tests must run Agent Run provider contract "
+        "tests/test_agent_runtime.py::test_agent_run_executes_future_http_sse_tool_call"
+    ) in messages
+
+
+def test_release_workflow_guard_accepts_new_agent_run_provider_contract_before_packaging(tmp_path):
+    workflow = tmp_path / verifier.RELEASE_WORKFLOW_FILE
+    workflow.parent.mkdir(parents=True)
+    current_workflow = (verifier.ROOT / verifier.RELEASE_WORKFLOW_FILE).read_text(
+        encoding="utf-8"
+    )
+    test_path = "tests/test_agent_runtime.py::test_agent_run_executes_future_http_sse_tool_call"
+    workflow.write_text(
+        current_workflow.replace(
+            "            tests/test_agent_runtime.py::test_agent_run_executes_streaming_tool_call_and_continues \\\n",
+            f"            {test_path} \\\n"
+            "            tests/test_agent_runtime.py::test_agent_run_executes_streaming_tool_call_and_continues \\\n",
+        ),
+        encoding="utf-8",
+    )
+    test_file = tmp_path / "tests" / "test_agent_runtime.py"
+    test_file.parent.mkdir(parents=True)
+    test_file.write_text(
+        "def test_agent_run_executes_future_http_sse_tool_call():\n"
+        "    pass\n",
+        encoding="utf-8",
+    )
+
+    findings = verifier._verify_release_workflow_guards(tmp_path)
+    messages = [finding.message for finding in findings]
+
+    assert (
+        "macOS release workflow smoke tests must run Agent Run provider contract "
+        f"{test_path}"
+    ) not in messages
+    assert (
+        "macOS release workflow Agent Run provider contract must run before packaged backend and DMG builds: "
+        f"{test_path}"
+    ) not in messages
+
+
 def test_verifier_reports_packaged_app_missing_ui_e2e_selector(tmp_path):
     app_dir = _write_packaged_app_bundle(tmp_path)
     asar_path = app_dir / verifier.PACKAGED_ASAR_RELATIVE_PATH

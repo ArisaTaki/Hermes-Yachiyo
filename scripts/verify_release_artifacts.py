@@ -1417,6 +1417,25 @@ def _release_electron_ui_smoke_scripts(root: Path) -> tuple[str, ...]:
     return tuple(scripts)
 
 
+AGENT_RUN_PROVIDER_CONTRACT_TEST_RE = re.compile(
+    r"^def (?P<name>test_agent_run_[A-Za-z0-9_]*(?:http_sse|streaming|responses|function_call)[A-Za-z0-9_]*)\(",
+    re.MULTILINE,
+)
+
+
+def _release_agent_run_provider_contract_tests(root: Path) -> tuple[str, ...]:
+    test_file = _resolve(root, "tests/test_agent_runtime.py")
+    try:
+        text = test_file.read_text(encoding="utf-8")
+    except OSError:
+        return ()
+    tests = [
+        f"tests/test_agent_runtime.py::{match.group('name')}"
+        for match in AGENT_RUN_PROVIDER_CONTRACT_TEST_RE.finditer(text)
+    ]
+    return tuple(dict.fromkeys(tests))
+
+
 def _release_electron_ui_smoke_selectors(root: Path) -> tuple[str, ...]:
     selectors: set[str] = set()
     for script in _release_electron_ui_smoke_scripts(root):
@@ -1803,6 +1822,15 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
     for required_text, message in RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT:
         if required_text not in workflow:
             findings.append(Finding(workflow_path, message))
+    agent_run_provider_contract_tests = _release_agent_run_provider_contract_tests(root)
+    for test_path in agent_run_provider_contract_tests:
+        if test_path not in workflow:
+            findings.append(
+                Finding(
+                    workflow_path,
+                    f"macOS release workflow smoke tests must run Agent Run provider contract {test_path}",
+                )
+            )
     electron_ui_smoke_scripts = _release_electron_ui_smoke_scripts(root)
     for script in electron_ui_smoke_scripts:
         required_text = f"node {script}"
@@ -1856,6 +1884,19 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
                     Finding(
                         workflow_path,
                         f"macOS release workflow smoke guard must run before packaged backend and DMG builds: {message}",
+                    )
+                )
+        for test_path in agent_run_provider_contract_tests:
+            required_index = workflow.find(test_path)
+            if (
+                required_index >= 0
+                and (required_index > build_backend or required_index > build_dmg)
+            ):
+                findings.append(
+                    Finding(
+                        workflow_path,
+                        "macOS release workflow Agent Run provider contract must run before "
+                        f"packaged backend and DMG builds: {test_path}",
                     )
                 )
         for script in electron_ui_smoke_scripts:
