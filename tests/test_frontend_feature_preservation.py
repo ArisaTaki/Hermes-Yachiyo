@@ -409,8 +409,13 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
             "data-runnable-id={runnableId}",
             'data-testid="chat-agent-run-progress-open-run-detail"',
             'data-testid="chat-message-summary-status"',
+            "data-summary-task-id={summaryTaskId}",
+            "data-summary-status={summaryStatus}",
             "data-summary-tone={summaryNotice.tone}",
+            "data-run-group-id={summaryRunGroupId}",
             'data-testid="chat-message-followup-status"',
+            "data-followup-task-ids={followupTaskIds}",
+            "data-followup-agent-message-ids={followupAgentMessageIds}",
         ],
     )
 

@@ -102,6 +102,7 @@ type ChatMessageMetadata = {
   group_dispatch_count?: number;
   group_dispatch_run_group_id?: string;
   group_dispatch_skipped?: string[];
+  group_agent_summary_task_id?: string;
   group_agent_summary_pending?: boolean;
   group_agent_summary_status?: string;
   group_agent_summary_error?: string;
@@ -135,6 +136,11 @@ type ChatMessage = {
   attachments?: ChatAttachment[];
   metadata?: ChatMessageMetadata;
 };
+
+function metadataListAttribute(value: unknown): string {
+  if (!Array.isArray(value)) return '';
+  return value.map((item) => String(item || '').trim()).filter(Boolean).join(',');
+}
 
 type MessagesPayload = {
   ok?: boolean;
@@ -2975,6 +2981,11 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
   const duplicateError = Boolean(message.error && displayContent.trim() && message.error.trim() === displayContent.trim());
   const summaryNotice = groupAgentSummaryNotice(message);
   const followupNotice = groupFollowupNotice(message);
+  const summaryTaskId = String(message.metadata?.group_agent_summary_task_id || '').trim();
+  const summaryStatus = String(message.metadata?.group_agent_summary_status || (message.metadata?.group_agent_summary_pending ? 'pending' : '')).trim();
+  const summaryRunGroupId = String(message.metadata?.group_dispatch_run_group_id || message.metadata?.run_group_id || '').trim();
+  const followupTaskIds = metadataListAttribute(message.metadata?.group_followup_for_task_ids);
+  const followupAgentMessageIds = metadataListAttribute(message.metadata?.group_followup_for_agent_message_ids);
   const showWorkflowStudioAction = message.metadata?.guidance_type === 'workflow_chat_entry_disabled';
   return (
     <article
@@ -3017,6 +3028,9 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
           {summaryNotice ? (
             <div
               className={`message-summary-status ${summaryNotice.tone}`}
+              data-run-group-id={summaryRunGroupId}
+              data-summary-status={summaryStatus}
+              data-summary-task-id={summaryTaskId}
               data-testid="chat-message-summary-status"
               data-summary-tone={summaryNotice.tone}
             >
@@ -3031,7 +3045,12 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
           progressLabel={message.progress_label}
         />
         {followupNotice ? (
-          <div className="message-followup-status" data-testid="chat-message-followup-status">
+          <div
+            className="message-followup-status"
+            data-followup-agent-message-ids={followupAgentMessageIds}
+            data-followup-task-ids={followupTaskIds}
+            data-testid="chat-message-followup-status"
+          >
             {followupNotice}
           </div>
         ) : null}
