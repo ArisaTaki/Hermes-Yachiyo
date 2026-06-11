@@ -3762,9 +3762,9 @@ export function AgentStudioView() {
                     <strong>{draft.avatar_url ? '已选择自定义头像' : '使用首字母头像'}</strong>
                   </div>
                   <div className="agent-avatar-picker-actions">
-                    <button type="button" className="hy-btn hy-btn-ghost" disabled={busy} onClick={() => void pickAgentAvatar()}>选择头像</button>
+                    <button type="button" className="hy-btn hy-btn-ghost" data-testid="agent-avatar-select" disabled={busy} onClick={() => void pickAgentAvatar()}>选择头像</button>
                     {draft.avatar_url ? (
-                      <button type="button" className="hy-btn hy-btn-ghost" disabled={busy} onClick={() => setDraft({ ...draft, avatar_url: '' })}>清除</button>
+                      <button type="button" className="hy-btn hy-btn-ghost" data-testid="agent-avatar-clear" disabled={busy} onClick={() => setDraft({ ...draft, avatar_url: '' })}>清除</button>
                     ) : null}
                   </div>
                 </div>

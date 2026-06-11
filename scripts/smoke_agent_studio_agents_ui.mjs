@@ -13,6 +13,7 @@ const VITE = path.join(FRONTEND, 'node_modules', '.bin', process.platform === 'w
 const CREATED_AGENT_ID = 'agent-studio-agents-ui-smoke-created';
 const CREATED_NAME = 'Agent Definition Smoke v1';
 const UPDATED_NAME = 'Agent Definition Smoke v2';
+const AVATAR_DATA_URL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
 const now = new Date().toISOString();
 
 let agents = [];
@@ -316,6 +317,18 @@ async function main() {
       element.dispatchEvent(new Event('change', { bubbles: true }));
     };
     document.querySelector('[data-testid="agent-new"]').click();
+    window.__ohaAgentAvatarPickerCalls = 0;
+    window.ohaDesktop = {
+      ...(window.ohaDesktop || {}),
+      chooseAvatarImage: async () => {
+        window.__ohaAgentAvatarPickerCalls += 1;
+        return {
+          data_url: ${JSON.stringify(AVATAR_DATA_URL)},
+          file_name: 'agent-avatar-smoke.png',
+          path: '/tmp/oha-yachiyo/agent-avatar-smoke.png',
+        };
+      },
+    };
     setNativeValue(document.querySelector('[data-testid="agent-name-input"]'), ${JSON.stringify(CREATED_NAME)});
     setNativeValue(document.querySelector('[data-testid="agent-nickname-input"]'), 'Definition Smoke');
     setNativeValue(document.querySelector('[data-testid="agent-description-input"]'), 'Created by Agent Studio Electron smoke');
@@ -323,6 +336,19 @@ async function main() {
     setNativeValue(document.querySelector('[data-testid="agent-instructions-input"]'), 'Preserve Agent Studio definition create and update paths.');
     setNativeValue(document.querySelector('[data-testid="agent-persona-input"]'), 'Concise QA helper.');
     setSelectValue(document.querySelector('[data-testid="agent-output-contract-select"]'), 'report');
+    document.querySelector('[data-testid="agent-avatar-select"]').click();
+  })();
+  \`, true);
+  await waitFor(win, () => (
+    document.querySelector('[data-testid="agent-avatar-clear"]')
+    && document.querySelector('.agent-avatar.has-image img')?.getAttribute('src')?.startsWith('data:image/png;base64,')
+  ), 'agent avatar selected');
+  const avatarPickerCalls = await win.webContents.executeJavaScript('window.__ohaAgentAvatarPickerCalls || 0', true);
+  if (avatarPickerCalls !== 1) {
+    throw new Error('expected Agent avatar picker to be called once, got ' + avatarPickerCalls);
+  }
+  await win.webContents.executeJavaScript(\`
+  (() => {
     document.querySelector('[data-testid="agent-save"]').click();
   })();
   \`, true);
@@ -410,6 +436,9 @@ function assertMockBridgeContract() {
   if (createAgentRequest.nickname !== 'Definition Smoke') throw new Error(`unexpected created agent nickname: ${createAgentRequest.nickname}`);
   if (createAgentRequest.description !== 'Created by Agent Studio Electron smoke') {
     throw new Error(`unexpected created agent description: ${createAgentRequest.description}`);
+  }
+  if (createAgentRequest.avatar_url !== AVATAR_DATA_URL) {
+    throw new Error(`unexpected created agent avatar: ${createAgentRequest.avatar_url || 'missing avatar'}`);
   }
   if (createAgentRequest.category !== 'smoke') throw new Error(`unexpected created agent category: ${createAgentRequest.category}`);
   if (createAgentRequest.instructions !== 'Preserve Agent Studio definition create and update paths.') {
