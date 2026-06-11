@@ -702,13 +702,17 @@ async function main() {
     const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
     const sequences = events.map((node) => node.getAttribute('data-run-event-sequence'));
     const runIds = events.map((node) => node.getAttribute('data-run-event-run-id'));
+    const artifactEvent = events.find((node) => node.getAttribute('data-run-event') === 'workflow.node.artifact');
+    const completedEvent = events.find((node) => node.getAttribute('data-run-event') === 'workflow.run.completed');
     return events.length === 4
       && eventTypes.includes('workflow.run.started')
       && eventTypes.includes('workflow.node.agent.completed')
       && eventTypes.includes('workflow.node.artifact')
       && eventTypes.includes('workflow.run.completed')
       && sequences.join(',') === '1,2,3,4'
-      && runIds.every((id) => id === ${JSON.stringify(RUN_ID)});
+      && runIds.every((id) => id === ${JSON.stringify(RUN_ID)})
+      && artifactEvent?.textContent.includes(${JSON.stringify(WORKFLOW_ARTIFACT_PATH)})
+      && completedEvent?.textContent.includes('Workflow save-and-run UI smoke completed');
   }, 'workflow run replay events');
   await waitFor(win, () => {
     const artifact = document.querySelector('[data-testid="agent-run-detail-artifact"]');
@@ -788,12 +792,14 @@ async function main() {
     const request = document.querySelector('[data-testid="agent-run-approval-request"]');
     const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
     const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
+    const approvalEvent = events.find((node) => node.getAttribute('data-run-event') === 'workflow.node.approval_required');
     return window.location.hash.includes(${JSON.stringify(APPROVAL_RUN_ID)})
       && detail?.getAttribute('data-run-id') === ${JSON.stringify(APPROVAL_RUN_ID)}
       && detail?.getAttribute('data-run-status') === 'approval_required'
       && approval?.textContent.includes('workflow.approval')
       && request?.textContent.includes(${JSON.stringify(APPROVAL_CRITERIA)})
-      && eventTypes.includes('workflow.node.approval_required');
+      && eventTypes.includes('workflow.node.approval_required')
+      && approvalEvent?.textContent.includes(${JSON.stringify(APPROVAL_CRITERIA)});
   }, 'workflow approval run detail');
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"agent-run-detail-approval-approve\\"]').click()", true);
   await waitFor(win, () => {
@@ -803,6 +809,9 @@ async function main() {
     const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
     const sequences = events.map((node) => node.getAttribute('data-run-event-sequence'));
     const runIds = events.map((node) => node.getAttribute('data-run-event-run-id'));
+    const approvalEvent = events.find((node) => node.getAttribute('data-run-event') === 'workflow.node.approval_approved');
+    const artifactEvent = events.find((node) => node.getAttribute('data-run-event') === 'workflow.node.artifact');
+    const completedEvent = events.find((node) => node.getAttribute('data-run-event') === 'workflow.run.completed');
     return detail?.getAttribute('data-run-id') === ${JSON.stringify(APPROVAL_RUN_ID)}
       && detail?.getAttribute('data-run-status') === 'completed'
       && !document.querySelector('[data-testid="agent-run-detail-approval"]')
@@ -812,7 +821,10 @@ async function main() {
       && eventTypes.includes('workflow.node.artifact')
       && eventTypes.includes('workflow.run.completed')
       && sequences.join(',') === '1,2,3,4,5'
-      && runIds.every((id) => id === ${JSON.stringify(APPROVAL_RUN_ID)});
+      && runIds.every((id) => id === ${JSON.stringify(APPROVAL_RUN_ID)})
+      && approvalEvent?.textContent.includes(${JSON.stringify(APPROVAL_CRITERIA)})
+      && artifactEvent?.textContent.includes(${JSON.stringify(APPROVAL_ARTIFACT_PATH)})
+      && completedEvent?.textContent.includes('Workflow approval save-and-run UI smoke completed');
   }, 'approved workflow replay events');
   await waitFor(win, () => {
     const artifact = document.querySelector('[data-testid="agent-run-detail-artifact"]');
