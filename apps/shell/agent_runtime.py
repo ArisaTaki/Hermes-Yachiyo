@@ -2841,6 +2841,44 @@ class ApprovalResumeProjectionCoordinator:
         )
 
 
+class RunTransitionProjectionCoordinator:
+    """Projects cross-run state transitions after a Run changes state."""
+
+    def __init__(
+        self,
+        *,
+        update_agent_run_group_if_root: Any,
+        resume_parent_workflows_after_child_update: Any,
+        workflow_run_is_group_root: Any,
+        update_run_group: Any,
+        get_run: Any,
+    ) -> None:
+        self._update_agent_run_group_if_root = update_agent_run_group_if_root
+        self._resume_parent_workflows_after_child_update = resume_parent_workflows_after_child_update
+        self._workflow_run_is_group_root = workflow_run_is_group_root
+        self._update_run_group = update_run_group
+        self._get_run = get_run
+
+    def project_child_run_transition(self, result: dict[str, Any]) -> dict[str, Any]:
+        self._update_agent_run_group_if_root(result)
+        self._resume_parent_workflows_after_child_update(result)
+        return result
+
+    def project_cancelled_workflow_group_if_root(
+        self,
+        run: dict[str, Any],
+        result: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not self._workflow_run_is_group_root(run):
+            return result
+        self._update_run_group(
+            str(run.get("run_group_id") or ""),
+            status="cancelled",
+            summary=str(result.get("result") or ""),
+        )
+        return self._get_run(str(run.get("run_id") or result.get("run_id") or ""))
+
+
 class WorkflowParentResumeCoordinator:
     """Coordinates parent Workflow updates after a child Run changes state."""
 
@@ -3858,6 +3896,13 @@ class NativeRunEngine:
             update_run=lambda run_id, **kwargs: self._update_run(run_id, **kwargs),
             update_agent_run_group_if_root=lambda run: self._update_agent_run_group_if_root(run),
             mark_parent_workflows_child_running=lambda run: self._mark_parent_workflows_child_running(run),
+        )
+        self.run_transition_projection = RunTransitionProjectionCoordinator(
+            update_agent_run_group_if_root=lambda run: self._update_agent_run_group_if_root(run),
+            resume_parent_workflows_after_child_update=lambda run: self._resume_parent_workflows_after_child_update(run),
+            workflow_run_is_group_root=lambda run: self._workflow_run_is_group_root(run),
+            update_run_group=lambda run_group_id, **kwargs: self._update_run_group(run_group_id, **kwargs),
+            get_run=lambda run_id: self.get_run(run_id),
         )
         self._init_db()
         self._migrate_agent_workspace_policies()
@@ -8533,19 +8578,10 @@ class NativeRunEngine:
         run: dict[str, Any],
         result: dict[str, Any],
     ) -> dict[str, Any]:
-        if not self._workflow_run_is_group_root(run):
-            return result
-        self._update_run_group(
-            str(run.get("run_group_id") or ""),
-            status="cancelled",
-            summary=str(result.get("result") or ""),
-        )
-        return self.get_run(str(run.get("run_id") or result.get("run_id") or ""))
+        return self.run_transition_projection.project_cancelled_workflow_group_if_root(run, result)
 
     def _project_child_run_transition(self, result: dict[str, Any]) -> dict[str, Any]:
-        self._update_agent_run_group_if_root(result)
-        self._resume_parent_workflows_after_child_update(result)
-        return result
+        return self.run_transition_projection.project_child_run_transition(result)
 
     def reject_run_approval(self, run_id: str, reason: str = "") -> dict[str, Any]:
         run = self.get_run(run_id)

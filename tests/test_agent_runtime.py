@@ -24,6 +24,7 @@ from apps.shell.agent_runtime import (
     ApprovalResumeProjectionCoordinator,
     NativeRunEngine,
     RunProjectionCoordinator,
+    RunTransitionProjectionCoordinator,
     TaskRunLinkRepository,
     ToolApprovalResumeContext,
     ToolApprovalTransitionContext,
@@ -88,6 +89,49 @@ def test_run_projection_coordinator_syncs_run_projections():
         ("task_links", "run-projection", {"status": "approval_required"}),
         ("task_links", "run-projection", {"last_event_sequence": 7}),
     ]
+
+
+def test_run_transition_projection_coordinator_projects_child_and_workflow_group():
+    agent_group_updates: list[dict[str, object]] = []
+    parent_updates: list[dict[str, object]] = []
+    workflow_group_updates: list[dict[str, object]] = []
+    stored_runs = {
+        "workflow_root": {
+            "run_id": "workflow_root",
+            "status": "cancelled",
+            "result": "Workflow cancelled",
+        }
+    }
+
+    coordinator = RunTransitionProjectionCoordinator(
+        update_agent_run_group_if_root=lambda run: agent_group_updates.append(run),
+        resume_parent_workflows_after_child_update=lambda run: parent_updates.append(run),
+        workflow_run_is_group_root=lambda run: bool(run.get("is_root")),
+        update_run_group=lambda run_group_id, **kwargs: workflow_group_updates.append(
+            {"run_group_id": run_group_id, **kwargs}
+        ),
+        get_run=lambda run_id: stored_runs[run_id],
+    )
+
+    child = {"run_id": "agent_child", "kind": "agent_run", "status": "completed"}
+    non_root_workflow = {"run_id": "workflow_child", "run_group_id": "group-child", "is_root": False}
+    root_workflow = {"run_id": "workflow_root", "run_group_id": "group-root", "is_root": True}
+    cancelled = {"run_id": "workflow_root", "status": "cancelled", "result": "Workflow cancelled"}
+
+    assert coordinator.project_child_run_transition(child) is child
+    assert coordinator.project_cancelled_workflow_group_if_root(non_root_workflow, cancelled) is cancelled
+    root_projection = coordinator.project_cancelled_workflow_group_if_root(root_workflow, cancelled)
+
+    assert agent_group_updates == [child]
+    assert parent_updates == [child]
+    assert workflow_group_updates == [
+        {
+            "run_group_id": "group-root",
+            "status": "cancelled",
+            "summary": "Workflow cancelled",
+        }
+    ]
+    assert root_projection == stored_runs["workflow_root"]
 
 
 def test_approval_resume_coordinator_executes_approved_tool_and_remaining_requests():

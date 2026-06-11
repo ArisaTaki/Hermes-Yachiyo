@@ -98,6 +98,7 @@ jobs:
             tests/test_agent_runtime.py::test_run_approval_routes_return_404_and_are_idempotent \
             tests/test_agent_runtime.py::test_run_approval_reject_route_is_idempotent \
             tests/test_agent_runtime.py::test_concurrent_cancel_run_is_idempotent \
+            tests/test_agent_runtime.py::test_run_transition_projection_coordinator_projects_child_and_workflow_group \
             tests/test_bridge_server.py::test_run_cancel_route_handler_is_idempotent \
             tests/test_bridge_server.py::test_chat_cancel_bridge_route_cancels_native_run_and_ignores_late_output \
             tests/test_executor.py::TestNativeAgentExecutor::test_run_uses_native_run_and_returns_task_result \
