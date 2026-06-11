@@ -11,12 +11,14 @@ const FRONTEND = path.join(ROOT, 'apps', 'frontend');
 const ELECTRON = path.join(FRONTEND, 'node_modules', '.bin', process.platform === 'win32' ? 'electron.cmd' : 'electron');
 const VITE = path.join(FRONTEND, 'node_modules', '.bin', process.platform === 'win32' ? 'vite.cmd' : 'vite');
 const RUN_ID = 'agent_run_detail_ui_smoke';
+const APPROVAL_RUN_ID = 'agent_run_detail_ui_smoke_approval';
 const RERUN_RUN_ID = 'agent_run_detail_ui_smoke_rerun';
 const RUN_GROUP_ID = 'run_group_detail_ui_smoke';
 const ARTIFACT_PATH = 'summary.md';
 const ARTIFACT_CONTENT = '# Run Detail UI Smoke\n\nArtifact preview loaded from mock Bridge.';
 const now = new Date().toISOString();
 let rerunCreated = false;
+let approvalApproved = false;
 
 const run = {
   run_id: RUN_ID,
@@ -44,13 +46,45 @@ const run = {
   agent_run_id: RUN_ID,
 };
 
+function approvalRun() {
+  return {
+    run_id: APPROVAL_RUN_ID,
+    run_group_id: RUN_GROUP_ID,
+    run_group_source: 'agent',
+    task_id: 'task-run-detail-ui-smoke-approval',
+    session_id: 'session-run-detail-ui-smoke-approval',
+    task_run_link_run_status: approvalApproved ? 'completed' : 'approval_required',
+    task_run_link_last_event_sequence: approvalApproved ? 5 : 2,
+    kind: 'agent_run',
+    runnable_id: 'agent-run-detail-smoke',
+    runnable_name: 'Run Detail Smoke Agent',
+    status: approvalApproved ? 'completed' : 'approval_required',
+    user_goal: 'Approve Native Run Detail from Agent Studio smoke',
+    result: approvalApproved ? 'Run Detail approval smoke completed' : '',
+    pending_approval: approvalApproved ? undefined : {
+      approval_id: 'approval-run-detail-ui-smoke',
+      tool: 'terminal.run',
+      input_preview: {
+        command: 'printf run-detail-approval-smoke',
+        cwd: '/workspace',
+        checkpoint: 'Run Detail approval smoke',
+      },
+    },
+    timeline: [],
+    artifacts: [],
+    created_at: now,
+    updated_at: now,
+    agent_run_id: APPROVAL_RUN_ID,
+  };
+}
+
 const runGroup = {
   run_group_id: RUN_GROUP_ID,
   title: 'Run Detail UI Smoke',
   source: 'agent',
   status: 'completed',
   summary: 'One completed Agent Run',
-  child_run_ids: [RUN_ID, RERUN_RUN_ID],
+  child_run_ids: [APPROVAL_RUN_ID, RUN_ID, RERUN_RUN_ID],
   created_at: now,
   updated_at: now,
 };
@@ -145,6 +179,75 @@ const rerunEvents = [
     created_at: now,
   },
 ];
+
+function approvalRunEvents() {
+  const events = [
+    {
+      event_id: 'event-run-detail-approval-smoke-1',
+      run_id: APPROVAL_RUN_ID,
+      sequence: 1,
+      schema_version: 1,
+      event_type: 'agent.run.started',
+      actor: 'agent',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: { goal: 'Approve Native Run Detail from Agent Studio smoke' },
+      created_at: now,
+    },
+    {
+      event_id: 'event-run-detail-approval-smoke-2',
+      run_id: APPROVAL_RUN_ID,
+      sequence: 2,
+      schema_version: 1,
+      event_type: 'agent.tool.approval_required',
+      actor: 'agent',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: { tool: 'terminal.run', command: 'printf run-detail-approval-smoke' },
+      created_at: now,
+    },
+  ];
+  if (!approvalApproved) return events;
+  return [
+    ...events,
+    {
+      event_id: 'event-run-detail-approval-smoke-3',
+      run_id: APPROVAL_RUN_ID,
+      sequence: 3,
+      schema_version: 1,
+      event_type: 'agent.tool.approval_approved',
+      actor: 'user',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: { tool: 'terminal.run', approval_id: 'approval-run-detail-ui-smoke' },
+      created_at: now,
+    },
+    {
+      event_id: 'event-run-detail-approval-smoke-4',
+      run_id: APPROVAL_RUN_ID,
+      sequence: 4,
+      schema_version: 1,
+      event_type: 'agent.tool.call',
+      actor: 'tool',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: { tool: 'terminal.run', command: 'printf run-detail-approval-smoke' },
+      created_at: now,
+    },
+    {
+      event_id: 'event-run-detail-approval-smoke-5',
+      run_id: APPROVAL_RUN_ID,
+      sequence: 5,
+      schema_version: 1,
+      event_type: 'agent.run.completed',
+      actor: 'agent',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: { result: 'Run Detail approval smoke completed' },
+      created_at: now,
+    },
+  ];
+}
 
 function log(message) {
   process.stdout.write(`[agent-run-detail-ui-smoke] ${message}\n`);
@@ -242,11 +345,20 @@ async function startMockBridge() {
         return;
       }
       if (request.method === 'GET' && url.pathname === '/ui/runs') {
-        sendJson(response, 200, { runs: rerunCreated ? [rerun, run] : [run] });
+        sendJson(response, 200, { runs: rerunCreated ? [rerun, run, approvalRun()] : [run, approvalRun()] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/ui/runs/${APPROVAL_RUN_ID}`) {
+        sendJson(response, 200, approvalRun());
         return;
       }
       if (request.method === 'GET' && url.pathname === `/ui/runs/${RUN_ID}`) {
         sendJson(response, 200, run);
+        return;
+      }
+      if (request.method === 'POST' && url.pathname === `/ui/runs/${APPROVAL_RUN_ID}/approval/approve`) {
+        approvalApproved = true;
+        sendJson(response, 200, approvalRun());
         return;
       }
       if (request.method === 'GET' && url.pathname === `/ui/runs/${RERUN_RUN_ID}`) {
@@ -283,6 +395,17 @@ async function startMockBridge() {
           after_sequence: Math.max(0, afterSequence),
           limit,
           events: runEvents.filter((event) => event.sequence > afterSequence).slice(0, limit),
+        });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/runs/${APPROVAL_RUN_ID}/events`) {
+        const afterSequence = Number(url.searchParams.get('after_sequence') || '0');
+        const limit = Math.max(1, Number(url.searchParams.get('limit') || '200'));
+        sendJson(response, 200, {
+          run_id: APPROVAL_RUN_ID,
+          after_sequence: Math.max(0, afterSequence),
+          limit,
+          events: approvalRunEvents().filter((event) => event.sequence > afterSequence).slice(0, limit),
         });
         return;
       }
@@ -354,6 +477,7 @@ const { app, BrowserWindow } = require('electron');
 const devUrl = ${JSON.stringify(devUrl)};
 const bridgeUrl = ${JSON.stringify(bridgeUrl)};
 const runId = ${JSON.stringify(RUN_ID)};
+const approvalRunId = ${JSON.stringify(APPROVAL_RUN_ID)};
 const watchdog = setTimeout(() => {
   console.error('electron smoke timed out');
   app.exit(1);
@@ -411,6 +535,43 @@ async function main() {
   win.webContents.on('console-message', (_event, level, message) => {
     if (level >= 2) console.error('[renderer]', message);
   });
+  await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '#/agents/' + encodeURIComponent(approvalRunId));
+  console.log('[electron-smoke] approval run detail loaded');
+  await waitFor(win, () => document.querySelector('[data-testid="agent-run-detail"]')?.getAttribute('data-run-id') === ${JSON.stringify(APPROVAL_RUN_ID)}, 'approval run detail article');
+  await waitFor(win, () => {
+    const approval = document.querySelector('[data-testid="agent-run-detail-approval"]');
+    const request = document.querySelector('[data-testid="agent-run-approval-request"]');
+    const approve = document.querySelector('[data-testid="agent-run-detail-approval-approve"]');
+    const reject = document.querySelector('[data-testid="agent-run-detail-approval-reject"]');
+    return approval
+      && request?.textContent.includes('terminal.run')
+      && request?.textContent.includes('printf run-detail-approval-smoke')
+      && approve
+      && reject
+      && !approve.disabled;
+  }, 'approval action box');
+  console.log('[electron-smoke] approval box rendered');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"agent-run-detail-approval-approve\\"]').click()", true);
+  await waitFor(win, () => {
+    const detail = document.querySelector('[data-testid="agent-run-detail"]');
+    const result = document.querySelector('[data-testid="agent-run-detail-result"]');
+    const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
+    const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
+    const sequences = events.map((node) => node.getAttribute('data-run-event-sequence'));
+    const runIds = events.map((node) => node.getAttribute('data-run-event-run-id'));
+    return detail?.getAttribute('data-run-id') === ${JSON.stringify(APPROVAL_RUN_ID)}
+      && !document.querySelector('[data-testid="agent-run-detail-approval"]')
+      && result?.textContent.includes('Run Detail approval smoke completed')
+      && eventTypes.includes('agent.tool.approval_required')
+      && eventTypes.includes('agent.tool.approval_approved')
+      && eventTypes.includes('agent.tool.call')
+      && eventTypes.includes('agent.run.completed')
+      && sequences.join(',') === '1,2,3,4,5'
+      && runIds.every((id) => id === ${JSON.stringify(APPROVAL_RUN_ID)});
+  }, 'approved run detail replay');
+  console.log('[electron-smoke] approval action completed');
+
+  await win.loadURL('about:blank');
   await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '#/agents/' + encodeURIComponent(runId));
   console.log('[electron-smoke] run detail loaded');
   await waitFor(win, () => document.querySelector('[data-testid="agent-run-detail"]')?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}, 'run detail article');
