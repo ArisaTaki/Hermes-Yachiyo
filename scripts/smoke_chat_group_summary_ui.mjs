@@ -20,6 +20,7 @@ const GROUP_AGENT_RUN_ID = 'agent_run_chat_group_ui_smoke';
 const SUMMARY_TASK_ID = 'task-chat-group-summary-ui-smoke';
 const GROUP_AGENT_TASK_ID = 'task-chat-group-agent-ui-smoke';
 const GROUP_AGENT_RESULT = 'Group UI Agent completed Native group dispatch.';
+const GROUP_SUMMARY_RESULT = 'Oha-Yachiyo completed the group summary.';
 const now = new Date().toISOString();
 
 const bridgeState = {
@@ -27,6 +28,7 @@ const bridgeState = {
   groupCreated: false,
   groupCreatePayload: null,
   messagePayload: null,
+  groupSummaryStatus: 'idle',
   messagesBySession: new Map([[MAIN_SESSION_ID, []]]),
 };
 
@@ -86,7 +88,11 @@ function sessionsPayload() {
       token_count: 0,
       is_processing: false,
       processing_count: 0,
-      latest_message_preview: bridgeState.messagePayload ? 'Waiting for main model summary' : '',
+      latest_message_preview: bridgeState.groupSummaryStatus === 'completed'
+        ? GROUP_SUMMARY_RESULT
+        : bridgeState.messagePayload
+          ? 'Waiting for main model summary'
+          : '',
       updated_at: now,
     });
   }
@@ -113,7 +119,21 @@ function messagesPayload() {
 }
 
 function createGroupMessages(text) {
-  return [
+  const summaryCompleted = bridgeState.groupSummaryStatus === 'completed';
+  const agentSummaryMetadata = {
+    sender: { kind: 'agent', id: AGENT_ID, name: agentRunnable.name, nickname: agentRunnable.nickname },
+    target: { kind: 'group', id: GROUP_SESSION_ID, name: GROUP_NAME },
+    runnable_kind: 'agent',
+    runnable_id: AGENT_ID,
+    run_group_id: RUN_GROUP_ID,
+    group_goal: text,
+    group_dispatch_count: 1,
+    group_dispatch_run_group_id: RUN_GROUP_ID,
+    group_agent_summary_task_id: SUMMARY_TASK_ID,
+    group_agent_summary_status: summaryCompleted ? 'completed' : 'processing',
+    ...(summaryCompleted ? {} : { group_agent_summary_pending: true }),
+  };
+  const messages = [
     {
       id: 'chat-group-ui-user-message',
       role: 'user',
@@ -129,21 +149,10 @@ function createGroupMessages(text) {
       id: 'chat-group-ui-agent-summary-message',
       role: 'assistant',
       content: 'Group UI Agent accepted the task and returned a draft result.',
-      status: 'processing',
+      status: summaryCompleted ? 'completed' : 'processing',
       created_at: now,
-      metadata: {
-        sender: { kind: 'agent', id: AGENT_ID, name: agentRunnable.name, nickname: agentRunnable.nickname },
-        target: { kind: 'group', id: GROUP_SESSION_ID, name: GROUP_NAME },
-        runnable_kind: 'agent',
-        runnable_id: AGENT_ID,
-        run_group_id: RUN_GROUP_ID,
-        group_goal: text,
-        group_dispatch_count: 1,
-        group_dispatch_run_group_id: RUN_GROUP_ID,
-        group_agent_summary_task_id: SUMMARY_TASK_ID,
-        group_agent_summary_pending: true,
-        group_agent_summary_status: 'processing',
-      },
+      task_id: GROUP_AGENT_TASK_ID,
+      metadata: agentSummaryMetadata,
       activity_events: [
         {
           event_id: 'activity-chat-group-ui-smoke',
@@ -161,6 +170,24 @@ function createGroupMessages(text) {
       ],
     },
   ];
+  if (summaryCompleted) {
+    messages.push({
+      id: 'chat-group-ui-main-summary-message',
+      role: 'assistant',
+      content: GROUP_SUMMARY_RESULT,
+      status: 'completed',
+      created_at: now,
+      task_id: SUMMARY_TASK_ID,
+      metadata: {
+        sender: { kind: 'main', name: 'Oha-Yachiyo', nickname: 'Yachiyo' },
+        target: { kind: 'group', id: GROUP_SESSION_ID, name: GROUP_NAME },
+        group_agent_summary_for_task_id: GROUP_AGENT_TASK_ID,
+        group_agent_summary_for_message_id: 'chat-group-ui-agent-summary-message',
+        run_group_id: RUN_GROUP_ID,
+      },
+    });
+  }
+  return messages;
 }
 
 function groupAgentRun() {
@@ -409,11 +436,18 @@ async function startMockBridge() {
         const body = await readRequestJson(request);
         log(`mock bridge group message text=${JSON.stringify(body.text || '')}`);
         bridgeState.messagePayload = body;
+        bridgeState.groupSummaryStatus = 'processing';
         bridgeState.messagesBySession.set(GROUP_SESSION_ID, createGroupMessages(String(body.text || '')));
         sendJson(response, 200, {
           ok: true,
           task_id: SUMMARY_TASK_ID,
         });
+        return;
+      }
+      if (request.method === 'POST' && url.pathname === '/__smoke/complete-group-summary') {
+        bridgeState.groupSummaryStatus = 'completed';
+        bridgeState.messagesBySession.set(GROUP_SESSION_ID, createGroupMessages(String(bridgeState.messagePayload?.text || '')));
+        sendJson(response, 200, { ok: true, summary_status: bridgeState.groupSummaryStatus });
         return;
       }
       if (request.method === 'POST' && url.pathname === '/ui/chat/sessions/load') {
@@ -476,16 +510,45 @@ function killProcess(child) {
 function runElectronSmoke(devUrl, bridgeUrl) {
   const script = `
 const { app, BrowserWindow } = require('electron');
+const http = require('node:http');
 const devUrl = ${JSON.stringify(devUrl)};
 const bridgeUrl = ${JSON.stringify(bridgeUrl)};
 const groupName = ${JSON.stringify(GROUP_NAME)};
 const groupGoal = ${JSON.stringify(GROUP_GOAL)};
 const runGroupId = ${JSON.stringify(RUN_GROUP_ID)};
 const summaryTaskId = ${JSON.stringify(SUMMARY_TASK_ID)};
+let chatLoadCounter = 0;
 const watchdog = setTimeout(() => {
   console.error('electron smoke timed out');
   app.exit(1);
 }, 30000);
+function requestBridgeJson(pathname, method = 'GET') {
+  return new Promise((resolve, reject) => {
+    const request = http.request(bridgeUrl + pathname, { method }, (response) => {
+      const chunks = [];
+      response.on('data', (chunk) => chunks.push(chunk));
+      response.on('end', () => {
+        const body = Buffer.concat(chunks).toString('utf8');
+        if (!response.statusCode || response.statusCode < 200 || response.statusCode >= 300) {
+          reject(new Error(method + ' ' + pathname + ' failed with status ' + response.statusCode + ': ' + body));
+          return;
+        }
+        try {
+          resolve(body ? JSON.parse(body) : {});
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+    request.on('error', reject);
+    request.end();
+  });
+}
+async function loadChat(win) {
+  chatLoadCounter += 1;
+  await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '&smokeLoad=' + chatLoadCounter + '#/chat');
+  await waitFor(win, () => document.querySelector('[data-testid="chat-composer-input"]'), 'chat composer input');
+}
 function waitFor(win, predicate, label, timeout = 15000) {
   const started = Date.now();
   return new Promise((resolve, reject) => {
@@ -556,10 +619,9 @@ async function main() {
   win.webContents.on('console-message', (_event, level, message) => {
     if (level >= 2) console.error('[renderer]', message);
   });
-  await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '#/chat');
+  await loadChat(win);
   console.log('[electron-smoke] chat loaded');
   await waitFor(win, () => document.querySelector('[data-testid="chat-session-tab-groups"]'), 'chat groups tab');
-  await waitFor(win, () => document.querySelector('[data-testid="chat-composer-input"]'), 'chat composer input');
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-session-tab-groups\\"]').click()", true);
   await waitFor(win, () => document.querySelector('[data-testid="chat-session-tab-create"]')?.getAttribute('aria-label') === '创建群组', 'group create action');
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-session-tab-create\\"]').click()", true);
@@ -607,6 +669,22 @@ async function main() {
       && document.body.textContent.includes(${JSON.stringify(GROUP_GOAL)});
   }, 'group summary status');
   console.log('[electron-smoke] group summary rendered');
+  await requestBridgeJson('/__smoke/complete-group-summary', 'POST');
+  await loadChat(win);
+  await waitFor(win, () => {
+    const summary = document.querySelector('[data-testid="chat-message-summary-status"]');
+    const summaryMessage = document.querySelector('[data-message-id="chat-group-ui-main-summary-message"]');
+    return summary
+      && summary.getAttribute('data-summary-task-id') === ${JSON.stringify(SUMMARY_TASK_ID)}
+      && summary.getAttribute('data-run-group-id') === ${JSON.stringify(RUN_GROUP_ID)}
+      && summary.getAttribute('data-summary-tone') === 'completed'
+      && summary.getAttribute('data-summary-status') === 'completed'
+      && summary.textContent.includes('主模型已整理')
+      && !summary.textContent.includes('等待主模型整理')
+      && summaryMessage?.textContent.includes(${JSON.stringify(GROUP_SUMMARY_RESULT)})
+      && document.body.textContent.includes('Group UI Agent accepted the task');
+  }, 'group completed summary status');
+  console.log('[electron-smoke] group summary completion rendered');
   await waitFor(win, () => {
     const row = document.querySelector('[data-testid="chat-message-activity-row"]');
     const openRun = document.querySelector('[data-testid="chat-message-activity-open-run-detail"]');
