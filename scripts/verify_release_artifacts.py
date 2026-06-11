@@ -57,6 +57,7 @@ _LEGACY_PROTOCOL_TOKENS: tuple[str, ...] = (
     f"get_{_OLD_PROTOCOL_PRODUCT}_workspace_dir",
     f"{_OLD_PROTOCOL_PRODUCT}_workspace",
     f"{_OLD_PROTOCOL_PRODUCT}-workspace",
+    f"{_OLD_PROTOCOL_PRODUCT}_agent",
     f".{_OLD_PROTOCOL_PRODUCT}_init",
     f"configs/{_OLD_PROTOCOL_PRODUCT}.json",
 )

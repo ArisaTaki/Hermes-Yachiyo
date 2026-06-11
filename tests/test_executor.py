@@ -575,7 +575,7 @@ class TestNativeAgentExecutor:
         assert not any(call == "cancel" for call in calls)
 
     @pytest.mark.asyncio
-    async def test_run_delegates_yachiyo_agent_before_final_reply(self, monkeypatch):
+    async def test_run_delegates_oha_agent_before_final_reply(self, monkeypatch):
         calls: list[list[dict]] = []
 
         class FakeRuntimeService:

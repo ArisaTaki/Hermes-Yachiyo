@@ -9592,8 +9592,19 @@ def test_explicit_empty_tool_policy_disables_model_tools(tmp_path, monkeypatch):
         assert captured["tools"] == []
         prompt = captured["messages"][0]["content"]
         assert "artifact.write" not in prompt
+        assert "Oha-Yachiyo Agent Runtime" in prompt
+        assert "Runtime: Yachiyo Agent Runtime" not in prompt
+        context_artifact = service.read_run_artifact(run["run_id"], "agent-context.md")
+        assert "Runtime: Oha Agent Runtime" in context_artifact["content"]
+        assert "Runtime: Yachiyo Agent Runtime" not in context_artifact["content"]
+        started = next(event for event in run["timeline"] if event["event"] == "agent.run.started")
+        assert started["runtime"] == "oha_agent"
         compiled = next(event for event in run["timeline"] if event["event"] == "agent.runtime.compiled")
+        assert compiled["detail"] == "Oha Agent Runtime compiled tools and workspace policy"
         assert compiled["allowed_tools"] == []
+        run_events = service.list_run_events(run["run_id"])["events"]
+        started_event = next(event for event in run_events if event["event_type"] == "agent.run.started")
+        assert started_event["payload"]["runtime"] == "oha_agent"
     finally:
         service.close()
 

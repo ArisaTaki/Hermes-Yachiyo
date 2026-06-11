@@ -1538,7 +1538,7 @@ python -m pytest tests/test_agent_runtime.py -k "main_chat_repeated_approval or 
 .venv/bin/python -m pytest tests/test_task_runner.py::test_task_runner_main_chat_image_attachment_reaches_native_model -q
 .venv/bin/python -m pytest tests/test_task_runner.py -q
 .venv/bin/python -m pytest tests/test_task_runner.py::test_task_runner_main_chat_auto_delegation_uses_native_runtime -q
-.venv/bin/python -m pytest tests/test_executor.py::TestNativeAgentExecutor::test_run_delegates_yachiyo_agent_before_final_reply tests/test_executor.py::TestNativeAgentExecutor::test_group_mode_returns_dispatch_for_chat_layer tests/test_executor.py::TestExecutorHelpers::test_run_oha_delegation_accepts_structured_directive tests/test_agent_runtime.py::test_delegation_targets_and_delegate_run -q
+.venv/bin/python -m pytest tests/test_executor.py::TestNativeAgentExecutor::test_run_delegates_oha_agent_before_final_reply tests/test_executor.py::TestNativeAgentExecutor::test_group_mode_returns_dispatch_for_chat_layer tests/test_executor.py::TestExecutorHelpers::test_run_oha_delegation_accepts_structured_directive tests/test_agent_runtime.py::test_delegation_targets_and_delegate_run -q
 .venv/bin/python -m pytest tests/test_executor.py -q
 .venv/bin/python -m pytest tests/test_agent_runtime.py -k "run_events_route_paginates_user_visible_events or run_events_route_returns_404_for_missing_run" -q
 .venv/bin/python -m pytest tests/test_executor.py -k "image_attachments or context_chars" -q
@@ -2018,6 +2018,7 @@ compileall passed
 - release verifier 现在除了 release / alpha / stable metadata，也会模拟 `OHA_YACHIYO_PACKAGED_BUILD=1`，确认 packaged build env 即使带 `OHA_YACHIYO_DEV=1` 也不能启用 development features、Bridge debug routes 或 `DevFileCredentialStore` fallback。
 - release workflow smoke 现在也强制包含 approved terminal failure output redaction 回归，确保批准后的 `terminal.run` 非零退出不会把 stdout / stderr secret 写入 Run projection、RunEvent 或 runtime SQLite。
 - release workflow smoke 现在也强制包含主聊天 provider exception / tool exception redaction 回归，避免异常文本中的 secret 进入 Run projection、RunEvent、tool result message 或 runtime SQLite。
+- 新 Agent Run 的 runtime metadata / prompt / compiled timeline 已从旧 `yachiyo_agent` / `Yachiyo Agent Runtime` 收敛为 `oha_agent` / `Oha Agent Runtime`；release artifact verifier 的 binary scan 也会阻断 `yachiyo_agent` 回归。
 - Electron 桌面 Bridge 重启会轮换 session token；前端 `restartDesktopBridge()` 现在会清空 renderer 侧 cached Bridge token，确保重启后的 mutating request 重新从 preload 读取新 token。
 - 桌面 `.app` 已实际启动并验证 bridge；主要 UI 页面已有静态入口 guard、浏览器级 route smoke 和部分按钮级交互 smoke，但仍缺少完整成熟功能 E2E。
 

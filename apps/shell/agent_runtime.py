@@ -6422,7 +6422,7 @@ class NativeRunEngine:
         tool_policy = self._compile_tool_policy(category, agent.get("tool_policy"))
         workspace_policy = self._compile_workspace_policy(agent.get("workspace_policy"))
         return {
-            "runtime": "yachiyo_agent",
+            "runtime": "oha_agent",
             "tool_policy": tool_policy,
             "workspace_policy": workspace_policy,
             "progress_events": [
@@ -6454,7 +6454,7 @@ class NativeRunEngine:
                 f"# Persona Prompt\n{agent.get('persona_prompt') or 'No persona override.'}",
                 f"# Mounted Skills\n{chr(10).join(skill_blocks) if skill_blocks else 'No mounted skills.'}",
                 "# Runtime\n"
-                "Runtime: Yachiyo Agent Runtime\n"
+                "Runtime: Oha Agent Runtime\n"
                 f"Allowed tools: {', '.join(tool_policy.get('allowed_tools') or [])}\n"
                 f"Approval required: {json.dumps(tool_policy.get('approval_required') or {}, ensure_ascii=False)}\n"
                 f"Workspace: {json.dumps(workspace_policy, ensure_ascii=False)}",
@@ -6628,7 +6628,7 @@ class NativeRunEngine:
         timeline.append(
             self._timeline(
                 "agent.runtime.compiled",
-                "Yachiyo Agent Runtime compiled tools and workspace policy",
+                "Oha Agent Runtime compiled tools and workspace policy",
                 allowed_tools=runtime["tool_policy"].get("allowed_tools") or [],
             )
         )
