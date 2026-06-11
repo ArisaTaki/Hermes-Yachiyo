@@ -141,8 +141,7 @@ async function acknowledgeAndOpenChat(mode: 'bubble' | 'live2d', data: LauncherP
       ? result.session_id || ''
       : String(data?.chat?.session_id || result.session_id || sessionId);
   } catch {}
-  const params: Record<string, string> | undefined =
-    data?.proactive?.has_attention && sessionId ? { session_id: sessionId } : undefined;
+  const params: Record<string, string> | undefined = sessionId ? { session_id: sessionId } : undefined;
   await openAppView('chat', params);
 }
 

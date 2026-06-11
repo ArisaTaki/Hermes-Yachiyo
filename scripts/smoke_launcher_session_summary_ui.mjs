@@ -345,6 +345,18 @@ function waitFor(win, predicate, label, timeout = 15000) {
     tick();
   });
 }
+async function installOpenViewProbe(win) {
+  await win.webContents.executeJavaScript(\`
+    window.__ohaLauncherOpenViewCalls = [];
+    window.ohaDesktop = {
+      ...(window.ohaDesktop || {}),
+      openView: async (view, params) => {
+        window.__ohaLauncherOpenViewCalls.push({ view, params: params || {} });
+      },
+    };
+    true;
+  \`, true);
+}
 async function main() {
   await app.whenReady();
   console.log('[electron-smoke] app ready');
@@ -365,6 +377,7 @@ async function main() {
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
   await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '&surface=desktop#/bubble');
+  await installOpenViewProbe(win);
   console.log('[electron-smoke] bubble loaded');
   await waitFor(win, () => document.querySelector('[data-testid="bubble-launcher-shell"]'), 'bubble shell');
   await waitFor(win, () => {
@@ -396,9 +409,17 @@ async function main() {
     Array.isArray(state.ackPayloads)
     && state.ackPayloads.some((payload) => payload?.mode === 'bubble')
   ), 'bubble launcher ack');
+  await waitFor(win, () => (
+    Array.isArray(window.__ohaLauncherOpenViewCalls)
+    && window.__ohaLauncherOpenViewCalls.some((call) => (
+      call?.view === 'chat'
+      && call?.params?.session_id === ${JSON.stringify(GROUP_SESSION_ID)}
+    ))
+  ), 'bubble launcher opened chat session');
   console.log('[electron-smoke] bubble launcher ack verified');
 
   await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '&surface=desktop#/live2d');
+  await installOpenViewProbe(win);
   console.log('[electron-smoke] live2d loaded');
   await waitFor(win, () => document.querySelector('[data-testid="live2d-launcher-shell"]'), 'live2d shell');
   await waitFor(win, () => {
