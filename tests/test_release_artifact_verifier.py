@@ -1146,6 +1146,38 @@ def test_verifier_requires_release_workflow_release_scan_after_metadata(tmp_path
     ) in findings
 
 
+def test_verifier_requires_build_metadata_before_packaged_backend(tmp_path):
+    workflow = tmp_path / verifier.RELEASE_WORKFLOW_FILE
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text(
+        "name: Build macOS DMG\n"
+        "jobs:\n"
+        "  package-macos:\n"
+        "    steps:\n"
+        "      - name: Verify release-facing product identity and security guards\n"
+        "        run: python scripts/verify_release_artifacts.py\n"
+        "      - name: Install Python dependencies\n"
+        "        run: python -m pip install -e .\n"
+        "      - name: Build packaged backend\n"
+        "        run: python scripts/build_backend.py --clean\n"
+        "      - name: Write app build metadata\n"
+        "        run: python scripts/app_version.py current\n"
+        "      - name: Build Electron DMG\n"
+        "        env:\n"
+        "          MACOS_SIGNING_ENABLED: true\n"
+        "        run: scripts/build_macos_self_signed_dmg.sh \"Oha-Yachiyo Self Signed\"\n",
+        encoding="utf-8",
+    )
+
+    findings = verifier._verify_release_workflow_guards(tmp_path)
+    messages = [finding.message for finding in findings]
+
+    assert (
+        "macOS release workflow must write app build metadata before packaged backend and DMG builds"
+        in messages
+    )
+
+
 def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_path):
     workflow = tmp_path / verifier.RELEASE_WORKFLOW_FILE
     workflow.parent.mkdir(parents=True)

@@ -1944,6 +1944,7 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
     signing_import = workflow.find("Import macOS self-signing certificate")
     smoke_tests = workflow.find("Run smoke tests")
     provider_smoke = workflow.find("Run opt-in real provider streaming smoke")
+    write_metadata = workflow.find("Write app build metadata")
     build_backend = workflow.find("Build packaged backend")
     build_dmg = workflow.find("Build Electron DMG")
     verify_packaged_resources = workflow.find("Verify packaged app resources")
@@ -2024,6 +2025,19 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
             Finding(
                 workflow_path,
                 "macOS release workflow must run opt-in real provider streaming smoke before packaged backend and DMG builds",
+            )
+        )
+    if (
+        write_metadata < 0
+        or build_backend < 0
+        or build_dmg < 0
+        or write_metadata > build_backend
+        or write_metadata > build_dmg
+    ):
+        findings.append(
+            Finding(
+                workflow_path,
+                "macOS release workflow must write app build metadata before packaged backend and DMG builds",
             )
         )
     if (

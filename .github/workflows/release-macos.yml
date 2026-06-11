@@ -292,6 +292,51 @@ jobs:
             --expect-finish-reason tool_calls \
             --expect-tool-result-finish-reason stop
 
+      - name: Write app build metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(python scripts/app_version.py current)"
+          RELEASE_VERSION="${VERSION}"
+          BUILD_NUMBER="${GITHUB_RUN_NUMBER}"
+          SHORT_SHA="${GITHUB_SHA::7}"
+          STAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            CHANNEL="${{ inputs.channel }}"
+          elif [[ "${GITHUB_REF_NAME}" == "main" ]]; then
+            CHANNEL="stable"
+          else
+            CHANNEL="experimental"
+          fi
+
+          if [[ "${CHANNEL}" == "stable" ]]; then
+            LATEST_BRANCH="main"
+          elif [[ "${CHANNEL}" == "alpha" ]]; then
+            LATEST_BRANCH="alpha"
+          else
+            LATEST_BRANCH="develop"
+          fi
+
+          mkdir -p apps/frontend/public
+          cat > apps/frontend/public/oha-yachiyo-build.json <<EOF
+          {
+            "name": "Oha-Yachiyo",
+            "channel": "${CHANNEL}",
+            "branch": "${LATEST_BRANCH}",
+            "source_branch": "${GITHUB_REF_NAME}",
+            "version": "${RELEASE_VERSION}",
+            "base_version": "${VERSION}",
+            "commit": "${GITHUB_SHA}",
+            "short_commit": "${SHORT_SHA}",
+            "build_number": ${BUILD_NUMBER},
+            "run_number": ${GITHUB_RUN_NUMBER},
+            "repository": "${GITHUB_REPOSITORY}",
+            "latest_json_url": "https://github.com/${GITHUB_REPOSITORY}/releases/download/${LATEST_BRANCH}-latest/Oha-Yachiyo-${LATEST_BRANCH}-latest.json",
+            "built_at": "${STAMP}"
+          }
+          EOF
+
       - name: Build packaged backend
         run: python scripts/build_backend.py --clean
 
@@ -383,51 +428,6 @@ jobs:
           echo "identity=${SIGNING_IDENTITY}" >> "$GITHUB_OUTPUT"
           echo "keychain=${KEYCHAIN_PATH}" >> "$GITHUB_OUTPUT"
           echo "Imported self-signing certificate identity: ${SIGNING_IDENTITY}" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Write app build metadata
-        shell: bash
-        run: |
-          set -euo pipefail
-          VERSION="$(python scripts/app_version.py current)"
-          RELEASE_VERSION="${VERSION}"
-          BUILD_NUMBER="${GITHUB_RUN_NUMBER}"
-          SHORT_SHA="${GITHUB_SHA::7}"
-          STAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            CHANNEL="${{ inputs.channel }}"
-          elif [[ "${GITHUB_REF_NAME}" == "main" ]]; then
-            CHANNEL="stable"
-          else
-            CHANNEL="experimental"
-          fi
-
-          if [[ "${CHANNEL}" == "stable" ]]; then
-            LATEST_BRANCH="main"
-          elif [[ "${CHANNEL}" == "alpha" ]]; then
-            LATEST_BRANCH="alpha"
-          else
-            LATEST_BRANCH="develop"
-          fi
-
-          mkdir -p apps/frontend/public
-          cat > apps/frontend/public/oha-yachiyo-build.json <<EOF
-          {
-            "name": "Oha-Yachiyo",
-            "channel": "${CHANNEL}",
-            "branch": "${LATEST_BRANCH}",
-            "source_branch": "${GITHUB_REF_NAME}",
-            "version": "${RELEASE_VERSION}",
-            "base_version": "${VERSION}",
-            "commit": "${GITHUB_SHA}",
-            "short_commit": "${SHORT_SHA}",
-            "build_number": ${BUILD_NUMBER},
-            "run_number": ${GITHUB_RUN_NUMBER},
-            "repository": "${GITHUB_REPOSITORY}",
-            "latest_json_url": "https://github.com/${GITHUB_REPOSITORY}/releases/download/${LATEST_BRANCH}-latest/Oha-Yachiyo-${LATEST_BRANCH}-latest.json",
-            "built_at": "${STAMP}"
-          }
-          EOF
 
       - name: Build Electron DMG
         shell: bash

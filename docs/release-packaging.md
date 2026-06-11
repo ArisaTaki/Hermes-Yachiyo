@@ -85,10 +85,11 @@ Oha-Yachiyo.app/Contents/Resources/backend/oha-yachiyo-backend
 
 1. 安装 Python 与 Node 依赖。
 2. 运行关键 smoke tests。
-3. PyInstaller 构建后端。
-4. 如果配置了自签名证书，electron-builder 生成 `.app` 目录后由脚本签名 `.app` 并创建未签名 DMG；否则 electron-builder 直接生成 unsigned DMG。
-5. 上传 workflow artifact。
-6. 创建 GitHub Release。
+3. 写入当前 channel / commit / latest URL 的 build metadata。
+4. PyInstaller 构建后端，并把同一份 build metadata 打入后端可执行文件。
+5. 如果配置了自签名证书，electron-builder 生成 `.app` 目录后由脚本签名 `.app` 并创建未签名 DMG；否则 electron-builder 直接生成 unsigned DMG。
+6. 上传 workflow artifact。
+7. 创建 GitHub Release。
 
 Release tag 格式：
 
