@@ -907,6 +907,8 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow smoke tests must cover terminal output redaction and truncation" in messages
     assert "macOS release workflow smoke tests must cover approved terminal failure output redaction" in messages
     assert "macOS release workflow smoke tests must cover terminal timeout process-group kill" in messages
+    assert "macOS release workflow smoke tests must cover streaming output completed-event persistence" in messages
+    assert "macOS release workflow smoke tests must cover OpenAI SDK object stream completed-event persistence" in messages
     assert "macOS release workflow smoke tests must cover provider reasoning privacy for direct chat calls" in messages
     assert "macOS release workflow smoke tests must cover provider reasoning privacy for main chat loop" in messages
     assert "macOS release workflow smoke tests must cover provider exception redaction" in messages

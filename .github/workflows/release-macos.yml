@@ -122,6 +122,8 @@ jobs:
             tests/test_agent_runtime.py::test_terminal_run_truncates_and_sanitizes_outputs \
             tests/test_agent_runtime.py::test_agent_run_redacts_approved_terminal_failure_output_from_projection_and_storage \
             tests/test_agent_runtime.py::test_terminal_run_timeout_kills_process_group \
+            tests/test_agent_runtime.py::test_main_chat_model_loop_coalesces_stream_chunks_before_persisting \
+            tests/test_agent_runtime.py::test_main_chat_model_loop_coalesces_openai_sdk_object_stream_before_persisting \
             tests/test_agent_runtime.py::test_main_chat_model_rejects_non_stream_reasoning_only_output \
             tests/test_agent_runtime.py::test_main_chat_model_loop_rejects_non_stream_reasoning_only_output \
             tests/test_agent_runtime.py::test_main_chat_provider_exception_is_redacted_from_run_events_and_storage \

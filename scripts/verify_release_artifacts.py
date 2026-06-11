@@ -808,6 +808,14 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover terminal timeout process-group kill",
     ),
     (
+        "tests/test_agent_runtime.py::test_main_chat_model_loop_coalesces_stream_chunks_before_persisting",
+        "macOS release workflow smoke tests must cover streaming output completed-event persistence",
+    ),
+    (
+        "tests/test_agent_runtime.py::test_main_chat_model_loop_coalesces_openai_sdk_object_stream_before_persisting",
+        "macOS release workflow smoke tests must cover OpenAI SDK object stream completed-event persistence",
+    ),
+    (
         "tests/test_agent_runtime.py::test_main_chat_model_rejects_non_stream_reasoning_only_output",
         "macOS release workflow smoke tests must cover provider reasoning privacy for direct chat calls",
     ),
