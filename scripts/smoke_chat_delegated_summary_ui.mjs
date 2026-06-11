@@ -796,6 +796,23 @@ async function waitForCompletedRunDetail(win) {
       && events.every((node) => node.getAttribute('data-run-event-run-id') === ${JSON.stringify(DELEGATED_RUN_ID)});
   }, 'delegated completed Run Detail replay');
 }
+async function waitForSummaryRunDetail(win) {
+  await waitFor(win, () => {
+    const detail = document.querySelector('[data-testid="agent-run-detail"]');
+    const result = document.querySelector('[data-testid="agent-run-detail-result"]');
+    const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
+    const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
+    return window.location.hash.includes(${JSON.stringify(SUMMARY_RUN_ID)})
+      && detail?.getAttribute('data-run-id') === ${JSON.stringify(SUMMARY_RUN_ID)}
+      && detail?.getAttribute('data-run-kind') === 'main_chat_run'
+      && detail?.getAttribute('data-run-status') === 'completed'
+      && detail?.getAttribute('data-run-group-id') === ${JSON.stringify(RUN_GROUP_ID)}
+      && result?.textContent.includes(${JSON.stringify(SUMMARY_RESULT)})
+      && eventTypes.includes('model.output.completed')
+      && eventTypes.includes('run.completed')
+      && events.every((node) => node.getAttribute('data-run-event-run-id') === ${JSON.stringify(SUMMARY_RUN_ID)});
+  }, 'delegated summary Run Detail replay');
+}
 async function waitForCancelledRunDetail(win) {
   await waitFor(win, () => {
     const detail = document.querySelector('[data-testid="agent-run-detail"]');
@@ -873,6 +890,7 @@ async function main() {
     const summary = document.querySelector('[data-message-id="assistant-chat-delegated-summary-ui-smoke-summary"]');
     const notice = document.querySelector('[data-testid="chat-composer-approval-notice"]');
     const row = document.querySelector('[data-testid="chat-message-activity-row"]');
+    const openSummary = summary?.querySelector('[data-testid="chat-message-open-run-detail"]');
     const openRun = document.querySelector('[data-testid="chat-message-activity-open-run-detail"]');
     return summary?.textContent.includes(${JSON.stringify(SUMMARY_RESULT)})
       && !summary.textContent.includes('run_oha_agent')
@@ -880,9 +898,23 @@ async function main() {
       && !notice
       && row?.getAttribute('data-activity-status') === 'completed'
       && row.textContent.includes(${JSON.stringify(DELEGATED_RESULT)})
+      && openSummary
       && openRun;
   }, 'delegated summary created in Chat');
   console.log('[electron-smoke] delegated summary rendered');
+  await win.webContents.executeJavaScript("document.querySelector('[data-message-id=\\"assistant-chat-delegated-summary-ui-smoke-summary\\"] [data-testid=\\"chat-message-open-run-detail\\"]').click()", true);
+  await waitForSummaryRunDetail(win);
+  console.log('[electron-smoke] delegated summary Run Detail replay verified');
+  await loadChat(win);
+  await waitFor(win, () => {
+    const summary = document.querySelector('[data-message-id="assistant-chat-delegated-summary-ui-smoke-summary"]');
+    const row = document.querySelector('[data-testid="chat-message-activity-row"]');
+    const openRun = document.querySelector('[data-testid="chat-message-activity-open-run-detail"]');
+    return summary?.textContent.includes(${JSON.stringify(SUMMARY_RESULT)})
+      && row?.getAttribute('data-activity-status') === 'completed'
+      && row.textContent.includes(${JSON.stringify(DELEGATED_RESULT)})
+      && openRun;
+  }, 'delegated summary chat restored after Run Detail');
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-message-activity-open-run-detail\\"]').click()", true);
   await waitForCompletedRunDetail(win);
   console.log('[electron-smoke] delegated Run Detail replay verified');
