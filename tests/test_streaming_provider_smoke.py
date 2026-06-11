@@ -138,6 +138,71 @@ def test_stream_smoke_validates_multiline_sse_tool_call_without_leaking_argument
     assert "README.md" not in summary_json
 
 
+def test_stream_smoke_requires_tool_result_followup_content_without_leaking(monkeypatch):
+    requests: list[dict] = []
+    leaked_secret = "sk-stream-tool-result-secret123456"
+
+    class FakeToolCallResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            yield (
+                b'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_followup",'
+                b'"type":"function","function":{"name":"workspace_read","arguments":"{\\"path\\":\\"README.md\\"}"}}]},'
+                b'"finish_reason":"tool_calls"}]}\n\n'
+            )
+            yield b"data: [DONE]\n\n"
+
+    class FakeFollowupResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            yield b'data: {"choices":[{"delta":{"content":"followup ok"},"finish_reason":"stop"}]}\n\n'
+            yield b"data: [DONE]\n\n"
+
+    def fake_urlopen(request, timeout, context):
+        requests.append(json.loads(request.data.decode("utf-8")))
+        assert timeout == 180
+        assert isinstance(context, ssl.SSLContext)
+        assert request.get_header("Accept") == "text/event-stream"
+        return FakeToolCallResponse() if len(requests) == 1 else FakeFollowupResponse()
+
+    monkeypatch.setattr("apps.shell.model_profiles.urlrequest.urlopen", fake_urlopen)
+
+    summary = smoke.run_stream_smoke(
+        base_url="https://api.example.test/v1",
+        model="demo-model",
+        api_key=leaked_secret,
+        require_tool_call=True,
+        require_tool_result_content=True,
+        expect_tool_name="workspace_read",
+        expect_tool_argument_json_fields=["path=README.md"],
+        expect_finish_reasons=["tool_calls"],
+    )
+
+    summary_json = json.dumps(summary)
+    assert len(requests) == 2
+    assert requests[1]["messages"][1]["role"] == "assistant"
+    assert requests[1]["messages"][1]["tool_calls"][0]["id"] == "call_followup"
+    assert requests[1]["messages"][2]["role"] == "tool"
+    assert requests[1]["messages"][2]["tool_call_id"] == "call_followup"
+    assert "synthetic workspace_read result" in requests[1]["messages"][2]["content"]
+    assert summary["tool_result_followup_chunk_count"] == 1
+    assert summary["tool_result_followup_content_chars"] == len("followup ok")
+    assert summary["tool_result_followup_finish_reasons"] == ["stop"]
+    assert leaked_secret not in summary_json
+    assert "README.md" not in summary_json
+    assert "synthetic workspace_read result" not in summary_json
+
+
 def test_stream_smoke_requires_content_and_expected_tool_name(monkeypatch):
     requests: list[dict] = []
 
@@ -1247,6 +1312,7 @@ def test_stream_smoke_main_expect_tool_name_requests_tool_call(monkeypatch, caps
             "sk-stream-smoke-secret123456",
             "--require-content",
             "--require-reasoning",
+            "--require-tool-result-content",
             "--expect-tool-name",
             "workspace_read",
             "--expect-tool-argument-substring",
@@ -1263,6 +1329,7 @@ def test_stream_smoke_main_expect_tool_name_requests_tool_call(monkeypatch, caps
     assert calls[0]["tool_call"] is True
     assert calls[0]["require_content"] is True
     assert calls[0]["require_reasoning"] is True
+    assert calls[0]["require_tool_result_content"] is True
     assert calls[0]["expect_tool_name"] == "workspace_read"
     assert calls[0]["expect_tool_argument_substrings"] == ["README.md"]
     assert calls[0]["expect_tool_argument_json_fields"] == ["path=README.md"]

@@ -998,6 +998,7 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow provider smoke must require streamed content" in messages
     assert "macOS release workflow provider smoke must assert text finish_reason" in messages
     assert "macOS release workflow provider smoke must require streamed tool calls" in messages
+    assert "macOS release workflow provider smoke must verify streamed content after a tool result" in messages
     assert "macOS release workflow provider smoke must assert the workspace_read tool call" in messages
     assert "macOS release workflow provider smoke must assert the workspace_read README argument" in messages
     assert "macOS release workflow provider smoke must assert the workspace_read path JSON field" in messages

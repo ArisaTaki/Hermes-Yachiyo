@@ -527,6 +527,10 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow provider smoke must require streamed tool calls",
     ),
     (
+        "--require-tool-result-content",
+        "macOS release workflow provider smoke must verify streamed content after a tool result",
+    ),
+    (
         "--expect-tool-name workspace_read",
         "macOS release workflow provider smoke must assert the workspace_read tool call",
     ),

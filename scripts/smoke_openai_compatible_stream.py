@@ -490,6 +490,44 @@ def _workspace_read_tool() -> dict[str, Any]:
     }
 
 
+def _tool_result_followup_messages(prompt: str, tool_call: dict[str, Any]) -> list[dict[str, Any]]:
+    function_name = str(tool_call.get("name") or "workspace_read")
+    arguments = str(tool_call.get("arguments") or '{"path":"README.md"}')
+    if function_name != "workspace_read":
+        raise RuntimeError("tool-result follow-up requires workspace_read")
+    try:
+        parsed_arguments = json.loads(arguments or "{}")
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("tool-result follow-up requires JSON tool arguments") from exc
+    if not isinstance(parsed_arguments, dict) or str(parsed_arguments.get("path") or "") != "README.md":
+        raise RuntimeError("tool-result follow-up requires workspace_read path README.md")
+    tool_call_id = str(tool_call.get("id") or "call_workspace_read_smoke")
+    tool_result = {
+        "path": "README.md",
+        "content": "Oha-Yachiyo provider smoke synthetic workspace_read result.",
+    }
+    return [
+        {"role": "user", "content": prompt},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": tool_call_id,
+                    "type": "function",
+                    "function": {"name": function_name, "arguments": arguments},
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": tool_call_id,
+            "name": function_name,
+            "content": json.dumps(tool_result, ensure_ascii=False, sort_keys=True),
+        },
+    ]
+
+
 def run_stream_smoke(
     *,
     base_url: str,
@@ -498,6 +536,7 @@ def run_stream_smoke(
     prompt: str = "",
     tool_call: bool = False,
     require_tool_call: bool = False,
+    require_tool_result_content: bool = False,
     require_content: bool = False,
     require_reasoning: bool = False,
     expect_tool_name: str = "",
@@ -535,6 +574,7 @@ def run_stream_smoke(
     tool_call = (
         tool_call
         or require_tool_call
+        or require_tool_result_content
         or bool(expected_name)
         or bool(expected_argument_substrings)
         or bool(expected_argument_json_fields)
@@ -555,7 +595,9 @@ def run_stream_smoke(
     )
     summary = summarize_stream_chunks(
         chunks if not isinstance(chunks, dict) else [],
-        include_tool_arguments=bool(expected_argument_substrings or expected_argument_json_fields),
+        include_tool_arguments=bool(
+            require_tool_result_content or expected_argument_substrings or expected_argument_json_fields
+        ),
     )
     if require_content and int(summary["content_chars"]) == 0:
         raise RuntimeError("stream completed without content")
@@ -577,7 +619,27 @@ def run_stream_smoke(
         for key, expected in expected_argument_json_fields:
             if not any(_argument_json_field_matches(argument, key, expected) for argument in arguments):
                 raise RuntimeError("stream completed without expected tool call JSON argument field")
-    if expected_argument_substrings or expected_argument_json_fields:
+    if require_tool_result_content:
+        tool_calls = [call for call in summary["tool_calls"] if not expected_name or call.get("name") == expected_name]
+        if not tool_calls:
+            raise RuntimeError("tool-result follow-up requires a matching tool call")
+        followup_chunks = openai_compatible_chat_message(
+            base_url,
+            model,
+            api_key,
+            _tool_result_followup_messages(prompt, tool_calls[0]),
+            tools=[_workspace_read_tool()],
+            stream=True,
+        )
+        followup_summary = summarize_stream_chunks(
+            followup_chunks if not isinstance(followup_chunks, dict) else [],
+        )
+        if int(followup_summary["content_chars"]) == 0:
+            raise RuntimeError("tool-result follow-up completed without content")
+        summary["tool_result_followup_chunk_count"] = followup_summary["chunk_count"]
+        summary["tool_result_followup_content_chars"] = followup_summary["content_chars"]
+        summary["tool_result_followup_finish_reasons"] = followup_summary["finish_reasons"]
+    if require_tool_result_content or expected_argument_substrings or expected_argument_json_fields:
         for call in summary["tool_calls"]:
             call.pop("arguments", None)
     if expected_finish_reasons:
@@ -603,6 +665,11 @@ def main(argv: list[str] | None = None) -> int:
         "--require-tool-call",
         action="store_true",
         help="Fail if the provider streams content but does not emit a tool call.",
+    )
+    parser.add_argument(
+        "--require-tool-result-content",
+        action="store_true",
+        help="Fail unless a second streamed call with a synthetic workspace_read tool result emits content.",
     )
     parser.add_argument(
         "--expect-tool-name",
@@ -638,10 +705,13 @@ def main(argv: list[str] | None = None) -> int:
             tool_call=(
                 args.tool_call
                 or args.require_tool_call
+                or args.require_tool_result_content
                 or bool(args.expect_tool_name)
                 or bool(args.expect_tool_argument_substring)
+                or bool(args.expect_tool_argument_json_field)
             ),
             require_tool_call=args.require_tool_call,
+            require_tool_result_content=args.require_tool_result_content,
             require_content=args.require_content,
             require_reasoning=args.require_reasoning,
             expect_tool_name=args.expect_tool_name,

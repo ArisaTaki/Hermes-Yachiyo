@@ -243,6 +243,7 @@ jobs:
           python scripts/smoke_openai_compatible_stream.py \
             --tool-call \
             --require-tool-call \
+            --require-tool-result-content \
             --expect-tool-name workspace_read \
             --expect-tool-argument-substring README.md \
             --expect-tool-argument-json-field path=README.md \
