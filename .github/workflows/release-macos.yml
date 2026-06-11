@@ -101,6 +101,7 @@ jobs:
             tests/test_streaming_provider_smoke.py \
             tests/test_legacy_kernel_removal.py \
             tests/test_runtime_injection_boundary.py \
+            tests/test_runtime.py \
             tests/test_desktop_backend_app.py \
             tests/test_desktop_launcher.py \
             tests/test_shell_app_entrypoint.py \

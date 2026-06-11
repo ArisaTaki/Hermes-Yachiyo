@@ -490,6 +490,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover Native runtime injection boundary",
     ),
     (
+        "tests/test_runtime.py",
+        "macOS release workflow smoke tests must cover AppRuntime Native service aggregation",
+    ),
+    (
         "tests/test_desktop_backend_app.py",
         "macOS release workflow smoke tests must cover desktop backend Native startup",
     ),

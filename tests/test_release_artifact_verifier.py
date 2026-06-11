@@ -484,6 +484,7 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     )
     assert "macOS release workflow smoke tests must cover legacy Hermes kernel removal" in messages
     assert "macOS release workflow smoke tests must cover Native runtime injection boundary" in messages
+    assert "macOS release workflow smoke tests must cover AppRuntime Native service aggregation" in messages
     assert "macOS release workflow smoke tests must cover desktop backend Native startup" in messages
     assert "macOS release workflow smoke tests must cover desktop launcher startup wiring" in messages
     assert "macOS release workflow smoke tests must cover shell app Electron entrypoint" in messages
