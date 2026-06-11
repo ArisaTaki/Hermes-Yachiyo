@@ -657,6 +657,20 @@ def _responses_stream_text_delta(chunk: Any) -> str | None:
 
 def _responses_stream_text_done(chunk: Any) -> str | None:
     event_type = _responses_stream_event_type(chunk)
+    if event_type in {
+        "response.content_part.added",
+        "response.content_part.done",
+        "content_part.added",
+        "content_part.done",
+    }:
+        part = _message_field(chunk, "part")
+        return _message_visible_content_text(part)
+    if event_type in {"response.output_item.added", "response.output_item.done", "output_item.added", "output_item.done"}:
+        item = _message_field(chunk, "item")
+        item_type = _message_content_part_type(item)
+        if item_type == "message":
+            return _message_visible_content_text(item)
+        return None
     if event_type not in {"response.output_text.done", "output_text.done", "response.refusal.done", "refusal.done"}:
         return None
     for field_name in ("text", "refusal", "content", "delta"):

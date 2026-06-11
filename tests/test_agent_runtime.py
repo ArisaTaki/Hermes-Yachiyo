@@ -2690,6 +2690,118 @@ def test_main_chat_model_loop_uses_responses_output_text_done_snapshot(tmp_path,
         service.close()
 
 
+def test_main_chat_model_loop_uses_responses_output_item_message_snapshot(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    expected = "final message item snapshot"
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    def fake_chat(_base_url, _model, _api_key, _messages, *, tools=None, stream=False):
+        assert tools is not None
+        assert stream is True
+
+        def stream():
+            yield {
+                "type": "response.output_item.done",
+                "output_index": 0,
+                "item": {
+                    "id": "msg_response",
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": expected}],
+                },
+            }
+            yield {
+                "type": "response.completed",
+                "response": {
+                    "status": "completed",
+                    "output": [{"type": "message", "finish_reason": "stop"}],
+                },
+            }
+
+        return stream()
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-responses-output-item-message",
+            session_id="session-main-responses-output-item-message",
+            user_goal="Use Responses output_item message",
+        )
+        updated = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [{"role": "user", "content": "Use Responses output_item message"}],
+        )
+        rows = service._conn.execute(
+            "SELECT event_type, payload_json FROM run_events WHERE run_id=? ORDER BY sequence",
+            (run["run_id"],),
+        ).fetchall()
+        output_rows = [row for row in rows if row["event_type"] == "model.output.completed"]
+
+        assert updated["result"] == expected
+        assert len(output_rows) == 1
+        assert json.loads(output_rows[0]["payload_json"])["content"] == expected
+        assert not any(str(row["event_type"]).endswith(".delta") for row in rows)
+    finally:
+        service.close()
+
+
+def test_main_chat_model_loop_uses_responses_content_part_snapshot(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    expected = "final content part snapshot"
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    def fake_chat(_base_url, _model, _api_key, _messages, *, tools=None, stream=False):
+        assert tools is not None
+        assert stream is True
+
+        def stream():
+            yield {
+                "type": "response.content_part.done",
+                "output_index": 0,
+                "content_index": 0,
+                "part": {"type": "output_text", "text": expected},
+            }
+            yield {
+                "type": "response.completed",
+                "response": {
+                    "status": "completed",
+                    "output": [{"type": "message", "finish_reason": "stop"}],
+                },
+            }
+
+        return stream()
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-responses-content-part",
+            session_id="session-main-responses-content-part",
+            user_goal="Use Responses content_part",
+        )
+        updated = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [{"role": "user", "content": "Use Responses content_part"}],
+        )
+        rows = service._conn.execute(
+            "SELECT event_type, payload_json FROM run_events WHERE run_id=? ORDER BY sequence",
+            (run["run_id"],),
+        ).fetchall()
+        output_rows = [row for row in rows if row["event_type"] == "model.output.completed"]
+
+        assert updated["result"] == expected
+        assert len(output_rows) == 1
+        assert json.loads(output_rows[0]["payload_json"])["content"] == expected
+        assert not any(str(row["event_type"]).endswith(".delta") for row in rows)
+    finally:
+        service.close()
+
+
 def test_main_chat_model_loop_persists_streaming_refusal_delta(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     expected = "I cannot help with that request."

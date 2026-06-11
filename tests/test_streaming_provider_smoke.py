@@ -1206,6 +1206,62 @@ def test_stream_smoke_uses_responses_output_text_done_snapshot(monkeypatch):
     assert summary["finish_reasons"] == ["stop"]
 
 
+def test_stream_smoke_uses_responses_content_part_done_snapshot(monkeypatch):
+    requests: list[dict] = []
+    expected = "final content part snapshot"
+
+    def event(payload: dict) -> bytes:
+        event_type = str(payload.get("type") or "")
+        return f"event: {event_type}\ndata: {json.dumps(payload)}\n\n".encode("utf-8")
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            yield event(
+                {
+                    "type": "response.content_part.done",
+                    "output_index": 0,
+                    "content_index": 0,
+                    "part": {"type": "output_text", "text": expected},
+                }
+            )
+            yield event(
+                {
+                    "type": "response.completed",
+                    "response": {
+                        "status": "completed",
+                        "output": [{"type": "message", "finish_reason": "stop"}],
+                    },
+                }
+            )
+
+    def fake_urlopen(request, *_args, **_kwargs):
+        requests.append(json.loads(request.data.decode("utf-8")))
+        return FakeResponse()
+
+    monkeypatch.setattr("apps.shell.model_profiles.urlrequest.urlopen", fake_urlopen)
+
+    summary = smoke.run_stream_smoke(
+        base_url="https://api.example.test/v1",
+        model="demo-responses-content-part-done-model",
+        api_key="sk-stream-smoke-secret123456",
+        require_content=True,
+        expect_finish_reasons=["stop"],
+    )
+
+    summary_json = json.dumps(summary)
+    assert requests[0]["stream"] is True
+    assert summary["ok"] is True
+    assert summary["content_chars"] == len(expected)
+    assert summary["finish_reasons"] == ["stop"]
+    assert expected not in summary_json
+
+
 def test_stream_smoke_counts_refusal_delta_as_content(monkeypatch):
     requests: list[dict] = []
     expected = "I cannot help with that request."
