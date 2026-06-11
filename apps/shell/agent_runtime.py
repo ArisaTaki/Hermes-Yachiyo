@@ -6011,7 +6011,6 @@ class NativeRunEngine:
             artifacts=artifacts,
             pending_approval=pending_approval,
         )
-        self._sync_task_run_link_projection(run_id, status=str(run.get("status") or ""))
         return run
 
     def _terminal_run_or_none(self, run_id: str) -> dict[str, Any] | None:
@@ -6032,6 +6031,7 @@ class NativeRunEngine:
     ) -> None:
         self._sync_run_artifacts(run_id, artifacts)
         self._sync_run_approval(run_id, status=status, pending_approval=pending_approval)
+        self._sync_task_run_link_projection(run_id, status=status)
 
     def _sync_run_artifacts(self, run_id: str, artifacts: Any) -> None:
         self.run_artifacts.sync(run_id, artifacts)

@@ -1330,7 +1330,7 @@ def test_task_run_link_repository_tracks_run_projection(tmp_path):
         link = service.task_run_links.get("task-link-repo")
         assert link["last_event_sequence"] == event["sequence"]
 
-        service._update_run(run["run_id"], status="completed", result="done")
+        service.runs.update(run["run_id"], status="completed", result="done")
         link = service.task_run_links.get("task-link-repo")
         assert link["run_status"] == "completed"
     finally:

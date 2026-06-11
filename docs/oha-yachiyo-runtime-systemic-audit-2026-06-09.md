@@ -1251,7 +1251,7 @@ RunEvent sequence:
 - `RunRepository`
   - 负责 runs 表 get / list / insert / update / delete rows / idempotency lookup。
   - 保留 `NativeRunEngine` 公开方法作为薄委托，路由和业务调用不变。
-  - update 继续统一处理 secret redaction、timeline/artifact/pending approval 投影同步。
+  - update 继续统一处理 secret redaction、timeline/artifact/pending approval/TaskRunLink status 投影同步。
   - delete rows 通过显式 artifact cleanup 回调删除对应 artifact 文件后再删除 runs 表记录，`NativeRunEngine.delete_run()` 保留 active-run 检查、Workflow group 删除策略和返回结构。
 
 - `RunEventRepository`
