@@ -356,6 +356,30 @@ def test_verifier_reports_packaged_app_missing_ui_e2e_selector(tmp_path):
     ) in findings
 
 
+def test_verifier_reports_packaged_app_development_only_ui_e2e_hook(tmp_path):
+    app_dir = _write_packaged_app_bundle(tmp_path)
+    asar_path = app_dir / verifier.PACKAGED_ASAR_RELATIVE_PATH
+    asar_path.write_bytes(
+        "\n".join([*verifier.PACKAGED_UI_E2E_REQUIRED_SELECTORS, "oha-chat-e2e-add-image"]).encode("utf-8")
+    )
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[],
+        check_required_files=False,
+        check_release_security_guards=False,
+        check_packaged_app_bundle=True,
+        allow_binary_targets=True,
+    )
+
+    assert findings == [
+        verifier.Finding(
+            asar_path,
+            "packaged Electron app.asar must not include development-only UI E2E hook 'oha-chat-e2e-add-image'",
+        )
+    ]
+
+
 def test_verifier_reports_packaged_app_wrong_category(tmp_path):
     app_dir = _write_packaged_app_bundle(tmp_path)
     info_path = app_dir / "Contents" / "Info.plist"

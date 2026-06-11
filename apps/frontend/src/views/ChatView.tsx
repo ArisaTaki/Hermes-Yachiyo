@@ -26,6 +26,15 @@ type PendingAttachment = {
   data_url: string;
 };
 
+type ChatE2EImageDetail = {
+  name?: string;
+  mime_type?: string;
+  mimeType?: string;
+  data_url?: string;
+  dataUrl?: string;
+  base64?: string;
+};
+
 type ChatAttachment = {
   id?: string;
   kind?: string;
@@ -307,6 +316,7 @@ const COMPOSER_MIN_HEIGHT = 48;
 const COMPOSER_MAX_HEIGHT = 260;
 const COMPOSER_HEIGHT_STORAGE_KEY = 'oha.chat.composerHeight';
 const ASSISTANT_PROFILE_UPDATED_EVENT = 'oha-assistant-profile-updated';
+const CHAT_E2E_ADD_IMAGE_EVENT = 'oha-chat-e2e-add-image';
 const CODE_COPY_ICON_HTML = '<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="11" height="11" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"></path></svg>';
 const CODE_CHECK_ICON_HTML = '<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.2 4.2L19 7"></path></svg>';
 
@@ -1780,6 +1790,24 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     showNotice('当前不能发送图片', detail, 'warn');
     setStatus(detail);
   }
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return undefined;
+    const handleE2EAddImage = (event: Event) => {
+      const detail = (event as CustomEvent<ChatE2EImageDetail | ChatE2EImageDetail[]>).detail;
+      const payloads = Array.isArray(detail) ? detail : [detail];
+      void (async () => {
+        const files = (await Promise.all(payloads.map(fileFromE2EImageDetail))).filter((file): file is File => Boolean(file));
+        if (files.length === 0) {
+          setStatus('E2E 图片附件 payload 无效');
+          return;
+        }
+        await addImageFiles(files);
+      })();
+    };
+    window.addEventListener(CHAT_E2E_ADD_IMAGE_EVENT, handleE2EAddImage as EventListener);
+    return () => window.removeEventListener(CHAT_E2E_ADD_IMAGE_EVENT, handleE2EAddImage as EventListener);
+  }, [attachments.length, executor, isSending]);
 
   function focusComposerSoon() {
     window.requestAnimationFrame(() => {
@@ -4788,6 +4816,23 @@ function clipboardImageFiles(data: DataTransfer | null) {
   }
   if (files.length) return files;
   return Array.from(data.files || []).filter((file) => file.type.startsWith('image/'));
+}
+
+async function fileFromE2EImageDetail(detail: ChatE2EImageDetail | undefined): Promise<File | null> {
+  if (!detail) return null;
+  const mimeType = String(detail.mime_type || detail.mimeType || 'image/png').trim() || 'image/png';
+  const name = String(detail.name || 'e2e-image.png').trim() || 'e2e-image.png';
+  const dataUrl = String(detail.data_url || detail.dataUrl || '').trim()
+    || (detail.base64 ? `data:${mimeType};base64,${String(detail.base64).trim()}` : '');
+  if (!dataUrl.startsWith('data:image/')) return null;
+  try {
+    const response = await fetch(dataUrl);
+    const blob = await response.blob();
+    if (!blob.type.startsWith('image/')) return null;
+    return new File([blob], name, { type: blob.type || mimeType });
+  } catch {
+    return null;
+  }
 }
 
 function readPendingAttachment(file: File): Promise<PendingAttachment> {

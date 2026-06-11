@@ -232,6 +232,12 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
         chat_view,
         [
             "const [attachments, setAttachments] = useState<PendingAttachment[]>(() => [...retainedComposerDraft.attachments]);",
+            "const CHAT_E2E_ADD_IMAGE_EVENT = 'oha-chat-e2e-add-image';",
+            "type ChatE2EImageDetail = {",
+            "async function fileFromE2EImageDetail(detail: ChatE2EImageDetail | undefined): Promise<File | null>",
+            "if (!import.meta.env.DEV) return undefined;",
+            "window.addEventListener(CHAT_E2E_ADD_IMAGE_EVENT, handleE2EAddImage as EventListener);",
+            "window.removeEventListener(CHAT_E2E_ADD_IMAGE_EVENT, handleE2EAddImage as EventListener);",
             "const fileInputRef = useRef<HTMLInputElement>(null);",
             "if (attachments.length > 0 && !canAttachImages(executor))",
             "const outgoingAttachments = attachments;",
@@ -277,6 +283,7 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
     _assert_occurs(chat_view, "data-testid=\"chat-image-file-input\"", 1)
     _assert_occurs(chat_view, "disabled={imageAttachDisabled}", 3)
     _assert_occurs(chat_view, "if (imageAttachDisabled) {", 2)
+    _assert_occurs(chat_view, "import.meta.env.DEV", 1)
 
 
 def test_chat_ui_exposes_stable_e2e_selectors_for_image_cancel_approval_flow() -> None:

@@ -110,6 +110,9 @@ PACKAGED_UI_E2E_REQUIRED_SELECTORS: tuple[str, ...] = (
     "workflow-run-goal-input",
     "workflow-save-and-run",
 )
+PACKAGED_UI_E2E_FORBIDDEN_TEXT: tuple[str, ...] = (
+    "oha-chat-e2e-add-image",
+)
 PACKAGED_INFO_REQUIRED_VALUES: tuple[tuple[str, str, str], ...] = (
     (
         "LSApplicationCategoryType",
@@ -1165,6 +1168,14 @@ def _verify_packaged_app_bundle(root: Path) -> list[Finding]:
                             Finding(
                                 asar_path,
                                 f"packaged Electron app.asar must include UI E2E selector {selector!r}",
+                            )
+                        )
+                for forbidden in PACKAGED_UI_E2E_FORBIDDEN_TEXT:
+                    if forbidden.encode("utf-8") in asar_bytes:
+                        findings.append(
+                            Finding(
+                                asar_path,
+                                f"packaged Electron app.asar must not include development-only UI E2E hook {forbidden!r}",
                             )
                         )
 
