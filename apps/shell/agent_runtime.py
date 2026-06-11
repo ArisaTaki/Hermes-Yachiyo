@@ -2731,6 +2731,116 @@ class ApprovalResumeCoordinator:
         )
 
 
+class ApprovalResumeProjectionCoordinator:
+    """Projects Run state changes produced by approved-tool resume."""
+
+    def __init__(
+        self,
+        *,
+        timeline_factory: Any,
+        append_run_event: Any,
+        update_run: Any,
+        update_agent_run_group_if_root: Any,
+        mark_parent_workflows_child_running: Any,
+    ) -> None:
+        self._timeline = timeline_factory
+        self._append_run_event = append_run_event
+        self._update_run = update_run
+        self._update_agent_run_group_if_root = update_agent_run_group_if_root
+        self._mark_parent_workflows_child_running = mark_parent_workflows_child_running
+
+    def project_agent_running(self, running: dict[str, Any]) -> dict[str, Any]:
+        self._update_agent_run_group_if_root(running)
+        self._mark_parent_workflows_child_running(running)
+        return running
+
+    def project_agent_completed(
+        self,
+        context: ToolApprovalResumeContext,
+        result_text: str,
+    ) -> dict[str, Any]:
+        context.timeline.append(self._timeline("agent.run.completed", "Agent run completed"))
+        self._append_run_event(context.run_id, "agent.run.completed", {"result": result_text})
+        return self._update_run(
+            context.run_id,
+            status="completed",
+            result=result_text,
+            timeline=context.timeline,
+            artifacts=context.artifacts,
+            pending_approval=None,
+        )
+
+    def project_main_chat_completed(
+        self,
+        context: ToolApprovalResumeContext,
+        result_text: str,
+    ) -> dict[str, Any]:
+        context.timeline.append(
+            self._timeline(
+                "model.output.ready",
+                result_text[:500],
+                output_chars=len(result_text),
+            )
+        )
+        self._append_run_event(
+            context.run_id,
+            "model.output.completed",
+            {"content": result_text, "output_chars": len(result_text)},
+        )
+        return self._update_run(
+            context.run_id,
+            status="running",
+            result=result_text,
+            timeline=context.timeline,
+            artifacts=context.artifacts,
+            pending_approval=None,
+        )
+
+    def project_required(
+        self,
+        context: ToolApprovalResumeContext,
+        pending_approval: dict[str, Any],
+    ) -> dict[str, Any]:
+        public_pending = _public_pending_approval(pending_approval)
+        tool_name = str(pending_approval.get("tool") or "")
+        context.timeline.append(
+            self._timeline(
+                "agent.tool.approval_required",
+                tool_name,
+                pending_approval=public_pending,
+            )
+        )
+        self._append_run_event(
+            context.run_id,
+            "agent.tool.approval_required",
+            public_pending,
+        )
+        return self._update_run(
+            context.run_id,
+            status="approval_required",
+            result=f"等待审批：{tool_name or 'tool'}",
+            timeline=context.timeline,
+            artifacts=context.artifacts,
+            pending_approval=pending_approval,
+        )
+
+    def project_failed(
+        self,
+        context: ToolApprovalResumeContext,
+        safe_error: str,
+    ) -> dict[str, Any]:
+        context.timeline.append(self._timeline("agent.run.failed", safe_error))
+        self._append_run_event(context.run_id, "agent.run.failed", {"error": safe_error})
+        return self._update_run(
+            context.run_id,
+            status="failed",
+            result=safe_error,
+            timeline=context.timeline,
+            artifacts=context.artifacts,
+            pending_approval=None,
+        )
+
+
 class WorkflowParentResumeCoordinator:
     """Coordinates parent Workflow updates after a child Run changes state."""
 
@@ -3741,6 +3851,13 @@ class NativeRunEngine:
             append_run_event=lambda run_id, event_type, payload: self.append_run_event(run_id, event_type, payload),
             update_run=lambda run_id, **kwargs: self._update_run(run_id, **kwargs),
             update_run_group=lambda run_group_id, **kwargs: self._update_run_group(run_group_id, **kwargs),
+        )
+        self.approval_resume_projection = ApprovalResumeProjectionCoordinator(
+            timeline_factory=lambda event, detail="", **extra: self._timeline(event, detail, **extra),
+            append_run_event=lambda run_id, event_type, payload: self.append_run_event(run_id, event_type, payload),
+            update_run=lambda run_id, **kwargs: self._update_run(run_id, **kwargs),
+            update_agent_run_group_if_root=lambda run: self._update_agent_run_group_if_root(run),
+            mark_parent_workflows_child_running=lambda run: self._mark_parent_workflows_child_running(run),
         )
         self._init_db()
         self._migrate_agent_workspace_policies()
@@ -8312,95 +8429,35 @@ class NativeRunEngine:
         return project_result(result) if project_result is not None else result
 
     def _project_agent_approval_resume_running(self, running: dict[str, Any]) -> dict[str, Any]:
-        self._update_agent_run_group_if_root(running)
-        self._mark_parent_workflows_child_running(running)
-        return running
+        return self.approval_resume_projection.project_agent_running(running)
 
     def _project_agent_approval_resume_completed(
         self,
         context: ToolApprovalResumeContext,
         result_text: str,
     ) -> dict[str, Any]:
-        context.timeline.append(self._timeline("agent.run.completed", "Agent run completed"))
-        self.append_run_event(context.run_id, "agent.run.completed", {"result": result_text})
-        return self._update_run(
-            context.run_id,
-            status="completed",
-            result=result_text,
-            timeline=context.timeline,
-            artifacts=context.artifacts,
-            pending_approval=None,
-        )
+        return self.approval_resume_projection.project_agent_completed(context, result_text)
 
     def _project_main_chat_approval_resume_completed(
         self,
         context: ToolApprovalResumeContext,
         result_text: str,
     ) -> dict[str, Any]:
-        context.timeline.append(
-            self._timeline(
-                "model.output.ready",
-                result_text[:500],
-                output_chars=len(result_text),
-            )
-        )
-        self.append_run_event(
-            context.run_id,
-            "model.output.completed",
-            {"content": result_text, "output_chars": len(result_text)},
-        )
-        return self._update_run(
-            context.run_id,
-            status="running",
-            result=result_text,
-            timeline=context.timeline,
-            artifacts=context.artifacts,
-            pending_approval=None,
-        )
+        return self.approval_resume_projection.project_main_chat_completed(context, result_text)
 
     def _project_approval_resume_required(
         self,
         context: ToolApprovalResumeContext,
         pending_approval: dict[str, Any],
     ) -> dict[str, Any]:
-        public_pending = _public_pending_approval(pending_approval)
-        tool_name = str(pending_approval.get("tool") or "")
-        context.timeline.append(
-            self._timeline(
-                "agent.tool.approval_required",
-                tool_name,
-                pending_approval=public_pending,
-            )
-        )
-        self.append_run_event(
-            context.run_id,
-            "agent.tool.approval_required",
-            public_pending,
-        )
-        return self._update_run(
-            context.run_id,
-            status="approval_required",
-            result=f"等待审批：{tool_name or 'tool'}",
-            timeline=context.timeline,
-            artifacts=context.artifacts,
-            pending_approval=pending_approval,
-        )
+        return self.approval_resume_projection.project_required(context, pending_approval)
 
     def _project_approval_resume_failed(
         self,
         context: ToolApprovalResumeContext,
         safe_error: str,
     ) -> dict[str, Any]:
-        context.timeline.append(self._timeline("agent.run.failed", safe_error))
-        self.append_run_event(context.run_id, "agent.run.failed", {"error": safe_error})
-        return self._update_run(
-            context.run_id,
-            status="failed",
-            result=safe_error,
-            timeline=context.timeline,
-            artifacts=context.artifacts,
-            pending_approval=None,
-        )
+        return self.approval_resume_projection.project_failed(context, safe_error)
 
     def _approve_main_chat_run_approval(self, run: dict[str, Any]) -> dict[str, Any]:
         run_id = str(run["run_id"])

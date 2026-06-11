@@ -84,6 +84,7 @@ jobs:
             tests/test_agent_runtime.py::test_approval_resume_coordinator_executes_approved_tool_and_remaining_requests \
             tests/test_agent_runtime.py::test_approval_resume_coordinator_stops_on_fatal_tool_failure \
             tests/test_agent_runtime.py::test_approval_resume_coordinator_continues_custom_api_agent_after_approved_tool \
+            tests/test_agent_runtime.py::test_approval_resume_projection_coordinator_projects_resume_states \
             tests/test_agent_runtime.py::test_workflow_parent_resume_coordinator_continues_completed_child \
             tests/test_agent_runtime.py::test_workflow_parent_resume_coordinator_does_not_resume_completed_child_twice \
             tests/test_agent_runtime.py::test_workflow_parent_resume_coordinator_does_not_project_child_approval_twice \

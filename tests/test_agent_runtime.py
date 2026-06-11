@@ -21,6 +21,7 @@ from apps.shell.agent_runtime import (
     AgentRuntimeError,
     AgentRuntimeService,
     ApprovalResumeCoordinator,
+    ApprovalResumeProjectionCoordinator,
     NativeRunEngine,
     RunProjectionCoordinator,
     TaskRunLinkRepository,
@@ -280,6 +281,100 @@ def test_approval_resume_coordinator_claims_and_projects_approved_tool_once():
         "resumed_detail": "Agent resumed after approval",
         "running_result": "已批准，Agent 正在继续执行",
     }
+
+
+def test_approval_resume_projection_coordinator_projects_resume_states():
+    appended_events: list[tuple[str, str, dict[str, object]]] = []
+    updated_runs: list[dict[str, object]] = []
+    group_updates: list[dict[str, object]] = []
+    parent_marks: list[dict[str, object]] = []
+
+    def make_context(run_id: str) -> ToolApprovalResumeContext:
+        return ToolApprovalResumeContext(
+            run_id=run_id,
+            timeline=[{"event": "agent.tool.approval_approved"}],
+            artifacts=[{"path": f"{run_id}.md"}],
+            broker=SimpleNamespace(name="broker"),
+            allowed_tools=["terminal.run"],
+            budget=SimpleNamespace(name="budget"),
+            messages=[],
+            tool_request={"name": "terminal.run", "input": {"command": "printf ok"}},
+            tool_name="terminal.run",
+            input_preview={"command": "printf ok"},
+            remaining_requests=[],
+            next_iteration=3,
+        )
+
+    def update_run(run_id, **kwargs):
+        updated_runs.append({"run_id": run_id, **kwargs})
+        return {"run_id": run_id, **kwargs}
+
+    coordinator = ApprovalResumeProjectionCoordinator(
+        timeline_factory=lambda event, detail, **payload: {"event": event, "detail": detail, **payload},
+        append_run_event=lambda run_id, event_type, payload: appended_events.append((run_id, event_type, payload)),
+        update_run=update_run,
+        update_agent_run_group_if_root=lambda run: group_updates.append(run),
+        mark_parent_workflows_child_running=lambda run: parent_marks.append(run),
+    )
+
+    running = {"run_id": "agent_run_running", "kind": "agent_run", "status": "running"}
+    assert coordinator.project_agent_running(running) is running
+    agent_completed = coordinator.project_agent_completed(make_context("agent_run_completed"), "Agent done")
+    main_completed = coordinator.project_main_chat_completed(make_context("main_chat_run"), "Main done")
+    required = coordinator.project_required(
+        make_context("agent_run_required"),
+        {
+            "approval_id": "approval-next",
+            "tool": "terminal.run",
+            "input_preview": {"command": "printf next"},
+            "requested_at": "now",
+        },
+    )
+    failed = coordinator.project_failed(make_context("agent_run_failed"), "safe failure")
+
+    assert group_updates == [running]
+    assert parent_marks == [running]
+    assert agent_completed["status"] == "completed"
+    assert main_completed["status"] == "running"
+    assert required["status"] == "approval_required"
+    assert failed["status"] == "failed"
+    assert [item["status"] for item in updated_runs] == [
+        "completed",
+        "running",
+        "approval_required",
+        "failed",
+    ]
+    assert updated_runs[0]["timeline"][-1] == {
+        "event": "agent.run.completed",
+        "detail": "Agent run completed",
+    }
+    assert updated_runs[1]["timeline"][-1] == {
+        "event": "model.output.ready",
+        "detail": "Main done",
+        "output_chars": 9,
+    }
+    assert updated_runs[2]["result"] == "等待审批：terminal.run"
+    assert updated_runs[2]["pending_approval"]["approval_id"] == "approval-next"
+    assert updated_runs[3]["result"] == "safe failure"
+    assert appended_events == [
+        ("agent_run_completed", "agent.run.completed", {"result": "Agent done"}),
+        (
+            "main_chat_run",
+            "model.output.completed",
+            {"content": "Main done", "output_chars": 9},
+        ),
+        (
+            "agent_run_required",
+            "agent.tool.approval_required",
+            {
+                "approval_id": "approval-next",
+                "tool": "terminal.run",
+                "input_preview": {"command": "printf next"},
+                "requested_at": "now",
+            },
+        ),
+        ("agent_run_failed", "agent.run.failed", {"error": "safe failure"}),
+    ]
 
 
 def test_approval_resume_coordinator_stops_on_fatal_tool_failure():
