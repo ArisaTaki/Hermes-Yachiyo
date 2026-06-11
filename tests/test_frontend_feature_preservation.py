@@ -1257,6 +1257,51 @@ def test_workflow_save_run_ui_smoke_uses_studio_route_and_saved_workflow_id() ->
     )
 
 
+def test_agent_studio_agents_ui_smoke_uses_definition_crud_paths() -> None:
+    smoke_script = "scripts/smoke_agent_studio_agents_ui.mjs"
+    _assert_contains(
+        "apps/frontend/src/views/AgentStudioView.tsx",
+        [
+            'data-testid="agent-studio-agents"',
+            'data-testid="agent-new"',
+            'data-testid="agent-list"',
+            'data-testid="agent-list-item"',
+            'data-testid="agent-list-open"',
+            'data-testid="agent-editor"',
+            'data-testid="agent-name-input"',
+            'data-testid="agent-nickname-input"',
+            'data-testid="agent-description-input"',
+            'data-testid="agent-category-input"',
+            'data-testid="agent-output-contract-select"',
+            'data-testid="agent-instructions-input"',
+            'data-testid="agent-persona-input"',
+            'data-testid="agent-save"',
+            'data-testid="agent-delete"',
+        ],
+    )
+    _assert_contains(
+        smoke_script,
+        [
+            "#/agents/agents",
+            "request.method === 'POST' && url.pathname === '/ui/agents'",
+            "request.method === 'PATCH' && url.pathname === `/ui/agents/${CREATED_AGENT_ID}`",
+            "request.method === 'DELETE' && url.pathname === `/ui/agents/${CREATED_AGENT_ID}`",
+            "data-testid=\"agent-studio-agents\"",
+            "data-testid=\"agent-new\"",
+            "data-testid=\"agent-name-input\"",
+            "data-testid=\"agent-output-contract-select\"",
+            "data-testid=\"agent-save\"",
+            "data-testid=\"agent-list-item\"",
+            "data-testid=\"agent-delete\"",
+            "data-testid=\"confirm-action\"",
+            "assertMockBridgeContract",
+            "createAgentRequest.output_contract !== 'report'",
+            "updateAgentRequest.name !== UPDATED_NAME",
+            "deletedAgentId !== CREATED_AGENT_ID",
+        ],
+    )
+
+
 def test_agent_frontend_run_helpers_preserve_native_run_bridge_contract() -> None:
     agents_lib = "apps/frontend/src/lib/agents.ts"
     _assert_function_contains(

@@ -3681,7 +3681,7 @@ export function AgentStudioView() {
       ) : null}
 
       {!loading && tab === 'agents' ? (
-        <section className="agent-studio-grid">
+        <section className="agent-studio-grid" data-testid="agent-studio-agents">
           <aside className="agent-studio-panel">
             <div className="section-heading-row">
               <h2>Agents</h2>
@@ -3689,7 +3689,7 @@ export function AgentStudioView() {
                 {agents.length && !agentManagementMode ? (
                   <button type="button" disabled={busy} onClick={() => setAgentManagementMode(true)}>管理</button>
                 ) : null}
-                <button type="button" disabled={busy} onClick={startNewAgent}>新建</button>
+                <button type="button" data-testid="agent-new" disabled={busy} onClick={startNewAgent}>新建</button>
               </div>
             </div>
             {agents.length && agentManagementMode ? (
@@ -3703,10 +3703,12 @@ export function AgentStudioView() {
                 <button type="button" disabled={busy} onClick={finishAgentManagement}>完成</button>
               </div>
             ) : null}
-            <div className={agentManagementMode ? 'agent-list managing' : 'agent-list'}>
+            <div className={agentManagementMode ? 'agent-list managing' : 'agent-list'} data-testid="agent-list">
               {agents.map((agent) => (
                 <div
                   className={agent.agent_id === selectedAgentId ? 'agent-list-item active' : 'agent-list-item'}
+                  data-agent-id={agent.agent_id}
+                  data-testid="agent-list-item"
                   key={agent.agent_id}
                 >
                   <label className="agent-list-select" aria-label={`选择 Agent ${agent.nickname || agent.name}`}>
@@ -3720,6 +3722,7 @@ export function AgentStudioView() {
                   <button
                     type="button"
                     className="agent-list-main"
+                    data-testid="agent-list-open"
                     onClick={() => selectAgent(agent.agent_id)}
                   >
                     <span className="agent-list-profile">
@@ -3740,18 +3743,18 @@ export function AgentStudioView() {
               {!agents.length ? <span className="agent-empty-inline">暂无 Agent。点击“新建”创建一个 Agent。</span> : null}
             </div>
           </aside>
-          <form className="agent-studio-panel agent-editor" onSubmit={(event) => { event.preventDefault(); void runAction(saveAgent, '保存 Agent'); }}>
+          <form className="agent-studio-panel agent-editor" data-testid="agent-editor" onSubmit={(event) => { event.preventDefault(); void runAction(saveAgent, '保存 Agent'); }}>
             <div className="section-heading-row">
               <h2>{draft.agent_id ? '编辑 Agent' : '新建 Agent'}</h2>
-              {draft.agent_id && selectedAgentDeletable ? <button type="button" className="danger-action" disabled={busy} onClick={requestDeleteAgent}>删除</button> : null}
+              {draft.agent_id && selectedAgentDeletable ? <button type="button" className="danger-action" data-testid="agent-delete" disabled={busy} onClick={requestDeleteAgent}>删除</button> : null}
             </div>
             {selectedAgentReadOnly ? <div className="agent-inline-note">系统 Agent 由 oha-yachiyo 管理，可查看但不能编辑、删除或直接挂载 Skill。</div> : null}
             <div className="agent-profile-editor">
               <AgentAvatar avatarUrl={draft.avatar_url} name={draft.nickname || draft.name || 'Agent'} />
               <div className="agent-profile-fields">
                 <div className="agent-form-row">
-                  <label><span>Name</span><input className="hy-input" value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} required /></label>
-                  <label><span>Nickname</span><input className="hy-input" value={draft.nickname} onChange={(event) => setDraft({ ...draft, nickname: event.target.value })} placeholder="对话框里显示的称呼" /></label>
+                  <label><span>Name</span><input className="hy-input" data-testid="agent-name-input" value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} required /></label>
+                  <label><span>Nickname</span><input className="hy-input" data-testid="agent-nickname-input" value={draft.nickname} onChange={(event) => setDraft({ ...draft, nickname: event.target.value })} placeholder="对话框里显示的称呼" /></label>
                 </div>
                 <div className="agent-avatar-picker-row">
                   <div>
@@ -3765,14 +3768,14 @@ export function AgentStudioView() {
                     ) : null}
                   </div>
                 </div>
-                <label><span>Description</span><input className="hy-input" value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></label>
+                <label><span>Description</span><input className="hy-input" data-testid="agent-description-input" value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></label>
               </div>
             </div>
             <div className="agent-form-row">
-              <label><span>Category</span><input className="hy-input" value={draft.category} onChange={(event) => setDraft({ ...draft, category: event.target.value })} /></label>
+              <label><span>Category</span><input className="hy-input" data-testid="agent-category-input" value={draft.category} onChange={(event) => setDraft({ ...draft, category: event.target.value })} /></label>
               <label>
                 <span>Output Contract</span>
-                <select className="hy-select" value={draft.output_contract} onChange={(event) => setDraft({ ...draft, output_contract: event.target.value })}>
+                <select className="hy-select" data-testid="agent-output-contract-select" value={draft.output_contract} onChange={(event) => setDraft({ ...draft, output_contract: event.target.value })}>
                   <option value="chat">chat</option>
                   <option value="markdown">markdown</option>
                   <option value="diff">diff</option>
@@ -3784,12 +3787,12 @@ export function AgentStudioView() {
             </div>
             <label>
               <span>Functional Instructions</span>
-              <textarea className="hy-input agent-textarea" value={draft.instructions} onChange={(event) => setDraft({ ...draft, instructions: event.target.value })} />
+              <textarea className="hy-input agent-textarea" data-testid="agent-instructions-input" value={draft.instructions} onChange={(event) => setDraft({ ...draft, instructions: event.target.value })} />
               <small className="agent-field-help">写任务边界、工作方法、必须遵守的功能要求。</small>
             </label>
             <label>
               <span>Personal Prompt</span>
-              <textarea className="hy-input agent-textarea compact" value={draft.persona_prompt} onChange={(event) => setDraft({ ...draft, persona_prompt: event.target.value })} />
+              <textarea className="hy-input agent-textarea compact" data-testid="agent-persona-input" value={draft.persona_prompt} onChange={(event) => setDraft({ ...draft, persona_prompt: event.target.value })} />
               <small className="agent-field-help">写人设、口吻、角色偏好；运行时会和功能要求分段放进 Agent context。</small>
             </label>
             <section className="agent-backend-section" aria-label="Model">
@@ -3900,7 +3903,7 @@ export function AgentStudioView() {
             </label>
             <div className="agent-inline-note">可行性验证：保存后先用“测试模型”检查模型连接，再用 Quick Run 做端到端验证；工具权限和 scopes 会在运行时强制校验。</div>
             <div className="agent-editor-actions">
-              <button type="submit" className="primary-action" disabled={busy || selectedAgentReadOnly}>保存 Agent</button>
+              <button type="submit" className="primary-action" data-testid="agent-save" disabled={busy || selectedAgentReadOnly}>保存 Agent</button>
               {draft.agent_id ? <button type="button" disabled={busy || selectedAgentReadOnly} onClick={() => void runAction(async () => { const result = await testAgentModel(draft.agent_id || ''); setStatus(result.message || (result.ok ? '模型测试通过' : '模型测试失败')); }, '测试模型')}>测试模型</button> : null}
             </div>
             {draft.agent_id ? (
