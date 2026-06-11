@@ -2024,6 +2024,10 @@ class RunRepository:
             raise KeyError(run_id)
         return str(row["pending_approval_json"] or "{}")
 
+    def pending_approval_private(self, run_id: str) -> dict[str, Any]:
+        pending = _json_load(self.pending_approval_json(run_id), {})
+        return pending if isinstance(pending, dict) else {}
+
     def by_client_request_id(self, client_request_id: str) -> dict[str, Any] | None:
         clean_id = str(client_request_id or "").strip()
         if not clean_id:
@@ -5933,13 +5937,6 @@ class NativeRunEngine:
             "deleted_run_count": len(deleted_run_ids),
         }
 
-    def _pending_approval_json(self, run_id: str) -> str:
-        return self.runs.pending_approval_json(run_id)
-
-    def _pending_approval_private(self, run_id: str) -> dict[str, Any]:
-        pending = _json_load(self._pending_approval_json(run_id), {})
-        return pending if isinstance(pending, dict) else {}
-
     def read_run_artifact(self, run_id: str, artifact_path: str) -> dict[str, Any]:
         return self.run_artifacts.read(run_id, artifact_path)
 
@@ -7799,7 +7796,7 @@ class NativeRunEngine:
         timeline: list[dict[str, Any]],
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str]:
         artifacts = [item for item in run.get("artifacts") or [] if isinstance(item, dict)]
-        pending = self._pending_approval_private(run_id)
+        pending = self.runs.pending_approval_private(run_id)
         node_info: dict[str, str] = {}
         cancelled_child_run_id = ""
         label = "Workflow"
@@ -8006,7 +8003,7 @@ class NativeRunEngine:
             return self._approve_main_chat_run_approval(run)
         if run["kind"] != "agent_run":
             raise AgentRuntimeError("当前只支持恢复 Agent Run 的工具审批")
-        pending = self._pending_approval_private(run_id)
+        pending = self.runs.pending_approval_private(run_id)
         if not pending:
             raise AgentRuntimeError("Run 缺少待审批工具信息")
         agent = self._get_agent_private(str(run["runnable_id"]))
@@ -8077,7 +8074,7 @@ class NativeRunEngine:
 
     def _approve_main_chat_run_approval(self, run: dict[str, Any]) -> dict[str, Any]:
         run_id = str(run["run_id"])
-        pending = self._pending_approval_private(run_id)
+        pending = self.runs.pending_approval_private(run_id)
         if not pending:
             raise AgentRuntimeError("Run 缺少待审批工具信息")
         model_profile_id = str(pending.get("model_profile_id") or "").strip()
@@ -8171,7 +8168,7 @@ class NativeRunEngine:
 
     def _approve_workflow_run_approval(self, run: dict[str, Any]) -> dict[str, Any]:
         run_id = str(run["run_id"])
-        pending = self._pending_approval_private(run_id)
+        pending = self.runs.pending_approval_private(run_id)
         if not pending or str(pending.get("tool") or "") != "workflow.approval":
             raise AgentRuntimeError("Workflow Run 缺少待审批节点信息")
         workflow = self._workflow_for_run_resume(run)
@@ -8212,7 +8209,7 @@ class NativeRunEngine:
         if run["status"] != "approval_required":
             return run
         if run["kind"] == "workflow_run":
-            pending = self._pending_approval_private(run_id)
+            pending = self.runs.pending_approval_private(run_id)
             if not pending or str(pending.get("tool") or "") != "workflow.approval":
                 raise AgentRuntimeError("Workflow Run 缺少待审批节点信息")
             label = str(pending.get("workflow_node_label") or "Approval")
@@ -8235,7 +8232,7 @@ class NativeRunEngine:
                 )
                 result = self.get_run(run_id)
             return result
-        pending = self._pending_approval_private(run_id)
+        pending = self.runs.pending_approval_private(run_id)
         tool_request = pending.get("tool_request") if isinstance(pending.get("tool_request"), dict) else {}
         tool_name = str(tool_request.get("tool") or pending.get("tool") or "").strip()
         tool_input_preview = _tool_input_preview(tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {})
@@ -8255,7 +8252,7 @@ class NativeRunEngine:
         if run["status"] != "approval_required":
             return run
         if run["kind"] == "workflow_run":
-            pending = self._pending_approval_private(run_id)
+            pending = self.runs.pending_approval_private(run_id)
             if not pending or str(pending.get("tool") or "") != "workflow.approval":
                 return self.cancel_run(run_id)
             label = str(pending.get("workflow_node_label") or "Approval")
@@ -8278,7 +8275,7 @@ class NativeRunEngine:
                 )
                 result = self.get_run(run_id)
             return result
-        pending = self._pending_approval_private(run_id)
+        pending = self.runs.pending_approval_private(run_id)
         tool_request = pending.get("tool_request") if isinstance(pending.get("tool_request"), dict) else {}
         tool_name = str(tool_request.get("tool") or pending.get("tool") or "").strip()
         tool_input_preview = _tool_input_preview(tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {})

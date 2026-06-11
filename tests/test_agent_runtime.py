@@ -4736,7 +4736,8 @@ def test_main_chat_durable_approval_claim_blocks_duplicate_execution(tmp_path, m
         )
 
         assert waiting["status"] == "approval_required"
-        pending = service._pending_approval_private(run["run_id"])
+        pending = service.runs.pending_approval_private(run["run_id"])
+        assert pending["tool"] == "workspace.write_patch"
         claiming_service = make_service(tmp_path)
         assert claiming_service.run_approvals.claim_pending_approval(run["run_id"], pending) is True
         assert claiming_service.run_approvals.claim_pending_approval(run["run_id"], pending) is False
