@@ -263,6 +263,32 @@ def test_chat_group_summary_ui_smoke_uses_group_create_send_and_summary_status()
     )
 
 
+def test_chat_delegated_summary_ui_smoke_uses_activity_approval_summary_and_run_detail() -> None:
+    smoke_script = "scripts/smoke_chat_delegated_summary_ui.mjs"
+    _assert_contains(
+        smoke_script,
+        [
+            "#/chat",
+            "data-testid=\"chat-composer-approval-notice\"",
+            "data-approval-source') === 'activity'",
+            "data-testid=\"chat-composer-approval-open-run-detail\"",
+            "data-testid=\"chat-composer-approval-approve\"",
+            "data-testid=\"chat-message-activity-open-run-detail\"",
+            "data-testid=\"agent-run-detail\"",
+            "data-testid=\"agent-run-detail-execution-event\"",
+            "request.method === 'POST' && url.pathname === `/ui/runs/${DELEGATED_RUN_ID}/approval/approve`",
+            "request.method === 'POST' && url.pathname === '/ui/chat/delegated-run-summary'",
+            "summaryPayload.run_id !== DELEGATED_RUN_ID",
+            "agent.tool.approval_required",
+            "agent.tool.approval_approved",
+            "agent.run.completed",
+            "run_oha_agent",
+            "<oha_delegation>",
+            "assertMockBridgeContract",
+        ],
+    )
+
+
 def test_launcher_session_summary_ui_smoke_uses_bubble_and_live2d_summary_paths() -> None:
     smoke_script = "scripts/smoke_launcher_session_summary_ui.mjs"
     _assert_contains(

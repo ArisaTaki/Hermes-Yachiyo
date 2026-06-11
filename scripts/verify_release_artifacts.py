@@ -741,6 +741,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover Chat approval Electron UI smoke",
     ),
     (
+        "node scripts/smoke_chat_delegated_summary_ui.mjs",
+        "macOS release workflow smoke tests must cover Chat delegated summary Electron UI smoke",
+    ),
+    (
         "node scripts/smoke_chat_group_summary_ui.mjs",
         "macOS release workflow smoke tests must cover Chat group summary Electron UI smoke",
     ),
