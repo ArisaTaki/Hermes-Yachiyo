@@ -7958,11 +7958,42 @@ def test_cancel_workflow_approval_updates_group_and_step_info(tmp_path, monkeypa
         assert run["status"] == "approval_required"
         assert service.get_run_group(run["run_group_id"])["status"] == "approval_required"
 
+        projection_calls: list[dict[str, str]] = []
+        original_projection = service.run_transition_projection.project_cancelled_workflow_group_if_root
+
+        def spy_project_cancelled_workflow_group_if_root(
+            run_arg: dict[str, object],
+            result_arg: dict[str, object],
+        ) -> dict[str, object]:
+            projection_calls.append(
+                {
+                    "run_id": str(run_arg.get("run_id") or ""),
+                    "result_run_id": str(result_arg.get("run_id") or ""),
+                    "status": str(result_arg.get("status") or ""),
+                    "result": str(result_arg.get("result") or ""),
+                }
+            )
+            return original_projection(run_arg, result_arg)
+
+        monkeypatch.setattr(
+            service.run_transition_projection,
+            "project_cancelled_workflow_group_if_root",
+            spy_project_cancelled_workflow_group_if_root,
+        )
+
         cancelled = service.cancel_run(run["run_id"])
 
         assert cancelled["status"] == "cancelled"
         assert cancelled["pending_approval"] == {}
         assert cancelled["result"] == "Workflow 已取消：人工确认"
+        assert projection_calls == [
+            {
+                "run_id": run["run_id"],
+                "result_run_id": run["run_id"],
+                "status": "cancelled",
+                "result": "Workflow 已取消：人工确认",
+            }
+        ]
         assert len(calls) == 1
         cancelled_event = next(event for event in cancelled["timeline"] if event["event"] == "workflow.run.cancelled")
         assert cancelled_event["detail"] == "人工确认 cancelled"

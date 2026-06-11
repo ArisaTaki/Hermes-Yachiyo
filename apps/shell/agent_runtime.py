@@ -8425,16 +8425,10 @@ class NativeRunEngine:
             },
         )
         if result.get("kind") == "workflow_run" and self._workflow_run_is_group_root(result):
-            self._update_run_group(
-                str(result.get("run_group_id") or ""),
-                status="cancelled",
-                summary=str(result.get("result") or "Workflow 已取消"),
-            )
-            result = self.get_run(run_id)
-        else:
-            return self._project_child_run_transition(result)
-        self._resume_parent_workflows_after_child_update(result)
-        return result
+            projected = self._project_cancelled_workflow_group_if_root(run, result)
+            self._resume_parent_workflows_after_child_update(projected)
+            return projected
+        return self._project_child_run_transition(result)
 
     def _tool_approval_resume_context(
         self,
