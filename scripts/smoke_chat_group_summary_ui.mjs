@@ -16,6 +16,9 @@ const AGENT_ID = 'chat-group-ui-agent';
 const GROUP_NAME = 'Chat Group UI Smoke';
 const GROUP_GOAL = 'Coordinate the group UI smoke';
 const GROUP_FOLLOWUP_TEXT = 'Add this follow-up to the current group task.';
+const GROUP_AVATAR_DATA_URL = `data:image/svg+xml;base64,${Buffer.from(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" rx="8" fill="#14b8a6"/><text x="16" y="21" text-anchor="middle" font-size="16" fill="#fff">群</text></svg>',
+).toString('base64')}`;
 const RUN_GROUP_ID = 'run_group_chat_group_ui_smoke';
 const GROUP_AGENT_RUN_ID = 'agent_run_chat_group_ui_smoke';
 const GROUP_SUMMARY_RUN_ID = 'main_chat_run_group_summary_ui_smoke';
@@ -750,6 +753,66 @@ async function main() {
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-session-tab-create\\"]').click()", true);
   await waitFor(win, () => Boolean(document.querySelector('[data-testid="chat-group-dialog"]')), 'group dialog');
   await win.webContents.executeJavaScript(\`
+    (async () => {
+      const input = document.querySelector('[data-testid="chat-group-avatar-file-input"]');
+      const buttons = [
+        document.querySelector('[data-testid="chat-group-avatar-preview"]'),
+        document.querySelector('[data-testid="chat-group-avatar-select"]'),
+      ];
+      if (!input) throw new Error('chat group avatar file input not found');
+      if (buttons.some((button) => !button)) throw new Error('chat group avatar picker button not found');
+      let clickCount = 0;
+      const hadOwnClick = Object.prototype.hasOwnProperty.call(input, 'click');
+      const ownClick = hadOwnClick ? input.click : undefined;
+      Object.defineProperty(input, 'click', { configurable: true, value: () => { clickCount += 1; } });
+      try {
+        buttons.forEach((button) => button.click());
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      } finally {
+        delete input.click;
+        if (hadOwnClick) Object.defineProperty(input, 'click', { configurable: true, value: ownClick });
+      }
+      if (clickCount !== buttons.length) throw new Error('chat group avatar buttons did not target file input');
+    })();
+  \`, true);
+  console.log('[electron-smoke] group avatar picker fallback targets file input');
+  async function applyGroupAvatarFile() {
+    await win.webContents.executeJavaScript(\`
+      (async () => {
+        const input = document.querySelector('[data-testid="chat-group-avatar-file-input"]');
+        if (!input) throw new Error('chat group avatar file input not found');
+        const blob = await fetch(${JSON.stringify(GROUP_AVATAR_DATA_URL)}).then((response) => response.blob());
+        const file = new File([blob], 'group-avatar.svg', { type: 'image/svg+xml' });
+        const transfer = new DataTransfer();
+        transfer.items.add(file);
+        Object.defineProperty(input, 'files', { configurable: true, value: transfer.files });
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        delete input.files;
+      })();
+    \`, true);
+  }
+  await applyGroupAvatarFile();
+  await waitFor(win, () => {
+    const image = document.querySelector('[data-testid="chat-group-avatar-preview"] img');
+    const clear = document.querySelector('[data-testid="chat-group-avatar-clear"]');
+    const clearSecondary = document.querySelector('[data-testid="chat-group-avatar-clear-secondary"]');
+    return image?.getAttribute('src')?.startsWith('data:image/svg+xml')
+      && clear
+      && !clear.disabled
+      && clearSecondary
+      && !clearSecondary.disabled;
+  }, 'group avatar preview');
+  console.log('[electron-smoke] group avatar preview rendered');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-group-avatar-clear-secondary\\"]').click()", true);
+  await waitFor(win, () => {
+    const image = document.querySelector('[data-testid="chat-group-avatar-preview"] img');
+    const clear = document.querySelector('[data-testid="chat-group-avatar-clear"]');
+    return !image && clear?.disabled;
+  }, 'cleared group avatar');
+  console.log('[electron-smoke] group avatar cleared');
+  await applyGroupAvatarFile();
+  await waitFor(win, () => document.querySelector('[data-testid="chat-group-avatar-preview"] img')?.getAttribute('src')?.startsWith('data:image/svg+xml'), 'group avatar reapplied');
+  await win.webContents.executeJavaScript(\`
     (() => {
       const setNativeValue = (element, value) => {
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(element, value);
@@ -910,6 +973,9 @@ function assertMockBridgeContract() {
   const participantIds = Array.isArray(groupPayload.participant_ids) ? groupPayload.participant_ids : [];
   if (participantIds.length !== 1 || participantIds[0] !== AGENT_ID) {
     throw new Error(`unexpected group participants: ${JSON.stringify(participantIds)}`);
+  }
+  if (!String(groupPayload.avatar_url || '').startsWith('data:image/svg+xml')) {
+    throw new Error('group avatar was not submitted as a data URL');
   }
   const messagePayload = bridgeState.messagePayload;
   if (!messagePayload) throw new Error('group message was not sent');
