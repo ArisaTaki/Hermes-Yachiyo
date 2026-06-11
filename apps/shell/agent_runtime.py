@@ -8076,7 +8076,8 @@ class NativeRunEngine:
 
     @staticmethod
     def _assistant_message_for_history(message: dict[str, Any]) -> dict[str, Any]:
-        history = {"role": "assistant", "content": message.get("content") or ""}
+        content = message.get("content")
+        history = {"role": "assistant", "content": content if content not in (None, "") else None}
         tool_calls = message.get("tool_calls")
         if isinstance(tool_calls, list):
             history["tool_calls"] = tool_calls

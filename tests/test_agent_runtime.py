@@ -4494,6 +4494,76 @@ def test_main_chat_model_loop_executes_responses_style_streaming_tool_call(tmp_p
         service.close()
 
 
+def test_main_chat_model_loop_uses_responses_call_id_without_item_id(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    (workdir / "README.md").write_text("responses call id only content", encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        if len(calls) == 1:
+            assert tools is not None
+
+            def stream():
+                yield {
+                    "type": "response.output_item.done",
+                    "item": {
+                        "type": "function_call",
+                        "call_id": "call_response_only",
+                        "name": "workspace_read",
+                        "arguments": '{"path": "README.md"}',
+                    },
+                }
+                yield {
+                    "type": "response.completed",
+                    "response": {
+                        "status": "completed",
+                        "output": [{"type": "function_call", "finish_reason": "tool_calls"}],
+                    },
+                }
+
+            return stream()
+        assistant_tool_messages = [
+            message for message in messages if message.get("role") == "assistant" and message.get("tool_calls")
+        ]
+        assert assistant_tool_messages[-1]["content"] is None
+        assert assistant_tool_messages[-1]["tool_calls"][0]["id"] == "call_response_only"
+        assert assistant_tool_messages[-1]["tool_calls"][0]["function"]["arguments"] == '{"path": "README.md"}'
+        assert messages[-1]["role"] == "tool"
+        assert messages[-1]["tool_call_id"] == "call_response_only"
+        assert "responses call id only content" in messages[-1]["content"]
+        return {"content": "Responses call id only complete"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-responses-call-id-only",
+            session_id="session-main-responses-call-id-only",
+            user_goal="Read README through Responses call_id",
+        )
+        updated = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [{"role": "user", "content": "Read README"}],
+            tool_policy={"allowed_tools": ["workspace.read"]},
+            workspace_policy={"default_workdir": str(workdir), "readable_scopes": ["."]},
+        )
+        events = service.list_run_events(run["run_id"])["events"]
+        tool_event = next(event for event in events if event["event_type"] == "agent.tool.call")
+
+        assert updated["result"] == "Responses call id only complete"
+        assert tool_event["payload"]["tool"] == "workspace.read"
+        assert tool_event["payload"]["input_preview"]["path"] == "README.md"
+        assert len(calls) == 2
+    finally:
+        service.close()
+
+
 def test_main_chat_model_loop_executes_legacy_streaming_function_call(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     workdir = tmp_path / "repo"
