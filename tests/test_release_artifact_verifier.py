@@ -19,6 +19,7 @@ RELEASE_ELECTRON_SMOKE_SCRIPTS: tuple[str, ...] = (
     "scripts/smoke_launcher_session_summary_ui.mjs",
     "scripts/smoke_proactive_tts_ui.mjs",
     "scripts/smoke_agent_studio_agents_ui.mjs",
+    "scripts/smoke_agent_studio_skills_ui.mjs",
     "scripts/smoke_agent_run_detail_ui.mjs",
     "scripts/smoke_workflow_save_run_ui.mjs",
 )
@@ -911,6 +912,7 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow smoke tests must cover launcher session summary Electron UI smoke" in messages
     assert "macOS release workflow smoke tests must cover proactive TTS Electron UI smoke" in messages
     assert "macOS release workflow smoke tests must cover Agent Studio agents Electron UI smoke" in messages
+    assert "macOS release workflow smoke tests must cover Agent Studio skills Electron UI smoke" in messages
     assert "macOS release workflow smoke tests must cover Agent Run Detail replay Electron UI smoke" in messages
     assert "macOS release workflow smoke tests must cover Workflow save-and-run Electron UI smoke" in messages
     assert "macOS release workflow smoke tests must cover Bridge Host Origin and session token guard" in messages

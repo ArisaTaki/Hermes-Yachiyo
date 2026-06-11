@@ -4015,8 +4015,8 @@ export function AgentStudioView() {
       ) : null}
 
       {!loading && tab === 'skills' ? (
-        <section className="agent-studio-grid">
-          <div className="agent-studio-panel skill-import-panel">
+        <section className="agent-studio-grid" data-testid="skill-library">
+          <div className="agent-studio-panel skill-import-panel" data-testid="skill-import-panel">
             <div className="section-heading-row">
               <h2>Installed Skills</h2>
             </div>
@@ -4024,7 +4024,7 @@ export function AgentStudioView() {
             <div className="skill-import-target">
               <label>
                 <span>导入到文件夹</span>
-                <select className="hy-select" value={skillTargetFolderId} onChange={(event) => setSkillTargetFolderId(event.target.value)}>
+                <select className="hy-select" data-testid="skill-import-folder-select" value={skillTargetFolderId} onChange={(event) => setSkillTargetFolderId(event.target.value)}>
                   <option value="">无需分组</option>
                   {skillFolders.map((folder) => (
                     <option value={folder.folder_id} key={folder.folder_id}>{folder.name}</option>
@@ -4038,6 +4038,7 @@ export function AgentStudioView() {
                 <span>Skill 来源或安装命令</span>
                 <input
                   className="hy-input"
+                  data-testid="skill-install-command-input"
                   value={skillInstallCommand}
                   onChange={(event) => setSkillInstallCommand(event.target.value)}
                   placeholder="owner/repo --skill skill-name 或 skills@latest add owner/repo"
@@ -4048,7 +4049,7 @@ export function AgentStudioView() {
                   <span />
                 </div>
               ) : null}
-              <button type="button" disabled={busy || !skillInstallCommand.trim()} onClick={() => void runAction(installSkillFromCommand, '安装 Skill')}>
+              <button type="button" data-testid="skill-install-command-submit" disabled={busy || !skillInstallCommand.trim()} onClick={() => void runAction(installSkillFromCommand, '安装 Skill')}>
                 {installingSkill ? '安装中...' : '安装并同步'}
               </button>
               <small>可以直接输入 Skill 来源，也可以输入 <code>skills@latest add ...</code> 或 <code>npx skills add ...</code>。Oha-Yachiyo 会固定使用 <code>oha-yachiyo</code> 目标并补上 <code>--copy -y</code>，在 Installed Skill 工作区执行，不写入 Native 全局库。</small>
@@ -4071,12 +4072,12 @@ export function AgentStudioView() {
             </div>
             <div className="section-heading-row">
               <h2>Native Skill Library</h2>
-              <button type="button" disabled={busy} onClick={() => void runAction(syncNativeSkillLibrary, '同步 Native Skills')}>从 Native Library 同步</button>
+              <button type="button" data-testid="skill-native-sync" disabled={busy} onClick={() => void runAction(syncNativeSkillLibrary, '同步 Native Skills')}>从 Native Library 同步</button>
             </div>
             <p className="agent-section-help">Native Skill Library 的 `~/.oha-yachiyo/skill-library/skills` 只登记引用，不复制到 Installed Skill 管理区；项目级 Skills 暂不纳入本页管理。</p>
             <div className="skill-source-roots">
               {skillSources.map((source) => (
-                <div className={source.exists ? 'skill-source-root' : 'skill-source-root missing'} key={`${source.source_type}-${source.path}`}>
+                <div className={source.exists ? 'skill-source-root' : 'skill-source-root missing'} data-testid="skill-source-root" key={`${source.source_type}-${source.path}`}>
                   <strong>{skillSourceTypeLabel(source.source_type)}</strong>
                   <span>{source.skill_count || 0} skills</span>
                   <code>{source.path}</code>
@@ -4085,9 +4086,9 @@ export function AgentStudioView() {
               {!skillSources.length ? <div className="empty-state inline-empty">暂未检测到 Native skills root。</div> : null}
             </div>
             {skillImportResults.length ? (
-              <div className="skill-import-results" aria-label="Skill import results">
+              <div className="skill-import-results" aria-label="Skill import results" data-testid="skill-import-results">
                 {skillImportResults.map((result) => (
-                  <div className={`skill-import-result ${result.status}`} key={`${result.source}-${result.status}`}>
+                  <div className={`skill-import-result ${result.status}`} data-testid="skill-import-result" key={`${result.source}-${result.status}`}>
                     <strong>{skillResultStatusLabel(result.status)}</strong>
                     <span>{result.source}</span>
                     <small>{result.message}</small>
@@ -4096,7 +4097,7 @@ export function AgentStudioView() {
               </div>
             ) : null}
           </div>
-          <div className="agent-studio-panel">
+          <div className="agent-studio-panel" data-testid="skill-library-panel">
             <div className="section-heading-row">
               <h2>{skillLibraryFilter === 'native' ? 'Native Skill Library' : 'Installed Skill Library'}</h2>
               <div className="studio-heading-actions">
@@ -4108,11 +4109,12 @@ export function AgentStudioView() {
             </div>
             <div className="skill-filter-bar">
               <div className="skill-filter-tabs">
-                <button type="button" className={skillLibraryFilter === 'installed' ? 'active' : ''} onClick={() => setSkillLibraryFilter('installed')}>Installed</button>
-                <button type="button" className={skillLibraryFilter === 'native' ? 'active' : ''} onClick={() => setSkillLibraryFilter('native')}>Native</button>
+                <button type="button" data-testid="skill-filter-installed" className={skillLibraryFilter === 'installed' ? 'active' : ''} onClick={() => setSkillLibraryFilter('installed')}>Installed</button>
+                <button type="button" data-testid="skill-filter-native" className={skillLibraryFilter === 'native' ? 'active' : ''} onClick={() => setSkillLibraryFilter('native')}>Native</button>
               </div>
               <select
                 className="hy-select"
+                data-testid="skill-library-folder-filter"
                 value={skillLibraryFolderFilter}
                 onChange={(event) => setSkillLibraryFolderFilter(event.target.value)}
               >
@@ -4124,6 +4126,7 @@ export function AgentStudioView() {
               </select>
               <input
                 className="hy-input"
+                data-testid="skill-library-search"
                 value={skillLibrarySearch}
                 onChange={(event) => setSkillLibrarySearch(event.target.value)}
                 placeholder="搜索 Skill 名称、路径或摘要"
@@ -4140,7 +4143,7 @@ export function AgentStudioView() {
                 <button type="button" disabled={busy} onClick={finishSkillManagement}>完成</button>
               </div>
             ) : null}
-            <div className="skill-list">
+            <div className="skill-list" data-testid="skill-list">
               {filteredLibrarySkills.map((skill) => (
                 <SkillCard
                   busy={busy}
@@ -5212,12 +5215,19 @@ function SkillCard({
     managing ? 'managing' : '',
   ].filter(Boolean).join(' ');
   return (
-    <article className={cardClassName}>
+    <article
+      className={cardClassName}
+      data-skill-enabled={enabled ? 'true' : 'false'}
+      data-skill-folder-id={skill.folder_id || ''}
+      data-skill-id={skill.skill_id}
+      data-testid="skill-card"
+    >
       <div className="section-heading-row skill-card-head">
         <div className="skill-card-title">
           <label className="skill-card-select" aria-label={`选择 Skill ${skill.name}`}>
             <input
               type="checkbox"
+              data-testid="skill-card-select"
               checked={selected}
               disabled={busy || !managing}
               onChange={onSelectionChange}
@@ -5231,6 +5241,7 @@ function SkillCard({
         <label className={enabled ? 'skill-enable-switch active' : 'skill-enable-switch'}>
           <input
             type="checkbox"
+            data-testid="skill-card-enabled-toggle"
             checked={enabled}
             disabled={busy}
             onChange={() => void onToggleEnabled()}
@@ -5243,6 +5254,7 @@ function SkillCard({
         <span>文件夹</span>
         <select
           className="hy-select"
+          data-testid="skill-card-folder-select"
           value={skill.folder_id || ''}
           disabled={busy}
           onChange={(event) => void onMoveFolder(event.target.value)}
@@ -5265,8 +5277,8 @@ function SkillCard({
       ) : null}
       {skill.asset_paths?.length ? <small>{skill.asset_paths.length} assets/templates</small> : null}
       <div className="skill-card-actions">
-        <button type="button" disabled={busy || !skill.local_path} onClick={() => void onOpenLocation()}>打开路径</button>
-        <button type="button" className="danger-action" disabled={busy} onClick={() => void onDelete()}>删除</button>
+        <button type="button" data-testid="skill-card-open-location" disabled={busy || !skill.local_path} onClick={() => void onOpenLocation()}>打开路径</button>
+        <button type="button" className="danger-action" data-testid="skill-card-delete" disabled={busy} onClick={() => void onDelete()}>删除</button>
       </div>
       <pre>{(skill.skill_markdown || '').slice(0, 1200)}</pre>
     </article>

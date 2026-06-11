@@ -1302,6 +1302,64 @@ def test_agent_studio_agents_ui_smoke_uses_definition_crud_paths() -> None:
     )
 
 
+def test_agent_studio_skills_ui_smoke_uses_skill_library_paths() -> None:
+    smoke_script = "scripts/smoke_agent_studio_skills_ui.mjs"
+    _assert_contains(
+        "apps/frontend/src/views/AgentStudioView.tsx",
+        [
+            'data-testid="skill-library"',
+            'data-testid="skill-import-panel"',
+            'data-testid="skill-import-folder-select"',
+            'data-testid="skill-install-command-input"',
+            'data-testid="skill-install-command-submit"',
+            'data-testid="skill-native-sync"',
+            'data-testid="skill-source-root"',
+            'data-testid="skill-import-results"',
+            'data-testid="skill-import-result"',
+            'data-testid="skill-library-panel"',
+            'data-testid="skill-filter-installed"',
+            'data-testid="skill-filter-native"',
+            'data-testid="skill-library-folder-filter"',
+            'data-testid="skill-library-search"',
+            'data-testid="skill-list"',
+            'data-testid="skill-card"',
+            'data-testid="skill-card-select"',
+            'data-testid="skill-card-enabled-toggle"',
+            'data-testid="skill-card-folder-select"',
+            'data-testid="skill-card-open-location"',
+            'data-testid="skill-card-delete"',
+        ],
+    )
+    _assert_contains(
+        smoke_script,
+        [
+            "#/agents/skills",
+            "request.method === 'POST' && url.pathname === '/ui/skills/sync'",
+            "request.method === 'POST' && url.pathname === '/ui/skills/install'",
+            "request.method === 'PATCH' && url.pathname === `/ui/skills/${SKILL_ID}`",
+            "request.method === 'DELETE' && url.pathname === `/ui/skills/${SKILL_ID}`",
+            "data-testid=\"skill-library\"",
+            "data-testid=\"skill-native-sync\"",
+            "data-testid=\"skill-import-result\"",
+            "data-testid=\"skill-source-root\"",
+            "data-testid=\"skill-import-folder-select\"",
+            "data-testid=\"skill-install-command-input\"",
+            "data-testid=\"skill-install-command-submit\"",
+            "data-testid=\"skill-card\"",
+            "data-testid=\"skill-card-enabled-toggle\"",
+            "data-testid=\"skill-card-folder-select\"",
+            "data-testid=\"skill-card-delete\"",
+            "data-testid=\"confirm-action\"",
+            "assertMockBridgeContract",
+            "installSkillRequest.command !== INSTALL_COMMAND",
+            "installSkillRequest.folder_id !== FOLDER_A_ID",
+            "request.enabled === false",
+            "request.folder_id === FOLDER_B_ID",
+            "deletedSkillId !== SKILL_ID",
+        ],
+    )
+
+
 def test_agent_frontend_run_helpers_preserve_native_run_bridge_contract() -> None:
     agents_lib = "apps/frontend/src/lib/agents.ts"
     _assert_function_contains(
