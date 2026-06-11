@@ -248,6 +248,8 @@ def test_chat_ui_exposes_stable_e2e_selectors_for_image_cancel_approval_flow() -
             "data-testid=\"chat-image-file-input\"",
             "data-testid=\"chat-composer-attachment-preview\"",
             "data-testid=\"chat-composer-attachment-remove\"",
+            "data-testid=\"chat-message-attachments\"",
+            "testId=\"chat-message-attachment-item\"",
             "data-testid=\"chat-message-approval-card\"",
             "data-testid=\"chat-message-approval-actions\"",
             "data-testid=\"chat-message-approval-approve\"",

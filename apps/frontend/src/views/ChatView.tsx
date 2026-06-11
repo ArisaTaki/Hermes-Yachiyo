@@ -2966,9 +2966,13 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
             <div className="message-content markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(displayContent, message.id || '', copiedCodeBlockKey) }} />
           )}
           {message.attachments?.length ? (
-            <div className="message-attachments">
+            <div className="message-attachments" data-testid="chat-message-attachments">
               {message.attachments.map((attachment) => (
-                <ImageAttachmentViewer attachment={attachment} key={attachment.id || attachment.name} />
+                <ImageAttachmentViewer
+                  attachment={attachment}
+                  key={attachment.id || attachment.name}
+                  testId="chat-message-attachment-item"
+                />
               ))}
             </div>
           ) : null}
