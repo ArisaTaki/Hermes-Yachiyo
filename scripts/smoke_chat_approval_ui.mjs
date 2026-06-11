@@ -483,6 +483,7 @@ async function waitForApproval(win, label) {
     const openRun = document.querySelector('[data-testid="chat-message-approval-open-run-detail"]');
     const composerApprove = document.querySelector('[data-testid="chat-composer-approval-approve"]');
     const composerReject = document.querySelector('[data-testid="chat-composer-approval-reject"]');
+    const composerOpenRun = document.querySelector('[data-testid="chat-composer-approval-open-run-detail"]');
     return document.querySelector('textarea.chat-input')
       && card?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
       && card?.getAttribute('data-approval-id') === ${JSON.stringify(APPROVAL_ID)}
@@ -495,7 +496,8 @@ async function waitForApproval(win, label) {
       && composer?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
       && composer?.getAttribute('data-approval-id') === ${JSON.stringify(APPROVAL_ID)}
       && composerApprove
-      && composerReject;
+      && composerReject
+      && composerOpenRun;
   }, label);
 }
 async function waitForRunDetailHandoff(win, label) {
@@ -567,6 +569,11 @@ async function main() {
   await win.loadURL(chatUrl);
   console.log('[electron-smoke] chat loaded for composer reject');
   await waitForApproval(win, 'composer approval notice after reset');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-composer-approval-open-run-detail\\"]').click()", true);
+  await waitForRunDetailHandoff(win, 'composer approval Run Detail handoff');
+  console.log('[electron-smoke] composer approval opened Run Detail');
+  await win.loadURL(chatUrl);
+  await waitForApproval(win, 'composer approval notice after Run Detail handoff');
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-composer-approval-reject\\"]').click()", true);
   await waitForRejected(win, 'composer approval reject projection');
   console.log('[electron-smoke] composer approval rejected');
