@@ -13,6 +13,8 @@ const VITE = path.join(FRONTEND, 'node_modules', '.bin', process.platform === 'w
 const ARCHIVE_PATH = '/tmp/oha-live2d-settings-smoke.zip';
 const MODEL_PATH = '/tmp/oha-live2d-settings-smoke-model';
 const IMPORTED_MODEL_PATH = '/tmp/oha-live2d-imported/model.model3.json';
+const ASSETS_ROOT = '/tmp/oha-live2d-assets';
+const RELEASES_URL = 'https://example.test/oha-yachiyo/live2d';
 
 const bridgeState = {
   currentModelPath: '',
@@ -64,9 +66,9 @@ function live2dConfig() {
       source_label: modelPath ? 'Smoke model path' : 'No model path',
       configured_path_display: displayPath,
       effective_model_path_display: displayPath,
-      default_assets_root: '/tmp/oha-live2d-assets',
+      default_assets_root: ASSETS_ROOT,
       default_assets_root_display: '~/Library/Application Support/Oha-Yachiyo/live2d',
-      releases_url: 'https://example.test/oha-yachiyo/live2d',
+      releases_url: RELEASES_URL,
       help_text: 'Live2D settings smoke resource help.',
     },
     summary: {
@@ -241,6 +243,8 @@ function runElectronSmoke(devUrl, bridgeUrl) {
 const { contextBridge } = require('electron');
 let archiveCalls = 0;
 let modelDirectoryCalls = 0;
+let openedPaths = [];
+let externalUrls = [];
 contextBridge.exposeInMainWorld('ohaDesktop', {
   chooseLive2DArchive: async () => {
     archiveCalls += 1;
@@ -250,7 +254,15 @@ contextBridge.exposeInMainWorld('ohaDesktop', {
     modelDirectoryCalls += 1;
     return ${JSON.stringify(MODEL_PATH)};
   },
-  __live2dPickerCalls: () => ({ archiveCalls, modelDirectoryCalls }),
+  openPath: async (targetPath) => {
+    openedPaths.push(targetPath);
+    return true;
+  },
+  openExternalUrl: async (url) => {
+    externalUrls.push(url);
+    return true;
+  },
+  __live2dDesktopActions: () => ({ archiveCalls, modelDirectoryCalls, openedPaths, externalUrls }),
 });
 `, 'utf8');
   const script = `
@@ -320,6 +332,27 @@ async function main() {
     return resource && !document.querySelector('[data-testid="live2d-archive-import"]')?.disabled;
   }, 'live2d resource controls');
   console.log('[electron-smoke] live2d resource controls loaded');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"live2d-open-assets-dir\\"]').click()", true);
+  await waitFor(win, () => {
+    const status = document.querySelector('[data-testid="mode-settings-status"]');
+    return status?.textContent.includes('已打开默认导入目录')
+      && status?.textContent.includes('~/Library/Application Support/Oha-Yachiyo/live2d');
+  }, 'live2d assets directory opened');
+  const assetsDirActions = await win.webContents.executeJavaScript('window.ohaDesktop.__live2dDesktopActions()', true);
+  if (!assetsDirActions.openedPaths.includes(${JSON.stringify(ASSETS_ROOT)})) {
+    throw new Error('expected Live2D openPath to receive assets root, got ' + JSON.stringify(assetsDirActions.openedPaths));
+  }
+  console.log('[electron-smoke] live2d assets directory open verified');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"live2d-open-releases\\"]').click()", true);
+  await waitFor(win, () => {
+    const status = document.querySelector('[data-testid="mode-settings-status"]');
+    return status?.textContent.includes('已打开 GitHub Releases 页面');
+  }, 'live2d releases opened');
+  const releasesActions = await win.webContents.executeJavaScript('window.ohaDesktop.__live2dDesktopActions()', true);
+  if (!releasesActions.externalUrls.includes(${JSON.stringify(RELEASES_URL)})) {
+    throw new Error('expected Live2D openExternalUrl to receive releases URL, got ' + JSON.stringify(releasesActions.externalUrls));
+  }
+  console.log('[electron-smoke] live2d releases open verified');
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"live2d-archive-import\\"]').click()", true);
   await waitFor(win, () => {
     const status = document.querySelector('[data-testid="mode-settings-status"]');
@@ -327,7 +360,7 @@ async function main() {
     return status?.textContent.includes('Live2D ZIP imported by UI smoke')
       && !save?.disabled;
   }, 'live2d archive imported');
-  const archivePickerCalls = await win.webContents.executeJavaScript('window.ohaDesktop.__live2dPickerCalls().archiveCalls', true);
+  const archivePickerCalls = await win.webContents.executeJavaScript('window.ohaDesktop.__live2dDesktopActions().archiveCalls', true);
   if (archivePickerCalls !== 1) {
     throw new Error('expected Live2D archive picker to be called once, got ' + archivePickerCalls);
   }
@@ -339,7 +372,7 @@ async function main() {
     return status?.textContent.includes('Live2D model path prepared by UI smoke')
       && !save?.disabled;
   }, 'live2d model path prepared');
-  const modelPickerCalls = await win.webContents.executeJavaScript('window.ohaDesktop.__live2dPickerCalls().modelDirectoryCalls', true);
+  const modelPickerCalls = await win.webContents.executeJavaScript('window.ohaDesktop.__live2dDesktopActions().modelDirectoryCalls', true);
   if (modelPickerCalls !== 1) {
     throw new Error('expected Live2D model directory picker to be called once, got ' + modelPickerCalls);
   }

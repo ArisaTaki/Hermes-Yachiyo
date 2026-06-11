@@ -1113,12 +1113,12 @@ function SpecificModeSettingsView({ mode }: { mode: string }) {
     }
   }
 
-  async function openLive2DAssetsDir() {
+  async function openLive2DAssetsDir(assetsRootOverride?: string, assetsRootDisplayOverride?: string) {
     if (mode !== 'live2d') return;
     const config = payload?.settings?.config || {};
     const resource = asRecord(config.resource);
-    const assetsRoot = stringValue(resource.default_assets_root || config.default_assets_root);
-    const assetsRootDisplay = stringValue(resource.default_assets_root_display || config.default_assets_root_display || assetsRoot);
+    const assetsRoot = stringValue(assetsRootOverride || resource.default_assets_root || config.default_assets_root);
+    const assetsRootDisplay = stringValue(assetsRootDisplayOverride || resource.default_assets_root_display || config.default_assets_root_display || assetsRoot);
     if (!assetsRoot) {
       setStatus('未找到默认导入目录');
       return;
@@ -1131,11 +1131,11 @@ function SpecificModeSettingsView({ mode }: { mode: string }) {
     }
   }
 
-  async function openLive2DReleases() {
+  async function openLive2DReleases(releasesUrlOverride?: string) {
     if (mode !== 'live2d') return;
     const config = payload?.settings?.config || {};
     const resource = asRecord(config.resource);
-    const releasesUrl = stringValue(resource.releases_url || config.releases_url);
+    const releasesUrl = stringValue(releasesUrlOverride || resource.releases_url || config.releases_url);
     if (!releasesUrl) {
       setStatus('未找到 Releases 链接');
       return;
@@ -1445,19 +1445,21 @@ function Live2DResourceInfo({
   onManualArchivePathChange: (value: string) => void;
   onChooseModelPath: () => void;
   onImportArchive: () => void;
-  onOpenAssetsDir: () => void;
-  onOpenReleases: () => void;
+  onOpenAssetsDir: (assetsRoot?: string, assetsRootDisplay?: string) => void;
+  onOpenReleases: (releasesUrl?: string) => void;
 }) {
   const resource = asRecord(config.resource);
   const summary = asRecord(config.summary);
+  const assetsRoot = stringValue(resource.default_assets_root || config.default_assets_root || '');
+  const assetsRootDisplay = stringValue(resource.default_assets_root_display || config.default_assets_root_display || assetsRoot);
   const releasesUrl = stringValue(resource.releases_url || config.releases_url || '');
   return (
     <div className="settings-meta-list" data-testid="live2d-resource-settings">
       <div className="settings-resource-actions">
         <button type="button" data-testid="live2d-model-path-prepare" disabled={disabled} onClick={onChooseModelPath}>{desktopFilePickerAvailable ? '选择模型目录' : '检查模型目录路径'}</button>
         <button type="button" data-testid="live2d-archive-import" disabled={disabled} onClick={onImportArchive}>{desktopFilePickerAvailable ? '导入资源包 ZIP' : '按路径导入 ZIP'}</button>
-        <button type="button" data-testid="live2d-open-assets-dir" disabled={disabled} onClick={onOpenAssetsDir}>打开导入目录</button>
-        <button type="button" data-testid="live2d-open-releases" disabled={disabled || !releasesUrl} onClick={onOpenReleases}>打开 Releases</button>
+        <button type="button" data-testid="live2d-open-assets-dir" disabled={disabled} onClick={() => onOpenAssetsDir(assetsRoot, assetsRootDisplay)}>打开导入目录</button>
+        <button type="button" data-testid="live2d-open-releases" disabled={disabled || !releasesUrl} onClick={() => onOpenReleases(releasesUrl)}>打开 Releases</button>
       </div>
       {!desktopFilePickerAvailable ? (
         <div className="settings-resource-fallback">
@@ -1506,7 +1508,7 @@ function Live2DResourceInfo({
       </div>
       <div className="settings-meta-row">
         <span>默认导入目录</span>
-        <strong>{stringValue(resource.default_assets_root_display || config.default_assets_root_display || '—')}</strong>
+        <strong>{assetsRootDisplay || '—'}</strong>
       </div>
       {releasesUrl ? (
         <div className="settings-meta-row">
@@ -1516,7 +1518,7 @@ function Live2DResourceInfo({
               type="button"
               className="inline-link-button"
               disabled={disabled}
-              onClick={onOpenReleases}
+              onClick={() => onOpenReleases(releasesUrl)}
             >
               GitHub Releases
             </button>
