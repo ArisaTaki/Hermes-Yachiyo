@@ -482,6 +482,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover terminal output redaction and truncation",
     ),
     (
+        "tests/test_agent_runtime.py::test_agent_run_redacts_approved_terminal_failure_output_from_projection_and_storage",
+        "macOS release workflow smoke tests must cover approved terminal failure output redaction",
+    ),
+    (
         "tests/test_agent_runtime.py::test_terminal_run_timeout_kills_process_group",
         "macOS release workflow smoke tests must cover terminal timeout process-group kill",
     ),
