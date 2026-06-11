@@ -703,6 +703,59 @@ def test_stream_smoke_summarizes_message_level_tool_calls():
     assert "README.md" not in json.dumps(public_summary)
 
 
+def test_stream_smoke_accepts_sse_delta_tool_call_object_arguments_without_leaking(monkeypatch):
+    requests: list[dict] = []
+    leaked_secret = "sk-stream-object-args-secret123456"
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            yield (
+                b'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_object_args",'
+                b'"type":"function","function":{"name":"workspace_read","arguments":{"path":"README.md"}}}]},'
+                b'"finish_reason":"tool_calls"}]}\n\n'
+            )
+            yield b"data: [DONE]\n\n"
+
+    def fake_urlopen(request, *_args, **_kwargs):
+        requests.append(json.loads(request.data.decode("utf-8")))
+        return FakeResponse()
+
+    monkeypatch.setattr("apps.shell.model_profiles.urlrequest.urlopen", fake_urlopen)
+
+    summary = smoke.run_stream_smoke(
+        base_url="https://api.example.test/v1",
+        model="demo-model",
+        api_key=leaked_secret,
+        require_tool_call=True,
+        expect_tool_name="workspace_read",
+        expect_tool_argument_substrings=["README.md"],
+        expect_tool_argument_json_fields=["path=README.md"],
+        expect_finish_reasons=["tool_calls"],
+    )
+
+    summary_json = json.dumps(summary)
+    assert requests[0]["stream"] is True
+    assert summary["ok"] is True
+    assert summary["finish_reasons"] == ["tool_calls"]
+    assert summary["tool_call_delta_count"] == 1
+    assert summary["tool_call_count"] == 1
+    assert summary["tool_calls"] == [
+        {
+            "id": "call_object_args",
+            "name": "workspace_read",
+            "argument_chars": len('{"path": "README.md"}'),
+        }
+    ]
+    assert leaked_secret not in summary_json
+    assert "README.md" not in summary_json
+
+
 def test_stream_smoke_summarizes_legacy_function_call_deltas():
     chunks = [
         {
