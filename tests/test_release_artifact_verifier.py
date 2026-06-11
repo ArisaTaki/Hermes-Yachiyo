@@ -917,6 +917,8 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow smoke tests must cover NativeRunEngine message-level SSE tool calls" in messages
     assert "macOS release workflow smoke tests must cover NativeRunEngine multiline SSE tool calls" in messages
     assert "macOS release workflow smoke tests must cover NativeRunEngine split-frame SSE tool calls" in messages
+    assert "macOS release workflow smoke tests must cover NativeRunEngine interleaved SSE tool-call deltas" in messages
+    assert "macOS release workflow smoke tests must cover NativeRunEngine multi-choice same-index SSE tool calls" in messages
     assert "macOS release workflow smoke tests must cover NativeRunEngine indexless SSE tool-call deltas" in messages
     assert (
         "macOS release workflow smoke tests must cover NativeRunEngine indexless interleaved SSE tool-call deltas"
