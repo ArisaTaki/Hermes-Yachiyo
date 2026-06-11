@@ -33,6 +33,7 @@ let approvalApproved = false;
 let workflowChildApproved = false;
 let workflowChildRejected = false;
 let workflowChildCancelled = false;
+const runEventRequests = [];
 
 const run = {
   run_id: RUN_ID,
@@ -1248,6 +1249,7 @@ async function startMockBridge() {
       if (request.method === 'GET' && url.pathname === `/runs/${RUN_ID}/events`) {
         const afterSequence = Number(url.searchParams.get('after_sequence') || '0');
         const limit = Math.max(1, Number(url.searchParams.get('limit') || '200'));
+        runEventRequests.push({ after_sequence: Math.max(0, afterSequence), limit });
         sendJson(response, 200, {
           run_id: RUN_ID,
           after_sequence: Math.max(0, afterSequence),
@@ -1740,6 +1742,14 @@ async function main() {
     await runElectronSmoke(devUrl, bridge.url);
     if (!workflowChildRejected) throw new Error('workflow child reject action was not called');
     if (!workflowChildCancelled) throw new Error('workflow child cancel action was not called');
+    const initialReplayRequest = runEventRequests.some((request) => request.after_sequence === 0 && request.limit === 200);
+    const loadMoreReplayRequest = runEventRequests.some((request) => request.after_sequence === 200 && request.limit === 200);
+    if (!initialReplayRequest) {
+      throw new Error(`initial RunEvent replay request was not made with after_sequence=0&limit=200: ${JSON.stringify(runEventRequests)}`);
+    }
+    if (!loadMoreReplayRequest) {
+      throw new Error(`load-more RunEvent replay request was not made with after_sequence=200&limit=200: ${JSON.stringify(runEventRequests)}`);
+    }
     log('passed');
   } finally {
     killProcess(vite);
