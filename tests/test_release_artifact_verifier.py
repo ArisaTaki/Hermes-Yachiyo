@@ -166,7 +166,10 @@ def test_verifier_scans_legacy_protocol_and_workspace_tokens(tmp_path):
     old_workspace_config = resources / "configs" / "yachiyo.json"
     bundle.parent.mkdir(parents=True)
     old_workspace_config.parent.mkdir(parents=True)
-    bundle.write_bytes(b"\x00run_yachiyo\x00yachiyo_group_dispatch\x00yachiyo_agent\xff")
+    bundle.write_bytes(
+        b"\x00run_yachiyo\x00yachiyo_group_dispatch\x00yachiyo_agent\x00"
+        b"Runtime: Yachiyo Agent Runtime\xff"
+    )
     old_workspace_config.write_bytes(b'{"name":"Oha-Yachiyo"}')
 
     findings = verifier.verify_release_artifacts(
@@ -183,6 +186,7 @@ def test_verifier_scans_legacy_protocol_and_workspace_tokens(tmp_path):
     assert "contains legacy product token 'run_yachiyo'" in messages_by_path[bundle]
     assert "contains legacy product token 'yachiyo_group_dispatch'" in messages_by_path[bundle]
     assert "contains legacy product token 'yachiyo_agent'" in messages_by_path[bundle]
+    assert "contains legacy product token 'Runtime: Yachiyo Agent Runtime'" in messages_by_path[bundle]
     assert "path contains legacy product token 'configs/yachiyo.json'" in messages_by_path[old_workspace_config]
 
 

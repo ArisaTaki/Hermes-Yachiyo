@@ -25,6 +25,7 @@ _OLD_MODULE = "her" "mes_yachiyo"
 _OLD_KERNEL_NAME = "Her" "mes"
 _OLD_KERNEL_LOWER = "her" "mes"
 _OLD_PROTOCOL_PRODUCT = "yachi" "yo"
+_OLD_PROTOCOL_TITLE = "Yachi" "yo"
 _LEGACY_KERNEL_TOKENS: tuple[str, ...] = (
     f"{_OLD_KERNEL_NAME}Runtime",
     f"{_OLD_KERNEL_LOWER}_runtime",
@@ -70,6 +71,7 @@ _LEGACY_PROTOCOL_TOKENS: tuple[str, ...] = (
     f"{_OLD_PROTOCOL_PRODUCT}_workspace",
     f"{_OLD_PROTOCOL_PRODUCT}-workspace",
     f"{_OLD_PROTOCOL_PRODUCT}_agent",
+    f"Runtime: {_OLD_PROTOCOL_TITLE} Agent Runtime",
     f".{_OLD_PROTOCOL_PRODUCT}_init",
     f"configs/{_OLD_PROTOCOL_PRODUCT}.json",
 )

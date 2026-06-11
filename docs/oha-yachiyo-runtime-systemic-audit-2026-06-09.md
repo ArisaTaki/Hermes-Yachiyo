@@ -2112,7 +2112,7 @@ compileall passed
 - release workflow smoke 现在也强制包含 runtime SQLite database guard，确保 schema metadata、foreign keys、WAL、busy timeout 和 Run 删除后的 TaskRunLink cascade 不从发布路径回退。
 - release workflow smoke 现在也强制包含 Workflow save-and-run latest canvas route contract，确保 Workflow Studio 保存草稿后必须用最新 `workflow_id` / canvas 创建 Workflow Run，并继续覆盖 step approval、artifact 和 RunEvent replay。
 - release workflow smoke 现在也强制包含 Workflow approval shared context boundary 回归，确保 Workflow approval approve / reject / timeout 继续共享 `WorkflowApprovalTransitionContext` 解析 pending approval 字段。
-- 新 Agent Run 的 runtime metadata / prompt / compiled timeline 已从旧 `yachiyo_agent` / `Yachiyo Agent Runtime` 收敛为 `oha_agent` / `Oha Agent Runtime`；源码级 legacy kernel guard 和 release artifact verifier 的 binary scan 都会阻断 `yachiyo_agent` / 旧 context artifact runtime 标记回归。
+- 新 Agent Run 的 runtime metadata / prompt / compiled timeline 已从旧 `yachiyo_agent` / `Yachiyo Agent Runtime` 收敛为 `oha_agent` / `Oha Agent Runtime`；源码级 legacy kernel guard 和 release artifact verifier 的 binary scan 都会阻断 `yachiyo_agent` 与 `Runtime: Yachiyo Agent Runtime` 旧 context artifact runtime 标记回归，同时避免误伤合法的 `Oha-Yachiyo Agent Runtime` 产品文案。
 - Electron 桌面 Bridge 重启会轮换 session token；前端 `restartDesktopBridge()` 现在会清空 renderer 侧 cached Bridge token，确保重启后的 mutating request 重新从 preload 读取新 token。
 - 桌面 `.app` 已实际启动并验证 bridge；主要 UI 页面已有静态入口 guard、浏览器级 route smoke 和部分按钮级交互 smoke，但仍缺少完整成熟功能 E2E。
 
