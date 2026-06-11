@@ -115,6 +115,7 @@ jobs:
             tests/test_agent_runtime.py::test_main_chat_provider_exception_is_redacted_from_run_events_and_storage \
             tests/test_agent_runtime.py::test_main_chat_tool_exception_is_redacted_from_tool_messages_events_and_storage \
             tests/test_agent_runtime.py::test_main_chat_model_loop_executes_sse_delta_tool_call_object_arguments \
+            tests/test_agent_runtime.py::test_main_chat_model_loop_executes_responses_style_streaming_tool_call \
             tests/test_streaming_provider_smoke.py \
             tests/test_legacy_kernel_removal.py \
             tests/test_runtime_injection_boundary.py \
