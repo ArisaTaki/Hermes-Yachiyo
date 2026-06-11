@@ -867,6 +867,109 @@ def test_stream_smoke_summarizes_responses_style_tool_call_chunks():
     assert "README.md" not in json.dumps(public_summary)
 
 
+def test_stream_smoke_parses_responses_style_sse_transport_without_leaking_arguments(monkeypatch):
+    requests: list[dict] = []
+    leaked_secret = "sk-stream-responses-secret123456"
+
+    def event(payload: dict) -> bytes:
+        event_type = str(payload.get("type") or "")
+        return f"event: {event_type}\ndata: {json.dumps(payload)}\n\n".encode("utf-8")
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            yield event({"type": "response.output_text.delta", "delta": "checking responses "})
+            yield event(
+                {
+                    "type": "response.output_item.added",
+                    "output_index": 0,
+                    "item": {
+                        "id": "fc_response_read",
+                        "type": "function_call",
+                        "call_id": "call_response_read",
+                        "name": "workspace_read",
+                        "arguments": "",
+                    },
+                }
+            )
+            yield event(
+                {
+                    "type": "response.function_call_arguments.delta",
+                    "item_id": "fc_response_read",
+                    "delta": '{"path": "READ',
+                }
+            )
+            yield event(
+                {
+                    "type": "response.function_call_arguments.delta",
+                    "item_id": "fc_response_read",
+                    "delta": 'ME.md"}',
+                }
+            )
+            yield event(
+                {
+                    "type": "response.function_call_arguments.done",
+                    "item_id": "fc_response_read",
+                    "arguments": {"path": "README.md"},
+                }
+            )
+            yield event(
+                {
+                    "type": "response.output_item.done",
+                    "output_index": 0,
+                    "item": {
+                        "id": "fc_response_read",
+                        "type": "function_call",
+                        "call_id": "call_response_read",
+                        "name": "workspace_read",
+                        "arguments": {"path": "README.md"},
+                    },
+                }
+            )
+            yield event({"type": "response.completed", "response": {"status": "completed"}})
+
+    def fake_urlopen(request, *_args, **_kwargs):
+        requests.append(json.loads(request.data.decode("utf-8")))
+        return FakeResponse()
+
+    monkeypatch.setattr("apps.shell.model_profiles.urlrequest.urlopen", fake_urlopen)
+
+    summary = smoke.run_stream_smoke(
+        base_url="https://api.example.test/v1",
+        model="demo-responses-model",
+        api_key=leaked_secret,
+        require_content=True,
+        require_tool_call=True,
+        expect_tool_name="workspace_read",
+        expect_tool_argument_substrings=["README.md"],
+        expect_tool_argument_json_fields=["path=README.md"],
+        expect_finish_reasons=["completed"],
+    )
+
+    summary_json = json.dumps(summary)
+    assert requests[0]["stream"] is True
+    assert requests[0]["tools"][0]["function"]["name"] == "workspace_read"
+    assert summary["ok"] is True
+    assert summary["content_chars"] == len("checking responses ")
+    assert summary["finish_reasons"] == ["completed"]
+    assert summary["tool_call_delta_count"] == 5
+    assert summary["tool_call_count"] == 1
+    assert summary["tool_calls"] == [
+        {
+            "id": "call_response_read",
+            "name": "workspace_read",
+            "argument_chars": len('{"path": "README.md"}'),
+        }
+    ]
+    assert leaked_secret not in summary_json
+    assert "README.md" not in summary_json
+
+
 def test_stream_smoke_accepts_sse_delta_tool_call_object_arguments_without_leaking(monkeypatch):
     requests: list[dict] = []
     leaked_secret = "sk-stream-object-args-secret123456"
