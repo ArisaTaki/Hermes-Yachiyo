@@ -3293,6 +3293,120 @@ class WorkflowResumePlanner:
         return None
 
 
+class WorkflowPathPlanner:
+    """Plans Workflow node traversal, node metadata, and artifact paths."""
+
+    def __init__(self, *, node_kind: Any) -> None:
+        self._node_kind = node_kind
+
+    def workflow_path(self, workflow: dict[str, Any]) -> list[dict[str, Any]]:
+        nodes = {str(node["id"]): node for node in workflow["nodes"]}
+        outgoing = {str(edge["source"]): str(edge["target"]) for edge in workflow["edges"]}
+        start = next(node for node in workflow["nodes"] if self._node_kind(node) == "start")
+        result = [start]
+        current = str(start["id"])
+        while current in outgoing:
+            current = outgoing[current]
+            result.append(nodes[current])
+        return result
+
+    @staticmethod
+    def artifact_path(label: str, artifacts: list[dict[str, Any]], configured_path: str = "") -> str:
+        configured = str(configured_path or "").strip()
+        if configured:
+            rel = _safe_rel_path(configured)
+            rel_path = Path(rel)
+            if rel_path.suffix:
+                base = rel_path.with_suffix("")
+                suffix = rel_path.suffix
+            else:
+                base = rel_path
+                suffix = ".md"
+        else:
+            base = Path(_slug(label, "artifact"))
+            suffix = ".md"
+        existing_paths = {
+            str(item.get("path") or "")
+            for item in artifacts
+            if isinstance(item, dict) and item.get("kind") == "workflow_artifact"
+        }
+        candidate = f"{base}{suffix}"
+        index = 2
+        while candidate in existing_paths:
+            candidate = f"{base}-{index}{suffix}"
+            index += 1
+        return candidate
+
+    @staticmethod
+    def node_task(node: dict[str, Any]) -> str:
+        data = node.get("data") if isinstance(node.get("data"), dict) else {}
+        for key in ("task", "instructions", "step_task", "prompt"):
+            value = str(data.get(key) or "").strip()
+            if value:
+                return value
+        return ""
+
+    @staticmethod
+    def approval_criteria(node: dict[str, Any]) -> str:
+        data = node.get("data") if isinstance(node.get("data"), dict) else {}
+        for key in ("criteria", "approval_criteria", "instructions", "task", "prompt"):
+            value = str(data.get(key) or "").strip()
+            if value:
+                return value
+        return ""
+
+    @staticmethod
+    def child_goal(workflow_goal: str, step_task: str) -> str:
+        clean_workflow_goal = str(workflow_goal or "").strip()
+        clean_step_task = str(step_task or "").strip()
+        if not clean_step_task:
+            return clean_workflow_goal
+        if not clean_workflow_goal:
+            return clean_step_task
+        return f"{clean_step_task}\n\nWorkflow Goal:\n{clean_workflow_goal}"
+
+    def path_snapshot(self, workflow: dict[str, Any]) -> list[dict[str, str]]:
+        snapshot: list[dict[str, str]] = []
+        planned_artifacts: list[dict[str, Any]] = []
+        for node in self.workflow_path(workflow):
+            data = node.get("data") if isinstance(node.get("data"), dict) else {}
+            kind = self._node_kind(node)
+            node_id = str(node.get("id") or "")
+            label = str(data.get("label") or node_id or kind)
+            item = {
+                "id": node_id,
+                "kind": kind,
+                "label": label,
+            }
+            if kind == "artifact":
+                artifact_path = self.artifact_path(
+                    label,
+                    planned_artifacts,
+                    str(data.get("artifact_path") or data.get("artifactPath") or ""),
+                )
+                item["artifact_path"] = artifact_path
+                planned_artifacts.append({"kind": "workflow_artifact", "path": artifact_path})
+            if kind == "agent":
+                step_task = self.node_task(node)
+                if step_task:
+                    item["task"] = step_task
+            if kind == "approval":
+                criteria = self.approval_criteria(node)
+                if criteria:
+                    item["criteria"] = criteria
+            snapshot.append(item)
+        return snapshot
+
+    @staticmethod
+    def runtime_snapshot(workflow: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "workflow_id": str(workflow.get("workflow_id") or ""),
+            "name": str(workflow.get("name") or "Workflow"),
+            "nodes": _json_load(_json_dump(workflow.get("nodes") or []), []),
+            "edges": _json_load(_json_dump(workflow.get("edges") or []), []),
+        }
+
+
 class WorkflowParentResumeCoordinator:
     """Coordinates parent Workflow updates after a child Run changes state."""
 
@@ -4329,6 +4443,7 @@ class NativeRunEngine:
             get_run_group=self.get_run_group,
             get_run=self.get_run,
         )
+        self.workflow_path_planner = WorkflowPathPlanner(node_kind=self._node_kind)
         self.workflow_resume_planner = WorkflowResumePlanner(
             get_workflow=self.get_workflow,
             workflow_path=self._workflow_path,
@@ -8444,30 +8559,7 @@ class NativeRunEngine:
 
     @staticmethod
     def _workflow_artifact_path(label: str, artifacts: list[dict[str, Any]], configured_path: str = "") -> str:
-        configured = str(configured_path or "").strip()
-        if configured:
-            rel = _safe_rel_path(configured)
-            rel_path = Path(rel)
-            if rel_path.suffix:
-                base = rel_path.with_suffix("")
-                suffix = rel_path.suffix
-            else:
-                base = rel_path
-                suffix = ".md"
-        else:
-            base = Path(_slug(label, "artifact"))
-            suffix = ".md"
-        existing_paths = {
-            str(item.get("path") or "")
-            for item in artifacts
-            if isinstance(item, dict) and item.get("kind") == "workflow_artifact"
-        }
-        candidate = f"{base}{suffix}"
-        index = 2
-        while candidate in existing_paths:
-            candidate = f"{base}-{index}{suffix}"
-            index += 1
-        return candidate
+        return WorkflowPathPlanner.artifact_path(label, artifacts, configured_path)
 
     def _resume_parent_workflows_after_child_update(self, child_run: dict[str, Any]) -> None:
         self.workflow_parent_resume.resume_after_child_update(child_run)
@@ -8504,84 +8596,26 @@ class NativeRunEngine:
         )
 
     def _workflow_path(self, workflow: dict[str, Any]) -> list[dict[str, Any]]:
-        nodes = {str(node["id"]): node for node in workflow["nodes"]}
-        outgoing = {str(edge["source"]): str(edge["target"]) for edge in workflow["edges"]}
-        start = next(node for node in workflow["nodes"] if self._node_kind(node) == "start")
-        result = [start]
-        current = str(start["id"])
-        while current in outgoing:
-            current = outgoing[current]
-            result.append(nodes[current])
-        return result
+        return self.workflow_path_planner.workflow_path(workflow)
 
     @staticmethod
     def _workflow_node_task(node: dict[str, Any]) -> str:
-        data = node.get("data") if isinstance(node.get("data"), dict) else {}
-        for key in ("task", "instructions", "step_task", "prompt"):
-            value = str(data.get(key) or "").strip()
-            if value:
-                return value
-        return ""
+        return WorkflowPathPlanner.node_task(node)
 
     @staticmethod
     def _workflow_approval_criteria(node: dict[str, Any]) -> str:
-        data = node.get("data") if isinstance(node.get("data"), dict) else {}
-        for key in ("criteria", "approval_criteria", "instructions", "task", "prompt"):
-            value = str(data.get(key) or "").strip()
-            if value:
-                return value
-        return ""
+        return WorkflowPathPlanner.approval_criteria(node)
 
     @staticmethod
     def _workflow_child_goal(workflow_goal: str, step_task: str) -> str:
-        clean_workflow_goal = str(workflow_goal or "").strip()
-        clean_step_task = str(step_task or "").strip()
-        if not clean_step_task:
-            return clean_workflow_goal
-        if not clean_workflow_goal:
-            return clean_step_task
-        return f"{clean_step_task}\n\nWorkflow Goal:\n{clean_workflow_goal}"
+        return WorkflowPathPlanner.child_goal(workflow_goal, step_task)
 
     def _workflow_path_snapshot(self, workflow: dict[str, Any]) -> list[dict[str, str]]:
-        snapshot: list[dict[str, str]] = []
-        planned_artifacts: list[dict[str, Any]] = []
-        for node in self._workflow_path(workflow):
-            data = node.get("data") if isinstance(node.get("data"), dict) else {}
-            kind = self._node_kind(node)
-            node_id = str(node.get("id") or "")
-            label = str(data.get("label") or node_id or kind)
-            item = {
-                "id": node_id,
-                "kind": kind,
-                "label": label,
-            }
-            if kind == "artifact":
-                artifact_path = self._workflow_artifact_path(
-                    label,
-                    planned_artifacts,
-                    str(data.get("artifact_path") or data.get("artifactPath") or ""),
-                )
-                item["artifact_path"] = artifact_path
-                planned_artifacts.append({"kind": "workflow_artifact", "path": artifact_path})
-            if kind == "agent":
-                step_task = self._workflow_node_task(node)
-                if step_task:
-                    item["task"] = step_task
-            if kind == "approval":
-                criteria = self._workflow_approval_criteria(node)
-                if criteria:
-                    item["criteria"] = criteria
-            snapshot.append(item)
-        return snapshot
+        return self.workflow_path_planner.path_snapshot(workflow)
 
     @staticmethod
     def _workflow_runtime_snapshot(workflow: dict[str, Any]) -> dict[str, Any]:
-        return {
-            "workflow_id": str(workflow.get("workflow_id") or ""),
-            "name": str(workflow.get("name") or "Workflow"),
-            "nodes": _json_load(_json_dump(workflow.get("nodes") or []), []),
-            "edges": _json_load(_json_dump(workflow.get("edges") or []), []),
-        }
+        return WorkflowPathPlanner.runtime_snapshot(workflow)
 
     def _workflow_for_run_resume(self, workflow_run: dict[str, Any]) -> dict[str, Any]:
         return self.workflow_resume_planner.workflow_for_run_resume(workflow_run)

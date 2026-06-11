@@ -90,6 +90,7 @@ jobs:
             tests/test_agent_runtime.py::test_workflow_child_outcome_coordinator_projects_child_artifacts_and_timeline \
             tests/test_agent_runtime.py::test_workflow_parent_run_locator_finds_waiting_parents_and_root_groups \
             tests/test_agent_runtime.py::test_workflow_resume_planner_uses_snapshot_and_child_agent_ordinal \
+            tests/test_agent_runtime.py::test_workflow_path_planner_builds_path_snapshot_and_artifact_paths \
             tests/test_agent_runtime.py::test_workflow_parent_resume_coordinator_continues_completed_child \
             tests/test_agent_runtime.py::test_workflow_parent_resume_coordinator_does_not_resume_completed_child_twice \
             tests/test_agent_runtime.py::test_workflow_parent_resume_coordinator_does_not_project_child_approval_twice \

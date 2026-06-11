@@ -38,6 +38,7 @@ from apps.shell.agent_runtime import (
     WorkflowContinuationCoordinator,
     WorkflowParentRunLocator,
     WorkflowParentResumeCoordinator,
+    WorkflowPathPlanner,
     WorkflowResumePlanner,
 )
 from scripts.verify_secret_redaction import verify_secret_redaction
@@ -353,6 +354,56 @@ def test_workflow_resume_planner_uses_snapshot_and_child_agent_ordinal():
     assert planner.workflow_for_run_resume(
         {"run_id": "workflow_run", "runnable_id": "workflow_db", "timeline": []}
     ) == fallback_workflow
+
+
+def test_workflow_path_planner_builds_path_snapshot_and_artifact_paths():
+    planner = WorkflowPathPlanner(node_kind=lambda node: str(node.get("type") or ""))
+    workflow = {
+        "workflow_id": "workflow_plan",
+        "name": "Plan Workflow",
+        "nodes": [
+            {"id": "artifact-2", "type": "artifact", "data": {"label": "Final", "artifactPath": "reports/final.md"}},
+            {"id": "start", "type": "start", "data": {"label": "Start"}},
+            {"id": "agent", "type": "agent", "data": {"label": "Agent", "instructions": "Summarize"}},
+            {"id": "approval", "type": "approval", "data": {"label": "Gate", "approval_criteria": "Review output"}},
+            {"id": "artifact-1", "type": "artifact", "data": {"label": "Draft", "artifact_path": "reports/final.md"}},
+        ],
+        "edges": [
+            {"source": "start", "target": "agent"},
+            {"source": "agent", "target": "approval"},
+            {"source": "approval", "target": "artifact-1"},
+            {"source": "artifact-1", "target": "artifact-2"},
+        ],
+    }
+
+    path = planner.workflow_path(workflow)
+    snapshot = planner.path_snapshot(workflow)
+    runtime_snapshot = planner.runtime_snapshot(workflow)
+
+    assert [node["id"] for node in path] == ["start", "agent", "approval", "artifact-1", "artifact-2"]
+    assert snapshot == [
+        {"id": "start", "kind": "start", "label": "Start"},
+        {"id": "agent", "kind": "agent", "label": "Agent", "task": "Summarize"},
+        {"id": "approval", "kind": "approval", "label": "Gate", "criteria": "Review output"},
+        {"id": "artifact-1", "kind": "artifact", "label": "Draft", "artifact_path": "reports/final.md"},
+        {"id": "artifact-2", "kind": "artifact", "label": "Final", "artifact_path": "reports/final-2.md"},
+    ]
+    assert planner.artifact_path(
+        "Fallback Artifact",
+        [{"kind": "workflow_artifact", "path": "fallback-artifact.md"}],
+        "",
+    ) == "fallback-artifact-2.md"
+    assert planner.node_task({"data": {"prompt": "Prompt task"}}) == "Prompt task"
+    assert planner.approval_criteria({"data": {"task": "Task fallback"}}) == "Task fallback"
+    assert planner.child_goal("Workflow goal", "Step task") == "Step task\n\nWorkflow Goal:\nWorkflow goal"
+    assert runtime_snapshot == {
+        "workflow_id": "workflow_plan",
+        "name": "Plan Workflow",
+        "nodes": workflow["nodes"],
+        "edges": workflow["edges"],
+    }
+    assert runtime_snapshot["nodes"] is not workflow["nodes"]
+    assert runtime_snapshot["edges"] is not workflow["edges"]
 
 
 def test_workflow_approval_resume_context_parses_pending_payload():
