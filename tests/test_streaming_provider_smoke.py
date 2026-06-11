@@ -192,6 +192,7 @@ def test_stream_smoke_requires_tool_result_followup_content_without_leaking(monk
     summary_json = json.dumps(summary)
     assert len(requests) == 2
     assert requests[1]["messages"][1]["role"] == "assistant"
+    assert requests[1]["messages"][1]["content"] is None
     assert requests[1]["messages"][1]["tool_calls"][0]["id"] == "call_followup"
     assert requests[1]["messages"][2]["role"] == "tool"
     assert requests[1]["messages"][2]["tool_call_id"] == "call_followup"

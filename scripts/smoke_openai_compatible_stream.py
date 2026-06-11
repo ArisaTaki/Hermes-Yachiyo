@@ -532,7 +532,7 @@ def _tool_result_followup_messages(prompt: str, tool_call: dict[str, Any]) -> li
         {"role": "user", "content": prompt},
         {
             "role": "assistant",
-            "content": "",
+            "content": None,
             "tool_calls": [
                 {
                     "id": tool_call_id,
