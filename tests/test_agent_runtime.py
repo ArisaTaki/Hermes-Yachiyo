@@ -4463,7 +4463,9 @@ def test_tool_approval_transitions_use_shared_context_boundary(tmp_path, monkeyp
     workdir.mkdir()
     (workdir / "out.txt").write_text("before\n", encoding="utf-8")
     context_calls: list[dict[str, object]] = []
+    projection_calls: list[dict[str, object]] = []
     original_context = ToolApprovalTransitionContext.from_pending
+    original_projection = service._project_tool_approval_transition
 
     def spy_context(pending):
         context = original_context(pending)
@@ -4476,10 +4478,25 @@ def test_tool_approval_transitions_use_shared_context_boundary(tmp_path, monkeyp
         )
         return context
 
+    def spy_project_tool_approval_transition(result):
+        projection_calls.append(
+            {
+                "run_id": result.get("run_id"),
+                "kind": result.get("kind"),
+                "status": result.get("status"),
+            }
+        )
+        return original_projection(result)
+
     monkeypatch.setattr(
         ToolApprovalTransitionContext,
         "from_pending",
         staticmethod(spy_context),
+    )
+    monkeypatch.setattr(
+        service,
+        "_project_tool_approval_transition",
+        spy_project_tool_approval_transition,
     )
 
     def fake_chat(_base_url, _model, _api_key, _messages, *, tools=None):
@@ -4567,6 +4584,12 @@ def test_tool_approval_transitions_use_shared_context_boundary(tmp_path, monkeyp
             {"tool_name": "workspace.write_patch", "path": "out.txt", "command": None},
             {"tool_name": "terminal.run", "path": None, "command": "printf boundary"},
             {"tool_name": "terminal.run", "path": None, "command": "printf boundary"},
+        ]
+        assert projection_calls == [
+            {"run_id": main_reject_run["run_id"], "kind": "main_chat_run", "status": "cancelled"},
+            {"run_id": main_timeout_run["run_id"], "kind": "main_chat_run", "status": "cancelled"},
+            {"run_id": agent_reject_run["run_id"], "kind": "agent_run", "status": "cancelled"},
+            {"run_id": agent_timeout_run["run_id"], "kind": "agent_run", "status": "cancelled"},
         ]
     finally:
         service.close()

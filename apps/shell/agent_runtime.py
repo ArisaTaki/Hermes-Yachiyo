@@ -8283,6 +8283,11 @@ class NativeRunEngine:
         )
         return self.get_run(str(run.get("run_id") or result.get("run_id") or ""))
 
+    def _project_tool_approval_transition(self, result: dict[str, Any]) -> dict[str, Any]:
+        self._update_agent_run_group_if_root(result)
+        self._resume_parent_workflows_after_child_update(result)
+        return result
+
     def reject_run_approval(self, run_id: str, reason: str = "") -> dict[str, Any]:
         run = self.get_run(run_id)
         if run["status"] != "approval_required":
@@ -8309,9 +8314,7 @@ class NativeRunEngine:
             tool_name=approval_context.tool_name,
             input_preview=approval_context.input_preview,
         )
-        self._update_agent_run_group_if_root(result)
-        self._resume_parent_workflows_after_child_update(result)
-        return result
+        return self._project_tool_approval_transition(result)
 
     def timeout_run_approval(self, run_id: str, reason: str = "approval_wait_timeout") -> dict[str, Any]:
         run = self.get_run(run_id)
@@ -8341,9 +8344,7 @@ class NativeRunEngine:
             tool_name=approval_context.tool_name,
             input_preview=approval_context.input_preview,
         )
-        self._update_agent_run_group_if_root(result)
-        self._resume_parent_workflows_after_child_update(result)
-        return result
+        return self._project_tool_approval_transition(result)
 
     def _update_agent_run_group_if_root(self, run: dict[str, Any]) -> None:
         run_group_id = str(run.get("run_group_id") or "")

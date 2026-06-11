@@ -1288,6 +1288,10 @@ RunEvent sequence:
   - 统一解析 tool approval pending payload 中的 tool name 和 input preview。
   - 普通 Agent / 主聊天 tool approval reject / timeout 共享该结构，避免两个分支各自解析 pending tool request。
 
+- `_project_tool_approval_transition()`
+  - 负责普通 tool approval reject / timeout 后的 Agent RunGroup 投影和父 Workflow 恢复通知。
+  - 避免普通 Agent / 主聊天 tool approval reject / timeout 分支各自维护相同结束投影。
+
 - `WorkflowApprovalTransitionContext`
   - 统一解析 Workflow approval pending payload 中的 node id、label、criteria 和 input preview。
   - Workflow approval approve / reject / timeout 共享该结构，避免三个分支各自解析 pending approval 字段。
