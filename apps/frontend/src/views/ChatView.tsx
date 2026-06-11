@@ -3153,6 +3153,7 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
           <button
             className={`message-copy-button ${copied ? 'copied' : ''}`}
             type="button"
+            data-testid="chat-message-copy"
             title={copied ? '已复制' : '复制内容'}
             aria-label={copied ? '已复制' : '复制内容'}
             onClick={onCopy}

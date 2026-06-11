@@ -365,6 +365,7 @@ function waitFor(win, predicate, label, timeout = 15000) {
             JSON.stringify({
               hash: window.location.hash,
               chatButton: document.querySelector('[data-testid="chat-message-open-run-detail"]')?.outerHTML || '',
+              copyButton: document.querySelector('[data-testid="chat-message-copy"]')?.outerHTML || '',
               detail: document.querySelector('[data-testid="agent-run-detail"]')?.outerHTML || '',
               task: document.querySelector('[data-testid="agent-run-detail-task"]')?.textContent || '',
               result: document.querySelector('[data-testid="agent-run-detail-result"]')?.textContent || '',
@@ -409,8 +410,29 @@ async function main() {
     const button = document.querySelector('[data-testid="chat-message-open-run-detail"]');
     return Boolean(button)
       && button.textContent.includes('运行详情')
+      && document.querySelector('[data-testid="chat-message-copy"]')
       && document.body.textContent.includes(${JSON.stringify(RUN_RESULT)});
   }, 'completed Chat message Run Detail action');
+  await win.webContents.executeJavaScript(\`
+  (() => {
+    window.__ohaChatCopiedText = [];
+    window.ohaDesktop = {
+      ...(window.ohaDesktop || {}),
+      copyText: async (text) => {
+        window.__ohaChatCopiedText.push(text);
+      },
+    };
+    const copyButtons = Array.from(document.querySelectorAll('[data-testid="chat-message-copy"]'));
+    const assistantCopyButton = copyButtons.find((button) => button.closest('[data-message-id]')?.textContent.includes(${JSON.stringify(RUN_RESULT)}));
+    assistantCopyButton.click();
+  })();
+  \`, true);
+  await waitFor(win, () => (
+    Array.isArray(window.__ohaChatCopiedText)
+    && window.__ohaChatCopiedText[0] === ${JSON.stringify(RUN_RESULT)}
+    && document.querySelector('[data-testid="chat-message-copy"].copied')
+  ), 'completed Chat message copied');
+  console.log('[electron-smoke] completed Chat message copied');
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-message-open-run-detail\\"]').click()", true);
   await waitFor(win, () => (
     window.location.hash.includes('/agents')
