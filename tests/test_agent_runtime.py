@@ -6910,6 +6910,104 @@ def test_workflow_approval_node_pauses_and_resumes(tmp_path, monkeypatch):
         service.close()
 
 
+def test_workflow_approval_transitions_use_shared_context_boundary(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    context_calls: list[dict[str, object]] = []
+    original_context = NativeRunEngine._workflow_approval_transition_context
+
+    def spy_context(pending):
+        context = original_context(pending)
+        context_calls.append(
+            {
+                "label": context.label,
+                "workflow_node_id": context.workflow_node_id,
+                "criteria": context.criteria,
+                "checkpoint": context.input_preview.get("checkpoint"),
+            }
+        )
+        return context
+
+    monkeypatch.setattr(
+        NativeRunEngine,
+        "_workflow_approval_transition_context",
+        staticmethod(spy_context),
+    )
+
+    calls = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        return {"content": f"Agent {len(calls)} complete"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        model_config = {
+            "base_url": "https://api.example.test/v1",
+            "model": "demo-model",
+            "api_key": "sk-secret",
+        }
+        before = service.create_agent({"name": "Before Gate", "model_mode": "custom_api", "model_config": model_config})
+        after = service.create_agent({"name": "After Gate", "model_mode": "custom_api", "model_config": model_config})
+        workflow = service.create_workflow(
+            {
+                "name": "Shared Approval Context Flow",
+                "nodes": [
+                    {"id": "start", "type": "start", "data": {"label": "Start"}},
+                    {"id": "before", "type": "agent", "data": {"label": "Before Gate", "agent_id": before["agent_id"]}},
+                    {
+                        "id": "gate",
+                        "type": "approval",
+                        "data": {"label": "Human Gate", "criteria": "Review before continuing."},
+                    },
+                    {"id": "after", "type": "agent", "data": {"label": "After Gate", "agent_id": after["agent_id"]}},
+                ],
+                "edges": [
+                    {"source": "start", "target": "before"},
+                    {"source": "before", "target": "gate"},
+                    {"source": "gate", "target": "after"},
+                ],
+            }
+        )
+
+        approved_run = service.create_workflow_run({"workflow_id": workflow["workflow_id"], "user_goal": "Approve"})
+        rejected_run = service.create_workflow_run({"workflow_id": workflow["workflow_id"], "user_goal": "Reject"})
+        timed_out_run = service.create_workflow_run({"workflow_id": workflow["workflow_id"], "user_goal": "Timeout"})
+
+        assert approved_run["status"] == "approval_required"
+        assert rejected_run["status"] == "approval_required"
+        assert timed_out_run["status"] == "approval_required"
+
+        approved = service.approve_run_approval(approved_run["run_id"])
+        rejected = service.reject_run_approval(rejected_run["run_id"], "not now")
+        timed_out = service.timeout_run_approval(timed_out_run["run_id"])
+
+        assert approved["status"] == "completed"
+        assert rejected["status"] == "cancelled"
+        assert timed_out["status"] == "cancelled"
+        assert context_calls == [
+            {
+                "label": "Human Gate",
+                "workflow_node_id": "gate",
+                "criteria": "Review before continuing.",
+                "checkpoint": "Human Gate",
+            },
+            {
+                "label": "Human Gate",
+                "workflow_node_id": "gate",
+                "criteria": "Review before continuing.",
+                "checkpoint": "Human Gate",
+            },
+            {
+                "label": "Human Gate",
+                "workflow_node_id": "gate",
+                "criteria": "Review before continuing.",
+                "checkpoint": "Human Gate",
+            },
+        ]
+    finally:
+        service.close()
+
+
 def test_cancel_workflow_approval_updates_group_and_step_info(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     calls = []
