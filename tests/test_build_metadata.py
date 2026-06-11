@@ -16,6 +16,11 @@ def _write_metadata(tmp_path, *, channel: str) -> str:
     return str(path)
 
 
+def _write_metadata_at(path, *, channel: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"channel": channel}), encoding="utf-8")
+
+
 def _clear_build_env(monkeypatch) -> None:
     for key in (
         "OHA_YACHIYO_DEV",
@@ -48,6 +53,34 @@ def test_development_features_disabled_by_release_metadata(monkeypatch, tmp_path
     assert build_metadata.build_channel() == channel
     assert build_metadata.is_release_like_build() is True
     assert build_metadata.development_features_enabled() is False
+
+
+def test_packaged_backend_reads_pyinstaller_meipass_metadata(monkeypatch, tmp_path):
+    _clear_build_env(monkeypatch)
+    meipass = tmp_path / "_MEIPASS"
+    _write_metadata_at(
+        meipass / "apps" / "frontend" / "public" / build_metadata.APP_BUILD_METADATA_FILE,
+        channel="stable",
+    )
+    monkeypatch.setattr(sys, "_MEIPASS", str(meipass), raising=False)
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+
+    assert build_metadata.build_channel() == "stable"
+    assert build_metadata.is_release_like_build() is True
+
+
+def test_packaged_backend_reads_executable_adjacent_metadata(monkeypatch, tmp_path):
+    _clear_build_env(monkeypatch)
+    exe_dir = tmp_path / "Oha-Yachiyo.app" / "Contents" / "Resources" / "backend"
+    exe_dir.mkdir(parents=True)
+    executable = exe_dir / "oha-yachiyo-backend"
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    _write_metadata_at(exe_dir / build_metadata.APP_BUILD_METADATA_FILE, channel="alpha")
+    monkeypatch.setattr(sys, "executable", str(executable))
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+
+    assert build_metadata.build_channel() == "alpha"
+    assert build_metadata.is_release_like_build() is True
 
 
 def test_development_features_disabled_by_packaged_build(monkeypatch, tmp_path):
