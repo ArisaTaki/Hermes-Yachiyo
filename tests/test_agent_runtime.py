@@ -29,6 +29,7 @@ from apps.shell.agent_runtime import (
     ToolApprovalResumeContext,
     ToolApprovalTransitionContext,
     ToolBroker,
+    WorkflowApprovalResumeContext,
     WorkflowApprovalTransitionContext,
     WorkflowCancellationProjectionCoordinator,
     WorkflowContinuationCoordinator,
@@ -132,6 +133,59 @@ def test_run_transition_projection_coordinator_projects_child_and_workflow_group
         }
     ]
     assert root_projection == stored_runs["workflow_root"]
+
+
+def test_workflow_approval_resume_context_parses_pending_payload():
+    workflow = {"workflow_id": "workflow_resume"}
+    run = {
+        "run_id": "workflow_run",
+        "result": "fallback context",
+        "user_goal": "fallback goal",
+        "timeline": [
+            {"event": "workflow.node.approval_required"},
+            "not-an-event",
+        ],
+        "artifacts": [
+            {"kind": "workflow_artifact", "path": "summary.md"},
+            "not-an-artifact",
+        ],
+    }
+    pending = {
+        "tool": "workflow.approval",
+        "workflow_context": "approved context",
+        "workflow_next_index": "4",
+        "workflow_node_id": "gate",
+        "workflow_node_label": "Human Gate",
+        "workflow_node_approval_criteria": "Review before continuing.",
+        "input_preview": {"checkpoint": "Human Gate"},
+    }
+
+    context = WorkflowApprovalResumeContext.from_run(
+        run,
+        pending,
+        workflow=workflow,
+        root_group=True,
+    )
+
+    assert context.workflow is workflow
+    assert context.result_context == "approved context"
+    assert context.start_index == 4
+    assert context.root_group is True
+    assert context.timeline == [{"event": "workflow.node.approval_required"}]
+    assert context.artifacts == [{"kind": "workflow_artifact", "path": "summary.md"}]
+    assert context.approval.workflow_node_id == "gate"
+    assert context.approval.label == "Human Gate"
+    assert context.approval.criteria == "Review before continuing."
+    assert context.approval.input_preview == {"checkpoint": "Human Gate"}
+
+    bad_pending = {**pending, "workflow_next_index": "not-an-int"}
+    with pytest.raises(AgentRuntimeError, match="Workflow Run 待审批恢复位置无效"):
+        WorkflowApprovalResumeContext.from_run(
+            run,
+            bad_pending,
+            workflow=workflow,
+            root_group=False,
+        )
 
 
 def test_approval_resume_coordinator_executes_approved_tool_and_remaining_requests():

@@ -2619,6 +2619,53 @@ class WorkflowApprovalTransitionContext:
         )
 
 
+@dataclass(frozen=True)
+class WorkflowApprovalResumeContext:
+    """Shared context needed to resume a Workflow approval node."""
+
+    approval: WorkflowApprovalTransitionContext
+    workflow: dict[str, Any]
+    result_context: str
+    timeline: list[dict[str, Any]]
+    artifacts: list[dict[str, Any]]
+    start_index: int
+    root_group: bool
+
+    @classmethod
+    def from_run(
+        cls,
+        run: dict[str, Any],
+        pending: dict[str, Any] | None,
+        *,
+        workflow: dict[str, Any],
+        root_group: bool,
+    ) -> "WorkflowApprovalResumeContext":
+        approval = WorkflowApprovalTransitionContext.from_pending(pending)
+        raw_pending = pending if isinstance(pending, dict) else {}
+        try:
+            start_index = int(raw_pending.get("workflow_next_index") or 0)
+        except (TypeError, ValueError):
+            raise AgentRuntimeError("Workflow Run 待审批恢复位置无效")
+        return cls(
+            approval=approval,
+            workflow=workflow,
+            result_context=str(
+                raw_pending.get("workflow_context")
+                or run.get("result")
+                or run.get("user_goal")
+                or ""
+            ),
+            timeline=[
+                event
+                for event in run.get("timeline") or []
+                if isinstance(event, dict)
+            ],
+            artifacts=[item for item in run.get("artifacts") or [] if isinstance(item, dict)],
+            start_index=start_index,
+            root_group=root_group,
+        )
+
+
 class ApprovalResumeCoordinator:
     """Executes the approved tool portion of a paused run resume."""
 
@@ -8543,34 +8590,26 @@ class NativeRunEngine:
     def _approve_workflow_run_approval(self, run: dict[str, Any]) -> dict[str, Any]:
         run_id = str(run["run_id"])
         pending = self.runs.pending_approval_private(run_id)
-        approval_context = WorkflowApprovalTransitionContext.from_pending(pending)
-        workflow = self._workflow_for_run_resume(run)
-        context = str(pending.get("workflow_context") or run.get("result") or run.get("user_goal") or "")
-        try:
-            start_index = int(pending.get("workflow_next_index") or 0)
-        except (TypeError, ValueError):
-            raise AgentRuntimeError("Workflow Run 待审批恢复位置无效")
-        timeline = [
-            event
-            for event in run.get("timeline") or []
-            if isinstance(event, dict)
-        ]
-        artifacts = [item for item in run.get("artifacts") or [] if isinstance(item, dict)]
-        root_group = self._workflow_run_is_group_root(run)
+        resume_context = WorkflowApprovalResumeContext.from_run(
+            run,
+            pending,
+            workflow=self._workflow_for_run_resume(run),
+            root_group=self._workflow_run_is_group_root(run),
+        )
         if not self.run_approvals.claim_pending_approval(run_id, pending):
             return self.get_run(run_id)
         return self.workflow_continuation.resume_after_approval_node(
             run,
-            workflow,
-            context=context,
-            timeline=timeline,
-            artifacts=artifacts,
-            start_index=start_index,
-            root_group=root_group,
-            workflow_node_id=approval_context.workflow_node_id,
-            label=approval_context.label,
-            criteria=approval_context.criteria,
-            input_preview=approval_context.input_preview,
+            resume_context.workflow,
+            context=resume_context.result_context,
+            timeline=resume_context.timeline,
+            artifacts=resume_context.artifacts,
+            start_index=resume_context.start_index,
+            root_group=resume_context.root_group,
+            workflow_node_id=resume_context.approval.workflow_node_id,
+            label=resume_context.approval.label,
+            criteria=resume_context.approval.criteria,
+            input_preview=resume_context.approval.input_preview,
         )
 
     def _project_cancelled_workflow_group_if_root(
