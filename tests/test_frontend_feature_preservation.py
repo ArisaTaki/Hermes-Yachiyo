@@ -440,7 +440,12 @@ def test_diagnostics_screenshot_ui_smoke_uses_local_screen_probe_path() -> None:
         "apps/frontend/src/views/DiagnosticsView.tsx",
         [
             "apiGet<ScreenshotProbe>('/screen/current')",
+            "apiPost<DiagnosticResult>('/ui/native-agent/diagnostic-command'",
+            "await copyText(text);",
             'data-testid="diagnostics-status"',
+            'data-testid="diagnostics-run-command"',
+            'data-testid="diagnostics-output"',
+            'data-testid="diagnostics-copy-output"',
             'data-testid="diagnostics-screen-probe"',
             'data-testid="diagnostics-screen-probe-card"',
             'data-testid="diagnostics-screen-probe-summary"',
@@ -452,11 +457,19 @@ def test_diagnostics_screenshot_ui_smoke_uses_local_screen_probe_path() -> None:
         [
             "#/diagnostics",
             "request.method === 'GET' && url.pathname === '/screen/current'",
+            "request.method === 'POST' && url.pathname === '/ui/native-agent/diagnostic-command'",
+            "data-testid=\"diagnostics-run-command\"",
+            "data-testid=\"diagnostics-output\"",
+            "data-testid=\"diagnostics-copy-output\"",
             "data-testid=\"diagnostics-screen-probe\"",
             "data-testid=\"diagnostics-screen-probe-card\"",
             "data-testid=\"diagnostics-screen-probe-summary\"",
             "data-testid=\"diagnostics-screen-probe-image\"",
             "bridgeState.screenRequests !== 1",
+            "window.__ohaDiagnosticsCopiedText",
+            "copyText: async (text)",
+            "window.__ohaDiagnosticsCopiedText[0] ===",
+            "diagnosticRequest.command !== DIAGNOSTIC_COMMAND",
         ],
     )
 

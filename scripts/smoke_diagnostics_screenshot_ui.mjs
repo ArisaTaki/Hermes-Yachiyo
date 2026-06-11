@@ -13,9 +13,12 @@ const VITE = path.join(FRONTEND, 'node_modules', '.bin', process.platform === 'w
 const SCREENSHOT_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
 const SCREENSHOT_WIDTH = 320;
 const SCREENSHOT_HEIGHT = 200;
+const DIAGNOSTIC_COMMAND = 'native config check';
+const DIAGNOSTIC_OUTPUT = 'Diagnostics copy smoke output\\nNative runtime ready';
 
 const bridgeState = {
   screenRequests: 0,
+  diagnosticRequests: [],
 };
 
 function log(message) {
@@ -91,6 +94,44 @@ function screenshotPayload() {
   };
 }
 
+function diagnosticResultPayload(command = DIAGNOSTIC_COMMAND) {
+  return {
+    success: true,
+    label: '运行 Doctor',
+    command,
+    returncode: 0,
+    elapsed_seconds: 0.2,
+    output: DIAGNOSTIC_OUTPUT,
+    message: 'Doctor smoke completed',
+    cached_at: new Date().toISOString(),
+    diagnostic_cache: {
+      stale: false,
+      updated_at: new Date().toISOString(),
+      commands: {},
+    },
+  };
+}
+
+function readJson(request) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    request.on('data', (chunk) => chunks.push(chunk));
+    request.on('error', reject);
+    request.on('end', () => {
+      const body = Buffer.concat(chunks).toString('utf8').trim();
+      if (!body) {
+        resolve({});
+        return;
+      }
+      try {
+        resolve(JSON.parse(body));
+      } catch (error) {
+        reject(error);
+      }
+    });
+  });
+}
+
 function pickPort() {
   return new Promise((resolve, reject) => {
     const server = http.createServer();
@@ -116,7 +157,7 @@ function sendJson(response, statusCode, payload) {
 }
 
 async function startMockBridge() {
-  const server = http.createServer((request, response) => {
+  const server = http.createServer(async (request, response) => {
     try {
       if (request.method === 'OPTIONS') {
         sendJson(response, 204, {});
@@ -150,6 +191,12 @@ async function startMockBridge() {
       if (request.method === 'GET' && url.pathname === '/screen/current') {
         bridgeState.screenRequests += 1;
         sendJson(response, 200, screenshotPayload());
+        return;
+      }
+      if (request.method === 'POST' && url.pathname === '/ui/native-agent/diagnostic-command') {
+        const body = await readJson(request);
+        bridgeState.diagnosticRequests.push(body);
+        sendJson(response, 200, diagnosticResultPayload(typeof body.command === 'string' ? body.command : DIAGNOSTIC_COMMAND));
         return;
       }
       sendJson(response, 404, { ok: false, error: `not found: ${request.method} ${url.pathname}` });
@@ -230,6 +277,8 @@ function waitFor(win, predicate, label, timeout = 18000) {
             JSON.stringify({
               hash: window.location.hash,
               status: document.querySelector('[data-testid="diagnostics-status"]')?.textContent || '',
+              output: document.querySelector('[data-testid="diagnostics-output"]')?.textContent || '',
+              copyButton: document.querySelector('[data-testid="diagnostics-copy-output"]')?.outerHTML || '',
               button: document.querySelector('[data-testid="diagnostics-screen-probe"]')?.outerHTML || '',
               summary: document.querySelector('[data-testid="diagnostics-screen-probe-summary"]')?.textContent || '',
               card: document.querySelector('[data-testid="diagnostics-screen-probe-card"]')?.outerHTML || '',
@@ -282,6 +331,30 @@ async function main() {
       && image.naturalWidth > 0;
   }, 'diagnostics screenshot preview');
   console.log('[electron-smoke] diagnostics screenshot preview verified');
+  await win.webContents.executeJavaScript(\`
+  (() => {
+    window.__ohaDiagnosticsCopiedText = [];
+    window.ohaDesktop = {
+      ...(window.ohaDesktop || {}),
+      copyText: async (text) => {
+        window.__ohaDiagnosticsCopiedText.push(text);
+      },
+    };
+    document.querySelector('[data-testid="diagnostics-run-command"]').click();
+  })();
+  \`, true);
+  await waitFor(win, () => (
+    document.querySelector('[data-testid="diagnostics-status"]')?.textContent.includes('Doctor smoke completed')
+    && document.querySelector('[data-testid="diagnostics-output"]')?.textContent.includes(${JSON.stringify(DIAGNOSTIC_OUTPUT)})
+    && document.querySelector('[data-testid="diagnostics-copy-output"]')?.disabled === false
+  ), 'diagnostic command output');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"diagnostics-copy-output\\"]').click()", true);
+  await waitFor(win, () => (
+    Array.isArray(window.__ohaDiagnosticsCopiedText)
+    && window.__ohaDiagnosticsCopiedText[0] === ${JSON.stringify(DIAGNOSTIC_OUTPUT)}
+    && document.querySelector('[data-testid="diagnostics-status"]')?.textContent.includes('诊断输出已复制')
+  ), 'diagnostics copied output');
+  console.log('[electron-smoke] diagnostics copy output verified');
   clearTimeout(watchdog);
   await win.close();
   app.quit();
@@ -323,6 +396,13 @@ main().catch((error) => {
 function assertMockBridgeContract() {
   if (bridgeState.screenRequests !== 1) {
     throw new Error(`expected exactly one /screen/current request, got ${bridgeState.screenRequests}`);
+  }
+  if (bridgeState.diagnosticRequests.length !== 1) {
+    throw new Error(`expected one diagnostic command request, got ${bridgeState.diagnosticRequests.length}`);
+  }
+  const diagnosticRequest = bridgeState.diagnosticRequests[0] || {};
+  if (diagnosticRequest.command !== DIAGNOSTIC_COMMAND) {
+    throw new Error(`unexpected diagnostic command: ${diagnosticRequest.command || 'missing command'}`);
   }
 }
 

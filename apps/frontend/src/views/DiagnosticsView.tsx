@@ -660,6 +660,7 @@ export function DiagnosticsView() {
           <button
             className="hy-btn hy-btn-primary"
             type="button"
+            data-testid="diagnostics-run-command"
             disabled={busy}
             onClick={() => void runDiagnostic()}
           >
@@ -897,9 +898,9 @@ export function DiagnosticsView() {
           {result?.cached_at ? <span>缓存：{formatShortDateTime(result.cached_at)}</span> : null}
           {diagnosticCache?.stale ? <span>配置已变化，建议重新运行</span> : null}
         </div>
-        <pre className="diagnostic-output">{diagnosticOutput(result, busy)}</pre>
+        <pre className="diagnostic-output" data-testid="diagnostics-output">{diagnosticOutput(result, busy)}</pre>
         <div className="diagnostic-result-actions">
-          <button type="button" className="hy-btn hy-btn-ghost" disabled={!result || busy} onClick={() => void copyOutput()}>复制输出</button>
+          <button type="button" className="hy-btn hy-btn-ghost" data-testid="diagnostics-copy-output" disabled={!result || busy} onClick={() => void copyOutput()}>复制输出</button>
         </div>
       </section>
     </section>
