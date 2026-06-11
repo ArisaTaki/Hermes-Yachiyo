@@ -74,6 +74,9 @@ jobs:
             tests/test_bridge_server.py::test_run_cancel_route_handler_is_idempotent \
             tests/test_bridge_server.py::test_chat_cancel_bridge_route_cancels_native_run_and_ignores_late_output \
             tests/test_executor.py::TestNativeAgentExecutor::test_run_uses_native_run_and_returns_task_result \
+            tests/test_executor.py::TestNativeAgentExecutor::test_run_passes_recent_chat_history_and_excludes_current_task \
+            tests/test_executor.py::TestNativeAgentExecutor::test_run_limits_chat_history_by_context_chars \
+            tests/test_executor.py::TestNativeAgentExecutor::test_run_passes_image_attachments_as_limited_data_urls \
             tests/test_agent_runtime.py::test_main_chat_run_links_task_and_records_replayable_events \
             tests/test_agent_runtime.py::test_runtime_shutdown_cancels_active_runs_rejects_new_runs_and_records_fact \
             tests/test_agent_runtime.py::test_runtime_shutdown_close_db_closes_runtime_resources \

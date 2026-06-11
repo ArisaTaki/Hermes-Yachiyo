@@ -382,6 +382,18 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover NativeAgentExecutor Task-to-Run boundary",
     ),
     (
+        "tests/test_executor.py::TestNativeAgentExecutor::test_run_passes_recent_chat_history_and_excludes_current_task",
+        "macOS release workflow smoke tests must cover NativeAgentExecutor multi-turn context filtering",
+    ),
+    (
+        "tests/test_executor.py::TestNativeAgentExecutor::test_run_limits_chat_history_by_context_chars",
+        "macOS release workflow smoke tests must cover NativeAgentExecutor context size limit",
+    ),
+    (
+        "tests/test_executor.py::TestNativeAgentExecutor::test_run_passes_image_attachments_as_limited_data_urls",
+        "macOS release workflow smoke tests must cover NativeAgentExecutor image attachment payloads",
+    ),
+    (
         "tests/test_agent_runtime.py::test_main_chat_run_links_task_and_records_replayable_events",
         "macOS release workflow smoke tests must cover TaskRunLink replay projection",
     ),

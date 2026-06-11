@@ -443,6 +443,9 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow smoke tests must cover UI Run cancel route idempotency" in messages
     assert "macOS release workflow smoke tests must cover Chat cancel late-output HTTP roundtrip" in messages
     assert "macOS release workflow smoke tests must cover NativeAgentExecutor Task-to-Run boundary" in messages
+    assert "macOS release workflow smoke tests must cover NativeAgentExecutor multi-turn context filtering" in messages
+    assert "macOS release workflow smoke tests must cover NativeAgentExecutor context size limit" in messages
+    assert "macOS release workflow smoke tests must cover NativeAgentExecutor image attachment payloads" in messages
     assert "macOS release workflow smoke tests must cover TaskRunLink replay projection" in messages
     assert "macOS release workflow smoke tests must cover Native runtime shutdown cancellation facts" in messages
     assert "macOS release workflow smoke tests must cover Native runtime shutdown resource closure" in messages
