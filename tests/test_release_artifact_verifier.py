@@ -376,6 +376,20 @@ def test_packaged_selector_gate_covers_release_electron_smoke_selectors():
     assert missing == []
 
 
+def test_release_workflow_guard_covers_release_electron_smoke_scripts():
+    required_workflow_text = {
+        required
+        for required, _message in verifier.RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT
+    }
+    missing = sorted(
+        f"node {script}"
+        for script in RELEASE_ELECTRON_SMOKE_SCRIPTS
+        if f"node {script}" not in required_workflow_text
+    )
+
+    assert missing == []
+
+
 def test_verifier_reports_packaged_app_missing_ui_e2e_selector(tmp_path):
     app_dir = _write_packaged_app_bundle(tmp_path)
     asar_path = app_dir / verifier.PACKAGED_ASAR_RELATIVE_PATH
@@ -996,6 +1010,7 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow smoke tests must cover Agent Studio skill folders Electron UI smoke" in messages
     assert "macOS release workflow smoke tests must cover Agent Run Detail replay Electron UI smoke" in messages
     assert "macOS release workflow smoke tests must cover Workflow save-and-run Electron UI smoke" in messages
+    assert "macOS release workflow smoke tests must cover Workflow management Electron UI smoke" in messages
     assert "macOS release workflow smoke tests must cover Bridge Host Origin and session token guard" in messages
     assert "macOS release workflow smoke tests must cover Bridge loopback bind guard" in messages
     assert "macOS release workflow smoke tests must cover mutating Bridge token guard" in messages
