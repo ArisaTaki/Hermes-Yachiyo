@@ -18,6 +18,7 @@ const WORKFLOW_REJECT_RUN_ID = 'workflow_run_detail_ui_smoke_child_reject';
 const WORKFLOW_REJECT_CHILD_RUN_ID = 'agent_run_detail_ui_smoke_workflow_child_reject';
 const WORKFLOW_CANCEL_RUN_ID = 'workflow_run_detail_ui_smoke_child_cancel';
 const WORKFLOW_CANCEL_CHILD_RUN_ID = 'agent_run_detail_ui_smoke_workflow_child_cancel';
+const ACTIVE_CANCEL_RUN_ID = 'agent_run_detail_ui_smoke_active_cancel';
 const RERUN_RUN_ID = 'agent_run_detail_ui_smoke_rerun';
 const RUN_GROUP_ID = 'run_group_detail_ui_smoke';
 const WORKFLOW_RUN_GROUP_ID = 'run_group_detail_ui_workflow_child_smoke';
@@ -33,6 +34,7 @@ let approvalApproved = false;
 let workflowChildApproved = false;
 let workflowChildRejected = false;
 let workflowChildCancelled = false;
+let activeRunCancelled = false;
 const runEventRequests = [];
 const deletedRunIds = [];
 
@@ -214,16 +216,48 @@ function workflowRun() {
   };
 }
 
-const runGroup = {
-  run_group_id: RUN_GROUP_ID,
-  title: 'Run Detail UI Smoke',
-  source: 'agent',
-  status: 'completed',
-  summary: 'One completed Agent Run',
-  child_run_ids: [APPROVAL_RUN_ID, RUN_ID, RERUN_RUN_ID],
-  created_at: now,
-  updated_at: now,
-};
+function activeCancelRun() {
+  return {
+    run_id: ACTIVE_CANCEL_RUN_ID,
+    run_group_id: RUN_GROUP_ID,
+    run_group_source: 'agent',
+    task_id: 'task-run-detail-ui-smoke-active-cancel',
+    session_id: 'session-run-detail-ui-smoke-active-cancel',
+    task_run_link_run_status: activeRunCancelled ? 'cancelled' : 'running',
+    task_run_link_last_event_sequence: activeRunCancelled ? 2 : 1,
+    kind: 'agent_run',
+    runnable_id: 'agent-run-detail-smoke',
+    runnable_name: 'Run Detail Smoke Agent',
+    status: activeRunCancelled ? 'cancelled' : 'running',
+    user_goal: 'Cancel active Agent Run from Run Detail smoke',
+    result: activeRunCancelled ? 'Run Detail active Run cancelled from UI smoke' : '',
+    timeline: activeRunCancelled
+      ? [
+          { event: 'agent.run.started', status: 'running', detail: 'Cancel active Agent Run from Run Detail smoke', time: now },
+          { event: 'agent.run.cancelled', status: 'cancelled', detail: 'Run Detail active Run cancelled from UI smoke', time: now },
+        ]
+      : [
+          { event: 'agent.run.started', status: 'running', detail: 'Cancel active Agent Run from Run Detail smoke', time: now },
+        ],
+    artifacts: [],
+    created_at: now,
+    updated_at: activeRunCancelled ? new Date(Date.now() + 1000).toISOString() : now,
+    agent_run_id: ACTIVE_CANCEL_RUN_ID,
+  };
+}
+
+function runGroup() {
+  return {
+    run_group_id: RUN_GROUP_ID,
+    title: 'Run Detail UI Smoke',
+    source: 'agent',
+    status: activeRunCancelled ? 'completed' : 'running',
+    summary: activeRunCancelled ? 'Active Run cancelled and completed runs remain' : 'One active Agent Run',
+    child_run_ids: [ACTIVE_CANCEL_RUN_ID, APPROVAL_RUN_ID, RUN_ID, RERUN_RUN_ID],
+    created_at: now,
+    updated_at: activeRunCancelled ? new Date(Date.now() + 1000).toISOString() : now,
+  };
+}
 
 function workflowRunGroup() {
   return {
@@ -517,6 +551,39 @@ const runEvents = [
     created_at: now,
   },
 ];
+
+function activeCancelRunEvents() {
+  const events = [
+    {
+      event_id: 'event-run-detail-active-cancel-smoke-1',
+      run_id: ACTIVE_CANCEL_RUN_ID,
+      sequence: 1,
+      schema_version: 1,
+      event_type: 'agent.run.started',
+      actor: 'agent',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: { goal: 'Cancel active Agent Run from Run Detail smoke' },
+      created_at: now,
+    },
+  ];
+  if (!activeRunCancelled) return events;
+  return [
+    ...events,
+    {
+      event_id: 'event-run-detail-active-cancel-smoke-2',
+      run_id: ACTIVE_CANCEL_RUN_ID,
+      sequence: 2,
+      schema_version: 1,
+      event_type: 'agent.run.cancelled',
+      actor: 'runtime',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: { result: 'Run Detail active Run cancelled from UI smoke' },
+      created_at: now,
+    },
+  ];
+}
 
 const rerunEvents = [
   {
@@ -1144,10 +1211,14 @@ async function startMockBridge() {
         return;
       }
       if (request.method === 'GET' && url.pathname === '/ui/runs') {
-        const runs = [workflowCancelRun(), workflowRejectRun(), workflowRun(), run, approvalRun()];
+        const runs = [activeCancelRun(), workflowCancelRun(), workflowRejectRun(), workflowRun(), run, approvalRun()];
         sendJson(response, 200, {
           runs: (rerunCreated ? [rerun, ...runs] : runs).filter((item) => !deletedRunIds.includes(item.run_id)),
         });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/ui/runs/${ACTIVE_CANCEL_RUN_ID}`) {
+        sendJson(response, 200, activeCancelRun());
         return;
       }
       if (request.method === 'GET' && url.pathname === `/ui/runs/${WORKFLOW_RUN_ID}`) {
@@ -1202,6 +1273,11 @@ async function startMockBridge() {
         sendJson(response, 200, workflowCancelChildRun());
         return;
       }
+      if (request.method === 'POST' && url.pathname === `/ui/runs/${ACTIVE_CANCEL_RUN_ID}/cancel`) {
+        activeRunCancelled = true;
+        sendJson(response, 200, activeCancelRun());
+        return;
+      }
       if (request.method === 'GET' && url.pathname === `/ui/runs/${RERUN_RUN_ID}`) {
         sendJson(response, rerunCreated ? 200 : 404, rerunCreated ? rerun : { ok: false, error: 'rerun not created' });
         return;
@@ -1240,7 +1316,7 @@ async function startMockBridge() {
         return;
       }
       if (request.method === 'GET' && url.pathname === '/ui/run-groups') {
-        sendJson(response, 200, { run_groups: [workflowCancelRunGroup(), workflowRejectRunGroup(), workflowRunGroup(), runGroup] });
+        sendJson(response, 200, { run_groups: [workflowCancelRunGroup(), workflowRejectRunGroup(), workflowRunGroup(), runGroup()] });
         return;
       }
       if (request.method === 'GET' && url.pathname === `/ui/run-groups/${WORKFLOW_RUN_GROUP_ID}`) {
@@ -1256,7 +1332,7 @@ async function startMockBridge() {
         return;
       }
       if (request.method === 'GET' && url.pathname === `/ui/run-groups/${RUN_GROUP_ID}`) {
-        sendJson(response, 200, runGroup);
+        sendJson(response, 200, runGroup());
         return;
       }
       if (request.method === 'GET' && url.pathname === `/runs/${RUN_ID}/events`) {
@@ -1268,6 +1344,17 @@ async function startMockBridge() {
           after_sequence: Math.max(0, afterSequence),
           limit,
           events: runEvents.filter((event) => event.sequence > afterSequence).slice(0, limit),
+        });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/runs/${ACTIVE_CANCEL_RUN_ID}/events`) {
+        const afterSequence = Number(url.searchParams.get('after_sequence') || '0');
+        const limit = Math.max(1, Number(url.searchParams.get('limit') || '200'));
+        sendJson(response, 200, {
+          run_id: ACTIVE_CANCEL_RUN_ID,
+          after_sequence: Math.max(0, afterSequence),
+          limit,
+          events: activeCancelRunEvents().filter((event) => event.sequence > afterSequence).slice(0, limit),
         });
         return;
       }
@@ -1420,6 +1507,7 @@ const approvalRunId = ${JSON.stringify(APPROVAL_RUN_ID)};
 const workflowRunId = ${JSON.stringify(WORKFLOW_RUN_ID)};
 const workflowRejectRunId = ${JSON.stringify(WORKFLOW_REJECT_RUN_ID)};
 const workflowCancelRunId = ${JSON.stringify(WORKFLOW_CANCEL_RUN_ID)};
+const activeCancelRunId = ${JSON.stringify(ACTIVE_CANCEL_RUN_ID)};
 const watchdog = setTimeout(() => {
   console.error('electron smoke timed out');
   app.exit(1);
@@ -1477,6 +1565,49 @@ async function main() {
   win.webContents.on('console-message', (_event, level, message) => {
     if (level >= 2) console.error('[renderer]', message);
   });
+  await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '#/agents/' + encodeURIComponent(activeCancelRunId));
+  console.log('[electron-smoke] active cancel run detail loaded');
+  await waitFor(win, () => {
+    const detail = document.querySelector('[data-testid="agent-run-detail"]');
+    const cancel = document.querySelector('[data-testid="agent-run-detail-cancel"]');
+    const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
+    return detail?.getAttribute('data-run-id') === ${JSON.stringify(ACTIVE_CANCEL_RUN_ID)}
+      && detail?.getAttribute('data-run-status') === 'running'
+      && document.querySelector('[data-testid="agent-run-detail-task"]')?.textContent.includes('Cancel active Agent Run from Run Detail smoke')
+      && cancel
+      && !cancel.disabled
+      && events.some((node) => node.getAttribute('data-run-event') === 'agent.run.started');
+  }, 'active cancel run detail article');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"agent-run-detail-cancel\\"]').click()", true);
+  await waitFor(win, () => {
+    const dialog = document.querySelector('[data-testid="confirm-dialog"]');
+    const confirm = document.querySelector('[data-testid="confirm-action"]');
+    return dialog?.textContent.includes('取消 Run')
+      && dialog?.textContent.includes('这会终止当前进行中或待审批的 Run')
+      && confirm
+      && !confirm.disabled;
+  }, 'active run cancel confirmation');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"confirm-action\\"]').click()", true);
+  await waitFor(win, () => {
+    const detail = document.querySelector('[data-testid="agent-run-detail"]');
+    const result = document.querySelector('[data-testid="agent-run-detail-result"]');
+    const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
+    const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
+    const sequences = events.map((node) => node.getAttribute('data-run-event-sequence'));
+    const runIds = events.map((node) => node.getAttribute('data-run-event-run-id'));
+    const cancelledEvent = events.find((node) => node.getAttribute('data-run-event') === 'agent.run.cancelled');
+    return detail?.getAttribute('data-run-id') === ${JSON.stringify(ACTIVE_CANCEL_RUN_ID)}
+      && detail?.getAttribute('data-run-status') === 'cancelled'
+      && !document.querySelector('[data-testid="agent-run-detail-cancel"]')
+      && result?.textContent.includes('Run Detail active Run cancelled from UI smoke')
+      && eventTypes.includes('agent.run.started')
+      && eventTypes.includes('agent.run.cancelled')
+      && sequences.join(',') === '1,2'
+      && runIds.every((id) => id === ${JSON.stringify(ACTIVE_CANCEL_RUN_ID)})
+      && cancelledEvent?.textContent.includes('Run Detail active Run cancelled from UI smoke');
+  }, 'active run cancelled detail replay');
+  console.log('[electron-smoke] active Run Detail cancel completed');
+
   await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '#/agents/' + encodeURIComponent(approvalRunId));
   console.log('[electron-smoke] approval run detail loaded');
   await waitFor(win, () => document.querySelector('[data-testid="agent-run-detail"]')?.getAttribute('data-run-id') === ${JSON.stringify(APPROVAL_RUN_ID)}, 'approval run detail article');
@@ -1855,6 +1986,7 @@ async function main() {
     await runElectronSmoke(devUrl, bridge.url);
     if (!workflowChildRejected) throw new Error('workflow child reject action was not called');
     if (!workflowChildCancelled) throw new Error('workflow child cancel action was not called');
+    if (!activeRunCancelled) throw new Error('active Run Detail cancel action was not called');
     if (!deletedRunIds.includes(APPROVAL_RUN_ID)) throw new Error('agent run history delete route was not called');
     const initialReplayRequest = runEventRequests.some((request) => request.after_sequence === 0 && request.limit === 200);
     const loadMoreReplayRequest = runEventRequests.some((request) => request.after_sequence === 200 && request.limit === 200);
