@@ -619,6 +619,30 @@ def test_verifier_reports_packaged_app_missing_ui_e2e_selector(tmp_path):
     ) in findings
 
 
+def test_verifier_reports_packaged_app_missing_dynamic_smoke_selector(tmp_path):
+    app_dir = _write_packaged_app_bundle(tmp_path)
+    smoke = tmp_path / "scripts" / "smoke_new_mature_surface_ui.mjs"
+    smoke.parent.mkdir(parents=True)
+    smoke.write_text(
+        "document.querySelector('[data-testid=\"new-mature-surface-open\"]');\n",
+        encoding="utf-8",
+    )
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[],
+        check_required_files=False,
+        check_release_security_guards=False,
+        check_packaged_app_bundle=True,
+        allow_binary_targets=True,
+    )
+
+    assert verifier.Finding(
+        app_dir / verifier.PACKAGED_ASAR_RELATIVE_PATH,
+        "packaged Electron app.asar must include UI E2E selector 'new-mature-surface-open'",
+    ) in findings
+
+
 def test_verifier_reports_packaged_app_development_only_ui_e2e_hook(tmp_path):
     app_dir = _write_packaged_app_bundle(tmp_path)
     asar_path = app_dir / verifier.PACKAGED_ASAR_RELATIVE_PATH

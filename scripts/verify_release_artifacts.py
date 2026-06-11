@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import plistlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -1369,6 +1370,36 @@ def _release_electron_ui_smoke_scripts(root: Path) -> tuple[str, ...]:
     return tuple(scripts)
 
 
+def _release_electron_ui_smoke_selectors(root: Path) -> tuple[str, ...]:
+    selectors: set[str] = set()
+    for script in _release_electron_ui_smoke_scripts(root):
+        script_path = _resolve(root, script)
+        try:
+            text = script_path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for match in re.finditer(r'data-testid=(?:\\)?"([^"\\]+)(?:\\)?"', text):
+            selector = match.group(1)
+            if "$" in selector or "{" in selector:
+                continue
+            selectors.add(selector)
+    return tuple(sorted(selectors))
+
+
+def _packaged_ui_e2e_required_selectors(root: Path) -> tuple[str, ...]:
+    selectors: list[str] = []
+    seen: set[str] = set()
+    for selector in (
+        *PACKAGED_UI_E2E_REQUIRED_SELECTORS,
+        *_release_electron_ui_smoke_selectors(root),
+    ):
+        if selector in seen:
+            continue
+        seen.add(selector)
+        selectors.append(selector)
+    return tuple(selectors)
+
+
 def verify_release_artifacts(
     *,
     root: Path | str = ROOT,
@@ -1688,7 +1719,7 @@ def _verify_packaged_app_bundle(root: Path) -> list[Finding]:
             except OSError as exc:
                 findings.append(Finding(asar_path, f"packaged Electron app.asar could not be read: {exc}"))
             else:
-                for selector in PACKAGED_UI_E2E_REQUIRED_SELECTORS:
+                for selector in _packaged_ui_e2e_required_selectors(root):
                     if selector.encode("utf-8") not in asar_bytes:
                         findings.append(
                             Finding(
