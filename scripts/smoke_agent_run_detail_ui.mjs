@@ -1501,6 +1501,10 @@ async function main() {
     const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
     const sequences = events.map((node) => node.getAttribute('data-run-event-sequence'));
     const runIds = events.map((node) => node.getAttribute('data-run-event-run-id'));
+    const startedEvent = events.find((node) => node.getAttribute('data-run-event') === 'agent.run.started');
+    const approvalRequiredEvent = events.find((node) => node.getAttribute('data-run-event') === 'agent.tool.approval_required');
+    const toolCallEvent = events.find((node) => node.getAttribute('data-run-event') === 'agent.tool.call');
+    const completedEvent = events.find((node) => node.getAttribute('data-run-event') === 'agent.run.completed');
     return detail?.getAttribute('data-run-id') === ${JSON.stringify(APPROVAL_RUN_ID)}
       && !document.querySelector('[data-testid="agent-run-detail-approval"]')
       && result?.textContent.includes('Run Detail approval smoke completed')
@@ -1509,6 +1513,12 @@ async function main() {
       && eventTypes.includes('agent.tool.call')
       && eventTypes.includes('agent.run.completed')
       && sequences.join(',') === '1,2,3,4,5'
+      && startedEvent?.textContent.includes('Approve Native Run Detail from Agent Studio smoke')
+      && approvalRequiredEvent?.textContent.includes('terminal.run')
+      && approvalRequiredEvent?.textContent.includes('printf run-detail-approval-smoke')
+      && toolCallEvent?.textContent.includes('terminal.run')
+      && toolCallEvent?.textContent.includes('printf run-detail-approval-smoke')
+      && completedEvent?.textContent.includes('Run Detail approval smoke completed')
       && runIds.every((id) => id === ${JSON.stringify(APPROVAL_RUN_ID)});
   }, 'approved run detail replay');
   console.log('[electron-smoke] approval action completed');
