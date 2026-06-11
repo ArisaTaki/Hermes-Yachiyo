@@ -141,7 +141,7 @@ async function acknowledgeAndOpenChat(mode: 'bubble' | 'live2d', data: LauncherP
       ? result.session_id || ''
       : String(data?.chat?.session_id || result.session_id || sessionId);
   } catch {}
-  const params: Record<string, string> | undefined = sessionId ? { session_id: sessionId } : undefined;
+  const params = launcherChatOpenParams(data, sessionId);
   await openAppView('chat', params);
 }
 
@@ -875,6 +875,17 @@ function latestAssistantText(chat: LauncherPayload['chat'], launcher: NonNullabl
 
 function launcherRecentSessions(chat: LauncherPayload['chat']): LauncherRecentSession[] {
   return Array.isArray(chat?.recent_sessions) ? chat.recent_sessions.slice(0, 3) : [];
+}
+
+function launcherChatOpenParams(data: LauncherPayload | null, sessionId: string): Record<string, string> | undefined {
+  if (!sessionId) return undefined;
+  const params: Record<string, string> = { session_id: sessionId };
+  const session = launcherRecentSessions(data?.chat).find((item) => String(item.session_id || '') === sessionId);
+  const conversationKind = String(session?.conversation_kind || '').trim();
+  const latestTaskId = String(session?.latest_task_id || '').trim();
+  if (conversationKind) params.conversation_kind = conversationKind;
+  if (latestTaskId) params.task_id = latestTaskId;
+  return params;
 }
 
 function latestLauncherSessionSummary(chat: LauncherPayload['chat']) {

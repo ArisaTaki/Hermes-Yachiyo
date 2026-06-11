@@ -426,6 +426,8 @@ async function main() {
     && window.__ohaLauncherOpenViewCalls.some((call) => (
       call?.view === 'chat'
       && call?.params?.session_id === ${JSON.stringify(GROUP_SESSION_ID)}
+      && call?.params?.conversation_kind === 'group'
+      && call?.params?.task_id === ${JSON.stringify(GROUP_TASK_ID)}
     ))
   ), 'bubble launcher opened chat session');
   console.log('[electron-smoke] bubble launcher ack verified');
@@ -529,6 +531,8 @@ async function main() {
     && window.__ohaLauncherOpenViewCalls.some((call) => (
       call?.view === 'chat'
       && call?.params?.session_id === ${JSON.stringify(DELEGATED_SESSION_ID)}
+      && call?.params?.conversation_kind === 'agent'
+      && call?.params?.task_id === ${JSON.stringify(DELEGATED_TASK_ID)}
     ))
   ), 'live2d launcher opened delegated chat session');
   console.log('[electron-smoke] live2d open-chat session handoff verified');
