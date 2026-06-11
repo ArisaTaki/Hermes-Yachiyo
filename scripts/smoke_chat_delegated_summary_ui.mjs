@@ -22,7 +22,9 @@ const APPROVAL_ID = 'approval-chat-delegated-summary-ui-smoke';
 const APPROVAL_COMMAND = 'printf delegated-summary-ui-smoke';
 const DELEGATED_GOAL = 'Build delegated summary UI smoke evidence';
 const DELEGATED_RESULT = 'Coding Agent completed delegated summary UI smoke.';
+const REJECTED_RESULT = 'Delegated run rejected from Chat.';
 const SUMMARY_RESULT = 'Delegated summary UI smoke final summary.';
+const REJECTED_SUMMARY_RESULT = 'Delegated summary UI smoke rejected summary.';
 const now = new Date().toISOString();
 
 const bridgeState = {
@@ -30,7 +32,10 @@ const bridgeState = {
   approveCalls: 0,
   rejectCalls: 0,
   summaryCalls: 0,
+  summaryVisible: false,
+  summaryStatus: '',
   summaryPayload: null,
+  summaryRequests: [],
 };
 
 const agentRunnable = {
@@ -77,7 +82,7 @@ function delegatedRun() {
     run_group_id: RUN_GROUP_ID,
     user_goal: DELEGATED_GOAL,
     pending_approval: bridgeState.delegatedStatus === 'approval_required' ? pendingApproval() : {},
-    result: completed ? DELEGATED_RESULT : cancelled ? 'Delegated run rejected from Chat.' : '',
+    result: completed ? DELEGATED_RESULT : cancelled ? REJECTED_RESULT : '',
     task_run_link_run_status: completed ? 'completed' : cancelled ? 'cancelled' : 'approval_required',
     task_run_link_last_event_sequence: completed ? 5 : cancelled ? 3 : 1,
     timeline: completed
@@ -112,12 +117,12 @@ function summaryRun() {
     task_id: SUMMARY_TASK_ID,
     run_group_id: RUN_GROUP_ID,
     user_goal: `Summarize delegated Run ${DELEGATED_RUN_ID}`,
-    result: SUMMARY_RESULT,
+    result: summaryResult(),
     task_run_link_run_status: 'completed',
     task_run_link_last_event_sequence: 2,
     timeline: [
-      { event: 'model.output.completed', status: 'completed', detail: SUMMARY_RESULT },
-      { event: 'run.completed', status: 'completed', detail: SUMMARY_RESULT },
+      { event: 'model.output.completed', status: 'completed', detail: summaryResult() },
+      { event: 'run.completed', status: 'completed', detail: summaryResult() },
     ],
     artifacts: [],
     created_at: now,
@@ -216,7 +221,7 @@ function summaryRunEvents() {
       actor: 'model',
       visibility: 'public',
       sensitivity: 'normal',
-      payload: { content: SUMMARY_RESULT },
+      payload: { content: summaryResult() },
       created_at: now,
     },
     {
@@ -226,21 +231,27 @@ function summaryRunEvents() {
       actor: 'runtime',
       visibility: 'public',
       sensitivity: 'normal',
-      payload: { result: SUMMARY_RESULT },
+      payload: { result: summaryResult() },
       created_at: now,
     },
   ];
 }
 
+function summaryResult() {
+  return bridgeState.summaryStatus === 'cancelled' ? REJECTED_SUMMARY_RESULT : SUMMARY_RESULT;
+}
+
 function runGroup() {
+  const completed = bridgeState.delegatedStatus === 'completed';
+  const cancelled = bridgeState.delegatedStatus === 'cancelled';
   return {
     run_group_id: RUN_GROUP_ID,
     source: 'delegation',
-    status: bridgeState.delegatedStatus === 'completed' ? 'completed' : 'approval_required',
+    status: completed ? 'completed' : cancelled ? 'cancelled' : 'approval_required',
     title: 'Chat delegated summary UI smoke',
-    summary: bridgeState.summaryCalls ? SUMMARY_RESULT : '',
+    summary: bridgeState.summaryVisible ? summaryResult() : '',
     root_run_id: DELEGATED_RUN_ID,
-    child_run_ids: bridgeState.summaryCalls ? [DELEGATED_RUN_ID, SUMMARY_RUN_ID] : [DELEGATED_RUN_ID],
+    child_run_ids: bridgeState.summaryVisible ? [DELEGATED_RUN_ID, SUMMARY_RUN_ID] : [DELEGATED_RUN_ID],
     created_at: now,
     updated_at: now,
   };
@@ -248,13 +259,20 @@ function runGroup() {
 
 function delegatedActivityEvent() {
   const pending = bridgeState.delegatedStatus === 'approval_required';
+  const cancelled = bridgeState.delegatedStatus === 'cancelled';
   return {
     event_id: 'activity-chat-delegated-summary-ui-smoke',
     task_id: SOURCE_TASK_ID,
-    title: pending ? `${AGENT_NAME} waiting for approval` : `${AGENT_NAME} completed delegated run`,
+    title: pending
+      ? `${AGENT_NAME} waiting for approval`
+      : cancelled
+        ? `${AGENT_NAME} delegated run rejected`
+        : `${AGENT_NAME} completed delegated run`,
     detail: pending
       ? `Tool: terminal.run\nCommand: ${APPROVAL_COMMAND}\nAssociated task: ${DELEGATED_GOAL}`
-      : DELEGATED_RESULT,
+      : cancelled
+        ? REJECTED_RESULT
+        : DELEGATED_RESULT,
     tool_name: 'oha.delegation',
     status: pending ? 'approval_required' : bridgeState.delegatedStatus,
     metadata: {
@@ -293,11 +311,11 @@ function chatMessages() {
       activity_events: [delegatedActivityEvent()],
     },
   ];
-  if (bridgeState.summaryCalls) {
+  if (bridgeState.summaryVisible) {
     messages.push({
       id: 'assistant-chat-delegated-summary-ui-smoke-summary',
       role: 'assistant',
-      content: SUMMARY_RESULT,
+      content: summaryResult(),
       status: 'completed',
       created_at: now,
       task_id: SUMMARY_TASK_ID,
@@ -343,11 +361,13 @@ function sessionsPayload() {
         token_count: 0,
         is_processing: pending,
         processing_count: pending ? 1 : 0,
-        latest_message_preview: bridgeState.summaryCalls
-          ? SUMMARY_RESULT
+        latest_message_preview: bridgeState.summaryVisible
+          ? summaryResult()
           : pending
             ? 'Coding Agent waiting for approval'
-            : DELEGATED_RESULT,
+            : bridgeState.delegatedStatus === 'cancelled'
+              ? REJECTED_RESULT
+              : DELEGATED_RESULT,
         latest_message_status: pending ? 'processing' : 'completed',
         updated_at: now,
       },
@@ -483,7 +503,7 @@ async function startMockBridge() {
       }
       if (request.method === 'GET' && url.pathname === '/ui/runs') {
         sendJson(response, 200, {
-          runs: bridgeState.summaryCalls ? [summaryRun(), delegatedRun()] : [delegatedRun()],
+          runs: bridgeState.summaryVisible ? [summaryRun(), delegatedRun()] : [delegatedRun()],
         });
         return;
       }
@@ -492,7 +512,7 @@ async function startMockBridge() {
         return;
       }
       if (request.method === 'GET' && url.pathname === `/ui/runs/${SUMMARY_RUN_ID}`) {
-        sendJson(response, bridgeState.summaryCalls ? 200 : 404, bridgeState.summaryCalls ? summaryRun() : { ok: false, error: 'summary run not created' });
+        sendJson(response, bridgeState.summaryVisible ? 200 : 404, bridgeState.summaryVisible ? summaryRun() : { ok: false, error: 'summary run not created' });
         return;
       }
       if (request.method === 'GET' && url.pathname === '/ui/run-groups') {
@@ -511,6 +531,18 @@ async function startMockBridge() {
         sendJson(response, 200, { run_id: SUMMARY_RUN_ID, ...runEventsPage(summaryRunEvents(), url) });
         return;
       }
+      if (request.method === 'GET' && url.pathname === '/__smoke/state') {
+        sendJson(response, 200, {
+          delegatedStatus: bridgeState.delegatedStatus,
+          approveCalls: bridgeState.approveCalls,
+          rejectCalls: bridgeState.rejectCalls,
+          summaryCalls: bridgeState.summaryCalls,
+          summaryVisible: bridgeState.summaryVisible,
+          summaryStatus: bridgeState.summaryStatus,
+          summaryRequests: bridgeState.summaryRequests,
+        });
+        return;
+      }
       if (request.method === 'POST' && url.pathname === `/ui/runs/${DELEGATED_RUN_ID}/approval/approve`) {
         bridgeState.delegatedStatus = 'completed';
         bridgeState.approveCalls += 1;
@@ -526,7 +558,10 @@ async function startMockBridge() {
       if (request.method === 'POST' && url.pathname === '/ui/chat/delegated-run-summary') {
         const body = await readRequestJson(request);
         bridgeState.summaryPayload = body;
+        bridgeState.summaryStatus = bridgeState.delegatedStatus;
+        bridgeState.summaryVisible = true;
         bridgeState.summaryCalls += 1;
+        bridgeState.summaryRequests.push({ body, status: bridgeState.delegatedStatus });
         sendJson(response, 200, {
           ok: true,
           summary_created: true,
@@ -537,6 +572,14 @@ async function startMockBridge() {
           run_status: bridgeState.delegatedStatus,
           source_task_id: SOURCE_TASK_ID,
         });
+        return;
+      }
+      if (request.method === 'POST' && url.pathname === '/__smoke/reset-delegated-approval') {
+        bridgeState.delegatedStatus = 'approval_required';
+        bridgeState.summaryVisible = false;
+        bridgeState.summaryStatus = '';
+        bridgeState.summaryPayload = null;
+        sendJson(response, 200, { ok: true });
         return;
       }
       sendJson(response, 404, { ok: false, error: `not found: ${request.method} ${url.pathname}` });
@@ -593,12 +636,59 @@ function killProcess(child) {
 function runElectronSmoke(devUrl, bridgeUrl) {
   const script = `
 const { app, BrowserWindow } = require('electron');
+const http = require('node:http');
 const devUrl = ${JSON.stringify(devUrl)};
 const bridgeUrl = ${JSON.stringify(bridgeUrl)};
+let chatLoadCounter = 0;
 const watchdog = setTimeout(() => {
   console.error('electron smoke timed out');
   app.exit(1);
-}, 35000);
+}, 45000);
+function requestBridgeJson(pathname, method = 'GET') {
+  return new Promise((resolve, reject) => {
+    const request = http.request(bridgeUrl + pathname, { method }, (response) => {
+      const chunks = [];
+      response.on('data', (chunk) => chunks.push(chunk));
+      response.on('end', () => {
+        const body = Buffer.concat(chunks).toString('utf8');
+        if (!response.statusCode || response.statusCode < 200 || response.statusCode >= 300) {
+          reject(new Error(method + ' ' + pathname + ' failed with status ' + response.statusCode + ': ' + body));
+          return;
+        }
+        try {
+          resolve(body ? JSON.parse(body) : {});
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+    request.on('error', reject);
+    request.end();
+  });
+}
+function postBridgeReset() {
+  return requestBridgeJson('/__smoke/reset-delegated-approval', 'POST');
+}
+function waitForBridgeState(predicate, label, timeout = 18000) {
+  const started = Date.now();
+  return new Promise((resolve, reject) => {
+    const tick = async () => {
+      try {
+        const state = await requestBridgeJson('/__smoke/state');
+        if (predicate(state)) {
+          resolve(state);
+          return;
+        }
+      } catch {}
+      if (Date.now() - started > timeout) {
+        reject(new Error('timeout waiting for bridge state: ' + label));
+      } else {
+        setTimeout(tick, 120);
+      }
+    };
+    tick();
+  });
+}
 function waitFor(win, predicate, label, timeout = 18000) {
   const started = Date.now();
   return new Promise((resolve, reject) => {
@@ -645,7 +735,8 @@ function waitFor(win, predicate, label, timeout = 18000) {
   });
 }
 async function loadChat(win) {
-  await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '#/chat');
+  chatLoadCounter += 1;
+  await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '&smokeLoad=' + chatLoadCounter + '#/chat');
   await waitFor(win, () => document.querySelector('[data-testid="chat-composer-input"]'), 'chat composer input');
 }
 async function waitForActivityApproval(win) {
@@ -653,6 +744,7 @@ async function waitForActivityApproval(win) {
     const notice = document.querySelector('[data-testid="chat-composer-approval-notice"]');
     const openRun = document.querySelector('[data-testid="chat-composer-approval-open-run-detail"]');
     const approve = document.querySelector('[data-testid="chat-composer-approval-approve"]');
+    const reject = document.querySelector('[data-testid="chat-composer-approval-reject"]');
     const row = document.querySelector('[data-testid="chat-message-activity-row"]');
     return notice?.getAttribute('data-approval-source') === 'activity'
       && notice?.getAttribute('data-run-id') === ${JSON.stringify(DELEGATED_RUN_ID)}
@@ -662,7 +754,8 @@ async function waitForActivityApproval(win) {
       && row?.getAttribute('data-activity-status') === 'approval_required'
       && row.textContent.includes('Coding Agent')
       && openRun
-      && approve;
+      && approve
+      && reject;
   }, 'activity approval composer notice');
 }
 async function waitForApprovalRunDetail(win) {
@@ -703,6 +796,24 @@ async function waitForCompletedRunDetail(win) {
       && events.every((node) => node.getAttribute('data-run-event-run-id') === ${JSON.stringify(DELEGATED_RUN_ID)});
   }, 'delegated completed Run Detail replay');
 }
+async function waitForCancelledRunDetail(win) {
+  await waitFor(win, () => {
+    const detail = document.querySelector('[data-testid="agent-run-detail"]');
+    const result = document.querySelector('[data-testid="agent-run-detail-result"]');
+    const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
+    const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
+    return window.location.hash.includes(${JSON.stringify(DELEGATED_RUN_ID)})
+      && detail?.getAttribute('data-run-id') === ${JSON.stringify(DELEGATED_RUN_ID)}
+      && detail?.getAttribute('data-run-kind') === 'agent_run'
+      && detail?.getAttribute('data-run-status') === 'cancelled'
+      && detail?.getAttribute('data-run-group-id') === ${JSON.stringify(RUN_GROUP_ID)}
+      && result?.textContent.includes(${JSON.stringify(REJECTED_RESULT)})
+      && eventTypes.includes('agent.tool.approval_required')
+      && eventTypes.includes('agent.tool.approval_rejected')
+      && eventTypes.includes('agent.run.cancelled')
+      && events.every((node) => node.getAttribute('data-run-event-run-id') === ${JSON.stringify(DELEGATED_RUN_ID)});
+  }, 'delegated cancelled Run Detail replay');
+}
 async function main() {
   await app.whenReady();
   console.log('[electron-smoke] app ready');
@@ -723,11 +834,41 @@ async function main() {
   await loadChat(win);
   console.log('[electron-smoke] chat loaded');
   await waitForActivityApproval(win);
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-composer-approval-reject\\"]').click()", true);
+  await waitForBridgeState((state) => (
+    state.rejectCalls === 1
+    && state.summaryRequests?.some((request) => request.status === 'cancelled')
+  ), 'delegated reject summary request');
+  await loadChat(win);
+  await waitFor(win, () => {
+    const summary = document.querySelector('[data-message-id="assistant-chat-delegated-summary-ui-smoke-summary"]');
+    const notice = document.querySelector('[data-testid="chat-composer-approval-notice"]');
+    const row = document.querySelector('[data-testid="chat-message-activity-row"]');
+    const openRun = document.querySelector('[data-testid="chat-message-activity-open-run-detail"]');
+    return summary?.textContent.includes(${JSON.stringify(REJECTED_SUMMARY_RESULT)})
+      && !summary.textContent.includes('run_oha_agent')
+      && !document.body.textContent.includes('<oha_delegation>')
+      && !notice
+      && row?.getAttribute('data-activity-status') === 'cancelled'
+      && row.textContent.includes(${JSON.stringify(REJECTED_RESULT)})
+      && openRun;
+  }, 'delegated reject summary created in Chat');
+  console.log('[electron-smoke] delegated reject summary rendered');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-message-activity-open-run-detail\\"]').click()", true);
+  await waitForCancelledRunDetail(win);
+  console.log('[electron-smoke] delegated cancelled Run Detail replay verified');
+  await postBridgeReset();
+  await loadChat(win);
+  await waitForActivityApproval(win);
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-composer-approval-open-run-detail\\"]').click()", true);
   await waitForApprovalRunDetail(win);
   await loadChat(win);
   await waitForActivityApproval(win);
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-composer-approval-approve\\"]').click()", true);
+  await waitForBridgeState((state) => (
+    state.approveCalls === 1
+    && state.summaryRequests?.some((request) => request.status === 'completed')
+  ), 'delegated approve summary request');
   await waitFor(win, () => {
     const summary = document.querySelector('[data-message-id="assistant-chat-delegated-summary-ui-smoke-summary"]');
     const notice = document.querySelector('[data-testid="chat-composer-approval-notice"]');
@@ -766,7 +907,7 @@ main().catch((error) => {
     const timeout = setTimeout(() => {
       child.kill('SIGTERM');
       reject(new Error('electron smoke child timed out'));
-    }, 50_000);
+    }, 65_000);
     child.stdout.on('data', (chunk) => process.stdout.write(chunk));
     child.stderr.on('data', (chunk) => process.stderr.write(chunk));
     child.on('error', (error) => {
@@ -787,14 +928,18 @@ function assertMockBridgeContract() {
   if (bridgeState.approveCalls !== 1) {
     throw new Error(`expected one delegated approval approve call, saw ${bridgeState.approveCalls}`);
   }
-  if (bridgeState.rejectCalls !== 0) {
-    throw new Error(`unexpected delegated approval reject calls: ${bridgeState.rejectCalls}`);
+  if (bridgeState.rejectCalls !== 1) {
+    throw new Error(`expected one delegated approval reject call, saw ${bridgeState.rejectCalls}`);
   }
-  if (bridgeState.summaryCalls !== 1) {
-    throw new Error(`expected one delegated summary call, saw ${bridgeState.summaryCalls}`);
+  if (bridgeState.summaryCalls !== 2) {
+    throw new Error(`expected two delegated summary calls, saw ${bridgeState.summaryCalls}`);
   }
-  if (!bridgeState.summaryPayload || bridgeState.summaryPayload.run_id !== DELEGATED_RUN_ID) {
-    throw new Error(`unexpected delegated summary payload: ${JSON.stringify(bridgeState.summaryPayload)}`);
+  if (bridgeState.summaryRequests.some((request) => request.body?.run_id !== DELEGATED_RUN_ID)) {
+    throw new Error(`unexpected delegated summary payloads: ${JSON.stringify(bridgeState.summaryRequests)}`);
+  }
+  const summaryStatuses = bridgeState.summaryRequests.map((request) => request.status).join(',');
+  if (summaryStatuses !== 'cancelled,completed') {
+    throw new Error(`expected cancelled then completed delegated summaries, saw ${summaryStatuses}`);
   }
 }
 
