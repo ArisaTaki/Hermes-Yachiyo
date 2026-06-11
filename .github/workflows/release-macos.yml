@@ -73,6 +73,7 @@ jobs:
             tests/test_agent_runtime.py::test_main_chat_approval_timeout_records_replayable_fact_and_is_idempotent \
             tests/test_agent_runtime.py::test_main_chat_records_failed_run_event_when_approved_tool_fails \
             tests/test_agent_runtime.py::test_main_chat_repeated_approval_does_not_execute_tool_twice \
+            tests/test_agent_runtime.py::test_main_chat_approval_uses_resume_coordinator_claim_boundary \
             tests/test_agent_runtime.py::test_main_chat_durable_approval_claim_blocks_duplicate_execution \
             tests/test_agent_runtime.py::test_approval_resume_coordinator_claims_and_projects_approved_tool_once \
             tests/test_agent_runtime.py::test_agent_run_approval_uses_resume_coordinator_claim_boundary \

@@ -4805,6 +4805,94 @@ def test_main_chat_repeated_approval_does_not_execute_tool_twice(tmp_path, monke
         service.close()
 
 
+def test_main_chat_approval_uses_resume_coordinator_claim_boundary(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    target = workdir / "out.txt"
+    target.write_text("before\n", encoding="utf-8")
+    calls = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        if len(calls) == 1:
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_patch",
+                        "type": "function",
+                        "function": {
+                            "name": "workspace_write_patch",
+                            "arguments": json.dumps(
+                                {
+                                    "path": "out.txt",
+                                    "patch": "--- out.txt\n+++ out.txt\n@@ -1 +1 @@\n-before\n+after\n",
+                                }
+                            ),
+                        },
+                    }
+                ],
+            }
+        assert messages[-1]["role"] == "tool"
+        return {"content": "Main chat claim boundary complete"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        claim_calls: list[dict[str, object]] = []
+        original_claim = service.approval_resume.claim_and_project_approved_tool
+
+        def spy_claim(run_id, pending, context, **kwargs):
+            claim_calls.append(
+                {
+                    "run_id": run_id,
+                    "tool": pending.get("tool"),
+                    "context_run_id": context.run_id,
+                    "context_tool_name": context.tool_name,
+                    "resumed_detail": kwargs.get("resumed_detail"),
+                    "running_result": kwargs.get("running_result"),
+                }
+            )
+            return original_claim(run_id, pending, context, **kwargs)
+
+        monkeypatch.setattr(service.approval_resume, "claim_and_project_approved_tool", spy_claim)
+        run = service.start_main_chat_run(
+            task_id="task-main-claim-boundary",
+            session_id="session-main-claim-boundary",
+            user_goal="Patch through main chat",
+        )
+        waiting = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [{"role": "user", "content": "Patch out.txt"}],
+            tool_policy={"allowed_tools": ["workspace.write_patch"]},
+            workspace_policy={"default_workdir": str(workdir), "readable_scopes": ["."], "writable_scopes": ["."]},
+        )
+
+        assert waiting["status"] == "approval_required"
+
+        resumed = service.approve_run_approval(run["run_id"])
+
+        assert resumed["status"] == "running"
+        assert resumed["result"] == "Main chat claim boundary complete"
+        assert target.read_text(encoding="utf-8") == "after\n"
+        assert claim_calls == [
+            {
+                "run_id": run["run_id"],
+                "tool": "workspace.write_patch",
+                "context_run_id": run["run_id"],
+                "context_tool_name": "workspace.write_patch",
+                "resumed_detail": "Main chat resumed after approval",
+                "running_result": "已批准，Yachiyo 正在继续执行",
+            }
+        ]
+    finally:
+        service.close()
+
+
 def test_main_chat_durable_approval_claim_blocks_duplicate_execution(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     claiming_service = None

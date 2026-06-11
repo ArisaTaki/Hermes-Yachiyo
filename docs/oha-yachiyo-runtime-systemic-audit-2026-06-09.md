@@ -2035,6 +2035,7 @@ compileall passed
 - release verifier 现在除了 release / alpha / stable metadata，也会模拟 `OHA_YACHIYO_PACKAGED_BUILD=1`，确认 packaged build env 即使带 `OHA_YACHIYO_DEV=1` 也不能启用 development features、Bridge debug routes 或 `DevFileCredentialStore` fallback。
 - release workflow smoke 现在也强制包含 approved terminal failure output redaction 回归，确保批准后的 `terminal.run` 非零退出不会把 stdout / stderr secret 写入 Run projection、RunEvent 或 runtime SQLite。
 - release workflow smoke 现在也强制包含主聊天 provider exception / tool exception redaction 回归，避免异常文本中的 secret 进入 Run projection、RunEvent、tool result message 或 runtime SQLite。
+- release workflow smoke 现在也强制包含 main chat approval resume claim boundary 回归，确认 `main_chat_run` 批准恢复也通过 `ApprovalResumeCoordinator.claim_and_project_approved_tool()` 执行 claim/projection。
 - release workflow smoke 现在也强制包含 ApprovalResumeCoordinator claim projection boundary 回归，确保批准后的 pending approval claim 与 running projection 不回退到 NativeRunEngine 私有分支。
 - release workflow smoke 现在也强制包含 NativeRunEngine approval resume claim boundary 回归，确认 standalone Agent approval resume 通过 `ApprovalResumeCoordinator.claim_and_project_approved_tool()` 进入 approved-tool claim/projection 边界。
 - release workflow smoke 现在也强制包含 `TaskRunLinkRepository` projection boundary 回归，确保 Task↔Run link、Run status projection 和 replay `last_event_sequence` 继续由显式边界维护。
