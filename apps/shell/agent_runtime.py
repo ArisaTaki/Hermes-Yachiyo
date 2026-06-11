@@ -2486,6 +2486,17 @@ class WorkflowApprovalTransitionContext:
     criteria: str
     input_preview: dict[str, Any]
 
+    @classmethod
+    def from_pending(cls, pending: dict[str, Any] | None) -> "WorkflowApprovalTransitionContext":
+        if not pending or str(pending.get("tool") or "") != "workflow.approval":
+            raise AgentRuntimeError("Workflow Run 缺少待审批节点信息")
+        return cls(
+            label=str(pending.get("workflow_node_label") or "Approval"),
+            workflow_node_id=str(pending.get("workflow_node_id") or ""),
+            criteria=str(pending.get("workflow_node_approval_criteria") or "").strip(),
+            input_preview=pending.get("input_preview") if isinstance(pending.get("input_preview"), dict) else {},
+        )
+
 
 class ApprovalResumeCoordinator:
     """Executes the approved tool portion of a paused run resume."""
@@ -8207,23 +8218,10 @@ class NativeRunEngine:
             )
         return result
 
-    @staticmethod
-    def _workflow_approval_transition_context(
-        pending: dict[str, Any] | None,
-    ) -> WorkflowApprovalTransitionContext:
-        if not pending or str(pending.get("tool") or "") != "workflow.approval":
-            raise AgentRuntimeError("Workflow Run 缺少待审批节点信息")
-        return WorkflowApprovalTransitionContext(
-            label=str(pending.get("workflow_node_label") or "Approval"),
-            workflow_node_id=str(pending.get("workflow_node_id") or ""),
-            criteria=str(pending.get("workflow_node_approval_criteria") or "").strip(),
-            input_preview=pending.get("input_preview") if isinstance(pending.get("input_preview"), dict) else {},
-        )
-
     def _approve_workflow_run_approval(self, run: dict[str, Any]) -> dict[str, Any]:
         run_id = str(run["run_id"])
         pending = self.runs.pending_approval_private(run_id)
-        approval_context = self._workflow_approval_transition_context(pending)
+        approval_context = WorkflowApprovalTransitionContext.from_pending(pending)
         workflow = self._workflow_for_run_resume(run)
         context = str(pending.get("workflow_context") or run.get("result") or run.get("user_goal") or "")
         try:
@@ -8259,7 +8257,7 @@ class NativeRunEngine:
             return run
         if run["kind"] == "workflow_run":
             pending = self.runs.pending_approval_private(run_id)
-            approval_context = self._workflow_approval_transition_context(pending)
+            approval_context = WorkflowApprovalTransitionContext.from_pending(pending)
             result = self.approvals.reject_workflow_node(
                 run_id,
                 timeline=[*run["timeline"]],
@@ -8300,7 +8298,7 @@ class NativeRunEngine:
             pending = self.runs.pending_approval_private(run_id)
             if not pending or str(pending.get("tool") or "") != "workflow.approval":
                 return self.cancel_run(run_id)
-            approval_context = self._workflow_approval_transition_context(pending)
+            approval_context = WorkflowApprovalTransitionContext.from_pending(pending)
             result = self.approvals.timeout_workflow_node(
                 run_id,
                 timeline=[*run["timeline"]],

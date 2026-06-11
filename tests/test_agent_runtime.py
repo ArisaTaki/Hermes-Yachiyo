@@ -26,6 +26,7 @@ from apps.shell.agent_runtime import (
     TaskRunLinkRepository,
     ToolApprovalResumeContext,
     ToolBroker,
+    WorkflowApprovalTransitionContext,
     WorkflowContinuationCoordinator,
     WorkflowParentResumeCoordinator,
 )
@@ -6913,7 +6914,7 @@ def test_workflow_approval_node_pauses_and_resumes(tmp_path, monkeypatch):
 def test_workflow_approval_transitions_use_shared_context_boundary(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     context_calls: list[dict[str, object]] = []
-    original_context = NativeRunEngine._workflow_approval_transition_context
+    original_context = WorkflowApprovalTransitionContext.from_pending
 
     def spy_context(pending):
         context = original_context(pending)
@@ -6928,8 +6929,8 @@ def test_workflow_approval_transitions_use_shared_context_boundary(tmp_path, mon
         return context
 
     monkeypatch.setattr(
-        NativeRunEngine,
-        "_workflow_approval_transition_context",
+        WorkflowApprovalTransitionContext,
+        "from_pending",
         staticmethod(spy_context),
     )
 
