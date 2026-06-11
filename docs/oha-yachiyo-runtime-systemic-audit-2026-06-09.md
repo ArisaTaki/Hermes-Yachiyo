@@ -1281,6 +1281,10 @@ RunEvent sequence:
   - 负责 Workflow 节点 timeline、child Agent Run 创建、approval pause、artifact write、completed/failed 状态落库。
   - `NativeRunEngine._continue_workflow_run()` 保留为薄 wrapper，成熟调用点不变。
 
+- `_cancel_workflow_run_projection()`
+  - 负责 Workflow Run 取消时的 pending approval / child approval / child outcome 合并与 Workflow timeline 投影。
+  - `NativeRunEngine._cancel_run_once()` 保留普通 Run 与 Workflow Run 的取消分派、最终落库、RunGroup 更新和父 Workflow 恢复通知。
+
 - `_coalesce_model_message()`
   - 普通 provider 返回 dict 时行为保持不变。
   - provider 返回 stream iterable 时先在内存中合并 delta 内容，再交给现有 completed-event 持久化路径。

@@ -7752,6 +7752,92 @@ class NativeRunEngine:
                 if self._run_cancel_locks.get(clean_run_id) is lock:
                     self._run_cancel_locks.pop(clean_run_id, None)
 
+    def _cancel_workflow_run_projection(
+        self,
+        run_id: str,
+        run: dict[str, Any],
+        timeline: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str]:
+        artifacts = [item for item in run.get("artifacts") or [] if isinstance(item, dict)]
+        pending = self._pending_approval_private(run_id)
+        node_info: dict[str, str] = {}
+        cancelled_child_run_id = ""
+        label = "Workflow"
+        if pending and str(pending.get("tool") or "") == "workflow.approval":
+            label = str(pending.get("workflow_node_label") or "Approval")
+            node_info = {
+                "workflow_node_id": str(pending.get("workflow_node_id") or ""),
+                "workflow_node_kind": "approval",
+                "workflow_node_label": label,
+                "workflow_node_approval_criteria": str(
+                    pending.get("workflow_node_approval_criteria") or ""
+                ).strip(),
+            }
+        else:
+            child_run_id = ""
+            for event in reversed(timeline):
+                if not isinstance(event, dict):
+                    continue
+                if event.get("event") != "workflow.run.approval_required":
+                    continue
+                child_run_id = str(event.get("child_run_id") or "").strip()
+                if child_run_id:
+                    break
+            if child_run_id:
+                cancelled_child_run_id = child_run_id
+                for event in timeline:
+                    if (
+                        isinstance(event, dict)
+                        and event.get("event") == "workflow.node.agent"
+                        and str(event.get("child_run_id") or "") == child_run_id
+                    ):
+                        label = (
+                            str(event.get("detail") or event.get("workflow_node_label") or "Agent").strip()
+                            or "Agent"
+                        )
+                        node_info = {
+                            "workflow_node_id": str(event.get("workflow_node_id") or ""),
+                            "workflow_node_kind": str(event.get("workflow_node_kind") or "agent"),
+                            "workflow_node_label": str(event.get("workflow_node_label") or label),
+                        }
+                        break
+                try:
+                    child_run = self.get_run(child_run_id)
+                except KeyError:
+                    child_run = {}
+                if child_run and str(child_run.get("status") or "") not in _FINAL_RUN_STATUSES:
+                    child_timeline = [
+                        event
+                        for event in child_run.get("timeline") or []
+                        if isinstance(event, dict)
+                    ]
+                    child_timeline.append(self._timeline("run.cancelled", "Parent Workflow cancelled"))
+                    self.append_run_event(
+                        child_run_id,
+                        "run.cancelled",
+                        {"reason": "Parent Workflow cancelled", "parent_run_id": run_id},
+                    )
+                    child_run = self._update_run(
+                        child_run_id,
+                        status="cancelled",
+                        result="父 Workflow 已取消",
+                        timeline=child_timeline,
+                        pending_approval=None,
+                    )
+                if child_run:
+                    self._merge_workflow_child_run_outcome(timeline, artifacts, child_run, label)
+        cancel_event_extra: dict[str, Any] = {"status": "cancelled", **node_info}
+        if cancelled_child_run_id:
+            cancel_event_extra["child_run_id"] = cancelled_child_run_id
+        timeline.append(
+            self._timeline(
+                "workflow.run.cancelled",
+                f"{label} cancelled",
+                **cancel_event_extra,
+            )
+        )
+        return timeline, artifacts, f"Workflow 已取消：{label}"
+
     def _cancel_run_once(self, run_id: str) -> dict[str, Any]:
         run = self.get_run(run_id)
         if run["status"] in _FINAL_RUN_STATUSES:
@@ -7760,80 +7846,7 @@ class NativeRunEngine:
         artifacts: list[dict[str, Any]] | None = None
         result_text: str | None = None
         if run.get("kind") == "workflow_run":
-            artifacts = [item for item in run.get("artifacts") or [] if isinstance(item, dict)]
-            pending = self._pending_approval_private(run_id)
-            node_info: dict[str, str] = {}
-            cancelled_child_run_id = ""
-            label = "Workflow"
-            if pending and str(pending.get("tool") or "") == "workflow.approval":
-                label = str(pending.get("workflow_node_label") or "Approval")
-                node_info = {
-                    "workflow_node_id": str(pending.get("workflow_node_id") or ""),
-                    "workflow_node_kind": "approval",
-                    "workflow_node_label": label,
-                    "workflow_node_approval_criteria": str(pending.get("workflow_node_approval_criteria") or "").strip(),
-                }
-            else:
-                child_run_id = ""
-                for event in reversed(timeline):
-                    if not isinstance(event, dict):
-                        continue
-                    if event.get("event") != "workflow.run.approval_required":
-                        continue
-                    child_run_id = str(event.get("child_run_id") or "").strip()
-                    if child_run_id:
-                        break
-                if child_run_id:
-                    cancelled_child_run_id = child_run_id
-                    for event in timeline:
-                        if (
-                            isinstance(event, dict)
-                            and event.get("event") == "workflow.node.agent"
-                            and str(event.get("child_run_id") or "") == child_run_id
-                        ):
-                            label = str(event.get("detail") or event.get("workflow_node_label") or "Agent").strip() or "Agent"
-                            node_info = {
-                                "workflow_node_id": str(event.get("workflow_node_id") or ""),
-                                "workflow_node_kind": str(event.get("workflow_node_kind") or "agent"),
-                                "workflow_node_label": str(event.get("workflow_node_label") or label),
-                            }
-                            break
-                    try:
-                        child_run = self.get_run(child_run_id)
-                    except KeyError:
-                        child_run = {}
-                    if child_run and str(child_run.get("status") or "") not in _FINAL_RUN_STATUSES:
-                        child_timeline = [
-                            event
-                            for event in child_run.get("timeline") or []
-                            if isinstance(event, dict)
-                        ]
-                        child_timeline.append(self._timeline("run.cancelled", "Parent Workflow cancelled"))
-                        self.append_run_event(
-                            child_run_id,
-                            "run.cancelled",
-                            {"reason": "Parent Workflow cancelled", "parent_run_id": run_id},
-                        )
-                        child_run = self._update_run(
-                            child_run_id,
-                            status="cancelled",
-                            result="父 Workflow 已取消",
-                            timeline=child_timeline,
-                            pending_approval=None,
-                        )
-                    if child_run:
-                        self._merge_workflow_child_run_outcome(timeline, artifacts, child_run, label)
-            cancel_event_extra: dict[str, Any] = {"status": "cancelled", **node_info}
-            if cancelled_child_run_id:
-                cancel_event_extra["child_run_id"] = cancelled_child_run_id
-            timeline.append(
-                self._timeline(
-                    "workflow.run.cancelled",
-                    f"{label} cancelled",
-                    **cancel_event_extra,
-                )
-            )
-            result_text = f"Workflow 已取消：{label}"
+            timeline, artifacts, result_text = self._cancel_workflow_run_projection(run_id, run, timeline)
         else:
             timeline.append(self._timeline("run.cancelled", "Run cancelled"))
             result_text = "Run cancelled"
