@@ -3,8 +3,33 @@
 from __future__ import annotations
 
 import plistlib
+import re
 
 from scripts import verify_release_artifacts as verifier
+
+RELEASE_ELECTRON_SMOKE_SCRIPTS: tuple[str, ...] = (
+    "scripts/smoke_chat_image_attachment_ui.mjs",
+    "scripts/smoke_chat_cancel_ui.mjs",
+    "scripts/smoke_chat_approval_ui.mjs",
+    "scripts/smoke_chat_delegated_summary_ui.mjs",
+    "scripts/smoke_chat_group_summary_ui.mjs",
+    "scripts/smoke_launcher_session_summary_ui.mjs",
+    "scripts/smoke_proactive_tts_ui.mjs",
+    "scripts/smoke_agent_run_detail_ui.mjs",
+    "scripts/smoke_workflow_save_run_ui.mjs",
+)
+
+
+def _explicit_smoke_selectors() -> set[str]:
+    selectors: set[str] = set()
+    for script in RELEASE_ELECTRON_SMOKE_SCRIPTS:
+        text = (verifier.ROOT / script).read_text(encoding="utf-8")
+        for match in re.finditer(r'data-testid=(?:\\)?"([^"\\]+)(?:\\)?"', text):
+            selector = match.group(1)
+            if "$" in selector or "{" in selector:
+                continue
+            selectors.add(selector)
+    return selectors
 
 
 def test_verifier_accepts_current_release_files():
@@ -332,6 +357,15 @@ def test_verifier_reports_packaged_app_missing_permission_copy(tmp_path):
     assert "packaged app Info.plist must include microphone permission copy" in messages
 
 
+def test_packaged_selector_gate_covers_release_electron_smoke_selectors():
+    missing = sorted(
+        _explicit_smoke_selectors()
+        - set(verifier.PACKAGED_UI_E2E_REQUIRED_SELECTORS)
+    )
+
+    assert missing == []
+
+
 def test_verifier_reports_packaged_app_missing_ui_e2e_selector(tmp_path):
     app_dir = _write_packaged_app_bundle(tmp_path)
     asar_path = app_dir / verifier.PACKAGED_ASAR_RELATIVE_PATH
@@ -349,6 +383,10 @@ def test_verifier_reports_packaged_app_missing_ui_e2e_selector(tmp_path):
     assert verifier.Finding(
         asar_path,
         "packaged Electron app.asar must include UI E2E selector 'workflow-save-and-run'",
+    ) in findings
+    assert verifier.Finding(
+        asar_path,
+        "packaged Electron app.asar must include UI E2E selector 'chat-header-image-attach-button'",
     ) in findings
     assert verifier.Finding(
         asar_path,
@@ -385,6 +423,14 @@ def test_verifier_reports_packaged_app_missing_ui_e2e_selector(tmp_path):
     assert verifier.Finding(
         asar_path,
         "packaged Electron app.asar must include UI E2E selector 'chat-composer-stop-button'",
+    ) in findings
+    assert verifier.Finding(
+        asar_path,
+        "packaged Electron app.asar must include UI E2E selector 'bubble-launcher-shell'",
+    ) in findings
+    assert verifier.Finding(
+        asar_path,
+        "packaged Electron app.asar must include UI E2E selector 'live2d-launcher-reply-text'",
     ) in findings
     assert verifier.Finding(
         asar_path,
