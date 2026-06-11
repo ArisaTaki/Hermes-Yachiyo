@@ -2477,6 +2477,16 @@ class ToolApprovalResumeContext:
     next_iteration: int
 
 
+@dataclass(frozen=True)
+class WorkflowApprovalTransitionContext:
+    """Shared public context for Workflow approval approve/reject/timeout transitions."""
+
+    label: str
+    workflow_node_id: str
+    criteria: str
+    input_preview: dict[str, Any]
+
+
 class ApprovalResumeCoordinator:
     """Executes the approved tool portion of a paused run resume."""
 
@@ -8197,13 +8207,24 @@ class NativeRunEngine:
             )
         return result
 
+    @staticmethod
+    def _workflow_approval_transition_context(
+        pending: dict[str, Any] | None,
+    ) -> WorkflowApprovalTransitionContext:
+        if not pending or str(pending.get("tool") or "") != "workflow.approval":
+            raise AgentRuntimeError("Workflow Run 缺少待审批节点信息")
+        return WorkflowApprovalTransitionContext(
+            label=str(pending.get("workflow_node_label") or "Approval"),
+            workflow_node_id=str(pending.get("workflow_node_id") or ""),
+            criteria=str(pending.get("workflow_node_approval_criteria") or "").strip(),
+            input_preview=pending.get("input_preview") if isinstance(pending.get("input_preview"), dict) else {},
+        )
+
     def _approve_workflow_run_approval(self, run: dict[str, Any]) -> dict[str, Any]:
         run_id = str(run["run_id"])
         pending = self.runs.pending_approval_private(run_id)
-        if not pending or str(pending.get("tool") or "") != "workflow.approval":
-            raise AgentRuntimeError("Workflow Run 缺少待审批节点信息")
+        approval_context = self._workflow_approval_transition_context(pending)
         workflow = self._workflow_for_run_resume(run)
-        label = str(pending.get("workflow_node_label") or "Approval")
         context = str(pending.get("workflow_context") or run.get("result") or run.get("user_goal") or "")
         try:
             start_index = int(pending.get("workflow_next_index") or 0)
@@ -8214,9 +8235,6 @@ class NativeRunEngine:
             for event in run.get("timeline") or []
             if isinstance(event, dict)
         ]
-        workflow_node_id = str(pending.get("workflow_node_id") or "")
-        criteria = str(pending.get("workflow_node_approval_criteria") or "").strip()
-        approval_preview = pending.get("input_preview") if isinstance(pending.get("input_preview"), dict) else {}
         artifacts = [item for item in run.get("artifacts") or [] if isinstance(item, dict)]
         root_group = self._workflow_run_is_group_root(run)
         if not self.run_approvals.claim_pending_approval(run_id, pending):
@@ -8229,10 +8247,10 @@ class NativeRunEngine:
             artifacts=artifacts,
             start_index=start_index,
             root_group=root_group,
-            workflow_node_id=workflow_node_id,
-            label=label,
-            criteria=criteria,
-            input_preview=approval_preview,
+            workflow_node_id=approval_context.workflow_node_id,
+            label=approval_context.label,
+            criteria=approval_context.criteria,
+            input_preview=approval_context.input_preview,
         )
 
     def reject_run_approval(self, run_id: str, reason: str = "") -> dict[str, Any]:
@@ -8241,19 +8259,15 @@ class NativeRunEngine:
             return run
         if run["kind"] == "workflow_run":
             pending = self.runs.pending_approval_private(run_id)
-            if not pending or str(pending.get("tool") or "") != "workflow.approval":
-                raise AgentRuntimeError("Workflow Run 缺少待审批节点信息")
-            label = str(pending.get("workflow_node_label") or "Approval")
-            criteria = str(pending.get("workflow_node_approval_criteria") or "").strip()
-            approval_preview = pending.get("input_preview") if isinstance(pending.get("input_preview"), dict) else {}
+            approval_context = self._workflow_approval_transition_context(pending)
             result = self.approvals.reject_workflow_node(
                 run_id,
                 timeline=[*run["timeline"]],
                 reason=reason,
-                workflow_node_id=str(pending.get("workflow_node_id") or ""),
-                label=label,
-                criteria=criteria,
-                input_preview=approval_preview,
+                workflow_node_id=approval_context.workflow_node_id,
+                label=approval_context.label,
+                criteria=approval_context.criteria,
+                input_preview=approval_context.input_preview,
             )
             if self._workflow_run_is_group_root(run):
                 self._update_run_group(
@@ -8286,17 +8300,15 @@ class NativeRunEngine:
             pending = self.runs.pending_approval_private(run_id)
             if not pending or str(pending.get("tool") or "") != "workflow.approval":
                 return self.cancel_run(run_id)
-            label = str(pending.get("workflow_node_label") or "Approval")
-            criteria = str(pending.get("workflow_node_approval_criteria") or "").strip()
-            approval_preview = pending.get("input_preview") if isinstance(pending.get("input_preview"), dict) else {}
+            approval_context = self._workflow_approval_transition_context(pending)
             result = self.approvals.timeout_workflow_node(
                 run_id,
                 timeline=[*run["timeline"]],
                 reason=reason,
-                workflow_node_id=str(pending.get("workflow_node_id") or ""),
-                label=label,
-                criteria=criteria,
-                input_preview=approval_preview,
+                workflow_node_id=approval_context.workflow_node_id,
+                label=approval_context.label,
+                criteria=approval_context.criteria,
+                input_preview=approval_context.input_preview,
             )
             if self._workflow_run_is_group_root(run):
                 self._update_run_group(

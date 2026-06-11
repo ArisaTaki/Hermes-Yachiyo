@@ -1284,6 +1284,10 @@ RunEvent sequence:
   - 主聊天和 Agent Run 的工具审批恢复共用同一个 resume context 和 coordinator。
   - 保留 `NativeRunEngine` 对最终模型继续执行和 Run 状态落库的编排职责。
 
+- `WorkflowApprovalTransitionContext`
+  - 统一解析 Workflow approval pending payload 中的 node id、label、criteria 和 input preview。
+  - Workflow approval approve / reject / timeout 共享该结构，避免三个分支各自解析 pending approval 字段。
+
 - `WorkflowParentResumeCoordinator`
   - 负责子 Agent Run 状态变化后标记父 Workflow running / approval_required / failed / cancelled / resumed。
   - 负责合并子 Run 结果、子 artifact references、父 Workflow timeline 和 RunGroup 状态更新。
