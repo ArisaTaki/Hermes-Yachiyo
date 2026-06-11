@@ -8125,6 +8125,71 @@ def test_workflow_stops_when_child_agent_fails(tmp_path, monkeypatch):
         service.close()
 
 
+def test_workflow_child_agent_provider_exception_is_redacted_from_parent_events_and_storage(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    calls = []
+    leaked_secret = "sk-workflow-child-provider-secret123456"
+
+    def fake_chat(*_args, **_kwargs):
+        calls.append("called")
+        raise RuntimeError(f"provider rejected api_key={leaked_secret}")
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Secret Failing Agent",
+                "model_mode": "custom_api",
+                "model_config": {
+                    "base_url": "https://api.example.test/v1",
+                    "model": "demo-model",
+                    "api_key": "workflow-child-placeholder-key",
+                },
+            }
+        )
+        workflow = service.create_workflow(
+            {
+                "name": "Secret Safe Child Failure",
+                "nodes": [
+                    {"id": "start", "type": "start", "data": {"label": "Start"}},
+                    {"id": "agent", "type": "agent", "data": {"label": "Failing Agent", "agent_id": agent["agent_id"]}},
+                ],
+                "edges": [{"source": "start", "target": "agent"}],
+            }
+        )
+
+        run = service.create_workflow_run({"workflow_id": workflow["workflow_id"], "user_goal": "Run failing child"})
+        parent_events = service.list_run_events(run["run_id"])["events"]
+        node_fact = next(event for event in parent_events if event["event_type"] == "workflow.node.agent")
+        failed_fact = next(event for event in parent_events if event["event_type"] == "workflow.run.failed")
+        child_run_id = node_fact["payload"]["child_run_id"]
+        child_run = service.get_run(child_run_id)
+        child_events = service.list_run_events(child_run_id)["events"]
+        projection = json.dumps(
+            {
+                "workflow_run": run,
+                "workflow_events": parent_events,
+                "run_group": service.get_run_group(run["run_group_id"]),
+                "child_run": child_run,
+                "child_events": child_events,
+            },
+            ensure_ascii=False,
+        )
+
+        assert calls == ["called"]
+        assert run["status"] == "failed"
+        assert child_run["status"] == "failed"
+        assert node_fact["payload"]["status"] == "failed"
+        assert "[redacted]" in node_fact["payload"]["result"]
+        assert "[redacted]" in failed_fact["payload"]["result"]
+        assert "[redacted]" in projection
+        assert leaked_secret not in projection
+    finally:
+        service.close()
+
+    assert verify_secret_redaction(paths=[tmp_path]) == []
+
+
 def test_agent_execution_backend_legacy_values_normalize_to_native(tmp_path):
     service = make_service(tmp_path)
     try:

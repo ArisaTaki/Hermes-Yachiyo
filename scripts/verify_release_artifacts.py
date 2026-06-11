@@ -759,6 +759,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover provider exception redaction",
     ),
     (
+        "tests/test_agent_runtime.py::test_workflow_child_agent_provider_exception_is_redacted_from_parent_events_and_storage",
+        "macOS release workflow smoke tests must cover Workflow child provider exception redaction",
+    ),
+    (
         "tests/test_agent_runtime.py::test_main_chat_tool_exception_is_redacted_from_tool_messages_events_and_storage",
         "macOS release workflow smoke tests must cover tool exception redaction",
     ),

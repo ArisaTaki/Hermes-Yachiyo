@@ -862,6 +862,7 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow smoke tests must cover provider reasoning privacy for direct chat calls" in messages
     assert "macOS release workflow smoke tests must cover provider reasoning privacy for main chat loop" in messages
     assert "macOS release workflow smoke tests must cover provider exception redaction" in messages
+    assert "macOS release workflow smoke tests must cover Workflow child provider exception redaction" in messages
     assert "macOS release workflow smoke tests must cover tool exception redaction" in messages
     assert "macOS release workflow smoke tests must cover NativeRunEngine SSE object tool-call arguments" in messages
     assert "macOS release workflow smoke tests must cover NativeRunEngine Responses-style streaming tool calls" in messages
