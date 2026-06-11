@@ -1545,11 +1545,13 @@ async function main() {
     const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
     const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
     const runIds = events.map((node) => node.getAttribute('data-run-event-run-id'));
+    const rejectCancelledEvent = events.find((node) => node.getAttribute('data-run-event') === 'workflow.run.cancelled');
     return detail?.getAttribute('data-run-id') === ${JSON.stringify(WORKFLOW_REJECT_RUN_ID)}
       && !document.querySelector('[data-testid="agent-run-detail-workflow-child-approval"]')
       && result?.textContent.includes('Workflow child approval rejected from Electron smoke')
       && steps.some((node) => node.getAttribute('data-child-run-id') === ${JSON.stringify(WORKFLOW_REJECT_CHILD_RUN_ID)} && node.getAttribute('data-workflow-step-status') === 'cancelled')
       && eventTypes.includes('workflow.run.cancelled')
+      && rejectCancelledEvent?.textContent.includes(${JSON.stringify(WORKFLOW_REJECT_CHILD_RUN_ID)})
       && runIds.every((id) => id === ${JSON.stringify(WORKFLOW_REJECT_RUN_ID)});
   }, 'workflow child reject completed parent detail');
   console.log('[electron-smoke] workflow child reject action completed');
@@ -1576,11 +1578,13 @@ async function main() {
     const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
     const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
     const runIds = events.map((node) => node.getAttribute('data-run-event-run-id'));
+    const cancelCancelledEvent = events.find((node) => node.getAttribute('data-run-event') === 'workflow.run.cancelled');
     return detail?.getAttribute('data-run-id') === ${JSON.stringify(WORKFLOW_CANCEL_RUN_ID)}
       && !document.querySelector('[data-testid="agent-run-detail-workflow-child-approval"]')
       && result?.textContent.includes('Workflow child run cancelled from Electron smoke')
       && steps.some((node) => node.getAttribute('data-child-run-id') === ${JSON.stringify(WORKFLOW_CANCEL_CHILD_RUN_ID)} && node.getAttribute('data-workflow-step-status') === 'cancelled')
       && eventTypes.includes('workflow.run.cancelled')
+      && cancelCancelledEvent?.textContent.includes(${JSON.stringify(WORKFLOW_CANCEL_CHILD_RUN_ID)})
       && runIds.every((id) => id === ${JSON.stringify(WORKFLOW_CANCEL_RUN_ID)});
   }, 'workflow child cancel completed parent detail');
   console.log('[electron-smoke] workflow child cancel action completed');
