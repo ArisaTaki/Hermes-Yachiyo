@@ -74,6 +74,7 @@ jobs:
             tests/test_agent_runtime.py::test_main_chat_records_failed_run_event_when_approved_tool_fails \
             tests/test_agent_runtime.py::test_main_chat_repeated_approval_does_not_execute_tool_twice \
             tests/test_agent_runtime.py::test_main_chat_durable_approval_claim_blocks_duplicate_execution \
+            tests/test_agent_runtime.py::test_approval_resume_coordinator_claims_and_projects_approved_tool_once \
             tests/test_agent_runtime.py::test_approval_resume_coordinator_executes_approved_tool_and_remaining_requests \
             tests/test_agent_runtime.py::test_approval_resume_coordinator_stops_on_fatal_tool_failure \
             tests/test_agent_runtime.py::test_approval_resume_coordinator_continues_custom_api_agent_after_approved_tool \

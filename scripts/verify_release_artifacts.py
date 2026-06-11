@@ -387,6 +387,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover durable approval claim across runtime instances",
     ),
     (
+        "tests/test_agent_runtime.py::test_approval_resume_coordinator_claims_and_projects_approved_tool_once",
+        "macOS release workflow smoke tests must cover ApprovalResumeCoordinator claim projection boundary",
+    ),
+    (
         "tests/test_agent_runtime.py::test_approval_resume_coordinator_executes_approved_tool_and_remaining_requests",
         "macOS release workflow smoke tests must cover ApprovalResumeCoordinator approved tool resume flow",
     ),
