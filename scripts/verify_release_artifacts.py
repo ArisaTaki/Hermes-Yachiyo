@@ -345,6 +345,9 @@ PACKAGED_UI_E2E_REQUIRED_SELECTORS: tuple[str, ...] = (
 PACKAGED_UI_E2E_FORBIDDEN_TEXT: tuple[str, ...] = (
     "oha-chat-e2e-add-image",
 )
+DATA_TESTID_SELECTOR_RE = re.compile(
+    r"""data-testid=(?:\\)?(?P<quote>["'])(?P<selector>[^"'\\]+)(?:\\)?(?P=quote)"""
+)
 PACKAGED_INFO_REQUIRED_VALUES: tuple[tuple[str, str, str], ...] = (
     (
         "LSApplicationCategoryType",
@@ -1378,8 +1381,8 @@ def _release_electron_ui_smoke_selectors(root: Path) -> tuple[str, ...]:
             text = script_path.read_text(encoding="utf-8")
         except OSError:
             continue
-        for match in re.finditer(r'data-testid=(?:\\)?"([^"\\]+)(?:\\)?"', text):
-            selector = match.group(1)
+        for match in DATA_TESTID_SELECTOR_RE.finditer(text):
+            selector = match.group("selector")
             if "$" in selector or "{" in selector:
                 continue
             selectors.add(selector)

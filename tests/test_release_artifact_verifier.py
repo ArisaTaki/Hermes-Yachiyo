@@ -42,8 +42,8 @@ def _explicit_smoke_selectors() -> set[str]:
     selectors: set[str] = set()
     for script in _release_workflow_electron_smoke_scripts():
         text = (verifier.ROOT / script).read_text(encoding="utf-8")
-        for match in re.finditer(r'data-testid=(?:\\)?"([^"\\]+)(?:\\)?"', text):
-            selector = match.group(1)
+        for match in verifier.DATA_TESTID_SELECTOR_RE.finditer(text):
+            selector = match.group("selector")
             if "$" in selector or "{" in selector:
                 continue
             selectors.add(selector)
@@ -624,7 +624,8 @@ def test_verifier_reports_packaged_app_missing_dynamic_smoke_selector(tmp_path):
     smoke = tmp_path / "scripts" / "smoke_new_mature_surface_ui.mjs"
     smoke.parent.mkdir(parents=True)
     smoke.write_text(
-        "document.querySelector('[data-testid=\"new-mature-surface-open\"]');\n",
+        "document.querySelector('[data-testid=\"new-mature-surface-open\"]');\n"
+        "document.querySelector(\"[data-testid='new-mature-surface-delete']\");\n",
         encoding="utf-8",
     )
 
@@ -640,6 +641,10 @@ def test_verifier_reports_packaged_app_missing_dynamic_smoke_selector(tmp_path):
     assert verifier.Finding(
         app_dir / verifier.PACKAGED_ASAR_RELATIVE_PATH,
         "packaged Electron app.asar must include UI E2E selector 'new-mature-surface-open'",
+    ) in findings
+    assert verifier.Finding(
+        app_dir / verifier.PACKAGED_ASAR_RELATIVE_PATH,
+        "packaged Electron app.asar must include UI E2E selector 'new-mature-surface-delete'",
     ) in findings
 
 
