@@ -235,12 +235,29 @@ function killProcess(child) {
 }
 
 function runElectronSmoke(devUrl, bridgeUrl) {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oha-live2d-settings-ui-smoke-'));
+  const preloadPath = path.join(tempDir, 'preload.cjs');
+  fs.writeFileSync(preloadPath, `
+const { contextBridge } = require('electron');
+let archiveCalls = 0;
+let modelDirectoryCalls = 0;
+contextBridge.exposeInMainWorld('ohaDesktop', {
+  chooseLive2DArchive: async () => {
+    archiveCalls += 1;
+    return ${JSON.stringify(ARCHIVE_PATH)};
+  },
+  chooseLive2DModelDirectory: async () => {
+    modelDirectoryCalls += 1;
+    return ${JSON.stringify(MODEL_PATH)};
+  },
+  __live2dPickerCalls: () => ({ archiveCalls, modelDirectoryCalls }),
+});
+`, 'utf8');
   const script = `
 const { app, BrowserWindow } = require('electron');
 const devUrl = ${JSON.stringify(devUrl)};
 const bridgeUrl = ${JSON.stringify(bridgeUrl)};
-const archivePath = ${JSON.stringify(ARCHIVE_PATH)};
-const modelPath = ${JSON.stringify(MODEL_PATH)};
+const preloadPath = ${JSON.stringify(preloadPath)};
 const watchdog = setTimeout(() => {
   console.error('electron smoke timed out');
   app.exit(1);
@@ -279,12 +296,6 @@ function waitFor(win, predicate, label, timeout = 18000) {
     tick();
   });
 }
-function setNativeValue(input, value) {
-  const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value').set;
-  setter.call(input, value);
-  input.dispatchEvent(new Event('input', { bubbles: true }));
-  input.dispatchEvent(new Event('change', { bubbles: true }));
-}
 async function main() {
   await app.whenReady();
   console.log('[electron-smoke] app ready');
@@ -297,6 +308,7 @@ async function main() {
       nodeIntegration: false,
       sandbox: true,
       backgroundThrottling: false,
+      preload: preloadPath,
     },
   });
   win.webContents.on('console-message', (_event, level, message) => {
@@ -305,48 +317,32 @@ async function main() {
   await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '#/settings/live2d');
   await waitFor(win, () => {
     const resource = document.querySelector('[data-testid="live2d-resource-settings"]');
-    const archive = document.querySelector('[data-testid="live2d-manual-archive-path"]');
-    const model = document.querySelector('[data-testid="live2d-manual-model-path"]');
-    return resource && archive && model && !document.querySelector('[data-testid="live2d-archive-import"]')?.disabled;
+    return resource && !document.querySelector('[data-testid="live2d-archive-import"]')?.disabled;
   }, 'live2d resource controls');
   console.log('[electron-smoke] live2d resource controls loaded');
-  await win.webContents.executeJavaScript(\`
-    (() => {
-      const setNativeValue = (input, value) => {
-        const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value').set;
-        setter.call(input, value);
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-      };
-      setNativeValue(document.querySelector('[data-testid="live2d-manual-archive-path"]'), \${JSON.stringify(archivePath)});
-      document.querySelector('[data-testid="live2d-archive-import"]').click();
-    })();
-  \`, true);
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"live2d-archive-import\\"]').click()", true);
   await waitFor(win, () => {
     const status = document.querySelector('[data-testid="mode-settings-status"]');
     const save = document.querySelector('[data-testid="mode-settings-save"]');
     return status?.textContent.includes('Live2D ZIP imported by UI smoke')
       && !save?.disabled;
   }, 'live2d archive imported');
+  const archivePickerCalls = await win.webContents.executeJavaScript('window.ohaDesktop.__live2dPickerCalls().archiveCalls', true);
+  if (archivePickerCalls !== 1) {
+    throw new Error('expected Live2D archive picker to be called once, got ' + archivePickerCalls);
+  }
   console.log('[electron-smoke] live2d archive import verified');
-  await win.webContents.executeJavaScript(\`
-    (() => {
-      const setNativeValue = (input, value) => {
-        const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value').set;
-        setter.call(input, value);
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-      };
-      setNativeValue(document.querySelector('[data-testid="live2d-manual-model-path"]'), \${JSON.stringify(modelPath)});
-      document.querySelector('[data-testid="live2d-model-path-prepare"]').click();
-    })();
-  \`, true);
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"live2d-model-path-prepare\\"]').click()", true);
   await waitFor(win, () => {
     const status = document.querySelector('[data-testid="mode-settings-status"]');
     const save = document.querySelector('[data-testid="mode-settings-save"]');
     return status?.textContent.includes('Live2D model path prepared by UI smoke')
       && !save?.disabled;
   }, 'live2d model path prepared');
+  const modelPickerCalls = await win.webContents.executeJavaScript('window.ohaDesktop.__live2dPickerCalls().modelDirectoryCalls', true);
+  if (modelPickerCalls !== 1) {
+    throw new Error('expected Live2D model directory picker to be called once, got ' + modelPickerCalls);
+  }
   console.log('[electron-smoke] live2d model path verified');
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"mode-settings-save\\"]').click()", true);
   await waitFor(win, () => {
@@ -370,7 +366,6 @@ main().catch((error) => {
   app.exit(1);
 });
 `;
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oha-live2d-settings-ui-smoke-'));
   const mainPath = path.join(tempDir, 'main.cjs');
   fs.writeFileSync(mainPath, script, 'utf8');
   return new Promise((resolve, reject) => {
@@ -401,10 +396,10 @@ main().catch((error) => {
 
 function assertMockBridgeContract() {
   if (!bridgeState.importedArchives.some((payload) => payload.path === ARCHIVE_PATH)) {
-    throw new Error(`Live2D archive import did not use manual ZIP path: ${JSON.stringify(bridgeState.importedArchives)}`);
+    throw new Error(`Live2D archive import did not use desktop picker ZIP path: ${JSON.stringify(bridgeState.importedArchives)}`);
   }
   if (!bridgeState.preparedModelPaths.some((payload) => payload.path === MODEL_PATH)) {
-    throw new Error(`Live2D model prepare did not use manual model path: ${JSON.stringify(bridgeState.preparedModelPaths)}`);
+    throw new Error(`Live2D model prepare did not use desktop picker model path: ${JSON.stringify(bridgeState.preparedModelPaths)}`);
   }
   const settingsPayload = bridgeState.settingsPayloads.at(-1);
   if (!settingsPayload) {
