@@ -840,6 +840,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover NativeRunEngine message-level SSE tool calls",
     ),
     (
+        "tests/test_agent_runtime.py::test_main_chat_model_loop_executes_multiline_openai_compatible_sse_tool_call",
+        "macOS release workflow smoke tests must cover NativeRunEngine multiline SSE tool calls",
+    ),
+    (
         "tests/test_agent_runtime.py::test_main_chat_model_loop_executes_responses_style_streaming_tool_call",
         "macOS release workflow smoke tests must cover NativeRunEngine Responses-style streaming tool calls",
     ),
