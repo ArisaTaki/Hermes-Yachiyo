@@ -408,10 +408,10 @@ def test_verifier_reports_packaged_app_missing_permission_copy(tmp_path):
     assert "packaged app Info.plist must include microphone permission copy" in messages
 
 
-def test_packaged_selector_gate_covers_release_electron_smoke_selectors():
+def test_dynamic_packaged_selector_gate_covers_release_electron_smoke_selectors():
     missing = sorted(
         _explicit_smoke_selectors()
-        - set(verifier.PACKAGED_UI_E2E_REQUIRED_SELECTORS)
+        - set(verifier._packaged_ui_e2e_required_selectors(verifier.ROOT))
     )
 
     assert missing == []
@@ -421,18 +421,35 @@ def test_release_electron_smoke_script_list_matches_workflow():
     assert _release_workflow_electron_smoke_scripts() == RELEASE_ELECTRON_SMOKE_SCRIPTS
 
 
-def test_release_workflow_guard_covers_release_electron_smoke_scripts():
-    required_workflow_text = {
-        required
-        for required, _message in verifier.RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT
-    }
-    missing = sorted(
-        f"node {script}"
-        for script in _release_workflow_electron_smoke_scripts()
-        if f"node {script}" not in required_workflow_text
+def test_release_workflow_guard_accepts_discovered_electron_smoke_script_before_packaging(tmp_path):
+    workflow = tmp_path / verifier.RELEASE_WORKFLOW_FILE
+    workflow.parent.mkdir(parents=True)
+    current_workflow = (verifier.ROOT / verifier.RELEASE_WORKFLOW_FILE).read_text(
+        encoding="utf-8"
     )
+    smoke_command = "          node scripts/smoke_new_mature_surface_ui.mjs\n"
+    workflow.write_text(
+        current_workflow.replace(
+            "          node scripts/smoke_chat_image_attachment_ui.mjs\n",
+            smoke_command + "          node scripts/smoke_chat_image_attachment_ui.mjs\n",
+        ),
+        encoding="utf-8",
+    )
+    smoke = tmp_path / "scripts" / "smoke_new_mature_surface_ui.mjs"
+    smoke.parent.mkdir(parents=True)
+    smoke.write_text("#!/usr/bin/env node\nconsole.log('new mature surface smoke');\n", encoding="utf-8")
 
-    assert missing == []
+    findings = verifier._verify_release_workflow_guards(tmp_path)
+    messages = [finding.message for finding in findings]
+
+    assert (
+        "macOS release workflow smoke tests must run Electron UI smoke script "
+        "scripts/smoke_new_mature_surface_ui.mjs"
+    ) not in messages
+    assert (
+        "macOS release workflow Electron UI smoke must run before packaged backend and DMG builds: "
+        "scripts/smoke_new_mature_surface_ui.mjs"
+    ) not in messages
 
 
 def test_verifier_reports_packaged_app_missing_ui_e2e_selector(tmp_path):
