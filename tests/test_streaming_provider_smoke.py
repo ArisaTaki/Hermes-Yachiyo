@@ -1086,6 +1086,64 @@ def test_stream_smoke_summarizes_responses_style_tool_call_chunks():
     assert "README.md" not in json.dumps(public_summary)
 
 
+def test_stream_smoke_summarizes_multiple_responses_tool_calls_without_leaking_arguments():
+    chunks = [
+        {
+            "type": "response.output_item.done",
+            "output_index": 0,
+            "item": {
+                "id": "fc_response_readme",
+                "type": "function_call",
+                "call_id": "call_response_readme",
+                "name": "workspace_read",
+                "arguments": '{"path":"README.md"}',
+            },
+        },
+        {
+            "type": "response.output_item.done",
+            "output_index": 1,
+            "item": {
+                "id": "fc_response_notes",
+                "type": "function_call",
+                "call_id": "call_response_notes",
+                "name": "workspace_read",
+                "arguments": '{"path":"NOTES.md"}',
+            },
+        },
+        {
+            "type": "response.completed",
+            "response": {
+                "status": "completed",
+                "output": [{"type": "function_call", "finish_reason": "tool_calls"}],
+            },
+        },
+    ]
+
+    public_summary = smoke.summarize_stream_chunks(chunks)
+    summary = smoke.summarize_stream_chunks(chunks, include_tool_arguments=True)
+
+    assert summary["ok"] is True
+    assert summary["finish_reasons"] == ["tool_calls"]
+    assert summary["tool_call_delta_count"] == 2
+    assert summary["tool_call_count"] == 2
+    assert summary["tool_calls"] == [
+        {
+            "id": "call_response_readme",
+            "name": "workspace_read",
+            "argument_chars": len('{"path":"README.md"}'),
+            "arguments": '{"path":"README.md"}',
+        },
+        {
+            "id": "call_response_notes",
+            "name": "workspace_read",
+            "argument_chars": len('{"path":"NOTES.md"}'),
+            "arguments": '{"path":"NOTES.md"}',
+        },
+    ]
+    assert "README.md" not in json.dumps(public_summary)
+    assert "NOTES.md" not in json.dumps(public_summary)
+
+
 def test_stream_smoke_parses_responses_style_sse_transport_without_leaking_arguments(monkeypatch):
     requests: list[dict] = []
     leaked_secret = "sk-stream-responses-secret123456"
