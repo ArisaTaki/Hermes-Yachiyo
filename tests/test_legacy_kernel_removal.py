@@ -77,6 +77,8 @@ FORBIDDEN_KERNEL_TOKENS = [
     "get_yachiyo_workspace_dir",
     "yachiyo_workspace",
     "yachiyo-workspace",
+    "yachiyo_agent",
+    "Runtime: Yachiyo Agent Runtime",
     ".yachiyo_init",
     "configs/yachiyo.json",
 ]
