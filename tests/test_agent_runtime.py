@@ -5308,9 +5308,27 @@ def test_main_chat_approval_uses_resume_coordinator_claim_boundary(tmp_path, mon
     monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
     try:
         claim_calls: list[dict[str, object]] = []
+        resume_step_calls: list[dict[str, object]] = []
         completed_projection_calls: list[dict[str, object]] = []
+        original_resume_approved_tool_run = service._resume_approved_tool_run
         original_claim = service.approval_resume.claim_and_project_approved_tool
         original_completed_projection = service._project_main_chat_approval_resume_completed
+
+        def spy_resume_approved_tool_run(**kwargs):
+            resume_step_calls.append(
+                {
+                    "run_id": kwargs.get("run_id"),
+                    "tool": kwargs.get("pending", {}).get("tool"),
+                    "context_run_id": kwargs.get("resume_context").run_id,
+                    "context_tool_name": kwargs.get("resume_context").tool_name,
+                    "resumed_detail": kwargs.get("resumed_detail"),
+                    "running_result": kwargs.get("running_result"),
+                    "has_running_projection": kwargs.get("project_running") is not None,
+                    "has_required_projection": kwargs.get("project_required") is not None,
+                    "has_result_projection": kwargs.get("project_result") is not None,
+                }
+            )
+            return original_resume_approved_tool_run(**kwargs)
 
         def spy_claim(run_id, pending, context, **kwargs):
             claim_calls.append(
@@ -5335,6 +5353,7 @@ def test_main_chat_approval_uses_resume_coordinator_claim_boundary(tmp_path, mon
             )
             return original_completed_projection(context, result_text)
 
+        monkeypatch.setattr(service, "_resume_approved_tool_run", spy_resume_approved_tool_run)
         monkeypatch.setattr(service.approval_resume, "claim_and_project_approved_tool", spy_claim)
         monkeypatch.setattr(
             service,
@@ -5360,6 +5379,19 @@ def test_main_chat_approval_uses_resume_coordinator_claim_boundary(tmp_path, mon
         assert resumed["status"] == "running"
         assert resumed["result"] == "Main chat claim boundary complete"
         assert target.read_text(encoding="utf-8") == "after\n"
+        assert resume_step_calls == [
+            {
+                "run_id": run["run_id"],
+                "tool": "workspace.write_patch",
+                "context_run_id": run["run_id"],
+                "context_tool_name": "workspace.write_patch",
+                "resumed_detail": "Main chat resumed after approval",
+                "running_result": "已批准，Yachiyo 正在继续执行",
+                "has_running_projection": False,
+                "has_required_projection": True,
+                "has_result_projection": False,
+            }
+        ]
         assert claim_calls == [
             {
                 "run_id": run["run_id"],
@@ -9238,13 +9270,31 @@ def test_agent_run_approval_uses_resume_coordinator_claim_boundary(tmp_path, mon
     monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
     try:
         claim_calls: list[dict[str, object]] = []
+        resume_step_calls: list[dict[str, object]] = []
         running_projection_calls: list[dict[str, object]] = []
         completed_projection_calls: list[dict[str, object]] = []
         projection_calls: list[dict[str, object]] = []
+        original_resume_approved_tool_run = service._resume_approved_tool_run
         original_claim = service.approval_resume.claim_and_project_approved_tool
         original_running_projection = service._project_agent_approval_resume_running
         original_completed_projection = service._project_agent_approval_resume_completed
         original_projection = service._project_child_run_transition
+
+        def spy_resume_approved_tool_run(**kwargs):
+            resume_step_calls.append(
+                {
+                    "run_id": kwargs.get("run_id"),
+                    "tool": kwargs.get("pending", {}).get("tool"),
+                    "context_run_id": kwargs.get("resume_context").run_id,
+                    "context_tool_name": kwargs.get("resume_context").tool_name,
+                    "resumed_detail": kwargs.get("resumed_detail"),
+                    "running_result": kwargs.get("running_result"),
+                    "has_running_projection": kwargs.get("project_running") is not None,
+                    "has_required_projection": kwargs.get("project_required") is not None,
+                    "has_result_projection": kwargs.get("project_result") is not None,
+                }
+            )
+            return original_resume_approved_tool_run(**kwargs)
 
         def spy_claim(run_id, pending, context, **kwargs):
             claim_calls.append(
@@ -9290,6 +9340,7 @@ def test_agent_run_approval_uses_resume_coordinator_claim_boundary(tmp_path, mon
             )
             return original_projection(result)
 
+        monkeypatch.setattr(service, "_resume_approved_tool_run", spy_resume_approved_tool_run)
         monkeypatch.setattr(service.approval_resume, "claim_and_project_approved_tool", spy_claim)
         monkeypatch.setattr(
             service,
@@ -9319,6 +9370,19 @@ def test_agent_run_approval_uses_resume_coordinator_claim_boundary(tmp_path, mon
 
         assert resumed["status"] == "completed"
         assert resumed["result"] == "Claim boundary complete"
+        assert resume_step_calls == [
+            {
+                "run_id": run["run_id"],
+                "tool": "terminal.run",
+                "context_run_id": run["run_id"],
+                "context_tool_name": "terminal.run",
+                "resumed_detail": "Agent resumed after approval",
+                "running_result": "已批准，Agent 正在继续执行",
+                "has_running_projection": True,
+                "has_required_projection": False,
+                "has_result_projection": True,
+            }
+        ]
         assert claim_calls == [
             {
                 "run_id": run["run_id"],

@@ -8182,37 +8182,67 @@ class NativeRunEngine:
         agent = self._get_agent_private(str(run["runnable_id"]))
         runtime = self._compile_agent_runtime(agent)
         resume_context = self._tool_approval_resume_context(run, pending, runtime=runtime)
+        return self._resume_approved_tool_run(
+            run_id=run_id,
+            pending=pending,
+            resume_context=resume_context,
+            agent=agent,
+            resumed_detail="Agent resumed after approval",
+            running_result="已批准，Agent 正在继续执行",
+            project_running=self._project_agent_approval_resume_running,
+            project_completed=self._project_agent_approval_resume_completed,
+            project_result=self._project_child_run_transition,
+            redact_error=redact_secrets,
+        )
+
+    def _resume_approved_tool_run(
+        self,
+        *,
+        run_id: str,
+        pending: dict[str, Any],
+        resume_context: ToolApprovalResumeContext,
+        agent: dict[str, Any],
+        resumed_detail: str,
+        running_result: str,
+        project_completed: Any,
+        project_running: Any | None = None,
+        project_required: Any | None = None,
+        project_result: Any | None = None,
+        redact_error: Any = redact_api_error_text,
+    ) -> dict[str, Any]:
         running = self.approval_resume.claim_and_project_approved_tool(
             run_id,
             pending,
             resume_context,
-            resumed_detail="Agent resumed after approval",
-            running_result="已批准，Agent 正在继续执行",
+            resumed_detail=resumed_detail,
+            running_result=running_result,
         )
         if running is None:
             return self.get_run(run_id)
-        running = self._project_agent_approval_resume_running(running)
+        if project_running is not None:
+            running = project_running(running)
         try:
             result_text = self.approval_resume.continue_custom_api_agent_after_approved_tool(
                 agent,
                 resume_context,
             )
-            result = self._project_agent_approval_resume_completed(
+            result = project_completed(
                 resume_context,
                 result_text,
             )
         except AgentApprovalRequired as exc:
+            pending_next = project_required(exc.pending_approval) if project_required is not None else exc.pending_approval
             result = self._project_approval_resume_required(
                 resume_context,
-                exc.pending_approval,
+                pending_next,
             )
         except Exception as exc:
-            safe_error = redact_secrets(exc)
+            safe_error = redact_error(exc)
             result = self._project_approval_resume_failed(
                 resume_context,
                 safe_error,
             )
-        return self._project_child_run_transition(result)
+        return project_result(result) if project_result is not None else result
 
     def _project_agent_approval_resume_running(self, running: dict[str, Any]) -> dict[str, Any]:
         self._update_agent_run_group_if_root(running)
@@ -8324,42 +8354,22 @@ class NativeRunEngine:
         )
         runtime = self._compile_agent_runtime(agent)
         resume_context = self._tool_approval_resume_context(run, pending, runtime=runtime)
-        running = self.approval_resume.claim_and_project_approved_tool(
-            run_id,
-            pending,
-            resume_context,
+        return self._resume_approved_tool_run(
+            run_id=run_id,
+            pending=pending,
+            resume_context=resume_context,
+            agent=agent,
             resumed_detail="Main chat resumed after approval",
             running_result="已批准，Yachiyo 正在继续执行",
-        )
-        if running is None:
-            return self.get_run(run_id)
-        try:
-            result_text = self.approval_resume.continue_custom_api_agent_after_approved_tool(
-                agent,
-                resume_context,
-            )
-            result = self._project_main_chat_approval_resume_completed(
-                resume_context,
-                result_text,
-            )
-        except AgentApprovalRequired as exc:
-            pending_next = self._main_chat_pending_approval(
-                exc.pending_approval,
+            project_completed=self._project_main_chat_approval_resume_completed,
+            project_required=lambda pending_approval: self._main_chat_pending_approval(
+                pending_approval,
                 model_profile_id=model_profile_id,
                 tool_policy=runtime["tool_policy"],
                 workspace_policy=runtime["workspace_policy"],
-            )
-            result = self._project_approval_resume_required(
-                resume_context,
-                pending_next,
-            )
-        except Exception as exc:
-            safe_error = redact_api_error_text(exc)
-            result = self._project_approval_resume_failed(
-                resume_context,
-                safe_error,
-            )
-        return result
+            ),
+            redact_error=redact_api_error_text,
+        )
 
     def _approve_workflow_run_approval(self, run: dict[str, Any]) -> dict[str, Any]:
         run_id = str(run["run_id"])
