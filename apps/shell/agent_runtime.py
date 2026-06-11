@@ -8269,6 +8269,20 @@ class NativeRunEngine:
             input_preview=approval_context.input_preview,
         )
 
+    def _project_cancelled_workflow_group_if_root(
+        self,
+        run: dict[str, Any],
+        result: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not self._workflow_run_is_group_root(run):
+            return result
+        self._update_run_group(
+            str(run.get("run_group_id") or ""),
+            status="cancelled",
+            summary=str(result.get("result") or ""),
+        )
+        return self.get_run(str(run.get("run_id") or result.get("run_id") or ""))
+
     def reject_run_approval(self, run_id: str, reason: str = "") -> dict[str, Any]:
         run = self.get_run(run_id)
         if run["status"] != "approval_required":
@@ -8285,14 +8299,7 @@ class NativeRunEngine:
                 criteria=approval_context.criteria,
                 input_preview=approval_context.input_preview,
             )
-            if self._workflow_run_is_group_root(run):
-                self._update_run_group(
-                    str(run.get("run_group_id") or ""),
-                    status="cancelled",
-                    summary=str(result.get("result") or ""),
-                )
-                result = self.get_run(run_id)
-            return result
+            return self._project_cancelled_workflow_group_if_root(run, result)
         pending = self.runs.pending_approval_private(run_id)
         approval_context = ToolApprovalTransitionContext.from_pending(pending)
         result = self.approvals.reject_tool_run(
@@ -8324,14 +8331,7 @@ class NativeRunEngine:
                 criteria=approval_context.criteria,
                 input_preview=approval_context.input_preview,
             )
-            if self._workflow_run_is_group_root(run):
-                self._update_run_group(
-                    str(run.get("run_group_id") or ""),
-                    status="cancelled",
-                    summary=str(result.get("result") or ""),
-                )
-                result = self.get_run(run_id)
-            return result
+            return self._project_cancelled_workflow_group_if_root(run, result)
         pending = self.runs.pending_approval_private(run_id)
         approval_context = ToolApprovalTransitionContext.from_pending(pending)
         result = self.approvals.timeout_tool_run(

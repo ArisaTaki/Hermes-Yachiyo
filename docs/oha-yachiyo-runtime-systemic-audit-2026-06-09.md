@@ -1292,6 +1292,10 @@ RunEvent sequence:
   - 统一解析 Workflow approval pending payload 中的 node id、label、criteria 和 input preview。
   - Workflow approval approve / reject / timeout 共享该结构，避免三个分支各自解析 pending approval 字段。
 
+- `_project_cancelled_workflow_group_if_root()`
+  - 负责 Workflow approval reject / timeout 后 root RunGroup 的 cancelled 状态和 summary 投影。
+  - 避免 Workflow approval reject / timeout 两个分支各自维护相同 RunGroup cancelled projection。
+
 - `WorkflowParentResumeCoordinator`
   - 负责子 Agent Run 状态变化后标记父 Workflow running / approval_required / failed / cancelled / resumed。
   - 负责合并子 Run 结果、子 artifact references、父 Workflow timeline 和 RunGroup 状态更新。
