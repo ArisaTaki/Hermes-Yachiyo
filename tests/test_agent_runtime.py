@@ -3032,6 +3032,94 @@ def test_main_chat_model_loop_coalesces_streaming_tool_call_deltas(tmp_path, mon
         service.close()
 
 
+def test_main_chat_model_loop_executes_responses_style_streaming_tool_call(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    (workdir / "README.md").write_text("responses streamed tool call content", encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        if len(calls) == 1:
+            assert tools is not None
+
+            def stream():
+                yield {"type": "response.output_text.delta", "delta": "checking responses "}
+                yield {
+                    "type": "response.output_item.added",
+                    "item": {
+                        "id": "fc_response_read",
+                        "type": "function_call",
+                        "call_id": "call_response_read",
+                        "name": "workspace_read",
+                        "arguments": "",
+                    },
+                }
+                yield {
+                    "type": "response.function_call_arguments.delta",
+                    "item_id": "fc_response_read",
+                    "delta": '{"path": "READ',
+                }
+                yield {
+                    "type": "response.function_call_arguments.delta",
+                    "item_id": "fc_response_read",
+                    "delta": 'ME.md"}',
+                }
+                yield {
+                    "type": "response.output_item.done",
+                    "item": {
+                        "id": "fc_response_read",
+                        "type": "function_call",
+                        "call_id": "call_response_read",
+                        "name": "workspace_read",
+                        "arguments": {"path": "README.md"},
+                    },
+                }
+                yield {"type": "response.completed", "response": {"status": "completed"}}
+
+            return stream()
+        assistant_tool_messages = [
+            message for message in messages if message.get("role") == "assistant" and message.get("tool_calls")
+        ]
+        assert assistant_tool_messages[-1]["content"] == "checking responses "
+        assert assistant_tool_messages[-1]["tool_calls"][0]["id"] == "call_response_read"
+        assert assistant_tool_messages[-1]["tool_calls"][0]["function"]["arguments"] == '{"path": "README.md"}'
+        assert messages[-1]["role"] == "tool"
+        assert "responses streamed tool call content" in messages[-1]["content"]
+        return {"content": "Responses streaming tool call complete"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-responses-streaming-tool-call",
+            session_id="session-main-responses-streaming-tool-call",
+            user_goal="Read README through Responses-style streaming tool call",
+        )
+        updated = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [{"role": "user", "content": "Read README"}],
+            tool_policy={"allowed_tools": ["workspace.read"]},
+            workspace_policy={"default_workdir": str(workdir), "readable_scopes": ["."]},
+        )
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        tool_event = next(event for event in events if event["event_type"] == "agent.tool.call")
+
+        assert updated["result"] == "Responses streaming tool call complete"
+        assert tool_event["payload"]["tool"] == "workspace.read"
+        assert tool_event["payload"]["input_preview"]["path"] == "README.md"
+        assert event_types.count("agent.tool.call") == 1
+        assert event_types.count("model.output.completed") == 1
+        assert not any(str(event_type).endswith(".delta") for event_type in event_types)
+    finally:
+        service.close()
+
+
 def test_main_chat_model_loop_executes_legacy_streaming_function_call(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     workdir = tmp_path / "repo"

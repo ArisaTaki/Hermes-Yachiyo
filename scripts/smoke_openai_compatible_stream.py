@@ -33,6 +33,84 @@ def _content_part_type(value: Any) -> str:
     return str(_field(value, "type") or "").strip().lower()
 
 
+def _responses_stream_event_type(value: Any) -> str:
+    return str(_field(value, "type") or _field(value, "event") or "").strip().lower()
+
+
+def _responses_stream_text_delta(chunk: Any) -> str | None:
+    event_type = _responses_stream_event_type(chunk)
+    if event_type in {"response.output_text.delta", "output_text.delta"}:
+        return _text_value(_field(chunk, "delta"))
+    if event_type in {
+        "response.function_call_arguments.delta",
+        "response.function_call_arguments.done",
+        "response.output_item.added",
+        "response.output_item.done",
+        "function_call_arguments.delta",
+        "function_call_arguments.done",
+        "output_item.added",
+        "output_item.done",
+    }:
+        return ""
+    return None
+
+
+def _responses_stream_reasoning_delta(chunk: Any) -> str | None:
+    event_type = _responses_stream_event_type(chunk)
+    if event_type in {"response.reasoning.delta", "response.reasoning_text.delta", "reasoning.delta"}:
+        return _text_value(_field(chunk, "delta"))
+    return None
+
+
+def _responses_stream_tool_call(chunk: Any) -> dict[str, Any] | None:
+    event_type = _responses_stream_event_type(chunk)
+    item = _field(chunk, "item")
+    snapshot = event_type in {"response.output_item.done", "output_item.done"}
+    if event_type in {"response.output_item.added", "response.output_item.done", "output_item.added", "output_item.done"}:
+        item_type = _content_part_type(item)
+        if item_type not in {"function_call", "tool_call"}:
+            return None
+        arguments = _field(item, "arguments")
+        item_id = _field(item, "id")
+        call_id = _field(item, "call_id")
+        return {
+            "index": _field(chunk, "output_index") or _field(item, "index") or 0,
+            "id": str(item_id or call_id or ""),
+            "item_id": str(item_id or "") if item_id else "",
+            "call_id": str(call_id or "") if call_id else "",
+            "type": "function",
+            "function": {
+                "name": str(_field(item, "name") or ""),
+                "arguments": arguments if arguments is not None else "",
+            },
+            "_snapshot": snapshot,
+        }
+    if event_type in {
+        "response.function_call_arguments.delta",
+        "response.function_call_arguments.done",
+        "function_call_arguments.delta",
+        "function_call_arguments.done",
+    }:
+        arguments = _field(chunk, "arguments")
+        if arguments is None:
+            arguments = _field(chunk, "delta")
+        item_id = _field(chunk, "item_id")
+        call_id = _field(chunk, "call_id")
+        return {
+            "index": _field(chunk, "output_index") or _field(chunk, "index") or 0,
+            "id": str(item_id or call_id or ""),
+            "item_id": str(item_id or "") if item_id else "",
+            "call_id": str(call_id or "") if call_id else "",
+            "type": "function",
+            "function": {
+                "name": str(_field(chunk, "name") or ""),
+                "arguments": arguments if arguments is not None else "",
+            },
+            "_snapshot": event_type.endswith(".done"),
+        }
+    return None
+
+
 def _is_reasoning_content_part(value: Any) -> bool:
     return _content_part_type(value) in {"reasoning", "reasoning_content", "thinking", "thought"}
 
@@ -148,6 +226,9 @@ def _reasoning_text(value: Any) -> str:
 def _chunk_text(chunk: Any) -> str:
     if isinstance(chunk, str):
         return chunk
+    responses_text = _responses_stream_text_delta(chunk)
+    if responses_text is not None:
+        return responses_text
     choices = _field(chunk, "choices")
     if isinstance(choices, list):
         parts: list[str] = []
@@ -173,6 +254,9 @@ def _chunk_text(chunk: Any) -> str:
 
 
 def _chunk_reasoning_text(chunk: Any) -> str:
+    responses_reasoning = _responses_stream_reasoning_delta(chunk)
+    if responses_reasoning is not None:
+        return responses_reasoning
     choices = _field(chunk, "choices")
     if isinstance(choices, list):
         parts: list[str] = []
@@ -204,6 +288,9 @@ def _normalized_index(value: Any, fallback: int) -> int:
 
 
 def _chunk_tool_calls(chunk: Any) -> list[tuple[int, int, Any]]:
+    responses_call = _responses_stream_tool_call(chunk)
+    if responses_call is not None:
+        return [(0, _normalized_index(_field(responses_call, "index"), 0), responses_call)]
     choices = _field(chunk, "choices")
     direct = _field(chunk, "tool_calls")
     if isinstance(direct, list):
@@ -242,6 +329,11 @@ def _chunk_tool_calls(chunk: Any) -> list[tuple[int, int, Any]]:
 
 
 def _chunk_finish_reasons(chunk: Any) -> list[str]:
+    event_type = _responses_stream_event_type(chunk)
+    if event_type in {"response.completed", "response.done"}:
+        response = _field(chunk, "response")
+        status = _field(response, "status") if response is not None else None
+        return [str(status or _field(chunk, "status") or "completed")]
     direct_reason = _field(chunk, "finish_reason")
     if direct_reason is None:
         direct_reason = _field(chunk, "stop_reason")
@@ -265,23 +357,43 @@ def _merge_tool_delta(
     raw_index = _field(raw_call, "index")
     index = _normalized_index(raw_index, fallback_index)
     call_id = _field(raw_call, "id")
+    item_id = _field(raw_call, "item_id")
+    response_call_id = _field(raw_call, "call_id")
+    match_ids = {str(value) for value in (call_id, item_id, response_call_id) if value}
     key = (choice_index, index)
-    if call_id:
-        call_id_text = str(call_id)
+    if match_ids:
         for existing_key, existing in accumulator.items():
-            if existing_key[0] == choice_index and str(existing.get("id") or "") == call_id_text:
+            existing_ids = {
+                str(value)
+                for value in (existing.get("id"), existing.get("item_id"), existing.get("call_id"))
+                if value
+            }
+            if existing_key[0] == choice_index and match_ids.intersection(existing_ids):
                 key = existing_key
                 break
         else:
             existing = accumulator.get(key)
-            if raw_index is None and existing and str(existing.get("id") or "") not in {"", call_id_text}:
+            has_distinct_id = False
+            if raw_index is None and existing:
+                existing_ids = {
+                    str(value)
+                    for value in (existing.get("id"), existing.get("item_id"), existing.get("call_id"))
+                    if value
+                }
+                has_distinct_id = bool(existing_ids and not match_ids.intersection(existing_ids))
+            if raw_index is None and existing and has_distinct_id:
                 occupied = {tool_index for existing_choice, tool_index in accumulator if existing_choice == choice_index}
                 while index in occupied:
                     index += 1
                 key = (choice_index, index)
     entry = accumulator.setdefault(key, {"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
-    if call_id:
-        entry["id"] = str(call_id)
+    if item_id:
+        entry["item_id"] = str(item_id)
+    if response_call_id:
+        entry["call_id"] = str(response_call_id)
+    preferred_id = response_call_id or call_id or item_id
+    if preferred_id:
+        entry["id"] = str(preferred_id)
     call_type = _field(raw_call, "type")
     if call_type:
         entry["type"] = str(call_type)
@@ -289,12 +401,14 @@ def _merge_tool_delta(
     if function_delta is None:
         return
     function = entry.setdefault("function", {"name": "", "arguments": ""})
+    snapshot = bool(_field(raw_call, "_snapshot"))
     name = _field(function_delta, "name")
     if name:
-        function["name"] = f"{function.get('name') or ''}{name}"
+        function["name"] = str(name) if snapshot else f"{function.get('name') or ''}{name}"
     arguments = _field(function_delta, "arguments")
-    if arguments:
-        function["arguments"] = f"{function.get('arguments') or ''}{_tool_arguments_text(arguments)}"
+    if arguments or snapshot:
+        arguments_text = _tool_arguments_text(arguments)
+        function["arguments"] = arguments_text if snapshot else f"{function.get('arguments') or ''}{arguments_text}"
 
 
 def summarize_stream_chunks(

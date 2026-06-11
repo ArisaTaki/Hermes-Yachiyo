@@ -757,6 +757,61 @@ def test_stream_smoke_summarizes_top_level_delta_and_message_tool_calls():
     assert "README.md" not in json.dumps(public_summary)
 
 
+def test_stream_smoke_summarizes_responses_style_tool_call_chunks():
+    chunks = [
+        {"type": "response.output_text.delta", "delta": "checking responses "},
+        {
+            "type": "response.output_item.added",
+            "item": {
+                "id": "fc_response_read",
+                "type": "function_call",
+                "call_id": "call_response_read",
+                "name": "workspace_read",
+                "arguments": "",
+            },
+        },
+        {
+            "type": "response.function_call_arguments.delta",
+            "item_id": "fc_response_read",
+            "delta": '{"path": "READ',
+        },
+        {
+            "type": "response.function_call_arguments.delta",
+            "item_id": "fc_response_read",
+            "delta": 'ME.md"}',
+        },
+        {
+            "type": "response.output_item.done",
+            "item": {
+                "id": "fc_response_read",
+                "type": "function_call",
+                "call_id": "call_response_read",
+                "name": "workspace_read",
+                "arguments": {"path": "README.md"},
+            },
+        },
+        {"type": "response.completed", "response": {"status": "completed"}},
+    ]
+
+    public_summary = smoke.summarize_stream_chunks(chunks)
+    summary = smoke.summarize_stream_chunks(chunks, include_tool_arguments=True)
+
+    assert summary["ok"] is True
+    assert summary["content_chars"] == len("checking responses ")
+    assert summary["finish_reasons"] == ["completed"]
+    assert summary["tool_call_delta_count"] == 4
+    assert summary["tool_call_count"] == 1
+    assert summary["tool_calls"] == [
+        {
+            "id": "call_response_read",
+            "name": "workspace_read",
+            "argument_chars": len('{"path": "README.md"}'),
+            "arguments": '{"path": "README.md"}',
+        }
+    ]
+    assert "README.md" not in json.dumps(public_summary)
+
+
 def test_stream_smoke_accepts_sse_delta_tool_call_object_arguments_without_leaking(monkeypatch):
     requests: list[dict] = []
     leaked_secret = "sk-stream-object-args-secret123456"
