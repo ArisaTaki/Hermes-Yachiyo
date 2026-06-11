@@ -18,6 +18,7 @@ ACTIVE_USER_DOC_TARGETS = [
     ROOT / "README.en.md",
     ROOT / "README.ja.md",
     ROOT / "docs" / "knowledge-base.md",
+    ROOT / "docs" / "user-manual.md",
     ROOT / "docs" / "desktop-frontend-architecture.md",
     ROOT / "docs" / "live2d-assets.md",
     ROOT / "docs" / "release-packaging.md",
