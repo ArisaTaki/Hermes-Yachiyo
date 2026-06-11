@@ -1645,6 +1645,10 @@ async function main() {
     const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
     const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
     const runIds = events.map((node) => node.getAttribute('data-run-event-run-id'));
+    const startedEvent = events.find((node) => node.getAttribute('data-run-event') === 'agent.run.started');
+    const approvalRequiredEvent = events.find((node) => node.getAttribute('data-run-event') === 'agent.tool.approval_required');
+    const toolCallEvent = events.find((node) => node.getAttribute('data-run-event') === 'agent.tool.call');
+    const completedEvent = events.find((node) => node.getAttribute('data-run-event') === 'agent.run.completed');
     return window.location.hash.includes(${JSON.stringify(WORKFLOW_CHILD_RUN_ID)})
       && detail?.getAttribute('data-run-id') === ${JSON.stringify(WORKFLOW_CHILD_RUN_ID)}
       && document.querySelector('[data-testid="agent-run-detail-open-parent-run"]')
@@ -1653,6 +1657,12 @@ async function main() {
       && eventTypes.includes('agent.tool.approval_approved')
       && eventTypes.includes('agent.tool.call')
       && eventTypes.includes('agent.run.completed')
+      && startedEvent?.textContent.includes('Approve child Agent from Workflow Run Detail smoke')
+      && approvalRequiredEvent?.textContent.includes('terminal.run')
+      && approvalRequiredEvent?.textContent.includes('printf workflow-child-electron-approved')
+      && toolCallEvent?.textContent.includes('terminal.run')
+      && toolCallEvent?.textContent.includes('printf workflow-child-electron-approved')
+      && completedEvent?.textContent.includes('Workflow child approval Electron smoke complete')
       && runIds.every((id) => id === ${JSON.stringify(WORKFLOW_CHILD_RUN_ID)});
   }, 'workflow child run detail replay');
   console.log('[electron-smoke] workflow child run detail rendered');
