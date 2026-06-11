@@ -8004,7 +8004,7 @@ class NativeRunEngine:
             )
             result = self.get_run(run_id)
         else:
-            self._update_agent_run_group_if_root(result)
+            return self._project_child_run_transition(result)
         self._resume_parent_workflows_after_child_update(result)
         return result
 
@@ -8138,9 +8138,7 @@ class NativeRunEngine:
                 artifacts=resume_context.artifacts,
                 pending_approval=None,
             )
-        self._update_agent_run_group_if_root(result)
-        self._resume_parent_workflows_after_child_update(result)
-        return result
+        return self._project_child_run_transition(result)
 
     def _approve_main_chat_run_approval(self, run: dict[str, Any]) -> dict[str, Any]:
         run_id = str(run["run_id"])
@@ -8283,7 +8281,7 @@ class NativeRunEngine:
         )
         return self.get_run(str(run.get("run_id") or result.get("run_id") or ""))
 
-    def _project_tool_approval_transition(self, result: dict[str, Any]) -> dict[str, Any]:
+    def _project_child_run_transition(self, result: dict[str, Any]) -> dict[str, Any]:
         self._update_agent_run_group_if_root(result)
         self._resume_parent_workflows_after_child_update(result)
         return result
@@ -8314,7 +8312,7 @@ class NativeRunEngine:
             tool_name=approval_context.tool_name,
             input_preview=approval_context.input_preview,
         )
-        return self._project_tool_approval_transition(result)
+        return self._project_child_run_transition(result)
 
     def timeout_run_approval(self, run_id: str, reason: str = "approval_wait_timeout") -> dict[str, Any]:
         run = self.get_run(run_id)
@@ -8344,7 +8342,7 @@ class NativeRunEngine:
             tool_name=approval_context.tool_name,
             input_preview=approval_context.input_preview,
         )
-        return self._project_tool_approval_transition(result)
+        return self._project_child_run_transition(result)
 
     def _update_agent_run_group_if_root(self, run: dict[str, Any]) -> None:
         run_group_id = str(run.get("run_group_id") or "")
