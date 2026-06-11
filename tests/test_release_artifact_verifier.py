@@ -452,6 +452,66 @@ def test_release_workflow_guard_accepts_discovered_electron_smoke_script_before_
     ) not in messages
 
 
+def test_release_workflow_guard_reports_new_main_chat_provider_contract(tmp_path):
+    workflow = tmp_path / verifier.RELEASE_WORKFLOW_FILE
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text(
+        (verifier.ROOT / verifier.RELEASE_WORKFLOW_FILE).read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    test_file = tmp_path / "tests" / "test_agent_runtime.py"
+    test_file.parent.mkdir(parents=True)
+    test_file.write_text(
+        "def test_main_chat_model_loop_executes_future_openai_compatible_sse_frame():\n"
+        "    pass\n",
+        encoding="utf-8",
+    )
+
+    findings = verifier._verify_release_workflow_guards(tmp_path)
+    messages = [finding.message for finding in findings]
+
+    assert (
+        "macOS release workflow smoke tests must run Main Chat provider contract "
+        "tests/test_agent_runtime.py::test_main_chat_model_loop_executes_future_openai_compatible_sse_frame"
+    ) in messages
+
+
+def test_release_workflow_guard_accepts_new_main_chat_provider_contract_before_packaging(tmp_path):
+    workflow = tmp_path / verifier.RELEASE_WORKFLOW_FILE
+    workflow.parent.mkdir(parents=True)
+    current_workflow = (verifier.ROOT / verifier.RELEASE_WORKFLOW_FILE).read_text(
+        encoding="utf-8"
+    )
+    test_path = "tests/test_agent_runtime.py::test_main_chat_model_loop_executes_future_openai_compatible_sse_frame"
+    workflow.write_text(
+        current_workflow.replace(
+            "            tests/test_agent_runtime.py::test_main_chat_model_loop_coalesces_stream_chunks_before_persisting \\\n",
+            f"            {test_path} \\\n"
+            "            tests/test_agent_runtime.py::test_main_chat_model_loop_coalesces_stream_chunks_before_persisting \\\n",
+        ),
+        encoding="utf-8",
+    )
+    test_file = tmp_path / "tests" / "test_agent_runtime.py"
+    test_file.parent.mkdir(parents=True)
+    test_file.write_text(
+        "def test_main_chat_model_loop_executes_future_openai_compatible_sse_frame():\n"
+        "    pass\n",
+        encoding="utf-8",
+    )
+
+    findings = verifier._verify_release_workflow_guards(tmp_path)
+    messages = [finding.message for finding in findings]
+
+    assert (
+        "macOS release workflow smoke tests must run Main Chat provider contract "
+        f"{test_path}"
+    ) not in messages
+    assert (
+        "macOS release workflow Main Chat provider contract must run before packaged backend and DMG builds: "
+        f"{test_path}"
+    ) not in messages
+
+
 def test_release_workflow_guard_reports_new_agent_run_provider_contract(tmp_path):
     workflow = tmp_path / verifier.RELEASE_WORKFLOW_FILE
     workflow.parent.mkdir(parents=True)
