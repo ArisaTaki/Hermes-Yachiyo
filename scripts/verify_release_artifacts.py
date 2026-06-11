@@ -26,6 +26,8 @@ _OLD_KERNEL_NAME = "Her" "mes"
 _OLD_KERNEL_LOWER = "her" "mes"
 _OLD_PROTOCOL_PRODUCT = "yachi" "yo"
 _LEGACY_KERNEL_TOKENS: tuple[str, ...] = (
+    f"{_OLD_KERNEL_NAME}Runtime",
+    f"{_OLD_KERNEL_LOWER}_runtime",
     f"{_OLD_KERNEL_NAME}Executor",
     f"{_OLD_KERNEL_NAME}UnavailableExecutor",
     f"{_OLD_KERNEL_NAME} CLI",

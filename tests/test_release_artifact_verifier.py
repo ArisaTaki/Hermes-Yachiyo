@@ -114,7 +114,10 @@ def test_verifier_binary_mode_scans_legacy_tokens(tmp_path):
 
 def test_verifier_binary_mode_scans_legacy_kernel_entrypoints(tmp_path):
     artifact = tmp_path / "Oha-Yachiyo-kernel-legacy.dmg"
-    artifact.write_bytes(b"\x00Hermes installer\x00hermes_stream_bridge\x00hermes-cli\xff")
+    artifact.write_bytes(
+        b"\x00HermesRuntime\x00hermes_runtime\x00Hermes installer\x00"
+        b"hermes_stream_bridge\x00hermes-cli\xff"
+    )
 
     findings = verifier.verify_release_artifacts(
         root=tmp_path,
@@ -125,6 +128,8 @@ def test_verifier_binary_mode_scans_legacy_kernel_entrypoints(tmp_path):
     )
 
     messages = [finding.message for finding in findings]
+    assert "contains legacy product token 'HermesRuntime'" in messages
+    assert "contains legacy product token 'hermes_runtime'" in messages
     assert "contains legacy product token 'Hermes installer'" in messages
     assert "contains legacy product token 'hermes_stream_bridge'" in messages
     assert "contains legacy product token 'hermes-cli'" in messages
@@ -132,7 +137,7 @@ def test_verifier_binary_mode_scans_legacy_kernel_entrypoints(tmp_path):
 
 def test_verifier_scans_release_artifact_paths_for_legacy_kernel_entrypoints(tmp_path):
     resources = tmp_path / "Oha-Yachiyo.app" / "Contents" / "Resources"
-    legacy_cli = resources / "bin" / "hermes-cli"
+    legacy_cli = resources / "bin" / "hermes_runtime" / "hermes-cli"
     legacy_cli.parent.mkdir(parents=True)
     legacy_cli.write_bytes(b"\xff\x00Oha-Yachiyo\xfe")
 
@@ -144,9 +149,9 @@ def test_verifier_scans_release_artifact_paths_for_legacy_kernel_entrypoints(tmp
         allow_binary_targets=True,
     )
 
-    assert findings == [
-        verifier.Finding(legacy_cli, "path contains legacy product token 'hermes-cli'")
-    ]
+    messages = [finding.message for finding in findings]
+    assert "path contains legacy product token 'hermes_runtime'" in messages
+    assert "path contains legacy product token 'hermes-cli'" in messages
 
 
 def test_verifier_scans_legacy_protocol_and_workspace_tokens(tmp_path):

@@ -48,6 +48,8 @@ TEXT_SUFFIXES = {
     ".yml",
 }
 FORBIDDEN_KERNEL_TOKENS = [
+    "HermesRuntime",
+    "hermes_runtime",
     "HermesExecutor",
     "HermesUnavailableExecutor",
     "Hermes CLI",
