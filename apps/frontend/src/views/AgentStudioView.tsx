@@ -3938,10 +3938,10 @@ export function AgentStudioView() {
               <div className="agent-inline-note">保存 Agent 后即可在这里直接运行，并在 Runs 中查看结果和 artifacts。</div>
             )}
             {draft.agent_id ? (
-              <div className="agent-skill-mounts">
+              <div className="agent-skill-mounts" data-testid="agent-skill-mounts">
                 <div className="agent-skill-mounts-head">
                   <h3>Mounted Skills</h3>
-                  <span>{mountedSkillCount} mounted / {filteredMountSkills.length} visible skills</span>
+                  <span data-testid="agent-skill-mount-summary">{mountedSkillCount} mounted / {filteredMountSkills.length} visible skills</span>
                 </div>
                 {disabledMountedSkills.length ? (
                   <div className="agent-inline-note warn">
@@ -3950,11 +3950,12 @@ export function AgentStudioView() {
                 ) : null}
                 <div className="skill-filter-bar">
                   <div className="skill-filter-tabs">
-                    <button type="button" className={skillMountFilter === 'installed' ? 'active' : ''} onClick={() => setSkillMountFilter('installed')}>Installed</button>
-                    <button type="button" className={skillMountFilter === 'native' ? 'active' : ''} onClick={() => setSkillMountFilter('native')}>Native</button>
+                    <button type="button" data-testid="agent-skill-mount-filter-installed" className={skillMountFilter === 'installed' ? 'active' : ''} onClick={() => setSkillMountFilter('installed')}>Installed</button>
+                    <button type="button" data-testid="agent-skill-mount-filter-native" className={skillMountFilter === 'native' ? 'active' : ''} onClick={() => setSkillMountFilter('native')}>Native</button>
                   </div>
                   <select
                     className="hy-select"
+                    data-testid="agent-skill-mount-folder-filter"
                     value={skillMountFolderFilter}
                     onChange={(event) => setSkillMountFolderFilter(event.target.value)}
                   >
@@ -3966,15 +3967,17 @@ export function AgentStudioView() {
                   </select>
                   <input
                     className="hy-input"
+                    data-testid="agent-skill-mount-search"
                     value={skillMountSearch}
                     onChange={(event) => setSkillMountSearch(event.target.value)}
                     placeholder="搜索可挂载 Skills"
                   />
                 </div>
                 <div className="agent-skill-bulk-actions">
-                  <span>{visibleMountedCount} / {filteredMountSkills.length} 当前筛选已挂载</span>
+                  <span data-testid="agent-skill-mount-visible-count">{visibleMountedCount} / {filteredMountSkills.length} 当前筛选已挂载</span>
                   <button
                     type="button"
+                    data-testid="agent-skill-mount-all-visible"
                     disabled={busy || selectedAgentReadOnly || !filteredMountSkills.length || visibleMountedCount === filteredMountSkills.length}
                     onClick={() => void runAction(mountVisibleSkills, '挂载当前筛选 Skills')}
                   >
@@ -3982,19 +3985,23 @@ export function AgentStudioView() {
                   </button>
                   <button
                     type="button"
+                    data-testid="agent-skill-unmount-all-visible"
                     disabled={busy || selectedAgentReadOnly || !visibleMountedCount}
                     onClick={() => void runAction(unmountVisibleSkills, '移除当前筛选 Skills')}
                   >
                     清空当前筛选
                   </button>
                 </div>
-                <div className="agent-skill-grid">
+                <div className="agent-skill-grid" data-testid="agent-skill-mount-grid">
                   {filteredMountSkills.map((skill) => {
                     const mounted = selectedAgent?.skill_ids?.includes(skill.skill_id);
                     return (
                       <button
                         type="button"
                         className={mounted ? 'active' : ''}
+                        data-skill-id={skill.skill_id}
+                        data-skill-mounted={mounted ? 'true' : 'false'}
+                        data-testid="agent-skill-mount-item"
                         key={skill.skill_id}
                         onClick={() => void runAction(async () => {
                           if (!draft.agent_id) return;

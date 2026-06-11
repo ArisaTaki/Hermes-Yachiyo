@@ -222,6 +222,17 @@ PACKAGED_UI_E2E_REQUIRED_SELECTORS: tuple[str, ...] = (
     "skill-card-enabled-toggle",
     "skill-card-folder-select",
     "skill-card-delete",
+    "agent-skill-mounts",
+    "agent-skill-mount-summary",
+    "agent-skill-mount-filter-installed",
+    "agent-skill-mount-filter-native",
+    "agent-skill-mount-folder-filter",
+    "agent-skill-mount-search",
+    "agent-skill-mount-visible-count",
+    "agent-skill-mount-all-visible",
+    "agent-skill-unmount-all-visible",
+    "agent-skill-mount-grid",
+    "agent-skill-mount-item",
     "agent-run-detail",
     "agent-run-detail-approval",
     "agent-run-detail-approval-approve",
@@ -890,6 +901,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "node scripts/smoke_agent_studio_skills_ui.mjs",
         "macOS release workflow smoke tests must cover Agent Studio skills Electron UI smoke",
+    ),
+    (
+        "node scripts/smoke_agent_studio_skill_mount_ui.mjs",
+        "macOS release workflow smoke tests must cover Agent Studio skill mounting Electron UI smoke",
     ),
     (
         "node scripts/smoke_agent_run_detail_ui.mjs",
