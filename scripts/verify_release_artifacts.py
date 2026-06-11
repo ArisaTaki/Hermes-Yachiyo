@@ -387,6 +387,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover main chat approval resume claim boundary",
     ),
     (
+        "tests/test_agent_runtime.py::test_tool_approval_transitions_use_shared_context_boundary",
+        "macOS release workflow smoke tests must cover tool approval shared context boundary",
+    ),
+    (
         "tests/test_agent_runtime.py::test_main_chat_durable_approval_claim_blocks_duplicate_execution",
         "macOS release workflow smoke tests must cover durable approval claim across runtime instances",
     ),

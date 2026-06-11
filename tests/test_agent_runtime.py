@@ -25,6 +25,7 @@ from apps.shell.agent_runtime import (
     RunProjectionCoordinator,
     TaskRunLinkRepository,
     ToolApprovalResumeContext,
+    ToolApprovalTransitionContext,
     ToolBroker,
     WorkflowApprovalTransitionContext,
     WorkflowContinuationCoordinator,
@@ -4448,6 +4449,125 @@ def test_main_chat_reject_and_timeout_use_approval_coordinator_boundaries(tmp_pa
         assert timeout_calls[0]["tool_name"] == "workspace.write_patch"
         assert "agent.tool.approval_required" in timeout_calls[0]["timeline_events"]
         assert timeout_calls[0]["input_preview"]["path"] == "out.txt"
+    finally:
+        service.close()
+
+
+def test_tool_approval_transitions_use_shared_context_boundary(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    (workdir / "out.txt").write_text("before\n", encoding="utf-8")
+    context_calls: list[dict[str, object]] = []
+    original_context = ToolApprovalTransitionContext.from_pending
+
+    def spy_context(pending):
+        context = original_context(pending)
+        context_calls.append(
+            {
+                "tool_name": context.tool_name,
+                "path": context.input_preview.get("path") if isinstance(context.input_preview, dict) else "",
+                "command": context.input_preview.get("command") if isinstance(context.input_preview, dict) else "",
+            }
+        )
+        return context
+
+    monkeypatch.setattr(
+        ToolApprovalTransitionContext,
+        "from_pending",
+        staticmethod(spy_context),
+    )
+
+    def fake_chat(_base_url, _model, _api_key, _messages, *, tools=None):
+        tool_names = {(tool.get("function") or {}).get("name") for tool in tools or []}
+        if "workspace_write_patch" in tool_names:
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_patch",
+                        "type": "function",
+                        "function": {
+                            "name": "workspace_write_patch",
+                            "arguments": json.dumps(
+                                {
+                                    "path": "out.txt",
+                                    "patch": "--- out.txt\n+++ out.txt\n@@ -1 +1 @@\n-before\n+after\n",
+                                }
+                            ),
+                        },
+                    }
+                ],
+            }
+        return {
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_terminal",
+                    "type": "function",
+                    "function": {
+                        "name": "terminal_run",
+                        "arguments": json.dumps({"command": "printf boundary"}),
+                    },
+                }
+            ],
+        }
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        main_reject_run = service.start_main_chat_run(
+            task_id="task-main-reject-context",
+            session_id="session-main-reject-context",
+            user_goal="Reject patch",
+        )
+        main_timeout_run = service.start_main_chat_run(
+            task_id="task-main-timeout-context",
+            session_id="session-main-timeout-context",
+            user_goal="Timeout patch",
+        )
+        for run in (main_reject_run, main_timeout_run):
+            waiting = service.execute_main_chat_model_loop(
+                run["run_id"],
+                [{"role": "user", "content": "Patch"}],
+                tool_policy={"allowed_tools": ["workspace.write_patch"]},
+                workspace_policy={"default_workdir": str(workdir), "readable_scopes": ["."], "writable_scopes": ["."]},
+            )
+            assert waiting["status"] == "approval_required"
+
+        agent = service.create_agent(
+            {
+                "name": "Tool Context Agent",
+                "model_mode": "custom_api",
+                "model_config": {"base_url": "https://api.example.test/v1", "model": "demo-model", "api_key": "sk-secret"},
+                "tool_policy": {"allowed_tools": ["terminal.run"]},
+                "workspace_policy": {"default_workdir": str(workdir), "readable_scopes": ["."]},
+            }
+        )
+        agent_reject_run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Reject command"})
+        agent_timeout_run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Timeout command"})
+
+        assert agent_reject_run["status"] == "approval_required"
+        assert agent_timeout_run["status"] == "approval_required"
+
+        main_rejected = service.reject_run_approval(main_reject_run["run_id"], "not now")
+        main_timed_out = service.timeout_run_approval(main_timeout_run["run_id"])
+        agent_rejected = service.reject_run_approval(agent_reject_run["run_id"], "not now")
+        agent_timed_out = service.timeout_run_approval(agent_timeout_run["run_id"])
+
+        assert main_rejected["status"] == "cancelled"
+        assert main_timed_out["status"] == "cancelled"
+        assert agent_rejected["status"] == "cancelled"
+        assert agent_timed_out["status"] == "cancelled"
+        assert context_calls == [
+            {"tool_name": "workspace.write_patch", "path": "out.txt", "command": None},
+            {"tool_name": "workspace.write_patch", "path": "out.txt", "command": None},
+            {"tool_name": "terminal.run", "path": None, "command": "printf boundary"},
+            {"tool_name": "terminal.run", "path": None, "command": "printf boundary"},
+        ]
     finally:
         service.close()
 
