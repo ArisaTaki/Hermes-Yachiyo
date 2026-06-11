@@ -1409,6 +1409,80 @@ def test_workflow_continuation_coordinator_resumes_after_approval_node(monkeypat
     assert calls[-1][1]["root_group"] is True
 
 
+def test_workflow_continuation_coordinator_projects_background_failure_without_secret_leak():
+    leaked_secret = "sk-workflow-background-secret123456"
+
+    class FakeEngine:
+        def __init__(self):
+            self.events: list[tuple[str, str, dict[str, object]]] = []
+            self.run_updates: list[tuple[str, dict[str, object]]] = []
+            self.group_updates: list[tuple[str, dict[str, object]]] = []
+
+        def _timeline(self, event, detail, **payload):
+            return {"event": event, "detail": detail, **payload}
+
+        def _update_run(self, run_id, **fields):
+            self.run_updates.append((run_id, fields))
+            return {"run_id": run_id, "run_group_id": "run_group", **fields}
+
+        def append_run_event(self, run_id, event_type, payload):
+            self.events.append((run_id, event_type, payload))
+
+        def _update_run_group(self, run_group_id, **fields):
+            self.group_updates.append((run_group_id, fields))
+
+    engine = FakeEngine()
+    coordinator = WorkflowContinuationCoordinator(engine)
+    timeline = [{"event": "workflow.run.started", "detail": "Start"}]
+    run = {"run_id": "workflow_run", "run_group_id": "run_group"}
+
+    result = coordinator.project_background_failure(
+        run,
+        timeline=timeline,
+        error=RuntimeError(f"provider failed with token={leaked_secret}"),
+        root_group=True,
+    )
+
+    serialized = json.dumps(
+        {
+            "result": result,
+            "events": engine.events,
+            "run_updates": engine.run_updates,
+            "group_updates": engine.group_updates,
+        },
+        ensure_ascii=False,
+    )
+    assert result["status"] == "failed"
+    assert leaked_secret not in serialized
+    assert "[redacted]" in result["result"]
+    assert timeline == [{"event": "workflow.run.started", "detail": "Start"}]
+    assert engine.run_updates == [
+        (
+            "workflow_run",
+            {
+                "status": "failed",
+                "result": result["result"],
+                "timeline": [
+                    {"event": "workflow.run.started", "detail": "Start"},
+                    {
+                        "event": "workflow.run.failed",
+                        "detail": result["result"],
+                        "status": "failed",
+                    },
+                ],
+                "artifacts": [],
+                "pending_approval": None,
+            },
+        )
+    ]
+    assert engine.events == [
+        ("workflow_run", "workflow.run.failed", {"error": result["result"]})
+    ]
+    assert engine.group_updates == [
+        ("run_group", {"status": "failed", "summary": result["result"]})
+    ]
+
+
 def test_workflow_continuation_coordinator_fails_unknown_node_without_secret_leak():
     leaked_secret = "sk-workflow-continuation-secret123456"
 

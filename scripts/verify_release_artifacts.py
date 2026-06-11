@@ -723,6 +723,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover WorkflowContinuationCoordinator approval resume handoff",
     ),
     (
+        "tests/test_agent_runtime.py::test_workflow_continuation_coordinator_projects_background_failure_without_secret_leak",
+        "macOS release workflow smoke tests must cover WorkflowContinuationCoordinator background failure projection",
+    ),
+    (
         "tests/test_agent_runtime.py::test_workflow_continuation_coordinator_fails_unknown_node_without_secret_leak",
         "macOS release workflow smoke tests must cover WorkflowContinuationCoordinator failure redaction boundary",
     ),

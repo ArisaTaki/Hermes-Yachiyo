@@ -3618,6 +3618,38 @@ class WorkflowContinuationCoordinator:
             root_group=root_group,
         )
 
+    def project_background_failure(
+        self,
+        run: dict[str, Any],
+        *,
+        timeline: list[dict[str, Any]],
+        error: Any,
+        root_group: bool,
+    ) -> dict[str, Any]:
+        engine = self._engine
+        run_id = str(run["run_id"])
+        safe_error = redact_secrets(error)
+        failed_timeline = [
+            *timeline,
+            engine._timeline("workflow.run.failed", safe_error, status="failed"),
+        ]
+        failed = engine._update_run(
+            run_id,
+            status="failed",
+            result=safe_error,
+            timeline=failed_timeline,
+            artifacts=[],
+            pending_approval=None,
+        )
+        engine.append_run_event(run_id, "workflow.run.failed", {"error": safe_error})
+        if root_group:
+            engine._update_run_group(
+                str(run.get("run_group_id") or ""),
+                status="failed",
+                summary=safe_error,
+            )
+        return failed
+
     def _run_agent_node(
         self,
         run: dict[str, Any],
@@ -8020,22 +8052,12 @@ class NativeRunEngine:
                 logging.getLogger(__name__).error(
                     "异步 Workflow Run 执行失败: %s", exc, exc_info=True
                 )
-                safe_error = redact_secrets(exc)
-                failed = self._update_run(
-                    run["run_id"],
-                    status="failed",
-                    result=safe_error,
-                    timeline=[*timeline, self._timeline("workflow.run.failed", safe_error, status="failed")],
-                    artifacts=[],
-                    pending_approval=None,
+                failed = self.workflow_continuation.project_background_failure(
+                    run,
+                    timeline=timeline,
+                    error=exc,
+                    root_group=root_group,
                 )
-                self.append_run_event(
-                    run["run_id"],
-                    "workflow.run.failed",
-                    {"error": safe_error},
-                )
-                if root_group:
-                    self._update_run_group(run_group_id, status="failed", summary=safe_error)
                 if on_complete:
                     on_complete(failed)
 
