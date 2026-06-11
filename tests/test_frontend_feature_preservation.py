@@ -459,6 +459,33 @@ def test_chat_cancel_ui_smoke_uses_stop_buttons_and_cancel_route() -> None:
     )
 
 
+def test_chat_approval_ui_smoke_uses_message_and_composer_actions() -> None:
+    smoke_script = "scripts/smoke_chat_approval_ui.mjs"
+    _assert_contains(
+        smoke_script,
+        [
+            "`/ui/runs/${RUN_ID}`",
+            "`/ui/runs/${RUN_ID}/approval/approve`",
+            "`/ui/runs/${RUN_ID}/approval/reject`",
+            "document.querySelector('[data-testid=\"chat-message-approval-card\"]')",
+            "document.querySelector('[data-testid=\"chat-message-approval-actions\"]')",
+            "document.querySelector('[data-testid=\"chat-message-approval-approve\"]')",
+            "document.querySelector('[data-testid=\"chat-message-approval-reject\"]')",
+            "document.querySelector('[data-testid=\"chat-composer-approval-notice\"]')",
+            "document.querySelector('[data-testid=\"chat-composer-approval-approve\"]')",
+            "document.querySelector('[data-testid=\"chat-composer-approval-reject\"]')",
+            r'''document.querySelector('[data-testid=\\"chat-message-approval-approve\\"]').click()''',
+            r'''document.querySelector('[data-testid=\\"chat-composer-approval-reject\\"]').click()''',
+            "Approved from Chat approval UI smoke.",
+            "Rejected from chat",
+            "expected one chat approval approve call",
+            "expected one chat approval reject call",
+            "message approval approved",
+            "composer approval rejected",
+        ],
+    )
+
+
 def test_agent_run_detail_ui_smoke_uses_replay_route_and_dom_attributes() -> None:
     smoke_script = "scripts/smoke_agent_run_detail_ui.mjs"
     _assert_contains(

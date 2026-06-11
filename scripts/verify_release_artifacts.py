@@ -115,7 +115,13 @@ PACKAGED_UI_E2E_REQUIRED_SELECTORS: tuple[str, ...] = (
     "live2d-launcher-session-summary-probe",
     "live2d-launcher-recent-session",
     "chat-message-approval-card",
+    "chat-message-approval-approve",
+    "chat-message-approval-reject",
+    "chat-message-approval-open-run-detail",
     "chat-composer-approval-notice",
+    "chat-composer-approval-approve",
+    "chat-composer-approval-reject",
+    "chat-composer-approval-open-run-detail",
     "agent-run-detail",
     "agent-run-detail-approval",
     "agent-run-detail-approval-approve",
@@ -729,6 +735,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "node scripts/smoke_chat_cancel_ui.mjs",
         "macOS release workflow smoke tests must cover Chat cancel Electron UI smoke",
+    ),
+    (
+        "node scripts/smoke_chat_approval_ui.mjs",
+        "macOS release workflow smoke tests must cover Chat approval Electron UI smoke",
     ),
     (
         "node scripts/smoke_chat_group_summary_ui.mjs",
