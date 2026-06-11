@@ -979,16 +979,17 @@ export function ProactiveTtsSettingsView() {
                       </label>
                     ) : null}
                   </div>
-                  <div className="settings-resource-panel wide">
+                  <div className="settings-resource-panel wide" data-testid="tts-gsv-service-panel">
                     <div>
                       <strong>GPT-SoVITS 本地服务</strong>
                       <p>{voiceResource?.service_help_text || '音色包不包含 GPT-SoVITS 基础预训练模型与运行时；本地 API 服务需要单独部署并启动。'}</p>
-                      <span>{gsvServiceStatusText(serviceStatus)}</span>
+                      <span data-testid="tts-gsv-service-status">{gsvServiceStatusText(serviceStatus)}</span>
                     </div>
                     <div className="settings-resource-actions compact-actions">
                       <button
                         type="button"
                         className={busyAction === 'service-setup' ? 'loading-button' : undefined}
+                        data-testid="tts-gsv-service-setup"
                         disabled={interactionBusy}
                         onClick={requestOpenGsvSetupTerminal}
                       >
@@ -997,6 +998,7 @@ export function ProactiveTtsSettingsView() {
                       <button
                         type="button"
                         className={busyAction === 'service' ? 'loading-button' : undefined}
+                        data-testid="tts-gsv-service-terminal"
                         disabled={interactionBusy}
                         onClick={() => void openGsvServiceTerminal()}
                       >
@@ -1006,6 +1008,7 @@ export function ProactiveTtsSettingsView() {
                         <button
                           type="button"
                           className={busyAction === 'service-install' ? 'loading-button' : undefined}
+                          data-testid="tts-gsv-service-install"
                           disabled={interactionBusy}
                           onClick={() => void installGsvLaunchAgent()}
                         >
@@ -1015,12 +1018,13 @@ export function ProactiveTtsSettingsView() {
                       <button
                         type="button"
                         className={busyAction === 'service-uninstall' ? 'loading-button danger-action' : 'danger-action'}
+                        data-testid="tts-gsv-service-uninstall"
                         disabled={interactionBusy || !serviceStatus?.launch_agent_installed}
                         onClick={requestUninstallGsvLaunchAgent}
                       >
                         {busyAction === 'service-uninstall' ? '停止中...' : '停止本地后台'}
                       </button>
-                      <button type="button" disabled={interactionBusy} onClick={() => void refreshGsvServiceStatus()}>刷新状态</button>
+                      <button type="button" data-testid="tts-gsv-service-refresh" disabled={interactionBusy} onClick={() => void refreshGsvServiceStatus()}>刷新状态</button>
                     </div>
                     {externalGsvServiceDetected ? (
                       <div className="settings-resource-fallback">
@@ -1031,6 +1035,7 @@ export function ProactiveTtsSettingsView() {
                         <button
                           type="button"
                           className={busyAction === 'service-use-existing' ? 'loading-button' : undefined}
+                          data-testid="tts-gsv-service-use-existing"
                           disabled={interactionBusy}
                           onClick={() => void useExistingGsvService()}
                         >
@@ -1039,6 +1044,7 @@ export function ProactiveTtsSettingsView() {
                         <button
                           type="button"
                           className={busyAction === 'service-adopt' ? 'loading-button' : undefined}
+                          data-testid="tts-gsv-service-adopt"
                           disabled={interactionBusy}
                           onClick={requestAdoptGsvLaunchAgent}
                         >
@@ -1070,7 +1076,7 @@ export function ProactiveTtsSettingsView() {
                       />
                     </label>
                     {serviceStatus ? (
-                      <div className="settings-meta-list wide">
+                      <div className="settings-meta-list wide" data-testid="tts-gsv-service-meta">
                         <div className="settings-meta-row">
                           <span>API 可达</span>
                           <strong className={serviceStatus.reachable ? 'ok' : 'warn'}>{serviceStatus.reachable ? '可达' : serviceStatus.reachable_error || '不可达'}</strong>

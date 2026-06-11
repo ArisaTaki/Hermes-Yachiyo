@@ -14,6 +14,10 @@ const VOICE_ARCHIVE_PATH = '/tmp/oha-yachiyo-proactive-tts-ui-smoke-voice.zip';
 const TEST_TEXT = 'Proactive TTS Electron smoke text.';
 
 const bridgeState = {
+  gsvServiceInstallRequests: 0,
+  gsvServiceInstalled: false,
+  gsvServiceStatusPayloads: [],
+  gsvServiceUninstallRequests: 0,
   settings: initialSettings(),
   permissionPayload: null,
   proactivePayload: null,
@@ -114,8 +118,9 @@ function gsvServiceStatus() {
     workdir_display: '~/AI/GPT-SoVITS',
     workdir_exists: true,
     command_configured: true,
-    launch_agent_installed: false,
-    launch_agent_running: false,
+    launch_agent_installed: bridgeState.gsvServiceInstalled,
+    launch_agent_running: bridgeState.gsvServiceInstalled,
+    plist_path_display: bridgeState.gsvServiceInstalled ? '~/Library/LaunchAgents/com.oha-yachiyo.gpt-sovits.plist' : '',
     api_process: {
       running: true,
       pid: 9880,
@@ -232,7 +237,31 @@ async function startMockBridge() {
         return;
       }
       if (request.method === 'POST' && url.pathname === '/ui/tts/gpt-sovits/service-status') {
+        const body = await readRequestJson(request);
+        bridgeState.gsvServiceStatusPayloads.push(body);
         sendJson(response, 200, gsvServiceStatus());
+        return;
+      }
+      if (request.method === 'POST' && url.pathname === '/ui/tts/gpt-sovits/service/install') {
+        await readRequestJson(request);
+        bridgeState.gsvServiceInstallRequests += 1;
+        bridgeState.gsvServiceInstalled = true;
+        sendJson(response, 200, {
+          ok: true,
+          message: 'GPT-SoVITS service installed from UI smoke',
+          status: gsvServiceStatus(),
+        });
+        return;
+      }
+      if (request.method === 'POST' && url.pathname === '/ui/tts/gpt-sovits/service/uninstall') {
+        await readRequestJson(request);
+        bridgeState.gsvServiceUninstallRequests += 1;
+        bridgeState.gsvServiceInstalled = false;
+        sendJson(response, 200, {
+          ok: true,
+          message: 'GPT-SoVITS service stopped from UI smoke',
+          status: gsvServiceStatus(),
+        });
         return;
       }
       if (request.method === 'POST' && url.pathname === '/ui/proactive/screen-permission/check') {
@@ -411,6 +440,27 @@ async function main() {
   ), 'proactive TTS settings loaded');
   console.log('[electron-smoke] proactive TTS loaded');
   await waitFor(win, () => document.querySelector('[data-testid="proactive-tts-runtime-status"]')?.textContent.includes('TTS runtime smoke ready'), 'runtime status');
+  await waitFor(win, () => (
+    document.querySelector('[data-testid="tts-gsv-service-panel"]')
+    && document.querySelector('[data-testid="tts-gsv-service-status"]')?.textContent.includes('API 已可达')
+    && document.querySelector('[data-testid="tts-gsv-service-refresh"]')
+    && document.querySelector('[data-testid="tts-gsv-service-install"]')
+    && document.querySelector('[data-testid="tts-gsv-service-uninstall"]')
+  ), 'GPT-SoVITS service controls');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"tts-gsv-service-refresh\\"]').click()", true);
+  await waitFor(win, () => document.querySelector('[data-testid="tts-gsv-service-meta"]')?.textContent.includes('API 可达'), 'GPT-SoVITS service refresh');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"tts-gsv-service-install\\"]').click()", true);
+  await waitFor(win, () => (
+    document.querySelector('[data-testid="proactive-tts-status"]')?.textContent.includes('GPT-SoVITS API 已就绪')
+    && !document.querySelector('[data-testid="tts-gsv-service-uninstall"]')?.disabled
+  ), 'GPT-SoVITS service install');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"tts-gsv-service-uninstall\\"]').click()", true);
+  await waitFor(win, () => document.querySelector('[data-testid="confirm-dialog"]'), 'GPT-SoVITS service uninstall confirm');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"confirm-action\\"]').click()", true);
+  await waitFor(win, () => (
+    document.querySelector('[data-testid="proactive-tts-status"]')?.textContent.includes('GPT-SoVITS service stopped from UI smoke')
+    && document.querySelector('[data-testid="tts-gsv-service-status"]')?.textContent.includes('API 已可达')
+  ), 'GPT-SoVITS service uninstall');
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"proactive-screen-permission-check\\"]').click()", true);
   await waitFor(win, () => (
     document.querySelector('[data-testid="proactive-test-result"]')?.textContent.includes('Screen permission smoke ok')
@@ -492,6 +542,15 @@ main().catch((error) => {
 }
 
 function assertMockBridgeContract() {
+  if (!bridgeState.gsvServiceStatusPayloads.length) {
+    throw new Error('GPT-SoVITS service status was not requested');
+  }
+  if (bridgeState.gsvServiceInstallRequests !== 1) {
+    throw new Error(`unexpected GPT-SoVITS service install count: ${bridgeState.gsvServiceInstallRequests}`);
+  }
+  if (bridgeState.gsvServiceUninstallRequests !== 1) {
+    throw new Error(`unexpected GPT-SoVITS service uninstall count: ${bridgeState.gsvServiceUninstallRequests}`);
+  }
   if (!bridgeState.permissionPayload || bridgeState.permissionPayload.open_settings !== true) {
     throw new Error(`unexpected screen permission payload: ${JSON.stringify(bridgeState.permissionPayload)}`);
   }
