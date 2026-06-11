@@ -772,6 +772,7 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow smoke tests must cover Chat delegated summary Electron UI smoke" in messages
     assert "macOS release workflow smoke tests must cover Chat group summary Electron UI smoke" in messages
     assert "macOS release workflow smoke tests must cover launcher session summary Electron UI smoke" in messages
+    assert "macOS release workflow smoke tests must cover proactive TTS Electron UI smoke" in messages
     assert "macOS release workflow smoke tests must cover Agent Run Detail replay Electron UI smoke" in messages
     assert "macOS release workflow smoke tests must cover Workflow save-and-run Electron UI smoke" in messages
     assert "macOS release workflow smoke tests must cover Bridge Host Origin and session token guard" in messages

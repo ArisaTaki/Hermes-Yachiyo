@@ -699,7 +699,7 @@ export function ProactiveTtsSettingsView() {
   const registryReady = shouldSyncTtsRegistry(form, ttsRegistryReady);
 
   return (
-    <section className="hy-route-page hy-tts-page">
+    <section className="hy-route-page hy-tts-page" data-testid="proactive-tts-settings">
       <header className="hy-page-header hy-tts-page-header hy-stagger">
         <div>
           <span className="hy-eyebrow">Proactive Care · Desktop Watch</span>
@@ -729,9 +729,9 @@ export function ProactiveTtsSettingsView() {
         </article>
       </section>
 
-      {status ? <div className={`notice hy-tts-notice hy-stagger ${/失败|错误/.test(status) ? 'danger' : ''}`}>{status}</div> : null}
+      {status ? <div className={`notice hy-tts-notice hy-stagger ${/失败|错误/.test(status) ? 'danger' : ''}`} data-testid="proactive-tts-status">{status}</div> : null}
       {shouldShowRuntimeStatus(runtimeStatus) ? (
-        <div className={`notice hy-tts-notice hy-stagger ${ttsRuntimeStatusTone(runtimeStatus)}`}>
+        <div className={`notice hy-tts-notice hy-stagger ${ttsRuntimeStatusTone(runtimeStatus)}`} data-testid="proactive-tts-runtime-status">
           <strong>{ttsRuntimeStatusTitle(runtimeStatus)}</strong>
           <span>{ttsRuntimeStatusDetail(runtimeStatus)}</span>
         </div>
@@ -815,7 +815,7 @@ export function ProactiveTtsSettingsView() {
             </div>
 
             {proactiveResult ? (
-              <div className={`native-test-result ${proactiveResult.success || proactiveResult.ok || proactiveResult.allowed ? 'success' : 'danger'}`}>
+              <div className={`native-test-result ${proactiveResult.success || proactiveResult.ok || proactiveResult.allowed ? 'success' : 'danger'}`} data-testid="proactive-test-result">
                 <strong>{proactiveResult.error || proactiveResult.message || (proactiveResult.allowed ? '权限可用' : '主动关怀已触发')}</strong>
                 <span>{proactiveResult.mode || proactiveForm.target_mode}</span>
                 {proactiveResult.response || proactiveResult.prompt ? <pre>{proactiveResult.response || proactiveResult.prompt}</pre> : null}
@@ -824,15 +824,16 @@ export function ProactiveTtsSettingsView() {
 
             <div className="settings-savebar hy-tts-savebar">
               <span>{proactiveDirty ? '有未保存的主动关怀设置' : '主动关怀设置已同步'}</span>
-              <button type="button" className="hy-btn hy-btn-ghost" disabled={interactionBusy} onClick={() => void checkScreenPermission()}>
+              <button type="button" className="hy-btn hy-btn-ghost" data-testid="proactive-screen-permission-check" disabled={interactionBusy} onClick={() => void checkScreenPermission()}>
                 {busyAction === 'proactive-permission' ? '检查中...' : '检查屏幕权限'}
               </button>
-              <button type="button" className="hy-btn hy-btn-ghost" disabled={interactionBusy} onClick={() => void runProactiveTest()}>
+              <button type="button" className="hy-btn hy-btn-ghost" data-testid="proactive-test-run" disabled={interactionBusy} onClick={() => void runProactiveTest()}>
                 {busyAction === 'proactive-test' ? '测试中...' : '立即测试'}
               </button>
               <button
                 type="button"
                 className={busyAction === 'proactive-save' ? 'hy-btn hy-btn-primary loading-button' : 'hy-btn hy-btn-primary'}
+                data-testid="proactive-save-settings"
                 disabled={interactionBusy || !proactiveDirty}
                 onClick={() => void saveProactiveSettings()}
               >
@@ -876,6 +877,7 @@ export function ProactiveTtsSettingsView() {
                 <span>TTS Provider</span>
                 <select
                   id="proactive-tts-provider"
+                  data-testid="proactive-tts-provider"
                   value={provider}
                   disabled={interactionBusy}
                   onChange={(event) => updateField('provider', event.target.value)}
@@ -954,19 +956,21 @@ export function ProactiveTtsSettingsView() {
                       <button
                         type="button"
                         className={resourceBusy ? 'loading-button' : undefined}
+                        data-testid="tts-voice-import"
                         disabled={interactionBusy}
                         onClick={() => void importVoiceArchive()}
                       >
                         {resourceBusy ? '导入中...' : filePickerAvailable ? '导入音色包 ZIP' : '按路径导入 ZIP'}
                       </button>
-                      <button type="button" disabled={interactionBusy} onClick={() => void openVoiceAssetsDir()}>打开导入目录</button>
-                      <button type="button" disabled={interactionBusy || !(voiceResource?.voice_package_url || voiceResource?.releases_url)} onClick={() => void openVoiceReleases()}>下载音色包</button>
+                      <button type="button" data-testid="tts-voice-assets-open" disabled={interactionBusy} onClick={() => void openVoiceAssetsDir()}>打开导入目录</button>
+                      <button type="button" data-testid="tts-voice-download" disabled={interactionBusy || !(voiceResource?.voice_package_url || voiceResource?.releases_url)} onClick={() => void openVoiceReleases()}>下载音色包</button>
                     </div>
                     {!filePickerAvailable ? (
                       <label className="settings-field wide" htmlFor="tts-voice-archive-path-page">
                         <span>音色包 ZIP 路径</span>
                         <input
                           id="tts-voice-archive-path-page"
+                          data-testid="tts-voice-archive-path"
                           value={manualVoiceArchivePath}
                           placeholder="~/Downloads/Oha-Yachiyo-yachiyo-gpt-sovits-v4.zip"
                           disabled={interactionBusy}
@@ -1303,7 +1307,7 @@ export function ProactiveTtsSettingsView() {
             </div>
 
             {testResult ? (
-              <div className={`native-test-result ${testResult.success ? 'success' : 'danger'}`}>
+              <div className={`native-test-result ${testResult.success ? 'success' : 'danger'}`} data-testid="tts-test-result">
                 <strong>{testResult.success ? testResult.message || '测试语音已完成' : testResult.error || testResult.message || '测试语音失败'}</strong>
                 <span>{testResult.provider ? `Provider: ${ttsProviderLabel(testResult.provider)}` : '—'}</span>
                 {testResult.spoken_text ? <pre>{testResult.spoken_text}</pre> : null}
@@ -1312,10 +1316,11 @@ export function ProactiveTtsSettingsView() {
 
             <div className="settings-savebar hy-tts-savebar">
               <span>{registryReady ? '语音测试已通过，保存后同步到模型配置' : isDirty ? '有未保存的语音设置' : enabled ? '语音设置已同步' : '主动关怀将只发送文字'}</span>
-              <button type="button" className="hy-btn hy-btn-ghost" disabled={interactionBusy || !isDirty} onClick={resetDraft}>重置草稿</button>
+              <button type="button" className="hy-btn hy-btn-ghost" data-testid="tts-reset-draft" disabled={interactionBusy || !isDirty} onClick={resetDraft}>重置草稿</button>
               <button
                 type="button"
                 className={busyAction === 'test' ? 'hy-btn hy-btn-ghost loading-button' : 'hy-btn hy-btn-ghost'}
+                data-testid="tts-save-and-test"
                 disabled={interactionBusy || provider === 'none'}
                 onClick={() => void saveAndTestSettings()}
               >
@@ -1324,6 +1329,7 @@ export function ProactiveTtsSettingsView() {
               <button
                 type="submit"
                 className={busyAction === 'save' ? 'hy-btn hy-btn-primary loading-button' : 'hy-btn hy-btn-primary'}
+                data-testid="tts-save-settings"
                 disabled={interactionBusy}
               >
                 {busyAction === 'save' ? '保存中...' : registryReady ? '保存并登记语音源' : '保存语音设置'}

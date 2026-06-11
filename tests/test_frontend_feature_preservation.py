@@ -321,6 +321,31 @@ def test_launcher_session_summary_ui_smoke_uses_bubble_and_live2d_summary_paths(
     )
 
 
+def test_proactive_tts_ui_smoke_uses_screen_permission_tts_and_voice_import_paths() -> None:
+    smoke_script = "scripts/smoke_proactive_tts_ui.mjs"
+    _assert_contains(
+        smoke_script,
+        [
+            "#/proactive-tts",
+            "request.method === 'POST' && url.pathname === '/ui/proactive/screen-permission/check'",
+            "request.method === 'POST' && url.pathname === '/ui/proactive/test'",
+            "request.method === 'POST' && url.pathname === '/ui/tts/voice-resource/import'",
+            "request.method === 'POST' && url.pathname === '/ui/tts/test'",
+            "request.method === 'POST' && url.pathname === '/ui/settings'",
+            "proactive-screen-permission-check",
+            "proactive-test-run",
+            'data-testid="tts-voice-archive-path"',
+            'data-testid="tts-voice-import"',
+            'data-testid="tts-save-and-test"',
+            'data-testid="tts-test-result"',
+            "permissionPayload.open_settings !== true",
+            "proactivePayload.mode !== 'live2d'",
+            "voiceImportPayload.path !== VOICE_ARCHIVE_PATH",
+            "ttsTestPayload.text !== TEST_TEXT",
+        ],
+    )
+
+
 def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> None:
     chat_view = "apps/frontend/src/views/ChatView.tsx"
     _assert_contains(
@@ -1272,6 +1297,14 @@ def test_desktop_presence_features_preserve_live2d_screenshot_and_tts_entrypoint
             "chooseTtsVoiceArchive",
             "hasDesktopTtsVoiceArchivePicker",
             "const selectedPath = voiceArchivePickerAvailable",
+            'data-testid="proactive-screen-permission-check"',
+            'data-testid="proactive-test-run"',
+            'data-testid="proactive-save-settings"',
+            'data-testid="proactive-tts-provider"',
+            'data-testid="tts-voice-import"',
+            'data-testid="tts-voice-archive-path"',
+            'data-testid="tts-save-and-test"',
+            'data-testid="tts-test-result"',
             "'/ui/tts/gpt-sovits/service/install'",
             "'/ui/tts/gpt-sovits/service/adopt'",
             "'/ui/tts/gpt-sovits/service/uninstall'",

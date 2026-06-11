@@ -114,6 +114,13 @@ PACKAGED_UI_E2E_REQUIRED_SELECTORS: tuple[str, ...] = (
     "bubble-launcher-recent-session",
     "live2d-launcher-session-summary-probe",
     "live2d-launcher-recent-session",
+    "proactive-tts-settings",
+    "proactive-screen-permission-check",
+    "proactive-test-run",
+    "tts-voice-import",
+    "tts-voice-archive-path",
+    "tts-save-and-test",
+    "tts-test-result",
     "chat-message-approval-card",
     "chat-message-approval-approve",
     "chat-message-approval-reject",
@@ -751,6 +758,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "node scripts/smoke_launcher_session_summary_ui.mjs",
         "macOS release workflow smoke tests must cover launcher session summary Electron UI smoke",
+    ),
+    (
+        "node scripts/smoke_proactive_tts_ui.mjs",
+        "macOS release workflow smoke tests must cover proactive TTS Electron UI smoke",
     ),
     (
         "node scripts/smoke_agent_run_detail_ui.mjs",
