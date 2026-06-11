@@ -363,6 +363,56 @@ async function main() {
   ), 'unmounted skill mount grid');
   console.log('[electron-smoke] mount grid ready');
   await win.webContents.executeJavaScript(\`
+  document.querySelector('[data-testid="agent-skill-mount-filter-native"]').click();
+  \`, true);
+  await waitFor(win, () => (
+    document.querySelectorAll('[data-testid="agent-skill-mount-item"]').length === 0
+    && document.querySelector('[data-testid="agent-skill-mount-summary"]')?.textContent.includes('0 mounted / 0 visible skills')
+    && document.querySelector('[data-testid="agent-skill-mount-visible-count"]')?.textContent.includes('0 / 0')
+  ), 'native skill mount filter');
+  await win.webContents.executeJavaScript(\`
+  document.querySelector('[data-testid="agent-skill-mount-filter-installed"]').click();
+  \`, true);
+  await waitFor(win, () => document.querySelectorAll('[data-testid="agent-skill-mount-item"]').length === 2, 'installed skill mount filter');
+  await win.webContents.executeJavaScript(\`
+  (() => {
+    const search = document.querySelector('[data-testid="agent-skill-mount-search"]');
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(search, 'Skill B');
+    search.dispatchEvent(new Event('input', { bubbles: true }));
+  })();
+  \`, true);
+  await waitFor(win, () => (
+    document.querySelectorAll('[data-testid="agent-skill-mount-item"]').length === 1
+    && document.querySelector('[data-testid="agent-skill-mount-item"]')?.getAttribute('data-skill-id') === ${JSON.stringify(SKILL_B_ID)}
+    && document.querySelector('[data-testid="agent-skill-mount-visible-count"]')?.textContent.includes('0 / 1')
+  ), 'skill mount search filter');
+  await win.webContents.executeJavaScript(\`
+  (() => {
+    const search = document.querySelector('[data-testid="agent-skill-mount-search"]');
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(search, '');
+    search.dispatchEvent(new Event('input', { bubbles: true }));
+    const folder = document.querySelector('[data-testid="agent-skill-mount-folder-filter"]');
+    folder.value = 'uncategorized';
+    folder.dispatchEvent(new Event('change', { bubbles: true }));
+  })();
+  \`, true);
+  await waitFor(win, () => (
+    document.querySelectorAll('[data-testid="agent-skill-mount-item"]').length === 0
+    && document.querySelector('[data-testid="agent-skill-mount-summary"]')?.textContent.includes('0 mounted / 0 visible skills')
+  ), 'skill mount uncategorized folder filter');
+  await win.webContents.executeJavaScript(\`
+  (() => {
+    const folder = document.querySelector('[data-testid="agent-skill-mount-folder-filter"]');
+    folder.value = ${JSON.stringify(FOLDER_ID)};
+    folder.dispatchEvent(new Event('change', { bubbles: true }));
+  })();
+  \`, true);
+  await waitFor(win, () => (
+    document.querySelectorAll('[data-testid="agent-skill-mount-item"]').length === 2
+    && document.querySelector('[data-testid="agent-skill-mount-summary"]')?.textContent.includes('0 mounted / 2 visible skills')
+  ), 'skill mount folder filter');
+  console.log('[electron-smoke] skill mount filters verified');
+  await win.webContents.executeJavaScript(\`
   document.querySelector('[data-testid="agent-skill-mount-item"][data-skill-id="${SKILL_A_ID}"]').click();
   \`, true);
   await waitFor(win, () => (
