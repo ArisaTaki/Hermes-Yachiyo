@@ -127,6 +127,7 @@ jobs:
             tests/test_agent_runtime.py::test_main_chat_provider_exception_is_redacted_from_run_events_and_storage \
             tests/test_agent_runtime.py::test_workflow_child_agent_provider_exception_is_redacted_from_parent_events_and_storage \
             tests/test_agent_runtime.py::test_main_chat_tool_exception_is_redacted_from_tool_messages_events_and_storage \
+            tests/test_agent_runtime.py::test_main_chat_model_loop_executes_openai_compatible_sse_tool_calls \
             tests/test_agent_runtime.py::test_main_chat_model_loop_executes_singular_sse_tool_call_frames \
             tests/test_agent_runtime.py::test_main_chat_model_loop_executes_sse_delta_tool_call_object_arguments \
             tests/test_agent_runtime.py::test_main_chat_model_loop_executes_message_level_openai_compatible_sse_tool_call \
