@@ -8095,15 +8095,9 @@ class NativeRunEngine:
                 agent,
                 resume_context,
             )
-            resume_context.timeline.append(self._timeline("agent.run.completed", "Agent run completed"))
-            self.append_run_event(run_id, "agent.run.completed", {"result": result_text})
-            result = self._update_run(
-                run_id,
-                status="completed",
-                result=result_text,
-                timeline=resume_context.timeline,
-                artifacts=resume_context.artifacts,
-                pending_approval=None,
+            result = self._project_agent_approval_resume_completed(
+                resume_context,
+                result_text,
             )
         except AgentApprovalRequired as exc:
             resume_context.timeline.append(
@@ -8140,6 +8134,48 @@ class NativeRunEngine:
             )
         return self._project_child_run_transition(result)
 
+    def _project_agent_approval_resume_completed(
+        self,
+        context: ToolApprovalResumeContext,
+        result_text: str,
+    ) -> dict[str, Any]:
+        context.timeline.append(self._timeline("agent.run.completed", "Agent run completed"))
+        self.append_run_event(context.run_id, "agent.run.completed", {"result": result_text})
+        return self._update_run(
+            context.run_id,
+            status="completed",
+            result=result_text,
+            timeline=context.timeline,
+            artifacts=context.artifacts,
+            pending_approval=None,
+        )
+
+    def _project_main_chat_approval_resume_completed(
+        self,
+        context: ToolApprovalResumeContext,
+        result_text: str,
+    ) -> dict[str, Any]:
+        context.timeline.append(
+            self._timeline(
+                "model.output.ready",
+                result_text[:500],
+                output_chars=len(result_text),
+            )
+        )
+        self.append_run_event(
+            context.run_id,
+            "model.output.completed",
+            {"content": result_text, "output_chars": len(result_text)},
+        )
+        return self._update_run(
+            context.run_id,
+            status="running",
+            result=result_text,
+            timeline=context.timeline,
+            artifacts=context.artifacts,
+            pending_approval=None,
+        )
+
     def _approve_main_chat_run_approval(self, run: dict[str, Any]) -> dict[str, Any]:
         run_id = str(run["run_id"])
         pending = self.runs.pending_approval_private(run_id)
@@ -8173,25 +8209,9 @@ class NativeRunEngine:
                 agent,
                 resume_context,
             )
-            resume_context.timeline.append(
-                self._timeline(
-                    "model.output.ready",
-                    result_text[:500],
-                    output_chars=len(result_text),
-                )
-            )
-            self.append_run_event(
-                run_id,
-                "model.output.completed",
-                {"content": result_text, "output_chars": len(result_text)},
-            )
-            result = self._update_run(
-                run_id,
-                status="running",
-                result=result_text,
-                timeline=resume_context.timeline,
-                artifacts=resume_context.artifacts,
-                pending_approval=None,
+            result = self._project_main_chat_approval_resume_completed(
+                resume_context,
+                result_text,
             )
         except AgentApprovalRequired as exc:
             pending_next = self._main_chat_pending_approval(
