@@ -97,6 +97,19 @@ PACKAGED_APP_NAME = "Oha-Yachiyo.app"
 PACKAGED_APP_IDENTIFIER = "io.github.arisataki.oha-yachiyo"
 PACKAGED_BACKEND_RELATIVE_PATH = Path("Contents/Resources/backend/oha-yachiyo-backend")
 PACKAGED_ASAR_RELATIVE_PATH = Path("Contents/Resources/app.asar")
+PACKAGED_UI_E2E_REQUIRED_SELECTORS: tuple[str, ...] = (
+    "chat-image-file-input",
+    "chat-composer-attachment-preview",
+    "chat-composer-attachment-remove",
+    "chat-message-attachment-item",
+    "chat-image-viewer-modal",
+    "chat-message-approval-card",
+    "chat-composer-approval-notice",
+    "agent-run-detail",
+    "agent-run-detail-execution-event",
+    "workflow-run-goal-input",
+    "workflow-save-and-run",
+)
 PACKAGED_INFO_REQUIRED_VALUES: tuple[tuple[str, str, str], ...] = (
     (
         "LSApplicationCategoryType",
@@ -1140,6 +1153,20 @@ def _verify_packaged_app_bundle(root: Path) -> list[Finding]:
         asar_path = app_dir / PACKAGED_ASAR_RELATIVE_PATH
         if not asar_path.is_file():
             findings.append(Finding(asar_path, "packaged Electron app.asar is missing from app resources"))
+        else:
+            try:
+                asar_bytes = asar_path.read_bytes()
+            except OSError as exc:
+                findings.append(Finding(asar_path, f"packaged Electron app.asar could not be read: {exc}"))
+            else:
+                for selector in PACKAGED_UI_E2E_REQUIRED_SELECTORS:
+                    if selector.encode("utf-8") not in asar_bytes:
+                        findings.append(
+                            Finding(
+                                asar_path,
+                                f"packaged Electron app.asar must include UI E2E selector {selector!r}",
+                            )
+                        )
 
     return findings
 

@@ -266,7 +266,7 @@ def _write_packaged_app_bundle(
     if include_asar:
         asar = app_dir / verifier.PACKAGED_ASAR_RELATIVE_PATH
         asar.parent.mkdir(parents=True, exist_ok=True)
-        asar.write_bytes(b"asar")
+        asar.write_bytes("\n".join(verifier.PACKAGED_UI_E2E_REQUIRED_SELECTORS).encode("utf-8"))
     return app_dir
 
 
@@ -330,6 +330,30 @@ def test_verifier_reports_packaged_app_missing_permission_copy(tmp_path):
     assert "packaged app Info.plist must include Documents folder permission copy" in messages
     assert "packaged app Info.plist must include Downloads folder permission copy" in messages
     assert "packaged app Info.plist must include microphone permission copy" in messages
+
+
+def test_verifier_reports_packaged_app_missing_ui_e2e_selector(tmp_path):
+    app_dir = _write_packaged_app_bundle(tmp_path)
+    asar_path = app_dir / verifier.PACKAGED_ASAR_RELATIVE_PATH
+    asar_path.write_bytes(b"chat-image-file-input\nagent-run-detail\n")
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[],
+        check_required_files=False,
+        check_release_security_guards=False,
+        check_packaged_app_bundle=True,
+        allow_binary_targets=True,
+    )
+
+    assert verifier.Finding(
+        asar_path,
+        "packaged Electron app.asar must include UI E2E selector 'workflow-save-and-run'",
+    ) in findings
+    assert verifier.Finding(
+        asar_path,
+        "packaged Electron app.asar must include UI E2E selector 'chat-composer-attachment-preview'",
+    ) in findings
 
 
 def test_verifier_reports_packaged_app_wrong_category(tmp_path):
