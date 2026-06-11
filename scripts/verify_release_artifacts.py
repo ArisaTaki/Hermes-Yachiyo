@@ -880,6 +880,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover Chat image Electron UI smoke",
     ),
     (
+        "node scripts/smoke_chat_run_detail_handoff_ui.mjs",
+        "macOS release workflow smoke tests must cover Chat completed Run Detail handoff Electron UI smoke",
+    ),
+    (
         "node scripts/smoke_chat_cancel_ui.mjs",
         "macOS release workflow smoke tests must cover Chat cancel Electron UI smoke",
     ),

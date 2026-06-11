@@ -9,6 +9,7 @@ from scripts import verify_release_artifacts as verifier
 
 RELEASE_ELECTRON_SMOKE_SCRIPTS: tuple[str, ...] = (
     "scripts/smoke_chat_image_attachment_ui.mjs",
+    "scripts/smoke_chat_run_detail_handoff_ui.mjs",
     "scripts/smoke_chat_cancel_ui.mjs",
     "scripts/smoke_chat_approval_ui.mjs",
     "scripts/smoke_chat_delegated_summary_ui.mjs",

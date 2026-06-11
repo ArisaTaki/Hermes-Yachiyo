@@ -642,6 +642,32 @@ def test_chat_image_attachment_ui_smoke_uses_file_input_path() -> None:
     _assert_not_contains(smoke_script, ["oha-chat-e2e-add-image"])
 
 
+def test_chat_run_detail_handoff_ui_smoke_uses_completed_message_run_metadata() -> None:
+    smoke_script = "scripts/smoke_chat_run_detail_handoff_ui.mjs"
+    _assert_contains(
+        smoke_script,
+        [
+            "#/chat",
+            "metadata: {",
+            "run_id: RUN_ID",
+            "run_status: 'completed'",
+            "source: 'main_chat'",
+            "data-testid=\"chat-message-open-run-detail\"",
+            r'''document.querySelector('[data-testid=\\"chat-message-open-run-detail\\"]').click()''',
+            "data-testid=\"agent-run-detail\"",
+            "data-testid=\"agent-run-detail-task\"",
+            "data-testid=\"agent-run-detail-result\"",
+            "data-testid=\"agent-run-detail-execution-event\"",
+            "`/ui/runs/${RUN_ID}`",
+            "`/runs/${RUN_ID}/events`",
+            "agent.run.started",
+            "model.output.completed",
+            "agent.run.completed",
+            "completed Chat message opened matching Run Detail",
+        ],
+    )
+
+
 def test_chat_cancel_ui_smoke_uses_stop_buttons_and_cancel_route() -> None:
     smoke_script = "scripts/smoke_chat_cancel_ui.mjs"
     _assert_contains(
