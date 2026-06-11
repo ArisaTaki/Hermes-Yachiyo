@@ -33,6 +33,7 @@ from apps.shell.agent_runtime import (
     WorkflowApprovalResumeCoordinator,
     WorkflowApprovalResumeContext,
     WorkflowApprovalTransitionContext,
+    WorkflowChildOutcomeCoordinator,
     WorkflowCancellationProjectionCoordinator,
     WorkflowContinuationCoordinator,
     WorkflowParentResumeCoordinator,
@@ -142,6 +143,72 @@ def test_run_transition_projection_coordinator_projects_child_and_workflow_group
         }
     ]
     assert root_projection == stored_runs["workflow_root"]
+
+
+def test_workflow_child_outcome_coordinator_projects_child_artifacts_and_timeline():
+    coordinator = WorkflowChildOutcomeCoordinator()
+    timeline = [
+        {
+            "event": "workflow.node.agent",
+            "detail": "Research Agent",
+            "child_run_id": "child_run",
+            "workflow_node_id": "agent-node",
+            "workflow_node_kind": "agent",
+            "workflow_node_label": "Research Step",
+        }
+    ]
+    artifacts = [
+        {
+            "kind": "workflow_child_artifact",
+            "source_run_id": "child_run",
+            "path": "reports/existing.md",
+        }
+    ]
+    child_run = {
+        "run_id": "child_run",
+        "kind": "agent_run",
+        "runnable_id": "agent_research",
+        "runnable_name": "Research Agent",
+        "status": "completed",
+        "result": "Child Agent completed with a long but visible summary.",
+        "artifacts": [
+            {"kind": "context", "path": "context.md"},
+            {"kind": "agent_artifact", "path": "reports/existing.md"},
+            {"kind": "agent_artifact", "path": "reports/fresh.md"},
+            {"kind": "agent_artifact", "path": ""},
+            "not-an-artifact",
+        ],
+    }
+
+    label, node_info = coordinator.child_node_context(timeline, child_run)
+    coordinator.merge_child_run_outcome(timeline, artifacts, child_run, label)
+
+    assert label == "Research Agent"
+    assert node_info == {
+        "workflow_node_id": "agent-node",
+        "workflow_node_kind": "agent",
+        "workflow_node_label": "Research Step",
+    }
+    assert timeline[0]["status"] == "completed"
+    assert timeline[0]["result"] == "Child Agent completed with a long but visible summary."
+    assert timeline[0]["artifact_count"] == 2
+    assert artifacts == [
+        {
+            "kind": "workflow_child_artifact",
+            "source_run_id": "child_run",
+            "path": "reports/existing.md",
+        },
+        {
+            "kind": "workflow_child_artifact",
+            "path": "reports/fresh.md",
+            "source_run_id": "child_run",
+            "source_run_kind": "agent_run",
+            "source_runnable_id": "agent_research",
+            "source_runnable_name": "Research Agent",
+            "workflow_step_label": "Research Agent",
+            "artifact_kind": "agent_artifact",
+        },
+    ]
 
 
 def test_workflow_approval_resume_context_parses_pending_payload():

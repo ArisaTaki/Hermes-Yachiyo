@@ -916,6 +916,7 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
         in messages
     )
     assert "macOS release workflow smoke tests must cover ToolApprovalResumeContext pending payload parsing" in messages
+    assert "macOS release workflow smoke tests must cover WorkflowChildOutcomeCoordinator projection boundary" in messages
     assert "macOS release workflow smoke tests must cover WorkflowParentResumeCoordinator completed child handoff" in messages
     assert (
         "macOS release workflow smoke tests must cover WorkflowParentResumeCoordinator completed child replay idempotency"

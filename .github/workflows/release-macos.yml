@@ -87,6 +87,7 @@ jobs:
             tests/test_agent_runtime.py::test_approval_resume_coordinator_continues_custom_api_agent_after_approved_tool \
             tests/test_agent_runtime.py::test_approval_resume_projection_coordinator_projects_resume_states \
             tests/test_agent_runtime.py::test_tool_approval_resume_context_parses_pending_payload \
+            tests/test_agent_runtime.py::test_workflow_child_outcome_coordinator_projects_child_artifacts_and_timeline \
             tests/test_agent_runtime.py::test_workflow_parent_resume_coordinator_continues_completed_child \
             tests/test_agent_runtime.py::test_workflow_parent_resume_coordinator_does_not_resume_completed_child_twice \
             tests/test_agent_runtime.py::test_workflow_parent_resume_coordinator_does_not_project_child_approval_twice \

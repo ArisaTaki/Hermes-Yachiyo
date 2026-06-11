@@ -3074,6 +3074,106 @@ class RunTransitionProjectionCoordinator:
         return self._get_run(str(run.get("run_id") or result.get("run_id") or ""))
 
 
+class WorkflowChildOutcomeCoordinator:
+    """Projects child Agent Run outcomes into a parent Workflow timeline."""
+
+    @staticmethod
+    def child_artifact_refs(child_run: dict[str, Any], label: str) -> list[dict[str, Any]]:
+        child_run_id = str(child_run.get("run_id") or "")
+        if not child_run_id:
+            return []
+        refs: list[dict[str, Any]] = []
+        for artifact in child_run.get("artifacts") or []:
+            if not isinstance(artifact, dict):
+                continue
+            artifact_kind = str(artifact.get("kind") or "").strip()
+            if artifact_kind == "context":
+                continue
+            path = str(artifact.get("path") or "").strip()
+            if not path:
+                continue
+            refs.append(
+                {
+                    "kind": "workflow_child_artifact",
+                    "path": path,
+                    "source_run_id": child_run_id,
+                    "source_run_kind": str(child_run.get("kind") or ""),
+                    "source_runnable_id": str(child_run.get("runnable_id") or ""),
+                    "source_runnable_name": str(child_run.get("runnable_name") or child_run.get("runnable_id") or ""),
+                    "workflow_step_label": label,
+                    "artifact_kind": artifact_kind,
+                }
+            )
+        return refs
+
+    @staticmethod
+    def child_node_context(
+        timeline: list[dict[str, Any]],
+        child_run: dict[str, Any],
+    ) -> tuple[str, dict[str, str]]:
+        child_run_id = str(child_run.get("run_id") or "")
+        child_label = str(child_run.get("runnable_name") or child_run.get("runnable_id") or "Agent")
+        child_node_info: dict[str, str] = {}
+        for event in timeline:
+            if (
+                isinstance(event, dict)
+                and event.get("event") == "workflow.node.agent"
+                and str(event.get("child_run_id") or "") == child_run_id
+            ):
+                child_label = str(event.get("detail") or child_label).strip() or child_label
+                node_id = str(event.get("workflow_node_id") or "").strip()
+                if node_id:
+                    child_node_info = {
+                        "workflow_node_id": node_id,
+                        "workflow_node_kind": str(event.get("workflow_node_kind") or "agent"),
+                        "workflow_node_label": str(event.get("workflow_node_label") or child_label),
+                    }
+                break
+        return child_label, child_node_info
+
+    def merge_child_run_outcome(
+        self,
+        timeline: list[dict[str, Any]],
+        artifacts: list[dict[str, Any]],
+        child_run: dict[str, Any],
+        label: str,
+    ) -> None:
+        child_run_id = str(child_run.get("run_id") or "")
+        if not child_run_id:
+            return
+        child_status = str(child_run.get("status") or "")
+        child_result = str(child_run.get("result") or "")
+        child_artifacts = self.child_artifact_refs(child_run, label)
+        for event in timeline:
+            if not isinstance(event, dict):
+                continue
+            if event.get("event") != "workflow.node.agent":
+                continue
+            if str(event.get("child_run_id") or "") != child_run_id:
+                continue
+            event["status"] = child_status
+            event["result"] = _tool_input_preview(child_result, limit=1800)
+            event["artifact_count"] = len(child_artifacts)
+        existing_refs = {
+            (
+                str(item.get("kind") or ""),
+                str(item.get("source_run_id") or ""),
+                str(item.get("path") or ""),
+            )
+            for item in artifacts
+            if isinstance(item, dict)
+        }
+        for artifact in child_artifacts:
+            key = (
+                str(artifact.get("kind") or ""),
+                str(artifact.get("source_run_id") or ""),
+                str(artifact.get("path") or ""),
+            )
+            if key not in existing_refs:
+                artifacts.append(artifact)
+                existing_refs.add(key)
+
+
 class WorkflowParentResumeCoordinator:
     """Coordinates parent Workflow updates after a child Run changes state."""
 
@@ -4105,6 +4205,7 @@ class NativeRunEngine:
             append_run_event=lambda run_id, event_type, payload: self.append_run_event(run_id, event_type, payload),
             update_run=lambda run_id, **kwargs: self._update_run(run_id, **kwargs),
         )
+        self.workflow_child_outcomes = WorkflowChildOutcomeCoordinator()
         self.workflow_parent_resume = WorkflowParentResumeCoordinator(
             parent_runs_waiting_for_child=lambda child_run: self._workflow_parent_runs_waiting_for_child(child_run),
             workflow_run_is_group_root=lambda workflow_run: self._workflow_run_is_group_root(workflow_run),
@@ -8241,57 +8342,14 @@ class NativeRunEngine:
 
     @staticmethod
     def _workflow_child_artifact_refs(child_run: dict[str, Any], label: str) -> list[dict[str, Any]]:
-        child_run_id = str(child_run.get("run_id") or "")
-        if not child_run_id:
-            return []
-        refs: list[dict[str, Any]] = []
-        for artifact in child_run.get("artifacts") or []:
-            if not isinstance(artifact, dict):
-                continue
-            artifact_kind = str(artifact.get("kind") or "").strip()
-            if artifact_kind == "context":
-                continue
-            path = str(artifact.get("path") or "").strip()
-            if not path:
-                continue
-            refs.append(
-                {
-                    "kind": "workflow_child_artifact",
-                    "path": path,
-                    "source_run_id": child_run_id,
-                    "source_run_kind": str(child_run.get("kind") or ""),
-                    "source_runnable_id": str(child_run.get("runnable_id") or ""),
-                    "source_runnable_name": str(child_run.get("runnable_name") or child_run.get("runnable_id") or ""),
-                    "workflow_step_label": label,
-                    "artifact_kind": artifact_kind,
-                }
-            )
-        return refs
+        return WorkflowChildOutcomeCoordinator.child_artifact_refs(child_run, label)
 
     @staticmethod
     def _workflow_child_node_context(
         timeline: list[dict[str, Any]],
         child_run: dict[str, Any],
     ) -> tuple[str, dict[str, str]]:
-        child_run_id = str(child_run.get("run_id") or "")
-        child_label = str(child_run.get("runnable_name") or child_run.get("runnable_id") or "Agent")
-        child_node_info: dict[str, str] = {}
-        for event in timeline:
-            if (
-                isinstance(event, dict)
-                and event.get("event") == "workflow.node.agent"
-                and str(event.get("child_run_id") or "") == child_run_id
-            ):
-                child_label = str(event.get("detail") or child_label).strip() or child_label
-                node_id = str(event.get("workflow_node_id") or "").strip()
-                if node_id:
-                    child_node_info = {
-                        "workflow_node_id": node_id,
-                        "workflow_node_kind": str(event.get("workflow_node_kind") or "agent"),
-                        "workflow_node_label": str(event.get("workflow_node_label") or child_label),
-                    }
-                break
-        return child_label, child_node_info
+        return WorkflowChildOutcomeCoordinator.child_node_context(timeline, child_run)
 
     def _merge_workflow_child_run_outcome(
         self,
@@ -8300,40 +8358,12 @@ class NativeRunEngine:
         child_run: dict[str, Any],
         label: str,
     ) -> None:
-        child_run_id = str(child_run.get("run_id") or "")
-        if not child_run_id:
-            return
-        child_status = str(child_run.get("status") or "")
-        child_result = str(child_run.get("result") or "")
-        child_artifacts = self._workflow_child_artifact_refs(child_run, label)
-        for event in timeline:
-            if not isinstance(event, dict):
-                continue
-            if event.get("event") != "workflow.node.agent":
-                continue
-            if str(event.get("child_run_id") or "") != child_run_id:
-                continue
-            event["status"] = child_status
-            event["result"] = _tool_input_preview(child_result, limit=1800)
-            event["artifact_count"] = len(child_artifacts)
-        existing_refs = {
-            (
-                str(item.get("kind") or ""),
-                str(item.get("source_run_id") or ""),
-                str(item.get("path") or ""),
-            )
-            for item in artifacts
-            if isinstance(item, dict)
-        }
-        for artifact in child_artifacts:
-            key = (
-                str(artifact.get("kind") or ""),
-                str(artifact.get("source_run_id") or ""),
-                str(artifact.get("path") or ""),
-            )
-            if key not in existing_refs:
-                artifacts.append(artifact)
-                existing_refs.add(key)
+        self.workflow_child_outcomes.merge_child_run_outcome(
+            timeline,
+            artifacts,
+            child_run,
+            label,
+        )
 
     @staticmethod
     def _workflow_artifact_path(label: str, artifacts: list[dict[str, Any]], configured_path: str = "") -> str:
