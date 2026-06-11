@@ -115,6 +115,7 @@ jobs:
             tests/test_screenshot.py \
             tests/test_proactive.py \
             tests/test_chat_session.py \
+            tests/test_chat_store.py \
             tests/test_chat_bridge.py \
             tests/test_chat_api.py \
             tests/test_activity_store.py \

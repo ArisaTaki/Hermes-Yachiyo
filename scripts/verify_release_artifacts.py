@@ -546,6 +546,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover ChatSession persistence",
     ),
     (
+        "tests/test_chat_store.py",
+        "macOS release workflow smoke tests must cover ChatStore persistence and redaction",
+    ),
+    (
         "tests/test_chat_bridge.py",
         "macOS release workflow smoke tests must cover ChatBridge session summary",
     ),
