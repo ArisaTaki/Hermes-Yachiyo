@@ -667,6 +667,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover Agent approval cancel Run Detail HTTP roundtrip",
     ),
     (
+        "tests/test_agent_runtime.py::test_workflow_routes_save_and_run_latest_canvas_with_step_approval_and_artifact",
+        "macOS release workflow smoke tests must cover Workflow save-and-run latest canvas route contract",
+    ),
+    (
         "tests/test_bridge_server.py::test_workflow_approval_node_http_roundtrip_approve_detail_and_replay",
         "macOS release workflow smoke tests must cover Workflow approval Run Detail HTTP roundtrip",
     ),

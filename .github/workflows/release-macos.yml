@@ -144,6 +144,7 @@ jobs:
             tests/test_bridge_server.py::test_agent_run_http_routes_roundtrip_approval_detail_and_replay \
             tests/test_bridge_server.py::test_agent_run_http_routes_roundtrip_reject_detail_and_replay \
             tests/test_bridge_server.py::test_agent_run_http_routes_roundtrip_cancel_detail_and_replay \
+            tests/test_agent_runtime.py::test_workflow_routes_save_and_run_latest_canvas_with_step_approval_and_artifact \
             tests/test_bridge_server.py::test_workflow_approval_node_http_roundtrip_approve_detail_and_replay \
             tests/test_bridge_server.py::test_workflow_approval_node_http_roundtrip_reject_detail_and_replay \
             tests/test_bridge_server.py::test_workflow_approval_node_http_roundtrip_cancel_detail_group_and_replay \
