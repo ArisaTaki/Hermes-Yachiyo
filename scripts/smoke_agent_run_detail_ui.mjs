@@ -1796,10 +1796,14 @@ async function main() {
     const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
     const sequences = events.map((node) => node.getAttribute('data-run-event-sequence'));
     const runIds = events.map((node) => node.getAttribute('data-run-event-run-id'));
+    const rerunStartedEvent = events.find((node) => node.getAttribute('data-run-event') === 'run.rerun.started');
+    const rerunCompletedEvent = events.find((node) => node.getAttribute('data-run-event') === 'agent.run.completed');
     return events.length === 2
       && eventTypes.includes('run.rerun.started')
       && eventTypes.includes('agent.run.completed')
       && sequences.join(',') === '1,2'
+      && rerunStartedEvent?.textContent.includes(${JSON.stringify(RUN_ID)})
+      && rerunCompletedEvent?.textContent.includes('Run Detail UI smoke rerun completed')
       && runIds.every((id) => id === ${JSON.stringify(RERUN_RUN_ID)});
   }, 'rerun replay events');
   console.log('[electron-smoke] rerun detail rendered');

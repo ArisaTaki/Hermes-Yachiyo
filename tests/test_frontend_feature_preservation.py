@@ -985,6 +985,8 @@ def test_agent_run_detail_ui_smoke_uses_replay_route_and_dom_attributes() -> Non
             "toolCallEvent?.textContent.includes('printf workflow-child-electron-approved')",
             "rejectCancelledEvent?.textContent.includes(${JSON.stringify(WORKFLOW_REJECT_CHILD_RUN_ID)})",
             "cancelCancelledEvent?.textContent.includes(${JSON.stringify(WORKFLOW_CANCEL_CHILD_RUN_ID)})",
+            "rerunStartedEvent?.textContent.includes(${JSON.stringify(RUN_ID)})",
+            "rerunCompletedEvent?.textContent.includes('Run Detail UI smoke rerun completed')",
             "after_sequence === 200 && request.limit === 200",
             "Artifact preview loaded from mock Bridge.",
             "Run Detail approval smoke completed",
