@@ -2014,6 +2014,7 @@ compileall passed
 - Chat 群聊 UI 已补稳定 `data-testid` 入口，覆盖 Agent/群组 tab、创建群组按钮、群组设置、群组 dialog、头像选择/清除、群名输入、成员列表、Agent 成员 checkbox 和提交/取消按钮，后续 Browser E2E 可以直接驱动群聊创建/编辑路径。
 - Chat message summary/followup 状态已补稳定 `data-testid` 和 summary tone 属性，后续 Browser E2E 可以直接断言群聊总结、直接 Agent follow-up 和自动委派整理任务的 processing/completed/failed UI 状态。
 - Chat message activity list 已补稳定 `data-testid`、activity status/tool 数据属性和 Run Detail / Activity detail / expand 操作 selector，后续 Browser E2E 可以直接断言自动委派 activity、ActivityStore detail 跳转和 Run Detail handoff。
+- Chat Agent run progress card 已补稳定 `data-testid`、Run/RunGroup/runnable 数据属性和 Run Detail 操作 selector，后续 Browser E2E 可以直接断言群聊/自动委派执行中 UI 与同一 Native Run Detail handoff。
 - Chat readiness 已有真实浏览器级 E2E：source preview 打到 localhost-only source Bridge，未配置模型时 UI 入口保留、显示 native readiness、console error 为空，直接 POST 返回 `native_agent_not_ready / model_profile_required`。
 - Chat 可用模型路径已有真实浏览器级 E2E：source preview 打到 localhost-only source Bridge 和本地 OpenAI-compatible fake model，真实提交用户消息，TaskRunner 走 `NativeAgentExecutor`，Run 完成并回放 `model.output.completed`，ChatSession 投影 assistant 回复。
 - Chat 取消 late-output 已加固，并已补可重复 pytest 级 Bridge route 回归与 in-app Browser 按钮级 source Bridge smoke：慢模型返回前通过 `/ui/chat/session/cancel` 取消任务后，Run 可靠进入 `cancelled`，late model response 不再写 `model.output.completed` 或把 Run 覆盖回 running/completed，且 `/ui/runs` list/detail projection 可读取同一 cancelled Native main_chat_run 的 Task↔Run 映射、`task_run_link_run_status`、`task_run_link_last_event_sequence` 与 `run.cancelled` fact。

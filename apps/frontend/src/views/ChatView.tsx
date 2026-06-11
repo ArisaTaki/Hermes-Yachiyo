@@ -3388,14 +3388,31 @@ function AgentRunProgressCard({ message, onOpenDetails, runId }: {
   const name = participantDisplayName(sender) || messageRoleLabel(message);
   const title = String(message.metadata?.run_progress_title || 'Agent 正在执行');
   const detail = String(message.metadata?.run_progress_detail || `${name} 正在继续处理当前任务。`);
+  const runnableKind = String(message.metadata?.runnable_kind || sender?.kind || '').trim();
+  const runnableId = String(message.metadata?.runnable_id || sender?.id || '').trim();
+  const runGroupId = String(message.metadata?.run_group_id || '').trim();
+  const runStatus = messageRunStatus(message);
   return (
-    <div className="message-content message-agent-progress-card">
+    <div
+      className="message-content message-agent-progress-card"
+      data-run-group-id={runGroupId}
+      data-run-id={runId}
+      data-run-status={runStatus}
+      data-runnable-id={runnableId}
+      data-runnable-kind={runnableKind}
+      data-testid="chat-agent-run-progress-card"
+    >
       <span className="message-agent-progress-icon loading-ring" aria-hidden="true" />
       <div>
         <strong>{title}</strong>
         <span>{detail}</span>
         {runId ? (
-          <button type="button" onClick={onOpenDetails}>
+          <button
+            type="button"
+            data-run-id={runId}
+            data-testid="chat-agent-run-progress-open-run-detail"
+            onClick={onOpenDetails}
+          >
             运行详情
           </button>
         ) : null}
