@@ -4953,7 +4953,16 @@ export function AgentStudioView() {
                         const childArtifacts = workflowStepArtifacts(childRun);
                         const workflowArtifact = workflowRunArtifactForStep(selectedRun, step);
                         return (
-                          <article className={`workflow-child-result workflow-step-result ${step.kind}`} data-testid="agent-run-detail-workflow-step" key={step.key}>
+                          <article
+                            className={`workflow-child-result workflow-step-result ${step.kind}`}
+                            data-testid="agent-run-detail-workflow-step"
+                            data-workflow-step-key={step.key}
+                            data-workflow-step-kind={step.kind}
+                            data-workflow-step-node-id={step.nodeId || ''}
+                            data-workflow-step-status={childStatus}
+                            data-child-run-id={step.childRunId || ''}
+                            key={step.key}
+                          >
                             <div className="workflow-child-result-head">
                               <div>
                                 <strong>{index + 1}. {step.label}</strong>
@@ -5103,11 +5112,16 @@ export function AgentStudioView() {
                   <div className="run-detail-fold-body run-artifacts" data-testid="agent-run-detail-artifact-list">
                     {(selectedRun.artifacts || []).map((artifact, index) => {
                       const path = String(artifact.path || '');
+                      const artifactKind = String(artifact.kind || artifact.artifact_kind || '').trim();
                       const sourceRunId = String(artifact.source_run_id || artifact.run_id || selectedRun.run_id);
                       const sourceLabel = String(artifact.source_runnable_name || artifact.workflow_step_label || '').trim();
                       return (
                         <button
                           type="button"
+                          data-artifact-kind={artifactKind}
+                          data-artifact-path={path}
+                          data-artifact-source-label={sourceLabel}
+                          data-artifact-source-run-id={sourceRunId}
                           data-testid="agent-run-detail-artifact"
                           disabled={!path}
                           key={`${path}-${index}`}
