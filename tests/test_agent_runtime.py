@@ -3514,6 +3514,8 @@ def test_main_chat_model_loop_executes_openai_compatible_sse_tool_calls(tmp_path
 
     first_response = FakeResponse(
         [
+            b": provider keepalive\n\n",
+            b'event: ping\ndata: {"type":"ping"}\n\n',
             event(
                 {
                     "choices": [
@@ -3532,6 +3534,7 @@ def test_main_chat_model_loop_executes_openai_compatible_sse_tool_calls(tmp_path
                     ]
                 }
             ),
+            b'data: {"type":"heartbeat","created":123}\n\n',
             event(
                 {
                     "choices": [
@@ -9933,6 +9936,8 @@ def test_agent_run_executes_http_sse_tool_call_and_continues(tmp_path, monkeypat
 
     first_response = FakeResponse(
         [
+            b": provider keepalive\n\n",
+            b'event: ping\ndata: {"type":"ping"}\n\n',
             event(
                 {
                     "choices": [
@@ -9951,6 +9956,7 @@ def test_agent_run_executes_http_sse_tool_call_and_continues(tmp_path, monkeypat
                     ]
                 }
             ),
+            b'data: {"type":"heartbeat","created":123}\n\n',
             event(
                 {
                     "choices": [
@@ -9970,6 +9976,8 @@ def test_agent_run_executes_http_sse_tool_call_and_continues(tmp_path, monkeypat
     )
     second_response = FakeResponse(
         [
+            b"event: heartbeat\n"
+            b'data: {"type":"heartbeat"}\n\n',
             event({"choices": [{"delta": {"content": "Agent HTTP SSE tool call complete"}}]}),
             b"data: [DONE]\n\n",
         ]
