@@ -11,10 +11,12 @@ const FRONTEND = path.join(ROOT, 'apps', 'frontend');
 const ELECTRON = path.join(FRONTEND, 'node_modules', '.bin', process.platform === 'win32' ? 'electron.cmd' : 'electron');
 const VITE = path.join(FRONTEND, 'node_modules', '.bin', process.platform === 'win32' ? 'vite.cmd' : 'vite');
 const RUN_ID = 'agent_run_detail_ui_smoke';
+const RERUN_RUN_ID = 'agent_run_detail_ui_smoke_rerun';
 const RUN_GROUP_ID = 'run_group_detail_ui_smoke';
 const ARTIFACT_PATH = 'summary.md';
 const ARTIFACT_CONTENT = '# Run Detail UI Smoke\n\nArtifact preview loaded from mock Bridge.';
 const now = new Date().toISOString();
+let rerunCreated = false;
 
 const run = {
   run_id: RUN_ID,
@@ -48,9 +50,19 @@ const runGroup = {
   source: 'agent',
   status: 'completed',
   summary: 'One completed Agent Run',
-  child_run_ids: [RUN_ID],
+  child_run_ids: [RUN_ID, RERUN_RUN_ID],
   created_at: now,
   updated_at: now,
+};
+
+const rerun = {
+  ...run,
+  run_id: RERUN_RUN_ID,
+  task_id: 'task-run-detail-ui-smoke-rerun',
+  result: 'Run Detail UI smoke rerun completed',
+  task_run_link_last_event_sequence: 2,
+  artifacts: [],
+  agent_run_id: RERUN_RUN_ID,
 };
 
 const runEvents = [
@@ -103,6 +115,33 @@ const runEvents = [
     visibility: 'user',
     sensitivity: 'normal',
     payload: { result: run.result },
+    created_at: now,
+  },
+];
+
+const rerunEvents = [
+  {
+    event_id: 'event-run-detail-smoke-rerun-1',
+    run_id: RERUN_RUN_ID,
+    sequence: 1,
+    schema_version: 1,
+    event_type: 'run.rerun.started',
+    actor: 'system',
+    visibility: 'user',
+    sensitivity: 'normal',
+    payload: { source_run_id: RUN_ID },
+    created_at: now,
+  },
+  {
+    event_id: 'event-run-detail-smoke-rerun-2',
+    run_id: RERUN_RUN_ID,
+    sequence: 2,
+    schema_version: 1,
+    event_type: 'agent.run.completed',
+    actor: 'agent',
+    visibility: 'user',
+    sensitivity: 'normal',
+    payload: { result: rerun.result },
     created_at: now,
   },
 ];
@@ -171,7 +210,19 @@ async function startMockBridge() {
         return;
       }
       if (request.method === 'GET' && url.pathname === '/ui/model-profiles') {
-        sendJson(response, 200, { ok: true, profiles: [], defaults: {} });
+        sendJson(response, 200, {
+          ok: true,
+          profiles: [{
+            profile_id: 'profile-run-detail-smoke',
+            name: 'Run Detail Smoke Chat Profile',
+            capability: 'chat',
+            provider: 'openai_compatible',
+            enabled: true,
+            api_key_configured: true,
+            status: 'available',
+          }],
+          defaults: { chat: 'profile-run-detail-smoke' },
+        });
         return;
       }
       if (request.method === 'GET' && url.pathname === '/ui/workflows') {
@@ -191,11 +242,20 @@ async function startMockBridge() {
         return;
       }
       if (request.method === 'GET' && url.pathname === '/ui/runs') {
-        sendJson(response, 200, { runs: [run] });
+        sendJson(response, 200, { runs: rerunCreated ? [rerun, run] : [run] });
         return;
       }
       if (request.method === 'GET' && url.pathname === `/ui/runs/${RUN_ID}`) {
         sendJson(response, 200, run);
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/ui/runs/${RERUN_RUN_ID}`) {
+        sendJson(response, rerunCreated ? 200 : 404, rerunCreated ? rerun : { ok: false, error: 'rerun not created' });
+        return;
+      }
+      if (request.method === 'POST' && url.pathname === `/ui/runs/${RUN_ID}/rerun`) {
+        rerunCreated = true;
+        sendJson(response, 200, rerun);
         return;
       }
       if (request.method === 'GET' && url.pathname === `/ui/runs/${RUN_ID}/artifacts/${ARTIFACT_PATH}`) {
@@ -224,6 +284,17 @@ async function startMockBridge() {
           limit,
           events: runEvents.filter((event) => event.sequence > afterSequence).slice(0, limit),
         });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/runs/${RERUN_RUN_ID}/events`) {
+        const afterSequence = Number(url.searchParams.get('after_sequence') || '0');
+        const limit = Math.max(1, Number(url.searchParams.get('limit') || '200'));
+        sendJson(response, rerunCreated ? 200 : 404, rerunCreated ? {
+          run_id: RERUN_RUN_ID,
+          after_sequence: Math.max(0, afterSequence),
+          limit,
+          events: rerunEvents.filter((event) => event.sequence > afterSequence).slice(0, limit),
+        } : { ok: false, error: 'rerun not created' });
         return;
       }
       sendJson(response, 404, { ok: false, error: `not found: ${request.method} ${url.pathname}` });
@@ -387,6 +458,25 @@ async function main() {
       && preview.textContent.includes('Artifact preview loaded from mock Bridge.');
   }, 'run detail artifact preview');
   console.log('[electron-smoke] artifact preview rendered');
+  await waitFor(win, () => !document.querySelector('[data-testid="agent-run-detail-rerun"]')?.disabled, 'enabled rerun button');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"agent-run-detail-rerun\\"]').click()", true);
+  await waitFor(win, () => (
+    window.location.hash.includes(${JSON.stringify(RERUN_RUN_ID)})
+    && document.querySelector('[data-testid="agent-run-detail"]')?.getAttribute('data-run-id') === ${JSON.stringify(RERUN_RUN_ID)}
+    && document.querySelector('[data-testid="agent-run-detail-result"]')?.textContent.includes('Run Detail UI smoke rerun completed')
+  ), 'rerun run detail');
+  await waitFor(win, () => {
+    const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
+    const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
+    const sequences = events.map((node) => node.getAttribute('data-run-event-sequence'));
+    const runIds = events.map((node) => node.getAttribute('data-run-event-run-id'));
+    return events.length === 2
+      && eventTypes.includes('run.rerun.started')
+      && eventTypes.includes('agent.run.completed')
+      && sequences.join(',') === '1,2'
+      && runIds.every((id) => id === ${JSON.stringify(RERUN_RUN_ID)});
+  }, 'rerun replay events');
+  console.log('[electron-smoke] rerun detail rendered');
   clearTimeout(watchdog);
   await win.close();
   app.quit();
