@@ -507,6 +507,7 @@ async function waitForRunDetailHandoff(win, label) {
     const request = document.querySelector('[data-testid="agent-run-approval-request"]');
     const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
     const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
+    const approvalRequiredEvent = events.find((node) => node.getAttribute('data-run-event') === 'agent.tool.approval_required');
     return window.location.hash.includes(${JSON.stringify(RUN_ID)})
       && detail?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
       && detail?.getAttribute('data-run-kind') === 'main_chat_run'
@@ -515,6 +516,10 @@ async function waitForRunDetailHandoff(win, label) {
       && request?.textContent.includes('terminal.run')
       && request?.textContent.includes(${JSON.stringify(APPROVAL_COMMAND)})
       && eventTypes.includes('agent.tool.approval_required')
+      && approvalRequiredEvent?.textContent.includes('terminal.run')
+      && approvalRequiredEvent?.textContent.includes(${JSON.stringify(APPROVAL_COMMAND)})
+      && approvalRequiredEvent?.textContent.includes('/workspace')
+      && approvalRequiredEvent?.textContent.includes('Chat approval UI smoke')
       && events.every((node) => node.getAttribute('data-run-event-run-id') === ${JSON.stringify(RUN_ID)});
   }, label);
 }
