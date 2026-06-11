@@ -206,11 +206,18 @@ function killProcess(child) {
 }
 
 function runElectronSmoke(devUrl, bridgeUrl) {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oha-chat-image-smoke-'));
+  const imageFilePath = path.join(tempDir, 'smoke-image-cdp.svg');
+  fs.writeFileSync(
+    imageFilePath,
+    Buffer.from(TEST_IMAGE_DATA_URL.split(',')[1] || '', 'base64'),
+  );
   const script = `
 const { app, BrowserWindow } = require('electron');
 const devUrl = ${JSON.stringify(devUrl)};
 const bridgeUrl = ${JSON.stringify(bridgeUrl)};
 const imageDataUrl = ${JSON.stringify(TEST_IMAGE_DATA_URL)};
+const imageFilePath = ${JSON.stringify(imageFilePath)};
 const watchdog = setTimeout(() => {
   console.error('electron smoke timed out');
   app.exit(1);
@@ -245,6 +252,19 @@ function waitFor(win, predicate, label, timeout = 15000) {
       }
     };
     tick();
+  });
+}
+async function setChatImageInputFileWithCdp(win, filePath) {
+  if (!win.webContents.debugger.isAttached()) win.webContents.debugger.attach('1.3');
+  const documentResult = await win.webContents.debugger.sendCommand('DOM.getDocument', { depth: -1, pierce: true });
+  const queryResult = await win.webContents.debugger.sendCommand('DOM.querySelector', {
+    nodeId: documentResult.root.nodeId,
+    selector: '[data-testid="chat-image-file-input"]',
+  });
+  if (!queryResult.nodeId) throw new Error('chat image file input not found through CDP');
+  await win.webContents.debugger.sendCommand('DOM.setFileInputFiles', {
+    files: [filePath],
+    nodeId: queryResult.nodeId,
   });
 }
 async function main() {
@@ -310,6 +330,7 @@ async function main() {
       transfer.items.add(file);
       Object.defineProperty(input, 'files', { configurable: true, value: transfer.files });
       input.dispatchEvent(new Event('change', { bubbles: true }));
+      delete input.files;
     })();
   \`, true);
   await waitFor(win, () => {
@@ -322,22 +343,19 @@ async function main() {
   await waitFor(win, () => document.querySelector('button[aria-label="发送消息"]')?.disabled, 'disabled send button after attachment removal');
   console.log('[electron-smoke] attachment preview removed');
   await win.webContents.executeJavaScript(\`
-    (async () => {
+    (() => {
       const input = document.querySelector('[data-testid="chat-image-file-input"]');
       if (!input) throw new Error('chat image file input not found');
-      const blob = await fetch(\${JSON.stringify(imageDataUrl)}).then((response) => response.blob());
-      const file = new File([blob], 'smoke-image.svg', { type: 'image/svg+xml' });
-      const transfer = new DataTransfer();
-      transfer.items.add(file);
-      Object.defineProperty(input, 'files', { configurable: true, value: transfer.files });
-      input.dispatchEvent(new Event('change', { bubbles: true }));
+      delete input.files;
+      input.value = '';
     })();
   \`, true);
+  await setChatImageInputFileWithCdp(win, imageFilePath);
   await waitFor(win, () => {
     const preview = document.querySelector('[data-testid="chat-composer-attachment-preview"]');
-    return preview && preview.getAttribute('data-attachment-name') === 'smoke-image.svg';
+    return preview && preview.getAttribute('data-attachment-name') === 'smoke-image-cdp.svg';
   }, 'composer attachment preview after removal');
-  console.log('[electron-smoke] attachment preview rendered after removal');
+  console.log('[electron-smoke] attachment preview rendered through CDP file input');
   await win.webContents.executeJavaScript(\`
     const input = document.querySelector('textarea.chat-input');
     const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
@@ -348,7 +366,7 @@ async function main() {
   await win.webContents.executeJavaScript("document.querySelector('button[aria-label=\\"发送消息\\"]').closest('form').requestSubmit()", true);
   await waitFor(win, () => {
     const item = document.querySelector('[data-testid="chat-message-attachment-item"]');
-    return item && item.getAttribute('data-attachment-name') === 'smoke-image.svg';
+    return item && item.getAttribute('data-attachment-name') === 'smoke-image-cdp.svg';
   }, 'rendered message attachment');
   console.log('[electron-smoke] message attachment rendered');
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-message-attachment-item\\"]').click()", true);
@@ -363,7 +381,6 @@ main().catch((error) => {
   app.exit(1);
 });
 `;
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oha-chat-image-smoke-'));
   const mainPath = path.join(tempDir, 'main.cjs');
   fs.writeFileSync(mainPath, script, 'utf8');
   return new Promise((resolve, reject) => {
@@ -410,7 +427,7 @@ async function main() {
       fail('Chat UI did not submit exactly one attachment');
     }
     const attachment = payload.attachments[0];
-    if (attachment.name !== 'smoke-image.svg') fail(`unexpected attachment name: ${attachment.name}`);
+    if (attachment.name !== 'smoke-image-cdp.svg') fail(`unexpected attachment name: ${attachment.name}`);
     if (!String(attachment.data_url || '').startsWith('data:image/svg+xml')) {
       fail('submitted attachment did not include image data URL');
     }

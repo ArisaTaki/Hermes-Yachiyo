@@ -425,10 +425,14 @@ def test_chat_image_attachment_ui_smoke_uses_file_input_path() -> None:
             "transfer.items.add(file)",
             "Object.defineProperty(input, 'files', { configurable: true, value: transfer.files })",
             "input.dispatchEvent(new Event('change', { bubbles: true }))",
+            "delete input.files",
             "chat-composer-attachment-remove",
             "removed composer attachment preview",
             "disabled send button after attachment removal",
-            "composer attachment preview after removal",
+            "setChatImageInputFileWithCdp",
+            "DOM.setFileInputFiles",
+            "smoke-image-cdp.svg",
+            "attachment preview rendered through CDP file input",
         ],
     )
     _assert_not_contains(smoke_script, ["oha-chat-e2e-add-image"])
