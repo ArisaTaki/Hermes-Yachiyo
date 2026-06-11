@@ -196,6 +196,7 @@ jobs:
             tests/test_agent_runtime.py::test_workflow_routes_save_and_run_latest_canvas_with_step_approval_and_artifact \
             tests/test_agent_runtime.py::test_workflow_approval_transitions_use_shared_context_boundary \
             tests/test_agent_runtime.py::test_workflow_approval_resume_context_parses_pending_payload \
+            tests/test_agent_runtime.py::test_workflow_approval_resume_coordinator_claims_and_handoffs \
             tests/test_bridge_server.py::test_workflow_approval_node_http_roundtrip_approve_detail_and_replay \
             tests/test_bridge_server.py::test_workflow_approval_node_http_roundtrip_reject_detail_and_replay \
             tests/test_bridge_server.py::test_workflow_approval_node_http_roundtrip_cancel_detail_group_and_replay \

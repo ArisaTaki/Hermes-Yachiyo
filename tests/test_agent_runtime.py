@@ -30,6 +30,7 @@ from apps.shell.agent_runtime import (
     ToolApprovalResumeContext,
     ToolApprovalTransitionContext,
     ToolBroker,
+    WorkflowApprovalResumeCoordinator,
     WorkflowApprovalResumeContext,
     WorkflowApprovalTransitionContext,
     WorkflowCancellationProjectionCoordinator,
@@ -194,6 +195,82 @@ def test_workflow_approval_resume_context_parses_pending_payload():
             workflow=workflow,
             root_group=False,
         )
+
+
+def test_workflow_approval_resume_coordinator_claims_and_handoffs():
+    calls: list[tuple[str, dict[str, object]]] = []
+    claim_result = {"value": True}
+    run = {"run_id": "workflow_run"}
+    pending = {"tool": "workflow.approval", "approval_id": "approval-1"}
+    workflow = {"workflow_id": "workflow_resume"}
+    timeline = [{"event": "workflow.node.approval_required"}]
+    artifacts = [{"path": "summary.md"}]
+    context = WorkflowApprovalResumeContext(
+        approval=WorkflowApprovalTransitionContext(
+            label="Human Gate",
+            workflow_node_id="gate",
+            criteria="Review before continuing.",
+            input_preview={"checkpoint": "Human Gate"},
+        ),
+        workflow=workflow,
+        result_context="approved context",
+        timeline=timeline,
+        artifacts=artifacts,
+        start_index=3,
+        root_group=True,
+    )
+
+    def claim_pending_approval(run_id, approval_payload):
+        calls.append(("claim_pending_approval", {"run_id": run_id, "pending": approval_payload}))
+        return claim_result["value"]
+
+    def get_current_run(run_id):
+        calls.append(("get_current_run", {"run_id": run_id}))
+        return {"run_id": run_id, "status": "approval_required"}
+
+    def resume_after_approval_node(received_run, received_workflow, **kwargs):
+        calls.append(
+            (
+                "resume_after_approval_node",
+                {
+                    "run": received_run,
+                    "workflow": received_workflow,
+                    **kwargs,
+                },
+            )
+        )
+        return {"run_id": received_run["run_id"], "status": "completed"}
+
+    coordinator = WorkflowApprovalResumeCoordinator(
+        claim_pending_approval=claim_pending_approval,
+        get_current_run=get_current_run,
+        resume_after_approval_node=resume_after_approval_node,
+    )
+
+    completed = coordinator.resume_after_approval(run, pending, context)
+    claim_result["value"] = False
+    duplicate = coordinator.resume_after_approval(run, pending, context)
+
+    assert completed == {"run_id": "workflow_run", "status": "completed"}
+    assert duplicate == {"run_id": "workflow_run", "status": "approval_required"}
+    assert [name for name, _payload in calls] == [
+        "claim_pending_approval",
+        "resume_after_approval_node",
+        "claim_pending_approval",
+        "get_current_run",
+    ]
+    handoff = calls[1][1]
+    assert handoff["run"] is run
+    assert handoff["workflow"] is workflow
+    assert handoff["context"] == "approved context"
+    assert handoff["timeline"] is timeline
+    assert handoff["artifacts"] is artifacts
+    assert handoff["start_index"] == 3
+    assert handoff["root_group"] is True
+    assert handoff["workflow_node_id"] == "gate"
+    assert handoff["label"] == "Human Gate"
+    assert handoff["criteria"] == "Review before continuing."
+    assert handoff["input_preview"] == {"checkpoint": "Human Gate"}
 
 
 def test_approval_resume_coordinator_executes_approved_tool_and_remaining_requests():

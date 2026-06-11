@@ -2715,6 +2715,44 @@ class WorkflowApprovalResumeContext:
         )
 
 
+class WorkflowApprovalResumeCoordinator:
+    """Claims and resumes a Workflow approval node."""
+
+    def __init__(
+        self,
+        *,
+        claim_pending_approval: Any,
+        get_current_run: Any,
+        resume_after_approval_node: Any,
+    ) -> None:
+        self._claim_pending_approval = claim_pending_approval
+        self._get_current_run = get_current_run
+        self._resume_after_approval_node = resume_after_approval_node
+
+    def resume_after_approval(
+        self,
+        run: dict[str, Any],
+        pending: dict[str, Any],
+        context: WorkflowApprovalResumeContext,
+    ) -> dict[str, Any]:
+        run_id = str(run["run_id"])
+        if not self._claim_pending_approval(run_id, pending):
+            return self._get_current_run(run_id)
+        return self._resume_after_approval_node(
+            run,
+            context.workflow,
+            context=context.result_context,
+            timeline=context.timeline,
+            artifacts=context.artifacts,
+            start_index=context.start_index,
+            root_group=context.root_group,
+            workflow_node_id=context.approval.workflow_node_id,
+            label=context.approval.label,
+            criteria=context.approval.criteria,
+            input_preview=context.approval.input_preview,
+        )
+
+
 class ApprovalResumeCoordinator:
     """Executes the approved tool portion of a paused run resume."""
 
@@ -4052,6 +4090,11 @@ class NativeRunEngine:
             continue_custom_api_agent=self._run_custom_api_agent,
         )
         self.workflow_continuation = WorkflowContinuationCoordinator(self)
+        self.workflow_approval_resume = WorkflowApprovalResumeCoordinator(
+            claim_pending_approval=self.run_approvals.claim_pending_approval,
+            get_current_run=self.get_run,
+            resume_after_approval_node=self.workflow_continuation.resume_after_approval_node,
+        )
         self.workflow_cancellation = WorkflowCancellationProjectionCoordinator(
             pending_approval_private=lambda run_id: self.runs.pending_approval_private(run_id),
             get_run=lambda run_id: self.get_run(run_id),
@@ -8679,20 +8722,10 @@ class NativeRunEngine:
             workflow=self._workflow_for_run_resume(run),
             root_group=self._workflow_run_is_group_root(run),
         )
-        if not self.run_approvals.claim_pending_approval(run_id, pending):
-            return self.get_run(run_id)
-        return self.workflow_continuation.resume_after_approval_node(
+        return self.workflow_approval_resume.resume_after_approval(
             run,
-            resume_context.workflow,
-            context=resume_context.result_context,
-            timeline=resume_context.timeline,
-            artifacts=resume_context.artifacts,
-            start_index=resume_context.start_index,
-            root_group=resume_context.root_group,
-            workflow_node_id=resume_context.approval.workflow_node_id,
-            label=resume_context.approval.label,
-            criteria=resume_context.approval.criteria,
-            input_preview=resume_context.approval.input_preview,
+            pending,
+            resume_context,
         )
 
     def _project_cancelled_workflow_group_if_root(
