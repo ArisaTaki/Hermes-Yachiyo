@@ -702,6 +702,14 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover mature UI flow contracts",
     ),
     (
+        "node scripts/smoke_chat_image_attachment_ui.mjs",
+        "macOS release workflow smoke tests must cover Chat image Electron UI smoke",
+    ),
+    (
+        "node scripts/smoke_agent_run_detail_ui.mjs",
+        "macOS release workflow smoke tests must cover Agent Run Detail replay Electron UI smoke",
+    ),
+    (
         "tests/test_bridge_server.py::test_bridge_http_middleware_enforces_host_origin_and_session_token",
         "macOS release workflow smoke tests must cover Bridge Host Origin and session token guard",
     ),

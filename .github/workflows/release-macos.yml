@@ -169,6 +169,9 @@ jobs:
             tests/test_effect_policy.py \
             tests/test_mode_settings.py
 
+          node scripts/smoke_chat_image_attachment_ui.mjs
+          node scripts/smoke_agent_run_detail_ui.mjs
+
       - name: Run opt-in real provider streaming smoke
         shell: bash
         env:
