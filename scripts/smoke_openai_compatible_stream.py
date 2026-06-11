@@ -69,6 +69,30 @@ def _tool_arguments_text(value: Any) -> str:
     return str(value)
 
 
+def _expected_json_fields(values: Iterable[str] | None) -> list[tuple[str, str]]:
+    fields: list[tuple[str, str]] = []
+    for raw_value in values or []:
+        value = str(raw_value or "").strip()
+        if not value:
+            continue
+        if "=" not in value:
+            raise ValueError("Expected tool argument JSON field must use KEY=VALUE")
+        key, expected = value.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise ValueError("Expected tool argument JSON field key cannot be empty")
+        fields.append((key, expected.strip()))
+    return fields
+
+
+def _argument_json_field_matches(arguments: str, key: str, expected: str) -> bool:
+    try:
+        parsed = json.loads(arguments or "{}")
+    except json.JSONDecodeError:
+        return False
+    return isinstance(parsed, dict) and key in parsed and str(parsed[key]) == expected
+
+
 def _raw_part_text(value: Any) -> str:
     if isinstance(value, str):
         return value
@@ -341,6 +365,7 @@ def run_stream_smoke(
     require_reasoning: bool = False,
     expect_tool_name: str = "",
     expect_tool_argument_substrings: Iterable[str] | None = None,
+    expect_tool_argument_json_fields: Iterable[str] | None = None,
     expect_finish_reasons: Iterable[str] | None = None,
 ) -> dict[str, Any]:
     base_url = str(base_url or "").strip()
@@ -364,12 +389,19 @@ def run_stream_smoke(
         for value in (expect_tool_argument_substrings or [])
         if str(value or "").strip()
     ]
+    expected_argument_json_fields = _expected_json_fields(expect_tool_argument_json_fields)
     expected_finish_reasons = [
         str(value).strip()
         for value in (expect_finish_reasons or [])
         if str(value or "").strip()
     ]
-    tool_call = tool_call or require_tool_call or bool(expected_name) or bool(expected_argument_substrings)
+    tool_call = (
+        tool_call
+        or require_tool_call
+        or bool(expected_name)
+        or bool(expected_argument_substrings)
+        or bool(expected_argument_json_fields)
+    )
     if not prompt:
         prompt = (
             "Call workspace_read with path README.md, then stream a short answer."
@@ -386,7 +418,7 @@ def run_stream_smoke(
     )
     summary = summarize_stream_chunks(
         chunks if not isinstance(chunks, dict) else [],
-        include_tool_arguments=bool(expected_argument_substrings),
+        include_tool_arguments=bool(expected_argument_substrings or expected_argument_json_fields),
     )
     if require_content and int(summary["content_chars"]) == 0:
         raise RuntimeError("stream completed without content")
@@ -403,6 +435,12 @@ def run_stream_smoke(
         for expected_argument in expected_argument_substrings:
             if not any(expected_argument in argument for argument in arguments):
                 raise RuntimeError("stream completed without expected tool call argument substring")
+    if expected_argument_json_fields:
+        arguments = [str(call.get("arguments") or "") for call in summary["tool_calls"]]
+        for key, expected in expected_argument_json_fields:
+            if not any(_argument_json_field_matches(argument, key, expected) for argument in arguments):
+                raise RuntimeError("stream completed without expected tool call JSON argument field")
+    if expected_argument_substrings or expected_argument_json_fields:
         for call in summary["tool_calls"]:
             call.pop("arguments", None)
     if expected_finish_reasons:
@@ -441,6 +479,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Fail unless at least one streamed tool call argument contains this substring. May be repeated.",
     )
     parser.add_argument(
+        "--expect-tool-argument-json-field",
+        action="append",
+        default=[],
+        help="Fail unless at least one streamed tool call argument JSON object has KEY=VALUE. May be repeated.",
+    )
+    parser.add_argument(
         "--expect-finish-reason",
         action="append",
         default=[],
@@ -465,6 +509,7 @@ def main(argv: list[str] | None = None) -> int:
             require_reasoning=args.require_reasoning,
             expect_tool_name=args.expect_tool_name,
             expect_tool_argument_substrings=args.expect_tool_argument_substring,
+            expect_tool_argument_json_fields=args.expect_tool_argument_json_field,
             expect_finish_reasons=args.expect_finish_reason,
         )
     except ValueError as exc:

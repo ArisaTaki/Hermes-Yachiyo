@@ -51,6 +51,7 @@ def test_stream_smoke_summarizes_split_tool_call_without_secrets(monkeypatch):
         tool_call=True,
         require_tool_call=True,
         expect_tool_argument_substrings=["README.md"],
+        expect_tool_argument_json_fields=["path=README.md"],
     )
 
     assert requests[0]["stream"] is True
@@ -860,6 +861,15 @@ def test_stream_smoke_fails_when_expected_content_or_tool_is_missing(monkeypatch
             expect_tool_argument_substrings=["README.md"],
         )
 
+    with pytest.raises(RuntimeError, match="expected tool call JSON argument field"):
+        smoke.run_stream_smoke(
+            base_url="https://api.example.test/v1",
+            model="demo-model",
+            api_key="sk-stream-smoke-secret123456",
+            tool_call=True,
+            expect_tool_argument_json_fields=["path=README.md"],
+        )
+
 
 def test_stream_smoke_requires_expected_finish_reason(monkeypatch):
     class FakeResponse:
@@ -921,6 +931,8 @@ def test_stream_smoke_main_expect_tool_name_requests_tool_call(monkeypatch, caps
             "workspace_read",
             "--expect-tool-argument-substring",
             "README.md",
+            "--expect-tool-argument-json-field",
+            "path=README.md",
             "--expect-finish-reason",
             "tool_calls",
         ]
@@ -933,6 +945,7 @@ def test_stream_smoke_main_expect_tool_name_requests_tool_call(monkeypatch, caps
     assert calls[0]["require_reasoning"] is True
     assert calls[0]["expect_tool_name"] == "workspace_read"
     assert calls[0]["expect_tool_argument_substrings"] == ["README.md"]
+    assert calls[0]["expect_tool_argument_json_fields"] == ["path=README.md"]
     assert calls[0]["expect_finish_reasons"] == ["tool_calls"]
     assert "sk-stream" not in captured.out
 
