@@ -106,6 +106,7 @@ jobs:
             tests/test_shell_app_entrypoint.py \
             tests/test_main_api_modes.py \
             tests/test_model_capabilities.py \
+            tests/test_model_profiles.py \
             tests/test_build_backend.py \
             tests/test_build_metadata.py \
             tests/test_credential_store.py \
