@@ -87,6 +87,7 @@ jobs:
             tests/test_executor.py::TestNativeAgentExecutor::test_run_limits_chat_history_by_context_chars \
             tests/test_executor.py::TestNativeAgentExecutor::test_run_passes_image_attachments_as_limited_data_urls \
             tests/test_agent_runtime.py::test_main_chat_run_links_task_and_records_replayable_events \
+            tests/test_agent_runtime.py::test_task_run_link_repository_tracks_run_projection \
             tests/test_agent_runtime.py::test_runtime_shutdown_cancels_active_runs_rejects_new_runs_and_records_fact \
             tests/test_agent_runtime.py::test_runtime_shutdown_close_db_closes_runtime_resources \
             tests/test_agent_runtime.py::test_agent_run_validates_write_patch_workspace_boundary_before_approval \

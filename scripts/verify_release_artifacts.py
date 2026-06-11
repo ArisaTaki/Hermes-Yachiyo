@@ -439,6 +439,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover TaskRunLink replay projection",
     ),
     (
+        "tests/test_agent_runtime.py::test_task_run_link_repository_tracks_run_projection",
+        "macOS release workflow smoke tests must cover TaskRunLink repository projection boundary",
+    ),
+    (
         "tests/test_agent_runtime.py::test_runtime_shutdown_cancels_active_runs_rejects_new_runs_and_records_fact",
         "macOS release workflow smoke tests must cover Native runtime shutdown cancellation facts",
     ),
