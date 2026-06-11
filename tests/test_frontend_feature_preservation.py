@@ -422,6 +422,33 @@ def test_proactive_tts_ui_smoke_uses_screen_permission_tts_and_voice_import_path
     )
 
 
+def test_diagnostics_screenshot_ui_smoke_uses_local_screen_probe_path() -> None:
+    smoke_script = "scripts/smoke_diagnostics_screenshot_ui.mjs"
+    _assert_contains(
+        "apps/frontend/src/views/DiagnosticsView.tsx",
+        [
+            "apiGet<ScreenshotProbe>('/screen/current')",
+            'data-testid="diagnostics-status"',
+            'data-testid="diagnostics-screen-probe"',
+            'data-testid="diagnostics-screen-probe-card"',
+            'data-testid="diagnostics-screen-probe-summary"',
+            'data-testid="diagnostics-screen-probe-image"',
+        ],
+    )
+    _assert_contains(
+        smoke_script,
+        [
+            "#/diagnostics",
+            "request.method === 'GET' && url.pathname === '/screen/current'",
+            "data-testid=\"diagnostics-screen-probe\"",
+            "data-testid=\"diagnostics-screen-probe-card\"",
+            "data-testid=\"diagnostics-screen-probe-summary\"",
+            "data-testid=\"diagnostics-screen-probe-image\"",
+            "bridgeState.screenRequests !== 1",
+        ],
+    )
+
+
 def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> None:
     chat_view = "apps/frontend/src/views/ChatView.tsx"
     _assert_contains(

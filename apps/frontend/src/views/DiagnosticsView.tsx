@@ -676,7 +676,7 @@ export function DiagnosticsView() {
         label={diagnosticLoadingLabel({ initialLoading, busy, runtimeBusy, toolsLoading })}
       />
 
-      {status ? <div className={diagnosticNoticeClass(status)}>{status}</div> : null}
+      {status ? <div className={diagnosticNoticeClass(status)} data-testid="diagnostics-status">{status}</div> : null}
 
       <section className="hy-diagnostic-grid hy-stagger" aria-label="系统检测">
         {diagnosticOverviewItems(overview, diagnosticCache, settingsOverview).map((item) => (
@@ -865,15 +865,15 @@ export function DiagnosticsView() {
             <p className="section-caption">手动调用截图与活动窗口接口；截图只显示本地缩略预览和尺寸。</p>
           </div>
           <div className="diagnostic-result-actions">
-            <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(runtimeBusy)} onClick={() => void probeScreen()}>{runtimeBusy === 'screen' ? '探测中...' : '截图摘要'}</button>
+            <button type="button" className="hy-btn hy-btn-ghost" data-testid="diagnostics-screen-probe" disabled={Boolean(runtimeBusy)} onClick={() => void probeScreen()}>{runtimeBusy === 'screen' ? '探测中...' : '截图摘要'}</button>
             <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(runtimeBusy)} onClick={() => void probeActiveWindow()}>{runtimeBusy === 'active-window' ? '探测中...' : '活动窗口'}</button>
           </div>
         </div>
         <div className="diagnostic-probe-grid">
-          <article className="diagnostic-probe-card">
+          <article className="diagnostic-probe-card" data-testid="diagnostics-screen-probe-card">
             <strong>屏幕截图</strong>
-            <span>{screenProbe ? `${screenProbe.width || '—'}×${screenProbe.height || '—'} · ${screenProbe.format || 'png'} · ${formatShortDateTime(screenProbe.captured_at)}` : '未探测'}</span>
-            {screenProbe?.image_base64 ? <img src={`data:image/${screenProbe.format || 'png'};base64,${screenProbe.image_base64}`} alt="当前屏幕缩略图" /> : null}
+            <span data-testid="diagnostics-screen-probe-summary">{screenProbe ? `${screenProbe.width || '—'}×${screenProbe.height || '—'} · ${screenProbe.format || 'png'} · ${formatShortDateTime(screenProbe.captured_at)}` : '未探测'}</span>
+            {screenProbe?.image_base64 ? <img data-testid="diagnostics-screen-probe-image" src={`data:image/${screenProbe.format || 'png'};base64,${screenProbe.image_base64}`} alt="当前屏幕缩略图" /> : null}
           </article>
           <article className="diagnostic-probe-card">
             <strong>活动窗口</strong>

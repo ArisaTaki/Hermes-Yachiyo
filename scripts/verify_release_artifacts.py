@@ -136,6 +136,11 @@ PACKAGED_UI_E2E_REQUIRED_SELECTORS: tuple[str, ...] = (
     "activity-detail-delete",
     "confirm-dialog",
     "confirm-action",
+    "diagnostics-status",
+    "diagnostics-screen-probe",
+    "diagnostics-screen-probe-card",
+    "diagnostics-screen-probe-summary",
+    "diagnostics-screen-probe-image",
     "bubble-launcher-shell",
     "bubble-launcher-button",
     "bubble-launcher-summary",
@@ -821,6 +826,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "node scripts/smoke_activity_ui.mjs",
         "macOS release workflow smoke tests must cover Activity feed/detail Electron UI smoke",
+    ),
+    (
+        "node scripts/smoke_diagnostics_screenshot_ui.mjs",
+        "macOS release workflow smoke tests must cover local screenshot Electron UI smoke",
     ),
     (
         "node scripts/smoke_launcher_session_summary_ui.mjs",
