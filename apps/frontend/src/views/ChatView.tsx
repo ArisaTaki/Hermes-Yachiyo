@@ -889,7 +889,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     const files = clipboardImageFiles(event.clipboardData);
     if (files.length === 0) return;
     event.preventDefault();
-    if (!canAttachImages(executor)) {
+    if (imageAttachDisabled) {
       showImageInputBlocked();
       return;
     }
@@ -968,7 +968,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   }
 
   async function addImageFiles(files: File[]) {
-    if (!canAttachImages(executor)) {
+    if (isSending || !canAttachImages(executor)) {
       showImageInputBlocked();
       return;
     }
@@ -1758,9 +1758,16 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     noticeTimerRef.current = window.setTimeout(() => setNotice(null), 5200);
   }
 
+  function imageInputBlockedNoticeText() {
+    if (isSending) return '正在发送中，稍后再添加图片';
+    if (attachments.length >= MAX_ATTACHMENTS) return `一次最多附加 ${MAX_ATTACHMENTS} 张图片`;
+    return imageInputUnavailableText(executor);
+  }
+
   function showImageInputBlocked() {
-    showNotice('当前不能发送图片', imageInputUnavailableText(executor), 'warn');
-    setStatus('图片未附加');
+    const detail = imageInputBlockedNoticeText();
+    showNotice('当前不能发送图片', detail, 'warn');
+    setStatus(detail);
   }
 
   function focusComposerSoon() {
@@ -2548,6 +2555,11 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
               onChange={(event) => {
                 const files = Array.from(event.target.files || []);
                 event.target.value = '';
+                if (files.length === 0) return;
+                if (imageAttachDisabled) {
+                  showImageInputBlocked();
+                  return;
+                }
                 void addImageFiles(files);
               }}
             />

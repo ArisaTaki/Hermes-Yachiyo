@@ -190,10 +190,17 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
             "retainComposerDraft(text, outgoingAttachments);",
             "setAttachments(outgoingAttachments);",
             "const imageAttachDisabled = isSending || !canAttachImages(executor) || attachments.length >= MAX_ATTACHMENTS;",
+            "if (imageAttachDisabled) {",
+            "if (isSending || !canAttachImages(executor)) {",
+            "function imageInputBlockedNoticeText()",
+            "if (isSending) return '正在发送中，稍后再添加图片';",
+            "const detail = imageInputBlockedNoticeText();",
+            "setStatus(detail);",
             "disabled={imageAttachDisabled}",
             "onClick={() => fileInputRef.current?.click()}",
             "const files = Array.from(event.target.files || []);",
             "event.target.value = '';",
+            "if (files.length === 0) return;",
             "void addImageFiles(files);",
             "aria-label={`移除 ${attachment.name}`}",
             "onClick={() => removeAttachment(attachment.id)}",
@@ -221,6 +228,7 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
     _assert_occurs(chat_view, "onClick={() => fileInputRef.current?.click()}", 2)
     _assert_occurs(chat_view, "data-testid=\"chat-image-file-input\"", 1)
     _assert_occurs(chat_view, "disabled={imageAttachDisabled}", 3)
+    _assert_occurs(chat_view, "if (imageAttachDisabled) {", 2)
 
 
 def test_chat_ui_exposes_stable_e2e_selectors_for_image_cancel_approval_flow() -> None:
