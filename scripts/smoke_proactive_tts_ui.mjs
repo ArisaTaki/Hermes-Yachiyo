@@ -423,13 +423,22 @@ async function main() {
   ), 'proactive test result');
   await win.webContents.executeJavaScript(\`
     (() => {
-      const input = document.querySelector('[data-testid="tts-voice-archive-path"]');
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(VOICE_ARCHIVE_PATH)});
-      input.dispatchEvent(new Event('input', { bubbles: true }));
+      window.__ohaTtsVoiceArchivePickerCalls = 0;
+      window.ohaDesktop = {
+        ...(window.ohaDesktop || {}),
+        chooseTtsVoiceArchive: async () => {
+          window.__ohaTtsVoiceArchivePickerCalls += 1;
+          return ${JSON.stringify(VOICE_ARCHIVE_PATH)};
+        },
+      };
     })();
   \`, true);
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"tts-voice-import\\"]').click()", true);
   await waitFor(win, () => document.querySelector('[data-testid="proactive-tts-status"]')?.textContent.includes('Voice package imported from UI smoke'), 'voice import result');
+  const ttsPickerCalls = await win.webContents.executeJavaScript('window.__ohaTtsVoiceArchivePickerCalls || 0', true);
+  if (ttsPickerCalls !== 1) {
+    throw new Error('expected TTS voice archive picker to be called once, got ' + ttsPickerCalls);
+  }
   await win.webContents.executeJavaScript(\`
     (() => {
       const input = document.querySelector('#tts-test-text-page');
