@@ -507,6 +507,8 @@ async function main() {
     const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
     const runIds = events.map((node) => node.getAttribute('data-run-event-run-id'));
     const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
+    const startedEvent = events.find((node) => node.getAttribute('data-run-event') === 'agent.run.started');
+    const completedEvent = events.find((node) => node.getAttribute('data-run-event') === 'run.completed');
     return window.location.hash.includes('/agents/' + encodeURIComponent(${JSON.stringify(RUN_ID)}))
       && detail?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
       && detail?.getAttribute('data-task-id') === ${JSON.stringify(TASK_ID)}
@@ -516,6 +518,8 @@ async function main() {
       && events.length === 2
       && eventTypes.includes('agent.run.started')
       && eventTypes.includes('run.completed')
+      && startedEvent?.textContent.includes(${JSON.stringify(TASK_ID)})
+      && completedEvent?.textContent.includes('Activity UI smoke opened Run Detail')
       && runIds.every((id) => id === ${JSON.stringify(RUN_ID)});
   }, 'activity run detail handoff');
   console.log('[electron-smoke] activity run detail handoff verified');

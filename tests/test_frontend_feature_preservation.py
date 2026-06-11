@@ -456,6 +456,8 @@ def test_activity_ui_smoke_uses_feed_detail_trace_and_delete_paths() -> None:
             "bridgeState.detailRequests.includes(ACTIVITY_EVENT_ID)",
             "bridgeState.runDetailRequests.includes(RUN_ID)",
             "bridgeState.runEventRequests.some((request) => request.after_sequence === 0 && request.limit === 200)",
+            "startedEvent?.textContent.includes(${JSON.stringify(TASK_ID)})",
+            "completedEvent?.textContent.includes('Activity UI smoke opened Run Detail')",
             "bridgeState.deletedEventIds.includes(ACTIVITY_EVENT_ID)",
         ],
     )
