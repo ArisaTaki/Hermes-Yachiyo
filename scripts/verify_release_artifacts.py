@@ -458,6 +458,18 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow must run the release verifier before dependency installation",
     ),
     (
+        "          - alpha",
+        "macOS release workflow must expose an alpha release channel",
+    ),
+    (
+        'CHANNEL_LABEL="Alpha 版"',
+        "macOS release workflow must label alpha releases separately",
+    ),
+    (
+        'LATEST_BRANCH="alpha"',
+        "macOS release workflow must publish alpha builds to alpha-latest metadata",
+    ),
+    (
         "Import macOS self-signing certificate",
         "macOS release workflow must import the signing certificate before building the DMG",
     ),

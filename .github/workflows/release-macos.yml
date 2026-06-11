@@ -14,6 +14,7 @@ on:
         type: choice
         options:
           - stable
+          - alpha
           - experimental
 
 permissions:
@@ -403,6 +404,8 @@ jobs:
 
           if [[ "${CHANNEL}" == "stable" ]]; then
             LATEST_BRANCH="main"
+          elif [[ "${CHANNEL}" == "alpha" ]]; then
+            LATEST_BRANCH="alpha"
           else
             LATEST_BRANCH="develop"
           fi
@@ -489,6 +492,10 @@ jobs:
             CHANNEL_LABEL="正式版"
             PRERELEASE="false"
             LATEST_BRANCH="main"
+          elif [[ "${CHANNEL}" == "alpha" ]]; then
+            CHANNEL_LABEL="Alpha 版"
+            PRERELEASE="true"
+            LATEST_BRANCH="alpha"
           else
             CHANNEL_LABEL="实验版"
             PRERELEASE="true"

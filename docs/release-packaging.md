@@ -94,6 +94,7 @@ Release tag 格式：
 
 ```text
 stable-v<产品版本>-build.<构建号>-<短SHA>
+alpha-v<产品版本>-build.<构建号>-<短SHA>
 experimental-v<产品版本>-build.<构建号>-<短SHA>
 ```
 
@@ -108,21 +109,23 @@ python scripts/app_version.py check
 
 - 最新正式版 DMG：<https://github.com/kuguya-AI-app-develop/oha-yachiyo/releases/latest/download/Oha-Yachiyo-main-latest.dmg>
 - 最新正式版滚动 release：<https://github.com/kuguya-AI-app-develop/oha-yachiyo/releases/download/main-latest/Oha-Yachiyo-main-latest.dmg>
+- 最新 Alpha 版 DMG：<https://github.com/kuguya-AI-app-develop/oha-yachiyo/releases/download/alpha-latest/Oha-Yachiyo-alpha-latest.dmg>
 - 最新实验版 DMG：<https://github.com/kuguya-AI-app-develop/oha-yachiyo/releases/download/develop-latest/Oha-Yachiyo-develop-latest.dmg>
 
-`main` 的版本化 release 会显式标记为 GitHub Latest，并额外上传 `Oha-Yachiyo-main-latest.dmg`，因此门户网站可以使用 `releases/latest/download/...`。`develop` 是 prerelease，GitHub 的 `releases/latest` 不会稳定指向它，所以 workflow 维护 `develop-latest` 这个滚动 release。
+`main` 的版本化 release 会显式标记为 GitHub Latest，并额外上传 `Oha-Yachiyo-main-latest.dmg`，因此门户网站可以使用 `releases/latest/download/...`。`alpha` 与 `develop` 都是 prerelease，GitHub 的 `releases/latest` 不会稳定指向它们，所以 workflow 分别维护 `alpha-latest` 与 `develop-latest` 滚动 release。
 
 渠道区分规则：
 
 - `main` -> `stable` release，固定 DMG 名为 `Oha-Yachiyo-main-latest.dmg`。
+- 手动 `alpha` -> `alpha` prerelease，固定 DMG 名为 `Oha-Yachiyo-alpha-latest.dmg`。
 - `develop` -> `experimental` prerelease，固定 DMG 名为 `Oha-Yachiyo-develop-latest.dmg`。
 
 固定 DMG 旁边会同时发布同名 `.sha256` 和 `.json` 文件，门户或安装页可以用它们展示版本、commit 和校验值。
 
-Release workflow 会基于当前渠道上一条 `stable-v*` / `experimental-v*` tag 生成更新日志。更新日志来源是 `git log`，会按 commit 前缀粗分为“新增/改进”“修复”“工程/发布”“文档”“测试”“重构/优化”等分组，并同时写入：
+Release workflow 会基于当前渠道上一条 `stable-v*` / `alpha-v*` / `experimental-v*` tag 生成更新日志。更新日志来源是 `git log`，会按 commit 前缀粗分为“新增/改进”“修复”“工程/发布”“文档”“测试”“重构/优化”等分组，并同时写入：
 
 - 版本化 GitHub release notes。
-- `main-latest` / `develop-latest` 滚动 release notes。
+- `main-latest` / `alpha-latest` / `develop-latest` 滚动 release notes。
 - 固定 latest JSON 的 `changelog` 字段，应用内“应用更新”页面会直接展示这份更新内容。
 
 后续如果要面向普通用户无 Gatekeeper 警告地分发，需要再补 Apple Developer ID 签名与 notarization；当前链路先保证可重复构建和可安装 DMG。

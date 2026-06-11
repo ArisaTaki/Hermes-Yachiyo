@@ -988,6 +988,9 @@ def test_verifier_requires_release_workflow_binary_scans_packaged_outputs(tmp_pa
     findings = verifier._verify_release_workflow_guards(tmp_path)
     messages = [finding.message for finding in findings]
 
+    assert "macOS release workflow must expose an alpha release channel" in messages
+    assert "macOS release workflow must label alpha releases separately" in messages
+    assert "macOS release workflow must publish alpha builds to alpha-latest metadata" in messages
     assert "macOS release workflow must scan the packaged backend binary" in messages
     assert "macOS release workflow must discover packaged app resource directories" in messages
     assert "macOS release workflow must binary-scan packaged app resources" in messages
