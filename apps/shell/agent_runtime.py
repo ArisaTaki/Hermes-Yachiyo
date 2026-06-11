@@ -2488,6 +2488,8 @@ class ApprovalResumeCoordinator:
         append_tool_result_message: Any,
         run_tool_requests: Any,
         timeline_factory: Any,
+        claim_pending_approval: Any | None = None,
+        approve_tool_run: Any | None = None,
         continue_custom_api_agent: Any | None = None,
     ) -> None:
         self._call_agent_tool = call_agent_tool
@@ -2495,7 +2497,34 @@ class ApprovalResumeCoordinator:
         self._append_tool_result_message = append_tool_result_message
         self._run_tool_requests = run_tool_requests
         self._timeline = timeline_factory
+        self._claim_pending_approval = claim_pending_approval
+        self._approve_tool_run = approve_tool_run
         self._continue_custom_api_agent = continue_custom_api_agent
+
+    def claim_and_project_approved_tool(
+        self,
+        run_id: str,
+        pending: dict[str, Any],
+        context: ToolApprovalResumeContext,
+        *,
+        resumed_detail: str,
+        running_result: str,
+    ) -> dict[str, Any] | None:
+        if self._claim_pending_approval is None or self._approve_tool_run is None:
+            raise AgentRuntimeError(
+                "Approval resume coordinator is missing approval projection callbacks"
+            )
+        if not self._claim_pending_approval(run_id, pending):
+            return None
+        return self._approve_tool_run(
+            run_id,
+            timeline=context.timeline,
+            artifacts=context.artifacts,
+            tool_name=context.tool_name,
+            input_preview=context.input_preview,
+            resumed_detail=resumed_detail,
+            running_result=running_result,
+        )
 
     def execute_approved_tool(self, context: ToolApprovalResumeContext) -> None:
         tool_result = self._call_agent_tool(
@@ -3404,6 +3433,8 @@ class NativeRunEngine:
             append_tool_result_message=self._append_tool_result_message,
             run_tool_requests=self._run_tool_requests,
             timeline_factory=self._timeline,
+            claim_pending_approval=self.run_approvals.claim_pending_approval,
+            approve_tool_run=self.approvals.approve_tool_run,
             continue_custom_api_agent=self._run_custom_api_agent,
         )
         self.workflow_continuation = WorkflowContinuationCoordinator(self)
@@ -7978,27 +8009,6 @@ class NativeRunEngine:
             next_iteration=next_iteration,
         )
 
-    def _claim_and_project_approved_tool(
-        self,
-        run_id: str,
-        pending: dict[str, Any],
-        resume_context: ToolApprovalResumeContext,
-        *,
-        resumed_detail: str,
-        running_result: str,
-    ) -> dict[str, Any] | None:
-        if not self.run_approvals.claim_pending_approval(run_id, pending):
-            return None
-        return self.approvals.approve_tool_run(
-            run_id,
-            timeline=resume_context.timeline,
-            artifacts=resume_context.artifacts,
-            tool_name=resume_context.tool_name,
-            input_preview=resume_context.input_preview,
-            resumed_detail=resumed_detail,
-            running_result=running_result,
-        )
-
     def approve_run_approval(self, run_id: str) -> dict[str, Any]:
         clean_run_id = str(run_id or "").strip()
         with self._approval_execution_lock:
@@ -8030,7 +8040,7 @@ class NativeRunEngine:
         agent = self._get_agent_private(str(run["runnable_id"]))
         runtime = self._compile_agent_runtime(agent)
         resume_context = self._tool_approval_resume_context(run, pending, runtime=runtime)
-        running = self._claim_and_project_approved_tool(
+        running = self.approval_resume.claim_and_project_approved_tool(
             run_id,
             pending,
             resume_context,
@@ -8112,7 +8122,7 @@ class NativeRunEngine:
         )
         runtime = self._compile_agent_runtime(agent)
         resume_context = self._tool_approval_resume_context(run, pending, runtime=runtime)
-        running = self._claim_and_project_approved_tool(
+        running = self.approval_resume.claim_and_project_approved_tool(
             run_id,
             pending,
             resume_context,

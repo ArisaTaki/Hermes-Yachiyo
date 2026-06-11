@@ -197,6 +197,88 @@ def test_approval_resume_coordinator_executes_approved_tool_and_remaining_reques
     assert messages[-1] == {"role": "tool", "content": '{"ok": true, "stdout": "ok"}'}
 
 
+def test_approval_resume_coordinator_claims_and_projects_approved_tool_once():
+    calls: list[tuple[str, dict[str, object]]] = []
+    timeline: list[dict[str, object]] = [{"event": "agent.tool.approval_required"}]
+    artifacts: list[dict[str, object]] = [{"path": "report.md"}]
+    pending = {"tool": "terminal.run", "approval_id": "approval-1"}
+    claim_result = True
+
+    def claim_pending_approval(run_id, approval_payload):
+        calls.append(
+            (
+                "claim_pending_approval",
+                {"run_id": run_id, "pending": approval_payload},
+            )
+        )
+        return claim_result
+
+    def approve_tool_run(run_id, **kwargs):
+        calls.append(("approve_tool_run", {"run_id": run_id, **kwargs}))
+        return {"run_id": run_id, "status": "running", "result": kwargs["running_result"]}
+
+    coordinator = ApprovalResumeCoordinator(
+        call_agent_tool=lambda *_args, **_kwargs: {"ok": True},
+        fatal_tool_failure_detail=lambda *_args: "",
+        append_tool_result_message=lambda *_args: None,
+        run_tool_requests=lambda *_args, **_kwargs: None,
+        timeline_factory=lambda event, detail, **payload: {"event": event, "detail": detail, **payload},
+        claim_pending_approval=claim_pending_approval,
+        approve_tool_run=approve_tool_run,
+    )
+    context = ToolApprovalResumeContext(
+        run_id="run_approval",
+        timeline=timeline,
+        artifacts=artifacts,
+        broker=SimpleNamespace(name="broker"),
+        allowed_tools=["terminal.run"],
+        budget=SimpleNamespace(name="budget"),
+        messages=[],
+        tool_request={"name": "terminal.run", "input": {"command": "printf ok"}},
+        tool_name="terminal.run",
+        input_preview={"command": "printf ok"},
+        remaining_requests=[],
+        next_iteration=3,
+    )
+
+    running = coordinator.claim_and_project_approved_tool(
+        "run_approval",
+        pending,
+        context,
+        resumed_detail="Agent resumed after approval",
+        running_result="已批准，Agent 正在继续执行",
+    )
+    claim_result = False
+    duplicate = coordinator.claim_and_project_approved_tool(
+        "run_approval",
+        pending,
+        context,
+        resumed_detail="Agent resumed after approval",
+        running_result="已批准，Agent 正在继续执行",
+    )
+
+    assert running == {
+        "run_id": "run_approval",
+        "status": "running",
+        "result": "已批准，Agent 正在继续执行",
+    }
+    assert duplicate is None
+    assert [name for name, _payload in calls] == [
+        "claim_pending_approval",
+        "approve_tool_run",
+        "claim_pending_approval",
+    ]
+    assert calls[1][1] == {
+        "run_id": "run_approval",
+        "timeline": timeline,
+        "artifacts": artifacts,
+        "tool_name": "terminal.run",
+        "input_preview": {"command": "printf ok"},
+        "resumed_detail": "Agent resumed after approval",
+        "running_result": "已批准，Agent 正在继续执行",
+    }
+
+
 def test_approval_resume_coordinator_stops_on_fatal_tool_failure():
     calls: list[str] = []
     timeline: list[dict[str, object]] = []
