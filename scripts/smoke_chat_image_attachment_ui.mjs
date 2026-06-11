@@ -277,6 +277,30 @@ async function main() {
   );
   console.log('[electron-smoke] composer ready');
   await win.webContents.executeJavaScript(\`
+    (() => {
+      const input = document.querySelector('[data-testid="chat-image-file-input"]');
+      const buttons = [
+        document.querySelector('[data-testid="chat-header-image-attach-button"]'),
+        document.querySelector('[data-testid="chat-composer-image-attach-button"]'),
+      ];
+      if (!input) throw new Error('chat image file input not found');
+      if (buttons.some((button) => !button)) throw new Error('chat image attach button not found');
+      if (buttons.some((button) => button.disabled)) throw new Error('chat image attach button disabled');
+      let clickCount = 0;
+      const hadOwnClick = Object.prototype.hasOwnProperty.call(input, 'click');
+      const ownClick = hadOwnClick ? input.click : undefined;
+      Object.defineProperty(input, 'click', { configurable: true, value: () => { clickCount += 1; } });
+      try {
+        buttons.forEach((button) => button.click());
+      } finally {
+        delete input.click;
+        if (hadOwnClick) Object.defineProperty(input, 'click', { configurable: true, value: ownClick });
+      }
+      if (clickCount !== buttons.length) throw new Error('chat image attach buttons did not target file input');
+    })();
+  \`, true);
+  console.log('[electron-smoke] image attach buttons target file input');
+  await win.webContents.executeJavaScript(\`
     (async () => {
       const input = document.querySelector('[data-testid="chat-image-file-input"]');
       if (!input) throw new Error('chat image file input not found');

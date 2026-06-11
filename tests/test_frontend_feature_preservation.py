@@ -354,7 +354,12 @@ def test_chat_image_attachment_ui_smoke_uses_file_input_path() -> None:
     _assert_contains(
         smoke_script,
         [
+            "document.querySelector('[data-testid=\"chat-header-image-attach-button\"]')",
+            "document.querySelector('[data-testid=\"chat-composer-image-attach-button\"]')",
             "document.querySelector('[data-testid=\"chat-image-file-input\"]')",
+            "Object.defineProperty(input, 'click', { configurable: true, value: () => { clickCount += 1; } })",
+            "buttons.forEach((button) => button.click())",
+            "if (clickCount !== buttons.length) throw new Error('chat image attach buttons did not target file input')",
             "new File([blob], 'smoke-image.svg', { type: 'image/svg+xml' })",
             "new DataTransfer()",
             "transfer.items.add(file)",
