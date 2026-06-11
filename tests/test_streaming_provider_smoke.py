@@ -1136,6 +1136,76 @@ def test_stream_smoke_accepts_responses_completed_finish_reason(monkeypatch):
     assert summary["finish_reasons"] == ["stop"]
 
 
+def test_stream_smoke_uses_responses_output_text_done_snapshot(monkeypatch):
+    requests: list[dict] = []
+    expected = "final Responses snapshot"
+
+    def event(payload: dict) -> bytes:
+        event_type = str(payload.get("type") or "")
+        return f"event: {event_type}\ndata: {json.dumps(payload)}\n\n".encode("utf-8")
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            yield event(
+                {
+                    "type": "response.output_text.delta",
+                    "output_index": 0,
+                    "content_index": 0,
+                    "delta": "draft ",
+                }
+            )
+            yield event(
+                {
+                    "type": "response.output_text.delta",
+                    "output_index": 0,
+                    "content_index": 0,
+                    "delta": "partial",
+                }
+            )
+            yield event(
+                {
+                    "type": "response.output_text.done",
+                    "output_index": 0,
+                    "content_index": 0,
+                    "text": expected,
+                }
+            )
+            yield event(
+                {
+                    "type": "response.completed",
+                    "response": {
+                        "status": "completed",
+                        "output": [{"type": "message", "finish_reason": "stop"}],
+                    },
+                }
+            )
+
+    def fake_urlopen(request, *_args, **_kwargs):
+        requests.append(json.loads(request.data.decode("utf-8")))
+        return FakeResponse()
+
+    monkeypatch.setattr("apps.shell.model_profiles.urlrequest.urlopen", fake_urlopen)
+
+    summary = smoke.run_stream_smoke(
+        base_url="https://api.example.test/v1",
+        model="demo-responses-output-text-done-model",
+        api_key="sk-stream-smoke-secret123456",
+        require_content=True,
+        expect_finish_reasons=["stop"],
+    )
+
+    assert requests[0]["stream"] is True
+    assert summary["ok"] is True
+    assert summary["content_chars"] == len(expected)
+    assert summary["finish_reasons"] == ["stop"]
+
+
 def test_stream_smoke_accepts_sse_delta_tool_call_object_arguments_without_leaking(monkeypatch):
     requests: list[dict] = []
     leaked_secret = "sk-stream-object-args-secret123456"

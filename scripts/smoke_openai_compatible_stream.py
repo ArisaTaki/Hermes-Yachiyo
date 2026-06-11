@@ -55,6 +55,24 @@ def _responses_stream_text_delta(chunk: Any) -> str | None:
     return None
 
 
+def _responses_stream_text_done(chunk: Any) -> str | None:
+    event_type = _responses_stream_event_type(chunk)
+    if event_type not in {"response.output_text.done", "output_text.done"}:
+        return None
+    for field_name in ("text", "content", "delta"):
+        value = _field(chunk, field_name)
+        if value is not None:
+            return _text_value(value)
+    return ""
+
+
+def _responses_stream_text_key(chunk: Any) -> tuple[int, int]:
+    return (
+        _normalized_index(_field(chunk, "output_index"), 0),
+        _normalized_index(_field(chunk, "content_index"), 0),
+    )
+
+
 def _responses_stream_reasoning_delta(chunk: Any) -> str | None:
     event_type = _responses_stream_event_type(chunk)
     if event_type in {"response.reasoning.delta", "response.reasoning_text.delta", "reasoning.delta"}:
@@ -452,15 +470,29 @@ def summarize_stream_chunks(
 ) -> dict[str, Any]:
     chunk_count = 0
     content_parts: list[str] = []
+    responses_text_order: list[tuple[int, int]] = []
+    responses_text_deltas: dict[tuple[int, int], list[str]] = {}
+    responses_text_done: dict[tuple[int, int], str] = {}
     reasoning_parts: list[str] = []
     finish_reasons: list[str] = []
     tool_deltas: dict[tuple[int, int], dict[str, Any]] = {}
     tool_delta_count = 0
     for chunk in chunks:
         chunk_count += 1
-        content = _chunk_text(chunk)
-        if content:
-            content_parts.append(content)
+        responses_delta = _responses_stream_text_delta(chunk)
+        responses_done = _responses_stream_text_done(chunk)
+        if responses_delta is not None or responses_done is not None:
+            key = _responses_stream_text_key(chunk)
+            if key not in responses_text_order:
+                responses_text_order.append(key)
+            if responses_delta:
+                responses_text_deltas.setdefault(key, []).append(responses_delta)
+            if responses_done is not None:
+                responses_text_done[key] = responses_done
+        else:
+            content = _chunk_text(chunk)
+            if content:
+                content_parts.append(content)
         reasoning = _chunk_reasoning_text(chunk)
         if reasoning:
             reasoning_parts.append(reasoning)
@@ -469,6 +501,9 @@ def summarize_stream_chunks(
         tool_delta_count += len(calls)
         for choice_index, fallback_index, call in calls:
             _merge_tool_delta(tool_deltas, call, choice_index, fallback_index)
+
+    for key in responses_text_order:
+        content_parts.append(responses_text_done.get(key) or "".join(responses_text_deltas.get(key, [])))
 
     tool_calls = [tool_deltas[index] for index in sorted(tool_deltas)]
     content = "".join(content_parts)

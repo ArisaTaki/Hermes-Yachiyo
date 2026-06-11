@@ -653,6 +653,31 @@ def _responses_stream_text_delta(chunk: Any) -> str | None:
     return None
 
 
+def _responses_stream_text_done(chunk: Any) -> str | None:
+    event_type = _responses_stream_event_type(chunk)
+    if event_type not in {"response.output_text.done", "output_text.done"}:
+        return None
+    for field_name in ("text", "content", "delta"):
+        value = _message_field(chunk, field_name)
+        if value is not None:
+            return _message_text_value(value)
+    return ""
+
+
+def _stream_index_value(value: Any, fallback: int) -> int:
+    try:
+        return int(value) if value is not None else fallback
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _responses_stream_text_key(chunk: Any) -> tuple[int, int]:
+    return (
+        _stream_index_value(_message_field(chunk, "output_index"), 0),
+        _stream_index_value(_message_field(chunk, "content_index"), 0),
+    )
+
+
 def _responses_stream_tool_call(chunk: Any) -> dict[str, Any] | None:
     event_type = _responses_stream_event_type(chunk)
     item = _message_field(chunk, "item")
@@ -1052,16 +1077,33 @@ def _coalesce_model_message(message: Any) -> dict[str, Any]:
         return result
 
     content_parts: list[str] = []
+    responses_text_order: list[tuple[int, int]] = []
+    responses_text_deltas: dict[tuple[int, int], list[str]] = {}
+    responses_text_done: dict[tuple[int, int], str] = {}
     tool_calls: list[dict[str, Any]] | None = None
     tool_call_deltas: dict[tuple[int, int], dict[str, Any]] = {}
     for chunk in message:
-        content = _stream_chunk_text(chunk)
-        if content:
-            content_parts.append(content)
+        responses_delta = _responses_stream_text_delta(chunk)
+        responses_done = _responses_stream_text_done(chunk)
+        if responses_delta is not None or responses_done is not None:
+            key = _responses_stream_text_key(chunk)
+            if key not in responses_text_order:
+                responses_text_order.append(key)
+            if responses_delta:
+                responses_text_deltas.setdefault(key, []).append(responses_delta)
+            if responses_done is not None:
+                responses_text_done[key] = responses_done
+        else:
+            content = _stream_chunk_text(chunk)
+            if content:
+                content_parts.append(content)
         chunk_tool_calls = _stream_chunk_tool_calls(chunk)
         if isinstance(chunk_tool_calls, list):
             for choice_index, fallback_index, call in chunk_tool_calls:
                 _merge_stream_tool_call_delta(tool_call_deltas, call, choice_index, fallback_index)
+
+    for key in responses_text_order:
+        content_parts.append(responses_text_done.get(key) or "".join(responses_text_deltas.get(key, [])))
 
     result: dict[str, Any] = {"role": "assistant", "content": "".join(content_parts)}
     if tool_call_deltas:
