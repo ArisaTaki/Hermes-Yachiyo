@@ -70,6 +70,29 @@ def test_verifier_checks_release_security_guards():
     assert verifier.verify_release_artifacts(paths=[], check_required_files=False) == []
 
 
+def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
+    script = tmp_path / "scripts" / "smoke_openai_compatible_stream.py"
+    script.parent.mkdir(parents=True)
+    script.write_text("def main():\n    return 0\n", encoding="utf-8")
+    tests = tmp_path / "tests" / "test_streaming_provider_smoke.py"
+    tests.parent.mkdir(parents=True)
+    tests.write_text("def test_placeholder():\n    pass\n", encoding="utf-8")
+
+    findings = verifier._verify_streaming_provider_smoke_contract_guards(tmp_path)
+    messages = [finding.message for finding in findings]
+
+    assert "real provider smoke helper must send a streamed tool-result follow-up request" in messages
+    assert "real provider smoke helper must strip tool-call arguments before printing summaries" in messages
+    assert "real provider smoke helper must redact provider errors before printing stderr" in messages
+    assert "provider smoke tests must cover tool-result follow-up without leaking arguments" in messages
+    assert (
+        "provider smoke tests must prove synthetic tool-result content stays out of printed summaries"
+        in messages
+    )
+    assert "provider smoke tests must cover CLI tool-result finish_reason wiring" in messages
+    assert "provider smoke tests must prove provider errors do not print API keys" in messages
+
+
 def test_verifier_reports_legacy_product_tokens(tmp_path):
     release_file = tmp_path / "release.yml"
     release_file.write_text(f"name: {verifier.FORBIDDEN_TOKENS[0]}\n", encoding="utf-8")

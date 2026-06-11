@@ -600,6 +600,54 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow provider smoke must assert tool-result follow-up finish_reason",
     ),
 )
+STREAMING_PROVIDER_SMOKE_SCRIPT_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
+    (
+        "require_tool_result_followup = require_tool_result_content or bool(expected_tool_result_finish_reasons)",
+        "real provider smoke helper must enable tool-result follow-up when finish_reason is asserted",
+    ),
+    (
+        "_tool_result_followup_messages(prompt, tool_calls[0])",
+        "real provider smoke helper must send a streamed tool-result follow-up request",
+    ),
+    (
+        'call.pop("arguments", None)',
+        "real provider smoke helper must strip tool-call arguments before printing summaries",
+    ),
+    (
+        'redact_api_error_text(str(exc), fallback="stream smoke failed")',
+        "real provider smoke helper must redact provider errors before printing stderr",
+    ),
+)
+STREAMING_PROVIDER_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
+    (
+        "def test_stream_smoke_requires_tool_result_followup_content_without_leaking",
+        "provider smoke tests must cover tool-result follow-up without leaking arguments",
+    ),
+    (
+        'assert "synthetic workspace_read result" not in summary_json',
+        "provider smoke tests must prove synthetic tool-result content stays out of printed summaries",
+    ),
+    (
+        "def test_stream_smoke_uses_responses_call_id_for_tool_result_followup",
+        "provider smoke tests must cover Responses call_id tool-result follow-up",
+    ),
+    (
+        "def test_stream_smoke_main_expect_tool_name_requests_tool_call",
+        "provider smoke tests must cover CLI tool-call expectation wiring",
+    ),
+    (
+        'assert calls[0]["expect_tool_result_finish_reasons"] == ["stop"]',
+        "provider smoke tests must cover CLI tool-result finish_reason wiring",
+    ),
+    (
+        "def test_stream_smoke_main_redacts_provider_errors",
+        "provider smoke tests must cover provider error redaction",
+    ),
+    (
+        "assert leaked_secret not in captured.err",
+        "provider smoke tests must prove provider errors do not print API keys",
+    ),
+)
 RELEASE_WORKFLOW_METADATA_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         'LATEST_SHA256="$(shasum -a 256 "release/${LATEST_DMG}"',
@@ -1588,6 +1636,7 @@ def verify_release_artifacts(
 
     if check_release_security_guards:
         findings.extend(_verify_release_security_guards(root_path))
+        findings.extend(_verify_streaming_provider_smoke_contract_guards(root_path))
         findings.extend(_verify_tracked_generated_artifacts(root_path))
         findings.extend(_verify_release_packaging_guards(root_path))
         findings.extend(_verify_macos_signing_guards(root_path))
@@ -1722,6 +1771,31 @@ def _verify_release_security_guards(root: Path) -> list[Finding]:
                         "packaged build env must not allow DevFileCredentialStore",
                     )
                 )
+    return findings
+
+
+def _verify_streaming_provider_smoke_contract_guards(root: Path) -> list[Finding]:
+    findings: list[Finding] = []
+    targets = (
+        (
+            Path("scripts/smoke_openai_compatible_stream.py"),
+            STREAMING_PROVIDER_SMOKE_SCRIPT_REQUIRED_TEXT,
+        ),
+        (
+            Path("tests/test_streaming_provider_smoke.py"),
+            STREAMING_PROVIDER_SMOKE_TEST_REQUIRED_TEXT,
+        ),
+    )
+    for relative_path, required_texts in targets:
+        path = _resolve(root, relative_path)
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            findings.append(Finding(path, f"could not read provider smoke contract source: {exc}"))
+            continue
+        for required_text, message in required_texts:
+            if required_text not in text:
+                findings.append(Finding(path, message))
     return findings
 
 
