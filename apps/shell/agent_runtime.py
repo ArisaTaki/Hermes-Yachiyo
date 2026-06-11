@@ -3235,6 +3235,64 @@ class WorkflowParentRunLocator:
         )
 
 
+class WorkflowResumePlanner:
+    """Resolves Workflow snapshots and child resume positions."""
+
+    def __init__(
+        self,
+        *,
+        get_workflow: Any,
+        workflow_path: Any,
+        node_kind: Any,
+    ) -> None:
+        self._get_workflow = get_workflow
+        self._workflow_path = workflow_path
+        self._node_kind = node_kind
+
+    def workflow_for_run_resume(self, workflow_run: dict[str, Any]) -> dict[str, Any]:
+        for event in workflow_run.get("timeline") or []:
+            if not isinstance(event, dict) or event.get("event") != "workflow.run.started":
+                continue
+            snapshot = event.get("workflow_snapshot")
+            if not isinstance(snapshot, dict):
+                continue
+            nodes = snapshot.get("nodes")
+            edges = snapshot.get("edges")
+            if isinstance(nodes, list) and isinstance(edges, list):
+                return {
+                    "workflow_id": str(snapshot.get("workflow_id") or workflow_run.get("runnable_id") or ""),
+                    "name": str(snapshot.get("name") or "Workflow"),
+                    "nodes": nodes,
+                    "edges": edges,
+                    "enabled": True,
+                }
+        return self._get_workflow(str(workflow_run["runnable_id"]))
+
+    def resume_start_index(
+        self,
+        workflow: dict[str, Any],
+        workflow_run: dict[str, Any],
+        child_run_id: str,
+    ) -> int | None:
+        target_agent_ordinal = 0
+        for event in workflow_run.get("timeline") or []:
+            if not isinstance(event, dict) or event.get("event") != "workflow.node.agent":
+                continue
+            target_agent_ordinal += 1
+            if str(event.get("child_run_id") or "") == child_run_id:
+                break
+        else:
+            return None
+        seen_agent_nodes = 0
+        for index, node in enumerate(self._workflow_path(workflow)):
+            if self._node_kind(node) != "agent":
+                continue
+            seen_agent_nodes += 1
+            if seen_agent_nodes == target_agent_ordinal:
+                return index + 1
+        return None
+
+
 class WorkflowParentResumeCoordinator:
     """Coordinates parent Workflow updates after a child Run changes state."""
 
@@ -4270,6 +4328,11 @@ class NativeRunEngine:
         self.workflow_parent_locator = WorkflowParentRunLocator(
             get_run_group=self.get_run_group,
             get_run=self.get_run,
+        )
+        self.workflow_resume_planner = WorkflowResumePlanner(
+            get_workflow=self.get_workflow,
+            workflow_path=self._workflow_path,
+            node_kind=self._node_kind,
         )
         self.workflow_parent_resume = WorkflowParentResumeCoordinator(
             parent_runs_waiting_for_child=lambda child_run: self._workflow_parent_runs_waiting_for_child(child_run),
@@ -8345,23 +8408,11 @@ class NativeRunEngine:
         workflow_run: dict[str, Any],
         child_run_id: str,
     ) -> int | None:
-        target_agent_ordinal = 0
-        for event in workflow_run.get("timeline") or []:
-            if not isinstance(event, dict) or event.get("event") != "workflow.node.agent":
-                continue
-            target_agent_ordinal += 1
-            if str(event.get("child_run_id") or "") == child_run_id:
-                break
-        else:
-            return None
-        seen_agent_nodes = 0
-        for index, node in enumerate(self._workflow_path(workflow)):
-            if self._node_kind(node) != "agent":
-                continue
-            seen_agent_nodes += 1
-            if seen_agent_nodes == target_agent_ordinal:
-                return index + 1
-        return None
+        return self.workflow_resume_planner.resume_start_index(
+            workflow,
+            workflow_run,
+            child_run_id,
+        )
 
     def _workflow_run_is_group_root(self, workflow_run: dict[str, Any]) -> bool:
         return self.workflow_parent_locator.workflow_run_is_group_root(workflow_run)
@@ -8533,23 +8584,7 @@ class NativeRunEngine:
         }
 
     def _workflow_for_run_resume(self, workflow_run: dict[str, Any]) -> dict[str, Any]:
-        for event in workflow_run.get("timeline") or []:
-            if not isinstance(event, dict) or event.get("event") != "workflow.run.started":
-                continue
-            snapshot = event.get("workflow_snapshot")
-            if not isinstance(snapshot, dict):
-                continue
-            nodes = snapshot.get("nodes")
-            edges = snapshot.get("edges")
-            if isinstance(nodes, list) and isinstance(edges, list):
-                return {
-                    "workflow_id": str(snapshot.get("workflow_id") or workflow_run.get("runnable_id") or ""),
-                    "name": str(snapshot.get("name") or "Workflow"),
-                    "nodes": nodes,
-                    "edges": edges,
-                    "enabled": True,
-                }
-        return self.get_workflow(str(workflow_run["runnable_id"]))
+        return self.workflow_resume_planner.workflow_for_run_resume(workflow_run)
 
     def cancel_run(self, run_id: str) -> dict[str, Any]:
         clean_run_id = str(run_id or "").strip()

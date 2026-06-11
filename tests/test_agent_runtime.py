@@ -38,6 +38,7 @@ from apps.shell.agent_runtime import (
     WorkflowContinuationCoordinator,
     WorkflowParentRunLocator,
     WorkflowParentResumeCoordinator,
+    WorkflowResumePlanner,
 )
 from scripts.verify_secret_redaction import verify_secret_redaction
 
@@ -296,6 +297,62 @@ def test_workflow_parent_run_locator_finds_waiting_parents_and_root_groups():
     assert locator.workflow_run_is_group_root({"run_id": "workflow_external", "run_group_id": "workflow_group"}) is True
     assert locator.workflow_run_is_group_root({"run_id": "workflow_missing", "run_group_id": "missing"}) is False
     assert locator.workflow_run_is_group_root({"run_id": "workflow_without_group"}) is False
+
+
+def test_workflow_resume_planner_uses_snapshot_and_child_agent_ordinal():
+    fallback_workflow = {"workflow_id": "workflow_db", "nodes": [], "edges": [], "enabled": True}
+    snapshot_nodes = [
+        {"id": "start", "type": "start"},
+        {"id": "agent-a", "type": "agent"},
+        {"id": "approval", "type": "approval"},
+        {"id": "agent-b", "type": "agent"},
+        {"id": "artifact", "type": "artifact"},
+    ]
+    snapshot_edges = [
+        {"source": "start", "target": "agent-a"},
+        {"source": "agent-a", "target": "approval"},
+        {"source": "approval", "target": "agent-b"},
+        {"source": "agent-b", "target": "artifact"},
+    ]
+    workflow_run = {
+        "run_id": "workflow_run",
+        "runnable_id": "workflow_db",
+        "timeline": [
+            "not-an-event",
+            {
+                "event": "workflow.run.started",
+                "workflow_snapshot": {
+                    "workflow_id": "workflow_snapshot",
+                    "name": "Snapshot Workflow",
+                    "nodes": snapshot_nodes,
+                    "edges": snapshot_edges,
+                },
+            },
+            {"event": "workflow.node.agent", "child_run_id": "agent_run_a"},
+            {"event": "workflow.node.approval_required"},
+            {"event": "workflow.node.agent", "child_run_id": "agent_run_b"},
+        ],
+    }
+    planner = WorkflowResumePlanner(
+        get_workflow=lambda workflow_id: {**fallback_workflow, "workflow_id": workflow_id},
+        workflow_path=lambda workflow: list(workflow["nodes"]),
+        node_kind=lambda node: str(node.get("type") or ""),
+    )
+
+    workflow = planner.workflow_for_run_resume(workflow_run)
+
+    assert workflow == {
+        "workflow_id": "workflow_snapshot",
+        "name": "Snapshot Workflow",
+        "nodes": snapshot_nodes,
+        "edges": snapshot_edges,
+        "enabled": True,
+    }
+    assert planner.resume_start_index(workflow, workflow_run, "agent_run_b") == 4
+    assert planner.resume_start_index(workflow, workflow_run, "missing_child") is None
+    assert planner.workflow_for_run_resume(
+        {"run_id": "workflow_run", "runnable_id": "workflow_db", "timeline": []}
+    ) == fallback_workflow
 
 
 def test_workflow_approval_resume_context_parses_pending_payload():
