@@ -848,6 +848,14 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover NativeRunEngine split-frame SSE tool calls",
     ),
     (
+        "tests/test_agent_runtime.py::test_main_chat_model_loop_coalesces_indexless_streaming_tool_call_deltas",
+        "macOS release workflow smoke tests must cover NativeRunEngine indexless SSE tool-call deltas",
+    ),
+    (
+        "tests/test_agent_runtime.py::test_main_chat_model_loop_coalesces_indexless_interleaved_tool_call_deltas_by_id",
+        "macOS release workflow smoke tests must cover NativeRunEngine indexless interleaved SSE tool-call deltas",
+    ),
+    (
         "tests/test_agent_runtime.py::test_main_chat_model_loop_executes_responses_style_streaming_tool_call",
         "macOS release workflow smoke tests must cover NativeRunEngine Responses-style streaming tool calls",
     ),
