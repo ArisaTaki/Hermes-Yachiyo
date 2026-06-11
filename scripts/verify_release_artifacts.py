@@ -643,6 +643,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover mutating Bridge token guard",
     ),
     (
+        "tests/test_bridge_server.py::test_run_events_http_route_paginates_and_hides_non_user_events",
+        "macOS release workflow smoke tests must cover RunEvent HTTP replay pagination and filtering",
+    ),
+    (
         "tests/test_bridge_server.py::test_chat_message_image_attachment_http_roundtrip_maps_idempotency_and_file_response",
         "macOS release workflow smoke tests must cover Chat image HTTP roundtrip",
     ),
