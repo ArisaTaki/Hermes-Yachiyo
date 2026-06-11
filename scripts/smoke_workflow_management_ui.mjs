@@ -295,6 +295,33 @@ async function main() {
     return Boolean(bulk) && checkboxes.length === 2 && checkboxes.every((input) => !input.disabled);
   }, 'workflow management mode');
   await runInPage(win, () => {
+    document.querySelector('[data-testid="workflow-select-all"]').click();
+  });
+  await waitFor(win, () => {
+    const bulk = document.querySelector('[data-testid="workflow-bulk-actions"]');
+    const checkboxes = Array.from(document.querySelectorAll('[data-testid="workflow-list-checkbox"]'));
+    const deleteSelected = document.querySelector('[data-testid="workflow-delete-selected"]');
+    return Boolean(bulk?.textContent.includes('已选择 2 / 2'))
+      && checkboxes.length === 2
+      && checkboxes.every((input) => input.checked)
+      && Boolean(deleteSelected)
+      && !deleteSelected.disabled;
+  }, 'workflow select all');
+  await runInPage(win, () => {
+    document.querySelector('[data-testid="workflow-clear-selection"]').click();
+  });
+  await waitFor(win, () => {
+    const bulk = document.querySelector('[data-testid="workflow-bulk-actions"]');
+    const checkboxes = Array.from(document.querySelectorAll('[data-testid="workflow-list-checkbox"]'));
+    const deleteSelected = document.querySelector('[data-testid="workflow-delete-selected"]');
+    return Boolean(bulk?.textContent.includes('2 workflows'))
+      && checkboxes.length === 2
+      && checkboxes.every((input) => !input.checked)
+      && Boolean(deleteSelected)
+      && deleteSelected.disabled;
+  }, 'workflow clear selection');
+  console.log('[electron-smoke] workflow selection controls verified');
+  await runInPage(win, () => {
     const checkboxes = Array.from(document.querySelectorAll('[data-testid="workflow-list-checkbox"]'));
     checkboxes[0].click();
   });
