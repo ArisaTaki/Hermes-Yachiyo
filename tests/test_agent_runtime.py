@@ -478,6 +478,7 @@ def test_approval_resume_projection_coordinator_projects_resume_states():
 def test_tool_approval_resume_context_parses_pending_payload():
     broker = SimpleNamespace(name="broker")
     budget = SimpleNamespace(name="budget")
+    budget_calls: list[dict[str, object]] = []
     run = {
         "run_id": "agent_run_resume",
         "timeline": [
@@ -505,12 +506,16 @@ def test_tool_approval_resume_context_parses_pending_payload():
         "next_iteration": "5",
     }
 
+    def budget_factory(run_id, timeline):
+        budget_calls.append({"run_id": run_id, "timeline": timeline})
+        return budget
+
     context = ToolApprovalResumeContext.from_run(
         run,
         pending,
         broker=broker,
         allowed_tools=["terminal.run", "artifact.write"],
-        budget=budget,
+        budget_factory=budget_factory,
     )
 
     assert context.run_id == "agent_run_resume"
@@ -525,6 +530,8 @@ def test_tool_approval_resume_context_parses_pending_payload():
     assert context.input_preview == {"command": "printf ok"}
     assert context.remaining_requests == [{"tool": "artifact.write", "input": {"path": "report.md"}}]
     assert context.next_iteration == 5
+    assert budget_calls == [{"run_id": "agent_run_resume", "timeline": context.timeline}]
+    assert budget_calls[0]["timeline"] is context.timeline
 
     fallback_iteration = ToolApprovalResumeContext.from_run(
         run,

@@ -1281,7 +1281,7 @@ RunEvent sequence:
 - `ApprovalResumeCoordinator` / `ToolApprovalResumeContext`
   - 负责批准后 pending approval 持久化 claim 和 running projection，重复 approval claim 直接返回当前 Run，不重复执行工具。
   - 负责批准后恢复时的已批准工具调用执行。
-  - `ToolApprovalResumeContext.from_run()` 统一解析 pending approval 中的 messages、tool request、remaining requests、next iteration、timeline 和 artifacts。
+  - `ToolApprovalResumeContext.from_run()` 统一解析 pending approval 中的 messages、tool request、remaining requests、next iteration、timeline 和 artifacts，并用同一份 timeline 构造 resume budget。
   - 主聊天和 Agent Run 的工具审批恢复共用同一个 resume context 和 coordinator。
   - 保留 `NativeRunEngine` 对最终模型继续执行和 Run 状态落库的编排职责。
 
@@ -2109,7 +2109,7 @@ compileall passed
 - release workflow smoke 现在也强制包含 NativeRunEngine approval resume claim boundary 回归，确认 standalone Agent approval resume 通过 `ApprovalResumeCoordinator.claim_and_project_approved_tool()` 进入 approved-tool claim/projection 边界。
 - release workflow smoke 现在也强制包含 approved-tool resume wait / failure projection 边界回归，确认主聊天与 Agent Run 的连续审批、批准后失败投影不回退到 approve 分支私有实现。
 - release workflow smoke 现在也强制包含 ApprovalResumeProjectionCoordinator resume state projections 回归，确保 approved-tool resume 的 running / completed / approval_required / failed 投影继续由显式 projection boundary 维护。
-- release workflow smoke 现在也强制包含 ToolApprovalResumeContext pending payload parsing 回归，确保 approved-tool resume 上下文继续统一解析 messages、tool request、remaining requests、next iteration、timeline 和 artifacts。
+- release workflow smoke 现在也强制包含 ToolApprovalResumeContext pending payload parsing 回归，确保 approved-tool resume 上下文继续统一解析 messages、tool request、remaining requests、next iteration、timeline、artifacts 和 budget 输入。
 - NativeRunEngine 的主聊天与 standalone Agent approved-tool resume 现在共用 `_resume_approved_tool_run()` 恢复步骤；主聊天仍保留 `model.output.completed` / running Task 投影，Agent Run 仍保留 running group / parent Workflow child projection 和 completed/failed group 投影，但 claim、tool-result follow-up、二次审批、失败清洗统一由同一内部步骤编排。release workflow 已锁定的 main chat / Agent claim-boundary 回归现在也显式断言两条路径都经过该共享恢复步骤。
 - release workflow smoke 现在也强制包含 WorkflowParentResumeCoordinator completed child handoff / replay idempotency 回归，确保 completed child 只恢复父 Workflow 一次，并写入 child completed 与 workflow resumed replay facts。
 - release workflow smoke 现在也强制包含 WorkflowParentResumeCoordinator child approval replay idempotency 回归，确保重复 child approval_required update 不会重复投影父 Workflow replay fact 或重复更新父 Run / RunGroup。

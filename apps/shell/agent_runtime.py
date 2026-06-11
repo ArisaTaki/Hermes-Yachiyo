@@ -2587,7 +2587,8 @@ class ToolApprovalResumeContext:
         *,
         broker: ToolBroker,
         allowed_tools: list[str],
-        budget: _RunBudget,
+        budget: _RunBudget | None = None,
+        budget_factory: Any | None = None,
     ) -> "ToolApprovalResumeContext":
         run_id = str(run["run_id"])
         messages = pending.get("messages") if isinstance(pending.get("messages"), list) else []
@@ -2607,13 +2608,18 @@ class ToolApprovalResumeContext:
         except (TypeError, ValueError):
             next_iteration = 0
         tool_name = str(tool_request.get("tool") or pending.get("tool") or "").strip()
+        run_budget = budget
+        if run_budget is None:
+            if budget_factory is None:
+                raise AgentRuntimeError("Run 待审批预算上下文不完整，无法恢复")
+            run_budget = budget_factory(run_id, timeline)
         return cls(
             run_id=run_id,
             timeline=timeline,
             artifacts=artifacts,
             broker=broker,
             allowed_tools=allowed_tools,
-            budget=budget,
+            budget=run_budget,
             messages=messages,
             tool_request=tool_request,
             tool_name=tool_name,
@@ -8438,13 +8444,15 @@ class NativeRunEngine:
         runtime: dict[str, Any],
     ) -> ToolApprovalResumeContext:
         run_id = str(run["run_id"])
-        timeline = [event for event in run.get("timeline") or [] if isinstance(event, dict)]
         return ToolApprovalResumeContext.from_run(
             run,
             pending,
             broker=ToolBroker(runtime["workspace_policy"], self.agent_artifacts_dir / run_id),
             allowed_tools=runtime["tool_policy"].get("allowed_tools") or [],
-            budget=self._run_budget(run_id, timeline),
+            budget_factory=lambda context_run_id, context_timeline: self._run_budget(
+                context_run_id,
+                context_timeline,
+            ),
         )
 
     def approve_run_approval(self, run_id: str) -> dict[str, Any]:
