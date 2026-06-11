@@ -443,6 +443,9 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow smoke tests must cover main chat approved tool failure replay" in messages
     assert "macOS release workflow smoke tests must cover main chat repeated approval idempotency" in messages
     assert "macOS release workflow smoke tests must cover durable approval claim across runtime instances" in messages
+    assert "macOS release workflow smoke tests must cover ApprovalResumeCoordinator approved tool resume flow" in messages
+    assert "macOS release workflow smoke tests must cover ApprovalResumeCoordinator fatal tool failure boundary" in messages
+    assert "macOS release workflow smoke tests must cover ApprovalResumeCoordinator custom API resume flow" in messages
     assert "macOS release workflow smoke tests must cover approval approve route idempotency" in messages
     assert "macOS release workflow smoke tests must cover approval reject route idempotency" in messages
     assert "macOS release workflow smoke tests must cover concurrent Run cancellation idempotency" in messages
