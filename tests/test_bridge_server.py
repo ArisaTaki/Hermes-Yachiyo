@@ -2173,15 +2173,23 @@ def test_chat_group_dispatch_bridge_route_runs_native_summary(tmp_path, monkeypa
         assert completed_summary_task is not None
         assert completed_summary_task.status == TaskStatus.COMPLETED
         assert completed_summary_task.result == "群组总结：Coding 已完成 Bridge route Native 派发。"
-        summary_run = service.get_run(service.get_task_run_link(summary_task.task_id)["run_id"])
+        summary_link = service.get_task_run_link(summary_task.task_id)
+        summary_run = service.get_run(summary_link["run_id"])
         detail = await agent_routes.get_any_run(summary_run["run_id"])
         replay = await run_routes.list_run_events(summary_run["run_id"], after_sequence=0, limit=200)
+        replay_last_sequence = max(event["sequence"] for event in replay["events"])
         summary_event_types = [event["event_type"] for event in replay["events"]]
+        assert summary_link["task_id"] == summary_task.task_id
+        assert summary_link["session_id"] == runtime.chat_session.session_id
+        assert summary_link["run_status"] == "completed"
+        assert summary_link["last_event_sequence"] == replay_last_sequence
         assert summary_run["kind"] == "main_chat_run"
         assert summary_run["status"] == "completed"
         assert summary_run["run_id"] != main_run["run_id"]
         assert detail["task_id"] == summary_task.task_id
         assert detail["session_id"] == runtime.chat_session.session_id
+        assert detail["task_run_link_run_status"] == "completed"
+        assert detail["task_run_link_last_event_sequence"] == replay_last_sequence
         assert "task.linked" in summary_event_types
         assert summary_event_types.count("model.output.completed") == 1
         assert "run.completed" in summary_event_types
@@ -2211,6 +2219,8 @@ def test_chat_group_dispatch_bridge_route_runs_native_summary(tmp_path, monkeypa
         assert settled_summary is not None
         assert "group_agent_summary_pending" not in settled_parent["metadata"]
         assert settled_parent["metadata"]["group_agent_summary_status"] == "completed"
+        assert settled_parent["metadata"]["group_agent_summary_task_id"] == summary_task.task_id
+        assert settled_parent["metadata"]["group_dispatch_run_group_id"] == agent_message["metadata"]["run_group_id"]
         assert settled_summary["status"] == "completed"
         assert settled_summary["content"] == "群组总结：Coding 已完成 Bridge route Native 派发。"
 
