@@ -182,6 +182,7 @@ jobs:
           node scripts/smoke_agent_studio_agents_ui.mjs
           node scripts/smoke_agent_studio_skills_ui.mjs
           node scripts/smoke_agent_studio_skill_mount_ui.mjs
+          node scripts/smoke_agent_studio_skill_folders_ui.mjs
           node scripts/smoke_agent_run_detail_ui.mjs
           node scripts/smoke_workflow_save_run_ui.mjs
 

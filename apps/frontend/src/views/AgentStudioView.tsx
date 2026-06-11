@@ -4173,7 +4173,7 @@ export function AgentStudioView() {
       ) : null}
 
       {!loading && tab === 'skill-groups' ? (
-        <section className="agent-studio-grid skill-group-page">
+        <section className="agent-studio-grid skill-group-page" data-testid="skill-folder-page">
           <aside className="agent-studio-panel">
             <div className="section-heading-row">
               <h2>Skill 分组</h2>
@@ -4186,12 +4186,13 @@ export function AgentStudioView() {
               <div className="skill-folder-create">
                 <input
                   className="hy-input"
+                  data-testid="skill-folder-name-input"
                   maxLength={skillFolderNameMaxLength + 1}
                   value={newSkillFolderName}
                   onChange={(event) => setNewSkillFolderName(event.target.value)}
                   placeholder="例如 Laravel / Design"
                 />
-                <button type="button" disabled={busy || !newSkillFolderName.trim() || Boolean(newSkillFolderError)} onClick={() => void runAction(createSkillFolderFromDraft, '创建 Skill 文件夹')}>新建</button>
+                <button type="button" data-testid="skill-folder-create" disabled={busy || !newSkillFolderName.trim() || Boolean(newSkillFolderError)} onClick={() => void runAction(createSkillFolderFromDraft, '创建 Skill 文件夹')}>新建</button>
               </div>
               {newSkillFolderError ? <small className="skill-folder-validation">{newSkillFolderError}</small> : null}
             </div>
@@ -4210,17 +4211,24 @@ export function AgentStudioView() {
               <h2>文件夹管理</h2>
               <span className="agent-section-count">{skillFolders.length} folders</span>
             </div>
-            <div className="skill-folder-manager-list">
+            <div className="skill-folder-manager-list" data-testid="skill-folder-list">
               {skillFolders.map((folder) => {
                 const editing = editingSkillFolderId === folder.folder_id;
                 const deleteMode = skillFolderDeleteModes[folder.folder_id] || 'folder';
                 const deleteWithSkills = deleteMode === 'skills' && Boolean(folder.skill_count || 0);
                 return (
-                  <article className="skill-folder-manager-row" key={folder.folder_id}>
+                  <article
+                    className="skill-folder-manager-row"
+                    data-folder-id={folder.folder_id}
+                    data-folder-name={folder.name}
+                    data-testid="skill-folder-row"
+                    key={folder.folder_id}
+                  >
                     <div className="skill-folder-manager-main">
                       {editing ? (
                         <input
                           className="hy-input"
+                          data-testid="skill-folder-edit-name-input"
                           maxLength={skillFolderNameMaxLength + 1}
                           value={editingSkillFolderName}
                           onChange={(event) => setEditingSkillFolderName(event.target.value)}
@@ -4240,17 +4248,18 @@ export function AgentStudioView() {
                     <div className="skill-folder-actions">
                       {editing ? (
                         <>
-                          <button type="button" disabled={busy || !editingSkillFolderName.trim() || Boolean(editingSkillFolderError)} onClick={() => void runAction(async () => updateSkillFolderFromDraft(folder.folder_id), '重命名 Skill 文件夹')}>保存</button>
-                          <button type="button" disabled={busy} onClick={cancelEditingSkillFolder}>取消</button>
+                          <button type="button" data-testid="skill-folder-save-rename" disabled={busy || !editingSkillFolderName.trim() || Boolean(editingSkillFolderError)} onClick={() => void runAction(async () => updateSkillFolderFromDraft(folder.folder_id), '重命名 Skill 文件夹')}>保存</button>
+                          <button type="button" data-testid="skill-folder-cancel-rename" disabled={busy} onClick={cancelEditingSkillFolder}>取消</button>
                         </>
                       ) : (
                         <>
-                          <button type="button" disabled={busy} onClick={() => startEditingSkillFolder(folder)}>重命名</button>
-                          <button type="button" disabled={busy} onClick={() => openSkillLibraryFolder(folder)}>查看</button>
+                          <button type="button" data-testid="skill-folder-rename" disabled={busy} onClick={() => startEditingSkillFolder(folder)}>重命名</button>
+                          <button type="button" data-testid="skill-folder-open" disabled={busy} onClick={() => openSkillLibraryFolder(folder)}>查看</button>
                           <div className="skill-folder-delete-control" aria-label={`${folder.name} 删除设置`}>
                             <label className="skill-folder-delete-switch" title="开启后删除文件夹时会连带删除其中 Skills">
                               <input
                                 type="checkbox"
+                                data-testid="skill-folder-delete-with-skills"
                                 role="switch"
                                 checked={deleteWithSkills}
                                 disabled={busy || !(folder.skill_count || 0)}
@@ -4263,6 +4272,7 @@ export function AgentStudioView() {
                             <button
                               type="button"
                               className="danger-action"
+                              data-testid="skill-folder-delete"
                               disabled={busy}
                               onClick={() => requestDeleteSkillFolder(folder, deleteWithSkills)}
                             >
