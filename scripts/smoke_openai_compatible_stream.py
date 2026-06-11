@@ -211,6 +211,14 @@ def _chunk_tool_calls(chunk: Any) -> list[tuple[int, int, Any]]:
     direct_function = _field(chunk, "function_call")
     if direct_function is not None:
         return [(0, 0, {"index": 0, "type": "function", "function": direct_function})]
+    for field_name in ("delta", "message"):
+        value = _field(chunk, field_name)
+        calls = _field(value, "tool_calls") if value is not None else None
+        if isinstance(calls, list):
+            return [(0, index, call) for index, call in enumerate(calls)]
+        function_call = _field(value, "function_call") if value is not None else None
+        if function_call is not None:
+            return [(0, 0, {"index": 0, "type": "function", "function": function_call})]
     if not isinstance(choices, list):
         return []
     calls: list[tuple[int, int, Any]] = []
@@ -234,10 +242,13 @@ def _chunk_tool_calls(chunk: Any) -> list[tuple[int, int, Any]]:
 
 
 def _chunk_finish_reasons(chunk: Any) -> list[str]:
+    direct_reason = _field(chunk, "finish_reason")
+    if direct_reason is None:
+        direct_reason = _field(chunk, "stop_reason")
     choices = _field(chunk, "choices")
+    reasons: list[str] = [str(direct_reason)] if direct_reason else []
     if not isinstance(choices, list):
-        return []
-    reasons: list[str] = []
+        return reasons
     for choice in choices:
         reason = _field(choice, "finish_reason")
         if reason:

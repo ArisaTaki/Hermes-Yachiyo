@@ -703,6 +703,60 @@ def test_stream_smoke_summarizes_message_level_tool_calls():
     assert "README.md" not in json.dumps(public_summary)
 
 
+def test_stream_smoke_summarizes_top_level_delta_and_message_tool_calls():
+    chunks = [
+        {
+            "delta": {
+                "content": "checking ",
+                "tool_calls": [
+                    {
+                        "id": "call_top_delta",
+                        "type": "function",
+                        "function": {
+                            "name": "workspace_",
+                            "arguments": {"path": "READ"},
+                        },
+                    }
+                ],
+            }
+        },
+        {
+            "message": {
+                "tool_calls": [
+                    {
+                        "id": "call_top_delta",
+                        "type": "function",
+                        "function": {
+                            "name": "read",
+                            "arguments": "ME.md",
+                        },
+                    }
+                ],
+            },
+            "finish_reason": "tool_calls",
+        },
+        {"message": {"content": "done"}, "stop_reason": "stop"},
+    ]
+
+    public_summary = smoke.summarize_stream_chunks(chunks)
+    summary = smoke.summarize_stream_chunks(chunks, include_tool_arguments=True)
+
+    assert summary["ok"] is True
+    assert summary["content_chars"] == len("checking done")
+    assert summary["finish_reasons"] == ["tool_calls", "stop"]
+    assert summary["tool_call_delta_count"] == 2
+    assert summary["tool_call_count"] == 1
+    assert summary["tool_calls"] == [
+        {
+            "id": "call_top_delta",
+            "name": "workspace_read",
+            "argument_chars": len('{"path": "READ"}ME.md'),
+            "arguments": '{"path": "READ"}ME.md',
+        }
+    ]
+    assert "README.md" not in json.dumps(public_summary)
+
+
 def test_stream_smoke_accepts_sse_delta_tool_call_object_arguments_without_leaking(monkeypatch):
     requests: list[dict] = []
     leaked_secret = "sk-stream-object-args-secret123456"
