@@ -921,6 +921,7 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow must wire opt-in provider smoke API key secret" in messages
     assert "macOS release workflow must run the real provider streaming smoke helper when configured" in messages
     assert "macOS release workflow provider smoke must require streamed content" in messages
+    assert "macOS release workflow provider smoke must assert text finish_reason" in messages
     assert "macOS release workflow provider smoke must require streamed tool calls" in messages
     assert "macOS release workflow provider smoke must assert the workspace_read tool call" in messages
     assert "macOS release workflow provider smoke must assert the workspace_read README argument" in messages

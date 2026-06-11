@@ -500,6 +500,10 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow provider smoke must require streamed content",
     ),
     (
+        "--expect-finish-reason stop",
+        "macOS release workflow provider smoke must assert text finish_reason",
+    ),
+    (
         "--require-tool-call",
         "macOS release workflow provider smoke must require streamed tool calls",
     ),
