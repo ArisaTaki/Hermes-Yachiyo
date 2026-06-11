@@ -374,6 +374,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover UI Run cancel route idempotency",
     ),
     (
+        "tests/test_bridge_server.py::test_chat_cancel_bridge_route_cancels_native_run_and_ignores_late_output",
+        "macOS release workflow smoke tests must cover Chat cancel late-output HTTP roundtrip",
+    ),
+    (
         "tests/test_executor.py::TestNativeAgentExecutor::test_run_uses_native_run_and_returns_task_result",
         "macOS release workflow smoke tests must cover NativeAgentExecutor Task-to-Run boundary",
     ),

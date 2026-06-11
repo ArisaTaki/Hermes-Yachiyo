@@ -441,6 +441,7 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow smoke tests must cover approval reject route idempotency" in messages
     assert "macOS release workflow smoke tests must cover concurrent Run cancellation idempotency" in messages
     assert "macOS release workflow smoke tests must cover UI Run cancel route idempotency" in messages
+    assert "macOS release workflow smoke tests must cover Chat cancel late-output HTTP roundtrip" in messages
     assert "macOS release workflow smoke tests must cover NativeAgentExecutor Task-to-Run boundary" in messages
     assert "macOS release workflow smoke tests must cover TaskRunLink replay projection" in messages
     assert "macOS release workflow smoke tests must cover Native runtime shutdown cancellation facts" in messages
