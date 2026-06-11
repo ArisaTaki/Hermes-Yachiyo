@@ -1354,6 +1354,21 @@ def _iter_files(root: Path, paths: Iterable[Path | str]) -> Iterable[Path]:
             yield resolved
 
 
+def _release_electron_ui_smoke_scripts(root: Path) -> tuple[str, ...]:
+    scripts_dir = _resolve(root, "scripts")
+    if not scripts_dir.is_dir():
+        return ()
+    scripts: list[str] = []
+    for script in sorted(scripts_dir.glob("smoke_*_ui.mjs")):
+        if not script.is_file():
+            continue
+        try:
+            scripts.append(script.relative_to(root).as_posix())
+        except ValueError:
+            continue
+    return tuple(scripts)
+
+
 def verify_release_artifacts(
     *,
     root: Path | str = ROOT,
@@ -1710,6 +1725,16 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
     for required_text, message in RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT:
         if required_text not in workflow:
             findings.append(Finding(workflow_path, message))
+    electron_ui_smoke_scripts = _release_electron_ui_smoke_scripts(root)
+    for script in electron_ui_smoke_scripts:
+        required_text = f"node {script}"
+        if required_text not in workflow:
+            findings.append(
+                Finding(
+                    workflow_path,
+                    f"macOS release workflow smoke tests must run Electron UI smoke script {script}",
+                )
+            )
 
     preinstall_guard = workflow.find("Verify release-facing product identity and security guards")
     install_deps = workflow.find("Install Python dependencies")
@@ -1753,6 +1778,19 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
                     Finding(
                         workflow_path,
                         f"macOS release workflow smoke guard must run before packaged backend and DMG builds: {message}",
+                    )
+                )
+        for script in electron_ui_smoke_scripts:
+            required_index = workflow.find(f"node {script}")
+            if (
+                required_index >= 0
+                and (required_index > build_backend or required_index > build_dmg)
+            ):
+                findings.append(
+                    Finding(
+                        workflow_path,
+                        "macOS release workflow Electron UI smoke must run before "
+                        f"packaged backend and DMG builds: {script}",
                     )
                 )
     if (

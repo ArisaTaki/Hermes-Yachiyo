@@ -1130,6 +1130,26 @@ def test_verifier_requires_individual_smoke_guards_before_packaging(tmp_path):
     ) in messages
 
 
+def test_verifier_requires_every_electron_ui_smoke_script_in_release_workflow(tmp_path):
+    workflow = tmp_path / verifier.RELEASE_WORKFLOW_FILE
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text(
+        (verifier.ROOT / verifier.RELEASE_WORKFLOW_FILE).read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    smoke = tmp_path / "scripts" / "smoke_new_mature_surface_ui.mjs"
+    smoke.parent.mkdir(parents=True)
+    smoke.write_text("#!/usr/bin/env node\nconsole.log('new mature surface smoke');\n", encoding="utf-8")
+
+    findings = verifier._verify_release_workflow_guards(tmp_path)
+
+    assert verifier.Finding(
+        workflow,
+        "macOS release workflow smoke tests must run Electron UI smoke script "
+        "scripts/smoke_new_mature_surface_ui.mjs",
+    ) in findings
+
+
 def test_verifier_requires_release_workflow_to_publish_metadata_json(tmp_path):
     workflow = tmp_path / verifier.RELEASE_WORKFLOW_FILE
     workflow.parent.mkdir(parents=True)
