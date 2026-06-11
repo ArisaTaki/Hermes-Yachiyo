@@ -277,9 +277,16 @@ async function main() {
   );
   console.log('[electron-smoke] composer ready');
   await win.webContents.executeJavaScript(\`
-    window.dispatchEvent(new CustomEvent('oha-chat-e2e-add-image', {
-      detail: { name: 'smoke-image.svg', mime_type: 'image/svg+xml', data_url: \${JSON.stringify(imageDataUrl)} }
-    }));
+    (async () => {
+      const input = document.querySelector('[data-testid="chat-image-file-input"]');
+      if (!input) throw new Error('chat image file input not found');
+      const blob = await fetch(\${JSON.stringify(imageDataUrl)}).then((response) => response.blob());
+      const file = new File([blob], 'smoke-image.svg', { type: 'image/svg+xml' });
+      const transfer = new DataTransfer();
+      transfer.items.add(file);
+      Object.defineProperty(input, 'files', { configurable: true, value: transfer.files });
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    })();
   \`, true);
   await waitFor(win, () => {
     const preview = document.querySelector('[data-testid="chat-composer-attachment-preview"]');
