@@ -1155,7 +1155,7 @@ function SpecificModeSettingsView({ mode }: { mode: string }) {
         <div className="settings-page-subtitle">{payload?.mode?.settings_description || '读取中…'}</div>
       </div>
 
-      {status ? <div className={statusClassName(status)}>{status}</div> : null}
+      {status ? <div className={statusClassName(status)} data-testid="mode-settings-status">{status}</div> : null}
 
       <SettingsSection title="当前状态">
         <SettingsItem label="状态摘要" description={payload?.settings?.summary || '读取中…'} />
@@ -1194,6 +1194,7 @@ function SpecificModeSettingsView({ mode }: { mode: string }) {
             <SettingsActionButton disabled={!hasChanges || saving} onClick={resetDraft}>重置草稿</SettingsActionButton>
             <SettingsActionButton
               variant="primary"
+              dataTestId="mode-settings-save"
               disabled={!hasChanges || saving}
               loading={saving}
               submit
@@ -1451,12 +1452,12 @@ function Live2DResourceInfo({
   const summary = asRecord(config.summary);
   const releasesUrl = stringValue(resource.releases_url || config.releases_url || '');
   return (
-    <div className="settings-meta-list">
+    <div className="settings-meta-list" data-testid="live2d-resource-settings">
       <div className="settings-resource-actions">
-        <button type="button" disabled={disabled} onClick={onChooseModelPath}>{desktopFilePickerAvailable ? '选择模型目录' : '检查模型目录路径'}</button>
-        <button type="button" disabled={disabled} onClick={onImportArchive}>{desktopFilePickerAvailable ? '导入资源包 ZIP' : '按路径导入 ZIP'}</button>
-        <button type="button" disabled={disabled} onClick={onOpenAssetsDir}>打开导入目录</button>
-        <button type="button" disabled={disabled || !releasesUrl} onClick={onOpenReleases}>打开 Releases</button>
+        <button type="button" data-testid="live2d-model-path-prepare" disabled={disabled} onClick={onChooseModelPath}>{desktopFilePickerAvailable ? '选择模型目录' : '检查模型目录路径'}</button>
+        <button type="button" data-testid="live2d-archive-import" disabled={disabled} onClick={onImportArchive}>{desktopFilePickerAvailable ? '导入资源包 ZIP' : '按路径导入 ZIP'}</button>
+        <button type="button" data-testid="live2d-open-assets-dir" disabled={disabled} onClick={onOpenAssetsDir}>打开导入目录</button>
+        <button type="button" data-testid="live2d-open-releases" disabled={disabled || !releasesUrl} onClick={onOpenReleases}>打开 Releases</button>
       </div>
       {!desktopFilePickerAvailable ? (
         <div className="settings-resource-fallback">
@@ -1465,6 +1466,7 @@ function Live2DResourceInfo({
             <label htmlFor="manual-live2d-model-path">模型目录路径</label>
             <input
               id="manual-live2d-model-path"
+              data-testid="live2d-manual-model-path"
               value={manualModelPath}
               placeholder="~/Downloads/yachiyo"
               onChange={(event) => onManualModelPathChange(event.target.value)}
@@ -1474,6 +1476,7 @@ function Live2DResourceInfo({
             <label htmlFor="manual-live2d-archive-path">资源包 ZIP 路径</label>
             <input
               id="manual-live2d-archive-path"
+              data-testid="live2d-manual-archive-path"
               value={manualArchivePath}
               placeholder="~/Downloads/oha-yachiyo-live2d-yachiyo-20260423.zip"
               onChange={(event) => onManualArchivePathChange(event.target.value)}
@@ -1483,7 +1486,7 @@ function Live2DResourceInfo({
       ) : null}
       <div className="settings-meta-row">
         <span>模型状态</span>
-        <strong className={live2dStateClass(stringValue(config.model_state))}>{live2dStateLabel(stringValue(config.model_state))}</strong>
+        <strong className={live2dStateClass(stringValue(config.model_state))} data-testid="live2d-model-state">{live2dStateLabel(stringValue(config.model_state))}</strong>
       </div>
       <div className="settings-meta-row">
         <span>模型入口</span>
@@ -1495,11 +1498,11 @@ function Live2DResourceInfo({
       </div>
       <div className="settings-meta-row">
         <span>当前配置路径</span>
-        <strong>{stringValue(resource.configured_path_display || config.model_path_display || '—')}</strong>
+        <strong data-testid="live2d-configured-path">{stringValue(resource.configured_path_display || config.model_path_display || '—')}</strong>
       </div>
       <div className="settings-meta-row">
         <span>当前生效路径</span>
-        <strong>{stringValue(resource.effective_model_path_display || config.effective_model_path_display || '—')}</strong>
+        <strong data-testid="live2d-effective-path">{stringValue(resource.effective_model_path_display || config.effective_model_path_display || '—')}</strong>
       </div>
       <div className="settings-meta-row">
         <span>默认导入目录</span>
@@ -1608,6 +1611,7 @@ function SettingsActionButton({
   variant,
   loading,
   submit,
+  dataTestId,
 }: {
   children: React.ReactNode;
   onClick?: () => void;
@@ -1615,6 +1619,7 @@ function SettingsActionButton({
   variant?: 'primary' | 'danger';
   loading?: boolean;
   submit?: boolean;
+  dataTestId?: string;
 }) {
   const className = [
     'settings-action-btn',
@@ -1623,7 +1628,7 @@ function SettingsActionButton({
     loading ? 'loading' : '',
   ].filter(Boolean).join(' ');
   return (
-    <button type={submit ? 'submit' : 'button'} className={className} disabled={disabled || loading} onClick={onClick}>
+    <button type={submit ? 'submit' : 'button'} className={className} data-testid={dataTestId} disabled={disabled || loading} onClick={onClick}>
       {children}
     </button>
   );

@@ -176,6 +176,7 @@ jobs:
           node scripts/smoke_chat_group_summary_ui.mjs
           node scripts/smoke_activity_ui.mjs
           node scripts/smoke_diagnostics_screenshot_ui.mjs
+          node scripts/smoke_live2d_settings_ui.mjs
           node scripts/smoke_launcher_session_summary_ui.mjs
           node scripts/smoke_proactive_tts_ui.mjs
           node scripts/smoke_agent_run_detail_ui.mjs

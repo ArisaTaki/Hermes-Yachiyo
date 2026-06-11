@@ -449,6 +449,43 @@ def test_diagnostics_screenshot_ui_smoke_uses_local_screen_probe_path() -> None:
     )
 
 
+def test_live2d_settings_ui_smoke_uses_resource_import_and_model_prepare_paths() -> None:
+    smoke_script = "scripts/smoke_live2d_settings_ui.mjs"
+    _assert_contains(
+        "apps/frontend/src/views/ModeSettingsView.tsx",
+        [
+            "apiPost<Live2DResourceActionResult>('/ui/live2d/model-path/prepare'",
+            "apiPost<Live2DResourceActionResult>('/ui/live2d/archive/import'",
+            'data-testid="mode-settings-status"',
+            'dataTestId="mode-settings-save"',
+            'data-testid="live2d-resource-settings"',
+            'data-testid="live2d-model-path-prepare"',
+            'data-testid="live2d-archive-import"',
+            'data-testid="live2d-manual-model-path"',
+            'data-testid="live2d-manual-archive-path"',
+            'data-testid="live2d-model-state"',
+            'data-testid="live2d-configured-path"',
+            'data-testid="live2d-effective-path"',
+        ],
+    )
+    _assert_contains(
+        smoke_script,
+        [
+            "#/settings/live2d",
+            "request.method === 'POST' && url.pathname === '/ui/live2d/archive/import'",
+            "request.method === 'POST' && url.pathname === '/ui/live2d/model-path/prepare'",
+            "request.method === 'POST' && url.pathname === '/ui/settings'",
+            "data-testid=\"live2d-manual-archive-path\"",
+            "data-testid=\"live2d-archive-import\"",
+            "data-testid=\"live2d-manual-model-path\"",
+            "data-testid=\"live2d-model-path-prepare\"",
+            "data-testid=\"mode-settings-save\"",
+            "changes['live2d_mode.model_path'] !== MODEL_PATH",
+            "changes.display_mode !== 'live2d'",
+        ],
+    )
+
+
 def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> None:
     chat_view = "apps/frontend/src/views/ChatView.tsx"
     _assert_contains(

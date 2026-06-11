@@ -15,6 +15,7 @@ RELEASE_ELECTRON_SMOKE_SCRIPTS: tuple[str, ...] = (
     "scripts/smoke_chat_group_summary_ui.mjs",
     "scripts/smoke_activity_ui.mjs",
     "scripts/smoke_diagnostics_screenshot_ui.mjs",
+    "scripts/smoke_live2d_settings_ui.mjs",
     "scripts/smoke_launcher_session_summary_ui.mjs",
     "scripts/smoke_proactive_tts_ui.mjs",
     "scripts/smoke_agent_run_detail_ui.mjs",
@@ -905,6 +906,7 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow smoke tests must cover Chat group summary Electron UI smoke" in messages
     assert "macOS release workflow smoke tests must cover Activity feed/detail Electron UI smoke" in messages
     assert "macOS release workflow smoke tests must cover local screenshot Electron UI smoke" in messages
+    assert "macOS release workflow smoke tests must cover Live2D settings Electron UI smoke" in messages
     assert "macOS release workflow smoke tests must cover launcher session summary Electron UI smoke" in messages
     assert "macOS release workflow smoke tests must cover proactive TTS Electron UI smoke" in messages
     assert "macOS release workflow smoke tests must cover Agent Run Detail replay Electron UI smoke" in messages
