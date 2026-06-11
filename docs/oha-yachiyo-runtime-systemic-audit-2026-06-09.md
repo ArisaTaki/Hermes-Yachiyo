@@ -2131,6 +2131,7 @@ compileall passed
 - release workflow smoke 现在也强制包含 Workflow approval resume context boundary 回归，确保 Workflow approval approve 恢复时的 context、next index、timeline 和 artifact 继续由显式上下文解析。
 - 新 Agent Run 的 runtime metadata / prompt / compiled timeline 已从旧 `yachiyo_agent` / `Yachiyo Agent Runtime` 收敛为 `oha_agent` / `Oha Agent Runtime`；源码级 legacy kernel guard 和 release artifact verifier 的 binary scan 都会阻断 `yachiyo_agent` 与 `Runtime: Yachiyo Agent Runtime` 旧 context artifact runtime 标记回归，同时避免误伤合法的 `Oha-Yachiyo Agent Runtime` 产品文案。
 - Electron 桌面 Bridge 重启会轮换 session token；前端 `restartDesktopBridge()` 现在会清空 renderer 侧 cached Bridge token，确保重启后的 mutating request 重新从 preload 读取新 token。
+- CredentialStore release/packaged guard 现在同时覆盖 direct DevFile fallback 禁用与 `create_credential_store()` factory 选择：即使 `OHA_YACHIYO_DEV=1`，release/alpha/stable metadata 或 packaged build env 也不会选择 development file fallback；macOS release-like build 仍选择 Keychain。
 - 桌面 `.app` 已实际启动并验证 bridge；主要 UI 页面已有静态入口 guard、浏览器级 route smoke 和部分按钮级交互 smoke，但仍缺少完整成熟功能 E2E。
 
 ## 下一步建议
