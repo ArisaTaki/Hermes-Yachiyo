@@ -392,6 +392,7 @@ async function main() {
     const probe = document.querySelector('[data-testid="bubble-launcher-session-summary-probe"]');
     const status = document.querySelector('[data-testid="bubble-launcher-status-label"]');
     const sessions = Array.from(document.querySelectorAll('[data-testid="bubble-launcher-recent-session"]'));
+    const bodyText = document.body.textContent || '';
     return summary
       && summary.textContent.includes(${JSON.stringify(BUBBLE_SUMMARY)})
       && probe
@@ -404,7 +405,11 @@ async function main() {
       && sessions[1].getAttribute('data-session-id') === ${JSON.stringify(DELEGATED_SESSION_ID)}
       && sessions[1].getAttribute('data-task-id') === ${JSON.stringify(DELEGATED_TASK_ID)}
       && sessions[1].getAttribute('data-conversation-kind') === 'agent'
-      && sessions[1].textContent.includes(${JSON.stringify(DELEGATED_SUMMARY)});
+      && sessions[1].textContent.includes(${JSON.stringify(DELEGATED_SUMMARY)})
+      && !bodyText.includes('oha.group_dispatch')
+      && !bodyText.includes('<oha_group_dispatch>')
+      && !bodyText.includes('run_oha_agent')
+      && !bodyText.includes('<oha_delegation>');
   }, 'bubble summary and recent sessions');
   console.log('[electron-smoke] bubble summary rendered');
   await win.webContents.executeJavaScript(\`
@@ -437,6 +442,7 @@ async function main() {
     const probe = document.querySelector('[data-testid="live2d-launcher-session-summary-probe"]');
     const preview = document.querySelector('[data-testid="live2d-launcher-preview-fallback"]');
     const sessions = Array.from(document.querySelectorAll('[data-testid="live2d-launcher-recent-session"]'));
+    const bodyText = document.body.textContent || '';
     return quickInput
       && quickField
       && quickSubmit
@@ -451,7 +457,11 @@ async function main() {
       && sessions[1].getAttribute('data-session-id') === ${JSON.stringify(DELEGATED_SESSION_ID)}
       && sessions[1].getAttribute('data-task-id') === ${JSON.stringify(DELEGATED_TASK_ID)}
       && sessions[1].getAttribute('data-conversation-kind') === 'agent'
-      && sessions[1].textContent.includes(${JSON.stringify(DELEGATED_SUMMARY)});
+      && sessions[1].textContent.includes(${JSON.stringify(DELEGATED_SUMMARY)})
+      && !bodyText.includes('oha.group_dispatch')
+      && !bodyText.includes('<oha_group_dispatch>')
+      && !bodyText.includes('run_oha_agent')
+      && !bodyText.includes('<oha_delegation>');
   }, 'live2d quick input and recent sessions');
   console.log('[electron-smoke] live2d summary rendered');
   await win.webContents.executeJavaScript(\`
