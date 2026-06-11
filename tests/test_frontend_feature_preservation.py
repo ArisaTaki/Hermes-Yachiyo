@@ -374,6 +374,29 @@ def test_chat_image_attachment_ui_smoke_uses_file_input_path() -> None:
     _assert_not_contains(smoke_script, ["oha-chat-e2e-add-image"])
 
 
+def test_agent_run_detail_ui_smoke_uses_replay_route_and_dom_attributes() -> None:
+    smoke_script = "scripts/smoke_agent_run_detail_ui.mjs"
+    _assert_contains(
+        smoke_script,
+        [
+            "`/ui/runs/${RUN_ID}`",
+            "`/runs/${RUN_ID}/events`",
+            "events: runEvents.filter((event) => event.sequence > afterSequence).slice(0, limit)",
+            "#/agents/",
+            "data-testid=\"agent-run-detail\"",
+            "data-testid=\"agent-run-detail-task\"",
+            "data-testid=\"agent-run-detail-result\"",
+            "data-testid=\"agent-run-detail-execution-event\"",
+            "data-run-event",
+            "data-run-event-sequence",
+            "data-run-event-run-id",
+            "agent.run.started",
+            "agent.tool.call",
+            "agent.run.completed",
+        ],
+    )
+
+
 def test_chat_approval_run_detail_handoff_preserves_route_and_replay_wiring() -> None:
     _assert_contains(
         "apps/frontend/src/views/ChatView.tsx",
