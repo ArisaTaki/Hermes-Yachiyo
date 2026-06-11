@@ -1216,8 +1216,18 @@ function timelineEventTone(event: Record<string, unknown>): string {
 }
 
 function timelineEventCode(event: Record<string, unknown>): string {
-  const name = String(event.event || '');
+  const name = timelineEventName(event);
   return name.includes('.') ? name.split('.').slice(-2).join('.') : name || 'event';
+}
+
+function timelineEventName(event: Record<string, unknown>): string {
+  return String(event.event || '').trim();
+}
+
+function timelineEventSequence(event: Record<string, unknown>): string {
+  const value = event.sequence;
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return typeof value === 'string' ? value.trim() : '';
 }
 
 function timelineEventTime(event: Record<string, unknown>): string {
@@ -5005,8 +5015,19 @@ export function AgentStudioView() {
                       const payload = timelineEventPayload(event);
                       const detail = String(event.detail || '').trim();
                       const eventTone = timelineEventTone(event);
+                      const eventName = timelineEventName(event);
+                      const eventSequence = timelineEventSequence(event);
                       return (
-                        <li className={`run-execution-step ${eventTone}`} data-testid="agent-run-detail-execution-event" key={`${String(event.event || 'event')}-${index}`}>
+                        <li
+                          className={`run-execution-step ${eventTone}`}
+                          data-child-run-id={childRunId || ''}
+                          data-run-event={eventName}
+                          data-run-event-sequence={eventSequence}
+                          data-run-event-status={eventStatus || ''}
+                          data-run-event-tone={eventTone}
+                          data-testid="agent-run-detail-execution-event"
+                          key={`${eventName || 'event'}-${index}`}
+                        >
                           <span className="run-step-rail"><i aria-hidden="true" /></span>
                           <div className="run-step-card">
                             <div className="run-step-head">
