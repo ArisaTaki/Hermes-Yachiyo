@@ -2478,6 +2478,24 @@ class ToolApprovalResumeContext:
 
 
 @dataclass(frozen=True)
+class ToolApprovalTransitionContext:
+    """Shared public context for tool approval reject/timeout transitions."""
+
+    tool_name: str
+    input_preview: Any
+
+    @classmethod
+    def from_pending(cls, pending: dict[str, Any]) -> "ToolApprovalTransitionContext":
+        tool_request = pending.get("tool_request") if isinstance(pending.get("tool_request"), dict) else {}
+        return cls(
+            tool_name=str(tool_request.get("tool") or pending.get("tool") or "").strip(),
+            input_preview=_tool_input_preview(
+                tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+            ),
+        )
+
+
+@dataclass(frozen=True)
 class WorkflowApprovalTransitionContext:
     """Shared public context for Workflow approval approve/reject/timeout transitions."""
 
@@ -8276,15 +8294,13 @@ class NativeRunEngine:
                 result = self.get_run(run_id)
             return result
         pending = self.runs.pending_approval_private(run_id)
-        tool_request = pending.get("tool_request") if isinstance(pending.get("tool_request"), dict) else {}
-        tool_name = str(tool_request.get("tool") or pending.get("tool") or "").strip()
-        tool_input_preview = _tool_input_preview(tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {})
+        approval_context = ToolApprovalTransitionContext.from_pending(pending)
         result = self.approvals.reject_tool_run(
             run_id,
             timeline=[*run["timeline"]],
             reason=reason,
-            tool_name=tool_name,
-            input_preview=tool_input_preview,
+            tool_name=approval_context.tool_name,
+            input_preview=approval_context.input_preview,
         )
         self._update_agent_run_group_if_root(result)
         self._resume_parent_workflows_after_child_update(result)
@@ -8317,15 +8333,13 @@ class NativeRunEngine:
                 result = self.get_run(run_id)
             return result
         pending = self.runs.pending_approval_private(run_id)
-        tool_request = pending.get("tool_request") if isinstance(pending.get("tool_request"), dict) else {}
-        tool_name = str(tool_request.get("tool") or pending.get("tool") or "").strip()
-        tool_input_preview = _tool_input_preview(tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {})
+        approval_context = ToolApprovalTransitionContext.from_pending(pending)
         result = self.approvals.timeout_tool_run(
             run_id,
             timeline=[*run["timeline"]],
             reason=reason,
-            tool_name=tool_name,
-            input_preview=tool_input_preview,
+            tool_name=approval_context.tool_name,
+            input_preview=approval_context.input_preview,
         )
         self._update_agent_run_group_if_root(result)
         self._resume_parent_workflows_after_child_update(result)
