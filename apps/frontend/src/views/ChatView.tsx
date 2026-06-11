@@ -3142,6 +3142,7 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
             <button
               className={`message-retry-button ${retrying ? 'retrying' : ''}`}
               type="button"
+              data-testid="chat-message-retry"
               title={retrying ? '重试中' : '重试这条失败消息'}
               aria-label={retrying ? '重试中' : '重试这条失败消息'}
               disabled={retryDisabled}

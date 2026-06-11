@@ -17,9 +17,19 @@ const SESSION_ID = 'session-chat-run-detail-handoff-ui-smoke';
 const RUN_GROUP_ID = 'group-chat-run-detail-handoff-ui-smoke';
 const RUN_GOAL = 'Open completed Chat message Run Detail from Electron UI smoke';
 const RUN_RESULT = 'Chat completed message Run Detail handoff smoke completed';
+const FAILED_RUN_ID = 'chat_run_detail_handoff_ui_smoke_failed_run';
+const FAILED_TASK_ID = 'task-chat-run-detail-handoff-ui-smoke-failed';
+const FAILED_RUN_GROUP_ID = 'group-chat-run-detail-handoff-ui-smoke-failed';
+const FAILED_MESSAGE_ID = 'assistant-chat-run-detail-handoff-failed-message';
+const FAILED_RUN_GOAL = 'Open failed Chat message Run Detail from Electron UI smoke';
+const FAILED_RUN_ERROR = 'Chat failed message mapped NativeRunEngine failure.';
 const CODE_BLOCK = "console.log('oha code copy smoke');";
 const ASSISTANT_CONTENT = `${RUN_RESULT}\n\n\`\`\`js\n${CODE_BLOCK}\n\`\`\``;
 const now = new Date().toISOString();
+
+const bridgeState = {
+  retryPayloads: [],
+};
 
 const agent = {
   agent_id: AGENT_ID,
@@ -56,6 +66,30 @@ const run = {
   updated_at: now,
 };
 
+const failedRun = {
+  run_id: FAILED_RUN_ID,
+  run_group_id: FAILED_RUN_GROUP_ID,
+  run_group_source: 'main_chat',
+  task_id: FAILED_TASK_ID,
+  session_id: SESSION_ID,
+  task_run_link_run_status: 'failed',
+  task_run_link_last_event_sequence: 3,
+  kind: 'agent_run',
+  runnable_id: AGENT_ID,
+  runnable_name: 'Chat Run Detail Handoff Agent',
+  status: 'failed',
+  user_goal: FAILED_RUN_GOAL,
+  result: FAILED_RUN_ERROR,
+  timeline: [
+    { event: 'agent.run.started', status: 'running', task_id: FAILED_TASK_ID },
+    { event: 'model.request.failed', status: 'failed', error: FAILED_RUN_ERROR },
+    { event: 'agent.run.failed', status: 'failed', error: FAILED_RUN_ERROR },
+  ],
+  artifacts: [],
+  created_at: now,
+  updated_at: now,
+};
+
 const runGroup = {
   run_group_id: RUN_GROUP_ID,
   title: 'Chat Run Detail Handoff',
@@ -63,6 +97,17 @@ const runGroup = {
   status: 'completed',
   summary: 'Completed main Chat Native Run',
   child_run_ids: [RUN_ID],
+  created_at: now,
+  updated_at: now,
+};
+
+const failedRunGroup = {
+  run_group_id: FAILED_RUN_GROUP_ID,
+  title: 'Chat Run Detail Handoff Failed',
+  source: 'main_chat',
+  status: 'failed',
+  summary: FAILED_RUN_ERROR,
+  child_run_ids: [FAILED_RUN_ID],
   created_at: now,
   updated_at: now,
 };
@@ -132,6 +177,62 @@ const messages = [
       source: 'main_chat',
     },
   },
+  {
+    id: FAILED_MESSAGE_ID,
+    role: 'assistant',
+    content: FAILED_RUN_ERROR,
+    error: FAILED_RUN_ERROR,
+    status: 'failed',
+    task_id: FAILED_TASK_ID,
+    created_at: now,
+    metadata: {
+      task_id: FAILED_TASK_ID,
+      run_id: FAILED_RUN_ID,
+      run_status: 'failed',
+      runnable_id: AGENT_ID,
+      runnable_kind: 'agent',
+      source: 'main_chat',
+    },
+  },
+];
+
+const failedRunEvents = [
+  {
+    event_id: 'event-chat-handoff-failed-smoke-1',
+    run_id: FAILED_RUN_ID,
+    sequence: 1,
+    schema_version: 1,
+    event_type: 'agent.run.started',
+    actor: 'agent',
+    visibility: 'user',
+    sensitivity: 'normal',
+    payload: { task_id: FAILED_TASK_ID, goal: FAILED_RUN_GOAL },
+    created_at: now,
+  },
+  {
+    event_id: 'event-chat-handoff-failed-smoke-2',
+    run_id: FAILED_RUN_ID,
+    sequence: 2,
+    schema_version: 1,
+    event_type: 'model.request.failed',
+    actor: 'model',
+    visibility: 'user',
+    sensitivity: 'normal',
+    payload: { error: FAILED_RUN_ERROR },
+    created_at: now,
+  },
+  {
+    event_id: 'event-chat-handoff-failed-smoke-3',
+    run_id: FAILED_RUN_ID,
+    sequence: 3,
+    schema_version: 1,
+    event_type: 'agent.run.failed',
+    actor: 'agent',
+    visibility: 'user',
+    sensitivity: 'normal',
+    payload: { error: FAILED_RUN_ERROR },
+    created_at: now,
+  },
 ];
 
 function log(message) {
@@ -152,6 +253,25 @@ function pickPort() {
   });
 }
 
+function readRequestJson(request) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    request.on('data', (chunk) => chunks.push(chunk));
+    request.on('end', () => {
+      if (!chunks.length) {
+        resolve({});
+        return;
+      }
+      try {
+        resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+      } catch (error) {
+        reject(error);
+      }
+    });
+    request.on('error', reject);
+  });
+}
+
 function sendJson(response, statusCode, payload) {
   response.writeHead(statusCode, {
     'Access-Control-Allow-Origin': '*',
@@ -162,14 +282,15 @@ function sendJson(response, statusCode, payload) {
   response.end(JSON.stringify(payload));
 }
 
-function runEventsPage(url) {
+function runEventsPage(url, runId) {
   const afterSequence = Math.max(0, Number(url.searchParams.get('after_sequence') || '0'));
   const limit = Math.max(1, Number(url.searchParams.get('limit') || '200'));
+  const events = runId === FAILED_RUN_ID ? failedRunEvents : runEvents;
   return {
-    run_id: RUN_ID,
+    run_id: runId,
     after_sequence: afterSequence,
     limit,
-    events: runEvents.filter((event) => event.sequence > afterSequence).slice(0, limit),
+    events: events.filter((event) => event.sequence > afterSequence).slice(0, limit),
   };
 }
 
@@ -220,6 +341,15 @@ async function startMockBridge() {
         });
         return;
       }
+      if (request.method === 'POST' && url.pathname === '/ui/chat/messages/retry') {
+        const body = await readRequestJson(request);
+        bridgeState.retryPayloads.push(body);
+        sendJson(response, 200, {
+          ok: true,
+          task_id: 'task-chat-run-detail-handoff-retry-smoke',
+        });
+        return;
+      }
       if (request.method === 'GET' && url.pathname === '/ui/agents') {
         sendJson(response, 200, { agents: [agent] });
         return;
@@ -265,23 +395,35 @@ async function startMockBridge() {
         return;
       }
       if (request.method === 'GET' && url.pathname === '/ui/runs') {
-        sendJson(response, 200, { runs: [run] });
+        sendJson(response, 200, { runs: [run, failedRun] });
         return;
       }
       if (request.method === 'GET' && url.pathname === `/ui/runs/${RUN_ID}`) {
         sendJson(response, 200, run);
         return;
       }
+      if (request.method === 'GET' && url.pathname === `/ui/runs/${FAILED_RUN_ID}`) {
+        sendJson(response, 200, failedRun);
+        return;
+      }
       if (request.method === 'GET' && url.pathname === '/ui/run-groups') {
-        sendJson(response, 200, { run_groups: [runGroup] });
+        sendJson(response, 200, { run_groups: [runGroup, failedRunGroup] });
         return;
       }
       if (request.method === 'GET' && url.pathname === `/ui/run-groups/${RUN_GROUP_ID}`) {
         sendJson(response, 200, runGroup);
         return;
       }
+      if (request.method === 'GET' && url.pathname === `/ui/run-groups/${FAILED_RUN_GROUP_ID}`) {
+        sendJson(response, 200, failedRunGroup);
+        return;
+      }
       if (request.method === 'GET' && url.pathname === `/runs/${RUN_ID}/events`) {
-        sendJson(response, 200, runEventsPage(url));
+        sendJson(response, 200, runEventsPage(url, RUN_ID));
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/runs/${FAILED_RUN_ID}/events`) {
+        sendJson(response, 200, runEventsPage(url, FAILED_RUN_ID));
         return;
       }
       sendJson(response, 404, { ok: false, error: `not found: ${request.method} ${url.pathname}` });
@@ -345,6 +487,11 @@ const taskId = ${JSON.stringify(TASK_ID)};
 const sessionId = ${JSON.stringify(SESSION_ID)};
 const runGoal = ${JSON.stringify(RUN_GOAL)};
 const runResult = ${JSON.stringify(RUN_RESULT)};
+const failedRunId = ${JSON.stringify(FAILED_RUN_ID)};
+const failedTaskId = ${JSON.stringify(FAILED_TASK_ID)};
+const failedMessageId = ${JSON.stringify(FAILED_MESSAGE_ID)};
+const failedRunGoal = ${JSON.stringify(FAILED_RUN_GOAL)};
+const failedRunError = ${JSON.stringify(FAILED_RUN_ERROR)};
 const watchdog = setTimeout(() => {
   console.error('electron smoke timed out');
   app.exit(1);
@@ -411,12 +558,62 @@ async function main() {
   console.log('[electron-smoke] chat loaded');
   await waitFor(win, () => {
     const button = document.querySelector('[data-testid="chat-message-open-run-detail"]');
+    const failedArticle = document.querySelector('[data-message-id="${FAILED_MESSAGE_ID}"]');
+    return Boolean(button)
+      && button.textContent.includes('运行详情')
+      && document.querySelector('[data-testid="chat-message-copy"]')
+      && document.querySelector('[data-testid="chat-code-copy"]')
+      && document.body.textContent.includes(${JSON.stringify(RUN_RESULT)})
+      && failedArticle?.classList.contains('error')
+      && failedArticle?.textContent.includes(${JSON.stringify(FAILED_RUN_ERROR)})
+      && failedArticle?.querySelector('[data-testid="chat-message-retry"]')
+      && failedArticle?.querySelector('[data-testid="chat-message-open-run-detail"]');
+  }, 'completed Chat message Run Detail action');
+  await win.webContents.executeJavaScript(\`
+    const retry = document.querySelector('[data-message-id="${FAILED_MESSAGE_ID}"] [data-testid="chat-message-retry"]');
+    if (!retry) throw new Error('missing failed Chat message retry button');
+    retry.click();
+  \`, true);
+  console.log('[electron-smoke] failed Chat message retry clicked');
+  await win.webContents.executeJavaScript(\`
+    const openFailedRun = document.querySelector('[data-message-id="${FAILED_MESSAGE_ID}"] [data-testid="chat-message-open-run-detail"]');
+    if (!openFailedRun) throw new Error('missing failed Chat message Run Detail button');
+    openFailedRun.click();
+  \`, true);
+  await waitFor(win, () => (
+    window.location.hash.includes('/agents')
+    && window.location.hash.includes(${JSON.stringify(FAILED_RUN_ID)})
+    && document.querySelector('[data-testid="agent-run-detail"]')?.getAttribute('data-run-id') === ${JSON.stringify(FAILED_RUN_ID)}
+    && document.querySelector('[data-testid="agent-run-detail"]')?.getAttribute('data-task-id') === ${JSON.stringify(FAILED_TASK_ID)}
+    && document.querySelector('[data-testid="agent-run-detail"]')?.getAttribute('data-session-id') === ${JSON.stringify(SESSION_ID)}
+    && document.querySelector('[data-testid="agent-run-detail"]')?.getAttribute('data-run-status') === 'failed'
+    && document.querySelector('[data-testid="agent-run-detail-task"]')?.textContent.includes(${JSON.stringify(FAILED_RUN_GOAL)})
+    && document.querySelector('[data-testid="agent-run-detail-result"]')?.textContent.includes(${JSON.stringify(FAILED_RUN_ERROR)})
+  ), 'failed Chat message Run Detail handoff');
+  await waitFor(win, () => {
+    const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
+    const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
+    const sequences = events.map((node) => node.getAttribute('data-run-event-sequence'));
+    const runIds = events.map((node) => node.getAttribute('data-run-event-run-id'));
+    const failedEvent = events.find((node) => node.getAttribute('data-run-event') === 'agent.run.failed');
+    return events.length === 3
+      && eventTypes.includes('agent.run.started')
+      && eventTypes.includes('model.request.failed')
+      && eventTypes.includes('agent.run.failed')
+      && sequences.join(',') === '1,2,3'
+      && runIds.every((id) => id === ${JSON.stringify(FAILED_RUN_ID)})
+      && failedEvent?.textContent.includes(${JSON.stringify(FAILED_RUN_ERROR)});
+  }, 'failed Run Detail replay events');
+  console.log('[electron-smoke] failed Chat message opened matching Run Detail');
+  await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '#/chat');
+  await waitFor(win, () => {
+    const button = document.querySelector('[data-testid="chat-message-open-run-detail"]');
     return Boolean(button)
       && button.textContent.includes('运行详情')
       && document.querySelector('[data-testid="chat-message-copy"]')
       && document.querySelector('[data-testid="chat-code-copy"]')
       && document.body.textContent.includes(${JSON.stringify(RUN_RESULT)});
-  }, 'completed Chat message Run Detail action');
+  }, 'completed Chat message after failed Run Detail');
   await win.webContents.executeJavaScript(\`
   (() => {
     window.__ohaChatCopiedText = [];
@@ -509,6 +706,16 @@ main().catch((error) => {
   });
 }
 
+function assertMockBridgeContract() {
+  if (bridgeState.retryPayloads.length !== 1) {
+    throw new Error(`expected one failed message retry request, got ${bridgeState.retryPayloads.length}`);
+  }
+  const retryPayload = bridgeState.retryPayloads[0] || {};
+  if (retryPayload.message_id !== FAILED_MESSAGE_ID) {
+    throw new Error(`unexpected retry message_id: ${retryPayload.message_id || 'missing message_id'}`);
+  }
+}
+
 async function main() {
   const bridge = await startMockBridge();
   const vitePort = await pickPort();
@@ -517,6 +724,7 @@ async function main() {
     const devUrl = `http://127.0.0.1:${vitePort}`;
     await waitForHttp(devUrl);
     await runElectronSmoke(devUrl, bridge.url);
+    assertMockBridgeContract();
     log('passed');
   } finally {
     killProcess(vite);
