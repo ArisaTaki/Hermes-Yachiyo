@@ -354,6 +354,10 @@ def test_verifier_reports_packaged_app_missing_ui_e2e_selector(tmp_path):
         asar_path,
         "packaged Electron app.asar must include UI E2E selector 'chat-composer-attachment-preview'",
     ) in findings
+    assert verifier.Finding(
+        asar_path,
+        "packaged Electron app.asar must include UI E2E selector 'chat-message-summary-status'",
+    ) in findings
 
 
 def test_verifier_reports_packaged_app_development_only_ui_e2e_hook(tmp_path):
@@ -727,6 +731,7 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow smoke tests must cover mature frontend feature preservation" in messages
     assert "macOS release workflow smoke tests must cover mature UI flow contracts" in messages
     assert "macOS release workflow smoke tests must cover Chat image Electron UI smoke" in messages
+    assert "macOS release workflow smoke tests must cover Chat group summary Electron UI smoke" in messages
     assert "macOS release workflow smoke tests must cover Agent Run Detail replay Electron UI smoke" in messages
     assert "macOS release workflow smoke tests must cover Workflow save-and-run Electron UI smoke" in messages
     assert "macOS release workflow smoke tests must cover Bridge Host Origin and session token guard" in messages

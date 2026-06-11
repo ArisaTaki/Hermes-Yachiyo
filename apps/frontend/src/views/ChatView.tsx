@@ -2532,6 +2532,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                 ) : null}
                 <textarea
                   className="chat-input"
+                  data-testid="chat-composer-input"
                   ref={inputRef}
                   value={input}
                   onChange={(event) => setInput(event.target.value)}
@@ -2593,6 +2594,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
               <button
                 type="submit"
                 className="chat-send-btn neon-glow"
+                data-testid="chat-composer-send"
                 disabled={isSending || (!input.trim() && attachments.length === 0)}
                 aria-label="发送消息"
                 title={isProcessing ? '继续发送消息' : '发送消息'}

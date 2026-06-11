@@ -222,6 +222,34 @@ def test_chat_group_ui_exposes_stable_e2e_selectors() -> None:
             'data-testid="chat-group-agent-member-checkbox"',
             'data-testid="chat-group-dialog-cancel"',
             'data-testid="chat-group-dialog-submit"',
+            'data-testid="chat-composer-input"',
+            'data-testid="chat-composer-send"',
+        ],
+    )
+
+
+def test_chat_group_summary_ui_smoke_uses_group_create_send_and_summary_status() -> None:
+    smoke_script = "scripts/smoke_chat_group_summary_ui.mjs"
+    _assert_contains(
+        smoke_script,
+        [
+            "#/chat",
+            "request.method === 'POST' && url.pathname === '/ui/chat/groups'",
+            "request.method === 'POST' && url.pathname === '/ui/chat/messages'",
+            "data-testid=\"chat-session-tab-groups\"",
+            "data-testid=\"chat-session-tab-create\"",
+            "data-testid=\"chat-group-dialog\"",
+            "data-testid=\"chat-group-agent-member-checkbox\"",
+            "data-testid=\"chat-group-dialog-submit\"",
+            "data-testid=\"chat-composer-input\"",
+            "data-testid=\"chat-composer-send\"",
+            "data-testid=\"chat-message-summary-status\"",
+            "group_agent_summary_task_id",
+            "group_agent_summary_pending",
+            "group_dispatch_run_group_id",
+            "assertMockBridgeContract",
+            "messagePayload.client_message_id",
+            "bridgeState.currentSessionId !== GROUP_SESSION_ID",
         ],
     )
 
