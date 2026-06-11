@@ -481,6 +481,7 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow provider smoke must assert the workspace_read tool call" in messages
     assert "macOS release workflow provider smoke must assert the workspace_read README argument" in messages
     assert "macOS release workflow provider smoke must assert the workspace_read path JSON field" in messages
+    assert "macOS release workflow provider smoke must assert tool-call finish_reason" in messages
     assert (
         "macOS release workflow must run opt-in real provider streaming smoke before packaged backend and DMG builds"
         in messages

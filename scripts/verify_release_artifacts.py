@@ -289,6 +289,10 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "--expect-tool-argument-json-field path=README.md",
         "macOS release workflow provider smoke must assert the workspace_read path JSON field",
     ),
+    (
+        "--expect-finish-reason tool_calls",
+        "macOS release workflow provider smoke must assert tool-call finish_reason",
+    ),
 )
 RELEASE_WORKFLOW_METADATA_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
