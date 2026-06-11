@@ -1251,7 +1251,7 @@ RunEvent sequence:
 - `RunRepository`
   - 负责 runs 表 get / list / insert / update / delete rows / idempotency lookup / private pending approval payload read。
   - 保留 `NativeRunEngine` 公开方法作为薄委托，路由和业务调用不变。
-  - update 继续统一处理 secret redaction、timeline/artifact/pending approval/TaskRunLink status 投影同步。
+  - update 继续统一处理 secret redaction、Run row/timeline 落库，并通过 `RunProjectionCoordinator` 同步 artifact / pending approval / TaskRunLink status 投影。
   - delete rows 通过显式 artifact cleanup 回调删除对应 artifact 文件后再删除 runs 表记录，`NativeRunEngine.delete_run()` 保留 active-run 检查、Workflow group 删除策略和返回结构。
 
 - `RunEventRepository`
@@ -1263,6 +1263,10 @@ RunEvent sequence:
 - `TaskRunLinkRepository`
   - 负责 `task_run_links` 的 Task↔Run 映射、按 Run 读取、Run status projection 和 replay `last_event_sequence` projection。
   - 保留 `NativeRunEngine.link_task_run()` / `get_task_run_link()` 作为 TaskRunner、ChatAPI 和路由兼容入口。
+
+- `RunProjectionCoordinator`
+  - 负责 Run update 后同步 `run_artifacts`、`run_approvals` 和 `task_run_links` status projection。
+  - `RunRepository.update()` 直接调用该边界，`NativeRunEngine` 不再保留单独的 Run projection 同步 helper。
 
 - `ApprovalRepository`
   - 负责 `run_approvals` pending / resolved 投影同步。

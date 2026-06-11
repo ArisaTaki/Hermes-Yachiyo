@@ -22,6 +22,7 @@ from apps.shell.agent_runtime import (
     AgentRuntimeService,
     ApprovalResumeCoordinator,
     NativeRunEngine,
+    RunProjectionCoordinator,
     TaskRunLinkRepository,
     ToolApprovalResumeContext,
     ToolBroker,
@@ -42,6 +43,45 @@ def make_service(tmp_path, *, seed_templates: bool = False) -> AgentRuntimeServi
 
 def test_agent_runtime_service_is_native_run_engine_compatibility_name():
     assert AgentRuntimeService is NativeRunEngine
+
+
+def test_run_projection_coordinator_syncs_run_projections():
+    calls: list[tuple[str, str, object]] = []
+
+    class Projection:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def sync(self, run_id: str, *args, **kwargs) -> None:
+            calls.append((self.name, run_id, kwargs or args))
+
+        def sync_projection(self, run_id: str, **kwargs) -> None:
+            calls.append((self.name, run_id, kwargs))
+
+    coordinator = RunProjectionCoordinator(
+        run_artifacts=Projection("artifacts"),
+        run_approvals=Projection("approvals"),
+        task_run_links=Projection("task_links"),
+    )
+
+    artifacts = [{"kind": "file", "path": "report.md"}]
+    pending_approval = {"tool": "workspace.write_patch"}
+    coordinator.sync(
+        "run-projection",
+        status="approval_required",
+        artifacts=artifacts,
+        pending_approval=pending_approval,
+    )
+
+    assert calls == [
+        ("artifacts", "run-projection", (artifacts,)),
+        (
+            "approvals",
+            "run-projection",
+            {"status": "approval_required", "pending_approval": pending_approval},
+        ),
+        ("task_links", "run-projection", {"status": "approval_required"}),
+    ]
 
 
 def test_approval_resume_coordinator_executes_approved_tool_and_remaining_requests():
@@ -1313,6 +1353,8 @@ def test_task_run_link_repository_tracks_run_projection(tmp_path):
     service = make_service(tmp_path)
     try:
         assert isinstance(service.task_run_links, TaskRunLinkRepository)
+        assert isinstance(service.run_projections, RunProjectionCoordinator)
+        assert service.runs._sync_projections.__self__ is service.run_projections
 
         run = service.start_main_chat_run(
             task_id="task-link-repo",

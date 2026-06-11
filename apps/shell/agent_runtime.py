@@ -1823,6 +1823,33 @@ class RunArtifactRepository:
         return self._agent_artifacts_dir if run.get("kind") == "agent_run" else self._workflow_artifacts_dir
 
 
+class RunProjectionCoordinator:
+    """Synchronizes secondary projections after a run row changes."""
+
+    def __init__(
+        self,
+        *,
+        run_artifacts: Any,
+        run_approvals: Any,
+        task_run_links: Any,
+    ) -> None:
+        self._run_artifacts = run_artifacts
+        self._run_approvals = run_approvals
+        self._task_run_links = task_run_links
+
+    def sync(
+        self,
+        run_id: str,
+        *,
+        status: str,
+        artifacts: Any,
+        pending_approval: dict[str, Any],
+    ) -> None:
+        self._run_artifacts.sync(run_id, artifacts)
+        self._run_approvals.sync(run_id, status=status, pending_approval=pending_approval)
+        self._task_run_links.sync_projection(run_id, status=status)
+
+
 class RunGroupRepository:
     """Lifecycle store for run groups and their child run membership."""
 
@@ -3323,15 +3350,6 @@ class NativeRunEngine:
             row_to_run_group=self._row_to_run_group,
             row_to_run=self._row_to_run,
         )
-        self.runs = RunRepository(
-            self._conn,
-            ensure_row_factory=self._ensure_row_factory,
-            row_to_run=self._row_to_run,
-            accepting_runs=lambda: self._accepting_runs,
-            sync_projections=self._sync_run_projections,
-            append_run_to_group=self._append_run_to_group,
-        )
-        self.run_events = RunEventRepository(self._conn, self._db_lock, ensure_run_exists=self.get_run)
         self.run_approvals = ApprovalRepository(self._conn, self._db_lock)
         self.run_artifacts = RunArtifactRepository(
             self._conn,
@@ -3339,6 +3357,20 @@ class NativeRunEngine:
             workflow_artifacts_dir=self.workflow_artifacts_dir,
             get_run=self.get_run,
         )
+        self.run_projections = RunProjectionCoordinator(
+            run_artifacts=self.run_artifacts,
+            run_approvals=self.run_approvals,
+            task_run_links=self.task_run_links,
+        )
+        self.runs = RunRepository(
+            self._conn,
+            ensure_row_factory=self._ensure_row_factory,
+            row_to_run=self._row_to_run,
+            accepting_runs=lambda: self._accepting_runs,
+            sync_projections=self.run_projections.sync,
+            append_run_to_group=self._append_run_to_group,
+        )
+        self.run_events = RunEventRepository(self._conn, self._db_lock, ensure_run_exists=self.get_run)
         self.approvals = ApprovalCoordinator(
             timeline_factory=self._timeline,
             append_run_event=self.append_run_event,
@@ -6017,24 +6049,6 @@ class NativeRunEngine:
             return None
         status = str(run.get("status") or "").strip()
         return run if status in _FINAL_RUN_STATUSES else None
-
-    def _sync_run_projections(
-        self,
-        run_id: str,
-        *,
-        status: str,
-        artifacts: Any,
-        pending_approval: dict[str, Any],
-    ) -> None:
-        self._sync_run_artifacts(run_id, artifacts)
-        self._sync_run_approval(run_id, status=status, pending_approval=pending_approval)
-        self._sync_task_run_link_projection(run_id, status=status)
-
-    def _sync_run_artifacts(self, run_id: str, artifacts: Any) -> None:
-        self.run_artifacts.sync(run_id, artifacts)
-
-    def _sync_run_approval(self, run_id: str, *, status: str, pending_approval: dict[str, Any]) -> None:
-        self.run_approvals.sync(run_id, status=status, pending_approval=pending_approval)
 
     @staticmethod
     def _timeline(event: str, detail: str = "", **extra: Any) -> dict[str, Any]:
