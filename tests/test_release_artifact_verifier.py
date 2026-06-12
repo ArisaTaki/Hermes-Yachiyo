@@ -1684,6 +1684,7 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow smoke tests must cover NativeRunEngine Responses-style multiple Agent Run tool calls" in messages
     assert "macOS release workflow smoke tests must cover NativeRunEngine Agent Run Responses output_text.done snapshots" in messages
     assert "macOS release workflow smoke tests must cover NativeRunEngine Agent Run Responses output_item.done message snapshots" in messages
+    assert "macOS release workflow smoke tests must cover NativeRunEngine Agent Run Responses content_part.done snapshots" in messages
     assert "macOS release workflow smoke tests must cover OpenAI-compatible streaming provider contracts" in messages
     assert "macOS release workflow must expose opt-in real provider streaming smoke" in messages
     assert "macOS release workflow must wire opt-in provider smoke base URL secret" in messages
