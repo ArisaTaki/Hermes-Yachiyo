@@ -2778,6 +2778,39 @@ class ToolApprovalResumeContext:
 
 
 @dataclass(frozen=True)
+class ToolApprovalContinuationHandoff:
+    """Continuation payload after an approved tool call has been executed."""
+
+    agent: dict[str, Any]
+    user_goal: str
+    broker: ToolBroker
+    timeline: list[dict[str, Any]]
+    artifacts: list[dict[str, Any]]
+    messages: list[dict[str, Any]]
+    start_iteration: int
+    run_id: str
+    budget: _RunBudget
+
+    @classmethod
+    def from_context(
+        cls,
+        agent: dict[str, Any],
+        context: ToolApprovalResumeContext,
+    ) -> "ToolApprovalContinuationHandoff":
+        return cls(
+            agent=agent,
+            user_goal="",
+            broker=context.broker,
+            timeline=context.timeline,
+            artifacts=context.artifacts,
+            messages=context.messages,
+            start_iteration=context.next_iteration,
+            run_id=context.run_id,
+            budget=context.budget,
+        )
+
+
+@dataclass(frozen=True)
 class ToolApprovalTransitionContext:
     """Shared public context for tool approval reject/timeout transitions."""
 
@@ -3009,18 +3042,26 @@ class ApprovalResumeCoordinator:
             raise AgentRuntimeError(
                 "Approval resume coordinator is missing custom API continuation"
             )
-        self.execute_approved_tool(context)
+        handoff = self.continuation_handoff_after_approved_tool(agent, context)
         return self._continue_custom_api_agent(
-            agent,
-            "",
-            context.broker,
-            context.timeline,
-            context.artifacts,
-            messages=context.messages,
-            start_iteration=context.next_iteration,
-            run_id=context.run_id,
-            budget=context.budget,
+            handoff.agent,
+            handoff.user_goal,
+            handoff.broker,
+            handoff.timeline,
+            handoff.artifacts,
+            messages=handoff.messages,
+            start_iteration=handoff.start_iteration,
+            run_id=handoff.run_id,
+            budget=handoff.budget,
         )
+
+    def continuation_handoff_after_approved_tool(
+        self,
+        agent: dict[str, Any],
+        context: ToolApprovalResumeContext,
+    ) -> ToolApprovalContinuationHandoff:
+        self.execute_approved_tool(context)
+        return ToolApprovalContinuationHandoff.from_context(agent, context)
 
     def resume_approved_tool_run(
         self,

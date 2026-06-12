@@ -28,6 +28,7 @@ from apps.shell.agent_runtime import (
     RunProjectionCoordinator,
     RunTransitionProjectionCoordinator,
     TaskRunLinkRepository,
+    ToolApprovalContinuationHandoff,
     ToolApprovalResumeContext,
     ToolApprovalTransitionContext,
     ToolBroker,
@@ -1381,6 +1382,59 @@ def test_approval_resume_coordinator_stops_on_fatal_tool_failure():
             "status": "failed",
         }
     ]
+
+
+def test_approval_resume_coordinator_builds_continuation_handoff_after_approved_tool():
+    calls: list[str] = []
+    broker = SimpleNamespace(name="broker")
+    budget = SimpleNamespace(name="budget")
+    timeline: list[dict[str, object]] = []
+    artifacts: list[dict[str, object]] = []
+    messages: list[dict[str, object]] = [{"role": "user", "content": "resume"}]
+    agent = {"agent_id": "agent_resume", "name": "Resume Agent"}
+
+    def append_tool_result_message(run_messages, _request, tool_result):
+        calls.append("append_tool_result_message")
+        run_messages.append({"role": "tool", "content": json.dumps(tool_result)})
+
+    coordinator = ApprovalResumeCoordinator(
+        call_agent_tool=lambda *_args, **_kwargs: calls.append("call_agent_tool") or {"ok": True},
+        fatal_tool_failure_detail=lambda *_args: "",
+        append_tool_result_message=append_tool_result_message,
+        run_tool_requests=lambda *_args, **_kwargs: calls.append("run_tool_requests"),
+        timeline_factory=lambda event, detail, **payload: {"event": event, "detail": detail, **payload},
+    )
+
+    handoff = coordinator.continuation_handoff_after_approved_tool(
+        agent,
+        ToolApprovalResumeContext(
+            run_id="run_resume_handoff",
+            timeline=timeline,
+            artifacts=artifacts,
+            broker=broker,
+            allowed_tools=["terminal.run"],
+            budget=budget,
+            messages=messages,
+            tool_request={"name": "terminal.run", "input": {"command": "printf ok"}},
+            tool_name="terminal.run",
+            input_preview={"command": "printf ok"},
+            remaining_requests=[],
+            next_iteration=5,
+        ),
+    )
+
+    assert isinstance(handoff, ToolApprovalContinuationHandoff)
+    assert calls == ["call_agent_tool", "append_tool_result_message", "run_tool_requests"]
+    assert handoff.agent is agent
+    assert handoff.user_goal == ""
+    assert handoff.broker is broker
+    assert handoff.timeline is timeline
+    assert handoff.artifacts is artifacts
+    assert handoff.messages is messages
+    assert handoff.start_iteration == 5
+    assert handoff.run_id == "run_resume_handoff"
+    assert handoff.budget is budget
+    assert messages[-1] == {"role": "tool", "content": '{"ok": true}'}
 
 
 def test_approval_resume_coordinator_continues_custom_api_agent_after_approved_tool():
