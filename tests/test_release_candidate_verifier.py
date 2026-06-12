@@ -2264,6 +2264,25 @@ def test_release_candidate_verifier_runs_dmg_screen_recording_probe(
     assert commands[1][:2] == ["hdiutil", "detach"]
     assert len(popen_calls) == 1
     assert popen_calls[0]["start_new_session"] is True
+    assert popen_calls[0]["command"] == [
+        str(
+            tmp_path
+            / "tmp"
+            / "rc-screen-smoke"
+            / "Oha-Yachiyo-0.4.0-arm64"
+            / "Oha-Yachiyo.app"
+            / "Contents"
+            / "MacOS"
+            / "Oha-Yachiyo"
+        )
+    ]
+    assert popen_calls[0]["cwd"] == str(
+        tmp_path
+        / "tmp"
+        / "rc-screen-smoke"
+        / "Oha-Yachiyo-0.4.0-arm64"
+        / "Oha-Yachiyo.app"
+    )
     env = popen_calls[0]["env"]
     assert env["OHA_YACHIYO_BRIDGE_URL"] == "http://127.0.0.1:49124"
     output = capsys.readouterr().out
@@ -2286,6 +2305,12 @@ def test_release_candidate_verifier_runs_dmg_screen_recording_probe(
                     "commit": "def1234567890abc1234567890abc1234567890a",
                     "short_commit": "def1234",
                 },
+            }
+        ],
+        "app_launch_paths": [
+            {
+                "dmg_path": "release/Oha-Yachiyo-0.4.0-arm64.dmg",
+                "app_path": "tmp/rc-screen-smoke/Oha-Yachiyo-0.4.0-arm64/Oha-Yachiyo.app",
             }
         ],
         "screens": [
@@ -2411,6 +2436,12 @@ def test_release_candidate_verifier_keeps_bridge_evidence_when_dmg_screen_probe_
             },
         }
     ]
+    assert report["dmg_screen_probe"]["app_launch_paths"] == [
+        {
+            "dmg_path": "release/Oha-Yachiyo-0.4.0-arm64.dmg",
+            "app_path": "tmp/rc-screen-smoke/Oha-Yachiyo-0.4.0-arm64/Oha-Yachiyo.app",
+        }
+    ]
     assert report["dmg_screen_probe"]["screens"] == []
     manual_statuses = {
         check["id"]: check
@@ -2424,6 +2455,10 @@ def test_release_candidate_verifier_keeps_bridge_evidence_when_dmg_screen_probe_
     assert "--run-dmg-screen-smoke reached packaged Bridge" in manual_statuses[
         "screen_recording_permission"
     ]["notes"]
+    assert (
+        "Stable app path for macOS Screen Recording permission: "
+        "tmp/rc-screen-smoke/Oha-Yachiyo-0.4.0-arm64/Oha-Yachiyo.app"
+    ) in manual_statuses["screen_recording_permission"]["notes"]
     assert "release/Oha-Yachiyo-0.4.0-arm64.dmg" in manual_statuses[
         "screen_recording_permission"
     ]["notes"]

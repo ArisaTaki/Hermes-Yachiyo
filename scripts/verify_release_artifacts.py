@@ -1376,6 +1376,10 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release candidate verifier screen probe evidence must avoid archiving screenshot bytes",
     ),
     (
+        '"app_launch_paths"',
+        "release candidate verifier must report stable app launch paths for screen permission",
+    ),
+    (
         '"automated_rc_gate"',
         "release candidate verifier must label automatically supplied manual evidence",
     ),

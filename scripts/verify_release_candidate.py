@@ -680,6 +680,22 @@ def _append_dmg_screen_probe_failure_supporting_evidence(
     artifact_label = ", ".join(str(path) for path in raw_paths if path)
     if not artifact_label:
         artifact_label = "selected DMG artifacts"
+    raw_launch_paths = dmg_screen_probe.get("app_launch_paths")
+    launch_labels: list[str] = []
+    if isinstance(raw_launch_paths, list):
+        for item in raw_launch_paths:
+            if not isinstance(item, dict):
+                continue
+            launch_path = str(item.get("app_path") or "").strip()
+            if launch_path:
+                launch_labels.append(launch_path)
+    launch_note = (
+        " Stable app path for macOS Screen Recording permission: "
+        + ", ".join(launch_labels)
+        + "."
+        if launch_labels
+        else ""
+    )
     reason = _dmg_screen_probe_failure_reason(dmg_screen_probe)
     _append_manual_release_candidate_check_note(
         checks,
@@ -689,6 +705,7 @@ def _append_dmg_screen_probe_failure_supporting_evidence(
             f"packaged Bridge for {artifact_label}, but /screen/current failed "
             f"with {reason}; keep this check manual_required until Screen "
             "Recording is granted and the probe passes."
+            f"{launch_note}"
         ),
     )
 
@@ -2167,17 +2184,24 @@ def verify_dmg_screen_recording_probe(
     dmg_paths: Sequence[Path],
     *,
     timeout_seconds: float = DMG_APP_SMOKE_TIMEOUT_SECONDS,
-) -> tuple[list[Finding], list[dict[str, object]], list[str], list[dict[str, object]]]:
+) -> tuple[
+    list[Finding],
+    list[dict[str, object]],
+    list[str],
+    list[dict[str, object]],
+    list[dict[str, str]],
+]:
     findings: list[Finding] = []
     screens: list[dict[str, object]] = []
     bridge_ready_dmg_paths: list[str] = []
     bridge_statuses: list[dict[str, object]] = []
+    app_launch_paths: list[dict[str, str]] = []
     if not dmg_paths:
         findings.append(Finding(root, "release candidate DMG screen probe requested but no .dmg artifacts were found"))
-        return findings, screens, bridge_ready_dmg_paths, bridge_statuses
+        return findings, screens, bridge_ready_dmg_paths, bridge_statuses, app_launch_paths
     if sys.platform != "darwin":
         findings.append(Finding(root, "release candidate DMG screen probe requires macOS"))
-        return findings, screens, bridge_ready_dmg_paths, bridge_statuses
+        return findings, screens, bridge_ready_dmg_paths, bridge_statuses, app_launch_paths
     for dmg_path in dmg_paths:
         absolute_dmg = _absolute_artifact_path(root, dmg_path)
         mount_dir = Path(tempfile.mkdtemp(prefix="oha-yachiyo-rc-screen-"))
@@ -2216,6 +2240,28 @@ def verify_dmg_screen_recording_probe(
             if not os.access(executable_path, os.X_OK):
                 findings.append(Finding(dmg_path, f"mounted {PACKAGED_APP_NAME} executable is not executable"))
                 continue
+            launch_app_path = root / "tmp" / "rc-screen-smoke" / dmg_path.stem / PACKAGED_APP_NAME
+            shutil.rmtree(launch_app_path, ignore_errors=True)
+            launch_app_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(app_path, launch_app_path, symlinks=True)
+            launch_executable_path = (
+                launch_app_path
+                / "Contents"
+                / "MacOS"
+                / PACKAGED_APP_EXECUTABLE_NAME
+            )
+            if not launch_executable_path.is_file():
+                findings.append(Finding(dmg_path, f"copied {PACKAGED_APP_NAME} must contain executable {PACKAGED_APP_EXECUTABLE_NAME}"))
+                continue
+            if not os.access(launch_executable_path, os.X_OK):
+                findings.append(Finding(dmg_path, f"copied {PACKAGED_APP_NAME} executable is not executable"))
+                continue
+            app_launch_paths.append(
+                {
+                    "dmg_path": str(dmg_path),
+                    "app_path": str(launch_app_path.relative_to(root)),
+                }
+            )
             bridge_url = f"http://127.0.0.1:{_allocate_loopback_port()}"
             with tempfile.TemporaryDirectory(prefix="oha-yachiyo-rc-home-") as home_dir:
                 env = {
@@ -2225,8 +2271,8 @@ def verify_dmg_screen_recording_probe(
                     "OHA_YACHIYO_BRIDGE_URL": bridge_url,
                 }
                 process = subprocess.Popen(
-                    [str(executable_path)],
-                    cwd=str(app_path),
+                    [str(launch_executable_path)],
+                    cwd=str(launch_app_path),
                     env=env,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
@@ -2280,7 +2326,7 @@ def verify_dmg_screen_recording_probe(
                         message = f"{message}: {detail}"
                     findings.append(Finding(dmg_path, message))
             shutil.rmtree(mount_dir, ignore_errors=True)
-    return findings, screens, bridge_ready_dmg_paths, bridge_statuses
+    return findings, screens, bridge_ready_dmg_paths, bridge_statuses, app_launch_paths
 
 
 def _read_packaged_ui_sampling_report(report_path: Path) -> dict[str, object]:
@@ -2687,6 +2733,7 @@ def verify_release_candidate(
             "dmg_paths": [],
             "bridge_ready_dmg_paths": [],
             "bridge_statuses": [],
+            "app_launch_paths": [],
             "screens": [],
             "findings": [],
             "run_requested": run_dmg_screen_smoke,
@@ -2791,6 +2838,7 @@ def verify_release_candidate(
             "dmg_paths": [],
             "bridge_ready_dmg_paths": [],
             "bridge_statuses": [],
+            "app_launch_paths": [],
             "screens": [],
             "findings": [],
             "run_requested": run_dmg_screen_smoke,
@@ -2880,12 +2928,13 @@ def verify_release_candidate(
             }
             report["dmg_screen_probe"] = {
                 "status": "skipped",
-                "dmg_paths": [],
-                "bridge_ready_dmg_paths": [],
-                "bridge_statuses": [],
-                "screens": [],
-                "findings": [],
-                "run_requested": run_dmg_screen_smoke,
+            "dmg_paths": [],
+            "bridge_ready_dmg_paths": [],
+            "bridge_statuses": [],
+            "app_launch_paths": [],
+            "screens": [],
+            "findings": [],
+            "run_requested": run_dmg_screen_smoke,
             }
             report["dmg_ui_sampling_smoke"] = {
                 "status": "skipped",
@@ -3007,15 +3056,20 @@ def verify_release_candidate(
             "dmg_paths": [],
             "bridge_ready_dmg_paths": [],
             "bridge_statuses": [],
+            "app_launch_paths": [],
             "screens": [],
             "findings": [],
             "run_requested": run_dmg_screen_smoke,
         }
     elif run_dmg_screen_smoke:
         dmg_paths = release_candidate_dmg_paths(root, selected_artifacts)
-        screen_findings, screen_results, screen_bridge_ready_paths, screen_bridge_statuses = (
-            verify_dmg_screen_recording_probe(root, dmg_paths)
-        )
+        (
+            screen_findings,
+            screen_results,
+            screen_bridge_ready_paths,
+            screen_bridge_statuses,
+            screen_app_launch_paths,
+        ) = verify_dmg_screen_recording_probe(root, dmg_paths)
         _print_findings("DMG screen recording probe", screen_findings)
         failed = failed or bool(screen_findings)
         report["dmg_screen_probe"] = {
@@ -3023,6 +3077,7 @@ def verify_release_candidate(
             "dmg_paths": [str(path) for path in dmg_paths],
             "bridge_ready_dmg_paths": screen_bridge_ready_paths,
             "bridge_statuses": screen_bridge_statuses,
+            "app_launch_paths": screen_app_launch_paths,
             "screens": screen_results,
             "findings": _finding_report(screen_findings),
             "run_requested": run_dmg_screen_smoke,
@@ -3034,6 +3089,7 @@ def verify_release_candidate(
             "dmg_paths": [],
             "bridge_ready_dmg_paths": [],
             "bridge_statuses": [],
+            "app_launch_paths": [],
             "screens": [],
             "findings": [],
             "run_requested": run_dmg_screen_smoke,

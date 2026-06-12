@@ -259,6 +259,10 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
         "release candidate verifier screen probe evidence must avoid archiving screenshot bytes"
         in messages
     )
+    assert (
+        "release candidate verifier must report stable app launch paths for screen permission"
+        in messages
+    )
     assert "release candidate verifier must label automatically supplied manual evidence" in messages
     assert "release candidate verifier must refresh manual check status after automated gates" in messages
     assert "release candidate verifier must expose manual check evidence input" in messages

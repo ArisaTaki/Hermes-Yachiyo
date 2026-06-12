@@ -207,7 +207,7 @@ python scripts/verify_release_candidate.py --require-artifacts --run-dmg-chat-na
 python scripts/verify_release_candidate.py --require-artifacts --run-dmg-screen-smoke
 ```
 
-`--run-dmg-screen-smoke` 会启动 DMG 内 `.app`、等待 packaged Bridge `/status`，再请求 `/screen/current`。通过时 RC report 只记录截图 `width`、`height`、`format`、`captured_at` 等元数据，不归档 `image_base64`；同一轮 gate 会把 `packaged_bridge_isolation` 和 `screen_recording_permission` 自动标为 `passed`。
+`--run-dmg-screen-smoke` 会从 DMG 内复制 `.app` 到稳定的 `tmp/rc-screen-smoke/<dmg-name>/Oha-Yachiyo.app`，再启动该副本、等待 packaged Bridge `/status`，并请求 `/screen/current`。如果 macOS Screen Recording 权限未授权，RC report 会在 `dmg_screen_probe.app_launch_paths` 和 manual checklist supporting note 中写入这个稳定 app path，方便签核人对同一路径授权后复跑，而不是每次授权随机 mount path。通过时 RC report 只记录截图 `width`、`height`、`format`、`captured_at` 等元数据，不归档 `image_base64`；同一轮 gate 会把 `packaged_bridge_isolation` 和 `screen_recording_permission` 自动标为 `passed`。
 
 具备真实 OpenAI-compatible provider smoke 凭据时，运行：
 
