@@ -4188,6 +4188,59 @@ def test_main_chat_model_loop_coalesces_stream_chunks_before_persisting(tmp_path
         service.close()
 
 
+def test_main_chat_model_preserves_stream_finish_reason_and_usage_in_completed_event(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    def fake_chat(_base_url, _model, _api_key, _messages, *, tools=None, stream=False):
+        assert tools is None
+        assert stream is True
+
+        def stream_chunks():
+            yield {"choices": [{"delta": {"content": "provider "}, "finish_reason": None}]}
+            yield {
+                "choices": [{"delta": {"content": "metadata"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18},
+            }
+
+        return stream_chunks()
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-stream-metadata",
+            session_id="session-main-stream-metadata",
+            user_goal="Preserve provider metadata",
+        )
+        result = service.call_main_chat_model(
+            run["run_id"],
+            [{"role": "user", "content": "Preserve provider metadata"}],
+        )
+        rows = service._conn.execute(
+            "SELECT event_type, payload_json FROM run_events WHERE run_id=? ORDER BY sequence",
+            (run["run_id"],),
+        ).fetchall()
+        output_rows = [row for row in rows if row["event_type"] == "model.output.completed"]
+        payload = json.loads(output_rows[0]["payload_json"])
+
+        assert result == "provider metadata"
+        assert len(output_rows) == 1
+        assert payload["content"] == "provider metadata"
+        assert payload["finish_reason"] == "stop"
+        assert payload["usage"] == {
+            "prompt_tokens": 11,
+            "completion_tokens": 7,
+            "total_tokens": 18,
+        }
+        assert payload["truncated"] is False
+        assert not any(str(row["event_type"]).endswith(".delta") for row in rows)
+    finally:
+        service.close()
+
+
 def test_main_chat_model_loop_uses_responses_output_text_done_snapshot(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     expected = "final Responses snapshot"
@@ -5948,6 +6001,71 @@ def test_main_chat_model_loop_coalesces_openai_sdk_object_stream_before_persisti
         assert json.loads(output_rows[0]["payload_json"])["content"] == expected
         assert not any(str(row["event_type"]).endswith(".delta") for row in rows)
         assert len(rows) < 10
+    finally:
+        service.close()
+
+
+def test_main_chat_model_loop_preserves_openai_sdk_stream_usage_in_completed_event(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    def fake_chat(_base_url, _model, _api_key, _messages, *, tools=None, stream=False):
+        assert tools is not None
+        assert stream is True
+
+        def stream_chunks():
+            yield SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        delta=SimpleNamespace(content="sdk "),
+                        finish_reason=None,
+                    )
+                ]
+            )
+            yield SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        delta=SimpleNamespace(content="metadata"),
+                        finish_reason="stop",
+                    )
+                ],
+                usage=SimpleNamespace(prompt_tokens=5, completion_tokens=6, total_tokens=11),
+            )
+
+        return stream_chunks()
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-sdk-object-stream-metadata",
+            session_id="session-main-sdk-object-stream-metadata",
+            user_goal="Preserve SDK stream metadata",
+        )
+        updated = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [{"role": "user", "content": "Preserve SDK stream metadata"}],
+        )
+        rows = service._conn.execute(
+            "SELECT event_type, payload_json FROM run_events WHERE run_id=? ORDER BY sequence",
+            (run["run_id"],),
+        ).fetchall()
+        output_rows = [row for row in rows if row["event_type"] == "model.output.completed"]
+        payload = json.loads(output_rows[0]["payload_json"])
+
+        assert updated["result"] == "sdk metadata"
+        assert len(output_rows) == 1
+        assert payload["content"] == "sdk metadata"
+        assert payload["finish_reason"] == "stop"
+        assert payload["usage"] == {
+            "prompt_tokens": 5,
+            "completion_tokens": 6,
+            "total_tokens": 11,
+        }
+        assert payload["truncated"] is False
+        assert not any(str(row["event_type"]).endswith(".delta") for row in rows)
     finally:
         service.close()
 

@@ -629,6 +629,108 @@ def _message_field(value: Any, name: str) -> Any:
     return getattr(value, name, None)
 
 
+_MODEL_USAGE_KEYS = (
+    "prompt_tokens",
+    "completion_tokens",
+    "total_tokens",
+    "input_tokens",
+    "output_tokens",
+    "cached_tokens",
+)
+
+
+class _ModelOutputText(str):
+    def __new__(
+        cls,
+        value: str,
+        *,
+        metadata: dict[str, Any] | None = None,
+        truncated: bool = False,
+    ) -> "_ModelOutputText":
+        obj = str.__new__(cls, value)
+        obj.model_metadata = metadata or {}
+        obj.output_truncated = truncated
+        return obj
+
+
+def _coerce_model_usage(value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    usage: dict[str, Any] = {}
+    for key in _MODEL_USAGE_KEYS:
+        raw = _message_field(value, key)
+        if raw is None:
+            continue
+        try:
+            usage[key] = int(raw)
+        except (TypeError, ValueError):
+            usage[key] = raw
+    return usage or None
+
+
+def _stream_chunk_usage(chunk: Any) -> dict[str, Any] | None:
+    usage = _coerce_model_usage(_message_field(chunk, "usage"))
+    if usage is not None:
+        return usage
+    response = _message_field(chunk, "response")
+    if response is not None:
+        return _coerce_model_usage(_message_field(response, "usage"))
+    return None
+
+
+def _stream_chunk_finish_reason(chunk: Any) -> str | None:
+    direct = _message_field(chunk, "finish_reason")
+    if direct:
+        return str(direct)
+    choices = _message_field(chunk, "choices")
+    if isinstance(choices, list):
+        for choice in choices:
+            reason = _message_field(choice, "finish_reason")
+            if reason:
+                return str(reason)
+    response = _message_field(chunk, "response")
+    output = _message_field(response, "output") if response is not None else None
+    if isinstance(output, list):
+        for item in output:
+            reason = _message_field(item, "finish_reason")
+            if reason:
+                return str(reason)
+    return None
+
+
+def _model_message_metadata(message: Any) -> dict[str, Any]:
+    metadata: dict[str, Any] = {}
+    finish_reason = _message_field(message, "finish_reason")
+    if finish_reason:
+        metadata["finish_reason"] = str(finish_reason)
+    usage = _coerce_model_usage(_message_field(message, "usage"))
+    if usage is not None:
+        metadata["usage"] = usage
+    return metadata
+
+
+def _model_output_metadata(value: Any) -> dict[str, Any]:
+    metadata = getattr(value, "model_metadata", None)
+    return metadata if isinstance(metadata, dict) else {}
+
+
+def _model_output_completed_payload(
+    content: str,
+    *,
+    truncated: bool = False,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "content": content,
+        "output_chars": len(content),
+        "truncated": truncated,
+    }
+    for key, value in (metadata or {}).items():
+        if value is not None:
+            payload[key] = value
+    return payload
+
+
 def _message_content_part_type(value: Any) -> str:
     return str(_message_field(value, "type") or "").strip().lower()
 
@@ -1134,9 +1236,17 @@ def _coalesce_model_message(message: Any) -> dict[str, Any]:
     responses_text_done: dict[tuple[int, int], str] = {}
     tool_calls: list[dict[str, Any]] | None = None
     tool_call_deltas: dict[tuple[int, int], dict[str, Any]] = {}
+    finish_reason: str | None = None
+    usage: dict[str, Any] | None = None
     for chunk in message:
         if _responses_stream_is_reasoning_event(chunk):
             continue
+        chunk_finish_reason = _stream_chunk_finish_reason(chunk)
+        if chunk_finish_reason:
+            finish_reason = chunk_finish_reason
+        chunk_usage = _stream_chunk_usage(chunk)
+        if chunk_usage is not None:
+            usage = chunk_usage
         responses_delta = _responses_stream_text_delta(chunk)
         responses_done = _responses_stream_text_done(chunk)
         if responses_delta is not None or responses_done is not None:
@@ -1164,6 +1274,10 @@ def _coalesce_model_message(message: Any) -> dict[str, Any]:
         tool_calls = _coalesced_stream_tool_calls(tool_call_deltas)
     if tool_calls is not None:
         result["tool_calls"] = tool_calls
+    if finish_reason:
+        result["finish_reason"] = finish_reason
+    if usage is not None:
+        result["usage"] = usage
     return result
 
 
@@ -8250,6 +8364,7 @@ class NativeRunEngine:
             content = content.strip()
             if not content:
                 raise AgentRuntimeError("Native Agent 模型返回了空回复")
+            output_metadata = _model_message_metadata(message)
         except Exception as exc:
             terminal = self._terminal_run_or_none(run_id)
             if terminal is not None:
@@ -8274,7 +8389,11 @@ class NativeRunEngine:
         self.append_run_event(
             run_id,
             "model.output.completed",
-            {"content": content, "output_chars": len(content), "truncated": output_truncated},
+            _model_output_completed_payload(
+                content,
+                truncated=output_truncated,
+                metadata=output_metadata,
+            ),
         )
         return content
 
@@ -8460,13 +8579,17 @@ class NativeRunEngine:
                 "model.output.ready",
                 result_text[:500],
                 output_chars=len(result_text),
-                truncated=len(result_text) >= self.runtime_limits.max_model_output_chars,
+                truncated=bool(getattr(result_text, "output_truncated", False)),
             )
         )
         self.append_run_event(
             run_id,
             "model.output.completed",
-            {"content": result_text, "output_chars": len(result_text)},
+            _model_output_completed_payload(
+                str(result_text),
+                truncated=bool(getattr(result_text, "output_truncated", False)),
+                metadata=_model_output_metadata(result_text),
+            ),
         )
         return self._update_run(
             run_id,
@@ -8856,8 +8979,12 @@ class NativeRunEngine:
             if not tool_requests:
                 if not content.strip():
                     raise AgentRuntimeError("Native Agent 模型返回了空回复")
-                result_text, _truncated = self._limit_model_output(content)
-                return result_text
+                result_text, truncated = self._limit_model_output(content)
+                return _ModelOutputText(
+                    result_text,
+                    metadata=_model_message_metadata(message),
+                    truncated=truncated,
+                )
 
             if tool_requests[0].get("protocol") == "tool_calls":
                 messages.append(self._assistant_message_for_history(message))

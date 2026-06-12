@@ -142,3 +142,21 @@ def test_api_error_detail_redacts_nested_payloads():
 
     assert output["error"]["message"] == "bad token=[redacted]"
     assert output["error"]["api_key"] == "[redacted]"
+
+
+def test_sanitize_sensitive_value_keeps_numeric_token_usage_counts():
+    output = security.sanitize_sensitive_value(
+        {
+            "usage": {
+                "prompt_tokens": 11,
+                "completion_tokens": 7,
+                "total_tokens": 18,
+                "token": "provider-secret-123456",
+            }
+        }
+    )
+
+    assert output["usage"]["prompt_tokens"] == 11
+    assert output["usage"]["completion_tokens"] == 7
+    assert output["usage"]["total_tokens"] == 18
+    assert output["usage"]["token"] == "[redacted]"

@@ -36,6 +36,14 @@ _SENSITIVE_ENV_KEY_RE = re.compile(
     r"(?i)(^SSH_AUTH_SOCK$|^GITHUB_TOKEN$|^(AWS|GOOGLE|AZURE)_|(_API_KEY|_TOKEN|_SECRET|_PASSWORD)$)"
 )
 _SENSITIVE_KEY_RE = re.compile(r"(?i)(api[_-]?key|token|password|passwd|secret|authorization|bearer)")
+_SAFE_TOKEN_COUNT_KEYS = {
+    "prompt_tokens",
+    "completion_tokens",
+    "total_tokens",
+    "input_tokens",
+    "output_tokens",
+    "cached_tokens",
+}
 _TOOL_CALL_SNIPPET_RE = re.compile(r"<tool_call\b.*?</tool_call>", re.IGNORECASE | re.DOTALL)
 _TOOL_CALL_TAIL_RE = re.compile(r"<tool_call\b.*", re.IGNORECASE | re.DOTALL)
 
@@ -127,7 +135,10 @@ def sanitize_sensitive_value(
                 trim=trim,
             )
             if _SENSITIVE_KEY_RE.search(raw_key):
-                result[key_text] = REDACTED
+                if _is_safe_token_count_field(raw_key, item):
+                    result[key_text] = item
+                else:
+                    result[key_text] = REDACTED
             else:
                 result[key_text] = sanitize_sensitive_value(
                     item,
@@ -162,6 +173,12 @@ def sanitize_sensitive_value(
         collapse_whitespace=collapse_whitespace,
         trim=trim,
     )
+
+
+def _is_safe_token_count_field(key: str, value: Any) -> bool:
+    if key.lower() not in _SAFE_TOKEN_COUNT_KEYS:
+        return False
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def redact_tool_call_markup(text: str) -> str:
