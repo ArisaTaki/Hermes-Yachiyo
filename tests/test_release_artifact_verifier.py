@@ -394,7 +394,14 @@ def _write_packaged_app_bundle(
     if include_asar:
         asar = app_dir / verifier.PACKAGED_ASAR_RELATIVE_PATH
         asar.parent.mkdir(parents=True, exist_ok=True)
-        asar.write_bytes("\n".join(verifier.PACKAGED_UI_E2E_REQUIRED_SELECTORS).encode("utf-8"))
+        asar.write_bytes(
+            "\n".join(
+                (
+                    *verifier.PACKAGED_UI_E2E_REQUIRED_SELECTORS,
+                    *verifier.PACKAGED_UI_E2E_REQUIRED_DATA_ATTRIBUTES,
+                )
+            ).encode("utf-8")
+        )
     return app_dir
 
 
@@ -871,6 +878,10 @@ def test_verifier_reports_packaged_app_missing_ui_e2e_selector(tmp_path):
     ) in findings
     assert verifier.Finding(
         asar_path,
+        "packaged Electron app.asar must include UI E2E selector 'agent-run-detail-execution-open-child-run'",
+    ) in findings
+    assert verifier.Finding(
+        asar_path,
         "packaged Electron app.asar must include UI E2E selector 'agent-run-detail-result'",
     ) in findings
     assert verifier.Finding(
@@ -956,11 +967,41 @@ def test_verifier_reports_packaged_app_missing_dynamic_smoke_data_attribute(tmp_
     ) in findings
 
 
+def test_verifier_reports_packaged_app_missing_required_run_handoff_data_attributes(tmp_path):
+    app_dir = _write_packaged_app_bundle(tmp_path)
+    asar_path = app_dir / verifier.PACKAGED_ASAR_RELATIVE_PATH
+    asar_path.write_bytes("\n".join(verifier.PACKAGED_UI_E2E_REQUIRED_SELECTORS).encode("utf-8"))
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[],
+        check_required_files=False,
+        check_release_security_guards=False,
+        check_packaged_app_bundle=True,
+        allow_binary_targets=True,
+    )
+
+    assert verifier.Finding(
+        app_dir / verifier.PACKAGED_ASAR_RELATIVE_PATH,
+        "packaged Electron app.asar must include UI E2E data attribute 'data-run-id'",
+    ) in findings
+    assert verifier.Finding(
+        app_dir / verifier.PACKAGED_ASAR_RELATIVE_PATH,
+        "packaged Electron app.asar must include UI E2E data attribute 'data-run-status'",
+    ) in findings
+
+
 def test_verifier_reports_packaged_app_development_only_ui_e2e_hook(tmp_path):
     app_dir = _write_packaged_app_bundle(tmp_path)
     asar_path = app_dir / verifier.PACKAGED_ASAR_RELATIVE_PATH
     asar_path.write_bytes(
-        "\n".join([*verifier.PACKAGED_UI_E2E_REQUIRED_SELECTORS, "oha-chat-e2e-add-image"]).encode("utf-8")
+        "\n".join(
+            [
+                *verifier.PACKAGED_UI_E2E_REQUIRED_SELECTORS,
+                *verifier.PACKAGED_UI_E2E_REQUIRED_DATA_ATTRIBUTES,
+                "oha-chat-e2e-add-image",
+            ]
+        ).encode("utf-8")
     )
 
     findings = verifier.verify_release_artifacts(

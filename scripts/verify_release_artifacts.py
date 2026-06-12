@@ -305,6 +305,7 @@ PACKAGED_UI_E2E_REQUIRED_SELECTORS: tuple[str, ...] = (
     "agent-run-detail-workflow-child-cancel",
     "agent-run-detail-workflow-child-open-run",
     "agent-run-detail-workflow-step-open-run",
+    "agent-run-detail-execution-open-child-run",
     "agent-run-detail-execution-event",
     "agent-run-detail-task",
     "agent-run-detail-result",
@@ -347,6 +348,10 @@ PACKAGED_UI_E2E_REQUIRED_SELECTORS: tuple[str, ...] = (
     "workflow-run-preview-step",
     "workflow-run-goal-input",
     "workflow-save-and-run",
+)
+PACKAGED_UI_E2E_REQUIRED_DATA_ATTRIBUTES: tuple[str, ...] = (
+    "data-run-id",
+    "data-run-status",
 )
 PACKAGED_UI_E2E_FORBIDDEN_TEXT: tuple[str, ...] = (
     "oha-chat-e2e-add-image",
@@ -1607,7 +1612,17 @@ def _packaged_ui_e2e_required_selectors(root: Path) -> tuple[str, ...]:
 
 
 def _packaged_ui_e2e_required_data_attributes(root: Path) -> tuple[str, ...]:
-    return _release_electron_ui_smoke_data_attributes(root)
+    attributes: list[str] = []
+    seen: set[str] = set()
+    for attribute in (
+        *PACKAGED_UI_E2E_REQUIRED_DATA_ATTRIBUTES,
+        *_release_electron_ui_smoke_data_attributes(root),
+    ):
+        if attribute in seen:
+            continue
+        seen.add(attribute)
+        attributes.append(attribute)
+    return tuple(attributes)
 
 
 def verify_release_artifacts(
