@@ -575,6 +575,7 @@ def test_verifier_requires_release_packaging_docs_for_release_gates(tmp_path):
     assert "release packaging docs must document reusable app build metadata preparation" in messages
     assert "release packaging docs must document per-DMG checksum file validation" in messages
     assert "release packaging docs must document the local RC verification entrypoint" in messages
+    assert "release packaging docs must document the local RC DMG mount gate" in messages
     assert "release packaging docs must document the local RC Electron UI smoke gate" in messages
     assert "release packaging docs must document the source-only RC dry run" in messages
     assert "release packaging docs must document the CI release-candidate gate before upload" in messages
@@ -584,6 +585,7 @@ def test_verifier_requires_release_packaging_docs_for_release_gates(tmp_path):
 def _write_packaged_app_bundle(
     root,
     *,
+    app_dir=None,
     identifier=verifier.PACKAGED_APP_IDENTIFIER,
     executable_mode=0o755,
     backend_mode=0o755,
@@ -591,7 +593,8 @@ def _write_packaged_app_bundle(
     include_permission_copy=True,
     include_backend_metadata=True,
 ):
-    app_dir = root / verifier.PACKAGED_APP_OUTPUT_DIR / "mac-arm64" / verifier.PACKAGED_APP_NAME
+    if app_dir is None:
+        app_dir = root / verifier.PACKAGED_APP_OUTPUT_DIR / "mac-arm64" / verifier.PACKAGED_APP_NAME
     contents = app_dir / "Contents"
     macos_dir = contents / "MacOS"
     resources_dir = contents / "Resources"
@@ -644,6 +647,24 @@ def test_verifier_accepts_packaged_app_bundle_structure(tmp_path):
     findings = verifier.verify_release_artifacts(
         root=tmp_path,
         paths=[],
+        check_required_files=False,
+        check_release_security_guards=False,
+        check_packaged_app_bundle=True,
+        allow_binary_targets=True,
+    )
+
+    assert findings == []
+
+
+def test_verifier_accepts_packaged_app_bundle_from_explicit_resources_path(tmp_path):
+    app_dir = _write_packaged_app_bundle(
+        tmp_path,
+        app_dir=tmp_path / "mounted" / verifier.PACKAGED_APP_NAME,
+    )
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[app_dir / "Contents" / "Resources"],
         check_required_files=False,
         check_release_security_guards=False,
         check_packaged_app_bundle=True,
@@ -1534,7 +1555,7 @@ def test_verifier_requires_release_workflow_rc_gate_before_upload(tmp_path):
     )
     rc_step = (
         "\n      - name: Verify release candidate artifacts\n"
-        "        run: python scripts/verify_release_candidate.py --require-artifacts --report-json release/rc-verification.json\n"
+        "        run: python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount --report-json release/rc-verification.json\n"
     )
     workflow.write_text(
         current_workflow.replace(rc_step, "")

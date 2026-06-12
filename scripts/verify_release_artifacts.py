@@ -536,6 +536,10 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document the local RC verification entrypoint",
     ),
     (
+        "python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount",
+        "release packaging docs must document the local RC DMG mount gate",
+    ),
+    (
         "python scripts/verify_release_candidate.py --require-artifacts --run-ui-smoke",
         "release packaging docs must document the local RC Electron UI smoke gate",
     ),
@@ -544,7 +548,7 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document the source-only RC dry run",
     ),
     (
-        "上传 DMG 前运行 `python scripts/verify_release_candidate.py --require-artifacts --report-json release/rc-verification.json`",
+        "上传 DMG 前运行 `python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount --report-json release/rc-verification.json`",
         "release packaging docs must document the CI release-candidate gate before upload",
     ),
     (
@@ -620,6 +624,10 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "python scripts/verify_release_candidate.py --require-artifacts",
         "macOS release workflow must run the local RC verification gate",
+    ),
+    (
+        "python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount",
+        "macOS release workflow must mount-check DMG contents during local RC verification",
     ),
     (
         "--report-json release/rc-verification.json",
@@ -2079,7 +2087,7 @@ def verify_release_artifacts(
         findings.extend(_verify_release_workflow_guards(root_path))
 
     if check_packaged_app_bundle:
-        findings.extend(_verify_packaged_app_bundle(root_path))
+        findings.extend(_verify_packaged_app_bundle(root_path, scan_paths))
 
     return findings
 
@@ -2507,10 +2515,38 @@ def _verify_macos_signing_guards(root: Path) -> list[Finding]:
     return findings
 
 
-def _verify_packaged_app_bundle(root: Path) -> list[Finding]:
+def _packaged_app_dirs_from_paths(root: Path, paths: Sequence[Path | str]) -> list[Path]:
+    app_dirs: list[Path] = []
+    seen: set[Path] = set()
+
+    def add_app_dir(candidate: Path) -> None:
+        if candidate.name != PACKAGED_APP_NAME or not candidate.is_dir():
+            return
+        resolved = candidate.resolve(strict=False)
+        if resolved in seen:
+            return
+        seen.add(resolved)
+        app_dirs.append(candidate)
+
+    for path in paths:
+        resolved = _resolve(root, path)
+        for candidate in (resolved, *resolved.parents):
+            add_app_dir(candidate)
+        if resolved.is_dir():
+            for app_dir in sorted(resolved.rglob(PACKAGED_APP_NAME)):
+                add_app_dir(app_dir)
+
+    return app_dirs
+
+
+def _verify_packaged_app_bundle(
+    root: Path, paths: Sequence[Path | str] | None = None
+) -> list[Finding]:
     findings: list[Finding] = []
     output_dir = _resolve(root, PACKAGED_APP_OUTPUT_DIR)
-    app_dirs = sorted(output_dir.rglob(PACKAGED_APP_NAME)) if output_dir.exists() else []
+    app_dirs = _packaged_app_dirs_from_paths(root, paths) if paths is not None else []
+    if not app_dirs:
+        app_dirs = sorted(output_dir.rglob(PACKAGED_APP_NAME)) if output_dir.exists() else []
     if not app_dirs:
         return [
             Finding(

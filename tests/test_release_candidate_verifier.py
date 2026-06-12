@@ -135,6 +135,28 @@ def test_release_candidate_verifier_source_only_rejects_ui_smoke(
     assert report["built_artifact_guards"]["status"] == "failed"
 
 
+def test_release_candidate_verifier_source_only_rejects_dmg_mount(
+    tmp_path, monkeypatch, capsys
+):
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **kwargs: calls.append(kwargs) or [])
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        check_dmg_mount=True,
+        report_json=Path("tmp/source-only-rc.json"),
+    ) == 1
+
+    assert calls == []
+    output = capsys.readouterr().out
+    assert "--source-only cannot be combined with --check-dmg-mount" in output
+    report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
+    assert report["ok"] is False
+    assert report["source_release_guards"]["status"] == "skipped"
+    assert report["built_artifact_guards"]["status"] == "failed"
+
+
 def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
     (tmp_path / "release").mkdir()
 
@@ -151,9 +173,90 @@ def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
     assert report["source_release_guards"]["status"] == "passed"
     assert report["built_artifact_guards"]["status"] == "passed"
     assert report["built_artifact_guards"]["artifact_paths"] == ["release"]
+    assert report["dmg_mount_guards"]["status"] == "skipped"
     assert report["electron_ui_smoke"]["status"] == "skipped"
     assert report["manual_release_candidate_check_status"] == "manual_required"
     assert report["manual_release_candidate_checks"] == list(rc.MANUAL_RELEASE_CANDIDATE_CHECKS)
+
+
+def test_release_candidate_verifier_checks_mounted_dmg_app(tmp_path, monkeypatch, capsys):
+    release_dir = tmp_path / "release"
+    release_dir.mkdir()
+    dmg_path = release_dir / "Oha-Yachiyo-0.4.0-arm64.dmg"
+    dmg_path.write_bytes(b"fake dmg")
+    calls: list[dict[str, object]] = []
+    commands: list[list[str]] = []
+
+    def fake_verify_release_artifacts(**kwargs):
+        calls.append(kwargs)
+        return []
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        if command[:2] == ["hdiutil", "attach"]:
+            mount_dir = Path(command[command.index("-mountpoint") + 1])
+            (mount_dir / "Oha-Yachiyo.app" / "Contents" / "Resources").mkdir(parents=True)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(rc.sys, "platform", "darwin")
+    monkeypatch.setattr(rc, "verify_release_artifacts", fake_verify_release_artifacts)
+    monkeypatch.setattr(rc.subprocess, "run", fake_run)
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        artifact_paths=(Path("release"),),
+        check_dmg_mount=True,
+        report_json=Path("tmp/rc.json"),
+    ) == 0
+
+    mount_path = Path(commands[0][commands[0].index("-mountpoint") + 1])
+    assert calls == [
+        {"root": tmp_path},
+        {
+            "root": tmp_path,
+            "paths": (Path("release"),),
+            "allow_binary_targets": True,
+            "check_packaged_app_bundle": True,
+        },
+        {
+            "root": tmp_path,
+            "paths": (mount_path / "Oha-Yachiyo.app" / "Contents" / "Resources",),
+            "check_required_files": False,
+            "check_release_security_guards": False,
+            "allow_binary_targets": True,
+            "check_packaged_app_bundle": True,
+        },
+    ]
+    assert commands[0][:2] == ["hdiutil", "attach"]
+    assert commands[1][:2] == ["hdiutil", "detach"]
+    output = capsys.readouterr().out
+    assert "DMG mount guards: passed" in output
+    report = json.loads((tmp_path / "tmp" / "rc.json").read_text(encoding="utf-8"))
+    assert report["ok"] is True
+    assert report["dmg_mount_guards"] == {
+        "status": "passed",
+        "dmg_paths": ["release/Oha-Yachiyo-0.4.0-arm64.dmg"],
+        "findings": [],
+        "run_requested": True,
+    }
+
+
+def test_release_candidate_verifier_dmg_mount_fails_without_dmgs(tmp_path, monkeypatch, capsys):
+    (tmp_path / "release").mkdir()
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        artifact_paths=(Path("release"),),
+        check_dmg_mount=True,
+        report_json=Path("tmp/rc.json"),
+    ) == 1
+
+    output = capsys.readouterr().out
+    assert "release candidate DMG mount check requested but no .dmg artifacts were found" in output
+    report = json.loads((tmp_path / "tmp" / "rc.json").read_text(encoding="utf-8"))
+    assert report["ok"] is False
+    assert report["dmg_mount_guards"]["status"] == "failed"
 
 
 def test_release_candidate_verifier_requires_artifacts_when_requested(tmp_path, monkeypatch, capsys):
@@ -235,15 +338,22 @@ def test_release_candidate_verifier_rejects_artifact_paths_outside_root(
 
     monkeypatch.setattr(rc, "verify_release_artifacts", fake_verify_release_artifacts)
 
+    def fail_run(*_args, **_kwargs):
+        raise AssertionError("invalid artifact paths must not be mounted")
+
+    monkeypatch.setattr(rc.subprocess, "run", fail_run)
+
     assert rc.verify_release_candidate(
         root=tmp_path,
         artifact_paths=(Path("../outside-release"),),
+        check_dmg_mount=True,
         report_json=Path("release/rc-verification.json"),
     ) == 1
 
     assert calls == [{"root": tmp_path}]
     output = capsys.readouterr().out
     assert "built artifact guards: failed" in output
+    assert "DMG mount guards: skipped because artifact paths failed validation" in output
     assert "release candidate artifact path must stay inside project root" in output
     report_path = tmp_path / "release" / "rc-verification.json"
     report = json.loads(report_path.read_text(encoding="utf-8"))
@@ -258,6 +368,7 @@ def test_release_candidate_verifier_rejects_artifact_paths_outside_root(
             }
         ],
     }
+    assert report["dmg_mount_guards"]["status"] == "skipped"
 
 
 def test_release_candidate_verifier_runs_electron_ui_smoke_scripts(tmp_path, monkeypatch):

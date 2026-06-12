@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -14,12 +16,14 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from scripts.verify_release_artifacts import Finding, verify_release_artifacts
+from packages.security import redact_api_error_text
 
 DEFAULT_ARTIFACT_PATHS: tuple[Path, ...] = (
     Path("dist/backend"),
     Path("dist/electron"),
     Path("release"),
 )
+PACKAGED_APP_NAME = "Oha-Yachiyo.app"
 MANUAL_RELEASE_CANDIDATE_CHECKS: tuple[str, ...] = (
     "Mount the DMG and launch Oha-Yachiyo.app once with the documented Gatekeeper first-launch flow.",
     "Confirm the packaged app starts its local bridge and does not connect to a development backend.",
@@ -98,12 +102,114 @@ def _validate_smoke_script_paths(root: Path, smoke_scripts: Sequence[Path]) -> t
     return tuple(smoke_scripts)
 
 
+def _absolute_artifact_path(root: Path, artifact_path: Path) -> Path:
+    return artifact_path if artifact_path.is_absolute() else root / artifact_path
+
+
+def release_candidate_dmg_paths(root: Path, artifact_paths: Sequence[Path]) -> tuple[Path, ...]:
+    dmg_paths: list[Path] = []
+    seen: set[Path] = set()
+    for artifact_path in artifact_paths:
+        candidate = _absolute_artifact_path(root, artifact_path)
+        if candidate.is_file() and candidate.suffix.lower() == ".dmg":
+            resolved = candidate.resolve(strict=False)
+            if resolved not in seen:
+                dmg_paths.append(artifact_path)
+                seen.add(resolved)
+        elif candidate.is_dir():
+            for dmg in sorted(candidate.rglob("*.dmg")):
+                resolved = dmg.resolve(strict=False)
+                if resolved in seen:
+                    continue
+                try:
+                    dmg_paths.append(dmg.relative_to(root))
+                except ValueError:
+                    dmg_paths.append(dmg)
+                seen.add(resolved)
+    return tuple(dmg_paths)
+
+
+def verify_dmg_mount_artifacts(root: Path, dmg_paths: Sequence[Path]) -> list[Finding]:
+    findings: list[Finding] = []
+    if not dmg_paths:
+        findings.append(Finding(root, "release candidate DMG mount check requested but no .dmg artifacts were found"))
+        return findings
+    if sys.platform != "darwin":
+        findings.append(Finding(root, "release candidate DMG mount check requires macOS hdiutil"))
+        return findings
+    for dmg_path in dmg_paths:
+        absolute_dmg = _absolute_artifact_path(root, dmg_path)
+        mount_dir = Path(tempfile.mkdtemp(prefix="oha-yachiyo-rc-dmg-"))
+        attached = False
+        try:
+            attach = subprocess.run(
+                [
+                    "hdiutil",
+                    "attach",
+                    str(absolute_dmg),
+                    "-nobrowse",
+                    "-readonly",
+                    "-mountpoint",
+                    str(mount_dir),
+                    "-quiet",
+                ],
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            if attach.returncode != 0:
+                detail = redact_api_error_text((attach.stderr or attach.stdout or "").strip())
+                message = "release candidate DMG could not be mounted"
+                if detail:
+                    message = f"{message}: {detail}"
+                findings.append(Finding(dmg_path, message))
+                continue
+            attached = True
+            app_path = mount_dir / PACKAGED_APP_NAME
+            if not app_path.is_dir():
+                findings.append(Finding(dmg_path, f"mounted release candidate DMG must contain {PACKAGED_APP_NAME}"))
+                continue
+            resources_path = app_path / "Contents" / "Resources"
+            if not resources_path.is_dir():
+                findings.append(Finding(dmg_path, f"mounted {PACKAGED_APP_NAME} must contain Contents/Resources"))
+                continue
+            findings.extend(
+                verify_release_artifacts(
+                    root=root,
+                    paths=(resources_path,),
+                    check_required_files=False,
+                    check_release_security_guards=False,
+                    allow_binary_targets=True,
+                    check_packaged_app_bundle=True,
+                )
+            )
+        finally:
+            if attached:
+                detach = subprocess.run(
+                    ["hdiutil", "detach", str(mount_dir), "-quiet"],
+                    check=False,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                if detach.returncode != 0:
+                    detail = redact_api_error_text((detach.stderr or detach.stdout or "").strip())
+                    message = "release candidate DMG could not be detached"
+                    if detail:
+                        message = f"{message}: {detail}"
+                    findings.append(Finding(dmg_path, message))
+            shutil.rmtree(mount_dir, ignore_errors=True)
+    return findings
+
+
 def verify_release_candidate(
     *,
     root: Path = PROJECT_ROOT,
     artifact_paths: Sequence[Path] | None = None,
     require_artifacts: bool = False,
     source_only: bool = False,
+    check_dmg_mount: bool = False,
     run_ui_smoke: bool = False,
     smoke_scripts: Sequence[Path] | None = None,
     report_json: Path | None = None,
@@ -123,6 +229,12 @@ def verify_release_candidate(
             "scripts": [],
             "run_requested": run_ui_smoke,
         },
+        "dmg_mount_guards": {
+            "status": "pending",
+            "dmg_paths": [],
+            "findings": [],
+            "run_requested": check_dmg_mount,
+        },
         "manual_release_candidate_check_status": "manual_required",
         "manual_release_candidate_checks": list(MANUAL_RELEASE_CANDIDATE_CHECKS),
     }
@@ -133,6 +245,8 @@ def verify_release_candidate(
             source_only_conflicts.append("artifact paths")
         if require_artifacts:
             source_only_conflicts.append("--require-artifacts")
+        if check_dmg_mount:
+            source_only_conflicts.append("--check-dmg-mount")
         if run_ui_smoke:
             source_only_conflicts.append("--run-ui-smoke")
 
@@ -153,6 +267,17 @@ def verify_release_candidate(
                     "message": conflict_message,
                 }
             ],
+        }
+        report["dmg_mount_guards"] = {
+            "status": "skipped",
+            "dmg_paths": [],
+            "findings": [],
+            "run_requested": check_dmg_mount,
+        }
+        report["electron_ui_smoke"] = {
+            "status": "skipped",
+            "scripts": [],
+            "run_requested": run_ui_smoke,
         }
         if report_json is not None:
             try:
@@ -177,11 +302,13 @@ def verify_release_candidate(
         if source_only
         else tuple(artifact_paths) if artifact_paths is not None else existing_artifact_paths(root)
     )
+    artifact_paths_valid = True
     try:
         selected_artifacts = _validate_artifact_paths(root, selected_artifacts)
     except ValueError as exc:
         print(f"built artifact guards: failed\n- {exc}")
         failed = True
+        artifact_paths_valid = False
         report["built_artifact_guards"] = {
             "status": "failed",
             "artifact_paths": [str(path) for path in selected_artifacts],
@@ -194,6 +321,12 @@ def verify_release_candidate(
                 "status": "skipped",
                 "artifact_paths": [],
                 "findings": [],
+            }
+            report["dmg_mount_guards"] = {
+                "status": "skipped",
+                "dmg_paths": [],
+                "findings": [],
+                "run_requested": check_dmg_mount,
             }
         elif selected_artifacts:
             artifact_findings = verify_release_artifacts(
@@ -232,6 +365,34 @@ def verify_release_candidate(
                 "artifact_paths": [],
                 "findings": [],
             }
+
+    if check_dmg_mount and not artifact_paths_valid:
+        print("DMG mount guards: skipped because artifact paths failed validation")
+        report["dmg_mount_guards"] = {
+            "status": "skipped",
+            "dmg_paths": [],
+            "findings": [],
+            "run_requested": check_dmg_mount,
+        }
+    elif check_dmg_mount:
+        dmg_paths = release_candidate_dmg_paths(root, selected_artifacts)
+        dmg_findings = verify_dmg_mount_artifacts(root, dmg_paths)
+        _print_findings("DMG mount guards", dmg_findings)
+        failed = failed or bool(dmg_findings)
+        report["dmg_mount_guards"] = {
+            "status": "failed" if dmg_findings else "passed",
+            "dmg_paths": [str(path) for path in dmg_paths],
+            "findings": _finding_report(dmg_findings),
+            "run_requested": check_dmg_mount,
+        }
+    else:
+        print("DMG mount guards: skipped; pass --check-dmg-mount to inspect the app inside DMG artifacts")
+        report["dmg_mount_guards"] = {
+            "status": "skipped",
+            "dmg_paths": [],
+            "findings": [],
+            "run_requested": check_dmg_mount,
+        }
 
     selected_smoke_scripts = tuple(smoke_scripts) if smoke_scripts is not None else release_ui_smoke_scripts(root)
     smoke_results: list[dict[str, object]] = []
@@ -326,6 +487,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Run every scripts/smoke_*_ui.mjs Electron UI smoke.",
     )
     parser.add_argument(
+        "--check-dmg-mount",
+        action="store_true",
+        help="Mount every discovered DMG and verify the packaged app inside it.",
+    )
+    parser.add_argument(
         "--report-json",
         type=Path,
         help="Write a machine-readable release-candidate verification report.",
@@ -335,6 +501,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         artifact_paths=args.paths or None,
         require_artifacts=args.require_artifacts,
         source_only=args.source_only,
+        check_dmg_mount=args.check_dmg_mount,
         run_ui_smoke=args.run_ui_smoke,
         report_json=args.report_json,
     )
