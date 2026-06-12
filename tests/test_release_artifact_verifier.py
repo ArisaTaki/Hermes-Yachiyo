@@ -698,7 +698,10 @@ def test_verifier_requires_release_packaging_docs_for_release_gates(tmp_path):
     assert "release packaging docs must document the archived Electron UI smoke runner report" in messages
     assert "release packaging docs must document the archived Electron UI smoke report" in messages
     assert "release packaging docs must document the source-only RC dry run" in messages
-    assert "release packaging docs must document the CI release-candidate gate before upload" in messages
+    assert (
+        "release packaging docs must document the CI release-candidate gate and packaged app startup smoke before upload"
+        in messages
+    )
     assert "release packaging docs must document the archived RC verification report" in messages
     assert "release packaging docs must document the archived manual RC check template" in messages
     assert "release packaging docs must document the archived manual RC check draft" in messages
@@ -1751,6 +1754,41 @@ def test_verifier_requires_release_workflow_provider_missing_status_args(tmp_pat
 
     assert (
         "macOS release workflow must mark provider smoke not_applicable in archived signoff artifacts when secrets are missing"
+        in messages
+    )
+
+
+def test_verifier_requires_release_workflow_dmg_app_startup_smoke(tmp_path):
+    workflow = tmp_path / verifier.RELEASE_WORKFLOW_FILE
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text(
+        "name: Build macOS DMG\n"
+        "jobs:\n"
+        "  package-macos:\n"
+        "    steps:\n"
+        "      - name: Verify release-facing product identity and security guards\n"
+        "        run: python scripts/verify_release_artifacts.py\n"
+        "      - name: Install Python dependencies\n"
+        "        run: python -m pip install -e .\n"
+        "      - name: Prepare release metadata\n"
+        "        run: mkdir -p release\n"
+        "      - name: Verify release candidate artifacts\n"
+        "        run: |\n"
+        "          provider_smoke_status_args+=(--mark-provider-smoke-not-applicable-if-missing)\n"
+        "          python scripts/verify_release_candidate.py --write-manual-checks-template release/manual-rc-checks.template.json\n"
+        "          python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount --report-json release/rc-verification.json\n"
+        "          python scripts/verify_release_candidate.py --manual-checks-json release/rc-verification.json --write-manual-checks-draft release/manual-rc-checks.draft.json\n"
+        "          python scripts/verify_release_candidate.py --manual-checks-json release/manual-rc-checks.draft.json --write-manual-checks-markdown release/manual-rc-checks.md\n"
+        "      - name: Upload DMG artifact\n"
+        "        run: echo upload\n",
+        encoding="utf-8",
+    )
+
+    findings = verifier._verify_release_workflow_guards(tmp_path)
+    messages = [finding.message for finding in findings]
+
+    assert (
+        "macOS release workflow must launch the app inside DMG artifacts during RC verification"
         in messages
     )
 

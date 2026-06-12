@@ -606,8 +606,8 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document the source-only RC dry run",
     ),
     (
-        "上传 DMG 前运行 `python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount --report-json release/rc-verification.json`",
-        "release packaging docs must document the CI release-candidate gate before upload",
+        "上传 DMG 前运行 `python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount --run-dmg-app-smoke --report-json release/rc-verification.json`",
+        "release packaging docs must document the CI release-candidate gate and packaged app startup smoke before upload",
     ),
     (
         "release/rc-verification.json",
@@ -778,6 +778,10 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount",
         "macOS release workflow must mount-check DMG contents during local RC verification",
+    ),
+    (
+        "python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount --run-dmg-app-smoke",
+        "macOS release workflow must launch the app inside DMG artifacts during RC verification",
     ),
     (
         "provider_smoke_status_args+=(--mark-provider-smoke-not-applicable-if-missing)",
