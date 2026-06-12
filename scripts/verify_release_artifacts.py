@@ -131,6 +131,11 @@ RELEASE_LATEST_BRANCH_CHANNELS: dict[str, str] = {
     "develop": "experimental",
 }
 RELEASE_LATEST_JSON_RE = re.compile(r"^Oha-Yachiyo-(?P<branch>main|alpha|develop)-latest\.json$")
+RELEASE_LATEST_SIGNING_MODES = {"unsigned", "self-signed-app-unsigned-dmg"}
+RELEASE_SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$")
+RELEASE_SHA_RE = re.compile(r"^[0-9a-f]{40}$", re.IGNORECASE)
+RELEASE_SHORT_SHA_RE = re.compile(r"^[0-9a-f]{7}$", re.IGNORECASE)
+RELEASE_PUBLISHED_AT_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 PACKAGED_UI_E2E_REQUIRED_SELECTORS: tuple[str, ...] = (
     "chat-image-file-input",
     "chat-header-image-attach-button",
@@ -493,8 +498,8 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document latest JSON checksum consistency checks",
     ),
     (
-        "latest JSON 的 `name` / `channel` / `branch` / `build_number` / `signing` / `changelog`",
-        "release packaging docs must document latest JSON metadata field validation",
+        "latest JSON 的 `name` / `channel` / `branch` / `version` / `commit` / `short_commit` / `build_number` / `run_number` / `run_id` / `tag` / `signing` / `published_at` / `changelog`",
+        "release packaging docs must document latest JSON metadata format validation",
     ),
     (
         "每个 DMG 的 `.sha256` 文件",
@@ -1825,8 +1830,13 @@ def _verify_release_latest_json_metadata(metadata_path: Path, metadata: dict[str
         "channel",
         "branch",
         "version",
+        "base_version",
         "commit",
+        "short_commit",
         "build_number",
+        "run_number",
+        "run_id",
+        "tag",
         "signing",
         "dmg_name",
         "sha256",
@@ -1855,8 +1865,36 @@ def _verify_release_latest_json_metadata(metadata_path: Path, metadata: dict[str
     expected_dmg = f"Oha-Yachiyo-{expected_branch}-latest.dmg"
     if metadata.get("dmg_name") != expected_dmg:
         findings.append(Finding(metadata_path, "release latest JSON dmg_name must match its filename branch"))
+    version = str(metadata.get("version") or "")
+    base_version = str(metadata.get("base_version") or "")
+    if not RELEASE_SEMVER_RE.fullmatch(version):
+        findings.append(Finding(metadata_path, "release latest JSON version must be semver"))
+    if not RELEASE_SEMVER_RE.fullmatch(base_version):
+        findings.append(Finding(metadata_path, "release latest JSON base_version must be semver"))
+    commit = str(metadata.get("commit") or "")
+    short_commit = str(metadata.get("short_commit") or "")
+    if not RELEASE_SHA_RE.fullmatch(commit):
+        findings.append(Finding(metadata_path, "release latest JSON commit must be a 40-character git SHA"))
+    if not RELEASE_SHORT_SHA_RE.fullmatch(short_commit):
+        findings.append(Finding(metadata_path, "release latest JSON short_commit must be a 7-character git SHA prefix"))
+    if commit and short_commit and not commit.lower().startswith(short_commit.lower()):
+        findings.append(Finding(metadata_path, "release latest JSON short_commit must prefix commit"))
     if not isinstance(metadata.get("build_number"), int):
         findings.append(Finding(metadata_path, "release latest JSON build_number must be an integer"))
+    if not isinstance(metadata.get("run_number"), int):
+        findings.append(Finding(metadata_path, "release latest JSON run_number must be an integer"))
+    if not str(metadata.get("run_id") or "").isdigit():
+        findings.append(Finding(metadata_path, "release latest JSON run_id must be numeric"))
+    signing = str(metadata.get("signing") or "")
+    if signing not in RELEASE_LATEST_SIGNING_MODES:
+        findings.append(Finding(metadata_path, "release latest JSON signing must be a known signing mode"))
+    published_at = str(metadata.get("published_at") or "")
+    if not RELEASE_PUBLISHED_AT_RE.fullmatch(published_at):
+        findings.append(Finding(metadata_path, "release latest JSON published_at must be UTC ISO-8601"))
+    tag = str(metadata.get("tag") or "")
+    expected_tag_prefix = f"{expected_channel}-v{version}-build.{metadata.get('build_number')}-"
+    if tag and short_commit and tag != f"{expected_tag_prefix}{short_commit}":
+        findings.append(Finding(metadata_path, "release latest JSON tag must match channel version build and short_commit"))
     if not isinstance(metadata.get("changelog"), dict):
         findings.append(Finding(metadata_path, "release latest JSON changelog must be an object"))
     return findings

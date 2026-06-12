@@ -167,12 +167,12 @@ def test_verifier_validates_release_latest_json_checksum_contract(tmp_path):
         "source_branch": "main",
         "version": "0.4.0",
         "base_version": "0.4.0",
-        "commit": "abc123",
-        "short_commit": "abc123",
+        "commit": "abc1234567890abc1234567890abc1234567890a",
+        "short_commit": "abc1234",
         "build_number": 1,
         "run_number": 1,
         "run_id": "12345",
-        "tag": "stable-v0.4.0-build.1-abc123",
+        "tag": "stable-v0.4.0-build.1-abc1234",
         "signing": "self-signed-app-unsigned-dmg",
         "dmg_name": dmg.name,
         "sha256": digest,
@@ -210,15 +210,20 @@ def test_verifier_reports_release_latest_json_metadata_mismatches(tmp_path):
                 "name": "Wrong App",
                 "channel": "experimental",
                 "branch": "develop",
-                "version": "0.4.0",
+                "version": "not-semver",
+                "base_version": "not-semver",
                 "commit": "abc123",
+                "short_commit": "def9999",
                 "build_number": "1",
-                "signing": "self-signed-app-unsigned-dmg",
+                "run_number": "1",
+                "run_id": "run-1",
+                "tag": "experimental-v0.4.0-build.1-def9999",
+                "signing": "notarized",
                 "dmg_name": "Oha-Yachiyo-develop-latest.dmg",
                 "sha256": digest,
                 "download_url": f"https://github.example/releases/download/main-latest/{dmg.name}",
                 "latest_json_url": "https://github.example/releases/download/main-latest/Oha-Yachiyo-main-latest.json",
-                "published_at": "2026-06-12T00:00:00Z",
+                "published_at": "2026-06-12 00:00:00",
                 "changelog": [],
             }
         ),
@@ -238,7 +243,16 @@ def test_verifier_reports_release_latest_json_metadata_mismatches(tmp_path):
     assert "release latest JSON branch must match its filename" in messages
     assert "release latest JSON channel must match its filename branch" in messages
     assert "release latest JSON dmg_name must match its filename branch" in messages
+    assert "release latest JSON version must be semver" in messages
+    assert "release latest JSON base_version must be semver" in messages
+    assert "release latest JSON commit must be a 40-character git SHA" in messages
+    assert "release latest JSON short_commit must prefix commit" in messages
     assert "release latest JSON build_number must be an integer" in messages
+    assert "release latest JSON run_number must be an integer" in messages
+    assert "release latest JSON run_id must be numeric" in messages
+    assert "release latest JSON signing must be a known signing mode" in messages
+    assert "release latest JSON published_at must be UTC ISO-8601" in messages
+    assert "release latest JSON tag must match channel version build and short_commit" in messages
     assert "release latest JSON changelog must be an object" in messages
 
 
@@ -545,7 +559,7 @@ def test_verifier_requires_release_packaging_docs_for_release_gates(tmp_path):
     assert "release packaging docs must document final packaged app signature verification" in messages
     assert "release packaging docs must document final release artifact binary scanning" in messages
     assert "release packaging docs must document latest JSON checksum consistency checks" in messages
-    assert "release packaging docs must document latest JSON metadata field validation" in messages
+    assert "release packaging docs must document latest JSON metadata format validation" in messages
     assert "release packaging docs must document per-DMG checksum file validation" in messages
 
 
