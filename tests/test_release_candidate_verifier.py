@@ -889,6 +889,67 @@ def test_release_candidate_verifier_manual_check_draft_can_mark_provider_not_app
     assert loaded["real_provider_smoke"]["evidence_source"] == "credentials_unavailable"
 
 
+def test_release_candidate_verifier_manual_check_write_actions_print_remaining_summary(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    for env_name in rc.PROVIDER_SMOKE_ENV_VARS:
+        monkeypatch.delenv(env_name, raising=False)
+    monkeypatch.setattr(rc, "PROJECT_ROOT", tmp_path)
+    prior_statuses = rc._manual_release_candidate_check_report()
+    for check in prior_statuses:
+        if check["id"] == "packaged_bridge_isolation":
+            check["status"] = "passed"
+            check["evidence"] = "Automated --run-dmg-app-smoke passed for release/Oha-Yachiyo.dmg"
+            check["evidence_source"] = "automated_rc_gate"
+
+    prior_report_path = tmp_path / "tmp" / "final-rc.json"
+    prior_report_path.parent.mkdir(parents=True)
+    prior_report_path.write_text(
+        json.dumps({"manual_release_candidate_check_statuses": prior_statuses}),
+        encoding="utf-8",
+    )
+
+    assert (
+        rc.main(
+            [
+                "--manual-checks-json",
+                "tmp/final-rc.json",
+                "--write-manual-checks-draft",
+                "tmp/final-rc-signoff.json",
+                "--mark-provider-smoke-not-applicable-if-missing",
+            ]
+        )
+        == 0
+    )
+    output = capsys.readouterr().out
+    assert "manual release-candidate checks draft: tmp/final-rc-signoff.json" in output
+    assert "manual release-candidate check progress: 2/6 complete, 4 remaining" in output
+    assert (
+        "manual release-candidate check summary: 4 remaining "
+        "(gatekeeper_first_launch, screen_recording_permission, "
+        "chat_native_file_upload, packaged_ui_sampling)"
+    ) in output
+    assert "- [screen_recording_permission] Prefer rerunning the RC gate with --run-dmg-screen-smoke" in output
+
+    assert (
+        rc.main(
+            [
+                "--manual-checks-json",
+                "tmp/final-rc-signoff.json",
+                "--write-manual-checks-markdown",
+                "tmp/final-rc-signoff.md",
+            ]
+        )
+        == 0
+    )
+    output = capsys.readouterr().out
+    assert "manual release-candidate checks markdown: tmp/final-rc-signoff.md" in output
+    assert "manual release-candidate check progress: 2/6 complete, 4 remaining" in output
+    assert "manual release-candidate next actions:" in output
+
+
 def test_release_candidate_verifier_manual_check_markdown_can_mark_provider_not_applicable(
     tmp_path,
     monkeypatch,

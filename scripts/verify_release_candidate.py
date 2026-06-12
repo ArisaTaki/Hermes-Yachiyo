@@ -505,6 +505,59 @@ def _manual_release_candidate_check_summary(
     }
 
 
+def _print_manual_release_candidate_check_summary(summary: dict[str, Any]) -> None:
+    remaining_ids = summary.get("remaining_check_ids")
+    remaining_count = summary.get("remaining_count")
+    total = summary.get("total")
+    if isinstance(total, int) and isinstance(remaining_count, int):
+        completed_count = max(0, total - remaining_count)
+        print(
+            "manual release-candidate check progress: "
+            f"{completed_count}/{total} complete, {remaining_count} remaining"
+        )
+    if isinstance(remaining_ids, list) and remaining_ids:
+        print(
+            "manual release-candidate check summary: "
+            f"{remaining_count} remaining ({', '.join(str(check_id) for check_id in remaining_ids)})"
+        )
+        remaining_next_actions = summary.get("remaining_next_actions")
+        if isinstance(remaining_next_actions, list):
+            print("manual release-candidate next actions:")
+            for item in remaining_next_actions:
+                if not isinstance(item, dict):
+                    continue
+                check_id = str(item.get("id", "")).strip()
+                next_action = str(item.get("next_action", "")).strip()
+                if check_id and next_action:
+                    print(f"- [{check_id}] {next_action}")
+    else:
+        print("manual release-candidate check summary: complete")
+
+
+def _print_manual_release_candidate_checks_for_write_action(
+    root: Path,
+    source_path: ManualChecksJsonInput | Path | None,
+    *,
+    mark_provider_smoke_not_applicable_if_missing: bool = False,
+) -> None:
+    source_is_markdown = isinstance(source_path, Path) and source_path.suffix.lower() in {
+        ".md",
+        ".markdown",
+    }
+    checks, findings = _load_manual_release_candidate_checks(
+        root,
+        None if source_is_markdown else source_path,
+        source_path if source_is_markdown else None,
+    )
+    if findings:
+        return
+    if mark_provider_smoke_not_applicable_if_missing:
+        _mark_provider_smoke_not_applicable_if_missing(checks)
+    _print_manual_release_candidate_check_summary(
+        _manual_release_candidate_check_summary(checks)
+    )
+
+
 def _manual_release_candidate_checks_by_id(
     checks: Sequence[dict[str, str]],
 ) -> dict[str, dict[str, str]]:
@@ -1791,25 +1844,7 @@ def verify_release_candidate(
         print(f"- [{check['id']}] {check['status']}: {check['description']}")
     manual_summary = report["manual_release_candidate_check_summary"]
     if isinstance(manual_summary, dict):
-        remaining_ids = manual_summary.get("remaining_check_ids")
-        remaining_count = manual_summary.get("remaining_count")
-        if isinstance(remaining_ids, list) and remaining_ids:
-            print(
-                "manual release-candidate check summary: "
-                f"{remaining_count} remaining ({', '.join(str(check_id) for check_id in remaining_ids)})"
-            )
-            remaining_next_actions = manual_summary.get("remaining_next_actions")
-            if isinstance(remaining_next_actions, list):
-                print("manual release-candidate next actions:")
-                for item in remaining_next_actions:
-                    if not isinstance(item, dict):
-                        continue
-                    check_id = str(item.get("id", "")).strip()
-                    next_action = str(item.get("next_action", "")).strip()
-                    if check_id and next_action:
-                        print(f"- [{check_id}] {next_action}")
-        else:
-            print("manual release-candidate check summary: complete")
+        _print_manual_release_candidate_check_summary(manual_summary)
     if manual_check_findings:
         print("manual release-candidate check evidence: failed")
         for finding in manual_check_findings:
@@ -1981,6 +2016,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"manual release-candidate checks draft: failed\n- {exc}")
             return 1
         print(f"manual release-candidate checks draft: {args.write_manual_checks_draft}")
+        _print_manual_release_candidate_checks_for_write_action(
+            PROJECT_ROOT,
+            args.manual_checks_json,
+            mark_provider_smoke_not_applicable_if_missing=(
+                args.mark_provider_smoke_not_applicable_if_missing
+            ),
+        )
         return 0
     if args.write_manual_checks_markdown is not None:
         try:
@@ -1996,6 +2038,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"manual release-candidate checks markdown: failed\n- {exc}")
             return 1
         print(f"manual release-candidate checks markdown: {args.write_manual_checks_markdown}")
+        _print_manual_release_candidate_checks_for_write_action(
+            PROJECT_ROOT,
+            args.manual_checks_markdown or args.manual_checks_json,
+            mark_provider_smoke_not_applicable_if_missing=(
+                args.mark_provider_smoke_not_applicable_if_missing
+            ),
+        )
         return 0
     return verify_release_candidate(
         artifact_paths=args.paths or None,

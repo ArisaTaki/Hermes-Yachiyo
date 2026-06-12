@@ -650,6 +650,10 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document manual RC check Markdown generation",
     ),
     (
+        "生成 draft 或 Markdown 时，CLI 会立即打印同一套 progress",
+        "release packaging docs must document fast signoff summary output for generated drafts",
+    ),
+    (
         "不写显式 `status` 会按 `passed` 解析",
         "release packaging docs must document checked Markdown items default to passed",
     ),
@@ -1006,6 +1010,14 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "_manual_release_candidate_check_summary",
         "release candidate verifier must calculate manual check progress summary",
+    ),
+    (
+        "_print_manual_release_candidate_check_summary",
+        "release candidate verifier must print manual check progress for both gates and generated drafts",
+    ),
+    (
+        "manual release-candidate check progress:",
+        "release candidate verifier must print compact manual check progress",
     ),
     (
         '"remaining_check_ids"',
