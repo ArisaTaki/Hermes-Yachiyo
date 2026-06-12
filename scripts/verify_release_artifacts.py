@@ -618,6 +618,10 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document manual RC check template generation",
     ),
     (
+        "--write-manual-checks-draft",
+        "release packaging docs must document manual RC check draft generation",
+    ),
+    (
         "--require-manual-checks-complete",
         "release packaging docs must document final manual RC signoff enforcement",
     ),
@@ -964,6 +968,14 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release candidate verifier must expose manual check template writing",
     ),
     (
+        "_manual_release_candidate_check_draft",
+        "release candidate verifier must generate editable manual check drafts",
+    ),
+    (
+        "write_manual_release_candidate_checks_draft",
+        "release candidate verifier must expose manual check draft writing",
+    ),
+    (
         '"evidence_prompt"',
         "release candidate verifier manual check templates must preserve evidence prompts",
     ),
@@ -1010,6 +1022,10 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         '"--write-manual-checks-template"',
         "release candidate verifier CLI must write manual check templates",
+    ),
+    (
+        '"--write-manual-checks-draft"',
+        "release candidate verifier CLI must write editable manual check drafts",
     ),
 )
 STREAMING_PROVIDER_SMOKE_SCRIPT_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (

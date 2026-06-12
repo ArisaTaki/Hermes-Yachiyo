@@ -529,6 +529,52 @@ def test_release_candidate_verifier_writes_manual_check_template(tmp_path):
     )
 
 
+def test_release_candidate_verifier_writes_manual_check_draft_from_prior_report(tmp_path):
+    prior_statuses = rc._manual_release_candidate_check_report()
+    for check in prior_statuses:
+        if check["id"] == "packaged_bridge_isolation":
+            check["status"] = "passed"
+            check["evidence"] = "Automated --run-dmg-app-smoke passed for release/Oha-Yachiyo.dmg"
+            check["evidence_source"] = "automated_rc_gate"
+
+    prior_report_path = tmp_path / "tmp" / "final-rc.json"
+    prior_report_path.parent.mkdir(parents=True)
+    prior_report_path.write_text(
+        json.dumps(
+            {
+                "manual_release_candidate_check_statuses": prior_statuses,
+                "manual_release_candidate_check_summary": {
+                    "remaining_count": 5,
+                    "automated_evidence_check_ids": ["packaged_bridge_isolation"],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    draft_path = rc.write_manual_release_candidate_checks_draft(
+        tmp_path,
+        Path("tmp/final-rc-signoff.json"),
+        Path("tmp/final-rc.json"),
+    )
+
+    assert draft_path == tmp_path / "tmp" / "final-rc-signoff.json"
+    draft = json.loads(draft_path.read_text(encoding="utf-8"))
+    assert draft["manual_release_candidate_checks_source"] == "tmp/final-rc.json"
+    assert draft["manual_release_candidate_check_summary"]["remaining_count"] == 5
+    assert draft["manual_release_candidate_check_summary"]["automated_evidence_check_ids"] == [
+        "packaged_bridge_isolation"
+    ]
+    checks = {check["id"]: check for check in draft["checks"]}
+    assert checks["gatekeeper_first_launch"]["status"] == "manual_required"
+    assert checks["gatekeeper_first_launch"]["evidence"] == ""
+    assert checks["gatekeeper_first_launch"]["evidence_prompt"]
+    assert checks["gatekeeper_first_launch"]["next_action"]
+    assert checks["packaged_bridge_isolation"]["status"] == "passed"
+    assert checks["packaged_bridge_isolation"]["evidence_source"] == "automated_rc_gate"
+    assert "--run-dmg-app-smoke passed" in checks["packaged_bridge_isolation"]["evidence"]
+
+
 def test_release_candidate_verifier_rejects_manual_check_template_outside_root(tmp_path):
     outside = tmp_path.parent / "manual-rc-checks.template.json"
 
@@ -539,6 +585,35 @@ def test_release_candidate_verifier_rejects_manual_check_template_outside_root(t
     else:
         raise AssertionError("manual check template path outside root must fail")
     assert not outside.exists()
+
+
+def test_release_candidate_verifier_rejects_manual_check_draft_outside_root(tmp_path):
+    outside = tmp_path.parent / "manual-rc-checks.draft.json"
+
+    try:
+        rc.write_manual_release_candidate_checks_draft(tmp_path, outside)
+    except ValueError as exc:
+        assert "manual release-candidate checks draft path must stay inside project root" in str(exc)
+    else:
+        raise AssertionError("manual check draft path outside root must fail")
+    assert not outside.exists()
+
+
+def test_release_candidate_verifier_rejects_template_and_draft_cli_conflict(capsys):
+    assert (
+        rc.main(
+            [
+                "--write-manual-checks-template",
+                "tmp/template.json",
+                "--write-manual-checks-draft",
+                "tmp/draft.json",
+            ]
+        )
+        == 1
+    )
+
+    output = capsys.readouterr().out
+    assert "choose either --write-manual-checks-template or --write-manual-checks-draft" in output
 
 
 def test_release_candidate_verifier_checks_mounted_dmg_app(tmp_path, monkeypatch, capsys):

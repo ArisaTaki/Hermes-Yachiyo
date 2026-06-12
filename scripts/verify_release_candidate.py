@@ -152,6 +152,46 @@ def _manual_release_candidate_check_template() -> dict[str, object]:
     }
 
 
+def _manual_release_candidate_check_draft(
+    checks: Sequence[dict[str, str]],
+    *,
+    source_path: Path | None = None,
+) -> dict[str, object]:
+    check_details = {check["id"]: check for check in MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS}
+    draft_checks: list[dict[str, str]] = []
+    for check in checks:
+        check_id = check["id"]
+        details = check_details[check_id]
+        status = check.get("status", "manual_required")
+        evidence = str(check.get("evidence", "")).strip()
+        if status == "manual_required" and evidence == details["evidence"]:
+            evidence = ""
+        draft_check = {
+            "id": check_id,
+            "status": status,
+            "required_before": details["required_before"],
+            "description": details["description"],
+            "evidence_prompt": details["evidence"],
+            "next_action": details["next_action"],
+            "evidence": evidence,
+            "notes": str(check.get("notes", "")),
+        }
+        evidence_source = str(check.get("evidence_source", "")).strip()
+        if evidence_source:
+            draft_check["evidence_source"] = evidence_source
+        draft_checks.append(draft_check)
+
+    draft: dict[str, object] = {
+        "checks": draft_checks,
+        "manual_release_candidate_check_summary": _manual_release_candidate_check_summary(
+            draft_checks
+        ),
+    }
+    if source_path is not None:
+        draft["manual_release_candidate_checks_source"] = str(source_path)
+    return draft
+
+
 def _manual_release_candidate_checks_from_payload(raw_payload: Any) -> object:
     if isinstance(raw_payload, dict):
         if "checks" in raw_payload:
@@ -338,6 +378,27 @@ def write_manual_release_candidate_checks_template(root: Path, output_path: Path
         "manual release-candidate checks template",
     )
     _write_report(resolved, _manual_release_candidate_check_template())
+    return resolved
+
+
+def write_manual_release_candidate_checks_draft(
+    root: Path,
+    output_path: Path,
+    source_path: Path | None = None,
+) -> Path:
+    checks, findings = _load_manual_release_candidate_checks(root, source_path)
+    if findings:
+        formatted = "; ".join(finding.format() for finding in findings)
+        raise ValueError(f"manual release-candidate checks draft source is invalid: {formatted}")
+    resolved = _resolve_project_file(
+        root,
+        output_path,
+        "manual release-candidate checks draft",
+    )
+    _write_report(
+        resolved,
+        _manual_release_candidate_check_draft(checks, source_path=source_path),
+    )
     return resolved
 
 
@@ -1197,7 +1258,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=Path,
         help="Write a project-local manual release-candidate checks JSON template and exit.",
     )
+    parser.add_argument(
+        "--write-manual-checks-draft",
+        type=Path,
+        help=(
+            "Write a project-local editable manual check draft, optionally seeded from "
+            "--manual-checks-json, and exit."
+        ),
+    )
     args = parser.parse_args(argv)
+    if args.write_manual_checks_template is not None and args.write_manual_checks_draft is not None:
+        print(
+            "manual release-candidate checks: failed\n"
+            "- choose either --write-manual-checks-template or --write-manual-checks-draft"
+        )
+        return 1
     if args.write_manual_checks_template is not None:
         try:
             write_manual_release_candidate_checks_template(
@@ -1208,6 +1283,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"manual release-candidate checks template: failed\n- {exc}")
             return 1
         print(f"manual release-candidate checks template: {args.write_manual_checks_template}")
+        return 0
+    if args.write_manual_checks_draft is not None:
+        try:
+            write_manual_release_candidate_checks_draft(
+                PROJECT_ROOT,
+                args.write_manual_checks_draft,
+                args.manual_checks_json,
+            )
+        except (OSError, ValueError) as exc:
+            print(f"manual release-candidate checks draft: failed\n- {exc}")
+            return 1
+        print(f"manual release-candidate checks draft: {args.write_manual_checks_draft}")
         return 0
     return verify_release_candidate(
         artifact_paths=args.paths or None,

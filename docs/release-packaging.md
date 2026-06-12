@@ -189,12 +189,18 @@ macOS release workflow 会在生成 release metadata 后、上传 DMG 前运行 
 python scripts/verify_release_candidate.py --write-manual-checks-template tmp/manual-rc-checks.json
 ```
 
+已有上一轮 RC report 时，优先从 report 生成可编辑签核草稿，保留自动 gate 已填充的 evidence，并把仍需人工确认的项目留空：
+
+```bash
+python scripts/verify_release_candidate.py --manual-checks-json tmp/final-rc.json --write-manual-checks-draft tmp/final-rc-signoff.json
+```
+
 已有人工 evidence 时可传入项目内 JSON：
 
 ```bash
-python scripts/verify_release_candidate.py --require-artifacts --manual-checks-json tmp/manual-rc-checks.json --require-manual-checks-complete --report-json tmp/rc-with-manual-checks.json
+python scripts/verify_release_candidate.py --require-artifacts --manual-checks-json tmp/final-rc-signoff.json --require-manual-checks-complete --report-json tmp/rc-with-manual-checks.json
 ```
 
-`--write-manual-checks-template` 输出的每项都带 `description`、`required_before`、`evidence_prompt`、空 `evidence` 和 `notes`，可直接编辑后交给 `--manual-checks-json`。`--manual-checks-json` 支持顶层 list、`{ "checks": [...] }`，也支持直接传入上一轮 RC report 并读取其中的 `manual_release_candidate_check_statuses`，因此自动 evidence 不需要手工复制到另一个模板文件。每项至少包含 `id`、`status` 和必要时的 `evidence`。`status` 只能是 `manual_required`、`passed`、`failed` 或 `not_applicable`；`passed`、`failed` 和 `not_applicable` 必须带 evidence。未知 id、重复 id、非法 status、缺 evidence 或显式 `failed` 都会让 RC gate 失败并写入 `manual_release_candidate_check_findings`。最终发布签核时加 `--require-manual-checks-complete`，任何在自动 evidence 和人工 evidence 合并后仍为 `manual_required` 的检查都会让 RC gate 失败。
+`--write-manual-checks-template` 输出的每项都带 `description`、`required_before`、`evidence_prompt`、空 `evidence` 和 `notes`，适合从零开始填写。`--write-manual-checks-draft` 会读取 `--manual-checks-json` 指向的上一轮 RC report 或 evidence JSON，输出同样可编辑、可再喂回 `--manual-checks-json` 的 `{ "checks": [...] }` 草稿；草稿会保留 `automated_rc_gate` evidence，并把仍是 `manual_required` 的项目 `evidence` 留空。`--manual-checks-json` 支持顶层 list、`{ "checks": [...] }`，也支持直接传入上一轮 RC report 并读取其中的 `manual_release_candidate_check_statuses`，因此自动 evidence 不需要手工复制到另一个模板文件。每项至少包含 `id`、`status` 和必要时的 `evidence`。`status` 只能是 `manual_required`、`passed`、`failed` 或 `not_applicable`；`passed`、`failed` 和 `not_applicable` 必须带 evidence。未知 id、重复 id、非法 status、缺 evidence 或显式 `failed` 都会让 RC gate 失败并写入 `manual_release_candidate_check_findings`。最终发布签核时加 `--require-manual-checks-complete`，任何在自动 evidence 和人工 evidence 合并后仍为 `manual_required` 的检查都会让 RC gate 失败。
 
 后续如果要面向普通用户无 Gatekeeper 警告地分发，需要再补 Apple Developer ID 签名与 notarization；当前链路先保证可重复构建和可安装 DMG。

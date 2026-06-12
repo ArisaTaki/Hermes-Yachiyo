@@ -2187,8 +2187,8 @@ compileall passed
 ## 下一步建议
 
 1. 做最终发布签核批处理：
-   - 以 `tmp/final-rc.json` 作为自动 evidence source，补齐 `gatekeeper_first_launch`、`screen_recording_permission`、`chat_native_file_upload` 和 `packaged_ui_sampling` 四个人工项；如果没有真实 provider credentials，则把 `real_provider_smoke` 标为 `not_applicable` 并附 credentials-unavailable evidence。
-   - 补齐人工 evidence 后运行 `python scripts/verify_release_candidate.py --require-artifacts --manual-checks-json tmp/final-rc.json --require-manual-checks-complete --report-json tmp/final-rc-signed.json`，让最终是否可发布由同一个 RC gate 判定。
+   - 以 `tmp/final-rc.json` 作为自动 evidence source，先运行 `python scripts/verify_release_candidate.py --manual-checks-json tmp/final-rc.json --write-manual-checks-draft tmp/final-rc-signoff.json` 生成可编辑签核草稿，再补齐 `gatekeeper_first_launch`、`screen_recording_permission`、`chat_native_file_upload` 和 `packaged_ui_sampling` 四个人工项；如果没有真实 provider credentials，则把 `real_provider_smoke` 标为 `not_applicable` 并附 credentials-unavailable evidence。
+   - 补齐人工 evidence 后运行 `python scripts/verify_release_candidate.py --require-artifacts --manual-checks-json tmp/final-rc-signoff.json --require-manual-checks-complete --report-json tmp/final-rc-signed.json`，让最终是否可发布由同一个 RC gate 判定。
 
 2. 做 release candidate `.app` 内跨页面人工抽样：
    - Chat UI 图片附件的自动链路已有 source Bridge E2E、HTTP route roundtrip、TaskRunner image roundtrip、RunEvent replay 和本地 Electron smoke 的 CDP file input / 附件预览 / 提交闭环；剩余只需人工确认 packaged app 的原生 file picker 路径。
