@@ -758,8 +758,11 @@ async function waitForActivityApproval(win) {
       && notice?.getAttribute('data-approval-tool') === 'terminal.run'
       && notice.textContent.includes(${JSON.stringify(APPROVAL_COMMAND)})
       && row?.getAttribute('data-activity-status') === 'approval_required'
+      && row?.getAttribute('data-run-id') === ${JSON.stringify(DELEGATED_RUN_ID)}
+      && row?.getAttribute('data-run-status') === 'approval_required'
       && row.textContent.includes('Coding Agent')
-      && openRun
+      && openRun?.getAttribute('data-run-id') === ${JSON.stringify(DELEGATED_RUN_ID)}
+      && openRun?.getAttribute('data-run-status') === 'approval_required'
       && approve
       && reject;
   }, 'activity approval composer notice');
@@ -881,8 +884,11 @@ async function main() {
       && !document.body.textContent.includes('<oha_delegation>')
       && !notice
       && row?.getAttribute('data-activity-status') === 'cancelled'
+      && row?.getAttribute('data-run-id') === ${JSON.stringify(DELEGATED_RUN_ID)}
+      && row?.getAttribute('data-run-status') === 'cancelled'
       && row.textContent.includes(${JSON.stringify(REJECTED_RESULT)})
-      && openRun;
+      && openRun?.getAttribute('data-run-id') === ${JSON.stringify(DELEGATED_RUN_ID)}
+      && openRun?.getAttribute('data-run-status') === 'cancelled';
   }, 'delegated reject summary created in Chat');
   console.log('[electron-smoke] delegated reject summary rendered');
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-message-activity-open-run-detail\\"]').click()", true);
@@ -938,8 +944,11 @@ async function main() {
     const openRun = document.querySelector('[data-testid="chat-message-activity-open-run-detail"]');
     return summary?.textContent.includes(${JSON.stringify(SUMMARY_RESULT)})
       && row?.getAttribute('data-activity-status') === 'completed'
+      && row?.getAttribute('data-run-id') === ${JSON.stringify(DELEGATED_RUN_ID)}
+      && row?.getAttribute('data-run-status') === 'completed'
       && row.textContent.includes(${JSON.stringify(DELEGATED_RESULT)})
-      && openRun;
+      && openRun?.getAttribute('data-run-id') === ${JSON.stringify(DELEGATED_RUN_ID)}
+      && openRun?.getAttribute('data-run-status') === 'completed';
   }, 'delegated summary chat restored after Run Detail');
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-message-activity-open-run-detail\\"]').click()", true);
   await waitForCompletedRunDetail(win);

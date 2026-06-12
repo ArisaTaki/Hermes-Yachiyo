@@ -3231,6 +3231,8 @@ function MessageActivityList({ events, messageStatus, onOpenRunDetails, progress
             className={`message-activity-row ${activityStatusClass(displayStatus)}${runId ? ' has-detail' : ''}${expanded ? ' expanded' : ''}`}
             data-activity-status={displayStatus || ''}
             data-activity-tool={event.tool_name || ''}
+            data-run-id={runId || ''}
+            data-run-status={displayStatus || ''}
             data-testid="chat-message-activity-row"
             key={eventKey}
           >
@@ -3275,7 +3277,14 @@ function MessageActivityList({ events, messageStatus, onOpenRunDetails, progress
             </div>
             <time>{formatShortTime(event.created_at)}</time>
             {runId ? (
-              <button type="button" className="message-activity-detail-button" data-testid="chat-message-activity-open-run-detail" onClick={() => onOpenRunDetails(runId)}>
+              <button
+                type="button"
+                className="message-activity-detail-button"
+                data-run-id={runId}
+                data-run-status={displayStatus || ''}
+                data-testid="chat-message-activity-open-run-detail"
+                onClick={() => onOpenRunDetails(runId)}
+              >
                 详情
               </button>
             ) : null}

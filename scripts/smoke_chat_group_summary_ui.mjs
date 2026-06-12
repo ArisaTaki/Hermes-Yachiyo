@@ -937,8 +937,11 @@ async function main() {
     const row = document.querySelector('[data-testid="chat-message-activity-row"]');
     const openRun = document.querySelector('[data-testid="chat-message-activity-open-run-detail"]');
     return row?.getAttribute('data-activity-status') === 'completed'
+      && row?.getAttribute('data-run-id') === ${JSON.stringify(GROUP_AGENT_RUN_ID)}
+      && row?.getAttribute('data-run-status') === 'completed'
       && row.textContent.includes('Group UI Agent')
-      && openRun;
+      && openRun?.getAttribute('data-run-id') === ${JSON.stringify(GROUP_AGENT_RUN_ID)}
+      && openRun?.getAttribute('data-run-status') === 'completed';
   }, 'group activity Run Detail action');
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-message-activity-open-run-detail\\"]').click()", true);
   await waitFor(win, () => {
