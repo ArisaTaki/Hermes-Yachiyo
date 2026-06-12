@@ -1283,6 +1283,7 @@ RunEvent sequence:
   - 负责批准后恢复时的已批准工具调用执行。
   - `ToolApprovalResumeContext.from_run()` 统一解析 pending approval 中的 messages、tool request、remaining requests、next iteration、timeline 和 artifacts，并用同一份 timeline 构造 resume budget。
   - `ToolApprovalContinuationHandoff` 负责批准工具执行后的 custom API continuation 参数交接，避免 coordinator 内继续散落 broker、timeline、artifacts、messages、iteration、run id 和 budget 参数拼装。
+  - `continue_and_project_after_approved_tool()` 负责批准工具执行后的 completed / approval_required / failed continuation outcome 分派；`resume_approved_tool_run()` 保留 claim、running projection 和最终 result projection 编排。
   - 主聊天和 Agent Run 的工具审批恢复共用同一个 resume context 和 coordinator。
   - 保留 `NativeRunEngine` 对最终模型继续执行和 Run 状态落库的编排职责。
 

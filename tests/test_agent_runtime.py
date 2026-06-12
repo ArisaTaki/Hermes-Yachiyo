@@ -1541,6 +1541,130 @@ def test_approval_resume_coordinator_continues_custom_api_agent_after_approved_t
     assert calls[-1][1]["budget"] is budget
 
 
+def test_approval_resume_coordinator_projects_continuation_outcome_after_approved_tool():
+    calls: list[tuple[str, dict[str, object]]] = []
+    mode = {"value": "completed"}
+    agent = {"agent_id": "agent_resume", "name": "Resume Agent"}
+
+    def append_tool_result_message(run_messages, _request, tool_result):
+        calls.append(("append_tool_result_message", {"tool_result": tool_result}))
+        run_messages.append({"role": "tool", "content": json.dumps(tool_result)})
+
+    def continue_custom_api_agent(
+        _agent,
+        _user_goal,
+        _broker,
+        _timeline,
+        _artifacts,
+        **kwargs,
+    ):
+        calls.append(
+            (
+                "continue_custom_api_agent",
+                {
+                    "messages": kwargs["messages"],
+                    "run_id": kwargs["run_id"],
+                    "start_iteration": kwargs["start_iteration"],
+                },
+            )
+        )
+        if mode["value"] == "required":
+            raise AgentApprovalRequired({"tool": "terminal.run", "approval_id": "next"})
+        if mode["value"] == "failed":
+            raise RuntimeError("provider raw failure")
+        return "resumed model output"
+
+    coordinator = ApprovalResumeCoordinator(
+        call_agent_tool=lambda *_args, **_kwargs: calls.append(("call_agent_tool", {})) or {"ok": True},
+        fatal_tool_failure_detail=lambda *_args: "",
+        append_tool_result_message=append_tool_result_message,
+        run_tool_requests=lambda *_args, **_kwargs: calls.append(("run_tool_requests", {})),
+        timeline_factory=lambda event, detail, **payload: {"event": event, "detail": detail, **payload},
+        continue_custom_api_agent=continue_custom_api_agent,
+    )
+
+    def make_context(run_id: str) -> ToolApprovalResumeContext:
+        return ToolApprovalResumeContext(
+            run_id=run_id,
+            timeline=[],
+            artifacts=[],
+            broker=SimpleNamespace(name="broker"),
+            allowed_tools=["terminal.run"],
+            budget=SimpleNamespace(name="budget"),
+            messages=[{"role": "user", "content": "resume"}],
+            tool_request={"name": "terminal.run", "input": {"command": "printf ok"}},
+            tool_name="terminal.run",
+            input_preview={"command": "printf ok"},
+            remaining_requests=[],
+            next_iteration=6,
+        )
+
+    def run_mode(value: str) -> dict[str, object]:
+        mode["value"] = value
+        context = make_context(f"run_{value}")
+        return coordinator.continue_and_project_after_approved_tool(
+            agent=agent,
+            context=context,
+            project_completed=lambda _context, result_text: calls.append(("project_completed", {})) or {
+                "status": "completed",
+                "result": result_text,
+            },
+            prepare_required=lambda pending: calls.append(("prepare_required", {"pending": pending})) or {
+                **pending,
+                "prepared": True,
+            },
+            project_required=lambda _context, pending: calls.append(("project_required", {"pending": pending})) or {
+                "status": "approval_required",
+                "pending": pending,
+            },
+            project_failed=lambda _context, safe_error: calls.append(("project_failed", {"safe_error": safe_error})) or {
+                "status": "failed",
+                "error": safe_error,
+            },
+            redact_error=lambda exc: calls.append(("redact_error", {"type": type(exc).__name__})) or "safe RuntimeError",
+        )
+
+    assert run_mode("completed") == {
+        "status": "completed",
+        "result": "resumed model output",
+    }
+    assert run_mode("required") == {
+        "status": "approval_required",
+        "pending": {"tool": "terminal.run", "approval_id": "next", "prepared": True},
+    }
+    assert run_mode("failed") == {
+        "status": "failed",
+        "error": "safe RuntimeError",
+    }
+    assert [name for name, _payload in calls] == [
+        "call_agent_tool",
+        "append_tool_result_message",
+        "run_tool_requests",
+        "continue_custom_api_agent",
+        "project_completed",
+        "call_agent_tool",
+        "append_tool_result_message",
+        "run_tool_requests",
+        "continue_custom_api_agent",
+        "prepare_required",
+        "project_required",
+        "call_agent_tool",
+        "append_tool_result_message",
+        "run_tool_requests",
+        "continue_custom_api_agent",
+        "redact_error",
+        "project_failed",
+    ]
+    assert calls[3][1]["run_id"] == "run_completed"
+    assert calls[3][1]["start_iteration"] == 6
+    assert calls[10][1]["pending"] == {
+        "tool": "terminal.run",
+        "approval_id": "next",
+        "prepared": True,
+    }
+    assert calls[15][1] == {"type": "RuntimeError"}
+
+
 def test_workflow_child_run_projection_builds_replay_payloads():
     child_run = {
         "run_id": "child_run",

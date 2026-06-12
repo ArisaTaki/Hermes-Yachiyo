@@ -3070,6 +3070,41 @@ class ApprovalResumeCoordinator:
         self.execute_approved_tool(context)
         return ToolApprovalContinuationHandoff.from_context(agent, context)
 
+    def continue_and_project_after_approved_tool(
+        self,
+        *,
+        agent: dict[str, Any],
+        context: ToolApprovalResumeContext,
+        project_completed: Any,
+        project_required: Any,
+        project_failed: Any,
+        prepare_required: Any | None = None,
+        redact_error: Any = redact_api_error_text,
+    ) -> dict[str, Any]:
+        try:
+            result_text = self.continue_custom_api_agent_after_approved_tool(
+                agent,
+                context,
+            )
+            return project_completed(
+                context,
+                result_text,
+            )
+        except AgentApprovalRequired as exc:
+            pending_next = exc.pending_approval
+            if prepare_required is not None:
+                pending_next = prepare_required(pending_next)
+            return project_required(
+                context,
+                pending_next,
+            )
+        except Exception as exc:
+            safe_error = redact_error(exc)
+            return project_failed(
+                context,
+                safe_error,
+            )
+
     def resume_approved_tool_run(
         self,
         *,
@@ -3099,29 +3134,15 @@ class ApprovalResumeCoordinator:
             return get_current_run(run_id)
         if project_running is not None:
             running = project_running(running)
-        try:
-            result_text = self.continue_custom_api_agent_after_approved_tool(
-                agent,
-                context,
-            )
-            result = project_completed(
-                context,
-                result_text,
-            )
-        except AgentApprovalRequired as exc:
-            pending_next = exc.pending_approval
-            if prepare_required is not None:
-                pending_next = prepare_required(pending_next)
-            result = project_required(
-                context,
-                pending_next,
-            )
-        except Exception as exc:
-            safe_error = redact_error(exc)
-            result = project_failed(
-                context,
-                safe_error,
-            )
+        result = self.continue_and_project_after_approved_tool(
+            agent=agent,
+            context=context,
+            project_completed=project_completed,
+            project_required=project_required,
+            project_failed=project_failed,
+            prepare_required=prepare_required,
+            redact_error=redact_error,
+        )
         return project_result(result) if project_result is not None else result
 
 
