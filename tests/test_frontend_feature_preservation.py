@@ -1800,6 +1800,10 @@ def test_agent_studio_skill_mount_ui_smoke_uses_attach_detach_and_bulk_paths() -
             'data-testid="agent-skill-mount-item"',
             "data-skill-mounted={mounted ? 'true' : 'false'}",
             "disabled={busy || selectedAgentReadOnly}",
+            """if (selectedAgentReadOnly) {
+                            setStatus('系统 Agent 只能查看，不能修改 Skill 挂载。');
+                            return;
+                          }""",
             "if (mounted) await detachSkill(draft.agent_id, skill.skill_id);",
             "else await attachSkill(draft.agent_id, skill.skill_id);",
             "await updateAgent(draft.agent_id, { skill_ids: nextSkillIds });",

@@ -4008,6 +4008,10 @@ export function AgentStudioView() {
                         key={skill.skill_id}
                         onClick={() => void runAction(async () => {
                           if (!draft.agent_id) return;
+                          if (selectedAgentReadOnly) {
+                            setStatus('系统 Agent 只能查看，不能修改 Skill 挂载。');
+                            return;
+                          }
                           if (mounted) await detachSkill(draft.agent_id, skill.skill_id);
                           else await attachSkill(draft.agent_id, skill.skill_id);
                         }, mounted ? '移除 Skill' : '挂载 Skill')}
