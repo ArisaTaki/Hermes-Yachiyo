@@ -5277,6 +5277,100 @@ def test_main_chat_model_loop_executes_multiple_responses_tool_calls(tmp_path, m
         service.close()
 
 
+def test_main_chat_model_loop_preserves_responses_zero_output_index(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    (workdir / "README.md").write_text("zero output index README content", encoding="utf-8")
+    (workdir / "NOTES.md").write_text("zero output index NOTES content", encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        if len(calls) == 1:
+            assert tools is not None
+
+            def stream():
+                yield {
+                    "type": "response.output_item.done",
+                    "output_index": 0,
+                    "item": {
+                        "id": "fc_response_zero",
+                        "index": 1,
+                        "type": "function_call",
+                        "call_id": "call_response_zero",
+                        "name": "workspace_read",
+                        "arguments": '{"path": "README.md"}',
+                    },
+                }
+                yield {
+                    "type": "response.output_item.done",
+                    "output_index": 1,
+                    "item": {
+                        "id": "fc_response_one",
+                        "index": 0,
+                        "type": "function_call",
+                        "call_id": "call_response_one",
+                        "name": "workspace_read",
+                        "arguments": '{"path": "NOTES.md"}',
+                    },
+                }
+                yield {
+                    "type": "response.completed",
+                    "response": {
+                        "status": "completed",
+                        "output": [{"type": "function_call", "finish_reason": "tool_calls"}],
+                    },
+                }
+
+            return stream()
+        assistant_tool_messages = [
+            message for message in messages if message.get("role") == "assistant" and message.get("tool_calls")
+        ]
+        tool_messages = [message for message in messages if message.get("role") == "tool"]
+        assert [tool_call["id"] for tool_call in assistant_tool_messages[-1]["tool_calls"]] == [
+            "call_response_zero",
+            "call_response_one",
+        ]
+        assert [message["tool_call_id"] for message in tool_messages] == [
+            "call_response_zero",
+            "call_response_one",
+        ]
+        assert "zero output index README content" in tool_messages[0]["content"]
+        assert "zero output index NOTES content" in tool_messages[1]["content"]
+        return {"content": "Responses zero output index complete"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-responses-zero-output-index",
+            session_id="session-main-responses-zero-output-index",
+            user_goal="Read README and NOTES through zero-index Responses tool calls",
+        )
+        updated = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [{"role": "user", "content": "Read README and NOTES"}],
+            tool_policy={"allowed_tools": ["workspace.read"]},
+            workspace_policy={"default_workdir": str(workdir), "readable_scopes": ["."]},
+        )
+        tool_events = [
+            event for event in service.list_run_events(run["run_id"])["events"] if event["event_type"] == "agent.tool.call"
+        ]
+
+        assert updated["result"] == "Responses zero output index complete"
+        assert [event["payload"]["input_preview"]["path"] for event in tool_events] == [
+            "README.md",
+            "NOTES.md",
+        ]
+        assert len(calls) == 2
+    finally:
+        service.close()
+
+
 def test_main_chat_model_loop_uses_responses_call_id_without_item_id(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     workdir = tmp_path / "repo"
@@ -12571,6 +12665,96 @@ def test_agent_run_executes_multiple_responses_tool_calls(tmp_path, monkeypatch)
         ]
         assert event_types.count("agent.tool.call") == 2
         assert event_types.count("agent.run.completed") == 1
+        assert len(calls) == 2
+    finally:
+        service.close()
+
+
+def test_agent_run_preserves_responses_zero_output_index(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    (workdir / "README.md").write_text("agent zero output index README content", encoding="utf-8")
+    (workdir / "NOTES.md").write_text("agent zero output index NOTES content", encoding="utf-8")
+    calls = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        if len(calls) == 1:
+            assert any((tool.get("function") or {}).get("name") == "workspace_read" for tool in tools or [])
+
+            def stream():
+                yield {
+                    "type": "response.output_item.done",
+                    "output_index": 0,
+                    "item": {
+                        "id": "fc_agent_response_zero",
+                        "index": 1,
+                        "type": "function_call",
+                        "call_id": "call_agent_response_zero",
+                        "name": "workspace_read",
+                        "arguments": '{"path": "README.md"}',
+                    },
+                }
+                yield {
+                    "type": "response.output_item.done",
+                    "output_index": 1,
+                    "item": {
+                        "id": "fc_agent_response_one",
+                        "index": 0,
+                        "type": "function_call",
+                        "call_id": "call_agent_response_one",
+                        "name": "workspace_read",
+                        "arguments": '{"path": "NOTES.md"}',
+                    },
+                }
+                yield {
+                    "type": "response.completed",
+                    "response": {
+                        "status": "completed",
+                        "output": [{"type": "function_call", "finish_reason": "tool_calls"}],
+                    },
+                }
+
+            return stream()
+        assistant_tool_messages = [
+            message for message in messages if message.get("role") == "assistant" and message.get("tool_calls")
+        ]
+        tool_messages = [message for message in messages if message.get("role") == "tool"]
+        assert [tool_call["id"] for tool_call in assistant_tool_messages[-1]["tool_calls"]] == [
+            "call_agent_response_zero",
+            "call_agent_response_one",
+        ]
+        assert [message["tool_call_id"] for message in tool_messages] == [
+            "call_agent_response_zero",
+            "call_agent_response_one",
+        ]
+        assert "agent zero output index README content" in tool_messages[0]["content"]
+        assert "agent zero output index NOTES content" in tool_messages[1]["content"]
+        return {"content": "Agent Responses zero output index complete"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Responses Zero Output Index Agent",
+                "model_mode": "custom_api",
+                "model_config": {"base_url": "https://api.example.test/v1", "model": "demo-model", "api_key": "sk-secret"},
+                "tool_policy": {"allowed_tools": ["workspace.read"]},
+                "workspace_policy": {"default_workdir": str(workdir), "readable_scopes": ["."]},
+            }
+        )
+        run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Read README and NOTES"})
+        tool_facts = [
+            event for event in service.list_run_events(run["run_id"])["events"] if event["event_type"] == "agent.tool.call"
+        ]
+
+        assert run["status"] == "completed"
+        assert run["result"] == "Agent Responses zero output index complete"
+        assert [event["payload"]["input_preview"]["path"] for event in tool_facts] == [
+            "README.md",
+            "NOTES.md",
+        ]
         assert len(calls) == 2
     finally:
         service.close()

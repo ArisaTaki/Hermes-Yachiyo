@@ -709,6 +709,13 @@ def _stream_index_value(value: Any, fallback: int) -> int:
         return fallback
 
 
+def _first_present(*values: Any) -> Any:
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
 def _responses_stream_text_key(chunk: Any) -> tuple[int, int]:
     return (
         _stream_index_value(_message_field(chunk, "output_index"), 0),
@@ -728,7 +735,7 @@ def _responses_stream_tool_call(chunk: Any) -> dict[str, Any] | None:
         item_id = _message_field(item, "id")
         call_id = _message_field(item, "call_id")
         return {
-            "index": _message_field(chunk, "output_index") or _message_field(item, "index") or 0,
+            "index": _stream_index_value(_first_present(_message_field(chunk, "output_index"), _message_field(item, "index")), 0),
             "id": str(item_id or call_id or ""),
             "item_id": str(item_id or "") if item_id else "",
             "call_id": str(call_id or "") if call_id else "",
@@ -751,7 +758,7 @@ def _responses_stream_tool_call(chunk: Any) -> dict[str, Any] | None:
         item_id = _message_field(chunk, "item_id")
         call_id = _message_field(chunk, "call_id")
         return {
-            "index": _message_field(chunk, "output_index") or _message_field(chunk, "index") or 0,
+            "index": _stream_index_value(_first_present(_message_field(chunk, "output_index"), _message_field(chunk, "index")), 0),
             "id": str(item_id or call_id or ""),
             "item_id": str(item_id or "") if item_id else "",
             "call_id": str(call_id or "") if call_id else "",

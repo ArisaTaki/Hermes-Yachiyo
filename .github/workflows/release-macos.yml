@@ -193,6 +193,7 @@ jobs:
             tests/test_agent_runtime.py::test_main_chat_model_loop_executes_openai_sdk_object_message_tool_calls \
             tests/test_agent_runtime.py::test_main_chat_model_loop_executes_responses_style_streaming_tool_call \
             tests/test_agent_runtime.py::test_main_chat_model_loop_executes_multiple_responses_tool_calls \
+            tests/test_agent_runtime.py::test_main_chat_model_loop_preserves_responses_zero_output_index \
             tests/test_agent_runtime.py::test_main_chat_model_loop_uses_responses_call_id_without_item_id \
             tests/test_agent_runtime.py::test_agent_run_executes_provider_message_tool_calls \
             tests/test_agent_runtime.py::test_agent_run_executes_openai_sdk_object_message_tool_calls \
@@ -219,6 +220,7 @@ jobs:
             tests/test_agent_runtime.py::test_agent_run_uses_responses_call_id_without_item_id \
             tests/test_agent_runtime.py::test_agent_run_prefers_responses_call_id_over_item_id \
             tests/test_agent_runtime.py::test_agent_run_executes_multiple_responses_tool_calls \
+            tests/test_agent_runtime.py::test_agent_run_preserves_responses_zero_output_index \
             tests/test_agent_runtime.py::test_agent_run_uses_responses_output_text_done_snapshot \
             tests/test_agent_runtime.py::test_agent_run_uses_responses_output_item_message_snapshot \
             tests/test_agent_runtime.py::test_agent_run_uses_responses_content_part_snapshot \
