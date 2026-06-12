@@ -393,9 +393,7 @@ def _chunk_finish_reasons(chunk: Any) -> list[str]:
     if not isinstance(choices, list):
         return reasons
     for choice in choices:
-        reason = _field(choice, "finish_reason")
-        if reason:
-            reasons.append(str(reason))
+        reasons.extend(_finish_reasons_from_value(choice))
     return reasons
 
 

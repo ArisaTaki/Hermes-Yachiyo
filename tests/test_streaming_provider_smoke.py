@@ -1883,6 +1883,40 @@ def test_stream_smoke_requires_expected_finish_reason(monkeypatch):
         )
 
 
+def test_stream_smoke_accepts_choice_level_stop_reason(monkeypatch):
+    requests: list[dict] = []
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            yield b'data: {"choices":[{"delta":{"content":"done"},"stop_reason":"stop"}]}\n\n'
+            yield b"data: [DONE]\n\n"
+
+    def fake_urlopen(request, *_args, **_kwargs):
+        requests.append(json.loads(request.data.decode("utf-8")))
+        return FakeResponse()
+
+    monkeypatch.setattr("apps.shell.model_profiles.urlrequest.urlopen", fake_urlopen)
+
+    summary = smoke.run_stream_smoke(
+        base_url="https://api.example.test/v1",
+        model="demo-choice-stop-reason-model",
+        api_key="sk-stream-smoke-secret123456",
+        require_content=True,
+        expect_finish_reasons=["stop"],
+    )
+
+    assert requests[0]["stream"] is True
+    assert summary["ok"] is True
+    assert summary["content_chars"] == len("done")
+    assert summary["finish_reasons"] == ["stop"]
+
+
 def test_stream_smoke_main_expect_tool_name_requests_tool_call(monkeypatch, capsys):
     calls: list[dict] = []
 
