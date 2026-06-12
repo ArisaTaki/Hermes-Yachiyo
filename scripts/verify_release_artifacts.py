@@ -741,6 +741,10 @@ STREAMING_PROVIDER_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "provider smoke tests must cover object-shaped streaming tool arguments without leaks",
     ),
     (
+        "def test_stream_smoke_coalesces_indexless_interleaved_tool_call_deltas_by_id",
+        "provider smoke tests must cover indexless interleaved streaming tool-call deltas without leaks",
+    ),
+    (
         "def test_stream_smoke_handles_sse_event_split_across_response_chunks_without_leaking",
         "provider smoke tests must cover SSE events split across response chunks",
     ),

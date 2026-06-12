@@ -1096,6 +1096,106 @@ def test_stream_smoke_summarizes_singular_tool_call_frames():
     assert "README.md" not in json.dumps(public_summary)
 
 
+def test_stream_smoke_coalesces_indexless_interleaved_tool_call_deltas_by_id():
+    chunks = [
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "id": "call_indexless_readme",
+                                "type": "function",
+                                "function": {
+                                    "name": "workspace_",
+                                    "arguments": '{"path":"READ',
+                                },
+                            }
+                        ]
+                    }
+                }
+            ]
+        },
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "id": "call_indexless_notes",
+                                "type": "function",
+                                "function": {
+                                    "name": "workspace_",
+                                    "arguments": '{"path":"NOT',
+                                },
+                            }
+                        ]
+                    }
+                }
+            ]
+        },
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "id": "call_indexless_readme",
+                                "function": {
+                                    "name": "read",
+                                    "arguments": 'ME.md"}',
+                                },
+                            }
+                        ]
+                    }
+                }
+            ]
+        },
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "id": "call_indexless_notes",
+                                "function": {
+                                    "name": "read",
+                                    "arguments": 'ES.md"}',
+                                },
+                            }
+                        ]
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ]
+        },
+    ]
+
+    public_summary = smoke.summarize_stream_chunks(chunks)
+    summary = smoke.summarize_stream_chunks(chunks, include_tool_arguments=True)
+
+    assert summary["ok"] is True
+    assert summary["finish_reasons"] == ["tool_calls"]
+    assert summary["tool_call_delta_count"] == 4
+    assert summary["tool_call_count"] == 2
+    assert summary["tool_calls"] == [
+        {
+            "id": "call_indexless_readme",
+            "name": "workspace_read",
+            "argument_chars": len('{"path":"README.md"}'),
+            "arguments": '{"path":"README.md"}',
+        },
+        {
+            "id": "call_indexless_notes",
+            "name": "workspace_read",
+            "argument_chars": len('{"path":"NOTES.md"}'),
+            "arguments": '{"path":"NOTES.md"}',
+        },
+    ]
+    assert "README.md" not in json.dumps(public_summary)
+    assert "NOTES.md" not in json.dumps(public_summary)
+
+
 def test_stream_smoke_summarizes_responses_style_tool_call_chunks():
     chunks = [
         {"type": "response.output_text.delta", "delta": "checking responses "},
