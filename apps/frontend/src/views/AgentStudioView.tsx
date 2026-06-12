@@ -4002,6 +4002,7 @@ export function AgentStudioView() {
                         data-skill-id={skill.skill_id}
                         data-skill-mounted={mounted ? 'true' : 'false'}
                         data-testid="agent-skill-mount-item"
+                        disabled={busy || selectedAgentReadOnly}
                         key={skill.skill_id}
                         onClick={() => void runAction(async () => {
                           if (!draft.agent_id) return;

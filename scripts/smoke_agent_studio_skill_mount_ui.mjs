@@ -10,6 +10,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FRONTEND = path.join(ROOT, 'apps', 'frontend');
 const ELECTRON = path.join(FRONTEND, 'node_modules', '.bin', process.platform === 'win32' ? 'electron.cmd' : 'electron');
 const VITE = path.join(FRONTEND, 'node_modules', '.bin', process.platform === 'win32' ? 'vite.cmd' : 'vite');
+const SYSTEM_AGENT_ID = 'builtin:yachiyo-main';
 const AGENT_ID = 'agent-studio-skill-mount-ui-smoke-agent';
 const SKILL_A_ID = 'agent-studio-skill-mount-ui-smoke-a';
 const SKILL_B_ID = 'agent-studio-skill-mount-ui-smoke-b';
@@ -17,10 +18,40 @@ const FOLDER_ID = 'agent-studio-skill-mount-ui-smoke-folder';
 const PROFILE_ID = 'agent-studio-skill-mount-ui-smoke-profile';
 const now = new Date().toISOString();
 
+const systemAgent = {
+  agent_id: SYSTEM_AGENT_ID,
+  name: 'Oha-Yachiyo',
+  nickname: 'Oha-Yachiyo',
+  description: 'System main chat Agent managed by oha-yachiyo.',
+  avatar_url: '',
+  category: 'system',
+  instructions: 'System managed Agent.',
+  persona_prompt: '',
+  model_mode: 'profile',
+  model_profile_id: PROFILE_ID,
+  vision_model_profile_id: '',
+  model_config: {},
+  tool_policy: { allowed_tools: [] },
+  workspace_policy: {
+    default_workdir: '',
+    readable_scopes: ['.'],
+    writable_scopes: [],
+  },
+  skill_ids: [SKILL_A_ID],
+  output_contract: 'chat',
+  enabled: true,
+  editable: false,
+  deletable: false,
+  system: true,
+  created_at: now,
+  updated_at: now,
+};
+
 let agent = agentSpec([]);
 const attachSkillRequests = [];
 const detachSkillRequests = [];
 const updateAgentRequests = [];
+const systemMutationRequests = [];
 
 function log(message) {
   process.stdout.write(`[agent-studio-skill-mount-ui-smoke] ${message}\n`);
@@ -158,7 +189,12 @@ async function startMockBridge() {
       }
       const url = new URL(request.url || '/', 'http://127.0.0.1');
       if (request.method === 'GET' && url.pathname === '/ui/agents') {
-        sendJson(response, 200, { agents: [agent] });
+        sendJson(response, 200, { agents: [systemAgent, agent] });
+        return;
+      }
+      if (url.pathname.includes(encodeURIComponent(SYSTEM_AGENT_ID)) || url.pathname.includes(SYSTEM_AGENT_ID)) {
+        systemMutationRequests.push({ method: request.method, path: url.pathname });
+        sendJson(response, 403, { ok: false, error: 'system agent is read-only' });
         return;
       }
       if (request.method === 'PATCH' && url.pathname === `/ui/agents/${AGENT_ID}`) {
@@ -218,6 +254,12 @@ async function startMockBridge() {
       if (request.method === 'GET' && url.pathname === '/ui/runnables') {
         sendJson(response, 200, {
           runnables: [{
+            id: SYSTEM_AGENT_ID,
+            name: systemAgent.name,
+            kind: 'agent',
+            enabled: true,
+            output_contract: 'chat',
+          }, {
             id: AGENT_ID,
             name: agent.name,
             kind: 'agent',
@@ -351,9 +393,31 @@ async function main() {
   });
   await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '#/agents/agents');
   console.log('[electron-smoke] agent studio agents loaded');
-  await waitFor(win, () => document.querySelector('[data-testid="agent-list-open"]'), 'agent list');
+  await waitFor(win, () => document.querySelector('[data-agent-id="builtin:yachiyo-main"] [data-testid="agent-list-open"]'), 'agent list');
   await win.webContents.executeJavaScript(\`
-  document.querySelector('[data-testid="agent-list-open"]').click();
+  document.querySelector('[data-agent-id="builtin:yachiyo-main"] [data-testid="agent-list-open"]').click();
+  \`, true);
+  await waitFor(win, () => {
+    const mountAll = document.querySelector('[data-testid="agent-skill-mount-all-visible"]');
+    const unmountAll = document.querySelector('[data-testid="agent-skill-unmount-all-visible"]');
+    const skillA = document.querySelector('[data-testid="agent-skill-mount-item"][data-skill-id="${SKILL_A_ID}"]');
+    const skillB = document.querySelector('[data-testid="agent-skill-mount-item"][data-skill-id="${SKILL_B_ID}"]');
+    const inlineNotes = Array.from(document.querySelectorAll('.agent-inline-note')).map((node) => node.textContent || '');
+    return document.querySelector('[data-testid="agent-skill-mounts"]')
+      && document.querySelectorAll('[data-testid="agent-skill-mount-item"]').length === 2
+      && document.querySelector('[data-testid="agent-skill-mount-summary"]')?.textContent.includes('1 mounted / 2 visible skills')
+      && document.querySelector('[data-testid="agent-skill-mount-visible-count"]')?.textContent.includes('1 / 2')
+      && skillA?.getAttribute('data-skill-mounted') === 'true'
+      && skillB?.getAttribute('data-skill-mounted') === 'false'
+      && skillA?.disabled
+      && skillB?.disabled
+      && mountAll?.disabled
+      && unmountAll?.disabled
+      && inlineNotes.some((text) => text.includes('系统 Agent 由 oha-yachiyo 管理'));
+  }, 'system Agent skill mount read-only guard');
+  console.log('[electron-smoke] system Agent skill mount read-only guard verified');
+  await win.webContents.executeJavaScript(\`
+  document.querySelector('[data-agent-id="${AGENT_ID}"] [data-testid="agent-list-open"]').click();
   \`, true);
   await waitFor(win, () => (
     document.querySelector('[data-testid="agent-skill-mounts"]')
@@ -483,6 +547,9 @@ main().catch((error) => {
 }
 
 function assertMockBridgeContract() {
+  if (systemMutationRequests.length) {
+    throw new Error(`system Agent Skill mount mutation was attempted: ${JSON.stringify(systemMutationRequests)}`);
+  }
   if (attachSkillRequests.length !== 1 || attachSkillRequests[0].skill_id !== SKILL_A_ID) {
     throw new Error(`unexpected attach requests: ${JSON.stringify(attachSkillRequests)}`);
   }
