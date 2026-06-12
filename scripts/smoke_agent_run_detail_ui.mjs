@@ -1730,6 +1730,7 @@ async function main() {
     const reject = document.querySelector('[data-testid="agent-run-detail-workflow-child-reject"]');
     const cancel = document.querySelector('[data-testid="agent-run-detail-workflow-child-cancel"]');
     const openRun = document.querySelector('[data-testid="agent-run-detail-workflow-child-open-run"]');
+    const executionChildOpenRun = document.querySelector('[data-testid="agent-run-detail-execution-open-child-run"]');
     return childApproval
       && childApproval.textContent.includes(${JSON.stringify(WORKFLOW_CHILD_RUN_ID)})
       && request?.textContent.includes('terminal.run')
@@ -1739,6 +1740,8 @@ async function main() {
       && cancel
       && openRun?.getAttribute('data-run-id') === ${JSON.stringify(WORKFLOW_CHILD_RUN_ID)}
       && openRun?.getAttribute('data-run-status') === 'approval_required'
+      && executionChildOpenRun?.getAttribute('data-run-id') === ${JSON.stringify(WORKFLOW_CHILD_RUN_ID)}
+      && executionChildOpenRun?.getAttribute('data-run-status') === 'approval_required'
       && !approve.disabled;
   }, 'workflow child approval bridge');
   console.log('[electron-smoke] workflow child approval bridge rendered');
@@ -1748,6 +1751,7 @@ async function main() {
     const result = document.querySelector('[data-testid="agent-run-detail-result"]');
     const steps = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-workflow-step"]'));
     const openStepRun = document.querySelector('[data-testid="agent-run-detail-workflow-step-open-run"]');
+    const executionChildOpenRun = document.querySelector('[data-testid="agent-run-detail-execution-open-child-run"]');
     const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
     const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
     const runIds = events.map((node) => node.getAttribute('data-run-event-run-id'));
@@ -1762,6 +1766,8 @@ async function main() {
       && openStepRun?.getAttribute('data-run-id') === ${JSON.stringify(WORKFLOW_CHILD_RUN_ID)}
       && openStepRun?.getAttribute('data-run-status') === 'completed'
       && !openStepRun.disabled
+      && executionChildOpenRun?.getAttribute('data-run-id') === ${JSON.stringify(WORKFLOW_CHILD_RUN_ID)}
+      && executionChildOpenRun?.getAttribute('data-run-status') === 'completed'
       && eventTypes.includes('workflow.run.child_resumed')
       && eventTypes.includes('workflow.run.resumed')
       && eventTypes.includes('workflow.node.artifact')

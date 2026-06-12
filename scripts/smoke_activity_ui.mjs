@@ -480,6 +480,7 @@ async function main() {
     const detail = document.querySelector('[data-testid="activity-detail-page"]');
     const summary = document.querySelector('[data-testid="activity-detail-summary"]');
     const body = document.querySelector('[data-testid="activity-detail-body"]');
+    const openRun = document.querySelector('[data-testid="activity-detail-open-run"]');
     const traceRows = Array.from(document.querySelectorAll('[data-testid="activity-trace-row"]'));
     return window.location.hash.includes(${JSON.stringify(ACTIVITY_EVENT_ID)})
       && detail?.getAttribute('data-activity-event-id') === ${JSON.stringify(ACTIVITY_EVENT_ID)}
@@ -487,7 +488,8 @@ async function main() {
       && detail?.getAttribute('data-task-id') === ${JSON.stringify(TASK_ID)}
       && detail?.getAttribute('data-session-id') === ${JSON.stringify(SESSION_ID)}
       && summary?.textContent.includes('workspace.read')
-      && document.querySelector('[data-testid="activity-detail-open-run"]')
+      && openRun?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
+      && openRun?.getAttribute('data-run-status') === 'completed'
       && body?.textContent.includes(${JSON.stringify(ACTIVITY_DETAIL)})
       && traceRows.length === 2
       && traceRows.some((node) => node.getAttribute('data-activity-event-id') === ${JSON.stringify(ACTIVITY_EVENT_ID)});

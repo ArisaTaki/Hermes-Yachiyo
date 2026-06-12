@@ -1886,6 +1886,7 @@ export function AgentStudioView() {
   const [runSearchQuery, setRunSearchQuery] = useState('');
   const [collapsedRunHistoryGroups, setCollapsedRunHistoryGroups] = useState<Set<string>>(new Set());
   const [selectedRunId, setSelectedRunId] = useState(() => routeRunId);
+  const selectedRunIdRef = useRef(selectedRunId);
   const [artifactPreview, setArtifactPreview] = useState<{ path: string; content: string; truncated?: boolean } | null>(null);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
@@ -2452,6 +2453,14 @@ export function AgentStudioView() {
     }));
   }
 
+  function isApprovalFollowupCurrent(selectedAfterAction: string): boolean {
+    return selectedRunIdRef.current === selectedAfterAction;
+  }
+
+  function approvalFollowupRefreshOptions(selectedAfterAction: string): StudioRefreshOptions {
+    return isApprovalFollowupCurrent(selectedAfterAction) ? { selectedRunId: selectedAfterAction } : {};
+  }
+
   async function pollApprovedRunProgress(runId: string, selectedAfterAction: string) {
     const pollRunIds = Array.from(new Set([runId, selectedAfterAction].filter(Boolean)));
     if (!pollRunIds.length) return;
@@ -2471,17 +2480,21 @@ export function AgentStudioView() {
       if (!watchedRun) continue;
       const watchedStatus = normalizeRunStatus(watchedRun.status);
       if (watchedStatus === 'approval_required') {
-        setStatus('Run 需要处理下一次审批。');
-        await refresh({ selectedRunId: selectedAfterAction });
+        if (isApprovalFollowupCurrent(selectedAfterAction)) {
+          setStatus('Run 需要处理下一次审批。');
+        }
+        await refresh(approvalFollowupRefreshOptions(selectedAfterAction));
         return;
       }
       if (!isActiveRunStatus(watchedRun.status)) {
-        setStatus(approvedRunStatusMessage(watchedRun));
-        await refresh({ selectedRunId: selectedAfterAction });
+        if (isApprovalFollowupCurrent(selectedAfterAction)) {
+          setStatus(approvedRunStatusMessage(watchedRun));
+        }
+        await refresh(approvalFollowupRefreshOptions(selectedAfterAction));
         return;
       }
     }
-    await refresh({ selectedRunId: selectedAfterAction });
+    await refresh(approvalFollowupRefreshOptions(selectedAfterAction));
   }
 
   const refresh = useCallback(async (options: StudioRefreshOptions = {}) => {
@@ -2535,6 +2548,10 @@ export function AgentStudioView() {
       .catch((err: unknown) => setError(err instanceof Error ? err.message : '读取 Agent Studio 失败'))
       .finally(() => setLoading(false));
   }, [refresh]);
+
+  useEffect(() => {
+    selectedRunIdRef.current = selectedRunId;
+  }, [selectedRunId]);
 
   useEffect(() => {
     const nextTab = routeRunId || routeRunTarget ? 'runs' : routeTab;
@@ -3565,12 +3582,16 @@ export function AgentStudioView() {
         }
         upsertRunDetailCache(updatedRuns);
         await refreshRunGroupsForRuns(updatedRuns);
-        setSelectedRunId(selectedAfterAction);
-        setStatus(approvedRunStatusMessage(run));
+        if (isApprovalFollowupCurrent(selectedAfterAction)) {
+          setSelectedRunId(selectedAfterAction);
+          setStatus(approvedRunStatusMessage(run));
+        }
       })
       .catch((err: unknown) => {
-        setError(err instanceof Error ? err.message : '批准 Run 审批失败');
-        void refresh({ selectedRunId: selectedAfterAction }).catch(() => undefined);
+        if (isApprovalFollowupCurrent(selectedAfterAction)) {
+          setError(err instanceof Error ? err.message : '批准 Run 审批失败');
+        }
+        void refresh(approvalFollowupRefreshOptions(selectedAfterAction)).catch(() => undefined);
       });
     return {
       selectedRunId: selectedAfterAction,
@@ -5106,6 +5127,7 @@ export function AgentStudioView() {
                       const childRunId = timelineChildRunId(event);
                       const childRun = childRunId ? runById.get(childRunId) : null;
                       const eventStatus = timelineStatus(event);
+                      const childRunStatus = normalizeRunStatus(childRun?.status || eventStatus);
                       const payload = timelineEventPayload(event);
                       const detail = String(event.detail || '').trim();
                       const eventTone = timelineEventTone(event);
@@ -5158,10 +5180,12 @@ export function AgentStudioView() {
                               <button
                                 type="button"
                                 className="run-timeline-child"
+                                data-run-id={childRunId}
+                                data-run-status={childRunStatus}
                                 data-testid="agent-run-detail-execution-open-child-run"
                                 onClick={() => openRunDetail(childRunId)}
                               >
-                                Child Run {childRun?.status ? `· ${runStatusLabel(childRun.status)}` : ''} · {childRunId}
+                                Child Run {childRunStatus ? `· ${runStatusLabel(childRunStatus)}` : ''} · {childRunId}
                               </button>
                             ) : null}
                           </div>

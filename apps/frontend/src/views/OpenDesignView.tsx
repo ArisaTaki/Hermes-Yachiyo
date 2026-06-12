@@ -2072,6 +2072,8 @@ export function ActivityDetailPage() {
                 <button
                   type="button"
                   className="hy-btn hy-btn-ghost activity-run-link"
+                  data-run-id={activityRunId}
+                  data-run-status={event.status || ''}
                   data-testid="activity-detail-open-run"
                   onClick={() => navigateTo('agents', { run: activityRunId }, ['tab', 'target', 'goal'])}
                 >
