@@ -1221,6 +1221,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover NativeRunEngine Agent Run reasoning privacy",
     ),
     (
+        "tests/test_agent_runtime.py::test_agent_run_redacts_http_sse_provider_error",
+        "macOS release workflow smoke tests must cover NativeRunEngine Agent Run HTTP SSE provider error redaction",
+    ),
+    (
         "tests/test_agent_runtime.py::test_agent_run_executes_http_sse_tool_call_and_continues",
         "macOS release workflow smoke tests must cover NativeRunEngine Agent Run HTTP SSE tool calls",
     ),

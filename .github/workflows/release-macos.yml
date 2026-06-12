@@ -183,6 +183,7 @@ jobs:
             tests/test_agent_runtime.py::test_agent_run_accepts_refusal_message_field \
             tests/test_agent_runtime.py::test_agent_run_hides_streaming_reasoning_delta \
             tests/test_agent_runtime.py::test_agent_run_rejects_reasoning_only_output_without_leaking \
+            tests/test_agent_runtime.py::test_agent_run_redacts_http_sse_provider_error \
             tests/test_agent_runtime.py::test_agent_run_executes_http_sse_tool_call_and_continues \
             tests/test_agent_runtime.py::test_agent_run_executes_split_http_sse_tool_call_chunks_and_continues \
             tests/test_agent_runtime.py::test_agent_run_executes_singular_http_sse_tool_call_and_continues \
