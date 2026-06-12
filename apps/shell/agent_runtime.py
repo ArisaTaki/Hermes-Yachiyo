@@ -2302,6 +2302,8 @@ class RunRepository:
         run_id = f"{kind}_{uuid4().hex[:12]}"
         now = _now()
         clean_client_request_id = str(client_request_id or "").strip()[:128]
+        if contains_sensitive_text(clean_client_request_id):
+            raise AgentRuntimeError("client_request_id 不能包含 API key、token 或其他敏感值")
         self._conn.execute(
             """
             INSERT INTO runs (

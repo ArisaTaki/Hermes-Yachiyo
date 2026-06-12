@@ -7457,6 +7457,25 @@ def test_run_repository_redacts_and_syncs_approval_projection(tmp_path):
         service.close()
 
 
+def test_run_repository_rejects_sensitive_client_request_id_before_persistence(tmp_path):
+    service = make_service(tmp_path)
+    leaked_client_request_id = "sk-run-repository-client-secret123456"
+    try:
+        with pytest.raises(AgentRuntimeError, match="client_request_id"):
+            service.runs.insert(
+                kind="main_chat_run",
+                runnable_id="builtin:yachiyo-main",
+                user_goal="Use safe idempotency key",
+                client_request_id=leaked_client_request_id,
+            )
+
+        rows = service._conn.execute("SELECT client_request_id FROM runs WHERE client_request_id<>''").fetchall()
+        assert rows == []
+        assert verify_secret_redaction(paths=[tmp_path]) == []
+    finally:
+        service.close()
+
+
 def test_run_artifact_repository_redacts_projection_and_reads_files(tmp_path):
     service = make_service(tmp_path)
     try:

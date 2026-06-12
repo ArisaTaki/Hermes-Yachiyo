@@ -1640,6 +1640,7 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow smoke tests must cover RunGroupRepository summary redaction" in messages
     assert "macOS release workflow smoke tests must cover RunGroupRepository insert redaction" in messages
     assert "macOS release workflow smoke tests must cover legacy RunGroupRepository secret scrub" in messages
+    assert "macOS release workflow smoke tests must cover RunRepository sensitive client_request_id rejection" in messages
     assert "macOS release workflow smoke tests must cover RunRepository artifact cleanup callback" in messages
     assert "macOS release workflow smoke tests must cover RunEvent concurrent replay cursor projection" in messages
     assert "macOS release workflow smoke tests must cover runtime SQLite database guards" in messages

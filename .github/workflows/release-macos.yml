@@ -126,6 +126,7 @@ jobs:
             tests/test_agent_runtime.py::test_run_group_repository_redacts_summary_projection \
             tests/test_agent_runtime.py::test_run_group_repository_redacts_insert_projection \
             tests/test_agent_runtime.py::test_legacy_run_group_secret_projection_migration_vacuums_plaintext_secret \
+            tests/test_agent_runtime.py::test_run_repository_rejects_sensitive_client_request_id_before_persistence \
             tests/test_agent_runtime.py::test_run_repository_deletes_rows_and_artifacts \
             tests/test_agent_runtime.py::test_run_event_repository_allocates_sequences_under_concurrent_writers \
             tests/test_agent_runtime.py::test_runtime_sqlite_enables_required_database_guards \

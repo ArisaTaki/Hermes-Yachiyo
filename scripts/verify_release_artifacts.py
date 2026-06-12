@@ -1049,6 +1049,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover legacy RunGroupRepository secret scrub",
     ),
     (
+        "tests/test_agent_runtime.py::test_run_repository_rejects_sensitive_client_request_id_before_persistence",
+        "macOS release workflow smoke tests must cover RunRepository sensitive client_request_id rejection",
+    ),
+    (
         "tests/test_agent_runtime.py::test_run_repository_deletes_rows_and_artifacts",
         "macOS release workflow smoke tests must cover RunRepository artifact cleanup callback",
     ),
