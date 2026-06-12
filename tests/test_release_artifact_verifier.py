@@ -1757,6 +1757,8 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow must wire opt-in provider smoke base URL secret" in messages
     assert "macOS release workflow must wire opt-in provider smoke model secret" in messages
     assert "macOS release workflow must wire opt-in provider smoke API key secret" in messages
+    assert "macOS release workflow provider smoke must skip unless all opt-in secrets are configured" in messages
+    assert "macOS release workflow provider smoke must report an explicit opt-in secret skip" in messages
     assert "macOS release workflow must run the real provider streaming smoke helper when configured" in messages
     assert "macOS release workflow provider smoke must require streamed content" in messages
     assert "macOS release workflow provider smoke must assert text finish_reason" in messages

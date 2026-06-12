@@ -640,6 +640,14 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow must wire opt-in provider smoke API key secret",
     ),
     (
+        'if [[ -z "${OHA_YACHIYO_SMOKE_BASE_URL}" || -z "${OHA_YACHIYO_SMOKE_MODEL}" || -z "${OHA_YACHIYO_SMOKE_API_KEY}" ]]; then',
+        "macOS release workflow provider smoke must skip unless all opt-in secrets are configured",
+    ),
+    (
+        "Skipping opt-in real provider streaming smoke; OHA_YACHIYO_SMOKE_* secrets are not fully configured.",
+        "macOS release workflow provider smoke must report an explicit opt-in secret skip",
+    ),
+    (
         "python scripts/smoke_openai_compatible_stream.py",
         "macOS release workflow must run the real provider streaming smoke helper when configured",
     ),
