@@ -4014,6 +4014,56 @@ class WorkflowParentResumeCoordinator:
             return result
 
 
+@dataclass(frozen=True)
+class WorkflowCancellationTarget:
+    """Workflow cancellation target rendered into timeline and result text."""
+
+    label: str
+    node_info: dict[str, str]
+    child_run_id: str = ""
+
+    @classmethod
+    def workflow(cls) -> "WorkflowCancellationTarget":
+        return cls(label="Workflow", node_info={})
+
+    @classmethod
+    def from_pending_approval(cls, pending: dict[str, Any]) -> "WorkflowCancellationTarget":
+        label = str(pending.get("workflow_node_label") or "Approval")
+        return cls(
+            label=label,
+            node_info={
+                "workflow_node_id": str(pending.get("workflow_node_id") or ""),
+                "workflow_node_kind": "approval",
+                "workflow_node_label": label,
+                "workflow_node_approval_criteria": str(
+                    pending.get("workflow_node_approval_criteria") or ""
+                ).strip(),
+            },
+        )
+
+    @classmethod
+    def from_child(
+        cls,
+        *,
+        child_run_id: str,
+        label: str,
+        node_info: dict[str, str],
+    ) -> "WorkflowCancellationTarget":
+        return cls(label=label, node_info=dict(node_info), child_run_id=child_run_id)
+
+    def event_payload(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {"status": "cancelled", **self.node_info}
+        if self.child_run_id:
+            payload["child_run_id"] = self.child_run_id
+        return payload
+
+    def event_detail(self) -> str:
+        return f"{self.label} cancelled"
+
+    def result_text(self) -> str:
+        return f"Workflow 已取消：{self.label}"
+
+
 class WorkflowCancellationProjectionCoordinator:
     """Builds Workflow cancellation projections, including waiting child Runs."""
 
@@ -4042,46 +4092,32 @@ class WorkflowCancellationProjectionCoordinator:
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str]:
         artifacts = [item for item in run.get("artifacts") or [] if isinstance(item, dict)]
         pending = self._pending_approval_private(run_id)
-        label = "Workflow"
-        node_info: dict[str, str] = {}
-        cancelled_child_run_id = ""
         if pending and str(pending.get("tool") or "") == "workflow.approval":
-            label = str(pending.get("workflow_node_label") or "Approval")
-            node_info = {
-                "workflow_node_id": str(pending.get("workflow_node_id") or ""),
-                "workflow_node_kind": "approval",
-                "workflow_node_label": label,
-                "workflow_node_approval_criteria": str(
-                    pending.get("workflow_node_approval_criteria") or ""
-                ).strip(),
-            }
+            target = WorkflowCancellationTarget.from_pending_approval(pending)
         else:
-            cancelled_child_run_id, label, node_info = self._cancel_waiting_child_run(
+            target = self._cancel_waiting_child_run(
                 run_id,
                 timeline,
                 artifacts,
             )
-        cancel_event_extra: dict[str, Any] = {"status": "cancelled", **node_info}
-        if cancelled_child_run_id:
-            cancel_event_extra["child_run_id"] = cancelled_child_run_id
         timeline.append(
             self._timeline(
                 "workflow.run.cancelled",
-                f"{label} cancelled",
-                **cancel_event_extra,
+                target.event_detail(),
+                **target.event_payload(),
             )
         )
-        return timeline, artifacts, f"Workflow 已取消：{label}"
+        return timeline, artifacts, target.result_text()
 
     def _cancel_waiting_child_run(
         self,
         parent_run_id: str,
         timeline: list[dict[str, Any]],
         artifacts: list[dict[str, Any]],
-    ) -> tuple[str, str, dict[str, str]]:
+    ) -> WorkflowCancellationTarget:
         child_run_id = self._latest_waiting_child_run_id(timeline)
         if not child_run_id:
-            return "", "Workflow", {}
+            return WorkflowCancellationTarget.workflow()
         label, node_info = self._child_node_context(timeline, child_run_id)
         try:
             child_run = self._get_run(child_run_id)
@@ -4091,7 +4127,11 @@ class WorkflowCancellationProjectionCoordinator:
             child_run = self._cancel_child_run(parent_run_id, child_run)
         if child_run:
             self._merge_workflow_child_run_outcome(timeline, artifacts, child_run, label)
-        return child_run_id, label, node_info
+        return WorkflowCancellationTarget.from_child(
+            child_run_id=child_run_id,
+            label=label,
+            node_info=node_info,
+        )
 
     @staticmethod
     def _latest_waiting_child_run_id(timeline: list[dict[str, Any]]) -> str:

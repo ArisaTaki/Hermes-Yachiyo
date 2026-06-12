@@ -39,6 +39,7 @@ from apps.shell.agent_runtime import (
     WorkflowChildOutcomeCoordinator,
     WorkflowChildRunProjection,
     WorkflowCancellationProjectionCoordinator,
+    WorkflowCancellationTarget,
     WorkflowContinuationCoordinator,
     WorkflowParentRunLocator,
     WorkflowParentResumeCoordinator,
@@ -1861,6 +1862,46 @@ def test_workflow_parent_resume_coordinator_does_not_project_child_cancel_twice(
             "workflow_node_id": "agent",
         },
     ]
+
+
+def test_workflow_cancellation_target_builds_event_payloads():
+    pending_target = WorkflowCancellationTarget.from_pending_approval(
+        {
+            "workflow_node_id": "gate",
+            "workflow_node_label": "Human Gate",
+            "workflow_node_approval_criteria": "Review output",
+        }
+    )
+
+    assert pending_target.event_detail() == "Human Gate cancelled"
+    assert pending_target.result_text() == "Workflow 已取消：Human Gate"
+    assert pending_target.event_payload() == {
+        "status": "cancelled",
+        "workflow_node_id": "gate",
+        "workflow_node_kind": "approval",
+        "workflow_node_label": "Human Gate",
+        "workflow_node_approval_criteria": "Review output",
+    }
+
+    child_target = WorkflowCancellationTarget.from_child(
+        child_run_id="child_run",
+        label="Research Agent",
+        node_info={
+            "workflow_node_id": "agent",
+            "workflow_node_kind": "agent",
+            "workflow_node_label": "Research Agent",
+        },
+    )
+
+    assert child_target.event_detail() == "Research Agent cancelled"
+    assert child_target.result_text() == "Workflow 已取消：Research Agent"
+    assert child_target.event_payload() == {
+        "status": "cancelled",
+        "workflow_node_id": "agent",
+        "workflow_node_kind": "agent",
+        "workflow_node_label": "Research Agent",
+        "child_run_id": "child_run",
+    }
 
 
 def test_workflow_cancellation_projection_coordinator_cancels_waiting_child_run():

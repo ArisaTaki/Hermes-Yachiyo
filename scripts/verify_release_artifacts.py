@@ -1017,6 +1017,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover WorkflowParentResumeCoordinator child failure replay idempotency",
     ),
     (
+        "tests/test_agent_runtime.py::test_workflow_cancellation_target_builds_event_payloads",
+        "macOS release workflow smoke tests must cover Workflow cancellation target projection",
+    ),
+    (
         "tests/test_agent_runtime.py::test_workflow_cancellation_projection_coordinator_cancels_waiting_child_run",
         "macOS release workflow smoke tests must cover WorkflowCancellationProjectionCoordinator child cancellation projection",
     ),
