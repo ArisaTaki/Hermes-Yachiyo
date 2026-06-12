@@ -9983,6 +9983,59 @@ def test_agent_run_executes_streaming_tool_call_and_continues(tmp_path, monkeypa
         service.close()
 
 
+def test_agent_run_consumes_split_utf8_http_sse_content_chunks(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    expected = "Agent 跨块 HTTP SSE 完成"
+    requests = []
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            payload = json.dumps({"choices": [{"delta": {"content": expected}}]}, ensure_ascii=False)
+            frame = f"data: {payload}\n\ndata: [DONE]\n\n".encode("utf-8")
+            split_at = frame.index("跨".encode("utf-8")) + 1
+            yield frame[:split_at]
+            yield frame[split_at : split_at + 2]
+            yield frame[split_at + 2 :]
+
+    def fake_urlopen(request, **kwargs):
+        body = json.loads(request.data.decode("utf-8"))
+        requests.append({"request": request, "body": body, "kwargs": kwargs})
+        assert request.full_url == "https://api.example.test/v1/chat/completions"
+        assert request.get_header("Accept") == "text/event-stream"
+        assert body["stream"] is True
+        return FakeResponse()
+
+    monkeypatch.setattr("apps.core.tls.urlrequest.urlopen", fake_urlopen)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Split UTF8 HTTP SSE Agent",
+                "model_mode": "custom_api",
+                "model_config": {"base_url": "https://api.example.test/v1", "model": "demo-model", "api_key": "sk-secret"},
+            }
+        )
+        run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Stream UTF-8"})
+        run_events = service.list_run_events(run["run_id"])["events"]
+        completed_fact = next(event for event in run_events if event["event_type"] == "agent.run.completed")
+        payload_json = json.dumps(completed_fact["payload"], ensure_ascii=False)
+
+        assert run["status"] == "completed"
+        assert run["result"] == expected
+        assert len(requests) == 1
+        assert "\ufffd" not in run["result"]
+        assert "\ufffd" not in payload_json
+        assert completed_fact["payload"]["result"] == expected
+        assert not any(str(event["event_type"]).endswith(".delta") for event in run_events)
+    finally:
+        service.close()
+
+
 def test_agent_run_executes_http_sse_tool_call_and_continues(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     workdir = tmp_path / "repo"

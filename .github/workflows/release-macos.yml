@@ -178,6 +178,7 @@ jobs:
             tests/test_agent_runtime.py::test_main_chat_model_loop_executes_multiple_responses_tool_calls \
             tests/test_agent_runtime.py::test_main_chat_model_loop_uses_responses_call_id_without_item_id \
             tests/test_agent_runtime.py::test_agent_run_executes_streaming_tool_call_and_continues \
+            tests/test_agent_runtime.py::test_agent_run_consumes_split_utf8_http_sse_content_chunks \
             tests/test_agent_runtime.py::test_agent_run_executes_http_sse_tool_call_and_continues \
             tests/test_agent_runtime.py::test_agent_run_executes_split_http_sse_tool_call_chunks_and_continues \
             tests/test_agent_runtime.py::test_agent_run_executes_singular_http_sse_tool_call_and_continues \
