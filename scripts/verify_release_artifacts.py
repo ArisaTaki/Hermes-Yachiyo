@@ -1673,6 +1673,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover Workflow approval resume context boundary",
     ),
     (
+        "tests/test_agent_runtime.py::test_workflow_approval_resume_rejects_out_of_range_next_index",
+        "macOS release workflow smoke tests must cover Workflow approval resume index validation",
+    ),
+    (
         "tests/test_agent_runtime.py::test_workflow_approval_resume_coordinator_claims_and_handoffs",
         "macOS release workflow smoke tests must cover Workflow approval resume coordinator boundary",
     ),

@@ -1869,6 +1869,7 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow smoke tests must cover Workflow save-and-run latest canvas route contract" in messages
     assert "macOS release workflow smoke tests must cover Workflow approval shared context boundary" in messages
     assert "macOS release workflow smoke tests must cover Workflow approval resume context boundary" in messages
+    assert "macOS release workflow smoke tests must cover Workflow approval resume index validation" in messages
     assert "macOS release workflow smoke tests must cover Workflow approval resume coordinator boundary" in messages
     assert "macOS release workflow smoke tests must cover Workflow approval Run Detail HTTP roundtrip" in messages
     assert "macOS release workflow smoke tests must cover Workflow approval reject Run Detail HTTP roundtrip" in messages

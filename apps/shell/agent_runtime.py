@@ -4064,9 +4064,11 @@ class WorkflowContinuationCoordinator:
         current_node_info: dict[str, str] = {}
         try:
             workflow_goal = str(run.get("user_goal") or context)
-            has_agent_upstream = max(0, start_index) > 0
             path = engine._workflow_path(workflow)
-            for index, node in enumerate(path[max(0, start_index) :], start=max(0, start_index)):
+            if start_index < 0 or start_index > len(path):
+                raise AgentRuntimeError("Workflow Run 待审批恢复位置无效")
+            has_agent_upstream = start_index > 0
+            for index, node in enumerate(path[start_index:], start=start_index):
                 kind = engine._node_kind(node)
                 label = str((node.get("data") or {}).get("label") or node.get("id"))
                 current_node_info = {

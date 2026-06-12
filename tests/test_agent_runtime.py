@@ -9558,6 +9558,57 @@ def test_workflow_approval_resume_uses_runtime_snapshot_after_workflow_edit(tmp_
         service.close()
 
 
+def test_workflow_approval_resume_rejects_out_of_range_next_index(tmp_path):
+    service = make_service(tmp_path)
+    try:
+        workflow = service.create_workflow(
+            {
+                "name": "Bad Resume Index Flow",
+                "nodes": [
+                    {"id": "start", "type": "start", "data": {"label": "Start"}},
+                    {"id": "gate", "type": "approval", "data": {"label": "Manual Gate"}},
+                    {"id": "summary", "type": "artifact", "data": {"label": "Summary"}},
+                ],
+                "edges": [
+                    {"source": "start", "target": "gate"},
+                    {"source": "gate", "target": "summary"},
+                ],
+            }
+        )
+        run = service.create_workflow_run(
+            {"workflow_id": workflow["workflow_id"], "user_goal": "Wait then write"}
+        )
+        assert run["status"] == "approval_required"
+        pending = service.runs.pending_approval_private(run["run_id"])
+        pending["workflow_next_index"] = 99
+        service.runs.update(run["run_id"], pending_approval=pending)
+
+        resumed = service.approve_run_approval(run["run_id"])
+
+        assert resumed["status"] == "failed"
+        assert resumed["pending_approval"] == {}
+        assert "Workflow Run 待审批恢复位置无效" in resumed["result"]
+        assert resumed["artifacts"] == []
+        assert any(event["event"] == "workflow.node.approval_approved" for event in resumed["timeline"])
+        assert any(
+            event["event"] == "workflow.run.failed"
+            and event["detail"] == "Workflow Run 待审批恢复位置无效"
+            for event in resumed["timeline"]
+        )
+        assert not any(event["event"] == "workflow.run.completed" for event in resumed["timeline"])
+        run_events = service.list_run_events(run["run_id"])["events"]
+        assert any(event["event_type"] == "workflow.node.approval_approved" for event in run_events)
+        assert any(
+            event["event_type"] == "workflow.run.failed"
+            and event["payload"]["error"] == "Workflow Run 待审批恢复位置无效"
+            for event in run_events
+        )
+        assert not any(event["event_type"] == "workflow.run.completed" for event in run_events)
+        assert service.get_run_group(run["run_group_id"])["status"] == "failed"
+    finally:
+        service.close()
+
+
 def test_workflow_approval_node_reject_cancels_run(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     calls = []
