@@ -15,6 +15,7 @@ SCAN_TARGETS = [
     ROOT / "pyproject.toml",
 ]
 ACTIVE_USER_DOC_TARGETS = [
+    ROOT / ".github",
     ROOT / "README.md",
     ROOT / "README.en.md",
     ROOT / "README.ja.md",
@@ -132,7 +133,11 @@ FORBIDDEN_ACTIVE_DOC_TOKENS = [
 
 
 def _iter_source_files():
-    for target in SCAN_TARGETS:
+    yield from _iter_text_files(SCAN_TARGETS)
+
+
+def _iter_text_files(targets):
+    for target in targets:
         if target.is_file():
             yield target
             continue
@@ -159,7 +164,7 @@ def test_runtime_sources_do_not_reintroduce_legacy_hermes_kernel_entrypoints() -
 
 def test_active_user_facing_docs_do_not_reintroduce_legacy_hermes_identity() -> None:
     findings: list[str] = []
-    for path in ACTIVE_USER_DOC_TARGETS:
+    for path in _iter_text_files(ACTIVE_USER_DOC_TARGETS):
         text = path.read_text(encoding="utf-8", errors="ignore")
         for token in FORBIDDEN_ACTIVE_DOC_TOKENS:
             if token in text:
