@@ -129,3 +129,42 @@ def test_release_candidate_verifier_reports_electron_ui_smoke_failure(tmp_path, 
 
     output = capsys.readouterr().out
     assert "scripts/smoke_fail_ui.mjs failed with exit code 7" in output
+
+
+def test_release_candidate_verifier_reports_electron_ui_smoke_start_failure(
+    tmp_path, monkeypatch, capsys
+):
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    smoke = scripts / "smoke_missing_node_ui.mjs"
+    smoke.write_text("console.log('missing node')\n", encoding="utf-8")
+
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    def fake_run(*_args, **_kwargs):
+        raise OSError("node not found")
+
+    monkeypatch.setattr(rc.subprocess, "run", fake_run)
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        run_ui_smoke=True,
+        report_json=Path("release/rc-verification.json"),
+    ) == 1
+
+    output = capsys.readouterr().out
+    assert "scripts/smoke_missing_node_ui.mjs could not start: node not found" in output
+    report_path = tmp_path / "release" / "rc-verification.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["ok"] is False
+    assert report["electron_ui_smoke"] == {
+        "status": "failed",
+        "scripts": [
+            {
+                "script": "scripts/smoke_missing_node_ui.mjs",
+                "exit_code": None,
+                "error": "node not found",
+            }
+        ],
+        "run_requested": True,
+    }

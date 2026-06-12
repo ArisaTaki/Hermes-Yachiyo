@@ -140,13 +140,21 @@ def verify_release_candidate(
             failed = True
         for script in selected_smoke_scripts:
             print(f"Electron UI smoke: node {script}")
-            result = subprocess.run(["node", str(script)], cwd=root, check=False)
-            smoke_results.append({"script": str(script), "exit_code": result.returncode})
-            if result.returncode != 0:
-                print(f"- {script} failed with exit code {result.returncode}")
+            try:
+                result = subprocess.run(["node", str(script)], cwd=root, check=False)
+            except OSError as exc:
+                print(f"- {script} could not start: {exc}")
+                smoke_results.append(
+                    {"script": str(script), "exit_code": None, "error": str(exc)}
+                )
                 failed = True
+            else:
+                smoke_results.append({"script": str(script), "exit_code": result.returncode})
+                if result.returncode != 0:
+                    print(f"- {script} failed with exit code {result.returncode}")
+                    failed = True
         smoke_failed = (not selected_smoke_scripts) or any(
-            item["exit_code"] for item in smoke_results
+            item["exit_code"] is None or item["exit_code"] for item in smoke_results
         )
         report["electron_ui_smoke"] = {
             "status": "failed" if smoke_failed else "passed",
