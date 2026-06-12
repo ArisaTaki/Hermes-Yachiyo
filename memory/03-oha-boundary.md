@@ -1,6 +1,6 @@
-# Hermes Boundary
+# Oha Boundary
 
-Hermes-Yachiyo does:
+Oha-Yachiyo does:
 - local assistant runtime
 - machine status queries
 - screenshots
@@ -8,7 +8,7 @@ Hermes-Yachiyo does:
 - local task APIs
 - local-first execution without QQ
 
-Hermes-Yachiyo does not:
+Oha-Yachiyo does not:
 - own Codex CLI execution
 - replace Hapi
 - become AstrBot-centered

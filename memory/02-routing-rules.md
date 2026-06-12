@@ -1,8 +1,8 @@
 # Routing Rules
 
-/y status  -> Hermes-Yachiyo
-/y tasks   -> Hermes-Yachiyo
-/y screen  -> Hermes-Yachiyo
-/y window  -> Hermes-Yachiyo
-/y do      -> Hermes-Yachiyo
+/y status  -> Oha-Yachiyo
+/y tasks   -> Oha-Yachiyo
+/y screen  -> Oha-Yachiyo
+/y window  -> Oha-Yachiyo
+/y do      -> Oha-Yachiyo
 /y codex   -> Hapi

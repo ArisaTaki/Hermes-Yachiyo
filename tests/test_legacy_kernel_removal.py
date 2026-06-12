@@ -28,6 +28,13 @@ ACTIVE_USER_DOC_TARGETS = [
     ROOT / "docs" / "release-packaging.md",
     ROOT / "docs" / "tts-voice-assets.md",
 ]
+ACTIVE_MEMORY_DOC_TARGETS = [
+    ROOT / "memory" / "00-project-definition.md",
+    ROOT / "memory" / "01-system-architecture.md",
+    ROOT / "memory" / "02-routing-rules.md",
+    ROOT / "memory" / "03-oha-boundary.md",
+    ROOT / "memory" / "04-hapi-boundary.md",
+]
 IGNORED_DIRS = {
     "__pycache__",
     ".pytest_cache",
@@ -170,5 +177,19 @@ def test_active_user_facing_docs_do_not_reintroduce_legacy_hermes_identity() -> 
         for token in FORBIDDEN_ACTIVE_DOC_TOKENS:
             if token in text:
                 findings.append(f"{path.relative_to(ROOT)} contains {token!r}")
+
+    assert findings == []
+
+
+def test_active_memory_docs_do_not_reintroduce_legacy_hermes_identity() -> None:
+    findings: list[str] = []
+    for path in _iter_text_files(ACTIVE_MEMORY_DOC_TARGETS):
+        relative_path = path.relative_to(ROOT).as_posix()
+        if "hermes" in relative_path.lower():
+            findings.append(f"{relative_path} path contains legacy hermes token")
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for token in FORBIDDEN_ACTIVE_DOC_TOKENS:
+            if token in text:
+                findings.append(f"{relative_path} contains {token!r}")
 
     assert findings == []

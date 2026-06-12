@@ -1,25 +1,25 @@
 # System Architecture
 
-Hermes-Yachiyo App
+Oha-Yachiyo App
 
 - desktop shell
 - tray/window entry
 - settings/web UI
 - display mode selection
 
-Hermes-Yachiyo Core
+Oha-Yachiyo Core
 
-- Hermes runtime
+- NativeRunEngine runtime
 - task/state management
 - local assistant logic
 
-Hermes-Yachiyo Local Capabilities
+Oha-Yachiyo Local Capabilities
 
 - screenshots
 - active-window
 - local integrations
 
-Hermes-Yachiyo Bridge
+Oha-Yachiyo Bridge
 
 - internal/local API for UI and AstrBot integration
 

@@ -8,6 +8,6 @@ Hapi does:
 - existing stable code-agent pipeline
 
 Hapi does not:
-- replace Hermes-Yachiyo local assistant runtime
+- replace Oha-Yachiyo local assistant runtime
 - own screenshot or active-window queries
 - become the QQ bridge itself
