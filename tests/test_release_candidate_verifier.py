@@ -263,6 +263,10 @@ def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
             "packaged_ui_sampling",
             "real_provider_smoke",
         ],
+        "remaining_next_actions": [
+            {"id": check["id"], "next_action": check["next_action"]}
+            for check in rc.MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS
+        ],
         "failed_check_ids": [],
         "automated_evidence_check_ids": [],
     }
@@ -342,6 +346,7 @@ def test_release_candidate_verifier_merges_manual_check_evidence(
     }
     assert report["manual_release_candidate_check_summary"]["remaining_count"] == 0
     assert report["manual_release_candidate_check_summary"]["remaining_check_ids"] == []
+    assert report["manual_release_candidate_check_summary"]["remaining_next_actions"] == []
 
 
 def test_release_candidate_verifier_accepts_previous_rc_report_manual_statuses(
@@ -414,6 +419,8 @@ def test_release_candidate_verifier_requires_complete_manual_checks_for_signoff(
 
     output = capsys.readouterr().out
     assert "manual release-candidate check evidence: incomplete" in output
+    assert "manual release-candidate next actions:" in output
+    assert "[packaged_bridge_isolation] Prefer rerunning the RC gate with --run-dmg-app-smoke" in output
     report = json.loads((tmp_path / "tmp" / "rc.json").read_text(encoding="utf-8"))
     assert report["ok"] is False
     assert report["manual_release_candidate_check_status"] == "manual_required"
@@ -457,6 +464,7 @@ def test_release_candidate_verifier_accepts_complete_manual_checks_for_signoff(
     assert report["manual_release_candidate_check_status"] == "passed"
     assert report["manual_release_candidate_checks_required"] is True
     assert report["manual_release_candidate_check_summary"]["remaining_count"] == 0
+    assert report["manual_release_candidate_check_summary"]["remaining_next_actions"] == []
 
 
 def test_release_candidate_verifier_fails_failed_manual_check_evidence(
@@ -514,6 +522,7 @@ def test_release_candidate_verifier_writes_manual_check_template(tmp_path):
     assert all(check["status"] == "manual_required" for check in template["checks"])
     assert all(check["evidence"] == "" for check in template["checks"])
     assert all(check["evidence_prompt"] for check in template["checks"])
+    assert all(check["next_action"] for check in template["checks"])
     assert all(
         check["required_before"] == "public_release_signoff"
         for check in template["checks"]

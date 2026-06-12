@@ -78,6 +78,7 @@ MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS: tuple[dict[str, str], ...] = (
         "required_before": "public_release_signoff",
         "description": "Mount the DMG and launch Oha-Yachiyo.app once with the documented Gatekeeper first-launch flow.",
         "evidence": "Record the mounted DMG path and confirm Finder Control-click -> Open or System Settings allow-open flow reaches the app.",
+        "next_action": "Manually mount the final DMG and launch Oha-Yachiyo.app through Finder Control-click -> Open or the System Settings allow-open flow.",
     },
     {
         "id": "packaged_bridge_isolation",
@@ -85,6 +86,7 @@ MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS: tuple[dict[str, str], ...] = (
         "required_before": "public_release_signoff",
         "description": "Confirm the packaged app starts its local bridge and does not connect to a development backend.",
         "evidence": "Record the packaged bridge /status response and confirm the bridge URL is local loopback.",
+        "next_action": "Prefer rerunning the RC gate with --run-dmg-app-smoke; otherwise manually record the packaged /status response and loopback bridge URL.",
     },
     {
         "id": "screen_recording_permission",
@@ -92,6 +94,7 @@ MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS: tuple[dict[str, str], ...] = (
         "required_before": "public_release_signoff",
         "description": "Grant Screen Recording permission to Oha-Yachiyo.app and verify the local screenshot/proactive probe path.",
         "evidence": "Record the System Settings permission state and a successful local screenshot or proactive probe result.",
+        "next_action": "Manually grant Screen Recording to the packaged app in System Settings and verify local screenshot or proactive probe success.",
     },
     {
         "id": "chat_native_file_upload",
@@ -99,6 +102,7 @@ MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS: tuple[dict[str, str], ...] = (
         "required_before": "public_release_signoff",
         "description": "Use the packaged app's Chat image attach button with the native file picker and verify preview, send, message attachment, image viewer, and Run Detail handoff.",
         "evidence": "Record the image filename, native picker path used, sent message attachment metadata, image viewer open/close result, and linked Run Detail id.",
+        "next_action": "Manually use the packaged Chat image attach button and native file picker, then verify preview, send, image viewer, and Run Detail handoff.",
     },
     {
         "id": "packaged_ui_sampling",
@@ -106,6 +110,7 @@ MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS: tuple[dict[str, str], ...] = (
         "required_before": "public_release_signoff",
         "description": "Sample mature packaged app surfaces across Chat approval/cancel, Run Detail replay, Workflow save-and-run, Agent Studio, group/delegation/session summary, manual TTS, and Live2D.",
         "evidence": "Record the packaged app build, sampled pages/actions, and visible pass/fail result for each sampled mature surface.",
+        "next_action": "Manually sample the packaged app surfaces listed here; --run-ui-smoke is supporting regression evidence but does not replace packaged UI sampling.",
     },
     {
         "id": "real_provider_smoke",
@@ -113,6 +118,7 @@ MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS: tuple[dict[str, str], ...] = (
         "required_before": "public_release_signoff",
         "description": "If real provider credentials are available, run --run-provider-smoke for the opt-in streaming/tool-call provider gate.",
         "evidence": "Archive the RC report provider_smoke section from a credentialed run, or record that provider credentials were unavailable.",
+        "next_action": "If OHA_YACHIYO_SMOKE_* credentials are available, rerun the RC gate with --run-provider-smoke; otherwise mark not_applicable with credentials-unavailable evidence.",
     },
 )
 MANUAL_RELEASE_CANDIDATE_CHECKS: tuple[str, ...] = tuple(
@@ -133,6 +139,7 @@ def _manual_release_candidate_check_template() -> dict[str, object]:
                 "required_before": check["required_before"],
                 "description": check["description"],
                 "evidence_prompt": check["evidence"],
+                "next_action": check["next_action"],
                 "evidence": "",
                 "notes": "",
             }
@@ -170,6 +177,14 @@ def _manual_release_candidate_check_summary(
     remaining_check_ids = [
         check["id"] for check in checks if check.get("status") == "manual_required"
     ]
+    remaining_next_actions = [
+        {
+            "id": check["id"],
+            "next_action": check.get("next_action", ""),
+        }
+        for check in checks
+        if check.get("status") == "manual_required"
+    ]
     failed_check_ids = [check["id"] for check in checks if check.get("status") == "failed"]
     automated_evidence_check_ids = [
         check["id"]
@@ -181,6 +196,7 @@ def _manual_release_candidate_check_summary(
         "status_counts": status_counts,
         "remaining_count": len(remaining_check_ids),
         "remaining_check_ids": remaining_check_ids,
+        "remaining_next_actions": remaining_next_actions,
         "failed_check_ids": failed_check_ids,
         "automated_evidence_check_ids": automated_evidence_check_ids,
     }
@@ -1126,6 +1142,16 @@ def verify_release_candidate(
                 "manual release-candidate check summary: "
                 f"{remaining_count} remaining ({', '.join(str(check_id) for check_id in remaining_ids)})"
             )
+            remaining_next_actions = manual_summary.get("remaining_next_actions")
+            if isinstance(remaining_next_actions, list):
+                print("manual release-candidate next actions:")
+                for item in remaining_next_actions:
+                    if not isinstance(item, dict):
+                        continue
+                    check_id = str(item.get("id", "")).strip()
+                    next_action = str(item.get("next_action", "")).strip()
+                    if check_id and next_action:
+                        print(f"- [{check_id}] {next_action}")
         else:
             print("manual release-candidate check summary: complete")
     if manual_check_findings:

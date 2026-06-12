@@ -902,6 +902,10 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release candidate verifier manual summary must list remaining check ids",
     ),
     (
+        '"remaining_next_actions"',
+        "release candidate verifier manual summary must list remaining next actions",
+    ),
+    (
         '"automated_evidence_check_ids"',
         "release candidate verifier manual summary must list automated evidence check ids",
     ),
@@ -920,6 +924,10 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         '"evidence_prompt"',
         "release candidate verifier manual check templates must preserve evidence prompts",
+    ),
+    (
+        '"next_action"',
+        "release candidate verifier manual check templates must include next actions",
     ),
     (
         "_load_manual_release_candidate_checks",
