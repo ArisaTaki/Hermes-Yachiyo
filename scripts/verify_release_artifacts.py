@@ -654,6 +654,14 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document direct no-provider Markdown signoff draft generation",
     ),
     (
+        "草稿会把 `--run-ui-smoke` 通过的脚本列表预填到 `packaged_ui_sampling` 的 `Notes:`",
+        "release packaging docs must document UI smoke supporting evidence notes",
+    ),
+    (
+        "这两项仍保持 `manual_required`",
+        "release packaging docs must document UI smoke does not auto-pass manual checks",
+    ),
+    (
         "--mark-provider-smoke-not-applicable-if-missing",
         "release packaging docs must document explicit provider-smoke not_applicable draft evidence",
     ),
@@ -1066,6 +1074,14 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "_manual_release_candidate_checks_from_payload",
         "release candidate verifier must accept previous RC reports as manual evidence input",
+    ),
+    (
+        "_manual_release_candidate_checks_with_supporting_evidence",
+        "release candidate verifier must preserve supporting evidence from previous RC reports",
+    ),
+    (
+        "the packaged native file picker still ",
+        "release candidate verifier must not auto-pass native file picker from UI smoke",
     ),
     (
         "_auto_apply_release_candidate_check_evidence",

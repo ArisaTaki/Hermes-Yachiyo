@@ -660,6 +660,24 @@ def test_release_candidate_verifier_writes_manual_check_draft_from_prior_report(
                     "remaining_count": 5,
                     "automated_evidence_check_ids": ["packaged_bridge_isolation"],
                 },
+                "electron_ui_smoke": {
+                    "status": "passed",
+                    "script_count": 3,
+                    "scripts": [
+                        {
+                            "script": "scripts/smoke_chat_image_attachment_ui.mjs",
+                            "exit_code": 0,
+                        },
+                        {
+                            "script": "scripts/smoke_chat_approval_ui.mjs",
+                            "exit_code": 0,
+                        },
+                        {
+                            "script": "scripts/smoke_workflow_save_run_ui.mjs",
+                            "exit_code": 0,
+                        },
+                    ],
+                },
             }
         ),
         encoding="utf-8",
@@ -686,6 +704,13 @@ def test_release_candidate_verifier_writes_manual_check_draft_from_prior_report(
     assert checks["packaged_bridge_isolation"]["status"] == "passed"
     assert checks["packaged_bridge_isolation"]["evidence_source"] == "automated_rc_gate"
     assert "--run-dmg-app-smoke passed" in checks["packaged_bridge_isolation"]["evidence"]
+    assert checks["packaged_ui_sampling"]["status"] == "manual_required"
+    assert "--run-ui-smoke passed 3 Electron UI smoke scripts" in checks["packaged_ui_sampling"]["notes"]
+    assert "scripts/smoke_workflow_save_run_ui.mjs" in checks["packaged_ui_sampling"]["notes"]
+    assert checks["chat_native_file_upload"]["status"] == "manual_required"
+    assert "packaged native file picker still requires manual evidence" in checks[
+        "chat_native_file_upload"
+    ]["notes"]
 
 
 def test_release_candidate_verifier_manual_check_draft_can_mark_provider_not_applicable(
@@ -704,7 +729,25 @@ def test_release_candidate_verifier_manual_check_draft_can_mark_provider_not_app
     prior_report_path = tmp_path / "tmp" / "final-rc.json"
     prior_report_path.parent.mkdir(parents=True)
     prior_report_path.write_text(
-        json.dumps({"manual_release_candidate_check_statuses": prior_statuses}),
+        json.dumps(
+            {
+                "manual_release_candidate_check_statuses": prior_statuses,
+                "electron_ui_smoke": {
+                    "status": "passed",
+                    "script_count": 2,
+                    "scripts": [
+                        {
+                            "script": "scripts/smoke_chat_image_attachment_ui.mjs",
+                            "exit_code": 0,
+                        },
+                        {
+                            "script": "scripts/smoke_workflow_management_ui.mjs",
+                            "exit_code": 0,
+                        },
+                    ],
+                },
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -758,7 +801,25 @@ def test_release_candidate_verifier_manual_check_markdown_can_mark_provider_not_
     prior_report_path = tmp_path / "tmp" / "final-rc.json"
     prior_report_path.parent.mkdir(parents=True)
     prior_report_path.write_text(
-        json.dumps({"manual_release_candidate_check_statuses": prior_statuses}),
+        json.dumps(
+            {
+                "manual_release_candidate_check_statuses": prior_statuses,
+                "electron_ui_smoke": {
+                    "status": "passed",
+                    "script_count": 2,
+                    "scripts": [
+                        {
+                            "script": "scripts/smoke_chat_image_attachment_ui.mjs",
+                            "exit_code": 0,
+                        },
+                        {
+                            "script": "scripts/smoke_workflow_management_ui.mjs",
+                            "exit_code": 0,
+                        },
+                    ],
+                },
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -773,6 +834,9 @@ def test_release_candidate_verifier_manual_check_markdown_can_mark_provider_not_
     assert "- Remaining checks: 4" in markdown
     assert "- [x] `real_provider_smoke` - not_applicable" in markdown
     assert "Evidence source: credentials_unavailable" in markdown
+    assert "--run-ui-smoke passed 2 Electron UI smoke scripts" in markdown
+    assert "scripts/smoke_workflow_management_ui.mjs" in markdown
+    assert "packaged native file picker still requires manual evidence" in markdown
     for env_name in rc.PROVIDER_SMOKE_ENV_VARS:
         assert env_name in markdown
 

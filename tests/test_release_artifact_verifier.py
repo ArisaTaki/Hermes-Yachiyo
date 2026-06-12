@@ -177,6 +177,8 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
     assert "release candidate verifier must load manual check evidence JSON" in messages
     assert "release candidate verifier must parse manual check Markdown evidence" in messages
     assert "release candidate verifier must accept previous RC reports as manual evidence input" in messages
+    assert "release candidate verifier must preserve supporting evidence from previous RC reports" in messages
+    assert "release candidate verifier must not auto-pass native file picker from UI smoke" in messages
     assert "release candidate verifier must auto-fill manual evidence from passed RC gates" in messages
     assert "release candidate verifier must label automatically supplied manual evidence" in messages
     assert "release candidate verifier must refresh manual check status after automated gates" in messages
@@ -699,6 +701,8 @@ def test_verifier_requires_release_packaging_docs_for_release_gates(tmp_path):
         "release packaging docs must document direct no-provider Markdown signoff draft generation"
         in messages
     )
+    assert "release packaging docs must document UI smoke supporting evidence notes" in messages
+    assert "release packaging docs must document UI smoke does not auto-pass manual checks" in messages
     assert (
         "release packaging docs must document explicit provider-smoke not_applicable draft evidence"
         in messages

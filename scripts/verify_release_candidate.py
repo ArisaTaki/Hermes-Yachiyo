@@ -248,6 +248,7 @@ def _manual_release_candidate_checks_markdown(
     if not remaining_checks:
         lines.append("- None")
     for check in remaining_checks:
+        notes = str(check.get("notes", "")).strip()
         lines.extend(
             [
                 f"- [ ] `{check['id']}`",
@@ -255,7 +256,7 @@ def _manual_release_candidate_checks_markdown(
                 f"  - Next action: {check.get('next_action', '')}",
                 f"  - Evidence to record: {check.get('evidence_prompt', check.get('evidence', ''))}",
                 "  - Evidence:",
-                "  - Notes:",
+                f"  - Notes: {notes}" if notes else "  - Notes:",
             ]
         )
 
@@ -304,9 +305,78 @@ def _mark_provider_smoke_not_applicable_if_missing(
 def _manual_release_candidate_checks_from_payload(raw_payload: Any) -> object:
     if isinstance(raw_payload, dict):
         if "checks" in raw_payload:
-            return raw_payload.get("checks")
-        return raw_payload.get("manual_release_candidate_check_statuses")
+            checks = raw_payload.get("checks")
+        else:
+            checks = raw_payload.get("manual_release_candidate_check_statuses")
+        if isinstance(checks, list):
+            return _manual_release_candidate_checks_with_supporting_evidence(
+                checks,
+                raw_payload,
+            )
+        return checks
     return raw_payload
+
+
+def _append_manual_release_candidate_check_note(
+    checks: list[Any],
+    check_id: str,
+    note: str,
+) -> None:
+    for check in checks:
+        if not isinstance(check, dict) or check.get("id") != check_id:
+            continue
+        existing = str(check.get("notes", "")).strip()
+        if note in existing:
+            return
+        check["notes"] = f"{existing}\n{note}" if existing else note
+        return
+
+
+def _manual_release_candidate_checks_with_supporting_evidence(
+    raw_checks: Sequence[Any],
+    raw_payload: dict[str, Any],
+) -> list[Any]:
+    checks = [dict(check) if isinstance(check, dict) else check for check in raw_checks]
+    electron_ui_smoke = raw_payload.get("electron_ui_smoke")
+    if not isinstance(electron_ui_smoke, dict) or electron_ui_smoke.get("status") != "passed":
+        return checks
+    scripts = electron_ui_smoke.get("scripts")
+    if not isinstance(scripts, list):
+        return checks
+    passed_scripts = [
+        str(script.get("script", "")).strip()
+        for script in scripts
+        if isinstance(script, dict)
+        and script.get("exit_code") == 0
+        and str(script.get("script", "")).strip()
+    ]
+    if not passed_scripts:
+        return checks
+    script_count = electron_ui_smoke.get("script_count")
+    script_count_text = (
+        str(script_count)
+        if isinstance(script_count, int) and script_count >= len(passed_scripts)
+        else str(len(passed_scripts))
+    )
+    _append_manual_release_candidate_check_note(
+        checks,
+        "packaged_ui_sampling",
+        (
+            f"Supporting automated evidence: --run-ui-smoke passed {script_count_text} "
+            f"Electron UI smoke scripts: {', '.join(passed_scripts)}."
+        ),
+    )
+    if any(script.endswith("smoke_chat_image_attachment_ui.mjs") for script in passed_scripts):
+        _append_manual_release_candidate_check_note(
+            checks,
+            "chat_native_file_upload",
+            (
+                "Supporting automated evidence: smoke_chat_image_attachment_ui.mjs "
+                "passed via Electron UI smoke; the packaged native file picker still "
+                "requires manual evidence."
+            ),
+        )
+    return checks
 
 
 def _manual_release_candidate_checks_from_markdown(raw_text: str) -> list[dict[str, str]]:
