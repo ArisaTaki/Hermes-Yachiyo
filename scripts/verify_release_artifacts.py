@@ -105,6 +105,7 @@ DEFAULT_SCAN_PATHS: tuple[Path, ...] = (
     Path("docs/release-packaging.md"),
     Path("apps/frontend/electron-builder.yml"),
     Path("scripts/build_backend.py"),
+    Path("scripts/prepare_app_build_metadata.py"),
     Path("scripts/verify_release_candidate.py"),
     Path("apps/frontend/public/oha-yachiyo-build.json"),
 )
@@ -521,6 +522,10 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "latest JSON 的 `name` / `channel` / `branch` / `source_branch` / `version` / `commit` / `short_commit` / `build_number` / `run_number` / `run_id` / `tag` / `signing` / `published_at` / `changelog`",
         "release packaging docs must document latest JSON metadata format validation",
+    ),
+    (
+        "python scripts/prepare_app_build_metadata.py",
+        "release packaging docs must document reusable app build metadata preparation",
     ),
     (
         "每个 DMG 的 `.sha256` 文件",
@@ -1563,6 +1568,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "tests/test_build_metadata.py",
         "macOS release workflow smoke tests must cover release-like build metadata guards",
+    ),
+    (
+        "tests/test_prepare_app_build_metadata.py",
+        "macOS release workflow smoke tests must cover app build metadata preparation",
     ),
     (
         "tests/test_release_candidate_verifier.py",
@@ -2673,6 +2682,7 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
     smoke_tests = workflow.find("Run smoke tests")
     provider_smoke = workflow.find("Run opt-in real provider streaming smoke")
     write_metadata = workflow.find("Write app build metadata")
+    write_metadata_script = workflow.find("python scripts/prepare_app_build_metadata.py")
     build_backend = workflow.find("Build packaged backend")
     build_dmg = workflow.find("Build Electron DMG")
     verify_packaged_resources = workflow.find("Verify packaged app resources")
@@ -2766,6 +2776,25 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
             Finding(
                 workflow_path,
                 "macOS release workflow must write app build metadata before packaged backend and DMG builds",
+            )
+        )
+    if write_metadata_script < 0:
+        findings.append(
+            Finding(
+                workflow_path,
+                "macOS release workflow must write app build metadata through scripts/prepare_app_build_metadata.py",
+            )
+        )
+    elif (
+        build_backend < 0
+        or build_dmg < 0
+        or write_metadata_script > build_backend
+        or write_metadata_script > build_dmg
+    ):
+        findings.append(
+            Finding(
+                workflow_path,
+                "macOS release workflow must run app build metadata script before packaged backend and DMG builds",
             )
         )
     if (

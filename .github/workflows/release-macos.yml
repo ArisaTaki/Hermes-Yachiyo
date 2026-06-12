@@ -253,6 +253,7 @@ jobs:
             tests/test_provider_catalog_sync.py \
             tests/test_build_backend.py \
             tests/test_build_metadata.py \
+            tests/test_prepare_app_build_metadata.py \
             tests/test_release_candidate_verifier.py \
             tests/test_credential_store.py \
             tests/test_bridge_server.py::test_bridge_debug_routes_are_disabled_for_release_metadata \
@@ -356,11 +357,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          VERSION="$(python scripts/app_version.py current)"
-          RELEASE_VERSION="${VERSION}"
-          BUILD_NUMBER="${GITHUB_RUN_NUMBER}"
-          SHORT_SHA="${GITHUB_SHA::7}"
-          STAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
             CHANNEL="${{ inputs.channel }}"
@@ -370,32 +366,13 @@ jobs:
             CHANNEL="experimental"
           fi
 
-          if [[ "${CHANNEL}" == "stable" ]]; then
-            LATEST_BRANCH="main"
-          elif [[ "${CHANNEL}" == "alpha" ]]; then
-            LATEST_BRANCH="alpha"
-          else
-            LATEST_BRANCH="develop"
-          fi
-
-          mkdir -p apps/frontend/public
-          cat > apps/frontend/public/oha-yachiyo-build.json <<EOF
-          {
-            "name": "Oha-Yachiyo",
-            "channel": "${CHANNEL}",
-            "branch": "${LATEST_BRANCH}",
-            "source_branch": "${GITHUB_REF_NAME}",
-            "version": "${RELEASE_VERSION}",
-            "base_version": "${VERSION}",
-            "commit": "${GITHUB_SHA}",
-            "short_commit": "${SHORT_SHA}",
-            "build_number": ${BUILD_NUMBER},
-            "run_number": ${GITHUB_RUN_NUMBER},
-            "repository": "${GITHUB_REPOSITORY}",
-            "latest_json_url": "https://github.com/${GITHUB_REPOSITORY}/releases/download/${LATEST_BRANCH}-latest/Oha-Yachiyo-${LATEST_BRANCH}-latest.json",
-            "built_at": "${STAMP}"
-          }
-          EOF
+          python scripts/prepare_app_build_metadata.py \
+            --channel "${CHANNEL}" \
+            --source-branch "${GITHUB_REF_NAME}" \
+            --commit "${GITHUB_SHA}" \
+            --build-number "${GITHUB_RUN_NUMBER}" \
+            --run-number "${GITHUB_RUN_NUMBER}" \
+            --repository "${GITHUB_REPOSITORY}"
 
       - name: Build packaged backend
         run: python scripts/build_backend.py --clean

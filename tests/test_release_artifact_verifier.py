@@ -572,6 +572,7 @@ def test_verifier_requires_release_packaging_docs_for_release_gates(tmp_path):
     assert "release packaging docs must document final release artifact binary scanning" in messages
     assert "release packaging docs must document latest JSON checksum consistency checks" in messages
     assert "release packaging docs must document latest JSON metadata format validation" in messages
+    assert "release packaging docs must document reusable app build metadata preparation" in messages
     assert "release packaging docs must document per-DMG checksum file validation" in messages
     assert "release packaging docs must document the local RC verification entrypoint" in messages
     assert "release packaging docs must document the local RC Electron UI smoke gate" in messages
@@ -1580,6 +1581,28 @@ def test_verifier_requires_build_metadata_before_packaged_backend(tmp_path):
         "macOS release workflow must write app build metadata before packaged backend and DMG builds"
         in messages
     )
+
+
+def test_verifier_requires_reusable_build_metadata_script(tmp_path):
+    workflow = tmp_path / verifier.RELEASE_WORKFLOW_FILE
+    workflow.parent.mkdir(parents=True)
+    current_workflow = (verifier.ROOT / verifier.RELEASE_WORKFLOW_FILE).read_text(
+        encoding="utf-8"
+    )
+    workflow.write_text(
+        current_workflow.replace(
+            "python scripts/prepare_app_build_metadata.py",
+            "python scripts/app_version.py current",
+        ),
+        encoding="utf-8",
+    )
+
+    findings = verifier._verify_release_workflow_guards(tmp_path)
+
+    assert verifier.Finding(
+        workflow,
+        "macOS release workflow must write app build metadata through scripts/prepare_app_build_metadata.py",
+    ) in findings
 
 
 def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_path):

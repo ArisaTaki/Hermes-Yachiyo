@@ -86,7 +86,7 @@ Oha-Yachiyo.app/Contents/Resources/backend/oha-yachiyo-backend
 1. 先运行 release-facing product identity and security guards，确认发布配置、旧产品身份扫描、debug route、CredentialStore fallback 和关键 smoke 清单没有退化。
 2. 安装 Python 与 Node 依赖。
 3. 运行关键 smoke tests；如果配置了真实 provider smoke secrets，还会执行 opt-in streaming/tool-call provider smoke。
-4. 写入当前 channel / commit / latest URL 的 build metadata。
+4. 通过 `python scripts/prepare_app_build_metadata.py` 写入当前 channel / commit / latest URL 的 build metadata。
 5. PyInstaller 构建后端，并把同一份 build metadata 打入后端可执行文件。
 6. 如果配置了自签名证书，electron-builder 生成 `.app` 目录后由脚本签名 `.app` 并创建未签名 DMG；否则 electron-builder 直接生成 unsigned DMG。
 7. Verify packaged app resources 会检查 `.app` 结构、后端可执行文件、`app.asar`、关键 UI selector 和 packaged resources 旧身份扫描；启用自签名时，还会对最终 packaged `.app` 运行 `codesign --verify --deep --strict --verbose=2`。
@@ -107,6 +107,12 @@ experimental-v<产品版本>-build.<构建号>-<短SHA>
 ```bash
 python scripts/app_version.py set 0.4.0
 python scripts/app_version.py check
+```
+
+本地重新打包 RC 前，先刷新 `.app` 和 packaged backend 共用的 build metadata，确保产物可追溯到当前 commit：
+
+```bash
+python scripts/prepare_app_build_metadata.py --channel experimental
 ```
 
 固定下载链接：
