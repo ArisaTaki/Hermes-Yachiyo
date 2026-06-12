@@ -80,6 +80,8 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
     rc_verifier.write_text("def main():\n    return 0\n", encoding="utf-8")
     ui_runner = tmp_path / "scripts" / "run_electron_ui_smokes.py"
     ui_runner.write_text("def main():\n    return 0\n", encoding="utf-8")
+    packaged_ui_smoke = tmp_path / "scripts" / "smoke_packaged_ui_sampling.mjs"
+    packaged_ui_smoke.write_text("console.log('placeholder');\n", encoding="utf-8")
 
     findings = verifier._verify_streaming_provider_smoke_contract_guards(tmp_path)
     messages = [finding.message for finding in findings]
@@ -185,7 +187,11 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
     assert "release candidate verifier must not auto-pass native file picker from UI smoke" in messages
     assert "release candidate verifier must auto-fill manual evidence from passed RC gates" in messages
     assert "release candidate verifier must report packaged screen probe results" in messages
+    assert "release candidate verifier must report packaged UI sampling smoke results" in messages
+    assert "release candidate verifier must name the packaged UI sampling smoke helper" in messages
+    assert "release candidate verifier must expose packaged UI sampling verification" in messages
     assert "release candidate verifier CLI must expose packaged screen recording smoke" in messages
+    assert "release candidate verifier CLI must expose packaged UI sampling smoke" in messages
     assert (
         "release candidate verifier screen probe evidence must avoid archiving screenshot bytes"
         in messages
@@ -218,6 +224,12 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
     assert "Electron UI smoke runner must discover every scripts/smoke_*_ui.mjs file" in messages
     assert "Electron UI smoke runner must execute discovered smoke scripts with node" in messages
     assert "Electron UI smoke runner report must include script_count" in messages
+    assert "packaged UI sampling smoke must define route samples" in messages
+    assert "packaged UI sampling smoke must connect to the packaged app DevTools port" in messages
+    assert "packaged UI sampling smoke must use the DevTools websocket protocol" in messages
+    assert "packaged UI sampling smoke must cover Workflow Studio" in messages
+    assert "packaged UI sampling smoke must cover Chat composer selectors" in messages
+    assert "packaged UI sampling smoke must cover Live2D settings selectors" in messages
     assert "Electron UI smoke runner report must include per-script results" in messages
     assert "Electron UI smoke runner CLI must accept a report JSON output path" in messages
 

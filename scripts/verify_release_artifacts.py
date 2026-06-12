@@ -128,6 +128,7 @@ PACKAGED_BACKEND_RELATIVE_PATH = Path("Contents/Resources/backend/oha-yachiyo-ba
 PACKAGED_BACKEND_BUILD_METADATA_MARKER = b"apps/frontend/public/oha-yachiyo-build.json"
 PACKAGED_ASAR_RELATIVE_PATH = Path("Contents/Resources/app.asar")
 CHAT_IMAGE_ATTACHMENT_SMOKE_SCRIPT = Path("scripts/smoke_chat_image_attachment_ui.mjs")
+PACKAGED_UI_SAMPLING_SMOKE_SCRIPT = Path("scripts/smoke_packaged_ui_sampling.mjs")
 CHAT_IMAGE_ATTACHMENT_SMOKE_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "DOM.setFileInputFiles",
@@ -152,6 +153,32 @@ CHAT_IMAGE_ATTACHMENT_SMOKE_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "chat desktop image picker should not click hidden file input",
         "Chat image Electron UI smoke must prove desktop image picker bypasses the hidden input",
+    ),
+)
+PACKAGED_UI_SAMPLING_SMOKE_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
+    (
+        "ROUTE_SAMPLES",
+        "packaged UI sampling smoke must define route samples",
+    ),
+    (
+        "--debug-port",
+        "packaged UI sampling smoke must connect to the packaged app DevTools port",
+    ),
+    (
+        "WebSocket",
+        "packaged UI sampling smoke must use the DevTools websocket protocol",
+    ),
+    (
+        '#/agents/workflows',
+        "packaged UI sampling smoke must cover Workflow Studio",
+    ),
+    (
+        '[data-testid="chat-composer-input"]',
+        "packaged UI sampling smoke must cover Chat composer selectors",
+    ),
+    (
+        '[data-testid="live2d-resource-settings"]',
+        "packaged UI sampling smoke must cover Live2D settings selectors",
     ),
 )
 ELECTRON_UI_SMOKE_RUNNER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
@@ -682,6 +709,10 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document UI smoke does not auto-pass manual checks",
     ),
     (
+        "--run-dmg-ui-sampling-smoke",
+        "release packaging docs must document packaged UI sampling smoke",
+    ),
+    (
         "--mark-provider-smoke-not-applicable-if-missing",
         "release packaging docs must document explicit provider-smoke not_applicable draft evidence",
     ),
@@ -1140,8 +1171,24 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release candidate verifier must report packaged screen probe results",
     ),
     (
+        '"dmg_ui_sampling_smoke"',
+        "release candidate verifier must report packaged UI sampling smoke results",
+    ),
+    (
+        "DMG_UI_SAMPLING_SMOKE_SCRIPT",
+        "release candidate verifier must name the packaged UI sampling smoke helper",
+    ),
+    (
+        "verify_dmg_ui_sampling_smoke",
+        "release candidate verifier must expose packaged UI sampling verification",
+    ),
+    (
         '"--run-dmg-screen-smoke"',
         "release candidate verifier CLI must expose packaged screen recording smoke",
+    ),
+    (
+        '"--run-dmg-ui-sampling-smoke"',
+        "release candidate verifier CLI must expose packaged UI sampling smoke",
     ),
     (
         "Screenshot image bytes were not archived",
@@ -2858,6 +2905,10 @@ def _verify_streaming_provider_smoke_contract_guards(root: Path) -> list[Finding
         (
             Path("scripts/run_electron_ui_smokes.py"),
             ELECTRON_UI_SMOKE_RUNNER_REQUIRED_TEXT,
+        ),
+        (
+            PACKAGED_UI_SAMPLING_SMOKE_SCRIPT,
+            PACKAGED_UI_SAMPLING_SMOKE_REQUIRED_TEXT,
         ),
     )
     for relative_path, required_texts in targets:

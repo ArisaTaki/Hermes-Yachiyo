@@ -205,6 +205,29 @@ def test_release_candidate_verifier_source_only_rejects_provider_smoke(
     assert report["provider_smoke"]["status"] == "skipped"
 
 
+def test_release_candidate_verifier_source_only_rejects_dmg_ui_sampling_smoke(
+    tmp_path, monkeypatch, capsys
+):
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **kwargs: calls.append(kwargs) or [])
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        run_dmg_ui_sampling_smoke=True,
+        report_json=Path("tmp/source-only-rc.json"),
+    ) == 1
+
+    assert calls == []
+    output = capsys.readouterr().out
+    assert "--source-only cannot be combined with --run-dmg-ui-sampling-smoke" in output
+    report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
+    assert report["ok"] is False
+    assert report["source_release_guards"]["status"] == "skipped"
+    assert report["built_artifact_guards"]["status"] == "failed"
+    assert report["dmg_ui_sampling_smoke"]["status"] == "skipped"
+
+
 def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
     (tmp_path / "release").mkdir()
 
@@ -223,6 +246,7 @@ def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
     assert report["built_artifact_guards"]["artifact_paths"] == ["release"]
     assert report["dmg_mount_guards"]["status"] == "skipped"
     assert report["dmg_app_smoke"]["status"] == "skipped"
+    assert report["dmg_ui_sampling_smoke"]["status"] == "skipped"
     assert report["provider_smoke"]["status"] == "skipped"
     assert report["electron_ui_smoke"]["status"] == "skipped"
     assert report["manual_release_candidate_check_status"] == "manual_required"
@@ -1567,6 +1591,151 @@ def test_release_candidate_verifier_runs_dmg_screen_recording_probe(
     assert report["manual_release_candidate_check_summary"]["automated_evidence_check_ids"] == [
         "packaged_bridge_isolation",
         "screen_recording_permission",
+    ]
+
+
+def test_release_candidate_verifier_runs_dmg_ui_sampling_smoke(
+    tmp_path, monkeypatch, capsys
+):
+    release_dir = tmp_path / "release"
+    release_dir.mkdir()
+    (release_dir / "Oha-Yachiyo-0.4.0-arm64.dmg").write_bytes(b"fake dmg")
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / rc.DMG_UI_SAMPLING_SMOKE_SCRIPT).write_text(
+        "#!/usr/bin/env node\n",
+        encoding="utf-8",
+    )
+    commands: list[list[str]] = []
+    popen_calls: list[dict[str, object]] = []
+    ports = iter((49125, 49225))
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b'{"service":"oha-yachiyo","version":"0.4.0","uptime_seconds":1}'
+
+    class FakeProcess:
+        returncode = None
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self):
+            self.returncode = 0
+
+        def wait(self, timeout=None):
+            self.returncode = 0
+            return 0
+
+        def kill(self):
+            self.returncode = -9
+
+        def communicate(self, timeout=None):
+            return "", ""
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        if command[:2] == ["hdiutil", "attach"]:
+            mount_dir = Path(command[command.index("-mountpoint") + 1])
+            executable = mount_dir / "Oha-Yachiyo.app" / "Contents" / "MacOS" / "Oha-Yachiyo"
+            executable.parent.mkdir(parents=True)
+            executable.write_text("#!/bin/sh\n", encoding="utf-8")
+            executable.chmod(0o755)
+        elif command[:2] == ["node", str(rc.DMG_UI_SAMPLING_SMOKE_SCRIPT)]:
+            report_path = Path(command[command.index("--report-json") + 1])
+            report_path.write_text(
+                json.dumps(
+                    {
+                        "ok": True,
+                        "sample_count": 3,
+                        "samples": [
+                            {"id": "chat", "route": "#/chat"},
+                            {"id": "workflow_studio", "route": "#/agents/workflows"},
+                            {"id": "live2d_settings", "route": "#/settings/live2d"},
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            return SimpleNamespace(
+                returncode=0,
+                stdout="[packaged-ui-sampling] passed 3 packaged routes\n",
+                stderr="",
+            )
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    def fake_popen(command, **kwargs):
+        popen_calls.append(
+            {
+                "command": command,
+                "cwd": kwargs.get("cwd"),
+                "env": kwargs.get("env"),
+                "start_new_session": kwargs.get("start_new_session"),
+            }
+        )
+        return FakeProcess()
+
+    monkeypatch.setattr(rc.sys, "platform", "darwin")
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+    monkeypatch.setattr(rc, "_allocate_loopback_port", lambda: next(ports))
+    monkeypatch.setattr(rc.subprocess, "run", fake_run)
+    monkeypatch.setattr(rc.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(rc.urllib.request, "urlopen", lambda url, timeout: FakeResponse())
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        artifact_paths=(Path("release"),),
+        run_dmg_ui_sampling_smoke=True,
+        report_json=Path("tmp/rc.json"),
+    ) == 0
+
+    assert commands[0][:2] == ["hdiutil", "attach"]
+    assert commands[1][:2] == ["node", str(rc.DMG_UI_SAMPLING_SMOKE_SCRIPT)]
+    assert commands[1][commands[1].index("--debug-port") + 1] == "49225"
+    assert commands[2][:2] == ["hdiutil", "detach"]
+    assert len(popen_calls) == 1
+    assert popen_calls[0]["command"][0].endswith("/Oha-Yachiyo.app/Contents/MacOS/Oha-Yachiyo")
+    assert "--remote-debugging-port=49225" in popen_calls[0]["command"]
+    assert "--remote-allow-origins=*" in popen_calls[0]["command"]
+    assert popen_calls[0]["start_new_session"] is True
+    env = popen_calls[0]["env"]
+    assert env["OHA_YACHIYO_BRIDGE_URL"] == "http://127.0.0.1:49125"
+    output = capsys.readouterr().out
+    assert "DMG packaged UI sampling smoke: passed" in output
+    report = json.loads((tmp_path / "tmp" / "rc.json").read_text(encoding="utf-8"))
+    assert report["ok"] is True
+    assert report["dmg_ui_sampling_smoke"] == {
+        "status": "passed",
+        "dmg_paths": ["release/Oha-Yachiyo-0.4.0-arm64.dmg"],
+        "samples": [
+            {
+                "dmg_path": "release/Oha-Yachiyo-0.4.0-arm64.dmg",
+                "sample_count": 3,
+                "routes": ["#/chat", "#/agents/workflows", "#/settings/live2d"],
+            }
+        ],
+        "findings": [],
+        "run_requested": True,
+    }
+    manual_statuses = {
+        check["id"]: check
+        for check in report["manual_release_candidate_check_statuses"]
+    }
+    assert manual_statuses["packaged_bridge_isolation"]["status"] == "passed"
+    assert manual_statuses["packaged_bridge_isolation"]["evidence_source"] == "automated_rc_gate"
+    assert "--run-dmg-ui-sampling-smoke passed" in manual_statuses["packaged_bridge_isolation"]["evidence"]
+    assert manual_statuses["packaged_ui_sampling"]["status"] == "passed"
+    assert manual_statuses["packaged_ui_sampling"]["evidence_source"] == "automated_rc_gate"
+    assert "#/agents/workflows" in manual_statuses["packaged_ui_sampling"]["evidence"]
+    assert report["manual_release_candidate_check_summary"]["remaining_count"] == 4
+    assert report["manual_release_candidate_check_summary"]["automated_evidence_check_ids"] == [
+        "packaged_bridge_isolation",
+        "packaged_ui_sampling",
     ]
 
 

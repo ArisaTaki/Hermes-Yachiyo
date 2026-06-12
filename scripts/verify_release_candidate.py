@@ -38,6 +38,8 @@ PACKAGED_APP_NAME = "Oha-Yachiyo.app"
 PACKAGED_APP_EXECUTABLE_NAME = "Oha-Yachiyo"
 DMG_APP_SMOKE_TIMEOUT_SECONDS = 45.0
 DMG_SCREEN_PROBE_REQUEST_TIMEOUT_SECONDS = 10.0
+DMG_UI_SAMPLING_SMOKE_TIMEOUT_SECONDS = 60.0
+DMG_UI_SAMPLING_SMOKE_SCRIPT = Path("scripts/smoke_packaged_ui_sampling.mjs")
 PROVIDER_SMOKE_ENV_VARS: tuple[str, ...] = (
     "OHA_YACHIYO_SMOKE_BASE_URL",
     "OHA_YACHIYO_SMOKE_MODEL",
@@ -117,7 +119,7 @@ MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS: tuple[dict[str, str], ...] = (
         "required_before": "public_release_signoff",
         "description": "Sample mature packaged app surfaces across Chat approval/cancel, Run Detail replay, Workflow save-and-run, Agent Studio, group/delegation/session summary, manual TTS, and Live2D.",
         "evidence": "Record the packaged app build, sampled pages/actions, and visible pass/fail result for each sampled mature surface.",
-        "next_action": "Manually sample the packaged app surfaces listed here; --run-ui-smoke is supporting regression evidence but does not replace packaged UI sampling.",
+        "next_action": "Prefer rerunning the RC gate with --run-dmg-ui-sampling-smoke; otherwise manually sample the packaged app surfaces listed here.",
     },
     {
         "id": "real_provider_smoke",
@@ -671,6 +673,50 @@ def _auto_apply_release_candidate_check_evidence(
             ),
         )
 
+    dmg_ui_sampling_smoke = report.get("dmg_ui_sampling_smoke")
+    if (
+        isinstance(dmg_ui_sampling_smoke, dict)
+        and dmg_ui_sampling_smoke.get("status") == "passed"
+    ):
+        dmg_paths = dmg_ui_sampling_smoke.get("dmg_paths")
+        if isinstance(dmg_paths, list) and dmg_paths:
+            artifact_label = ", ".join(str(path) for path in dmg_paths)
+        else:
+            artifact_label = "selected DMG artifacts"
+        samples = dmg_ui_sampling_smoke.get("samples")
+        route_labels: list[str] = []
+        if isinstance(samples, list):
+            for sample in samples:
+                if not isinstance(sample, dict):
+                    continue
+                sample_routes = sample.get("routes")
+                if isinstance(sample_routes, list):
+                    route_labels.extend(str(route) for route in sample_routes if route)
+        route_summary = (
+            ", ".join(dict.fromkeys(route_labels))
+            if route_labels
+            else "packaged Chat, Agent Studio, Workflow, Activity, Diagnostics, TTS, and Live2D routes"
+        )
+        _auto_apply_manual_release_candidate_check_evidence(
+            checks,
+            "packaged_bridge_isolation",
+            (
+                "Automated --run-dmg-ui-sampling-smoke passed for "
+                f"{artifact_label}: the packaged app was launched from a mounted DMG "
+                "with temporary HOME/OHA_YACHIYO_HOME and loopback OHA_YACHIYO_BRIDGE_URL, "
+                "and /status returned service=oha-yachiyo before packaged renderer sampling."
+            ),
+        )
+        _auto_apply_manual_release_candidate_check_evidence(
+            checks,
+            "packaged_ui_sampling",
+            (
+                "Automated --run-dmg-ui-sampling-smoke passed for "
+                f"{artifact_label}: Chromium DevTools sampled visible selectors on {route_summary} "
+                "inside the packaged renderer."
+            ),
+        )
+
     provider_smoke = report.get("provider_smoke")
     if isinstance(provider_smoke, dict) and provider_smoke.get("status") == "passed":
         raw_checks = provider_smoke.get("checks")
@@ -1035,6 +1081,14 @@ def _read_process_output(process: subprocess.Popen[str]) -> tuple[str, str]:
 def _redacted_process_detail(stdout: str, stderr: str) -> str:
     detail = "\n".join(part.strip() for part in (stderr, stdout) if part and part.strip())
     return redact_api_error_text(detail.strip())
+
+
+def _process_output_text(value: str | bytes | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
 
 
 def _provider_smoke_missing_env() -> list[str]:
@@ -1472,6 +1526,185 @@ def verify_dmg_screen_recording_probe(
     return findings, screens
 
 
+def _read_packaged_ui_sampling_report(report_path: Path) -> dict[str, object]:
+    data = json.loads(report_path.read_text(encoding="utf-8"))
+    return data if isinstance(data, dict) else {}
+
+
+def verify_dmg_ui_sampling_smoke(
+    root: Path,
+    dmg_paths: Sequence[Path],
+    *,
+    timeout_seconds: float = DMG_UI_SAMPLING_SMOKE_TIMEOUT_SECONDS,
+) -> tuple[list[Finding], list[dict[str, object]]]:
+    findings: list[Finding] = []
+    samples: list[dict[str, object]] = []
+    if not dmg_paths:
+        findings.append(Finding(root, "release candidate DMG UI sampling smoke requested but no .dmg artifacts were found"))
+        return findings, samples
+    if sys.platform != "darwin":
+        findings.append(Finding(root, "release candidate DMG UI sampling smoke requires macOS"))
+        return findings, samples
+
+    script = root / DMG_UI_SAMPLING_SMOKE_SCRIPT
+    if not script.is_file():
+        findings.append(Finding(script, "packaged UI sampling smoke script not found"))
+        return findings, samples
+
+    for dmg_path in dmg_paths:
+        absolute_dmg = _absolute_artifact_path(root, dmg_path)
+        mount_dir = Path(tempfile.mkdtemp(prefix="oha-yachiyo-rc-ui-"))
+        attached = False
+        process: subprocess.Popen[str] | None = None
+        try:
+            attach = subprocess.run(
+                [
+                    "hdiutil",
+                    "attach",
+                    str(absolute_dmg),
+                    "-nobrowse",
+                    "-readonly",
+                    "-mountpoint",
+                    str(mount_dir),
+                    "-quiet",
+                ],
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            if attach.returncode != 0:
+                detail = redact_api_error_text((attach.stderr or attach.stdout or "").strip())
+                message = "release candidate DMG could not be mounted for UI sampling smoke"
+                if detail:
+                    message = f"{message}: {detail}"
+                findings.append(Finding(dmg_path, message))
+                continue
+            attached = True
+            app_path = mount_dir / PACKAGED_APP_NAME
+            executable_path = app_path / "Contents" / "MacOS" / PACKAGED_APP_EXECUTABLE_NAME
+            if not executable_path.is_file():
+                findings.append(Finding(dmg_path, f"mounted {PACKAGED_APP_NAME} must contain executable {PACKAGED_APP_EXECUTABLE_NAME}"))
+                continue
+            if not os.access(executable_path, os.X_OK):
+                findings.append(Finding(dmg_path, f"mounted {PACKAGED_APP_NAME} executable is not executable"))
+                continue
+            bridge_url = f"http://127.0.0.1:{_allocate_loopback_port()}"
+            debug_port = _allocate_loopback_port()
+            with tempfile.TemporaryDirectory(prefix="oha-yachiyo-rc-home-") as home_dir:
+                env = {
+                    **os.environ,
+                    "HOME": home_dir,
+                    "OHA_YACHIYO_HOME": str(Path(home_dir) / ".oha-yachiyo"),
+                    "OHA_YACHIYO_BRIDGE_URL": bridge_url,
+                }
+                process = subprocess.Popen(
+                    [
+                        str(executable_path),
+                        f"--remote-debugging-port={debug_port}",
+                        "--remote-allow-origins=*",
+                    ],
+                    cwd=str(app_path),
+                    env=env,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    start_new_session=True,
+                )
+                status_finding = _wait_for_dmg_app_status(
+                    process,
+                    bridge_url=bridge_url,
+                    dmg_path=dmg_path,
+                    timeout_seconds=timeout_seconds,
+                )
+                if status_finding is not None:
+                    findings.append(status_finding)
+                    continue
+
+                sample_report_path = Path(home_dir) / "packaged-ui-sampling.json"
+                command = [
+                    "node",
+                    str(DMG_UI_SAMPLING_SMOKE_SCRIPT),
+                    "--debug-port",
+                    str(debug_port),
+                    "--timeout-ms",
+                    str(int(timeout_seconds * 1000)),
+                    "--report-json",
+                    str(sample_report_path),
+                ]
+                try:
+                    result = subprocess.run(
+                        command,
+                        cwd=root,
+                        check=False,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        timeout=timeout_seconds + 10.0,
+                    )
+                except subprocess.TimeoutExpired as exc:
+                    detail = _redacted_process_detail(
+                        _process_output_text(exc.stdout),
+                        _process_output_text(exc.stderr),
+                    )
+                    message = f"release candidate packaged UI sampling smoke timed out after {timeout_seconds:.0f}s"
+                    if detail:
+                        message = f"{message}: {detail}"
+                    findings.append(Finding(dmg_path, message))
+                    continue
+                except OSError as exc:
+                    detail = redact_api_error_text(str(exc))
+                    findings.append(Finding(dmg_path, f"release candidate packaged UI sampling smoke could not start: {detail}"))
+                    continue
+                if result.returncode != 0:
+                    detail = _redacted_process_detail(result.stdout, result.stderr)
+                    message = f"release candidate packaged UI sampling smoke failed with exit code {result.returncode}"
+                    if detail:
+                        message = f"{message}: {detail}"
+                    findings.append(Finding(dmg_path, message))
+                    continue
+                try:
+                    sample_report = _read_packaged_ui_sampling_report(sample_report_path)
+                except (OSError, json.JSONDecodeError) as exc:
+                    findings.append(Finding(dmg_path, f"release candidate packaged UI sampling report could not be read: {exc}"))
+                    continue
+                if sample_report.get("ok") is not True:
+                    findings.append(Finding(dmg_path, "release candidate packaged UI sampling report did not pass"))
+                    continue
+                raw_samples = sample_report.get("samples")
+                route_labels: list[str] = []
+                if isinstance(raw_samples, list):
+                    for sample in raw_samples:
+                        if isinstance(sample, dict) and sample.get("route"):
+                            route_labels.append(str(sample["route"]))
+                samples.append(
+                    {
+                        "dmg_path": str(dmg_path),
+                        "sample_count": sample_report.get("sample_count", len(route_labels)),
+                        "routes": route_labels,
+                    }
+                )
+        finally:
+            if process is not None:
+                _terminate_process(process)
+            if attached:
+                detach = subprocess.run(
+                    ["hdiutil", "detach", str(mount_dir), "-quiet"],
+                    check=False,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                if detach.returncode != 0:
+                    detail = redact_api_error_text((detach.stderr or detach.stdout or "").strip())
+                    message = "release candidate DMG could not be detached after UI sampling smoke"
+                    if detail:
+                        message = f"{message}: {detail}"
+                    findings.append(Finding(dmg_path, message))
+            shutil.rmtree(mount_dir, ignore_errors=True)
+    return findings, samples
+
+
 def verify_release_candidate(
     *,
     root: Path = PROJECT_ROOT,
@@ -1481,6 +1714,7 @@ def verify_release_candidate(
     check_dmg_mount: bool = False,
     run_dmg_app_smoke: bool = False,
     run_dmg_screen_smoke: bool = False,
+    run_dmg_ui_sampling_smoke: bool = False,
     run_provider_smoke: bool = False,
     run_ui_smoke: bool = False,
     smoke_scripts: Sequence[Path] | None = None,
@@ -1538,6 +1772,13 @@ def verify_release_candidate(
             "findings": [],
             "run_requested": run_dmg_screen_smoke,
         },
+        "dmg_ui_sampling_smoke": {
+            "status": "pending",
+            "dmg_paths": [],
+            "samples": [],
+            "findings": [],
+            "run_requested": run_dmg_ui_sampling_smoke,
+        },
         "provider_smoke": {
             "status": "pending",
             "checks": [],
@@ -1567,6 +1808,8 @@ def verify_release_candidate(
             source_only_conflicts.append("--run-dmg-app-smoke")
         if run_dmg_screen_smoke:
             source_only_conflicts.append("--run-dmg-screen-smoke")
+        if run_dmg_ui_sampling_smoke:
+            source_only_conflicts.append("--run-dmg-ui-sampling-smoke")
         if run_provider_smoke:
             source_only_conflicts.append("--run-provider-smoke")
         if run_ui_smoke:
@@ -1614,6 +1857,13 @@ def verify_release_candidate(
             "screens": [],
             "findings": [],
             "run_requested": run_dmg_screen_smoke,
+        }
+        report["dmg_ui_sampling_smoke"] = {
+            "status": "skipped",
+            "dmg_paths": [],
+            "samples": [],
+            "findings": [],
+            "run_requested": run_dmg_ui_sampling_smoke,
         }
         report["electron_ui_smoke"] = {
             "status": "skipped",
@@ -1687,6 +1937,13 @@ def verify_release_candidate(
                 "screens": [],
                 "findings": [],
                 "run_requested": run_dmg_screen_smoke,
+            }
+            report["dmg_ui_sampling_smoke"] = {
+                "status": "skipped",
+                "dmg_paths": [],
+                "samples": [],
+                "findings": [],
+                "run_requested": run_dmg_ui_sampling_smoke,
             }
         elif selected_artifacts:
             artifact_findings = verify_release_artifacts(
@@ -1813,6 +2070,37 @@ def verify_release_candidate(
             "run_requested": run_dmg_screen_smoke,
         }
 
+    if run_dmg_ui_sampling_smoke and not artifact_paths_valid:
+        print("DMG packaged UI sampling smoke: skipped because artifact paths failed validation")
+        report["dmg_ui_sampling_smoke"] = {
+            "status": "skipped",
+            "dmg_paths": [],
+            "samples": [],
+            "findings": [],
+            "run_requested": run_dmg_ui_sampling_smoke,
+        }
+    elif run_dmg_ui_sampling_smoke:
+        dmg_paths = release_candidate_dmg_paths(root, selected_artifacts)
+        ui_findings, ui_samples = verify_dmg_ui_sampling_smoke(root, dmg_paths)
+        _print_findings("DMG packaged UI sampling smoke", ui_findings)
+        failed = failed or bool(ui_findings)
+        report["dmg_ui_sampling_smoke"] = {
+            "status": "failed" if ui_findings else "passed",
+            "dmg_paths": [str(path) for path in dmg_paths],
+            "samples": ui_samples,
+            "findings": _finding_report(ui_findings),
+            "run_requested": run_dmg_ui_sampling_smoke,
+        }
+    else:
+        print("DMG packaged UI sampling smoke: skipped; pass --run-dmg-ui-sampling-smoke to sample packaged renderer routes")
+        report["dmg_ui_sampling_smoke"] = {
+            "status": "skipped",
+            "dmg_paths": [],
+            "samples": [],
+            "findings": [],
+            "run_requested": run_dmg_ui_sampling_smoke,
+        }
+
     if run_provider_smoke:
         provider_findings, provider_results = verify_provider_smoke(root)
         _print_findings("real provider smoke", provider_findings)
@@ -1936,6 +2224,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--run-dmg-screen-smoke",
         action="store_true",
         help="Launch the app inside discovered DMGs and verify packaged /screen/current for Screen Recording signoff evidence.",
+    )
+    parser.add_argument(
+        "--run-dmg-ui-sampling-smoke",
+        action="store_true",
+        help="Launch the app inside discovered DMGs and sample key packaged renderer routes through Chromium DevTools.",
     )
     parser.add_argument(
         "--run-provider-smoke",
@@ -2077,6 +2370,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         check_dmg_mount=args.check_dmg_mount,
         run_dmg_app_smoke=args.run_dmg_app_smoke,
         run_dmg_screen_smoke=args.run_dmg_screen_smoke,
+        run_dmg_ui_sampling_smoke=args.run_dmg_ui_sampling_smoke,
         run_provider_smoke=args.run_provider_smoke,
         run_ui_smoke=args.run_ui_smoke,
         manual_checks_json=args.manual_checks_json,
