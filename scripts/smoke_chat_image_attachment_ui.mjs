@@ -446,6 +446,10 @@ async function main() {
         document.querySelector('[data-testid="chat-composer-image-attach-button"]'),
       ];
       if (!input) throw new Error('chat image file input not found');
+      if (input.type !== 'file') throw new Error('chat image input must stay a file input');
+      if (input.accept !== 'image/*') throw new Error('chat image input must only accept images');
+      if (!input.multiple) throw new Error('chat image input must support multiple images');
+      if (!input.hidden) throw new Error('chat image input must stay hidden behind visible attach buttons');
       if (buttons.some((button) => !button)) throw new Error('chat image attach button not found');
       if (buttons.some((button) => button.disabled)) throw new Error('chat image attach button disabled');
       let clickCount = 0;
