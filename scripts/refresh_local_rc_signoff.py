@@ -60,6 +60,22 @@ def _load_report(path: Path) -> dict[str, object]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _write_report(path: Path, payload: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _resolve_project_file(path: Path, label: str) -> Path:
+    root = ROOT.resolve(strict=False)
+    candidate = path if path.is_absolute() else ROOT / path
+    resolved = candidate.resolve(strict=False)
+    try:
+        resolved.relative_to(root)
+    except ValueError:
+        raise ValueError(f"{label} path must stay inside project root: {path}")
+    return resolved
+
+
 def _report_matches_current_source(
     report_path: Path,
     *,
@@ -229,6 +245,67 @@ def print_local_rc_signoff_status(*, short_commit: str | None = None) -> bool:
     return _run(command, allow_failure=True) == 0
 
 
+def write_local_os_manual_evidence(
+    *,
+    output_path: Path,
+    short_commit: str | None = None,
+    gatekeeper_evidence: str = "",
+    screen_recording_evidence: str = "",
+) -> Path:
+    label = short_commit or _git_short_commit()
+    signoff_draft = ROOT / "tmp" / f"rc-signoff-{label}-current.json"
+    if not signoff_draft.exists():
+        raise ValueError(
+            f"local RC signoff draft not found: {signoff_draft.relative_to(ROOT)}"
+        )
+    gatekeeper_evidence = gatekeeper_evidence.strip()
+    screen_recording_evidence = screen_recording_evidence.strip()
+    if not gatekeeper_evidence and not screen_recording_evidence:
+        raise ValueError(
+            "provide --gatekeeper-evidence, --screen-recording-evidence, or both"
+        )
+
+    draft = _load_report(signoff_draft)
+    source_revisions = draft.get("manual_release_candidate_check_source_revisions")
+    if not isinstance(source_revisions, list) or not source_revisions:
+        raise ValueError(
+            f"{signoff_draft.relative_to(ROOT)} is missing "
+            "manual_release_candidate_check_source_revisions; refresh local RC "
+            "signoff before recording OS evidence"
+        )
+
+    checks: list[dict[str, str]] = []
+    if gatekeeper_evidence:
+        checks.append(
+            {
+                "id": "gatekeeper_first_launch",
+                "status": "passed",
+                "evidence": gatekeeper_evidence,
+                "notes": "Recorded via refresh_local_rc_signoff.py --write-os-evidence.",
+            }
+        )
+    if screen_recording_evidence:
+        checks.append(
+            {
+                "id": "screen_recording_permission",
+                "status": "passed",
+                "evidence": screen_recording_evidence,
+                "notes": "Recorded via refresh_local_rc_signoff.py --write-os-evidence.",
+            }
+        )
+
+    resolved = _resolve_project_file(output_path, "local RC OS evidence")
+    _write_report(
+        resolved,
+        {
+            "checks": checks,
+            "manual_release_candidate_checks_source": str(signoff_draft.relative_to(ROOT)),
+            "manual_release_candidate_check_source_revisions": source_revisions,
+        },
+    )
+    return resolved
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--short-commit", help="Override report filename commit label.")
@@ -247,6 +324,25 @@ def main(argv: list[str] | None = None) -> int:
         help="Print the current HEAD local RC signoff status without building or writing reports.",
     )
     parser.add_argument(
+        "--write-os-evidence",
+        type=Path,
+        help=(
+            "Write a small project-local manual evidence JSON for Gatekeeper and/or "
+            "Screen Recording OS signoff, inheriting source revision metadata from "
+            "the current local RC signoff draft."
+        ),
+    )
+    parser.add_argument(
+        "--gatekeeper-evidence",
+        default="",
+        help="Evidence text for the gatekeeper_first_launch manual check.",
+    )
+    parser.add_argument(
+        "--screen-recording-evidence",
+        default="",
+        help="Evidence text for the screen_recording_permission manual check.",
+    )
+    parser.add_argument(
         "--reuse-current-reports",
         action="store_true",
         help=(
@@ -260,8 +356,38 @@ def main(argv: list[str] | None = None) -> int:
         help="Run real provider smoke during the packaged batch gate.",
     )
     args = parser.parse_args(argv)
+    if args.print_status and args.write_os_evidence is not None:
+        print(
+            "local RC signoff action: failed\n"
+            "- choose either --print-status or --write-os-evidence",
+            file=sys.stderr,
+        )
+        return 1
     if args.print_status:
         return 0 if print_local_rc_signoff_status(short_commit=args.short_commit) else 1
+    if args.write_os_evidence is not None:
+        try:
+            evidence_path = write_local_os_manual_evidence(
+                output_path=args.write_os_evidence,
+                short_commit=args.short_commit,
+                gatekeeper_evidence=args.gatekeeper_evidence,
+                screen_recording_evidence=args.screen_recording_evidence,
+            )
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            print(f"local RC OS evidence: failed\n- {exc}", file=sys.stderr)
+            return 1
+        print(f"local RC OS evidence: {evidence_path.relative_to(ROOT)}")
+        label = args.short_commit or _git_short_commit()
+        print("local RC final signoff command:")
+        print(
+            f"{sys.executable} scripts/verify_release_candidate.py "
+            f"--require-artifacts "
+            f"--manual-checks-json tmp/rc-signoff-{label}-current.json "
+            f"--manual-checks-json {evidence_path.relative_to(ROOT)} "
+            f"--require-manual-checks-complete "
+            f"--report-json tmp/rc-signoff-{label}-final.json"
+        )
+        return 0
     if args.run_provider_smoke and not _provider_smoke_configured():
         missing = [
             name for name in PROVIDER_SMOKE_ENV_VARS if not os.getenv(name, "").strip()

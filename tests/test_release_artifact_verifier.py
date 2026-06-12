@@ -772,6 +772,7 @@ def test_verifier_requires_release_packaging_docs_for_release_gates(tmp_path):
     assert "release packaging docs must document local RC signoff refresh helper" in messages
     assert "release packaging docs must document local RC signoff resume/reuse mode" in messages
     assert "release packaging docs must document local RC signoff status shortcut" in messages
+    assert "release packaging docs must document local RC OS evidence shortcut" in messages
     assert "release packaging docs must document per-DMG checksum file validation" in messages
     assert "release packaging docs must document the local RC verification entrypoint" in messages
     assert "release packaging docs must document the local RC DMG mount gate" in messages

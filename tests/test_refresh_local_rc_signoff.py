@@ -456,6 +456,102 @@ def test_refresh_local_rc_signoff_print_status_fails_when_draft_missing(
     assert refresh.main(["--short-commit", "abc12345", "--print-status"]) == 1
 
 
+def test_refresh_local_rc_signoff_writes_os_evidence_with_source_revisions(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    monkeypatch.setattr(refresh, "ROOT", tmp_path)
+    draft = tmp_path / "tmp" / "rc-signoff-abc12345-current.json"
+    draft.parent.mkdir(parents=True, exist_ok=True)
+    source_revisions = [
+        {
+            "source": "tmp/rc-verification-abc12345-packaged-batch.json",
+            "available": True,
+            "commit": "abc12345deadbeef",
+            "short_commit": "abc1234",
+            "dirty": False,
+        }
+    ]
+    draft.write_text(
+        json.dumps(
+            {
+                "checks": [],
+                "manual_release_candidate_check_source_revisions": source_revisions,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    output = tmp_path / "tmp" / "rc-signoff-abc12345-os-evidence.json"
+
+    assert (
+        refresh.main(
+            [
+                "--short-commit",
+                "abc12345",
+                "--write-os-evidence",
+                "tmp/rc-signoff-abc12345-os-evidence.json",
+                "--gatekeeper-evidence",
+                "Mounted dist/electron/Oha-Yachiyo.dmg and opened the app via Finder Control-click -> Open.",
+                "--screen-recording-evidence",
+                "Granted Screen Recording to tmp/rc-screen-smoke/Oha-Yachiyo.app and reran /screen/current successfully.",
+            ]
+        )
+        == 0
+    )
+
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    checks = {check["id"]: check for check in payload["checks"]}
+    assert checks["gatekeeper_first_launch"]["status"] == "passed"
+    assert "Control-click" in checks["gatekeeper_first_launch"]["evidence"]
+    assert checks["screen_recording_permission"]["status"] == "passed"
+    assert "Screen Recording" in checks["screen_recording_permission"]["evidence"]
+    assert payload["manual_release_candidate_checks_source"] == (
+        "tmp/rc-signoff-abc12345-current.json"
+    )
+    assert payload["manual_release_candidate_check_source_revisions"] == source_revisions
+    stdout = capsys.readouterr().out
+    assert "local RC OS evidence: tmp/rc-signoff-abc12345-os-evidence.json" in stdout
+    assert "--manual-checks-json tmp/rc-signoff-abc12345-current.json" in stdout
+    assert "--manual-checks-json tmp/rc-signoff-abc12345-os-evidence.json" in stdout
+
+
+def test_refresh_local_rc_signoff_rejects_empty_os_evidence(monkeypatch, tmp_path):
+    monkeypatch.setattr(refresh, "ROOT", tmp_path)
+    draft = tmp_path / "tmp" / "rc-signoff-abc12345-current.json"
+    draft.parent.mkdir(parents=True, exist_ok=True)
+    draft.write_text(
+        json.dumps(
+            {
+                "manual_release_candidate_check_source_revisions": [
+                    {
+                        "source": "tmp/rc-verification-abc12345-packaged-batch.json",
+                        "available": True,
+                        "commit": "abc12345deadbeef",
+                        "short_commit": "abc1234",
+                        "dirty": False,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert (
+        refresh.main(
+            [
+                "--short-commit",
+                "abc12345",
+                "--write-os-evidence",
+                "tmp/rc-signoff-abc12345-os-evidence.json",
+            ]
+        )
+        == 1
+    )
+    assert not (tmp_path / "tmp" / "rc-signoff-abc12345-os-evidence.json").exists()
+
+
 def test_refresh_local_rc_signoff_requires_provider_credentials(monkeypatch):
     for name in refresh.PROVIDER_SMOKE_ENV_VARS:
         monkeypatch.delenv(name, raising=False)

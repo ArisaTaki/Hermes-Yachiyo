@@ -132,6 +132,27 @@ python scripts/refresh_local_rc_signoff.py --print-status
 
 该命令只读取 `tmp/rc-signoff-<short-commit>-current.json` 并打印剩余项，不运行 build、DMG 或 UI gate。
 
+Gatekeeper / Screen Recording 已人工确认后，可以生成只包含剩余 OS evidence 的小 JSON；该文件会继承当前 `tmp/rc-signoff-<short-commit>-current.json` 里的 `manual_release_candidate_check_source_revisions`，避免最终 gate 因人工证据缺少源码版本而失败：
+
+```bash
+SHORT_COMMIT="$(git rev-parse --short=8 HEAD)"
+python scripts/refresh_local_rc_signoff.py \
+  --write-os-evidence "tmp/rc-signoff-${SHORT_COMMIT}-os-evidence.json" \
+  --gatekeeper-evidence "Mounted dist/electron/Oha-Yachiyo-0.4.0-arm64.dmg and opened Oha-Yachiyo.app through Finder Control-click -> Open." \
+  --screen-recording-evidence "Granted Screen Recording to tmp/rc-screen-smoke/Oha-Yachiyo-0.4.0-arm64/Oha-Yachiyo.app and reran --run-dmg-screen-smoke successfully."
+```
+
+最终签核时先传当前自动 evidence draft，再传这个 OS evidence 文件，让后者只覆盖两个手动 OS 项：
+
+```bash
+python scripts/verify_release_candidate.py \
+  --require-artifacts \
+  --manual-checks-json "tmp/rc-signoff-${SHORT_COMMIT}-current.json" \
+  --manual-checks-json "tmp/rc-signoff-${SHORT_COMMIT}-os-evidence.json" \
+  --require-manual-checks-complete \
+  --report-json "tmp/rc-signoff-${SHORT_COMMIT}-final.json"
+```
+
 如果一次刷新在 batch 或 screen 阶段后中断，可以断点续跑：
 
 ```bash

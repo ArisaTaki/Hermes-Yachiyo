@@ -674,6 +674,10 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document local RC signoff status shortcut",
     ),
     (
+        "--write-os-evidence",
+        "release packaging docs must document local RC OS evidence shortcut",
+    ),
+    (
         "每个 DMG 的 `.sha256` 文件",
         "release packaging docs must document per-DMG checksum file validation",
     ),
