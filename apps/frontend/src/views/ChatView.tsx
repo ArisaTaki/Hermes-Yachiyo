@@ -3483,6 +3483,7 @@ function AgentRunProgressCard({ message, onOpenDetails, runId }: {
           <button
             type="button"
             data-run-id={runId}
+            data-run-status={runStatus}
             data-testid="chat-agent-run-progress-open-run-detail"
             onClick={onOpenDetails}
           >

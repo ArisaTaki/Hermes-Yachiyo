@@ -464,9 +464,18 @@ async function main() {
       && card.getAttribute('data-run-status') === 'processing'
       && card.getAttribute('data-run-group-id') === smoke.runGroupId
       && card.textContent.includes(smoke.progressTitle)
-      && Boolean(button);
+      && button?.getAttribute('data-run-id') === smoke.runId
+      && button?.getAttribute('data-run-status') === 'processing';
   }, 'Chat Agent progress card');
-  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\"chat-agent-run-progress-open-run-detail\"]').click()", true);
+  await win.webContents.executeJavaScript(
+    "const openRun = document.querySelector('[data-testid=\"chat-agent-run-progress-open-run-detail\"]');" +
+      "const smoke = window.__ohaSmoke || {};" +
+      "if (!openRun) throw new Error('missing Chat Agent progress Run Detail button');" +
+      "if (openRun.getAttribute('data-run-id') !== smoke.runId) throw new Error('Chat Agent progress Run Detail button has wrong run id');" +
+      "if (openRun.getAttribute('data-run-status') !== 'processing') throw new Error('Chat Agent progress Run Detail button has wrong status');" +
+      "openRun.click();",
+    true
+  );
   await waitFor(win, () => (
     (() => {
       const smoke = window.__ohaSmoke || {};
