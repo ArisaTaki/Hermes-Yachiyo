@@ -187,6 +187,7 @@ def test_refresh_local_rc_signoff_reuses_current_reports(monkeypatch, tmp_path):
         report_path.write_text(json.dumps(payload), encoding="utf-8")
 
     current_source = {
+        "ok": True,
         "source_revision": {
             "available": True,
             "commit": "abc12345deadbeef",
@@ -256,6 +257,88 @@ def test_refresh_local_rc_signoff_reuses_current_reports(monkeypatch, tmp_path):
         "tmp/rc-signoff-abc12345-current.md",
     ]
     assert commands[2][1] is True
+
+
+def test_refresh_local_rc_signoff_does_not_reuse_failed_batch_report(
+    monkeypatch,
+    tmp_path,
+):
+    commands: list[tuple[list[str], bool]] = []
+    build_calls: list[dict[str, object]] = []
+    monkeypatch.setattr(refresh, "ROOT", tmp_path)
+
+    def fake_build(**kwargs: object) -> None:
+        build_calls.append(kwargs)
+
+    monkeypatch.setattr(refresh, "build_release_candidate_artifacts", fake_build)
+
+    def write_report(path: str, payload: dict[str, object]) -> None:
+        report_path = tmp_path / path
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    write_report(
+        "tmp/rc-verification-abc12345-packaged-batch.json",
+        {
+            "ok": False,
+            "source_revision": {
+                "available": True,
+                "commit": "abc12345deadbeef",
+                "short_commit": "abc1234",
+                "dirty": False,
+            },
+        },
+    )
+
+    def fake_run(command: list[str], *, allow_failure: bool = False) -> int:
+        commands.append((command, allow_failure))
+        if "--report-json" in command:
+            report_path = command[command.index("--report-json") + 1]
+            write_report(
+                report_path,
+                {
+                    "ok": False,
+                    "manual_release_candidate_check_summary": {
+                        "remaining_count": 2,
+                    },
+                    "source_revision_final_signoff_findings": [],
+                    "manual_release_candidate_check_source_revision_findings": [],
+                },
+            )
+            return 1 if report_path.endswith("-preview.json") else 0
+        if "--write-manual-checks-draft" in command:
+            write_report(
+                command[command.index("--write-manual-checks-draft") + 1],
+                {"manual_release_candidate_check_summary": {"remaining_count": 2}},
+            )
+        if "--write-manual-checks-markdown" in command:
+            markdown_path = tmp_path / command[
+                command.index("--write-manual-checks-markdown") + 1
+            ]
+            markdown_path.parent.mkdir(parents=True, exist_ok=True)
+            markdown_path.write_text("# Manual Signoff\n", encoding="utf-8")
+        return 0
+
+    monkeypatch.setattr(refresh, "_run", fake_run)
+
+    refresh.refresh_local_rc_signoff(
+        short_commit="abc12345",
+        reuse_current_reports=True,
+        skip_screen_smoke=True,
+    )
+
+    assert build_calls == [{"channel": "experimental", "repository": None}]
+    assert commands[0][0] == [
+        sys.executable,
+        "scripts/verify_release_candidate.py",
+        "--require-artifacts",
+        "--check-dmg-mount",
+        "--run-dmg-app-smoke",
+        "--run-dmg-ui-sampling-smoke",
+        "--run-dmg-chat-native-file-smoke",
+        "--report-json",
+        "tmp/rc-verification-abc12345-packaged-batch.json",
+    ]
 
 
 def test_refresh_local_rc_signoff_reruns_batch_for_provider_smoke(

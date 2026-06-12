@@ -60,12 +60,19 @@ def _load_report(path: Path) -> dict[str, object]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _report_matches_current_source(report_path: Path, *, short_commit: str) -> bool:
+def _report_matches_current_source(
+    report_path: Path,
+    *,
+    short_commit: str,
+    require_ok: bool = False,
+) -> bool:
     if not report_path.exists():
         return False
     try:
         report = _load_report(report_path)
     except (OSError, json.JSONDecodeError):
+        return False
+    if require_ok and report.get("ok") is not True:
         return False
     source_revision = report.get("source_revision")
     if not isinstance(source_revision, dict):
@@ -112,7 +119,11 @@ def refresh_local_rc_signoff(
     batch_report_is_current = (
         reuse_current_reports
         and not run_provider_smoke
-        and _report_matches_current_source(batch_report, short_commit=label)
+        and _report_matches_current_source(
+            batch_report,
+            short_commit=label,
+            require_ok=True,
+        )
     )
     screen_report_is_current = (
         reuse_current_reports
