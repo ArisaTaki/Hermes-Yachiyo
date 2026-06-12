@@ -3753,8 +3753,8 @@ export function AgentStudioView() {
               <AgentAvatar avatarUrl={draft.avatar_url} name={draft.nickname || draft.name || 'Agent'} />
               <div className="agent-profile-fields">
                 <div className="agent-form-row">
-                  <label><span>Name</span><input className="hy-input" data-testid="agent-name-input" value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} required /></label>
-                  <label><span>Nickname</span><input className="hy-input" data-testid="agent-nickname-input" value={draft.nickname} onChange={(event) => setDraft({ ...draft, nickname: event.target.value })} placeholder="对话框里显示的称呼" /></label>
+                  <label><span>Name</span><input className="hy-input" data-testid="agent-name-input" value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} readOnly={selectedAgentReadOnly} required /></label>
+                  <label><span>Nickname</span><input className="hy-input" data-testid="agent-nickname-input" value={draft.nickname} onChange={(event) => setDraft({ ...draft, nickname: event.target.value })} readOnly={selectedAgentReadOnly} placeholder="对话框里显示的称呼" /></label>
                 </div>
                 <div className="agent-avatar-picker-row">
                   <div>
@@ -3762,20 +3762,20 @@ export function AgentStudioView() {
                     <strong>{draft.avatar_url ? '已选择自定义头像' : '使用首字母头像'}</strong>
                   </div>
                   <div className="agent-avatar-picker-actions">
-                    <button type="button" className="hy-btn hy-btn-ghost" data-testid="agent-avatar-select" disabled={busy} onClick={() => void pickAgentAvatar()}>选择头像</button>
+                    <button type="button" className="hy-btn hy-btn-ghost" data-testid="agent-avatar-select" disabled={busy || selectedAgentReadOnly} onClick={() => void pickAgentAvatar()}>选择头像</button>
                     {draft.avatar_url ? (
-                      <button type="button" className="hy-btn hy-btn-ghost" data-testid="agent-avatar-clear" disabled={busy} onClick={() => setDraft({ ...draft, avatar_url: '' })}>清除</button>
+                      <button type="button" className="hy-btn hy-btn-ghost" data-testid="agent-avatar-clear" disabled={busy || selectedAgentReadOnly} onClick={() => setDraft({ ...draft, avatar_url: '' })}>清除</button>
                     ) : null}
                   </div>
                 </div>
-                <label><span>Description</span><input className="hy-input" data-testid="agent-description-input" value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></label>
+                <label><span>Description</span><input className="hy-input" data-testid="agent-description-input" value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} readOnly={selectedAgentReadOnly} /></label>
               </div>
             </div>
             <div className="agent-form-row">
-              <label><span>Category</span><input className="hy-input" data-testid="agent-category-input" value={draft.category} onChange={(event) => setDraft({ ...draft, category: event.target.value })} /></label>
+              <label><span>Category</span><input className="hy-input" data-testid="agent-category-input" value={draft.category} onChange={(event) => setDraft({ ...draft, category: event.target.value })} readOnly={selectedAgentReadOnly} /></label>
               <label>
                 <span>Output Contract</span>
-                <select className="hy-select" data-testid="agent-output-contract-select" value={draft.output_contract} onChange={(event) => setDraft({ ...draft, output_contract: event.target.value })}>
+                <select className="hy-select" data-testid="agent-output-contract-select" value={draft.output_contract} disabled={selectedAgentReadOnly} onChange={(event) => setDraft({ ...draft, output_contract: event.target.value })}>
                   <option value="chat">chat</option>
                   <option value="markdown">markdown</option>
                   <option value="diff">diff</option>
@@ -3787,12 +3787,12 @@ export function AgentStudioView() {
             </div>
             <label>
               <span>Functional Instructions</span>
-              <textarea className="hy-input agent-textarea" data-testid="agent-instructions-input" value={draft.instructions} onChange={(event) => setDraft({ ...draft, instructions: event.target.value })} />
+              <textarea className="hy-input agent-textarea" data-testid="agent-instructions-input" value={draft.instructions} onChange={(event) => setDraft({ ...draft, instructions: event.target.value })} readOnly={selectedAgentReadOnly} />
               <small className="agent-field-help">写任务边界、工作方法、必须遵守的功能要求。</small>
             </label>
             <label>
               <span>Personal Prompt</span>
-              <textarea className="hy-input agent-textarea compact" data-testid="agent-persona-input" value={draft.persona_prompt} onChange={(event) => setDraft({ ...draft, persona_prompt: event.target.value })} />
+              <textarea className="hy-input agent-textarea compact" data-testid="agent-persona-input" value={draft.persona_prompt} onChange={(event) => setDraft({ ...draft, persona_prompt: event.target.value })} readOnly={selectedAgentReadOnly} />
               <small className="agent-field-help">写人设、口吻、角色偏好；运行时会和功能要求分段放进 Agent context。</small>
             </label>
             <section className="agent-backend-section" aria-label="Model">
@@ -3804,7 +3804,7 @@ export function AgentStudioView() {
                   <span>Chat Profile</span>
                   <select
                     className="hy-select"
-                    disabled={draft.model_mode === 'custom_api'}
+                    disabled={selectedAgentReadOnly || draft.model_mode === 'custom_api'}
                     value={draft.model_profile_id}
                     onChange={(event) => setDraft({ ...draft, model_profile_id: event.target.value })}
                   >
@@ -3820,6 +3820,7 @@ export function AgentStudioView() {
                   <input
                     type="checkbox"
                     checked={draft.model_mode === 'custom_api'}
+                    disabled={selectedAgentReadOnly}
                     onChange={(event) => setDraft({ ...draft, model_mode: event.target.checked ? 'custom_api' : 'profile' })}
                   />
                   <span>Custom API</span>
@@ -3832,7 +3833,7 @@ export function AgentStudioView() {
             <div className="agent-form-row">
               <label>
                 <span>Vision Profile</span>
-                <select className="hy-select" value={draft.vision_model_profile_id} onChange={(event) => setDraft({ ...draft, vision_model_profile_id: event.target.value })}>
+                <select className="hy-select" value={draft.vision_model_profile_id} disabled={selectedAgentReadOnly} onChange={(event) => setDraft({ ...draft, vision_model_profile_id: event.target.value })}>
                   <option value="">跟随全局图片识别</option>
                   {visionModelProfiles.map((profile) => (
                     <option key={profile.profile_id} value={profile.profile_id}>
@@ -3848,9 +3849,9 @@ export function AgentStudioView() {
             ) : null}
             {draft.model_mode === 'custom_api' ? (
               <div className="agent-config-box">
-                <label><span>Model</span><input className="hy-input" value={draft.model} onChange={(event) => setDraft({ ...draft, model: event.target.value })} placeholder="gpt-4.1-mini" /></label>
-                <label><span>Base URL</span><input className="hy-input" value={draft.base_url} onChange={(event) => setDraft({ ...draft, base_url: event.target.value })} placeholder="https://api.example.com/v1" /></label>
-                <label><span>API Key</span><input className="hy-input" type="password" value={draft.api_key} onChange={(event) => setDraft({ ...draft, api_key: event.target.value })} placeholder={selectedAgent?.model_config.api_key_configured ? '已配置，留空不覆盖' : '保存到后端'} /></label>
+                <label><span>Model</span><input className="hy-input" value={draft.model} onChange={(event) => setDraft({ ...draft, model: event.target.value })} readOnly={selectedAgentReadOnly} placeholder="gpt-4.1-mini" /></label>
+                <label><span>Base URL</span><input className="hy-input" value={draft.base_url} onChange={(event) => setDraft({ ...draft, base_url: event.target.value })} readOnly={selectedAgentReadOnly} placeholder="https://api.example.com/v1" /></label>
+                <label><span>API Key</span><input className="hy-input" type="password" value={draft.api_key} onChange={(event) => setDraft({ ...draft, api_key: event.target.value })} readOnly={selectedAgentReadOnly} placeholder={selectedAgent?.model_config.api_key_configured ? '已配置，留空不覆盖' : '保存到后端'} /></label>
               </div>
             ) : null}
             <section className="agent-capability-box" aria-label="Capabilities">
@@ -3860,19 +3861,19 @@ export function AgentStudioView() {
               <p className="agent-section-help">这里会实际写入 ToolBroker 允许工具；写文件和运行命令即使开启，也仍然需要 Run 审批。</p>
               <div className="agent-capability-grid">
                 <label className="agent-checkbox-row">
-                  <input type="checkbox" checked={draft.allow_workspace_read} onChange={(event) => setDraft({ ...draft, allow_workspace_read: event.target.checked })} />
+                  <input type="checkbox" checked={draft.allow_workspace_read} disabled={selectedAgentReadOnly} onChange={(event) => setDraft({ ...draft, allow_workspace_read: event.target.checked })} />
                   <span>Read workspace</span>
                 </label>
                 <label className="agent-checkbox-row">
-                  <input type="checkbox" checked={draft.allow_workspace_write} onChange={(event) => setDraft({ ...draft, allow_workspace_write: event.target.checked, allow_workspace_read: event.target.checked ? true : draft.allow_workspace_read })} />
+                  <input type="checkbox" checked={draft.allow_workspace_write} disabled={selectedAgentReadOnly} onChange={(event) => setDraft({ ...draft, allow_workspace_write: event.target.checked, allow_workspace_read: event.target.checked ? true : draft.allow_workspace_read })} />
                   <span>Write files</span>
                 </label>
                 <label className="agent-checkbox-row">
-                  <input type="checkbox" checked={draft.allow_terminal} onChange={(event) => setDraft({ ...draft, allow_terminal: event.target.checked })} />
+                  <input type="checkbox" checked={draft.allow_terminal} disabled={selectedAgentReadOnly} onChange={(event) => setDraft({ ...draft, allow_terminal: event.target.checked })} />
                   <span>Run commands</span>
                 </label>
                 <label className="agent-checkbox-row">
-                  <input type="checkbox" checked={draft.allow_artifacts} onChange={(event) => setDraft({ ...draft, allow_artifacts: event.target.checked })} />
+                  <input type="checkbox" checked={draft.allow_artifacts} disabled={selectedAgentReadOnly} onChange={(event) => setDraft({ ...draft, allow_artifacts: event.target.checked })} />
                   <span>Write artifacts</span>
                 </label>
               </div>
@@ -3887,18 +3888,18 @@ export function AgentStudioView() {
             <div className="agent-form-row">
               <label>
                 <span>Default Workdir</span>
-                <input className="hy-input" value={draft.default_workdir} onChange={(event) => setDraft({ ...draft, default_workdir: event.target.value })} placeholder="保存后自动分配独立目录" />
+                <input className="hy-input" value={draft.default_workdir} onChange={(event) => setDraft({ ...draft, default_workdir: event.target.value })} readOnly={selectedAgentReadOnly} placeholder="保存后自动分配独立目录" />
                 <small className="agent-field-help">工具相对路径的基准目录；留空时保存后自动分配到 Yachiyo 的 Agent 工作区。</small>
               </label>
               <label>
                 <span>Writable Scopes</span>
-                <input className="hy-input" value={draft.writable_scopes} onChange={(event) => setDraft({ ...draft, writable_scopes: event.target.value })} placeholder="src, tests" />
+                <input className="hy-input" value={draft.writable_scopes} onChange={(event) => setDraft({ ...draft, writable_scopes: event.target.value })} readOnly={selectedAgentReadOnly} placeholder="src, tests" />
                 <small className="agent-field-help">允许 `workspace.write_patch` 写入的相对目录，逗号分隔。</small>
               </label>
             </div>
             <label>
               <span>Readable Scopes</span>
-              <input className="hy-input" value={draft.readable_scopes} onChange={(event) => setDraft({ ...draft, readable_scopes: event.target.value })} />
+              <input className="hy-input" value={draft.readable_scopes} onChange={(event) => setDraft({ ...draft, readable_scopes: event.target.value })} readOnly={selectedAgentReadOnly} />
               <small className="agent-field-help">允许 `workspace.list/read` 访问的相对目录，默认 `.` 表示工作区内可读。</small>
             </label>
             <div className="agent-inline-note">可行性验证：保存后先用“测试模型”检查模型连接，再用 Quick Run 做端到端验证；工具权限和 scopes 会在运行时强制校验。</div>
@@ -3917,6 +3918,7 @@ export function AgentStudioView() {
                   <textarea
                     className="hy-input agent-run-textarea"
                     value={agentRunGoal}
+                    disabled={selectedAgentReadOnly}
                     onChange={(event) => setAgentRunGoal(event.target.value)}
                     placeholder="例如：检查这个页面还有哪些交互缺口"
                   />

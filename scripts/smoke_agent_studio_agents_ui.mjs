@@ -337,15 +337,30 @@ async function main() {
   await win.webContents.executeJavaScript("document.querySelector('[data-agent-id=\\"builtin:yachiyo-main\\"] [data-testid=\\"agent-list-open\\"]').click()", true);
   await waitFor(win, () => {
     const systemItem = document.querySelector('[data-agent-id="builtin:yachiyo-main"]');
+    const readOnlyFields = [
+      document.querySelector('[data-testid="agent-name-input"]'),
+      document.querySelector('[data-testid="agent-nickname-input"]'),
+      document.querySelector('[data-testid="agent-description-input"]'),
+      document.querySelector('[data-testid="agent-category-input"]'),
+      document.querySelector('[data-testid="agent-instructions-input"]'),
+      document.querySelector('[data-testid="agent-persona-input"]'),
+    ];
+    const outputContract = document.querySelector('[data-testid="agent-output-contract-select"]');
+    const avatarSelect = document.querySelector('[data-testid="agent-avatar-select"]');
     const save = document.querySelector('[data-testid="agent-save"]');
     const quickRun = document.querySelector('.agent-quick-run button.primary-action');
+    const quickRunGoal = document.querySelector('.agent-run-textarea');
     const inlineNotes = Array.from(document.querySelectorAll('.agent-inline-note')).map((node) => node.textContent || '');
     return document.querySelectorAll('[data-testid="agent-list-item"]').length === 1
       && systemItem?.textContent.includes('Oha-Yachiyo')
       && document.querySelector('[data-testid="agent-name-input"]')?.value === 'Oha-Yachiyo'
+      && readOnlyFields.every((field) => field?.readOnly)
+      && outputContract?.disabled
+      && avatarSelect?.disabled
       && save?.disabled
       && !document.querySelector('[data-testid="agent-delete"]')
       && quickRun?.disabled
+      && quickRunGoal?.disabled
       && quickRun?.getAttribute('title')?.includes('系统 Agent 只能查看')
       && inlineNotes.some((text) => text.includes('系统 Agent 由 oha-yachiyo 管理'));
   }, 'system Agent read-only guard');
@@ -354,6 +369,9 @@ async function main() {
   await waitFor(win, () => (
     !document.querySelector('[data-testid="agent-delete"]')
     && document.querySelector('[data-testid="agent-name-input"]')?.value === ''
+    && !document.querySelector('[data-testid="agent-name-input"]')?.readOnly
+    && !document.querySelector('[data-testid="agent-output-contract-select"]')?.disabled
+    && !document.querySelector('[data-testid="agent-avatar-select"]')?.disabled
     && !document.querySelector('[data-testid="agent-save"]')?.disabled
   ), 'new Agent draft after system Agent');
   await win.webContents.executeJavaScript(\`
