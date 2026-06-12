@@ -8367,12 +8367,12 @@ class NativeRunEngine:
         return {
             "approval_id": f"approval_{uuid4().hex[:12]}",
             "tool": _normalize_tool_name(tool_request.get("tool")),
-            "input": raw_input,
+            "input": deepcopy(raw_input),
             "input_preview": _tool_input_preview(raw_input),
             "requested_at": _now(),
-            "messages": messages,
-            "tool_request": tool_request,
-            "remaining_tool_requests": remaining_tool_requests,
+            "messages": deepcopy(messages),
+            "tool_request": deepcopy(tool_request),
+            "remaining_tool_requests": deepcopy(remaining_tool_requests),
             "next_iteration": max(0, min(int(next_iteration or 0), _MAX_AGENT_TOOL_ITERATIONS)),
         }
 

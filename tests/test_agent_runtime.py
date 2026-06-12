@@ -1013,6 +1013,79 @@ def test_approval_resume_projection_coordinator_projects_resume_states():
     ]
 
 
+def test_pending_approval_snapshot_is_isolated_before_resume():
+    messages = [{"role": "user", "content": "run approved tool", "meta": {"turn": 1}}]
+    tool_request = {
+        "tool": "terminal.run",
+        "input": {"command": "printf ok", "options": {"timeout": 3}},
+    }
+    remaining_requests = [
+        {
+            "tool": "artifact.write",
+            "input": {"path": "report.md", "content": "ok"},
+        }
+    ]
+
+    pending = NativeRunEngine._make_pending_approval(
+        tool_request,
+        messages=messages,
+        next_iteration=5,
+        remaining_tool_requests=remaining_requests,
+    )
+
+    assert pending["input"] == {"command": "printf ok", "options": {"timeout": 3}}
+    assert pending["messages"] == messages
+    assert pending["tool_request"] == tool_request
+    assert pending["remaining_tool_requests"] == remaining_requests
+    assert pending["next_iteration"] == 5
+    assert pending["input"] is not tool_request["input"]
+    assert pending["input"] is not pending["tool_request"]["input"]
+    assert pending["input"]["options"] is not tool_request["input"]["options"]
+    assert pending["messages"] is not messages
+    assert pending["messages"][0] is not messages[0]
+    assert pending["tool_request"] is not tool_request
+    assert pending["tool_request"]["input"] is not tool_request["input"]
+    assert pending["remaining_tool_requests"] is not remaining_requests
+    assert pending["remaining_tool_requests"][0] is not remaining_requests[0]
+    assert pending["remaining_tool_requests"][0]["input"] is not remaining_requests[0]["input"]
+
+    messages[0]["meta"]["turn"] = 2
+    tool_request["input"]["command"] = "changed"
+    tool_request["input"]["options"]["timeout"] = 9
+    remaining_requests[0]["input"]["path"] = "changed.md"
+
+    assert pending["input"] == {"command": "printf ok", "options": {"timeout": 3}}
+    assert pending["messages"] == [{"role": "user", "content": "run approved tool", "meta": {"turn": 1}}]
+    assert pending["tool_request"] == {
+        "tool": "terminal.run",
+        "input": {"command": "printf ok", "options": {"timeout": 3}},
+    }
+    assert pending["remaining_tool_requests"] == [
+        {
+            "tool": "artifact.write",
+            "input": {"path": "report.md", "content": "ok"},
+        }
+    ]
+
+    pending["input"]["command"] = "pending input changed"
+    pending["tool_request"]["input"]["command"] = "pending request changed"
+    pending["remaining_tool_requests"][0]["input"]["content"] = "pending content changed"
+
+    assert tool_request == {
+        "tool": "terminal.run",
+        "input": {"command": "changed", "options": {"timeout": 9}},
+    }
+    assert remaining_requests == [
+        {
+            "tool": "artifact.write",
+            "input": {"path": "changed.md", "content": "ok"},
+        }
+    ]
+    assert pending["input"]["command"] == "pending input changed"
+    assert pending["tool_request"]["input"]["command"] == "pending request changed"
+    assert pending["remaining_tool_requests"][0]["input"]["content"] == "pending content changed"
+
+
 def test_tool_approval_resume_context_parses_pending_payload():
     broker = SimpleNamespace(name="broker")
     budget = SimpleNamespace(name="budget")
