@@ -617,6 +617,10 @@ STREAMING_PROVIDER_SMOKE_SCRIPT_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         'redact_api_error_text(str(exc), fallback="stream smoke failed")',
         "real provider smoke helper must redact provider errors before printing stderr",
     ),
+    (
+        "_finish_reasons_from_value(choice)",
+        "real provider smoke helper must parse choice-level stop_reason values",
+    ),
 )
 STREAMING_PROVIDER_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
@@ -642,6 +646,10 @@ STREAMING_PROVIDER_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "def test_stream_smoke_main_redacts_provider_errors",
         "provider smoke tests must cover provider error redaction",
+    ),
+    (
+        "def test_stream_smoke_accepts_choice_level_stop_reason",
+        "provider smoke tests must cover choice-level stop_reason provider chunks",
     ),
     (
         "assert leaked_secret not in captured.err",
