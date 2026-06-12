@@ -110,6 +110,23 @@ def _manual_release_candidate_check_report() -> list[dict[str, str]]:
     return [dict(check) for check in MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS]
 
 
+def _manual_release_candidate_check_template() -> dict[str, object]:
+    return {
+        "checks": [
+            {
+                "id": check["id"],
+                "status": "manual_required",
+                "required_before": check["required_before"],
+                "description": check["description"],
+                "evidence_prompt": check["evidence"],
+                "evidence": "",
+                "notes": "",
+            }
+            for check in MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS
+        ]
+    }
+
+
 def _manual_release_candidate_check_status(
     checks: Sequence[dict[str, str]],
     findings: Sequence[Finding],
@@ -171,6 +188,16 @@ def _resolve_project_file(root: Path, relative_or_absolute: Path, label: str) ->
         resolved.relative_to(root_path)
     except ValueError:
         raise ValueError(f"{label} path must stay inside project root: {relative_or_absolute}")
+    return resolved
+
+
+def write_manual_release_candidate_checks_template(root: Path, output_path: Path) -> Path:
+    resolved = _resolve_project_file(
+        root,
+        output_path,
+        "manual release-candidate checks template",
+    )
+    _write_report(resolved, _manual_release_candidate_check_template())
     return resolved
 
 
@@ -1019,7 +1046,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=Path,
         help="Merge manual release-candidate check evidence from a project-local JSON file.",
     )
+    parser.add_argument(
+        "--write-manual-checks-template",
+        type=Path,
+        help="Write a project-local manual release-candidate checks JSON template and exit.",
+    )
     args = parser.parse_args(argv)
+    if args.write_manual_checks_template is not None:
+        try:
+            write_manual_release_candidate_checks_template(
+                PROJECT_ROOT,
+                args.write_manual_checks_template,
+            )
+        except (OSError, ValueError) as exc:
+            print(f"manual release-candidate checks template: failed\n- {exc}")
+            return 1
+        print(f"manual release-candidate checks template: {args.write_manual_checks_template}")
+        return 0
     return verify_release_candidate(
         artifact_paths=args.paths or None,
         require_artifacts=args.require_artifacts,

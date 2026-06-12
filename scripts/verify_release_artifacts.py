@@ -572,6 +572,10 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document manual RC check evidence input",
     ),
     (
+        "--write-manual-checks-template",
+        "release packaging docs must document manual RC check template generation",
+    ),
+    (
         "gatekeeper_first_launch",
         "release packaging docs must document the Gatekeeper manual RC check id",
     ),
@@ -862,6 +866,18 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release candidate verifier must copy manual check details into reports",
     ),
     (
+        "_manual_release_candidate_check_template()",
+        "release candidate verifier must generate manual check templates",
+    ),
+    (
+        "write_manual_release_candidate_checks_template",
+        "release candidate verifier must expose manual check template writing",
+    ),
+    (
+        '"evidence_prompt"',
+        "release candidate verifier manual check templates must preserve evidence prompts",
+    ),
+    (
         "_load_manual_release_candidate_checks",
         "release candidate verifier must load manual check evidence JSON",
     ),
@@ -872,6 +888,10 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         '"--manual-checks-json"',
         "release candidate verifier CLI must accept manual check evidence JSON",
+    ),
+    (
+        '"--write-manual-checks-template"',
+        "release candidate verifier CLI must write manual check templates",
     ),
 )
 STREAMING_PROVIDER_SMOKE_SCRIPT_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (

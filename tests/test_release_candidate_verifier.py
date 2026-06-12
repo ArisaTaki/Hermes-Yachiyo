@@ -344,6 +344,41 @@ def test_release_candidate_verifier_fails_failed_manual_check_evidence(
     assert report["manual_release_candidate_check_findings"] == []
 
 
+def test_release_candidate_verifier_writes_manual_check_template(tmp_path):
+    template_path = rc.write_manual_release_candidate_checks_template(
+        tmp_path,
+        Path("tmp/manual-rc-checks.template.json"),
+    )
+
+    assert template_path == tmp_path / "tmp" / "manual-rc-checks.template.json"
+    template = json.loads(template_path.read_text(encoding="utf-8"))
+    assert [check["id"] for check in template["checks"]] == [
+        "gatekeeper_first_launch",
+        "packaged_bridge_isolation",
+        "screen_recording_permission",
+        "real_provider_smoke",
+    ]
+    assert all(check["status"] == "manual_required" for check in template["checks"])
+    assert all(check["evidence"] == "" for check in template["checks"])
+    assert all(check["evidence_prompt"] for check in template["checks"])
+    assert all(
+        check["required_before"] == "public_release_signoff"
+        for check in template["checks"]
+    )
+
+
+def test_release_candidate_verifier_rejects_manual_check_template_outside_root(tmp_path):
+    outside = tmp_path.parent / "manual-rc-checks.template.json"
+
+    try:
+        rc.write_manual_release_candidate_checks_template(tmp_path, outside)
+    except ValueError as exc:
+        assert "manual release-candidate checks template path must stay inside project root" in str(exc)
+    else:
+        raise AssertionError("manual check template path outside root must fail")
+    assert not outside.exists()
+
+
 def test_release_candidate_verifier_checks_mounted_dmg_app(tmp_path, monkeypatch, capsys):
     release_dir = tmp_path / "release"
     release_dir.mkdir()
