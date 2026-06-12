@@ -1786,9 +1786,11 @@ async function main() {
     const approvalRequiredEvent = events.find((node) => node.getAttribute('data-run-event') === 'agent.tool.approval_required');
     const toolCallEvent = events.find((node) => node.getAttribute('data-run-event') === 'agent.tool.call');
     const completedEvent = events.find((node) => node.getAttribute('data-run-event') === 'agent.run.completed');
+    const parentOpen = document.querySelector('[data-testid="agent-run-detail-open-parent-run"]');
     return window.location.hash.includes(${JSON.stringify(WORKFLOW_CHILD_RUN_ID)})
       && detail?.getAttribute('data-run-id') === ${JSON.stringify(WORKFLOW_CHILD_RUN_ID)}
-      && document.querySelector('[data-testid="agent-run-detail-open-parent-run"]')
+      && parentOpen?.getAttribute('data-run-id') === ${JSON.stringify(WORKFLOW_RUN_ID)}
+      && parentOpen?.getAttribute('data-run-status') === 'completed'
       && result?.textContent.includes('Workflow child approval Electron smoke complete')
       && eventTypes.includes('agent.tool.approval_required')
       && eventTypes.includes('agent.tool.approval_approved')
@@ -1813,10 +1815,16 @@ async function main() {
   await waitFor(win, () => {
     const manage = document.querySelector('[data-testid="agent-run-history-manage"]');
     const rows = Array.from(document.querySelectorAll('[data-testid="agent-run-history-row"]'));
+    const approvalOpen = document.querySelector('[data-testid="agent-run-history-row"][data-run-id="${APPROVAL_RUN_ID}"] [data-testid="agent-run-history-open-run"]');
+    const selectedOpen = document.querySelector('[data-testid="agent-run-history-row"][data-run-id="${RUN_ID}"] [data-testid="agent-run-history-open-run"]');
     return manage
       && !manage.disabled
       && rows.some((row) => row.getAttribute('data-run-id') === ${JSON.stringify(APPROVAL_RUN_ID)})
-      && rows.some((row) => row.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)});
+      && rows.some((row) => row.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)})
+      && approvalOpen?.getAttribute('data-run-id') === ${JSON.stringify(APPROVAL_RUN_ID)}
+      && approvalOpen?.getAttribute('data-run-status') === 'completed'
+      && selectedOpen?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
+      && selectedOpen?.getAttribute('data-run-status') === 'completed';
   }, 'agent run history management controls');
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"agent-run-history-manage\\"]').click()", true);
   await waitFor(win, () => {

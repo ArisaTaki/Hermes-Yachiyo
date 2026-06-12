@@ -4751,6 +4751,8 @@ export function AgentStudioView() {
                         <button
                           type="button"
                           className={run.run_id === selectedRunId ? 'run-list-item active' : 'run-list-item'}
+                          data-run-id={run.run_id}
+                          data-run-status={run.status}
                           data-testid="agent-run-history-open-run"
                           onClick={() => openRunDetail(run.run_id)}
                         >
@@ -4833,7 +4835,14 @@ export function AgentStudioView() {
                     重新运行
                   </button>
                   {selectedWorkflowParentRunId ? (
-                    <button type="button" className="run-parent-link" data-testid="agent-run-detail-open-parent-run" onClick={() => openRunDetail(selectedWorkflowParentRunId)}>
+                    <button
+                      type="button"
+                      className="run-parent-link"
+                      data-run-id={selectedWorkflowParentRunId}
+                      data-run-status={selectedWorkflowParentRun?.status || ''}
+                      data-testid="agent-run-detail-open-parent-run"
+                      onClick={() => openRunDetail(selectedWorkflowParentRunId)}
+                    >
                       返回 Workflow：{selectedWorkflowParentRun?.runnable_name || selectedWorkflowParentRun?.runnable_id || '父 Workflow'}
                     </button>
                   ) : null}
