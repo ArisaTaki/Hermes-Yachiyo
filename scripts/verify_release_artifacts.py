@@ -601,6 +601,10 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow must binary-scan final release artifacts",
     ),
     (
+        "python scripts/verify_release_candidate.py --require-artifacts",
+        "macOS release workflow must run the local RC verification gate",
+    ),
+    (
         'cp "${dmg_files[0]}" "release/${VERSIONED_DMG}"',
         "macOS release workflow must stage the versioned DMG for final artifact scanning",
     ),
@@ -2662,6 +2666,21 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
             Finding(
                 workflow_path,
                 "macOS release workflow must verify release artifacts after preparing release metadata",
+            )
+        )
+    verify_rc = workflow.find("python scripts/verify_release_candidate.py --require-artifacts")
+    upload_artifact = workflow.find("Upload DMG artifact")
+    if (
+        prepare_release < 0
+        or verify_rc < 0
+        or upload_artifact < 0
+        or verify_rc < prepare_release
+        or verify_rc > upload_artifact
+    ):
+        findings.append(
+            Finding(
+                workflow_path,
+                "macOS release workflow must run local RC verification gate after preparing release artifacts before upload",
             )
         )
     return findings

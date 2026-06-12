@@ -663,6 +663,9 @@ jobs:
       - name: Verify packaged release artifacts
         run: python scripts/verify_release_artifacts.py --allow-binary release
 
+      - name: Verify release candidate artifacts
+        run: python scripts/verify_release_candidate.py --require-artifacts
+
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
         with:

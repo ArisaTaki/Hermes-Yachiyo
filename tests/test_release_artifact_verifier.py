@@ -1517,6 +1517,31 @@ def test_verifier_requires_release_workflow_release_scan_after_metadata(tmp_path
     ) in findings
 
 
+def test_verifier_requires_release_workflow_rc_gate_before_upload(tmp_path):
+    workflow = tmp_path / verifier.RELEASE_WORKFLOW_FILE
+    workflow.parent.mkdir(parents=True)
+    current_workflow = (verifier.ROOT / verifier.RELEASE_WORKFLOW_FILE).read_text(
+        encoding="utf-8"
+    )
+    rc_step = (
+        "\n      - name: Verify release candidate artifacts\n"
+        "        run: python scripts/verify_release_candidate.py --require-artifacts\n"
+    )
+    workflow.write_text(
+        current_workflow.replace(rc_step, "")
+        + "\n      - name: Late release candidate verification\n"
+        "        run: python scripts/verify_release_candidate.py --require-artifacts\n",
+        encoding="utf-8",
+    )
+
+    findings = verifier._verify_release_workflow_guards(tmp_path)
+
+    assert verifier.Finding(
+        workflow,
+        "macOS release workflow must run local RC verification gate after preparing release artifacts before upload",
+    ) in findings
+
+
 def test_verifier_requires_build_metadata_before_packaged_backend(tmp_path):
     workflow = tmp_path / verifier.RELEASE_WORKFLOW_FILE
     workflow.parent.mkdir(parents=True)
