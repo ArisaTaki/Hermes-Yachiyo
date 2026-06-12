@@ -2187,7 +2187,7 @@ compileall passed
 ## 下一步建议
 
 1. 做最终发布签核批处理：
-   - 以 `tmp/final-rc.json` 作为自动 evidence source，先运行 `python scripts/verify_release_candidate.py --manual-checks-json tmp/final-rc.json --write-manual-checks-draft tmp/final-rc-signoff.json` 生成可编辑签核草稿，再补齐 `gatekeeper_first_launch`、`screen_recording_permission`、`chat_native_file_upload` 和 `packaged_ui_sampling` 四个人工项；如果没有真实 provider credentials，则把 `real_provider_smoke` 标为 `not_applicable` 并附 credentials-unavailable evidence。
+   - 以 `tmp/final-rc.json` 作为自动 evidence source，先运行 `python scripts/verify_release_candidate.py --manual-checks-json tmp/final-rc.json --write-manual-checks-draft tmp/final-rc-signoff.json` 生成可编辑签核草稿；release workflow 也会在 `release/rc-verification.json` 生成后归档 `release/manual-rc-checks.draft.json`。发布签核人只需补齐 `gatekeeper_first_launch`、`screen_recording_permission`、`chat_native_file_upload` 和 `packaged_ui_sampling` 四个人工项；如果没有真实 provider credentials，则把 `real_provider_smoke` 标为 `not_applicable` 并附 credentials-unavailable evidence。
    - 补齐人工 evidence 后运行 `python scripts/verify_release_candidate.py --require-artifacts --manual-checks-json tmp/final-rc-signoff.json --require-manual-checks-complete --report-json tmp/final-rc-signed.json`，让最终是否可发布由同一个 RC gate 判定。
 
 2. 做 release candidate `.app` 内跨页面人工抽样：

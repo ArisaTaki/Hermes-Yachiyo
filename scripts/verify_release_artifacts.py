@@ -606,6 +606,10 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document the archived manual RC check template",
     ),
     (
+        "release/manual-rc-checks.draft.json",
+        "release packaging docs must document the archived manual RC check draft",
+    ),
+    (
         "manual_release_candidate_check_statuses",
         "release packaging docs must document structured manual RC check statuses",
     ),
@@ -722,6 +726,10 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "--write-manual-checks-template release/manual-rc-checks.template.json",
         "macOS release workflow must archive a manual RC check evidence template",
+    ),
+    (
+        "--manual-checks-json release/rc-verification.json --write-manual-checks-draft release/manual-rc-checks.draft.json",
+        "macOS release workflow must archive a manual RC check draft seeded from the RC report",
     ),
     (
         'cp "${dmg_files[0]}" "release/${VERSIONED_DMG}"',

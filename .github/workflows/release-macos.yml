@@ -638,6 +638,7 @@ jobs:
           fi
           python scripts/verify_release_candidate.py --write-manual-checks-template release/manual-rc-checks.template.json
           python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount "${provider_smoke_args[@]}" --report-json release/rc-verification.json
+          python scripts/verify_release_candidate.py --manual-checks-json release/rc-verification.json --write-manual-checks-draft release/manual-rc-checks.draft.json
 
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4

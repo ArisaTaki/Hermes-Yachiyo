@@ -662,6 +662,7 @@ def test_verifier_requires_release_packaging_docs_for_release_gates(tmp_path):
     assert "release packaging docs must document the CI release-candidate gate before upload" in messages
     assert "release packaging docs must document the archived RC verification report" in messages
     assert "release packaging docs must document the archived manual RC check template" in messages
+    assert "release packaging docs must document the archived manual RC check draft" in messages
     assert "release packaging docs must document structured manual RC check statuses" in messages
     assert "release packaging docs must document manual RC check evidence input" in messages
     assert "release packaging docs must document manual RC check template generation" in messages
@@ -1531,6 +1532,7 @@ def test_verifier_requires_release_workflow_binary_scans_packaged_outputs(tmp_pa
     assert "macOS release workflow must run the local RC verification gate" in messages
     assert "macOS release workflow must upload a release-candidate verification report" in messages
     assert "macOS release workflow must archive a manual RC check evidence template" in messages
+    assert "macOS release workflow must archive a manual RC check draft seeded from the RC report" in messages
 
 
 def test_verifier_requires_release_workflow_guard_before_dependency_install(tmp_path):
