@@ -79,6 +79,8 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
     tests = tmp_path / "tests" / "test_streaming_provider_smoke.py"
     tests.parent.mkdir(parents=True)
     tests.write_text("def test_placeholder():\n    pass\n", encoding="utf-8")
+    rc_verifier = tmp_path / "scripts" / "verify_release_candidate.py"
+    rc_verifier.write_text("def main():\n    return 0\n", encoding="utf-8")
 
     findings = verifier._verify_streaming_provider_smoke_contract_guards(tmp_path)
     messages = [finding.message for finding in findings]
@@ -105,6 +107,33 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
     assert "provider smoke tests must cover indexless interleaved streaming tool-call deltas without leaks" in messages
     assert "provider smoke tests must cover SSE events split across response chunks" in messages
     assert "provider smoke tests must prove provider errors do not print API keys" in messages
+    assert "release candidate verifier must define opt-in provider smoke environment variables" in messages
+    assert "release candidate verifier must define provider smoke command contracts" in messages
+    assert "release candidate verifier must run the real provider streaming smoke helper" in messages
+    assert "release candidate verifier must run real provider text stream smoke" in messages
+    assert "release candidate verifier text smoke must require streamed content" in messages
+    assert "release candidate verifier provider smoke must assert finish_reason values" in messages
+    assert "release candidate verifier provider smoke must assert stop finish_reason" in messages
+    assert "release candidate verifier must run real provider tool-call stream smoke" in messages
+    assert "release candidate verifier tool-call smoke must require streamed tool calls" in messages
+    assert (
+        "release candidate verifier tool-call smoke must verify streamed content after a tool result"
+        in messages
+    )
+    assert "release candidate verifier tool-call smoke must assert the workspace_read tool call" in messages
+    assert "release candidate verifier tool-call smoke must assert the README argument" in messages
+    assert "release candidate verifier tool-call smoke must assert the README path JSON field" in messages
+    assert "release candidate verifier tool-call smoke must assert tool_calls finish_reason" in messages
+    assert (
+        "release candidate verifier tool-call smoke must assert tool-result follow-up finish_reason"
+        in messages
+    )
+    assert (
+        "release candidate verifier provider smoke must fail explicitly when credentials are missing"
+        in messages
+    )
+    assert "release candidate verifier must expose provider smoke verification" in messages
+    assert "release candidate verifier must report whether provider smoke was requested" in messages
 
 
 def test_verifier_reports_legacy_product_tokens(tmp_path):
@@ -1555,12 +1584,14 @@ def test_verifier_requires_release_workflow_rc_gate_before_upload(tmp_path):
     current_workflow = (verifier.ROOT / verifier.RELEASE_WORKFLOW_FILE).read_text(
         encoding="utf-8"
     )
-    rc_step = (
-        "\n      - name: Verify release candidate artifacts\n"
-        "        run: python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount --report-json release/rc-verification.json\n"
+    rc_step_start = current_workflow.index("\n      - name: Verify release candidate artifacts\n")
+    upload_step_start = current_workflow.index(
+        "\n      - name: Upload DMG artifact\n",
+        rc_step_start,
     )
+    workflow_without_rc_step = current_workflow[:rc_step_start] + current_workflow[upload_step_start:]
     workflow.write_text(
-        current_workflow.replace(rc_step, "")
+        workflow_without_rc_step
         + "\n      - name: Late release candidate verification\n"
         "        run: python scripts/verify_release_candidate.py --require-artifacts\n",
         encoding="utf-8",
@@ -1863,24 +1894,15 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow smoke tests must cover NativeRunEngine Agent Run Responses output_item.done message snapshots" in messages
     assert "macOS release workflow smoke tests must cover NativeRunEngine Agent Run Responses content_part.done snapshots" in messages
     assert "macOS release workflow smoke tests must cover OpenAI-compatible streaming provider contracts" in messages
-    assert "macOS release workflow must expose opt-in real provider streaming smoke" in messages
+    assert "macOS release workflow must expose opt-in real provider smoke through the RC gate" in messages
     assert "macOS release workflow must wire opt-in provider smoke base URL secret" in messages
     assert "macOS release workflow must wire opt-in provider smoke model secret" in messages
     assert "macOS release workflow must wire opt-in provider smoke API key secret" in messages
     assert "macOS release workflow provider smoke must skip unless all opt-in secrets are configured" in messages
     assert "macOS release workflow provider smoke must report an explicit opt-in secret skip" in messages
-    assert "macOS release workflow must run the real provider streaming smoke helper when configured" in messages
-    assert "macOS release workflow provider smoke must require streamed content" in messages
-    assert "macOS release workflow provider smoke must assert text finish_reason" in messages
-    assert "macOS release workflow provider smoke must require streamed tool calls" in messages
-    assert "macOS release workflow provider smoke must verify streamed content after a tool result" in messages
-    assert "macOS release workflow provider smoke must assert the workspace_read tool call" in messages
-    assert "macOS release workflow provider smoke must assert the workspace_read README argument" in messages
-    assert "macOS release workflow provider smoke must assert the workspace_read path JSON field" in messages
-    assert "macOS release workflow provider smoke must assert tool-call finish_reason" in messages
-    assert "macOS release workflow provider smoke must assert tool-result follow-up finish_reason" in messages
+    assert "macOS release workflow must pass opt-in provider smoke args to the RC verifier" in messages
     assert (
-        "macOS release workflow must run opt-in real provider streaming smoke before packaged backend and DMG builds"
+        "macOS release workflow must fold opt-in provider smoke into the RC verification report before upload"
         in messages
     )
     assert "macOS release workflow smoke tests must cover legacy Hermes kernel removal" in messages

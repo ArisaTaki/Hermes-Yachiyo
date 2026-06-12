@@ -85,13 +85,13 @@ Oha-Yachiyo.app/Contents/Resources/backend/oha-yachiyo-backend
 
 1. 先运行 release-facing product identity and security guards，确认发布配置、旧产品身份扫描、debug route、CredentialStore fallback 和关键 smoke 清单没有退化。
 2. 安装 Python 与 Node 依赖。
-3. 运行关键 smoke tests；如果配置了真实 provider smoke secrets，还会执行 opt-in streaming/tool-call provider smoke。
+3. 运行关键 smoke tests。
 4. 通过 `python scripts/prepare_app_build_metadata.py` 写入当前 channel / commit / latest URL 的 build metadata。
 5. PyInstaller 构建后端，并把同一份 build metadata 打入后端可执行文件。
 6. 如果配置了自签名证书，electron-builder 生成 `.app` 目录后由脚本签名 `.app` 并创建未签名 DMG；否则 electron-builder 直接生成 unsigned DMG。
 7. Verify packaged app resources 会检查 `.app` 结构、后端可执行文件、`app.asar`、关键 UI selector 和 packaged resources 旧身份扫描；启用自签名时，还会对最终 packaged `.app` 运行 `codesign --verify --deep --strict --verbose=2`。
 8. 生成版本化 DMG、latest DMG、SHA256、latest JSON 和 release notes。
-9. 对 `release/` 目录执行 binary-safe release artifact scan，确认最终 DMG、JSON、checksum 和 notes 没有旧产品身份或旧执行内核 token，并校验每个 DMG 的 `.sha256` 文件、latest JSON 的 `name` / `channel` / `branch` / `source_branch` / `version` / `commit` / `short_commit` / `build_number` / `run_number` / `run_id` / `tag` / `signing` / `published_at` / `changelog` 元数据格式和一致性，以及 latest JSON 的 `dmg_name` / `sha256` 均与同目录 DMG 内容一致。
+9. 对 `release/` 目录执行 binary-safe release artifact scan，确认最终 DMG、JSON、checksum 和 notes 没有旧产品身份或旧执行内核 token，并校验每个 DMG 的 `.sha256` 文件、latest JSON 的 `name` / `channel` / `branch` / `source_branch` / `version` / `commit` / `short_commit` / `build_number` / `run_number` / `run_id` / `tag` / `signing` / `published_at` / `changelog` 元数据格式和一致性，以及 latest JSON 的 `dmg_name` / `sha256` 均与同目录 DMG 内容一致；随后运行最终 RC gate，并在配置真实 provider smoke secrets 时把 opt-in streaming/tool-call provider smoke 结果写入 `release/rc-verification.json`。
 10. 上传 workflow artifact，并创建或更新 GitHub Release 与 latest channel release。
 
 Release tag 格式：
@@ -181,7 +181,7 @@ python scripts/verify_release_candidate.py --source-only --report-json tmp/sourc
 `--source-only` 会跳过本机已有 `dist/` 或 `release/` 旧产物，避免 stale `.app` / DMG 干扰源码验收判断；最终 RC 仍必须重新打包并运行 `--require-artifacts`。
 `--source-only` 不能和 artifact path、`--require-artifacts`、`--check-dmg-mount`、`--run-dmg-app-smoke`、`--run-provider-smoke` 或 `--run-ui-smoke` 混用；DMG mount、DMG app startup smoke、真实 provider smoke 和 Electron UI smoke 只属于完整本地 RC 复验。
 
-macOS release workflow 会在生成 release metadata 后、上传 DMG 前运行 `python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount --report-json release/rc-verification.json`，确保 CI 与本地 RC 验收入口一致，并把 `release/rc-verification.json` 作为可归档验收报告随 release artifacts 上传。`--check-dmg-mount` 会只读挂载发现到的 DMG，并对 DMG 内真实 `.app` 的 `Contents/Resources` 再执行 packaged app scan。带 `--run-dmg-app-smoke` 的 packaged app 启动检查和带 `--run-ui-smoke` 的完整 Electron UI smoke 仍保留给本地 RC 复验，因为它们会启动本地 Electron 应用或 BrowserWindow。
+macOS release workflow 会在生成 release metadata 后、上传 DMG 前运行 `python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount --report-json release/rc-verification.json`，确保 CI 与本地 RC 验收入口一致，并把 `release/rc-verification.json` 作为可归档验收报告随 release artifacts 上传。`--check-dmg-mount` 会只读挂载发现到的 DMG，并对 DMG 内真实 `.app` 的 `Contents/Resources` 再执行 packaged app scan；如果 `OHA_YACHIYO_SMOKE_BASE_URL`、`OHA_YACHIYO_SMOKE_MODEL` 和 `OHA_YACHIYO_SMOKE_API_KEY` 都已配置，workflow 会向同一个 RC gate 传入 `--run-provider-smoke`，让 report 的 `provider_smoke` 字段记录真实 provider 文本流与 tool-call follow-up 结果。带 `--run-dmg-app-smoke` 的 packaged app 启动检查和带 `--run-ui-smoke` 的完整 Electron UI smoke 仍保留给本地 RC 复验，因为它们会启动本地 Electron 应用或 BrowserWindow。
 
 脚本仍会列出必须人工确认的首次启动 / Gatekeeper / 屏幕录制权限检查项。
 

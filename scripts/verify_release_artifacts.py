@@ -674,8 +674,8 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow must publish latest channel JSON metadata",
     ),
     (
-        "Run opt-in real provider streaming smoke",
-        "macOS release workflow must expose opt-in real provider streaming smoke",
+        "provider_smoke_args+=(--run-provider-smoke)",
+        "macOS release workflow must expose opt-in real provider smoke through the RC gate",
     ),
     (
         "OHA_YACHIYO_SMOKE_BASE_URL",
@@ -698,44 +698,94 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow provider smoke must report an explicit opt-in secret skip",
     ),
     (
-        "python scripts/smoke_openai_compatible_stream.py",
-        "macOS release workflow must run the real provider streaming smoke helper when configured",
+        '"${provider_smoke_args[@]}"',
+        "macOS release workflow must pass opt-in provider smoke args to the RC verifier",
+    ),
+)
+RELEASE_CANDIDATE_PROVIDER_SMOKE_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
+    (
+        "PROVIDER_SMOKE_ENV_VARS",
+        "release candidate verifier must define opt-in provider smoke environment variables",
     ),
     (
-        "--require-content",
-        "macOS release workflow provider smoke must require streamed content",
+        "PROVIDER_SMOKE_COMMANDS",
+        "release candidate verifier must define provider smoke command contracts",
     ),
     (
-        "--expect-finish-reason stop",
-        "macOS release workflow provider smoke must assert text finish_reason",
+        "scripts/smoke_openai_compatible_stream.py",
+        "release candidate verifier must run the real provider streaming smoke helper",
     ),
     (
-        "--require-tool-call",
-        "macOS release workflow provider smoke must require streamed tool calls",
+        '"text_stream"',
+        "release candidate verifier must run real provider text stream smoke",
     ),
     (
-        "--require-tool-result-content",
-        "macOS release workflow provider smoke must verify streamed content after a tool result",
+        '"--require-content"',
+        "release candidate verifier text smoke must require streamed content",
     ),
     (
-        "--expect-tool-name workspace_read",
-        "macOS release workflow provider smoke must assert the workspace_read tool call",
+        '"--expect-finish-reason"',
+        "release candidate verifier provider smoke must assert finish_reason values",
     ),
     (
-        "--expect-tool-argument-substring README.md",
-        "macOS release workflow provider smoke must assert the workspace_read README argument",
+        '"stop"',
+        "release candidate verifier provider smoke must assert stop finish_reason",
     ),
     (
-        "--expect-tool-argument-json-field path=README.md",
-        "macOS release workflow provider smoke must assert the workspace_read path JSON field",
+        '"tool_call_stream"',
+        "release candidate verifier must run real provider tool-call stream smoke",
     ),
     (
-        "--expect-finish-reason tool_calls",
-        "macOS release workflow provider smoke must assert tool-call finish_reason",
+        '"--require-tool-call"',
+        "release candidate verifier tool-call smoke must require streamed tool calls",
     ),
     (
-        "--expect-tool-result-finish-reason stop",
-        "macOS release workflow provider smoke must assert tool-result follow-up finish_reason",
+        '"--require-tool-result-content"',
+        "release candidate verifier tool-call smoke must verify streamed content after a tool result",
+    ),
+    (
+        '"--expect-tool-name"',
+        "release candidate verifier tool-call smoke must assert an expected tool name",
+    ),
+    (
+        '"workspace_read"',
+        "release candidate verifier tool-call smoke must assert the workspace_read tool call",
+    ),
+    (
+        '"--expect-tool-argument-substring"',
+        "release candidate verifier tool-call smoke must assert an expected argument substring",
+    ),
+    (
+        '"README.md"',
+        "release candidate verifier tool-call smoke must assert the README argument",
+    ),
+    (
+        '"--expect-tool-argument-json-field"',
+        "release candidate verifier tool-call smoke must assert an expected JSON argument field",
+    ),
+    (
+        '"path=README.md"',
+        "release candidate verifier tool-call smoke must assert the README path JSON field",
+    ),
+    (
+        '"tool_calls"',
+        "release candidate verifier tool-call smoke must assert tool_calls finish_reason",
+    ),
+    (
+        '"--expect-tool-result-finish-reason"',
+        "release candidate verifier tool-call smoke must assert tool-result follow-up finish_reason",
+    ),
+    (
+        "missing environment variables",
+        "release candidate verifier provider smoke must fail explicitly when credentials are missing",
+    ),
+    (
+        "verify_provider_smoke",
+        "release candidate verifier must expose provider smoke verification",
+    ),
+    (
+        "run_provider_smoke",
+        "release candidate verifier must report whether provider smoke was requested",
     ),
 )
 STREAMING_PROVIDER_SMOKE_SCRIPT_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
@@ -2449,6 +2499,10 @@ def _verify_streaming_provider_smoke_contract_guards(root: Path) -> list[Finding
             Path("tests/test_streaming_provider_smoke.py"),
             STREAMING_PROVIDER_SMOKE_TEST_REQUIRED_TEXT,
         ),
+        (
+            Path("scripts/verify_release_candidate.py"),
+            RELEASE_CANDIDATE_PROVIDER_SMOKE_REQUIRED_TEXT,
+        ),
     )
     for relative_path, required_texts in targets:
         path = _resolve(root, relative_path)
@@ -2724,7 +2778,7 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
         )
     signing_import = workflow.find("Import macOS self-signing certificate")
     smoke_tests = workflow.find("Run smoke tests")
-    provider_smoke = workflow.find("Run opt-in real provider streaming smoke")
+    provider_smoke = workflow.find("provider_smoke_args+=(--run-provider-smoke)")
     write_metadata = workflow.find("Write app build metadata")
     write_metadata_script = workflow.find("python scripts/prepare_app_build_metadata.py")
     build_backend = workflow.find("Build packaged backend")
@@ -2796,19 +2850,6 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
                         f"packaged backend and DMG builds: {script}",
                     )
                 )
-    if (
-        provider_smoke < 0
-        or build_backend < 0
-        or build_dmg < 0
-        or provider_smoke > build_backend
-        or provider_smoke > build_dmg
-    ):
-        findings.append(
-            Finding(
-                workflow_path,
-                "macOS release workflow must run opt-in real provider streaming smoke before packaged backend and DMG builds",
-            )
-        )
     if (
         write_metadata < 0
         or build_backend < 0
@@ -2882,6 +2923,19 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
             Finding(
                 workflow_path,
                 "macOS release workflow must run local RC verification gate after preparing release artifacts before upload",
+            )
+        )
+    if (
+        provider_smoke < 0
+        or verify_rc < 0
+        or upload_artifact < 0
+        or provider_smoke > verify_rc
+        or provider_smoke > upload_artifact
+    ):
+        findings.append(
+            Finding(
+                workflow_path,
+                "macOS release workflow must fold opt-in provider smoke into the RC verification report before upload",
             )
         )
     return findings
