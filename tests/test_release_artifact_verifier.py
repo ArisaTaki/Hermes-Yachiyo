@@ -135,6 +135,10 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
     assert "release candidate verifier must expose provider smoke verification" in messages
     assert "release candidate verifier must report whether provider smoke was requested" in messages
     assert "release candidate verifier must define structured manual release checks" in messages
+    assert "release candidate verifier must define allowed manual check statuses" in messages
+    assert "release candidate verifier manual checks must support passed status" in messages
+    assert "release candidate verifier manual checks must support failed status" in messages
+    assert "release candidate verifier manual checks must support not_applicable status" in messages
     assert "release candidate verifier must track Gatekeeper first-launch manual status" in messages
     assert "release candidate verifier must track packaged bridge isolation manual status" in messages
     assert "release candidate verifier must track screen recording permission manual status" in messages
@@ -147,6 +151,9 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
         in messages
     )
     assert "release candidate verifier must copy manual check details into reports" in messages
+    assert "release candidate verifier must load manual check evidence JSON" in messages
+    assert "release candidate verifier must expose manual check evidence input" in messages
+    assert "release candidate verifier CLI must accept manual check evidence JSON" in messages
 
 
 def test_verifier_reports_legacy_product_tokens(tmp_path):
@@ -625,6 +632,7 @@ def test_verifier_requires_release_packaging_docs_for_release_gates(tmp_path):
     assert "release packaging docs must document the CI release-candidate gate before upload" in messages
     assert "release packaging docs must document the archived RC verification report" in messages
     assert "release packaging docs must document structured manual RC check statuses" in messages
+    assert "release packaging docs must document manual RC check evidence input" in messages
     assert "release packaging docs must document the Gatekeeper manual RC check id" in messages
     assert "release packaging docs must document the screen recording manual RC check id" in messages
 

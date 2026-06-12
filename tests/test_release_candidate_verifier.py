@@ -246,6 +246,104 @@ def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
     )
 
 
+def test_release_candidate_verifier_merges_manual_check_evidence(
+    tmp_path, monkeypatch, capsys
+):
+    (tmp_path / "release").mkdir()
+    evidence_path = tmp_path / "tmp" / "manual-checks.json"
+    evidence_path.parent.mkdir()
+    evidence_path.write_text(
+        json.dumps(
+            {
+                "checks": [
+                    {
+                        "id": "gatekeeper_first_launch",
+                        "status": "passed",
+                        "evidence": "Finder Control-click -> Open reached the app.",
+                    },
+                    {
+                        "id": "packaged_bridge_isolation",
+                        "status": "passed",
+                        "evidence": "Packaged /status returned service=oha-yachiyo on 127.0.0.1.",
+                    },
+                    {
+                        "id": "screen_recording_permission",
+                        "status": "passed",
+                        "evidence": "System Settings allowed Oha-Yachiyo and screenshot probe succeeded.",
+                    },
+                    {
+                        "id": "real_provider_smoke",
+                        "status": "not_applicable",
+                        "evidence": "Provider credentials unavailable for this local RC pass.",
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        manual_checks_json=Path("tmp/manual-checks.json"),
+        report_json=Path("tmp/rc.json"),
+    ) == 0
+
+    output = capsys.readouterr().out
+    assert "manual release-candidate check evidence: passed" in output
+    report = json.loads((tmp_path / "tmp" / "rc.json").read_text(encoding="utf-8"))
+    assert report["ok"] is True
+    assert report["manual_release_candidate_check_status"] == "passed"
+    assert report["manual_release_candidate_check_findings"] == []
+    assert report["manual_release_candidate_checks_source"] == "tmp/manual-checks.json"
+    statuses = {
+        check["id"]: check["status"]
+        for check in report["manual_release_candidate_check_statuses"]
+    }
+    assert statuses == {
+        "gatekeeper_first_launch": "passed",
+        "packaged_bridge_isolation": "passed",
+        "screen_recording_permission": "passed",
+        "real_provider_smoke": "not_applicable",
+    }
+
+
+def test_release_candidate_verifier_fails_failed_manual_check_evidence(
+    tmp_path, monkeypatch, capsys
+):
+    evidence_path = tmp_path / "tmp" / "manual-checks.json"
+    evidence_path.parent.mkdir()
+    evidence_path.write_text(
+        json.dumps(
+            {
+                "checks": [
+                    {
+                        "id": "screen_recording_permission",
+                        "status": "failed",
+                        "evidence": "macOS did not show Oha-Yachiyo in Screen Recording settings.",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        manual_checks_json=Path("tmp/manual-checks.json"),
+        report_json=Path("tmp/rc.json"),
+    ) == 1
+
+    output = capsys.readouterr().out
+    assert "[screen_recording_permission] failed" in output
+    assert "manual release-candidate check evidence: failed" in output
+    report = json.loads((tmp_path / "tmp" / "rc.json").read_text(encoding="utf-8"))
+    assert report["ok"] is False
+    assert report["manual_release_candidate_check_status"] == "failed"
+    assert report["manual_release_candidate_check_findings"] == []
+
+
 def test_release_candidate_verifier_checks_mounted_dmg_app(tmp_path, monkeypatch, capsys):
     release_dir = tmp_path / "release"
     release_dir.mkdir()

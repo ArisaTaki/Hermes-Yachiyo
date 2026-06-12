@@ -568,6 +568,10 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document structured manual RC check statuses",
     ),
     (
+        "--manual-checks-json",
+        "release packaging docs must document manual RC check evidence input",
+    ),
+    (
         "gatekeeper_first_launch",
         "release packaging docs must document the Gatekeeper manual RC check id",
     ),
@@ -806,6 +810,22 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release candidate verifier must define structured manual release checks",
     ),
     (
+        "MANUAL_RELEASE_CANDIDATE_CHECK_STATUS_VALUES",
+        "release candidate verifier must define allowed manual check statuses",
+    ),
+    (
+        '"passed"',
+        "release candidate verifier manual checks must support passed status",
+    ),
+    (
+        '"failed"',
+        "release candidate verifier manual checks must support failed status",
+    ),
+    (
+        '"not_applicable"',
+        "release candidate verifier manual checks must support not_applicable status",
+    ),
+    (
         '"gatekeeper_first_launch"',
         "release candidate verifier must track Gatekeeper first-launch manual status",
     ),
@@ -840,6 +860,18 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "_manual_release_candidate_check_report()",
         "release candidate verifier must copy manual check details into reports",
+    ),
+    (
+        "_load_manual_release_candidate_checks",
+        "release candidate verifier must load manual check evidence JSON",
+    ),
+    (
+        "manual_checks_json",
+        "release candidate verifier must expose manual check evidence input",
+    ),
+    (
+        '"--manual-checks-json"',
+        "release candidate verifier CLI must accept manual check evidence JSON",
     ),
 )
 STREAMING_PROVIDER_SMOKE_SCRIPT_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (

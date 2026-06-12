@@ -65,6 +65,12 @@ PROVIDER_SMOKE_COMMANDS: tuple[tuple[str, tuple[str, ...]], ...] = (
         ),
     ),
 )
+MANUAL_RELEASE_CANDIDATE_CHECK_STATUS_VALUES: tuple[str, ...] = (
+    "manual_required",
+    "passed",
+    "failed",
+    "not_applicable",
+)
 MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS: tuple[dict[str, str], ...] = (
     {
         "id": "gatekeeper_first_launch",
@@ -102,6 +108,17 @@ MANUAL_RELEASE_CANDIDATE_CHECKS: tuple[str, ...] = tuple(
 
 def _manual_release_candidate_check_report() -> list[dict[str, str]]:
     return [dict(check) for check in MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS]
+
+
+def _manual_release_candidate_check_status(
+    checks: Sequence[dict[str, str]],
+    findings: Sequence[Finding],
+) -> str:
+    if findings or any(check.get("status") == "failed" for check in checks):
+        return "failed"
+    if all(check.get("status") in {"passed", "not_applicable"} for check in checks):
+        return "passed"
+    return "manual_required"
 
 
 def existing_artifact_paths(root: Path) -> tuple[Path, ...]:
@@ -146,6 +163,17 @@ def _resolve_report_path(root: Path, report_json: Path) -> Path:
     return resolved
 
 
+def _resolve_project_file(root: Path, relative_or_absolute: Path, label: str) -> Path:
+    root_path = root.resolve(strict=False)
+    candidate = relative_or_absolute if relative_or_absolute.is_absolute() else root / relative_or_absolute
+    resolved = candidate.resolve(strict=False)
+    try:
+        resolved.relative_to(root_path)
+    except ValueError:
+        raise ValueError(f"{label} path must stay inside project root: {relative_or_absolute}")
+    return resolved
+
+
 def _validate_artifact_paths(root: Path, artifact_paths: Sequence[Path]) -> tuple[Path, ...]:
     root_path = root.resolve(strict=False)
     for artifact_path in artifact_paths:
@@ -172,6 +200,104 @@ def _validate_smoke_script_paths(root: Path, smoke_scripts: Sequence[Path]) -> t
                 f"release candidate smoke script path must stay inside project root: {smoke_script}"
             )
     return tuple(smoke_scripts)
+
+
+def _load_manual_release_candidate_checks(
+    root: Path,
+    manual_checks_json: Path | None,
+) -> tuple[list[dict[str, str]], list[Finding]]:
+    checks = _manual_release_candidate_check_report()
+    findings: list[Finding] = []
+    if manual_checks_json is None:
+        return checks, findings
+
+    try:
+        evidence_path = _resolve_project_file(
+            root,
+            manual_checks_json,
+            "manual release-candidate checks",
+        )
+        raw_payload = json.loads(evidence_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        findings.append(
+            Finding(
+                manual_checks_json,
+                f"manual release-candidate checks could not be loaded: {exc}",
+            )
+        )
+        return checks, findings
+
+    if isinstance(raw_payload, dict):
+        raw_checks = raw_payload.get("checks")
+    else:
+        raw_checks = raw_payload
+    if not isinstance(raw_checks, list):
+        findings.append(
+            Finding(
+                manual_checks_json,
+                "manual release-candidate checks JSON must be a list or contain a checks list",
+            )
+        )
+        return checks, findings
+
+    known = {check["id"]: check for check in checks}
+    seen: set[str] = set()
+    for index, raw_check in enumerate(raw_checks):
+        if not isinstance(raw_check, dict):
+            findings.append(
+                Finding(
+                    manual_checks_json,
+                    f"manual release-candidate check at index {index} must be an object",
+                )
+            )
+            continue
+        check_id = str(raw_check.get("id", "")).strip()
+        if check_id not in known:
+            findings.append(
+                Finding(
+                    manual_checks_json,
+                    f"manual release-candidate check has unknown id: {check_id or '<missing>'}",
+                )
+            )
+            continue
+        if check_id in seen:
+            findings.append(
+                Finding(
+                    manual_checks_json,
+                    f"manual release-candidate check is duplicated: {check_id}",
+                )
+            )
+            continue
+        seen.add(check_id)
+
+        status = str(raw_check.get("status", "")).strip()
+        if status not in MANUAL_RELEASE_CANDIDATE_CHECK_STATUS_VALUES:
+            findings.append(
+                Finding(
+                    manual_checks_json,
+                    f"manual release-candidate check {check_id} has invalid status: {status or '<missing>'}",
+                )
+            )
+            continue
+        evidence = str(raw_check.get("evidence", "")).strip()
+        if status in {"passed", "failed", "not_applicable"} and not evidence:
+            findings.append(
+                Finding(
+                    manual_checks_json,
+                    f"manual release-candidate check {check_id} requires evidence for status {status}",
+                )
+            )
+            continue
+
+        target = known[check_id]
+        target["status"] = status
+        if evidence:
+            target["evidence"] = evidence
+        notes = raw_check.get("notes")
+        if notes is not None:
+            target["notes"] = str(notes)
+
+    return checks, findings
 
 
 def _absolute_artifact_path(root: Path, artifact_path: Path) -> Path:
@@ -488,10 +614,19 @@ def verify_release_candidate(
     run_provider_smoke: bool = False,
     run_ui_smoke: bool = False,
     smoke_scripts: Sequence[Path] | None = None,
+    manual_checks_json: Path | None = None,
     report_json: Path | None = None,
 ) -> int:
     root = Path(root)
     failed = False
+    manual_checks, manual_check_findings = _load_manual_release_candidate_checks(
+        root,
+        manual_checks_json,
+    )
+    manual_check_status = _manual_release_candidate_check_status(
+        manual_checks,
+        manual_check_findings,
+    )
     report: dict[str, Any] = {
         "ok": False,
         "source_release_guards": {"status": "pending", "findings": []},
@@ -523,9 +658,11 @@ def verify_release_candidate(
             "findings": [],
             "run_requested": run_provider_smoke,
         },
-        "manual_release_candidate_check_status": "manual_required",
+        "manual_release_candidate_check_status": manual_check_status,
         "manual_release_candidate_checks": list(MANUAL_RELEASE_CANDIDATE_CHECKS),
-        "manual_release_candidate_check_statuses": _manual_release_candidate_check_report(),
+        "manual_release_candidate_check_statuses": manual_checks,
+        "manual_release_candidate_check_findings": _finding_report(manual_check_findings),
+        "manual_release_candidate_checks_source": str(manual_checks_json) if manual_checks_json else "",
     }
 
     source_only_conflicts: list[str] = []
@@ -809,9 +946,16 @@ def verify_release_candidate(
         }
 
     print("manual release-candidate checks:")
-    for check in MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS:
-        print(f"- [{check['id']}] {check['description']}")
+    for check in manual_checks:
+        print(f"- [{check['id']}] {check['status']}: {check['description']}")
+    if manual_check_findings:
+        print("manual release-candidate check evidence: failed")
+        for finding in manual_check_findings:
+            print(f"- {finding.format()}")
+    elif manual_checks_json is not None:
+        print(f"manual release-candidate check evidence: {manual_check_status}")
 
+    failed = failed or manual_check_status == "failed"
     report["ok"] = not failed
     if report_json is not None:
         try:
@@ -870,6 +1014,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=Path,
         help="Write a machine-readable release-candidate verification report.",
     )
+    parser.add_argument(
+        "--manual-checks-json",
+        type=Path,
+        help="Merge manual release-candidate check evidence from a project-local JSON file.",
+    )
     args = parser.parse_args(argv)
     return verify_release_candidate(
         artifact_paths=args.paths or None,
@@ -879,6 +1028,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         run_dmg_app_smoke=args.run_dmg_app_smoke,
         run_provider_smoke=args.run_provider_smoke,
         run_ui_smoke=args.run_ui_smoke,
+        manual_checks_json=args.manual_checks_json,
         report_json=args.report_json,
     )
 

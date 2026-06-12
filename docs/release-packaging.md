@@ -183,6 +183,12 @@ python scripts/verify_release_candidate.py --source-only --report-json tmp/sourc
 
 macOS release workflow 会在生成 release metadata 后、上传 DMG 前运行 `python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount --report-json release/rc-verification.json`，确保 CI 与本地 RC 验收入口一致，并把 `release/rc-verification.json` 作为可归档验收报告随 release artifacts 上传。`--check-dmg-mount` 会只读挂载发现到的 DMG，并对 DMG 内真实 `.app` 的 `Contents/Resources` 再执行 packaged app scan；如果 `OHA_YACHIYO_SMOKE_BASE_URL`、`OHA_YACHIYO_SMOKE_MODEL` 和 `OHA_YACHIYO_SMOKE_API_KEY` 都已配置，workflow 会向同一个 RC gate 传入 `--run-provider-smoke`，让 report 的 `provider_smoke` 字段记录真实 provider 文本流与 tool-call follow-up 结果。带 `--run-dmg-app-smoke` 的 packaged app 启动检查和带 `--run-ui-smoke` 的完整 Electron UI smoke 仍保留给本地 RC 复验，因为它们会启动本地 Electron 应用或 BrowserWindow。
 
-脚本仍会列出必须人工确认的首次启动 / Gatekeeper / 屏幕录制权限检查项，并在 `release/rc-verification.json` 中写入结构化 `manual_release_candidate_check_statuses`。这些条目默认是 `manual_required`，并带有稳定 id 与证据说明；当前固定 id 包括 `gatekeeper_first_launch`、`packaged_bridge_isolation`、`screen_recording_permission` 和 `real_provider_smoke`，用于最终 release signoff 时逐项附上人工复验记录或凭据不可用说明。
+脚本仍会列出必须人工确认的首次启动 / Gatekeeper / 屏幕录制权限检查项，并在 `release/rc-verification.json` 中写入结构化 `manual_release_candidate_check_statuses`。这些条目默认是 `manual_required`，并带有稳定 id 与证据说明；当前固定 id 包括 `gatekeeper_first_launch`、`packaged_bridge_isolation`、`screen_recording_permission` 和 `real_provider_smoke`，用于最终 release signoff 时逐项附上人工复验记录或凭据不可用说明。已有人工 evidence 时可传入项目内 JSON：
+
+```bash
+python scripts/verify_release_candidate.py --require-artifacts --manual-checks-json tmp/manual-rc-checks.json --report-json tmp/rc-with-manual-checks.json
+```
+
+`--manual-checks-json` 支持顶层 list 或 `{ "checks": [...] }`，每项至少包含 `id`、`status` 和必要时的 `evidence`。`status` 只能是 `manual_required`、`passed`、`failed` 或 `not_applicable`；`passed`、`failed` 和 `not_applicable` 必须带 evidence。未知 id、重复 id、非法 status、缺 evidence 或显式 `failed` 都会让 RC gate 失败并写入 `manual_release_candidate_check_findings`。
 
 后续如果要面向普通用户无 Gatekeeper 警告地分发，需要再补 Apple Developer ID 签名与 notarization；当前链路先保证可重复构建和可安装 DMG。
