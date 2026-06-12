@@ -37,6 +37,7 @@ from apps.shell.agent_runtime import (
     WorkflowApprovalTransitionContext,
     WorkflowAgentNodeHandoff,
     WorkflowChildOutcomeCoordinator,
+    WorkflowChildRunProjection,
     WorkflowCancellationProjectionCoordinator,
     WorkflowContinuationCoordinator,
     WorkflowParentRunLocator,
@@ -1536,6 +1537,41 @@ def test_approval_resume_coordinator_continues_custom_api_agent_after_approved_t
     assert calls[-1][1]["start_iteration"] == 4
     assert calls[-1][1]["run_id"] == "run_resume"
     assert calls[-1][1]["budget"] is budget
+
+
+def test_workflow_child_run_projection_builds_replay_payloads():
+    child_run = {
+        "run_id": "child_run",
+        "status": "completed",
+        "result": "Child result",
+    }
+    artifacts = [
+        {"kind": "workflow_child_artifact", "source_run_id": "child_run", "path": "a.md"},
+        {"kind": "workflow_child_artifact", "source_run_id": "child_run", "path": "b.md"},
+        {"kind": "workflow_child_artifact", "source_run_id": "other_child", "path": "c.md"},
+    ]
+    node_info = {
+        "workflow_node_id": "research",
+        "workflow_node_kind": "agent",
+        "workflow_node_label": "Research",
+    }
+
+    projection = WorkflowChildRunProjection.from_child_run(child_run, node_info, artifacts)
+
+    assert projection is not None
+    assert projection.agent_event_payload() == {
+        "child_run_id": "child_run",
+        "status": "completed",
+        "result": "Child result",
+        "artifact_count": 2,
+        **node_info,
+    }
+    assert projection.status_event_payload("running") == {
+        "child_run_id": "child_run",
+        "status": "running",
+        **node_info,
+    }
+    assert WorkflowChildRunProjection.from_child_run({}, node_info, artifacts) is None
 
 
 def test_workflow_parent_resume_coordinator_continues_completed_child():

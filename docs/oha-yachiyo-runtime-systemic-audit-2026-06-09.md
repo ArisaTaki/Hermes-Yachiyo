@@ -1313,6 +1313,7 @@ RunEvent sequence:
 
 - `WorkflowParentResumeCoordinator`
   - 负责子 Agent Run 状态变化后标记父 Workflow running / approval_required / failed / cancelled / resumed。
+  - `WorkflowChildRunProjection` 负责父 Workflow replay 中的 child run 状态、result preview、artifact count 和 node metadata payload。
   - 负责合并子 Run 结果、子 artifact references、父 Workflow timeline 和 RunGroup 状态更新。
 
 - `WorkflowContinuationCoordinator`
@@ -2124,6 +2125,7 @@ compileall passed
 - release workflow smoke 现在也强制包含 ToolApprovalResumeContext pending payload parsing 回归，确保 approved-tool resume 上下文继续统一解析 messages、tool request、remaining requests、next iteration、timeline、artifacts 和 budget 输入。
 - NativeRunEngine 的主聊天与 standalone Agent approved-tool resume 现在共用 `_resume_approved_tool_run()` 恢复步骤；主聊天仍保留 `model.output.completed` / running Task 投影，Agent Run 仍保留 running group / parent Workflow child projection 和 completed/failed group 投影，但 claim、tool-result follow-up、二次审批、失败清洗统一由同一内部步骤编排。release workflow 已锁定的 main chat / Agent claim-boundary 回归现在也显式断言两条路径都经过该共享恢复步骤。
 - release workflow smoke 现在也强制包含 WorkflowParentResumeCoordinator completed child handoff / replay idempotency 回归，确保 completed child 只恢复父 Workflow 一次，并写入 child completed 与 workflow resumed replay facts。
+- release workflow smoke 现在也强制包含 Workflow child run replay payload projection 回归，确保 child run 状态、result preview、artifact count 和 node metadata payload 继续由显式 projection boundary 维护。
 - release workflow smoke 现在也强制包含 WorkflowParentResumeCoordinator child approval replay idempotency 回归，确保重复 child approval_required update 不会重复投影父 Workflow replay fact 或重复更新父 Run / RunGroup。
 - release workflow smoke 现在也强制包含 WorkflowParentResumeCoordinator child cancellation / failure replay idempotency 回归，确保重复 child cancelled / failed update 不会重复投影父 Workflow replay fact 或重复更新父 Run / RunGroup。
 - release workflow smoke 现在也强制包含 Workflow agent-node child run handoff 回归，确保 child Agent、child goal、upstream context、node metadata 和 replay payload 继续由显式 handoff 边界维护。

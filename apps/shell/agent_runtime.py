@@ -3643,6 +3643,58 @@ class WorkflowRunStartProjector:
         return timeline, event_payload
 
 
+@dataclass(frozen=True)
+class WorkflowChildRunProjection:
+    """Replay payload snapshot for projecting child Run state into a Workflow."""
+
+    child_run_id: str
+    status: str
+    result_preview: Any
+    artifact_count: int
+    node_info: dict[str, str]
+
+    @classmethod
+    def from_child_run(
+        cls,
+        child_run: dict[str, Any],
+        child_node_info: dict[str, str],
+        artifacts: list[dict[str, Any]],
+    ) -> "WorkflowChildRunProjection | None":
+        child_run_id = str(child_run.get("run_id") or "")
+        if not child_run_id:
+            return None
+        status = str(child_run.get("status") or "")
+        return cls(
+            child_run_id=child_run_id,
+            status=status,
+            result_preview=_tool_input_preview(child_run.get("result") or status, limit=1800),
+            artifact_count=sum(
+                1
+                for artifact in artifacts
+                if isinstance(artifact, dict)
+                and artifact.get("kind") == "workflow_child_artifact"
+                and str(artifact.get("source_run_id") or "") == child_run_id
+            ),
+            node_info=dict(child_node_info),
+        )
+
+    def agent_event_payload(self) -> dict[str, Any]:
+        return {
+            "child_run_id": self.child_run_id,
+            "status": self.status,
+            "result": self.result_preview,
+            "artifact_count": self.artifact_count,
+            **self.node_info,
+        }
+
+    def status_event_payload(self, status: str | None = None) -> dict[str, Any]:
+        return {
+            "child_run_id": self.child_run_id,
+            "status": self.status if status is None else status,
+            **self.node_info,
+        }
+
+
 class WorkflowParentResumeCoordinator:
     """Coordinates parent Workflow updates after a child Run changes state."""
 
@@ -3682,16 +3734,6 @@ class WorkflowParentResumeCoordinator:
             self.resume_parent_after_child_update(workflow_run, child_run)
 
     @staticmethod
-    def _child_artifact_count(artifacts: list[dict[str, Any]], child_run_id: str) -> int:
-        return sum(
-            1
-            for artifact in artifacts
-            if isinstance(artifact, dict)
-            and artifact.get("kind") == "workflow_child_artifact"
-            and str(artifact.get("source_run_id") or "") == child_run_id
-        )
-
-    @staticmethod
     def _timeline_has_child_event(timeline: list[dict[str, Any]], event_name: str, child_run_id: str) -> bool:
         if not child_run_id:
             return False
@@ -3709,21 +3751,13 @@ class WorkflowParentResumeCoordinator:
         child_node_info: dict[str, str],
         artifacts: list[dict[str, Any]],
     ) -> None:
-        child_run_id = str(child_run.get("run_id") or "")
-        if not child_run_id:
+        projection = WorkflowChildRunProjection.from_child_run(child_run, child_node_info, artifacts)
+        if projection is None:
             return
-        status = str(child_run.get("status") or "")
-        payload = {
-            "child_run_id": child_run_id,
-            "status": status,
-            "result": _tool_input_preview(child_run.get("result") or status, limit=1800),
-            "artifact_count": self._child_artifact_count(artifacts, child_run_id),
-            **child_node_info,
-        }
         self._append_run_event(
             str(workflow_run["run_id"]),
             "workflow.node.agent",
-            payload,
+            projection.agent_event_payload(),
         )
 
     def _mark_parent_child_running(
@@ -3741,11 +3775,12 @@ class WorkflowParentResumeCoordinator:
         child_label, child_node_info = self._workflow_child_node_context(timeline, child_run)
         child_run_id = str(child_run.get("run_id") or "")
         self._merge_workflow_child_run_outcome(timeline, artifacts, child_run, child_label)
-        child_resumed_payload = {
-            "child_run_id": child_run_id,
-            "status": "running",
-            **child_node_info,
-        }
+        projection = WorkflowChildRunProjection.from_child_run(child_run, child_node_info, artifacts)
+        child_resumed_payload = (
+            projection.status_event_payload("running")
+            if projection is not None
+            else {"child_run_id": child_run_id, "status": "running", **child_node_info}
+        )
         already_child_resumed = self._timeline_has_child_event(
             timeline,
             "workflow.run.child_resumed",
@@ -3827,6 +3862,7 @@ class WorkflowParentResumeCoordinator:
             return workflow_run
         child_label, child_node_info = self._workflow_child_node_context(timeline, child_run)
         self._merge_workflow_child_run_outcome(timeline, artifacts, child_run, child_label)
+        projection = WorkflowChildRunProjection.from_child_run(child_run, child_node_info, artifacts)
         if child_status == "approval_required":
             self._append_child_agent_state_event(
                 workflow_run,
@@ -3834,11 +3870,11 @@ class WorkflowParentResumeCoordinator:
                 child_node_info,
                 artifacts,
             )
-            event_payload = {
-                "child_run_id": child_run_id,
-                "status": "approval_required",
-                **child_node_info,
-            }
+            event_payload = (
+                projection.status_event_payload("approval_required")
+                if projection is not None
+                else {"child_run_id": child_run_id, "status": "approval_required", **child_node_info}
+            )
             timeline.append(
                 self._timeline(
                     "workflow.run.approval_required",
@@ -3881,19 +3917,27 @@ class WorkflowParentResumeCoordinator:
                 self._timeline(
                     f"workflow.run.{status}",
                     detail,
-                    child_run_id=child_run_id,
-                    status=child_status,
-                    **child_node_info,
+                    **(
+                        projection.status_event_payload(child_status)
+                        if projection is not None
+                        else {"child_run_id": child_run_id, "status": child_status, **child_node_info}
+                    ),
                 )
             )
             self._append_run_event(
                 str(workflow_run["run_id"]),
                 f"workflow.run.{status}",
                 {
-                    "child_run_id": child_run_id,
-                    "status": child_status,
-                    "result": _tool_input_preview(child_result or child_status, limit=1800),
-                    **child_node_info,
+                    **(
+                        projection.status_event_payload(child_status)
+                        if projection is not None
+                        else {"child_run_id": child_run_id, "status": child_status, **child_node_info}
+                    ),
+                    "result": (
+                        projection.result_preview
+                        if projection is not None
+                        else _tool_input_preview(child_result or child_status, limit=1800)
+                    ),
                 },
             )
             result = self._update_run(
@@ -3917,7 +3961,11 @@ class WorkflowParentResumeCoordinator:
                 child_node_info,
                 artifacts,
             )
-            resumed_payload = {"child_run_id": child_run_id, "status": "running", **child_node_info}
+            resumed_payload = (
+                projection.status_event_payload("running")
+                if projection is not None
+                else {"child_run_id": child_run_id, "status": "running", **child_node_info}
+            )
             timeline.append(
                 self._timeline(
                     "workflow.run.resumed",
