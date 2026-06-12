@@ -40,6 +40,7 @@ from apps.shell.agent_runtime import (
     WorkflowAgentNodeExecution,
     WorkflowChildOutcomeCoordinator,
     WorkflowChildRunProjection,
+    WorkflowChildStatusProjection,
     WorkflowCancellationProjectionCoordinator,
     WorkflowCancellationTarget,
     WorkflowContinuationCoordinator,
@@ -1699,6 +1700,59 @@ def test_workflow_child_run_projection_builds_replay_payloads():
         **node_info,
     }
     assert WorkflowChildRunProjection.from_child_run({}, node_info, artifacts) is None
+
+
+def test_workflow_child_status_projection_builds_projected_and_fallback_payloads():
+    node_info = {
+        "workflow_node_id": "research",
+        "workflow_node_kind": "agent",
+        "workflow_node_label": "Research",
+    }
+    projected = WorkflowChildStatusProjection.from_child_run(
+        {
+            "run_id": "child_run",
+            "status": "failed",
+            "result": "Child failed",
+        },
+        node_info,
+        [
+            {"kind": "workflow_child_artifact", "source_run_id": "child_run", "path": "a.md"},
+            {"kind": "other", "source_run_id": "child_run", "path": "ignored.md"},
+        ],
+    )
+    fallback = WorkflowChildStatusProjection.from_child_run(
+        {
+            "status": "cancelled",
+            "result": "Child cancelled",
+        },
+        node_info,
+        [],
+    )
+
+    assert projected.projection is not None
+    assert projected.status_event_payload("running") == {
+        "child_run_id": "child_run",
+        "status": "running",
+        **node_info,
+    }
+    assert projected.result_event_payload("failed") == {
+        "child_run_id": "child_run",
+        "status": "failed",
+        "result": "Child failed",
+        **node_info,
+    }
+    assert fallback.projection is None
+    assert fallback.status_event_payload() == {
+        "child_run_id": "",
+        "status": "cancelled",
+        **node_info,
+    }
+    assert fallback.result_event_payload("failed") == {
+        "child_run_id": "",
+        "status": "failed",
+        "result": "Child cancelled",
+        **node_info,
+    }
 
 
 def test_workflow_parent_resume_coordinator_continues_completed_child():

@@ -3723,6 +3723,56 @@ class WorkflowChildRunProjection:
         }
 
 
+@dataclass(frozen=True)
+class WorkflowChildStatusProjection:
+    """Status payload for projecting child Run transitions into a parent Workflow."""
+
+    child_run_id: str
+    status: str
+    result_preview: Any
+    node_info: dict[str, str]
+    projection: WorkflowChildRunProjection | None = None
+
+    @classmethod
+    def from_child_run(
+        cls,
+        child_run: dict[str, Any],
+        child_node_info: dict[str, str],
+        artifacts: list[dict[str, Any]],
+    ) -> "WorkflowChildStatusProjection":
+        projection = WorkflowChildRunProjection.from_child_run(child_run, child_node_info, artifacts)
+        child_status = str(child_run.get("status") or "")
+        if projection is not None:
+            return cls(
+                child_run_id=projection.child_run_id,
+                status=projection.status,
+                result_preview=projection.result_preview,
+                node_info=dict(projection.node_info),
+                projection=projection,
+            )
+        return cls(
+            child_run_id=str(child_run.get("run_id") or ""),
+            status=child_status,
+            result_preview=_tool_input_preview(child_run.get("result") or child_status, limit=1800),
+            node_info=dict(child_node_info),
+        )
+
+    def status_event_payload(self, status: str | None = None) -> dict[str, Any]:
+        if self.projection is not None:
+            return self.projection.status_event_payload(status)
+        return {
+            "child_run_id": self.child_run_id,
+            "status": self.status if status is None else status,
+            **self.node_info,
+        }
+
+    def result_event_payload(self, status: str | None = None) -> dict[str, Any]:
+        return {
+            **self.status_event_payload(status),
+            "result": self.result_preview,
+        }
+
+
 class WorkflowParentResumeCoordinator:
     """Coordinates parent Workflow updates after a child Run changes state."""
 
@@ -3803,12 +3853,8 @@ class WorkflowParentResumeCoordinator:
         child_label, child_node_info = self._workflow_child_node_context(timeline, child_run)
         child_run_id = str(child_run.get("run_id") or "")
         self._merge_workflow_child_run_outcome(timeline, artifacts, child_run, child_label)
-        projection = WorkflowChildRunProjection.from_child_run(child_run, child_node_info, artifacts)
-        child_resumed_payload = (
-            projection.status_event_payload("running")
-            if projection is not None
-            else {"child_run_id": child_run_id, "status": "running", **child_node_info}
-        )
+        status_projection = WorkflowChildStatusProjection.from_child_run(child_run, child_node_info, artifacts)
+        child_resumed_payload = status_projection.status_event_payload("running")
         already_child_resumed = self._timeline_has_child_event(
             timeline,
             "workflow.run.child_resumed",
@@ -3890,7 +3936,7 @@ class WorkflowParentResumeCoordinator:
             return workflow_run
         child_label, child_node_info = self._workflow_child_node_context(timeline, child_run)
         self._merge_workflow_child_run_outcome(timeline, artifacts, child_run, child_label)
-        projection = WorkflowChildRunProjection.from_child_run(child_run, child_node_info, artifacts)
+        status_projection = WorkflowChildStatusProjection.from_child_run(child_run, child_node_info, artifacts)
         if child_status == "approval_required":
             self._append_child_agent_state_event(
                 workflow_run,
@@ -3898,11 +3944,7 @@ class WorkflowParentResumeCoordinator:
                 child_node_info,
                 artifacts,
             )
-            event_payload = (
-                projection.status_event_payload("approval_required")
-                if projection is not None
-                else {"child_run_id": child_run_id, "status": "approval_required", **child_node_info}
-            )
+            event_payload = status_projection.status_event_payload("approval_required")
             timeline.append(
                 self._timeline(
                     "workflow.run.approval_required",
@@ -3945,28 +3987,13 @@ class WorkflowParentResumeCoordinator:
                 self._timeline(
                     f"workflow.run.{status}",
                     detail,
-                    **(
-                        projection.status_event_payload(child_status)
-                        if projection is not None
-                        else {"child_run_id": child_run_id, "status": child_status, **child_node_info}
-                    ),
+                    **status_projection.status_event_payload(child_status),
                 )
             )
             self._append_run_event(
                 str(workflow_run["run_id"]),
                 f"workflow.run.{status}",
-                {
-                    **(
-                        projection.status_event_payload(child_status)
-                        if projection is not None
-                        else {"child_run_id": child_run_id, "status": child_status, **child_node_info}
-                    ),
-                    "result": (
-                        projection.result_preview
-                        if projection is not None
-                        else _tool_input_preview(child_result or child_status, limit=1800)
-                    ),
-                },
+                status_projection.result_event_payload(child_status),
             )
             result = self._update_run(
                 str(workflow_run["run_id"]),
@@ -3989,11 +4016,7 @@ class WorkflowParentResumeCoordinator:
                 child_node_info,
                 artifacts,
             )
-            resumed_payload = (
-                projection.status_event_payload("running")
-                if projection is not None
-                else {"child_run_id": child_run_id, "status": "running", **child_node_info}
-            )
+            resumed_payload = status_projection.status_event_payload("running")
             timeline.append(
                 self._timeline(
                     "workflow.run.resumed",
