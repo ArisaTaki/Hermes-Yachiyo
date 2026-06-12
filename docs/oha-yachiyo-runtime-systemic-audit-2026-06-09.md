@@ -2181,25 +2181,29 @@ compileall passed
 - release candidate verifier 已新增 `--run-dmg-app-smoke`：本地会只读挂载 DMG、用临时 `HOME` / `OHA_YACHIYO_HOME` 与临时 Bridge 端口直接启动 DMG 内 `Oha-Yachiyo.app`，等待 packaged backend `/status` 返回 `service=oha-yachiyo` 后关闭应用进程。提升权限后 `python scripts/verify_release_candidate.py --require-artifacts --run-dmg-app-smoke --report-json tmp/rc-verification-local-dmg-app.json` 已通过；组合运行 `python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount --run-dmg-app-smoke --report-json tmp/rc-verification-local-dmg-combined.json` 也已通过，证明当前 DMG 内 `.app` 能实际启动并暴露 packaged Bridge，而不是只通过静态 artifact scan。
 - release candidate verifier 已新增 `--run-provider-smoke`：本地 RC 可以复用 release workflow 的 opt-in 真实 provider 合同，分别验证文本流 `finish_reason=stop`，以及 `workspace_read` tool-call、`README.md` 参数、`path=README.md` JSON 字段、`finish_reason=tool_calls` 和 synthetic tool-result follow-up `finish_reason=stop`。显式传入该 flag 时如果 `OHA_YACHIYO_SMOKE_BASE_URL`、`OHA_YACHIYO_SMOKE_MODEL` 或 `OHA_YACHIYO_SMOKE_API_KEY` 缺失，会失败并写入 report；当前本机三项 env 均缺失，`python scripts/verify_release_candidate.py --run-provider-smoke --report-json tmp/rc-verification-provider-smoke-missing.json` 已按预期失败并只输出缺失变量名。release workflow 现在会在三项 secrets 均配置时把 `--run-provider-smoke` 注入最终 `python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount ... --report-json release/rc-verification.json`，让真实 provider smoke 不再作为旁路步骤，而是进入归档的 `provider_smoke` report 字段。
 - release candidate report 现在还会写入结构化 `manual_release_candidate_check_statuses` 和 `manual_release_candidate_check_summary`，把 `gatekeeper_first_launch`、`packaged_bridge_isolation`、`screen_recording_permission`、`chat_native_file_upload`、`packaged_ui_sampling` 和 `real_provider_smoke` 六个最终验收项标成稳定 id，并记录每项 release signoff 前需要附上的 evidence 和下一步动作；旧的 `manual_release_candidate_checks` 字符串列表保留兼容。summary 会输出 `remaining_count`、`remaining_check_ids`、`remaining_next_actions`、`failed_check_ids` 和 `automated_evidence_check_ids`，后续判断“还差多少”和下一步该跑哪个 gate / 做哪项人工复验不再需要人工数列表。默认状态仍是 `manual_required`，但通过同一次 RC gate 的 `--run-dmg-app-smoke` 会把 `packaged_bridge_isolation` 自动标为 `passed` 并写入 `evidence_source=automated_rc_gate`，通过 `--run-provider-smoke` 会把 `real_provider_smoke` 自动标为 `passed`；自动 evidence 只填充仍为 `manual_required` 的项，不覆盖签核人已写入的 `passed` / `failed` / `not_applicable`。`--write-manual-checks-template` 可生成带 `evidence_prompt` 的项目内 JSON 模板，release workflow 会把 `release/manual-rc-checks.template.json` 随 DMG/RC report 一起上传；`--manual-checks-json` 可从项目内 JSON 合并人工 evidence，支持顶层 list、`{ "checks": [...] }` 或上一轮 RC report 的 `manual_release_candidate_check_statuses`，让自动 evidence 能直接进入最终 signoff rerun 而不需要复制模板；支持状态为 `manual_required` / `passed` / `failed` / `not_applicable`，未知 id、重复 id、非法 status、缺 evidence 或显式 failed 都会让 RC gate 失败并写入 `manual_release_candidate_check_findings`；最终发布签核可加 `--require-manual-checks-complete`，任何在自动 evidence 和人工 evidence 合并后仍为 `manual_required` 的检查都会失败。release verifier 会阻断 RC verifier、release workflow 或 release packaging 文档丢失这些字段、关键 id、summary、next actions、自动 evidence 合并、模板输出、evidence 输入、上一轮 RC report 复用或最终签核强制入口。
+- 本轮已按批量 RC 路线合并运行 `python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount --run-dmg-app-smoke --run-ui-smoke --report-json tmp/final-rc.json`，source release guards、built artifact guards、DMG mount guards、DMG app startup smoke 和 19 个 Electron UI smoke 均通过；`manual_release_candidate_check_summary.remaining_count` 从 source-only dry run 的 6 项降为 5 项，`automated_evidence_check_ids` 为 `packaged_bridge_isolation`。当前本机三项 `OHA_YACHIYO_SMOKE_*` env 仍缺失，`provider_smoke` 保持 skipped，最终签核需要在有凭据环境运行 `--run-provider-smoke`，或把 `real_provider_smoke` 以 credentials-unavailable evidence 标为 `not_applicable`。
 - 桌面 `.app` 已实际启动并验证 bridge；主要 UI 页面已有静态入口 guard、浏览器级 route smoke、source Browser 按钮级交互 smoke、DMG 内 packaged app startup smoke 和十九个本地 Electron UI smoke。剩余 UI 验收重点不再是入口是否存在，而是当前 Browser runner 尚不能完整驱动的真实图片 file upload、真实外部 provider 环境、Gatekeeper/Finder 首启路径、屏幕录制授权，以及 release candidate 包的跨页面人工抽样复验。
 
 ## 下一步建议
 
-1. 做 PR-3 成熟功能 UI 级回归：
-   - Chat UI 图片附件的真实 file upload 仍是最大浏览器级缺口；当前图片已有 source Bridge E2E、HTTP route roundtrip、TaskRunner image roundtrip、RunEvent replay 和本地 Electron smoke 的 CDP file input / 附件预览 / 提交闭环，且 release verifier 会阻断该 Electron smoke 退化，但 Codex in-app Browser 当前缺少 `setInputFiles()` / 虚拟剪贴板能力，不能直接计作完整 Browser upload E2E。
+1. 做最终发布签核批处理：
+   - 以 `tmp/final-rc.json` 作为自动 evidence source，补齐 `gatekeeper_first_launch`、`screen_recording_permission`、`chat_native_file_upload` 和 `packaged_ui_sampling` 四个人工项；如果没有真实 provider credentials，则把 `real_provider_smoke` 标为 `not_applicable` 并附 credentials-unavailable evidence。
+   - 补齐人工 evidence 后运行 `python scripts/verify_release_candidate.py --require-artifacts --manual-checks-json tmp/final-rc.json --require-manual-checks-complete --report-json tmp/final-rc-signed.json`，让最终是否可发布由同一个 RC gate 判定。
+
+2. 做 release candidate `.app` 内跨页面人工抽样：
+   - Chat UI 图片附件的自动链路已有 source Bridge E2E、HTTP route roundtrip、TaskRunner image roundtrip、RunEvent replay 和本地 Electron smoke 的 CDP file input / 附件预览 / 提交闭环；剩余只需人工确认 packaged app 的原生 file picker 路径。
    - 群聊、自动委派、会话总结、Agent Studio、Workflow、Run Detail、approval UI、主动关怀、本地截图、手动 TTS 和 Live2D 已有 source Browser / Electron smoke / packaged selector gate 的组合覆盖；后续重点是 release candidate `.app` 内跨页面人工复验，而不是继续只补静态 selector。
 
-2. 做 NativeRunEngine 组件边界收敛：
-   - 逐步把 approval resume execution 编排拆成可测试的恢复步骤，保持 API 行为不变。
-   - 继续审计 Workflow/Agent child-run 编排，避免 `NativeRunEngine` 重新变成单体。
-   - 保持现有 API 不变，只减少单类内聚。
-
-3. 做 streaming/event replay 硬化：
+3. 做真实 provider smoke 收口：
    - 在具备真实 provider credentials 的环境运行 `python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount --run-provider-smoke --report-json tmp/rc-verification-provider-smoke.json`，或触发配置了三项 `OHA_YACHIYO_SMOKE_*` secrets 的 release workflow，确认真实网关也满足 `finish_reason`、`workspace_read` 参数和 tool-result follow-up 合同，并让结果进入 RC report 的 `provider_smoke` 字段；通过后同一份 report 会自动把 `real_provider_smoke` 签核项标为 `passed`。
    - contract tests 已覆盖主流 chunk 形态；后续只在发现真实 provider 新 frame 形态时继续补 NativeRunEngine / smoke helper 对称回归。
    - RunEvent replay/projection 已有 HTTP pagination/filtering、Run Detail、Workflow child approval、rerun/artifact 和 packaged selector gate 覆盖；剩余重点是 release candidate UI 中的人工抽样复验。
 
-4. 做最终发布验收切片：
+4. 把 NativeRunEngine 组件边界收敛降级为发布后硬化：
+   - approval resume、Workflow/Agent child-run 等内部编排已经有 release workflow smoke 覆盖；除非 RC / 人工签核暴露真实缺陷，否则不再把内部小边界拆分作为发布前阻塞项。
+   - 后续重构仍应保持 API 行为不变，只减少单类内聚。
+
+5. 做最终发布验收切片：
    - release/alpha/stable 的旧产品身份扫描、debug routes guard、dev credential fallback guard、release metadata、packaged resources scan 和 generated artifact guard 已由 `scripts/verify_release_artifacts.py` 与 release workflow 锁定。
    - 当前免费分发策略是 `.app` 自签名、DMG 不签名且不 notarize，并在 release notes 中明确 Gatekeeper 首启提示和屏幕录制权限；如果后续引入 Apple Developer ID，再新增 notarization / stapling / `spctl` 实测切片。
-   - 当前实际产出的 `.app` / DMG 已通过 `python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount` 和 `python scripts/verify_release_candidate.py --require-artifacts --run-dmg-app-smoke`，十九个 Electron UI smoke 也已在本地 RC gate 通过；最终发布前剩余人工确认首次启动文案、Gatekeeper 打开路径和屏幕录制权限提示，以及在具备真实 provider credentials 时运行带 `--run-provider-smoke` 的 RC gate。
+   - 当前实际产出的 `.app` / DMG 已在同一次批量 RC gate 中通过 `--check-dmg-mount`、`--run-dmg-app-smoke` 和 `--run-ui-smoke`；最终发布前剩余人工确认首次启动文案、Gatekeeper 打开路径、屏幕录制权限提示、原生图片 file picker、packaged UI 抽样，以及在具备真实 provider credentials 时运行带 `--run-provider-smoke` 的 RC gate。
