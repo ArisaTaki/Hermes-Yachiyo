@@ -4587,6 +4587,45 @@ class WorkflowArtifactNodeWrite:
         )
 
 
+@dataclass(frozen=True)
+class WorkflowStartNodeProjection:
+    """Replay payload for a completed Workflow start node."""
+
+    node_id: str
+    node_kind: str
+    node_label: str
+
+    @classmethod
+    def from_node(
+        cls,
+        node: dict[str, Any],
+        *,
+        label: str,
+        kind: str,
+    ) -> "WorkflowStartNodeProjection":
+        return cls(
+            node_id=str(node.get("id") or ""),
+            node_kind=kind,
+            node_label=label,
+        )
+
+    def event_payload(self) -> dict[str, Any]:
+        return {
+            "workflow_node_id": self.node_id,
+            "workflow_node_kind": self.node_kind,
+            "workflow_node_label": self.node_label,
+            "status": "completed",
+        }
+
+    def timeline_event(self, timeline_factory: Any) -> dict[str, Any]:
+        return timeline_factory(
+            "workflow.node.start",
+            self.node_label,
+            workflow_node_id=self.node_id,
+            status="completed",
+        )
+
+
 class WorkflowContinuationCoordinator:
     """Executes Workflow nodes for a Workflow Run."""
 
@@ -4622,24 +4661,12 @@ class WorkflowContinuationCoordinator:
                     "workflow_node_label": label,
                 }
                 if kind == "start":
-                    start_payload = {
-                        "workflow_node_id": str(node.get("id") or ""),
-                        "workflow_node_kind": kind,
-                        "workflow_node_label": label,
-                        "status": "completed",
-                    }
-                    timeline.append(
-                        engine._timeline(
-                            "workflow.node.start",
-                            label,
-                            workflow_node_id=start_payload["workflow_node_id"],
-                            status="completed",
-                        )
-                    )
+                    projection = WorkflowStartNodeProjection.from_node(node, label=label, kind=kind)
+                    timeline.append(projection.timeline_event(engine._timeline))
                     engine.append_run_event(
                         str(run["run_id"]),
                         "workflow.node.start",
-                        start_payload,
+                        projection.event_payload(),
                     )
                     continue
                 if kind == "agent":

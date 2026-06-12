@@ -52,6 +52,7 @@ from apps.shell.agent_runtime import (
     WorkflowPathPlanner,
     WorkflowResumePlanner,
     WorkflowRunStartProjector,
+    WorkflowStartNodeProjection,
     _MAX_AGENT_TOOL_ITERATIONS,
 )
 from scripts.verify_secret_redaction import verify_secret_redaction
@@ -2631,6 +2632,29 @@ def test_workflow_artifact_node_write_builds_record_and_replay_payload(tmp_path)
         "event": "workflow.node.artifact",
         "detail": "Final Report",
         **write.event_payload(),
+    }
+
+
+def test_workflow_start_node_projection_builds_timeline_and_replay_payloads():
+    projection = WorkflowStartNodeProjection.from_node(
+        {"id": "start", "type": "start"},
+        label="Start",
+        kind="start",
+    )
+
+    assert projection.timeline_event(
+        lambda event, detail, **payload: {"event": event, "detail": detail, **payload}
+    ) == {
+        "event": "workflow.node.start",
+        "detail": "Start",
+        "workflow_node_id": "start",
+        "status": "completed",
+    }
+    assert projection.event_payload() == {
+        "workflow_node_id": "start",
+        "workflow_node_kind": "start",
+        "workflow_node_label": "Start",
+        "status": "completed",
     }
 
 
