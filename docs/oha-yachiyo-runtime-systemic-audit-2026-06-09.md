@@ -2101,6 +2101,9 @@ compileall passed
 - release workflow smoke 现在会在 packaging 前直接运行 Chat 图片附件、Chat completed message Run Detail handoff、Chat Agent progress Run Detail handoff、Chat 取消、Chat 审批、Chat delegated summary、群聊 summary、Activity feed/detail、Diagnostics local screenshot、Live2D settings、launcher session summary、Proactive TTS、Agent Studio agents 定义 CRUD、Agent Studio Skill Library、Agent Studio Skill mounting、Agent Studio Skill folders、Agent Run Detail replay / Workflow child approval、Workflow save-and-run 和 Workflow management/delete 十九个 Electron UI smoke；release verifier 会阻断 workflow 丢失这些关键 smoke。
 - release workflow 的 opt-in 真实 provider 文本流 smoke 现在要求 `finish_reason=stop`，tool-call smoke 要求 `finish_reason=tool_calls` 且要求 synthetic `workspace_read` tool-result 后第二轮 stream 输出内容与 `finish_reason=stop`；release verifier 会阻断丢失任一断言的 workflow，避免真实 provider 未完成标准结束协议或不接受 tool-result history 时误过发布门禁。
 - NativeRunEngine 与 opt-in streaming smoke helper 现在也接受 OpenAI-compatible gateway 预处理后的单数 `tool_call` frame：`choices[].delta.tool_call` / `choices[].message.tool_call` 会和既有 `tool_calls[]` 分片一样归并，进入 `workspace.read` 执行与 tool-result provider history，仍只落 `agent.tool.call` / `model.output.completed` 完成态 facts，不写 token 级 delta；smoke helper 摘要继续不打印 raw arguments。该 NativeRunEngine 产品路径回归已纳入 release workflow smoke，release verifier 会阻断发布门禁漏跑单数 SSE tool-call frame 覆盖。
+- NativeRunEngine Agent Run 现在也覆盖 Responses `output_item.done` message snapshot、`content_part.done` snapshot、`refusal.done` snapshot、reasoning privacy、provider message tools、OpenAI SDK object tools、object-shaped arguments、split/coalesced/multiline SSE content、Responses call_id history 和多 tool call history；对应测试已纳入 release workflow smoke 和 release artifact verifier。
+- NativeRunEngine Agent Run 与 opt-in streaming smoke helper 均已覆盖无 `index`、交错到达但带不同 `id` 的 SSE tool-call delta 按 id 归并，避免真实 provider 省略 index 时把多个工具调用拼接到同一个 call；公开 smoke summary 继续只输出参数长度，不回显 raw arguments。
+- release artifact verifier 现在会动态发现 Main Chat 与 Agent Run provider contract tests，并要求它们在 packaged backend / DMG build 之前运行；Agent Run discovery 已覆盖 `http_sse`、`streaming`、`responses`、`function_call`、`provider_message`、`sdk`、`reasoning` 和 `refusal` 类测试，避免后续新增 provider 合同但忘记接入 release workflow。
 - release verifier 现在除了 release / alpha / stable metadata，也会模拟 `OHA_YACHIYO_PACKAGED_BUILD=1`，确认 packaged build env 即使带 `OHA_YACHIYO_DEV=1` 也不能启用 development features、Bridge debug routes 或 `DevFileCredentialStore` fallback。
 - release workflow smoke 现在也强制包含 Bridge debug routes release metadata / packaged build guard，直接覆盖 `debug_routes_enabled()` 在 release-like metadata 与 packaged env 下不会因 `OHA_YACHIYO_DEV=1` 被重新打开。
 - release workflow smoke 现在也强制包含 approved terminal failure output redaction 回归，确保批准后的 `terminal.run` 非零退出不会把 stdout / stderr secret 写入 Run projection、RunEvent 或 runtime SQLite。
@@ -2133,16 +2136,13 @@ compileall passed
 - 新 Agent Run 的 runtime metadata / prompt / compiled timeline 已从旧 `yachiyo_agent` / `Yachiyo Agent Runtime` 收敛为 `oha_agent` / `Oha Agent Runtime`；源码级 legacy kernel guard 和 release artifact verifier 的 binary scan 都会阻断 `yachiyo_agent` 与 `Runtime: Yachiyo Agent Runtime` 旧 context artifact runtime 标记回归，同时避免误伤合法的 `Oha-Yachiyo Agent Runtime` 产品文案。
 - Electron 桌面 Bridge 重启会轮换 session token；前端 `restartDesktopBridge()` 现在会清空 renderer 侧 cached Bridge token，确保重启后的 mutating request 重新从 preload 读取新 token。
 - CredentialStore release/packaged guard 现在同时覆盖 direct DevFile fallback 禁用与 `create_credential_store()` factory 选择：即使 `OHA_YACHIYO_DEV=1`，release/alpha/stable metadata 或 packaged build env 也不会选择 development file fallback；macOS release-like build 仍选择 Keychain。
-- 桌面 `.app` 已实际启动并验证 bridge；主要 UI 页面已有静态入口 guard、浏览器级 route smoke 和部分按钮级交互 smoke，但仍缺少完整成熟功能 E2E。
+- 桌面 `.app` 已实际启动并验证 bridge；主要 UI 页面已有静态入口 guard、浏览器级 route smoke、source Browser 按钮级交互 smoke 和十九个本地 Electron UI smoke。剩余 UI 验收重点不再是入口是否存在，而是当前 Browser runner 尚不能完整驱动的真实图片 file upload、真实外部 provider 环境、以及 release candidate 包的跨页面人工复验。
 
 ## 下一步建议
 
 1. 做 PR-3 成熟功能 UI 级回归：
-   - 在现有入口 guard、同步 UI flow contract、route smoke、部分按钮级 smoke、Chat readiness Browser E2E 和 fake-model Chat Browser E2E 基础上补完整浏览器 E2E。
-   - Chat UI 图片附件的浏览器级交互复验；当前图片已有 source Bridge E2E 但还不是完整 UI upload E2E，approval approve、message reject、composer reject 与取消按钮已有 source Bridge Browser smoke。
-   - 群聊、自动委派、会话总结的完整浏览器交互。
-   - Agent Studio、Workflow、Run Detail、approval UI。
-   - 主动关怀、本地截图、手动 TTS、Live2D。
+   - Chat UI 图片附件的真实 file upload 仍是最大浏览器级缺口；当前图片已有 source Bridge E2E、HTTP route roundtrip、TaskRunner image roundtrip、RunEvent replay 和本地 Electron smoke 的附件预览/提交闭环，但 Codex in-app Browser 当前缺少 `setInputFiles()` / 虚拟剪贴板能力，不能直接计作完整 UI upload E2E。
+   - 群聊、自动委派、会话总结、Agent Studio、Workflow、Run Detail、approval UI、主动关怀、本地截图、手动 TTS 和 Live2D 已有 source Browser / Electron smoke / packaged selector gate 的组合覆盖；后续重点是 release candidate `.app` 内跨页面人工复验，而不是继续只补静态 selector。
 
 2. 做 NativeRunEngine 组件边界收敛：
    - 逐步把 approval resume execution 编排拆成可测试的恢复步骤，保持 API 行为不变。
@@ -2150,10 +2150,11 @@ compileall passed
    - 保持现有 API 不变，只减少单类内聚。
 
 3. 做 streaming/event replay 硬化：
-   - 用 `scripts/smoke_openai_compatible_stream.py` 对真实 streaming provider 做联调，确认不同 provider chunk 形态都能正确合并。
-   - 继续补 RunEvent replay/projection 的端到端 UI 展示验证。
+   - 在具备真实 provider credentials 的环境运行 `.github/workflows/release-macos.yml` 中 opt-in 的 `scripts/smoke_openai_compatible_stream.py` 文本流与 tool-call 流，确认真实网关也满足 `finish_reason`、`workspace_read` 参数和 tool-result follow-up 合同。
+   - contract tests 已覆盖主流 chunk 形态；后续只在发现真实 provider 新 frame 形态时继续补 NativeRunEngine / smoke helper 对称回归。
+   - RunEvent replay/projection 已有 HTTP pagination/filtering、Run Detail、Workflow child approval、rerun/artifact 和 packaged selector gate 覆盖；剩余重点是 release candidate UI 中的人工抽样复验。
 
 4. 做最终发布验收切片：
-   - release/alpha package grep。
-   - 确认 release build 不注册 debug routes，不包含 dev credential fallback。
-   - 代码签名、notarization 和首次启动权限提示验证。
+   - release/alpha/stable 的旧产品身份扫描、debug routes guard、dev credential fallback guard、release metadata、packaged resources scan 和 generated artifact guard 已由 `scripts/verify_release_artifacts.py` 与 release workflow 锁定。
+   - 当前免费分发策略是 `.app` 自签名、DMG 不签名且不 notarize，并在 release notes 中明确 Gatekeeper 首启提示和屏幕录制权限；如果后续引入 Apple Developer ID，再新增 notarization / stapling / `spctl` 实测切片。
+   - 最终 RC 前仍需对实际产出的 `.app` / DMG 运行 release verifier、二进制旧身份扫描、关键 Electron smoke，并人工确认首次启动文案与权限提示。
