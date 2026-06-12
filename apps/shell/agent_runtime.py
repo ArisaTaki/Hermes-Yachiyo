@@ -635,6 +635,26 @@ def _responses_stream_event_type(value: Any) -> str:
     return str(_message_field(value, "type") or _message_field(value, "event") or "").strip().lower()
 
 
+_RESPONSES_STREAM_REASONING_EVENTS = {
+    "response.reasoning.delta",
+    "response.reasoning.done",
+    "response.reasoning_text.delta",
+    "response.reasoning_text.done",
+    "response.reasoning_summary_text.delta",
+    "response.reasoning_summary_text.done",
+    "reasoning.delta",
+    "reasoning.done",
+    "reasoning_text.delta",
+    "reasoning_text.done",
+    "reasoning_summary_text.delta",
+    "reasoning_summary_text.done",
+}
+
+
+def _responses_stream_is_reasoning_event(value: Any) -> bool:
+    return _responses_stream_event_type(value) in _RESPONSES_STREAM_REASONING_EVENTS
+
+
 def _responses_stream_text_delta(chunk: Any) -> str | None:
     event_type = _responses_stream_event_type(chunk)
     if event_type in {"response.output_text.delta", "output_text.delta"}:
@@ -862,6 +882,8 @@ def _message_visible_content_text(content: Any) -> str:
 def _stream_chunk_text(chunk: Any) -> str:
     if isinstance(chunk, str):
         return chunk
+    if _responses_stream_is_reasoning_event(chunk):
+        return ""
     responses_text = _responses_stream_text_delta(chunk)
     if responses_text is not None:
         return responses_text
@@ -1104,6 +1126,8 @@ def _coalesce_model_message(message: Any) -> dict[str, Any]:
     tool_calls: list[dict[str, Any]] | None = None
     tool_call_deltas: dict[tuple[int, int], dict[str, Any]] = {}
     for chunk in message:
+        if _responses_stream_is_reasoning_event(chunk):
+            continue
         responses_delta = _responses_stream_text_delta(chunk)
         responses_done = _responses_stream_text_done(chunk)
         if responses_delta is not None or responses_done is not None:
