@@ -765,6 +765,7 @@ def test_verifier_requires_release_packaging_docs_for_release_gates(tmp_path):
     assert "release packaging docs must document latest JSON metadata format validation" in messages
     assert "release packaging docs must document reusable app build metadata preparation" in messages
     assert "release packaging docs must document local RC artifact build helper" in messages
+    assert "release packaging docs must document local RC signoff refresh helper" in messages
     assert "release packaging docs must document per-DMG checksum file validation" in messages
     assert "release packaging docs must document the local RC verification entrypoint" in messages
     assert "release packaging docs must document the local RC DMG mount gate" in messages

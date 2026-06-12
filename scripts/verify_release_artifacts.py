@@ -107,6 +107,7 @@ DEFAULT_SCAN_PATHS: tuple[Path, ...] = (
     Path("scripts/build_backend.py"),
     Path("scripts/prepare_app_build_metadata.py"),
     Path("scripts/build_release_candidate_artifacts.py"),
+    Path("scripts/refresh_local_rc_signoff.py"),
     Path("scripts/verify_release_candidate.py"),
     Path("apps/frontend/public/oha-yachiyo-build.json"),
 )
@@ -659,6 +660,10 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "python scripts/build_release_candidate_artifacts.py",
         "release packaging docs must document local RC artifact build helper",
+    ),
+    (
+        "python scripts/refresh_local_rc_signoff.py",
+        "release packaging docs must document local RC signoff refresh helper",
     ),
     (
         "每个 DMG 的 `.sha256` 文件",

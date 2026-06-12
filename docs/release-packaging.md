@@ -116,6 +116,14 @@ python scripts/build_release_candidate_artifacts.py --channel experimental --rep
 
 CI 仍直接运行 `python scripts/prepare_app_build_metadata.py`、`python scripts/build_backend.py --clean` 和 `npm --prefix apps/frontend run dist:mac`，因为 workflow 工作区不会把临时 metadata 改动提交回仓库。
 
+如果要一次刷新当前 HEAD 的本地 RC evidence、Screen Recording attempt、provider-not-applicable 草稿和 final signoff preview，运行：
+
+```bash
+python scripts/refresh_local_rc_signoff.py --channel experimental --repository kuguya-AI-app-develop/oha-yachiyo
+```
+
+该命令会生成 `tmp/rc-verification-<short-commit>-packaged-batch.json`、`tmp/rc-verification-<short-commit>-screen.json`、`tmp/rc-signoff-<short-commit>-current.json` 和 `tmp/rc-signoff-<short-commit>-preview.json`；如果 final signoff 只因为 Gatekeeper / Screen Recording 仍为 `manual_required` 而失败，命令仍返回成功，方便把“还差多少”作为状态刷新而不是构建失败处理。
+
 固定下载链接：
 
 - 最新正式版 DMG：<https://github.com/kuguya-AI-app-develop/oha-yachiyo/releases/latest/download/Oha-Yachiyo-main-latest.dmg>
