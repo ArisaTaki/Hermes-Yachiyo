@@ -14183,6 +14183,14 @@ def test_tool_descriptor_schema_and_validation_share_patch_contract():
     assert "patch" in properties
     assert "content" not in properties
     assert schema["function"]["parameters"]["required"] == ["path"]
+    properties["approved"] = {"type": "boolean"}
+    properties["path"]["description"] = "mutated"
+    schema["function"]["parameters"]["required"].append("patch")
+    fresh_schema = NativeRunEngine._tool_schemas(["workspace.write_patch"])[0]
+    fresh_properties = fresh_schema["function"]["parameters"]["properties"]
+    assert "approved" not in fresh_properties
+    assert fresh_properties["path"]["description"] == "Relative file path inside writable scopes."
+    assert fresh_schema["function"]["parameters"]["required"] == ["path"]
 
     NativeRunEngine._validate_tool_payload("workspace.write_patch", {"path": "src/out.txt", "patch": "*** patch"})
     with pytest.raises(AgentRuntimeError, match="未声明字段：approved"):

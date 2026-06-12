@@ -1231,7 +1231,7 @@ class ToolDescriptor:
                 "description": self.description,
                 "parameters": {
                     "type": "object",
-                    "properties": self.properties,
+                    "properties": deepcopy(self.properties),
                     "required": list(self.required),
                     "additionalProperties": False,
                 },
