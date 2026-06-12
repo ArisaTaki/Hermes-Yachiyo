@@ -10083,6 +10083,60 @@ def test_agent_run_persists_streaming_refusal_delta(tmp_path, monkeypatch):
         service.close()
 
 
+def test_agent_run_hides_streaming_reasoning_delta(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    private_reasoning = "agent provider hidden reasoning"
+    expected = "Agent visible final answer"
+    requests = []
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            yield (
+                f'data: {{"choices":[{{"delta":{{"reasoning_content":"{private_reasoning}"}}}}]}}\n\n'.encode(
+                    "utf-8"
+                )
+            )
+            yield f'data: {{"choices":[{{"delta":{{"content":"{expected}"}}}}]}}\n\n'.encode("utf-8")
+            yield b"data: [DONE]\n\n"
+
+    def fake_urlopen(request, **kwargs):
+        body = json.loads(request.data.decode("utf-8"))
+        requests.append({"request": request, "body": body, "kwargs": kwargs})
+        assert request.full_url == "https://api.example.test/v1/chat/completions"
+        assert request.get_header("Accept") == "text/event-stream"
+        assert body["stream"] is True
+        return FakeResponse()
+
+    monkeypatch.setattr("apps.core.tls.urlrequest.urlopen", fake_urlopen)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Reasoning Delta HTTP SSE Agent",
+                "model_mode": "custom_api",
+                "model_config": {"base_url": "https://api.example.test/v1", "model": "demo-model", "api_key": "sk-secret"},
+            }
+        )
+        run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Keep stream reasoning private"})
+        run_events = service.list_run_events(run["run_id"], include_internal=True)["events"]
+        completed_fact = next(event for event in run_events if event["event_type"] == "agent.run.completed")
+        projection = json.dumps({"run": run, "events": run_events}, ensure_ascii=False)
+
+        assert run["status"] == "completed"
+        assert run["result"] == expected
+        assert len(requests) == 1
+        assert completed_fact["payload"]["result"] == expected
+        assert private_reasoning not in projection
+        assert not any(str(event["event_type"]).endswith(".delta") for event in run_events)
+    finally:
+        service.close()
+
+
 def test_agent_run_rejects_reasoning_only_output_without_leaking(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     private_reasoning = "agent provider private reasoning only"
