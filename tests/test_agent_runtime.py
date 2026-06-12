@@ -7436,6 +7436,30 @@ def test_run_group_repository_manages_membership_and_cleanup(tmp_path):
         service.close()
 
 
+def test_run_group_repository_redacts_summary_projection(tmp_path):
+    service = make_service(tmp_path)
+    leaked_secret = "sk-run-group-summary-secret123456"
+    try:
+        group = service.run_groups.insert(title="Grouped Runs", source="workflow")
+        service.run_groups.update(
+            group["run_group_id"],
+            status="failed",
+            summary=f"Workflow child failed with token={leaked_secret}",
+        )
+
+        grouped = service.get_run_group(group["run_group_id"])
+        raw_summary = service._conn.execute(
+            "SELECT summary FROM run_groups WHERE run_group_id=?",
+            (group["run_group_id"],),
+        ).fetchone()["summary"]
+
+        assert grouped["summary"] == "Workflow child failed with token=[redacted]"
+        assert raw_summary == "Workflow child failed with token=[redacted]"
+        assert leaked_secret not in json.dumps({"grouped": grouped, "raw_summary": raw_summary}, ensure_ascii=False)
+    finally:
+        service.close()
+
+
 def test_run_repository_deletes_rows_and_artifacts(tmp_path):
     service = make_service(tmp_path)
     try:

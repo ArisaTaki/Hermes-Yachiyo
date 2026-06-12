@@ -2149,7 +2149,7 @@ class RunGroupRepository:
             """,
             (
                 status or current["status"],
-                summary if summary is not None else current["summary"],
+                redact_secrets(summary) if summary is not None else current["summary"],
                 _now(),
                 run_group_id,
             ),
