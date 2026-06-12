@@ -1324,6 +1324,7 @@ RunEvent sequence:
   - 负责 Workflow 节点 timeline、child Agent Run 创建、approval pause、artifact write、completed/failed 状态落库。
   - `WorkflowAgentNodeHandoff` 负责从 Workflow agent node 解析 child Agent、child goal、upstream context、node metadata 和 replay payload，避免 child-run 参数继续散落在执行循环内。
   - `WorkflowAgentNodeExecution` 负责从 handoff 创建并执行 child Agent Run，集中维护 next context、artifact count、agent replay payload 和 status replay payload。
+  - `WorkflowApprovalPauseProjection` 负责 Workflow approval node 暂停时的 private pending approval、public replay payload、timeline event 和 Run update 字段。
   - 负责异步 Workflow 后台线程异常时的 failed Run、RunEvent 和 root RunGroup 投影。
   - `NativeRunEngine._continue_workflow_run()` 保留为薄 wrapper，成熟调用点不变。
 

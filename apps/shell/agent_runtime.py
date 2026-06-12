@@ -2951,6 +2951,96 @@ class WorkflowApprovalResumeCoordinator:
         )
 
 
+@dataclass(frozen=True)
+class WorkflowApprovalPauseProjection:
+    """Pending approval and replay payload for a Workflow approval node pause."""
+
+    approval_id: str
+    node_id: str
+    node_kind: str
+    label: str
+    criteria: str
+    context: str
+    next_index: int
+    requested_at: str
+
+    @classmethod
+    def from_node(
+        cls,
+        engine: Any,
+        node: dict[str, Any],
+        *,
+        label: str,
+        kind: str,
+        context: str,
+        next_index: int,
+    ) -> "WorkflowApprovalPauseProjection":
+        return cls(
+            approval_id=f"approval_{uuid4().hex[:12]}",
+            node_id=str(node.get("id") or ""),
+            node_kind=kind,
+            label=label,
+            criteria=engine._workflow_approval_criteria(node),
+            context=context,
+            next_index=next_index,
+            requested_at=_now(),
+        )
+
+    def pending_approval(self) -> dict[str, Any]:
+        return {
+            "approval_id": self.approval_id,
+            "tool": "workflow.approval",
+            "input_preview": {
+                "checkpoint": self.label,
+                "context": _tool_input_preview(self.context),
+                **({"criteria": self.criteria} if self.criteria else {}),
+            },
+            "requested_at": self.requested_at,
+            "workflow_context": self.context,
+            "workflow_next_index": self.next_index,
+            "workflow_node_id": self.node_id,
+            "workflow_node_label": self.label,
+            "workflow_node_approval_criteria": self.criteria,
+        }
+
+    def public_pending_approval(self) -> dict[str, Any]:
+        return _public_pending_approval(self.pending_approval())
+
+    def event_payload(self) -> dict[str, Any]:
+        return {
+            "workflow_node_id": self.node_id,
+            "workflow_node_kind": self.node_kind,
+            "workflow_node_label": self.label,
+            "workflow_node_approval_criteria": self.criteria,
+            "status": "approval_required",
+            "pending_approval": self.public_pending_approval(),
+        }
+
+    def timeline_event(self, timeline_factory: Any) -> dict[str, Any]:
+        return timeline_factory(
+            "workflow.node.approval_required",
+            self.label,
+            **self.event_payload(),
+        )
+
+    def result_text(self) -> str:
+        return f"等待审批：{self.label}"
+
+    def update_fields(
+        self,
+        *,
+        timeline: list[dict[str, Any]],
+        artifacts: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        return {
+            "status": "approval_required",
+            "result": self.result_text(),
+            "timeline": timeline,
+            "artifacts": artifacts,
+            "pending_approval": self.pending_approval(),
+        }
+
+
 class ApprovalResumeCoordinator:
     """Executes the approved tool portion of a paused run resume."""
 
@@ -4762,59 +4852,29 @@ class WorkflowContinuationCoordinator:
         node_index: int,
     ) -> dict[str, Any]:
         engine = self._engine
-        criteria = engine._workflow_approval_criteria(node)
-        pending = {
-            "approval_id": f"approval_{uuid4().hex[:12]}",
-            "tool": "workflow.approval",
-            "input_preview": {
-                "checkpoint": label,
-                "context": _tool_input_preview(context),
-                **({"criteria": criteria} if criteria else {}),
-            },
-            "requested_at": _now(),
-            "workflow_context": context,
-            "workflow_next_index": node_index + 1,
-            "workflow_node_id": str(node.get("id") or ""),
-            "workflow_node_label": label,
-            "workflow_node_approval_criteria": criteria,
-        }
-        timeline.append(
-            engine._timeline(
-                "workflow.node.approval_required",
-                label,
-                workflow_node_id=str(node.get("id") or ""),
-                workflow_node_kind=kind,
-                workflow_node_label=label,
-                workflow_node_approval_criteria=criteria,
-                status="approval_required",
-                pending_approval=_public_pending_approval(pending),
-            )
+        projection = WorkflowApprovalPauseProjection.from_node(
+            engine,
+            node,
+            label=label,
+            kind=kind,
+            context=context,
+            next_index=node_index + 1,
         )
+        timeline.append(projection.timeline_event(engine._timeline))
         engine.append_run_event(
             str(run["run_id"]),
             "workflow.node.approval_required",
-            {
-                "workflow_node_id": str(node.get("id") or ""),
-                "workflow_node_kind": kind,
-                "workflow_node_label": label,
-                "workflow_node_approval_criteria": criteria,
-                "status": "approval_required",
-                "pending_approval": _public_pending_approval(pending),
-            },
+            projection.event_payload(),
         )
         result = engine._update_run(
             str(run["run_id"]),
-            status="approval_required",
-            result=f"等待审批：{label}",
-            timeline=timeline,
-            artifacts=artifacts,
-            pending_approval=pending,
+            **projection.update_fields(timeline=timeline, artifacts=artifacts),
         )
         if root_group:
             engine._update_run_group(
                 run_group_id,
                 status="approval_required",
-                summary=f"等待审批：{label}",
+                summary=projection.result_text(),
             )
             result = engine.get_run(result["run_id"])
         return result

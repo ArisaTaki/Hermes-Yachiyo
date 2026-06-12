@@ -35,6 +35,7 @@ from apps.shell.agent_runtime import (
     ToolBroker,
     WorkflowApprovalResumeCoordinator,
     WorkflowApprovalResumeContext,
+    WorkflowApprovalPauseProjection,
     WorkflowApprovalTransitionContext,
     WorkflowAgentNodeHandoff,
     WorkflowAgentNodeExecution,
@@ -2504,6 +2505,70 @@ def test_workflow_agent_node_execution_runs_child_and_builds_replay_payloads():
             },
         ),
     ]
+
+
+def test_workflow_approval_pause_projection_builds_private_and_public_payloads():
+    timeline: list[dict[str, object]] = []
+    artifacts: list[dict[str, object]] = [{"kind": "workflow_artifact", "path": "notes.md"}]
+    projection = WorkflowApprovalPauseProjection(
+        approval_id="approval_manual",
+        node_id="gate",
+        node_kind="approval",
+        label="Human Gate",
+        criteria="Review output",
+        context="Child result ready",
+        next_index=4,
+        requested_at="2026-06-12T00:00:00+00:00",
+    )
+    pending = projection.pending_approval()
+    event = projection.timeline_event(
+        lambda event, detail, **payload: {"event": event, "detail": detail, **payload}
+    )
+    timeline.append(event)
+
+    assert pending == {
+        "approval_id": "approval_manual",
+        "tool": "workflow.approval",
+        "input_preview": {
+            "checkpoint": "Human Gate",
+            "context": "Child result ready",
+            "criteria": "Review output",
+        },
+        "requested_at": "2026-06-12T00:00:00+00:00",
+        "workflow_context": "Child result ready",
+        "workflow_next_index": 4,
+        "workflow_node_id": "gate",
+        "workflow_node_label": "Human Gate",
+        "workflow_node_approval_criteria": "Review output",
+    }
+    assert projection.public_pending_approval() == {
+        "approval_id": "approval_manual",
+        "tool": "workflow.approval",
+        "input_preview": {
+            "checkpoint": "Human Gate",
+            "context": "Child result ready",
+            "criteria": "Review output",
+        },
+        "requested_at": "2026-06-12T00:00:00+00:00",
+    }
+    assert "workflow_context" not in projection.public_pending_approval()
+    assert event == {
+        "event": "workflow.node.approval_required",
+        "detail": "Human Gate",
+        "workflow_node_id": "gate",
+        "workflow_node_kind": "approval",
+        "workflow_node_label": "Human Gate",
+        "workflow_node_approval_criteria": "Review output",
+        "status": "approval_required",
+        "pending_approval": projection.public_pending_approval(),
+    }
+    assert projection.update_fields(timeline=timeline, artifacts=artifacts) == {
+        "status": "approval_required",
+        "result": "等待审批：Human Gate",
+        "timeline": timeline,
+        "artifacts": artifacts,
+        "pending_approval": pending,
+    }
 
 
 def test_workflow_continuation_coordinator_pauses_for_approval_node():
