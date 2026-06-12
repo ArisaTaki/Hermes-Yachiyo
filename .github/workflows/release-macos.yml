@@ -169,6 +169,7 @@ jobs:
             tests/test_agent_runtime.py::test_terminal_run_timeout_kills_process_group \
             tests/test_agent_runtime.py::test_main_chat_model_loop_coalesces_stream_chunks_before_persisting \
             tests/test_agent_runtime.py::test_main_chat_model_preserves_stream_finish_reason_and_usage_in_completed_event \
+            tests/test_agent_runtime.py::test_main_chat_model_preserves_stream_stop_reason_as_finish_reason_in_completed_event \
             tests/test_agent_runtime.py::test_main_chat_model_loop_uses_responses_output_text_done_snapshot \
             tests/test_agent_runtime.py::test_main_chat_model_loop_uses_responses_output_item_message_snapshot \
             tests/test_agent_runtime.py::test_main_chat_model_loop_uses_responses_content_part_snapshot \
@@ -221,6 +222,7 @@ jobs:
             tests/test_agent_runtime.py::test_agent_run_consumes_http_sse_content_parts \
             tests/test_agent_runtime.py::test_agent_run_persists_streaming_refusal_delta \
             tests/test_agent_runtime.py::test_agent_run_accepts_refusal_message_field \
+            tests/test_agent_runtime.py::test_agent_run_preserves_stream_stop_reason_as_finish_reason_in_run_events \
             tests/test_agent_runtime.py::test_agent_run_uses_responses_refusal_done_snapshot \
             tests/test_agent_runtime.py::test_agent_run_hides_streaming_reasoning_delta \
             tests/test_agent_runtime.py::test_agent_run_rejects_reasoning_only_output_without_leaking \

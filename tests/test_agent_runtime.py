@@ -4241,6 +4241,50 @@ def test_main_chat_model_preserves_stream_finish_reason_and_usage_in_completed_e
         service.close()
 
 
+def test_main_chat_model_preserves_stream_stop_reason_as_finish_reason_in_completed_event(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    def fake_chat(_base_url, _model, _api_key, _messages, *, tools=None, stream=False):
+        assert tools is None
+        assert stream is True
+
+        def stream_chunks():
+            yield {"choices": [{"delta": {"content": "provider stop "}, "stop_reason": None}]}
+            yield {"choices": [{"delta": {"content": "metadata"}, "stop_reason": "stop"}]}
+
+        return stream_chunks()
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-stream-stop-reason",
+            session_id="session-main-stream-stop-reason",
+            user_goal="Preserve provider stop_reason metadata",
+        )
+        result = service.call_main_chat_model(
+            run["run_id"],
+            [{"role": "user", "content": "Preserve provider stop_reason metadata"}],
+        )
+        rows = service._conn.execute(
+            "SELECT event_type, payload_json FROM run_events WHERE run_id=? ORDER BY sequence",
+            (run["run_id"],),
+        ).fetchall()
+        output_rows = [row for row in rows if row["event_type"] == "model.output.completed"]
+        payload = json.loads(output_rows[0]["payload_json"])
+
+        assert result == "provider stop metadata"
+        assert len(output_rows) == 1
+        assert payload["content"] == "provider stop metadata"
+        assert payload["finish_reason"] == "stop"
+        assert not any(str(row["event_type"]).endswith(".delta") for row in rows)
+    finally:
+        service.close()
+
+
 def test_main_chat_model_loop_uses_responses_output_text_done_snapshot(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     expected = "final Responses snapshot"
@@ -12414,6 +12458,49 @@ def test_agent_run_accepts_refusal_message_field(tmp_path, monkeypatch):
         assert run["status"] == "completed"
         assert run["result"] == expected
         assert completed_fact["payload"]["result"] == expected
+        assert not any(str(event["event_type"]).endswith(".delta") for event in run_events)
+    finally:
+        service.close()
+
+
+def test_agent_run_preserves_stream_stop_reason_as_finish_reason_in_run_events(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    expected = "Agent provider stop metadata"
+
+    def fake_chat(_base_url, _model, _api_key, _messages, *, tools=None, stream=False):
+        assert tools is not None
+        assert stream is True
+
+        def stream():
+            yield {"choices": [{"delta": {"content": "Agent provider stop "}, "stop_reason": None}]}
+            yield {"choices": [{"delta": {"content": "metadata"}, "stop_reason": "stop"}]}
+
+        return stream()
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Stop Reason Metadata Agent",
+                "model_mode": "custom_api",
+                "model_config": {
+                    "base_url": "https://api.example.test/v1",
+                    "model": "demo-model",
+                    "api_key": "sk-secret",
+                },
+            }
+        )
+        run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Return stop_reason"})
+        run_events = service.list_run_events(run["run_id"], include_internal=True)["events"]
+        event_types = [event["event_type"] for event in run_events]
+        output_fact = next(event for event in run_events if event["event_type"] == "model.output.completed")
+
+        assert run["status"] == "completed"
+        assert run["result"] == expected
+        assert event_types.index("model.output.completed") < event_types.index("agent.run.completed")
+        assert output_fact["payload"]["content"] == expected
+        assert output_fact["payload"]["finish_reason"] == "stop"
+        assert output_fact["payload"]["truncated"] is False
         assert not any(str(event["event_type"]).endswith(".delta") for event in run_events)
     finally:
         service.close()

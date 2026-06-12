@@ -679,20 +679,27 @@ def _stream_chunk_usage(chunk: Any) -> dict[str, Any] | None:
 
 
 def _stream_chunk_finish_reason(chunk: Any) -> str | None:
-    direct = _message_field(chunk, "finish_reason")
+    direct = _first_present(_message_field(chunk, "finish_reason"), _message_field(chunk, "stop_reason"))
     if direct:
         return str(direct)
     choices = _message_field(chunk, "choices")
     if isinstance(choices, list):
         for choice in choices:
-            reason = _message_field(choice, "finish_reason")
+            reason = _first_present(_message_field(choice, "finish_reason"), _message_field(choice, "stop_reason"))
             if reason:
                 return str(reason)
     response = _message_field(chunk, "response")
+    response_reason = (
+        _first_present(_message_field(response, "finish_reason"), _message_field(response, "stop_reason"))
+        if response is not None
+        else None
+    )
+    if response_reason:
+        return str(response_reason)
     output = _message_field(response, "output") if response is not None else None
     if isinstance(output, list):
         for item in output:
-            reason = _message_field(item, "finish_reason")
+            reason = _first_present(_message_field(item, "finish_reason"), _message_field(item, "stop_reason"))
             if reason:
                 return str(reason)
     return None
@@ -700,7 +707,7 @@ def _stream_chunk_finish_reason(chunk: Any) -> str | None:
 
 def _model_message_metadata(message: Any) -> dict[str, Any]:
     metadata: dict[str, Any] = {}
-    finish_reason = _message_field(message, "finish_reason")
+    finish_reason = _first_present(_message_field(message, "finish_reason"), _message_field(message, "stop_reason"))
     if finish_reason:
         metadata["finish_reason"] = str(finish_reason)
     usage = _coerce_model_usage(_message_field(message, "usage"))
@@ -8871,12 +8878,22 @@ class NativeRunEngine:
             artifacts.append({"kind": "context", **artifact})
             timeline.append(self._timeline("agent.artifact.write", "agent-context.md", artifact=artifact))
             result = self._run_custom_api_agent(agent, context, broker, timeline, artifacts, run_id=run_id)
+            result_text = str(result)
+            self.append_run_event(
+                run_id,
+                "model.output.completed",
+                _model_output_completed_payload(
+                    result_text,
+                    truncated=bool(getattr(result, "output_truncated", False)),
+                    metadata=_model_output_metadata(result),
+                ),
+            )
             timeline.append(self._timeline("agent.run.completed", "Agent run completed"))
-            self.append_run_event(run_id, "agent.run.completed", {"result": result})
+            self.append_run_event(run_id, "agent.run.completed", {"result": result_text})
             return self._update_run(
                 run_id,
                 status="completed",
-                result=result,
+                result=result_text,
                 timeline=timeline,
                 artifacts=artifacts,
                 pending_approval=None,

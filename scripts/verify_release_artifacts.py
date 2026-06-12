@@ -1888,6 +1888,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover streaming output completed-event persistence",
     ),
     (
+        "tests/test_agent_runtime.py::test_main_chat_model_preserves_stream_stop_reason_as_finish_reason_in_completed_event",
+        "macOS release workflow smoke tests must cover NativeRunEngine stop_reason stream metadata normalization",
+    ),
+    (
         "tests/test_agent_runtime.py::test_main_chat_model_loop_coalesces_openai_sdk_object_stream_before_persisting",
         "macOS release workflow smoke tests must cover OpenAI SDK object stream completed-event persistence",
     ),
@@ -2034,6 +2038,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "tests/test_agent_runtime.py::test_agent_run_accepts_refusal_message_field",
         "macOS release workflow smoke tests must cover NativeRunEngine Agent Run refusal message fields",
+    ),
+    (
+        "tests/test_agent_runtime.py::test_agent_run_preserves_stream_stop_reason_as_finish_reason_in_run_events",
+        "macOS release workflow smoke tests must cover NativeRunEngine Agent Run stop_reason metadata replay",
     ),
     (
         "tests/test_agent_runtime.py::test_agent_run_uses_responses_refusal_done_snapshot",
