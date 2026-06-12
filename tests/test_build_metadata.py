@@ -55,6 +55,26 @@ def test_development_features_disabled_by_release_metadata(monkeypatch, tmp_path
     assert build_metadata.development_features_enabled() is False
 
 
+@pytest.mark.parametrize("channel", ["release", "alpha", "stable"])
+def test_development_features_disabled_by_release_channel_env(monkeypatch, channel):
+    _clear_build_env(monkeypatch)
+    monkeypatch.setenv("OHA_YACHIYO_DEV", "1")
+    monkeypatch.setenv("OHA_YACHIYO_BUILD_CHANNEL", channel)
+
+    assert build_metadata.is_release_like_build() is True
+    assert build_metadata.development_features_enabled() is False
+
+
+@pytest.mark.parametrize("env_name", ["OHA_YACHIYO_RELEASE_BUILD", "OHA_YACHIYO_ALPHA_BUILD"])
+def test_development_features_disabled_by_release_flag_env(monkeypatch, env_name):
+    _clear_build_env(monkeypatch)
+    monkeypatch.setenv("OHA_YACHIYO_DEV", "1")
+    monkeypatch.setenv(env_name, "1")
+
+    assert build_metadata.is_release_like_build() is True
+    assert build_metadata.development_features_enabled() is False
+
+
 def test_packaged_backend_reads_pyinstaller_meipass_metadata(monkeypatch, tmp_path):
     _clear_build_env(monkeypatch)
     meipass = tmp_path / "_MEIPASS"
