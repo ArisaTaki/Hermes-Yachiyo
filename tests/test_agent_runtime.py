@@ -37,6 +37,7 @@ from apps.shell.agent_runtime import (
     WorkflowApprovalResumeContext,
     WorkflowApprovalTransitionContext,
     WorkflowAgentNodeHandoff,
+    WorkflowAgentNodeExecution,
     WorkflowChildOutcomeCoordinator,
     WorkflowChildRunProjection,
     WorkflowCancellationProjectionCoordinator,
@@ -2302,6 +2303,115 @@ def test_workflow_agent_node_handoff_builds_child_run_payload():
         context="Previous result",
         has_agent_upstream=False,
     ).upstream == ""
+
+
+def test_workflow_agent_node_execution_runs_child_and_builds_replay_payloads():
+    calls: list[tuple[str, dict[str, object]]] = []
+    agent = {"agent_id": "agent_research", "name": "Research Agent"}
+    handoff = WorkflowAgentNodeHandoff(
+        agent=agent,
+        agent_id="agent_research",
+        node_id="research",
+        node_kind="agent",
+        node_label="Research",
+        step_task="Summarize launch risk.",
+        child_goal="Ship release candidate\n\nStep: Summarize launch risk.",
+        upstream="Previous result",
+    )
+    child_result = {
+        "run_id": "child_run",
+        "kind": "agent_run",
+        "status": "completed",
+        "result": "Launch risk summary",
+        "artifacts": [
+            {"kind": "context", "path": "context.md"},
+            {"kind": "artifact", "path": "risk.md"},
+            {"kind": "artifact", "path": "plan.md"},
+        ],
+    }
+
+    class FakeEngine:
+        def _insert_run(self, **kwargs):
+            calls.append(("insert_run", kwargs))
+            return {"run_id": "child_run"}
+
+        def _execute_agent_run(self, run_id, received_agent, user_goal, *, upstream):
+            calls.append(
+                (
+                    "execute_agent_run",
+                    {
+                        "run_id": run_id,
+                        "agent": received_agent,
+                        "user_goal": user_goal,
+                        "upstream": upstream,
+                    },
+                )
+            )
+            return child_result
+
+        def _workflow_child_artifact_refs(self, child_run, label):
+            calls.append(("workflow_child_artifact_refs", {"child_run": child_run, "label": label}))
+            return [
+                artifact
+                for artifact in child_run.get("artifacts") or []
+                if artifact.get("kind") != "context"
+            ]
+
+    execution = WorkflowAgentNodeExecution.from_handoff(
+        FakeEngine(),
+        handoff,
+        run_group_id="workflow_group",
+    )
+
+    assert execution.handoff is handoff
+    assert execution.child_run is child_result
+    assert execution.next_context == "Launch risk summary"
+    assert execution.status == "completed"
+    assert execution.artifact_count == 2
+    assert execution.agent_event_payload() == {
+        "workflow_node_id": "research",
+        "workflow_node_kind": "agent",
+        "workflow_node_label": "Research",
+        "workflow_node_task": "Summarize launch risk.",
+        "child_run_id": "child_run",
+        "status": "completed",
+        "result": "Launch risk summary",
+        "artifact_count": 2,
+    }
+    assert execution.status_event_payload() == {
+        "workflow_node_id": "research",
+        "workflow_node_kind": "agent",
+        "workflow_node_label": "Research",
+        "child_run_id": "child_run",
+        "status": "completed",
+    }
+    assert calls == [
+        (
+            "insert_run",
+            {
+                "kind": "agent_run",
+                "runnable_id": "agent_research",
+                "user_goal": "Ship release candidate\n\nStep: Summarize launch risk.",
+                "run_group_id": "workflow_group",
+            },
+        ),
+        (
+            "execute_agent_run",
+            {
+                "run_id": "child_run",
+                "agent": agent,
+                "user_goal": "Ship release candidate\n\nStep: Summarize launch risk.",
+                "upstream": "Previous result",
+            },
+        ),
+        (
+            "workflow_child_artifact_refs",
+            {
+                "child_run": child_result,
+                "label": "Research",
+            },
+        ),
+    ]
 
 
 def test_workflow_continuation_coordinator_pauses_for_approval_node():

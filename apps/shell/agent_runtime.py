@@ -4321,6 +4321,53 @@ class WorkflowAgentNodeHandoff:
         }
 
 
+@dataclass(frozen=True)
+class WorkflowAgentNodeExecution:
+    """Executed child Agent result for a Workflow agent node."""
+
+    handoff: WorkflowAgentNodeHandoff
+    child_run: dict[str, Any]
+    next_context: str
+    artifact_count: int
+
+    @classmethod
+    def from_handoff(
+        cls,
+        engine: Any,
+        handoff: WorkflowAgentNodeHandoff,
+        *,
+        run_group_id: str,
+    ) -> "WorkflowAgentNodeExecution":
+        child = engine._insert_run(
+            kind="agent_run",
+            runnable_id=handoff.agent_id,
+            user_goal=handoff.child_goal,
+            run_group_id=run_group_id,
+        )
+        child = engine._execute_agent_run(
+            child["run_id"],
+            handoff.agent,
+            handoff.child_goal,
+            upstream=handoff.upstream,
+        )
+        return cls(
+            handoff=handoff,
+            child_run=child,
+            next_context=str(child.get("result") or ""),
+            artifact_count=len(engine._workflow_child_artifact_refs(child, handoff.node_label)),
+        )
+
+    @property
+    def status(self) -> str:
+        return str(self.child_run.get("status") or "")
+
+    def agent_event_payload(self) -> dict[str, Any]:
+        return self.handoff.agent_event_payload(self.child_run, artifact_count=self.artifact_count)
+
+    def status_event_payload(self) -> dict[str, Any]:
+        return self.handoff.status_event_payload(self.child_run)
+
+
 class WorkflowContinuationCoordinator:
     """Executes Workflow nodes for a Workflow Run."""
 
@@ -4558,23 +4605,13 @@ class WorkflowContinuationCoordinator:
             context=context,
             has_agent_upstream=has_agent_upstream,
         )
-        child = engine._insert_run(
-            kind="agent_run",
-            runnable_id=handoff.agent_id,
-            user_goal=handoff.child_goal,
+        execution = WorkflowAgentNodeExecution.from_handoff(
+            engine,
+            handoff,
             run_group_id=run_group_id,
         )
-        child = engine._execute_agent_run(
-            child["run_id"],
-            handoff.agent,
-            handoff.child_goal,
-            upstream=handoff.upstream,
-        )
-        next_context = child["result"]
-        agent_payload = handoff.agent_event_payload(
-            child,
-            artifact_count=len(engine._workflow_child_artifact_refs(child, label)),
-        )
+        next_context = execution.next_context
+        agent_payload = execution.agent_event_payload()
         timeline.append(
             engine._timeline(
                 "workflow.node.agent",
@@ -4583,9 +4620,9 @@ class WorkflowContinuationCoordinator:
             )
         )
         engine.append_run_event(str(run["run_id"]), "workflow.node.agent", agent_payload)
-        engine._merge_workflow_child_run_outcome(timeline, artifacts, child, label)
-        if child["status"] == "approval_required":
-            event_payload = handoff.status_event_payload(child)
+        engine._merge_workflow_child_run_outcome(timeline, artifacts, execution.child_run, label)
+        if execution.status == "approval_required":
+            event_payload = execution.status_event_payload()
             timeline.append(
                 engine._timeline(
                     "workflow.run.approval_required",
@@ -4613,22 +4650,22 @@ class WorkflowContinuationCoordinator:
                 )
                 result = engine.get_run(result["run_id"])
             return {"done": True, "run": result}
-        if child["status"] != "completed":
-            status = "cancelled" if child["status"] == "cancelled" else "failed"
-            detail = f"{label}: {next_context or child['status']}"
+        if execution.status != "completed":
+            status = "cancelled" if execution.status == "cancelled" else "failed"
+            detail = f"{label}: {next_context or execution.status}"
             timeline.append(
                 engine._timeline(
                     f"workflow.run.{status}",
                     detail,
-                    **handoff.status_event_payload(child),
+                    **execution.status_event_payload(),
                 )
             )
             engine.append_run_event(
                 str(run["run_id"]),
                 f"workflow.run.{status}",
                 {
-                    **handoff.status_event_payload(child),
-                    "result": _tool_input_preview(next_context or child["status"], limit=1800),
+                    **execution.status_event_payload(),
+                    "result": _tool_input_preview(next_context or execution.status, limit=1800),
                 },
             )
             result = engine._update_run(

@@ -1680,6 +1680,8 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
         "macOS release workflow smoke tests must cover WorkflowCancellationProjectionCoordinator child cancellation projection"
         in messages
     )
+    assert "macOS release workflow smoke tests must cover Workflow agent-node child run handoff" in messages
+    assert "macOS release workflow smoke tests must cover Workflow agent-node child run execution handoff" in messages
     assert "macOS release workflow smoke tests must cover WorkflowContinuationCoordinator approval pause projection" in messages
     assert "macOS release workflow smoke tests must cover WorkflowContinuationCoordinator approval resume handoff" in messages
     assert "macOS release workflow smoke tests must cover WorkflowContinuationCoordinator background failure projection" in messages
