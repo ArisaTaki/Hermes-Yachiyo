@@ -563,6 +563,8 @@ def write_manual_release_candidate_checks_markdown(
     root: Path,
     output_path: Path,
     source_path: Path | None = None,
+    *,
+    mark_provider_smoke_not_applicable_if_missing: bool = False,
 ) -> Path:
     source_is_markdown = (
         source_path is not None and source_path.suffix.lower() in {".md", ".markdown"}
@@ -575,6 +577,8 @@ def write_manual_release_candidate_checks_markdown(
     if findings:
         formatted = "; ".join(finding.format() for finding in findings)
         raise ValueError(f"manual release-candidate checks markdown source is invalid: {formatted}")
+    if mark_provider_smoke_not_applicable_if_missing:
+        _mark_provider_smoke_not_applicable_if_missing(checks)
     resolved = _resolve_project_file(
         root,
         output_path,
@@ -1506,8 +1510,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--mark-provider-smoke-not-applicable-if-missing",
         action="store_true",
         help=(
-            "When writing a manual check draft, mark real_provider_smoke not_applicable "
-            "if any OHA_YACHIYO_SMOKE_* credential is missing."
+            "When writing a manual check draft or Markdown checklist, mark "
+            "real_provider_smoke not_applicable if any OHA_YACHIYO_SMOKE_* credential "
+            "is missing."
         ),
     )
     args = parser.parse_args(argv)
@@ -1520,10 +1525,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     if (
         args.mark_provider_smoke_not_applicable_if_missing
         and args.write_manual_checks_draft is None
+        and args.write_manual_checks_markdown is None
     ):
         print(
             "manual release-candidate checks: failed\n"
-            "- --mark-provider-smoke-not-applicable-if-missing requires --write-manual-checks-draft"
+            "- --mark-provider-smoke-not-applicable-if-missing requires "
+            "--write-manual-checks-draft or --write-manual-checks-markdown"
         )
         return 1
     write_actions = [
@@ -1570,6 +1577,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 PROJECT_ROOT,
                 args.write_manual_checks_markdown,
                 args.manual_checks_markdown or args.manual_checks_json,
+                mark_provider_smoke_not_applicable_if_missing=(
+                    args.mark_provider_smoke_not_applicable_if_missing
+                ),
             )
         except (OSError, ValueError) as exc:
             print(f"manual release-candidate checks markdown: failed\n- {exc}")

@@ -192,6 +192,10 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
         "release candidate verifier CLI must explicitly mark provider smoke not_applicable only when requested"
         in messages
     )
+    assert (
+        "release candidate verifier CLI must allow provider not_applicable evidence for Markdown drafts"
+        in messages
+    )
     assert "release candidate verifier must isolate provider smoke not_applicable draft handling" in messages
     assert "Electron UI smoke runner must expose dynamic smoke script discovery" in messages
     assert "Electron UI smoke runner must expose reusable report generation" in messages
@@ -691,6 +695,10 @@ def test_verifier_requires_release_packaging_docs_for_release_gates(tmp_path):
     assert "release packaging docs must document checked Markdown items default to passed" in messages
     assert "release packaging docs must document explicit Markdown not_applicable status" in messages
     assert "release packaging docs must document Markdown signoff evidence requirements" in messages
+    assert (
+        "release packaging docs must document direct no-provider Markdown signoff draft generation"
+        in messages
+    )
     assert (
         "release packaging docs must document explicit provider-smoke not_applicable draft evidence"
         in messages

@@ -742,6 +742,41 @@ def test_release_candidate_verifier_manual_check_draft_can_mark_provider_not_app
     assert loaded["real_provider_smoke"]["evidence_source"] == "credentials_unavailable"
 
 
+def test_release_candidate_verifier_manual_check_markdown_can_mark_provider_not_applicable(
+    tmp_path,
+    monkeypatch,
+):
+    for env_name in rc.PROVIDER_SMOKE_ENV_VARS:
+        monkeypatch.delenv(env_name, raising=False)
+    prior_statuses = rc._manual_release_candidate_check_report()
+    for check in prior_statuses:
+        if check["id"] == "packaged_bridge_isolation":
+            check["status"] = "passed"
+            check["evidence"] = "Automated --run-dmg-app-smoke passed for release/Oha-Yachiyo.dmg"
+            check["evidence_source"] = "automated_rc_gate"
+
+    prior_report_path = tmp_path / "tmp" / "final-rc.json"
+    prior_report_path.parent.mkdir(parents=True)
+    prior_report_path.write_text(
+        json.dumps({"manual_release_candidate_check_statuses": prior_statuses}),
+        encoding="utf-8",
+    )
+
+    markdown_path = rc.write_manual_release_candidate_checks_markdown(
+        tmp_path,
+        Path("tmp/final-rc-signoff.md"),
+        Path("tmp/final-rc.json"),
+        mark_provider_smoke_not_applicable_if_missing=True,
+    )
+
+    markdown = markdown_path.read_text(encoding="utf-8")
+    assert "- Remaining checks: 4" in markdown
+    assert "- [x] `real_provider_smoke` - not_applicable" in markdown
+    assert "Evidence source: credentials_unavailable" in markdown
+    for env_name in rc.PROVIDER_SMOKE_ENV_VARS:
+        assert env_name in markdown
+
+
 def test_release_candidate_verifier_writes_manual_check_markdown_from_draft(tmp_path):
     draft_checks = rc._manual_release_candidate_check_report()
     for check in draft_checks:
@@ -849,12 +884,15 @@ def test_release_candidate_verifier_rejects_json_and_markdown_input_conflict(cap
     assert "choose either --manual-checks-json or --manual-checks-markdown" in output
 
 
-def test_release_candidate_verifier_provider_not_applicable_flag_requires_draft(capsys):
+def test_release_candidate_verifier_provider_not_applicable_flag_requires_draft_or_markdown(
+    capsys,
+):
     assert rc.main(["--mark-provider-smoke-not-applicable-if-missing"]) == 1
 
     output = capsys.readouterr().out
     assert (
-        "--mark-provider-smoke-not-applicable-if-missing requires --write-manual-checks-draft"
+        "--mark-provider-smoke-not-applicable-if-missing requires "
+        "--write-manual-checks-draft or --write-manual-checks-markdown"
         in output
     )
 

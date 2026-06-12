@@ -650,6 +650,10 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document Markdown signoff evidence requirements",
     ),
     (
+        "--write-manual-checks-markdown tmp/final-rc-signoff.md --mark-provider-smoke-not-applicable-if-missing",
+        "release packaging docs must document direct no-provider Markdown signoff draft generation",
+    ),
+    (
         "--mark-provider-smoke-not-applicable-if-missing",
         "release packaging docs must document explicit provider-smoke not_applicable draft evidence",
     ),
@@ -1110,6 +1114,10 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         '"--mark-provider-smoke-not-applicable-if-missing"',
         "release candidate verifier CLI must explicitly mark provider smoke not_applicable only when requested",
+    ),
+    (
+        "and args.write_manual_checks_markdown is None",
+        "release candidate verifier CLI must allow provider not_applicable evidence for Markdown drafts",
     ),
     (
         "_mark_provider_smoke_not_applicable_if_missing",
