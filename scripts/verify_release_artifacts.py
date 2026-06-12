@@ -486,6 +486,10 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "latest JSON 的 `dmg_name` / `sha256`",
         "release packaging docs must document latest JSON checksum consistency checks",
     ),
+    (
+        "每个 DMG 的 `.sha256` 文件",
+        "release packaging docs must document per-DMG checksum file validation",
+    ),
 )
 RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
@@ -1745,6 +1749,7 @@ def _verify_release_directory_artifacts(root: Path, scan_paths: Sequence[Path | 
             release_dirs.add(resolved.parent)
 
     for release_dir in sorted(release_dirs):
+        findings.extend(_verify_release_dmg_checksum_files(release_dir))
         latest_json_files = sorted(release_dir.glob("Oha-Yachiyo-*-latest.json"))
         if not latest_json_files:
             findings.append(Finding(release_dir, "release directory must include latest channel JSON metadata"))
@@ -1799,6 +1804,31 @@ def _verify_release_directory_artifacts(root: Path, scan_paths: Sequence[Path | 
                 continue
             if actual_sha != expected_sha:
                 findings.append(Finding(dmg_path, "release latest DMG content does not match latest JSON sha256"))
+    return findings
+
+
+def _verify_release_dmg_checksum_files(release_dir: Path) -> list[Finding]:
+    findings: list[Finding] = []
+    for dmg_path in sorted(release_dir.glob("*.dmg")):
+        sha_path = release_dir / f"{dmg_path.name}.sha256"
+        if not sha_path.is_file():
+            findings.append(Finding(sha_path, "release DMG checksum file is missing"))
+            continue
+        try:
+            sha_file_value = sha_path.read_text(encoding="utf-8").split()[0].strip().lower()
+        except (OSError, IndexError) as exc:
+            findings.append(Finding(sha_path, f"release DMG checksum could not be read: {exc.__class__.__name__}"))
+            continue
+        if not re.fullmatch(r"[0-9a-f]{64}", sha_file_value):
+            findings.append(Finding(sha_path, "release DMG checksum file must start with a 64-character sha256"))
+            continue
+        try:
+            actual_sha = _sha256_file(dmg_path)
+        except OSError as exc:
+            findings.append(Finding(dmg_path, f"release DMG could not be hashed: {exc}"))
+            continue
+        if actual_sha != sha_file_value:
+            findings.append(Finding(dmg_path, "release DMG content does not match checksum file"))
     return findings
 
 

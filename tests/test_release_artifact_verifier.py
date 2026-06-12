@@ -240,6 +240,44 @@ def test_verifier_reports_release_latest_json_checksum_mismatches(tmp_path):
     assert messages_by_path[alpha_dmg] == "release latest DMG content does not match latest JSON sha256"
 
 
+def test_verifier_checks_every_release_dmg_checksum_file(tmp_path):
+    release_dir = tmp_path / "release"
+    release_dir.mkdir()
+
+    latest_dmg = release_dir / "Oha-Yachiyo-main-latest.dmg"
+    latest_dmg.write_bytes(b"latest dmg")
+    latest_digest = hashlib.sha256(latest_dmg.read_bytes()).hexdigest()
+    (release_dir / f"{latest_dmg.name}.sha256").write_text(f"{latest_digest}  {latest_dmg.name}\n", encoding="utf-8")
+    (release_dir / "Oha-Yachiyo-main-latest.json").write_text(
+        json.dumps(
+            {
+                "dmg_name": latest_dmg.name,
+                "sha256": latest_digest,
+                "download_url": f"https://github.example/releases/download/main-latest/{latest_dmg.name}",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    versioned_dmg = release_dir / "Oha-Yachiyo-stable-v0.4.0-build.12-abc1234.dmg"
+    versioned_dmg.write_bytes(b"versioned dmg")
+    (release_dir / f"{versioned_dmg.name}.sha256").write_text(f"{'1' * 64}  {versioned_dmg.name}\n", encoding="utf-8")
+    orphan_dmg = release_dir / "Oha-Yachiyo-alpha-v0.4.0-build.12-abc1234.dmg"
+    orphan_dmg.write_bytes(b"orphan dmg")
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[release_dir],
+        check_required_files=False,
+        check_release_security_guards=False,
+        allow_binary_targets=True,
+    )
+    messages_by_path = {finding.path: finding.message for finding in findings}
+
+    assert messages_by_path[versioned_dmg] == "release DMG content does not match checksum file"
+    assert messages_by_path[release_dir / f"{orphan_dmg.name}.sha256"] == "release DMG checksum file is missing"
+
+
 def test_verifier_binary_mode_scans_legacy_kernel_entrypoints(tmp_path):
     artifact = tmp_path / "Oha-Yachiyo-kernel-legacy.dmg"
     artifact.write_bytes(
@@ -453,6 +491,7 @@ def test_verifier_requires_release_packaging_docs_for_release_gates(tmp_path):
     assert "release packaging docs must document final packaged app signature verification" in messages
     assert "release packaging docs must document final release artifact binary scanning" in messages
     assert "release packaging docs must document latest JSON checksum consistency checks" in messages
+    assert "release packaging docs must document per-DMG checksum file validation" in messages
 
 
 def _write_packaged_app_bundle(
