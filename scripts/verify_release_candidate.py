@@ -422,6 +422,55 @@ def _append_electron_ui_smoke_supporting_evidence(
         )
 
 
+def _dmg_screen_probe_failure_reason(dmg_screen_probe: dict[str, Any]) -> str:
+    findings = dmg_screen_probe.get("findings")
+    if not isinstance(findings, list):
+        return "the recorded probe error"
+    messages: list[str] = []
+    for finding in findings:
+        if isinstance(finding, dict):
+            message = str(finding.get("message", "")).strip()
+        else:
+            message = str(finding).strip()
+        if message:
+            messages.append(message)
+    for message in messages:
+        if "screen_capture_permission_denied" in message:
+            return "screen_capture_permission_denied"
+        match = re.search(r'"error"\s*:\s*"([^"]+)"', message)
+        if match:
+            return match.group(1)
+    return "the recorded probe error"
+
+
+def _append_dmg_screen_probe_failure_supporting_evidence(
+    checks: Sequence[Any],
+    dmg_screen_probe: Any,
+) -> None:
+    if (
+        not isinstance(dmg_screen_probe, dict)
+        or dmg_screen_probe.get("status") != "failed"
+    ):
+        return
+    raw_paths = dmg_screen_probe.get("bridge_ready_dmg_paths")
+    if not isinstance(raw_paths, list) or not raw_paths:
+        return
+    artifact_label = ", ".join(str(path) for path in raw_paths if path)
+    if not artifact_label:
+        artifact_label = "selected DMG artifacts"
+    reason = _dmg_screen_probe_failure_reason(dmg_screen_probe)
+    _append_manual_release_candidate_check_note(
+        checks,
+        "screen_recording_permission",
+        (
+            "Supporting automated evidence: --run-dmg-screen-smoke reached "
+            f"packaged Bridge for {artifact_label}, but /screen/current failed "
+            f"with {reason}; keep this check manual_required until Screen "
+            "Recording is granted and the probe passes."
+        ),
+    )
+
+
 def _manual_release_candidate_checks_with_supporting_evidence(
     raw_checks: Sequence[Any],
     raw_payload: dict[str, Any],
@@ -430,6 +479,10 @@ def _manual_release_candidate_checks_with_supporting_evidence(
     _append_electron_ui_smoke_supporting_evidence(
         checks,
         raw_payload.get("electron_ui_smoke"),
+    )
+    _append_dmg_screen_probe_failure_supporting_evidence(
+        checks,
+        raw_payload.get("dmg_screen_probe"),
     )
     return checks
 
@@ -705,6 +758,10 @@ def _auto_apply_release_candidate_check_evidence(
             dmg_screen_probe,
             flag="--run-dmg-screen-smoke",
             detail="the screen probe failed",
+        )
+        _append_dmg_screen_probe_failure_supporting_evidence(
+            checks,
+            dmg_screen_probe,
         )
 
     dmg_ui_sampling_smoke = report.get("dmg_ui_sampling_smoke")

@@ -1035,6 +1035,103 @@ def test_release_candidate_verifier_manual_check_draft_can_mark_provider_not_app
     assert loaded["real_provider_smoke"]["evidence_source"] == "credentials_unavailable"
 
 
+def test_release_candidate_verifier_draft_keeps_failed_dmg_screen_probe_notes(
+    tmp_path,
+    monkeypatch,
+):
+    for env_name in rc.PROVIDER_SMOKE_ENV_VARS:
+        monkeypatch.delenv(env_name, raising=False)
+
+    signoff_statuses = rc._manual_release_candidate_check_report()
+    passed_evidence = {
+        "packaged_bridge_isolation": "Automated --run-dmg-app-smoke passed for dist/electron/Oha-Yachiyo-0.4.0-arm64.dmg",
+        "chat_native_file_upload": "Automated --run-dmg-chat-native-file-smoke passed for dist/electron/Oha-Yachiyo-0.4.0-arm64.dmg",
+        "packaged_ui_sampling": "Automated --run-dmg-ui-sampling-smoke passed for dist/electron/Oha-Yachiyo-0.4.0-arm64.dmg",
+    }
+    for check in signoff_statuses:
+        evidence = passed_evidence.get(check["id"])
+        if evidence:
+            check["status"] = "passed"
+            check["evidence"] = evidence
+            check["evidence_source"] = "automated_rc_gate"
+
+    signoff_path = tmp_path / "tmp" / "rc-signoff.json"
+    screen_report_path = tmp_path / "tmp" / "rc-screen.json"
+    signoff_path.parent.mkdir(parents=True)
+    signoff_path.write_text(
+        json.dumps({"manual_release_candidate_check_statuses": signoff_statuses}),
+        encoding="utf-8",
+    )
+
+    screen_statuses = rc._manual_release_candidate_check_report()
+    for check in screen_statuses:
+        if check["id"] == "packaged_bridge_isolation":
+            check["status"] = "passed"
+            check["evidence"] = (
+                "Automated --run-dmg-screen-smoke reached packaged /status for "
+                "dist/electron/Oha-Yachiyo-0.4.0-arm64.dmg"
+            )
+            check["evidence_source"] = "automated_rc_gate"
+    screen_report_path.write_text(
+        json.dumps(
+            {
+                "manual_release_candidate_check_statuses": screen_statuses,
+                "dmg_screen_probe": {
+                    "status": "failed",
+                    "dmg_paths": [
+                        "dist/electron/Oha-Yachiyo-0.4.0-arm64.dmg",
+                    ],
+                    "bridge_ready_dmg_paths": [
+                        "dist/electron/Oha-Yachiyo-0.4.0-arm64.dmg",
+                    ],
+                    "screens": [],
+                    "findings": [
+                        {
+                            "path": "dist/electron/Oha-Yachiyo-0.4.0-arm64.dmg",
+                            "message": (
+                                "release candidate packaged /screen/current probe failed: "
+                                '{"detail":{"error":"screen_capture_permission_denied",'
+                                '"message":"grant permission",'
+                                '"detail":"temporary backend path /private/var/folders/example"}}'
+                            ),
+                        }
+                    ],
+                    "run_requested": True,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    draft_path = rc.write_manual_release_candidate_checks_draft(
+        tmp_path,
+        Path("tmp/rc-signoff-current-with-screen-attempt.json"),
+        (
+            Path("tmp/rc-signoff.json"),
+            Path("tmp/rc-screen.json"),
+        ),
+        mark_provider_smoke_not_applicable_if_missing=True,
+    )
+
+    draft = json.loads(draft_path.read_text(encoding="utf-8"))
+    assert draft["manual_release_candidate_check_summary"]["remaining_count"] == 2
+    assert draft["manual_release_candidate_check_summary"]["remaining_check_ids"] == [
+        "gatekeeper_first_launch",
+        "screen_recording_permission",
+    ]
+    checks = {check["id"]: check for check in draft["checks"]}
+    assert checks["packaged_bridge_isolation"]["status"] == "passed"
+    assert checks["chat_native_file_upload"]["status"] == "passed"
+    assert checks["packaged_ui_sampling"]["status"] == "passed"
+    assert checks["real_provider_smoke"]["status"] == "not_applicable"
+    assert checks["screen_recording_permission"]["status"] == "manual_required"
+    notes = checks["screen_recording_permission"]["notes"]
+    assert "--run-dmg-screen-smoke reached packaged Bridge" in notes
+    assert "dist/electron/Oha-Yachiyo-0.4.0-arm64.dmg" in notes
+    assert "screen_capture_permission_denied" in notes
+    assert "/private/var/folders" not in notes
+
+
 def test_release_candidate_verifier_manual_check_write_actions_print_remaining_summary(
     tmp_path,
     monkeypatch,
@@ -1742,6 +1839,12 @@ def test_release_candidate_verifier_keeps_bridge_evidence_when_dmg_screen_probe_
         "packaged_bridge_isolation"
     ]["evidence"]
     assert manual_statuses["screen_recording_permission"]["status"] == "manual_required"
+    assert "--run-dmg-screen-smoke reached packaged Bridge" in manual_statuses[
+        "screen_recording_permission"
+    ]["notes"]
+    assert "release/Oha-Yachiyo-0.4.0-arm64.dmg" in manual_statuses[
+        "screen_recording_permission"
+    ]["notes"]
     assert report["manual_release_candidate_check_summary"]["remaining_count"] == 5
     assert report["manual_release_candidate_check_summary"]["automated_evidence_check_ids"] == [
         "packaged_bridge_isolation"
