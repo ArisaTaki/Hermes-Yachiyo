@@ -16,6 +16,7 @@ import threading
 import time
 import zipfile
 from collections.abc import Iterable as IterableABC
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -2691,18 +2692,39 @@ class ToolApprovalResumeContext:
         budget_factory: Any | None = None,
     ) -> "ToolApprovalResumeContext":
         run_id = str(run["run_id"])
-        messages = pending.get("messages") if isinstance(pending.get("messages"), list) else []
-        tool_request = pending.get("tool_request") if isinstance(pending.get("tool_request"), dict) else {}
+        messages = (
+            deepcopy(pending.get("messages"))
+            if isinstance(pending.get("messages"), list)
+            else []
+        )
+        tool_request = (
+            deepcopy(pending.get("tool_request"))
+            if isinstance(pending.get("tool_request"), dict)
+            else {}
+        )
         if not messages or not tool_request:
             raise AgentRuntimeError("Run 待审批上下文不完整，无法恢复")
         timeline = [
-            event
+            deepcopy(event)
             for event in run.get("timeline") or []
             if isinstance(event, dict)
         ]
-        artifacts = [item for item in run.get("artifacts") or [] if isinstance(item, dict)]
+        artifacts = [
+            deepcopy(item)
+            for item in run.get("artifacts") or []
+            if isinstance(item, dict)
+        ]
         remaining = pending.get("remaining_tool_requests")
-        remaining_requests = [item for item in remaining if isinstance(item, dict)] if isinstance(remaining, list) else []
+        remaining_requests = (
+            [
+                deepcopy(item)
+                for item in remaining
+                if isinstance(item, dict)
+            ]
+            if isinstance(remaining, list)
+            else []
+        )
+        allowed_tool_names = list(allowed_tools)
         try:
             next_iteration = int(pending.get("next_iteration") or 0)
         except (TypeError, ValueError):
@@ -2718,12 +2740,16 @@ class ToolApprovalResumeContext:
             timeline=timeline,
             artifacts=artifacts,
             broker=broker,
-            allowed_tools=allowed_tools,
+            allowed_tools=allowed_tool_names,
             budget=run_budget,
             messages=messages,
             tool_request=tool_request,
             tool_name=tool_name,
-            input_preview=_tool_input_preview(tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}),
+            input_preview=_tool_input_preview(
+                tool_request.get("input")
+                if isinstance(tool_request.get("input"), dict)
+                else {}
+            ),
             remaining_requests=remaining_requests,
             next_iteration=next_iteration,
         )

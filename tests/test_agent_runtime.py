@@ -1035,11 +1035,12 @@ def test_tool_approval_resume_context_parses_pending_payload():
         budget_calls.append({"run_id": run_id, "timeline": timeline})
         return budget
 
+    allowed_tools = ["terminal.run", "artifact.write"]
     context = ToolApprovalResumeContext.from_run(
         run,
         pending,
         broker=broker,
-        allowed_tools=["terminal.run", "artifact.write"],
+        allowed_tools=allowed_tools,
         budget_factory=budget_factory,
     )
 
@@ -1048,15 +1049,37 @@ def test_tool_approval_resume_context_parses_pending_payload():
     assert context.artifacts == [{"path": "report.md"}]
     assert context.broker is broker
     assert context.allowed_tools == ["terminal.run", "artifact.write"]
+    assert context.allowed_tools is not allowed_tools
     assert context.budget is budget
-    assert context.messages is messages
-    assert context.tool_request is tool_request
+    assert context.messages == messages
+    assert context.messages is not messages
+    assert context.tool_request == tool_request
+    assert context.tool_request is not tool_request
     assert context.tool_name == "terminal.run"
     assert context.input_preview == {"command": "printf ok"}
     assert context.remaining_requests == [{"tool": "artifact.write", "input": {"path": "report.md"}}]
     assert context.next_iteration == 5
     assert budget_calls == [{"run_id": "agent_run_resume", "timeline": context.timeline}]
     assert budget_calls[0]["timeline"] is context.timeline
+    context.messages.append({"role": "tool", "content": "ok"})
+    context.tool_request["input"]["command"] = "changed"
+    context.remaining_requests[0]["input"]["path"] = "changed.md"
+    context.timeline[0]["event"] = "changed"
+    context.artifacts[0]["path"] = "changed.md"
+    context.allowed_tools.append("workspace.read")
+    assert pending["messages"] == [{"role": "user", "content": "run approved tool"}]
+    assert pending["tool_request"] == {
+        "tool": "terminal.run",
+        "input": {"command": "printf ok"},
+    }
+    assert pending["remaining_tool_requests"][0] == {
+        "tool": "artifact.write",
+        "input": {"path": "report.md"},
+    }
+    assert run["timeline"][0] == {"event": "agent.tool.approval_required"}
+    assert run["artifacts"][0] == {"path": "report.md"}
+    assert pending["messages"] is messages
+    assert pending["tool_request"] is tool_request
 
     fallback_iteration = ToolApprovalResumeContext.from_run(
         run,
