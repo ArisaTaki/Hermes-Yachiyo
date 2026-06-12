@@ -10,13 +10,39 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FRONTEND = path.join(ROOT, 'apps', 'frontend');
 const ELECTRON = path.join(FRONTEND, 'node_modules', '.bin', process.platform === 'win32' ? 'electron.cmd' : 'electron');
 const VITE = path.join(FRONTEND, 'node_modules', '.bin', process.platform === 'win32' ? 'vite.cmd' : 'vite');
+const SYSTEM_AGENT_ID = 'builtin:yachiyo-main';
 const CREATED_AGENT_ID = 'agent-studio-agents-ui-smoke-created';
 const CREATED_NAME = 'Agent Definition Smoke v1';
 const UPDATED_NAME = 'Agent Definition Smoke v2';
 const AVATAR_DATA_URL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
 const now = new Date().toISOString();
 
-let agents = [];
+const systemAgent = {
+  agent_id: SYSTEM_AGENT_ID,
+  name: 'Oha-Yachiyo',
+  nickname: 'Oha-Yachiyo',
+  description: 'System main chat Agent managed by oha-yachiyo.',
+  avatar_url: '',
+  category: 'system',
+  instructions: 'System managed Agent.',
+  persona_prompt: '',
+  model_mode: 'profile',
+  model_profile_id: 'profile-agent-studio-agents-smoke',
+  vision_model_profile_id: '',
+  model_config: {},
+  tool_policy: { allowed_tools: [] },
+  workspace_policy: { default_workdir: '', readable_scopes: ['.'], writable_scopes: [] },
+  output_contract: 'chat',
+  enabled: true,
+  editable: false,
+  deletable: false,
+  system: true,
+  skill_ids: [],
+  created_at: now,
+  updated_at: now,
+};
+
+let agents = [systemAgent];
 let createAgentRequest = null;
 let updateAgentRequest = null;
 let deletedAgentId = '';
@@ -114,7 +140,7 @@ async function startMockBridge() {
       if (request.method === 'POST' && url.pathname === '/ui/agents') {
         createAgentRequest = await readJson(request);
         const created = agentSpec(createAgentRequest);
-        agents = [created];
+        agents = [systemAgent, created];
         sendJson(response, 200, created);
         return;
       }
@@ -122,13 +148,13 @@ async function startMockBridge() {
         updateAgentRequest = await readJson(request);
         const current = agents.find((agent) => agent.agent_id === CREATED_AGENT_ID) || agentSpec(createAgentRequest || {});
         const updated = { ...current, ...updateAgentRequest, agent_id: CREATED_AGENT_ID, updated_at: now };
-        agents = [updated];
+        agents = [systemAgent, updated];
         sendJson(response, 200, updated);
         return;
       }
       if (request.method === 'DELETE' && url.pathname === `/ui/agents/${CREATED_AGENT_ID}`) {
         deletedAgentId = CREATED_AGENT_ID;
-        agents = [];
+        agents = [systemAgent];
         sendJson(response, 200, { ok: true });
         return;
       }
@@ -304,7 +330,32 @@ async function main() {
     && document.querySelector('[data-testid="agent-editor"]')
     && document.querySelector('[data-testid="agent-list"]')
   ), 'agent studio agents');
-  await waitFor(win, () => document.querySelectorAll('[data-testid="agent-list-item"]').length === 0, 'initial empty agent list');
+  await waitFor(win, () => (
+    document.querySelectorAll('[data-testid="agent-list-item"]').length === 1
+    && document.querySelector('[data-agent-id="builtin:yachiyo-main"]')?.textContent.includes('Oha-Yachiyo')
+  ), 'initial system Agent list');
+  await win.webContents.executeJavaScript("document.querySelector('[data-agent-id=\\"builtin:yachiyo-main\\"] [data-testid=\\"agent-list-open\\"]').click()", true);
+  await waitFor(win, () => {
+    const systemItem = document.querySelector('[data-agent-id="builtin:yachiyo-main"]');
+    const save = document.querySelector('[data-testid="agent-save"]');
+    const quickRun = document.querySelector('.agent-quick-run button.primary-action');
+    const inlineNotes = Array.from(document.querySelectorAll('.agent-inline-note')).map((node) => node.textContent || '');
+    return document.querySelectorAll('[data-testid="agent-list-item"]').length === 1
+      && systemItem?.textContent.includes('Oha-Yachiyo')
+      && document.querySelector('[data-testid="agent-name-input"]')?.value === 'Oha-Yachiyo'
+      && save?.disabled
+      && !document.querySelector('[data-testid="agent-delete"]')
+      && quickRun?.disabled
+      && quickRun?.getAttribute('title')?.includes('系统 Agent 只能查看')
+      && inlineNotes.some((text) => text.includes('系统 Agent 由 oha-yachiyo 管理'));
+  }, 'system Agent read-only guard');
+  console.log('[electron-smoke] system Agent read-only guard verified');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"agent-new\\"]').click()", true);
+  await waitFor(win, () => (
+    !document.querySelector('[data-testid="agent-delete"]')
+    && document.querySelector('[data-testid="agent-name-input"]')?.value === ''
+    && !document.querySelector('[data-testid="agent-save"]')?.disabled
+  ), 'new Agent draft after system Agent');
   await win.webContents.executeJavaScript(\`
   (() => {
     const setNativeValue = (element, value) => {
@@ -316,7 +367,6 @@ async function main() {
       element.value = value;
       element.dispatchEvent(new Event('change', { bubbles: true }));
     };
-    document.querySelector('[data-testid="agent-new"]').click();
     window.__ohaAgentAvatarPickerCalls = 0;
     window.ohaDesktop = {
       ...(window.ohaDesktop || {}),
@@ -369,8 +419,9 @@ async function main() {
   })();
   \`, true);
   await waitFor(win, () => {
-    const item = document.querySelector('[data-testid="agent-list-item"]');
-    return item
+    const item = document.querySelector('[data-agent-id="${CREATED_AGENT_ID}"]');
+    return document.querySelectorAll('[data-testid="agent-list-item"]').length === 2
+      && item
       && item.getAttribute('data-agent-id') === ${JSON.stringify(CREATED_AGENT_ID)}
       && item.textContent.includes(${JSON.stringify(CREATED_NAME)})
       && document.querySelector('[data-testid="agent-delete"]');
@@ -389,7 +440,7 @@ async function main() {
   })();
   \`, true);
   await waitFor(win, () => {
-    const item = document.querySelector('[data-testid="agent-list-item"]');
+    const item = document.querySelector('[data-agent-id="${CREATED_AGENT_ID}"]');
     return item
       && item.textContent.includes(${JSON.stringify(UPDATED_NAME)})
       && document.querySelector('[data-testid="agent-name-input"]')?.value === ${JSON.stringify(UPDATED_NAME)};
@@ -401,7 +452,8 @@ async function main() {
   document.querySelector('[data-testid="confirm-action"]').click();
   \`, true);
   await waitFor(win, () => (
-    document.querySelectorAll('[data-testid="agent-list-item"]').length === 0
+    document.querySelectorAll('[data-testid="agent-list-item"]').length === 1
+    && document.querySelector('[data-agent-id="builtin:yachiyo-main"]')
     && !document.querySelector('[data-testid="agent-delete"]')
     && document.querySelector('[data-testid="agent-name-input"]')?.value === ''
   ), 'agent deleted and editor reset');
