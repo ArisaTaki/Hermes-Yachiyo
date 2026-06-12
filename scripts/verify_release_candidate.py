@@ -731,6 +731,15 @@ def _manual_release_candidate_check_summary(
         for check in checks
         if check.get("status") == "manual_required"
     ]
+    remaining_notes = [
+        {
+            "id": check["id"],
+            "notes": str(check.get("notes", "")).strip(),
+        }
+        for check in checks
+        if check.get("status") == "manual_required"
+        and str(check.get("notes", "")).strip()
+    ]
     failed_check_ids = [check["id"] for check in checks if check.get("status") == "failed"]
     automated_evidence_check_ids = [
         check["id"]
@@ -743,6 +752,7 @@ def _manual_release_candidate_check_summary(
         "remaining_count": len(remaining_check_ids),
         "remaining_check_ids": remaining_check_ids,
         "remaining_next_actions": remaining_next_actions,
+        "remaining_notes": remaining_notes,
         "failed_check_ids": failed_check_ids,
         "automated_evidence_check_ids": automated_evidence_check_ids,
     }
@@ -773,6 +783,16 @@ def _print_manual_release_candidate_check_summary(summary: dict[str, Any]) -> No
                 next_action = str(item.get("next_action", "")).strip()
                 if check_id and next_action:
                     print(f"- [{check_id}] {next_action}")
+        remaining_notes = summary.get("remaining_notes")
+        if isinstance(remaining_notes, list) and remaining_notes:
+            print("manual release-candidate supporting notes:")
+            for item in remaining_notes:
+                if not isinstance(item, dict):
+                    continue
+                check_id = str(item.get("id", "")).strip()
+                notes = str(item.get("notes", "")).strip()
+                if check_id and notes:
+                    print(f"- [{check_id}] {notes}")
     else:
         print("manual release-candidate check summary: complete")
 

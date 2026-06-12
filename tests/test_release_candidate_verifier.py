@@ -316,6 +316,7 @@ def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
             {"id": check["id"], "next_action": check["next_action"]}
             for check in rc.MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS
         ],
+        "remaining_notes": [],
         "failed_check_ids": [],
         "automated_evidence_check_ids": [],
     }
@@ -1106,6 +1107,7 @@ def test_release_candidate_verifier_manual_check_draft_can_mark_provider_not_app
 def test_release_candidate_verifier_draft_keeps_failed_dmg_screen_probe_notes(
     tmp_path,
     monkeypatch,
+    capsys,
 ):
     for env_name in rc.PROVIDER_SMOKE_ENV_VARS:
         monkeypatch.delenv(env_name, raising=False)
@@ -1187,6 +1189,18 @@ def test_release_candidate_verifier_draft_keeps_failed_dmg_screen_probe_notes(
         "gatekeeper_first_launch",
         "screen_recording_permission",
     ]
+    assert draft["manual_release_candidate_check_summary"]["remaining_notes"] == [
+        {
+            "id": "screen_recording_permission",
+            "notes": (
+                "Supporting automated evidence: --run-dmg-screen-smoke reached "
+                "packaged Bridge for dist/electron/Oha-Yachiyo-0.4.0-arm64.dmg, "
+                "but /screen/current failed with screen_capture_permission_denied; "
+                "keep this check manual_required until Screen Recording is granted "
+                "and the probe passes."
+            ),
+        }
+    ]
     checks = {check["id"]: check for check in draft["checks"]}
     assert checks["packaged_bridge_isolation"]["status"] == "passed"
     assert checks["chat_native_file_upload"]["status"] == "passed"
@@ -1198,6 +1212,23 @@ def test_release_candidate_verifier_draft_keeps_failed_dmg_screen_probe_notes(
     assert "dist/electron/Oha-Yachiyo-0.4.0-arm64.dmg" in notes
     assert "screen_capture_permission_denied" in notes
     assert "/private/var/folders" not in notes
+
+    assert rc.print_manual_release_candidate_checks_status(
+        tmp_path,
+        (
+            Path("tmp/rc-signoff.json"),
+            Path("tmp/rc-screen.json"),
+        ),
+        mark_provider_smoke_not_applicable_if_missing=True,
+    )
+    output = capsys.readouterr().out
+    assert "manual release-candidate supporting notes:" in output
+    assert (
+        "- [screen_recording_permission] Supporting automated evidence: "
+        "--run-dmg-screen-smoke reached packaged Bridge"
+    ) in output
+    assert "screen_capture_permission_denied" in output
+    assert "/private/var/folders" not in output
 
 
 def test_release_candidate_verifier_manual_check_write_actions_print_remaining_summary(

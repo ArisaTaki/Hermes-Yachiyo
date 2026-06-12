@@ -1154,6 +1154,10 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release candidate verifier manual summary must list remaining next actions",
     ),
     (
+        '"remaining_notes"',
+        "release candidate verifier manual summary must list supporting notes for remaining checks",
+    ),
+    (
         '"automated_evidence_check_ids"',
         "release candidate verifier manual summary must list automated evidence check ids",
     ),
