@@ -43,7 +43,7 @@ from apps.core.special_sessions import is_proactive_chat_session
 from apps.locald.screenshot import ScreenCapturePermissionError, capture_screenshot_to_file
 from apps.shell.agent_runtime import AgentRuntimeError, get_agent_runtime_service
 from apps.shell.native_capabilities import get_native_image_input_capability
-from packages.security import redact_api_error_text
+from packages.security import contains_sensitive_text, redact_api_error_text
 from packages.protocol.enums import ErrorCode, TaskStatus, TaskType
 
 if TYPE_CHECKING:
@@ -504,7 +504,10 @@ class ChatAPI:
         normalized = str(value or "").strip()
         if not normalized:
             return ""
-        return normalized[:128]
+        normalized = normalized[:128]
+        if contains_sensitive_text(normalized):
+            raise AgentRuntimeError("client_message_id/idempotency_key 不能包含 API key、token 或其他敏感值")
+        return normalized
 
     @staticmethod
     def _with_client_message_id(metadata: dict[str, Any] | None, client_message_id: str) -> dict[str, Any] | None:
@@ -625,7 +628,10 @@ class ChatAPI:
         raw_attachments = attachments or []
         if not text and not raw_attachments:
             return {"ok": False, "error": "消息内容不能为空"}
-        idempotency_key = self._normalize_client_message_id(client_message_id)
+        try:
+            idempotency_key = self._normalize_client_message_id(client_message_id)
+        except AgentRuntimeError as exc:
+            return {"ok": False, "error": redact_api_error_text(exc)}
         existing_response = self._idempotent_message_response(idempotency_key)
         if existing_response is not None:
             return existing_response

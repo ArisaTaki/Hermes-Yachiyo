@@ -163,6 +163,22 @@ def test_send_message_is_idempotent_for_client_message_id(tmp_path):
         store.close()
 
 
+def test_send_message_rejects_sensitive_client_message_id_before_persistence(tmp_path):
+    api, runtime, store = _make_api(tmp_path)
+    leaked_client_message_id = "sk-client-message-id-secret123456"
+    try:
+        result = api.send_message("你好", client_message_id=leaked_client_message_id)
+
+        assert result["ok"] is False
+        assert "client_message_id/idempotency_key" in result["error"]
+        assert leaked_client_message_id not in result["error"]
+        assert runtime.chat_session.get_messages() == []
+        assert runtime.state.list_tasks() == []
+        assert verify_secret_redaction(paths=[tmp_path]) == []
+    finally:
+        store.close()
+
+
 def test_send_message_rejects_when_native_agent_unavailable(tmp_path):
     api, runtime, store = _make_api(tmp_path)
     runtime.task_runner = SimpleNamespace(
