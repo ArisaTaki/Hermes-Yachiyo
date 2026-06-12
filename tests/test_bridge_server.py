@@ -2625,6 +2625,72 @@ def test_agent_and_workflow_run_http_routes_redact_sensitive_idempotency_key_err
         _restore_module_prefixes(("fastapi",), saved_modules)
 
 
+def test_agent_run_http_route_rejects_sensitive_idempotency_key_before_persistence(tmp_path, monkeypatch):
+    saved_modules = _unload_module_prefixes(("fastapi",))
+    try:
+        try:
+            from fastapi import FastAPI
+            from fastapi.testclient import TestClient
+        except ModuleNotFoundError as exc:
+            pytest.skip(f"FastAPI/TestClient dependency is not installed: {exc.name}")
+
+        route_path = Path(__file__).resolve().parents[1] / "apps" / "bridge" / "routes" / "agents.py"
+        spec = importlib.util.spec_from_file_location("_oha_agent_sensitive_id_real_http_under_test", route_path)
+        assert spec is not None
+        assert spec.loader is not None
+        agent_route_module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = agent_route_module
+        spec.loader.exec_module(agent_route_module)
+
+        service = AgentRuntimeService(
+            db_path=tmp_path / "agent-runtime.db",
+            workspace_dir=tmp_path / "runtime",
+            credential_store=MemoryCredentialStore(),
+            seed_templates=False,
+        )
+        try:
+            agent = service.create_agent(
+                {
+                    "name": "HTTP Sensitive Idempotency Agent",
+                    "model_mode": "custom_api",
+                    "model_config": {
+                        "base_url": "https://api.example.test/v1",
+                        "model": "demo-model",
+                        "api_key": "sk-agent-secret",
+                    },
+                }
+            )
+            monkeypatch.setattr(
+                agent_route_module,
+                "get_agent_runtime_service",
+                lambda: (_ for _ in ()).throw(AssertionError("agent routes should use AppRuntime service")),
+            )
+            route_app = FastAPI()
+            route_app.state.runtime = SimpleNamespace(agent_runtime_service=service)
+            route_app.include_router(agent_route_module.router)
+            leaked_idempotency_key = "sk-real-http-agent-id-secret123456"
+
+            with TestClient(route_app) as client:
+                response = client.post(
+                    "/ui/agent-runs",
+                    json={"agent_id": agent["agent_id"], "user_goal": "hello"},
+                    headers={"Idempotency-Key": leaked_idempotency_key},
+                )
+
+            body = json.dumps(response.json(), ensure_ascii=False)
+            run_count = service._conn.execute("SELECT COUNT(*) AS count FROM runs").fetchone()["count"]
+            assert response.status_code == 400
+            assert "client_run_id/idempotency_key" in body
+            assert leaked_idempotency_key not in body
+            assert run_count == 0
+            assert verify_secret_redaction(paths=[tmp_path]) == []
+        finally:
+            service.close()
+    finally:
+        sys.modules.pop("_oha_agent_sensitive_id_real_http_under_test", None)
+        _restore_module_prefixes(("fastapi",), saved_modules)
+
+
 def test_run_detail_management_http_routes_use_app_runtime_service(monkeypatch):
     saved_modules = _unload_module_prefixes(("fastapi",))
     try:
