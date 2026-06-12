@@ -11069,6 +11069,170 @@ def test_agent_run_executes_singular_http_sse_tool_call_and_continues(tmp_path, 
         service.close()
 
 
+def test_agent_run_coalesces_indexless_interleaved_http_sse_tool_call_deltas_by_id(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    (workdir / "README.md").write_text("agent indexless readme content", encoding="utf-8")
+    (workdir / "NOTES.md").write_text("agent indexless notes content", encoding="utf-8")
+    requests = []
+
+    class FakeResponse:
+        def __init__(self, lines):
+            self._lines = lines
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            for line in self._lines:
+                yield line
+
+    def event(payload: dict) -> bytes:
+        return f"data: {json.dumps(payload)}\n\n".encode("utf-8")
+
+    first_response = FakeResponse(
+        [
+            event(
+                {
+                    "choices": [
+                        {
+                            "delta": {
+                                "tool_calls": [
+                                    {
+                                        "id": "call_agent_indexless_readme",
+                                        "type": "function",
+                                        "function": {"name": "workspace_", "arguments": '{"path": "READ'},
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            ),
+            event(
+                {
+                    "choices": [
+                        {
+                            "delta": {
+                                "tool_calls": [
+                                    {
+                                        "id": "call_agent_indexless_notes",
+                                        "type": "function",
+                                        "function": {"name": "workspace_", "arguments": '{"path": "NOT'},
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            ),
+            event(
+                {
+                    "choices": [
+                        {
+                            "delta": {
+                                "tool_calls": [
+                                    {
+                                        "id": "call_agent_indexless_readme",
+                                        "function": {"name": "read", "arguments": 'ME.md"}'},
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            ),
+            event(
+                {
+                    "choices": [
+                        {
+                            "delta": {
+                                "tool_calls": [
+                                    {
+                                        "id": "call_agent_indexless_notes",
+                                        "function": {"name": "read", "arguments": 'ES.md"}'},
+                                    }
+                                ]
+                            },
+                            "finish_reason": "tool_calls",
+                        }
+                    ]
+                }
+            ),
+            b"data: [DONE]\n\n",
+        ]
+    )
+    second_response = FakeResponse(
+        [
+            event({"choices": [{"delta": {"content": "Agent indexless interleaved HTTP SSE complete"}}]}),
+            b"data: [DONE]\n\n",
+        ]
+    )
+    responses = [first_response, second_response]
+
+    def fake_urlopen(request, **kwargs):
+        body = json.loads(request.data.decode("utf-8"))
+        requests.append({"request": request, "body": body, "kwargs": kwargs})
+        assert request.full_url == "https://api.example.test/v1/chat/completions"
+        assert request.get_header("Accept") == "text/event-stream"
+        assert body["stream"] is True
+        return responses.pop(0)
+
+    monkeypatch.setattr("apps.core.tls.urlrequest.urlopen", fake_urlopen)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Indexless Interleaved HTTP SSE Reader",
+                "model_mode": "custom_api",
+                "model_config": {"base_url": "https://api.example.test/v1", "model": "demo-model", "api_key": "sk-secret"},
+                "tool_policy": {"allowed_tools": ["workspace.read"]},
+                "workspace_policy": {"default_workdir": str(workdir), "readable_scopes": ["."]},
+            }
+        )
+        run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Read README and NOTES"})
+        run_events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in run_events]
+        tool_facts = [event for event in run_events if event["event_type"] == "agent.tool.call"]
+        assistant_tool_messages = [
+            message
+            for message in requests[1]["body"]["messages"]
+            if message.get("role") == "assistant" and message.get("tool_calls")
+        ]
+        tool_messages = [message for message in requests[1]["body"]["messages"] if message.get("role") == "tool"]
+
+        assert run["status"] == "completed"
+        assert run["result"] == "Agent indexless interleaved HTTP SSE complete"
+        assert len(requests) == 2
+        assert requests[0]["body"]["tools"][0]["function"]["name"] == "workspace_read"
+        assert [call["id"] for call in assistant_tool_messages[-1]["tool_calls"]] == [
+            "call_agent_indexless_readme",
+            "call_agent_indexless_notes",
+        ]
+        assert [call["function"]["arguments"] for call in assistant_tool_messages[-1]["tool_calls"]] == [
+            '{"path": "README.md"}',
+            '{"path": "NOTES.md"}',
+        ]
+        assert [message["tool_call_id"] for message in tool_messages] == [
+            "call_agent_indexless_readme",
+            "call_agent_indexless_notes",
+        ]
+        assert "agent indexless readme content" in tool_messages[0]["content"]
+        assert "agent indexless notes content" in tool_messages[1]["content"]
+        assert [event["payload"]["input_preview"]["path"] for event in tool_facts] == [
+            "README.md",
+            "NOTES.md",
+        ]
+        assert event_types.count("agent.tool.call") == 2
+        assert event_types.count("agent.run.completed") == 1
+        assert not any(str(event_type).endswith(".delta") for event_type in event_types)
+    finally:
+        service.close()
+
+
 def test_agent_run_executes_http_sse_object_tool_call_arguments(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     workdir = tmp_path / "repo"

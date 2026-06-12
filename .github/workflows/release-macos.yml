@@ -195,6 +195,7 @@ jobs:
             tests/test_agent_runtime.py::test_agent_run_executes_http_sse_tool_call_and_continues \
             tests/test_agent_runtime.py::test_agent_run_executes_split_http_sse_tool_call_chunks_and_continues \
             tests/test_agent_runtime.py::test_agent_run_executes_singular_http_sse_tool_call_and_continues \
+            tests/test_agent_runtime.py::test_agent_run_coalesces_indexless_interleaved_http_sse_tool_call_deltas_by_id \
             tests/test_agent_runtime.py::test_agent_run_executes_http_sse_object_tool_call_arguments \
             tests/test_agent_runtime.py::test_agent_run_executes_message_level_http_sse_tool_call \
             tests/test_agent_runtime.py::test_agent_run_executes_legacy_streaming_function_call \

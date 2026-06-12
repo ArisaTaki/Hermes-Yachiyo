@@ -1674,6 +1674,7 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow smoke tests must cover NativeRunEngine Agent Run HTTP SSE tool calls" in messages
     assert "macOS release workflow smoke tests must cover NativeRunEngine Agent Run split HTTP SSE tool calls" in messages
     assert "macOS release workflow smoke tests must cover NativeRunEngine Agent Run singular HTTP SSE tool calls" in messages
+    assert "macOS release workflow smoke tests must cover NativeRunEngine Agent Run indexless interleaved HTTP SSE tool-call deltas" in messages
     assert "macOS release workflow smoke tests must cover NativeRunEngine Agent Run HTTP SSE object tool-call arguments" in messages
     assert "macOS release workflow smoke tests must cover NativeRunEngine Agent Run message-level HTTP SSE tool calls" in messages
     assert "macOS release workflow smoke tests must cover NativeRunEngine Agent Run legacy streaming function_call frames" in messages
