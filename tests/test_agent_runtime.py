@@ -868,6 +868,43 @@ def test_approval_resume_coordinator_orchestrates_resume_projection_states():
         "project_failed",
     ]
 
+    duplicate_calls: list[str] = []
+
+    def unexpected_resume_callback(*_args, **_kwargs):
+        raise AssertionError("approval resume must not execute after duplicate claim")
+
+    duplicate_coordinator = ApprovalResumeCoordinator(
+        call_agent_tool=unexpected_resume_callback,
+        fatal_tool_failure_detail=unexpected_resume_callback,
+        append_tool_result_message=unexpected_resume_callback,
+        run_tool_requests=unexpected_resume_callback,
+        timeline_factory=lambda event, detail, **payload: {"event": event, "detail": detail, **payload},
+        claim_pending_approval=lambda *_args: duplicate_calls.append("claim_pending_approval") or False,
+        approve_tool_run=unexpected_resume_callback,
+        continue_custom_api_agent=unexpected_resume_callback,
+    )
+
+    current = duplicate_coordinator.resume_approved_tool_run(
+        run_id=context.run_id,
+        pending={"tool": "terminal.run"},
+        context=context,
+        agent={"agent_id": "agent_resume"},
+        resumed_detail="Agent resumed after approval",
+        running_result="已批准，Agent 正在继续执行",
+        project_running=unexpected_resume_callback,
+        project_completed=unexpected_resume_callback,
+        project_required=unexpected_resume_callback,
+        project_failed=unexpected_resume_callback,
+        get_current_run=lambda run_id: duplicate_calls.append("get_current_run") or {
+            "run_id": run_id,
+            "status": "approval_required",
+        },
+        project_result=unexpected_resume_callback,
+    )
+
+    assert current == {"run_id": context.run_id, "status": "approval_required"}
+    assert duplicate_calls == ["claim_pending_approval", "get_current_run"]
+
 
 def test_approval_resume_projection_coordinator_projects_resume_states():
     appended_events: list[tuple[str, str, dict[str, object]]] = []
