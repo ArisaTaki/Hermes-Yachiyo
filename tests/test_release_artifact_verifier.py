@@ -1649,6 +1649,10 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow smoke tests must cover NativeRunEngine approval resume claim boundary" in messages
     assert "macOS release workflow smoke tests must cover Agent approval resume wait projection" in messages
     assert "macOS release workflow smoke tests must cover ApprovalResumeCoordinator approved tool resume flow" in messages
+    assert (
+        "macOS release workflow smoke tests must cover ToolApprovalExecutionFailureProjection timeline boundary"
+        in messages
+    )
     assert "macOS release workflow smoke tests must cover ApprovalResumeCoordinator fatal tool failure boundary" in messages
     assert "macOS release workflow smoke tests must cover ApprovalResumeCoordinator custom API resume flow" in messages
     assert "macOS release workflow smoke tests must cover custom API Agent start iteration normalization" in messages

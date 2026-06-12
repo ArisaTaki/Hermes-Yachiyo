@@ -87,6 +87,7 @@ jobs:
             tests/test_agent_runtime.py::test_agent_run_approval_uses_resume_coordinator_claim_boundary \
             tests/test_agent_runtime.py::test_agent_run_consecutive_terminal_approvals_update_pending_request \
             tests/test_agent_runtime.py::test_approval_resume_coordinator_executes_approved_tool_and_remaining_requests \
+            tests/test_agent_runtime.py::test_tool_approval_execution_failure_projection_builds_timeline_event \
             tests/test_agent_runtime.py::test_approval_resume_coordinator_stops_on_fatal_tool_failure \
             tests/test_agent_runtime.py::test_approval_resume_coordinator_continues_custom_api_agent_after_approved_tool \
             tests/test_agent_runtime.py::test_custom_api_agent_normalizes_invalid_start_iteration \

@@ -31,6 +31,7 @@ from apps.shell.agent_runtime import (
     RunCancellationProjection,
     ToolApprovalContinuationHandoff,
     ToolApprovalContinuationOutcome,
+    ToolApprovalExecutionFailureProjection,
     ToolApprovalResumeContext,
     ToolApprovalTransitionContext,
     ToolBroker,
@@ -1395,6 +1396,41 @@ def test_approval_resume_coordinator_stops_on_fatal_tool_failure():
             "status": "failed",
         }
     ]
+
+
+def test_tool_approval_execution_failure_projection_builds_timeline_event():
+    context = ToolApprovalResumeContext(
+        run_id="run_failed_tool",
+        timeline=[],
+        artifacts=[],
+        broker=SimpleNamespace(name="broker"),
+        allowed_tools=["terminal.run"],
+        budget=SimpleNamespace(name="budget"),
+        messages=[],
+        tool_request={"name": "terminal.run", "input": {"command": "false"}},
+        tool_name="",
+        input_preview={"command": "false"},
+        remaining_requests=[],
+        next_iteration=2,
+    )
+    tool_result = {"ok": False, "stderr": "denied"}
+
+    projection = ToolApprovalExecutionFailureProjection.from_context(
+        context,
+        tool_result,
+        "terminal.run failed fatally",
+    )
+
+    assert projection.detail == "terminal.run failed fatally"
+    assert projection.timeline_event(
+        lambda event, detail, **payload: {"event": event, "detail": detail, **payload}
+    ) == {
+        "event": "agent.tool.failed",
+        "detail": "tool",
+        "input_preview": {"command": "false"},
+        "result": tool_result,
+        "status": "failed",
+    }
 
 
 def test_approval_resume_coordinator_builds_continuation_handoff_after_approved_tool():

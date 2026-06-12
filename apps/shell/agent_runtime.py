@@ -2869,6 +2869,39 @@ class ToolApprovalContinuationOutcome:
 
 
 @dataclass(frozen=True)
+class ToolApprovalExecutionFailureProjection:
+    """Fatal failure projection for an approved tool execution."""
+
+    tool_name: str
+    input_preview: dict[str, Any]
+    tool_result: Any
+    detail: str
+
+    @classmethod
+    def from_context(
+        cls,
+        context: ToolApprovalResumeContext,
+        tool_result: Any,
+        detail: str,
+    ) -> "ToolApprovalExecutionFailureProjection":
+        return cls(
+            tool_name=context.tool_name or "tool",
+            input_preview=context.input_preview,
+            tool_result=tool_result,
+            detail=detail,
+        )
+
+    def timeline_event(self, timeline_factory: Any) -> dict[str, Any]:
+        return timeline_factory(
+            "agent.tool.failed",
+            self.tool_name,
+            input_preview=self.input_preview,
+            result=self.tool_result,
+            status="failed",
+        )
+
+
+@dataclass(frozen=True)
 class ToolApprovalTransitionContext:
     """Shared public context for tool approval reject/timeout transitions."""
 
@@ -3158,16 +3191,13 @@ class ApprovalResumeCoordinator:
             tool_result,
         )
         if fatal_failure:
-            context.timeline.append(
-                self._timeline(
-                    "agent.tool.failed",
-                    context.tool_name or "tool",
-                    input_preview=context.input_preview,
-                    result=tool_result,
-                    status="failed",
-                )
+            failure = ToolApprovalExecutionFailureProjection.from_context(
+                context,
+                tool_result,
+                fatal_failure,
             )
-            raise AgentRuntimeError(fatal_failure)
+            context.timeline.append(failure.timeline_event(self._timeline))
+            raise AgentRuntimeError(failure.detail)
         self._append_tool_result_message(context.messages, context.tool_request, tool_result)
         self._run_tool_requests(
             context.remaining_requests,
