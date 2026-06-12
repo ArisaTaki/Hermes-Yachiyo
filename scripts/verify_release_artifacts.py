@@ -626,6 +626,10 @@ STREAMING_PROVIDER_SMOKE_SCRIPT_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "_finish_reasons_from_value(choice)",
         "real provider smoke helper must parse choice-level stop_reason values",
     ),
+    (
+        "_responses_stream_reasoning_done(chunk)",
+        "real provider smoke helper must parse Responses reasoning summary done snapshots",
+    ),
 )
 STREAMING_PROVIDER_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
@@ -663,6 +667,10 @@ STREAMING_PROVIDER_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "def test_stream_smoke_accepts_responses_completed_top_level_stop_reason",
         "provider smoke tests must cover Responses completed top-level stop_reason",
+    ),
+    (
+        "def test_stream_smoke_uses_responses_reasoning_summary_done_snapshot",
+        "provider smoke tests must cover Responses reasoning summary done snapshots",
     ),
     (
         "assert leaked_secret not in captured.err",

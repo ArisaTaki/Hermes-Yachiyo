@@ -92,6 +92,8 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
     assert "provider smoke tests must cover CLI tool-result finish_reason wiring" in messages
     assert "provider smoke tests must cover Responses completed top-level finish_reason" in messages
     assert "provider smoke tests must cover Responses completed top-level stop_reason" in messages
+    assert "real provider smoke helper must parse Responses reasoning summary done snapshots" in messages
+    assert "provider smoke tests must cover Responses reasoning summary done snapshots" in messages
     assert "provider smoke tests must prove provider errors do not print API keys" in messages
 
 
