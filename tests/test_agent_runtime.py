@@ -32,6 +32,7 @@ from apps.shell.agent_runtime import (
     ToolApprovalClaimProjection,
     ToolApprovalContinuationHandoff,
     ToolApprovalContinuationOutcome,
+    ToolApprovalCustomApiContinuationRequest,
     ToolApprovalExecutionFailureProjection,
     ToolApprovalExecutionFollowup,
     ToolApprovalExecutionRequest,
@@ -1697,6 +1698,74 @@ def test_approval_resume_coordinator_builds_continuation_handoff_after_approved_
     assert handoff.run_id == "run_resume_handoff"
     assert handoff.budget is budget
     assert messages[-1] == {"role": "tool", "content": '{"ok": true}'}
+
+
+def test_tool_approval_custom_api_continuation_request_calls_model_with_handoff_payload():
+    calls: list[tuple[str, dict[str, object]]] = []
+    agent = {"agent_id": "agent_resume", "name": "Resume Agent"}
+    broker = SimpleNamespace(name="broker")
+    budget = SimpleNamespace(name="budget")
+    timeline: list[dict[str, object]] = [{"event": "agent.tool.completed"}]
+    artifacts: list[dict[str, object]] = [{"path": "report.md"}]
+    messages: list[dict[str, object]] = [{"role": "user", "content": "resume"}]
+    handoff = ToolApprovalContinuationHandoff(
+        agent=agent,
+        user_goal="",
+        broker=broker,
+        timeline=timeline,
+        artifacts=artifacts,
+        messages=messages,
+        start_iteration=5,
+        run_id="run_resume",
+        budget=budget,
+    )
+
+    def continue_custom_api_agent(
+        received_agent,
+        user_goal,
+        tool_broker,
+        run_timeline,
+        run_artifacts,
+        **kwargs,
+    ):
+        calls.append(
+            (
+                "continue_custom_api_agent",
+                {
+                    "agent": received_agent,
+                    "user_goal": user_goal,
+                    "broker": tool_broker,
+                    "timeline": run_timeline,
+                    "artifacts": run_artifacts,
+                    "messages": kwargs["messages"],
+                    "start_iteration": kwargs["start_iteration"],
+                    "run_id": kwargs["run_id"],
+                    "budget": kwargs["budget"],
+                },
+            )
+        )
+        return "resumed model output"
+
+    request = ToolApprovalCustomApiContinuationRequest.from_handoff(handoff)
+
+    assert request.execute(continue_custom_api_agent) == "resumed model output"
+    assert calls == [
+        (
+            "continue_custom_api_agent",
+            {
+                "agent": agent,
+                "user_goal": "",
+                "broker": broker,
+                "timeline": timeline,
+                "artifacts": artifacts,
+                "messages": messages,
+                "start_iteration": 5,
+                "run_id": "run_resume",
+                "budget": budget,
+            },
+        )
+    ]
+    assert request.handoff is handoff
 
 
 def test_approval_resume_coordinator_continues_custom_api_agent_after_approved_tool():

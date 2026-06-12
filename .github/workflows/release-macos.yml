@@ -92,6 +92,7 @@ jobs:
             tests/test_agent_runtime.py::test_tool_approval_execution_followup_appends_result_and_runs_remaining_requests \
             tests/test_agent_runtime.py::test_tool_approval_execution_failure_projection_builds_timeline_event \
             tests/test_agent_runtime.py::test_approval_resume_coordinator_stops_on_fatal_tool_failure \
+            tests/test_agent_runtime.py::test_tool_approval_custom_api_continuation_request_calls_model_with_handoff_payload \
             tests/test_agent_runtime.py::test_approval_resume_coordinator_continues_custom_api_agent_after_approved_tool \
             tests/test_agent_runtime.py::test_custom_api_agent_normalizes_invalid_start_iteration \
             tests/test_agent_runtime.py::test_approval_resume_projection_coordinator_projects_resume_states \

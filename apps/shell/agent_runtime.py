@@ -2901,6 +2901,33 @@ class ToolApprovalContinuationHandoff:
 
 
 @dataclass(frozen=True)
+class ToolApprovalCustomApiContinuationRequest:
+    """Custom API continuation call assembled from approved-tool handoff."""
+
+    handoff: ToolApprovalContinuationHandoff
+
+    @classmethod
+    def from_handoff(
+        cls,
+        handoff: ToolApprovalContinuationHandoff,
+    ) -> "ToolApprovalCustomApiContinuationRequest":
+        return cls(handoff=handoff)
+
+    def execute(self, continue_custom_api_agent: Any) -> str:
+        return continue_custom_api_agent(
+            self.handoff.agent,
+            self.handoff.user_goal,
+            self.handoff.broker,
+            self.handoff.timeline,
+            self.handoff.artifacts,
+            messages=self.handoff.messages,
+            start_iteration=self.handoff.start_iteration,
+            run_id=self.handoff.run_id,
+            budget=self.handoff.budget,
+        )
+
+
+@dataclass(frozen=True)
 class ToolApprovalContinuationOutcome:
     """Projection outcome after continuing a run with an approved tool result."""
 
@@ -3345,17 +3372,8 @@ class ApprovalResumeCoordinator:
                 "Approval resume coordinator is missing custom API continuation"
             )
         handoff = self.continuation_handoff_after_approved_tool(agent, context)
-        return self._continue_custom_api_agent(
-            handoff.agent,
-            handoff.user_goal,
-            handoff.broker,
-            handoff.timeline,
-            handoff.artifacts,
-            messages=handoff.messages,
-            start_iteration=handoff.start_iteration,
-            run_id=handoff.run_id,
-            budget=handoff.budget,
-        )
+        request = ToolApprovalCustomApiContinuationRequest.from_handoff(handoff)
+        return request.execute(self._continue_custom_api_agent)
 
     def continuation_handoff_after_approved_tool(
         self,

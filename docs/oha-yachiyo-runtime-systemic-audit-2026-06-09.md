@@ -1285,6 +1285,7 @@ RunEvent sequence:
   - `ToolApprovalClaimProjection` 负责批准 claim 成功后的 running Run 投影 payload，避免 claim 分支继续直接拼 timeline、artifact、tool name 和 input preview 参数。
   - `ToolApprovalExecutionRequest` 负责 approved-tool 调用参数交接，固定 `approved=True`、run id、budget、timeline 和 artifact 传递。
   - `ToolApprovalContinuationHandoff` 负责批准工具执行后的 custom API continuation 参数交接，避免 coordinator 内继续散落 broker、timeline、artifacts、messages、iteration、run id 和 budget 参数拼装。
+  - `ToolApprovalCustomApiContinuationRequest` 负责 approved-tool 后 custom API 模型续跑回调参数交接。
   - `ToolApprovalExecutionFollowup` 负责批准工具成功后的 tool-result message 追加和 remaining tool requests 续跑参数交接。
   - `ToolApprovalContinuationOutcome` 负责批准工具执行后的 completed / approval_required / failed continuation outcome 投影分派；`continue_and_project_after_approved_tool()` 保留模型继续执行与 outcome 构造，`resume_approved_tool_run()` 保留 claim、running projection 和最终 result projection 编排。
   - `ToolApprovalExecutionFailureProjection` 负责 approved-tool fatal failure timeline event 和错误详情，避免 `execute_approved_tool()` 直接拼失败 replay payload。
@@ -2143,6 +2144,7 @@ compileall passed
 - release workflow smoke 现在也强制包含 approved-tool resume wait / failure projection 边界回归，确认主聊天与 Agent Run 的连续审批、批准后失败投影不回退到 approve 分支私有实现。
 - release workflow smoke 现在也强制包含 ToolApprovalExecutionRequest approved call boundary 回归，确保 approved-tool 调用参数继续由显式 request boundary 维护。
 - release workflow smoke 现在也强制包含 ToolApprovalExecutionFollowup remaining-tool boundary 回归，确保 approved-tool 成功后的 tool-result message 与 remaining tool requests 续跑参数继续由显式 follow-up boundary 维护。
+- release workflow smoke 现在也强制包含 ToolApprovalCustomApiContinuationRequest handoff boundary 回归，确保 approved-tool 后 custom API 模型续跑参数继续由显式 request boundary 维护。
 - release workflow smoke 现在也强制包含 ApprovalResumeProjectionCoordinator resume state projections 回归，确保 approved-tool resume 的 running / completed / approval_required / failed 投影继续由显式 projection boundary 维护。
 - release workflow smoke 现在也强制包含 ToolApprovalResumeContext pending payload parsing 回归，确保 approved-tool resume 上下文继续统一解析 messages、tool request、remaining requests、next iteration、timeline、artifacts 和 budget 输入。
 - NativeRunEngine 的主聊天与 standalone Agent approved-tool resume 现在共用 `_resume_approved_tool_run()` 恢复步骤；主聊天仍保留 `model.output.completed` / running Task 投影，Agent Run 仍保留 running group / parent Workflow child projection 和 completed/failed group 投影，但 claim、tool-result follow-up、二次审批、失败清洗统一由同一内部步骤编排。release workflow 已锁定的 main chat / Agent claim-boundary 回归现在也显式断言两条路径都经过该共享恢复步骤。
