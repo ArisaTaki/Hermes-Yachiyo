@@ -78,8 +78,11 @@ def test_run_projection_coordinator_syncs_run_projections():
         task_run_links=Projection("task_links"),
     )
 
-    artifacts = [{"kind": "file", "path": "report.md"}]
-    pending_approval = {"tool": "workspace.write_patch"}
+    artifacts = [{"kind": "file", "path": "report.md", "meta": {"revision": 1}}]
+    pending_approval = {
+        "tool": "workspace.write_patch",
+        "input_preview": {"path": "report.md"},
+    }
     coordinator.sync(
         "run-projection",
         status="approval_required",
@@ -88,16 +91,34 @@ def test_run_projection_coordinator_syncs_run_projections():
     )
     coordinator.sync_event_cursor("run-projection", sequence=7)
 
+    projected_artifacts = calls[0][2][0]
+    projected_pending = calls[1][2]["pending_approval"]
     assert calls == [
-        ("artifacts", "run-projection", (artifacts,)),
+        ("artifacts", "run-projection", (projected_artifacts,)),
         (
             "approvals",
             "run-projection",
-            {"status": "approval_required", "pending_approval": pending_approval},
+            {"status": "approval_required", "pending_approval": projected_pending},
         ),
         ("task_links", "run-projection", {"status": "approval_required"}),
         ("task_links", "run-projection", {"last_event_sequence": 7}),
     ]
+    assert projected_artifacts == artifacts
+    assert projected_artifacts is not artifacts
+    assert projected_artifacts[0] is not artifacts[0]
+    assert projected_artifacts[0]["meta"] is not artifacts[0]["meta"]
+    assert projected_pending == pending_approval
+    assert projected_pending is not pending_approval
+    assert projected_pending["input_preview"] is not pending_approval["input_preview"]
+
+    artifacts[0]["path"] = "changed.md"
+    artifacts[0]["meta"]["revision"] = 2
+    pending_approval["input_preview"]["path"] = "changed.md"
+    assert projected_artifacts == [{"kind": "file", "path": "report.md", "meta": {"revision": 1}}]
+    assert projected_pending == {
+        "tool": "workspace.write_patch",
+        "input_preview": {"path": "report.md"},
+    }
 
 
 def test_run_transition_projection_coordinator_projects_child_and_workflow_group():

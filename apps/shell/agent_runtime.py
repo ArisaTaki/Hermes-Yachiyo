@@ -2061,8 +2061,14 @@ class RunProjectionCoordinator:
         artifacts: Any,
         pending_approval: dict[str, Any],
     ) -> None:
-        self._run_artifacts.sync(run_id, artifacts)
-        self._run_approvals.sync(run_id, status=status, pending_approval=pending_approval)
+        artifact_snapshot = deepcopy(artifacts)
+        pending_snapshot = (
+            deepcopy(pending_approval)
+            if isinstance(pending_approval, dict)
+            else {}
+        )
+        self._run_artifacts.sync(run_id, artifact_snapshot)
+        self._run_approvals.sync(run_id, status=status, pending_approval=pending_snapshot)
         self._task_run_links.sync_projection(run_id, status=status)
 
     def sync_event_cursor(self, run_id: str, *, sequence: int) -> None:
