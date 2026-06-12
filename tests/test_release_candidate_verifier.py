@@ -1045,6 +1045,38 @@ def test_release_candidate_verifier_dmg_mount_fails_without_dmgs(tmp_path, monke
     assert report["dmg_mount_guards"]["status"] == "failed"
 
 
+def test_release_candidate_verifier_terminates_packaged_app_process_group(monkeypatch):
+    signals: list[tuple[int, int]] = []
+
+    class FakeProcess:
+        pid = 12345
+        returncode = None
+        terminated = False
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self):
+            self.terminated = True
+            self.returncode = 0
+
+        def wait(self, timeout=None):
+            self.returncode = 0
+            return 0
+
+        def kill(self):
+            self.returncode = -9
+
+    monkeypatch.setattr(rc.os, "getpgid", lambda pid: 45678)
+    monkeypatch.setattr(rc.os, "killpg", lambda pgid, sig: signals.append((pgid, sig)))
+
+    process = FakeProcess()
+    rc._terminate_process(process)
+
+    assert signals == [(45678, rc.signal.SIGTERM)]
+    assert process.terminated is False
+
+
 def test_release_candidate_verifier_runs_dmg_app_startup_smoke(
     tmp_path, monkeypatch, capsys
 ):
@@ -1094,7 +1126,14 @@ def test_release_candidate_verifier_runs_dmg_app_startup_smoke(
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     def fake_popen(command, **kwargs):
-        popen_calls.append({"command": command, "cwd": kwargs.get("cwd"), "env": kwargs.get("env")})
+        popen_calls.append(
+            {
+                "command": command,
+                "cwd": kwargs.get("cwd"),
+                "env": kwargs.get("env"),
+                "start_new_session": kwargs.get("start_new_session"),
+            }
+        )
         return FakeProcess()
 
     monkeypatch.setattr(rc.sys, "platform", "darwin")
@@ -1116,6 +1155,7 @@ def test_release_candidate_verifier_runs_dmg_app_startup_smoke(
     assert len(popen_calls) == 1
     assert popen_calls[0]["command"][0].endswith("/Oha-Yachiyo.app/Contents/MacOS/Oha-Yachiyo")
     assert popen_calls[0]["cwd"].endswith("/Oha-Yachiyo.app")
+    assert popen_calls[0]["start_new_session"] is True
     env = popen_calls[0]["env"]
     assert env["OHA_YACHIYO_BRIDGE_URL"] == "http://127.0.0.1:49123"
     assert env["OHA_YACHIYO_HOME"].endswith("/.oha-yachiyo")
@@ -1194,7 +1234,14 @@ def test_release_candidate_verifier_runs_dmg_screen_recording_probe(
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     def fake_popen(command, **kwargs):
-        popen_calls.append({"command": command, "cwd": kwargs.get("cwd"), "env": kwargs.get("env")})
+        popen_calls.append(
+            {
+                "command": command,
+                "cwd": kwargs.get("cwd"),
+                "env": kwargs.get("env"),
+                "start_new_session": kwargs.get("start_new_session"),
+            }
+        )
         return FakeProcess()
 
     def fake_urlopen(url, timeout):
@@ -1225,6 +1272,7 @@ def test_release_candidate_verifier_runs_dmg_screen_recording_probe(
     assert commands[0][:2] == ["hdiutil", "attach"]
     assert commands[1][:2] == ["hdiutil", "detach"]
     assert len(popen_calls) == 1
+    assert popen_calls[0]["start_new_session"] is True
     env = popen_calls[0]["env"]
     assert env["OHA_YACHIYO_BRIDGE_URL"] == "http://127.0.0.1:49124"
     output = capsys.readouterr().out

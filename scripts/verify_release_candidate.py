@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -878,11 +879,27 @@ def _allocate_loopback_port() -> int:
 def _terminate_process(process: subprocess.Popen[str], timeout_seconds: float = 5.0) -> None:
     if process.poll() is not None:
         return
-    process.terminate()
+    try:
+        process_group_id = os.getpgid(process.pid)
+    except (AttributeError, OSError):
+        process_group_id = None
+    if process_group_id is not None:
+        try:
+            os.killpg(process_group_id, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            process.terminate()
+    else:
+        process.terminate()
     try:
         process.wait(timeout=timeout_seconds)
     except subprocess.TimeoutExpired:
-        process.kill()
+        if process_group_id is not None:
+            try:
+                os.killpg(process_group_id, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                process.kill()
+        else:
+            process.kill()
         try:
             process.wait(timeout=timeout_seconds)
         except subprocess.TimeoutExpired:
@@ -1190,6 +1207,7 @@ def verify_dmg_app_startup(
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
+                    start_new_session=True,
                 )
                 status_finding = _wait_for_dmg_app_status(
                     process,
@@ -1287,6 +1305,7 @@ def verify_dmg_screen_recording_probe(
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
+                    start_new_session=True,
                 )
                 status_finding = _wait_for_dmg_app_status(
                     process,
