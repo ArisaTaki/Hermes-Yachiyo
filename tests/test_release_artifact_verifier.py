@@ -210,6 +210,7 @@ def test_verifier_reports_release_latest_json_metadata_mismatches(tmp_path):
                 "name": "Wrong App",
                 "channel": "experimental",
                 "branch": "develop",
+                "source_branch": "../feature branch",
                 "version": "not-semver",
                 "base_version": "not-semver",
                 "commit": "abc123",
@@ -221,8 +222,8 @@ def test_verifier_reports_release_latest_json_metadata_mismatches(tmp_path):
                 "signing": "notarized",
                 "dmg_name": "Oha-Yachiyo-develop-latest.dmg",
                 "sha256": digest,
-                "download_url": f"https://github.example/releases/download/main-latest/{dmg.name}",
-                "latest_json_url": "https://github.example/releases/download/main-latest/Oha-Yachiyo-main-latest.json",
+                "download_url": "https://github.example/releases/download/develop-latest/Oha-Yachiyo-develop-latest.dmg",
+                "latest_json_url": "https://github.example/releases/download/develop-latest/Oha-Yachiyo-main-latest.json",
                 "published_at": "2026-06-12 00:00:00",
                 "changelog": [],
             }
@@ -242,7 +243,10 @@ def test_verifier_reports_release_latest_json_metadata_mismatches(tmp_path):
     assert "release latest JSON name must be Oha-Yachiyo" in messages
     assert "release latest JSON branch must match its filename" in messages
     assert "release latest JSON channel must match its filename branch" in messages
+    assert "release latest JSON source_branch must be a safe branch name" in messages
     assert "release latest JSON dmg_name must match its filename branch" in messages
+    assert "release latest JSON download_url must reference its latest channel tag" in messages
+    assert "release latest JSON latest_json_url must reference its latest channel tag" in messages
     assert "release latest JSON version must be semver" in messages
     assert "release latest JSON base_version must be semver" in messages
     assert "release latest JSON commit must be a 40-character git SHA" in messages

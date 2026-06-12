@@ -136,6 +136,7 @@ RELEASE_SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$")
 RELEASE_SHA_RE = re.compile(r"^[0-9a-f]{40}$", re.IGNORECASE)
 RELEASE_SHORT_SHA_RE = re.compile(r"^[0-9a-f]{7}$", re.IGNORECASE)
 RELEASE_PUBLISHED_AT_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+RELEASE_SOURCE_BRANCH_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
 PACKAGED_UI_E2E_REQUIRED_SELECTORS: tuple[str, ...] = (
     "chat-image-file-input",
     "chat-header-image-attach-button",
@@ -498,7 +499,7 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document latest JSON checksum consistency checks",
     ),
     (
-        "latest JSON 的 `name` / `channel` / `branch` / `version` / `commit` / `short_commit` / `build_number` / `run_number` / `run_id` / `tag` / `signing` / `published_at` / `changelog`",
+        "latest JSON 的 `name` / `channel` / `branch` / `source_branch` / `version` / `commit` / `short_commit` / `build_number` / `run_number` / `run_id` / `tag` / `signing` / `published_at` / `changelog`",
         "release packaging docs must document latest JSON metadata format validation",
     ),
     (
@@ -1823,12 +1824,21 @@ def _verify_release_directory_artifacts(root: Path, scan_paths: Sequence[Path | 
     return findings
 
 
+def _is_safe_release_source_branch(value: str) -> bool:
+    if not RELEASE_SOURCE_BRANCH_RE.fullmatch(value):
+        return False
+    if value.startswith("/") or value.endswith("/") or "//" in value or ".." in value:
+        return False
+    return True
+
+
 def _verify_release_latest_json_metadata(metadata_path: Path, metadata: dict[str, object]) -> list[Finding]:
     findings: list[Finding] = []
     required_fields = (
         "name",
         "channel",
         "branch",
+        "source_branch",
         "version",
         "base_version",
         "commit",
@@ -1858,13 +1868,23 @@ def _verify_release_latest_json_metadata(metadata_path: Path, metadata: dict[str
         return findings
     expected_branch = match.group("branch")
     expected_channel = RELEASE_LATEST_BRANCH_CHANNELS[expected_branch]
+    expected_latest_tag = f"{expected_branch}-latest"
     if metadata.get("branch") != expected_branch:
         findings.append(Finding(metadata_path, "release latest JSON branch must match its filename"))
     if metadata.get("channel") != expected_channel:
         findings.append(Finding(metadata_path, "release latest JSON channel must match its filename branch"))
+    source_branch = str(metadata.get("source_branch") or "")
+    if not _is_safe_release_source_branch(source_branch):
+        findings.append(Finding(metadata_path, "release latest JSON source_branch must be a safe branch name"))
     expected_dmg = f"Oha-Yachiyo-{expected_branch}-latest.dmg"
     if metadata.get("dmg_name") != expected_dmg:
         findings.append(Finding(metadata_path, "release latest JSON dmg_name must match its filename branch"))
+    download_url = str(metadata.get("download_url") or "")
+    if f"/releases/download/{expected_latest_tag}/" not in download_url:
+        findings.append(Finding(metadata_path, "release latest JSON download_url must reference its latest channel tag"))
+    latest_json_url = str(metadata.get("latest_json_url") or "")
+    if f"/releases/download/{expected_latest_tag}/" not in latest_json_url:
+        findings.append(Finding(metadata_path, "release latest JSON latest_json_url must reference its latest channel tag"))
     version = str(metadata.get("version") or "")
     base_version = str(metadata.get("base_version") or "")
     if not RELEASE_SEMVER_RE.fullmatch(version):
