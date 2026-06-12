@@ -152,6 +152,10 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
         "release candidate verifier must write structured manual check statuses to the RC report"
         in messages
     )
+    assert "release candidate verifier must write manual check progress summary to the RC report" in messages
+    assert "release candidate verifier must calculate manual check progress summary" in messages
+    assert "release candidate verifier manual summary must list remaining check ids" in messages
+    assert "release candidate verifier manual summary must list automated evidence check ids" in messages
     assert "release candidate verifier must copy manual check details into reports" in messages
     assert "release candidate verifier must generate manual check templates" in messages
     assert "release candidate verifier must expose manual check template writing" in messages

@@ -152,6 +152,32 @@ def _manual_release_candidate_check_status(
     return "manual_required"
 
 
+def _manual_release_candidate_check_summary(
+    checks: Sequence[dict[str, str]],
+) -> dict[str, object]:
+    status_counts = {
+        status: sum(1 for check in checks if check.get("status") == status)
+        for status in MANUAL_RELEASE_CANDIDATE_CHECK_STATUS_VALUES
+    }
+    remaining_check_ids = [
+        check["id"] for check in checks if check.get("status") == "manual_required"
+    ]
+    failed_check_ids = [check["id"] for check in checks if check.get("status") == "failed"]
+    automated_evidence_check_ids = [
+        check["id"]
+        for check in checks
+        if check.get("evidence_source") == "automated_rc_gate"
+    ]
+    return {
+        "total": len(checks),
+        "status_counts": status_counts,
+        "remaining_count": len(remaining_check_ids),
+        "remaining_check_ids": remaining_check_ids,
+        "failed_check_ids": failed_check_ids,
+        "automated_evidence_check_ids": automated_evidence_check_ids,
+    }
+
+
 def _manual_release_candidate_checks_by_id(
     checks: Sequence[dict[str, str]],
 ) -> dict[str, dict[str, str]]:
@@ -180,6 +206,9 @@ def _refresh_manual_release_candidate_check_report(
     status = _manual_release_candidate_check_status(checks, findings)
     report["manual_release_candidate_check_status"] = status
     report["manual_release_candidate_check_statuses"] = list(checks)
+    report["manual_release_candidate_check_summary"] = (
+        _manual_release_candidate_check_summary(checks)
+    )
     report["manual_release_candidate_check_findings"] = _finding_report(findings)
     return status
 
@@ -779,6 +808,9 @@ def verify_release_candidate(
         "manual_release_candidate_check_status": manual_check_status,
         "manual_release_candidate_checks": list(MANUAL_RELEASE_CANDIDATE_CHECKS),
         "manual_release_candidate_check_statuses": manual_checks,
+        "manual_release_candidate_check_summary": _manual_release_candidate_check_summary(
+            manual_checks
+        ),
         "manual_release_candidate_check_findings": _finding_report(manual_check_findings),
         "manual_release_candidate_checks_source": str(manual_checks_json) if manual_checks_json else "",
         "manual_release_candidate_checks_required": require_manual_checks_complete,
@@ -1074,6 +1106,17 @@ def verify_release_candidate(
     print("manual release-candidate checks:")
     for check in manual_checks:
         print(f"- [{check['id']}] {check['status']}: {check['description']}")
+    manual_summary = report["manual_release_candidate_check_summary"]
+    if isinstance(manual_summary, dict):
+        remaining_ids = manual_summary.get("remaining_check_ids")
+        remaining_count = manual_summary.get("remaining_count")
+        if isinstance(remaining_ids, list) and remaining_ids:
+            print(
+                "manual release-candidate check summary: "
+                f"{remaining_count} remaining ({', '.join(str(check_id) for check_id in remaining_ids)})"
+            )
+        else:
+            print("manual release-candidate check summary: complete")
     if manual_check_findings:
         print("manual release-candidate check evidence: failed")
         for finding in manual_check_findings:

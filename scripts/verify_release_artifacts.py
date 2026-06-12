@@ -890,6 +890,22 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release candidate verifier must write structured manual check statuses to the RC report",
     ),
     (
+        '"manual_release_candidate_check_summary"',
+        "release candidate verifier must write manual check progress summary to the RC report",
+    ),
+    (
+        "_manual_release_candidate_check_summary",
+        "release candidate verifier must calculate manual check progress summary",
+    ),
+    (
+        '"remaining_check_ids"',
+        "release candidate verifier manual summary must list remaining check ids",
+    ),
+    (
+        '"automated_evidence_check_ids"',
+        "release candidate verifier manual summary must list automated evidence check ids",
+    ),
+    (
         "_manual_release_candidate_check_report()",
         "release candidate verifier must copy manual check details into reports",
     ),

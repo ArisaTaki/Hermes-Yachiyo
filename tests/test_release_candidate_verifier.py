@@ -246,6 +246,26 @@ def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
         check["required_before"] == "public_release_signoff"
         for check in report["manual_release_candidate_check_statuses"]
     )
+    assert report["manual_release_candidate_check_summary"] == {
+        "total": 6,
+        "status_counts": {
+            "manual_required": 6,
+            "passed": 0,
+            "failed": 0,
+            "not_applicable": 0,
+        },
+        "remaining_count": 6,
+        "remaining_check_ids": [
+            "gatekeeper_first_launch",
+            "packaged_bridge_isolation",
+            "screen_recording_permission",
+            "chat_native_file_upload",
+            "packaged_ui_sampling",
+            "real_provider_smoke",
+        ],
+        "failed_check_ids": [],
+        "automated_evidence_check_ids": [],
+    }
 
 
 def test_release_candidate_verifier_merges_manual_check_evidence(
@@ -320,6 +340,8 @@ def test_release_candidate_verifier_merges_manual_check_evidence(
         "packaged_ui_sampling": "passed",
         "real_provider_smoke": "not_applicable",
     }
+    assert report["manual_release_candidate_check_summary"]["remaining_count"] == 0
+    assert report["manual_release_candidate_check_summary"]["remaining_check_ids"] == []
 
 
 def test_release_candidate_verifier_requires_complete_manual_checks_for_signoff(
@@ -377,6 +399,7 @@ def test_release_candidate_verifier_accepts_complete_manual_checks_for_signoff(
     assert report["ok"] is True
     assert report["manual_release_candidate_check_status"] == "passed"
     assert report["manual_release_candidate_checks_required"] is True
+    assert report["manual_release_candidate_check_summary"]["remaining_count"] == 0
 
 
 def test_release_candidate_verifier_fails_failed_manual_check_evidence(
@@ -623,6 +646,10 @@ def test_release_candidate_verifier_runs_dmg_app_startup_smoke(
     assert manual_statuses["packaged_bridge_isolation"]["status"] == "passed"
     assert manual_statuses["packaged_bridge_isolation"]["evidence_source"] == "automated_rc_gate"
     assert "--run-dmg-app-smoke passed" in manual_statuses["packaged_bridge_isolation"]["evidence"]
+    assert report["manual_release_candidate_check_summary"]["remaining_count"] == 5
+    assert report["manual_release_candidate_check_summary"]["automated_evidence_check_ids"] == [
+        "packaged_bridge_isolation"
+    ]
 
 
 def test_release_candidate_dmg_app_startup_smoke_requires_executable(
@@ -728,6 +755,10 @@ def test_release_candidate_verifier_runs_provider_smoke(tmp_path, monkeypatch, c
     assert manual_statuses["real_provider_smoke"]["status"] == "passed"
     assert manual_statuses["real_provider_smoke"]["evidence_source"] == "automated_rc_gate"
     assert "text_stream exit_code=0" in manual_statuses["real_provider_smoke"]["evidence"]
+    assert report["manual_release_candidate_check_summary"]["remaining_count"] == 5
+    assert report["manual_release_candidate_check_summary"]["automated_evidence_check_ids"] == [
+        "real_provider_smoke"
+    ]
 
 
 def test_release_candidate_verifier_does_not_override_failed_manual_evidence(
@@ -781,6 +812,9 @@ def test_release_candidate_verifier_does_not_override_failed_manual_evidence(
         "Credentialed provider smoke returned unexpected tool-call arguments."
     )
     assert "evidence_source" not in manual_statuses["real_provider_smoke"]
+    assert report["manual_release_candidate_check_summary"]["failed_check_ids"] == [
+        "real_provider_smoke"
+    ]
 
 
 def test_release_candidate_verifier_provider_smoke_fails_without_credentials(
