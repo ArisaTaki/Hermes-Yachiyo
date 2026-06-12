@@ -416,13 +416,24 @@ def test_refresh_local_rc_signoff_reruns_batch_for_provider_smoke(
 def test_refresh_local_rc_signoff_print_status_uses_current_draft(
     monkeypatch,
     tmp_path,
+    capsys,
 ):
     commands: list[tuple[list[str], bool]] = []
     monkeypatch.setattr(refresh, "ROOT", tmp_path)
     draft = tmp_path / "tmp" / "rc-signoff-abc12345-current.json"
     draft.parent.mkdir(parents=True, exist_ok=True)
     draft.write_text(
-        json.dumps({"manual_release_candidate_check_statuses": []}),
+        json.dumps(
+            {
+                "manual_release_candidate_check_statuses": [],
+                "manual_release_candidate_check_summary": {
+                    "remaining_check_ids": [
+                        "gatekeeper_first_launch",
+                        "screen_recording_permission",
+                    ]
+                },
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -445,6 +456,11 @@ def test_refresh_local_rc_signoff_print_status_uses_current_draft(
             True,
         )
     ]
+    output = capsys.readouterr().out
+    assert "local RC OS evidence command:" in output
+    assert "--write-os-evidence tmp/rc-signoff-abc12345-os-evidence.json" in output
+    assert "--gatekeeper-evidence" in output
+    assert "--screen-recording-evidence" in output
 
 
 def test_refresh_local_rc_signoff_print_status_fails_when_draft_missing(

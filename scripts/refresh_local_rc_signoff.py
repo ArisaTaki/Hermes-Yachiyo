@@ -114,6 +114,46 @@ def _preview_failure_is_only_manual_incomplete(report_path: Path) -> bool:
     return not _non_manual_findings(report)
 
 
+def _remaining_check_ids(report_path: Path) -> list[str]:
+    try:
+        report = _load_report(report_path)
+    except (OSError, json.JSONDecodeError):
+        return []
+    summary = report.get("manual_release_candidate_check_summary")
+    if not isinstance(summary, dict):
+        return []
+    remaining = summary.get("remaining_check_ids")
+    if not isinstance(remaining, list):
+        return []
+    return [str(check_id) for check_id in remaining if isinstance(check_id, str)]
+
+
+def _print_os_evidence_command(*, label: str, signoff_draft: Path) -> None:
+    remaining_ids = set(_remaining_check_ids(signoff_draft))
+    os_check_ids = {
+        "gatekeeper_first_launch",
+        "screen_recording_permission",
+    }
+    if not remaining_ids.intersection(os_check_ids):
+        return
+
+    command = [
+        f"{sys.executable} scripts/refresh_local_rc_signoff.py",
+        f"--write-os-evidence tmp/rc-signoff-{label}-os-evidence.json",
+    ]
+    if "gatekeeper_first_launch" in remaining_ids:
+        command.append(
+            '--gatekeeper-evidence "<record Gatekeeper/Finder first-launch evidence>"'
+        )
+    if "screen_recording_permission" in remaining_ids:
+        command.append(
+            '--screen-recording-evidence "<record Screen Recording evidence after '
+            'rerunning --run-dmg-screen-smoke or a manual screenshot/proactive probe>"'
+        )
+    print("local RC OS evidence command:")
+    print(" ".join(command))
+
+
 def refresh_local_rc_signoff(
     *,
     short_commit: str | None = None,
@@ -242,7 +282,10 @@ def print_local_rc_signoff_status(*, short_commit: str | None = None) -> bool:
         str(signoff_draft.relative_to(ROOT)),
         "--print-manual-checks-status",
     ]
-    return _run(command, allow_failure=True) == 0
+    ok = _run(command, allow_failure=True) == 0
+    if ok:
+        _print_os_evidence_command(label=label, signoff_draft=signoff_draft)
+    return ok
 
 
 def write_local_os_manual_evidence(
