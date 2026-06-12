@@ -223,6 +223,13 @@ def _manual_release_candidate_checks_markdown(
             else "none"
         ),
         "",
+        "## How To Fill",
+        "",
+        "- Leave ``- [ ] `check_id` `` unchanged to keep `manual_required`.",
+        "- Change to ``- [x] `check_id` `` to mark `passed`; omitted status defaults to `passed`.",
+        "- Use ``- [x] `check_id` - not_applicable`` or ``- [x] `check_id` - failed`` for explicit outcomes.",
+        "- Every `passed`, `failed`, or `not_applicable` item needs non-empty `Evidence:`; indent continuation lines under it.",
+        "",
         "## Remaining Manual Checks",
         "",
     ]

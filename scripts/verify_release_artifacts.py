@@ -1020,6 +1020,18 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release candidate verifier must generate manual check Markdown checklists",
     ),
     (
+        "## How To Fill",
+        "release candidate verifier Markdown checklist must include fill instructions",
+    ),
+    (
+        "omitted status defaults to `passed`",
+        "release candidate verifier Markdown checklist must explain checked items default to passed",
+    ),
+    (
+        "Every `passed`, `failed`, or `not_applicable` item needs non-empty `Evidence:`",
+        "release candidate verifier Markdown checklist must explain evidence requirements",
+    ),
+    (
         "write_manual_release_candidate_checks_markdown",
         "release candidate verifier must expose manual check Markdown writing",
     ),

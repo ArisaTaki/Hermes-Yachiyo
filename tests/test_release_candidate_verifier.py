@@ -772,6 +772,9 @@ def test_release_candidate_verifier_writes_manual_check_markdown_from_draft(tmp_
     assert markdown.startswith("# Oha-Yachiyo Manual Release-Candidate Signoff\n")
     assert "- Source: `tmp/final-rc-signoff.json`" in markdown
     assert "- Remaining checks: 4" in markdown
+    assert "## How To Fill" in markdown
+    assert "omitted status defaults to `passed`" in markdown
+    assert "Every `passed`, `failed`, or `not_applicable` item needs non-empty `Evidence:`" in markdown
     assert "## Remaining Manual Checks" in markdown
     assert "- [ ] `gatekeeper_first_launch`" in markdown
     assert "Evidence to record:" in markdown

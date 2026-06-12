@@ -163,6 +163,12 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
     assert "release candidate verifier must generate editable manual check drafts" in messages
     assert "release candidate verifier must expose manual check draft writing" in messages
     assert "release candidate verifier must generate manual check Markdown checklists" in messages
+    assert "release candidate verifier Markdown checklist must include fill instructions" in messages
+    assert (
+        "release candidate verifier Markdown checklist must explain checked items default to passed"
+        in messages
+    )
+    assert "release candidate verifier Markdown checklist must explain evidence requirements" in messages
     assert "release candidate verifier must expose manual check Markdown writing" in messages
     assert "release candidate verifier manual check templates must preserve evidence prompts" in messages
     assert "release candidate verifier manual check templates must include next actions" in messages
