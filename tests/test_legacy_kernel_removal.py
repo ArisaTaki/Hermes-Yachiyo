@@ -21,6 +21,7 @@ ACTIVE_USER_DOC_TARGETS = [
     ROOT / "README.en.md",
     ROOT / "README.ja.md",
     ROOT / "docs" / "knowledge-base.md",
+    ROOT / "docs" / "model-profile-runtime-notes.md",
     ROOT / "docs" / "user-manual.md",
     ROOT / "docs" / "memory-architecture.md",
     ROOT / "docs" / "desktop-frontend-architecture.md",
