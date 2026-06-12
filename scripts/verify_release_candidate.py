@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -127,6 +128,9 @@ MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS: tuple[dict[str, str], ...] = (
 )
 MANUAL_RELEASE_CANDIDATE_CHECKS: tuple[str, ...] = tuple(
     check["description"] for check in MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS
+)
+MANUAL_RELEASE_CANDIDATE_CHECK_MARKDOWN_RE = re.compile(
+    r"^- \[(?P<checked>[ xX])\] `(?P<id>[^`]+)`(?: - (?P<status>[A-Za-z_]+))?\s*$"
 )
 
 
@@ -284,6 +288,50 @@ def _manual_release_candidate_checks_from_payload(raw_payload: Any) -> object:
             return raw_payload.get("checks")
         return raw_payload.get("manual_release_candidate_check_statuses")
     return raw_payload
+
+
+def _manual_release_candidate_checks_from_markdown(raw_text: str) -> list[dict[str, str]]:
+    checks: list[dict[str, str]] = []
+    current: dict[str, str] | None = None
+    current_field = ""
+    field_names = {
+        "Evidence": "evidence",
+        "Notes": "notes",
+        "Evidence source": "evidence_source",
+    }
+    for line in raw_text.splitlines():
+        match = MANUAL_RELEASE_CANDIDATE_CHECK_MARKDOWN_RE.match(line)
+        if match:
+            checked = match.group("checked").strip().lower() == "x"
+            status = str(match.group("status") or "").strip()
+            current = {
+                "id": match.group("id").strip(),
+                "status": status or ("passed" if checked else "manual_required"),
+            }
+            checks.append(current)
+            current_field = ""
+            continue
+
+        if current is None:
+            continue
+        if line.startswith("  - "):
+            raw_field = line[4:]
+            field_label, separator, value = raw_field.partition(":")
+            field_name = field_names.get(field_label.strip())
+            if separator and field_name:
+                current[field_name] = value.strip()
+                current_field = field_name
+            else:
+                current_field = ""
+            continue
+        if current_field in {"evidence", "notes"} and line.startswith("    "):
+            continuation = line.strip()
+            if continuation:
+                previous = current.get(current_field, "")
+                current[current_field] = (
+                    f"{previous}\n{continuation}" if previous else continuation
+                )
+    return checks
 
 
 def _manual_release_candidate_check_status(
@@ -497,7 +545,14 @@ def write_manual_release_candidate_checks_markdown(
     output_path: Path,
     source_path: Path | None = None,
 ) -> Path:
-    checks, findings = _load_manual_release_candidate_checks(root, source_path)
+    source_is_markdown = (
+        source_path is not None and source_path.suffix.lower() in {".md", ".markdown"}
+    )
+    checks, findings = _load_manual_release_candidate_checks(
+        root,
+        None if source_is_markdown else source_path,
+        source_path if source_is_markdown else None,
+    )
     if findings:
         formatted = "; ".join(finding.format() for finding in findings)
         raise ValueError(f"manual release-candidate checks markdown source is invalid: {formatted}")
@@ -531,33 +586,61 @@ def _validate_artifact_paths(root: Path, artifact_paths: Sequence[Path]) -> tupl
 def _load_manual_release_candidate_checks(
     root: Path,
     manual_checks_json: Path | None,
+    manual_checks_markdown: Path | None = None,
 ) -> tuple[list[dict[str, str]], list[Finding]]:
     checks = _manual_release_candidate_check_report()
     findings: list[Finding] = []
-    if manual_checks_json is None:
-        return checks, findings
-
-    try:
-        evidence_path = _resolve_project_file(
-            root,
-            manual_checks_json,
-            "manual release-candidate checks",
-        )
-        raw_payload = json.loads(evidence_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError, json.JSONDecodeError) as exc:
+    if manual_checks_json is not None and manual_checks_markdown is not None:
         findings.append(
             Finding(
                 manual_checks_json,
+                "manual release-candidate checks must use either JSON or Markdown input, not both",
+            )
+        )
+        return checks, findings
+    if manual_checks_json is None and manual_checks_markdown is None:
+        return checks, findings
+
+    try:
+        if manual_checks_markdown is not None:
+            evidence_path = _resolve_project_file(
+                root,
+                manual_checks_markdown,
+                "manual release-candidate checks markdown",
+            )
+            raw_checks = _manual_release_candidate_checks_from_markdown(
+                evidence_path.read_text(encoding="utf-8")
+            )
+            if not raw_checks:
+                findings.append(
+                    Finding(
+                        manual_checks_markdown,
+                        "manual release-candidate checks Markdown must include checklist items",
+                    )
+                )
+                return checks, findings
+        else:
+            evidence_path = _resolve_project_file(
+                root,
+                manual_checks_json,
+                "manual release-candidate checks",
+            )
+            raw_payload = json.loads(evidence_path.read_text(encoding="utf-8"))
+            raw_checks = _manual_release_candidate_checks_from_payload(raw_payload)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        source_path = manual_checks_markdown or manual_checks_json
+        findings.append(
+            Finding(
+                source_path or root,
                 f"manual release-candidate checks could not be loaded: {exc}",
             )
         )
         return checks, findings
 
-    raw_checks = _manual_release_candidate_checks_from_payload(raw_payload)
     if not isinstance(raw_checks, list):
         findings.append(
             Finding(
-                manual_checks_json,
+                manual_checks_markdown or manual_checks_json or root,
                 (
                     "manual release-candidate checks JSON must be a list, contain a checks list, "
                     "or be a previous RC report with manual_release_candidate_check_statuses"
@@ -572,7 +655,7 @@ def _load_manual_release_candidate_checks(
         if not isinstance(raw_check, dict):
             findings.append(
                 Finding(
-                    manual_checks_json,
+                    manual_checks_markdown or manual_checks_json or root,
                     f"manual release-candidate check at index {index} must be an object",
                 )
             )
@@ -581,7 +664,7 @@ def _load_manual_release_candidate_checks(
         if check_id not in known:
             findings.append(
                 Finding(
-                    manual_checks_json,
+                    manual_checks_markdown or manual_checks_json or root,
                     f"manual release-candidate check has unknown id: {check_id or '<missing>'}",
                 )
             )
@@ -589,7 +672,7 @@ def _load_manual_release_candidate_checks(
         if check_id in seen:
             findings.append(
                 Finding(
-                    manual_checks_json,
+                    manual_checks_markdown or manual_checks_json or root,
                     f"manual release-candidate check is duplicated: {check_id}",
                 )
             )
@@ -600,7 +683,7 @@ def _load_manual_release_candidate_checks(
         if status not in MANUAL_RELEASE_CANDIDATE_CHECK_STATUS_VALUES:
             findings.append(
                 Finding(
-                    manual_checks_json,
+                    manual_checks_markdown or manual_checks_json or root,
                     f"manual release-candidate check {check_id} has invalid status: {status or '<missing>'}",
                 )
             )
@@ -609,7 +692,7 @@ def _load_manual_release_candidate_checks(
         if status in {"passed", "failed", "not_applicable"} and not evidence:
             findings.append(
                 Finding(
-                    manual_checks_json,
+                    manual_checks_markdown or manual_checks_json or root,
                     f"manual release-candidate check {check_id} requires evidence for status {status}",
                 )
             )
@@ -944,6 +1027,7 @@ def verify_release_candidate(
     run_ui_smoke: bool = False,
     smoke_scripts: Sequence[Path] | None = None,
     manual_checks_json: Path | None = None,
+    manual_checks_markdown: Path | None = None,
     require_manual_checks_complete: bool = False,
     report_json: Path | None = None,
 ) -> int:
@@ -952,7 +1036,9 @@ def verify_release_candidate(
     manual_checks, manual_check_findings = _load_manual_release_candidate_checks(
         root,
         manual_checks_json,
+        manual_checks_markdown,
     )
+    manual_checks_source = manual_checks_markdown or manual_checks_json
     manual_check_status = _manual_release_candidate_check_status(
         manual_checks,
         manual_check_findings,
@@ -995,7 +1081,9 @@ def verify_release_candidate(
             manual_checks
         ),
         "manual_release_candidate_check_findings": _finding_report(manual_check_findings),
-        "manual_release_candidate_checks_source": str(manual_checks_json) if manual_checks_json else "",
+        "manual_release_candidate_checks_source": str(manual_checks_source)
+        if manual_checks_source
+        else "",
         "manual_release_candidate_checks_required": require_manual_checks_complete,
     }
 
@@ -1286,7 +1374,7 @@ def verify_release_candidate(
         print("manual release-candidate check evidence: failed")
         for finding in manual_check_findings:
             print(f"- {finding.format()}")
-    elif manual_checks_json is not None:
+    elif manual_checks_source is not None:
         print(f"manual release-candidate check evidence: {manual_check_status}")
     if require_manual_checks_complete and manual_check_status != "passed":
         print(
@@ -1361,6 +1449,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Merge manual release-candidate check evidence from a project-local JSON file.",
     )
     parser.add_argument(
+        "--manual-checks-markdown",
+        type=Path,
+        help="Merge manual release-candidate check evidence from a project-local Markdown checklist.",
+    )
+    parser.add_argument(
         "--require-manual-checks-complete",
         action="store_true",
         help="Fail unless every manual release-candidate check is passed or not_applicable.",
@@ -1395,6 +1488,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
     )
     args = parser.parse_args(argv)
+    if args.manual_checks_json is not None and args.manual_checks_markdown is not None:
+        print(
+            "manual release-candidate checks: failed\n"
+            "- choose either --manual-checks-json or --manual-checks-markdown"
+        )
+        return 1
     if (
         args.mark_provider_smoke_not_applicable_if_missing
         and args.write_manual_checks_draft is None
@@ -1447,7 +1546,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             write_manual_release_candidate_checks_markdown(
                 PROJECT_ROOT,
                 args.write_manual_checks_markdown,
-                args.manual_checks_json,
+                args.manual_checks_markdown or args.manual_checks_json,
             )
         except (OSError, ValueError) as exc:
             print(f"manual release-candidate checks markdown: failed\n- {exc}")
@@ -1463,6 +1562,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         run_provider_smoke=args.run_provider_smoke,
         run_ui_smoke=args.run_ui_smoke,
         manual_checks_json=args.manual_checks_json,
+        manual_checks_markdown=args.manual_checks_markdown,
         require_manual_checks_complete=args.require_manual_checks_complete,
         report_json=args.report_json,
     )

@@ -622,6 +622,10 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document manual RC check evidence input",
     ),
     (
+        "--manual-checks-markdown",
+        "release packaging docs must document manual RC check Markdown evidence input",
+    ),
+    (
         "--write-manual-checks-template",
         "release packaging docs must document manual RC check template generation",
     ),
@@ -1020,6 +1024,10 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release candidate verifier must load manual check evidence JSON",
     ),
     (
+        "_manual_release_candidate_checks_from_markdown",
+        "release candidate verifier must parse manual check Markdown evidence",
+    ),
+    (
         "_manual_release_candidate_checks_from_payload",
         "release candidate verifier must accept previous RC reports as manual evidence input",
     ),
@@ -1046,6 +1054,10 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         '"--manual-checks-json"',
         "release candidate verifier CLI must accept manual check evidence JSON",
+    ),
+    (
+        '"--manual-checks-markdown"',
+        "release candidate verifier CLI must accept manual check evidence Markdown",
     ),
     (
         '"--require-manual-checks-complete"',

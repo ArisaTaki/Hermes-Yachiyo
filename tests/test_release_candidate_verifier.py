@@ -467,6 +467,65 @@ def test_release_candidate_verifier_accepts_complete_manual_checks_for_signoff(
     assert report["manual_release_candidate_check_summary"]["remaining_next_actions"] == []
 
 
+def test_release_candidate_verifier_accepts_complete_manual_markdown_for_signoff(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+    markdown_path = tmp_path / "tmp" / "manual-checks.md"
+    markdown_path.parent.mkdir(parents=True)
+    markdown_path.write_text(
+        "\n".join(
+            [
+                "# Oha-Yachiyo Manual Release-Candidate Signoff",
+                "",
+                "## Remaining Manual Checks",
+                "",
+                "- [x] `gatekeeper_first_launch` - passed",
+                "  - Evidence: Gatekeeper first launch reached the packaged app",
+                "- [x] `packaged_bridge_isolation` - passed",
+                "  - Evidence source: automated_rc_gate",
+                "  - Evidence: Automated --run-dmg-app-smoke passed",
+                "- [x] `screen_recording_permission` - passed",
+                "  - Evidence: Screen Recording permission granted and screenshot probe passed",
+                "- [x] `chat_native_file_upload` - passed",
+                "  - Evidence: Native file picker selected image and Run Detail opened",
+                "- [x] `packaged_ui_sampling` - passed",
+                "  - Evidence: Packaged Chat, Run Detail, Workflow, Agent Studio, TTS, and Live2D sampled",
+                "- [x] `real_provider_smoke` - not_applicable",
+                "  - Evidence source: credentials_unavailable",
+                "  - Evidence: OHA_YACHIYO_SMOKE_* credentials unavailable",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert (
+        rc.verify_release_candidate(
+            root=tmp_path,
+            source_only=True,
+            manual_checks_markdown=Path("tmp/manual-checks.md"),
+            require_manual_checks_complete=True,
+            report_json=Path("tmp/rc.json"),
+        )
+        == 0
+    )
+
+    output = capsys.readouterr().out
+    assert "manual release-candidate check summary: complete" in output
+    report = json.loads((tmp_path / "tmp" / "rc.json").read_text(encoding="utf-8"))
+    assert report["manual_release_candidate_check_status"] == "passed"
+    assert report["manual_release_candidate_checks_source"] == "tmp/manual-checks.md"
+    assert report["manual_release_candidate_check_summary"]["remaining_count"] == 0
+    statuses = {
+        check["id"]: check for check in report["manual_release_candidate_check_statuses"]
+    }
+    assert statuses["real_provider_smoke"]["status"] == "not_applicable"
+    assert statuses["real_provider_smoke"]["evidence_source"] == "credentials_unavailable"
+
+
 def test_release_candidate_verifier_fails_failed_manual_check_evidence(
     tmp_path, monkeypatch, capsys
 ):
@@ -711,6 +770,23 @@ def test_release_candidate_verifier_rejects_template_and_draft_cli_conflict(caps
         "choose only one of --write-manual-checks-template, --write-manual-checks-draft, "
         "or --write-manual-checks-markdown"
     ) in output
+
+
+def test_release_candidate_verifier_rejects_json_and_markdown_input_conflict(capsys):
+    assert (
+        rc.main(
+            [
+                "--manual-checks-json",
+                "tmp/manual-checks.json",
+                "--manual-checks-markdown",
+                "tmp/manual-checks.md",
+            ]
+        )
+        == 1
+    )
+
+    output = capsys.readouterr().out
+    assert "choose either --manual-checks-json or --manual-checks-markdown" in output
 
 
 def test_release_candidate_verifier_provider_not_applicable_flag_requires_draft(capsys):
