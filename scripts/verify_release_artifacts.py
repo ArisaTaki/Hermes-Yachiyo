@@ -2380,6 +2380,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover rejected direct group Agent Native summary flow",
     ),
     (
+        "tests/test_bridge_server.py::test_chat_direct_group_agent_bridge_route_runs_approved_summary",
+        "macOS release workflow smoke tests must cover approved direct group Agent Native summary flow",
+    ),
+    (
         "tests/test_bridge_server.py::test_chat_delegated_summary_bridge_route_runs_native_followup",
         "macOS release workflow smoke tests must cover auto delegation Native summary flow",
     ),

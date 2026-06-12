@@ -312,6 +312,7 @@ jobs:
             tests/test_bridge_server.py::test_chat_group_dispatch_bridge_route_runs_native_summary \
             tests/test_bridge_server.py::test_chat_direct_group_agent_bridge_route_runs_native_summary \
             tests/test_bridge_server.py::test_chat_direct_group_agent_bridge_route_runs_rejected_summary \
+            tests/test_bridge_server.py::test_chat_direct_group_agent_bridge_route_runs_approved_summary \
             tests/test_bridge_server.py::test_chat_delegated_summary_bridge_route_runs_native_followup \
             tests/test_tts.py \
             tests/test_tts.py::test_tts_command_invocation_uses_text_voice_and_timeout \
