@@ -158,10 +158,32 @@ def _manual_release_candidate_check_template() -> dict[str, object]:
     }
 
 
+ManualChecksJsonInput = Path | Sequence[Path] | None
+ManualChecksSource = Path | Sequence[Path] | str | None
+
+
+def _manual_checks_json_paths(manual_checks_json: ManualChecksJsonInput) -> tuple[Path, ...]:
+    if manual_checks_json is None:
+        return ()
+    if isinstance(manual_checks_json, Path):
+        return (manual_checks_json,)
+    return tuple(manual_checks_json)
+
+
+def _manual_checks_source_label(source_path: ManualChecksSource) -> str:
+    if source_path is None:
+        return ""
+    if isinstance(source_path, str):
+        return source_path
+    if isinstance(source_path, Path):
+        return str(source_path)
+    return ", ".join(str(path) for path in source_path)
+
+
 def _manual_release_candidate_check_draft(
     checks: Sequence[dict[str, str]],
     *,
-    source_path: Path | None = None,
+    source_path: ManualChecksSource = None,
 ) -> dict[str, object]:
     check_details = {check["id"]: check for check in MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS}
     draft_checks: list[dict[str, str]] = []
@@ -193,15 +215,16 @@ def _manual_release_candidate_check_draft(
             draft_checks
         ),
     }
-    if source_path is not None:
-        draft["manual_release_candidate_checks_source"] = str(source_path)
+    source_label = _manual_checks_source_label(source_path)
+    if source_label:
+        draft["manual_release_candidate_checks_source"] = source_label
     return draft
 
 
 def _manual_release_candidate_checks_markdown(
     checks: Sequence[dict[str, str]],
     *,
-    source_path: Path | None = None,
+    source_path: ManualChecksSource = None,
     markdown_path: Path | None = None,
 ) -> str:
     summary = _manual_release_candidate_check_summary(checks)
@@ -217,7 +240,9 @@ def _manual_release_candidate_checks_markdown(
     lines = [
         "# Oha-Yachiyo Manual Release-Candidate Signoff",
         "",
-        f"- Source: `{source_path}`" if source_path is not None else "- Source: manual checks",
+        f"- Source: `{_manual_checks_source_label(source_path)}`"
+        if source_path is not None
+        else "- Source: manual checks",
         f"- Remaining checks: {summary['remaining_count']}",
         f"- Failed checks: {len(failed_ids) if isinstance(failed_ids, list) else 0}",
         "- Automated evidence: "
@@ -664,7 +689,7 @@ def write_manual_release_candidate_checks_template(root: Path, output_path: Path
 def write_manual_release_candidate_checks_draft(
     root: Path,
     output_path: Path,
-    source_path: Path | None = None,
+    source_path: ManualChecksJsonInput = None,
     *,
     mark_provider_smoke_not_applicable_if_missing: bool = False,
 ) -> Path:
@@ -689,13 +714,14 @@ def write_manual_release_candidate_checks_draft(
 def write_manual_release_candidate_checks_markdown(
     root: Path,
     output_path: Path,
-    source_path: Path | None = None,
+    source_path: ManualChecksJsonInput = None,
     *,
     mark_provider_smoke_not_applicable_if_missing: bool = False,
 ) -> Path:
-    source_is_markdown = (
-        source_path is not None and source_path.suffix.lower() in {".md", ".markdown"}
-    )
+    source_is_markdown = isinstance(source_path, Path) and source_path.suffix.lower() in {
+        ".md",
+        ".markdown",
+    }
     checks, findings = _load_manual_release_candidate_checks(
         root,
         None if source_is_markdown else source_path,
@@ -739,24 +765,100 @@ def _validate_artifact_paths(root: Path, artifact_paths: Sequence[Path]) -> tupl
 
 def _load_manual_release_candidate_checks(
     root: Path,
-    manual_checks_json: Path | None,
+    manual_checks_json: ManualChecksJsonInput,
     manual_checks_markdown: Path | None = None,
 ) -> tuple[list[dict[str, str]], list[Finding]]:
     checks = _manual_release_candidate_check_report()
     findings: list[Finding] = []
-    if manual_checks_json is not None and manual_checks_markdown is not None:
+    json_paths = _manual_checks_json_paths(manual_checks_json)
+    if json_paths and manual_checks_markdown is not None:
         findings.append(
             Finding(
-                manual_checks_json,
+                json_paths[0],
                 "manual release-candidate checks must use either JSON or Markdown input, not both",
             )
         )
         return checks, findings
-    if manual_checks_json is None and manual_checks_markdown is None:
+    if not json_paths and manual_checks_markdown is None:
         return checks, findings
 
-    try:
-        if manual_checks_markdown is not None:
+    known = {check["id"]: check for check in checks}
+
+    def apply_raw_checks(raw_checks: object, source_path: Path) -> None:
+        if not isinstance(raw_checks, list):
+            findings.append(
+                Finding(
+                    source_path,
+                    (
+                        "manual release-candidate checks JSON must be a list, contain a checks list, "
+                        "or be a previous RC report with manual_release_candidate_check_statuses"
+                    ),
+                )
+            )
+            return
+        seen: set[str] = set()
+        for index, raw_check in enumerate(raw_checks):
+            if not isinstance(raw_check, dict):
+                findings.append(
+                    Finding(
+                        source_path,
+                        f"manual release-candidate check at index {index} must be an object",
+                    )
+                )
+                continue
+            check_id = str(raw_check.get("id", "")).strip()
+            if check_id not in known:
+                findings.append(
+                    Finding(
+                        source_path,
+                        f"manual release-candidate check has unknown id: {check_id or '<missing>'}",
+                    )
+                )
+                continue
+            if check_id in seen:
+                findings.append(
+                    Finding(
+                        source_path,
+                        f"manual release-candidate check is duplicated: {check_id}",
+                    )
+                )
+                continue
+            seen.add(check_id)
+
+            status = str(raw_check.get("status", "")).strip()
+            if status not in MANUAL_RELEASE_CANDIDATE_CHECK_STATUS_VALUES:
+                findings.append(
+                    Finding(
+                        source_path,
+                        f"manual release-candidate check {check_id} has invalid status: {status or '<missing>'}",
+                    )
+                )
+                continue
+            evidence = str(raw_check.get("evidence", "")).strip()
+            if status in {"passed", "failed", "not_applicable"} and not evidence:
+                findings.append(
+                    Finding(
+                        source_path,
+                        f"manual release-candidate check {check_id} requires evidence for status {status}",
+                    )
+                )
+                continue
+
+            target = known[check_id]
+            target["status"] = status
+            if evidence:
+                target["evidence"] = evidence
+            notes = raw_check.get("notes")
+            if notes is not None:
+                target["notes"] = str(notes)
+            evidence_source = str(raw_check.get("evidence_source", "")).strip()
+            if evidence_source in {"automated_rc_gate", "credentials_unavailable"}:
+                target["evidence_source"] = evidence_source
+            elif "evidence_source" in target and "evidence_source" in raw_check:
+                target.pop("evidence_source", None)
+
+    if manual_checks_markdown is not None:
+        try:
             evidence_path = _resolve_project_file(
                 root,
                 manual_checks_markdown,
@@ -773,95 +875,34 @@ def _load_manual_release_candidate_checks(
                     )
                 )
                 return checks, findings
-        else:
+            apply_raw_checks(raw_checks, manual_checks_markdown)
+        except (OSError, ValueError) as exc:
+            findings.append(
+                Finding(
+                    manual_checks_markdown,
+                    f"manual release-candidate checks could not be loaded: {exc}",
+                )
+            )
+        return checks, findings
+
+    for manual_checks_path in json_paths:
+        try:
             evidence_path = _resolve_project_file(
                 root,
-                manual_checks_json,
+                manual_checks_path,
                 "manual release-candidate checks",
             )
             raw_payload = json.loads(evidence_path.read_text(encoding="utf-8"))
             raw_checks = _manual_release_candidate_checks_from_payload(raw_payload)
-    except (OSError, ValueError, json.JSONDecodeError) as exc:
-        source_path = manual_checks_markdown or manual_checks_json
-        findings.append(
-            Finding(
-                source_path or root,
-                f"manual release-candidate checks could not be loaded: {exc}",
-            )
-        )
-        return checks, findings
-
-    if not isinstance(raw_checks, list):
-        findings.append(
-            Finding(
-                manual_checks_markdown or manual_checks_json or root,
-                (
-                    "manual release-candidate checks JSON must be a list, contain a checks list, "
-                    "or be a previous RC report with manual_release_candidate_check_statuses"
-                ),
-            )
-        )
-        return checks, findings
-
-    known = {check["id"]: check for check in checks}
-    seen: set[str] = set()
-    for index, raw_check in enumerate(raw_checks):
-        if not isinstance(raw_check, dict):
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
             findings.append(
                 Finding(
-                    manual_checks_markdown or manual_checks_json or root,
-                    f"manual release-candidate check at index {index} must be an object",
+                    manual_checks_path,
+                    f"manual release-candidate checks could not be loaded: {exc}",
                 )
             )
             continue
-        check_id = str(raw_check.get("id", "")).strip()
-        if check_id not in known:
-            findings.append(
-                Finding(
-                    manual_checks_markdown or manual_checks_json or root,
-                    f"manual release-candidate check has unknown id: {check_id or '<missing>'}",
-                )
-            )
-            continue
-        if check_id in seen:
-            findings.append(
-                Finding(
-                    manual_checks_markdown or manual_checks_json or root,
-                    f"manual release-candidate check is duplicated: {check_id}",
-                )
-            )
-            continue
-        seen.add(check_id)
-
-        status = str(raw_check.get("status", "")).strip()
-        if status not in MANUAL_RELEASE_CANDIDATE_CHECK_STATUS_VALUES:
-            findings.append(
-                Finding(
-                    manual_checks_markdown or manual_checks_json or root,
-                    f"manual release-candidate check {check_id} has invalid status: {status or '<missing>'}",
-                )
-            )
-            continue
-        evidence = str(raw_check.get("evidence", "")).strip()
-        if status in {"passed", "failed", "not_applicable"} and not evidence:
-            findings.append(
-                Finding(
-                    manual_checks_markdown or manual_checks_json or root,
-                    f"manual release-candidate check {check_id} requires evidence for status {status}",
-                )
-            )
-            continue
-
-        target = known[check_id]
-        target["status"] = status
-        if evidence:
-            target["evidence"] = evidence
-        notes = raw_check.get("notes")
-        if notes is not None:
-            target["notes"] = str(notes)
-        evidence_source = str(raw_check.get("evidence_source", "")).strip()
-        if evidence_source in {"automated_rc_gate", "credentials_unavailable"}:
-            target["evidence_source"] = evidence_source
+        apply_raw_checks(raw_checks, manual_checks_path)
 
     return checks, findings
 
@@ -1366,7 +1407,7 @@ def verify_release_candidate(
     run_provider_smoke: bool = False,
     run_ui_smoke: bool = False,
     smoke_scripts: Sequence[Path] | None = None,
-    manual_checks_json: Path | None = None,
+    manual_checks_json: ManualChecksJsonInput = None,
     manual_checks_markdown: Path | None = None,
     require_manual_checks_complete: bool = False,
     mark_provider_smoke_not_applicable_if_missing: bool = False,
@@ -1379,7 +1420,11 @@ def verify_release_candidate(
         manual_checks_json,
         manual_checks_markdown,
     )
-    manual_checks_source = manual_checks_markdown or manual_checks_json
+    manual_checks_source = (
+        manual_checks_markdown
+        if manual_checks_markdown is not None
+        else _manual_checks_source_label(_manual_checks_json_paths(manual_checks_json))
+    )
     manual_check_status = _manual_release_candidate_check_status(
         manual_checks,
         manual_check_findings,
@@ -1429,9 +1474,7 @@ def verify_release_candidate(
             manual_checks
         ),
         "manual_release_candidate_check_findings": _finding_report(manual_check_findings),
-        "manual_release_candidate_checks_source": str(manual_checks_source)
-        if manual_checks_source
-        else "",
+        "manual_release_candidate_checks_source": str(manual_checks_source),
         "manual_release_candidate_checks_required": require_manual_checks_complete,
     }
 
@@ -1848,7 +1891,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--manual-checks-json",
         type=Path,
-        help="Merge manual release-candidate check evidence from a project-local JSON file.",
+        action="append",
+        help=(
+            "Merge manual release-candidate check evidence from a project-local JSON file. "
+            "May be passed multiple times; later files override earlier check ids."
+        ),
     )
     parser.add_argument(
         "--manual-checks-markdown",

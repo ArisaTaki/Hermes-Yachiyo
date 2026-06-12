@@ -1136,6 +1136,10 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release candidate verifier CLI must accept manual check evidence JSON",
     ),
     (
+        'action="append"',
+        "release candidate verifier CLI must allow repeated manual check evidence JSON inputs",
+    ),
+    (
         '"--manual-checks-markdown"',
         "release candidate verifier CLI must accept manual check evidence Markdown",
     ),

@@ -406,6 +406,107 @@ def test_release_candidate_verifier_accepts_previous_rc_report_manual_statuses(
     assert manual_statuses["packaged_bridge_isolation"]["evidence_source"] == "automated_rc_gate"
 
 
+def test_release_candidate_verifier_merges_multiple_manual_check_json_sources(
+    tmp_path,
+    monkeypatch,
+):
+    auto_statuses = rc._manual_release_candidate_check_report()
+    for check in auto_statuses:
+        if check["id"] == "packaged_bridge_isolation":
+            check["status"] = "passed"
+            check["evidence"] = "Automated --run-dmg-app-smoke passed for release/Oha-Yachiyo.dmg"
+            check["evidence_source"] = "automated_rc_gate"
+    auto_report_path = tmp_path / "tmp" / "auto-rc.json"
+    auto_report_path.parent.mkdir(parents=True)
+    auto_report_path.write_text(
+        json.dumps(
+            {
+                "manual_release_candidate_check_statuses": auto_statuses,
+                "electron_ui_smoke": {
+                    "status": "passed",
+                    "script_count": 2,
+                    "scripts": [
+                        {
+                            "script": "scripts/smoke_chat_image_attachment_ui.mjs",
+                            "exit_code": 0,
+                        },
+                        {
+                            "script": "scripts/smoke_workflow_save_run_ui.mjs",
+                            "exit_code": 0,
+                        },
+                    ],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    manual_path = tmp_path / "tmp" / "manual-checks.json"
+    manual_path.write_text(
+        json.dumps(
+            {
+                "checks": [
+                    {
+                        "id": "gatekeeper_first_launch",
+                        "status": "passed",
+                        "evidence": "Gatekeeper first launch reached the packaged app.",
+                    },
+                    {
+                        "id": "screen_recording_permission",
+                        "status": "passed",
+                        "evidence": "Screen Recording permission granted and screenshot probe passed.",
+                    },
+                    {
+                        "id": "chat_native_file_upload",
+                        "status": "passed",
+                        "evidence": "Packaged native file picker selected sample.png and Run Detail opened.",
+                    },
+                    {
+                        "id": "packaged_ui_sampling",
+                        "status": "passed",
+                        "evidence": "Packaged Chat, Run Detail, Workflow, Agent Studio, TTS, and Live2D sampled.",
+                    },
+                    {
+                        "id": "real_provider_smoke",
+                        "status": "not_applicable",
+                        "evidence": "Provider credentials unavailable for this RC.",
+                        "evidence_source": "credentials_unavailable",
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    assert (
+        rc.verify_release_candidate(
+            root=tmp_path,
+            manual_checks_json=(Path("tmp/auto-rc.json"), Path("tmp/manual-checks.json")),
+            require_manual_checks_complete=True,
+            report_json=Path("tmp/rc.json"),
+        )
+        == 0
+    )
+
+    report = json.loads((tmp_path / "tmp" / "rc.json").read_text(encoding="utf-8"))
+    assert (
+        report["manual_release_candidate_checks_source"]
+        == "tmp/auto-rc.json, tmp/manual-checks.json"
+    )
+    assert report["manual_release_candidate_check_summary"]["remaining_count"] == 0
+    statuses = {
+        check["id"]: check
+        for check in report["manual_release_candidate_check_statuses"]
+    }
+    assert statuses["packaged_bridge_isolation"]["status"] == "passed"
+    assert statuses["packaged_bridge_isolation"]["evidence_source"] == "automated_rc_gate"
+    assert statuses["chat_native_file_upload"]["status"] == "passed"
+    assert "desktop chooseChatImages API path" in statuses["chat_native_file_upload"]["notes"]
+    assert statuses["packaged_ui_sampling"]["status"] == "passed"
+    assert "scripts/smoke_workflow_save_run_ui.mjs" in statuses["packaged_ui_sampling"]["notes"]
+    assert statuses["real_provider_smoke"]["status"] == "not_applicable"
+
+
 def test_release_candidate_verifier_requires_complete_manual_checks_for_signoff(
     tmp_path, monkeypatch, capsys
 ):

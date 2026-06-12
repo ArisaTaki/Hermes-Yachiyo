@@ -195,6 +195,10 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
     assert "release candidate verifier must expose manual check evidence input" in messages
     assert "release candidate verifier must expose final manual signoff enforcement" in messages
     assert "release candidate verifier CLI must accept manual check evidence JSON" in messages
+    assert (
+        "release candidate verifier CLI must allow repeated manual check evidence JSON inputs"
+        in messages
+    )
     assert "release candidate verifier CLI must accept manual check evidence Markdown" in messages
     assert "release candidate verifier CLI must require complete manual checks for final signoff" in messages
     assert "release candidate verifier CLI must write manual check templates" in messages
