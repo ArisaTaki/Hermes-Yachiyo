@@ -1282,6 +1282,7 @@ RunEvent sequence:
   - 负责批准后 pending approval 持久化 claim 和 running projection，重复 approval claim 直接返回当前 Run，不重复执行工具。
   - 负责批准后恢复时的已批准工具调用执行。
   - `ToolApprovalResumeContext.from_run()` 统一解析 pending approval 中的 messages、tool request、remaining requests、next iteration、timeline 和 artifacts，并用同一份 timeline 构造 resume budget。
+  - `ToolApprovalClaimProjection` 负责批准 claim 成功后的 running Run 投影 payload，避免 claim 分支继续直接拼 timeline、artifact、tool name 和 input preview 参数。
   - `ToolApprovalContinuationHandoff` 负责批准工具执行后的 custom API continuation 参数交接，避免 coordinator 内继续散落 broker、timeline、artifacts、messages、iteration、run id 和 budget 参数拼装。
   - `ToolApprovalContinuationOutcome` 负责批准工具执行后的 completed / approval_required / failed continuation outcome 投影分派；`continue_and_project_after_approved_tool()` 保留模型继续执行与 outcome 构造，`resume_approved_tool_run()` 保留 claim、running projection 和最终 result projection 编排。
   - `ToolApprovalExecutionFailureProjection` 负责 approved-tool fatal failure timeline event 和错误详情，避免 `execute_approved_tool()` 直接拼失败 replay payload。
@@ -2133,6 +2134,7 @@ compileall passed
 - release workflow smoke 现在也强制包含 main chat approval resume claim boundary 回归，确认 `main_chat_run` 批准恢复也通过 `ApprovalResumeCoordinator.claim_and_project_approved_tool()` 执行 claim/projection。
 - release workflow smoke 现在也强制包含 tool approval shared context boundary 回归，确保主聊天与 Agent Run 的 tool approval reject / timeout 继续共享 `ToolApprovalTransitionContext` 解析 pending tool request。
 - release workflow smoke 现在也强制包含 ApprovalResumeCoordinator claim projection boundary 回归，确保批准后的 pending approval claim 与 running projection 不回退到 NativeRunEngine 私有分支。
+- release workflow smoke 现在也强制包含 ToolApprovalClaimProjection running payload boundary 回归，确保 approved-tool claim 成功后的 running projection payload 继续由显式 projection boundary 维护。
 - release workflow smoke 现在也强制包含 ToolApprovalContinuationOutcome resume state projection boundary 回归，确保 approved-tool resume 后 completed / approval_required / failed outcome 分派继续由显式 outcome boundary 维护。
 - release workflow smoke 现在也强制包含 ToolApprovalExecutionFailureProjection timeline boundary 回归，确保 approved-tool fatal failure 的 timeline replay payload 继续由显式 projection boundary 维护。
 - release workflow smoke 现在也强制包含 NativeRunEngine approval resume claim boundary 回归，确认 standalone Agent approval resume 通过 `ApprovalResumeCoordinator.claim_and_project_approved_tool()` 进入 approved-tool claim/projection 边界。

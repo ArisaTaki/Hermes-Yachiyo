@@ -2785,6 +2785,49 @@ class ToolApprovalResumeContext:
 
 
 @dataclass(frozen=True)
+class ToolApprovalClaimProjection:
+    """Running projection after an approved tool claim succeeds."""
+
+    run_id: str
+    timeline: list[dict[str, Any]]
+    artifacts: list[dict[str, Any]]
+    tool_name: str
+    input_preview: dict[str, Any]
+    resumed_detail: str
+    running_result: str
+
+    @classmethod
+    def from_context(
+        cls,
+        run_id: str,
+        context: ToolApprovalResumeContext,
+        *,
+        resumed_detail: str,
+        running_result: str,
+    ) -> "ToolApprovalClaimProjection":
+        return cls(
+            run_id=run_id,
+            timeline=context.timeline,
+            artifacts=context.artifacts,
+            tool_name=context.tool_name,
+            input_preview=context.input_preview,
+            resumed_detail=resumed_detail,
+            running_result=running_result,
+        )
+
+    def project(self, approve_tool_run: Any) -> dict[str, Any]:
+        return approve_tool_run(
+            self.run_id,
+            timeline=self.timeline,
+            artifacts=self.artifacts,
+            tool_name=self.tool_name,
+            input_preview=self.input_preview,
+            resumed_detail=self.resumed_detail,
+            running_result=self.running_result,
+        )
+
+
+@dataclass(frozen=True)
 class ToolApprovalContinuationHandoff:
     """Continuation payload after an approved tool call has been executed."""
 
@@ -3164,15 +3207,13 @@ class ApprovalResumeCoordinator:
             )
         if not self._claim_pending_approval(run_id, pending):
             return None
-        return self._approve_tool_run(
+        projection = ToolApprovalClaimProjection.from_context(
             run_id,
-            timeline=context.timeline,
-            artifacts=context.artifacts,
-            tool_name=context.tool_name,
-            input_preview=context.input_preview,
+            context,
             resumed_detail=resumed_detail,
             running_result=running_result,
         )
+        return projection.project(self._approve_tool_run)
 
     def execute_approved_tool(self, context: ToolApprovalResumeContext) -> None:
         tool_result = self._call_agent_tool(

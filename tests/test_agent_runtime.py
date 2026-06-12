@@ -29,6 +29,7 @@ from apps.shell.agent_runtime import (
     RunTransitionProjectionCoordinator,
     TaskRunLinkRepository,
     RunCancellationProjection,
+    ToolApprovalClaimProjection,
     ToolApprovalContinuationHandoff,
     ToolApprovalContinuationOutcome,
     ToolApprovalExecutionFailureProjection,
@@ -918,6 +919,58 @@ def test_approval_resume_coordinator_claims_and_projects_approved_tool_once():
         "resumed_detail": "Agent resumed after approval",
         "running_result": "已批准，Agent 正在继续执行",
     }
+
+
+def test_tool_approval_claim_projection_builds_running_payload():
+    calls: list[tuple[str, dict[str, object]]] = []
+    timeline: list[dict[str, object]] = [{"event": "agent.tool.approval_required"}]
+    artifacts: list[dict[str, object]] = [{"path": "report.md"}]
+    context = ToolApprovalResumeContext(
+        run_id="context_run",
+        timeline=timeline,
+        artifacts=artifacts,
+        broker=SimpleNamespace(name="broker"),
+        allowed_tools=["terminal.run"],
+        budget=SimpleNamespace(name="budget"),
+        messages=[],
+        tool_request={"tool": "terminal.run", "input": {"command": "printf ok"}},
+        tool_name="terminal.run",
+        input_preview={"command": "printf ok"},
+        remaining_requests=[],
+        next_iteration=3,
+    )
+    projection = ToolApprovalClaimProjection.from_context(
+        "run_approval",
+        context,
+        resumed_detail="Agent resumed after approval",
+        running_result="已批准，Agent 正在继续执行",
+    )
+
+    def approve_tool_run(run_id, **kwargs):
+        calls.append(("approve_tool_run", {"run_id": run_id, **kwargs}))
+        return {"run_id": run_id, "status": "running", "result": kwargs["running_result"]}
+
+    assert projection.project(approve_tool_run) == {
+        "run_id": "run_approval",
+        "status": "running",
+        "result": "已批准，Agent 正在继续执行",
+    }
+    assert calls == [
+        (
+            "approve_tool_run",
+            {
+                "run_id": "run_approval",
+                "timeline": timeline,
+                "artifacts": artifacts,
+                "tool_name": "terminal.run",
+                "input_preview": {"command": "printf ok"},
+                "resumed_detail": "Agent resumed after approval",
+                "running_result": "已批准，Agent 正在继续执行",
+            },
+        )
+    ]
+    assert projection.timeline is timeline
+    assert projection.artifacts is artifacts
 
 
 def test_approval_resume_coordinator_orchestrates_resume_projection_states():
