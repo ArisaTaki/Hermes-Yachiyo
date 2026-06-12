@@ -10082,6 +10082,56 @@ def test_agent_run_consumes_coalesced_http_sse_content_frames(tmp_path, monkeypa
         service.close()
 
 
+def test_agent_run_consumes_multiline_http_sse_content_data_event(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    requests = []
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            yield (
+                b"id: agent-runtime-chunk-1\r\n"
+                b"event: completion.chunk\r\n"
+                b'data: {"choices":[{"delta":{"content":"agent multiline"}\r\n'
+                b'data: ,"finish_reason":"stop"}]}\r\n\r\n'
+                b"data: [DONE]\r\n\r\n"
+            )
+
+    def fake_urlopen(request, **kwargs):
+        body = json.loads(request.data.decode("utf-8"))
+        requests.append({"request": request, "body": body, "kwargs": kwargs})
+        assert request.full_url == "https://api.example.test/v1/chat/completions"
+        assert request.get_header("Accept") == "text/event-stream"
+        assert body["stream"] is True
+        return FakeResponse()
+
+    monkeypatch.setattr("apps.core.tls.urlrequest.urlopen", fake_urlopen)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Multiline HTTP SSE Agent",
+                "model_mode": "custom_api",
+                "model_config": {"base_url": "https://api.example.test/v1", "model": "demo-model", "api_key": "sk-secret"},
+            }
+        )
+        run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Use multiline SSE"})
+        run_events = service.list_run_events(run["run_id"], include_internal=True)["events"]
+        completed_fact = next(event for event in run_events if event["event_type"] == "agent.run.completed")
+
+        assert run["status"] == "completed"
+        assert run["result"] == "agent multiline"
+        assert len(requests) == 1
+        assert completed_fact["payload"]["result"] == "agent multiline"
+        assert not any(str(event["event_type"]).endswith(".delta") for event in run_events)
+    finally:
+        service.close()
+
+
 def test_agent_run_consumes_http_sse_content_parts(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     requests = []
