@@ -497,6 +497,14 @@ def test_workflow_approval_resume_context_parses_pending_payload():
             workflow=workflow,
             root_group=False,
         )
+    negative_pending = {**pending, "workflow_next_index": "-1"}
+    with pytest.raises(AgentRuntimeError, match="Workflow Run 待审批恢复位置无效"):
+        WorkflowApprovalResumeContext.from_run(
+            run,
+            negative_pending,
+            workflow=workflow,
+            root_group=False,
+        )
 
 
 def test_workflow_approval_resume_coordinator_claims_and_handoffs():

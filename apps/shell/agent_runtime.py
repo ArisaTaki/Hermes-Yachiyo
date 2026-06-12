@@ -2830,6 +2830,8 @@ class WorkflowApprovalResumeContext:
             start_index = int(raw_pending.get("workflow_next_index") or 0)
         except (TypeError, ValueError):
             raise AgentRuntimeError("Workflow Run 待审批恢复位置无效")
+        if start_index < 0:
+            raise AgentRuntimeError("Workflow Run 待审批恢复位置无效")
         return cls(
             approval=approval,
             workflow=deepcopy(workflow),
