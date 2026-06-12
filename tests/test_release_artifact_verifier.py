@@ -205,7 +205,7 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
         in messages
     )
     assert (
-        "release candidate verifier CLI must allow provider not_applicable evidence for Markdown drafts"
+        "release candidate verifier CLI must pass provider not_applicable evidence into RC reports"
         in messages
     )
     assert "release candidate verifier must isolate provider smoke not_applicable draft handling" in messages

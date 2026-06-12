@@ -1369,6 +1369,7 @@ def verify_release_candidate(
     manual_checks_json: Path | None = None,
     manual_checks_markdown: Path | None = None,
     require_manual_checks_complete: bool = False,
+    mark_provider_smoke_not_applicable_if_missing: bool = False,
     report_json: Path | None = None,
 ) -> int:
     root = Path(root)
@@ -1734,6 +1735,8 @@ def verify_release_candidate(
         }
 
     _auto_apply_release_candidate_check_evidence(report, manual_checks)
+    if mark_provider_smoke_not_applicable_if_missing:
+        _mark_provider_smoke_not_applicable_if_missing(manual_checks)
     manual_check_status = _refresh_manual_release_candidate_check_report(
         report,
         manual_checks,
@@ -1882,9 +1885,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--mark-provider-smoke-not-applicable-if-missing",
         action="store_true",
         help=(
-            "When writing a manual check draft or Markdown checklist, mark "
-            "real_provider_smoke not_applicable if any OHA_YACHIYO_SMOKE_* credential "
-            "is missing."
+            "Mark real_provider_smoke not_applicable if any OHA_YACHIYO_SMOKE_* "
+            "credential is missing. Applies to RC reports, manual check drafts, "
+            "and Markdown checklists."
         ),
     )
     args = parser.parse_args(argv)
@@ -1892,17 +1895,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(
             "manual release-candidate checks: failed\n"
             "- choose either --manual-checks-json or --manual-checks-markdown"
-        )
-        return 1
-    if (
-        args.mark_provider_smoke_not_applicable_if_missing
-        and args.write_manual_checks_draft is None
-        and args.write_manual_checks_markdown is None
-    ):
-        print(
-            "manual release-candidate checks: failed\n"
-            "- --mark-provider-smoke-not-applicable-if-missing requires "
-            "--write-manual-checks-draft or --write-manual-checks-markdown"
         )
         return 1
     write_actions = [
@@ -1970,6 +1962,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         manual_checks_json=args.manual_checks_json,
         manual_checks_markdown=args.manual_checks_markdown,
         require_manual_checks_complete=args.require_manual_checks_complete,
+        mark_provider_smoke_not_applicable_if_missing=(
+            args.mark_provider_smoke_not_applicable_if_missing
+        ),
         report_json=args.report_json,
     )
 

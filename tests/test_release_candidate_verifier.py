@@ -952,17 +952,48 @@ def test_release_candidate_verifier_rejects_json_and_markdown_input_conflict(cap
     assert "choose either --manual-checks-json or --manual-checks-markdown" in output
 
 
-def test_release_candidate_verifier_provider_not_applicable_flag_requires_draft_or_markdown(
-    capsys,
+def test_release_candidate_verifier_report_can_mark_provider_not_applicable_without_credentials(
+    tmp_path,
+    monkeypatch,
 ):
-    assert rc.main(["--mark-provider-smoke-not-applicable-if-missing"]) == 1
+    for env_name in rc.PROVIDER_SMOKE_ENV_VARS:
+        monkeypatch.delenv(env_name, raising=False)
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
 
-    output = capsys.readouterr().out
+    checks = rc._manual_release_candidate_check_report()
+    for check in checks:
+        if check["id"] == "real_provider_smoke":
+            continue
+        check["status"] = "passed"
+        check["evidence"] = f"{check['id']} release signoff evidence"
+    checks_path = tmp_path / "tmp" / "manual-checks.json"
+    checks_path.parent.mkdir(parents=True)
+    checks_path.write_text(json.dumps({"checks": checks}), encoding="utf-8")
+
     assert (
-        "--mark-provider-smoke-not-applicable-if-missing requires "
-        "--write-manual-checks-draft or --write-manual-checks-markdown"
-        in output
+        rc.verify_release_candidate(
+            root=tmp_path,
+            source_only=True,
+            manual_checks_json=Path("tmp/manual-checks.json"),
+            require_manual_checks_complete=True,
+            mark_provider_smoke_not_applicable_if_missing=True,
+            report_json=Path("tmp/rc.json"),
+        )
+        == 0
     )
+
+    report = json.loads((tmp_path / "tmp" / "rc.json").read_text(encoding="utf-8"))
+    assert report["ok"] is True
+    assert report["manual_release_candidate_check_summary"]["remaining_count"] == 0
+    statuses = {
+        check["id"]: check
+        for check in report["manual_release_candidate_check_statuses"]
+    }
+    assert statuses["real_provider_smoke"]["status"] == "not_applicable"
+    assert statuses["real_provider_smoke"]["evidence_source"] == "credentials_unavailable"
+    assert "missing environment variables" in statuses["real_provider_smoke"]["evidence"]
+    for env_name in rc.PROVIDER_SMOKE_ENV_VARS:
+        assert env_name in statuses["real_provider_smoke"]["evidence"]
 
 
 def test_release_candidate_verifier_checks_mounted_dmg_app(tmp_path, monkeypatch, capsys):

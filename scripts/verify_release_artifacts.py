@@ -1160,8 +1160,8 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release candidate verifier CLI must explicitly mark provider smoke not_applicable only when requested",
     ),
     (
-        "and args.write_manual_checks_markdown is None",
-        "release candidate verifier CLI must allow provider not_applicable evidence for Markdown drafts",
+        "mark_provider_smoke_not_applicable_if_missing=(",
+        "release candidate verifier CLI must pass provider not_applicable evidence into RC reports",
     ),
     (
         "_mark_provider_smoke_not_applicable_if_missing",
