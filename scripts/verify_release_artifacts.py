@@ -125,6 +125,12 @@ PACKAGED_APP_IDENTIFIER = "io.github.arisataki.oha-yachiyo"
 PACKAGED_BACKEND_RELATIVE_PATH = Path("Contents/Resources/backend/oha-yachiyo-backend")
 PACKAGED_BACKEND_BUILD_METADATA_MARKER = b"apps/frontend/public/oha-yachiyo-build.json"
 PACKAGED_ASAR_RELATIVE_PATH = Path("Contents/Resources/app.asar")
+RELEASE_LATEST_BRANCH_CHANNELS: dict[str, str] = {
+    "main": "stable",
+    "alpha": "alpha",
+    "develop": "experimental",
+}
+RELEASE_LATEST_JSON_RE = re.compile(r"^Oha-Yachiyo-(?P<branch>main|alpha|develop)-latest\.json$")
 PACKAGED_UI_E2E_REQUIRED_SELECTORS: tuple[str, ...] = (
     "chat-image-file-input",
     "chat-header-image-attach-button",
@@ -485,6 +491,10 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "latest JSON 的 `dmg_name` / `sha256`",
         "release packaging docs must document latest JSON checksum consistency checks",
+    ),
+    (
+        "latest JSON 的 `name` / `channel` / `branch` / `build_number` / `signing` / `changelog`",
+        "release packaging docs must document latest JSON metadata field validation",
     ),
     (
         "每个 DMG 的 `.sha256` 文件",
@@ -1763,6 +1773,7 @@ def _verify_release_directory_artifacts(root: Path, scan_paths: Sequence[Path | 
             if not isinstance(metadata, dict):
                 findings.append(Finding(metadata_path, "release latest JSON must be an object"))
                 continue
+            findings.extend(_verify_release_latest_json_metadata(metadata_path, metadata))
             dmg_name = str(metadata.get("dmg_name") or "").strip()
             if not dmg_name:
                 findings.append(Finding(metadata_path, "release latest JSON must include dmg_name"))
@@ -1804,6 +1815,50 @@ def _verify_release_directory_artifacts(root: Path, scan_paths: Sequence[Path | 
                 continue
             if actual_sha != expected_sha:
                 findings.append(Finding(dmg_path, "release latest DMG content does not match latest JSON sha256"))
+    return findings
+
+
+def _verify_release_latest_json_metadata(metadata_path: Path, metadata: dict[str, object]) -> list[Finding]:
+    findings: list[Finding] = []
+    required_fields = (
+        "name",
+        "channel",
+        "branch",
+        "version",
+        "commit",
+        "build_number",
+        "signing",
+        "dmg_name",
+        "sha256",
+        "download_url",
+        "latest_json_url",
+        "published_at",
+        "changelog",
+    )
+    for field_name in required_fields:
+        value = metadata.get(field_name)
+        if value in (None, ""):
+            findings.append(Finding(metadata_path, f"release latest JSON must include {field_name}"))
+    if metadata.get("name") != "Oha-Yachiyo":
+        findings.append(Finding(metadata_path, "release latest JSON name must be Oha-Yachiyo"))
+
+    match = RELEASE_LATEST_JSON_RE.fullmatch(metadata_path.name)
+    if not match:
+        findings.append(Finding(metadata_path, "release latest JSON filename must identify a known latest branch"))
+        return findings
+    expected_branch = match.group("branch")
+    expected_channel = RELEASE_LATEST_BRANCH_CHANNELS[expected_branch]
+    if metadata.get("branch") != expected_branch:
+        findings.append(Finding(metadata_path, "release latest JSON branch must match its filename"))
+    if metadata.get("channel") != expected_channel:
+        findings.append(Finding(metadata_path, "release latest JSON channel must match its filename branch"))
+    expected_dmg = f"Oha-Yachiyo-{expected_branch}-latest.dmg"
+    if metadata.get("dmg_name") != expected_dmg:
+        findings.append(Finding(metadata_path, "release latest JSON dmg_name must match its filename branch"))
+    if not isinstance(metadata.get("build_number"), int):
+        findings.append(Finding(metadata_path, "release latest JSON build_number must be an integer"))
+    if not isinstance(metadata.get("changelog"), dict):
+        findings.append(Finding(metadata_path, "release latest JSON changelog must be an object"))
     return findings
 
 

@@ -164,13 +164,22 @@ def test_verifier_validates_release_latest_json_checksum_contract(tmp_path):
         "name": "Oha-Yachiyo",
         "channel": "stable",
         "branch": "main",
+        "source_branch": "main",
         "version": "0.4.0",
+        "base_version": "0.4.0",
         "commit": "abc123",
+        "short_commit": "abc123",
         "build_number": 1,
+        "run_number": 1,
+        "run_id": "12345",
+        "tag": "stable-v0.4.0-build.1-abc123",
+        "signing": "self-signed-app-unsigned-dmg",
         "dmg_name": dmg.name,
         "sha256": digest,
         "download_url": f"https://github.example/releases/download/main-latest/{dmg.name}",
         "latest_json_url": "https://github.example/releases/download/main-latest/Oha-Yachiyo-main-latest.json",
+        "published_at": "2026-06-12T00:00:00Z",
+        "changelog": {"sections": []},
     }
     (release_dir / "Oha-Yachiyo-main-latest.json").write_text(
         json.dumps(metadata),
@@ -186,6 +195,51 @@ def test_verifier_validates_release_latest_json_checksum_contract(tmp_path):
     )
 
     assert findings == []
+
+
+def test_verifier_reports_release_latest_json_metadata_mismatches(tmp_path):
+    release_dir = tmp_path / "release"
+    release_dir.mkdir()
+    dmg = release_dir / "Oha-Yachiyo-main-latest.dmg"
+    dmg.write_bytes(b"fake dmg")
+    digest = hashlib.sha256(dmg.read_bytes()).hexdigest()
+    (release_dir / f"{dmg.name}.sha256").write_text(f"{digest}  {dmg.name}\n", encoding="utf-8")
+    (release_dir / "Oha-Yachiyo-main-latest.json").write_text(
+        json.dumps(
+            {
+                "name": "Wrong App",
+                "channel": "experimental",
+                "branch": "develop",
+                "version": "0.4.0",
+                "commit": "abc123",
+                "build_number": "1",
+                "signing": "self-signed-app-unsigned-dmg",
+                "dmg_name": "Oha-Yachiyo-develop-latest.dmg",
+                "sha256": digest,
+                "download_url": f"https://github.example/releases/download/main-latest/{dmg.name}",
+                "latest_json_url": "https://github.example/releases/download/main-latest/Oha-Yachiyo-main-latest.json",
+                "published_at": "2026-06-12T00:00:00Z",
+                "changelog": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[release_dir],
+        check_required_files=False,
+        check_release_security_guards=False,
+        allow_binary_targets=True,
+    )
+    messages = [finding.message for finding in findings if finding.path.name == "Oha-Yachiyo-main-latest.json"]
+
+    assert "release latest JSON name must be Oha-Yachiyo" in messages
+    assert "release latest JSON branch must match its filename" in messages
+    assert "release latest JSON channel must match its filename branch" in messages
+    assert "release latest JSON dmg_name must match its filename branch" in messages
+    assert "release latest JSON build_number must be an integer" in messages
+    assert "release latest JSON changelog must be an object" in messages
 
 
 def test_verifier_reports_release_latest_json_checksum_mismatches(tmp_path):
@@ -491,6 +545,7 @@ def test_verifier_requires_release_packaging_docs_for_release_gates(tmp_path):
     assert "release packaging docs must document final packaged app signature verification" in messages
     assert "release packaging docs must document final release artifact binary scanning" in messages
     assert "release packaging docs must document latest JSON checksum consistency checks" in messages
+    assert "release packaging docs must document latest JSON metadata field validation" in messages
     assert "release packaging docs must document per-DMG checksum file validation" in messages
 
 
