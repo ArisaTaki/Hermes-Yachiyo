@@ -1339,6 +1339,7 @@ RunEvent sequence:
 - `RunGroupRepository`
   - 负责 `run_groups` list / get / source / insert / append / update / delete。
   - 负责 child run membership 更新和空 group 清理。
+  - 负责 title/source/workspace_dir insert 投影和 summary update 投影的 secret redaction。
   - 保留原 Run group 路由和 Workflow/Agent Studio 行为不变。
 
 - `ToolDescriptor` / `ToolDescriptorRegistry`
@@ -1385,7 +1386,7 @@ RunEvent sequence:
 - `POST /runs`、`POST /ui/chat/messages`、`POST /ui/agent-runs` 和 `POST /ui/workflow-runs` 真实 FastAPI/TestClient HTTP 层覆盖 `Idempotency-Key` header 到 `client_message_id` / `client_run_id` 的映射；`NativeRunEngine.create_run_for_runnable()` 会继续把 `client_run_id` 传入底层 Agent/Workflow Run 创建路径。
 - `RunRepository` 直接覆盖 secret redaction、pending approval projection 和 client_request_id idempotency lookup。
 - `RunArtifactRepository` 直接覆盖 artifact projection secret redaction 和 artifact 文件读取 redaction。
-- `RunGroupRepository` 直接覆盖 child membership、list/get、status/summary update 和空 group 清理。
+- `RunGroupRepository` 直接覆盖 child membership、list/get、insert title/source/workspace_dir redaction、status/summary update redaction 和空 group 清理。
 - 主聊天模型长输出回归锁定为单条 `model.output.completed` durable event，不写 token/delta 级 RunEvent。
 - 主聊天模型 loop 的 stream iterator 压力回归锁定为先合并 300 个 delta chunk，再只写一条 `model.output.completed` durable event。
 - 主聊天模型 loop 新增 OpenAI SDK object-style stream chunk 回归：先合并 180 个 `chunk.choices[0].delta.content` 对象 chunk，再只写一条 `model.output.completed` durable event，避免真实 SDK chunk 形态被忽略或退化成逐 token RunEvent。
@@ -2127,6 +2128,7 @@ compileall passed
 - release workflow smoke 现在也强制包含 WorkflowContinuationCoordinator failure redaction boundary 回归，确保 Workflow continuation 未知节点失败不会把 node kind 中的 secret 写入 Run projection、RunEvent、timeline 或 RunGroup summary。
 - release workflow smoke 现在也强制包含 `TaskRunLinkRepository` projection boundary 回归，确保 Task↔Run link、Run status projection 和 replay `last_event_sequence` 继续由显式边界维护。
 - release workflow smoke 现在也强制包含 `RunArtifactRepository` redaction / file read 和 `RunRepository` artifact cleanup callback 回归，确保 artifact 投影清洗、文件读取清洗和 Run 删除文件清理不从发布路径回退。
+- release workflow smoke 现在也强制包含 `RunGroupRepository` insert / summary redaction 回归，确保 root RunGroup title/source/workspace_dir 和状态 summary 的持久化投影不会把用户 goal、source 或路径中的明显 secret 写入 SQLite。
 - release workflow smoke 现在也强制包含 RunEvent 并发写入 sequence / replay cursor projection 回归，确保 `RunEventRepository.append()` 与 TaskRunLink cursor projection 在共享 SQLite connection 上不会重新出现并发事务交错。
 - release workflow smoke 现在也强制包含 RunEvent HTTP replay pagination/filtering 回归，确保 `/runs/{run_id}/events` 的 `after_sequence`、limit clamp、user-visible 默认过滤和 secret hiding 不从发布路径回退。
 - release workflow smoke 现在也强制包含 runtime SQLite database guard，确保 schema metadata、foreign keys、WAL、busy timeout 和 Run 删除后的 TaskRunLink cascade 不从发布路径回退。

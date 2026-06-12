@@ -1634,6 +1634,7 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow smoke tests must cover TaskRunLink repository projection boundary" in messages
     assert "macOS release workflow smoke tests must cover RunArtifactRepository redaction and file reads" in messages
     assert "macOS release workflow smoke tests must cover RunGroupRepository summary redaction" in messages
+    assert "macOS release workflow smoke tests must cover RunGroupRepository insert redaction" in messages
     assert "macOS release workflow smoke tests must cover RunRepository artifact cleanup callback" in messages
     assert "macOS release workflow smoke tests must cover RunEvent concurrent replay cursor projection" in messages
     assert "macOS release workflow smoke tests must cover runtime SQLite database guards" in messages

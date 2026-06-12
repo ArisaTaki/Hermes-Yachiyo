@@ -2109,7 +2109,17 @@ class RunGroupRepository:
                 child_run_ids_json, created_at, updated_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (run_group_id, title[:180], source[:80], workspace_dir, "running", "", "[]", now, now),
+            (
+                run_group_id,
+                redact_secrets(title)[:180],
+                redact_secrets(source)[:80],
+                redact_secrets(workspace_dir),
+                "running",
+                "",
+                "[]",
+                now,
+                now,
+            ),
         )
         self._conn.commit()
         return self.get(run_group_id)

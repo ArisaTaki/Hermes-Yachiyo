@@ -7460,6 +7460,37 @@ def test_run_group_repository_redacts_summary_projection(tmp_path):
         service.close()
 
 
+def test_run_group_repository_redacts_insert_projection(tmp_path):
+    service = make_service(tmp_path)
+    title_secret = "sk-run-group-title-secret123456"
+    source_secret = "sk-run-group-source-secret123456"
+    workspace_secret = "sk-run-group-workspace-secret123456"
+    try:
+        group = service.run_groups.insert(
+            title=f"Grouped Runs {title_secret}",
+            source=f"agent-{source_secret}",
+            workspace_dir=f"/tmp/{workspace_secret}/project",
+        )
+
+        raw_row = service._conn.execute(
+            "SELECT title, source, workspace_dir FROM run_groups WHERE run_group_id=?",
+            (group["run_group_id"],),
+        ).fetchone()
+
+        assert group["title"] == "Grouped Runs [redacted]"
+        assert group["source"] == "agent-[redacted]"
+        assert group["workspace_dir"] == "/tmp/[redacted]/project"
+        assert raw_row["title"] == "Grouped Runs [redacted]"
+        assert raw_row["source"] == "agent-[redacted]"
+        assert raw_row["workspace_dir"] == "/tmp/[redacted]/project"
+        serialized = json.dumps({"group": group, "raw_row": dict(raw_row)}, ensure_ascii=False)
+        assert title_secret not in serialized
+        assert source_secret not in serialized
+        assert workspace_secret not in serialized
+    finally:
+        service.close()
+
+
 def test_run_repository_deletes_rows_and_artifacts(tmp_path):
     service = make_service(tmp_path)
     try:
