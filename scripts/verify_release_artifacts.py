@@ -517,6 +517,10 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow must validate packaged app bundle structure",
     ),
     (
+        'codesign --verify --deep --strict --verbose=2 "${app_path}"',
+        "macOS release workflow must verify the final packaged app code signature when signing is enabled",
+    ),
+    (
         "python scripts/verify_release_artifacts.py --allow-binary release",
         "macOS release workflow must binary-scan final release artifacts",
     ),

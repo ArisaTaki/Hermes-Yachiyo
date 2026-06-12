@@ -448,6 +448,8 @@ jobs:
 
       - name: Verify packaged app resources
         shell: bash
+        env:
+          MACOS_SIGNING_ENABLED: ${{ steps.macos_signing.outputs.enabled }}
         run: |
           set -euo pipefail
           if [[ ! -d dist/electron ]]; then
@@ -464,6 +466,17 @@ jobs:
           if [[ "${#app_resource_dirs[@]}" -eq 0 ]]; then
             echo "No packaged app resources found under dist/electron" >&2
             exit 1
+          fi
+
+          if [[ "${MACOS_SIGNING_ENABLED:-false}" == "true" ]]; then
+            for resources_dir in "${app_resource_dirs[@]}"; do
+              app_path="${resources_dir%/Contents/Resources}"
+              echo "Verifying final packaged app code signature: ${app_path}"
+              codesign --verify --deep --strict --verbose=2 "${app_path}"
+              codesign -dv "${app_path}" 2>&1 | sed 's/^/codesign: /'
+            done
+          else
+            echo "Skipping final packaged app codesign verification because macOS signing is disabled."
           fi
 
           package_scan_paths+=("${app_resource_dirs[@]}")

@@ -1134,6 +1134,7 @@ def test_verifier_requires_release_workflow_binary_scans_packaged_outputs(tmp_pa
     assert "macOS release workflow must discover packaged app resource directories" in messages
     assert "macOS release workflow must binary-scan packaged app resources" in messages
     assert "macOS release workflow must validate packaged app bundle structure" in messages
+    assert "macOS release workflow must verify the final packaged app code signature when signing is enabled" in messages
     assert "macOS release workflow must binary-scan final release artifacts" in messages
 
 
