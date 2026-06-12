@@ -1117,6 +1117,35 @@ def _finding_report(findings: Sequence[Finding]) -> list[dict[str, str]]:
     return [{"path": str(finding.path), "message": finding.message} for finding in findings]
 
 
+def _source_revision_final_signoff_findings(
+    root: Path,
+    report: dict[str, Any],
+    *,
+    require_manual_checks_complete: bool,
+) -> list[Finding]:
+    if not require_manual_checks_complete:
+        return []
+    source_revision = report.get("source_revision")
+    if (
+        not isinstance(source_revision, dict)
+        or source_revision.get("available") is not True
+        or source_revision.get("dirty") is not True
+    ):
+        return []
+    short_commit = str(source_revision.get("short_commit") or "").strip()
+    suffix = f" at {short_commit}" if short_commit else ""
+    return [
+        Finding(
+            root,
+            (
+                "final signoff requires a clean source revision"
+                f"{suffix}; commit or discard uncommitted changes and rebuild "
+                "release artifacts before final signoff"
+            ),
+        )
+    ]
+
+
 def _recorded_bridge_statuses(report: dict[str, Any]) -> list[dict[str, Any]]:
     statuses: list[dict[str, Any]] = []
     for section_name in DMG_BRIDGE_STATUS_REPORT_SECTIONS:
@@ -2944,10 +2973,23 @@ def verify_release_candidate(
             "manual release-candidate check evidence: incomplete\n"
             "- final signoff requires every manual check to be passed or not_applicable"
         )
+    source_revision_final_signoff_findings = _source_revision_final_signoff_findings(
+        root,
+        report,
+        require_manual_checks_complete=require_manual_checks_complete,
+    )
+    if source_revision_final_signoff_findings:
+        _print_findings(
+            "source revision final signoff guard",
+            source_revision_final_signoff_findings,
+        )
+    report["source_revision_final_signoff_findings"] = _finding_report(
+        source_revision_final_signoff_findings
+    )
 
     failed = failed or manual_check_status == "failed" or (
         require_manual_checks_complete and manual_check_status != "passed"
-    )
+    ) or bool(source_revision_final_signoff_findings)
     report["ok"] = not failed
     if report_json is not None:
         try:

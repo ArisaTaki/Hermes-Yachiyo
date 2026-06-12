@@ -399,6 +399,71 @@ def test_release_candidate_verifier_merges_manual_check_evidence(
     assert report["manual_release_candidate_check_summary"]["remaining_next_actions"] == []
 
 
+def test_release_candidate_verifier_final_signoff_rejects_dirty_source_revision(
+    tmp_path, monkeypatch, capsys
+):
+    commit = "1234567890abcdef1234567890abcdef12345678"
+    (tmp_path / "release").mkdir()
+    evidence_path = tmp_path / "tmp" / "manual-checks.json"
+    evidence_path.parent.mkdir()
+    evidence_path.write_text(
+        json.dumps(
+            {
+                "checks": [
+                    {
+                        **check,
+                        "status": "not_applicable" if check["id"] == "real_provider_smoke" else "passed",
+                        "evidence": f"{check['id']} evidence recorded.",
+                    }
+                    for check in rc.MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_source_revision_run(command, *, root):
+        assert root == tmp_path
+        if command == ["git", "rev-parse", "HEAD"]:
+            return SimpleNamespace(stdout=f"{commit}\n")
+        if command == ["git", "status", "--short"]:
+            return SimpleNamespace(stdout=" M docs/release-packaging.md\n")
+        raise AssertionError(f"unexpected command: {command!r}")
+
+    monkeypatch.setattr(rc, "_run_source_revision_git_command", fake_source_revision_run)
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        manual_checks_json=Path("tmp/manual-checks.json"),
+        require_manual_checks_complete=True,
+        report_json=Path("tmp/rc.json"),
+    ) == 1
+
+    output = capsys.readouterr().out
+    assert "manual release-candidate check evidence: passed" in output
+    assert "source revision final signoff guard: failed" in output
+    report = json.loads((tmp_path / "tmp" / "rc.json").read_text(encoding="utf-8"))
+    assert report["ok"] is False
+    assert report["manual_release_candidate_check_status"] == "passed"
+    assert report["source_revision"] == {
+        "available": True,
+        "commit": commit,
+        "short_commit": "1234567",
+        "dirty": True,
+    }
+    assert report["source_revision_final_signoff_findings"] == [
+        {
+            "path": str(tmp_path),
+            "message": (
+                "final signoff requires a clean source revision at 1234567; "
+                "commit or discard uncommitted changes and rebuild release artifacts "
+                "before final signoff"
+            ),
+        }
+    ]
+
+
 def test_release_candidate_verifier_accepts_previous_rc_report_manual_statuses(
     tmp_path, monkeypatch, capsys
 ):

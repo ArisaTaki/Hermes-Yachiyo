@@ -1130,6 +1130,10 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release candidate verifier must compare packaged Bridge build metadata with source revision",
     ),
     (
+        '"source_revision_final_signoff_findings"',
+        "release candidate verifier final signoff must reject dirty source revisions",
+    ),
+    (
         '"manual_release_candidate_check_source_revisions"',
         "release candidate verifier manual reports, drafts, and Markdown must preserve source revision metadata",
     ),
