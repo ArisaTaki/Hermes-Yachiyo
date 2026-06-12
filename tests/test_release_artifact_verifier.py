@@ -99,6 +99,7 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
     assert "provider smoke tests must cover Responses content part done snapshots" in messages
     assert "provider smoke tests must cover Responses refusal done snapshots" in messages
     assert "provider smoke tests must cover object-shaped streaming tool arguments without leaks" in messages
+    assert "provider smoke tests must cover SSE events split across response chunks" in messages
     assert "provider smoke tests must prove provider errors do not print API keys" in messages
 
 
