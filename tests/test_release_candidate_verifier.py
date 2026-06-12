@@ -1486,6 +1486,24 @@ def test_release_candidate_verifier_manual_check_markdown_can_mark_provider_not_
 
     markdown = markdown_path.read_text(encoding="utf-8")
     assert "- Remaining checks: 4" in markdown
+    assert "## Remaining Automation Commands" in markdown
+    assert "- `screen_recording_permission`" in markdown
+    assert (
+        "python scripts/verify_release_candidate.py --require-artifacts "
+        "--run-dmg-screen-smoke --report-json tmp/rc-verification-screen.json"
+    ) in markdown
+    assert "- `chat_native_file_upload`" in markdown
+    assert (
+        "python scripts/verify_release_candidate.py --require-artifacts "
+        "--run-dmg-chat-native-file-smoke "
+        "--report-json tmp/rc-verification-chat-native-file.json"
+    ) in markdown
+    assert "- `packaged_ui_sampling`" in markdown
+    assert (
+        "python scripts/verify_release_candidate.py --require-artifacts "
+        "--run-dmg-ui-sampling-smoke --report-json tmp/rc-verification-packaged-ui.json"
+    ) in markdown
+    assert "- `real_provider_smoke`" not in markdown
     assert "- [x] `real_provider_smoke` - not_applicable" in markdown
     assert "Evidence source: credentials_unavailable" in markdown
     assert "--run-ui-smoke passed 2 Electron UI smoke scripts" in markdown
@@ -1548,6 +1566,16 @@ def test_release_candidate_verifier_writes_manual_check_markdown_from_draft(tmp_
     assert "## Final Gate" in markdown
     assert "--manual-checks-markdown tmp/final-rc-signoff.md" in markdown
     assert "--require-manual-checks-complete --report-json tmp/rc-with-manual-checks.json" in markdown
+    assert "## Remaining Automation Commands" in markdown
+    assert "- `screen_recording_permission`" in markdown
+    assert "--run-dmg-screen-smoke --report-json tmp/rc-verification-screen.json" in markdown
+    assert "- `chat_native_file_upload`" in markdown
+    assert (
+        "--run-dmg-chat-native-file-smoke "
+        "--report-json tmp/rc-verification-chat-native-file.json"
+    ) in markdown
+    assert "- `packaged_ui_sampling`" in markdown
+    assert "--run-dmg-ui-sampling-smoke --report-json tmp/rc-verification-packaged-ui.json" in markdown
     assert "## Remaining Manual Checks" in markdown
     assert "- [ ] `gatekeeper_first_launch`" in markdown
     assert "Evidence to record:" in markdown

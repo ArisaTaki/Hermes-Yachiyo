@@ -423,6 +423,7 @@ def _manual_release_candidate_checks_markdown(
     ]
     automated_ids = summary.get("automated_evidence_check_ids", [])
     failed_ids = summary.get("failed_check_ids", [])
+    remaining_commands = summary.get("remaining_commands", [])
     manual_checks_arg = str(markdown_path) if markdown_path is not None else "<this-checklist.md>"
     source_revision_items = list(source_revisions or [])
     lines = [
@@ -458,9 +459,30 @@ def _manual_release_candidate_checks_markdown(
         "--require-manual-checks-complete --report-json tmp/rc-with-manual-checks.json",
         "```",
         "",
-        "## Remaining Manual Checks",
+        "## Remaining Automation Commands",
         "",
     ]
+    if isinstance(remaining_commands, list) and remaining_commands:
+        lines.append("Run any applicable automated gate before filling manual evidence:")
+        lines.append("")
+        for item in remaining_commands:
+            if not isinstance(item, dict):
+                continue
+            check_id = str(item.get("id", "")).strip()
+            command = str(item.get("command", "")).strip()
+            if not check_id or not command:
+                continue
+            lines.extend(
+                [
+                    f"- `{check_id}`",
+                    "```bash",
+                    command,
+                    "```",
+                ]
+            )
+    else:
+        lines.append("- None")
+    lines.extend(["", "## Remaining Manual Checks", ""])
     if source_revision_items:
         lines.extend(
             [

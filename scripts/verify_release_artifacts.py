@@ -748,6 +748,10 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document read-only manual RC check status printing",
     ),
     (
+        "自动收证命令",
+        "release packaging docs must document recommended automation commands for remaining manual checks",
+    ),
+    (
         "生成 draft 或 Markdown 时，CLI 会立即打印同一套 progress",
         "release packaging docs must document fast signoff summary output for generated drafts",
     ),
@@ -1176,6 +1180,10 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "manual release-candidate recommended commands:",
         "release candidate verifier must print recommended automation commands for remaining checks",
+    ),
+    (
+        "## Remaining Automation Commands",
+        "release candidate verifier Markdown checklist must include recommended automation commands",
     ),
     (
         '"remaining_notes"',
