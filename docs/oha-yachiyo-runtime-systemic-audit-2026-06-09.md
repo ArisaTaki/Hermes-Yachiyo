@@ -1316,6 +1316,7 @@ RunEvent sequence:
   - 负责子 Agent Run 状态变化后标记父 Workflow running / approval_required / failed / cancelled / resumed。
   - `WorkflowChildRunProjection` 负责父 Workflow replay 中的 child run 状态、result preview、artifact count 和 node metadata payload。
   - `WorkflowChildStatusProjection` 负责父 Workflow child transition 的 projected / fallback status payload 和 result payload，避免 approval / terminal / resumed 分支重复拼字典。
+  - `WorkflowParentResumeFailureProjection` 负责 child completed 后继续父 Workflow 失败时的错误清洗、failed timeline payload 和 Run update 字段。
   - 负责合并子 Run 结果、子 artifact references、父 Workflow timeline 和 RunGroup 状态更新。
 
 - `WorkflowContinuationCoordinator`

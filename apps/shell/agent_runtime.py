@@ -3773,6 +3773,59 @@ class WorkflowChildStatusProjection:
         }
 
 
+@dataclass(frozen=True)
+class WorkflowParentResumeFailureProjection:
+    """Failure projection when a parent Workflow cannot resume after a child update."""
+
+    safe_error: str
+    event_payload: dict[str, Any]
+
+    @classmethod
+    def from_error(
+        cls,
+        error: Any,
+        *,
+        child_run_id: str,
+        child_status: str,
+        child_node_info: dict[str, str],
+    ) -> "WorkflowParentResumeFailureProjection":
+        event_payload: dict[str, Any] = {
+            "status": "failed",
+            **{
+                key: redact_api_error_text(value)
+                for key, value in child_node_info.items()
+            },
+        }
+        if child_run_id:
+            event_payload["child_run_id"] = child_run_id
+        if child_status:
+            event_payload["child_run_status"] = child_status
+        return cls(
+            safe_error=redact_api_error_text(error),
+            event_payload=event_payload,
+        )
+
+    def timeline_event(self, timeline_factory: Any) -> dict[str, Any]:
+        return timeline_factory(
+            "workflow.run.failed",
+            self.safe_error,
+            **self.event_payload,
+        )
+
+    def update_fields(
+        self,
+        *,
+        timeline: list[dict[str, Any]],
+        artifacts: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        return {
+            "status": "failed",
+            "result": self.safe_error,
+            "timeline": timeline,
+            "artifacts": artifacts,
+        }
+
+
 class WorkflowParentResumeCoordinator:
     """Coordinates parent Workflow updates after a child Run changes state."""
 
@@ -4039,29 +4092,19 @@ class WorkflowParentResumeCoordinator:
                 root_group=root_group,
             )
         except Exception as exc:
-            failed_event_extra = dict(child_node_info)
-            if child_run_id:
-                failed_event_extra["child_run_id"] = child_run_id
-            if child_status:
-                failed_event_extra["child_run_status"] = child_status
-            safe_error = redact_api_error_text(exc)
-            timeline.append(
-                self._timeline(
-                    "workflow.run.failed",
-                    safe_error,
-                    status="failed",
-                    **failed_event_extra,
-                )
+            failure = WorkflowParentResumeFailureProjection.from_error(
+                exc,
+                child_run_id=child_run_id,
+                child_status=child_status,
+                child_node_info=child_node_info,
             )
+            timeline.append(failure.timeline_event(self._timeline))
             result = self._update_run(
                 str(workflow_run["run_id"]),
-                status="failed",
-                result=safe_error,
-                timeline=timeline,
-                artifacts=artifacts,
+                **failure.update_fields(timeline=timeline, artifacts=artifacts),
             )
             if root_group:
-                self._update_run_group(run_group_id, status="failed", summary=safe_error)
+                self._update_run_group(run_group_id, status="failed", summary=failure.safe_error)
             return result
 
 

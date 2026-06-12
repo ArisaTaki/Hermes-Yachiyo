@@ -99,6 +99,7 @@ jobs:
             tests/test_agent_runtime.py::test_workflow_path_planner_builds_path_snapshot_and_artifact_paths \
             tests/test_agent_runtime.py::test_workflow_run_start_projector_builds_timeline_and_replay_payload \
             tests/test_agent_runtime.py::test_workflow_child_status_projection_builds_projected_and_fallback_payloads \
+            tests/test_agent_runtime.py::test_workflow_parent_resume_failure_projection_redacts_and_builds_update_fields \
             tests/test_agent_runtime.py::test_workflow_parent_resume_coordinator_continues_completed_child \
             tests/test_agent_runtime.py::test_workflow_parent_resume_coordinator_does_not_resume_completed_child_twice \
             tests/test_agent_runtime.py::test_workflow_parent_resume_coordinator_does_not_project_child_approval_twice \

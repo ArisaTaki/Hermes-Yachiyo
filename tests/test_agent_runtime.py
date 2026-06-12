@@ -44,6 +44,7 @@ from apps.shell.agent_runtime import (
     WorkflowCancellationProjectionCoordinator,
     WorkflowCancellationTarget,
     WorkflowContinuationCoordinator,
+    WorkflowParentResumeFailureProjection,
     WorkflowParentRunLocator,
     WorkflowParentResumeCoordinator,
     WorkflowPathPlanner,
@@ -1752,6 +1753,43 @@ def test_workflow_child_status_projection_builds_projected_and_fallback_payloads
         "status": "failed",
         "result": "Child cancelled",
         **node_info,
+    }
+
+
+def test_workflow_parent_resume_failure_projection_redacts_and_builds_update_fields():
+    raw_secret = "sk-workflow-parent-resume-secret123456"
+    timeline: list[dict[str, object]] = []
+    artifacts: list[dict[str, object]] = [{"kind": "workflow_child_artifact", "path": "child.md"}]
+
+    projection = WorkflowParentResumeFailureProjection.from_error(
+        RuntimeError(f"snapshot failed with {raw_secret}"),
+        child_run_id="child_run",
+        child_status="completed",
+        child_node_info={
+            "workflow_node_id": "agent",
+            "workflow_node_kind": "agent",
+            "workflow_node_label": f"Research {raw_secret}",
+        },
+    )
+    event = projection.timeline_event(
+        lambda event, detail, **payload: {"event": event, "detail": detail, **payload}
+    )
+    timeline.append(event)
+
+    assert raw_secret not in json.dumps({"event": event, "projection": projection.event_payload}, ensure_ascii=False)
+    assert event["event"] == "workflow.run.failed"
+    assert event["detail"] == projection.safe_error
+    assert event["status"] == "failed"
+    assert event["workflow_node_id"] == "agent"
+    assert event["workflow_node_kind"] == "agent"
+    assert event["workflow_node_label"] == "Research [redacted]"
+    assert event["child_run_id"] == "child_run"
+    assert event["child_run_status"] == "completed"
+    assert projection.update_fields(timeline=timeline, artifacts=artifacts) == {
+        "status": "failed",
+        "result": projection.safe_error,
+        "timeline": timeline,
+        "artifacts": artifacts,
     }
 
 
