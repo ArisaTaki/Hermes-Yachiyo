@@ -888,6 +888,8 @@ def _is_reasoning_content_part(value: Any) -> bool:
 def _message_text_value(value: Any) -> str:
     if isinstance(value, str):
         return value
+    if isinstance(value, (list, tuple)):
+        return "\n".join(text for item in value if (text := _message_text_value(item)))
     if isinstance(value, dict):
         for key in ("value", "content", "text"):
             nested = value.get(key)
@@ -911,7 +913,7 @@ def _message_text_value(value: Any) -> str:
         text = _message_text_value(nested)
         if text:
             return text
-    return str(value) if value is not None and not isinstance(value, (list, tuple, set)) else ""
+    return str(value) if value is not None and not isinstance(value, set) else ""
 
 
 def _tool_arguments_text(value: Any) -> str:

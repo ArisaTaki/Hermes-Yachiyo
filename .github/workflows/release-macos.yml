@@ -171,6 +171,7 @@ jobs:
             tests/test_agent_runtime.py::test_main_chat_model_preserves_stream_finish_reason_and_usage_in_completed_event \
             tests/test_agent_runtime.py::test_main_chat_model_preserves_stream_stop_reason_as_finish_reason_in_completed_event \
             tests/test_agent_runtime.py::test_main_chat_model_loop_uses_responses_output_text_done_snapshot \
+            tests/test_agent_runtime.py::test_main_chat_model_loop_uses_responses_output_text_done_list_snapshot \
             tests/test_agent_runtime.py::test_main_chat_model_loop_uses_responses_output_item_message_snapshot \
             tests/test_agent_runtime.py::test_main_chat_model_loop_uses_responses_content_part_snapshot \
             tests/test_agent_runtime.py::test_main_chat_model_loop_persists_streaming_refusal_delta \
