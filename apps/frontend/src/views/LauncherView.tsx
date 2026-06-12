@@ -34,6 +34,29 @@ const LIVE2D_MASK_MAX_FILL_RATIO = 0.72;
 const LIVE2D_IDLE_MOTION_FIRST_MS = 700;
 const LIVE2D_IDLE_MOTION_MIN_MS = 8500;
 const LIVE2D_IDLE_MOTION_JITTER_MS = 6500;
+
+type LauncherMode = 'bubble' | 'live2d';
+
+const LAUNCHER_SUMMARY_TEST_IDS: Record<LauncherMode, {
+  latestReply: string;
+  recentSession: string;
+  sessionSummaryProbe: string;
+  statusLabel: string;
+}> = {
+  bubble: {
+    latestReply: 'bubble-launcher-latest-reply',
+    recentSession: 'bubble-launcher-recent-session',
+    sessionSummaryProbe: 'bubble-launcher-session-summary-probe',
+    statusLabel: 'bubble-launcher-status-label',
+  },
+  live2d: {
+    latestReply: 'live2d-launcher-latest-reply',
+    recentSession: 'live2d-launcher-recent-session',
+    sessionSummaryProbe: 'live2d-launcher-session-summary-probe',
+    statusLabel: 'live2d-launcher-status-label',
+  },
+};
+
 type PointerLike = {
   screenX: number;
   screenY: number;
@@ -161,7 +184,7 @@ function openSettings(mode: 'bubble' | 'live2d') {
   return openAppView('settings', { mode });
 }
 
-function handleContextMenu(event: MouseEvent, mode: 'bubble' | 'live2d') {
+function handleContextMenu(event: MouseEvent, mode: LauncherMode) {
   event.preventDefault();
   void openLauncherMenu(mode);
 }
@@ -900,17 +923,18 @@ function LauncherSessionSummaryProbe({
   statusLabel,
 }: {
   latestReply: string;
-  mode: 'bubble' | 'live2d';
+  mode: LauncherMode;
   sessions: LauncherRecentSession[];
   statusLabel: string;
 }) {
+  const testIds = LAUNCHER_SUMMARY_TEST_IDS[mode];
   return (
-    <div className="launcher-session-summary-probe" data-testid={`${mode}-launcher-session-summary-probe`} hidden>
-      <span data-testid={`${mode}-launcher-latest-reply`}>{latestReply}</span>
-      <span data-testid={`${mode}-launcher-status-label`}>{statusLabel}</span>
+    <div className="launcher-session-summary-probe" data-testid={testIds.sessionSummaryProbe} hidden>
+      <span data-testid={testIds.latestReply}>{latestReply}</span>
+      <span data-testid={testIds.statusLabel}>{statusLabel}</span>
       {sessions.map((session, index) => (
         <span
-          data-testid={`${mode}-launcher-recent-session`}
+          data-testid={testIds.recentSession}
           data-session-id={session.session_id || ''}
           data-task-id={session.latest_task_id || ''}
           data-conversation-kind={session.conversation_kind || ''}
