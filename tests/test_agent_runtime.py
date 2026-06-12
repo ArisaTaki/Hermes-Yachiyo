@@ -11563,6 +11563,66 @@ def test_agent_run_executes_multiple_responses_tool_calls(tmp_path, monkeypatch)
         service.close()
 
 
+def test_agent_run_uses_responses_output_text_done_snapshot(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    expected = "Agent final Responses snapshot"
+
+    def fake_chat(_base_url, _model, _api_key, _messages, *, tools=None, stream=False):
+        assert tools is not None
+        assert stream is True
+
+        def stream():
+            yield {
+                "type": "response.output_text.delta",
+                "output_index": 0,
+                "content_index": 0,
+                "delta": "draft ",
+            }
+            yield {
+                "type": "response.output_text.delta",
+                "output_index": 0,
+                "content_index": 0,
+                "delta": "partial",
+            }
+            yield {
+                "type": "response.output_text.done",
+                "output_index": 0,
+                "content_index": 0,
+                "text": expected,
+            }
+            yield {
+                "type": "response.completed",
+                "response": {
+                    "status": "completed",
+                    "output": [{"type": "message", "finish_reason": "stop"}],
+                },
+            }
+
+        return stream()
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Responses Output Text Snapshot Agent",
+                "model_mode": "custom_api",
+                "model_config": {"base_url": "https://api.example.test/v1", "model": "demo-model", "api_key": "sk-secret"},
+                "tool_policy": {"allowed_tools": ["workspace.read"]},
+            }
+        )
+        run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Use Responses output_text.done"})
+        run_events = service.list_run_events(run["run_id"], include_internal=True)["events"]
+        completed_fact = next(event for event in run_events if event["event_type"] == "agent.run.completed")
+
+        assert run["status"] == "completed"
+        assert run["result"] == expected
+        assert completed_fact["payload"]["result"] == expected
+        assert "draft partial" not in json.dumps({"run": run, "events": run_events}, ensure_ascii=False)
+        assert not any(str(event["event_type"]).endswith(".delta") for event in run_events)
+    finally:
+        service.close()
+
+
 def test_agent_run_discards_responses_reasoning_summary_stream(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     expected = "Agent visible Responses answer"
