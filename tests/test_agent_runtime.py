@@ -28,6 +28,7 @@ from apps.shell.agent_runtime import (
     RunProjectionCoordinator,
     RunTransitionProjectionCoordinator,
     TaskRunLinkRepository,
+    RunCancellationProjection,
     ToolApprovalContinuationHandoff,
     ToolApprovalResumeContext,
     ToolApprovalTransitionContext,
@@ -1901,6 +1902,43 @@ def test_workflow_cancellation_target_builds_event_payloads():
         "workflow_node_kind": "agent",
         "workflow_node_label": "Research Agent",
         "child_run_id": "child_run",
+    }
+
+
+def test_run_cancellation_projection_builds_update_fields():
+    timeline = [{"event": "run.started"}]
+
+    plain = RunCancellationProjection.plain(
+        timeline,
+        lambda event, detail: {"event": event, "detail": detail},
+    )
+
+    assert plain.update_fields() == {
+        "status": "cancelled",
+        "result": "Run cancelled",
+        "timeline": [
+            {"event": "run.started"},
+            {"event": "run.cancelled", "detail": "Run cancelled"},
+        ],
+        "artifacts": None,
+        "pending_approval": None,
+    }
+    assert timeline == [{"event": "run.started"}]
+
+    workflow_timeline = [{"event": "workflow.run.cancelled"}]
+    workflow_artifacts = [{"kind": "workflow_child_artifact", "path": "child.md"}]
+    workflow = RunCancellationProjection.workflow(
+        workflow_timeline,
+        workflow_artifacts,
+        "Workflow 已取消：Research Agent",
+    )
+
+    assert workflow.update_fields() == {
+        "status": "cancelled",
+        "result": "Workflow 已取消：Research Agent",
+        "timeline": workflow_timeline,
+        "artifacts": workflow_artifacts,
+        "pending_approval": None,
     }
 
 

@@ -4064,6 +4064,45 @@ class WorkflowCancellationTarget:
         return f"Workflow 已取消：{self.label}"
 
 
+@dataclass(frozen=True)
+class RunCancellationProjection:
+    """Run update fields produced by a cancellation request."""
+
+    timeline: list[dict[str, Any]]
+    artifacts: list[dict[str, Any]] | None
+    result_text: str
+
+    @classmethod
+    def plain(
+        cls,
+        timeline: list[dict[str, Any]],
+        timeline_factory: Any,
+    ) -> "RunCancellationProjection":
+        return cls(
+            timeline=[*timeline, timeline_factory("run.cancelled", "Run cancelled")],
+            artifacts=None,
+            result_text="Run cancelled",
+        )
+
+    @classmethod
+    def workflow(
+        cls,
+        timeline: list[dict[str, Any]],
+        artifacts: list[dict[str, Any]],
+        result_text: str,
+    ) -> "RunCancellationProjection":
+        return cls(timeline=timeline, artifacts=artifacts, result_text=result_text)
+
+    def update_fields(self) -> dict[str, Any]:
+        return {
+            "status": "cancelled",
+            "result": self.result_text,
+            "timeline": self.timeline,
+            "artifacts": self.artifacts,
+            "pending_approval": None,
+        }
+
+
 class WorkflowCancellationProjectionCoordinator:
     """Builds Workflow cancellation projections, including waiting child Runs."""
 
@@ -9044,20 +9083,14 @@ class NativeRunEngine:
         if run["status"] in _FINAL_RUN_STATUSES:
             return run
         timeline = [*run["timeline"]]
-        artifacts: list[dict[str, Any]] | None = None
-        result_text: str | None = None
         if run.get("kind") == "workflow_run":
-            timeline, artifacts, result_text = self._cancel_workflow_run_projection(run_id, run, timeline)
+            workflow_timeline, artifacts, result_text = self._cancel_workflow_run_projection(run_id, run, timeline)
+            projection = RunCancellationProjection.workflow(workflow_timeline, artifacts, result_text)
         else:
-            timeline.append(self._timeline("run.cancelled", "Run cancelled"))
-            result_text = "Run cancelled"
+            projection = RunCancellationProjection.plain(timeline, self._timeline)
         result = self._update_run(
             run_id,
-            status="cancelled",
-            result=result_text,
-            timeline=timeline,
-            artifacts=artifacts,
-            pending_approval=None,
+            **projection.update_fields(),
         )
         cancel_event_type = "workflow.run.cancelled" if result.get("kind") == "workflow_run" else "run.cancelled"
         self.append_run_event(

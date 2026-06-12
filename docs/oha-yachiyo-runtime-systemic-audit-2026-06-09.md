@@ -1326,6 +1326,7 @@ RunEvent sequence:
 - `WorkflowCancellationProjectionCoordinator`
   - 负责 Workflow Run 取消时的 pending approval / child approval / child outcome 合并与 Workflow timeline 投影。
   - `WorkflowCancellationTarget` 负责 pending approval / waiting child 两类取消目标的 label、node metadata、child run id、timeline payload 和 result 文本。
+  - `RunCancellationProjection` 负责普通 Run / Workflow Run 取消后的统一 `_update_run()` 字段，避免 cancel 分派继续直接拼状态、result、timeline、artifacts 和 pending approval 清理字段。
   - 负责父 Workflow 取消时取消等待中的子 Agent Run，并合并子 Run 结果、artifact references 和 workflow node 元数据。
   - `NativeRunEngine._cancel_workflow_run_projection()` 保留为薄 wrapper；`_cancel_run_once()` 保留普通 Run 与 Workflow Run 的取消分派、最终落库、RunGroup 更新和父 Workflow 恢复通知。
 
@@ -2130,6 +2131,7 @@ compileall passed
 - release workflow smoke 现在也强制包含 WorkflowParentResumeCoordinator child approval replay idempotency 回归，确保重复 child approval_required update 不会重复投影父 Workflow replay fact 或重复更新父 Run / RunGroup。
 - release workflow smoke 现在也强制包含 WorkflowParentResumeCoordinator child cancellation / failure replay idempotency 回归，确保重复 child cancelled / failed update 不会重复投影父 Workflow replay fact 或重复更新父 Run / RunGroup。
 - release workflow smoke 现在也强制包含 Workflow cancellation target projection 回归，确保 pending approval / waiting child 两类取消目标继续由显式 target boundary 生成 timeline payload 和 result 文本。
+- release workflow smoke 现在也强制包含 Run cancellation update projection 回归，确保普通 Run / Workflow Run 取消后的状态、result、timeline、artifact 和 pending approval 清理字段继续由显式 projection boundary 维护。
 - release workflow smoke 现在也强制包含 Workflow agent-node child run handoff 回归，确保 child Agent、child goal、upstream context、node metadata 和 replay payload 继续由显式 handoff 边界维护。
 - release workflow smoke 现在也强制包含 RunTransitionProjectionCoordinator child and workflow group projection 回归，确保 child Run 状态变化和 root Workflow cancelled RunGroup 投影继续由显式 transition boundary 维护。
 - release workflow smoke 现在也强制包含 sensitive `client_run_id` rejection 回归，确保外部幂等键误带 API key / token 时不会进入 `runs.client_request_id` 持久化投影。
