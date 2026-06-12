@@ -12794,6 +12794,51 @@ def test_agent_tool_loop_limit_includes_last_tool_detail(tmp_path, monkeypatch):
         service.close()
 
 
+def test_custom_api_agent_normalizes_invalid_start_iteration(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    calls: list[list[dict[str, object]]] = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        return {"content": "normalized start iteration"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        created = service.create_agent(
+            {
+                "name": "Direct Resume Agent",
+                "model_mode": "custom_api",
+                "model_config": {
+                    "base_url": "https://api.example.test/v1",
+                    "model": "demo-model",
+                    "api_key": "sk-secret",
+                },
+                "tool_policy": {"allowed_tools": []},
+                "workspace_policy": {"default_workdir": str(tmp_path), "readable_scopes": ["."]},
+            }
+        )
+        agent = service._get_agent_private(created["agent_id"])
+        broker = ToolBroker(
+            {"default_workdir": str(tmp_path), "readable_scopes": ["."]},
+            service.agent_artifacts_dir / "direct-resume",
+        )
+
+        result = service._run_custom_api_agent(
+            agent,
+            "Direct resume context",
+            broker,
+            [],
+            [],
+            start_iteration="not-an-int",
+            run_id="direct_resume",
+        )
+
+        assert result == "normalized start iteration"
+        assert len(calls) == 1
+    finally:
+        service.close()
+
+
 def test_agent_tool_loop_limit_after_artifact_write_completes_with_artifact(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     calls = []

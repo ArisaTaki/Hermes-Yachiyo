@@ -8074,7 +8074,8 @@ class NativeRunEngine:
         budget = budget or self._run_budget(run_id, timeline)
         self._check_context_budget(budget, messages)
         tools = self._tool_schemas(allowed_tools)
-        for iteration in range(max(0, int(start_iteration or 0)), _MAX_AGENT_TOOL_ITERATIONS):
+        start_iteration = _normalize_tool_iteration(start_iteration)
+        for iteration in range(start_iteration, _MAX_AGENT_TOOL_ITERATIONS):
             self._check_context_budget(budget, messages)
             budget.claim_model_call()
             message = _coalesce_model_message(

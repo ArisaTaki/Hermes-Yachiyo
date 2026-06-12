@@ -86,6 +86,7 @@ jobs:
             tests/test_agent_runtime.py::test_approval_resume_coordinator_executes_approved_tool_and_remaining_requests \
             tests/test_agent_runtime.py::test_approval_resume_coordinator_stops_on_fatal_tool_failure \
             tests/test_agent_runtime.py::test_approval_resume_coordinator_continues_custom_api_agent_after_approved_tool \
+            tests/test_agent_runtime.py::test_custom_api_agent_normalizes_invalid_start_iteration \
             tests/test_agent_runtime.py::test_approval_resume_projection_coordinator_projects_resume_states \
             tests/test_agent_runtime.py::test_pending_approval_snapshot_is_isolated_before_resume \
             tests/test_agent_runtime.py::test_tool_approval_resume_context_parses_pending_payload \

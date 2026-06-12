@@ -941,6 +941,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover ApprovalResumeCoordinator custom API resume flow",
     ),
     (
+        "tests/test_agent_runtime.py::test_custom_api_agent_normalizes_invalid_start_iteration",
+        "macOS release workflow smoke tests must cover custom API Agent start iteration normalization",
+    ),
+    (
         "tests/test_agent_runtime.py::test_approval_resume_projection_coordinator_projects_resume_states",
         "macOS release workflow smoke tests must cover ApprovalResumeProjectionCoordinator resume state projections",
     ),
