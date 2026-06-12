@@ -709,6 +709,7 @@ function waitFor(win, predicate, label, timeout = 18000) {
               notice: document.querySelector('[data-testid="chat-composer-approval-notice"]')?.outerHTML || '',
               messages: Array.from(document.querySelectorAll('[data-message-id]')).map((node) => ({
                 id: node.getAttribute('data-message-id'),
+                className: node.className,
                 text: node.textContent,
               })),
               activity: Array.from(document.querySelectorAll('[data-testid="chat-message-activity-row"]')).map((node) => ({
@@ -734,9 +735,14 @@ function waitFor(win, predicate, label, timeout = 18000) {
     tick();
   });
 }
-async function loadChat(win) {
+async function loadChat(win, params = {}) {
   chatLoadCounter += 1;
-  await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '&smokeLoad=' + chatLoadCounter + '#/chat');
+  const query = new URLSearchParams({
+    bridge: bridgeUrl,
+    smokeLoad: String(chatLoadCounter),
+    ...params,
+  });
+  await win.loadURL(devUrl + '?' + query.toString() + '#/chat');
   await waitFor(win, () => document.querySelector('[data-testid="chat-composer-input"]'), 'chat composer input');
 }
 async function waitForActivityApproval(win) {
@@ -910,6 +916,18 @@ async function main() {
       && openRun;
   }, 'delegated summary created in Chat');
   console.log('[electron-smoke] delegated summary rendered');
+  await loadChat(win, {
+    session_id: ${JSON.stringify(SESSION_ID)},
+    conversation_kind: 'agent',
+    task_id: ${JSON.stringify(SOURCE_TASK_ID)},
+  });
+  await waitFor(win, () => {
+    const summary = document.querySelector('[data-message-id="assistant-chat-delegated-summary-ui-smoke-summary"]');
+    return summary?.className.includes('search-highlighted')
+      && summary.textContent.includes(${JSON.stringify(SUMMARY_RESULT)})
+      && document.body.textContent.includes(${JSON.stringify(DELEGATED_RESULT)});
+  }, 'launcher task handoff highlights delegated summary message');
+  console.log('[electron-smoke] launcher task handoff highlighted delegated summary');
   await win.webContents.executeJavaScript("document.querySelector('[data-message-id=\\"assistant-chat-delegated-summary-ui-smoke-summary\\"] [data-testid=\\"chat-message-open-run-detail\\"]').click()", true);
   await waitForSummaryRunDetail(win);
   console.log('[electron-smoke] delegated summary Run Detail replay verified');
