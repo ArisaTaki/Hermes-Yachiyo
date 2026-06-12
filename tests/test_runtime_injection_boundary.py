@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 APPS_ROOT = ROOT / "apps"
 RUNTIME_ACCESSORS = {"get_agent_runtime_service", "get_native_run_engine"}
 RUNTIME_CONSTRUCTORS = {"AgentRuntimeService", "NativeRunEngine"}
+RUNTIME_IMPLEMENTATION_NAMES = {"AgentRuntimeService", "NativeRunEngine"}
 IGNORED_DIRS = {"__pycache__", "node_modules", "dist", "dist-electron", ".vite"}
 ALLOWED_RUNTIME_ACCESSOR_CALLS = {
     ("apps/bridge/routes/agents.py", "_agent_runtime_service", "get_agent_runtime_service"),
@@ -32,6 +33,7 @@ class _RuntimeAccessorVisitor(ast.NodeVisitor):
         self.function_stack: list[str] = []
         self.findings: list[tuple[str, str, int]] = []
         self.constructor_findings: list[tuple[str, str, int]] = []
+        self.import_findings: list[tuple[str, int]] = []
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         self.class_stack.append(node.name)
@@ -53,6 +55,13 @@ class _RuntimeAccessorVisitor(ast.NodeVisitor):
         if constructor is not None:
             qualname = self._current_qualname()
             self.constructor_findings.append((qualname, constructor, node.lineno))
+        self.generic_visit(node)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        if node.module == "apps.shell.agent_runtime":
+            for alias in node.names:
+                if alias.name in RUNTIME_IMPLEMENTATION_NAMES:
+                    self.import_findings.append((alias.name, node.lineno))
         self.generic_visit(node)
 
     def _visit_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
@@ -116,5 +125,22 @@ def test_native_runtime_construction_stays_confined_to_global_service_factory() 
             key = (relative, qualname, constructor)
             if key not in ALLOWED_RUNTIME_CONSTRUCTOR_CALLS:
                 unexpected.append(f"{relative}:{line} {qualname} constructs {constructor}()")
+
+    assert unexpected == []
+
+
+def test_native_runtime_implementation_imports_stay_inside_runtime_module() -> None:
+    unexpected: list[str] = []
+    for path in _iter_app_python_files():
+        relative = path.relative_to(ROOT).as_posix()
+        if relative == "apps/shell/agent_runtime.py":
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=relative)
+        visitor = _RuntimeAccessorVisitor(relative)
+        visitor.visit(tree)
+        for imported_name, line in visitor.import_findings:
+            unexpected.append(
+                f"{relative}:{line} imports runtime implementation {imported_name}"
+            )
 
     assert unexpected == []
