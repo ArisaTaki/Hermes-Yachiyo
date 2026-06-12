@@ -10273,6 +10273,71 @@ def test_agent_run_redacts_http_sse_provider_error(tmp_path, monkeypatch):
     assert verify_secret_redaction(paths=[tmp_path]) == []
 
 
+def test_agent_run_redacts_multiline_http_sse_provider_error(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    leaked_secret = "sk-agent-http-sse-multiline-error123456"
+    requests = []
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            yield b'data: {"choices":[{"delta":{"content":"partial multiline agent output"}}]}\r\n\r\n'
+            yield (
+                b"id: agent-multiline-error-1\r\n"
+                b"event: error\r\n"
+                b'data: {"error":{\r\n'
+                + f'data: "message":"agent provider stream rejected token={leaked_secret}",\r\n'.encode("utf-8")
+                + b'data: "type":"rate_limit_error","code":"quota_exceeded"}}\r\n\r\n'
+            )
+
+    def fake_urlopen(request, **kwargs):
+        body = json.loads(request.data.decode("utf-8"))
+        requests.append({"request": request, "body": body, "kwargs": kwargs})
+        assert request.full_url == "https://api.example.test/v1/chat/completions"
+        assert request.get_header("Accept") == "text/event-stream"
+        assert body["stream"] is True
+        return FakeResponse()
+
+    monkeypatch.setattr("apps.core.tls.urlrequest.urlopen", fake_urlopen)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Multiline Provider Error HTTP SSE Agent",
+                "model_mode": "custom_api",
+                "model_config": {"base_url": "https://api.example.test/v1", "model": "demo-model", "api_key": "sk-secret"},
+            }
+        )
+        run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Handle multiline provider SSE error"})
+        run_events = service.list_run_events(run["run_id"], include_internal=True)["events"]
+        projection = json.dumps(
+            {
+                "run": run,
+                "events": run_events,
+                "run_group": service.get_run_group(run["run_group_id"]),
+            },
+            ensure_ascii=False,
+        )
+        event_types = [event["event_type"] for event in run_events]
+
+        assert run["status"] == "failed"
+        assert "rate_limit_error" in run["result"]
+        assert "quota_exceeded" in run["result"]
+        assert "[redacted]" in projection
+        assert leaked_secret not in projection
+        assert len(requests) == 1
+        assert "agent.run.failed" in event_types
+        assert "agent.run.completed" not in event_types
+    finally:
+        service.close()
+
+    assert verify_secret_redaction(paths=[tmp_path]) == []
+
+
 def test_agent_run_executes_http_sse_tool_call_and_continues(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     workdir = tmp_path / "repo"
