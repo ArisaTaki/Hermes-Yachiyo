@@ -10036,6 +10036,65 @@ def test_agent_run_consumes_split_utf8_http_sse_content_chunks(tmp_path, monkeyp
         service.close()
 
 
+def test_agent_run_consumes_http_sse_content_parts(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    requests = []
+    private_reasoning_parts = ["agent hidden content-part reasoning", "agent hidden content-part thinking"]
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            yield b'data: {"choices":[{"delta":{"role":"assistant"}}]}\n\n'
+            yield (
+                b'data: {"choices":[{"delta":{"content":'
+                b'[{"type":"reasoning","text":{"value":"agent hidden content-part reasoning"}},'
+                b'{"type":"text","text":{"value":"agent content-part "}}]}}]}\n\n'
+            )
+            yield (
+                b'data: {"choices":[{"message":{"role":"assistant","content":'
+                b'[{"type":"thinking","text":{"value":"agent hidden content-part thinking"}},'
+                b'{"type":"text","text":{"value":"stream output"}}]},"finish_reason":"stop"}]}\n\n'
+            )
+            yield b"data: [DONE]\n\n"
+
+    def fake_urlopen(request, **kwargs):
+        body = json.loads(request.data.decode("utf-8"))
+        requests.append({"request": request, "body": body, "kwargs": kwargs})
+        assert request.full_url == "https://api.example.test/v1/chat/completions"
+        assert request.get_header("Accept") == "text/event-stream"
+        assert body["stream"] is True
+        return FakeResponse()
+
+    monkeypatch.setattr("apps.core.tls.urlrequest.urlopen", fake_urlopen)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Content Parts HTTP SSE Agent",
+                "model_mode": "custom_api",
+                "model_config": {"base_url": "https://api.example.test/v1", "model": "demo-model", "api_key": "sk-secret"},
+            }
+        )
+        run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Use content parts"})
+        run_events = service.list_run_events(run["run_id"], include_internal=True)["events"]
+        completed_fact = next(event for event in run_events if event["event_type"] == "agent.run.completed")
+        projection = json.dumps({"run": run, "events": run_events}, ensure_ascii=False)
+
+        assert run["status"] == "completed"
+        assert run["result"] == "agent content-part stream output"
+        assert len(requests) == 1
+        assert completed_fact["payload"]["result"] == "agent content-part stream output"
+        for private_reasoning in private_reasoning_parts:
+            assert private_reasoning not in projection
+        assert not any(str(event["event_type"]).endswith(".delta") for event in run_events)
+    finally:
+        service.close()
+
+
 def test_agent_run_persists_streaming_refusal_delta(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     expected = "Agent refuses this request."
