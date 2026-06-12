@@ -228,6 +228,7 @@ jobs:
             tests/test_provider_catalog_sync.py \
             tests/test_build_backend.py \
             tests/test_build_metadata.py \
+            tests/test_release_candidate_verifier.py \
             tests/test_credential_store.py \
             tests/test_bridge_server.py::test_bridge_debug_routes_are_disabled_for_release_metadata \
             tests/test_bridge_server.py::test_bridge_debug_routes_are_disabled_for_release_channel_env \

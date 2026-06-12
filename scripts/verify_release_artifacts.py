@@ -1437,6 +1437,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover release-like build metadata guards",
     ),
     (
+        "tests/test_release_candidate_verifier.py",
+        "macOS release workflow smoke tests must cover local RC verification gate",
+    ),
+    (
         "tests/test_credential_store.py",
         "macOS release workflow smoke tests must cover release-like CredentialStore guards",
     ),
