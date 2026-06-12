@@ -145,6 +145,14 @@ CHAT_IMAGE_ATTACHMENT_SMOKE_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "smoke-image-cdp-fourth.svg",
         "Chat image Electron UI smoke must keep multi-image file input coverage",
     ),
+    (
+        "chooseChatImages: async ()",
+        "Chat image Electron UI smoke must cover the desktop native image picker API path",
+    ),
+    (
+        "chat desktop image picker should not click hidden file input",
+        "Chat image Electron UI smoke must prove desktop image picker bypasses the hidden input",
+    ),
 )
 ELECTRON_UI_SMOKE_RUNNER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
@@ -1088,7 +1096,7 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release candidate verifier must attach UI smoke supporting evidence to current RC reports",
     ),
     (
-        "the packaged native file picker still ",
+        "the packaged OS file picker still ",
         "release candidate verifier must not auto-pass native file picker from UI smoke",
     ),
     (

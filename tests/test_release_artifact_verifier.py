@@ -958,6 +958,14 @@ def test_release_workflow_guard_reports_weak_chat_image_file_input_smoke(tmp_pat
         "Chat image Electron UI smoke must keep multi-image file input coverage"
         in messages
     )
+    assert (
+        "Chat image Electron UI smoke must cover the desktop native image picker API path"
+        in messages
+    )
+    assert (
+        "Chat image Electron UI smoke must prove desktop image picker bypasses the hidden input"
+        in messages
+    )
 
 
 def test_release_workflow_guard_reports_new_main_chat_provider_contract(tmp_path):

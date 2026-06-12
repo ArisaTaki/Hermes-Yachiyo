@@ -13,7 +13,7 @@ import { UiIcon } from '../components/UiIcon';
 import logoUrl from '../../../../docs/open-design/logo.png';
 import { type AssistantProfileSeed, useAssistantProfileSeed } from '../lib/assistantProfileSeed';
 import { approveRunApproval, listRunnables, type RunnableSummary, type RunSpec, getRun, rejectRunApproval } from '../lib/agents';
-import { apiGet, apiPatch, apiPost, bridgeUrl, chooseAvatarImage, copyText, openAppView, openExternalUrl, restartDesktopBridge } from '../lib/bridge';
+import { apiGet, apiPatch, apiPost, bridgeUrl, canChooseChatImages, chooseAvatarImage, chooseChatImages, copyText, openAppView, openExternalUrl, restartDesktopBridge, type ChatImageSelection } from '../lib/bridge';
 import { ROUTE_CHANGE_EVENT, currentParam, navigateTo } from '../lib/view';
 
 type PendingAttachment = {
@@ -1023,6 +1023,35 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       setStatus(next.length > 1 ? `已添加 ${next.length} 张图片附件` : '已添加图片附件');
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '读取图片失败');
+    }
+  }
+
+  async function addDesktopImageSelections(selections: ChatImageSelection[]) {
+    const files = (await Promise.all(selections.map(fileFromDesktopImageSelection))).filter((file): file is File => Boolean(file));
+    if (files.length === 0) {
+      setStatus('没有选择可用图片');
+      return;
+    }
+    await addImageFiles(files);
+  }
+
+  async function openImageAttachmentPicker() {
+    if (imageAttachDisabled) {
+      showImageInputBlocked();
+      return;
+    }
+    if (!canChooseChatImages()) {
+      fileInputRef.current?.click();
+      return;
+    }
+    try {
+      const selections = await chooseChatImages();
+      if (!Array.isArray(selections) || selections.length === 0) return;
+      await addDesktopImageSelections(selections);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '选择图片失败';
+      setStatus(message);
+      showNotice('选择图片失败', message, 'warn');
     }
   }
 
@@ -2393,7 +2422,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                 aria-label="附加图片"
                 data-testid="chat-header-image-attach-button"
                 disabled={imageAttachDisabled}
-                onClick={() => fileInputRef.current?.click()}
+                onClick={() => void openImageAttachmentPicker()}
               >
                 <UiIcon name="image" />
               </button>
@@ -2590,7 +2619,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                 title={attachmentHelpText(executor)}
                 aria-label="添加附件，当前仅支持图片"
                 data-testid="chat-composer-image-attach-button"
-                onClick={() => fileInputRef.current?.click()}
+                onClick={() => void openImageAttachmentPicker()}
               >
                 <UiIcon name="paperclip" />
               </button>
@@ -4901,6 +4930,25 @@ async function fileFromE2EImageDetail(detail: ChatE2EImageDetail | undefined): P
   const dataUrl = String(detail.data_url || detail.dataUrl || '').trim()
     || (detail.base64 ? `data:${mimeType};base64,${String(detail.base64).trim()}` : '');
   if (!dataUrl.startsWith('data:image/')) return null;
+  try {
+    const response = await fetch(dataUrl);
+    const blob = await response.blob();
+    if (!blob.type.startsWith('image/')) return null;
+    return new File([blob], name, { type: blob.type || mimeType });
+  } catch {
+    return null;
+  }
+}
+
+async function fileFromDesktopImageSelection(selection: ChatImageSelection | undefined): Promise<File | null> {
+  if (!selection) return null;
+  const mimeType = String(selection.mime_type || 'image/png').trim() || 'image/png';
+  const name = String(selection.file_name || 'desktop-image.png').trim() || 'desktop-image.png';
+  const dataUrl = String(selection.data_url || '').trim();
+  if (!dataUrl.startsWith('data:image/')) return null;
+  if (Number(selection.size || 0) > MAX_ATTACHMENT_BYTES) {
+    throw new Error(`图片 ${name} 超过 8 MB`);
+  }
   try {
     const response = await fetch(dataUrl);
     const blob = await response.blob();

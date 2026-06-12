@@ -695,11 +695,15 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
             "const detail = imageInputBlockedNoticeText();",
             "setStatus(detail);",
             "disabled={imageAttachDisabled}",
-            "onClick={() => fileInputRef.current?.click()}",
             "const files = Array.from(event.target.files || []);",
             "event.target.value = '';",
             "if (files.length === 0) return;",
             "void addImageFiles(files);",
+            "canChooseChatImages",
+            "chooseChatImages",
+            "async function openImageAttachmentPicker()",
+            "fileInputRef.current?.click();",
+            "await addDesktopImageSelections(selections);",
             "type=\"file\"",
             "accept=\"image/*\"",
             "multiple",
@@ -727,10 +731,10 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
             "(eventStatus === 'approval_required' || String(event?.metadata?.run_status || '').trim() === 'approval_required')",
         ],
     )
-    _assert_occurs(chat_view, "onClick={() => fileInputRef.current?.click()}", 2)
+    _assert_occurs(chat_view, "onClick={() => void openImageAttachmentPicker()}", 2)
     _assert_occurs(chat_view, "data-testid=\"chat-image-file-input\"", 1)
     _assert_occurs(chat_view, "disabled={imageAttachDisabled}", 3)
-    _assert_occurs(chat_view, "if (imageAttachDisabled) {", 2)
+    _assert_occurs(chat_view, "if (imageAttachDisabled) {", 3)
     _assert_occurs(chat_view, "import.meta.env.DEV", 1)
 
 
@@ -816,6 +820,10 @@ def test_chat_image_attachment_ui_smoke_uses_file_input_path() -> None:
             "Object.defineProperty(input, 'click', { configurable: true, value: () => { clickCount += 1; } })",
             "buttons.forEach((button) => button.click())",
             "if (clickCount !== buttons.length) throw new Error('chat image attach buttons did not target file input')",
+            "window.ohaDesktop = {",
+            "chooseChatImages: async () =>",
+            "chat desktop image picker should not click hidden file input",
+            "desktop native image picker API rendered attachment preview",
             "new File([blob], 'smoke-image.svg', { type: 'image/svg+xml' })",
             "new DataTransfer()",
             "transfer.items.add(file)",

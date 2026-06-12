@@ -83,6 +83,7 @@ const MIN_APP_WINDOW_HEIGHT = 860;
 const UI_RENDER_REVISION = 'open-design-v4-moon-bubble-scrollbar-gutter-v3-20260512';
 const MAX_LAUNCHER_SHAPE_RECTS = 10000;
 const MAX_AVATAR_IMAGE_BYTES = 8 * 1024 * 1024;
+const MAX_CHAT_IMAGE_BYTES = 8 * 1024 * 1024;
 type IconKind = 'dock' | 'tray' | 'window';
 
 type AppView =
@@ -256,6 +257,13 @@ type AvatarImageSelection = {
   path: string;
   data_url: string;
   file_name: string;
+};
+
+type ChatImageSelection = AvatarImageSelection & {
+  mime_type: string;
+  size: number;
+  width?: number;
+  height?: number;
 };
 
 let backendProcess: ChildProcessWithoutNullStreams | null = null;
@@ -2540,6 +2548,7 @@ function imageMimeTypeForPath(filePath: string): string {
   if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg';
   if (ext === '.webp') return 'image/webp';
   if (ext === '.gif') return 'image/gif';
+  if (ext === '.svg') return 'image/svg+xml';
   return 'application/octet-stream';
 }
 
@@ -2550,10 +2559,30 @@ async function readAvatarImageSelection(filePath: string | null): Promise<Avatar
   if (stats.size > MAX_AVATAR_IMAGE_BYTES) throw new Error('头像图片不能超过 8 MB');
   const data = await fs.promises.readFile(filePath);
   const mimeType = imageMimeTypeForPath(filePath);
-  if (!mimeType.startsWith('image/')) throw new Error('仅支持 PNG、JPG、WEBP 或 GIF 图片');
+  if (!mimeType.startsWith('image/')) throw new Error('仅支持 PNG、JPG、WEBP、GIF 或 SVG 图片');
   return {
     path: filePath,
     file_name: path.basename(filePath),
+    data_url: `data:${mimeType};base64,${data.toString('base64')}`,
+  };
+}
+
+async function readChatImageSelection(filePath: string): Promise<ChatImageSelection> {
+  const stats = await fs.promises.stat(filePath);
+  if (!stats.isFile()) throw new Error('请选择图片文件');
+  if (stats.size > MAX_CHAT_IMAGE_BYTES) throw new Error('聊天图片不能超过 8 MB');
+  const data = await fs.promises.readFile(filePath);
+  const mimeType = imageMimeTypeForPath(filePath);
+  if (!mimeType.startsWith('image/')) throw new Error('仅支持 PNG、JPG、WEBP、GIF 或 SVG 图片');
+  const image = nativeImage.createFromBuffer(data);
+  const size = image.isEmpty() ? { width: 0, height: 0 } : image.getSize();
+  return {
+    path: filePath,
+    file_name: path.basename(filePath),
+    mime_type: mimeType,
+    size: stats.size,
+    width: size.width || undefined,
+    height: size.height || undefined,
     data_url: `data:${mimeType};base64,${data.toString('base64')}`,
   };
 }
@@ -2714,6 +2743,17 @@ ipcMain.handle('oha:chooseAvatarImage', async (event) => {
     ],
   });
   return readAvatarImageSelection(selectedPath);
+});
+ipcMain.handle('oha:chooseChatImages', async (event) => {
+  const selectedPaths = await showOpenDialogPathsForSender(event, {
+    title: '选择聊天图片',
+    defaultPath: app.getPath('pictures') || app.getPath('home'),
+    properties: ['openFile', 'multiSelections'],
+    filters: [
+      { name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'] },
+    ],
+  });
+  return Promise.all(selectedPaths.map(readChatImageSelection));
 });
 ipcMain.handle('oha:chooseLive2DModelDirectory', (event) => showOpenDialogForSender(event, {
   title: '选择 Live2D 模型目录',

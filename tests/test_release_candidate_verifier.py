@@ -708,7 +708,10 @@ def test_release_candidate_verifier_writes_manual_check_draft_from_prior_report(
     assert "--run-ui-smoke passed 3 Electron UI smoke scripts" in checks["packaged_ui_sampling"]["notes"]
     assert "scripts/smoke_workflow_save_run_ui.mjs" in checks["packaged_ui_sampling"]["notes"]
     assert checks["chat_native_file_upload"]["status"] == "manual_required"
-    assert "packaged native file picker still requires manual evidence" in checks[
+    assert "desktop chooseChatImages API path" in checks[
+        "chat_native_file_upload"
+    ]["notes"]
+    assert "packaged OS file picker still requires manual evidence" in checks[
         "chat_native_file_upload"
     ]["notes"]
 
@@ -836,7 +839,8 @@ def test_release_candidate_verifier_manual_check_markdown_can_mark_provider_not_
     assert "Evidence source: credentials_unavailable" in markdown
     assert "--run-ui-smoke passed 2 Electron UI smoke scripts" in markdown
     assert "scripts/smoke_workflow_management_ui.mjs" in markdown
-    assert "packaged native file picker still requires manual evidence" in markdown
+    assert "desktop chooseChatImages API path" in markdown
+    assert "packaged OS file picker still requires manual evidence" in markdown
     for env_name in rc.PROVIDER_SMOKE_ENV_VARS:
         assert env_name in markdown
 

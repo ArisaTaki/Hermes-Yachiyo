@@ -371,8 +371,8 @@ def _append_electron_ui_smoke_supporting_evidence(
             "chat_native_file_upload",
             (
                 "Supporting automated evidence: smoke_chat_image_attachment_ui.mjs "
-                "passed via Electron UI smoke; the packaged native file picker still "
-                "requires manual evidence."
+                "passed via Electron UI smoke, including the desktop chooseChatImages "
+                "API path; the packaged OS file picker still requires manual evidence."
             ),
         )
 

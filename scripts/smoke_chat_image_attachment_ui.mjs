@@ -23,9 +23,11 @@ const CHAT_IMAGE_SMOKE_FILE_NAMES = [
   'smoke-image-cdp-third.svg',
   'smoke-image-cdp-fourth.svg',
 ];
+const NATIVE_PICKER_IMAGE_NAME = 'smoke-image-native.svg';
 const TEST_IMAGE_DATA_URL = `data:image/svg+xml;base64,${Buffer.from(
   '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><rect width="24" height="24" fill="#0ea5e9"/><circle cx="12" cy="12" r="7" fill="#fff"/></svg>',
 ).toString('base64')}`;
+const TEST_IMAGE_BYTE_SIZE = Buffer.from(TEST_IMAGE_DATA_URL.split(',')[1] || '', 'base64').length;
 
 const bridgeState = {
   messages: [],
@@ -368,8 +370,10 @@ const { app, BrowserWindow } = require('electron');
 const devUrl = ${JSON.stringify(devUrl)};
 const bridgeUrl = ${JSON.stringify(bridgeUrl)};
 const imageDataUrl = ${JSON.stringify(TEST_IMAGE_DATA_URL)};
+const imageByteSize = ${JSON.stringify(TEST_IMAGE_BYTE_SIZE)};
 const imageFileNames = ${JSON.stringify(imageFileNames)};
 const imageFilePaths = ${JSON.stringify(imageFilePaths)};
+const nativePickerImageName = ${JSON.stringify(NATIVE_PICKER_IMAGE_NAME)};
 const watchdog = setTimeout(() => {
   console.error('electron smoke timed out');
   app.exit(1);
@@ -475,7 +479,58 @@ async function main() {
       if (clickCount !== buttons.length) throw new Error('chat image attach buttons did not target file input');
     })();
   \`, true);
-  console.log('[electron-smoke] image attach buttons target file input');
+  console.log('[electron-smoke] image attach buttons target file input fallback');
+  await win.webContents.executeJavaScript(\`
+    (() => {
+      window.__chatNativePickerCalls = 0;
+      window.ohaDesktop = {
+        ...(window.ohaDesktop || {}),
+        chooseChatImages: async () => {
+          window.__chatNativePickerCalls += 1;
+          return [{
+            path: '/tmp/oha-yachiyo-native-picker-smoke/' + \${JSON.stringify(nativePickerImageName)},
+            file_name: \${JSON.stringify(nativePickerImageName)},
+            mime_type: 'image/svg+xml',
+            size: \${JSON.stringify(imageByteSize)},
+            width: 24,
+            height: 24,
+            data_url: \${JSON.stringify(imageDataUrl)},
+          }];
+        },
+      };
+    })();
+  \`, true);
+  await win.webContents.executeJavaScript(\`
+    (() => {
+      const input = document.querySelector('[data-testid="chat-image-file-input"]');
+      const button = document.querySelector('[data-testid="chat-composer-image-attach-button"]');
+      if (!input || !button) throw new Error('chat native picker smoke controls not found');
+      let clickCount = 0;
+      const hadOwnClick = Object.prototype.hasOwnProperty.call(input, 'click');
+      const ownClick = hadOwnClick ? input.click : undefined;
+      Object.defineProperty(input, 'click', { configurable: true, value: () => { clickCount += 1; } });
+      try {
+        button.click();
+      } finally {
+        delete input.click;
+        if (hadOwnClick) Object.defineProperty(input, 'click', { configurable: true, value: ownClick });
+      }
+      if (clickCount !== 0) throw new Error('chat desktop image picker should not click hidden file input');
+    })();
+  \`, true);
+  await waitFor(win, () => {
+    const preview = document.querySelector('[data-testid="chat-composer-attachment-preview"]');
+    return window.__chatNativePickerCalls === 1
+      && preview
+      && preview.getAttribute('data-attachment-name') === ${JSON.stringify(NATIVE_PICKER_IMAGE_NAME)}
+      && preview.getAttribute('data-attachment-mime') === 'image/svg+xml'
+      && Number(preview.getAttribute('data-attachment-size') || 0) > 0
+      && preview.getAttribute('data-attachment-width') === '24'
+      && preview.getAttribute('data-attachment-height') === '24';
+  }, 'composer attachment preview from desktop native picker API');
+  console.log('[electron-smoke] desktop native image picker API rendered attachment preview');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-composer-attachment-remove\\"]').click()", true);
+  await waitFor(win, () => !document.querySelector('[data-testid="chat-composer-attachment-preview"]'), 'removed native picker attachment preview');
   await win.webContents.executeJavaScript(\`
     (async () => {
       const input = document.querySelector('[data-testid="chat-image-file-input"]');

@@ -126,12 +126,19 @@ export type AvatarImageSelection = {
   data_url?: string;
   file_name?: string;
 };
+export type ChatImageSelection = AvatarImageSelection & {
+  mime_type?: string;
+  size?: number;
+  width?: number;
+  height?: number;
+};
 
 declare global {
   interface Window {
     ohaDesktop?: {
       cancelAppUpdateDownload?: () => Promise<{ ok?: boolean; cancelled?: boolean; error?: string }>;
       chooseAvatarImage?: () => Promise<AvatarImageSelection | string | null>;
+      chooseChatImages?: () => Promise<ChatImageSelection[]>;
       chooseLive2DArchive?: () => Promise<string | null>;
       chooseLive2DModelDirectory?: () => Promise<string | null>;
       chooseTtsVoiceArchive?: () => Promise<string | null>;
@@ -363,6 +370,17 @@ export async function chooseAvatarImage(): Promise<AvatarImageSelection | string
     throw new Error('当前环境没有桌面图片选择器入口');
   }
   return window.ohaDesktop.chooseAvatarImage();
+}
+
+export async function chooseChatImages(): Promise<ChatImageSelection[]> {
+  if (!window.ohaDesktop?.chooseChatImages) {
+    throw new Error('当前环境没有桌面图片选择器入口');
+  }
+  return window.ohaDesktop.chooseChatImages();
+}
+
+export function canChooseChatImages(): boolean {
+  return Boolean(window.ohaDesktop?.chooseChatImages);
 }
 
 export async function chooseLive2DArchive(): Promise<string | null> {
