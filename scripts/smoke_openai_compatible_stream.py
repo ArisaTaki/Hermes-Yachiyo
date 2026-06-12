@@ -105,6 +105,18 @@ def _responses_stream_reasoning_delta(chunk: Any) -> str | None:
 
 def _responses_stream_reasoning_done(chunk: Any) -> str | None:
     event_type = _responses_stream_event_type(chunk)
+    if event_type in {"response.output_item.added", "response.output_item.done", "output_item.added", "output_item.done"}:
+        item = _field(chunk, "item")
+        if _is_reasoning_content_part(item):
+            return _reasoning_text(item)
+        return None
+    if event_type in {
+        "response.reasoning_summary_part.added",
+        "response.reasoning_summary_part.done",
+        "reasoning_summary_part.added",
+        "reasoning_summary_part.done",
+    }:
+        return _raw_part_text(_field(chunk, "part"))
     if event_type not in {
         "response.reasoning.done",
         "response.reasoning_text.done",
@@ -242,13 +254,17 @@ def _raw_part_text(value: Any) -> str:
         return value
     if isinstance(value, list):
         return "\n".join(text for item in value if (text := _raw_part_text(item)))
-    nested = _field(value, "content")
-    if nested is not None:
-        text = _raw_part_text(nested)
-        if text:
-            return text
-    text = _field(value, "text")
-    return _text_value(text)
+    for field_name in ("content", "summary"):
+        nested = _field(value, field_name)
+        if nested is not None:
+            text = _raw_part_text(nested)
+            if text:
+                return text
+    for field_name in ("text", "delta"):
+        text = _field(value, field_name)
+        if text is not None:
+            return _text_value(text)
+    return ""
 
 
 def _content_text(value: Any) -> str:
@@ -284,6 +300,10 @@ def _reasoning_text(value: Any) -> str:
     reasoning = _field(value, "reasoning_content")
     if reasoning is None:
         reasoning = _field(value, "reasoning")
+    if reasoning is None:
+        summary = _field(value, "summary")
+        if summary is not None:
+            return _reasoning_text(summary)
     if reasoning is None:
         content = _field(value, "content")
         if content is not None:

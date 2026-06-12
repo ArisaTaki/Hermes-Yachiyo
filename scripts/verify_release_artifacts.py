@@ -738,6 +738,10 @@ STREAMING_PROVIDER_SMOKE_SCRIPT_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "_responses_stream_reasoning_done(chunk)",
         "real provider smoke helper must parse Responses reasoning summary done snapshots",
     ),
+    (
+        "response.reasoning_summary_part.done",
+        "real provider smoke helper must parse Responses reasoning summary part snapshots",
+    ),
 )
 STREAMING_PROVIDER_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
@@ -779,6 +783,10 @@ STREAMING_PROVIDER_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "def test_stream_smoke_uses_responses_reasoning_summary_done_snapshot",
         "provider smoke tests must cover Responses reasoning summary done snapshots",
+    ),
+    (
+        "def test_stream_smoke_uses_responses_reasoning_output_item_done_snapshot",
+        "provider smoke tests must cover Responses reasoning output item snapshots",
     ),
     (
         "def test_stream_smoke_uses_responses_content_part_done_snapshot",
