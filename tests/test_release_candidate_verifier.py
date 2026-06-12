@@ -1138,6 +1138,129 @@ def test_release_candidate_verifier_runs_dmg_app_startup_smoke(
     ]
 
 
+def test_release_candidate_verifier_runs_dmg_screen_recording_probe(
+    tmp_path, monkeypatch, capsys
+):
+    release_dir = tmp_path / "release"
+    release_dir.mkdir()
+    (release_dir / "Oha-Yachiyo-0.4.0-arm64.dmg").write_bytes(b"fake dmg")
+    commands: list[list[str]] = []
+    popen_calls: list[dict[str, object]] = []
+
+    class FakeResponse:
+        def __init__(self, body: bytes):
+            self._body = body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return self._body
+
+    class FakeProcess:
+        returncode = None
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self):
+            self.returncode = 0
+
+        def wait(self, timeout=None):
+            self.returncode = 0
+            return 0
+
+        def kill(self):
+            self.returncode = -9
+
+        def communicate(self, timeout=None):
+            return "", ""
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        if command[:2] == ["hdiutil", "attach"]:
+            mount_dir = Path(command[command.index("-mountpoint") + 1])
+            executable = mount_dir / "Oha-Yachiyo.app" / "Contents" / "MacOS" / "Oha-Yachiyo"
+            executable.parent.mkdir(parents=True)
+            executable.write_text("#!/bin/sh\n", encoding="utf-8")
+            executable.chmod(0o755)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    def fake_popen(command, **kwargs):
+        popen_calls.append({"command": command, "cwd": kwargs.get("cwd"), "env": kwargs.get("env")})
+        return FakeProcess()
+
+    def fake_urlopen(url, timeout):
+        if str(url).endswith("/status"):
+            return FakeResponse(
+                b'{"service":"oha-yachiyo","version":"0.4.0","uptime_seconds":1}'
+            )
+        if str(url).endswith("/screen/current"):
+            return FakeResponse(
+                b'{"image_base64":"private-image-bytes","format":"png","width":1920,"height":1080,"captured_at":"2026-06-12T00:00:00Z"}'
+            )
+        raise AssertionError(f"unexpected URL: {url}")
+
+    monkeypatch.setattr(rc.sys, "platform", "darwin")
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+    monkeypatch.setattr(rc, "_allocate_loopback_port", lambda: 49124)
+    monkeypatch.setattr(rc.subprocess, "run", fake_run)
+    monkeypatch.setattr(rc.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(rc.urllib.request, "urlopen", fake_urlopen)
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        artifact_paths=(Path("release"),),
+        run_dmg_screen_smoke=True,
+        report_json=Path("tmp/rc.json"),
+    ) == 0
+
+    assert commands[0][:2] == ["hdiutil", "attach"]
+    assert commands[1][:2] == ["hdiutil", "detach"]
+    assert len(popen_calls) == 1
+    env = popen_calls[0]["env"]
+    assert env["OHA_YACHIYO_BRIDGE_URL"] == "http://127.0.0.1:49124"
+    output = capsys.readouterr().out
+    assert "DMG screen recording probe: passed" in output
+    report_text = (tmp_path / "tmp" / "rc.json").read_text(encoding="utf-8")
+    assert "private-image-bytes" not in report_text
+    report = json.loads(report_text)
+    assert report["ok"] is True
+    assert report["dmg_screen_probe"] == {
+        "status": "passed",
+        "dmg_paths": ["release/Oha-Yachiyo-0.4.0-arm64.dmg"],
+        "screens": [
+            {
+                "dmg_path": "release/Oha-Yachiyo-0.4.0-arm64.dmg",
+                "width": 1920,
+                "height": 1080,
+                "format": "png",
+                "captured_at": "2026-06-12T00:00:00Z",
+            }
+        ],
+        "findings": [],
+        "run_requested": True,
+    }
+    manual_statuses = {
+        check["id"]: check
+        for check in report["manual_release_candidate_check_statuses"]
+    }
+    assert manual_statuses["packaged_bridge_isolation"]["status"] == "passed"
+    assert manual_statuses["packaged_bridge_isolation"]["evidence_source"] == "automated_rc_gate"
+    assert manual_statuses["screen_recording_permission"]["status"] == "passed"
+    assert manual_statuses["screen_recording_permission"]["evidence_source"] == "automated_rc_gate"
+    assert "/screen/current 1920x1080 png" in manual_statuses["screen_recording_permission"]["evidence"]
+    assert "Screenshot image bytes were not archived" in manual_statuses["screen_recording_permission"]["evidence"]
+    assert report["manual_release_candidate_check_summary"]["remaining_count"] == 4
+    assert report["manual_release_candidate_check_summary"]["automated_evidence_check_ids"] == [
+        "packaged_bridge_isolation",
+        "screen_recording_permission",
+    ]
+
+
 def test_release_candidate_dmg_app_startup_smoke_requires_executable(
     tmp_path, monkeypatch
 ):

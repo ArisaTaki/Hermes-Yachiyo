@@ -36,6 +36,7 @@ DEFAULT_ARTIFACT_PATHS: tuple[Path, ...] = (
 PACKAGED_APP_NAME = "Oha-Yachiyo.app"
 PACKAGED_APP_EXECUTABLE_NAME = "Oha-Yachiyo"
 DMG_APP_SMOKE_TIMEOUT_SECONDS = 45.0
+DMG_SCREEN_PROBE_REQUEST_TIMEOUT_SECONDS = 10.0
 PROVIDER_SMOKE_ENV_VARS: tuple[str, ...] = (
     "OHA_YACHIYO_SMOKE_BASE_URL",
     "OHA_YACHIYO_SMOKE_MODEL",
@@ -99,7 +100,7 @@ MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS: tuple[dict[str, str], ...] = (
         "required_before": "public_release_signoff",
         "description": "Grant Screen Recording permission to Oha-Yachiyo.app and verify the local screenshot/proactive probe path.",
         "evidence": "Record the System Settings permission state and a successful local screenshot or proactive probe result.",
-        "next_action": "Manually grant Screen Recording to the packaged app in System Settings and verify local screenshot or proactive probe success.",
+        "next_action": "Prefer rerunning the RC gate with --run-dmg-screen-smoke after granting Screen Recording; otherwise manually record the System Settings permission state and local screenshot/proactive probe result.",
     },
     {
         "id": "chat_native_file_upload",
@@ -532,6 +533,47 @@ def _auto_apply_release_candidate_check_evidence(
                 f"{artifact_label}: the packaged app was launched from a mounted DMG "
                 "with temporary HOME/OHA_YACHIYO_HOME and loopback OHA_YACHIYO_BRIDGE_URL, "
                 "and /status returned service=oha-yachiyo."
+            ),
+        )
+
+    dmg_screen_probe = report.get("dmg_screen_probe")
+    if isinstance(dmg_screen_probe, dict) and dmg_screen_probe.get("status") == "passed":
+        dmg_paths = dmg_screen_probe.get("dmg_paths")
+        if isinstance(dmg_paths, list) and dmg_paths:
+            artifact_label = ", ".join(str(path) for path in dmg_paths)
+        else:
+            artifact_label = "selected DMG artifacts"
+        screens = dmg_screen_probe.get("screens")
+        screen_labels: list[str] = []
+        if isinstance(screens, list):
+            for item in screens:
+                if isinstance(item, dict):
+                    width = item.get("width")
+                    height = item.get("height")
+                    image_format = item.get("format")
+                    dmg_path = item.get("dmg_path")
+                    if width is not None and height is not None:
+                        screen_labels.append(
+                            f"{dmg_path or 'DMG'} /screen/current {width}x{height} {image_format or ''}".strip()
+                        )
+        screen_summary = "; ".join(screen_labels) if screen_labels else "/screen/current returned screenshot metadata"
+        _auto_apply_manual_release_candidate_check_evidence(
+            checks,
+            "packaged_bridge_isolation",
+            (
+                "Automated --run-dmg-screen-smoke passed for "
+                f"{artifact_label}: the packaged app was launched from a mounted DMG "
+                "with temporary HOME/OHA_YACHIYO_HOME and loopback OHA_YACHIYO_BRIDGE_URL, "
+                "and /status returned service=oha-yachiyo before the screen probe."
+            ),
+        )
+        _auto_apply_manual_release_candidate_check_evidence(
+            checks,
+            "screen_recording_permission",
+            (
+                "Automated --run-dmg-screen-smoke passed for "
+                f"{artifact_label}: {screen_summary}. "
+                "Screenshot image bytes were not archived in the RC report."
             ),
         )
 
@@ -1002,11 +1044,84 @@ def verify_dmg_mount_artifacts(root: Path, dmg_paths: Sequence[Path]) -> list[Fi
     return findings
 
 
-def _read_status_json(bridge_url: str) -> dict[str, Any]:
-    with urllib.request.urlopen(f"{bridge_url}/status", timeout=1.0) as response:
+def _read_json_url(url: str, *, timeout: float) -> dict[str, Any]:
+    with urllib.request.urlopen(url, timeout=timeout) as response:
         body = response.read().decode("utf-8")
     data = json.loads(body)
     return data if isinstance(data, dict) else {}
+
+
+def _read_status_json(bridge_url: str) -> dict[str, Any]:
+    return _read_json_url(f"{bridge_url}/status", timeout=1.0)
+
+
+def _read_screen_probe_metadata(bridge_url: str) -> dict[str, object]:
+    data = _read_json_url(
+        f"{bridge_url}/screen/current",
+        timeout=DMG_SCREEN_PROBE_REQUEST_TIMEOUT_SECONDS,
+    )
+    width = data.get("width")
+    height = data.get("height")
+    if not isinstance(width, int) or width <= 0:
+        raise ValueError(f"unexpected /screen/current width={width!r}")
+    if not isinstance(height, int) or height <= 0:
+        raise ValueError(f"unexpected /screen/current height={height!r}")
+    image_format = str(data.get("format") or "").strip()
+    if image_format.lower() != "png":
+        raise ValueError(f"unexpected /screen/current format={image_format!r}")
+    metadata: dict[str, object] = {
+        "width": width,
+        "height": height,
+        "format": image_format,
+    }
+    captured_at = str(data.get("captured_at") or "").strip()
+    if captured_at:
+        metadata["captured_at"] = captured_at
+    return metadata
+
+
+def _redacted_url_error_detail(exc: BaseException) -> str:
+    if isinstance(exc, urllib.error.HTTPError):
+        try:
+            body = exc.read().decode("utf-8", errors="replace")
+        except Exception:
+            body = ""
+        return redact_api_error_text((body or str(exc)).strip())
+    return redact_api_error_text(str(exc))
+
+
+def _wait_for_dmg_app_status(
+    process: subprocess.Popen[str],
+    *,
+    bridge_url: str,
+    dmg_path: Path,
+    timeout_seconds: float,
+) -> Finding | None:
+    deadline = time.monotonic() + timeout_seconds
+    last_error = ""
+    while time.monotonic() < deadline:
+        exit_code = process.poll()
+        if exit_code is not None:
+            stdout, stderr = _read_process_output(process)
+            detail = _redacted_process_detail(stdout, stderr)
+            message = f"release candidate app exited before /status was ready: exit_code={exit_code}"
+            if detail:
+                message = f"{message}: {detail}"
+            return Finding(dmg_path, message)
+        try:
+            status = _read_status_json(bridge_url)
+        except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
+            last_error = _redacted_url_error_detail(exc)
+            time.sleep(0.5)
+            continue
+        if status.get("service") == "oha-yachiyo":
+            return None
+        last_error = redact_api_error_text(f"unexpected /status service={status.get('service')!r}")
+        time.sleep(0.5)
+    message = f"release candidate app did not expose /status within {timeout_seconds:.0f}s"
+    if last_error:
+        message = f"{message}: {last_error}"
+    return Finding(dmg_path, message)
 
 
 def verify_dmg_app_startup(
@@ -1076,35 +1191,14 @@ def verify_dmg_app_startup(
                     stderr=subprocess.PIPE,
                     text=True,
                 )
-                deadline = time.monotonic() + timeout_seconds
-                last_error = ""
-                passed = False
-                while time.monotonic() < deadline:
-                    exit_code = process.poll()
-                    if exit_code is not None:
-                        stdout, stderr = _read_process_output(process)
-                        detail = _redacted_process_detail(stdout, stderr)
-                        message = f"release candidate app exited before /status was ready: exit_code={exit_code}"
-                        if detail:
-                            message = f"{message}: {detail}"
-                        findings.append(Finding(dmg_path, message))
-                        break
-                    try:
-                        status = _read_status_json(bridge_url)
-                    except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
-                        last_error = redact_api_error_text(str(exc))
-                        time.sleep(0.5)
-                        continue
-                    if status.get("service") == "oha-yachiyo":
-                        passed = True
-                        break
-                    last_error = redact_api_error_text(f"unexpected /status service={status.get('service')!r}")
-                    time.sleep(0.5)
-                if not passed and not any(finding.path == dmg_path for finding in findings):
-                    message = f"release candidate app did not expose /status within {timeout_seconds:.0f}s"
-                    if last_error:
-                        message = f"{message}: {last_error}"
-                    findings.append(Finding(dmg_path, message))
+                status_finding = _wait_for_dmg_app_status(
+                    process,
+                    bridge_url=bridge_url,
+                    dmg_path=dmg_path,
+                    timeout_seconds=timeout_seconds,
+                )
+                if status_finding is not None:
+                    findings.append(status_finding)
         finally:
             if process is not None:
                 _terminate_process(process)
@@ -1126,6 +1220,121 @@ def verify_dmg_app_startup(
     return findings
 
 
+def verify_dmg_screen_recording_probe(
+    root: Path,
+    dmg_paths: Sequence[Path],
+    *,
+    timeout_seconds: float = DMG_APP_SMOKE_TIMEOUT_SECONDS,
+) -> tuple[list[Finding], list[dict[str, object]]]:
+    findings: list[Finding] = []
+    screens: list[dict[str, object]] = []
+    if not dmg_paths:
+        findings.append(Finding(root, "release candidate DMG screen probe requested but no .dmg artifacts were found"))
+        return findings, screens
+    if sys.platform != "darwin":
+        findings.append(Finding(root, "release candidate DMG screen probe requires macOS"))
+        return findings, screens
+    for dmg_path in dmg_paths:
+        absolute_dmg = _absolute_artifact_path(root, dmg_path)
+        mount_dir = Path(tempfile.mkdtemp(prefix="oha-yachiyo-rc-screen-"))
+        attached = False
+        process: subprocess.Popen[str] | None = None
+        try:
+            attach = subprocess.run(
+                [
+                    "hdiutil",
+                    "attach",
+                    str(absolute_dmg),
+                    "-nobrowse",
+                    "-readonly",
+                    "-mountpoint",
+                    str(mount_dir),
+                    "-quiet",
+                ],
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            if attach.returncode != 0:
+                detail = redact_api_error_text((attach.stderr or attach.stdout or "").strip())
+                message = "release candidate DMG could not be mounted for screen probe"
+                if detail:
+                    message = f"{message}: {detail}"
+                findings.append(Finding(dmg_path, message))
+                continue
+            attached = True
+            app_path = mount_dir / PACKAGED_APP_NAME
+            executable_path = app_path / "Contents" / "MacOS" / PACKAGED_APP_EXECUTABLE_NAME
+            if not executable_path.is_file():
+                findings.append(Finding(dmg_path, f"mounted {PACKAGED_APP_NAME} must contain executable {PACKAGED_APP_EXECUTABLE_NAME}"))
+                continue
+            if not os.access(executable_path, os.X_OK):
+                findings.append(Finding(dmg_path, f"mounted {PACKAGED_APP_NAME} executable is not executable"))
+                continue
+            bridge_url = f"http://127.0.0.1:{_allocate_loopback_port()}"
+            with tempfile.TemporaryDirectory(prefix="oha-yachiyo-rc-home-") as home_dir:
+                env = {
+                    **os.environ,
+                    "HOME": home_dir,
+                    "OHA_YACHIYO_HOME": str(Path(home_dir) / ".oha-yachiyo"),
+                    "OHA_YACHIYO_BRIDGE_URL": bridge_url,
+                }
+                process = subprocess.Popen(
+                    [str(executable_path)],
+                    cwd=str(app_path),
+                    env=env,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                status_finding = _wait_for_dmg_app_status(
+                    process,
+                    bridge_url=bridge_url,
+                    dmg_path=dmg_path,
+                    timeout_seconds=timeout_seconds,
+                )
+                if status_finding is not None:
+                    findings.append(status_finding)
+                    continue
+                try:
+                    metadata = _read_screen_probe_metadata(bridge_url)
+                except (
+                    OSError,
+                    ValueError,
+                    urllib.error.URLError,
+                    json.JSONDecodeError,
+                ) as exc:
+                    findings.append(
+                        Finding(
+                            dmg_path,
+                            "release candidate packaged /screen/current probe failed: "
+                            + _redacted_url_error_detail(exc),
+                        )
+                    )
+                    continue
+                screens.append({"dmg_path": str(dmg_path), **metadata})
+        finally:
+            if process is not None:
+                _terminate_process(process)
+            if attached:
+                detach = subprocess.run(
+                    ["hdiutil", "detach", str(mount_dir), "-quiet"],
+                    check=False,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                if detach.returncode != 0:
+                    detail = redact_api_error_text((detach.stderr or detach.stdout or "").strip())
+                    message = "release candidate DMG could not be detached after screen probe"
+                    if detail:
+                        message = f"{message}: {detail}"
+                    findings.append(Finding(dmg_path, message))
+            shutil.rmtree(mount_dir, ignore_errors=True)
+    return findings, screens
+
+
 def verify_release_candidate(
     *,
     root: Path = PROJECT_ROOT,
@@ -1134,6 +1343,7 @@ def verify_release_candidate(
     source_only: bool = False,
     check_dmg_mount: bool = False,
     run_dmg_app_smoke: bool = False,
+    run_dmg_screen_smoke: bool = False,
     run_provider_smoke: bool = False,
     run_ui_smoke: bool = False,
     smoke_scripts: Sequence[Path] | None = None,
@@ -1179,6 +1389,13 @@ def verify_release_candidate(
             "findings": [],
             "run_requested": run_dmg_app_smoke,
         },
+        "dmg_screen_probe": {
+            "status": "pending",
+            "dmg_paths": [],
+            "screens": [],
+            "findings": [],
+            "run_requested": run_dmg_screen_smoke,
+        },
         "provider_smoke": {
             "status": "pending",
             "checks": [],
@@ -1208,6 +1425,8 @@ def verify_release_candidate(
             source_only_conflicts.append("--check-dmg-mount")
         if run_dmg_app_smoke:
             source_only_conflicts.append("--run-dmg-app-smoke")
+        if run_dmg_screen_smoke:
+            source_only_conflicts.append("--run-dmg-screen-smoke")
         if run_provider_smoke:
             source_only_conflicts.append("--run-provider-smoke")
         if run_ui_smoke:
@@ -1248,6 +1467,13 @@ def verify_release_candidate(
             "checks": [],
             "findings": [],
             "run_requested": run_provider_smoke,
+        }
+        report["dmg_screen_probe"] = {
+            "status": "skipped",
+            "dmg_paths": [],
+            "screens": [],
+            "findings": [],
+            "run_requested": run_dmg_screen_smoke,
         }
         report["electron_ui_smoke"] = {
             "status": "skipped",
@@ -1314,6 +1540,13 @@ def verify_release_candidate(
                 "checks": [],
                 "findings": [],
                 "run_requested": run_provider_smoke,
+            }
+            report["dmg_screen_probe"] = {
+                "status": "skipped",
+                "dmg_paths": [],
+                "screens": [],
+                "findings": [],
+                "run_requested": run_dmg_screen_smoke,
             }
         elif selected_artifacts:
             artifact_findings = verify_release_artifacts(
@@ -1407,6 +1640,37 @@ def verify_release_candidate(
             "dmg_paths": [],
             "findings": [],
             "run_requested": run_dmg_app_smoke,
+        }
+
+    if run_dmg_screen_smoke and not artifact_paths_valid:
+        print("DMG screen recording probe: skipped because artifact paths failed validation")
+        report["dmg_screen_probe"] = {
+            "status": "skipped",
+            "dmg_paths": [],
+            "screens": [],
+            "findings": [],
+            "run_requested": run_dmg_screen_smoke,
+        }
+    elif run_dmg_screen_smoke:
+        dmg_paths = release_candidate_dmg_paths(root, selected_artifacts)
+        screen_findings, screen_results = verify_dmg_screen_recording_probe(root, dmg_paths)
+        _print_findings("DMG screen recording probe", screen_findings)
+        failed = failed or bool(screen_findings)
+        report["dmg_screen_probe"] = {
+            "status": "failed" if screen_findings else "passed",
+            "dmg_paths": [str(path) for path in dmg_paths],
+            "screens": screen_results,
+            "findings": _finding_report(screen_findings),
+            "run_requested": run_dmg_screen_smoke,
+        }
+    else:
+        print("DMG screen recording probe: skipped; pass --run-dmg-screen-smoke to verify packaged /screen/current")
+        report["dmg_screen_probe"] = {
+            "status": "skipped",
+            "dmg_paths": [],
+            "screens": [],
+            "findings": [],
+            "run_requested": run_dmg_screen_smoke,
         }
 
     if run_provider_smoke:
@@ -1545,6 +1809,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Launch the app inside discovered DMGs and wait for its packaged /status endpoint.",
     )
     parser.add_argument(
+        "--run-dmg-screen-smoke",
+        action="store_true",
+        help="Launch the app inside discovered DMGs and verify packaged /screen/current for Screen Recording signoff evidence.",
+    )
+    parser.add_argument(
         "--run-provider-smoke",
         action="store_true",
         help="Run opt-in real provider streaming and tool-call smoke using OHA_YACHIYO_SMOKE_* credentials.",
@@ -1676,6 +1945,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         source_only=args.source_only,
         check_dmg_mount=args.check_dmg_mount,
         run_dmg_app_smoke=args.run_dmg_app_smoke,
+        run_dmg_screen_smoke=args.run_dmg_screen_smoke,
         run_provider_smoke=args.run_provider_smoke,
         run_ui_smoke=args.run_ui_smoke,
         manual_checks_json=args.manual_checks_json,

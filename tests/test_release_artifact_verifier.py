@@ -184,6 +184,12 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
     )
     assert "release candidate verifier must not auto-pass native file picker from UI smoke" in messages
     assert "release candidate verifier must auto-fill manual evidence from passed RC gates" in messages
+    assert "release candidate verifier must report packaged screen probe results" in messages
+    assert "release candidate verifier CLI must expose packaged screen recording smoke" in messages
+    assert (
+        "release candidate verifier screen probe evidence must avoid archiving screenshot bytes"
+        in messages
+    )
     assert "release candidate verifier must label automatically supplied manual evidence" in messages
     assert "release candidate verifier must refresh manual check status after automated gates" in messages
     assert "release candidate verifier must expose manual check evidence input" in messages
@@ -682,6 +688,7 @@ def test_verifier_requires_release_packaging_docs_for_release_gates(tmp_path):
     assert "release packaging docs must document the local RC verification entrypoint" in messages
     assert "release packaging docs must document the local RC DMG mount gate" in messages
     assert "release packaging docs must document the local RC packaged app startup smoke" in messages
+    assert "release packaging docs must document the local RC packaged screen recording smoke" in messages
     assert "release packaging docs must document the local RC real provider smoke gate" in messages
     assert "release packaging docs must document the local RC Electron UI smoke gate" in messages
     assert "release packaging docs must document the archived Electron UI smoke runner report" in messages

@@ -168,6 +168,7 @@ jobs:
             tests/test_agent_runtime.py::test_agent_run_redacts_approved_terminal_failure_output_from_projection_and_storage \
             tests/test_agent_runtime.py::test_terminal_run_timeout_kills_process_group \
             tests/test_agent_runtime.py::test_main_chat_model_loop_coalesces_stream_chunks_before_persisting \
+            tests/test_agent_runtime.py::test_main_chat_model_preserves_stream_finish_reason_and_usage_in_completed_event \
             tests/test_agent_runtime.py::test_main_chat_model_loop_uses_responses_output_text_done_snapshot \
             tests/test_agent_runtime.py::test_main_chat_model_loop_uses_responses_output_item_message_snapshot \
             tests/test_agent_runtime.py::test_main_chat_model_loop_uses_responses_content_part_snapshot \
@@ -175,6 +176,7 @@ jobs:
             tests/test_agent_runtime.py::test_main_chat_model_loop_accepts_refusal_message_field \
             tests/test_agent_runtime.py::test_main_chat_model_loop_uses_responses_refusal_done_snapshot \
             tests/test_agent_runtime.py::test_main_chat_model_loop_coalesces_openai_sdk_object_stream_before_persisting \
+            tests/test_agent_runtime.py::test_main_chat_model_loop_preserves_openai_sdk_stream_usage_in_completed_event \
             tests/test_agent_runtime.py::test_main_chat_model_consumes_openai_compatible_sse_stream \
             tests/test_agent_runtime.py::test_main_chat_model_consumes_message_level_openai_compatible_sse_frame \
             tests/test_agent_runtime.py::test_main_chat_model_does_not_persist_streaming_reasoning_as_visible_output \

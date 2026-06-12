@@ -574,6 +574,10 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document the local RC packaged app startup smoke",
     ),
     (
+        "python scripts/verify_release_candidate.py --require-artifacts --run-dmg-screen-smoke",
+        "release packaging docs must document the local RC packaged screen recording smoke",
+    ),
+    (
         "python scripts/verify_release_candidate.py --require-artifacts --run-provider-smoke",
         "release packaging docs must document the local RC real provider smoke gate",
     ),
@@ -1090,6 +1094,18 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "_auto_apply_release_candidate_check_evidence",
         "release candidate verifier must auto-fill manual evidence from passed RC gates",
+    ),
+    (
+        '"dmg_screen_probe"',
+        "release candidate verifier must report packaged screen probe results",
+    ),
+    (
+        '"--run-dmg-screen-smoke"',
+        "release candidate verifier CLI must expose packaged screen recording smoke",
+    ),
+    (
+        "Screenshot image bytes were not archived",
+        "release candidate verifier screen probe evidence must avoid archiving screenshot bytes",
     ),
     (
         '"automated_rc_gate"',
