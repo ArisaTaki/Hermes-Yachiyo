@@ -2473,6 +2473,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                 onReveal={() => revealMessage(composerApprovalItem.messageId)}
                 onNext={() => selectComposerApproval(1)}
                 runId={composerApprovalItem.runId}
+                runStatus={composerApprovalItem.runStatus}
                 source={composerApprovalItem.source}
                 total={composerApprovalCount}
               />
@@ -3050,6 +3051,7 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
               messageId={message.id || ''}
               onOpenDetails={() => onOpenRunDetails(runId)}
               runId={runId}
+              runStatus={runStatus}
             />
           ) : showAgentProgress ? (
             <AgentRunProgressCard message={message} onOpenDetails={() => onOpenRunDetails(runId)} runId={runId} />
@@ -3304,12 +3306,13 @@ type ComposerApprovalItem = {
   approvalId?: string;
   messageId?: string;
   runId: string;
+  runStatus: string;
   createdAt?: string;
   details: ApprovalRequestDetails;
   source: 'message' | 'activity' | 'workflow-child';
 };
 
-function ApprovalRequestCard({ approvalId, approvalSignature, copiedCodeBlockKey, details, messageId, onOpenDetails, runId }: {
+function ApprovalRequestCard({ approvalId, approvalSignature, copiedCodeBlockKey, details, messageId, onOpenDetails, runId, runStatus }: {
   approvalId?: string;
   approvalSignature?: string;
   copiedCodeBlockKey: string;
@@ -3317,6 +3320,7 @@ function ApprovalRequestCard({ approvalId, approvalSignature, copiedCodeBlockKey
   messageId: string;
   onOpenDetails: () => void;
   runId: string;
+  runStatus: string;
 }) {
   const workflowApproval = isWorkflowApprovalDetails(details);
   return (
@@ -3340,7 +3344,13 @@ function ApprovalRequestCard({ approvalId, approvalSignature, copiedCodeBlockKey
         <span className="message-approval-header-side">
           <code>{details.tool}</code>
           {runId ? (
-            <button type="button" data-testid="chat-message-approval-open-run-detail" onClick={onOpenDetails}>
+            <button
+              type="button"
+              data-run-id={runId}
+              data-run-status={runStatus}
+              data-testid="chat-message-approval-open-run-detail"
+              onClick={onOpenDetails}
+            >
               运行详情
             </button>
           ) : null}
@@ -3377,7 +3387,7 @@ function ApprovalRequestCard({ approvalId, approvalSignature, copiedCodeBlockKey
   );
 }
 
-function ComposerApprovalNotice({ approvalId, busy, currentIndex, details, itemId, onApprove, onNext, onOpenDetails, onPrevious, onReject, onReveal, runId, source, total }: {
+function ComposerApprovalNotice({ approvalId, busy, currentIndex, details, itemId, onApprove, onNext, onOpenDetails, onPrevious, onReject, onReveal, runId, runStatus, source, total }: {
   approvalId?: string;
   busy: boolean;
   currentIndex: number;
@@ -3390,6 +3400,7 @@ function ComposerApprovalNotice({ approvalId, busy, currentIndex, details, itemI
   onReject: () => void;
   onReveal: () => void;
   runId?: string;
+  runStatus?: string;
   source?: ComposerApprovalItem['source'];
   total: number;
 }) {
@@ -3409,6 +3420,7 @@ function ComposerApprovalNotice({ approvalId, busy, currentIndex, details, itemI
       data-approval-source={source || ''}
       data-approval-tool={details.tool}
       data-run-id={runId || ''}
+      data-run-status={runStatus || ''}
       data-testid="chat-composer-approval-notice"
     >
       <div className="composer-approval-main">
@@ -3427,7 +3439,15 @@ function ComposerApprovalNotice({ approvalId, busy, currentIndex, details, itemI
         ) : null}
         <button type="button" data-testid="chat-composer-approval-reveal" onClick={onReveal}>定位消息</button>
         {runId ? (
-          <button type="button" data-testid="chat-composer-approval-open-run-detail" onClick={onOpenDetails}>运行详情</button>
+          <button
+            type="button"
+            data-run-id={runId}
+            data-run-status={runStatus || ''}
+            data-testid="chat-composer-approval-open-run-detail"
+            onClick={onOpenDetails}
+          >
+            运行详情
+          </button>
         ) : null}
         <button type="button" className="approve" data-testid="chat-composer-approval-approve" disabled={busy} onClick={onApprove}>{busy ? '处理中...' : '批准'}</button>
         <button type="button" className="reject" data-testid="chat-composer-approval-reject" disabled={busy} onClick={onReject}>拒绝</button>
@@ -3885,6 +3905,7 @@ function approvalRequiredItems(
       approvalId: approvalIdFromPending(message.metadata?.pending_approval),
       messageId: message.id,
       runId,
+      runStatus: messageRunStatus(message),
       createdAt: override?.createdAt || message.created_at,
       details: override?.details || approvalRequestDetails(message),
       source: 'message' as const,
@@ -3906,11 +3927,13 @@ function approvalRequiredItems(
       const signature = override?.signature || activityApprovalSignature(event);
       const itemId = `activity:${eventId}:${signature}`;
       if (resolved.has(itemId)) continue;
+      const runStatus = normalizeRunStatus(event.metadata?.run_status || event.status || 'approval_required');
       activityApprovals.push({
         id: itemId,
         approvalId: approvalIdFromPending(event.metadata?.pending_approval),
         messageId: message.id,
         runId,
+        runStatus,
         createdAt: override?.createdAt || event.created_at || message.created_at,
         details: override?.details || approvalRequestDetailsFromActivity(event),
         source: 'activity',
@@ -3938,6 +3961,7 @@ function approvalRequiredItems(
       approvalId: approvalIdFromPending(message.metadata?.workflow_waiting_pending_approval),
       messageId: message.id,
       runId,
+      runStatus: 'approval_required',
       createdAt: override?.createdAt || message.created_at,
       details: override?.details || approvalRequestDetailsFromWorkflowWaitingChild(message),
       source: 'workflow-child',

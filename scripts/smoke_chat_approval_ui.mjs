@@ -492,12 +492,15 @@ async function waitForApproval(win, label) {
       && actions?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
       && approve
       && reject
-      && openRun
+      && openRun?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
+      && openRun?.getAttribute('data-run-status') === 'approval_required'
       && composer?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
+      && composer?.getAttribute('data-run-status') === 'approval_required'
       && composer?.getAttribute('data-approval-id') === ${JSON.stringify(APPROVAL_ID)}
       && composerApprove
       && composerReject
-      && composerOpenRun;
+      && composerOpenRun?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
+      && composerOpenRun?.getAttribute('data-run-status') === 'approval_required';
   }, label);
 }
 async function waitForRunDetailHandoff(win, label) {
