@@ -420,6 +420,12 @@ def test_release_candidate_verifier_accepts_previous_rc_report_manual_statuses(
         json.dumps(
             {
                 "ok": True,
+                "source_revision": {
+                    "available": True,
+                    "commit": "fedcba9876543210fedcba9876543210fedcba98",
+                    "short_commit": "fedcba9",
+                    "dirty": False,
+                },
                 "manual_release_candidate_check_statuses": prior_statuses,
                 "manual_release_candidate_check_summary": {
                     "remaining_count": 0,
@@ -447,6 +453,15 @@ def test_release_candidate_verifier_accepts_previous_rc_report_manual_statuses(
     assert report["manual_release_candidate_check_summary"]["remaining_count"] == 0
     assert report["manual_release_candidate_check_summary"]["automated_evidence_check_ids"] == [
         "packaged_bridge_isolation"
+    ]
+    assert report["manual_release_candidate_check_source_revisions"] == [
+        {
+            "source": "tmp/prior-rc-report.json",
+            "available": True,
+            "commit": "fedcba9876543210fedcba9876543210fedcba98",
+            "short_commit": "fedcba9",
+            "dirty": False,
+        }
     ]
     manual_statuses = {
         check["id"]: check

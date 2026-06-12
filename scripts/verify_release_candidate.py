@@ -2167,6 +2167,10 @@ def verify_release_candidate(
         if manual_checks_markdown is not None
         else _manual_checks_source_label(_manual_checks_json_paths(manual_checks_json))
     )
+    manual_check_source_revisions = _manual_check_source_revisions(
+        root,
+        manual_checks_json,
+    )
     manual_check_status = _manual_release_candidate_check_status(
         manual_checks,
         manual_check_findings,
@@ -2236,6 +2240,10 @@ def verify_release_candidate(
         "manual_release_candidate_checks_source": str(manual_checks_source),
         "manual_release_candidate_checks_required": require_manual_checks_complete,
     }
+    if manual_check_source_revisions:
+        report["manual_release_candidate_check_source_revisions"] = (
+            manual_check_source_revisions
+        )
 
     source_only_conflicts: list[str] = []
     if source_only:
