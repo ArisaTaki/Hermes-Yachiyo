@@ -1650,6 +1650,7 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow smoke tests must cover NativeRunEngine approval resume claim boundary" in messages
     assert "macOS release workflow smoke tests must cover Agent approval resume wait projection" in messages
     assert "macOS release workflow smoke tests must cover ApprovalResumeCoordinator approved tool resume flow" in messages
+    assert "macOS release workflow smoke tests must cover ToolApprovalExecutionRequest approved call boundary" in messages
     assert "macOS release workflow smoke tests must cover ToolApprovalExecutionFollowup remaining-tool boundary" in messages
     assert (
         "macOS release workflow smoke tests must cover ToolApprovalExecutionFailureProjection timeline boundary"

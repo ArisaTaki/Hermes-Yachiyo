@@ -34,6 +34,7 @@ from apps.shell.agent_runtime import (
     ToolApprovalContinuationOutcome,
     ToolApprovalExecutionFailureProjection,
     ToolApprovalExecutionFollowup,
+    ToolApprovalExecutionRequest,
     ToolApprovalResumeContext,
     ToolApprovalTransitionContext,
     ToolBroker,
@@ -838,6 +839,78 @@ def test_approval_resume_coordinator_executes_approved_tool_and_remaining_reques
     assert calls[2][1]["requests"] == remaining_requests
     assert calls[2][1]["next_iteration"] == 7
     assert messages[-1] == {"role": "tool", "content": '{"ok": true, "stdout": "ok"}'}
+
+
+def test_tool_approval_execution_request_calls_approved_tool_with_context_payload():
+    calls: list[tuple[str, dict[str, object]]] = []
+    broker = SimpleNamespace(name="broker")
+    budget = SimpleNamespace(name="budget")
+    timeline: list[dict[str, object]] = [{"event": "agent.tool.approval_required"}]
+    artifacts: list[dict[str, object]] = [{"path": "report.md"}]
+    tool_request = {"tool": "terminal.run", "input": {"command": "printf ok"}}
+    context = ToolApprovalResumeContext(
+        run_id="run_approved",
+        timeline=timeline,
+        artifacts=artifacts,
+        broker=broker,
+        allowed_tools=["terminal.run", "artifact.write"],
+        budget=budget,
+        messages=[],
+        tool_request=tool_request,
+        tool_name="terminal.run",
+        input_preview={"command": "printf ok"},
+        remaining_requests=[],
+        next_iteration=7,
+    )
+
+    def call_agent_tool(
+        request,
+        allowed_tools,
+        tool_broker,
+        run_timeline,
+        *,
+        artifacts,
+        approved,
+        run_id,
+        budget,
+    ):
+        calls.append(
+            (
+                "call_agent_tool",
+                {
+                    "request": request,
+                    "allowed_tools": allowed_tools,
+                    "broker": tool_broker,
+                    "timeline": run_timeline,
+                    "artifacts": artifacts,
+                    "approved": approved,
+                    "run_id": run_id,
+                    "budget": budget,
+                },
+            )
+        )
+        return {"ok": True, "stdout": "ok"}
+
+    request = ToolApprovalExecutionRequest.from_context(context)
+
+    assert request.execute(call_agent_tool) == {"ok": True, "stdout": "ok"}
+    assert calls == [
+        (
+            "call_agent_tool",
+            {
+                "request": tool_request,
+                "allowed_tools": ["terminal.run", "artifact.write"],
+                "broker": broker,
+                "timeline": timeline,
+                "artifacts": artifacts,
+                "approved": True,
+                "run_id": "run_approved",
+                "budget": budget,
+            },
+        )
+    ]
+    assert request.timeline is timeline
+    assert request.artifacts is artifacts
 
 
 def test_tool_approval_execution_followup_appends_result_and_runs_remaining_requests():

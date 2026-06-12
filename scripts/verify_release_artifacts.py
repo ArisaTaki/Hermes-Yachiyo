@@ -965,6 +965,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover ApprovalResumeCoordinator approved tool resume flow",
     ),
     (
+        "tests/test_agent_runtime.py::test_tool_approval_execution_request_calls_approved_tool_with_context_payload",
+        "macOS release workflow smoke tests must cover ToolApprovalExecutionRequest approved call boundary",
+    ),
+    (
         "tests/test_agent_runtime.py::test_tool_approval_execution_followup_appends_result_and_runs_remaining_requests",
         "macOS release workflow smoke tests must cover ToolApprovalExecutionFollowup remaining-tool boundary",
     ),

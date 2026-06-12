@@ -2828,6 +2828,46 @@ class ToolApprovalClaimProjection:
 
 
 @dataclass(frozen=True)
+class ToolApprovalExecutionRequest:
+    """Approved tool call request assembled from resume context."""
+
+    tool_request: dict[str, Any]
+    allowed_tools: list[str]
+    broker: ToolBroker
+    timeline: list[dict[str, Any]]
+    artifacts: list[dict[str, Any]]
+    run_id: str
+    budget: _RunBudget
+
+    @classmethod
+    def from_context(
+        cls,
+        context: ToolApprovalResumeContext,
+    ) -> "ToolApprovalExecutionRequest":
+        return cls(
+            tool_request=context.tool_request,
+            allowed_tools=context.allowed_tools,
+            broker=context.broker,
+            timeline=context.timeline,
+            artifacts=context.artifacts,
+            run_id=context.run_id,
+            budget=context.budget,
+        )
+
+    def execute(self, call_agent_tool: Any) -> Any:
+        return call_agent_tool(
+            self.tool_request,
+            self.allowed_tools,
+            self.broker,
+            self.timeline,
+            artifacts=self.artifacts,
+            approved=True,
+            run_id=self.run_id,
+            budget=self.budget,
+        )
+
+
+@dataclass(frozen=True)
 class ToolApprovalContinuationHandoff:
     """Continuation payload after an approved tool call has been executed."""
 
@@ -3271,16 +3311,8 @@ class ApprovalResumeCoordinator:
         return projection.project(self._approve_tool_run)
 
     def execute_approved_tool(self, context: ToolApprovalResumeContext) -> None:
-        tool_result = self._call_agent_tool(
-            context.tool_request,
-            context.allowed_tools,
-            context.broker,
-            context.timeline,
-            artifacts=context.artifacts,
-            approved=True,
-            run_id=context.run_id,
-            budget=context.budget,
-        )
+        request = ToolApprovalExecutionRequest.from_context(context)
+        tool_result = request.execute(self._call_agent_tool)
         fatal_failure = self._fatal_tool_failure_detail(
             context.tool_name,
             context.tool_request,
