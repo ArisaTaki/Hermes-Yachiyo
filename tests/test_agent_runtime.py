@@ -1000,6 +1000,8 @@ def test_approval_resume_projection_coordinator_projects_resume_states():
     }
     assert updated_runs[2]["result"] == "等待审批：terminal.run"
     assert updated_runs[2]["pending_approval"]["approval_id"] == "approval-next"
+    assert updated_runs[2]["pending_approval"]["input_preview"] == {"command": "printf next"}
+    assert updated_runs[2]["pending_approval"] is not required_pending
     assert updated_runs[3]["result"] == "safe failure"
     assert appended_events == [
         ("agent_run_completed", "agent.run.completed", {"result": "Agent done"}),

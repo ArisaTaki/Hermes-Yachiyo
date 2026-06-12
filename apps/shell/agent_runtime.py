@@ -3135,8 +3135,9 @@ class ApprovalResumeProjectionCoordinator:
         context: ToolApprovalResumeContext,
         pending_approval: dict[str, Any],
     ) -> dict[str, Any]:
-        public_pending = _public_pending_approval(pending_approval)
-        tool_name = str(pending_approval.get("tool") or "")
+        private_pending = deepcopy(pending_approval)
+        public_pending = _public_pending_approval(private_pending)
+        tool_name = str(private_pending.get("tool") or "")
         context.timeline.append(
             self._timeline(
                 "agent.tool.approval_required",
@@ -3155,7 +3156,7 @@ class ApprovalResumeProjectionCoordinator:
             result=f"等待审批：{tool_name or 'tool'}",
             timeline=context.timeline,
             artifacts=context.artifacts,
-            pending_approval=pending_approval,
+            pending_approval=private_pending,
         )
 
     def project_failed(
