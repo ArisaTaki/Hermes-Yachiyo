@@ -317,6 +317,10 @@ def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
             for check in rc.MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS
         ],
         "remaining_notes": [],
+        "remaining_commands": [
+            {"id": check_id, "command": command}
+            for check_id, command in rc.MANUAL_RELEASE_CANDIDATE_CHECK_AUTOMATION_COMMANDS.items()
+        ],
         "failed_check_ids": [],
         "automated_evidence_check_ids": [],
     }
@@ -687,6 +691,20 @@ def test_release_candidate_verifier_accumulates_automated_evidence_from_multiple
         "gatekeeper_first_launch",
         "screen_recording_permission",
         "real_provider_smoke",
+    ]
+    assert summary["remaining_commands"] == [
+        {
+            "id": "screen_recording_permission",
+            "command": rc.MANUAL_RELEASE_CANDIDATE_CHECK_AUTOMATION_COMMANDS[
+                "screen_recording_permission"
+            ],
+        },
+        {
+            "id": "real_provider_smoke",
+            "command": rc.MANUAL_RELEASE_CANDIDATE_CHECK_AUTOMATION_COMMANDS[
+                "real_provider_smoke"
+            ],
+        },
     ]
     assert summary["automated_evidence_check_ids"] == [
         "packaged_bridge_isolation",
@@ -1339,6 +1357,18 @@ def test_release_candidate_verifier_manual_check_write_actions_print_remaining_s
         "chat_native_file_upload, packaged_ui_sampling)"
     ) in output
     assert "- [screen_recording_permission] Prefer rerunning the RC gate with --run-dmg-screen-smoke" in output
+    assert "manual release-candidate recommended commands:" in output
+    assert (
+        "- [screen_recording_permission] "
+        "python scripts/verify_release_candidate.py --require-artifacts "
+        "--run-dmg-screen-smoke --report-json tmp/rc-verification-screen.json"
+    ) in output
+    assert (
+        "- [chat_native_file_upload] "
+        "python scripts/verify_release_candidate.py --require-artifacts "
+        "--run-dmg-chat-native-file-smoke "
+        "--report-json tmp/rc-verification-chat-native-file.json"
+    ) in output
 
     assert (
         rc.main(
@@ -1355,6 +1385,7 @@ def test_release_candidate_verifier_manual_check_write_actions_print_remaining_s
     assert "manual release-candidate checks markdown: tmp/final-rc-signoff.md" in output
     assert "manual release-candidate check progress: 2/6 complete, 4 remaining" in output
     assert "manual release-candidate next actions:" in output
+    assert "manual release-candidate recommended commands:" in output
 
 
 def test_release_candidate_verifier_manual_check_status_action_prints_without_artifact_gate(
@@ -1399,6 +1430,12 @@ def test_release_candidate_verifier_manual_check_status_action_prints_without_ar
         "chat_native_file_upload, packaged_ui_sampling)"
     ) in output
     assert "- [gatekeeper_first_launch] Manually mount the final DMG" in output
+    assert "manual release-candidate recommended commands:" in output
+    assert (
+        "- [packaged_ui_sampling] "
+        "python scripts/verify_release_candidate.py --require-artifacts "
+        "--run-dmg-ui-sampling-smoke --report-json tmp/rc-verification-packaged-ui.json"
+    ) in output
     assert "Source release guard" not in output
 
 

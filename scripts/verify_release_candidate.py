@@ -139,6 +139,30 @@ MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS: tuple[dict[str, str], ...] = (
         "next_action": "If OHA_YACHIYO_SMOKE_* credentials are available, rerun the RC gate with --run-provider-smoke; otherwise mark not_applicable with credentials-unavailable evidence.",
     },
 )
+MANUAL_RELEASE_CANDIDATE_CHECK_AUTOMATION_COMMANDS: dict[str, str] = {
+    "packaged_bridge_isolation": (
+        "python scripts/verify_release_candidate.py --require-artifacts "
+        "--run-dmg-app-smoke --report-json tmp/rc-verification-dmg-app.json"
+    ),
+    "screen_recording_permission": (
+        "python scripts/verify_release_candidate.py --require-artifacts "
+        "--run-dmg-screen-smoke --report-json tmp/rc-verification-screen.json"
+    ),
+    "chat_native_file_upload": (
+        "python scripts/verify_release_candidate.py --require-artifacts "
+        "--run-dmg-chat-native-file-smoke "
+        "--report-json tmp/rc-verification-chat-native-file.json"
+    ),
+    "packaged_ui_sampling": (
+        "python scripts/verify_release_candidate.py --require-artifacts "
+        "--run-dmg-ui-sampling-smoke --report-json tmp/rc-verification-packaged-ui.json"
+    ),
+    "real_provider_smoke": (
+        "python scripts/verify_release_candidate.py --require-artifacts "
+        "--check-dmg-mount --run-provider-smoke "
+        "--report-json tmp/rc-verification-provider-smoke.json"
+    ),
+}
 MANUAL_RELEASE_CANDIDATE_CHECKS: tuple[str, ...] = tuple(
     check["description"] for check in MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS
 )
@@ -745,6 +769,15 @@ def _manual_release_candidate_check_summary(
         if check.get("status") == "manual_required"
         and str(check.get("notes", "")).strip()
     ]
+    remaining_commands = [
+        {
+            "id": check["id"],
+            "command": MANUAL_RELEASE_CANDIDATE_CHECK_AUTOMATION_COMMANDS[check["id"]],
+        }
+        for check in checks
+        if check.get("status") == "manual_required"
+        and check["id"] in MANUAL_RELEASE_CANDIDATE_CHECK_AUTOMATION_COMMANDS
+    ]
     failed_check_ids = [check["id"] for check in checks if check.get("status") == "failed"]
     automated_evidence_check_ids = [
         check["id"]
@@ -758,6 +791,7 @@ def _manual_release_candidate_check_summary(
         "remaining_check_ids": remaining_check_ids,
         "remaining_next_actions": remaining_next_actions,
         "remaining_notes": remaining_notes,
+        "remaining_commands": remaining_commands,
         "failed_check_ids": failed_check_ids,
         "automated_evidence_check_ids": automated_evidence_check_ids,
     }
@@ -788,6 +822,16 @@ def _print_manual_release_candidate_check_summary(summary: dict[str, Any]) -> No
                 next_action = str(item.get("next_action", "")).strip()
                 if check_id and next_action:
                     print(f"- [{check_id}] {next_action}")
+        remaining_commands = summary.get("remaining_commands")
+        if isinstance(remaining_commands, list) and remaining_commands:
+            print("manual release-candidate recommended commands:")
+            for item in remaining_commands:
+                if not isinstance(item, dict):
+                    continue
+                check_id = str(item.get("id", "")).strip()
+                command = str(item.get("command", "")).strip()
+                if check_id and command:
+                    print(f"- [{check_id}] {command}")
         remaining_notes = summary.get("remaining_notes")
         if isinstance(remaining_notes, list) and remaining_notes:
             print("manual release-candidate supporting notes:")

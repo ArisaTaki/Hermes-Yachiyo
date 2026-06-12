@@ -182,6 +182,14 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
     assert "release candidate verifier manual summary must list remaining check ids" in messages
     assert "release candidate verifier manual summary must list remaining next actions" in messages
     assert (
+        "release candidate verifier manual summary must list recommended automation commands"
+        in messages
+    )
+    assert (
+        "release candidate verifier must print recommended automation commands for remaining checks"
+        in messages
+    )
+    assert (
         "release candidate verifier manual summary must list supporting notes for remaining checks"
         in messages
     )

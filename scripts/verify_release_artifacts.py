@@ -1170,6 +1170,14 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release candidate verifier manual summary must list remaining next actions",
     ),
     (
+        '"remaining_commands"',
+        "release candidate verifier manual summary must list recommended automation commands",
+    ),
+    (
+        "manual release-candidate recommended commands:",
+        "release candidate verifier must print recommended automation commands for remaining checks",
+    ),
+    (
         '"remaining_notes"',
         "release candidate verifier manual summary must list supporting notes for remaining checks",
     ),
