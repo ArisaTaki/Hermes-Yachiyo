@@ -111,6 +111,7 @@ jobs:
             tests/test_agent_runtime.py::test_agent_run_rejects_sensitive_client_run_id_before_persistence \
             tests/test_bridge_server.py::test_agent_and_workflow_run_http_routes_redact_sensitive_idempotency_key_errors \
             tests/test_bridge_server.py::test_agent_run_http_route_rejects_sensitive_idempotency_key_before_persistence \
+            tests/test_bridge_server.py::test_workflow_run_http_route_rejects_sensitive_idempotency_key_before_persistence \
             tests/test_bridge_server.py::test_run_cancel_route_handler_is_idempotent \
             tests/test_bridge_server.py::test_chat_cancel_bridge_route_cancels_native_run_and_ignores_late_output \
             tests/test_executor.py::TestNativeAgentUnavailableExecutor::test_run_fails_without_simulated_result \

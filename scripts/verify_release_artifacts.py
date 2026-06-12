@@ -989,6 +989,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover sensitive Agent Idempotency-Key persistence rejection",
     ),
     (
+        "tests/test_bridge_server.py::test_workflow_run_http_route_rejects_sensitive_idempotency_key_before_persistence",
+        "macOS release workflow smoke tests must cover sensitive Workflow Idempotency-Key persistence rejection",
+    ),
+    (
         "tests/test_bridge_server.py::test_run_cancel_route_handler_is_idempotent",
         "macOS release workflow smoke tests must cover UI Run cancel route idempotency",
     ),
