@@ -18,6 +18,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Sequence
 
+_SOURCE_REVISION_SUBPROCESS_POPEN = subprocess.Popen
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -162,16 +164,16 @@ def _manual_release_candidate_check_template() -> dict[str, object]:
     }
 
 
-ManualChecksJsonInput = Path | Sequence[Path] | None
-ManualChecksSource = Path | Sequence[Path] | str | None
+ManualChecksJsonInput = Path | Sequence[Path | str] | str | None
+ManualChecksSource = Path | Sequence[Path | str] | str | None
 
 
 def _manual_checks_json_paths(manual_checks_json: ManualChecksJsonInput) -> tuple[Path, ...]:
     if manual_checks_json is None:
         return ()
-    if isinstance(manual_checks_json, Path):
-        return (manual_checks_json,)
-    return tuple(manual_checks_json)
+    if isinstance(manual_checks_json, (Path, str)):
+        return (Path(manual_checks_json),)
+    return tuple(Path(path) for path in manual_checks_json)
 
 
 def _manual_checks_source_label(source_path: ManualChecksSource) -> str:
@@ -184,10 +186,98 @@ def _manual_checks_source_label(source_path: ManualChecksSource) -> str:
     return ", ".join(str(path) for path in source_path)
 
 
+def _run_source_revision_git_command(
+    command: Sequence[str],
+    *,
+    root: Path,
+) -> subprocess.CompletedProcess[str]:
+    git_command = list(command)
+    with _SOURCE_REVISION_SUBPROCESS_POPEN(
+        git_command,
+        cwd=root,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    ) as process:
+        stdout, stderr = process.communicate()
+    if process.returncode != 0:
+        raise subprocess.CalledProcessError(
+            process.returncode,
+            git_command,
+            output=stdout,
+            stderr=stderr,
+        )
+    return subprocess.CompletedProcess(git_command, process.returncode, stdout, stderr)
+
+
+def _source_revision(root: Path) -> dict[str, object]:
+    try:
+        commit = _run_source_revision_git_command(
+            ["git", "rev-parse", "HEAD"],
+            root=root,
+        ).stdout.strip()
+        status = _run_source_revision_git_command(
+            ["git", "status", "--short"],
+            root=root,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError) as exc:
+        return {
+            "available": False,
+            "commit": "",
+            "short_commit": "",
+            "dirty": True,
+            "error": redact_api_error_text(str(exc), fallback="git source revision unavailable"),
+        }
+    return {
+        "available": bool(commit),
+        "commit": commit,
+        "short_commit": commit[:7],
+        "dirty": bool(status.strip()),
+    }
+
+
+def _manual_check_source_revisions(
+    root: Path,
+    source_path: ManualChecksSource,
+) -> list[dict[str, object]]:
+    revisions: list[dict[str, object]] = []
+    seen: set[tuple[str, str]] = set()
+
+    for manual_checks_path in _manual_checks_json_paths(source_path):
+        try:
+            evidence_path = _resolve_project_file(
+                root,
+                manual_checks_path,
+                "manual release-candidate checks",
+            )
+            raw_payload = json.loads(evidence_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        if not isinstance(raw_payload, dict):
+            continue
+        candidates: list[dict[str, object]] = []
+        source_revision = raw_payload.get("source_revision")
+        if isinstance(source_revision, dict):
+            candidates.append({"source": str(manual_checks_path), **source_revision})
+        nested_revisions = raw_payload.get("manual_release_candidate_check_source_revisions")
+        if isinstance(nested_revisions, list):
+            candidates.extend(item for item in nested_revisions if isinstance(item, dict))
+        for candidate in candidates:
+            source = str(candidate.get("source") or manual_checks_path)
+            commit = str(candidate.get("commit") or "")
+            key = (source, commit)
+            if key in seen:
+                continue
+            seen.add(key)
+            revisions.append({"source": source, **candidate})
+    return revisions
+
+
 def _manual_release_candidate_check_draft(
     checks: Sequence[dict[str, str]],
     *,
     source_path: ManualChecksSource = None,
+    source_revisions: Sequence[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     check_details = {check["id"]: check for check in MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS}
     draft_checks: list[dict[str, str]] = []
@@ -222,6 +312,8 @@ def _manual_release_candidate_check_draft(
     source_label = _manual_checks_source_label(source_path)
     if source_label:
         draft["manual_release_candidate_checks_source"] = source_label
+    if source_revisions:
+        draft["manual_release_candidate_check_source_revisions"] = list(source_revisions)
     return draft
 
 
@@ -980,7 +1072,11 @@ def write_manual_release_candidate_checks_draft(
     )
     _write_report(
         resolved,
-        _manual_release_candidate_check_draft(checks, source_path=source_path),
+        _manual_release_candidate_check_draft(
+            checks,
+            source_path=source_path,
+            source_revisions=_manual_check_source_revisions(root, source_path),
+        ),
     )
     return resolved
 
@@ -2077,6 +2173,7 @@ def verify_release_candidate(
     )
     report: dict[str, Any] = {
         "ok": False,
+        "source_revision": _source_revision(root),
         "source_release_guards": {"status": "pending", "findings": []},
         "built_artifact_guards": {
             "status": "pending",

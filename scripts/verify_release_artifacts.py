@@ -1118,6 +1118,14 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release candidate verifier must write structured manual check statuses to the RC report",
     ),
     (
+        '"source_revision"',
+        "release candidate verifier must write source revision metadata to the RC report",
+    ),
+    (
+        '"manual_release_candidate_check_source_revisions"',
+        "release candidate verifier manual drafts must preserve source revision metadata",
+    ),
+    (
         '"manual_release_candidate_check_summary"',
         "release candidate verifier must write manual check progress summary to the RC report",
     ),

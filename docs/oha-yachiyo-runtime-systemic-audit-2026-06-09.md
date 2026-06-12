@@ -2211,6 +2211,7 @@ compileall passed
 - 本轮补齐 direct group Agent 的审批通过 Bridge 路径：群组会话中直接点名 Agent 触发 `terminal.run` approval-required 后，经 `/ui/runs/{run_id}/approval/approve` 批准，Native Agent 执行工具并继续模型收敛为 completed Agent 消息，再自动创建 `[Oha-Yachiyo 群组直接 Agent 汇总]` summary task；测试验证 approved Agent replay、summary Run Detail、RunEvent replay 和父消息 summary 状态同步，并已加入 macOS release workflow 与 release verifier 必跑项。
 - 本轮补强最终签核状态查询：`verify_release_candidate.py --print-manual-checks-status` 可只读加载已有 RC report、JSON draft 或 Markdown checklist，打印同一套 progress、remaining ids 和 next actions，不运行 artifact / DMG / UI gate，也不写新文件；release packaging 文档和 release verifier required-text 已同步守卫该入口。
 - 本轮同步用户可见首次启动文档：README / README.en / README.ja 和 `docs/user-manual.md` 现在明确说明 macOS 未知开发者 / Gatekeeper 首启处理，以及屏幕录制权限配置；release verifier 新增 README 与用户手册 required-text guard，避免最终剩余 OS 签核项只存在于 release notes / packaging docs 而没有进入用户入口文档。
+- 本轮补强最终签核 traceability：`verify_release_candidate.py` 的 RC report 现在写入 `source_revision`（git commit / short commit / dirty 状态），由上一轮 RC report 生成的 `manual-rc-checks.draft.json` 会保留 `manual_release_candidate_check_source_revisions`；release packaging 文档和 release verifier required-text 已同步守卫，避免 Gatekeeper / Screen Recording 人工 evidence 脱离具体源码版本。
 - 桌面 `.app` 已实际启动并验证 bridge；主要 UI 页面已有静态入口 guard、浏览器级 route smoke、source Browser 按钮级交互 smoke、DMG 内 packaged app startup smoke、十九个本地 Electron UI smoke、真实 DMG packaged renderer 抽样和 packaged Chat native-file smoke。当前最终签核剩余项收敛到 Gatekeeper/Finder 首启路径和 Screen Recording 授权；真实 OS file picker 弹窗只作为额外人工复验，不再是当前结构化 signoff 的剩余项。
 
 ## 下一步建议

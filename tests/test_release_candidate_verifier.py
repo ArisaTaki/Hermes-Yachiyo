@@ -38,6 +38,31 @@ def test_release_candidate_verifier_runs_source_and_artifact_guards(tmp_path, mo
     assert "[screen_recording_permission]" in output
 
 
+def test_release_candidate_verifier_reports_source_revision(tmp_path, monkeypatch):
+    commit = "abcdef1234567890abcdef1234567890abcdef12"
+
+    def fake_run(command, *, root):
+        assert root == tmp_path
+        if command == ["git", "rev-parse", "HEAD"]:
+            return SimpleNamespace(stdout=f"{commit}\n")
+        if command == ["git", "status", "--short"]:
+            return SimpleNamespace(stdout=" M README.md\n")
+        raise AssertionError(f"unexpected command: {command!r}")
+
+    monkeypatch.setattr(rc, "_run_source_revision_git_command", fake_run)
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    assert rc.verify_release_candidate(root=tmp_path, report_json=Path("tmp/rc.json")) == 0
+
+    report = json.loads((tmp_path / "tmp" / "rc.json").read_text(encoding="utf-8"))
+    assert report["source_revision"] == {
+        "available": True,
+        "commit": commit,
+        "short_commit": "abcdef1",
+        "dirty": True,
+    }
+
+
 def test_release_candidate_verifier_source_only_skips_existing_artifacts(tmp_path, monkeypatch, capsys):
     (tmp_path / "dist" / "electron").mkdir(parents=True)
     calls: list[dict[str, object]] = []
@@ -838,6 +863,12 @@ def test_release_candidate_verifier_writes_manual_check_draft_from_prior_report(
     prior_report_path.write_text(
         json.dumps(
             {
+                "source_revision": {
+                    "available": True,
+                    "commit": "0123456789abcdef0123456789abcdef01234567",
+                    "short_commit": "0123456",
+                    "dirty": False,
+                },
                 "manual_release_candidate_check_statuses": prior_statuses,
                 "manual_release_candidate_check_summary": {
                     "remaining_count": 5,
@@ -869,12 +900,21 @@ def test_release_candidate_verifier_writes_manual_check_draft_from_prior_report(
     draft_path = rc.write_manual_release_candidate_checks_draft(
         tmp_path,
         Path("tmp/final-rc-signoff.json"),
-        Path("tmp/final-rc.json"),
+        "tmp/final-rc.json",
     )
 
     assert draft_path == tmp_path / "tmp" / "final-rc-signoff.json"
     draft = json.loads(draft_path.read_text(encoding="utf-8"))
     assert draft["manual_release_candidate_checks_source"] == "tmp/final-rc.json"
+    assert draft["manual_release_candidate_check_source_revisions"] == [
+        {
+            "source": "tmp/final-rc.json",
+            "available": True,
+            "commit": "0123456789abcdef0123456789abcdef01234567",
+            "short_commit": "0123456",
+            "dirty": False,
+        }
+    ]
     assert draft["manual_release_candidate_check_summary"]["remaining_count"] == 5
     assert draft["manual_release_candidate_check_summary"]["automated_evidence_check_ids"] == [
         "packaged_bridge_isolation"
