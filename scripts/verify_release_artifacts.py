@@ -1557,6 +1557,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover mutating Bridge token guard",
     ),
     (
+        "tests/test_bridge_server.py::test_post_runs_http_route_rejects_sensitive_idempotency_key_before_persistence",
+        "macOS release workflow smoke tests must cover sensitive generic Run Idempotency-Key persistence rejection",
+    ),
+    (
         "tests/test_bridge_server.py::test_run_events_http_route_paginates_and_hides_non_user_events",
         "macOS release workflow smoke tests must cover RunEvent HTTP replay pagination and filtering",
     ),

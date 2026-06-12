@@ -1788,6 +1788,7 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow smoke tests must cover Bridge Host Origin and session token guard" in messages
     assert "macOS release workflow smoke tests must cover Bridge loopback bind guard" in messages
     assert "macOS release workflow smoke tests must cover mutating Bridge token guard" in messages
+    assert "macOS release workflow smoke tests must cover sensitive generic Run Idempotency-Key persistence rejection" in messages
     assert "macOS release workflow smoke tests must cover RunEvent HTTP replay pagination and filtering" in messages
     assert "macOS release workflow smoke tests must cover sensitive Chat Idempotency-Key rejection" in messages
     assert "macOS release workflow smoke tests must cover Chat image HTTP roundtrip" in messages

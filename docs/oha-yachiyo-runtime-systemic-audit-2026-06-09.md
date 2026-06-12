@@ -2124,7 +2124,7 @@ compileall passed
 - release workflow smoke 现在也强制包含 WorkflowParentResumeCoordinator child cancellation / failure replay idempotency 回归，确保重复 child cancelled / failed update 不会重复投影父 Workflow replay fact 或重复更新父 Run / RunGroup。
 - release workflow smoke 现在也强制包含 RunTransitionProjectionCoordinator child and workflow group projection 回归，确保 child Run 状态变化和 root Workflow cancelled RunGroup 投影继续由显式 transition boundary 维护。
 - release workflow smoke 现在也强制包含 sensitive `client_run_id` rejection 回归，确保外部幂等键误带 API key / token 时不会进入 `runs.client_request_id` 持久化投影。
-- release workflow smoke 现在也强制包含 sensitive HTTP `Idempotency-Key` 回归，确保 Chat route 不创建消息/Task，真实 Agent Run route 不创建 Run / `runs.client_request_id`，Agent/Workflow route 的错误响应也不会回显 header secret。
+- release workflow smoke 现在也强制包含 sensitive HTTP `Idempotency-Key` 回归，确保 Chat route 不创建消息/Task，通用 `/runs` 和 Agent Run route 不创建 Run / `runs.client_request_id`，Agent/Workflow route 的错误响应也不会回显 header secret。
 - release workflow smoke 现在也强制包含 WorkflowCancellationProjectionCoordinator child cancellation projection 回归，确保父 Workflow 取消等待中的子 Agent Run 时继续写入 child cancellation replay fact，并保留 workflow node metadata / child outcome 投影。
 - release workflow smoke 现在也强制包含 WorkflowContinuationCoordinator approval pause / resume、background failure projection 与 artifact node handoff 回归，确保 Workflow approval node、批准后 continuation、异步后台失败投影和 artifact 写入继续走显式 step continuation 边界。
 - release workflow smoke 现在也强制包含 WorkflowContinuationCoordinator failure redaction boundary 回归，确保 Workflow continuation 未知节点失败不会把 node kind 中的 secret 写入 Run projection、RunEvent、timeline 或 RunGroup summary。

@@ -248,6 +248,7 @@ jobs:
             tests/test_bridge_server.py::test_bridge_http_middleware_enforces_host_origin_and_session_token \
             tests/test_bridge_server.py::test_bridge_start_and_restart_reject_non_loopback_host_before_binding \
             tests/test_bridge_server.py::test_all_registered_mutating_routes_require_bridge_token \
+            tests/test_bridge_server.py::test_post_runs_http_route_rejects_sensitive_idempotency_key_before_persistence \
             tests/test_bridge_server.py::test_run_events_http_route_paginates_and_hides_non_user_events \
             tests/test_bridge_server.py::test_chat_message_http_route_rejects_sensitive_idempotency_key_header \
             tests/test_bridge_server.py::test_chat_message_image_attachment_http_roundtrip_maps_idempotency_and_file_response \
