@@ -4600,6 +4600,73 @@ def test_main_chat_model_loop_discards_responses_reasoning_summary_stream(tmp_pa
         service.close()
 
 
+def test_main_chat_model_loop_discards_responses_reasoning_list_snapshot(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    expected = "visible answer after private reasoning list"
+    private_reasoning = "private list reasoning summary"
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    def fake_chat(_base_url, _model, _api_key, _messages, *, tools=None, stream=False):
+        assert tools is not None
+        assert stream is True
+
+        def stream():
+            yield {
+                "type": "response.output_item.done",
+                "output_index": 0,
+                "item": {
+                    "id": "rs_main_private_reasoning",
+                    "type": "reasoning",
+                    "summary": [
+                        {"type": "summary_text", "text": "private list reasoning"},
+                        {"type": "summary_text", "text": {"value": "summary"}},
+                    ],
+                },
+            }
+            yield {
+                "type": "response.output_text.done",
+                "output_index": 1,
+                "content_index": 0,
+                "text": expected,
+            }
+            yield {
+                "type": "response.completed",
+                "response": {
+                    "status": "completed",
+                    "output": [{"type": "message", "finish_reason": "stop"}],
+                },
+            }
+
+        return stream()
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-responses-reasoning-list",
+            session_id="session-main-responses-reasoning-list",
+            user_goal="Use Responses reasoning list",
+        )
+        updated = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [{"role": "user", "content": "Use Responses reasoning list"}],
+        )
+        events = service.list_run_events(run["run_id"], include_internal=True)["events"]
+        output_events = [event for event in events if event["event_type"] == "model.output.completed"]
+        events_json = json.dumps(events, ensure_ascii=False)
+
+        assert updated["result"] == expected
+        assert len(output_events) == 1
+        assert output_events[0]["payload"]["content"] == expected
+        assert private_reasoning not in updated["result"]
+        assert private_reasoning not in events_json
+        assert not any(str(event["event_type"]).endswith(".delta") for event in events)
+    finally:
+        service.close()
+
+
 def test_main_chat_model_loop_persists_streaming_refusal_delta(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     expected = "I cannot help with that request."
@@ -14347,6 +14414,69 @@ def test_agent_run_discards_responses_reasoning_summary_stream(tmp_path, monkeyp
         agent = service.create_agent(
             {
                 "name": "Responses Reasoning Summary Agent",
+                "model_mode": "custom_api",
+                "model_config": {"base_url": "https://api.example.test/v1", "model": "demo-model", "api_key": "sk-secret"},
+                "tool_policy": {"allowed_tools": ["workspace.read"]},
+            }
+        )
+        run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Summarize reasoning privately"})
+        run_events = service.list_run_events(run["run_id"], include_internal=True)["events"]
+        run_events_json = json.dumps(run_events, ensure_ascii=False)
+        timeline_json = json.dumps(run["timeline"], ensure_ascii=False)
+
+        assert run["status"] == "completed"
+        assert run["result"] == expected
+        assert private_reasoning not in run["result"]
+        assert private_reasoning not in timeline_json
+        assert private_reasoning not in run_events_json
+        assert not any(str(event["event_type"]).endswith(".delta") for event in run_events)
+    finally:
+        service.close()
+
+
+def test_agent_run_discards_responses_reasoning_list_snapshot(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    expected = "Agent visible answer after private reasoning list"
+    private_reasoning = "agent private list reasoning summary"
+
+    def fake_chat(_base_url, _model, _api_key, _messages, *, tools=None, stream=False):
+        assert tools is not None
+        assert stream is True
+
+        def stream():
+            yield {
+                "type": "response.output_item.done",
+                "output_index": 0,
+                "item": {
+                    "id": "rs_agent_private_reasoning",
+                    "type": "reasoning",
+                    "summary": [
+                        {"type": "summary_text", "text": "agent private list reasoning"},
+                        {"type": "summary_text", "text": {"value": "summary"}},
+                    ],
+                },
+            }
+            yield {
+                "type": "response.output_text.done",
+                "output_index": 1,
+                "content_index": 0,
+                "text": expected,
+            }
+            yield {
+                "type": "response.completed",
+                "response": {
+                    "status": "completed",
+                    "output": [{"type": "message", "finish_reason": "stop"}],
+                },
+            }
+
+        return stream()
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Responses Reasoning List Agent",
                 "model_mode": "custom_api",
                 "model_config": {"base_url": "https://api.example.test/v1", "model": "demo-model", "api_key": "sk-secret"},
                 "tool_policy": {"allowed_tools": ["workspace.read"]},

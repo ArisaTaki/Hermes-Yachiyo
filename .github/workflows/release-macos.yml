@@ -183,6 +183,7 @@ jobs:
             tests/test_agent_runtime.py::test_main_chat_model_consumes_message_level_openai_compatible_sse_frame \
             tests/test_agent_runtime.py::test_main_chat_model_does_not_persist_streaming_reasoning_as_visible_output \
             tests/test_agent_runtime.py::test_main_chat_model_loop_discards_responses_reasoning_summary_stream \
+            tests/test_agent_runtime.py::test_main_chat_model_loop_discards_responses_reasoning_list_snapshot \
             tests/test_agent_runtime.py::test_main_chat_model_consumes_coalesced_openai_compatible_sse_frames \
             tests/test_agent_runtime.py::test_main_chat_model_consumes_split_openai_compatible_sse_frame_chunks \
             tests/test_agent_runtime.py::test_main_chat_model_consumes_split_utf8_openai_compatible_sse_frame_chunks \
@@ -246,6 +247,7 @@ jobs:
             tests/test_agent_runtime.py::test_agent_run_uses_responses_output_item_message_snapshot \
             tests/test_agent_runtime.py::test_agent_run_uses_responses_content_part_snapshot \
             tests/test_agent_runtime.py::test_agent_run_discards_responses_reasoning_summary_stream \
+            tests/test_agent_runtime.py::test_agent_run_discards_responses_reasoning_list_snapshot \
             tests/test_streaming_provider_smoke.py \
             tests/test_legacy_kernel_removal.py \
             tests/test_runtime_injection_boundary.py \
