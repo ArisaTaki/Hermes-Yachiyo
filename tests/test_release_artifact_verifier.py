@@ -175,6 +175,11 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
     assert "release candidate verifier CLI must require complete manual checks for final signoff" in messages
     assert "release candidate verifier CLI must write manual check templates" in messages
     assert "release candidate verifier CLI must write editable manual check drafts" in messages
+    assert (
+        "release candidate verifier CLI must explicitly mark provider smoke not_applicable only when requested"
+        in messages
+    )
+    assert "release candidate verifier must isolate provider smoke not_applicable draft handling" in messages
     assert "Electron UI smoke runner must expose dynamic smoke script discovery" in messages
     assert "Electron UI smoke runner must expose reusable report generation" in messages
     assert "Electron UI smoke runner must discover every scripts/smoke_*_ui.mjs file" in messages
@@ -667,6 +672,10 @@ def test_verifier_requires_release_packaging_docs_for_release_gates(tmp_path):
     assert "release packaging docs must document manual RC check evidence input" in messages
     assert "release packaging docs must document manual RC check template generation" in messages
     assert "release packaging docs must document manual RC check draft generation" in messages
+    assert (
+        "release packaging docs must document explicit provider-smoke not_applicable draft evidence"
+        in messages
+    )
     assert "release packaging docs must document final manual RC signoff enforcement" in messages
     assert "release packaging docs must document the Gatekeeper manual RC check id" in messages
     assert "release packaging docs must document the screen recording manual RC check id" in messages

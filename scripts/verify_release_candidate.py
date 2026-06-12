@@ -192,6 +192,25 @@ def _manual_release_candidate_check_draft(
     return draft
 
 
+def _mark_provider_smoke_not_applicable_if_missing(
+    checks: Sequence[dict[str, str]],
+) -> bool:
+    missing = [name for name in PROVIDER_SMOKE_ENV_VARS if not os.environ.get(name)]
+    if not missing:
+        return False
+    check = _manual_release_candidate_checks_by_id(checks).get("real_provider_smoke")
+    if check is None or check.get("status") != "manual_required":
+        return False
+    check["status"] = "not_applicable"
+    check["evidence"] = (
+        "Real provider smoke credentials were unavailable in this environment; "
+        f"missing environment variables: {', '.join(missing)}. No external provider "
+        "call was attempted for this signoff draft."
+    )
+    check["evidence_source"] = "credentials_unavailable"
+    return True
+
+
 def _manual_release_candidate_checks_from_payload(raw_payload: Any) -> object:
     if isinstance(raw_payload, dict):
         if "checks" in raw_payload:
@@ -385,11 +404,15 @@ def write_manual_release_candidate_checks_draft(
     root: Path,
     output_path: Path,
     source_path: Path | None = None,
+    *,
+    mark_provider_smoke_not_applicable_if_missing: bool = False,
 ) -> Path:
     checks, findings = _load_manual_release_candidate_checks(root, source_path)
     if findings:
         formatted = "; ".join(finding.format() for finding in findings)
         raise ValueError(f"manual release-candidate checks draft source is invalid: {formatted}")
+    if mark_provider_smoke_not_applicable_if_missing:
+        _mark_provider_smoke_not_applicable_if_missing(checks)
     resolved = _resolve_project_file(
         root,
         output_path,
@@ -511,7 +534,7 @@ def _load_manual_release_candidate_checks(
         if notes is not None:
             target["notes"] = str(notes)
         evidence_source = str(raw_check.get("evidence_source", "")).strip()
-        if evidence_source == "automated_rc_gate":
+        if evidence_source in {"automated_rc_gate", "credentials_unavailable"}:
             target["evidence_source"] = evidence_source
 
     return checks, findings
@@ -1266,7 +1289,24 @@ def main(argv: Sequence[str] | None = None) -> int:
             "--manual-checks-json, and exit."
         ),
     )
+    parser.add_argument(
+        "--mark-provider-smoke-not-applicable-if-missing",
+        action="store_true",
+        help=(
+            "When writing a manual check draft, mark real_provider_smoke not_applicable "
+            "if any OHA_YACHIYO_SMOKE_* credential is missing."
+        ),
+    )
     args = parser.parse_args(argv)
+    if (
+        args.mark_provider_smoke_not_applicable_if_missing
+        and args.write_manual_checks_draft is None
+    ):
+        print(
+            "manual release-candidate checks: failed\n"
+            "- --mark-provider-smoke-not-applicable-if-missing requires --write-manual-checks-draft"
+        )
+        return 1
     if args.write_manual_checks_template is not None and args.write_manual_checks_draft is not None:
         print(
             "manual release-candidate checks: failed\n"
@@ -1290,6 +1330,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 PROJECT_ROOT,
                 args.write_manual_checks_draft,
                 args.manual_checks_json,
+                mark_provider_smoke_not_applicable_if_missing=(
+                    args.mark_provider_smoke_not_applicable_if_missing
+                ),
             )
         except (OSError, ValueError) as exc:
             print(f"manual release-candidate checks draft: failed\n- {exc}")

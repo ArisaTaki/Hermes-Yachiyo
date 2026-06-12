@@ -575,6 +575,60 @@ def test_release_candidate_verifier_writes_manual_check_draft_from_prior_report(
     assert "--run-dmg-app-smoke passed" in checks["packaged_bridge_isolation"]["evidence"]
 
 
+def test_release_candidate_verifier_manual_check_draft_can_mark_provider_not_applicable(
+    tmp_path,
+    monkeypatch,
+):
+    for env_name in rc.PROVIDER_SMOKE_ENV_VARS:
+        monkeypatch.delenv(env_name, raising=False)
+    prior_statuses = rc._manual_release_candidate_check_report()
+    for check in prior_statuses:
+        if check["id"] == "packaged_bridge_isolation":
+            check["status"] = "passed"
+            check["evidence"] = "Automated --run-dmg-app-smoke passed for release/Oha-Yachiyo.dmg"
+            check["evidence_source"] = "automated_rc_gate"
+
+    prior_report_path = tmp_path / "tmp" / "final-rc.json"
+    prior_report_path.parent.mkdir(parents=True)
+    prior_report_path.write_text(
+        json.dumps({"manual_release_candidate_check_statuses": prior_statuses}),
+        encoding="utf-8",
+    )
+
+    draft_path = rc.write_manual_release_candidate_checks_draft(
+        tmp_path,
+        Path("tmp/final-rc-signoff.json"),
+        Path("tmp/final-rc.json"),
+        mark_provider_smoke_not_applicable_if_missing=True,
+    )
+
+    draft = json.loads(draft_path.read_text(encoding="utf-8"))
+    assert draft["manual_release_candidate_check_summary"]["remaining_count"] == 4
+    assert draft["manual_release_candidate_check_summary"]["remaining_check_ids"] == [
+        "gatekeeper_first_launch",
+        "screen_recording_permission",
+        "chat_native_file_upload",
+        "packaged_ui_sampling",
+    ]
+    checks = {check["id"]: check for check in draft["checks"]}
+    assert checks["real_provider_smoke"]["status"] == "not_applicable"
+    assert checks["real_provider_smoke"]["evidence_source"] == "credentials_unavailable"
+    assert "missing environment variables" in checks["real_provider_smoke"]["evidence"]
+    for env_name in rc.PROVIDER_SMOKE_ENV_VARS:
+        assert env_name in checks["real_provider_smoke"]["evidence"]
+    assert checks["packaged_bridge_isolation"]["status"] == "passed"
+    assert checks["packaged_bridge_isolation"]["evidence_source"] == "automated_rc_gate"
+
+    loaded_checks, findings = rc._load_manual_release_candidate_checks(
+        tmp_path,
+        Path("tmp/final-rc-signoff.json"),
+    )
+    assert findings == []
+    loaded = {check["id"]: check for check in loaded_checks}
+    assert loaded["real_provider_smoke"]["status"] == "not_applicable"
+    assert loaded["real_provider_smoke"]["evidence_source"] == "credentials_unavailable"
+
+
 def test_release_candidate_verifier_rejects_manual_check_template_outside_root(tmp_path):
     outside = tmp_path.parent / "manual-rc-checks.template.json"
 
@@ -614,6 +668,16 @@ def test_release_candidate_verifier_rejects_template_and_draft_cli_conflict(caps
 
     output = capsys.readouterr().out
     assert "choose either --write-manual-checks-template or --write-manual-checks-draft" in output
+
+
+def test_release_candidate_verifier_provider_not_applicable_flag_requires_draft(capsys):
+    assert rc.main(["--mark-provider-smoke-not-applicable-if-missing"]) == 1
+
+    output = capsys.readouterr().out
+    assert (
+        "--mark-provider-smoke-not-applicable-if-missing requires --write-manual-checks-draft"
+        in output
+    )
 
 
 def test_release_candidate_verifier_checks_mounted_dmg_app(tmp_path, monkeypatch, capsys):
