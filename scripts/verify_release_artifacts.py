@@ -129,6 +129,7 @@ PACKAGED_BACKEND_BUILD_METADATA_MARKER = b"apps/frontend/public/oha-yachiyo-buil
 PACKAGED_ASAR_RELATIVE_PATH = Path("Contents/Resources/app.asar")
 CHAT_IMAGE_ATTACHMENT_SMOKE_SCRIPT = Path("scripts/smoke_chat_image_attachment_ui.mjs")
 PACKAGED_UI_SAMPLING_SMOKE_SCRIPT = Path("scripts/smoke_packaged_ui_sampling.mjs")
+PACKAGED_CHAT_NATIVE_FILE_SMOKE_SCRIPT = Path("scripts/smoke_packaged_chat_native_file_upload.mjs")
 CHAT_IMAGE_ATTACHMENT_SMOKE_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "DOM.setFileInputFiles",
@@ -179,6 +180,46 @@ PACKAGED_UI_SAMPLING_SMOKE_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         '[data-testid="live2d-resource-settings"]',
         "packaged UI sampling smoke must cover Live2D settings selectors",
+    ),
+)
+PACKAGED_CHAT_NATIVE_FILE_SMOKE_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
+    (
+        "--app-executable",
+        "packaged Chat native file smoke must launch the packaged app executable",
+    ),
+    (
+        "OHA_YACHIYO_CHAT_IMAGE_PICKER_SMOKE_PATHS",
+        "packaged Chat native file smoke must drive the desktop picker IPC with smoke file paths",
+    ),
+    (
+        "chat-composer-image-attach-button",
+        "packaged Chat native file smoke must click the Chat attach button",
+    ),
+    (
+        "chat-message-attachment-item",
+        "packaged Chat native file smoke must verify sent message attachments",
+    ),
+    (
+        "chat-image-viewer-modal",
+        "packaged Chat native file smoke must verify the image viewer",
+    ),
+    (
+        "agent-run-detail",
+        "packaged Chat native file smoke must verify Run Detail handoff",
+    ),
+)
+ELECTRON_MAIN_CHAT_NATIVE_FILE_SMOKE_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
+    (
+        "OHA_YACHIYO_DESKTOP_SMOKE_MODE",
+        "Electron main must gate Chat native file smoke override behind explicit smoke mode",
+    ),
+    (
+        "OHA_YACHIYO_CHAT_IMAGE_PICKER_SMOKE_PATHS",
+        "Electron main must expose smoke-selected Chat image picker paths",
+    ),
+    (
+        "chatImagePickerSmokePaths",
+        "Electron main must isolate Chat image picker smoke path parsing",
     ),
 )
 ELECTRON_UI_SMOKE_RUNNER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
@@ -1183,12 +1224,24 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release candidate verifier must report packaged UI sampling smoke results",
     ),
     (
+        '"dmg_chat_native_file_smoke"',
+        "release candidate verifier must report packaged Chat native file smoke results",
+    ),
+    (
         "DMG_UI_SAMPLING_SMOKE_SCRIPT",
         "release candidate verifier must name the packaged UI sampling smoke helper",
     ),
     (
+        "DMG_CHAT_NATIVE_FILE_SMOKE_SCRIPT",
+        "release candidate verifier must name the packaged Chat native file smoke helper",
+    ),
+    (
         "verify_dmg_ui_sampling_smoke",
         "release candidate verifier must expose packaged UI sampling verification",
+    ),
+    (
+        "verify_dmg_chat_native_file_upload_smoke",
+        "release candidate verifier must expose packaged Chat native file verification",
     ),
     (
         '"--run-dmg-screen-smoke"',
@@ -1197,6 +1250,10 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         '"--run-dmg-ui-sampling-smoke"',
         "release candidate verifier CLI must expose packaged UI sampling smoke",
+    ),
+    (
+        '"--run-dmg-chat-native-file-smoke"',
+        "release candidate verifier CLI must expose packaged Chat native file smoke",
     ),
     (
         "Screenshot image bytes were not archived",
@@ -2917,6 +2974,14 @@ def _verify_streaming_provider_smoke_contract_guards(root: Path) -> list[Finding
         (
             PACKAGED_UI_SAMPLING_SMOKE_SCRIPT,
             PACKAGED_UI_SAMPLING_SMOKE_REQUIRED_TEXT,
+        ),
+        (
+            PACKAGED_CHAT_NATIVE_FILE_SMOKE_SCRIPT,
+            PACKAGED_CHAT_NATIVE_FILE_SMOKE_REQUIRED_TEXT,
+        ),
+        (
+            Path("apps/frontend/electron/main.ts"),
+            ELECTRON_MAIN_CHAT_NATIVE_FILE_SMOKE_REQUIRED_TEXT,
         ),
     )
     for relative_path, required_texts in targets:

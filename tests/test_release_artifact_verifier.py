@@ -196,10 +196,14 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
     )
     assert "release candidate verifier must report packaged screen probe results" in messages
     assert "release candidate verifier must report packaged UI sampling smoke results" in messages
+    assert "release candidate verifier must report packaged Chat native file smoke results" in messages
     assert "release candidate verifier must name the packaged UI sampling smoke helper" in messages
+    assert "release candidate verifier must name the packaged Chat native file smoke helper" in messages
     assert "release candidate verifier must expose packaged UI sampling verification" in messages
+    assert "release candidate verifier must expose packaged Chat native file verification" in messages
     assert "release candidate verifier CLI must expose packaged screen recording smoke" in messages
     assert "release candidate verifier CLI must expose packaged UI sampling smoke" in messages
+    assert "release candidate verifier CLI must expose packaged Chat native file smoke" in messages
     assert (
         "release candidate verifier screen probe evidence must avoid archiving screenshot bytes"
         in messages

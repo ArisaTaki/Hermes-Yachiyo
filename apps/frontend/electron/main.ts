@@ -34,6 +34,8 @@ const require = createRequire(import.meta.url);
 const FRONTEND_DEV_URL = process.env.OHA_YACHIYO_FRONTEND_DEV_URL || 'http://127.0.0.1:5174';
 const BRIDGE_URL_ENV = 'OHA_YACHIYO_BRIDGE_URL';
 const BRIDGE_TOKEN_ENV = 'OHA_YACHIYO_BRIDGE_TOKEN';
+const DESKTOP_SMOKE_MODE_ENV = 'OHA_YACHIYO_DESKTOP_SMOKE_MODE';
+const CHAT_IMAGE_PICKER_SMOKE_PATHS_ENV = 'OHA_YACHIYO_CHAT_IMAGE_PICKER_SMOKE_PATHS';
 const DEV_BRIDGE_URL = 'http://127.0.0.1:8420';
 const PACKAGED_BRIDGE_URL = 'http://127.0.0.1:18420';
 let bridgeUrl = initialBridgeUrl();
@@ -2542,6 +2544,24 @@ async function showOpenDialogPathsForSender(
   return result.canceled ? [] : result.filePaths;
 }
 
+function chatImagePickerSmokePaths(): string[] | null {
+  if (process.env[DESKTOP_SMOKE_MODE_ENV] !== '1') return null;
+  const raw = process.env[CHAT_IMAGE_PICKER_SMOKE_PATHS_ENV];
+  if (!raw) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(`${CHAT_IMAGE_PICKER_SMOKE_PATHS_ENV} must be a JSON array`);
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error(`${CHAT_IMAGE_PICKER_SMOKE_PATHS_ENV} must be a JSON array`);
+  }
+  return parsed
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .map((value) => path.resolve(value));
+}
+
 function imageMimeTypeForPath(filePath: string): string {
   const ext = path.extname(filePath).toLowerCase();
   if (ext === '.png') return 'image/png';
@@ -2745,14 +2765,17 @@ ipcMain.handle('oha:chooseAvatarImage', async (event) => {
   return readAvatarImageSelection(selectedPath);
 });
 ipcMain.handle('oha:chooseChatImages', async (event) => {
-  const selectedPaths = await showOpenDialogPathsForSender(event, {
-    title: '选择聊天图片',
-    defaultPath: app.getPath('pictures') || app.getPath('home'),
-    properties: ['openFile', 'multiSelections'],
-    filters: [
-      { name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'] },
-    ],
-  });
+  const selectedPaths = chatImagePickerSmokePaths() || (await showOpenDialogPathsForSender(
+    event,
+    {
+      title: '选择聊天图片',
+      defaultPath: app.getPath('pictures') || app.getPath('home'),
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        { name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'] },
+      ],
+    },
+  ));
   return Promise.all(selectedPaths.map(readChatImageSelection));
 });
 ipcMain.handle('oha:chooseLive2DModelDirectory', (event) => showOpenDialogForSender(event, {

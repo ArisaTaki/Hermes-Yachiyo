@@ -1836,6 +1836,111 @@ def test_release_candidate_verifier_runs_dmg_ui_sampling_smoke(
     ]
 
 
+def test_release_candidate_verifier_runs_dmg_chat_native_file_smoke(
+    tmp_path, monkeypatch, capsys
+):
+    release_dir = tmp_path / "release"
+    release_dir.mkdir()
+    (release_dir / "Oha-Yachiyo-0.4.0-arm64.dmg").write_bytes(b"fake dmg")
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / rc.DMG_CHAT_NATIVE_FILE_SMOKE_SCRIPT).write_text(
+        "#!/usr/bin/env node\n",
+        encoding="utf-8",
+    )
+    commands: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        if command[:2] == ["hdiutil", "attach"]:
+            mount_dir = Path(command[command.index("-mountpoint") + 1])
+            executable = mount_dir / "Oha-Yachiyo.app" / "Contents" / "MacOS" / "Oha-Yachiyo"
+            executable.parent.mkdir(parents=True)
+            executable.write_text("#!/bin/sh\n", encoding="utf-8")
+            executable.chmod(0o755)
+        elif command[:2] == ["node", str(rc.DMG_CHAT_NATIVE_FILE_SMOKE_SCRIPT)]:
+            report_path = Path(command[command.index("--report-json") + 1])
+            report_path.write_text(
+                json.dumps(
+                    {
+                        "ok": True,
+                        "selected_file_name": "packaged-native-picker-smoke.svg",
+                        "selected_file_count": 1,
+                        "submitted_attachment_count": 1,
+                        "run_id": "main_chat_run_packaged_native_file_smoke",
+                        "task_id": "task-packaged-chat-native-file-smoke",
+                        "image_viewer_verified": True,
+                        "run_detail_verified": True,
+                        "desktop_picker_ipc_verified": True,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            return SimpleNamespace(
+                returncode=0,
+                stdout="[packaged-chat-native-file] passed\n",
+                stderr="",
+            )
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(rc.sys, "platform", "darwin")
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+    monkeypatch.setattr(rc.subprocess, "run", fake_run)
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        artifact_paths=(Path("release"),),
+        run_dmg_chat_native_file_smoke=True,
+        report_json=Path("tmp/rc.json"),
+    ) == 0
+
+    assert commands[0][:2] == ["hdiutil", "attach"]
+    assert commands[1][:2] == ["node", str(rc.DMG_CHAT_NATIVE_FILE_SMOKE_SCRIPT)]
+    assert commands[1][commands[1].index("--app-executable") + 1].endswith(
+        "/Oha-Yachiyo.app/Contents/MacOS/Oha-Yachiyo"
+    )
+    assert commands[1][commands[1].index("--app-cwd") + 1].endswith("/Oha-Yachiyo.app")
+    assert commands[2][:2] == ["hdiutil", "detach"]
+    output = capsys.readouterr().out
+    assert "DMG Chat native file smoke: passed" in output
+    report = json.loads((tmp_path / "tmp" / "rc.json").read_text(encoding="utf-8"))
+    assert report["ok"] is True
+    assert report["dmg_chat_native_file_smoke"] == {
+        "status": "passed",
+        "dmg_paths": ["release/Oha-Yachiyo-0.4.0-arm64.dmg"],
+        "uploads": [
+            {
+                "dmg_path": "release/Oha-Yachiyo-0.4.0-arm64.dmg",
+                "selected_file_name": "packaged-native-picker-smoke.svg",
+                "selected_file_count": 1,
+                "submitted_attachment_count": 1,
+                "run_id": "main_chat_run_packaged_native_file_smoke",
+                "task_id": "task-packaged-chat-native-file-smoke",
+                "image_viewer_verified": True,
+                "run_detail_verified": True,
+                "desktop_picker_ipc_verified": True,
+            }
+        ],
+        "findings": [],
+        "run_requested": True,
+    }
+    manual_statuses = {
+        check["id"]: check
+        for check in report["manual_release_candidate_check_statuses"]
+    }
+    assert manual_statuses["chat_native_file_upload"]["status"] == "passed"
+    assert manual_statuses["chat_native_file_upload"]["evidence_source"] == "automated_rc_gate"
+    assert "--run-dmg-chat-native-file-smoke passed" in manual_statuses[
+        "chat_native_file_upload"
+    ]["evidence"]
+    assert "main_chat_run_packaged_native_file_smoke" in manual_statuses[
+        "chat_native_file_upload"
+    ]["evidence"]
+    assert report["manual_release_candidate_check_summary"]["remaining_count"] == 5
+    assert report["manual_release_candidate_check_summary"]["automated_evidence_check_ids"] == [
+        "chat_native_file_upload",
+    ]
+
+
 def test_release_candidate_dmg_app_startup_smoke_requires_executable(
     tmp_path, monkeypatch
 ):

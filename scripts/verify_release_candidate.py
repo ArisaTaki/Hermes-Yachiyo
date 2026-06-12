@@ -40,6 +40,8 @@ DMG_APP_SMOKE_TIMEOUT_SECONDS = 45.0
 DMG_SCREEN_PROBE_REQUEST_TIMEOUT_SECONDS = 10.0
 DMG_UI_SAMPLING_SMOKE_TIMEOUT_SECONDS = 60.0
 DMG_UI_SAMPLING_SMOKE_SCRIPT = Path("scripts/smoke_packaged_ui_sampling.mjs")
+DMG_CHAT_NATIVE_FILE_SMOKE_TIMEOUT_SECONDS = 60.0
+DMG_CHAT_NATIVE_FILE_SMOKE_SCRIPT = Path("scripts/smoke_packaged_chat_native_file_upload.mjs")
 PROVIDER_SMOKE_ENV_VARS: tuple[str, ...] = (
     "OHA_YACHIYO_SMOKE_BASE_URL",
     "OHA_YACHIYO_SMOKE_MODEL",
@@ -111,7 +113,7 @@ MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS: tuple[dict[str, str], ...] = (
         "required_before": "public_release_signoff",
         "description": "Use the packaged app's Chat image attach button with the native file picker and verify preview, send, message attachment, image viewer, and Run Detail handoff.",
         "evidence": "Record the image filename, native picker path used, sent message attachment metadata, image viewer open/close result, and linked Run Detail id.",
-        "next_action": "Manually use the packaged Chat image attach button and native file picker, then verify preview, send, image viewer, and Run Detail handoff.",
+        "next_action": "Prefer rerunning the RC gate with --run-dmg-chat-native-file-smoke; otherwise manually use the packaged Chat image attach button and native file picker, then verify preview, send, image viewer, and Run Detail handoff.",
     },
     {
         "id": "packaged_ui_sampling",
@@ -754,6 +756,41 @@ def _auto_apply_release_candidate_check_evidence(
             dmg_ui_sampling_smoke,
             flag="--run-dmg-ui-sampling-smoke",
             detail="packaged renderer sampling failed",
+        )
+
+    dmg_chat_native_file_smoke = report.get("dmg_chat_native_file_smoke")
+    if (
+        isinstance(dmg_chat_native_file_smoke, dict)
+        and dmg_chat_native_file_smoke.get("status") == "passed"
+    ):
+        dmg_paths = dmg_chat_native_file_smoke.get("dmg_paths")
+        artifact_label = (
+            ", ".join(str(path) for path in dmg_paths)
+            if isinstance(dmg_paths, list) and dmg_paths
+            else "selected DMG artifacts"
+        )
+        uploads = dmg_chat_native_file_smoke.get("uploads")
+        upload_labels: list[str] = []
+        if isinstance(uploads, list):
+            for upload in uploads:
+                if isinstance(upload, dict):
+                    selected_file_name = str(upload.get("selected_file_name") or "").strip()
+                    run_id = str(upload.get("run_id") or "").strip()
+                    if selected_file_name and run_id:
+                        upload_labels.append(f"{selected_file_name} -> Run Detail {run_id}")
+                    elif selected_file_name:
+                        upload_labels.append(selected_file_name)
+        upload_summary = ", ".join(upload_labels) if upload_labels else "packaged native file upload flow"
+        _auto_apply_manual_release_candidate_check_evidence(
+            checks,
+            "chat_native_file_upload",
+            (
+                f"Automated --run-dmg-chat-native-file-smoke passed for {artifact_label}: "
+                "the packaged Chat attach button invoked the desktop chooseChatImages IPC "
+                "against a smoke-selected local image, rendered the preview, sent the "
+                "message, opened the image viewer, and verified Run Detail handoff "
+                f"({upload_summary})."
+            ),
         )
 
     provider_smoke = report.get("provider_smoke")
@@ -1748,6 +1785,149 @@ def verify_dmg_ui_sampling_smoke(
     return findings, samples, bridge_ready_dmg_paths
 
 
+def verify_dmg_chat_native_file_upload_smoke(
+    root: Path,
+    dmg_paths: Sequence[Path],
+    *,
+    timeout_seconds: float = DMG_CHAT_NATIVE_FILE_SMOKE_TIMEOUT_SECONDS,
+) -> tuple[list[Finding], list[dict[str, object]]]:
+    findings: list[Finding] = []
+    uploads: list[dict[str, object]] = []
+    if not dmg_paths:
+        findings.append(Finding(root, "release candidate DMG Chat native file smoke requested but no .dmg artifacts were found"))
+        return findings, uploads
+    if sys.platform != "darwin":
+        findings.append(Finding(root, "release candidate DMG Chat native file smoke requires macOS"))
+        return findings, uploads
+
+    script = root / DMG_CHAT_NATIVE_FILE_SMOKE_SCRIPT
+    if not script.is_file():
+        findings.append(Finding(script, "packaged Chat native file smoke script not found"))
+        return findings, uploads
+
+    for dmg_path in dmg_paths:
+        absolute_dmg = _absolute_artifact_path(root, dmg_path)
+        mount_dir = Path(tempfile.mkdtemp(prefix="oha-yachiyo-rc-chat-file-"))
+        attached = False
+        try:
+            attach = subprocess.run(
+                [
+                    "hdiutil",
+                    "attach",
+                    str(absolute_dmg),
+                    "-nobrowse",
+                    "-readonly",
+                    "-mountpoint",
+                    str(mount_dir),
+                    "-quiet",
+                ],
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            if attach.returncode != 0:
+                detail = redact_api_error_text((attach.stderr or attach.stdout or "").strip())
+                message = "release candidate DMG could not be mounted for Chat native file smoke"
+                if detail:
+                    message = f"{message}: {detail}"
+                findings.append(Finding(dmg_path, message))
+                continue
+            attached = True
+            app_path = mount_dir / PACKAGED_APP_NAME
+            executable_path = app_path / "Contents" / "MacOS" / PACKAGED_APP_EXECUTABLE_NAME
+            if not executable_path.is_file():
+                findings.append(Finding(dmg_path, f"mounted {PACKAGED_APP_NAME} must contain executable {PACKAGED_APP_EXECUTABLE_NAME}"))
+                continue
+            if not os.access(executable_path, os.X_OK):
+                findings.append(Finding(dmg_path, f"mounted {PACKAGED_APP_NAME} executable is not executable"))
+                continue
+
+            with tempfile.TemporaryDirectory(prefix="oha-yachiyo-rc-chat-file-") as home_dir:
+                report_path = Path(home_dir) / "packaged-chat-native-file-upload.json"
+                command = [
+                    "node",
+                    str(DMG_CHAT_NATIVE_FILE_SMOKE_SCRIPT),
+                    "--app-executable",
+                    str(executable_path),
+                    "--app-cwd",
+                    str(app_path),
+                    "--timeout-ms",
+                    str(int(timeout_seconds * 1000)),
+                    "--report-json",
+                    str(report_path),
+                ]
+                try:
+                    result = subprocess.run(
+                        command,
+                        cwd=root,
+                        check=False,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        timeout=timeout_seconds + 10.0,
+                    )
+                except subprocess.TimeoutExpired as exc:
+                    detail = _redacted_process_detail(
+                        _process_output_text(exc.stdout),
+                        _process_output_text(exc.stderr),
+                    )
+                    message = f"release candidate packaged Chat native file smoke timed out after {timeout_seconds:.0f}s"
+                    if detail:
+                        message = f"{message}: {detail}"
+                    findings.append(Finding(dmg_path, message))
+                    continue
+                except OSError as exc:
+                    detail = redact_api_error_text(str(exc))
+                    findings.append(Finding(dmg_path, f"release candidate packaged Chat native file smoke could not start: {detail}"))
+                    continue
+                if result.returncode != 0:
+                    detail = _redacted_process_detail(result.stdout, result.stderr)
+                    message = f"release candidate packaged Chat native file smoke failed with exit code {result.returncode}"
+                    if detail:
+                        message = f"{message}: {detail}"
+                    findings.append(Finding(dmg_path, message))
+                    continue
+                try:
+                    upload_report = _read_packaged_ui_sampling_report(report_path)
+                except (OSError, json.JSONDecodeError) as exc:
+                    findings.append(Finding(dmg_path, f"release candidate packaged Chat native file smoke report could not be read: {exc}"))
+                    continue
+                if upload_report.get("ok") is not True:
+                    findings.append(Finding(dmg_path, "release candidate packaged Chat native file smoke report did not pass"))
+                    continue
+                uploads.append(
+                    {
+                        "dmg_path": str(dmg_path),
+                        "selected_file_name": upload_report.get("selected_file_name"),
+                        "selected_file_count": upload_report.get("selected_file_count"),
+                        "submitted_attachment_count": upload_report.get("submitted_attachment_count"),
+                        "run_id": upload_report.get("run_id"),
+                        "task_id": upload_report.get("task_id"),
+                        "image_viewer_verified": upload_report.get("image_viewer_verified"),
+                        "run_detail_verified": upload_report.get("run_detail_verified"),
+                        "desktop_picker_ipc_verified": upload_report.get("desktop_picker_ipc_verified"),
+                    }
+                )
+        finally:
+            if attached:
+                detach = subprocess.run(
+                    ["hdiutil", "detach", str(mount_dir), "-quiet"],
+                    check=False,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                if detach.returncode != 0:
+                    detail = redact_api_error_text((detach.stderr or detach.stdout or "").strip())
+                    message = "release candidate DMG could not be detached after Chat native file smoke"
+                    if detail:
+                        message = f"{message}: {detail}"
+                    findings.append(Finding(dmg_path, message))
+            shutil.rmtree(mount_dir, ignore_errors=True)
+    return findings, uploads
+
+
 def verify_release_candidate(
     *,
     root: Path = PROJECT_ROOT,
@@ -1758,6 +1938,7 @@ def verify_release_candidate(
     run_dmg_app_smoke: bool = False,
     run_dmg_screen_smoke: bool = False,
     run_dmg_ui_sampling_smoke: bool = False,
+    run_dmg_chat_native_file_smoke: bool = False,
     run_provider_smoke: bool = False,
     run_ui_smoke: bool = False,
     smoke_scripts: Sequence[Path] | None = None,
@@ -1824,6 +2005,13 @@ def verify_release_candidate(
             "findings": [],
             "run_requested": run_dmg_ui_sampling_smoke,
         },
+        "dmg_chat_native_file_smoke": {
+            "status": "pending",
+            "dmg_paths": [],
+            "uploads": [],
+            "findings": [],
+            "run_requested": run_dmg_chat_native_file_smoke,
+        },
         "provider_smoke": {
             "status": "pending",
             "checks": [],
@@ -1855,6 +2043,8 @@ def verify_release_candidate(
             source_only_conflicts.append("--run-dmg-screen-smoke")
         if run_dmg_ui_sampling_smoke:
             source_only_conflicts.append("--run-dmg-ui-sampling-smoke")
+        if run_dmg_chat_native_file_smoke:
+            source_only_conflicts.append("--run-dmg-chat-native-file-smoke")
         if run_provider_smoke:
             source_only_conflicts.append("--run-provider-smoke")
         if run_ui_smoke:
@@ -1911,6 +2101,13 @@ def verify_release_candidate(
             "samples": [],
             "findings": [],
             "run_requested": run_dmg_ui_sampling_smoke,
+        }
+        report["dmg_chat_native_file_smoke"] = {
+            "status": "skipped",
+            "dmg_paths": [],
+            "uploads": [],
+            "findings": [],
+            "run_requested": run_dmg_chat_native_file_smoke,
         }
         report["electron_ui_smoke"] = {
             "status": "skipped",
@@ -1993,6 +2190,13 @@ def verify_release_candidate(
                 "samples": [],
                 "findings": [],
                 "run_requested": run_dmg_ui_sampling_smoke,
+            }
+            report["dmg_chat_native_file_smoke"] = {
+                "status": "skipped",
+                "dmg_paths": [],
+                "uploads": [],
+                "findings": [],
+                "run_requested": run_dmg_chat_native_file_smoke,
             }
         elif selected_artifacts:
             artifact_findings = verify_release_artifacts(
@@ -2161,6 +2365,40 @@ def verify_release_candidate(
             "run_requested": run_dmg_ui_sampling_smoke,
         }
 
+    if run_dmg_chat_native_file_smoke and not artifact_paths_valid:
+        print("DMG Chat native file smoke: skipped because artifact paths failed validation")
+        report["dmg_chat_native_file_smoke"] = {
+            "status": "skipped",
+            "dmg_paths": [],
+            "uploads": [],
+            "findings": [],
+            "run_requested": run_dmg_chat_native_file_smoke,
+        }
+    elif run_dmg_chat_native_file_smoke:
+        dmg_paths = release_candidate_dmg_paths(root, selected_artifacts)
+        upload_findings, uploads = verify_dmg_chat_native_file_upload_smoke(
+            root,
+            dmg_paths,
+        )
+        _print_findings("DMG Chat native file smoke", upload_findings)
+        failed = failed or bool(upload_findings)
+        report["dmg_chat_native_file_smoke"] = {
+            "status": "failed" if upload_findings else "passed",
+            "dmg_paths": [str(path) for path in dmg_paths],
+            "uploads": uploads,
+            "findings": _finding_report(upload_findings),
+            "run_requested": run_dmg_chat_native_file_smoke,
+        }
+    else:
+        print("DMG Chat native file smoke: skipped; pass --run-dmg-chat-native-file-smoke to verify packaged Chat native file upload")
+        report["dmg_chat_native_file_smoke"] = {
+            "status": "skipped",
+            "dmg_paths": [],
+            "uploads": [],
+            "findings": [],
+            "run_requested": run_dmg_chat_native_file_smoke,
+        }
+
     if run_provider_smoke:
         provider_findings, provider_results = verify_provider_smoke(root)
         _print_findings("real provider smoke", provider_findings)
@@ -2289,6 +2527,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--run-dmg-ui-sampling-smoke",
         action="store_true",
         help="Launch the app inside discovered DMGs and sample key packaged renderer routes through Chromium DevTools.",
+    )
+    parser.add_argument(
+        "--run-dmg-chat-native-file-smoke",
+        action="store_true",
+        help="Launch the packaged app inside discovered DMGs and verify Chat native image file upload through the desktop picker IPC.",
     )
     parser.add_argument(
         "--run-provider-smoke",
@@ -2431,6 +2674,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         run_dmg_app_smoke=args.run_dmg_app_smoke,
         run_dmg_screen_smoke=args.run_dmg_screen_smoke,
         run_dmg_ui_sampling_smoke=args.run_dmg_ui_sampling_smoke,
+        run_dmg_chat_native_file_smoke=args.run_dmg_chat_native_file_smoke,
         run_provider_smoke=args.run_provider_smoke,
         run_ui_smoke=args.run_ui_smoke,
         manual_checks_json=args.manual_checks_json,
