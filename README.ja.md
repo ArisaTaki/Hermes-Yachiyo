@@ -96,6 +96,7 @@ oha-yachiyo-backend
 
 よくある確認点:
 
+- macOS で未知の開発元 / Gatekeeper により初回起動が止まる場合: Finder で `Oha-Yachiyo.app` を Control クリックして「開く」を選ぶか、システム設定の「プライバシーとセキュリティ」で許可します。
 - モデル接続に失敗する: Base URL、モデル名、API Key を確認します。
 - Bridge に接続できない: デスクトップバックエンドが起動しており、ローカルポートが空いているか確認します。
 - macOS でスクリーンショットが使えない: Oha-Yachiyo に画面収録権限を付与します。

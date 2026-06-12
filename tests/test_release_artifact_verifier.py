@@ -763,6 +763,22 @@ def test_verifier_requires_release_packaging_docs_for_release_gates(tmp_path):
     assert "release packaging docs must document the packaged UI sampling manual RC check id" in messages
 
 
+def test_verifier_requires_user_facing_release_docs_for_first_launch(tmp_path):
+    readme = tmp_path / "README.md"
+    readme.write_text("# Oha-Yachiyo\n\n首次启动后配置模型。\n", encoding="utf-8")
+    manual = tmp_path / "docs" / "user-manual.md"
+    manual.parent.mkdir(parents=True)
+    manual.write_text("# Oha-Yachiyo 使用手册\n\n首次启动后进入主窗口。\n", encoding="utf-8")
+
+    findings = verifier._verify_user_facing_release_docs(tmp_path)
+    messages = [finding.message for finding in findings]
+
+    assert "README must document Gatekeeper first-launch handling" in messages
+    assert "README must document macOS Screen Recording permission" in messages
+    assert "user manual must document Gatekeeper first-launch handling" in messages
+    assert "user manual must document macOS Screen Recording permission" in messages
+
+
 def _write_packaged_app_bundle(
     root,
     *,

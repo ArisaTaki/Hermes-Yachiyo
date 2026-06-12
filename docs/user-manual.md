@@ -7,7 +7,7 @@ Oha-Yachiyo 是桌面优先的本地个人 Agent 应用。当前版本使用内�
 ## 1. 首次启动
 
 1. 将 `Oha-Yachiyo.app` 放入 `/Applications`。
-2. 打开应用。
+2. 打开应用。若 macOS 因未知开发者 / Gatekeeper 阻止首次打开，请在 Finder 中按住 Control 点击 `Oha-Yachiyo.app` 并选择“打开”，或到系统设置“隐私与安全性”中允许打开。
 3. 首次启动后进入主窗口或配置向导。
 4. 配置默认对话模型。
 5. 需要图片附件、主动关怀或语音时，再配置对应能力。

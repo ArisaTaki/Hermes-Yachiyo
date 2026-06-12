@@ -120,6 +120,28 @@ FORBIDDEN_FILES: tuple[Path, ...] = (
 
 RELEASE_SECURITY_CHANNELS: tuple[str, ...] = ("release", "alpha", "stable")
 RELEASE_PACKAGING_DOC_FILE = Path("docs/release-packaging.md")
+USER_FACING_RELEASE_DOC_REQUIRED_TEXT: tuple[tuple[Path, str, str], ...] = (
+    (
+        Path("README.md"),
+        "未知开发者 / Gatekeeper",
+        "README must document Gatekeeper first-launch handling",
+    ),
+    (
+        Path("README.md"),
+        "屏幕录制",
+        "README must document macOS Screen Recording permission",
+    ),
+    (
+        Path("docs/user-manual.md"),
+        "未知开发者 / Gatekeeper",
+        "user manual must document Gatekeeper first-launch handling",
+    ),
+    (
+        Path("docs/user-manual.md"),
+        "屏幕录制权限",
+        "user manual must document macOS Screen Recording permission",
+    ),
+)
 PACKAGING_CONFIG_FILE = Path("apps/frontend/electron-builder.yml")
 PACKAGED_APP_OUTPUT_DIR = Path("dist/electron")
 PACKAGED_APP_NAME = "Oha-Yachiyo.app"
@@ -2641,6 +2663,7 @@ def verify_release_artifacts(
 
     if check_release_security_guards:
         findings.extend(_verify_release_security_guards(root_path))
+        findings.extend(_verify_user_facing_release_docs(root_path))
         findings.extend(_verify_release_packaging_documentation(root_path))
         findings.extend(_verify_streaming_provider_smoke_contract_guards(root_path))
         findings.extend(_verify_tracked_generated_artifacts(root_path))
@@ -2988,6 +3011,22 @@ def _verify_release_packaging_documentation(root: Path) -> list[Finding]:
         return [Finding(path, f"could not read release packaging docs: {exc}")]
     for required_text, message in RELEASE_PACKAGING_DOC_REQUIRED_TEXT:
         if required_text not in text:
+            findings.append(Finding(path, message))
+    return findings
+
+
+def _verify_user_facing_release_docs(root: Path) -> list[Finding]:
+    findings: list[Finding] = []
+    cached_text: dict[Path, str] = {}
+    for relative_path, required_text, message in USER_FACING_RELEASE_DOC_REQUIRED_TEXT:
+        path = _resolve(root, relative_path)
+        if path not in cached_text:
+            try:
+                cached_text[path] = path.read_text(encoding="utf-8")
+            except OSError as exc:
+                findings.append(Finding(path, f"could not read user-facing release docs: {exc}"))
+                cached_text[path] = ""
+        if required_text not in cached_text[path]:
             findings.append(Finding(path, message))
     return findings
 

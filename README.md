@@ -203,6 +203,7 @@ oha-yachiyo-backend
 
 常见情况：
 
+- macOS 提示未知开发者 / Gatekeeper 阻止首次打开：在 Finder 中按住 Control 点击 `Oha-Yachiyo.app` 并选择“打开”，或到系统设置“隐私与安全性”中允许打开。
 - 模型连接失败：检查 Base URL、模型名和 API Key。
 - Bridge 无法连接：确认桌面后端已经启动，并且本机端口未被占用。
 - 本地截图不可用：到 macOS“系统设置 -> 隐私与安全性 -> 屏幕录制”给 Oha-Yachiyo 授权。

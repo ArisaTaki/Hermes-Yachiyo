@@ -96,6 +96,7 @@ If no model is configured, Chat and Agent runs return structured `native_agent_n
 
 Common checks:
 
+- Unknown developer / Gatekeeper blocks the first launch on macOS: Control-click `Oha-Yachiyo.app` in Finder and choose Open, or allow it from System Settings -> Privacy & Security.
 - Model connection failed: verify Base URL, model name, and API key.
 - Bridge unavailable: confirm the desktop backend is running and the local port is free.
 - Screenshot unavailable on macOS: grant Screen Recording permission to Oha-Yachiyo.
