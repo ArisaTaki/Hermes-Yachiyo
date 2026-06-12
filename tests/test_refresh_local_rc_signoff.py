@@ -330,6 +330,49 @@ def test_refresh_local_rc_signoff_reruns_batch_for_provider_smoke(
     assert "--run-provider-smoke" in batch_command
 
 
+def test_refresh_local_rc_signoff_print_status_uses_current_draft(
+    monkeypatch,
+    tmp_path,
+):
+    commands: list[tuple[list[str], bool]] = []
+    monkeypatch.setattr(refresh, "ROOT", tmp_path)
+    draft = tmp_path / "tmp" / "rc-signoff-abc12345-current.json"
+    draft.parent.mkdir(parents=True, exist_ok=True)
+    draft.write_text(
+        json.dumps({"manual_release_candidate_check_statuses": []}),
+        encoding="utf-8",
+    )
+
+    def fake_run(command: list[str], *, allow_failure: bool = False) -> int:
+        commands.append((command, allow_failure))
+        return 0
+
+    monkeypatch.setattr(refresh, "_run", fake_run)
+
+    assert refresh.main(["--short-commit", "abc12345", "--print-status"]) == 0
+    assert commands == [
+        (
+            [
+                sys.executable,
+                "scripts/verify_release_candidate.py",
+                "--manual-checks-json",
+                "tmp/rc-signoff-abc12345-current.json",
+                "--print-manual-checks-status",
+            ],
+            True,
+        )
+    ]
+
+
+def test_refresh_local_rc_signoff_print_status_fails_when_draft_missing(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setattr(refresh, "ROOT", tmp_path)
+
+    assert refresh.main(["--short-commit", "abc12345", "--print-status"]) == 1
+
+
 def test_refresh_local_rc_signoff_requires_provider_credentials(monkeypatch):
     for name in refresh.PROVIDER_SMOKE_ENV_VARS:
         monkeypatch.delenv(name, raising=False)

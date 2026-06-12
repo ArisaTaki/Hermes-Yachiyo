@@ -124,6 +124,14 @@ python scripts/refresh_local_rc_signoff.py --channel experimental --repository k
 
 该命令会生成 `tmp/rc-verification-<short-commit>-packaged-batch.json`、`tmp/rc-verification-<short-commit>-screen.json`、`tmp/rc-signoff-<short-commit>-current.json`、`tmp/rc-signoff-<short-commit>-current.md` 和 `tmp/rc-signoff-<short-commit>-preview.json`；如果 final signoff 只因为 Gatekeeper / Screen Recording 仍为 `manual_required` 而失败，命令仍返回成功，方便把“还差多少”作为状态刷新而不是构建失败处理。签核人可以直接填写 Markdown checklist，再用 `--manual-checks-markdown` 进入最终 gate。
 
+只查看当前 HEAD 还剩哪些签核项时，运行：
+
+```bash
+python scripts/refresh_local_rc_signoff.py --print-status
+```
+
+该命令只读取 `tmp/rc-signoff-<short-commit>-current.json` 并打印剩余项，不运行 build、DMG 或 UI gate。
+
 如果一次刷新在 batch 或 screen 阶段后中断，可以断点续跑：
 
 ```bash

@@ -670,6 +670,10 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document local RC signoff resume/reuse mode",
     ),
     (
+        "python scripts/refresh_local_rc_signoff.py --print-status",
+        "release packaging docs must document local RC signoff status shortcut",
+    ),
+    (
         "每个 DMG 的 `.sha256` 文件",
         "release packaging docs must document per-DMG checksum file validation",
     ),

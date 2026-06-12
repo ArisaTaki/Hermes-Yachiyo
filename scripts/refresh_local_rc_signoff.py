@@ -199,6 +199,25 @@ def refresh_local_rc_signoff(
     }
 
 
+def print_local_rc_signoff_status(*, short_commit: str | None = None) -> bool:
+    label = short_commit or _git_short_commit()
+    signoff_draft = ROOT / "tmp" / f"rc-signoff-{label}-current.json"
+    if not signoff_draft.exists():
+        print(
+            f"local RC signoff draft not found: {signoff_draft.relative_to(ROOT)}",
+            file=sys.stderr,
+        )
+        return False
+    command = [
+        sys.executable,
+        "scripts/verify_release_candidate.py",
+        "--manual-checks-json",
+        str(signoff_draft.relative_to(ROOT)),
+        "--print-manual-checks-status",
+    ]
+    return _run(command, allow_failure=True) == 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--short-commit", help="Override report filename commit label.")
@@ -211,6 +230,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repository", help="GitHub owner/repo for build metadata.")
     parser.add_argument("--skip-build", action="store_true")
     parser.add_argument("--skip-screen-smoke", action="store_true")
+    parser.add_argument(
+        "--print-status",
+        action="store_true",
+        help="Print the current HEAD local RC signoff status without building or writing reports.",
+    )
     parser.add_argument(
         "--reuse-current-reports",
         action="store_true",
@@ -225,6 +249,8 @@ def main(argv: list[str] | None = None) -> int:
         help="Run real provider smoke during the packaged batch gate.",
     )
     args = parser.parse_args(argv)
+    if args.print_status:
+        return 0 if print_local_rc_signoff_status(short_commit=args.short_commit) else 1
     if args.run_provider_smoke and not _provider_smoke_configured():
         missing = [
             name for name in PROVIDER_SMOKE_ENV_VARS if not os.getenv(name, "").strip()
