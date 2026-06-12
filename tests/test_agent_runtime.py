@@ -6631,6 +6631,87 @@ def test_main_chat_model_loop_executes_legacy_streaming_function_call(tmp_path, 
         service.close()
 
 
+def test_main_chat_model_loop_executes_top_level_delta_message_tool_calls(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    (workdir / "README.md").write_text("top-level delta message tool content", encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        if len(calls) == 1:
+            assert tools is not None
+
+            def stream():
+                yield {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "id": "call_top_level_delta_message_read",
+                                "type": "function",
+                                "function": {"name": "workspace_", "arguments": '{"path": "READ'},
+                            }
+                        ]
+                    }
+                }
+                yield {
+                    "message": {
+                        "tool_calls": [
+                            {
+                                "id": "call_top_level_delta_message_read",
+                                "type": "function",
+                                "function": {"name": "read", "arguments": 'ME.md"}'},
+                            }
+                        ]
+                    },
+                    "finish_reason": "tool_calls",
+                }
+
+            return stream()
+        assistant_tool_messages = [
+            message for message in messages if message.get("role") == "assistant" and message.get("tool_calls")
+        ]
+        assert assistant_tool_messages[-1]["content"] is None
+        assert assistant_tool_messages[-1]["tool_calls"][0]["id"] == "call_top_level_delta_message_read"
+        assert assistant_tool_messages[-1]["tool_calls"][0]["function"]["name"] == "workspace_read"
+        assert assistant_tool_messages[-1]["tool_calls"][0]["function"]["arguments"] == '{"path": "README.md"}'
+        assert messages[-1]["role"] == "tool"
+        assert messages[-1]["tool_call_id"] == "call_top_level_delta_message_read"
+        assert "top-level delta message tool content" in messages[-1]["content"]
+        return {"content": "Top-level delta message tool call complete"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-top-level-delta-message-tool-call",
+            session_id="session-main-top-level-delta-message-tool-call",
+            user_goal="Read README through top-level delta/message tool calls",
+        )
+        updated = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [{"role": "user", "content": "Read README"}],
+            tool_policy={"allowed_tools": ["workspace.read"]},
+            workspace_policy={"default_workdir": str(workdir), "readable_scopes": ["."]},
+        )
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        tool_event = next(event for event in events if event["event_type"] == "agent.tool.call")
+
+        assert updated["result"] == "Top-level delta message tool call complete"
+        assert tool_event["payload"]["tool"] == "workspace.read"
+        assert tool_event["payload"]["input_preview"]["path"] == "README.md"
+        assert event_types.count("agent.tool.call") == 1
+        assert event_types.count("model.output.completed") == 1
+        assert not any(str(event_type).endswith(".delta") for event_type in event_types)
+    finally:
+        service.close()
+
+
 def test_main_chat_model_loop_coalesces_interleaved_streaming_tool_call_deltas(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     workdir = tmp_path / "repo"
@@ -12117,6 +12198,89 @@ def test_agent_run_executes_streaming_tool_call_and_continues(tmp_path, monkeypa
 
         assert run["status"] == "completed"
         assert run["result"] == "Agent streaming tool call complete"
+        assert len(calls) == 2
+        assert tool_fact["payload"]["tool"] == "workspace.read"
+        assert tool_fact["payload"]["input_preview"]["path"] == "README.md"
+        assert tool_fact["payload"]["result"]["ok"] is True
+        assert event_types.count("agent.tool.call") == 1
+        assert event_types.count("agent.run.completed") == 1
+        assert not any(str(event_type).endswith(".delta") for event_type in event_types)
+    finally:
+        service.close()
+
+
+def test_agent_run_executes_top_level_delta_message_streaming_tool_call(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    (workdir / "README.md").write_text("agent top-level delta message tool content", encoding="utf-8")
+    calls = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        if len(calls) == 1:
+            assert any((tool.get("function") or {}).get("name") == "workspace_read" for tool in tools or [])
+
+            def stream():
+                yield {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "id": "call_agent_top_level_delta_message_read",
+                                "type": "function",
+                                "function": {"name": "workspace_", "arguments": '{"path": "READ'},
+                            }
+                        ]
+                    }
+                }
+                yield {
+                    "message": {
+                        "tool_calls": [
+                            {
+                                "id": "call_agent_top_level_delta_message_read",
+                                "type": "function",
+                                "function": {"name": "read", "arguments": 'ME.md"}'},
+                            }
+                        ]
+                    },
+                    "finish_reason": "tool_calls",
+                }
+
+            return stream()
+        assistant_tool_messages = [
+            message for message in messages if message.get("role") == "assistant" and message.get("tool_calls")
+        ]
+        assert assistant_tool_messages[-1]["content"] is None
+        assert assistant_tool_messages[-1]["tool_calls"][0]["id"] == "call_agent_top_level_delta_message_read"
+        assert assistant_tool_messages[-1]["tool_calls"][0]["function"]["name"] == "workspace_read"
+        assert assistant_tool_messages[-1]["tool_calls"][0]["function"]["arguments"] == '{"path": "README.md"}'
+        assert messages[-1]["role"] == "tool"
+        assert messages[-1]["tool_call_id"] == "call_agent_top_level_delta_message_read"
+        assert "agent top-level delta message tool content" in messages[-1]["content"]
+        return {"content": "Agent top-level delta message tool call complete"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Top Level Delta Message Reader",
+                "model_mode": "custom_api",
+                "model_config": {
+                    "base_url": "https://api.example.test/v1",
+                    "model": "demo-model",
+                    "api_key": "sk-secret",
+                },
+                "tool_policy": {"allowed_tools": ["workspace.read"]},
+                "workspace_policy": {"default_workdir": str(workdir), "readable_scopes": ["."]},
+            }
+        )
+        run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Read README"})
+        run_events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in run_events]
+        tool_fact = next(event for event in run_events if event["event_type"] == "agent.tool.call")
+
+        assert run["status"] == "completed"
+        assert run["result"] == "Agent top-level delta message tool call complete"
         assert len(calls) == 2
         assert tool_fact["payload"]["tool"] == "workspace.read"
         assert tool_fact["payload"]["input_preview"]["path"] == "README.md"

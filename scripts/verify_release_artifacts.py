@@ -1980,6 +1980,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover NativeRunEngine legacy streaming function_call frames",
     ),
     (
+        "tests/test_agent_runtime.py::test_main_chat_model_loop_executes_top_level_delta_message_tool_calls",
+        "macOS release workflow smoke tests must cover NativeRunEngine top-level delta/message tool-call frames",
+    ),
+    (
         "tests/test_agent_runtime.py::test_main_chat_model_loop_executes_provider_message_tool_calls",
         "macOS release workflow smoke tests must cover NativeRunEngine provider message tool calls",
     ),
@@ -2010,6 +2014,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "tests/test_agent_runtime.py::test_agent_run_executes_streaming_tool_call_and_continues",
         "macOS release workflow smoke tests must cover NativeRunEngine Agent Run streaming tool calls",
+    ),
+    (
+        "tests/test_agent_runtime.py::test_agent_run_executes_top_level_delta_message_streaming_tool_call",
+        "macOS release workflow smoke tests must cover NativeRunEngine Agent Run top-level delta/message tool-call frames",
     ),
     (
         "tests/test_agent_runtime.py::test_agent_run_consumes_split_utf8_http_sse_content_chunks",

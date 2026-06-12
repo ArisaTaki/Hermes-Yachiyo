@@ -206,6 +206,7 @@ jobs:
             tests/test_agent_runtime.py::test_main_chat_model_loop_coalesces_indexless_streaming_tool_call_deltas \
             tests/test_agent_runtime.py::test_main_chat_model_loop_coalesces_indexless_interleaved_tool_call_deltas_by_id \
             tests/test_agent_runtime.py::test_main_chat_model_loop_executes_legacy_streaming_function_call \
+            tests/test_agent_runtime.py::test_main_chat_model_loop_executes_top_level_delta_message_tool_calls \
             tests/test_agent_runtime.py::test_main_chat_model_loop_executes_provider_message_tool_calls \
             tests/test_agent_runtime.py::test_main_chat_model_loop_executes_openai_sdk_object_message_tool_calls \
             tests/test_agent_runtime.py::test_main_chat_model_loop_executes_responses_style_streaming_tool_call \
@@ -215,6 +216,7 @@ jobs:
             tests/test_agent_runtime.py::test_agent_run_executes_provider_message_tool_calls \
             tests/test_agent_runtime.py::test_agent_run_executes_openai_sdk_object_message_tool_calls \
             tests/test_agent_runtime.py::test_agent_run_executes_streaming_tool_call_and_continues \
+            tests/test_agent_runtime.py::test_agent_run_executes_top_level_delta_message_streaming_tool_call \
             tests/test_agent_runtime.py::test_agent_run_consumes_split_utf8_http_sse_content_chunks \
             tests/test_agent_runtime.py::test_agent_run_consumes_split_http_sse_content_frame_chunks \
             tests/test_agent_runtime.py::test_agent_run_consumes_coalesced_http_sse_content_frames \

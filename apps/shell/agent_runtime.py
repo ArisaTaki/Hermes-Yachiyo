@@ -1047,6 +1047,19 @@ def _stream_chunk_tool_calls(chunk: Any) -> list[tuple[int, int, Any]]:
     direct_function = _message_field(chunk, "function_call")
     if direct_function is not None:
         return [(0, 0, {"index": 0, "type": "function", "function": direct_function})]
+    for field_name in ("delta", "message"):
+        value = _message_field(chunk, field_name)
+        if value is None:
+            continue
+        calls = _message_field(value, "tool_calls")
+        if isinstance(calls, list):
+            return [(0, index, call) for index, call in enumerate(calls)]
+        single_call = _message_field(value, "tool_call")
+        if single_call is not None:
+            return [(0, 0, single_call)]
+        function_call = _message_field(value, "function_call")
+        if function_call is not None:
+            return [(0, 0, {"index": 0, "type": "function", "function": function_call})]
     choices = _message_field(chunk, "choices")
     if not isinstance(choices, list):
         return []
