@@ -10458,6 +10458,59 @@ def test_agent_run_accepts_refusal_message_field(tmp_path, monkeypatch):
         service.close()
 
 
+def test_agent_run_uses_responses_refusal_done_snapshot(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    expected = "Agent final Responses refusal"
+
+    def fake_chat(_base_url, _model, _api_key, _messages, *, tools=None, stream=False):
+        assert tools is not None
+        assert stream is True
+
+        def stream():
+            yield {
+                "type": "response.refusal.delta",
+                "output_index": 0,
+                "content_index": 0,
+                "delta": "draft refusal",
+            }
+            yield {
+                "type": "response.refusal.done",
+                "output_index": 0,
+                "content_index": 0,
+                "refusal": expected,
+            }
+            yield {
+                "type": "response.completed",
+                "response": {
+                    "status": "completed",
+                    "output": [{"type": "message", "finish_reason": "stop"}],
+                },
+            }
+
+        return stream()
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Responses Refusal Done Agent",
+                "model_mode": "custom_api",
+                "model_config": {"base_url": "https://api.example.test/v1", "model": "demo-model", "api_key": "sk-secret"},
+            }
+        )
+        run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Use Responses refusal.done"})
+        run_events = service.list_run_events(run["run_id"], include_internal=True)["events"]
+        completed_fact = next(event for event in run_events if event["event_type"] == "agent.run.completed")
+
+        assert run["status"] == "completed"
+        assert run["result"] == expected
+        assert completed_fact["payload"]["result"] == expected
+        assert "draft refusal" not in json.dumps({"run": run, "events": run_events}, ensure_ascii=False)
+        assert not any(str(event["event_type"]).endswith(".delta") for event in run_events)
+    finally:
+        service.close()
+
+
 def test_agent_run_hides_streaming_reasoning_delta(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     private_reasoning = "agent provider hidden reasoning"

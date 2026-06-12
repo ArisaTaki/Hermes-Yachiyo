@@ -1666,6 +1666,7 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow smoke tests must cover NativeRunEngine Agent Run HTTP SSE content parts" in messages
     assert "macOS release workflow smoke tests must cover NativeRunEngine Agent Run streaming refusal deltas" in messages
     assert "macOS release workflow smoke tests must cover NativeRunEngine Agent Run refusal message fields" in messages
+    assert "macOS release workflow smoke tests must cover NativeRunEngine Agent Run Responses refusal.done snapshots" in messages
     assert "macOS release workflow smoke tests must cover NativeRunEngine Agent Run streaming reasoning privacy" in messages
     assert "macOS release workflow smoke tests must cover NativeRunEngine Agent Run reasoning privacy" in messages
     assert "macOS release workflow smoke tests must cover NativeRunEngine Agent Run HTTP SSE provider error redaction" in messages

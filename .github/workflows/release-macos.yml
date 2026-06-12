@@ -187,6 +187,7 @@ jobs:
             tests/test_agent_runtime.py::test_agent_run_consumes_http_sse_content_parts \
             tests/test_agent_runtime.py::test_agent_run_persists_streaming_refusal_delta \
             tests/test_agent_runtime.py::test_agent_run_accepts_refusal_message_field \
+            tests/test_agent_runtime.py::test_agent_run_uses_responses_refusal_done_snapshot \
             tests/test_agent_runtime.py::test_agent_run_hides_streaming_reasoning_delta \
             tests/test_agent_runtime.py::test_agent_run_rejects_reasoning_only_output_without_leaking \
             tests/test_agent_runtime.py::test_agent_run_redacts_http_sse_provider_error \

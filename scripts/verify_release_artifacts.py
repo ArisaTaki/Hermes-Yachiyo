@@ -1237,6 +1237,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover NativeRunEngine Agent Run refusal message fields",
     ),
     (
+        "tests/test_agent_runtime.py::test_agent_run_uses_responses_refusal_done_snapshot",
+        "macOS release workflow smoke tests must cover NativeRunEngine Agent Run Responses refusal.done snapshots",
+    ),
+    (
         "tests/test_agent_runtime.py::test_agent_run_hides_streaming_reasoning_delta",
         "macOS release workflow smoke tests must cover NativeRunEngine Agent Run streaming reasoning privacy",
     ),
