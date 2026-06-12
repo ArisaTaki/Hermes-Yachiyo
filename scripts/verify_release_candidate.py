@@ -200,6 +200,7 @@ def _manual_release_candidate_checks_markdown(
     checks: Sequence[dict[str, str]],
     *,
     source_path: Path | None = None,
+    markdown_path: Path | None = None,
 ) -> str:
     summary = _manual_release_candidate_check_summary(checks)
     remaining_checks = [
@@ -210,6 +211,7 @@ def _manual_release_candidate_checks_markdown(
     ]
     automated_ids = summary.get("automated_evidence_check_ids", [])
     failed_ids = summary.get("failed_check_ids", [])
+    manual_checks_arg = str(markdown_path) if markdown_path is not None else "<this-checklist.md>"
     lines = [
         "# Oha-Yachiyo Manual Release-Candidate Signoff",
         "",
@@ -229,6 +231,16 @@ def _manual_release_candidate_checks_markdown(
         "- Change to ``- [x] `check_id` `` to mark `passed`; omitted status defaults to `passed`.",
         "- Use ``- [x] `check_id` - not_applicable`` or ``- [x] `check_id` - failed`` for explicit outcomes.",
         "- Every `passed`, `failed`, or `not_applicable` item needs non-empty `Evidence:`; indent continuation lines under it.",
+        "",
+        "## Final Gate",
+        "",
+        "After filling this checklist, run:",
+        "",
+        "```bash",
+        "python scripts/verify_release_candidate.py --require-artifacts "
+        f"--manual-checks-markdown {manual_checks_arg} "
+        "--require-manual-checks-complete --report-json tmp/rc-with-manual-checks.json",
+        "```",
         "",
         "## Remaining Manual Checks",
         "",
@@ -570,7 +582,11 @@ def write_manual_release_candidate_checks_markdown(
     )
     resolved.parent.mkdir(parents=True, exist_ok=True)
     resolved.write_text(
-        _manual_release_candidate_checks_markdown(checks, source_path=source_path),
+        _manual_release_candidate_checks_markdown(
+            checks,
+            source_path=source_path,
+            markdown_path=output_path,
+        ),
         encoding="utf-8",
     )
     return resolved

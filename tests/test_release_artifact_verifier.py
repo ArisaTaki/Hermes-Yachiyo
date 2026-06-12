@@ -169,6 +169,8 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
         in messages
     )
     assert "release candidate verifier Markdown checklist must explain evidence requirements" in messages
+    assert "release candidate verifier Markdown checklist must include the final gate command" in messages
+    assert "release candidate verifier Markdown checklist must name the final signoff report path" in messages
     assert "release candidate verifier must expose manual check Markdown writing" in messages
     assert "release candidate verifier manual check templates must preserve evidence prompts" in messages
     assert "release candidate verifier manual check templates must include next actions" in messages

@@ -1032,6 +1032,14 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release candidate verifier Markdown checklist must explain evidence requirements",
     ),
     (
+        "## Final Gate",
+        "release candidate verifier Markdown checklist must include the final gate command",
+    ),
+    (
+        "tmp/rc-with-manual-checks.json",
+        "release candidate verifier Markdown checklist must name the final signoff report path",
+    ),
+    (
         "write_manual_release_candidate_checks_markdown",
         "release candidate verifier must expose manual check Markdown writing",
     ),

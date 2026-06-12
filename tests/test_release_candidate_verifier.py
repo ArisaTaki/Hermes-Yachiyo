@@ -775,6 +775,9 @@ def test_release_candidate_verifier_writes_manual_check_markdown_from_draft(tmp_
     assert "## How To Fill" in markdown
     assert "omitted status defaults to `passed`" in markdown
     assert "Every `passed`, `failed`, or `not_applicable` item needs non-empty `Evidence:`" in markdown
+    assert "## Final Gate" in markdown
+    assert "--manual-checks-markdown tmp/final-rc-signoff.md" in markdown
+    assert "--require-manual-checks-complete --report-json tmp/rc-with-manual-checks.json" in markdown
     assert "## Remaining Manual Checks" in markdown
     assert "- [ ] `gatekeeper_first_launch`" in markdown
     assert "Evidence to record:" in markdown
