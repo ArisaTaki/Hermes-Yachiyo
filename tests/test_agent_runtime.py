@@ -35,6 +35,7 @@ from apps.shell.agent_runtime import (
     WorkflowApprovalResumeCoordinator,
     WorkflowApprovalResumeContext,
     WorkflowApprovalTransitionContext,
+    WorkflowAgentNodeHandoff,
     WorkflowChildOutcomeCoordinator,
     WorkflowCancellationProjectionCoordinator,
     WorkflowContinuationCoordinator,
@@ -1990,6 +1991,78 @@ def test_workflow_parent_resume_coordinator_does_not_project_child_failure_twice
             "workflow_node_id": "agent",
         },
     ]
+
+
+def test_workflow_agent_node_handoff_builds_child_run_payload():
+    agent = {"agent_id": "agent_research", "name": "Research Agent"}
+
+    class FakeEngine:
+        def _workflow_agent_for_node(self, node):
+            assert node["id"] == "research"
+            return agent
+
+        def _workflow_node_task(self, node):
+            return str((node.get("data") or {}).get("task") or "")
+
+        def _workflow_child_goal(self, workflow_goal, step_task):
+            return f"{workflow_goal}\n\nStep: {step_task}"
+
+    node = {
+        "id": "research",
+        "type": "agent",
+        "data": {"agentId": "fallback_agent", "task": "Summarize launch risk."},
+    }
+    handoff = WorkflowAgentNodeHandoff.from_node(
+        FakeEngine(),
+        node,
+        label="Research",
+        kind="agent",
+        workflow_goal="Ship release candidate",
+        context="Previous result",
+        has_agent_upstream=True,
+    )
+    child_run = {
+        "run_id": "child_run",
+        "status": "completed",
+        "result": "Launch risk summary",
+    }
+
+    assert handoff.agent is agent
+    assert handoff.agent_id == "agent_research"
+    assert handoff.node_info() == {
+        "workflow_node_id": "research",
+        "workflow_node_kind": "agent",
+        "workflow_node_label": "Research",
+    }
+    assert handoff.step_task == "Summarize launch risk."
+    assert handoff.child_goal == "Ship release candidate\n\nStep: Summarize launch risk."
+    assert handoff.upstream == "Previous result"
+    assert handoff.agent_event_payload(child_run, artifact_count=2) == {
+        "workflow_node_id": "research",
+        "workflow_node_kind": "agent",
+        "workflow_node_label": "Research",
+        "workflow_node_task": "Summarize launch risk.",
+        "child_run_id": "child_run",
+        "status": "completed",
+        "result": "Launch risk summary",
+        "artifact_count": 2,
+    }
+    assert handoff.status_event_payload(child_run) == {
+        "workflow_node_id": "research",
+        "workflow_node_kind": "agent",
+        "workflow_node_label": "Research",
+        "child_run_id": "child_run",
+        "status": "completed",
+    }
+    assert WorkflowAgentNodeHandoff.from_node(
+        FakeEngine(),
+        node,
+        label="Research",
+        kind="agent",
+        workflow_goal="Ship release candidate",
+        context="Previous result",
+        has_agent_upstream=False,
+    ).upstream == ""
 
 
 def test_workflow_continuation_coordinator_pauses_for_approval_node():

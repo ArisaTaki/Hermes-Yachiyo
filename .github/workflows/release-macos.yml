@@ -103,6 +103,7 @@ jobs:
             tests/test_agent_runtime.py::test_workflow_parent_resume_coordinator_does_not_project_child_cancel_twice \
             tests/test_agent_runtime.py::test_workflow_parent_resume_coordinator_does_not_project_child_failure_twice \
             tests/test_agent_runtime.py::test_workflow_cancellation_projection_coordinator_cancels_waiting_child_run \
+            tests/test_agent_runtime.py::test_workflow_agent_node_handoff_builds_child_run_payload \
             tests/test_agent_runtime.py::test_workflow_continuation_coordinator_pauses_for_approval_node \
             tests/test_agent_runtime.py::test_workflow_continuation_coordinator_resumes_after_approval_node \
             tests/test_agent_runtime.py::test_workflow_continuation_coordinator_projects_background_failure_without_secret_leak \
