@@ -60,6 +60,21 @@ def _load_report(path: Path) -> dict[str, object]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _report_matches_current_source(report_path: Path, *, short_commit: str) -> bool:
+    if not report_path.exists():
+        return False
+    try:
+        report = _load_report(report_path)
+    except (OSError, json.JSONDecodeError):
+        return False
+    source_revision = report.get("source_revision")
+    if not isinstance(source_revision, dict):
+        return False
+    if source_revision.get("dirty") is not False:
+        return False
+    return source_revision.get("short_commit") == short_commit
+
+
 def _preview_failure_is_only_manual_incomplete(report_path: Path) -> bool:
     report = _load_report(report_path)
     summary = report.get("manual_release_candidate_check_summary")
@@ -81,6 +96,7 @@ def refresh_local_rc_signoff(
     skip_build: bool = False,
     run_provider_smoke: bool = False,
     skip_screen_smoke: bool = False,
+    reuse_current_reports: bool = False,
 ) -> dict[str, Path]:
     label = short_commit or _git_short_commit()
     tmp_dir = ROOT / "tmp"
@@ -90,36 +106,48 @@ def refresh_local_rc_signoff(
     signoff_draft = tmp_dir / f"rc-signoff-{label}-current.json"
     signoff_markdown = tmp_dir / f"rc-signoff-{label}-current.md"
     signoff_preview = tmp_dir / f"rc-signoff-{label}-preview.json"
+    batch_report_is_current = (
+        reuse_current_reports
+        and not run_provider_smoke
+        and _report_matches_current_source(batch_report, short_commit=label)
+    )
+    screen_report_is_current = (
+        reuse_current_reports
+        and _report_matches_current_source(screen_report, short_commit=label)
+    )
 
-    if not skip_build:
+    if not skip_build and not batch_report_is_current:
         build_release_candidate_artifacts(channel=channel, repository=repository)
+        screen_report_is_current = False
 
-    batch_command = [
-        sys.executable,
-        "scripts/verify_release_candidate.py",
-        "--require-artifacts",
-        "--check-dmg-mount",
-        "--run-dmg-app-smoke",
-        "--run-dmg-ui-sampling-smoke",
-        "--run-dmg-chat-native-file-smoke",
-        "--report-json",
-        str(batch_report.relative_to(ROOT)),
-    ]
-    if run_provider_smoke:
-        batch_command.append("--run-provider-smoke")
-    _run(batch_command)
-
-    manual_sources = [batch_report]
-    if not skip_screen_smoke:
-        screen_command = [
+    if not batch_report_is_current:
+        batch_command = [
             sys.executable,
             "scripts/verify_release_candidate.py",
             "--require-artifacts",
-            "--run-dmg-screen-smoke",
+            "--check-dmg-mount",
+            "--run-dmg-app-smoke",
+            "--run-dmg-ui-sampling-smoke",
+            "--run-dmg-chat-native-file-smoke",
             "--report-json",
-            str(screen_report.relative_to(ROOT)),
+            str(batch_report.relative_to(ROOT)),
         ]
-        _run(screen_command, allow_failure=True)
+        if run_provider_smoke:
+            batch_command.append("--run-provider-smoke")
+        _run(batch_command)
+
+    manual_sources = [batch_report]
+    if not skip_screen_smoke:
+        if not screen_report_is_current:
+            screen_command = [
+                sys.executable,
+                "scripts/verify_release_candidate.py",
+                "--require-artifacts",
+                "--run-dmg-screen-smoke",
+                "--report-json",
+                str(screen_report.relative_to(ROOT)),
+            ]
+            _run(screen_command, allow_failure=True)
         if screen_report.exists():
             manual_sources.append(screen_report)
 
@@ -181,6 +209,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--skip-build", action="store_true")
     parser.add_argument("--skip-screen-smoke", action="store_true")
     parser.add_argument(
+        "--reuse-current-reports",
+        action="store_true",
+        help=(
+            "Reuse existing batch/screen reports when their source_revision "
+            "matches the current clean HEAD short commit."
+        ),
+    )
+    parser.add_argument(
         "--run-provider-smoke",
         action="store_true",
         help="Run real provider smoke during the packaged batch gate.",
@@ -205,6 +241,7 @@ def main(argv: list[str] | None = None) -> int:
             skip_build=args.skip_build,
             run_provider_smoke=args.run_provider_smoke,
             skip_screen_smoke=args.skip_screen_smoke,
+            reuse_current_reports=args.reuse_current_reports,
         )
     except subprocess.CalledProcessError as exc:
         print(

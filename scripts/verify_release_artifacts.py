@@ -666,6 +666,10 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document local RC signoff refresh helper",
     ),
     (
+        "--reuse-current-reports",
+        "release packaging docs must document local RC signoff resume/reuse mode",
+    ),
+    (
         "每个 DMG 的 `.sha256` 文件",
         "release packaging docs must document per-DMG checksum file validation",
     ),
