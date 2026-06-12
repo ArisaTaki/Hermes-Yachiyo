@@ -729,6 +729,18 @@ STREAMING_PROVIDER_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "provider smoke tests must cover Responses reasoning summary done snapshots",
     ),
     (
+        "def test_stream_smoke_uses_responses_content_part_done_snapshot",
+        "provider smoke tests must cover Responses content part done snapshots",
+    ),
+    (
+        "def test_stream_smoke_uses_responses_refusal_done_snapshot",
+        "provider smoke tests must cover Responses refusal done snapshots",
+    ),
+    (
+        "def test_stream_smoke_accepts_sse_delta_tool_call_object_arguments_without_leaking",
+        "provider smoke tests must cover object-shaped streaming tool arguments without leaks",
+    ),
+    (
         "assert leaked_secret not in captured.err",
         "provider smoke tests must prove provider errors do not print API keys",
     ),
