@@ -12,7 +12,7 @@
 
 - 执行内核替换：约 95%。
 - v0.5 功能保留合同：约 96%。
-- PR-4 Hermes 删除与发布验收：约 97%。
+- PR-4 Hermes 删除与发布验收：约 98%。
 - Harness 风格架构完整度：约 96%。
 
 这里的 Harness 风格指：Run 作为执行事实、事件可回放、工具有 descriptor/policy/approval/budget、Workflow/Agent Studio/Chat 共享同一个 NativeRunEngine。当前行为骨架已经具备，但组件边界和 replay/projection 成熟度还没到最终形态。
@@ -2178,7 +2178,8 @@ compileall passed
 - release workflow 的 app build metadata 生成已从内联 JSON 收敛到 `python scripts/prepare_app_build_metadata.py`，本地 RC 重新打包前可用同一脚本刷新 `.app` 与 packaged backend 共用 metadata；release verifier 会阻断 workflow 退回非脚本路径或漏跑脚本单测。
 - 本轮已用当前 commit metadata 临时刷新本地构建、重建 `dist/backend/oha-yachiyo-backend` 与 `dist/electron/Oha-Yachiyo-0.4.0-arm64.dmg`。首次 `python scripts/verify_release_candidate.py --require-artifacts --report-json tmp/rc-verification-local.json` 暴露 packaged `app.asar` 缺 `bubble-launcher-*` / `live2d-launcher-*` session summary 具体 selector；已把 Launcher session summary probe 从模板字符串 selector 改为显式 selector 常量，重打包后该 RC artifact gate 通过。`node scripts/smoke_launcher_session_summary_ui.mjs` 也通过，确认 Bubble / Live2D session summary selector 仍支撑真实 Electron 交互。随后提升权限运行 `python scripts/verify_release_candidate.py --require-artifacts --run-ui-smoke --report-json tmp/rc-verification-local-ui.json`，source guards、built artifact guards 和十九个 Electron UI smoke 全部通过；剩余仍需人工 Gatekeeper / 屏幕录制权限复验，以及具备真实 provider credentials 时运行 opt-in streaming/tool-call provider smoke。
 - release candidate verifier 已新增 `--check-dmg-mount`：本地会只读挂载发现到的 DMG，并对 DMG 内真实 `Oha-Yachiyo.app/Contents/Resources` 和所属 `.app` bundle 再跑 packaged app scan；release workflow 上传 DMG 前会运行 `python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount --report-json release/rc-verification.json`。本机沙箱内直接 `hdiutil attach` 会失败，提升权限后 `python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount --report-json tmp/rc-verification-local-dmg.json` 已通过，确认当前 DMG 内 `.app` 与 unpacked `.app` 一致通过发布门禁。
-- 桌面 `.app` 已实际启动并验证 bridge；主要 UI 页面已有静态入口 guard、浏览器级 route smoke、source Browser 按钮级交互 smoke 和十九个本地 Electron UI smoke。剩余 UI 验收重点不再是入口是否存在，而是当前 Browser runner 尚不能完整驱动的真实图片 file upload、真实外部 provider 环境、以及 release candidate 包的跨页面人工复验。
+- release candidate verifier 已新增 `--run-dmg-app-smoke`：本地会只读挂载 DMG、用临时 `HOME` / `OHA_YACHIYO_HOME` 与临时 Bridge 端口直接启动 DMG 内 `Oha-Yachiyo.app`，等待 packaged backend `/status` 返回 `service=oha-yachiyo` 后关闭应用进程。提升权限后 `python scripts/verify_release_candidate.py --require-artifacts --run-dmg-app-smoke --report-json tmp/rc-verification-local-dmg-app.json` 已通过；组合运行 `python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount --run-dmg-app-smoke --report-json tmp/rc-verification-local-dmg-combined.json` 也已通过，证明当前 DMG 内 `.app` 能实际启动并暴露 packaged Bridge，而不是只通过静态 artifact scan。
+- 桌面 `.app` 已实际启动并验证 bridge；主要 UI 页面已有静态入口 guard、浏览器级 route smoke、source Browser 按钮级交互 smoke、DMG 内 packaged app startup smoke 和十九个本地 Electron UI smoke。剩余 UI 验收重点不再是入口是否存在，而是当前 Browser runner 尚不能完整驱动的真实图片 file upload、真实外部 provider 环境、Gatekeeper/Finder 首启路径、屏幕录制授权，以及 release candidate 包的跨页面人工抽样复验。
 
 ## 下一步建议
 
@@ -2199,4 +2200,4 @@ compileall passed
 4. 做最终发布验收切片：
    - release/alpha/stable 的旧产品身份扫描、debug routes guard、dev credential fallback guard、release metadata、packaged resources scan 和 generated artifact guard 已由 `scripts/verify_release_artifacts.py` 与 release workflow 锁定。
    - 当前免费分发策略是 `.app` 自签名、DMG 不签名且不 notarize，并在 release notes 中明确 Gatekeeper 首启提示和屏幕录制权限；如果后续引入 Apple Developer ID，再新增 notarization / stapling / `spctl` 实测切片。
-   - 当前实际产出的 `.app` / DMG 已通过 `python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount`，十九个 Electron UI smoke 也已在本地 RC gate 通过；最终发布前剩余人工确认首次启动文案、Gatekeeper 打开路径和屏幕录制权限提示，以及在具备真实 provider credentials 时运行 opt-in streaming/tool-call provider smoke。
+   - 当前实际产出的 `.app` / DMG 已通过 `python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount` 和 `python scripts/verify_release_candidate.py --require-artifacts --run-dmg-app-smoke`，十九个 Electron UI smoke 也已在本地 RC gate 通过；最终发布前剩余人工确认首次启动文案、Gatekeeper 打开路径和屏幕录制权限提示，以及在具备真实 provider credentials 时运行 opt-in streaming/tool-call provider smoke。

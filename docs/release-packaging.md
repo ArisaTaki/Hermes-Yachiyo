@@ -152,6 +152,12 @@ python scripts/verify_release_candidate.py --require-artifacts
 python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount
 ```
 
+需要从 DMG 内真实 `.app` 启动并等待 packaged Bridge `/status` 时运行：
+
+```bash
+python scripts/verify_release_candidate.py --require-artifacts --run-dmg-app-smoke
+```
+
 需要把 Electron UI smoke 也纳入本地 RC gate 时运行：
 
 ```bash
@@ -165,9 +171,9 @@ python scripts/verify_release_candidate.py --source-only --report-json tmp/sourc
 ```
 
 `--source-only` 会跳过本机已有 `dist/` 或 `release/` 旧产物，避免 stale `.app` / DMG 干扰源码验收判断；最终 RC 仍必须重新打包并运行 `--require-artifacts`。
-`--source-only` 不能和 artifact path、`--require-artifacts`、`--check-dmg-mount` 或 `--run-ui-smoke` 混用；DMG mount 和 Electron UI smoke 只属于完整本地 RC 复验。
+`--source-only` 不能和 artifact path、`--require-artifacts`、`--check-dmg-mount`、`--run-dmg-app-smoke` 或 `--run-ui-smoke` 混用；DMG mount、DMG app startup smoke 和 Electron UI smoke 只属于完整本地 RC 复验。
 
-macOS release workflow 会在生成 release metadata 后、上传 DMG 前运行 `python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount --report-json release/rc-verification.json`，确保 CI 与本地 RC 验收入口一致，并把 `release/rc-verification.json` 作为可归档验收报告随 release artifacts 上传。`--check-dmg-mount` 会只读挂载发现到的 DMG，并对 DMG 内真实 `.app` 的 `Contents/Resources` 再执行 packaged app scan。带 `--run-ui-smoke` 的完整 Electron UI smoke 仍保留给本地 RC 复验，因为它会启动本地 Electron BrowserWindow。
+macOS release workflow 会在生成 release metadata 后、上传 DMG 前运行 `python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount --report-json release/rc-verification.json`，确保 CI 与本地 RC 验收入口一致，并把 `release/rc-verification.json` 作为可归档验收报告随 release artifacts 上传。`--check-dmg-mount` 会只读挂载发现到的 DMG，并对 DMG 内真实 `.app` 的 `Contents/Resources` 再执行 packaged app scan。带 `--run-dmg-app-smoke` 的 packaged app 启动检查和带 `--run-ui-smoke` 的完整 Electron UI smoke 仍保留给本地 RC 复验，因为它们会启动本地 Electron 应用或 BrowserWindow。
 
 脚本仍会列出必须人工确认的首次启动 / Gatekeeper / 屏幕录制权限检查项。
 

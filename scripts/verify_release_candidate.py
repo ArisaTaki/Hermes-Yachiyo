@@ -4,10 +4,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
+import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -24,6 +29,8 @@ DEFAULT_ARTIFACT_PATHS: tuple[Path, ...] = (
     Path("release"),
 )
 PACKAGED_APP_NAME = "Oha-Yachiyo.app"
+PACKAGED_APP_EXECUTABLE_NAME = "Oha-Yachiyo"
+DMG_APP_SMOKE_TIMEOUT_SECONDS = 45.0
 MANUAL_RELEASE_CANDIDATE_CHECKS: tuple[str, ...] = (
     "Mount the DMG and launch Oha-Yachiyo.app once with the documented Gatekeeper first-launch flow.",
     "Confirm the packaged app starts its local bridge and does not connect to a development backend.",
@@ -104,6 +111,39 @@ def _validate_smoke_script_paths(root: Path, smoke_scripts: Sequence[Path]) -> t
 
 def _absolute_artifact_path(root: Path, artifact_path: Path) -> Path:
     return artifact_path if artifact_path.is_absolute() else root / artifact_path
+
+
+def _allocate_loopback_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
+        server.bind(("127.0.0.1", 0))
+        return int(server.getsockname()[1])
+
+
+def _terminate_process(process: subprocess.Popen[str], timeout_seconds: float = 5.0) -> None:
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        try:
+            process.wait(timeout=timeout_seconds)
+        except subprocess.TimeoutExpired:
+            pass
+
+
+def _read_process_output(process: subprocess.Popen[str]) -> tuple[str, str]:
+    try:
+        stdout, stderr = process.communicate(timeout=1)
+    except subprocess.TimeoutExpired:
+        return "", ""
+    return stdout or "", stderr or ""
+
+
+def _redacted_process_detail(stdout: str, stderr: str) -> str:
+    detail = "\n".join(part.strip() for part in (stderr, stdout) if part and part.strip())
+    return redact_api_error_text(detail.strip())
 
 
 def release_candidate_dmg_paths(root: Path, artifact_paths: Sequence[Path]) -> tuple[Path, ...]:
@@ -203,6 +243,130 @@ def verify_dmg_mount_artifacts(root: Path, dmg_paths: Sequence[Path]) -> list[Fi
     return findings
 
 
+def _read_status_json(bridge_url: str) -> dict[str, Any]:
+    with urllib.request.urlopen(f"{bridge_url}/status", timeout=1.0) as response:
+        body = response.read().decode("utf-8")
+    data = json.loads(body)
+    return data if isinstance(data, dict) else {}
+
+
+def verify_dmg_app_startup(
+    root: Path,
+    dmg_paths: Sequence[Path],
+    *,
+    timeout_seconds: float = DMG_APP_SMOKE_TIMEOUT_SECONDS,
+) -> list[Finding]:
+    findings: list[Finding] = []
+    if not dmg_paths:
+        findings.append(Finding(root, "release candidate DMG app startup smoke requested but no .dmg artifacts were found"))
+        return findings
+    if sys.platform != "darwin":
+        findings.append(Finding(root, "release candidate DMG app startup smoke requires macOS"))
+        return findings
+    for dmg_path in dmg_paths:
+        absolute_dmg = _absolute_artifact_path(root, dmg_path)
+        mount_dir = Path(tempfile.mkdtemp(prefix="oha-yachiyo-rc-app-"))
+        attached = False
+        process: subprocess.Popen[str] | None = None
+        try:
+            attach = subprocess.run(
+                [
+                    "hdiutil",
+                    "attach",
+                    str(absolute_dmg),
+                    "-nobrowse",
+                    "-readonly",
+                    "-mountpoint",
+                    str(mount_dir),
+                    "-quiet",
+                ],
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            if attach.returncode != 0:
+                detail = redact_api_error_text((attach.stderr or attach.stdout or "").strip())
+                message = "release candidate DMG could not be mounted for app startup smoke"
+                if detail:
+                    message = f"{message}: {detail}"
+                findings.append(Finding(dmg_path, message))
+                continue
+            attached = True
+            app_path = mount_dir / PACKAGED_APP_NAME
+            executable_path = app_path / "Contents" / "MacOS" / PACKAGED_APP_EXECUTABLE_NAME
+            if not executable_path.is_file():
+                findings.append(Finding(dmg_path, f"mounted {PACKAGED_APP_NAME} must contain executable {PACKAGED_APP_EXECUTABLE_NAME}"))
+                continue
+            if not os.access(executable_path, os.X_OK):
+                findings.append(Finding(dmg_path, f"mounted {PACKAGED_APP_NAME} executable is not executable"))
+                continue
+            bridge_url = f"http://127.0.0.1:{_allocate_loopback_port()}"
+            with tempfile.TemporaryDirectory(prefix="oha-yachiyo-rc-home-") as home_dir:
+                env = {
+                    **os.environ,
+                    "HOME": home_dir,
+                    "OHA_YACHIYO_HOME": str(Path(home_dir) / ".oha-yachiyo"),
+                    "OHA_YACHIYO_BRIDGE_URL": bridge_url,
+                }
+                process = subprocess.Popen(
+                    [str(executable_path)],
+                    cwd=str(app_path),
+                    env=env,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                deadline = time.monotonic() + timeout_seconds
+                last_error = ""
+                passed = False
+                while time.monotonic() < deadline:
+                    exit_code = process.poll()
+                    if exit_code is not None:
+                        stdout, stderr = _read_process_output(process)
+                        detail = _redacted_process_detail(stdout, stderr)
+                        message = f"release candidate app exited before /status was ready: exit_code={exit_code}"
+                        if detail:
+                            message = f"{message}: {detail}"
+                        findings.append(Finding(dmg_path, message))
+                        break
+                    try:
+                        status = _read_status_json(bridge_url)
+                    except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
+                        last_error = redact_api_error_text(str(exc))
+                        time.sleep(0.5)
+                        continue
+                    if status.get("service") == "oha-yachiyo":
+                        passed = True
+                        break
+                    last_error = redact_api_error_text(f"unexpected /status service={status.get('service')!r}")
+                    time.sleep(0.5)
+                if not passed and not any(finding.path == dmg_path for finding in findings):
+                    message = f"release candidate app did not expose /status within {timeout_seconds:.0f}s"
+                    if last_error:
+                        message = f"{message}: {last_error}"
+                    findings.append(Finding(dmg_path, message))
+        finally:
+            if process is not None:
+                _terminate_process(process)
+            if attached:
+                detach = subprocess.run(
+                    ["hdiutil", "detach", str(mount_dir), "-quiet"],
+                    check=False,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                if detach.returncode != 0:
+                    detail = redact_api_error_text((detach.stderr or detach.stdout or "").strip())
+                    message = "release candidate DMG could not be detached after app startup smoke"
+                    if detail:
+                        message = f"{message}: {detail}"
+                    findings.append(Finding(dmg_path, message))
+            shutil.rmtree(mount_dir, ignore_errors=True)
+    return findings
+
+
 def verify_release_candidate(
     *,
     root: Path = PROJECT_ROOT,
@@ -210,6 +374,7 @@ def verify_release_candidate(
     require_artifacts: bool = False,
     source_only: bool = False,
     check_dmg_mount: bool = False,
+    run_dmg_app_smoke: bool = False,
     run_ui_smoke: bool = False,
     smoke_scripts: Sequence[Path] | None = None,
     report_json: Path | None = None,
@@ -235,6 +400,12 @@ def verify_release_candidate(
             "findings": [],
             "run_requested": check_dmg_mount,
         },
+        "dmg_app_smoke": {
+            "status": "pending",
+            "dmg_paths": [],
+            "findings": [],
+            "run_requested": run_dmg_app_smoke,
+        },
         "manual_release_candidate_check_status": "manual_required",
         "manual_release_candidate_checks": list(MANUAL_RELEASE_CANDIDATE_CHECKS),
     }
@@ -247,6 +418,8 @@ def verify_release_candidate(
             source_only_conflicts.append("--require-artifacts")
         if check_dmg_mount:
             source_only_conflicts.append("--check-dmg-mount")
+        if run_dmg_app_smoke:
+            source_only_conflicts.append("--run-dmg-app-smoke")
         if run_ui_smoke:
             source_only_conflicts.append("--run-ui-smoke")
 
@@ -273,6 +446,12 @@ def verify_release_candidate(
             "dmg_paths": [],
             "findings": [],
             "run_requested": check_dmg_mount,
+        }
+        report["dmg_app_smoke"] = {
+            "status": "skipped",
+            "dmg_paths": [],
+            "findings": [],
+            "run_requested": run_dmg_app_smoke,
         }
         report["electron_ui_smoke"] = {
             "status": "skipped",
@@ -327,6 +506,12 @@ def verify_release_candidate(
                 "dmg_paths": [],
                 "findings": [],
                 "run_requested": check_dmg_mount,
+            }
+            report["dmg_app_smoke"] = {
+                "status": "skipped",
+                "dmg_paths": [],
+                "findings": [],
+                "run_requested": run_dmg_app_smoke,
             }
         elif selected_artifacts:
             artifact_findings = verify_release_artifacts(
@@ -392,6 +577,34 @@ def verify_release_candidate(
             "dmg_paths": [],
             "findings": [],
             "run_requested": check_dmg_mount,
+        }
+
+    if run_dmg_app_smoke and not artifact_paths_valid:
+        print("DMG app startup smoke: skipped because artifact paths failed validation")
+        report["dmg_app_smoke"] = {
+            "status": "skipped",
+            "dmg_paths": [],
+            "findings": [],
+            "run_requested": run_dmg_app_smoke,
+        }
+    elif run_dmg_app_smoke:
+        dmg_paths = release_candidate_dmg_paths(root, selected_artifacts)
+        startup_findings = verify_dmg_app_startup(root, dmg_paths)
+        _print_findings("DMG app startup smoke", startup_findings)
+        failed = failed or bool(startup_findings)
+        report["dmg_app_smoke"] = {
+            "status": "failed" if startup_findings else "passed",
+            "dmg_paths": [str(path) for path in dmg_paths],
+            "findings": _finding_report(startup_findings),
+            "run_requested": run_dmg_app_smoke,
+        }
+    else:
+        print("DMG app startup smoke: skipped; pass --run-dmg-app-smoke to launch the app inside DMG artifacts")
+        report["dmg_app_smoke"] = {
+            "status": "skipped",
+            "dmg_paths": [],
+            "findings": [],
+            "run_requested": run_dmg_app_smoke,
         }
 
     selected_smoke_scripts = tuple(smoke_scripts) if smoke_scripts is not None else release_ui_smoke_scripts(root)
@@ -492,6 +705,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Mount every discovered DMG and verify the packaged app inside it.",
     )
     parser.add_argument(
+        "--run-dmg-app-smoke",
+        action="store_true",
+        help="Launch the app inside discovered DMGs and wait for its packaged /status endpoint.",
+    )
+    parser.add_argument(
         "--report-json",
         type=Path,
         help="Write a machine-readable release-candidate verification report.",
@@ -502,6 +720,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         require_artifacts=args.require_artifacts,
         source_only=args.source_only,
         check_dmg_mount=args.check_dmg_mount,
+        run_dmg_app_smoke=args.run_dmg_app_smoke,
         run_ui_smoke=args.run_ui_smoke,
         report_json=args.report_json,
     )
