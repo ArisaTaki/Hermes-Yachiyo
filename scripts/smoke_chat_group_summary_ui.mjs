@@ -730,6 +730,8 @@ async function waitForSummaryRunDetail(win) {
       && detail?.getAttribute('data-run-kind') === 'main_chat_run'
       && detail?.getAttribute('data-run-status') === 'completed'
       && detail?.getAttribute('data-run-group-id') === ${JSON.stringify(RUN_GROUP_ID)}
+      && detail?.getAttribute('data-task-id') === ${JSON.stringify(SUMMARY_TASK_ID)}
+      && detail?.getAttribute('data-session-id') === ${JSON.stringify(GROUP_SESSION_ID)}
       && result?.textContent.includes(${JSON.stringify(GROUP_SUMMARY_RESULT)})
       && eventTypes.includes('model.output.completed')
       && eventTypes.includes('run.completed')
@@ -956,6 +958,8 @@ async function main() {
       && detail?.getAttribute('data-run-kind') === 'agent_run'
       && detail?.getAttribute('data-run-status') === 'completed'
       && detail?.getAttribute('data-run-group-id') === ${JSON.stringify(RUN_GROUP_ID)}
+      && detail?.getAttribute('data-task-id') === ${JSON.stringify(GROUP_AGENT_TASK_ID)}
+      && detail?.getAttribute('data-session-id') === ${JSON.stringify(GROUP_SESSION_ID)}
       && result?.textContent.includes(${JSON.stringify(GROUP_AGENT_RESULT)})
       && eventTypes.includes('agent.run.started')
       && eventTypes.includes('model.output.completed')
