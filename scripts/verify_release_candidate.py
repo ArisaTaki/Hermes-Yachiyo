@@ -1212,6 +1212,61 @@ def _source_revision_final_signoff_findings(
     ]
 
 
+def _manual_evidence_source_revision_final_signoff_findings(
+    root: Path,
+    report: dict[str, Any],
+    *,
+    require_manual_checks_complete: bool,
+) -> list[Finding]:
+    if not require_manual_checks_complete:
+        return []
+    source_revision = report.get("source_revision")
+    if not isinstance(source_revision, dict) or source_revision.get("available") is not True:
+        return []
+    current_commit = str(source_revision.get("commit") or "").strip()
+    if not current_commit:
+        return []
+    current_label = str(source_revision.get("short_commit") or current_commit[:7]).strip()
+    raw_revisions = report.get("manual_release_candidate_check_source_revisions")
+    if not isinstance(raw_revisions, list):
+        return []
+
+    findings: list[Finding] = []
+    for revision in raw_revisions:
+        if not isinstance(revision, dict) or revision.get("available") is not True:
+            continue
+        source = Path(str(revision.get("source") or "manual release-candidate evidence"))
+        evidence_commit = str(revision.get("commit") or "").strip()
+        evidence_label = str(
+            revision.get("short_commit") or evidence_commit[:7] or "unavailable"
+        ).strip()
+        if revision.get("dirty") is True:
+            findings.append(
+                Finding(
+                    source,
+                    (
+                        "final signoff requires manual release-candidate evidence "
+                        f"from a clean source revision; {source}@{evidence_label} "
+                        "was recorded with dirty source"
+                    ),
+                )
+            )
+            continue
+        if evidence_commit and evidence_commit != current_commit:
+            findings.append(
+                Finding(
+                    source,
+                    (
+                        "manual release-candidate evidence source revision "
+                        f"{evidence_label} does not match current source_revision.commit "
+                        f"{current_label}; rerun RC evidence or regenerate manual "
+                        "checks from the current source before final signoff"
+                    ),
+                )
+            )
+    return findings
+
+
 def _recorded_bridge_statuses(report: dict[str, Any]) -> list[dict[str, Any]]:
     statuses: list[dict[str, Any]] = []
     for section_name in DMG_BRIDGE_STATUS_REPORT_SECTIONS:
@@ -3118,10 +3173,27 @@ def verify_release_candidate(
     report["source_revision_final_signoff_findings"] = _finding_report(
         source_revision_final_signoff_findings
     )
+    manual_source_revision_findings = (
+        _manual_evidence_source_revision_final_signoff_findings(
+            root,
+            report,
+            require_manual_checks_complete=require_manual_checks_complete,
+        )
+    )
+    if manual_source_revision_findings:
+        _print_findings(
+            "manual evidence source revision guard",
+            manual_source_revision_findings,
+        )
+    report["manual_release_candidate_check_source_revision_findings"] = _finding_report(
+        manual_source_revision_findings
+    )
 
     failed = failed or manual_check_status == "failed" or (
         require_manual_checks_complete and manual_check_status != "passed"
-    ) or bool(source_revision_final_signoff_findings)
+    ) or bool(source_revision_final_signoff_findings) or bool(
+        manual_source_revision_findings
+    )
     report["ok"] = not failed
     if report_json is not None:
         try:
