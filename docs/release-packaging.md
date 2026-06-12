@@ -91,7 +91,7 @@ Oha-Yachiyo.app/Contents/Resources/backend/oha-yachiyo-backend
 6. 如果配置了自签名证书，electron-builder 生成 `.app` 目录后由脚本签名 `.app` 并创建未签名 DMG；否则 electron-builder 直接生成 unsigned DMG。
 7. Verify packaged app resources 会检查 `.app` 结构、后端可执行文件、`app.asar`、关键 UI selector 和 packaged resources 旧身份扫描；启用自签名时，还会对最终 packaged `.app` 运行 `codesign --verify --deep --strict --verbose=2`。
 8. 生成版本化 DMG、latest DMG、SHA256、latest JSON 和 release notes。
-9. 对 `release/` 目录执行 binary-safe release artifact scan，确认最终 DMG、JSON、checksum 和 notes 没有旧产品身份或旧执行内核 token。
+9. 对 `release/` 目录执行 binary-safe release artifact scan，确认最终 DMG、JSON、checksum 和 notes 没有旧产品身份或旧执行内核 token，并校验 latest JSON 的 `dmg_name` / `sha256` 与同目录 DMG 和 `.sha256` 文件一致。
 10. 上传 workflow artifact，并创建或更新 GitHub Release 与 latest channel release。
 
 Release tag 格式：

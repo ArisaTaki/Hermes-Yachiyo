@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import plistlib
@@ -480,6 +481,10 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "binary-safe release artifact scan",
         "release packaging docs must document final release artifact binary scanning",
+    ),
+    (
+        "latest JSON 的 `dmg_name` / `sha256`",
+        "release packaging docs must document latest JSON checksum consistency checks",
     ),
 )
 RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
@@ -1712,6 +1717,8 @@ def verify_release_artifacts(
             except UnicodeDecodeError:
                 findings.append(Finding(path, "release verification target is not UTF-8 text"))
 
+    findings.extend(_verify_release_directory_artifacts(root_path, scan_paths))
+
     if check_release_security_guards:
         findings.extend(_verify_release_security_guards(root_path))
         findings.extend(_verify_release_packaging_documentation(root_path))
@@ -1725,6 +1732,82 @@ def verify_release_artifacts(
         findings.extend(_verify_packaged_app_bundle(root_path))
 
     return findings
+
+
+def _verify_release_directory_artifacts(root: Path, scan_paths: Sequence[Path | str]) -> list[Finding]:
+    findings: list[Finding] = []
+    release_dirs: set[Path] = set()
+    for path in scan_paths:
+        resolved = _resolve(root, path)
+        if resolved.is_dir() and resolved.name == "release":
+            release_dirs.add(resolved)
+        elif resolved.is_file() and resolved.parent.name == "release":
+            release_dirs.add(resolved.parent)
+
+    for release_dir in sorted(release_dirs):
+        latest_json_files = sorted(release_dir.glob("Oha-Yachiyo-*-latest.json"))
+        if not latest_json_files:
+            findings.append(Finding(release_dir, "release directory must include latest channel JSON metadata"))
+            continue
+        for metadata_path in latest_json_files:
+            try:
+                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                findings.append(Finding(metadata_path, f"release latest JSON could not be parsed: {exc.__class__.__name__}"))
+                continue
+            if not isinstance(metadata, dict):
+                findings.append(Finding(metadata_path, "release latest JSON must be an object"))
+                continue
+            dmg_name = str(metadata.get("dmg_name") or "").strip()
+            if not dmg_name:
+                findings.append(Finding(metadata_path, "release latest JSON must include dmg_name"))
+                continue
+            if Path(dmg_name).name != dmg_name:
+                findings.append(Finding(metadata_path, "release latest JSON dmg_name must be a filename"))
+                continue
+            expected_sha = str(metadata.get("sha256") or "").strip().lower()
+            if not re.fullmatch(r"[0-9a-f]{64}", expected_sha):
+                findings.append(Finding(metadata_path, "release latest JSON must include a 64-character sha256"))
+                continue
+            download_url = str(metadata.get("download_url") or "")
+            if dmg_name not in download_url:
+                findings.append(Finding(metadata_path, "release latest JSON download_url must reference dmg_name"))
+            latest_json_url = str(metadata.get("latest_json_url") or "")
+            if latest_json_url and metadata_path.name not in latest_json_url:
+                findings.append(Finding(metadata_path, "release latest JSON latest_json_url must reference its metadata filename"))
+
+            dmg_path = release_dir / dmg_name
+            sha_path = release_dir / f"{dmg_name}.sha256"
+            if not dmg_path.is_file():
+                findings.append(Finding(dmg_path, "release latest JSON dmg_name does not exist"))
+                continue
+            if not sha_path.is_file():
+                findings.append(Finding(sha_path, "release latest DMG checksum file is missing"))
+                continue
+            try:
+                sha_file_value = sha_path.read_text(encoding="utf-8").split()[0].strip().lower()
+            except (OSError, IndexError) as exc:
+                findings.append(Finding(sha_path, f"release latest DMG checksum could not be read: {exc.__class__.__name__}"))
+                continue
+            if sha_file_value != expected_sha:
+                findings.append(Finding(sha_path, "release latest DMG checksum does not match latest JSON sha256"))
+                continue
+            try:
+                actual_sha = _sha256_file(dmg_path)
+            except OSError as exc:
+                findings.append(Finding(dmg_path, f"release latest DMG could not be hashed: {exc}"))
+                continue
+            if actual_sha != expected_sha:
+                findings.append(Finding(dmg_path, "release latest DMG content does not match latest JSON sha256"))
+    return findings
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 @contextmanager

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import plistlib
 import re
 
@@ -149,6 +151,93 @@ def test_verifier_binary_mode_scans_legacy_tokens(tmp_path):
             f"contains legacy product token {verifier.FORBIDDEN_TOKENS[1]!r}",
         )
     ]
+
+
+def test_verifier_validates_release_latest_json_checksum_contract(tmp_path):
+    release_dir = tmp_path / "release"
+    release_dir.mkdir()
+    dmg = release_dir / "Oha-Yachiyo-main-latest.dmg"
+    dmg.write_bytes(b"fake main dmg bytes")
+    digest = hashlib.sha256(dmg.read_bytes()).hexdigest()
+    (release_dir / f"{dmg.name}.sha256").write_text(f"{digest}  {dmg.name}\n", encoding="utf-8")
+    metadata = {
+        "name": "Oha-Yachiyo",
+        "channel": "stable",
+        "branch": "main",
+        "version": "0.4.0",
+        "commit": "abc123",
+        "build_number": 1,
+        "dmg_name": dmg.name,
+        "sha256": digest,
+        "download_url": f"https://github.example/releases/download/main-latest/{dmg.name}",
+        "latest_json_url": "https://github.example/releases/download/main-latest/Oha-Yachiyo-main-latest.json",
+    }
+    (release_dir / "Oha-Yachiyo-main-latest.json").write_text(
+        json.dumps(metadata),
+        encoding="utf-8",
+    )
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[release_dir],
+        check_required_files=False,
+        check_release_security_guards=False,
+        allow_binary_targets=True,
+    )
+
+    assert findings == []
+
+
+def test_verifier_reports_release_latest_json_checksum_mismatches(tmp_path):
+    release_dir = tmp_path / "release"
+    release_dir.mkdir()
+
+    main_dmg = release_dir / "Oha-Yachiyo-main-latest.dmg"
+    main_dmg.write_bytes(b"main dmg")
+    main_digest = hashlib.sha256(main_dmg.read_bytes()).hexdigest()
+    (release_dir / f"{main_dmg.name}.sha256").write_text(f"{'0' * 64}  {main_dmg.name}\n", encoding="utf-8")
+    (release_dir / "Oha-Yachiyo-main-latest.json").write_text(
+        json.dumps(
+            {
+                "dmg_name": main_dmg.name,
+                "sha256": main_digest,
+                "download_url": f"https://github.example/releases/download/main-latest/{main_dmg.name}",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    alpha_dmg = release_dir / "Oha-Yachiyo-alpha-latest.dmg"
+    alpha_dmg.write_bytes(b"mutated alpha dmg")
+    expected_alpha_digest = hashlib.sha256(b"expected alpha dmg").hexdigest()
+    (release_dir / f"{alpha_dmg.name}.sha256").write_text(
+        f"{expected_alpha_digest}  {alpha_dmg.name}\n",
+        encoding="utf-8",
+    )
+    (release_dir / "Oha-Yachiyo-alpha-latest.json").write_text(
+        json.dumps(
+            {
+                "dmg_name": alpha_dmg.name,
+                "sha256": expected_alpha_digest,
+                "download_url": f"https://github.example/releases/download/alpha-latest/{alpha_dmg.name}",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[release_dir],
+        check_required_files=False,
+        check_release_security_guards=False,
+        allow_binary_targets=True,
+    )
+    messages_by_path = {finding.path: finding.message for finding in findings}
+
+    assert messages_by_path[release_dir / f"{main_dmg.name}.sha256"] == (
+        "release latest DMG checksum does not match latest JSON sha256"
+    )
+    assert messages_by_path[alpha_dmg] == "release latest DMG content does not match latest JSON sha256"
 
 
 def test_verifier_binary_mode_scans_legacy_kernel_entrypoints(tmp_path):
@@ -363,6 +452,7 @@ def test_verifier_requires_release_packaging_docs_for_release_gates(tmp_path):
     assert "release packaging docs must document release CredentialStore fallback guard coverage" in messages
     assert "release packaging docs must document final packaged app signature verification" in messages
     assert "release packaging docs must document final release artifact binary scanning" in messages
+    assert "release packaging docs must document latest JSON checksum consistency checks" in messages
 
 
 def _write_packaged_app_bundle(
