@@ -1196,6 +1196,14 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover Bridge debug routes release metadata guard",
     ),
     (
+        "tests/test_bridge_server.py::test_bridge_debug_routes_are_disabled_for_release_channel_env",
+        "macOS release workflow smoke tests must cover Bridge debug routes release channel env guard",
+    ),
+    (
+        "tests/test_bridge_server.py::test_bridge_debug_routes_are_disabled_for_release_flag_env",
+        "macOS release workflow smoke tests must cover Bridge debug routes release flag env guard",
+    ),
+    (
         "tests/test_bridge_server.py::test_bridge_debug_routes_are_disabled_for_packaged_build_env",
         "macOS release workflow smoke tests must cover Bridge debug routes packaged build guard",
     ),
