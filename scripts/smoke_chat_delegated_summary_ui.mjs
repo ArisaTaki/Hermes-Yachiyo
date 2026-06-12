@@ -779,6 +779,8 @@ async function waitForApprovalRunDetail(win) {
       && detail?.getAttribute('data-run-kind') === 'agent_run'
       && detail?.getAttribute('data-run-status') === 'approval_required'
       && detail?.getAttribute('data-run-group-id') === ${JSON.stringify(RUN_GROUP_ID)}
+      && detail?.getAttribute('data-task-id') === ${JSON.stringify(SOURCE_TASK_ID)}
+      && detail?.getAttribute('data-session-id') === ${JSON.stringify(SESSION_ID)}
       && eventTypes.includes('agent.tool.approval_required')
       && events.every((node) => node.getAttribute('data-run-event-run-id') === ${JSON.stringify(DELEGATED_RUN_ID)})
       && approval
@@ -799,6 +801,8 @@ async function waitForCompletedRunDetail(win) {
       && detail?.getAttribute('data-run-kind') === 'agent_run'
       && detail?.getAttribute('data-run-status') === 'completed'
       && detail?.getAttribute('data-run-group-id') === ${JSON.stringify(RUN_GROUP_ID)}
+      && detail?.getAttribute('data-task-id') === ${JSON.stringify(SOURCE_TASK_ID)}
+      && detail?.getAttribute('data-session-id') === ${JSON.stringify(SESSION_ID)}
       && result?.textContent.includes(${JSON.stringify(DELEGATED_RESULT)})
       && eventTypes.includes('agent.tool.approval_required')
       && eventTypes.includes('agent.tool.approval_approved')
@@ -822,6 +826,8 @@ async function waitForSummaryRunDetail(win) {
       && detail?.getAttribute('data-run-kind') === 'main_chat_run'
       && detail?.getAttribute('data-run-status') === 'completed'
       && detail?.getAttribute('data-run-group-id') === ${JSON.stringify(RUN_GROUP_ID)}
+      && detail?.getAttribute('data-task-id') === ${JSON.stringify(SUMMARY_TASK_ID)}
+      && detail?.getAttribute('data-session-id') === ${JSON.stringify(SESSION_ID)}
       && result?.textContent.includes(${JSON.stringify(SUMMARY_RESULT)})
       && eventTypes.includes('model.output.completed')
       && eventTypes.includes('run.completed')
@@ -841,6 +847,8 @@ async function waitForCancelledRunDetail(win) {
       && detail?.getAttribute('data-run-kind') === 'agent_run'
       && detail?.getAttribute('data-run-status') === 'cancelled'
       && detail?.getAttribute('data-run-group-id') === ${JSON.stringify(RUN_GROUP_ID)}
+      && detail?.getAttribute('data-task-id') === ${JSON.stringify(SOURCE_TASK_ID)}
+      && detail?.getAttribute('data-session-id') === ${JSON.stringify(SESSION_ID)}
       && result?.textContent.includes(${JSON.stringify(REJECTED_RESULT)})
       && eventTypes.includes('agent.tool.approval_required')
       && eventTypes.includes('agent.tool.approval_rejected')
