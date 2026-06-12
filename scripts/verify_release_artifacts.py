@@ -146,6 +146,32 @@ CHAT_IMAGE_ATTACHMENT_SMOKE_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "Chat image Electron UI smoke must keep multi-image file input coverage",
     ),
 )
+ELECTRON_UI_SMOKE_RUNNER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
+    (
+        "def electron_ui_smoke_scripts",
+        "Electron UI smoke runner must expose dynamic smoke script discovery",
+    ),
+    (
+        'glob("smoke_*_ui.mjs")',
+        "Electron UI smoke runner must discover every scripts/smoke_*_ui.mjs file",
+    ),
+    (
+        'subprocess.run(["node", str(relative_script)]',
+        "Electron UI smoke runner must execute discovered smoke scripts with node",
+    ),
+    (
+        '"script_count"',
+        "Electron UI smoke runner report must include script_count",
+    ),
+    (
+        '"scripts"',
+        "Electron UI smoke runner report must include per-script results",
+    ),
+    (
+        '"--report-json"',
+        "Electron UI smoke runner CLI must accept a report JSON output path",
+    ),
+)
 RELEASE_LATEST_BRANCH_CHANNELS: dict[str, str] = {
     "main": "stable",
     "alpha": "alpha",
@@ -550,6 +576,14 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "python scripts/verify_release_candidate.py --require-artifacts --run-ui-smoke",
         "release packaging docs must document the local RC Electron UI smoke gate",
+    ),
+    (
+        "python scripts/run_electron_ui_smokes.py --report-json release/electron-ui-smoke.json",
+        "release packaging docs must document the archived Electron UI smoke runner report",
+    ),
+    (
+        "release/electron-ui-smoke.json",
+        "release packaging docs must document the archived Electron UI smoke report",
     ),
     (
         "python scripts/verify_release_candidate.py --source-only --report-json tmp/source-only-rc.json",
@@ -1902,80 +1936,8 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover mature UI flow contracts",
     ),
     (
-        "node scripts/smoke_chat_image_attachment_ui.mjs",
-        "macOS release workflow smoke tests must cover Chat image Electron UI smoke",
-    ),
-    (
-        "node scripts/smoke_chat_run_detail_handoff_ui.mjs",
-        "macOS release workflow smoke tests must cover Chat completed Run Detail handoff Electron UI smoke",
-    ),
-    (
-        "node scripts/smoke_chat_agent_progress_ui.mjs",
-        "macOS release workflow smoke tests must cover Chat Agent progress Electron UI smoke",
-    ),
-    (
-        "node scripts/smoke_chat_cancel_ui.mjs",
-        "macOS release workflow smoke tests must cover Chat cancel Electron UI smoke",
-    ),
-    (
-        "node scripts/smoke_chat_approval_ui.mjs",
-        "macOS release workflow smoke tests must cover Chat approval Electron UI smoke",
-    ),
-    (
-        "node scripts/smoke_chat_delegated_summary_ui.mjs",
-        "macOS release workflow smoke tests must cover Chat delegated summary Electron UI smoke",
-    ),
-    (
-        "node scripts/smoke_chat_group_summary_ui.mjs",
-        "macOS release workflow smoke tests must cover Chat group summary Electron UI smoke",
-    ),
-    (
-        "node scripts/smoke_activity_ui.mjs",
-        "macOS release workflow smoke tests must cover Activity feed/detail Electron UI smoke",
-    ),
-    (
-        "node scripts/smoke_diagnostics_screenshot_ui.mjs",
-        "macOS release workflow smoke tests must cover local screenshot Electron UI smoke",
-    ),
-    (
-        "node scripts/smoke_live2d_settings_ui.mjs",
-        "macOS release workflow smoke tests must cover Live2D settings Electron UI smoke",
-    ),
-    (
-        "node scripts/smoke_launcher_session_summary_ui.mjs",
-        "macOS release workflow smoke tests must cover launcher session summary Electron UI smoke",
-    ),
-    (
-        "node scripts/smoke_proactive_tts_ui.mjs",
-        "macOS release workflow smoke tests must cover proactive TTS Electron UI smoke",
-    ),
-    (
-        "node scripts/smoke_agent_studio_agents_ui.mjs",
-        "macOS release workflow smoke tests must cover Agent Studio agents Electron UI smoke",
-    ),
-    (
-        "node scripts/smoke_agent_studio_skills_ui.mjs",
-        "macOS release workflow smoke tests must cover Agent Studio skills Electron UI smoke",
-    ),
-    (
-        "node scripts/smoke_agent_studio_skill_mount_ui.mjs",
-        "macOS release workflow smoke tests must cover Agent Studio skill mounting Electron UI smoke",
-    ),
-    (
-        "node scripts/smoke_agent_studio_skill_folders_ui.mjs",
-        "macOS release workflow smoke tests must cover Agent Studio skill folders Electron UI smoke",
-    ),
-    (
-        "node scripts/smoke_agent_run_detail_ui.mjs",
-        "macOS release workflow smoke tests must cover Agent Run Detail replay Electron UI smoke",
-    ),
-    (
-        "node scripts/smoke_workflow_save_run_ui.mjs",
-        "macOS release workflow smoke tests must cover Workflow save-and-run Electron UI smoke",
-    ),
-    (
-        "node scripts/smoke_workflow_management_ui.mjs",
-        "macOS release workflow smoke tests must cover Workflow management Electron UI smoke",
+        "python scripts/run_electron_ui_smokes.py --report-json release/electron-ui-smoke.json",
+        "macOS release workflow smoke tests must run dynamic Electron UI smoke runner and archive its report",
     ),
     (
         "tests/test_bridge_server.py::test_bridge_http_middleware_enforces_host_origin_and_session_token",
@@ -2689,6 +2651,10 @@ def _verify_streaming_provider_smoke_contract_guards(root: Path) -> list[Finding
             Path("scripts/verify_release_candidate.py"),
             RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT,
         ),
+        (
+            Path("scripts/run_electron_ui_smokes.py"),
+            ELECTRON_UI_SMOKE_RUNNER_REQUIRED_TEXT,
+        ),
     )
     for relative_path, required_texts in targets:
         path = _resolve(root, relative_path)
@@ -2939,16 +2905,6 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
                     f"macOS release workflow smoke tests must run Agent Run provider contract {test_path}",
                 )
             )
-    electron_ui_smoke_scripts = _release_electron_ui_smoke_scripts(root)
-    for script in electron_ui_smoke_scripts:
-        required_text = f"node {script}"
-        if required_text not in workflow:
-            findings.append(
-                Finding(
-                    workflow_path,
-                    f"macOS release workflow smoke tests must run Electron UI smoke script {script}",
-                )
-            )
     findings.extend(_verify_chat_image_attachment_smoke_guard(root))
 
     preinstall_guard = workflow.find("Verify release-facing product identity and security guards")
@@ -3021,19 +2977,6 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
                         workflow_path,
                         "macOS release workflow Agent Run provider contract must run before "
                         f"packaged backend and DMG builds: {test_path}",
-                    )
-                )
-        for script in electron_ui_smoke_scripts:
-            required_index = workflow.find(f"node {script}")
-            if (
-                required_index >= 0
-                and (required_index > build_backend or required_index > build_dmg)
-            ):
-                findings.append(
-                    Finding(
-                        workflow_path,
-                        "macOS release workflow Electron UI smoke must run before "
-                        f"packaged backend and DMG builds: {script}",
                     )
                 )
     if (

@@ -306,25 +306,7 @@ jobs:
             tests/test_effect_policy.py \
             tests/test_mode_settings.py
 
-          node scripts/smoke_chat_image_attachment_ui.mjs
-          node scripts/smoke_chat_run_detail_handoff_ui.mjs
-          node scripts/smoke_chat_agent_progress_ui.mjs
-          node scripts/smoke_chat_cancel_ui.mjs
-          node scripts/smoke_chat_approval_ui.mjs
-          node scripts/smoke_chat_delegated_summary_ui.mjs
-          node scripts/smoke_chat_group_summary_ui.mjs
-          node scripts/smoke_activity_ui.mjs
-          node scripts/smoke_diagnostics_screenshot_ui.mjs
-          node scripts/smoke_live2d_settings_ui.mjs
-          node scripts/smoke_launcher_session_summary_ui.mjs
-          node scripts/smoke_proactive_tts_ui.mjs
-          node scripts/smoke_agent_studio_agents_ui.mjs
-          node scripts/smoke_agent_studio_skills_ui.mjs
-          node scripts/smoke_agent_studio_skill_mount_ui.mjs
-          node scripts/smoke_agent_studio_skill_folders_ui.mjs
-          node scripts/smoke_agent_run_detail_ui.mjs
-          node scripts/smoke_workflow_save_run_ui.mjs
-          node scripts/smoke_workflow_management_ui.mjs
+          python scripts/run_electron_ui_smokes.py --report-json release/electron-ui-smoke.json
 
       - name: Write app build metadata
         shell: bash

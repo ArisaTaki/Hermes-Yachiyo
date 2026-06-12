@@ -7,6 +7,7 @@ import json
 import plistlib
 import re
 
+from scripts import run_electron_ui_smokes as smoke_runner
 from scripts import verify_release_artifacts as verifier
 
 RELEASE_ELECTRON_SMOKE_SCRIPTS: tuple[str, ...] = (
@@ -33,11 +34,7 @@ RELEASE_ELECTRON_SMOKE_SCRIPTS: tuple[str, ...] = (
 
 
 def _release_workflow_electron_smoke_scripts() -> tuple[str, ...]:
-    workflow = (verifier.ROOT / verifier.RELEASE_WORKFLOW_FILE).read_text(
-        encoding="utf-8"
-    )
-    scripts = re.findall(r"node (scripts/smoke_[A-Za-z0-9_]+_ui\.mjs)", workflow)
-    return tuple(dict.fromkeys(scripts))
+    return tuple(str(path) for path in smoke_runner.electron_ui_smoke_scripts(verifier.ROOT))
 
 
 def _explicit_smoke_selectors() -> set[str]:
@@ -81,6 +78,8 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
     tests.write_text("def test_placeholder():\n    pass\n", encoding="utf-8")
     rc_verifier = tmp_path / "scripts" / "verify_release_candidate.py"
     rc_verifier.write_text("def main():\n    return 0\n", encoding="utf-8")
+    ui_runner = tmp_path / "scripts" / "run_electron_ui_smokes.py"
+    ui_runner.write_text("def main():\n    return 0\n", encoding="utf-8")
 
     findings = verifier._verify_streaming_provider_smoke_contract_guards(tmp_path)
     messages = [finding.message for finding in findings]
@@ -172,6 +171,12 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
     assert "release candidate verifier CLI must accept manual check evidence JSON" in messages
     assert "release candidate verifier CLI must require complete manual checks for final signoff" in messages
     assert "release candidate verifier CLI must write manual check templates" in messages
+    assert "Electron UI smoke runner must expose dynamic smoke script discovery" in messages
+    assert "Electron UI smoke runner must discover every scripts/smoke_*_ui.mjs file" in messages
+    assert "Electron UI smoke runner must execute discovered smoke scripts with node" in messages
+    assert "Electron UI smoke runner report must include script_count" in messages
+    assert "Electron UI smoke runner report must include per-script results" in messages
+    assert "Electron UI smoke runner CLI must accept a report JSON output path" in messages
 
 
 def test_verifier_reports_legacy_product_tokens(tmp_path):
@@ -646,6 +651,8 @@ def test_verifier_requires_release_packaging_docs_for_release_gates(tmp_path):
     assert "release packaging docs must document the local RC packaged app startup smoke" in messages
     assert "release packaging docs must document the local RC real provider smoke gate" in messages
     assert "release packaging docs must document the local RC Electron UI smoke gate" in messages
+    assert "release packaging docs must document the archived Electron UI smoke runner report" in messages
+    assert "release packaging docs must document the archived Electron UI smoke report" in messages
     assert "release packaging docs must document the source-only RC dry run" in messages
     assert "release packaging docs must document the CI release-candidate gate before upload" in messages
     assert "release packaging docs must document the archived RC verification report" in messages
@@ -835,22 +842,15 @@ def test_dynamic_packaged_attribute_gate_covers_release_electron_smoke_attribute
     assert missing == []
 
 
-def test_release_electron_smoke_script_list_matches_workflow():
-    assert _release_workflow_electron_smoke_scripts() == RELEASE_ELECTRON_SMOKE_SCRIPTS
+def test_release_electron_smoke_runner_discovers_expected_scripts():
+    assert _release_workflow_electron_smoke_scripts() == tuple(sorted(RELEASE_ELECTRON_SMOKE_SCRIPTS))
 
 
 def test_release_workflow_guard_accepts_discovered_electron_smoke_script_before_packaging(tmp_path):
     workflow = tmp_path / verifier.RELEASE_WORKFLOW_FILE
     workflow.parent.mkdir(parents=True)
-    current_workflow = (verifier.ROOT / verifier.RELEASE_WORKFLOW_FILE).read_text(
-        encoding="utf-8"
-    )
-    smoke_command = "          node scripts/smoke_new_mature_surface_ui.mjs\n"
     workflow.write_text(
-        current_workflow.replace(
-            "          node scripts/smoke_chat_image_attachment_ui.mjs\n",
-            smoke_command + "          node scripts/smoke_chat_image_attachment_ui.mjs\n",
-        ),
+        (verifier.ROOT / verifier.RELEASE_WORKFLOW_FILE).read_text(encoding="utf-8"),
         encoding="utf-8",
     )
     smoke = tmp_path / "scripts" / "smoke_new_mature_surface_ui.mjs"
@@ -1985,23 +1985,10 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow smoke tests must cover mature UI bridge routes" in messages
     assert "macOS release workflow smoke tests must cover mature frontend feature preservation" in messages
     assert "macOS release workflow smoke tests must cover mature UI flow contracts" in messages
-    assert "macOS release workflow smoke tests must cover Chat image Electron UI smoke" in messages
-    assert "macOS release workflow smoke tests must cover Chat cancel Electron UI smoke" in messages
-    assert "macOS release workflow smoke tests must cover Chat approval Electron UI smoke" in messages
-    assert "macOS release workflow smoke tests must cover Chat delegated summary Electron UI smoke" in messages
-    assert "macOS release workflow smoke tests must cover Chat group summary Electron UI smoke" in messages
-    assert "macOS release workflow smoke tests must cover Activity feed/detail Electron UI smoke" in messages
-    assert "macOS release workflow smoke tests must cover local screenshot Electron UI smoke" in messages
-    assert "macOS release workflow smoke tests must cover Live2D settings Electron UI smoke" in messages
-    assert "macOS release workflow smoke tests must cover launcher session summary Electron UI smoke" in messages
-    assert "macOS release workflow smoke tests must cover proactive TTS Electron UI smoke" in messages
-    assert "macOS release workflow smoke tests must cover Agent Studio agents Electron UI smoke" in messages
-    assert "macOS release workflow smoke tests must cover Agent Studio skills Electron UI smoke" in messages
-    assert "macOS release workflow smoke tests must cover Agent Studio skill mounting Electron UI smoke" in messages
-    assert "macOS release workflow smoke tests must cover Agent Studio skill folders Electron UI smoke" in messages
-    assert "macOS release workflow smoke tests must cover Agent Run Detail replay Electron UI smoke" in messages
-    assert "macOS release workflow smoke tests must cover Workflow save-and-run Electron UI smoke" in messages
-    assert "macOS release workflow smoke tests must cover Workflow management Electron UI smoke" in messages
+    assert (
+        "macOS release workflow smoke tests must run dynamic Electron UI smoke runner "
+        "and archive its report"
+    ) in messages
     assert "macOS release workflow smoke tests must cover Bridge Host Origin and session token guard" in messages
     assert "macOS release workflow smoke tests must cover Bridge loopback bind guard" in messages
     assert "macOS release workflow smoke tests must cover mutating Bridge token guard" in messages
@@ -2041,10 +2028,10 @@ def test_verifier_requires_individual_smoke_guards_before_packaging(tmp_path):
     current_workflow = (verifier.ROOT / verifier.RELEASE_WORKFLOW_FILE).read_text(
         encoding="utf-8"
     )
-    late_smoke = "node scripts/smoke_workflow_management_ui.mjs"
+    late_smoke = "python scripts/run_electron_ui_smokes.py --report-json release/electron-ui-smoke.json"
     workflow.write_text(
         current_workflow.replace(f"          {late_smoke}\n", "")
-        + f"\n      - name: Late workflow management smoke\n        run: {late_smoke}\n",
+        + f"\n      - name: Late Electron UI smoke runner\n        run: {late_smoke}\n",
         encoding="utf-8",
     )
 
@@ -2053,11 +2040,12 @@ def test_verifier_requires_individual_smoke_guards_before_packaging(tmp_path):
 
     assert (
         "macOS release workflow smoke guard must run before packaged backend and DMG builds: "
-        "macOS release workflow smoke tests must cover Workflow management Electron UI smoke"
+        "macOS release workflow smoke tests must run dynamic Electron UI smoke runner "
+        "and archive its report"
     ) in messages
 
 
-def test_verifier_requires_every_electron_ui_smoke_script_in_release_workflow(tmp_path):
+def test_verifier_allows_new_electron_ui_smoke_without_workflow_edits(tmp_path):
     workflow = tmp_path / verifier.RELEASE_WORKFLOW_FILE
     workflow.parent.mkdir(parents=True)
     workflow.write_text(
@@ -2070,11 +2058,10 @@ def test_verifier_requires_every_electron_ui_smoke_script_in_release_workflow(tm
 
     findings = verifier._verify_release_workflow_guards(tmp_path)
 
-    assert verifier.Finding(
-        workflow,
-        "macOS release workflow smoke tests must run Electron UI smoke script "
-        "scripts/smoke_new_mature_surface_ui.mjs",
-    ) in findings
+    assert all(
+        "smoke_new_mature_surface_ui.mjs" not in finding.message
+        for finding in findings
+    )
 
 
 def test_verifier_requires_release_workflow_to_publish_metadata_json(tmp_path):
