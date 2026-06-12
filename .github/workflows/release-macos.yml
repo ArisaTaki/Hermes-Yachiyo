@@ -180,6 +180,7 @@ jobs:
             tests/test_agent_runtime.py::test_agent_run_executes_streaming_tool_call_and_continues \
             tests/test_agent_runtime.py::test_agent_run_consumes_split_utf8_http_sse_content_chunks \
             tests/test_agent_runtime.py::test_agent_run_persists_streaming_refusal_delta \
+            tests/test_agent_runtime.py::test_agent_run_accepts_refusal_message_field \
             tests/test_agent_runtime.py::test_agent_run_hides_streaming_reasoning_delta \
             tests/test_agent_runtime.py::test_agent_run_rejects_reasoning_only_output_without_leaking \
             tests/test_agent_runtime.py::test_agent_run_executes_http_sse_tool_call_and_continues \
