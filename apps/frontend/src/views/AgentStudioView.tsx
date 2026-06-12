@@ -1908,8 +1908,8 @@ export function AgentStudioView() {
     () => workflows.find((workflow) => workflow.workflow_id === selectedWorkflowId) || null,
     [workflows, selectedWorkflowId],
   );
-  const agentIds = useMemo(
-    () => agents.map((agent) => agent.agent_id).filter(Boolean),
+  const deletableAgentIds = useMemo(
+    () => agents.filter((agent) => !agent.system && agent.deletable !== false).map((agent) => agent.agent_id).filter(Boolean),
     [agents],
   );
   const workflowIds = useMemo(
@@ -1930,7 +1930,7 @@ export function AgentStudioView() {
     () => workflows.filter((workflow) => selectedWorkflowIdSet.has(workflow.workflow_id)),
     [workflows, selectedWorkflowIdSet],
   );
-  const allAgentsSelected = agentIds.length > 0 && selectedAgents.length === agentIds.length;
+  const allAgentsSelected = deletableAgentIds.length > 0 && selectedDeletableAgents.length === deletableAgentIds.length;
   const allWorkflowsSelected = workflowIds.length > 0 && selectedWorkflows.length === workflowIds.length;
   const chatModelProfiles = useMemo(
     () => modelProfiles.filter((profile) => profile.capability === 'chat' && profile.status === 'available' && profile.enabled !== false),
@@ -2555,8 +2555,8 @@ export function AgentStudioView() {
   }, [routeRunGoal, routeRunId, routeRunTarget, routeTab]);
 
   useEffect(() => {
-    setSelectedAgentIds((current) => pruneSelectedIds(current, agentIds));
-  }, [agentIds]);
+    setSelectedAgentIds((current) => pruneSelectedIds(current, deletableAgentIds));
+  }, [deletableAgentIds]);
 
   useEffect(() => {
     setSelectedSkillIds((current) => pruneSelectedIds(current, filteredLibrarySkillIds));
@@ -2762,6 +2762,7 @@ export function AgentStudioView() {
   );
 
   function toggleAgentSelected(agentId: string) {
+    if (!deletableAgentIds.includes(agentId)) return;
     setSelectedAgentIds((current) => toggleSelectedId(current, agentId));
   }
 
@@ -3687,7 +3688,7 @@ export function AgentStudioView() {
               <h2>Agents</h2>
               <div className="studio-heading-actions">
                 {agents.length && !agentManagementMode ? (
-                  <button type="button" disabled={busy} onClick={() => setAgentManagementMode(true)}>管理</button>
+                  <button type="button" data-testid="agent-management-toggle" disabled={busy} onClick={() => setAgentManagementMode(true)}>管理</button>
                 ) : null}
                 <button type="button" data-testid="agent-new" disabled={busy} onClick={startNewAgent}>新建</button>
               </div>
@@ -3695,12 +3696,12 @@ export function AgentStudioView() {
             {agents.length && agentManagementMode ? (
               <div className="studio-bulk-actions" aria-label="Agent 批量操作">
                 <span>{selectedAgents.length ? `已选择 ${selectedAgents.length} / ${agents.length}` : `${agents.length} agents`}</span>
-                <button type="button" disabled={busy} onClick={() => setSelectedAgentIds(allAgentsSelected ? [] : agentIds)}>
+                <button type="button" data-testid="agent-select-all" disabled={busy || !deletableAgentIds.length} onClick={() => setSelectedAgentIds(allAgentsSelected ? [] : deletableAgentIds)}>
                   {allAgentsSelected ? '取消全选' : '全选当前列表'}
                 </button>
-                <button type="button" disabled={busy || !selectedAgents.length} onClick={() => setSelectedAgentIds([])}>清空</button>
-                <button type="button" className="danger-action" disabled={busy || !selectedDeletableAgents.length} onClick={requestDeleteSelectedAgents}>删除所选</button>
-                <button type="button" disabled={busy} onClick={finishAgentManagement}>完成</button>
+                <button type="button" data-testid="agent-clear-selection" disabled={busy || !selectedAgents.length} onClick={() => setSelectedAgentIds([])}>清空</button>
+                <button type="button" className="danger-action" data-testid="agent-delete-selected" disabled={busy || !selectedDeletableAgents.length} onClick={requestDeleteSelectedAgents}>删除所选</button>
+                <button type="button" data-testid="agent-management-done" disabled={busy} onClick={finishAgentManagement}>完成</button>
               </div>
             ) : null}
             <div className={agentManagementMode ? 'agent-list managing' : 'agent-list'} data-testid="agent-list">
@@ -3708,14 +3709,16 @@ export function AgentStudioView() {
                 <div
                   className={agent.agent_id === selectedAgentId ? 'agent-list-item active' : 'agent-list-item'}
                   data-agent-id={agent.agent_id}
+                  data-agent-deletable={!agent.system && agent.deletable !== false ? 'true' : 'false'}
                   data-testid="agent-list-item"
                   key={agent.agent_id}
                 >
                   <label className="agent-list-select" aria-label={`选择 Agent ${agent.nickname || agent.name}`}>
                     <input
                       type="checkbox"
+                      data-testid="agent-list-select-checkbox"
                       checked={selectedAgentIdSet.has(agent.agent_id)}
-                      disabled={busy || !agentManagementMode}
+                      disabled={busy || !agentManagementMode || agent.system || agent.deletable === false}
                       onChange={() => toggleAgentSelected(agent.agent_id)}
                     />
                   </label>

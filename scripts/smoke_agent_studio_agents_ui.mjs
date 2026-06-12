@@ -445,6 +445,37 @@ async function main() {
       && document.querySelector('[data-testid="agent-delete"]');
   }, 'created agent selected');
   console.log('[electron-smoke] agent created');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"agent-management-toggle\\"]').click()", true);
+  await waitFor(win, () => {
+    const systemCheckbox = document.querySelector('[data-agent-id="builtin:yachiyo-main"] [data-testid="agent-list-select-checkbox"]');
+    const customCheckbox = document.querySelector('[data-agent-id="${CREATED_AGENT_ID}"] [data-testid="agent-list-select-checkbox"]');
+    return document.querySelector('[data-testid="agent-select-all"]')
+      && document.querySelector('[data-testid="agent-delete-selected"]')?.disabled
+      && document.querySelector('[data-agent-id="builtin:yachiyo-main"]')?.getAttribute('data-agent-deletable') === 'false'
+      && document.querySelector('[data-agent-id="${CREATED_AGENT_ID}"]')?.getAttribute('data-agent-deletable') === 'true'
+      && systemCheckbox?.disabled
+      && !systemCheckbox?.checked
+      && !customCheckbox?.disabled
+      && !customCheckbox?.checked;
+  }, 'agent management system selection guard');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"agent-select-all\\"]').click()", true);
+  await waitFor(win, () => {
+    const systemCheckbox = document.querySelector('[data-agent-id="builtin:yachiyo-main"] [data-testid="agent-list-select-checkbox"]');
+    const customCheckbox = document.querySelector('[data-agent-id="${CREATED_AGENT_ID}"] [data-testid="agent-list-select-checkbox"]');
+    return systemCheckbox?.disabled
+      && !systemCheckbox?.checked
+      && customCheckbox?.checked
+      && document.querySelector('.studio-bulk-actions')?.textContent.includes('已选择 1 / 2')
+      && !document.querySelector('[data-testid="agent-delete-selected"]')?.disabled;
+  }, 'agent select all excludes system Agent');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"agent-clear-selection\\"]').click()", true);
+  await waitFor(win, () => (
+    document.querySelector('[data-testid="agent-delete-selected"]')?.disabled
+    && !document.querySelector('[data-agent-id="${CREATED_AGENT_ID}"] [data-testid="agent-list-select-checkbox"]')?.checked
+  ), 'agent clear selection');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"agent-management-done\\"]').click()", true);
+  await waitFor(win, () => !document.querySelector('[data-testid="agent-select-all"]'), 'agent management done');
+  console.log('[electron-smoke] system Agent bulk selection guard verified');
   await win.webContents.executeJavaScript(\`
   (() => {
     const setNativeValue = (element, value) => {
