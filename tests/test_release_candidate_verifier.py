@@ -2479,7 +2479,7 @@ def test_release_candidate_verifier_runs_dmg_ui_sampling_smoke(
         "#!/usr/bin/env node\n",
         encoding="utf-8",
     )
-    commands: list[list[str]] = []
+    commands: list[dict[str, object]] = []
     popen_calls: list[dict[str, object]] = []
     ports = iter((49125, 49225))
 
@@ -2518,7 +2518,7 @@ def test_release_candidate_verifier_runs_dmg_ui_sampling_smoke(
             return "", ""
 
     def fake_run(command, **kwargs):
-        commands.append(command)
+        commands.append({"command": command, "kwargs": kwargs})
         if command[:2] == ["hdiutil", "attach"]:
             mount_dir = Path(command[command.index("-mountpoint") + 1])
             executable = mount_dir / "Oha-Yachiyo.app" / "Contents" / "MacOS" / "Oha-Yachiyo"
@@ -2573,10 +2573,12 @@ def test_release_candidate_verifier_runs_dmg_ui_sampling_smoke(
         report_json=Path("tmp/rc.json"),
     ) == 0
 
-    assert commands[0][:2] == ["hdiutil", "attach"]
-    assert commands[1][:2] == ["node", str(rc.DMG_UI_SAMPLING_SMOKE_SCRIPT)]
-    assert commands[1][commands[1].index("--debug-port") + 1] == "49225"
-    assert commands[2][:2] == ["hdiutil", "detach"]
+    assert commands[0]["command"][:2] == ["hdiutil", "attach"]
+    node_command = commands[1]["command"]
+    assert node_command[:2] == ["node", str(rc.DMG_UI_SAMPLING_SMOKE_SCRIPT)]
+    assert node_command[node_command.index("--debug-port") + 1] == "49225"
+    assert commands[1]["kwargs"]["timeout"] == 190.0
+    assert commands[2]["command"][:2] == ["hdiutil", "detach"]
     assert len(popen_calls) == 1
     assert popen_calls[0]["command"][0].endswith("/Oha-Yachiyo.app/Contents/MacOS/Oha-Yachiyo")
     assert "--remote-debugging-port=49225" in popen_calls[0]["command"]

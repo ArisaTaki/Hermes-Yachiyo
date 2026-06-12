@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const DEFAULT_TIMEOUT_MS = 60_000;
-const MIN_SELECTOR_TIMEOUT_MS = 15_000;
+const MIN_ROUTE_TIMEOUT_MS = 15_000;
 const ROUTE_SAMPLES = [
   {
     id: 'chat',
@@ -195,43 +195,63 @@ async function navigateToRoute(client, route) {
   `);
 }
 
-async function waitForVisibleSelector(client, selector, timeoutMs) {
+async function visibleSelectorMap(client, selectors) {
+  return evaluate(client, `
+    (() => {
+      const selectors = ${JSON.stringify(selectors)};
+      const result = {};
+      for (const selector of selectors) {
+        const node = document.querySelector(selector);
+        if (!node) {
+          result[selector] = false;
+          continue;
+        }
+        const style = window.getComputedStyle(node);
+        if (style.visibility === 'hidden' || style.display === 'none') {
+          result[selector] = false;
+          continue;
+        }
+        result[selector] = Boolean(node.offsetWidth || node.offsetHeight || node.getClientRects().length);
+      }
+      return result;
+    })()
+  `);
+}
+
+async function pageSnapshot(client) {
+  return evaluate(client, `
+    (() => ({
+      hash: window.location.hash,
+      title: document.title,
+      readyState: document.readyState,
+      bodyText: (document.body?.innerText || '').slice(0, 300),
+    }))()
+  `);
+}
+
+async function waitForVisibleSelectors(client, selectors, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   let lastSnapshot = {};
   while (Date.now() < deadline) {
-    const visible = await evaluate(client, `
-      (() => {
-        const node = document.querySelector(${JSON.stringify(selector)});
-        if (!node) return false;
-        const style = window.getComputedStyle(node);
-        if (style.visibility === 'hidden' || style.display === 'none') return false;
-        return Boolean(node.offsetWidth || node.offsetHeight || node.getClientRects().length);
-      })()
-    `);
-    if (visible) return;
-    lastSnapshot = await evaluate(client, `
-      (() => ({
-        hash: window.location.hash,
-        title: document.title,
-        readyState: document.readyState,
-        bodyText: (document.body?.innerText || '').slice(0, 300),
-      }))()
-    `);
+    const visibleMap = await visibleSelectorMap(client, selectors);
+    const missing = selectors.filter((selector) => !visibleMap?.[selector]);
+    if (missing.length === 0) return;
+    lastSnapshot = await pageSnapshot(client);
     await sleep(250);
   }
+  const visibleMap = await visibleSelectorMap(client, selectors);
+  const missing = selectors.filter((selector) => !visibleMap?.[selector]);
   const detail = JSON.stringify(lastSnapshot);
-  throw new Error(`selector did not render before timeout: ${selector}; page=${detail}`);
+  throw new Error(`selectors did not render before timeout: ${missing.join(', ')}; page=${detail}`);
 }
 
 async function sampleRoute(client, sample, timeoutMs) {
   const url = await navigateToRoute(client, sample.route);
-  const perSelectorTimeout = Math.max(
-    MIN_SELECTOR_TIMEOUT_MS,
+  const routeTimeout = Math.max(
+    MIN_ROUTE_TIMEOUT_MS,
     Math.floor(timeoutMs / ROUTE_SAMPLES.length),
   );
-  for (const selector of sample.selectors) {
-    await waitForVisibleSelector(client, selector, perSelectorTimeout);
-  }
+  await waitForVisibleSelectors(client, sample.selectors, routeTimeout);
   const title = await evaluate(client, 'document.title');
   const hash = await evaluate(client, 'window.location.hash');
   return {

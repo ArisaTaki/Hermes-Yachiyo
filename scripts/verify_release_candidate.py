@@ -41,6 +41,7 @@ PACKAGED_APP_EXECUTABLE_NAME = "Oha-Yachiyo"
 DMG_APP_SMOKE_TIMEOUT_SECONDS = 45.0
 DMG_SCREEN_PROBE_REQUEST_TIMEOUT_SECONDS = 10.0
 DMG_UI_SAMPLING_SMOKE_TIMEOUT_SECONDS = 60.0
+DMG_UI_SAMPLING_PARENT_TIMEOUT_FACTOR = 3.0
 DMG_UI_SAMPLING_SMOKE_SCRIPT = Path("scripts/smoke_packaged_ui_sampling.mjs")
 DMG_CHAT_NATIVE_FILE_SMOKE_TIMEOUT_SECONDS = 60.0
 DMG_CHAT_NATIVE_FILE_SMOKE_SCRIPT = Path("scripts/smoke_packaged_chat_native_file_upload.mjs")
@@ -2334,6 +2335,10 @@ def _read_packaged_ui_sampling_report(report_path: Path) -> dict[str, object]:
     return data if isinstance(data, dict) else {}
 
 
+def _dmg_ui_sampling_parent_timeout(timeout_seconds: float) -> float:
+    return timeout_seconds * DMG_UI_SAMPLING_PARENT_TIMEOUT_FACTOR + 10.0
+
+
 def verify_dmg_ui_sampling_smoke(
     root: Path,
     dmg_paths: Sequence[Path],
@@ -2448,7 +2453,7 @@ def verify_dmg_ui_sampling_smoke(
                         stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE,
                         text=True,
-                        timeout=timeout_seconds + 10.0,
+                        timeout=_dmg_ui_sampling_parent_timeout(timeout_seconds),
                     )
                 except subprocess.TimeoutExpired as exc:
                     detail = _redacted_process_detail(
