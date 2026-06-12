@@ -78,6 +78,7 @@ jobs:
             tests/test_agent_runtime.py::test_main_chat_repeated_approval_does_not_execute_tool_twice \
             tests/test_agent_runtime.py::test_main_chat_approval_uses_resume_coordinator_claim_boundary \
             tests/test_agent_runtime.py::test_main_chat_consecutive_tool_approvals_use_resume_required_projection \
+            tests/test_agent_runtime.py::test_approval_coordinator_snapshots_input_previews \
             tests/test_agent_runtime.py::test_tool_approval_transitions_use_shared_context_boundary \
             tests/test_agent_runtime.py::test_main_chat_durable_approval_claim_blocks_duplicate_execution \
             tests/test_agent_runtime.py::test_approval_resume_coordinator_claims_and_projects_approved_tool_once \

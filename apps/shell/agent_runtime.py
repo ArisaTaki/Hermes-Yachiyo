@@ -2430,16 +2430,17 @@ class ApprovalCoordinator:
         running_result: str,
     ) -> dict[str, Any]:
         display_tool = str(tool_name or "tool").strip() or "tool"
+        preview_snapshot = deepcopy(input_preview)
         event_payload = {
             "tool": display_tool,
-            "input_preview": input_preview,
+            "input_preview": preview_snapshot,
             "status": "completed",
         }
         timeline.append(
             self._timeline(
                 "agent.tool.approval_approved",
                 display_tool,
-                input_preview=input_preview,
+                input_preview=preview_snapshot,
                 status="completed",
             )
         )
@@ -2472,12 +2473,13 @@ class ApprovalCoordinator:
         criteria: str,
         input_preview: dict[str, Any],
     ) -> dict[str, Any]:
+        preview_snapshot = deepcopy(input_preview)
         event_payload = {
             "workflow_node_id": workflow_node_id,
             "workflow_node_kind": "approval",
             "workflow_node_label": label,
             "workflow_node_approval_criteria": criteria,
-            "input_preview": input_preview,
+            "input_preview": preview_snapshot,
             "status": "completed",
         }
         timeline.append(
@@ -2509,12 +2511,13 @@ class ApprovalCoordinator:
         input_preview: dict[str, Any],
     ) -> dict[str, Any]:
         detail = redact_secrets(reason).strip() or f"{label} approval rejected"
+        preview_snapshot = deepcopy(input_preview)
         timeline_payload = {
             "workflow_node_id": workflow_node_id,
             "workflow_node_kind": "approval",
             "workflow_node_label": label,
             "workflow_node_approval_criteria": criteria,
-            "input_preview": input_preview,
+            "input_preview": preview_snapshot,
             "status": "cancelled",
         }
         event_payload = {**timeline_payload, "reason": detail}
@@ -2555,12 +2558,13 @@ class ApprovalCoordinator:
         timeline_tool = str(tool_name or "").strip()
         display_tool = timeline_tool or "tool"
         detail = redact_secrets(reason).strip() or "Tool approval rejected"
+        preview_snapshot = deepcopy(input_preview)
         timeline.append(
             self._timeline(
                 "agent.tool.approval_rejected",
                 detail,
                 tool=timeline_tool,
-                input_preview=input_preview,
+                input_preview=preview_snapshot,
                 status="cancelled",
             )
         )
@@ -2576,7 +2580,7 @@ class ApprovalCoordinator:
             "agent.tool.approval_rejected",
             {
                 "tool": display_tool,
-                "input_preview": input_preview,
+                "input_preview": preview_snapshot,
                 "reason": detail,
                 "status": "cancelled",
             },
@@ -2603,12 +2607,13 @@ class ApprovalCoordinator:
         input_preview: dict[str, Any],
     ) -> dict[str, Any]:
         detail = redact_secrets(reason).strip() or "approval_wait_timeout"
+        preview_snapshot = deepcopy(input_preview)
         timeline_payload = {
             "workflow_node_id": workflow_node_id,
             "workflow_node_kind": "approval",
             "workflow_node_label": label,
             "workflow_node_approval_criteria": criteria,
-            "input_preview": input_preview,
+            "input_preview": preview_snapshot,
             "status": "cancelled",
         }
         event_payload = {
@@ -2653,12 +2658,13 @@ class ApprovalCoordinator:
         timeline_tool = str(tool_name or "").strip()
         display_tool = timeline_tool or "tool"
         detail = redact_secrets(reason).strip() or "approval_wait_timeout"
+        preview_snapshot = deepcopy(input_preview)
         timeline.append(
             self._timeline(
                 "agent.tool.approval_timeout",
                 detail,
                 tool=timeline_tool,
-                input_preview=input_preview,
+                input_preview=preview_snapshot,
                 status="cancelled",
             )
         )
@@ -2674,7 +2680,7 @@ class ApprovalCoordinator:
             "approval.timeout",
             {
                 "tool": display_tool,
-                "input_preview": input_preview,
+                "input_preview": preview_snapshot,
                 "reason": detail,
                 "status": "cancelled",
             },

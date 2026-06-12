@@ -21,6 +21,7 @@ from apps.shell.agent_runtime import (
     AgentApprovalRequired,
     AgentRuntimeError,
     AgentRuntimeService,
+    ApprovalCoordinator,
     ApprovalResumeCoordinator,
     ApprovalResumeProjectionCoordinator,
     NativeRunEngine,
@@ -169,6 +170,112 @@ def test_run_transition_projection_coordinator_projects_child_and_workflow_group
         }
     ]
     assert root_projection == stored_runs["workflow_root"]
+
+
+def test_approval_coordinator_snapshots_input_previews():
+    run_events: list[tuple[str, str, dict[str, object]]] = []
+    updates: list[dict[str, object]] = []
+
+    def update_run(run_id, **kwargs):
+        updates.append({"run_id": run_id, **kwargs})
+        return {"run_id": run_id, **kwargs}
+
+    coordinator = ApprovalCoordinator(
+        timeline_factory=lambda event, detail, **payload: {"event": event, "detail": detail, **payload},
+        append_run_event=lambda run_id, event_type, payload: run_events.append((run_id, event_type, payload)),
+        update_run=update_run,
+    )
+    previews = [
+        {"input": {"label": "approve-tool"}},
+        {"input": {"label": "reject-tool"}},
+        {"input": {"label": "timeout-tool"}},
+        {"input": {"label": "approve-workflow"}},
+        {"input": {"label": "reject-workflow"}},
+        {"input": {"label": "timeout-workflow"}},
+    ]
+    tool_approve_timeline: list[dict[str, object]] = []
+    tool_reject_timeline: list[dict[str, object]] = []
+    tool_timeout_timeline: list[dict[str, object]] = []
+    workflow_approve_timeline: list[dict[str, object]] = []
+    workflow_reject_timeline: list[dict[str, object]] = []
+    workflow_timeout_timeline: list[dict[str, object]] = []
+
+    coordinator.approve_tool_run(
+        "run-tool-approve",
+        timeline=tool_approve_timeline,
+        artifacts=[],
+        tool_name="terminal.run",
+        input_preview=previews[0],
+        resumed_detail="resumed",
+        running_result="running",
+    )
+    coordinator.reject_tool_run(
+        "run-tool-reject",
+        timeline=tool_reject_timeline,
+        reason="no",
+        tool_name="terminal.run",
+        input_preview=previews[1],
+    )
+    coordinator.timeout_tool_run(
+        "run-tool-timeout",
+        timeline=tool_timeout_timeline,
+        reason="late",
+        tool_name="terminal.run",
+        input_preview=previews[2],
+    )
+    coordinator.approve_workflow_node(
+        "run-workflow-approve",
+        timeline=workflow_approve_timeline,
+        artifacts=[],
+        result_context="context",
+        workflow_node_id="gate",
+        label="Gate",
+        criteria="Review",
+        input_preview=previews[3],
+    )
+    coordinator.reject_workflow_node(
+        "run-workflow-reject",
+        timeline=workflow_reject_timeline,
+        reason="no",
+        workflow_node_id="gate",
+        label="Gate",
+        criteria="Review",
+        input_preview=previews[4],
+    )
+    coordinator.timeout_workflow_node(
+        "run-workflow-timeout",
+        timeline=workflow_timeout_timeline,
+        reason="late",
+        workflow_node_id="gate",
+        label="Gate",
+        criteria="Review",
+        input_preview=previews[5],
+    )
+
+    for preview in previews:
+        preview["input"]["label"] = "changed"
+
+    projected_timelines = [
+        tool_approve_timeline,
+        tool_reject_timeline,
+        tool_timeout_timeline,
+        workflow_approve_timeline,
+        workflow_reject_timeline,
+        workflow_timeout_timeline,
+    ]
+    projected_json = json.dumps(
+        {"timelines": projected_timelines, "run_events": run_events, "updates": updates},
+        ensure_ascii=False,
+    )
+    assert "changed" not in projected_json
+    for original in previews:
+        for timeline in projected_timelines:
+            for event in timeline:
+                if isinstance(event.get("input_preview"), dict):
+                    assert event["input_preview"] is not original
+        for _run_id, _event_type, payload in run_events:
+            if isinstance(payload.get("input_preview"), dict):
+                assert payload["input_preview"] is not original
 
 
 def test_workflow_child_outcome_coordinator_projects_child_artifacts_and_timeline():
