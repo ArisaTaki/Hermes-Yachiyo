@@ -350,8 +350,13 @@ function killProcess(child) {
 function runElectronSmoke(devUrl, bridgeUrl) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oha-chat-image-smoke-'));
   const imageFilePath = path.join(tempDir, 'smoke-image-cdp.svg');
+  const secondImageFilePath = path.join(tempDir, 'smoke-image-cdp-second.svg');
   fs.writeFileSync(
     imageFilePath,
+    Buffer.from(TEST_IMAGE_DATA_URL.split(',')[1] || '', 'base64'),
+  );
+  fs.writeFileSync(
+    secondImageFilePath,
     Buffer.from(TEST_IMAGE_DATA_URL.split(',')[1] || '', 'base64'),
   );
   const script = `
@@ -360,6 +365,7 @@ const devUrl = ${JSON.stringify(devUrl)};
 const bridgeUrl = ${JSON.stringify(bridgeUrl)};
 const imageDataUrl = ${JSON.stringify(TEST_IMAGE_DATA_URL)};
 const imageFilePath = ${JSON.stringify(imageFilePath)};
+const secondImageFilePath = ${JSON.stringify(secondImageFilePath)};
 const watchdog = setTimeout(() => {
   console.error('electron smoke timed out');
   app.exit(1);
@@ -396,7 +402,7 @@ function waitFor(win, predicate, label, timeout = 15000) {
     tick();
   });
 }
-async function setChatImageInputFileWithCdp(win, filePath) {
+async function setChatImageInputFilesWithCdp(win, filePaths) {
   if (!win.webContents.debugger.isAttached()) win.webContents.debugger.attach('1.3');
   const documentResult = await win.webContents.debugger.sendCommand('DOM.getDocument', { depth: -1, pierce: true });
   const queryResult = await win.webContents.debugger.sendCommand('DOM.querySelector', {
@@ -405,7 +411,7 @@ async function setChatImageInputFileWithCdp(win, filePath) {
   });
   if (!queryResult.nodeId) throw new Error('chat image file input not found through CDP');
   await win.webContents.debugger.sendCommand('DOM.setFileInputFiles', {
-    files: [filePath],
+    files: filePaths,
     nodeId: queryResult.nodeId,
   });
 }
@@ -501,17 +507,21 @@ async function main() {
       input.value = '';
     })();
   \`, true);
-  await setChatImageInputFileWithCdp(win, imageFilePath);
+  await setChatImageInputFilesWithCdp(win, [imageFilePath, secondImageFilePath]);
   await waitFor(win, () => {
-    const preview = document.querySelector('[data-testid="chat-composer-attachment-preview"]');
-    return preview
-      && preview.getAttribute('data-attachment-name') === 'smoke-image-cdp.svg'
-      && preview.getAttribute('data-attachment-mime') === 'image/svg+xml'
-      && Number(preview.getAttribute('data-attachment-size') || 0) > 0
-      && preview.getAttribute('data-attachment-width') === '24'
-      && preview.getAttribute('data-attachment-height') === '24';
-  }, 'composer attachment preview after removal');
-  console.log('[electron-smoke] attachment preview rendered through CDP file input');
+    const previews = Array.from(document.querySelectorAll('[data-testid="chat-composer-attachment-preview"]'));
+    const names = previews.map((preview) => preview.getAttribute('data-attachment-name'));
+    return previews.length === 2
+      && names.includes('smoke-image-cdp.svg')
+      && names.includes('smoke-image-cdp-second.svg')
+      && previews.every((preview) => (
+        preview.getAttribute('data-attachment-mime') === 'image/svg+xml'
+        && Number(preview.getAttribute('data-attachment-size') || 0) > 0
+        && preview.getAttribute('data-attachment-width') === '24'
+        && preview.getAttribute('data-attachment-height') === '24'
+      ));
+  }, 'composer attachment previews after removal');
+  console.log('[electron-smoke] attachment previews rendered through CDP file input');
   await win.webContents.executeJavaScript(\`
     const input = document.querySelector('textarea.chat-input');
     const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
@@ -521,19 +531,23 @@ async function main() {
   await waitFor(win, () => !document.querySelector('button[aria-label="发送消息"]')?.disabled, 'enabled send button');
   await win.webContents.executeJavaScript("document.querySelector('button[aria-label=\\"发送消息\\"]').closest('form').requestSubmit()", true);
   await waitFor(win, () => {
-    const item = document.querySelector('[data-testid="chat-message-attachment-item"]');
-    return item
-      && item.getAttribute('data-attachment-id')
-      && item.getAttribute('data-attachment-kind') === 'image'
-      && item.getAttribute('data-attachment-mime') === 'image/svg+xml'
-      && item.getAttribute('data-attachment-name') === 'smoke-image-cdp.svg'
-      && Number(item.getAttribute('data-attachment-size') || 0) > 0;
-  }, 'rendered message attachment');
+    const items = Array.from(document.querySelectorAll('[data-testid="chat-message-attachment-item"]'));
+    const names = items.map((item) => item.getAttribute('data-attachment-name'));
+    return items.length === 2
+      && names.includes('smoke-image-cdp.svg')
+      && names.includes('smoke-image-cdp-second.svg')
+      && items.every((item) => (
+        item.getAttribute('data-attachment-id')
+        && item.getAttribute('data-attachment-kind') === 'image'
+        && item.getAttribute('data-attachment-mime') === 'image/svg+xml'
+        && Number(item.getAttribute('data-attachment-size') || 0) > 0
+      ));
+  }, 'rendered message attachments');
   await waitFor(win, () => (
     !document.querySelector('[data-testid="chat-composer-attachment-preview"]')
     && document.querySelector('textarea.chat-input')?.value === ''
   ), 'composer cleared after image send');
-  console.log('[electron-smoke] message attachment rendered');
+  console.log('[electron-smoke] message attachments rendered');
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-message-attachment-item\\"]').click()", true);
   await waitFor(win, () => {
     const modal = document.querySelector('[data-testid="chat-image-viewer-modal"]');
@@ -636,19 +650,23 @@ async function main() {
     if (!payload) fail('Chat UI did not send a message');
     if (payload.text !== 'browser image attachment smoke') fail(`unexpected submitted text: ${payload.text}`);
     if (!payload.client_message_id) fail('Chat UI did not submit client_message_id for image message idempotency');
-    if (!Array.isArray(payload.attachments) || payload.attachments.length !== 1) {
-      fail('Chat UI did not submit exactly one attachment');
+    if (!Array.isArray(payload.attachments) || payload.attachments.length !== 2) {
+      fail('Chat UI did not submit exactly two attachments');
     }
-    const attachment = payload.attachments[0];
-    if (!attachment.id) fail('submitted attachment did not include a client attachment id');
-    if (attachment.name !== 'smoke-image-cdp.svg') fail(`unexpected attachment name: ${attachment.name}`);
-    if (attachment.mime_type !== 'image/svg+xml') fail(`unexpected attachment mime: ${attachment.mime_type}`);
-    if (!(Number(attachment.size) > 0)) fail(`unexpected attachment size: ${attachment.size}`);
-    if (attachment.width !== 24 || attachment.height !== 24) {
-      fail(`unexpected attachment dimensions: ${attachment.width}x${attachment.height}`);
+    const attachmentNames = payload.attachments.map((attachment) => attachment.name);
+    for (const expectedName of ['smoke-image-cdp.svg', 'smoke-image-cdp-second.svg']) {
+      if (!attachmentNames.includes(expectedName)) fail(`missing submitted attachment: ${expectedName}`);
     }
-    if (!String(attachment.data_url || '').startsWith('data:image/svg+xml')) {
-      fail('submitted attachment did not include image data URL');
+    for (const attachment of payload.attachments) {
+      if (!attachment.id) fail('submitted attachment did not include a client attachment id');
+      if (attachment.mime_type !== 'image/svg+xml') fail(`unexpected attachment mime: ${attachment.mime_type}`);
+      if (!(Number(attachment.size) > 0)) fail(`unexpected attachment size: ${attachment.size}`);
+      if (attachment.width !== 24 || attachment.height !== 24) {
+        fail(`unexpected attachment dimensions: ${attachment.width}x${attachment.height}`);
+      }
+      if (!String(attachment.data_url || '').startsWith('data:image/svg+xml')) {
+        fail('submitted attachment did not include image data URL');
+      }
     }
     log('passed');
   } finally {
