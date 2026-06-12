@@ -201,6 +201,7 @@ jobs:
             tests/test_agent_runtime.py::test_agent_run_prefers_responses_call_id_over_item_id \
             tests/test_agent_runtime.py::test_agent_run_executes_multiple_responses_tool_calls \
             tests/test_agent_runtime.py::test_agent_run_uses_responses_output_text_done_snapshot \
+            tests/test_agent_runtime.py::test_agent_run_uses_responses_output_item_message_snapshot \
             tests/test_agent_runtime.py::test_agent_run_discards_responses_reasoning_summary_stream \
             tests/test_streaming_provider_smoke.py \
             tests/test_legacy_kernel_removal.py \

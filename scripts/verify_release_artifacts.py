@@ -1293,6 +1293,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover NativeRunEngine Agent Run Responses output_text.done snapshots",
     ),
     (
+        "tests/test_agent_runtime.py::test_agent_run_uses_responses_output_item_message_snapshot",
+        "macOS release workflow smoke tests must cover NativeRunEngine Agent Run Responses output_item.done message snapshots",
+    ),
+    (
         "tests/test_streaming_provider_smoke.py",
         "macOS release workflow smoke tests must cover OpenAI-compatible streaming provider contracts",
     ),
