@@ -515,6 +515,8 @@ async function waitForRunDetailHandoff(win, label) {
       && detail?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
       && detail?.getAttribute('data-run-kind') === 'main_chat_run'
       && detail?.getAttribute('data-run-status') === 'approval_required'
+      && detail?.getAttribute('data-task-id') === ${JSON.stringify(TASK_ID)}
+      && detail?.getAttribute('data-session-id') === ${JSON.stringify(SESSION_ID)}
       && approval
       && request?.textContent.includes('terminal.run')
       && request?.textContent.includes(${JSON.stringify(APPROVAL_COMMAND)})
@@ -539,6 +541,8 @@ async function waitForApprovedRunDetailHandoff(win, label) {
       && detail?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
       && detail?.getAttribute('data-run-kind') === 'main_chat_run'
       && detail?.getAttribute('data-run-status') === 'completed'
+      && detail?.getAttribute('data-task-id') === ${JSON.stringify(TASK_ID)}
+      && detail?.getAttribute('data-session-id') === ${JSON.stringify(SESSION_ID)}
       && result?.textContent.includes('Approved from Chat approval UI smoke.')
       && !document.querySelector('[data-testid="agent-run-detail-approval"]')
       && eventTypes.includes('agent.tool.approval_required')
