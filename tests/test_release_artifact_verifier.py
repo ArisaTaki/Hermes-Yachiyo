@@ -293,6 +293,7 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
     assert "Electron UI smoke runner must execute discovered smoke scripts with node" in messages
     assert "Electron UI smoke runner report must include script_count" in messages
     assert "packaged UI sampling smoke must define route samples" in messages
+    assert "packaged UI sampling smoke must keep a minimum per-selector timeout" in messages
     assert "packaged UI sampling smoke must connect to the packaged app DevTools port" in messages
     assert "packaged UI sampling smoke must use the DevTools websocket protocol" in messages
     assert "packaged UI sampling smoke must cover Workflow Studio" in messages

@@ -186,6 +186,10 @@ PACKAGED_UI_SAMPLING_SMOKE_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "packaged UI sampling smoke must define route samples",
     ),
     (
+        "MIN_SELECTOR_TIMEOUT_MS",
+        "packaged UI sampling smoke must keep a minimum per-selector timeout",
+    ),
+    (
         "--debug-port",
         "packaged UI sampling smoke must connect to the packaged app DevTools port",
     ),

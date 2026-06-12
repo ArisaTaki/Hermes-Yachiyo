@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const DEFAULT_TIMEOUT_MS = 60_000;
+const MIN_SELECTOR_TIMEOUT_MS = 15_000;
 const ROUTE_SAMPLES = [
   {
     id: 'chat',
@@ -196,6 +197,7 @@ async function navigateToRoute(client, route) {
 
 async function waitForVisibleSelector(client, selector, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
+  let lastSnapshot = {};
   while (Date.now() < deadline) {
     const visible = await evaluate(client, `
       (() => {
@@ -207,14 +209,26 @@ async function waitForVisibleSelector(client, selector, timeoutMs) {
       })()
     `);
     if (visible) return;
+    lastSnapshot = await evaluate(client, `
+      (() => ({
+        hash: window.location.hash,
+        title: document.title,
+        readyState: document.readyState,
+        bodyText: (document.body?.innerText || '').slice(0, 300),
+      }))()
+    `);
     await sleep(250);
   }
-  throw new Error(`selector did not render before timeout: ${selector}`);
+  const detail = JSON.stringify(lastSnapshot);
+  throw new Error(`selector did not render before timeout: ${selector}; page=${detail}`);
 }
 
 async function sampleRoute(client, sample, timeoutMs) {
   const url = await navigateToRoute(client, sample.route);
-  const perSelectorTimeout = Math.max(5000, Math.floor(timeoutMs / ROUTE_SAMPLES.length));
+  const perSelectorTimeout = Math.max(
+    MIN_SELECTOR_TIMEOUT_MS,
+    Math.floor(timeoutMs / ROUTE_SAMPLES.length),
+  );
   for (const selector of sample.selectors) {
     await waitForVisibleSelector(client, selector, perSelectorTimeout);
   }
