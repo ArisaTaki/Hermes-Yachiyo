@@ -152,6 +152,82 @@ def _manual_release_candidate_check_status(
     return "manual_required"
 
 
+def _manual_release_candidate_checks_by_id(
+    checks: Sequence[dict[str, str]],
+) -> dict[str, dict[str, str]]:
+    return {check["id"]: check for check in checks}
+
+
+def _auto_apply_manual_release_candidate_check_evidence(
+    checks: Sequence[dict[str, str]],
+    check_id: str,
+    evidence: str,
+) -> bool:
+    check = _manual_release_candidate_checks_by_id(checks).get(check_id)
+    if check is None or check.get("status") != "manual_required":
+        return False
+    check["status"] = "passed"
+    check["evidence"] = evidence
+    check["evidence_source"] = "automated_rc_gate"
+    return True
+
+
+def _refresh_manual_release_candidate_check_report(
+    report: dict[str, Any],
+    checks: Sequence[dict[str, str]],
+    findings: Sequence[Finding],
+) -> str:
+    status = _manual_release_candidate_check_status(checks, findings)
+    report["manual_release_candidate_check_status"] = status
+    report["manual_release_candidate_check_statuses"] = list(checks)
+    report["manual_release_candidate_check_findings"] = _finding_report(findings)
+    return status
+
+
+def _auto_apply_release_candidate_check_evidence(
+    report: dict[str, Any],
+    checks: Sequence[dict[str, str]],
+) -> None:
+    dmg_app_smoke = report.get("dmg_app_smoke")
+    if isinstance(dmg_app_smoke, dict) and dmg_app_smoke.get("status") == "passed":
+        dmg_paths = dmg_app_smoke.get("dmg_paths")
+        if isinstance(dmg_paths, list) and dmg_paths:
+            artifact_label = ", ".join(str(path) for path in dmg_paths)
+        else:
+            artifact_label = "selected DMG artifacts"
+        _auto_apply_manual_release_candidate_check_evidence(
+            checks,
+            "packaged_bridge_isolation",
+            (
+                "Automated --run-dmg-app-smoke passed for "
+                f"{artifact_label}: the packaged app was launched from a mounted DMG "
+                "with temporary HOME/OHA_YACHIYO_HOME and loopback OHA_YACHIYO_BRIDGE_URL, "
+                "and /status returned service=oha-yachiyo."
+            ),
+        )
+
+    provider_smoke = report.get("provider_smoke")
+    if isinstance(provider_smoke, dict) and provider_smoke.get("status") == "passed":
+        raw_checks = provider_smoke.get("checks")
+        check_labels: list[str] = []
+        if isinstance(raw_checks, list):
+            for item in raw_checks:
+                if isinstance(item, dict):
+                    label = item.get("label")
+                    exit_code = item.get("exit_code")
+                    if label is not None:
+                        check_labels.append(f"{label} exit_code={exit_code}")
+        check_summary = ", ".join(check_labels) if check_labels else "all provider smoke checks passed"
+        _auto_apply_manual_release_candidate_check_evidence(
+            checks,
+            "real_provider_smoke",
+            (
+                "Automated --run-provider-smoke passed in this RC gate: "
+                f"{check_summary}. The archived provider_smoke report section is the release evidence."
+            ),
+        )
+
+
 def existing_artifact_paths(root: Path) -> tuple[Path, ...]:
     return tuple(path for path in DEFAULT_ARTIFACT_PATHS if (root / path).exists())
 
@@ -987,6 +1063,13 @@ def verify_release_candidate(
             "scripts": [str(script) for script in selected_smoke_scripts],
             "run_requested": run_ui_smoke,
         }
+
+    _auto_apply_release_candidate_check_evidence(report, manual_checks)
+    manual_check_status = _refresh_manual_release_candidate_check_report(
+        report,
+        manual_checks,
+        manual_check_findings,
+    )
 
     print("manual release-candidate checks:")
     for check in manual_checks:

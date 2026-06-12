@@ -616,6 +616,13 @@ def test_release_candidate_verifier_runs_dmg_app_startup_smoke(
         "findings": [],
         "run_requested": True,
     }
+    manual_statuses = {
+        check["id"]: check
+        for check in report["manual_release_candidate_check_statuses"]
+    }
+    assert manual_statuses["packaged_bridge_isolation"]["status"] == "passed"
+    assert manual_statuses["packaged_bridge_isolation"]["evidence_source"] == "automated_rc_gate"
+    assert "--run-dmg-app-smoke passed" in manual_statuses["packaged_bridge_isolation"]["evidence"]
 
 
 def test_release_candidate_dmg_app_startup_smoke_requires_executable(
@@ -714,6 +721,66 @@ def test_release_candidate_verifier_runs_provider_smoke(tmp_path, monkeypatch, c
         "findings": [],
         "run_requested": True,
     }
+    manual_statuses = {
+        check["id"]: check
+        for check in report["manual_release_candidate_check_statuses"]
+    }
+    assert manual_statuses["real_provider_smoke"]["status"] == "passed"
+    assert manual_statuses["real_provider_smoke"]["evidence_source"] == "automated_rc_gate"
+    assert "text_stream exit_code=0" in manual_statuses["real_provider_smoke"]["evidence"]
+
+
+def test_release_candidate_verifier_does_not_override_failed_manual_evidence(
+    tmp_path, monkeypatch, capsys
+):
+    evidence_path = tmp_path / "tmp" / "manual-checks.json"
+    evidence_path.parent.mkdir()
+    evidence_path.write_text(
+        json.dumps(
+            {
+                "checks": [
+                    {
+                        "id": "real_provider_smoke",
+                        "status": "failed",
+                        "evidence": "Credentialed provider smoke returned unexpected tool-call arguments.",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+    monkeypatch.setenv("OHA_YACHIYO_SMOKE_BASE_URL", "https://provider.example/v1")
+    monkeypatch.setenv("OHA_YACHIYO_SMOKE_MODEL", "smoke-model")
+    monkeypatch.setenv("OHA_YACHIYO_SMOKE_API_KEY", "sk-test-provider-smoke")
+    monkeypatch.setattr(
+        rc.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout='{"ok": true}\n', stderr=""),
+    )
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        run_provider_smoke=True,
+        manual_checks_json=Path("tmp/manual-checks.json"),
+        report_json=Path("tmp/rc.json"),
+    ) == 1
+
+    output = capsys.readouterr().out
+    assert "real provider smoke: passed" in output
+    assert "[real_provider_smoke] failed" in output
+    report = json.loads((tmp_path / "tmp" / "rc.json").read_text(encoding="utf-8"))
+    assert report["ok"] is False
+    assert report["manual_release_candidate_check_status"] == "failed"
+    manual_statuses = {
+        check["id"]: check
+        for check in report["manual_release_candidate_check_statuses"]
+    }
+    assert manual_statuses["real_provider_smoke"]["status"] == "failed"
+    assert manual_statuses["real_provider_smoke"]["evidence"] == (
+        "Credentialed provider smoke returned unexpected tool-call arguments."
+    )
+    assert "evidence_source" not in manual_statuses["real_provider_smoke"]
 
 
 def test_release_candidate_verifier_provider_smoke_fails_without_credentials(

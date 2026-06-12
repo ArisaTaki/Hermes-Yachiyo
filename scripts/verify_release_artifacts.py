@@ -910,6 +910,18 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release candidate verifier must load manual check evidence JSON",
     ),
     (
+        "_auto_apply_release_candidate_check_evidence",
+        "release candidate verifier must auto-fill manual evidence from passed RC gates",
+    ),
+    (
+        '"automated_rc_gate"',
+        "release candidate verifier must label automatically supplied manual evidence",
+    ),
+    (
+        "_refresh_manual_release_candidate_check_report",
+        "release candidate verifier must refresh manual check status after automated gates",
+    ),
+    (
         "manual_checks_json",
         "release candidate verifier must expose manual check evidence input",
     ),
