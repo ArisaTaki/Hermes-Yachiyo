@@ -1676,6 +1676,7 @@ def test_release_candidate_verifier_terminates_packaged_app_process_group(monkey
 def test_release_candidate_verifier_runs_dmg_app_startup_smoke(
     tmp_path, monkeypatch, capsys
 ):
+    source_commit = "abc1234567890abc1234567890abc1234567890a"
     release_dir = tmp_path / "release"
     release_dir.mkdir()
     (release_dir / "Oha-Yachiyo-0.4.0-arm64.dmg").write_bytes(b"fake dmg")
@@ -1737,8 +1738,17 @@ def test_release_candidate_verifier_runs_dmg_app_startup_smoke(
         )
         return FakeProcess()
 
+    def fake_source_revision_run(command, *, root):
+        assert root == tmp_path
+        if command == ["git", "rev-parse", "HEAD"]:
+            return SimpleNamespace(stdout=f"{source_commit}\n")
+        if command == ["git", "status", "--short"]:
+            return SimpleNamespace(stdout="")
+        raise AssertionError(f"unexpected command: {command!r}")
+
     monkeypatch.setattr(rc.sys, "platform", "darwin")
     monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+    monkeypatch.setattr(rc, "_run_source_revision_git_command", fake_source_revision_run)
     monkeypatch.setattr(rc, "_allocate_loopback_port", lambda: 49123)
     monkeypatch.setattr(rc.subprocess, "run", fake_run)
     monkeypatch.setattr(rc.subprocess, "Popen", fake_popen)
@@ -1762,8 +1772,10 @@ def test_release_candidate_verifier_runs_dmg_app_startup_smoke(
     assert env["OHA_YACHIYO_HOME"].endswith("/.oha-yachiyo")
     output = capsys.readouterr().out
     assert "DMG app startup smoke: passed" in output
+    assert "DMG Bridge build metadata revision guards: passed" in output
     report = json.loads((tmp_path / "tmp" / "rc.json").read_text(encoding="utf-8"))
     assert report["ok"] is True
+    assert report["source_revision"]["commit"] == source_commit
     assert report["dmg_app_smoke"] == {
         "status": "passed",
         "dmg_paths": ["release/Oha-Yachiyo-0.4.0-arm64.dmg"],
@@ -1793,6 +1805,75 @@ def test_release_candidate_verifier_runs_dmg_app_startup_smoke(
     assert report["manual_release_candidate_check_summary"]["automated_evidence_check_ids"] == [
         "packaged_bridge_isolation"
     ]
+
+
+def test_release_candidate_verifier_rejects_stale_dmg_bridge_build_metadata(
+    tmp_path, monkeypatch, capsys
+):
+    source_commit = "1111111222222233333334444444555555566666"
+    stale_commit = "aaaaaaabbbbbbbcccccccdddddddeeeeeeeffffff"
+    release_dir = tmp_path / "release"
+    release_dir.mkdir()
+    (release_dir / "Oha-Yachiyo-0.4.0-arm64.dmg").write_bytes(b"fake dmg")
+
+    def fake_source_revision_run(command, *, root):
+        assert root == tmp_path
+        if command == ["git", "rev-parse", "HEAD"]:
+            return SimpleNamespace(stdout=f"{source_commit}\n")
+        if command == ["git", "status", "--short"]:
+            return SimpleNamespace(stdout="")
+        raise AssertionError(f"unexpected command: {command!r}")
+
+    def fake_verify_dmg_app_startup(root, dmg_paths):
+        assert root == tmp_path
+        assert tuple(dmg_paths) == (Path("release/Oha-Yachiyo-0.4.0-arm64.dmg"),)
+        return [], [
+            {
+                "dmg_path": "release/Oha-Yachiyo-0.4.0-arm64.dmg",
+                "service": "oha-yachiyo",
+                "version": "0.4.0",
+                "native_agent_ready": True,
+                "build_metadata": {
+                    "commit": stale_commit,
+                    "short_commit": "aaaaaaa",
+                },
+            }
+        ]
+
+    monkeypatch.setattr(rc, "_run_source_revision_git_command", fake_source_revision_run)
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+    monkeypatch.setattr(rc, "verify_dmg_app_startup", fake_verify_dmg_app_startup)
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        artifact_paths=(Path("release"),),
+        run_dmg_app_smoke=True,
+        report_json=Path("tmp/rc.json"),
+    ) == 1
+
+    output = capsys.readouterr().out
+    assert "DMG app startup smoke: passed" in output
+    assert "DMG Bridge build metadata revision guards: failed" in output
+    report = json.loads((tmp_path / "tmp" / "rc.json").read_text(encoding="utf-8"))
+    assert report["ok"] is False
+    assert report["dmg_app_smoke"]["status"] == "failed"
+    assert report["dmg_app_smoke"]["bridge_statuses"][0]["build_metadata"]["commit"] == stale_commit
+    assert report["dmg_app_smoke"]["findings"] == [
+        {
+            "path": "release/Oha-Yachiyo-0.4.0-arm64.dmg",
+            "message": (
+                "dmg_app_smoke packaged Bridge build_metadata.commit aaaaaaa "
+                "does not match source_revision.commit 1111111; rebuild the DMG "
+                "from the current source before final signoff"
+            ),
+        }
+    ]
+    manual_statuses = {
+        check["id"]: check
+        for check in report["manual_release_candidate_check_statuses"]
+    }
+    assert manual_statuses["packaged_bridge_isolation"]["status"] == "manual_required"
+    assert report["manual_release_candidate_check_summary"]["automated_evidence_check_ids"] == []
 
 
 def test_release_candidate_verifier_runs_dmg_screen_recording_probe(

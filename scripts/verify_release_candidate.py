@@ -44,6 +44,11 @@ DMG_UI_SAMPLING_SMOKE_TIMEOUT_SECONDS = 60.0
 DMG_UI_SAMPLING_SMOKE_SCRIPT = Path("scripts/smoke_packaged_ui_sampling.mjs")
 DMG_CHAT_NATIVE_FILE_SMOKE_TIMEOUT_SECONDS = 60.0
 DMG_CHAT_NATIVE_FILE_SMOKE_SCRIPT = Path("scripts/smoke_packaged_chat_native_file_upload.mjs")
+DMG_BRIDGE_STATUS_REPORT_SECTIONS: tuple[str, ...] = (
+    "dmg_app_smoke",
+    "dmg_screen_probe",
+    "dmg_ui_sampling_smoke",
+)
 PROVIDER_SMOKE_ENV_VARS: tuple[str, ...] = (
     "OHA_YACHIYO_SMOKE_BASE_URL",
     "OHA_YACHIYO_SMOKE_MODEL",
@@ -1110,6 +1115,106 @@ def _print_findings(title: str, findings: Sequence[Finding]) -> None:
 
 def _finding_report(findings: Sequence[Finding]) -> list[dict[str, str]]:
     return [{"path": str(finding.path), "message": finding.message} for finding in findings]
+
+
+def _recorded_bridge_statuses(report: dict[str, Any]) -> list[dict[str, Any]]:
+    statuses: list[dict[str, Any]] = []
+    for section_name in DMG_BRIDGE_STATUS_REPORT_SECTIONS:
+        section = report.get(section_name)
+        if not isinstance(section, dict):
+            continue
+        raw_statuses = section.get("bridge_statuses")
+        if not isinstance(raw_statuses, list):
+            continue
+        statuses.extend(status for status in raw_statuses if isinstance(status, dict))
+    return statuses
+
+
+def _source_revision_commit(report: dict[str, Any]) -> str:
+    source_revision = report.get("source_revision")
+    if not isinstance(source_revision, dict) or source_revision.get("available") is not True:
+        return ""
+    return str(source_revision.get("commit") or "").strip()
+
+
+def _bridge_status_source_revision_findings(
+    report: dict[str, Any],
+) -> dict[str, list[Finding]]:
+    source_commit = _source_revision_commit(report)
+    if not source_commit:
+        return {}
+    source_revision = report["source_revision"]
+    source_label = str(source_revision.get("short_commit") or source_commit[:7]).strip()
+
+    findings: dict[str, list[Finding]] = {}
+    for section_name in DMG_BRIDGE_STATUS_REPORT_SECTIONS:
+        section = report.get(section_name)
+        if not isinstance(section, dict):
+            continue
+        raw_statuses = section.get("bridge_statuses")
+        if not isinstance(raw_statuses, list):
+            continue
+        for status in raw_statuses:
+            if not isinstance(status, dict):
+                continue
+            dmg_path = Path(str(status.get("dmg_path") or section_name))
+            build_metadata = status.get("build_metadata")
+            build_commit = (
+                str(build_metadata.get("commit") or "").strip()
+                if isinstance(build_metadata, dict)
+                else ""
+            )
+            if not build_commit:
+                findings.setdefault(section_name, []).append(
+                    Finding(
+                        dmg_path,
+                        (
+                            f"{section_name} packaged Bridge /status must include "
+                            f"build_metadata.commit to compare against source_revision "
+                            f"{source_label}"
+                        ),
+                    )
+                )
+                continue
+            if build_commit != source_commit:
+                build_label = (
+                    str(build_metadata.get("short_commit") or build_commit[:7]).strip()
+                    if isinstance(build_metadata, dict)
+                    else build_commit[:7]
+                )
+                findings.setdefault(section_name, []).append(
+                    Finding(
+                        dmg_path,
+                        (
+                            f"{section_name} packaged Bridge build_metadata.commit "
+                            f"{build_label} does not match source_revision.commit "
+                            f"{source_label}; rebuild the DMG from the current source "
+                            "before final signoff"
+                        ),
+                    )
+                )
+    return findings
+
+
+def _apply_bridge_status_source_revision_findings(
+    report: dict[str, Any],
+) -> list[Finding]:
+    findings_by_section = _bridge_status_source_revision_findings(report)
+    all_findings: list[Finding] = []
+    for section_name, section_findings in findings_by_section.items():
+        section = report.get(section_name)
+        if not isinstance(section, dict):
+            continue
+        existing_findings = section.get("findings")
+        if not isinstance(existing_findings, list):
+            existing_findings = []
+        section["findings"] = [*existing_findings, *_finding_report(section_findings)]
+        if section.get("status") != "skipped":
+            section["status"] = "failed"
+        if "bridge_ready_dmg_paths" in section:
+            section["bridge_ready_dmg_paths"] = []
+        all_findings.extend(section_findings)
+    return all_findings
 
 
 def _write_report(path: Path, report: dict[str, Any]) -> None:
@@ -2727,6 +2832,16 @@ def verify_release_candidate(
             "findings": [],
             "run_requested": run_dmg_ui_sampling_smoke,
         }
+
+    bridge_revision_findings = _apply_bridge_status_source_revision_findings(report)
+    if bridge_revision_findings or (
+        _source_revision_commit(report) and _recorded_bridge_statuses(report)
+    ):
+        _print_findings(
+            "DMG Bridge build metadata revision guards",
+            bridge_revision_findings,
+        )
+    failed = failed or bool(bridge_revision_findings)
 
     if run_dmg_chat_native_file_smoke and not artifact_paths_valid:
         print("DMG Chat native file smoke: skipped because artifact paths failed validation")

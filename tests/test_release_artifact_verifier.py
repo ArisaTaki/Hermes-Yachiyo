@@ -161,6 +161,10 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
         in messages
     )
     assert (
+        "release candidate verifier must compare packaged Bridge build metadata with source revision"
+        in messages
+    )
+    assert (
         "release candidate verifier manual reports, drafts, and Markdown must preserve source revision metadata"
         in messages
     )
