@@ -4838,7 +4838,7 @@ class NativeRunEngine:
             );
             """
         )
-        scrubbed_agent_credentials = self._ensure_runtime_columns()
+        scrubbed_secrets = self._ensure_runtime_columns()
         self._conn.executescript(
             """
             CREATE INDEX IF NOT EXISTS idx_agents_name ON agents (LOWER(name));
@@ -4867,7 +4867,7 @@ class NativeRunEngine:
             (_now(),),
         )
         self._conn.commit()
-        if scrubbed_agent_credentials:
+        if scrubbed_secrets:
             self._vacuum_after_secret_scrub()
 
     def _ensure_runtime_columns(self) -> bool:
@@ -4946,7 +4946,9 @@ class NativeRunEngine:
             """
         )
         self._migrate_native_execution_and_skill_sources()
-        return self._migrate_agent_model_credentials()
+        scrubbed_run_groups = self._migrate_run_group_secret_projections()
+        scrubbed_agent_credentials = self._migrate_agent_model_credentials()
+        return scrubbed_run_groups or scrubbed_agent_credentials
 
     def _vacuum_after_secret_scrub(self) -> None:
         try:
@@ -4979,6 +4981,41 @@ class NativeRunEngine:
                AND item_key LIKE 'yachiyo:%'
             """
         )
+
+    def _migrate_run_group_secret_projections(self) -> bool:
+        scrubbed = False
+        rows = self._conn.execute(
+            "SELECT run_group_id, title, source, workspace_dir, summary FROM run_groups"
+        ).fetchall()
+        for row in rows:
+            clean_title = redact_secrets(row["title"])[:180]
+            clean_source = redact_secrets(row["source"])[:80]
+            clean_workspace_dir = redact_secrets(row["workspace_dir"])
+            clean_summary = redact_secrets(row["summary"])
+            if (
+                clean_title == row["title"]
+                and clean_source == row["source"]
+                and clean_workspace_dir == row["workspace_dir"]
+                and clean_summary == row["summary"]
+            ):
+                continue
+            self._conn.execute(
+                """
+                UPDATE run_groups
+                   SET title=?, source=?, workspace_dir=?, summary=?, updated_at=?
+                 WHERE run_group_id=?
+                """,
+                (
+                    clean_title,
+                    clean_source,
+                    clean_workspace_dir,
+                    clean_summary,
+                    _now(),
+                    str(row["run_group_id"]),
+                ),
+            )
+            scrubbed = True
+        return scrubbed
 
     def _agent_model_credential_ref(self, agent_id: str) -> str:
         return f"agent:{agent_id}:model_api_key"

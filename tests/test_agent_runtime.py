@@ -2355,6 +2355,73 @@ def test_runtime_migrates_task_run_link_projection_columns(tmp_path):
         service.close()
 
 
+def test_legacy_run_group_secret_projection_migration_vacuums_plaintext_secret(tmp_path):
+    db_path = tmp_path / "agent-runtime.db"
+    title_secret = "sk-legacy-run-group-title123456"
+    source_secret = "sk-legacy-run-group-source123456"
+    workspace_secret = "sk-legacy-run-group-workspace123456"
+    summary_secret = "sk-legacy-run-group-summary123456"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            CREATE TABLE run_groups (
+                run_group_id TEXT PRIMARY KEY,
+                title TEXT NOT NULL DEFAULT '',
+                source TEXT NOT NULL DEFAULT '',
+                workspace_dir TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'running',
+                summary TEXT NOT NULL DEFAULT '',
+                child_run_ids_json TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO run_groups (
+                run_group_id, title, source, workspace_dir, status, summary,
+                child_run_ids_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "run_group_legacy_secret",
+                f"Legacy {title_secret}",
+                f"workflow-{source_secret}",
+                f"/tmp/{workspace_secret}/project",
+                "failed",
+                f"Failed with token={summary_secret}",
+                "[]",
+                "2026-06-09T00:00:00+00:00",
+                "2026-06-09T00:00:00+00:00",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    service = make_service(tmp_path)
+    try:
+        group = service.get_run_group("run_group_legacy_secret")
+        row = service._conn.execute(
+            "SELECT title, source, workspace_dir, summary FROM run_groups WHERE run_group_id=?",
+            ("run_group_legacy_secret",),
+        ).fetchone()
+
+        assert group["title"] == "Legacy [redacted]"
+        assert group["source"] == "workflow-[redacted]"
+        assert group["workspace_dir"] == "/tmp/[redacted]/project"
+        assert group["summary"] == "Failed with token=[redacted]"
+        assert row["title"] == "Legacy [redacted]"
+        assert row["source"] == "workflow-[redacted]"
+        assert row["workspace_dir"] == "/tmp/[redacted]/project"
+        assert row["summary"] == "Failed with token=[redacted]"
+        assert verify_secret_redaction(paths=[tmp_path]) == []
+    finally:
+        service.close()
+
+
 def test_runtime_sqlite_enables_required_database_guards(tmp_path):
     service = make_service(tmp_path)
     try:
