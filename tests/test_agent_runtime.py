@@ -39,6 +39,7 @@ from apps.shell.agent_runtime import (
     WorkflowApprovalTransitionContext,
     WorkflowAgentNodeHandoff,
     WorkflowAgentNodeExecution,
+    WorkflowArtifactNodeWrite,
     WorkflowChildOutcomeCoordinator,
     WorkflowChildRunProjection,
     WorkflowChildStatusProjection,
@@ -2568,6 +2569,68 @@ def test_workflow_approval_pause_projection_builds_private_and_public_payloads()
         "timeline": timeline,
         "artifacts": artifacts,
         "pending_approval": pending,
+    }
+
+
+def test_workflow_artifact_node_write_builds_record_and_replay_payload(tmp_path):
+    class FakeEngine:
+        workflow_artifacts_dir = tmp_path / "workflow-artifacts"
+
+        def _default_workspace_policy(self):
+            return {"default_workdir": "", "readable_scopes": ["."], "writable_scopes": []}
+
+        def _workflow_artifact_path(self, label, artifacts, requested):
+            assert label == "Final Report"
+            assert artifacts == [{"kind": "existing", "path": "prior.md"}]
+            return requested or "final.md"
+
+    artifacts = [{"kind": "existing", "path": "prior.md"}]
+    content = "Final workflow summary"
+    write = WorkflowArtifactNodeWrite.from_node(
+        FakeEngine(),
+        {"run_id": "workflow_run"},
+        {
+            "id": "report",
+            "type": "artifact",
+            "data": {
+                "label": "Final Report",
+                "artifact_path": "reports/final.md",
+            },
+        },
+        label="Final Report",
+        kind="artifact",
+        context=content,
+        artifacts=artifacts,
+    )
+
+    assert (tmp_path / "workflow-artifacts" / "workflow_run" / "reports" / "final.md").read_text(
+        encoding="utf-8"
+    ) == content
+    assert write.artifact_record() == {
+        "kind": "workflow_artifact",
+        "workflow_node_id": "report",
+        "workflow_node_label": "Final Report",
+        "ok": True,
+        "path": "reports/final.md",
+        "bytes": len(content.encode("utf-8")),
+    }
+    assert write.event_payload() == {
+        "workflow_node_id": "report",
+        "workflow_node_kind": "artifact",
+        "workflow_node_label": "Final Report",
+        "status": "completed",
+        "artifact": {
+            "ok": True,
+            "path": "reports/final.md",
+            "bytes": len(content.encode("utf-8")),
+        },
+    }
+    assert write.timeline_event(
+        lambda event, detail, **payload: {"event": event, "detail": detail, **payload}
+    ) == {
+        "event": "workflow.node.artifact",
+        "detail": "Final Report",
+        **write.event_payload(),
     }
 
 

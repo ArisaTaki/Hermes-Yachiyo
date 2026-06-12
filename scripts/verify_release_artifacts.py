@@ -1073,6 +1073,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover WorkflowContinuationCoordinator failure redaction boundary",
     ),
     (
+        "tests/test_agent_runtime.py::test_workflow_artifact_node_write_builds_record_and_replay_payload",
+        "macOS release workflow smoke tests must cover Workflow artifact node write boundary",
+    ),
+    (
         "tests/test_agent_runtime.py::test_workflow_continuation_coordinator_writes_artifact_node",
         "macOS release workflow smoke tests must cover WorkflowContinuationCoordinator artifact node handoff",
     ),

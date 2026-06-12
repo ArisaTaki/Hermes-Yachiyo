@@ -4524,6 +4524,69 @@ class WorkflowAgentNodeExecution:
         return self.handoff.status_event_payload(self.child_run)
 
 
+@dataclass(frozen=True)
+class WorkflowArtifactNodeWrite:
+    """Artifact write result for a Workflow artifact node."""
+
+    node_id: str
+    node_kind: str
+    node_label: str
+    artifact: dict[str, Any]
+
+    @classmethod
+    def from_node(
+        cls,
+        engine: Any,
+        run: dict[str, Any],
+        node: dict[str, Any],
+        *,
+        label: str,
+        kind: str,
+        context: str,
+        artifacts: list[dict[str, Any]],
+    ) -> "WorkflowArtifactNodeWrite":
+        data = node.get("data") if isinstance(node.get("data"), dict) else {}
+        broker = ToolBroker(
+            engine._default_workspace_policy(),
+            engine.workflow_artifacts_dir / str(run["run_id"]),
+        )
+        artifact_path = engine._workflow_artifact_path(
+            label,
+            artifacts,
+            str(data.get("artifact_path") or data.get("artifactPath") or ""),
+        )
+        return cls(
+            node_id=str(node.get("id") or ""),
+            node_kind=kind,
+            node_label=label,
+            artifact=broker.artifact_write(artifact_path, context),
+        )
+
+    def artifact_record(self) -> dict[str, Any]:
+        return {
+            "kind": "workflow_artifact",
+            "workflow_node_id": self.node_id,
+            "workflow_node_label": self.node_label,
+            **self.artifact,
+        }
+
+    def event_payload(self) -> dict[str, Any]:
+        return {
+            "workflow_node_id": self.node_id,
+            "workflow_node_kind": self.node_kind,
+            "workflow_node_label": self.node_label,
+            "status": "completed",
+            "artifact": self.artifact,
+        }
+
+    def timeline_event(self, timeline_factory: Any) -> dict[str, Any]:
+        return timeline_factory(
+            "workflow.node.artifact",
+            self.node_label,
+            **self.event_payload(),
+        )
+
+
 class WorkflowContinuationCoordinator:
     """Executes Workflow nodes for a Workflow Run."""
 
@@ -4891,41 +4954,18 @@ class WorkflowContinuationCoordinator:
         timeline: list[dict[str, Any]],
     ) -> None:
         engine = self._engine
-        data = node.get("data") or {}
-        broker = ToolBroker(
-            engine._default_workspace_policy(),
-            engine.workflow_artifacts_dir / str(run["run_id"]),
+        write = WorkflowArtifactNodeWrite.from_node(
+            engine,
+            run,
+            node,
+            label=label,
+            kind=kind,
+            context=context,
+            artifacts=artifacts,
         )
-        workflow_node_id = str(node.get("id") or "")
-        artifact_path = engine._workflow_artifact_path(
-            label,
-            artifacts,
-            str(data.get("artifact_path") or data.get("artifactPath") or ""),
-        )
-        artifact = broker.artifact_write(artifact_path, context)
-        artifacts.append(
-            {
-                "kind": "workflow_artifact",
-                "workflow_node_id": workflow_node_id,
-                "workflow_node_label": label,
-                **artifact,
-            }
-        )
-        artifact_payload = {
-            "workflow_node_id": workflow_node_id,
-            "workflow_node_kind": kind,
-            "workflow_node_label": label,
-            "status": "completed",
-            "artifact": artifact,
-        }
-        timeline.append(
-            engine._timeline(
-                "workflow.node.artifact",
-                label,
-                **artifact_payload,
-            )
-        )
-        engine.append_run_event(str(run["run_id"]), "workflow.node.artifact", artifact_payload)
+        artifacts.append(write.artifact_record())
+        timeline.append(write.timeline_event(engine._timeline))
+        engine.append_run_event(str(run["run_id"]), "workflow.node.artifact", write.event_payload())
 
 
 class NativeRunEngine:

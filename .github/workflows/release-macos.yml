@@ -115,6 +115,7 @@ jobs:
             tests/test_agent_runtime.py::test_workflow_continuation_coordinator_resumes_after_approval_node \
             tests/test_agent_runtime.py::test_workflow_continuation_coordinator_projects_background_failure_without_secret_leak \
             tests/test_agent_runtime.py::test_workflow_continuation_coordinator_fails_unknown_node_without_secret_leak \
+            tests/test_agent_runtime.py::test_workflow_artifact_node_write_builds_record_and_replay_payload \
             tests/test_agent_runtime.py::test_workflow_continuation_coordinator_writes_artifact_node \
             tests/test_agent_runtime.py::test_run_approval_routes_return_404_and_are_idempotent \
             tests/test_agent_runtime.py::test_run_approval_reject_route_is_idempotent \
