@@ -551,6 +551,8 @@ async function main() {
     const openRun = reply?.querySelector('[data-testid="chat-message-open-run-detail"]');
     return reply?.textContent.includes(${JSON.stringify(RUN_RESULT)})
       && openRun
+      && openRun.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
+      && openRun.getAttribute('data-run-status') === 'completed'
       && openRun.textContent.includes('运行详情');
   }, 'image assistant reply Run Detail action');
   await win.webContents.executeJavaScript("document.querySelector('[data-message-id=\\"assistant-chat-image-ui-smoke-reply\\"] [data-testid=\\"chat-message-open-run-detail\\"]').click()", true);

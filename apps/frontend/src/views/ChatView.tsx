@@ -3015,6 +3015,7 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
         : '';
   const isProcessingEmpty = role === 'assistant' && message.status === 'processing' && !displayContent;
   const runId = messageRunId(message);
+  const runStatus = messageRunStatus(message);
   const showApprovalActions = hasActionableApproval(message) && Boolean(runId);
   const approvalDetails = showApprovalActions ? approvalRequestDetails(message) : null;
   const approvalId = approvalDetails ? approvalIdFromPending(message.metadata?.pending_approval) : '';
@@ -3134,6 +3135,8 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
             <button
               className="message-run-detail-button"
               type="button"
+              data-run-id={runId}
+              data-run-status={runStatus}
               data-testid="chat-message-open-run-detail"
               onClick={() => onOpenRunDetails(runId)}
             >

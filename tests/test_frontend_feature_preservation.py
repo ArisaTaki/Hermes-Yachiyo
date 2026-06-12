@@ -809,6 +809,8 @@ def test_chat_image_attachment_ui_smoke_uses_file_input_path() -> None:
             "model.output.completed",
             "run.completed",
             r'''document.querySelector('[data-message-id=\\"assistant-chat-image-ui-smoke-reply\\"] [data-testid=\\"chat-message-open-run-detail\\"]').click()''',
+            "openRun.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}",
+            "openRun.getAttribute('data-run-status') === 'completed'",
             "detail?.getAttribute('data-run-kind') === 'main_chat_run'",
             "outputEvent?.textContent.includes(${JSON.stringify(RUN_RESULT)})",
             "image message Run Detail replay verified",
