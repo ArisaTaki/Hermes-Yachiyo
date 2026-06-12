@@ -36,9 +36,10 @@ from apps.core.chat_store import ChatStore
 from apps.core.executor import NativeAgentExecutor
 from apps.core.state import AppState
 from apps.core.task_runner import TaskRunner
-from apps.shell.agent_runtime import AgentRuntimeService
+from apps.shell.agent_runtime import AgentRuntimeError, AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
 from packages.protocol.enums import TaskStatus
+from scripts.verify_secret_redaction import verify_secret_redaction
 
 
 class _FakeDefaultProfileService:
@@ -466,6 +467,53 @@ def test_chat_message_http_route_maps_idempotency_key_header(monkeypatch):
         assert response.json()["client_message_id"] == "header-message-1"
     finally:
         sys.modules.pop("_oha_ui_route_http_under_test", None)
+        _restore_module_prefixes(("fastapi",), saved_modules)
+
+
+def test_chat_message_http_route_rejects_sensitive_idempotency_key_header(tmp_path, monkeypatch):
+    saved_modules = _unload_module_prefixes(("fastapi",))
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    leaked_idempotency_key = "sk-http-chat-id-secret123456"
+    try:
+        try:
+            from fastapi import FastAPI
+            from fastapi.testclient import TestClient
+        except ModuleNotFoundError as exc:
+            pytest.skip(f"FastAPI/TestClient dependency is not installed: {exc.name}")
+
+        route_path = Path(__file__).resolve().parents[1] / "apps" / "bridge" / "routes" / "ui.py"
+        spec = importlib.util.spec_from_file_location("_oha_ui_sensitive_id_route_http_under_test", route_path)
+        assert spec is not None
+        assert spec.loader is not None
+        ui_route_module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = ui_route_module
+        spec.loader.exec_module(ui_route_module)
+
+        session = ChatSession(session_id="http-sensitive-client-message-id-session")
+        session.attach_store(store, load_existing=False)
+        runtime = SimpleNamespace(state=AppState(), chat_session=session)
+        monkeypatch.setattr(ui_route_module, "get_runtime", lambda: runtime)
+        route_app = FastAPI()
+        route_app.include_router(ui_route_module.router)
+
+        with TestClient(route_app) as client:
+            response = client.post(
+                "/ui/chat/messages",
+                json={"text": "hello"},
+                headers={"Idempotency-Key": leaked_idempotency_key},
+            )
+
+        body = response.json()
+        assert response.status_code == 200
+        assert body["ok"] is False
+        assert "client_message_id/idempotency_key" in body["error"]
+        assert leaked_idempotency_key not in json.dumps(body, ensure_ascii=False)
+        assert session.get_messages() == []
+        assert runtime.state.list_tasks() == []
+        assert verify_secret_redaction(paths=[tmp_path]) == []
+    finally:
+        store.close()
+        sys.modules.pop("_oha_ui_sensitive_id_route_http_under_test", None)
         _restore_module_prefixes(("fastapi",), saved_modules)
 
 
@@ -2498,6 +2546,82 @@ def test_agent_and_workflow_run_http_routes_map_idempotency_key_header(monkeypat
         ]
     finally:
         sys.modules.pop("_oha_agent_route_http_under_test", None)
+        _restore_module_prefixes(("fastapi",), saved_modules)
+
+
+def test_agent_and_workflow_run_http_routes_redact_sensitive_idempotency_key_errors(monkeypatch):
+    saved_modules = _unload_module_prefixes(("fastapi",))
+    try:
+        try:
+            from fastapi import FastAPI
+            from fastapi.testclient import TestClient
+        except ModuleNotFoundError as exc:
+            pytest.skip(f"FastAPI/TestClient dependency is not installed: {exc.name}")
+
+        route_path = Path(__file__).resolve().parents[1] / "apps" / "bridge" / "routes" / "agents.py"
+        spec = importlib.util.spec_from_file_location("_oha_agent_sensitive_id_route_http_under_test", route_path)
+        assert spec is not None
+        assert spec.loader is not None
+        agent_route_module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = agent_route_module
+        spec.loader.exec_module(agent_route_module)
+
+        class FakeRuntimeService:
+            def __init__(self):
+                self.calls: list[tuple[str, dict]] = []
+
+            def create_agent_run(self, payload):
+                self.calls.append(("create_agent_run", dict(payload)))
+                raise AgentRuntimeError(f"bad client_run_id {payload.get('client_run_id', '')}")
+
+            def create_workflow_run(self, payload):
+                self.calls.append(("create_workflow_run", dict(payload)))
+                raise AgentRuntimeError(f"bad client_run_id {payload.get('client_run_id', '')}")
+
+        service = FakeRuntimeService()
+        monkeypatch.setattr(
+            agent_route_module,
+            "get_agent_runtime_service",
+            lambda: (_ for _ in ()).throw(AssertionError("agent routes should use AppRuntime service")),
+        )
+        route_app = FastAPI()
+        route_app.state.runtime = SimpleNamespace(agent_runtime_service=service)
+        route_app.include_router(agent_route_module.router)
+        agent_secret = "sk-http-agent-run-id-secret123456"
+        workflow_secret = "sk-http-workflow-run-id-secret123456"
+
+        with TestClient(route_app) as client:
+            agent_response = client.post(
+                "/ui/agent-runs",
+                json={"agent_id": "agent-1", "user_goal": "hello"},
+                headers={"Idempotency-Key": agent_secret},
+            )
+            workflow_response = client.post(
+                "/ui/workflow-runs",
+                json={"workflow_id": "workflow-1", "user_goal": "hello"},
+                headers={"Idempotency-Key": workflow_secret},
+            )
+
+        assert agent_response.status_code == 400
+        assert workflow_response.status_code == 400
+        agent_body = json.dumps(agent_response.json(), ensure_ascii=False)
+        workflow_body = json.dumps(workflow_response.json(), ensure_ascii=False)
+        assert agent_secret not in agent_body
+        assert workflow_secret not in workflow_body
+        assert "[redacted]" in agent_body
+        assert "[redacted]" in workflow_body
+        assert service.calls == [
+            (
+                "create_agent_run",
+                {"agent_id": "agent-1", "user_goal": "hello", "client_run_id": agent_secret},
+            ),
+            (
+                "create_workflow_run",
+                {"workflow_id": "workflow-1", "user_goal": "hello", "client_run_id": workflow_secret},
+            ),
+        ]
+    finally:
+        sys.modules.pop("_oha_agent_sensitive_id_route_http_under_test", None)
         _restore_module_prefixes(("fastapi",), saved_modules)
 
 

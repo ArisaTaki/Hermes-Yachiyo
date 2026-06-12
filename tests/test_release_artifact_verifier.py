@@ -1623,6 +1623,7 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
         in messages
     )
     assert "macOS release workflow smoke tests must cover sensitive client_run_id rejection" in messages
+    assert "macOS release workflow smoke tests must cover sensitive Agent/Workflow Idempotency-Key error redaction" in messages
     assert "macOS release workflow smoke tests must cover UI Run cancel route idempotency" in messages
     assert "macOS release workflow smoke tests must cover Chat cancel late-output HTTP roundtrip" in messages
     assert "macOS release workflow smoke tests must cover missing-model executor structured failure" in messages
@@ -1787,6 +1788,7 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow smoke tests must cover Bridge loopback bind guard" in messages
     assert "macOS release workflow smoke tests must cover mutating Bridge token guard" in messages
     assert "macOS release workflow smoke tests must cover RunEvent HTTP replay pagination and filtering" in messages
+    assert "macOS release workflow smoke tests must cover sensitive Chat Idempotency-Key rejection" in messages
     assert "macOS release workflow smoke tests must cover Chat image HTTP roundtrip" in messages
     assert "macOS release workflow smoke tests must cover Chat image NativeRunEngine replay roundtrip" in messages
     assert "macOS release workflow smoke tests must cover Chat approval failed tool HTTP roundtrip" in messages

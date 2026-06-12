@@ -981,6 +981,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover sensitive client_run_id rejection",
     ),
     (
+        "tests/test_bridge_server.py::test_agent_and_workflow_run_http_routes_redact_sensitive_idempotency_key_errors",
+        "macOS release workflow smoke tests must cover sensitive Agent/Workflow Idempotency-Key error redaction",
+    ),
+    (
         "tests/test_bridge_server.py::test_run_cancel_route_handler_is_idempotent",
         "macOS release workflow smoke tests must cover UI Run cancel route idempotency",
     ),
@@ -1551,6 +1555,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "tests/test_bridge_server.py::test_run_events_http_route_paginates_and_hides_non_user_events",
         "macOS release workflow smoke tests must cover RunEvent HTTP replay pagination and filtering",
+    ),
+    (
+        "tests/test_bridge_server.py::test_chat_message_http_route_rejects_sensitive_idempotency_key_header",
+        "macOS release workflow smoke tests must cover sensitive Chat Idempotency-Key rejection",
     ),
     (
         "tests/test_bridge_server.py::test_chat_message_image_attachment_http_roundtrip_maps_idempotency_and_file_response",
