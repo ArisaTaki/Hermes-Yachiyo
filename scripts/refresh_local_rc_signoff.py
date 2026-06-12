@@ -72,6 +72,9 @@ def _report_matches_current_source(report_path: Path, *, short_commit: str) -> b
         return False
     if source_revision.get("dirty") is not False:
         return False
+    commit = source_revision.get("commit")
+    if isinstance(commit, str) and commit:
+        return commit.startswith(short_commit)
     return source_revision.get("short_commit") == short_commit
 
 

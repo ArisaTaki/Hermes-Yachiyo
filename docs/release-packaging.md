@@ -130,7 +130,7 @@ python scripts/refresh_local_rc_signoff.py --channel experimental --repository k
 python scripts/refresh_local_rc_signoff.py --reuse-current-reports
 ```
 
-该模式只会复用 `source_revision.short_commit` 等于当前 `<short-commit>` 且 `dirty=false` 的已有 batch / screen report；不匹配、缺失、损坏或 dirty 的 report 会照常重新生成，避免把旧 commit 的自动 evidence 合入当前 final signoff。
+该模式只会复用 `source_revision.commit` 能以当前 `<short-commit>` 为前缀且 `dirty=false` 的已有 batch / screen report；不匹配、缺失、损坏或 dirty 的 report 会照常重新生成，避免把旧 commit 的自动 evidence 合入当前 final signoff。
 
 固定下载链接：
 

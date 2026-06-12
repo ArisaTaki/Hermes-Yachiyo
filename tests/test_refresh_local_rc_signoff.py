@@ -190,7 +190,7 @@ def test_refresh_local_rc_signoff_reuses_current_reports(monkeypatch, tmp_path):
         "source_revision": {
             "available": True,
             "commit": "abc12345deadbeef",
-            "short_commit": "abc12345",
+            "short_commit": "abc1234",
             "dirty": False,
         }
     }
