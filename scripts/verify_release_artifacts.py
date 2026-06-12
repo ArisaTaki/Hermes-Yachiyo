@@ -1197,6 +1197,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover NativeRunEngine Responses call_id main chat history",
     ),
     (
+        "tests/test_agent_runtime.py::test_agent_run_executes_provider_message_tool_calls",
+        "macOS release workflow smoke tests must cover NativeRunEngine Agent Run provider message tool calls",
+    ),
+    (
         "tests/test_agent_runtime.py::test_agent_run_executes_streaming_tool_call_and_continues",
         "macOS release workflow smoke tests must cover NativeRunEngine Agent Run streaming tool calls",
     ),
