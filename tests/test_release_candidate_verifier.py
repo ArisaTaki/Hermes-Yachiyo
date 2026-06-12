@@ -186,6 +186,45 @@ def test_release_candidate_verifier_runs_electron_ui_smoke_scripts(tmp_path, mon
     ]
 
 
+def test_release_candidate_verifier_rejects_smoke_scripts_outside_root(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    def fail_run(*_args, **_kwargs):
+        raise AssertionError("outside smoke script must not run")
+
+    monkeypatch.setattr(rc.subprocess, "run", fail_run)
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        run_ui_smoke=True,
+        smoke_scripts=(Path("../outside-smoke-ui.mjs"),),
+        report_json=Path("release/rc-verification.json"),
+    ) == 1
+
+    output = capsys.readouterr().out
+    assert "Electron UI smoke: failed" in output
+    assert "release candidate smoke script path must stay inside project root" in output
+    report_path = tmp_path / "release" / "rc-verification.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["ok"] is False
+    assert report["electron_ui_smoke"] == {
+        "status": "failed",
+        "scripts": [
+            {
+                "script": "../outside-smoke-ui.mjs",
+                "exit_code": None,
+                "error": (
+                    "release candidate smoke script path must stay inside project root: "
+                    "../outside-smoke-ui.mjs"
+                ),
+            }
+        ],
+        "run_requested": True,
+    }
+
+
 def test_release_candidate_verifier_reports_electron_ui_smoke_failure(tmp_path, monkeypatch, capsys):
     scripts = tmp_path / "scripts"
     scripts.mkdir()

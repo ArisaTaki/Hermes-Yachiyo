@@ -84,6 +84,20 @@ def _validate_artifact_paths(root: Path, artifact_paths: Sequence[Path]) -> tupl
     return tuple(artifact_paths)
 
 
+def _validate_smoke_script_paths(root: Path, smoke_scripts: Sequence[Path]) -> tuple[Path, ...]:
+    root_path = root.resolve(strict=False)
+    for smoke_script in smoke_scripts:
+        candidate = smoke_script if smoke_script.is_absolute() else root / smoke_script
+        resolved = candidate.resolve(strict=False)
+        try:
+            resolved.relative_to(root_path)
+        except ValueError:
+            raise ValueError(
+                f"release candidate smoke script path must stay inside project root: {smoke_script}"
+            )
+    return tuple(smoke_scripts)
+
+
 def verify_release_candidate(
     *,
     root: Path = PROJECT_ROOT,
@@ -173,7 +187,20 @@ def verify_release_candidate(
     selected_smoke_scripts = tuple(smoke_scripts) if smoke_scripts is not None else release_ui_smoke_scripts(root)
     smoke_results: list[dict[str, object]] = []
     if run_ui_smoke:
-        if not selected_smoke_scripts:
+        try:
+            selected_smoke_scripts = _validate_smoke_script_paths(root, selected_smoke_scripts)
+        except ValueError as exc:
+            print(f"Electron UI smoke: failed\n- {exc}")
+            smoke_results.append(
+                {
+                    "script": ", ".join(str(script) for script in selected_smoke_scripts),
+                    "exit_code": None,
+                    "error": str(exc),
+                }
+            )
+            selected_smoke_scripts = ()
+            failed = True
+        if not selected_smoke_scripts and not smoke_results:
             print("Electron UI smoke: failed\n- no scripts/smoke_*_ui.mjs scripts found")
             failed = True
         for script in selected_smoke_scripts:
