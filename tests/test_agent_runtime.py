@@ -174,7 +174,7 @@ def test_workflow_child_outcome_coordinator_projects_child_artifacts_and_timelin
         "runnable_id": "agent_research",
         "runnable_name": "Research Agent",
         "status": "completed",
-        "result": "Child Agent completed with a long but visible summary.",
+        "result": "Child Agent completed with token=sk-workflow-child-secret123456 and visible summary.",
         "artifacts": [
             {"kind": "context", "path": "context.md"},
             {"kind": "agent_artifact", "path": "reports/existing.md"},
@@ -194,7 +194,8 @@ def test_workflow_child_outcome_coordinator_projects_child_artifacts_and_timelin
         "workflow_node_label": "Research Step",
     }
     assert timeline[0]["status"] == "completed"
-    assert timeline[0]["result"] == "Child Agent completed with a long but visible summary."
+    assert timeline[0]["result"] == "Child Agent completed with token=[redacted] and visible summary."
+    assert "sk-workflow-child-secret123456" not in json.dumps(timeline, ensure_ascii=False)
     assert timeline[0]["artifact_count"] == 2
     assert artifacts == [
         {
