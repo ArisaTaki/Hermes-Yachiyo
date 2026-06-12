@@ -14,12 +14,16 @@ const AGENT_ID = 'workflow-save-run-agent';
 const WORKFLOW_ID = 'workflow_save_run_ui_smoke_persisted';
 const RUN_ID = 'workflow_save_run_ui_smoke_run';
 const RUN_GROUP_ID = 'workflow_save_run_ui_smoke_group';
+const WORKFLOW_TASK_ID = 'task-workflow-save-run-ui-smoke';
+const WORKFLOW_SESSION_ID = 'session-workflow-save-run-ui-smoke';
 const RUN_GOAL = 'Run saved Workflow from Electron UI smoke';
 const WORKFLOW_ARTIFACT_PATH = 'workflow-save-run-summary.md';
 const WORKFLOW_ARTIFACT_CONTENT = '# Workflow Save Run UI Smoke\n\nArtifact node output preview.';
 const APPROVAL_WORKFLOW_ID = 'workflow_save_run_ui_smoke_approval_persisted';
 const APPROVAL_RUN_ID = 'workflow_save_run_ui_smoke_approval_run';
 const APPROVAL_RUN_GROUP_ID = 'workflow_save_run_ui_smoke_approval_group';
+const APPROVAL_TASK_ID = 'task-workflow-save-run-ui-smoke-approval';
+const APPROVAL_SESSION_ID = 'session-workflow-save-run-ui-smoke-approval';
 const APPROVAL_RUN_GOAL = 'Run approval Workflow from Electron UI smoke';
 const APPROVAL_CRITERIA = 'Approve this Workflow UI smoke before artifact handoff.';
 const APPROVAL_ARTIFACT_PATH = 'workflow-approval-node-summary.md';
@@ -61,8 +65,8 @@ const workflowRun = {
   run_id: RUN_ID,
   run_group_id: RUN_GROUP_ID,
   run_group_source: 'workflow',
-  task_id: 'task-workflow-save-run-ui-smoke',
-  session_id: 'session-workflow-save-run-ui-smoke',
+  task_id: WORKFLOW_TASK_ID,
+  session_id: WORKFLOW_SESSION_ID,
   task_run_link_run_status: 'completed',
   task_run_link_last_event_sequence: 4,
   kind: 'workflow_run',
@@ -160,8 +164,8 @@ function approvalWorkflowRun() {
     run_id: APPROVAL_RUN_ID,
     run_group_id: APPROVAL_RUN_GROUP_ID,
     run_group_source: 'workflow',
-    task_id: 'task-workflow-save-run-ui-smoke-approval',
-    session_id: 'session-workflow-save-run-ui-smoke-approval',
+    task_id: APPROVAL_TASK_ID,
+    session_id: APPROVAL_SESSION_ID,
     task_run_link_run_status: approvalRunApproved ? 'completed' : 'approval_required',
     task_run_link_last_event_sequence: approvalRunApproved ? 5 : 2,
     kind: 'workflow_run',
@@ -694,6 +698,8 @@ async function main() {
   await waitFor(win, () => (
     window.location.hash.includes(${JSON.stringify(RUN_ID)})
     && document.querySelector('[data-testid="agent-run-detail"]')?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
+    && document.querySelector('[data-testid="agent-run-detail"]')?.getAttribute('data-task-id') === ${JSON.stringify(WORKFLOW_TASK_ID)}
+    && document.querySelector('[data-testid="agent-run-detail"]')?.getAttribute('data-session-id') === ${JSON.stringify(WORKFLOW_SESSION_ID)}
     && document.querySelector('[data-testid="agent-run-detail-task"]')?.textContent.includes(${JSON.stringify(RUN_GOAL)})
     && document.querySelector('[data-testid="agent-run-detail-result"]')?.textContent.includes('Workflow save-and-run UI smoke completed')
   ), 'workflow run detail');
@@ -796,6 +802,8 @@ async function main() {
     return window.location.hash.includes(${JSON.stringify(APPROVAL_RUN_ID)})
       && detail?.getAttribute('data-run-id') === ${JSON.stringify(APPROVAL_RUN_ID)}
       && detail?.getAttribute('data-run-status') === 'approval_required'
+      && detail?.getAttribute('data-task-id') === ${JSON.stringify(APPROVAL_TASK_ID)}
+      && detail?.getAttribute('data-session-id') === ${JSON.stringify(APPROVAL_SESSION_ID)}
       && approval?.textContent.includes('workflow.approval')
       && request?.textContent.includes(${JSON.stringify(APPROVAL_CRITERIA)})
       && eventTypes.includes('workflow.node.approval_required')
@@ -814,6 +822,8 @@ async function main() {
     const completedEvent = events.find((node) => node.getAttribute('data-run-event') === 'workflow.run.completed');
     return detail?.getAttribute('data-run-id') === ${JSON.stringify(APPROVAL_RUN_ID)}
       && detail?.getAttribute('data-run-status') === 'completed'
+      && detail?.getAttribute('data-task-id') === ${JSON.stringify(APPROVAL_TASK_ID)}
+      && detail?.getAttribute('data-session-id') === ${JSON.stringify(APPROVAL_SESSION_ID)}
       && !document.querySelector('[data-testid="agent-run-detail-approval"]')
       && result?.textContent.includes('Workflow approval save-and-run UI smoke completed')
       && eventTypes.includes('workflow.node.approval_required')
