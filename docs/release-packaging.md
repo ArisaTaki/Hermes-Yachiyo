@@ -13,8 +13,7 @@
 ```bash
 python -m pip install -e ".[packaging]"
 npm ci --prefix apps/frontend
-python scripts/build_backend.py --clean
-npm --prefix apps/frontend run dist:mac
+python scripts/build_release_candidate_artifacts.py --channel experimental --repository kuguya-AI-app-develop/oha-yachiyo
 ```
 
 输出位置：
@@ -109,11 +108,13 @@ python scripts/app_version.py set 0.4.0
 python scripts/app_version.py check
 ```
 
-本地重新打包 RC 前，先刷新 `.app` 和 packaged backend 共用的 build metadata，确保产物可追溯到当前 commit：
+本地重新打包 RC 时，优先使用 `build_release_candidate_artifacts.py`。它会临时刷新 `.app` 和 packaged backend 共用的 build metadata、运行 PyInstaller 和 electron-builder，并在结束或失败时恢复 tracked `apps/frontend/public/oha-yachiyo-build.json` 开发占位，避免本地 RC evidence 因工作区 dirty 变成不可签核：
 
 ```bash
-python scripts/prepare_app_build_metadata.py --channel experimental
+python scripts/build_release_candidate_artifacts.py --channel experimental --repository kuguya-AI-app-develop/oha-yachiyo
 ```
+
+CI 仍直接运行 `python scripts/prepare_app_build_metadata.py`、`python scripts/build_backend.py --clean` 和 `npm --prefix apps/frontend run dist:mac`，因为 workflow 工作区不会把临时 metadata 改动提交回仓库。
 
 固定下载链接：
 
