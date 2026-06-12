@@ -1719,6 +1719,42 @@ def test_verifier_requires_release_workflow_manual_markdown_after_draft(tmp_path
     )
 
 
+def test_verifier_requires_release_workflow_provider_missing_status_args(tmp_path):
+    workflow = tmp_path / verifier.RELEASE_WORKFLOW_FILE
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text(
+        "name: Build macOS DMG\n"
+        "jobs:\n"
+        "  package-macos:\n"
+        "    steps:\n"
+        "      - name: Verify release-facing product identity and security guards\n"
+        "        run: python scripts/verify_release_artifacts.py\n"
+        "      - name: Install Python dependencies\n"
+        "        run: python -m pip install -e .\n"
+        "      - name: Prepare release metadata\n"
+        "        run: mkdir -p release\n"
+        "      - name: Verify release candidate artifacts\n"
+        "        run: |\n"
+        "          provider_smoke_args=()\n"
+        "          provider_smoke_args+=(--run-provider-smoke)\n"
+        "          python scripts/verify_release_candidate.py --write-manual-checks-template release/manual-rc-checks.template.json\n"
+        "          python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount --report-json release/rc-verification.json\n"
+        "          python scripts/verify_release_candidate.py --manual-checks-json release/rc-verification.json --write-manual-checks-draft release/manual-rc-checks.draft.json\n"
+        "          python scripts/verify_release_candidate.py --manual-checks-json release/manual-rc-checks.draft.json --write-manual-checks-markdown release/manual-rc-checks.md\n"
+        "      - name: Upload DMG artifact\n"
+        "        run: echo upload\n",
+        encoding="utf-8",
+    )
+
+    findings = verifier._verify_release_workflow_guards(tmp_path)
+    messages = [finding.message for finding in findings]
+
+    assert (
+        "macOS release workflow must mark provider smoke not_applicable in archived signoff artifacts when secrets are missing"
+        in messages
+    )
+
+
 def test_verifier_requires_release_workflow_release_scan_after_metadata(tmp_path):
     workflow = tmp_path / verifier.RELEASE_WORKFLOW_FILE
     workflow.parent.mkdir(parents=True)

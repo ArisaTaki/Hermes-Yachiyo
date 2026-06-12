@@ -633,15 +633,17 @@ jobs:
         run: |
           set -euo pipefail
           provider_smoke_args=()
+          provider_smoke_status_args=()
           if [[ -z "${OHA_YACHIYO_SMOKE_BASE_URL}" || -z "${OHA_YACHIYO_SMOKE_MODEL}" || -z "${OHA_YACHIYO_SMOKE_API_KEY}" ]]; then
             echo "Skipping opt-in real provider streaming smoke; OHA_YACHIYO_SMOKE_* secrets are not fully configured."
+            provider_smoke_status_args+=(--mark-provider-smoke-not-applicable-if-missing)
           else
             provider_smoke_args+=(--run-provider-smoke)
           fi
           python scripts/verify_release_candidate.py --write-manual-checks-template release/manual-rc-checks.template.json
-          python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount "${provider_smoke_args[@]}" --report-json release/rc-verification.json
-          python scripts/verify_release_candidate.py --manual-checks-json release/rc-verification.json --write-manual-checks-draft release/manual-rc-checks.draft.json
-          python scripts/verify_release_candidate.py --manual-checks-json release/manual-rc-checks.draft.json --write-manual-checks-markdown release/manual-rc-checks.md
+          python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount "${provider_smoke_args[@]}" "${provider_smoke_status_args[@]}" --report-json release/rc-verification.json
+          python scripts/verify_release_candidate.py --manual-checks-json release/rc-verification.json --write-manual-checks-draft release/manual-rc-checks.draft.json "${provider_smoke_status_args[@]}"
+          python scripts/verify_release_candidate.py --manual-checks-json release/manual-rc-checks.draft.json --write-manual-checks-markdown release/manual-rc-checks.md "${provider_smoke_status_args[@]}"
 
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4

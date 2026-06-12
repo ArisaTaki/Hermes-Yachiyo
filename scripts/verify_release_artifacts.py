@@ -682,6 +682,10 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document explicit provider-smoke not_applicable draft evidence",
     ),
     (
+        "workflow 会向 RC report、draft 和 Markdown 传入 `--mark-provider-smoke-not-applicable-if-missing`",
+        "release packaging docs must document workflow provider-smoke not_applicable evidence propagation",
+    ),
+    (
         "--require-manual-checks-complete",
         "release packaging docs must document final manual RC signoff enforcement",
     ),
@@ -774,6 +778,10 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount",
         "macOS release workflow must mount-check DMG contents during local RC verification",
+    ),
+    (
+        "provider_smoke_status_args+=(--mark-provider-smoke-not-applicable-if-missing)",
+        "macOS release workflow must mark provider smoke not_applicable in archived signoff artifacts when secrets are missing",
     ),
     (
         "--report-json release/rc-verification.json",
