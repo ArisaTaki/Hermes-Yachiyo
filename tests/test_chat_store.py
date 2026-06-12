@@ -108,6 +108,7 @@ class TestChatStore:
             }], ensure_ascii=False),
             metadata_json=json.dumps({
                 "api_key": "sk-secret987654321",
+                "client_message_id": "sk-client-message-id-secret123456789",
                 "nested": {
                     "safe": "保留\n换行",
                     "detail": "token=abc123456",
@@ -121,6 +122,7 @@ class TestChatStore:
         raw = json.dumps(loaded.__dict__, ensure_ascii=False)
 
         assert "sk-secret" not in raw
+        assert "sk-client-message-id-secret" not in raw
         assert "ghp_secretsecretsecret" not in raw
         assert "secret-value-123456" not in raw
         assert loaded.content == "第一行\nOPENAI_API_KEY=[redacted]\n第二行"
@@ -128,6 +130,7 @@ class TestChatStore:
         assert attachments[0]["name"] == "截图\n原始"
         assert attachments[0]["token"] == "[redacted]"
         assert metadata["api_key"] == "[redacted]"
+        assert metadata["client_message_id"] == "[redacted]"
         assert metadata["nested"]["safe"] == "保留\n换行"
         assert metadata["nested"]["detail"] == "token=[redacted]"
 
