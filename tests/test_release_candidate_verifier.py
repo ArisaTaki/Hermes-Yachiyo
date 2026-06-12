@@ -531,6 +531,64 @@ def test_release_candidate_verifier_merges_multiple_manual_check_json_sources(
     assert statuses["real_provider_smoke"]["status"] == "not_applicable"
 
 
+def test_release_candidate_verifier_accumulates_automated_evidence_from_multiple_rc_reports(
+    tmp_path,
+):
+    packaged_ui_statuses = rc._manual_release_candidate_check_report()
+    for check in packaged_ui_statuses:
+        if check["id"] == "packaged_bridge_isolation":
+            check["status"] = "passed"
+            check["evidence"] = "Automated --run-dmg-ui-sampling-smoke passed for release/Oha-Yachiyo.dmg."
+            check["evidence_source"] = "automated_rc_gate"
+        if check["id"] == "packaged_ui_sampling":
+            check["status"] = "passed"
+            check["evidence"] = "Automated --run-dmg-ui-sampling-smoke sampled #/chat and #/agents/workflows."
+            check["evidence_source"] = "automated_rc_gate"
+    chat_file_statuses = rc._manual_release_candidate_check_report()
+    for check in chat_file_statuses:
+        if check["id"] == "chat_native_file_upload":
+            check["status"] = "passed"
+            check["evidence"] = "Automated --run-dmg-chat-native-file-smoke passed for release/Oha-Yachiyo.dmg."
+            check["evidence_source"] = "automated_rc_gate"
+
+    packaged_ui_report = tmp_path / "tmp" / "packaged-ui-rc.json"
+    chat_file_report = tmp_path / "tmp" / "chat-file-rc.json"
+    packaged_ui_report.parent.mkdir(parents=True)
+    packaged_ui_report.write_text(
+        json.dumps({"manual_release_candidate_check_statuses": packaged_ui_statuses}),
+        encoding="utf-8",
+    )
+    chat_file_report.write_text(
+        json.dumps({"manual_release_candidate_check_statuses": chat_file_statuses}),
+        encoding="utf-8",
+    )
+
+    checks, findings = rc._load_manual_release_candidate_checks(
+        tmp_path,
+        (Path("tmp/packaged-ui-rc.json"), Path("tmp/chat-file-rc.json")),
+    )
+
+    assert findings == []
+    statuses = {check["id"]: check for check in checks}
+    assert statuses["packaged_bridge_isolation"]["status"] == "passed"
+    assert statuses["packaged_ui_sampling"]["status"] == "passed"
+    assert statuses["chat_native_file_upload"]["status"] == "passed"
+    assert statuses["packaged_bridge_isolation"]["evidence_source"] == "automated_rc_gate"
+    assert statuses["packaged_ui_sampling"]["evidence_source"] == "automated_rc_gate"
+    assert statuses["chat_native_file_upload"]["evidence_source"] == "automated_rc_gate"
+    summary = rc._manual_release_candidate_check_summary(checks)
+    assert summary["remaining_check_ids"] == [
+        "gatekeeper_first_launch",
+        "screen_recording_permission",
+        "real_provider_smoke",
+    ]
+    assert summary["automated_evidence_check_ids"] == [
+        "packaged_bridge_isolation",
+        "chat_native_file_upload",
+        "packaged_ui_sampling",
+    ]
+
+
 def test_release_candidate_verifier_requires_complete_manual_checks_for_signoff(
     tmp_path, monkeypatch, capsys
 ):

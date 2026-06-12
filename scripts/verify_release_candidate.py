@@ -974,7 +974,12 @@ def _load_manual_release_candidate_checks(
 
     known = {check["id"]: check for check in checks}
 
-    def apply_raw_checks(raw_checks: object, source_path: Path) -> None:
+    def apply_raw_checks(
+        raw_checks: object,
+        source_path: Path,
+        *,
+        preserve_existing_when_manual_required: bool = False,
+    ) -> None:
         if not isinstance(raw_checks, list):
             findings.append(
                 Finding(
@@ -1035,10 +1040,23 @@ def _load_manual_release_candidate_checks(
                 continue
 
             target = known[check_id]
+            notes = raw_check.get("notes")
+            if (
+                preserve_existing_when_manual_required
+                and status == "manual_required"
+                and target.get("status") != "manual_required"
+            ):
+                if notes is not None:
+                    existing_notes = str(target.get("notes", "")).strip()
+                    note_text = str(notes).strip()
+                    if note_text and note_text not in existing_notes:
+                        target["notes"] = (
+                            f"{existing_notes}\n{note_text}" if existing_notes else note_text
+                        )
+                continue
             target["status"] = status
             if evidence:
                 target["evidence"] = evidence
-            notes = raw_check.get("notes")
             if notes is not None:
                 target["notes"] = str(notes)
             evidence_source = str(raw_check.get("evidence_source", "")).strip()
@@ -1092,6 +1110,11 @@ def _load_manual_release_candidate_checks(
                     standalone_electron_ui_smoke,
                 )
                 continue
+            preserve_existing_when_manual_required = (
+                isinstance(raw_payload, dict)
+                and "manual_release_candidate_check_statuses" in raw_payload
+                and "checks" not in raw_payload
+            )
             raw_checks = _manual_release_candidate_checks_from_payload(raw_payload)
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             findings.append(
@@ -1101,7 +1124,11 @@ def _load_manual_release_candidate_checks(
                 )
             )
             continue
-        apply_raw_checks(raw_checks, manual_checks_path)
+        apply_raw_checks(
+            raw_checks,
+            manual_checks_path,
+            preserve_existing_when_manual_required=preserve_existing_when_manual_required,
+        )
 
     return checks, findings
 
