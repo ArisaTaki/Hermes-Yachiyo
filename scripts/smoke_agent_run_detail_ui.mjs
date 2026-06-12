@@ -1737,7 +1737,8 @@ async function main() {
       && approve
       && reject
       && cancel
-      && openRun
+      && openRun?.getAttribute('data-run-id') === ${JSON.stringify(WORKFLOW_CHILD_RUN_ID)}
+      && openRun?.getAttribute('data-run-status') === 'approval_required'
       && !approve.disabled;
   }, 'workflow child approval bridge');
   console.log('[electron-smoke] workflow child approval bridge rendered');
@@ -1758,7 +1759,8 @@ async function main() {
       && result?.textContent.includes('Workflow child approval Electron smoke complete')
       && steps.some((node) => node.getAttribute('data-child-run-id') === ${JSON.stringify(WORKFLOW_CHILD_RUN_ID)} && node.getAttribute('data-workflow-step-status') === 'completed')
       && steps.some((node) => node.getAttribute('data-workflow-step-kind') === 'artifact' && node.textContent.includes(${JSON.stringify(WORKFLOW_ARTIFACT_PATH)}))
-      && openStepRun
+      && openStepRun?.getAttribute('data-run-id') === ${JSON.stringify(WORKFLOW_CHILD_RUN_ID)}
+      && openStepRun?.getAttribute('data-run-status') === 'completed'
       && !openStepRun.disabled
       && eventTypes.includes('workflow.run.child_resumed')
       && eventTypes.includes('workflow.run.resumed')

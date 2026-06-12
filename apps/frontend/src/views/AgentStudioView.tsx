@@ -4917,7 +4917,14 @@ export function AgentStudioView() {
                           >
                             取消子 Run
                           </button>
-                          <button type="button" className="run-timeline-child" data-testid="agent-run-detail-workflow-child-open-run" onClick={() => openRunDetail(selectedWorkflowApprovalChildRunId)}>
+                          <button
+                            type="button"
+                            className="run-timeline-child"
+                            data-run-id={selectedWorkflowApprovalChildRunId}
+                            data-run-status={selectedWorkflowApprovalChildRun?.status || 'approval_required'}
+                            data-testid="agent-run-detail-workflow-child-open-run"
+                            onClick={() => openRunDetail(selectedWorkflowApprovalChildRunId)}
+                          >
                             打开子 Run
                           </button>
                         </div>
@@ -4926,7 +4933,14 @@ export function AgentStudioView() {
                       <>
                         <pre>{selectedWorkflowApprovalChildRun ? (selectedWorkflowApprovalChildRun.result || 'Child run has no approval payload.') : 'Loading child run...'}</pre>
                         <div className="run-approval-actions" data-testid="agent-run-detail-workflow-child-approval-actions">
-                          <button type="button" className="run-timeline-child" data-testid="agent-run-detail-workflow-child-open-run" onClick={() => openRunDetail(selectedWorkflowApprovalChildRunId)}>
+                          <button
+                            type="button"
+                            className="run-timeline-child"
+                            data-run-id={selectedWorkflowApprovalChildRunId}
+                            data-run-status={selectedWorkflowApprovalChildRun?.status || 'approval_required'}
+                            data-testid="agent-run-detail-workflow-child-open-run"
+                            onClick={() => openRunDetail(selectedWorkflowApprovalChildRunId)}
+                          >
                             打开子 Run
                           </button>
                         </div>
@@ -5010,7 +5024,14 @@ export function AgentStudioView() {
                               <div>
                                 <em className={`run-status-pill ${runStatusTone(childStatus)}`}>{runStatusLabel(childStatus)}</em>
                                 {step.childRunId ? (
-                                  <button type="button" className="run-timeline-child" data-testid="agent-run-detail-workflow-step-open-run" onClick={() => openRunDetail(step.childRunId || '')}>
+                                  <button
+                                    type="button"
+                                    className="run-timeline-child"
+                                    data-run-id={step.childRunId}
+                                    data-run-status={childStatus}
+                                    data-testid="agent-run-detail-workflow-step-open-run"
+                                    onClick={() => openRunDetail(step.childRunId || '')}
+                                  >
                                     Open Run
                                   </button>
                                 ) : null}
