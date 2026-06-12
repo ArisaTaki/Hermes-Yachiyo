@@ -796,6 +796,8 @@ def test_chat_image_attachment_ui_smoke_uses_file_input_path() -> None:
             "preview.getAttribute('data-attachment-height') === '24'",
             "item.getAttribute('data-attachment-kind') === 'image'",
             "Number(item.getAttribute('data-attachment-size') || 0) > 0",
+            "composer cleared after image send",
+            "document.querySelector('textarea.chat-input')?.value === ''",
             "Chat UI did not submit client_message_id for image message idempotency",
             "submitted attachment did not include a client attachment id",
             "attachment.width !== 24 || attachment.height !== 24",

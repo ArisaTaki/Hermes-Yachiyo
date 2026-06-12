@@ -525,6 +525,10 @@ async function main() {
       && item.getAttribute('data-attachment-name') === 'smoke-image-cdp.svg'
       && Number(item.getAttribute('data-attachment-size') || 0) > 0;
   }, 'rendered message attachment');
+  await waitFor(win, () => (
+    !document.querySelector('[data-testid="chat-composer-attachment-preview"]')
+    && document.querySelector('textarea.chat-input')?.value === ''
+  ), 'composer cleared after image send');
   console.log('[electron-smoke] message attachment rendered');
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-message-attachment-item\\"]').click()", true);
   await waitFor(win, () => {
