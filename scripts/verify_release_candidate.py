@@ -57,6 +57,19 @@ def _write_report(path: Path, report: dict[str, Any]) -> None:
     path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def _resolve_report_path(root: Path, report_json: Path) -> Path:
+    root_path = root.resolve(strict=False)
+    report_path = report_json if report_json.is_absolute() else root / report_json
+    resolved = report_path.resolve(strict=False)
+    try:
+        resolved.relative_to(root_path)
+    except ValueError:
+        raise ValueError(
+            f"release candidate report path must stay inside project root: {report_json}"
+        )
+    return resolved
+
+
 def verify_release_candidate(
     *,
     root: Path = PROJECT_ROOT,
@@ -175,7 +188,12 @@ def verify_release_candidate(
 
     report["ok"] = not failed
     if report_json is not None:
-        _write_report(root / report_json, report)
+        try:
+            report_path = _resolve_report_path(root, report_json)
+            _write_report(report_path, report)
+        except (OSError, ValueError) as exc:
+            print(f"release candidate report: failed\n- {exc}")
+            return 1
         print(f"release candidate report: {report_json}")
 
     return 1 if failed else 0

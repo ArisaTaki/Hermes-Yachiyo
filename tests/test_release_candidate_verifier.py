@@ -87,6 +87,44 @@ def test_release_candidate_verifier_writes_failed_report_json(tmp_path, monkeypa
     ]
 
 
+def test_release_candidate_verifier_rejects_report_json_outside_root(
+    tmp_path, monkeypatch, capsys
+):
+    (tmp_path / "release").mkdir()
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        report_json=Path("../outside-rc-verification.json"),
+    ) == 1
+
+    output = capsys.readouterr().out
+    assert "release candidate report: failed" in output
+    assert "release candidate report path must stay inside project root" in output
+    assert not (tmp_path.parent / "outside-rc-verification.json").exists()
+
+
+def test_release_candidate_verifier_reports_report_json_write_failure(
+    tmp_path, monkeypatch, capsys
+):
+    (tmp_path / "release").mkdir()
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    def fail_write(_path, _report):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(rc, "_write_report", fail_write)
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        report_json=Path("release/rc-verification.json"),
+    ) == 1
+
+    output = capsys.readouterr().out
+    assert "release candidate report: failed" in output
+    assert "disk full" in output
+
+
 def test_release_candidate_verifier_runs_electron_ui_smoke_scripts(tmp_path, monkeypatch):
     scripts = tmp_path / "scripts"
     scripts.mkdir()
