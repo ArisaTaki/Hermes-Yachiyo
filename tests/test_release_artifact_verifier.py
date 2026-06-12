@@ -1693,6 +1693,7 @@ def test_verifier_requires_release_workflow_to_stage_and_upload_dmg_artifacts(tm
     assert "macOS release workflow must stage the latest DMG for final artifact scanning" in messages
     assert "macOS release workflow must compute a SHA256 checksum for the versioned DMG" in messages
     assert "macOS release workflow must upload release DMG artifacts" in messages
+    assert "macOS release workflow must fail instead of choosing implicitly when multiple DMGs exist" in messages
     assert "macOS release workflow must upload release checksum artifacts" in messages
 
 

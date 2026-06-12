@@ -535,7 +535,9 @@ jobs:
             exit 1
           fi
           if [[ "${#dmg_files[@]}" -gt 1 ]]; then
-            echo "Multiple DMG artifacts found; using ${dmg_files[0]}" >&2
+            echo "Multiple DMG artifacts found; refusing to choose implicitly." >&2
+            printf '  %s\n' "${dmg_files[@]}" >&2
+            exit 1
           fi
           cp "${dmg_files[0]}" "release/${VERSIONED_DMG}"
           cp "${dmg_files[0]}" "release/${LATEST_DMG}"

@@ -568,6 +568,10 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow must upload release DMG artifacts",
     ),
     (
+        "Multiple DMG artifacts found; refusing to choose implicitly.",
+        "macOS release workflow must fail instead of choosing implicitly when multiple DMGs exist",
+    ),
+    (
         "release/*.sha256",
         "macOS release workflow must upload release checksum artifacts",
     ),
