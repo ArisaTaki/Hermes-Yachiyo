@@ -2205,6 +2205,7 @@ compileall passed
 - 本轮补齐 NativeRunEngine 与 provider smoke helper 的 Responses 文本快照对称性：`response.output_text.done.text` 现在支持 list/tuple 文本片段并按 provider smoke helper 同样的换行拼接语义生成最终内容。新增主聊天 NativeRunEngine loop 回归，覆盖 list snapshot 覆盖 delta 草稿、写入 `model.output.completed`、不落 delta 事件，避免真实兼容网关把 final text 作为数组时 smoke 能过但 Native 执行结果为空。
 - 本轮继续补强 Responses reasoning privacy contract：主聊天和 Agent Run 新增 `response.output_item.done` 中 `item.type=reasoning` 且 `summary` 为 list 的回归，证明这类私有 reasoning snapshot 不会进入最终结果、timeline 或 RunEvent，同时保留 visible `response.output_text.done` 输出；两个测试已加入 macOS release workflow 的 provider contract 矩阵。
 - 本轮补齐 Agent Run 侧的 visible Responses list text snapshot 回归：`response.output_text.done.text` 为 list 时，Agent Run 会用 final snapshot 覆盖草稿 delta，写入 `agent.run.completed`，且不持久化 delta 事件；该测试已加入 macOS release workflow，和主聊天 list snapshot 保持同等 provider contract 覆盖。
+- 本轮补齐 direct group Agent 的 Bridge 层产品入口回归：通过 `/ui/chat/messages` 携带 `runnable_id` 在群组会话中直接触发 Agent Run，完成后自动创建 `[Oha-Yachiyo 群组直接 Agent 汇总]` summary task，再由 NativeRunEngine 执行主模型汇总，并验证 Task↔Run link、Run Detail、RunEvent replay 和父 Agent 消息 summary 状态同步；该测试已加入 macOS release workflow 与 release verifier 必跑项。
 - 桌面 `.app` 已实际启动并验证 bridge；主要 UI 页面已有静态入口 guard、浏览器级 route smoke、source Browser 按钮级交互 smoke、DMG 内 packaged app startup smoke、十九个本地 Electron UI smoke、真实 DMG packaged renderer 抽样和 packaged Chat native-file smoke。当前最终签核剩余项收敛到 Gatekeeper/Finder 首启路径和 Screen Recording 授权；真实 OS file picker 弹窗只作为额外人工复验，不再是当前结构化 signoff 的剩余项。
 
 ## 下一步建议

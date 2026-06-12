@@ -2347,6 +2347,220 @@ def test_chat_group_dispatch_bridge_route_runs_native_summary(tmp_path, monkeypa
         store.close()
 
 
+def test_chat_direct_group_agent_bridge_route_runs_native_summary(tmp_path, monkeypatch):
+    monkeypatch.setenv("OHA_YACHIYO_HOME", str(tmp_path / "oha-yachiyo-home"))
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime.db",
+        workspace_dir=tmp_path / "agent-runtime",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id="bridge-direct-group-agent-session")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    model_calls: list[list[dict]] = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        model_calls.append(messages)
+        last_content = str(messages[-1]["content"])
+        if "[Oha-Yachiyo 群组直接 Agent 汇总]" in last_content:
+            assert "Design：已完成" in last_content
+            assert "汇报：Design bridge direct result" in last_content
+            assert "不要再派发新的 Agent 任务" in last_content
+            return {"role": "assistant", "content": "主模型整理：Design 的 Bridge 直接结果已归档。"}
+        assert "# Agent\nName: Design Agent" in last_content
+        assert "# User Goal\n做 Bridge route Native 直接点名验证" in last_content
+        assert "[Oha-Yachiyo 群组执行约定]" in last_content
+        assert "你在群内身份是：Design" in last_content
+        return {"role": "assistant", "content": "Design bridge direct result"}
+
+    monkeypatch.setattr(chat_store_mod, "get_chat_store", lambda: store)
+    monkeypatch.setattr(activity_store_mod, "get_activity_store", lambda: activity_store)
+    monkeypatch.setattr(chat_api_mod, "get_activity_store", lambda: activity_store)
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: service)
+    monkeypatch.setattr(agent_routes, "get_agent_runtime_service", lambda: service)
+    monkeypatch.setattr(run_routes, "get_native_run_engine", lambda: service)
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: _FakeDefaultProfileService(),
+    )
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+
+    design = service.create_agent(
+        {
+            "name": "Design Agent",
+            "nickname": "Design",
+            "description": "runs native direct group bridge route tests",
+            "model_mode": "custom_api",
+            "model_config": {
+                "base_url": "https://api.example.test/v1",
+                "model": "demo-model",
+                "api_key": "sk-secret",
+            },
+        }
+    )
+    executor = NativeAgentExecutor(
+        chat_session=session,
+        runtime_service_getter=lambda: service,
+        tool_policy_getter=lambda: {"allowed_tools": []},
+        workspace_policy_getter=lambda: {},
+        activity_store_getter=lambda: activity_store,
+    )
+    runner = TaskRunner(state, executor=executor, activity_store=activity_store)
+    runtime = SimpleNamespace(
+        state=state,
+        chat_session=session,
+        store=store,
+        task_runner=runner,
+        activity_store=activity_store,
+        agent_runtime_service=service,
+    )
+    monkeypatch.setattr(ui_routes, "get_runtime", lambda: runtime)
+
+    async def wait_for(condition):
+        last = None
+        for _ in range(150):
+            try:
+                last = condition()
+            except Exception as exc:
+                last = exc
+            if last:
+                return last
+            await asyncio.sleep(0.02)
+        raise AssertionError(f"condition not met; last={last!r}")
+
+    async def scenario():
+        created = await ui_routes.create_chat_group(
+            ui_routes.CreateChatGroupRequest(
+                name="Bridge Native Direct Group",
+                participant_ids=[design["agent_id"]],
+            )
+        )
+        assert created["ok"] is True
+        assert created["session_context"]["conversation_kind"] == "group"
+
+        sent = await ui_routes.send_chat_message(
+            ui_routes.SendChatMessageRequest(
+                text="做 Bridge route Native 直接点名验证",
+                runnable_id=design["agent_id"],
+                client_message_id="bridge-direct-group-agent-client-1",
+            )
+        )
+        assert sent["ok"] is True
+        assert sent["agent_run_id"]
+
+        agent_run = await wait_for(
+            lambda: (
+                service.get_run(sent["agent_run_id"])
+                if service.get_run(sent["agent_run_id"])["status"] in {"completed", "failed", "cancelled", "approval_required"}
+                else None
+            )
+        )
+        assert agent_run["kind"] == "agent_run"
+        assert agent_run["status"] == "completed"
+        assert agent_run["result"] == "Design bridge direct result"
+
+        completed_agent = None
+        for _ in range(150):
+            payload = await ui_routes.get_chat_messages()
+            completed_agent = next(
+                (
+                    message
+                    for message in payload["messages"]
+                    if message["role"] == "assistant"
+                    and message["metadata"].get("sender", {}).get("nickname") == "Design"
+                    and message["metadata"].get("run_status") == "completed"
+                ),
+                None,
+            )
+            if completed_agent is not None:
+                break
+            await asyncio.sleep(0.02)
+        assert completed_agent is not None
+        assert completed_agent["metadata"]["run_id"] == sent["agent_run_id"]
+        assert completed_agent["metadata"]["agent_report"] == "Design bridge direct result"
+        assert completed_agent["metadata"]["group_agent_summary_pending"] is True
+
+        summary_payload = await ui_routes.get_chat_messages()
+        summary_message = next(
+            message
+            for message in summary_payload["messages"]
+            if message["metadata"].get("group_direct_agent_summary_for_message_id") == completed_agent["id"]
+        )
+        summary_task = state.get_task(summary_message["task_id"])
+        assert summary_message["status"] == "processing"
+        assert summary_task is not None
+        assert summary_task.chat_session_id == runtime.chat_session.session_id
+        assert "[Oha-Yachiyo 群组直接 Agent 汇总]" in summary_task.description
+        assert "Design：已完成" in summary_task.description
+        assert "汇报：Design bridge direct result" in summary_task.description
+
+        await runner._execute_with_state(summary_task.task_id)
+
+        completed_summary_task = state.get_task(summary_task.task_id)
+        assert completed_summary_task is not None
+        assert completed_summary_task.status == TaskStatus.COMPLETED
+        assert completed_summary_task.result == "主模型整理：Design 的 Bridge 直接结果已归档。"
+        summary_link = service.get_task_run_link(summary_task.task_id)
+        summary_run = service.get_run(summary_link["run_id"])
+        detail = await agent_routes.get_any_run(summary_run["run_id"])
+        replay = await run_routes.list_run_events(summary_run["run_id"], after_sequence=0, limit=200)
+        replay_last_sequence = max(event["sequence"] for event in replay["events"])
+        summary_event_types = [event["event_type"] for event in replay["events"]]
+        assert summary_link["task_id"] == summary_task.task_id
+        assert summary_link["session_id"] == runtime.chat_session.session_id
+        assert summary_link["run_status"] == "completed"
+        assert summary_link["last_event_sequence"] == replay_last_sequence
+        assert summary_run["kind"] == "main_chat_run"
+        assert summary_run["status"] == "completed"
+        assert summary_run["run_id"] != agent_run["run_id"]
+        assert detail["task_id"] == summary_task.task_id
+        assert detail["session_id"] == runtime.chat_session.session_id
+        assert detail["task_run_link_run_status"] == "completed"
+        assert detail["task_run_link_last_event_sequence"] == replay_last_sequence
+        assert "task.linked" in summary_event_types
+        assert summary_event_types.count("model.output.completed") == 1
+        assert "run.completed" in summary_event_types
+
+        final_agent = None
+        final_summary = None
+        for _ in range(150):
+            final_payload = await ui_routes.get_chat_messages()
+            final_agent = next(
+                message
+                for message in final_payload["messages"]
+                if message["id"] == completed_agent["id"]
+            )
+            final_summary = next(
+                message
+                for message in final_payload["messages"]
+                if message["task_id"] == summary_task.task_id
+            )
+            if (
+                final_agent["metadata"].get("group_agent_summary_pending") is False
+                and final_agent["metadata"].get("group_agent_summary_status") == "completed"
+                and final_summary["status"] == "completed"
+            ):
+                break
+            await asyncio.sleep(0.02)
+        assert final_agent is not None
+        assert final_summary is not None
+        assert final_agent["metadata"]["group_agent_summary_pending"] is False
+        assert final_agent["metadata"]["group_agent_summary_status"] == "completed"
+        assert final_summary["status"] == "completed"
+        assert final_summary["content"] == "主模型整理：Design 的 Bridge 直接结果已归档。"
+
+    try:
+        asyncio.run(scenario())
+        assert len(model_calls) == 2
+    finally:
+        service.close()
+        activity_store.close()
+        store.close()
+
+
 def test_chat_cancel_bridge_route_cancels_native_run_and_ignores_late_output(tmp_path, monkeypatch):
     monkeypatch.setenv("OHA_YACHIYO_HOME", str(tmp_path / "oha-yachiyo-home"))
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
