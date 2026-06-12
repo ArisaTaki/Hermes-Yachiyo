@@ -157,6 +157,7 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
     )
     assert "release candidate verifier must write manual check progress summary to the RC report" in messages
     assert "release candidate verifier must calculate manual check progress summary" in messages
+    assert "release candidate verifier must expose read-only manual check status printing" in messages
     assert "release candidate verifier manual summary must list remaining check ids" in messages
     assert "release candidate verifier manual summary must list remaining next actions" in messages
     assert "release candidate verifier manual summary must list automated evidence check ids" in messages
@@ -223,6 +224,7 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
     assert "release candidate verifier CLI must write manual check templates" in messages
     assert "release candidate verifier CLI must write editable manual check drafts" in messages
     assert "release candidate verifier CLI must write manual check Markdown checklists" in messages
+    assert "release candidate verifier CLI must print manual check status without running artifact gates" in messages
     assert (
         "release candidate verifier CLI must explicitly mark provider smoke not_applicable only when requested"
         in messages

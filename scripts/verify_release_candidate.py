@@ -630,6 +630,33 @@ def _print_manual_release_candidate_checks_for_write_action(
     )
 
 
+def print_manual_release_candidate_checks_status(
+    root: Path,
+    source_path: ManualChecksJsonInput | Path | None,
+    *,
+    mark_provider_smoke_not_applicable_if_missing: bool = False,
+) -> bool:
+    source_is_markdown = isinstance(source_path, Path) and source_path.suffix.lower() in {
+        ".md",
+        ".markdown",
+    }
+    checks, findings = _load_manual_release_candidate_checks(
+        root,
+        None if source_is_markdown else source_path,
+        source_path if source_is_markdown else None,
+    )
+    if findings:
+        _print_findings("manual release-candidate checks status", findings)
+        return False
+    if mark_provider_smoke_not_applicable_if_missing:
+        _mark_provider_smoke_not_applicable_if_missing(checks)
+    print("manual release-candidate checks status:")
+    _print_manual_release_candidate_check_summary(
+        _manual_release_candidate_check_summary(checks)
+    )
+    return True
+
+
 def _manual_release_candidate_checks_by_id(
     checks: Sequence[dict[str, str]],
 ) -> dict[str, dict[str, str]]:
@@ -2668,6 +2695,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--print-manual-checks-status",
+        action="store_true",
+        help=(
+            "Load project-local manual release-candidate check evidence, print progress "
+            "and remaining next actions, then exit without running artifact gates."
+        ),
+    )
+    parser.add_argument(
         "--mark-provider-smoke-not-applicable-if-missing",
         action="store_true",
         help=(
@@ -2688,13 +2723,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.write_manual_checks_draft is not None,
         args.write_manual_checks_markdown is not None,
     ]
-    if sum(1 for enabled in write_actions if enabled) > 1:
+    if sum(1 for enabled in [*write_actions, args.print_manual_checks_status] if enabled) > 1:
         print(
             "manual release-candidate checks: failed\n"
             "- choose only one of --write-manual-checks-template, "
-            "--write-manual-checks-draft, or --write-manual-checks-markdown"
+            "--write-manual-checks-draft, --write-manual-checks-markdown, "
+            "or --print-manual-checks-status"
         )
         return 1
+    if args.print_manual_checks_status:
+        ok = print_manual_release_candidate_checks_status(
+            PROJECT_ROOT,
+            args.manual_checks_markdown or args.manual_checks_json,
+            mark_provider_smoke_not_applicable_if_missing=(
+                args.mark_provider_smoke_not_applicable_if_missing
+            ),
+        )
+        return 0 if ok else 1
     if args.write_manual_checks_template is not None:
         try:
             write_manual_release_candidate_checks_template(

@@ -225,6 +225,12 @@ python scripts/verify_release_candidate.py --manual-checks-json tmp/final-rc.jso
 python scripts/verify_release_candidate.py --manual-checks-json tmp/final-rc.json --write-manual-checks-draft tmp/final-rc-signoff.json --mark-provider-smoke-not-applicable-if-missing
 ```
 
+只想查看现有 RC report、draft 或 Markdown checklist 还剩哪些签核项时，使用只读状态命令；它不会运行 artifact / DMG / UI gate，也不会写出新文件：
+
+```bash
+python scripts/verify_release_candidate.py --manual-checks-json tmp/final-rc-signoff.json --print-manual-checks-status
+```
+
 已有人工 evidence 时可传入项目内 JSON：
 
 ```bash
