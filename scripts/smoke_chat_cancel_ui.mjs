@@ -13,6 +13,9 @@ const VITE = path.join(FRONTEND, 'node_modules', '.bin', process.platform === 'w
 const SESSION_ID = 'chat_cancel_ui_smoke_session';
 const TASK_ID = 'task-chat-cancel-ui-smoke';
 const RUN_ID = 'main_chat_run_cancel_ui_smoke';
+const RUN_GROUP_ID = 'group-chat-cancel-ui-smoke';
+const RUN_GOAL = 'Start a cancellable Chat UI smoke task.';
+const RUN_RESULT = 'Cancelled by user from Chat UI smoke.';
 const now = new Date().toISOString();
 
 const bridgeState = {
@@ -38,13 +41,14 @@ function messagesPayload(extra = {}) {
     ? {
         id: 'assistant-cancel-ui-smoke-cancelled',
         role: 'assistant',
-        content: 'Cancelled by user from Chat UI smoke.',
+        content: RUN_RESULT,
         status: 'failed',
-        error: 'Cancelled by user from Chat UI smoke.',
+        error: RUN_RESULT,
         created_at: now,
         metadata: {
           task_id: TASK_ID,
           run_id: RUN_ID,
+          run_group_id: RUN_GROUP_ID,
           run_status: 'cancelled',
         },
       }
@@ -67,7 +71,7 @@ function messagesPayload(extra = {}) {
       {
         id: 'user-cancel-ui-smoke',
         role: 'user',
-        content: 'Start a cancellable Chat UI smoke task.',
+        content: RUN_GOAL,
         status: 'completed',
         created_at: now,
         metadata: { task_id: TASK_ID },
@@ -80,6 +84,83 @@ function messagesPayload(extra = {}) {
     approval_count: 0,
     token_count: 0,
     ...extra,
+  };
+}
+
+function runPayload() {
+  return {
+    run_id: RUN_ID,
+    run_group_id: RUN_GROUP_ID,
+    run_group_source: 'main_chat',
+    task_id: TASK_ID,
+    session_id: SESSION_ID,
+    task_run_link_run_status: bridgeState.cancelled ? 'cancelled' : 'running',
+    task_run_link_last_event_sequence: bridgeState.cancelled ? 2 : 1,
+    kind: 'main_chat_run',
+    runnable_id: 'builtin:yachiyo-main',
+    runnable_name: 'Oha-Yachiyo',
+    status: bridgeState.cancelled ? 'cancelled' : 'running',
+    user_goal: RUN_GOAL,
+    result: bridgeState.cancelled ? RUN_RESULT : '',
+    timeline: bridgeState.cancelled
+      ? [
+          { event: 'run.started', status: 'running', task_id: TASK_ID },
+          { event: 'run.cancelled', status: 'cancelled', result: RUN_RESULT },
+        ]
+      : [{ event: 'run.started', status: 'running', task_id: TASK_ID }],
+    artifacts: [],
+    created_at: now,
+    updated_at: now,
+  };
+}
+
+const runGroup = {
+  run_group_id: RUN_GROUP_ID,
+  title: 'Chat Cancel UI Smoke',
+  source: 'main_chat',
+  status: 'cancelled',
+  summary: RUN_RESULT,
+  child_run_ids: [RUN_ID],
+  created_at: now,
+  updated_at: now,
+};
+
+function runEventsPage(url) {
+  const events = [
+    {
+      event_id: 'event-chat-cancel-smoke-1',
+      run_id: RUN_ID,
+      sequence: 1,
+      schema_version: 1,
+      event_type: 'run.started',
+      actor: 'runtime',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: { task_id: TASK_ID, goal: RUN_GOAL },
+      created_at: now,
+    },
+    ...(bridgeState.cancelled
+      ? [{
+          event_id: 'event-chat-cancel-smoke-2',
+          run_id: RUN_ID,
+          sequence: 2,
+          schema_version: 1,
+          event_type: 'run.cancelled',
+          actor: 'runtime',
+          visibility: 'user',
+          sensitivity: 'normal',
+          payload: { result: RUN_RESULT },
+          created_at: now,
+        }]
+      : []),
+  ];
+  const afterSequence = Math.max(0, Number(url.searchParams.get('after_sequence') || '0'));
+  const limit = Math.max(1, Number(url.searchParams.get('limit') || '200'));
+  return {
+    run_id: RUN_ID,
+    after_sequence: afterSequence,
+    limit,
+    events: events.filter((event) => event.sequence > afterSequence).slice(0, limit),
   };
 }
 
@@ -97,7 +178,7 @@ function sessionsPayload() {
         is_processing: !bridgeState.cancelled,
         processing_count: bridgeState.cancelled ? 0 : 1,
         latest_message_preview: bridgeState.cancelled
-          ? 'Cancelled by user from Chat UI smoke.'
+          ? RUN_RESULT
           : 'Still running cancel smoke.',
         latest_message_status: bridgeState.cancelled ? 'failed' : 'processing',
         updated_at: now,
@@ -152,6 +233,26 @@ async function startMockBridge() {
       }
       if (request.method === 'GET' && url.pathname === '/ui/runnables') {
         sendJson(response, 200, { runnables: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/runs') {
+        sendJson(response, 200, { runs: [runPayload()] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/ui/runs/${RUN_ID}`) {
+        sendJson(response, 200, runPayload());
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/run-groups') {
+        sendJson(response, 200, { run_groups: [runGroup] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/ui/run-groups/${RUN_GROUP_ID}`) {
+        sendJson(response, 200, runGroup);
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/runs/${RUN_ID}/events`) {
+        sendJson(response, 200, runEventsPage(url));
         return;
       }
       if (request.method === 'GET' && url.pathname === '/ui/chat/sessions') {
@@ -290,14 +391,38 @@ async function waitForCancelled(win, label) {
     const header = document.querySelector('[data-testid="chat-header-stop-button"]');
     const composer = document.querySelector('[data-testid="chat-composer-stop-button"]');
     const cancelledMessage = document.querySelector('[data-message-id="assistant-cancel-ui-smoke-cancelled"]');
+    const openRun = cancelledMessage?.querySelector('[data-testid="chat-message-open-run-detail"]');
     const status = document.querySelector('.chat-status')?.textContent || '';
     return header
       && header.disabled
       && !composer
       && cancelledMessage?.className.includes('error')
-      && document.body.textContent.includes('Cancelled by user from Chat UI smoke.')
+      && openRun?.textContent.includes('运行详情')
+      && document.body.textContent.includes(${JSON.stringify(RUN_RESULT)})
       && !document.body.textContent.includes('Still running cancel smoke.')
       && status !== '取消失败';
+  }, label);
+}
+async function waitForCancelledRunDetail(win, label) {
+  await waitFor(win, () => {
+    const detail = document.querySelector('[data-testid="agent-run-detail"]');
+    const result = document.querySelector('[data-testid="agent-run-detail-result"]');
+    const task = document.querySelector('[data-testid="agent-run-detail-task"]');
+    const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
+    const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
+    const cancelledEvent = events.find((node) => node.getAttribute('data-run-event') === 'run.cancelled');
+    return window.location.hash.includes(${JSON.stringify(RUN_ID)})
+      && detail?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
+      && detail?.getAttribute('data-run-kind') === 'main_chat_run'
+      && detail?.getAttribute('data-run-status') === 'cancelled'
+      && detail?.getAttribute('data-task-id') === ${JSON.stringify(TASK_ID)}
+      && detail?.getAttribute('data-session-id') === ${JSON.stringify(SESSION_ID)}
+      && task?.textContent.includes(${JSON.stringify(RUN_GOAL)})
+      && result?.textContent.includes(${JSON.stringify(RUN_RESULT)})
+      && eventTypes.includes('run.started')
+      && eventTypes.includes('run.cancelled')
+      && cancelledEvent?.textContent.includes(${JSON.stringify(RUN_RESULT)})
+      && events.every((node) => node.getAttribute('data-run-event-run-id') === ${JSON.stringify(RUN_ID)});
   }, label);
 }
 async function main() {
@@ -332,6 +457,9 @@ async function main() {
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-header-stop-button\\"]').click()", true);
   await waitForCancelled(win, 'header stop cancellation projection');
   console.log('[electron-smoke] header stop cancelled chat');
+  await win.webContents.executeJavaScript("document.querySelector('[data-message-id=\\"assistant-cancel-ui-smoke-cancelled\\"] [data-testid=\\"chat-message-open-run-detail\\"]').click()", true);
+  await waitForCancelledRunDetail(win, 'cancelled message Run Detail replay handoff');
+  console.log('[electron-smoke] cancelled message Run Detail replay verified');
 
   clearTimeout(watchdog);
   await win.close();
