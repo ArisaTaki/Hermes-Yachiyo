@@ -762,6 +762,38 @@ def test_release_workflow_guard_accepts_discovered_electron_smoke_script_before_
     ) not in messages
 
 
+def test_release_workflow_guard_reports_weak_chat_image_file_input_smoke(tmp_path):
+    workflow = tmp_path / verifier.RELEASE_WORKFLOW_FILE
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text(
+        (verifier.ROOT / verifier.RELEASE_WORKFLOW_FILE).read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    smoke = tmp_path / verifier.CHAT_IMAGE_ATTACHMENT_SMOKE_SCRIPT
+    smoke.parent.mkdir(parents=True)
+    smoke.write_text(
+        "#!/usr/bin/env node\n"
+        "document.querySelector('[data-testid=\"chat-image-file-input\"]')?.dispatchEvent(new Event('change'));\n",
+        encoding="utf-8",
+    )
+
+    findings = verifier._verify_release_workflow_guards(tmp_path)
+    messages = [finding.message for finding in findings]
+
+    assert (
+        "Chat image Electron UI smoke must drive the hidden file input through CDP DOM.setFileInputFiles"
+        in messages
+    )
+    assert (
+        "Chat image Electron UI smoke must pass real filesystem image paths to the file input"
+        in messages
+    )
+    assert (
+        "Chat image Electron UI smoke must keep multi-image file input coverage"
+        in messages
+    )
+
+
 def test_release_workflow_guard_reports_new_main_chat_provider_contract(tmp_path):
     workflow = tmp_path / verifier.RELEASE_WORKFLOW_FILE
     workflow.parent.mkdir(parents=True)

@@ -125,6 +125,25 @@ PACKAGED_APP_IDENTIFIER = "io.github.arisataki.oha-yachiyo"
 PACKAGED_BACKEND_RELATIVE_PATH = Path("Contents/Resources/backend/oha-yachiyo-backend")
 PACKAGED_BACKEND_BUILD_METADATA_MARKER = b"apps/frontend/public/oha-yachiyo-build.json"
 PACKAGED_ASAR_RELATIVE_PATH = Path("Contents/Resources/app.asar")
+CHAT_IMAGE_ATTACHMENT_SMOKE_SCRIPT = Path("scripts/smoke_chat_image_attachment_ui.mjs")
+CHAT_IMAGE_ATTACHMENT_SMOKE_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
+    (
+        "DOM.setFileInputFiles",
+        "Chat image Electron UI smoke must drive the hidden file input through CDP DOM.setFileInputFiles",
+    ),
+    (
+        "selector: '[data-testid=\"chat-image-file-input\"]'",
+        "Chat image Electron UI smoke must target the Chat image file input through CDP",
+    ),
+    (
+        "files: filePaths",
+        "Chat image Electron UI smoke must pass real filesystem image paths to the file input",
+    ),
+    (
+        "smoke-image-cdp-fourth.svg",
+        "Chat image Electron UI smoke must keep multi-image file input coverage",
+    ),
+)
 RELEASE_LATEST_BRANCH_CHANNELS: dict[str, str] = {
     "main": "stable",
     "alpha": "alpha",
@@ -1729,6 +1748,19 @@ def _release_electron_ui_smoke_scripts(root: Path) -> tuple[str, ...]:
     return tuple(scripts)
 
 
+def _verify_chat_image_attachment_smoke_guard(root: Path) -> list[Finding]:
+    script_path = _resolve(root, CHAT_IMAGE_ATTACHMENT_SMOKE_SCRIPT)
+    try:
+        script = script_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return [Finding(script_path, f"could not read Chat image Electron UI smoke script: {exc}")]
+    findings: list[Finding] = []
+    for required_text, message in CHAT_IMAGE_ATTACHMENT_SMOKE_REQUIRED_TEXT:
+        if required_text not in script:
+            findings.append(Finding(script_path, message))
+    return findings
+
+
 AGENT_RUN_PROVIDER_CONTRACT_TEST_RE = re.compile(
     r"^def (?P<name>test_agent_run_[A-Za-z0-9_]*(?:http_sse|streaming|responses|function_call|provider_message|sdk|reasoning|refusal)[A-Za-z0-9_]*)\(",
     re.MULTILINE,
@@ -2471,6 +2503,7 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
                     f"macOS release workflow smoke tests must run Electron UI smoke script {script}",
                 )
             )
+    findings.extend(_verify_chat_image_attachment_smoke_guard(root))
 
     preinstall_guard = workflow.find("Verify release-facing product identity and security guards")
     install_deps = workflow.find("Install Python dependencies")
