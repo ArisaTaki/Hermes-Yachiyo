@@ -2945,6 +2945,61 @@ class ToolApprovalExecutionFailureProjection:
 
 
 @dataclass(frozen=True)
+class ToolApprovalExecutionFollowup:
+    """Follow-up execution after an approved tool succeeds."""
+
+    messages: list[dict[str, Any]]
+    tool_request: dict[str, Any]
+    tool_result: Any
+    remaining_requests: list[dict[str, Any]]
+    allowed_tools: list[str]
+    broker: ToolBroker
+    timeline: list[dict[str, Any]]
+    artifacts: list[dict[str, Any]]
+    next_iteration: int
+    run_id: str
+    budget: _RunBudget
+
+    @classmethod
+    def from_context(
+        cls,
+        context: ToolApprovalResumeContext,
+        tool_result: Any,
+    ) -> "ToolApprovalExecutionFollowup":
+        return cls(
+            messages=context.messages,
+            tool_request=context.tool_request,
+            tool_result=tool_result,
+            remaining_requests=context.remaining_requests,
+            allowed_tools=context.allowed_tools,
+            broker=context.broker,
+            timeline=context.timeline,
+            artifacts=context.artifacts,
+            next_iteration=context.next_iteration,
+            run_id=context.run_id,
+            budget=context.budget,
+        )
+
+    def apply(
+        self,
+        append_tool_result_message: Any,
+        run_tool_requests: Any,
+    ) -> None:
+        append_tool_result_message(self.messages, self.tool_request, self.tool_result)
+        run_tool_requests(
+            self.remaining_requests,
+            self.allowed_tools,
+            self.broker,
+            self.messages,
+            self.timeline,
+            self.artifacts,
+            next_iteration=self.next_iteration,
+            run_id=self.run_id,
+            budget=self.budget,
+        )
+
+
+@dataclass(frozen=True)
 class ToolApprovalTransitionContext:
     """Shared public context for tool approval reject/timeout transitions."""
 
@@ -3239,17 +3294,13 @@ class ApprovalResumeCoordinator:
             )
             context.timeline.append(failure.timeline_event(self._timeline))
             raise AgentRuntimeError(failure.detail)
-        self._append_tool_result_message(context.messages, context.tool_request, tool_result)
-        self._run_tool_requests(
-            context.remaining_requests,
-            context.allowed_tools,
-            context.broker,
-            context.messages,
-            context.timeline,
-            context.artifacts,
-            next_iteration=context.next_iteration,
-            run_id=context.run_id,
-            budget=context.budget,
+        followup = ToolApprovalExecutionFollowup.from_context(
+            context,
+            tool_result,
+        )
+        followup.apply(
+            self._append_tool_result_message,
+            self._run_tool_requests,
         )
 
     def continue_custom_api_agent_after_approved_tool(
