@@ -1622,6 +1622,7 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
         "macOS release workflow smoke tests must cover RunTransitionProjectionCoordinator child and workflow group projection"
         in messages
     )
+    assert "macOS release workflow smoke tests must cover sensitive client_run_id rejection" in messages
     assert "macOS release workflow smoke tests must cover UI Run cancel route idempotency" in messages
     assert "macOS release workflow smoke tests must cover Chat cancel late-output HTTP roundtrip" in messages
     assert "macOS release workflow smoke tests must cover missing-model executor structured failure" in messages

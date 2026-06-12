@@ -977,6 +977,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover RunTransitionProjectionCoordinator child and workflow group projection",
     ),
     (
+        "tests/test_agent_runtime.py::test_agent_run_rejects_sensitive_client_run_id_before_persistence",
+        "macOS release workflow smoke tests must cover sensitive client_run_id rejection",
+    ),
+    (
         "tests/test_bridge_server.py::test_run_cancel_route_handler_is_idempotent",
         "macOS release workflow smoke tests must cover UI Run cancel route idempotency",
     ),

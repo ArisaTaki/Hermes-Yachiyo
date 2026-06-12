@@ -7338,6 +7338,40 @@ def test_agent_run_client_run_id_is_idempotent(tmp_path, monkeypatch):
         service.close()
 
 
+def test_agent_run_rejects_sensitive_client_run_id_before_persistence(tmp_path):
+    service = make_service(tmp_path)
+    leaked_client_run_id = "sk-client-run-id-secret123456"
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Sensitive Client Run Id Agent",
+                "model_mode": "custom_api",
+                "model_config": {
+                    "base_url": "https://api.example.test/v1",
+                    "model": "demo-model",
+                    "api_key": "sk-agent-secret",
+                },
+            }
+        )
+
+        with pytest.raises(AgentRuntimeError, match="client_run_id/idempotency_key"):
+            service.create_agent_run(
+                {
+                    "agent_id": agent["agent_id"],
+                    "user_goal": "Finish",
+                    "client_run_id": leaked_client_run_id,
+                }
+            )
+
+        rows = service._conn.execute(
+            "SELECT client_request_id FROM runs WHERE client_request_id<>''"
+        ).fetchall()
+        assert rows == []
+        assert verify_secret_redaction(paths=[tmp_path]) == []
+    finally:
+        service.close()
+
+
 def test_create_run_for_runnable_propagates_client_run_id(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     model_calls = 0

@@ -34,6 +34,7 @@ from apps.shell.model_profiles import (
     supports_openai_compatible_api,
 )
 from packages.security import (
+    contains_sensitive_text,
     redact_api_error_text,
     redact_sensitive_text,
     sanitize_sensitive_value,
@@ -7224,12 +7225,15 @@ class NativeRunEngine:
 
     @staticmethod
     def _client_request_id_from_payload(payload: dict[str, Any]) -> str:
-        return str(
+        client_request_id = str(
             payload.get("client_run_id")
             or payload.get("client_request_id")
             or payload.get("idempotency_key")
             or ""
         ).strip()[:128]
+        if contains_sensitive_text(client_request_id):
+            raise AgentRuntimeError("client_run_id/idempotency_key 不能包含 API key、token 或其他敏感值")
+        return client_request_id
 
     def _run_by_client_request_id(self, client_request_id: str) -> dict[str, Any] | None:
         return self.runs.by_client_request_id(client_request_id)
