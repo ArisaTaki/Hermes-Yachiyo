@@ -125,6 +125,42 @@ def test_release_candidate_verifier_reports_report_json_write_failure(
     assert "disk full" in output
 
 
+def test_release_candidate_verifier_rejects_artifact_paths_outside_root(
+    tmp_path, monkeypatch, capsys
+):
+    calls: list[dict[str, object]] = []
+
+    def fake_verify_release_artifacts(**kwargs):
+        calls.append(kwargs)
+        return []
+
+    monkeypatch.setattr(rc, "verify_release_artifacts", fake_verify_release_artifacts)
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        artifact_paths=(Path("../outside-release"),),
+        report_json=Path("release/rc-verification.json"),
+    ) == 1
+
+    assert calls == [{"root": tmp_path}]
+    output = capsys.readouterr().out
+    assert "built artifact guards: failed" in output
+    assert "release candidate artifact path must stay inside project root" in output
+    report_path = tmp_path / "release" / "rc-verification.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["ok"] is False
+    assert report["built_artifact_guards"] == {
+        "status": "failed",
+        "artifact_paths": ["../outside-release"],
+        "findings": [
+            {
+                "path": str(tmp_path),
+                "message": "release candidate artifact path must stay inside project root: ../outside-release",
+            }
+        ],
+    }
+
+
 def test_release_candidate_verifier_runs_electron_ui_smoke_scripts(tmp_path, monkeypatch):
     scripts = tmp_path / "scripts"
     scripts.mkdir()

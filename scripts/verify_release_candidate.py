@@ -70,6 +70,20 @@ def _resolve_report_path(root: Path, report_json: Path) -> Path:
     return resolved
 
 
+def _validate_artifact_paths(root: Path, artifact_paths: Sequence[Path]) -> tuple[Path, ...]:
+    root_path = root.resolve(strict=False)
+    for artifact_path in artifact_paths:
+        candidate = artifact_path if artifact_path.is_absolute() else root / artifact_path
+        resolved = candidate.resolve(strict=False)
+        try:
+            resolved.relative_to(root_path)
+        except ValueError:
+            raise ValueError(
+                f"release candidate artifact path must stay inside project root: {artifact_path}"
+            )
+    return tuple(artifact_paths)
+
+
 def verify_release_candidate(
     *,
     root: Path = PROJECT_ROOT,
@@ -107,43 +121,54 @@ def verify_release_candidate(
     }
 
     selected_artifacts = tuple(artifact_paths) if artifact_paths is not None else existing_artifact_paths(root)
-    if selected_artifacts:
-        artifact_findings = verify_release_artifacts(
-            root=root,
-            paths=selected_artifacts,
-            allow_binary_targets=True,
-            check_packaged_app_bundle=True,
-        )
-        _print_findings("built artifact guards", artifact_findings)
-        failed = failed or bool(artifact_findings)
-        report["built_artifact_guards"] = {
-            "status": "failed" if artifact_findings else "passed",
-            "artifact_paths": [str(path) for path in selected_artifacts],
-            "findings": _finding_report(artifact_findings),
-        }
-    elif require_artifacts:
-        print(
-            "built artifact guards: failed\n"
-            "- release candidate artifacts not found under dist/backend, dist/electron, or release"
-        )
+    try:
+        selected_artifacts = _validate_artifact_paths(root, selected_artifacts)
+    except ValueError as exc:
+        print(f"built artifact guards: failed\n- {exc}")
         failed = True
         report["built_artifact_guards"] = {
             "status": "failed",
-            "artifact_paths": [],
-            "findings": [
-                {
-                    "path": str(root),
-                    "message": "release candidate artifacts not found under dist/backend, dist/electron, or release",
-                }
-            ],
+            "artifact_paths": [str(path) for path in selected_artifacts],
+            "findings": [{"path": str(root), "message": str(exc)}],
         }
-    else:
-        print("built artifact guards: skipped; pass --require-artifacts for a release-candidate gate")
-        report["built_artifact_guards"] = {
-            "status": "skipped",
-            "artifact_paths": [],
-            "findings": [],
-        }
+    if report["built_artifact_guards"]["status"] == "pending":
+        if selected_artifacts:
+            artifact_findings = verify_release_artifacts(
+                root=root,
+                paths=selected_artifacts,
+                allow_binary_targets=True,
+                check_packaged_app_bundle=True,
+            )
+            _print_findings("built artifact guards", artifact_findings)
+            failed = failed or bool(artifact_findings)
+            report["built_artifact_guards"] = {
+                "status": "failed" if artifact_findings else "passed",
+                "artifact_paths": [str(path) for path in selected_artifacts],
+                "findings": _finding_report(artifact_findings),
+            }
+        elif require_artifacts:
+            print(
+                "built artifact guards: failed\n"
+                "- release candidate artifacts not found under dist/backend, dist/electron, or release"
+            )
+            failed = True
+            report["built_artifact_guards"] = {
+                "status": "failed",
+                "artifact_paths": [],
+                "findings": [
+                    {
+                        "path": str(root),
+                        "message": "release candidate artifacts not found under dist/backend, dist/electron, or release",
+                    }
+                ],
+            }
+        else:
+            print("built artifact guards: skipped; pass --require-artifacts for a release-candidate gate")
+            report["built_artifact_guards"] = {
+                "status": "skipped",
+                "artifact_paths": [],
+                "findings": [],
+            }
 
     selected_smoke_scripts = tuple(smoke_scripts) if smoke_scripts is not None else release_ui_smoke_scripts(root)
     smoke_results: list[dict[str, object]] = []
