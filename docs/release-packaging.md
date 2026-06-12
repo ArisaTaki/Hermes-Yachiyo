@@ -132,6 +132,14 @@ python scripts/refresh_local_rc_signoff.py --print-status
 
 该命令只读取 `tmp/rc-signoff-<short-commit>-current.json` 并打印剩余项，不运行 build、DMG 或 UI gate。
 
+需要按当前 draft 完成最后的 Gatekeeper / Screen Recording 收证时，可以先打印聚合操作指南；该命令只读已有 draft / screen report，不会写入 evidence，也不会把人工项标为通过：
+
+```bash
+python scripts/refresh_local_rc_signoff.py --print-os-signoff-guide
+```
+
+输出会列出当前 `tmp/rc-signoff-<short-commit>-current.json`、DMG、稳定 Screen Recording app path、可执行的 `open -R ...` / System Settings Screen Recording URL、授权后要 rerun 的 `--run-dmg-screen-smoke` 命令、`--write-os-evidence` 命令和最终 `--require-manual-checks-complete` 命令。只有在签核人实际完成 Finder Gatekeeper 首启和 Screen Recording 授权验证后，才能把对应 evidence 写入 OS evidence JSON。
+
 Gatekeeper / Screen Recording 已人工确认后，可以生成只包含剩余 OS evidence 的小 JSON；该文件会继承当前 `tmp/rc-signoff-<short-commit>-current.json` 里的 `manual_release_candidate_check_source_revisions`，避免最终 gate 因人工证据缺少源码版本而失败：
 
 ```bash

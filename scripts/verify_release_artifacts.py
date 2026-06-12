@@ -678,6 +678,10 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document local RC signoff status shortcut",
     ),
     (
+        "python scripts/refresh_local_rc_signoff.py --print-os-signoff-guide",
+        "release packaging docs must document local RC OS signoff guide shortcut",
+    ),
+    (
         "--write-os-evidence",
         "release packaging docs must document local RC OS evidence shortcut",
     ),

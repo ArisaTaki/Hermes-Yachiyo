@@ -16,6 +16,13 @@ PROVIDER_SMOKE_ENV_VARS = (
     "OHA_YACHIYO_SMOKE_MODEL",
     "OHA_YACHIYO_SMOKE_API_KEY",
 )
+SCREEN_RECORDING_SETTINGS_URL = (
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+)
+DEFAULT_SCREEN_SMOKE_APP_PATH = Path(
+    "tmp/rc-screen-smoke/Oha-Yachiyo-0.4.0-arm64/Oha-Yachiyo.app"
+)
+DEFAULT_DMG_PATH = Path("dist/electron/Oha-Yachiyo-0.4.0-arm64.dmg")
 
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -128,14 +135,14 @@ def _remaining_check_ids(report_path: Path) -> list[str]:
     return [str(check_id) for check_id in remaining if isinstance(check_id, str)]
 
 
-def _print_os_evidence_command(*, label: str, signoff_draft: Path) -> None:
+def _os_evidence_command_parts(*, label: str, signoff_draft: Path) -> list[str]:
     remaining_ids = set(_remaining_check_ids(signoff_draft))
     os_check_ids = {
         "gatekeeper_first_launch",
         "screen_recording_permission",
     }
     if not remaining_ids.intersection(os_check_ids):
-        return
+        return []
 
     command = [
         f"{sys.executable} scripts/refresh_local_rc_signoff.py",
@@ -150,8 +157,102 @@ def _print_os_evidence_command(*, label: str, signoff_draft: Path) -> None:
             '--screen-recording-evidence "<record Screen Recording evidence after '
             'rerunning --run-dmg-screen-smoke or a manual screenshot/proactive probe>"'
         )
+    return command
+
+
+def _print_os_evidence_command(*, label: str, signoff_draft: Path) -> None:
+    command = _os_evidence_command_parts(label=label, signoff_draft=signoff_draft)
+    if not command:
+        return
     print("local RC OS evidence command:")
     print(" ".join(command))
+
+
+def _screen_probe_launch_paths(*, label: str) -> tuple[str, str]:
+    screen_report = ROOT / "tmp" / f"rc-verification-{label}-screen.json"
+    if not screen_report.exists():
+        return (str(DEFAULT_DMG_PATH), str(DEFAULT_SCREEN_SMOKE_APP_PATH))
+    try:
+        report = _load_report(screen_report)
+    except (OSError, json.JSONDecodeError):
+        return (str(DEFAULT_DMG_PATH), str(DEFAULT_SCREEN_SMOKE_APP_PATH))
+    probe = report.get("dmg_screen_probe")
+    if not isinstance(probe, dict):
+        return (str(DEFAULT_DMG_PATH), str(DEFAULT_SCREEN_SMOKE_APP_PATH))
+    launch_paths = probe.get("app_launch_paths")
+    if not isinstance(launch_paths, list) or not launch_paths:
+        return (str(DEFAULT_DMG_PATH), str(DEFAULT_SCREEN_SMOKE_APP_PATH))
+    first = launch_paths[0]
+    if not isinstance(first, dict):
+        return (str(DEFAULT_DMG_PATH), str(DEFAULT_SCREEN_SMOKE_APP_PATH))
+    dmg_path = first.get("dmg_path")
+    app_path = first.get("app_path")
+    return (
+        dmg_path if isinstance(dmg_path, str) and dmg_path else str(DEFAULT_DMG_PATH),
+        app_path
+        if isinstance(app_path, str) and app_path
+        else str(DEFAULT_SCREEN_SMOKE_APP_PATH),
+    )
+
+
+def print_local_os_signoff_guide(*, short_commit: str | None = None) -> bool:
+    label = short_commit or _git_short_commit()
+    signoff_draft = ROOT / "tmp" / f"rc-signoff-{label}-current.json"
+    if not signoff_draft.exists():
+        print(
+            f"local RC signoff draft not found: {signoff_draft.relative_to(ROOT)}",
+            file=sys.stderr,
+        )
+        return False
+    remaining_ids = set(_remaining_check_ids(signoff_draft))
+    os_remaining = [
+        check_id
+        for check_id in ("gatekeeper_first_launch", "screen_recording_permission")
+        if check_id in remaining_ids
+    ]
+    print("local RC OS signoff guide:")
+    print(f"- signoff draft: {signoff_draft.relative_to(ROOT)}")
+    if not os_remaining:
+        print("- no Gatekeeper or Screen Recording manual checks remain")
+        return True
+
+    dmg_path, app_path = _screen_probe_launch_paths(label=label)
+    print(f"- DMG: {dmg_path}")
+    print(f"- stable Screen Recording app path: {app_path}")
+    if "gatekeeper_first_launch" in os_remaining:
+        print(
+            "- Gatekeeper: mount the DMG and launch Oha-Yachiyo.app via Finder "
+            "Control-click -> Open or the System Settings allow-open flow."
+        )
+    if "screen_recording_permission" in os_remaining:
+        print(
+            "- Screen Recording: reveal the stable app path, grant permission, "
+            "then rerun the screen smoke."
+        )
+        print(f"  open -R \"{app_path}\"")
+        print(f"  open \"{SCREEN_RECORDING_SETTINGS_URL}\"")
+        print(
+            "  "
+            f"{sys.executable} scripts/verify_release_candidate.py "
+            "--require-artifacts --run-dmg-screen-smoke "
+            f"--report-json tmp/rc-verification-{label}-screen.json"
+        )
+
+    command = _os_evidence_command_parts(label=label, signoff_draft=signoff_draft)
+    if command:
+        print("- after OS evidence is true, write the project-local evidence JSON:")
+        print("  " + " ".join(command))
+    print("- final signoff command:")
+    print(
+        "  "
+        f"{sys.executable} scripts/verify_release_candidate.py "
+        "--require-artifacts "
+        f"--manual-checks-json tmp/rc-signoff-{label}-current.json "
+        f"--manual-checks-json tmp/rc-signoff-{label}-os-evidence.json "
+        "--require-manual-checks-complete "
+        f"--report-json tmp/rc-signoff-{label}-final.json"
+    )
+    return True
 
 
 def refresh_local_rc_signoff(
@@ -367,6 +468,14 @@ def main(argv: list[str] | None = None) -> int:
         help="Print the current HEAD local RC signoff status without building or writing reports.",
     )
     parser.add_argument(
+        "--print-os-signoff-guide",
+        action="store_true",
+        help=(
+            "Print the concrete Gatekeeper and Screen Recording signoff steps "
+            "for the current local RC draft without changing evidence status."
+        ),
+    )
+    parser.add_argument(
         "--write-os-evidence",
         type=Path,
         help=(
@@ -399,15 +508,23 @@ def main(argv: list[str] | None = None) -> int:
         help="Run real provider smoke during the packaged batch gate.",
     )
     args = parser.parse_args(argv)
-    if args.print_status and args.write_os_evidence is not None:
+    selected_actions = [
+        args.print_status,
+        args.print_os_signoff_guide,
+        args.write_os_evidence is not None,
+    ]
+    if sum(1 for selected in selected_actions if selected) > 1:
         print(
             "local RC signoff action: failed\n"
-            "- choose either --print-status or --write-os-evidence",
+            "- choose only one of --print-status, --print-os-signoff-guide, "
+            "or --write-os-evidence",
             file=sys.stderr,
         )
         return 1
     if args.print_status:
         return 0 if print_local_rc_signoff_status(short_commit=args.short_commit) else 1
+    if args.print_os_signoff_guide:
+        return 0 if print_local_os_signoff_guide(short_commit=args.short_commit) else 1
     if args.write_os_evidence is not None:
         try:
             evidence_path = write_local_os_manual_evidence(

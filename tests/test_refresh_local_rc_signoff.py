@@ -472,6 +472,72 @@ def test_refresh_local_rc_signoff_print_status_fails_when_draft_missing(
     assert refresh.main(["--short-commit", "abc12345", "--print-status"]) == 1
 
 
+def test_refresh_local_rc_signoff_prints_os_signoff_guide(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    monkeypatch.setattr(refresh, "ROOT", tmp_path)
+    draft = tmp_path / "tmp" / "rc-signoff-abc12345-current.json"
+    draft.parent.mkdir(parents=True, exist_ok=True)
+    draft.write_text(
+        json.dumps(
+            {
+                "manual_release_candidate_check_summary": {
+                    "remaining_check_ids": [
+                        "gatekeeper_first_launch",
+                        "screen_recording_permission",
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    screen_report = tmp_path / "tmp" / "rc-verification-abc12345-screen.json"
+    screen_report.write_text(
+        json.dumps(
+            {
+                "dmg_screen_probe": {
+                    "app_launch_paths": [
+                        {
+                            "dmg_path": "dist/electron/Oha-Yachiyo-0.4.0-arm64.dmg",
+                            "app_path": (
+                                "tmp/rc-screen-smoke/Oha-Yachiyo-0.4.0-arm64/"
+                                "Oha-Yachiyo.app"
+                            ),
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert (
+        refresh.main(["--short-commit", "abc12345", "--print-os-signoff-guide"])
+        == 0
+    )
+
+    output = capsys.readouterr().out
+    assert "local RC OS signoff guide:" in output
+    assert "signoff draft: tmp/rc-signoff-abc12345-current.json" in output
+    assert "Finder Control-click -> Open" in output
+    assert (
+        "stable Screen Recording app path: "
+        "tmp/rc-screen-smoke/Oha-Yachiyo-0.4.0-arm64/Oha-Yachiyo.app"
+    ) in output
+    assert (
+        'open -R "tmp/rc-screen-smoke/Oha-Yachiyo-0.4.0-arm64/Oha-Yachiyo.app"'
+        in output
+    )
+    assert refresh.SCREEN_RECORDING_SETTINGS_URL in output
+    assert "--run-dmg-screen-smoke" in output
+    assert "--write-os-evidence tmp/rc-signoff-abc12345-os-evidence.json" in output
+    assert "--manual-checks-json tmp/rc-signoff-abc12345-current.json" in output
+    assert "--manual-checks-json tmp/rc-signoff-abc12345-os-evidence.json" in output
+    assert "--require-manual-checks-complete" in output
+
+
 def test_refresh_local_rc_signoff_writes_os_evidence_with_source_revisions(
     monkeypatch,
     tmp_path,
