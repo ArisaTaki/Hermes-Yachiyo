@@ -116,6 +116,7 @@ FORBIDDEN_FILES: tuple[Path, ...] = (
 )
 
 RELEASE_SECURITY_CHANNELS: tuple[str, ...] = ("release", "alpha", "stable")
+RELEASE_PACKAGING_DOC_FILE = Path("docs/release-packaging.md")
 PACKAGING_CONFIG_FILE = Path("apps/frontend/electron-builder.yml")
 PACKAGED_APP_OUTPUT_DIR = Path("dist/electron")
 PACKAGED_APP_NAME = "Oha-Yachiyo.app"
@@ -457,6 +458,28 @@ MACOS_ENTITLEMENTS_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "com.apple.security.cs.disable-library-validation",
         "macOS entitlements must disable library validation for packaged native modules",
+    ),
+)
+RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
+    (
+        "release-facing product identity and security guards",
+        "release packaging docs must document the pre-dependency release guard",
+    ),
+    (
+        "debug route",
+        "release packaging docs must document debug route guard coverage",
+    ),
+    (
+        "CredentialStore fallback",
+        "release packaging docs must document release CredentialStore fallback guard coverage",
+    ),
+    (
+        "codesign --verify --deep --strict --verbose=2",
+        "release packaging docs must document final packaged app signature verification",
+    ),
+    (
+        "binary-safe release artifact scan",
+        "release packaging docs must document final release artifact binary scanning",
     ),
 )
 RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
@@ -1687,6 +1710,7 @@ def verify_release_artifacts(
 
     if check_release_security_guards:
         findings.extend(_verify_release_security_guards(root_path))
+        findings.extend(_verify_release_packaging_documentation(root_path))
         findings.extend(_verify_streaming_provider_smoke_contract_guards(root_path))
         findings.extend(_verify_tracked_generated_artifacts(root_path))
         findings.extend(_verify_release_packaging_guards(root_path))
@@ -1822,6 +1846,19 @@ def _verify_release_security_guards(root: Path) -> list[Finding]:
                         "packaged build env must not allow DevFileCredentialStore",
                     )
                 )
+    return findings
+
+
+def _verify_release_packaging_documentation(root: Path) -> list[Finding]:
+    findings: list[Finding] = []
+    path = _resolve(root, RELEASE_PACKAGING_DOC_FILE)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return [Finding(path, f"could not read release packaging docs: {exc}")]
+    for required_text, message in RELEASE_PACKAGING_DOC_REQUIRED_TEXT:
+        if required_text not in text:
+            findings.append(Finding(path, message))
     return findings
 
 

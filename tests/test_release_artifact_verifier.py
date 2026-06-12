@@ -350,6 +350,21 @@ def test_verifier_requires_macos_signing_script_and_entitlements(tmp_path):
     assert "macOS entitlements must disable library validation for packaged native modules" in messages
 
 
+def test_verifier_requires_release_packaging_docs_for_release_gates(tmp_path):
+    doc = tmp_path / verifier.RELEASE_PACKAGING_DOC_FILE
+    doc.parent.mkdir(parents=True)
+    doc.write_text("# Release Packaging\n\nBuild and upload DMG.\n", encoding="utf-8")
+
+    findings = verifier._verify_release_packaging_documentation(tmp_path)
+    messages = [finding.message for finding in findings]
+
+    assert "release packaging docs must document the pre-dependency release guard" in messages
+    assert "release packaging docs must document debug route guard coverage" in messages
+    assert "release packaging docs must document release CredentialStore fallback guard coverage" in messages
+    assert "release packaging docs must document final packaged app signature verification" in messages
+    assert "release packaging docs must document final release artifact binary scanning" in messages
+
+
 def _write_packaged_app_bundle(
     root,
     *,
