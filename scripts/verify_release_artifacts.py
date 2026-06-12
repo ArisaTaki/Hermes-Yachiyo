@@ -656,6 +656,10 @@ STREAMING_PROVIDER_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "provider smoke tests must cover Responses completed top-level finish_reason",
     ),
     (
+        "def test_stream_smoke_accepts_responses_completed_top_level_stop_reason",
+        "provider smoke tests must cover Responses completed top-level stop_reason",
+    ),
+    (
         "assert leaked_secret not in captured.err",
         "provider smoke tests must prove provider errors do not print API keys",
     ),
