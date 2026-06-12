@@ -587,6 +587,14 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "screen_recording_permission",
         "release packaging docs must document the screen recording manual RC check id",
     ),
+    (
+        "chat_native_file_upload",
+        "release packaging docs must document the native Chat file upload manual RC check id",
+    ),
+    (
+        "packaged_ui_sampling",
+        "release packaging docs must document the packaged UI sampling manual RC check id",
+    ),
 )
 RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
@@ -848,6 +856,14 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         '"screen_recording_permission"',
         "release candidate verifier must track screen recording permission manual status",
+    ),
+    (
+        '"chat_native_file_upload"',
+        "release candidate verifier must track native Chat file upload manual status",
+    ),
+    (
+        '"packaged_ui_sampling"',
+        "release candidate verifier must track packaged UI sampling manual status",
     ),
     (
         '"real_provider_smoke"',

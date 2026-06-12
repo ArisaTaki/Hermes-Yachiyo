@@ -94,6 +94,20 @@ MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS: tuple[dict[str, str], ...] = (
         "evidence": "Record the System Settings permission state and a successful local screenshot or proactive probe result.",
     },
     {
+        "id": "chat_native_file_upload",
+        "status": "manual_required",
+        "required_before": "public_release_signoff",
+        "description": "Use the packaged app's Chat image attach button with the native file picker and verify preview, send, message attachment, image viewer, and Run Detail handoff.",
+        "evidence": "Record the image filename, native picker path used, sent message attachment metadata, image viewer open/close result, and linked Run Detail id.",
+    },
+    {
+        "id": "packaged_ui_sampling",
+        "status": "manual_required",
+        "required_before": "public_release_signoff",
+        "description": "Sample mature packaged app surfaces across Chat approval/cancel, Run Detail replay, Workflow save-and-run, Agent Studio, group/delegation/session summary, manual TTS, and Live2D.",
+        "evidence": "Record the packaged app build, sampled pages/actions, and visible pass/fail result for each sampled mature surface.",
+    },
+    {
         "id": "real_provider_smoke",
         "status": "manual_required",
         "required_before": "public_release_signoff",

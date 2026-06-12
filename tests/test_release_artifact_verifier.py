@@ -142,6 +142,8 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
     assert "release candidate verifier must track Gatekeeper first-launch manual status" in messages
     assert "release candidate verifier must track packaged bridge isolation manual status" in messages
     assert "release candidate verifier must track screen recording permission manual status" in messages
+    assert "release candidate verifier must track native Chat file upload manual status" in messages
+    assert "release candidate verifier must track packaged UI sampling manual status" in messages
     assert "release candidate verifier must track real provider smoke manual status" in messages
     assert "release candidate verifier manual checks must default to manual_required" in messages
     assert "release candidate verifier manual checks must declare the release signoff gate" in messages
@@ -641,6 +643,8 @@ def test_verifier_requires_release_packaging_docs_for_release_gates(tmp_path):
     assert "release packaging docs must document manual RC check template generation" in messages
     assert "release packaging docs must document the Gatekeeper manual RC check id" in messages
     assert "release packaging docs must document the screen recording manual RC check id" in messages
+    assert "release packaging docs must document the native Chat file upload manual RC check id" in messages
+    assert "release packaging docs must document the packaged UI sampling manual RC check id" in messages
 
 
 def _write_packaged_app_bundle(

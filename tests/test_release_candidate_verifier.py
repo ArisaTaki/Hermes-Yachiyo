@@ -234,6 +234,8 @@ def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
         "gatekeeper_first_launch",
         "packaged_bridge_isolation",
         "screen_recording_permission",
+        "chat_native_file_upload",
+        "packaged_ui_sampling",
         "real_provider_smoke",
     ]
     assert all(
@@ -272,6 +274,16 @@ def test_release_candidate_verifier_merges_manual_check_evidence(
                         "evidence": "System Settings allowed Oha-Yachiyo and screenshot probe succeeded.",
                     },
                     {
+                        "id": "chat_native_file_upload",
+                        "status": "passed",
+                        "evidence": "Native file picker selected sample.png, preview/send/viewer/Run Detail passed.",
+                    },
+                    {
+                        "id": "packaged_ui_sampling",
+                        "status": "passed",
+                        "evidence": "Sampled Chat approval/cancel, Run Detail, Workflow, Agent Studio, TTS, and Live2D.",
+                    },
+                    {
                         "id": "real_provider_smoke",
                         "status": "not_applicable",
                         "evidence": "Provider credentials unavailable for this local RC pass.",
@@ -304,6 +316,8 @@ def test_release_candidate_verifier_merges_manual_check_evidence(
         "gatekeeper_first_launch": "passed",
         "packaged_bridge_isolation": "passed",
         "screen_recording_permission": "passed",
+        "chat_native_file_upload": "passed",
+        "packaged_ui_sampling": "passed",
         "real_provider_smoke": "not_applicable",
     }
 
@@ -356,6 +370,8 @@ def test_release_candidate_verifier_writes_manual_check_template(tmp_path):
         "gatekeeper_first_launch",
         "packaged_bridge_isolation",
         "screen_recording_permission",
+        "chat_native_file_upload",
+        "packaged_ui_sampling",
         "real_provider_smoke",
     ]
     assert all(check["status"] == "manual_required" for check in template["checks"])
