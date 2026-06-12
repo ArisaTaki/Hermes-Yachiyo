@@ -30,6 +30,7 @@ from apps.shell.agent_runtime import (
     TaskRunLinkRepository,
     RunCancellationProjection,
     ToolApprovalContinuationHandoff,
+    ToolApprovalContinuationOutcome,
     ToolApprovalResumeContext,
     ToolApprovalTransitionContext,
     ToolBroker,
@@ -1547,6 +1548,87 @@ def test_approval_resume_coordinator_continues_custom_api_agent_after_approved_t
     assert calls[-1][1]["start_iteration"] == 4
     assert calls[-1][1]["run_id"] == "run_resume"
     assert calls[-1][1]["budget"] is budget
+
+
+def test_tool_approval_continuation_outcome_projects_resume_states():
+    calls: list[tuple[str, dict[str, object]]] = []
+    context = ToolApprovalResumeContext(
+        run_id="run_resume_outcome",
+        timeline=[],
+        artifacts=[],
+        broker=SimpleNamespace(name="broker"),
+        allowed_tools=["terminal.run"],
+        budget=SimpleNamespace(name="budget"),
+        messages=[],
+        tool_request={"tool": "terminal.run", "input": {"command": "printf ok"}},
+        tool_name="terminal.run",
+        input_preview={"command": "printf ok"},
+        remaining_requests=[],
+        next_iteration=2,
+    )
+
+    def project_completed(received_context, result_text):
+        calls.append(("project_completed", {"context": received_context, "result_text": result_text}))
+        return {"status": "completed", "result": result_text}
+
+    def project_required(received_context, pending):
+        calls.append(("project_required", {"context": received_context, "pending": pending}))
+        return {"status": "approval_required", "pending": pending}
+
+    def project_failed(received_context, safe_error):
+        calls.append(("project_failed", {"context": received_context, "safe_error": safe_error}))
+        return {"status": "failed", "error": safe_error}
+
+    completed = ToolApprovalContinuationOutcome.completed("resumed output")
+    required = ToolApprovalContinuationOutcome.approval_required(
+        {"tool": "terminal.run", "approval_id": "next"},
+        prepare_required=lambda pending: {**pending, "prepared": True},
+    )
+    failed = ToolApprovalContinuationOutcome.failed(
+        RuntimeError("raw provider failure"),
+        redact_error=lambda exc: f"safe {type(exc).__name__}",
+    )
+
+    assert completed.project(
+        context,
+        project_completed=project_completed,
+        project_required=project_required,
+        project_failed=project_failed,
+    ) == {"status": "completed", "result": "resumed output"}
+    assert required.project(
+        context,
+        project_completed=project_completed,
+        project_required=project_required,
+        project_failed=project_failed,
+    ) == {
+        "status": "approval_required",
+        "pending": {"tool": "terminal.run", "approval_id": "next", "prepared": True},
+    }
+    assert failed.project(
+        context,
+        project_completed=project_completed,
+        project_required=project_required,
+        project_failed=project_failed,
+    ) == {"status": "failed", "error": "safe RuntimeError"}
+    assert calls == [
+        ("project_completed", {"context": context, "result_text": "resumed output"}),
+        (
+            "project_required",
+            {
+                "context": context,
+                "pending": {"tool": "terminal.run", "approval_id": "next", "prepared": True},
+            },
+        ),
+        ("project_failed", {"context": context, "safe_error": "safe RuntimeError"}),
+    ]
+
+    with pytest.raises(AgentRuntimeError, match="Unknown approved-tool continuation outcome"):
+        ToolApprovalContinuationOutcome(kind="unknown").project(
+            context,
+            project_completed=project_completed,
+            project_required=project_required,
+            project_failed=project_failed,
+        )
 
 
 def test_approval_resume_coordinator_projects_continuation_outcome_after_approved_tool():

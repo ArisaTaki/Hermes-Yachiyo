@@ -83,6 +83,7 @@ jobs:
             tests/test_agent_runtime.py::test_main_chat_durable_approval_claim_blocks_duplicate_execution \
             tests/test_agent_runtime.py::test_approval_resume_coordinator_claims_and_projects_approved_tool_once \
             tests/test_agent_runtime.py::test_approval_resume_coordinator_orchestrates_resume_projection_states \
+            tests/test_agent_runtime.py::test_tool_approval_continuation_outcome_projects_resume_states \
             tests/test_agent_runtime.py::test_agent_run_approval_uses_resume_coordinator_claim_boundary \
             tests/test_agent_runtime.py::test_agent_run_consecutive_terminal_approvals_update_pending_request \
             tests/test_agent_runtime.py::test_approval_resume_coordinator_executes_approved_tool_and_remaining_requests \

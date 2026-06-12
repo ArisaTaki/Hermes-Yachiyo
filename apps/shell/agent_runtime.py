@@ -2818,6 +2818,57 @@ class ToolApprovalContinuationHandoff:
 
 
 @dataclass(frozen=True)
+class ToolApprovalContinuationOutcome:
+    """Projection outcome after continuing a run with an approved tool result."""
+
+    kind: str
+    result_text: str = ""
+    pending_approval: Any = None
+    safe_error: str = ""
+
+    @classmethod
+    def completed(cls, result_text: str) -> "ToolApprovalContinuationOutcome":
+        return cls(kind="completed", result_text=result_text)
+
+    @classmethod
+    def approval_required(
+        cls,
+        pending_approval: dict[str, Any],
+        *,
+        prepare_required: Any | None = None,
+    ) -> "ToolApprovalContinuationOutcome":
+        pending_next = pending_approval
+        if prepare_required is not None:
+            pending_next = prepare_required(pending_next)
+        return cls(kind="approval_required", pending_approval=pending_next)
+
+    @classmethod
+    def failed(
+        cls,
+        error: Any,
+        *,
+        redact_error: Any = redact_api_error_text,
+    ) -> "ToolApprovalContinuationOutcome":
+        return cls(kind="failed", safe_error=redact_error(error))
+
+    def project(
+        self,
+        context: ToolApprovalResumeContext,
+        *,
+        project_completed: Any,
+        project_required: Any,
+        project_failed: Any,
+    ) -> dict[str, Any]:
+        if self.kind == "completed":
+            return project_completed(context, self.result_text)
+        if self.kind == "approval_required":
+            return project_required(context, self.pending_approval)
+        if self.kind == "failed":
+            return project_failed(context, self.safe_error)
+        raise AgentRuntimeError(f"Unknown approved-tool continuation outcome: {self.kind}")
+
+
+@dataclass(frozen=True)
 class ToolApprovalTransitionContext:
     """Shared public context for tool approval reject/timeout transitions."""
 
@@ -3176,24 +3227,23 @@ class ApprovalResumeCoordinator:
                 agent,
                 context,
             )
-            return project_completed(
-                context,
-                result_text,
-            )
+            outcome = ToolApprovalContinuationOutcome.completed(result_text)
         except AgentApprovalRequired as exc:
-            pending_next = exc.pending_approval
-            if prepare_required is not None:
-                pending_next = prepare_required(pending_next)
-            return project_required(
-                context,
-                pending_next,
+            outcome = ToolApprovalContinuationOutcome.approval_required(
+                exc.pending_approval,
+                prepare_required=prepare_required,
             )
         except Exception as exc:
-            safe_error = redact_error(exc)
-            return project_failed(
-                context,
-                safe_error,
+            outcome = ToolApprovalContinuationOutcome.failed(
+                exc,
+                redact_error=redact_error,
             )
+        return outcome.project(
+            context,
+            project_completed=project_completed,
+            project_required=project_required,
+            project_failed=project_failed,
+        )
 
     def resume_approved_tool_run(
         self,
