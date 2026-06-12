@@ -34,6 +34,8 @@ def test_release_candidate_verifier_runs_source_and_artifact_guards(tmp_path, mo
     assert "source release guards: passed" in output
     assert "built artifact guards: passed" in output
     assert "manual release-candidate checks:" in output
+    assert "[gatekeeper_first_launch]" in output
+    assert "[screen_recording_permission]" in output
 
 
 def test_release_candidate_verifier_source_only_skips_existing_artifacts(tmp_path, monkeypatch, capsys):
@@ -225,6 +227,23 @@ def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
     assert report["electron_ui_smoke"]["status"] == "skipped"
     assert report["manual_release_candidate_check_status"] == "manual_required"
     assert report["manual_release_candidate_checks"] == list(rc.MANUAL_RELEASE_CANDIDATE_CHECKS)
+    assert report["manual_release_candidate_check_statuses"] == list(
+        rc.MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS
+    )
+    assert [check["id"] for check in report["manual_release_candidate_check_statuses"]] == [
+        "gatekeeper_first_launch",
+        "packaged_bridge_isolation",
+        "screen_recording_permission",
+        "real_provider_smoke",
+    ]
+    assert all(
+        check["status"] == "manual_required"
+        for check in report["manual_release_candidate_check_statuses"]
+    )
+    assert all(
+        check["required_before"] == "public_release_signoff"
+        for check in report["manual_release_candidate_check_statuses"]
+    )
 
 
 def test_release_candidate_verifier_checks_mounted_dmg_app(tmp_path, monkeypatch, capsys):

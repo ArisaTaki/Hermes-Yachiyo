@@ -563,6 +563,18 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release/rc-verification.json",
         "release packaging docs must document the archived RC verification report",
     ),
+    (
+        "manual_release_candidate_check_statuses",
+        "release packaging docs must document structured manual RC check statuses",
+    ),
+    (
+        "gatekeeper_first_launch",
+        "release packaging docs must document the Gatekeeper manual RC check id",
+    ),
+    (
+        "screen_recording_permission",
+        "release packaging docs must document the screen recording manual RC check id",
+    ),
 )
 RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
@@ -786,6 +798,48 @@ RELEASE_CANDIDATE_PROVIDER_SMOKE_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "run_provider_smoke",
         "release candidate verifier must report whether provider smoke was requested",
+    ),
+)
+RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
+    (
+        "MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS",
+        "release candidate verifier must define structured manual release checks",
+    ),
+    (
+        '"gatekeeper_first_launch"',
+        "release candidate verifier must track Gatekeeper first-launch manual status",
+    ),
+    (
+        '"packaged_bridge_isolation"',
+        "release candidate verifier must track packaged bridge isolation manual status",
+    ),
+    (
+        '"screen_recording_permission"',
+        "release candidate verifier must track screen recording permission manual status",
+    ),
+    (
+        '"real_provider_smoke"',
+        "release candidate verifier must track real provider smoke manual status",
+    ),
+    (
+        '"manual_required"',
+        "release candidate verifier manual checks must default to manual_required",
+    ),
+    (
+        '"public_release_signoff"',
+        "release candidate verifier manual checks must declare the release signoff gate",
+    ),
+    (
+        '"evidence"',
+        "release candidate verifier manual checks must describe required evidence",
+    ),
+    (
+        '"manual_release_candidate_check_statuses"',
+        "release candidate verifier must write structured manual check statuses to the RC report",
+    ),
+    (
+        "_manual_release_candidate_check_report()",
+        "release candidate verifier must copy manual check details into reports",
     ),
 )
 STREAMING_PROVIDER_SMOKE_SCRIPT_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
@@ -2502,6 +2556,10 @@ def _verify_streaming_provider_smoke_contract_guards(root: Path) -> list[Finding
         (
             Path("scripts/verify_release_candidate.py"),
             RELEASE_CANDIDATE_PROVIDER_SMOKE_REQUIRED_TEXT,
+        ),
+        (
+            Path("scripts/verify_release_candidate.py"),
+            RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT,
         ),
     )
     for relative_path, required_texts in targets:

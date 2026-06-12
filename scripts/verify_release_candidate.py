@@ -65,12 +65,43 @@ PROVIDER_SMOKE_COMMANDS: tuple[tuple[str, tuple[str, ...]], ...] = (
         ),
     ),
 )
-MANUAL_RELEASE_CANDIDATE_CHECKS: tuple[str, ...] = (
-    "Mount the DMG and launch Oha-Yachiyo.app once with the documented Gatekeeper first-launch flow.",
-    "Confirm the packaged app starts its local bridge and does not connect to a development backend.",
-    "Grant Screen Recording permission to Oha-Yachiyo.app and verify the local screenshot/proactive probe path.",
-    "If real provider credentials are available, run --run-provider-smoke for the opt-in streaming/tool-call provider gate.",
+MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS: tuple[dict[str, str], ...] = (
+    {
+        "id": "gatekeeper_first_launch",
+        "status": "manual_required",
+        "required_before": "public_release_signoff",
+        "description": "Mount the DMG and launch Oha-Yachiyo.app once with the documented Gatekeeper first-launch flow.",
+        "evidence": "Record the mounted DMG path and confirm Finder Control-click -> Open or System Settings allow-open flow reaches the app.",
+    },
+    {
+        "id": "packaged_bridge_isolation",
+        "status": "manual_required",
+        "required_before": "public_release_signoff",
+        "description": "Confirm the packaged app starts its local bridge and does not connect to a development backend.",
+        "evidence": "Record the packaged bridge /status response and confirm the bridge URL is local loopback.",
+    },
+    {
+        "id": "screen_recording_permission",
+        "status": "manual_required",
+        "required_before": "public_release_signoff",
+        "description": "Grant Screen Recording permission to Oha-Yachiyo.app and verify the local screenshot/proactive probe path.",
+        "evidence": "Record the System Settings permission state and a successful local screenshot or proactive probe result.",
+    },
+    {
+        "id": "real_provider_smoke",
+        "status": "manual_required",
+        "required_before": "public_release_signoff",
+        "description": "If real provider credentials are available, run --run-provider-smoke for the opt-in streaming/tool-call provider gate.",
+        "evidence": "Archive the RC report provider_smoke section from a credentialed run, or record that provider credentials were unavailable.",
+    },
 )
+MANUAL_RELEASE_CANDIDATE_CHECKS: tuple[str, ...] = tuple(
+    check["description"] for check in MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS
+)
+
+
+def _manual_release_candidate_check_report() -> list[dict[str, str]]:
+    return [dict(check) for check in MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS]
 
 
 def existing_artifact_paths(root: Path) -> tuple[Path, ...]:
@@ -494,6 +525,7 @@ def verify_release_candidate(
         },
         "manual_release_candidate_check_status": "manual_required",
         "manual_release_candidate_checks": list(MANUAL_RELEASE_CANDIDATE_CHECKS),
+        "manual_release_candidate_check_statuses": _manual_release_candidate_check_report(),
     }
 
     source_only_conflicts: list[str] = []
@@ -777,8 +809,8 @@ def verify_release_candidate(
         }
 
     print("manual release-candidate checks:")
-    for check in MANUAL_RELEASE_CANDIDATE_CHECKS:
-        print(f"- {check}")
+    for check in MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS:
+        print(f"- [{check['id']}] {check['description']}")
 
     report["ok"] = not failed
     if report_json is not None:

@@ -134,6 +134,19 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
     )
     assert "release candidate verifier must expose provider smoke verification" in messages
     assert "release candidate verifier must report whether provider smoke was requested" in messages
+    assert "release candidate verifier must define structured manual release checks" in messages
+    assert "release candidate verifier must track Gatekeeper first-launch manual status" in messages
+    assert "release candidate verifier must track packaged bridge isolation manual status" in messages
+    assert "release candidate verifier must track screen recording permission manual status" in messages
+    assert "release candidate verifier must track real provider smoke manual status" in messages
+    assert "release candidate verifier manual checks must default to manual_required" in messages
+    assert "release candidate verifier manual checks must declare the release signoff gate" in messages
+    assert "release candidate verifier manual checks must describe required evidence" in messages
+    assert (
+        "release candidate verifier must write structured manual check statuses to the RC report"
+        in messages
+    )
+    assert "release candidate verifier must copy manual check details into reports" in messages
 
 
 def test_verifier_reports_legacy_product_tokens(tmp_path):
@@ -611,6 +624,9 @@ def test_verifier_requires_release_packaging_docs_for_release_gates(tmp_path):
     assert "release packaging docs must document the source-only RC dry run" in messages
     assert "release packaging docs must document the CI release-candidate gate before upload" in messages
     assert "release packaging docs must document the archived RC verification report" in messages
+    assert "release packaging docs must document structured manual RC check statuses" in messages
+    assert "release packaging docs must document the Gatekeeper manual RC check id" in messages
+    assert "release packaging docs must document the screen recording manual RC check id" in messages
 
 
 def _write_packaged_app_bundle(
