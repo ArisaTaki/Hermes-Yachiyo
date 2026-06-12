@@ -180,6 +180,29 @@ def test_release_candidate_verifier_source_only_rejects_dmg_app_smoke(
     assert report["dmg_app_smoke"]["status"] == "skipped"
 
 
+def test_release_candidate_verifier_source_only_rejects_provider_smoke(
+    tmp_path, monkeypatch, capsys
+):
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **kwargs: calls.append(kwargs) or [])
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        run_provider_smoke=True,
+        report_json=Path("tmp/source-only-rc.json"),
+    ) == 1
+
+    assert calls == []
+    output = capsys.readouterr().out
+    assert "--source-only cannot be combined with --run-provider-smoke" in output
+    report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
+    assert report["ok"] is False
+    assert report["source_release_guards"]["status"] == "skipped"
+    assert report["built_artifact_guards"]["status"] == "failed"
+    assert report["provider_smoke"]["status"] == "skipped"
+
+
 def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
     (tmp_path / "release").mkdir()
 
@@ -198,6 +221,7 @@ def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
     assert report["built_artifact_guards"]["artifact_paths"] == ["release"]
     assert report["dmg_mount_guards"]["status"] == "skipped"
     assert report["dmg_app_smoke"]["status"] == "skipped"
+    assert report["provider_smoke"]["status"] == "skipped"
     assert report["electron_ui_smoke"]["status"] == "skipped"
     assert report["manual_release_candidate_check_status"] == "manual_required"
     assert report["manual_release_candidate_checks"] == list(rc.MANUAL_RELEASE_CANDIDATE_CHECKS)
@@ -397,6 +421,104 @@ def test_release_candidate_dmg_app_startup_smoke_requires_executable(
             "mounted Oha-Yachiyo.app must contain executable Oha-Yachiyo",
         )
     ]
+
+
+def test_release_candidate_verifier_runs_provider_smoke(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+    monkeypatch.setenv("OHA_YACHIYO_SMOKE_BASE_URL", "https://provider.example/v1")
+    monkeypatch.setenv("OHA_YACHIYO_SMOKE_MODEL", "smoke-model")
+    monkeypatch.setenv("OHA_YACHIYO_SMOKE_API_KEY", "sk-test-provider-smoke")
+    calls: list[dict[str, object]] = []
+
+    def fake_run(command, **kwargs):
+        calls.append({"command": command, "cwd": kwargs.get("cwd"), "text": kwargs.get("text")})
+        return SimpleNamespace(returncode=0, stdout='{"ok": true}\n', stderr="")
+
+    monkeypatch.setattr(rc.subprocess, "run", fake_run)
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        run_provider_smoke=True,
+        report_json=Path("tmp/rc.json"),
+    ) == 0
+
+    assert calls == [
+        {
+            "command": [
+                rc.sys.executable,
+                str(rc.PROVIDER_SMOKE_SCRIPT),
+                "--require-content",
+                "--expect-finish-reason",
+                "stop",
+            ],
+            "cwd": tmp_path,
+            "text": True,
+        },
+        {
+            "command": [
+                rc.sys.executable,
+                str(rc.PROVIDER_SMOKE_SCRIPT),
+                "--tool-call",
+                "--require-tool-call",
+                "--require-tool-result-content",
+                "--expect-tool-name",
+                "workspace_read",
+                "--expect-tool-argument-substring",
+                "README.md",
+                "--expect-tool-argument-json-field",
+                "path=README.md",
+                "--expect-finish-reason",
+                "tool_calls",
+                "--expect-tool-result-finish-reason",
+                "stop",
+            ],
+            "cwd": tmp_path,
+            "text": True,
+        },
+    ]
+    output = capsys.readouterr().out
+    assert "real provider smoke: passed" in output
+    report = json.loads((tmp_path / "tmp" / "rc.json").read_text(encoding="utf-8"))
+    assert report["ok"] is True
+    assert report["provider_smoke"] == {
+        "status": "passed",
+        "checks": [
+            {"label": "text_stream", "exit_code": 0},
+            {"label": "tool_call_stream", "exit_code": 0},
+        ],
+        "findings": [],
+        "run_requested": True,
+    }
+
+
+def test_release_candidate_verifier_provider_smoke_fails_without_credentials(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+    for name in rc.PROVIDER_SMOKE_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+
+    def fail_run(*_args, **_kwargs):
+        raise AssertionError("provider smoke must not start without credentials")
+
+    monkeypatch.setattr(rc.subprocess, "run", fail_run)
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        run_provider_smoke=True,
+        report_json=Path("tmp/rc.json"),
+    ) == 1
+
+    output = capsys.readouterr().out
+    assert "real provider smoke: failed" in output
+    assert "OHA_YACHIYO_SMOKE_BASE_URL" in output
+    assert "OHA_YACHIYO_SMOKE_MODEL" in output
+    assert "OHA_YACHIYO_SMOKE_API_KEY" in output
+    report = json.loads((tmp_path / "tmp" / "rc.json").read_text(encoding="utf-8"))
+    assert report["ok"] is False
+    assert report["provider_smoke"]["status"] == "failed"
+    assert report["provider_smoke"]["checks"] == []
+    assert "missing environment variables" in report["provider_smoke"]["findings"][0]["message"]
 
 
 def test_release_candidate_verifier_requires_artifacts_when_requested(tmp_path, monkeypatch, capsys):

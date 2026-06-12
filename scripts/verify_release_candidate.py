@@ -31,11 +31,45 @@ DEFAULT_ARTIFACT_PATHS: tuple[Path, ...] = (
 PACKAGED_APP_NAME = "Oha-Yachiyo.app"
 PACKAGED_APP_EXECUTABLE_NAME = "Oha-Yachiyo"
 DMG_APP_SMOKE_TIMEOUT_SECONDS = 45.0
+PROVIDER_SMOKE_ENV_VARS: tuple[str, ...] = (
+    "OHA_YACHIYO_SMOKE_BASE_URL",
+    "OHA_YACHIYO_SMOKE_MODEL",
+    "OHA_YACHIYO_SMOKE_API_KEY",
+)
+PROVIDER_SMOKE_SCRIPT = Path("scripts/smoke_openai_compatible_stream.py")
+PROVIDER_SMOKE_COMMANDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (
+        "text_stream",
+        (
+            "--require-content",
+            "--expect-finish-reason",
+            "stop",
+        ),
+    ),
+    (
+        "tool_call_stream",
+        (
+            "--tool-call",
+            "--require-tool-call",
+            "--require-tool-result-content",
+            "--expect-tool-name",
+            "workspace_read",
+            "--expect-tool-argument-substring",
+            "README.md",
+            "--expect-tool-argument-json-field",
+            "path=README.md",
+            "--expect-finish-reason",
+            "tool_calls",
+            "--expect-tool-result-finish-reason",
+            "stop",
+        ),
+    ),
+)
 MANUAL_RELEASE_CANDIDATE_CHECKS: tuple[str, ...] = (
     "Mount the DMG and launch Oha-Yachiyo.app once with the documented Gatekeeper first-launch flow.",
     "Confirm the packaged app starts its local bridge and does not connect to a development backend.",
     "Grant Screen Recording permission to Oha-Yachiyo.app and verify the local screenshot/proactive probe path.",
-    "If real provider credentials are available, run the opt-in streaming/tool-call provider smoke in release workflow.",
+    "If real provider credentials are available, run --run-provider-smoke for the opt-in streaming/tool-call provider gate.",
 )
 
 
@@ -144,6 +178,51 @@ def _read_process_output(process: subprocess.Popen[str]) -> tuple[str, str]:
 def _redacted_process_detail(stdout: str, stderr: str) -> str:
     detail = "\n".join(part.strip() for part in (stderr, stdout) if part and part.strip())
     return redact_api_error_text(detail.strip())
+
+
+def _provider_smoke_missing_env() -> list[str]:
+    return [name for name in PROVIDER_SMOKE_ENV_VARS if not os.getenv(name, "").strip()]
+
+
+def verify_provider_smoke(root: Path) -> tuple[list[Finding], list[dict[str, object]]]:
+    findings: list[Finding] = []
+    results: list[dict[str, object]] = []
+    missing_env = _provider_smoke_missing_env()
+    if missing_env:
+        findings.append(
+            Finding(
+                root,
+                "real provider smoke requested but missing environment variables: "
+                + ", ".join(missing_env),
+            )
+        )
+        return findings, results
+
+    script = root / PROVIDER_SMOKE_SCRIPT
+    for label, args in PROVIDER_SMOKE_COMMANDS:
+        command = [sys.executable, str(PROVIDER_SMOKE_SCRIPT), *args]
+        try:
+            result = subprocess.run(
+                command,
+                cwd=root,
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+        except OSError as exc:
+            detail = redact_api_error_text(str(exc))
+            findings.append(Finding(script, f"real provider {label} smoke could not start: {detail}"))
+            results.append({"label": label, "exit_code": None})
+            continue
+        results.append({"label": label, "exit_code": result.returncode})
+        if result.returncode != 0:
+            detail = _redacted_process_detail(result.stdout, result.stderr)
+            message = f"real provider {label} smoke failed with exit code {result.returncode}"
+            if detail:
+                message = f"{message}: {detail}"
+            findings.append(Finding(script, message))
+    return findings, results
 
 
 def release_candidate_dmg_paths(root: Path, artifact_paths: Sequence[Path]) -> tuple[Path, ...]:
@@ -375,6 +454,7 @@ def verify_release_candidate(
     source_only: bool = False,
     check_dmg_mount: bool = False,
     run_dmg_app_smoke: bool = False,
+    run_provider_smoke: bool = False,
     run_ui_smoke: bool = False,
     smoke_scripts: Sequence[Path] | None = None,
     report_json: Path | None = None,
@@ -406,6 +486,12 @@ def verify_release_candidate(
             "findings": [],
             "run_requested": run_dmg_app_smoke,
         },
+        "provider_smoke": {
+            "status": "pending",
+            "checks": [],
+            "findings": [],
+            "run_requested": run_provider_smoke,
+        },
         "manual_release_candidate_check_status": "manual_required",
         "manual_release_candidate_checks": list(MANUAL_RELEASE_CANDIDATE_CHECKS),
     }
@@ -420,6 +506,8 @@ def verify_release_candidate(
             source_only_conflicts.append("--check-dmg-mount")
         if run_dmg_app_smoke:
             source_only_conflicts.append("--run-dmg-app-smoke")
+        if run_provider_smoke:
+            source_only_conflicts.append("--run-provider-smoke")
         if run_ui_smoke:
             source_only_conflicts.append("--run-ui-smoke")
 
@@ -452,6 +540,12 @@ def verify_release_candidate(
             "dmg_paths": [],
             "findings": [],
             "run_requested": run_dmg_app_smoke,
+        }
+        report["provider_smoke"] = {
+            "status": "skipped",
+            "checks": [],
+            "findings": [],
+            "run_requested": run_provider_smoke,
         }
         report["electron_ui_smoke"] = {
             "status": "skipped",
@@ -512,6 +606,12 @@ def verify_release_candidate(
                 "dmg_paths": [],
                 "findings": [],
                 "run_requested": run_dmg_app_smoke,
+            }
+            report["provider_smoke"] = {
+                "status": "skipped",
+                "checks": [],
+                "findings": [],
+                "run_requested": run_provider_smoke,
             }
         elif selected_artifacts:
             artifact_findings = verify_release_artifacts(
@@ -605,6 +705,25 @@ def verify_release_candidate(
             "dmg_paths": [],
             "findings": [],
             "run_requested": run_dmg_app_smoke,
+        }
+
+    if run_provider_smoke:
+        provider_findings, provider_results = verify_provider_smoke(root)
+        _print_findings("real provider smoke", provider_findings)
+        failed = failed or bool(provider_findings)
+        report["provider_smoke"] = {
+            "status": "failed" if provider_findings else "passed",
+            "checks": provider_results,
+            "findings": _finding_report(provider_findings),
+            "run_requested": run_provider_smoke,
+        }
+    else:
+        print("real provider smoke: skipped; pass --run-provider-smoke when OHA_YACHIYO_SMOKE_* credentials are configured")
+        report["provider_smoke"] = {
+            "status": "skipped",
+            "checks": [],
+            "findings": [],
+            "run_requested": run_provider_smoke,
         }
 
     selected_smoke_scripts = tuple(smoke_scripts) if smoke_scripts is not None else release_ui_smoke_scripts(root)
@@ -710,6 +829,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Launch the app inside discovered DMGs and wait for its packaged /status endpoint.",
     )
     parser.add_argument(
+        "--run-provider-smoke",
+        action="store_true",
+        help="Run opt-in real provider streaming and tool-call smoke using OHA_YACHIYO_SMOKE_* credentials.",
+    )
+    parser.add_argument(
         "--report-json",
         type=Path,
         help="Write a machine-readable release-candidate verification report.",
@@ -721,6 +845,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         source_only=args.source_only,
         check_dmg_mount=args.check_dmg_mount,
         run_dmg_app_smoke=args.run_dmg_app_smoke,
+        run_provider_smoke=args.run_provider_smoke,
         run_ui_smoke=args.run_ui_smoke,
         report_json=args.report_json,
     )

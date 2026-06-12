@@ -544,6 +544,10 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document the local RC packaged app startup smoke",
     ),
     (
+        "python scripts/verify_release_candidate.py --require-artifacts --run-provider-smoke",
+        "release packaging docs must document the local RC real provider smoke gate",
+    ),
+    (
         "python scripts/verify_release_candidate.py --require-artifacts --run-ui-smoke",
         "release packaging docs must document the local RC Electron UI smoke gate",
     ),
