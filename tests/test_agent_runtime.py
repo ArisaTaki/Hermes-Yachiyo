@@ -10036,6 +10036,53 @@ def test_agent_run_consumes_split_utf8_http_sse_content_chunks(tmp_path, monkeyp
         service.close()
 
 
+def test_agent_run_persists_streaming_refusal_delta(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    expected = "Agent refuses this request."
+    requests = []
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            yield b'data: {"choices":[{"delta":{"refusal":"Agent refuses "}}]}\n\n'
+            yield b'data: {"choices":[{"delta":{"refusal":"this request."},"finish_reason":"stop"}]}\n\n'
+            yield b"data: [DONE]\n\n"
+
+    def fake_urlopen(request, **kwargs):
+        body = json.loads(request.data.decode("utf-8"))
+        requests.append({"request": request, "body": body, "kwargs": kwargs})
+        assert request.full_url == "https://api.example.test/v1/chat/completions"
+        assert request.get_header("Accept") == "text/event-stream"
+        assert body["stream"] is True
+        return FakeResponse()
+
+    monkeypatch.setattr("apps.core.tls.urlrequest.urlopen", fake_urlopen)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Refusal HTTP SSE Agent",
+                "model_mode": "custom_api",
+                "model_config": {"base_url": "https://api.example.test/v1", "model": "demo-model", "api_key": "sk-secret"},
+            }
+        )
+        run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Refuse unsafe request"})
+        run_events = service.list_run_events(run["run_id"])["events"]
+        completed_fact = next(event for event in run_events if event["event_type"] == "agent.run.completed")
+
+        assert run["status"] == "completed"
+        assert run["result"] == expected
+        assert len(requests) == 1
+        assert completed_fact["payload"]["result"] == expected
+        assert not any(str(event["event_type"]).endswith(".delta") for event in run_events)
+    finally:
+        service.close()
+
+
 def test_agent_run_executes_http_sse_tool_call_and_continues(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     workdir = tmp_path / "repo"

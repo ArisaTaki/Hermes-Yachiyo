@@ -1205,6 +1205,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover NativeRunEngine Agent Run split UTF-8 SSE content frames",
     ),
     (
+        "tests/test_agent_runtime.py::test_agent_run_persists_streaming_refusal_delta",
+        "macOS release workflow smoke tests must cover NativeRunEngine Agent Run streaming refusal deltas",
+    ),
+    (
         "tests/test_agent_runtime.py::test_agent_run_executes_http_sse_tool_call_and_continues",
         "macOS release workflow smoke tests must cover NativeRunEngine Agent Run HTTP SSE tool calls",
     ),
