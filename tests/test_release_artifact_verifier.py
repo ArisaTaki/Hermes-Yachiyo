@@ -133,6 +133,7 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
     )
     assert "release candidate verifier must expose provider smoke verification" in messages
     assert "release candidate verifier must report whether provider smoke was requested" in messages
+    assert "release candidate verifier must reuse the shared Electron UI smoke runner" in messages
     assert "release candidate verifier must define structured manual release checks" in messages
     assert "release candidate verifier must define allowed manual check statuses" in messages
     assert "release candidate verifier manual checks must support passed status" in messages
@@ -172,6 +173,7 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
     assert "release candidate verifier CLI must require complete manual checks for final signoff" in messages
     assert "release candidate verifier CLI must write manual check templates" in messages
     assert "Electron UI smoke runner must expose dynamic smoke script discovery" in messages
+    assert "Electron UI smoke runner must expose reusable report generation" in messages
     assert "Electron UI smoke runner must discover every scripts/smoke_*_ui.mjs file" in messages
     assert "Electron UI smoke runner must execute discovered smoke scripts with node" in messages
     assert "Electron UI smoke runner report must include script_count" in messages

@@ -152,6 +152,10 @@ ELECTRON_UI_SMOKE_RUNNER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "Electron UI smoke runner must expose dynamic smoke script discovery",
     ),
     (
+        "def run_electron_ui_smoke_report",
+        "Electron UI smoke runner must expose reusable report generation",
+    ),
+    (
         'glob("smoke_*_ui.mjs")',
         "Electron UI smoke runner must discover every scripts/smoke_*_ui.mjs file",
     ),
@@ -860,6 +864,10 @@ RELEASE_CANDIDATE_PROVIDER_SMOKE_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "run_provider_smoke",
         "release candidate verifier must report whether provider smoke was requested",
+    ),
+    (
+        "run_electron_ui_smoke_report",
+        "release candidate verifier must reuse the shared Electron UI smoke runner",
     ),
 )
 RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (

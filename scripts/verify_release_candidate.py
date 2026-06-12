@@ -20,6 +20,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from scripts.run_electron_ui_smokes import (
+    electron_ui_smoke_scripts as release_ui_smoke_scripts,
+    run_electron_ui_smoke_report,
+)
 from scripts.verify_release_artifacts import Finding, verify_release_artifacts
 from packages.security import redact_api_error_text
 
@@ -285,13 +289,6 @@ def existing_artifact_paths(root: Path) -> tuple[Path, ...]:
     return tuple(path for path in DEFAULT_ARTIFACT_PATHS if (root / path).exists())
 
 
-def release_ui_smoke_scripts(root: Path) -> tuple[Path, ...]:
-    scripts_dir = root / "scripts"
-    if not scripts_dir.is_dir():
-        return ()
-    return tuple(sorted(path.relative_to(root) for path in scripts_dir.glob("smoke_*_ui.mjs") if path.is_file()))
-
-
 def _print_findings(title: str, findings: Sequence[Finding]) -> None:
     if not findings:
         print(f"{title}: passed")
@@ -356,20 +353,6 @@ def _validate_artifact_paths(root: Path, artifact_paths: Sequence[Path]) -> tupl
                 f"release candidate artifact path must stay inside project root: {artifact_path}"
             )
     return tuple(artifact_paths)
-
-
-def _validate_smoke_script_paths(root: Path, smoke_scripts: Sequence[Path]) -> tuple[Path, ...]:
-    root_path = root.resolve(strict=False)
-    for smoke_script in smoke_scripts:
-        candidate = smoke_script if smoke_script.is_absolute() else root / smoke_script
-        resolved = candidate.resolve(strict=False)
-        try:
-            resolved.relative_to(root_path)
-        except ValueError:
-            raise ValueError(
-                f"release candidate smoke script path must stay inside project root: {smoke_script}"
-            )
-    return tuple(smoke_scripts)
 
 
 def _load_manual_release_candidate_checks(
@@ -1074,45 +1057,17 @@ def verify_release_candidate(
         }
 
     selected_smoke_scripts = tuple(smoke_scripts) if smoke_scripts is not None else release_ui_smoke_scripts(root)
-    smoke_results: list[dict[str, object]] = []
     if run_ui_smoke:
-        try:
-            selected_smoke_scripts = _validate_smoke_script_paths(root, selected_smoke_scripts)
-        except ValueError as exc:
-            print(f"Electron UI smoke: failed\n- {exc}")
-            smoke_results.append(
-                {
-                    "script": ", ".join(str(script) for script in selected_smoke_scripts),
-                    "exit_code": None,
-                    "error": str(exc),
-                }
-            )
-            selected_smoke_scripts = ()
-            failed = True
-        if not selected_smoke_scripts and not smoke_results:
-            print("Electron UI smoke: failed\n- no scripts/smoke_*_ui.mjs scripts found")
-            failed = True
-        for script in selected_smoke_scripts:
-            print(f"Electron UI smoke: node {script}")
-            try:
-                result = subprocess.run(["node", str(script)], cwd=root, check=False)
-            except OSError as exc:
-                print(f"- {script} could not start: {exc}")
-                smoke_results.append(
-                    {"script": str(script), "exit_code": None, "error": str(exc)}
-                )
-                failed = True
-            else:
-                smoke_results.append({"script": str(script), "exit_code": result.returncode})
-                if result.returncode != 0:
-                    print(f"- {script} failed with exit code {result.returncode}")
-                    failed = True
-        smoke_failed = (not selected_smoke_scripts) or any(
-            item["exit_code"] is None or item["exit_code"] for item in smoke_results
+        smoke_report = run_electron_ui_smoke_report(
+            root=root,
+            smoke_scripts=selected_smoke_scripts,
         )
+        smoke_failed = not bool(smoke_report.get("ok"))
+        failed = failed or smoke_failed
         report["electron_ui_smoke"] = {
             "status": "failed" if smoke_failed else "passed",
-            "scripts": smoke_results,
+            "script_count": smoke_report.get("script_count", len(selected_smoke_scripts)),
+            "scripts": smoke_report.get("scripts", []),
             "run_requested": run_ui_smoke,
         }
     else:

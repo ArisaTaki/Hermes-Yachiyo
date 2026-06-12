@@ -44,12 +44,11 @@ def _write_report(root: Path, report_json: Path, report: dict[str, Any]) -> None
     )
 
 
-def run_electron_ui_smokes(
+def run_electron_ui_smoke_report(
     *,
     root: Path = PROJECT_ROOT,
     smoke_scripts: Sequence[Path] | None = None,
-    report_json: Path | None = None,
-) -> int:
+) -> dict[str, Any]:
     root = Path(root)
     selected_scripts = (
         tuple(smoke_scripts)
@@ -92,10 +91,20 @@ def run_electron_ui_smokes(
         "script_count": len(selected_scripts),
         "scripts": results,
     }
+    return report
+
+
+def run_electron_ui_smokes(
+    *,
+    root: Path = PROJECT_ROOT,
+    smoke_scripts: Sequence[Path] | None = None,
+    report_json: Path | None = None,
+) -> int:
+    report = run_electron_ui_smoke_report(root=root, smoke_scripts=smoke_scripts)
     if report_json is not None:
         _write_report(root, report_json, report)
         print(f"Electron UI smoke report: {report_json}")
-    return 1 if failed else 0
+    return 0 if report["ok"] else 1
 
 
 def main(argv: Sequence[str] | None = None) -> int:

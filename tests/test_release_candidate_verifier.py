@@ -1042,12 +1042,26 @@ def test_release_candidate_verifier_runs_electron_ui_smoke_scripts(tmp_path, mon
 
     monkeypatch.setattr(rc.subprocess, "run", fake_run)
 
-    assert rc.verify_release_candidate(root=tmp_path, run_ui_smoke=True) == 0
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        run_ui_smoke=True,
+        report_json=Path("release/rc-verification.json"),
+    ) == 0
 
     assert commands == [
         {"command": ["node", "scripts/smoke_alpha_ui.mjs"], "cwd": tmp_path, "check": False},
         {"command": ["node", "scripts/smoke_beta_ui.mjs"], "cwd": tmp_path, "check": False},
     ]
+    report = json.loads((tmp_path / "release" / "rc-verification.json").read_text(encoding="utf-8"))
+    assert report["electron_ui_smoke"] == {
+        "status": "passed",
+        "script_count": 2,
+        "scripts": [
+            {"script": "scripts/smoke_alpha_ui.mjs", "exit_code": 0},
+            {"script": "scripts/smoke_beta_ui.mjs", "exit_code": 0},
+        ],
+        "run_requested": True,
+    }
 
 
 def test_release_candidate_verifier_rejects_smoke_scripts_outside_root(
@@ -1069,18 +1083,19 @@ def test_release_candidate_verifier_rejects_smoke_scripts_outside_root(
 
     output = capsys.readouterr().out
     assert "Electron UI smoke: failed" in output
-    assert "release candidate smoke script path must stay inside project root" in output
+    assert "Electron UI smoke script path must stay inside project root" in output
     report_path = tmp_path / "release" / "rc-verification.json"
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report["ok"] is False
     assert report["electron_ui_smoke"] == {
         "status": "failed",
+        "script_count": 1,
         "scripts": [
             {
                 "script": "../outside-smoke-ui.mjs",
                 "exit_code": None,
                 "error": (
-                    "release candidate smoke script path must stay inside project root: "
+                    "Electron UI smoke script path must stay inside project root: "
                     "../outside-smoke-ui.mjs"
                 ),
             }
@@ -1136,6 +1151,7 @@ def test_release_candidate_verifier_reports_electron_ui_smoke_start_failure(
     assert report["ok"] is False
     assert report["electron_ui_smoke"] == {
         "status": "failed",
+        "script_count": 1,
         "scripts": [
             {
                 "script": "scripts/smoke_missing_node_ui.mjs",
