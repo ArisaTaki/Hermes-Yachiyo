@@ -954,15 +954,15 @@ def test_approval_resume_projection_coordinator_projects_resume_states():
     assert coordinator.project_agent_running(running) is running
     agent_completed = coordinator.project_agent_completed(make_context("agent_run_completed"), "Agent done")
     main_completed = coordinator.project_main_chat_completed(make_context("main_chat_run"), "Main done")
-    required = coordinator.project_required(
-        make_context("agent_run_required"),
-        {
-            "approval_id": "approval-next",
-            "tool": "terminal.run",
-            "input_preview": {"command": "printf next"},
-            "requested_at": "now",
-        },
-    )
+    required_context = make_context("agent_run_required")
+    required_pending = {
+        "approval_id": "approval-next",
+        "tool": "terminal.run",
+        "input_preview": {"command": "printf next"},
+        "requested_at": "now",
+    }
+    required = coordinator.project_required(required_context, required_pending)
+    required_pending["input_preview"]["command"] = "mutated after projection"
     failed = coordinator.project_failed(make_context("agent_run_failed"), "safe failure")
 
     assert group_updates == [running]
@@ -985,6 +985,9 @@ def test_approval_resume_projection_coordinator_projects_resume_states():
         "event": "model.output.ready",
         "detail": "Main done",
         "output_chars": 9,
+    }
+    assert required_context.timeline[-1]["pending_approval"]["input_preview"] == {
+        "command": "printf next"
     }
     assert updated_runs[2]["result"] == "等待审批：terminal.run"
     assert updated_runs[2]["pending_approval"]["approval_id"] == "approval-next"

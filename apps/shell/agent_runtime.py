@@ -1200,10 +1200,15 @@ def _public_pending_approval(value: Any) -> dict[str, Any]:
     raw = value if isinstance(value, dict) else {}
     if not raw:
         return {}
+    input_preview = raw.get("input_preview")
+    if input_preview:
+        public_input_preview = _tool_input_preview(input_preview)
+    else:
+        public_input_preview = _tool_input_preview(raw.get("input") or {})
     return {
         "approval_id": str(raw.get("approval_id") or ""),
         "tool": str(raw.get("tool") or ""),
-        "input_preview": raw.get("input_preview") or _tool_input_preview(raw.get("input") or {}),
+        "input_preview": public_input_preview,
         "requested_at": str(raw.get("requested_at") or ""),
     }
 
