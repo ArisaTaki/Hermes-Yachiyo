@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -33,6 +34,26 @@ def test_release_candidate_verifier_runs_source_and_artifact_guards(tmp_path, mo
     assert "source release guards: passed" in output
     assert "built artifact guards: passed" in output
     assert "manual release-candidate checks:" in output
+
+
+def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
+    (tmp_path / "release").mkdir()
+
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        report_json=Path("release/rc-verification.json"),
+    ) == 0
+
+    report_path = tmp_path / "release" / "rc-verification.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["ok"] is True
+    assert report["source_release_guards"]["status"] == "passed"
+    assert report["built_artifact_guards"]["status"] == "passed"
+    assert report["built_artifact_guards"]["artifact_paths"] == ["release"]
+    assert report["electron_ui_smoke"]["status"] == "skipped"
+    assert report["manual_release_candidate_checks"] == list(rc.MANUAL_RELEASE_CANDIDATE_CHECKS)
 
 
 def test_release_candidate_verifier_requires_artifacts_when_requested(tmp_path, monkeypatch, capsys):

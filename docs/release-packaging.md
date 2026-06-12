@@ -146,7 +146,7 @@ python scripts/verify_release_candidate.py --require-artifacts
 python scripts/verify_release_candidate.py --require-artifacts --run-ui-smoke
 ```
 
-macOS release workflow 会在生成 release metadata 后、上传 DMG 前运行 `python scripts/verify_release_candidate.py --require-artifacts`，确保 CI 与本地 RC 验收入口一致。带 `--run-ui-smoke` 的完整 Electron UI smoke 仍保留给本地 RC 复验，因为它会启动本地 Electron BrowserWindow。
+macOS release workflow 会在生成 release metadata 后、上传 DMG 前运行 `python scripts/verify_release_candidate.py --require-artifacts --report-json release/rc-verification.json`，确保 CI 与本地 RC 验收入口一致，并把 `release/rc-verification.json` 作为可归档验收报告随 release artifacts 上传。带 `--run-ui-smoke` 的完整 Electron UI smoke 仍保留给本地 RC 复验，因为它会启动本地 Electron BrowserWindow。
 
 脚本仍会列出必须人工确认的首次启动 / Gatekeeper / 屏幕录制权限检查项。
 

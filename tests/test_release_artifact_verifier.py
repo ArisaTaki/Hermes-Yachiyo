@@ -573,6 +573,7 @@ def test_verifier_requires_release_packaging_docs_for_release_gates(tmp_path):
     assert "release packaging docs must document the local RC verification entrypoint" in messages
     assert "release packaging docs must document the local RC Electron UI smoke gate" in messages
     assert "release packaging docs must document the CI release-candidate gate before upload" in messages
+    assert "release packaging docs must document the archived RC verification report" in messages
 
 
 def _write_packaged_app_bundle(
@@ -1417,6 +1418,8 @@ def test_verifier_requires_release_workflow_binary_scans_packaged_outputs(tmp_pa
     assert "macOS release workflow must validate packaged app bundle structure" in messages
     assert "macOS release workflow must verify the final packaged app code signature when signing is enabled" in messages
     assert "macOS release workflow must binary-scan final release artifacts" in messages
+    assert "macOS release workflow must run the local RC verification gate" in messages
+    assert "macOS release workflow must upload a release-candidate verification report" in messages
 
 
 def test_verifier_requires_release_workflow_guard_before_dependency_install(tmp_path):

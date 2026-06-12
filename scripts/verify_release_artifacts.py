@@ -535,8 +535,12 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document the local RC Electron UI smoke gate",
     ),
     (
-        "上传 DMG 前运行 `python scripts/verify_release_candidate.py --require-artifacts`",
+        "上传 DMG 前运行 `python scripts/verify_release_candidate.py --require-artifacts --report-json release/rc-verification.json`",
         "release packaging docs must document the CI release-candidate gate before upload",
+    ),
+    (
+        "release/rc-verification.json",
+        "release packaging docs must document the archived RC verification report",
     ),
 )
 RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
@@ -607,6 +611,10 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "python scripts/verify_release_candidate.py --require-artifacts",
         "macOS release workflow must run the local RC verification gate",
+    ),
+    (
+        "--report-json release/rc-verification.json",
+        "macOS release workflow must upload a release-candidate verification report",
     ),
     (
         'cp "${dmg_files[0]}" "release/${VERSIONED_DMG}"',
