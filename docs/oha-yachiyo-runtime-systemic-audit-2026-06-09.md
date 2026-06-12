@@ -2226,18 +2226,18 @@ compileall passed
 
 ## 下一步建议
 
-1. 做最终发布签核批处理：
-   - 先对最新 HEAD 重跑 build metadata、backend/DMG build 和批量 RC gate，再以新生成的 `tmp/rc-signoff-<short-commit>-current.json` 作为自动 evidence source 继续补齐最终签核；无 provider credentials 的发布签核人当前只需补齐 `gatekeeper_first_launch` 和 `screen_recording_permission` 两项。屏幕录制可在授权后用 `python scripts/verify_release_candidate.py --require-artifacts --run-dmg-screen-smoke --report-json tmp/rc-verification-screen.json` 自动填 `screen_recording_permission` evidence；Gatekeeper 仍需通过 Finder Control-click -> Open 或系统设置 allow-open 记录人工 evidence。有真实 provider credentials 时仍应运行带 `--run-provider-smoke` 的 RC gate，而不是把 provider 标为 `not_applicable`。
-   - 当前推荐先运行 `python scripts/refresh_local_rc_signoff.py --print-status` 查看最新剩余项；该命令会直接打印 `--write-os-evidence tmp/rc-signoff-<short-commit>-os-evidence.json` 收证命令。补齐人工 evidence 后，运行 `python scripts/verify_release_candidate.py --require-artifacts --manual-checks-json tmp/rc-signoff-<short-commit>-current.json --manual-checks-json tmp/rc-signoff-<short-commit>-os-evidence.json --require-manual-checks-complete --report-json tmp/rc-signoff-<short-commit>-final.json`，让最终是否可发布由同一个 RC gate 判定。
+1. 完成最终 OS 签核收证：
+   - 当前本地 RC 状态已经收敛到 `gatekeeper_first_launch` 与 `screen_recording_permission` 两项；无 provider credentials 的签核人不应再优先拆 UI selector、内部 coordinator 或静态 guard 小边界。先运行 `python scripts/refresh_local_rc_signoff.py --print-status` 确认最新 HEAD 的剩余项，再运行 `python scripts/refresh_local_rc_signoff.py --print-os-signoff-guide` 获取 Gatekeeper / Screen Recording 的具体操作路径、稳定 app path、`--run-dmg-screen-smoke`、`--write-os-evidence` 和最终 `--require-manual-checks-complete` 命令。
+   - 屏幕录制可在授权后用 `python scripts/verify_release_candidate.py --require-artifacts --run-dmg-screen-smoke --report-json tmp/rc-verification-<short-commit>-screen.json` 自动填 `screen_recording_permission` evidence；Gatekeeper 仍需通过 Finder Control-click -> Open 或系统设置 allow-open 记录人工 evidence。补齐 OS evidence 后，运行同一个 final signoff gate，让最终是否可发布由 `--require-manual-checks-complete` 判定。
 
-2. 做 release candidate `.app` 内跨页面 packaged UI 抽样：
-   - Chat UI 图片附件的自动链路已有 source Bridge E2E、HTTP route roundtrip、TaskRunner image roundtrip、RunEvent replay 和本地 Electron smoke 的桌面 `chooseChatImages` API / hidden input fallback / CDP file input / 附件预览 / 提交闭环；新增 `--run-dmg-chat-native-file-smoke` 后，重新打包的 packaged app 可自动验证主进程 native picker IPC、Chat 附件按钮、预览、发送、图片查看器和 Run Detail handoff，失败时再回退人工复验。
-   - 群聊、自动委派、会话总结、Agent Studio、Workflow、Run Detail、approval UI、主动关怀、本地截图、手动 TTS 和 Live2D 已有 source Browser / Electron smoke / packaged selector gate 的组合覆盖；后续优先运行 `--run-dmg-ui-sampling-smoke` 做真实 packaged renderer 抽样，而不是继续只补静态 selector。
-
-3. 做真实 provider smoke 收口：
+2. 做真实 provider smoke 收口：
    - 在具备真实 provider credentials 的环境运行 `python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount --run-provider-smoke --report-json tmp/rc-verification-provider-smoke.json`，或触发配置了三项 `OHA_YACHIYO_SMOKE_*` secrets 的 release workflow，确认真实网关也满足 `finish_reason`、`workspace_read` 参数和 tool-result follow-up 合同，并让结果进入 RC report 的 `provider_smoke` 字段；通过后同一份 report 会自动把 `real_provider_smoke` 签核项标为 `passed`。
    - contract tests 已覆盖主流 chunk 形态；后续只在发现真实 provider 新 frame 形态时继续补 NativeRunEngine / smoke helper 对称回归。
-   - RunEvent replay/projection 已有 HTTP pagination/filtering、Run Detail、Workflow child approval、rerun/artifact 和 packaged selector gate 覆盖；release candidate UI 跨页面抽样优先走 `--run-dmg-ui-sampling-smoke` 自动收证，失败时再回退人工复验。
+   - 当前本机缺少三项 `OHA_YACHIYO_SMOKE_*` env 时，`real_provider_smoke` 维持 `not_applicable` 是结构化签核状态，不应伪造成通过。
+
+3. 只在 RC 或人工签核暴露缺陷时回到 UI / runtime 小边界：
+   - Chat native-file、packaged UI sampling、Run Detail、Workflow、approval UI、Agent Studio、群聊、自动委派、会话总结、主动关怀、本地截图、手动 TTS 和 Live2D 已有 source Browser / Electron smoke / packaged gate 组合覆盖，当前不是最终发布前的剩余阻塞项。
+   - 如果后续 `--run-dmg-ui-sampling-smoke`、`--run-dmg-chat-native-file-smoke`、人工 OS file picker 复验或 final signoff 暴露真实缺陷，再按失败 report 精准补回归；不要为了“再保险”继续追加静态 selector 或重复拆内部小边界。
 
 4. 把 NativeRunEngine 组件边界收敛降级为发布后硬化：
    - approval resume、Workflow/Agent child-run 等内部编排已经有 release workflow smoke 覆盖；除非 RC / 人工签核暴露真实缺陷，否则不再把内部小边界拆分作为发布前阻塞项。
