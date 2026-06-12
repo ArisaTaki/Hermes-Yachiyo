@@ -141,6 +141,14 @@ def _manual_release_candidate_check_template() -> dict[str, object]:
     }
 
 
+def _manual_release_candidate_checks_from_payload(raw_payload: Any) -> object:
+    if isinstance(raw_payload, dict):
+        if "checks" in raw_payload:
+            return raw_payload.get("checks")
+        return raw_payload.get("manual_release_candidate_check_statuses")
+    return raw_payload
+
+
 def _manual_release_candidate_check_status(
     checks: Sequence[dict[str, str]],
     findings: Sequence[Finding],
@@ -373,15 +381,15 @@ def _load_manual_release_candidate_checks(
         )
         return checks, findings
 
-    if isinstance(raw_payload, dict):
-        raw_checks = raw_payload.get("checks")
-    else:
-        raw_checks = raw_payload
+    raw_checks = _manual_release_candidate_checks_from_payload(raw_payload)
     if not isinstance(raw_checks, list):
         findings.append(
             Finding(
                 manual_checks_json,
-                "manual release-candidate checks JSON must be a list or contain a checks list",
+                (
+                    "manual release-candidate checks JSON must be a list, contain a checks list, "
+                    "or be a previous RC report with manual_release_candidate_check_statuses"
+                ),
             )
         )
         return checks, findings
@@ -442,6 +450,9 @@ def _load_manual_release_candidate_checks(
         notes = raw_check.get("notes")
         if notes is not None:
             target["notes"] = str(notes)
+        evidence_source = str(raw_check.get("evidence_source", "")).strip()
+        if evidence_source == "automated_rc_gate":
+            target["evidence_source"] = evidence_source
 
     return checks, findings
 

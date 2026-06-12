@@ -344,6 +344,63 @@ def test_release_candidate_verifier_merges_manual_check_evidence(
     assert report["manual_release_candidate_check_summary"]["remaining_check_ids"] == []
 
 
+def test_release_candidate_verifier_accepts_previous_rc_report_manual_statuses(
+    tmp_path, monkeypatch, capsys
+):
+    prior_report_path = tmp_path / "tmp" / "prior-rc-report.json"
+    prior_report_path.parent.mkdir()
+    prior_statuses = []
+    for check in rc.MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS:
+        status = "passed"
+        evidence = f"{check['id']} passed in previous RC report."
+        payload = {
+            **check,
+            "status": status,
+            "evidence": evidence,
+        }
+        if check["id"] == "packaged_bridge_isolation":
+            payload["evidence_source"] = "automated_rc_gate"
+            payload["evidence"] = "Automated --run-dmg-app-smoke passed in previous RC report."
+        prior_statuses.append(payload)
+    prior_report_path.write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "manual_release_candidate_check_statuses": prior_statuses,
+                "manual_release_candidate_check_summary": {
+                    "remaining_count": 0,
+                    "remaining_check_ids": [],
+                    "automated_evidence_check_ids": ["packaged_bridge_isolation"],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        manual_checks_json=Path("tmp/prior-rc-report.json"),
+        require_manual_checks_complete=True,
+        report_json=Path("tmp/rc.json"),
+    ) == 0
+
+    output = capsys.readouterr().out
+    assert "manual release-candidate check summary: complete" in output
+    report = json.loads((tmp_path / "tmp" / "rc.json").read_text(encoding="utf-8"))
+    assert report["ok"] is True
+    assert report["manual_release_candidate_check_status"] == "passed"
+    assert report["manual_release_candidate_check_summary"]["remaining_count"] == 0
+    assert report["manual_release_candidate_check_summary"]["automated_evidence_check_ids"] == [
+        "packaged_bridge_isolation"
+    ]
+    manual_statuses = {
+        check["id"]: check
+        for check in report["manual_release_candidate_check_statuses"]
+    }
+    assert manual_statuses["packaged_bridge_isolation"]["evidence_source"] == "automated_rc_gate"
+
+
 def test_release_candidate_verifier_requires_complete_manual_checks_for_signoff(
     tmp_path, monkeypatch, capsys
 ):

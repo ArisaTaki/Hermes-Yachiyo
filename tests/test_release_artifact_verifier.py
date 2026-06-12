@@ -161,6 +161,7 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
     assert "release candidate verifier must expose manual check template writing" in messages
     assert "release candidate verifier manual check templates must preserve evidence prompts" in messages
     assert "release candidate verifier must load manual check evidence JSON" in messages
+    assert "release candidate verifier must accept previous RC reports as manual evidence input" in messages
     assert "release candidate verifier must auto-fill manual evidence from passed RC gates" in messages
     assert "release candidate verifier must label automatically supplied manual evidence" in messages
     assert "release candidate verifier must refresh manual check status after automated gates" in messages
