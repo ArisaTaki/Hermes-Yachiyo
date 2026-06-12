@@ -7336,6 +7336,32 @@ def test_run_event_repository_allocates_sequences_under_concurrent_writers(tmp_p
         service.close()
 
 
+def test_run_event_repository_snapshots_payload_before_persistence(tmp_path):
+    service = make_service(tmp_path)
+    try:
+        run = service._insert_run(kind="main_chat_run", runnable_id="builtin:yachiyo-main", user_goal="test")
+        payload = {
+            "input_preview": {"command": "printf ok"},
+            "items": [{"path": "report.md"}],
+        }
+
+        written = service.append_run_event(run["run_id"], "snapshot.fact", payload)
+        payload["input_preview"]["command"] = "changed"
+        payload["items"][0]["path"] = "changed.md"
+
+        replayed = service.list_run_events(run["run_id"])["events"]
+
+        assert written["payload"] == {
+            "input_preview": {"command": "printf ok"},
+            "items": [{"path": "report.md"}],
+        }
+        assert written["payload"] is not payload
+        assert written["payload"]["input_preview"] is not payload["input_preview"]
+        assert replayed[0]["payload"] == written["payload"]
+    finally:
+        service.close()
+
+
 @pytest.mark.asyncio
 async def test_run_events_route_paginates_user_visible_events(tmp_path, monkeypatch):
     from apps.bridge.routes import runs as run_routes

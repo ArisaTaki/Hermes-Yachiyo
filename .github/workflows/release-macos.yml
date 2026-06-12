@@ -132,6 +132,7 @@ jobs:
             tests/test_agent_runtime.py::test_run_repository_rejects_sensitive_client_request_id_before_persistence \
             tests/test_agent_runtime.py::test_run_repository_deletes_rows_and_artifacts \
             tests/test_agent_runtime.py::test_run_event_repository_allocates_sequences_under_concurrent_writers \
+            tests/test_agent_runtime.py::test_run_event_repository_snapshots_payload_before_persistence \
             tests/test_agent_runtime.py::test_runtime_sqlite_enables_required_database_guards \
             tests/test_agent_runtime.py::test_runtime_shutdown_cancels_active_runs_rejects_new_runs_and_records_fact \
             tests/test_agent_runtime.py::test_runtime_shutdown_close_db_closes_runtime_resources \

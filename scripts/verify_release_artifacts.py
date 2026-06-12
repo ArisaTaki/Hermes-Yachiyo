@@ -1125,6 +1125,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover RunEvent concurrent replay cursor projection",
     ),
     (
+        "tests/test_agent_runtime.py::test_run_event_repository_snapshots_payload_before_persistence",
+        "macOS release workflow smoke tests must cover RunEvent payload snapshot boundary",
+    ),
+    (
         "tests/test_agent_runtime.py::test_runtime_sqlite_enables_required_database_guards",
         "macOS release workflow smoke tests must cover runtime SQLite database guards",
     ),

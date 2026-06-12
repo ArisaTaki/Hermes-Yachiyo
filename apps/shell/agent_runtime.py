@@ -1630,7 +1630,7 @@ class RunEventRepository:
 
         event_id = f"event_{uuid4().hex[:16]}"
         created_at = _now()
-        safe_payload = _redact_run_event_payload(payload or {})
+        safe_payload = _redact_run_event_payload(deepcopy(payload or {}))
         normalized_visibility = "internal" if str(visibility or "").strip() == "internal" else "user"
         normalized_sensitivity = "secret" if str(sensitivity or "").strip() == "secret" else "public"
 
