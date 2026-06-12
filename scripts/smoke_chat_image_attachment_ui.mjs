@@ -17,6 +17,12 @@ const RUN_GROUP_ID = 'group-chat-image-ui-smoke';
 const RUN_GOAL = 'browser image attachment smoke';
 const RUN_RESULT = 'Browser image attachment NativeRunEngine reply saw image attachment.';
 const now = new Date().toISOString();
+const CHAT_IMAGE_SMOKE_FILE_NAMES = [
+  'smoke-image-cdp.svg',
+  'smoke-image-cdp-second.svg',
+  'smoke-image-cdp-third.svg',
+  'smoke-image-cdp-fourth.svg',
+];
 const TEST_IMAGE_DATA_URL = `data:image/svg+xml;base64,${Buffer.from(
   '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><rect width="24" height="24" fill="#0ea5e9"/><circle cx="12" cy="12" r="7" fill="#fff"/></svg>',
 ).toString('base64')}`;
@@ -349,23 +355,21 @@ function killProcess(child) {
 
 function runElectronSmoke(devUrl, bridgeUrl) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oha-chat-image-smoke-'));
-  const imageFilePath = path.join(tempDir, 'smoke-image-cdp.svg');
-  const secondImageFilePath = path.join(tempDir, 'smoke-image-cdp-second.svg');
-  fs.writeFileSync(
-    imageFilePath,
-    Buffer.from(TEST_IMAGE_DATA_URL.split(',')[1] || '', 'base64'),
-  );
-  fs.writeFileSync(
-    secondImageFilePath,
-    Buffer.from(TEST_IMAGE_DATA_URL.split(',')[1] || '', 'base64'),
-  );
+  const imageFileNames = CHAT_IMAGE_SMOKE_FILE_NAMES;
+  const imageFilePaths = imageFileNames.map((name) => path.join(tempDir, name));
+  for (const filePath of imageFilePaths) {
+    fs.writeFileSync(
+      filePath,
+      Buffer.from(TEST_IMAGE_DATA_URL.split(',')[1] || '', 'base64'),
+    );
+  }
   const script = `
 const { app, BrowserWindow } = require('electron');
 const devUrl = ${JSON.stringify(devUrl)};
 const bridgeUrl = ${JSON.stringify(bridgeUrl)};
 const imageDataUrl = ${JSON.stringify(TEST_IMAGE_DATA_URL)};
-const imageFilePath = ${JSON.stringify(imageFilePath)};
-const secondImageFilePath = ${JSON.stringify(secondImageFilePath)};
+const imageFileNames = ${JSON.stringify(imageFileNames)};
+const imageFilePaths = ${JSON.stringify(imageFilePaths)};
 const watchdog = setTimeout(() => {
   console.error('electron smoke timed out');
   app.exit(1);
@@ -507,20 +511,27 @@ async function main() {
       input.value = '';
     })();
   \`, true);
-  await setChatImageInputFilesWithCdp(win, [imageFilePath, secondImageFilePath]);
+  await setChatImageInputFilesWithCdp(win, imageFilePaths);
   await waitFor(win, () => {
+    const expectedNames = ${JSON.stringify(imageFileNames)};
     const previews = Array.from(document.querySelectorAll('[data-testid="chat-composer-attachment-preview"]'));
     const names = previews.map((preview) => preview.getAttribute('data-attachment-name'));
-    return previews.length === 2
-      && names.includes('smoke-image-cdp.svg')
-      && names.includes('smoke-image-cdp-second.svg')
+    const buttons = [
+      document.querySelector('[data-testid="chat-header-image-attach-button"]'),
+      document.querySelector('[data-testid="chat-composer-image-attach-button"]'),
+    ];
+    const input = document.querySelector('[data-testid="chat-image-file-input"]');
+    return previews.length === expectedNames.length
+      && expectedNames.every((name) => names.includes(name))
       && previews.every((preview) => (
         preview.getAttribute('data-attachment-mime') === 'image/svg+xml'
         && Number(preview.getAttribute('data-attachment-size') || 0) > 0
         && preview.getAttribute('data-attachment-width') === '24'
         && preview.getAttribute('data-attachment-height') === '24'
-      ));
-  }, 'composer attachment previews after removal');
+      ))
+      && buttons.every((button) => button?.disabled)
+      && input?.disabled;
+  }, 'composer max attachment previews after removal');
   console.log('[electron-smoke] attachment previews rendered through CDP file input');
   await win.webContents.executeJavaScript(\`
     const input = document.querySelector('textarea.chat-input');
@@ -531,11 +542,11 @@ async function main() {
   await waitFor(win, () => !document.querySelector('button[aria-label="发送消息"]')?.disabled, 'enabled send button');
   await win.webContents.executeJavaScript("document.querySelector('button[aria-label=\\"发送消息\\"]').closest('form').requestSubmit()", true);
   await waitFor(win, () => {
+    const expectedNames = ${JSON.stringify(imageFileNames)};
     const items = Array.from(document.querySelectorAll('[data-testid="chat-message-attachment-item"]'));
     const names = items.map((item) => item.getAttribute('data-attachment-name'));
-    return items.length === 2
-      && names.includes('smoke-image-cdp.svg')
-      && names.includes('smoke-image-cdp-second.svg')
+    return items.length === expectedNames.length
+      && expectedNames.every((name) => names.includes(name))
       && items.every((item) => (
         item.getAttribute('data-attachment-id')
         && item.getAttribute('data-attachment-kind') === 'image'
@@ -650,11 +661,11 @@ async function main() {
     if (!payload) fail('Chat UI did not send a message');
     if (payload.text !== 'browser image attachment smoke') fail(`unexpected submitted text: ${payload.text}`);
     if (!payload.client_message_id) fail('Chat UI did not submit client_message_id for image message idempotency');
-    if (!Array.isArray(payload.attachments) || payload.attachments.length !== 2) {
-      fail('Chat UI did not submit exactly two attachments');
+    if (!Array.isArray(payload.attachments) || payload.attachments.length !== CHAT_IMAGE_SMOKE_FILE_NAMES.length) {
+      fail(`Chat UI did not submit exactly ${CHAT_IMAGE_SMOKE_FILE_NAMES.length} attachments`);
     }
     const attachmentNames = payload.attachments.map((attachment) => attachment.name);
-    for (const expectedName of ['smoke-image-cdp.svg', 'smoke-image-cdp-second.svg']) {
+    for (const expectedName of CHAT_IMAGE_SMOKE_FILE_NAMES) {
       if (!attachmentNames.includes(expectedName)) fail(`missing submitted attachment: ${expectedName}`);
     }
     for (const attachment of payload.attachments) {
