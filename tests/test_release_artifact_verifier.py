@@ -680,6 +680,9 @@ def test_verifier_requires_release_packaging_docs_for_release_gates(tmp_path):
     assert "release packaging docs must document manual RC check template generation" in messages
     assert "release packaging docs must document manual RC check draft generation" in messages
     assert "release packaging docs must document manual RC check Markdown generation" in messages
+    assert "release packaging docs must document checked Markdown items default to passed" in messages
+    assert "release packaging docs must document explicit Markdown not_applicable status" in messages
+    assert "release packaging docs must document Markdown signoff evidence requirements" in messages
     assert (
         "release packaging docs must document explicit provider-smoke not_applicable draft evidence"
         in messages

@@ -526,6 +526,60 @@ def test_release_candidate_verifier_accepts_complete_manual_markdown_for_signoff
     assert statuses["real_provider_smoke"]["evidence_source"] == "credentials_unavailable"
 
 
+def test_release_candidate_verifier_markdown_checked_items_default_to_passed(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+    markdown_path = tmp_path / "tmp" / "manual-checks.md"
+    markdown_path.parent.mkdir(parents=True)
+    markdown_path.write_text(
+        "\n".join(
+            [
+                "# Oha-Yachiyo Manual Release-Candidate Signoff",
+                "",
+                "## Remaining Manual Checks",
+                "",
+                "- [x] `gatekeeper_first_launch`",
+                "  - Evidence: Gatekeeper first launch reached the packaged app",
+                "- [x] `packaged_bridge_isolation`",
+                "  - Evidence source: automated_rc_gate",
+                "  - Evidence: Automated --run-dmg-app-smoke passed",
+                "- [x] `screen_recording_permission`",
+                "  - Evidence: Screen Recording permission granted and screenshot probe passed",
+                "- [x] `chat_native_file_upload`",
+                "  - Evidence: Native file picker selected image and Run Detail opened",
+                "- [x] `packaged_ui_sampling`",
+                "  - Evidence: Packaged app mature surfaces sampled",
+                "- [x] `real_provider_smoke` - not_applicable",
+                "  - Evidence source: credentials_unavailable",
+                "  - Evidence: OHA_YACHIYO_SMOKE_* credentials unavailable",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert (
+        rc.verify_release_candidate(
+            root=tmp_path,
+            source_only=True,
+            manual_checks_markdown=Path("tmp/manual-checks.md"),
+            require_manual_checks_complete=True,
+            report_json=Path("tmp/rc.json"),
+        )
+        == 0
+    )
+
+    report = json.loads((tmp_path / "tmp" / "rc.json").read_text(encoding="utf-8"))
+    statuses = {
+        check["id"]: check for check in report["manual_release_candidate_check_statuses"]
+    }
+    assert statuses["gatekeeper_first_launch"]["status"] == "passed"
+    assert statuses["packaged_ui_sampling"]["status"] == "passed"
+    assert statuses["real_provider_smoke"]["status"] == "not_applicable"
+
+
 def test_release_candidate_verifier_fails_failed_manual_check_evidence(
     tmp_path, monkeypatch, capsys
 ):

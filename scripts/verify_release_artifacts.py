@@ -638,6 +638,18 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document manual RC check Markdown generation",
     ),
     (
+        "不写显式 `status` 会按 `passed` 解析",
+        "release packaging docs must document checked Markdown items default to passed",
+    ),
+    (
+        "``- [x] `check_id` - not_applicable``",
+        "release packaging docs must document explicit Markdown not_applicable status",
+    ),
+    (
+        "非空 `Evidence:`",
+        "release packaging docs must document Markdown signoff evidence requirements",
+    ),
+    (
         "--mark-provider-smoke-not-applicable-if-missing",
         "release packaging docs must document explicit provider-smoke not_applicable draft evidence",
     ),
