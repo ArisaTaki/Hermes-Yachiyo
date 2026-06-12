@@ -10,6 +10,7 @@ SCAN_TARGETS = [
     ROOT / ".github",
     ROOT / "apps",
     ROOT / "integrations",
+    ROOT / "packaging",
     ROOT / "packages",
     ROOT / "scripts",
     ROOT / "pyproject.toml",
