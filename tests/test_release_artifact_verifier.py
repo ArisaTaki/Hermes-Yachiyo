@@ -158,7 +158,9 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
     assert "release candidate verifier manual check templates must preserve evidence prompts" in messages
     assert "release candidate verifier must load manual check evidence JSON" in messages
     assert "release candidate verifier must expose manual check evidence input" in messages
+    assert "release candidate verifier must expose final manual signoff enforcement" in messages
     assert "release candidate verifier CLI must accept manual check evidence JSON" in messages
+    assert "release candidate verifier CLI must require complete manual checks for final signoff" in messages
     assert "release candidate verifier CLI must write manual check templates" in messages
 
 
@@ -641,6 +643,7 @@ def test_verifier_requires_release_packaging_docs_for_release_gates(tmp_path):
     assert "release packaging docs must document structured manual RC check statuses" in messages
     assert "release packaging docs must document manual RC check evidence input" in messages
     assert "release packaging docs must document manual RC check template generation" in messages
+    assert "release packaging docs must document final manual RC signoff enforcement" in messages
     assert "release packaging docs must document the Gatekeeper manual RC check id" in messages
     assert "release packaging docs must document the screen recording manual RC check id" in messages
     assert "release packaging docs must document the native Chat file upload manual RC check id" in messages

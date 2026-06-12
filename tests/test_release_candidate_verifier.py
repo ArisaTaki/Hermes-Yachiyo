@@ -322,6 +322,63 @@ def test_release_candidate_verifier_merges_manual_check_evidence(
     }
 
 
+def test_release_candidate_verifier_requires_complete_manual_checks_for_signoff(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        require_manual_checks_complete=True,
+        report_json=Path("tmp/rc.json"),
+    ) == 1
+
+    output = capsys.readouterr().out
+    assert "manual release-candidate check evidence: incomplete" in output
+    report = json.loads((tmp_path / "tmp" / "rc.json").read_text(encoding="utf-8"))
+    assert report["ok"] is False
+    assert report["manual_release_candidate_check_status"] == "manual_required"
+    assert report["manual_release_candidate_checks_required"] is True
+
+
+def test_release_candidate_verifier_accepts_complete_manual_checks_for_signoff(
+    tmp_path, monkeypatch, capsys
+):
+    evidence_path = tmp_path / "tmp" / "manual-checks.json"
+    evidence_path.parent.mkdir()
+    evidence_path.write_text(
+        json.dumps(
+            {
+                "checks": [
+                    {
+                        "id": check["id"],
+                        "status": "passed",
+                        "evidence": f"{check['id']} passed for final signoff.",
+                    }
+                    for check in rc.MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        manual_checks_json=Path("tmp/manual-checks.json"),
+        require_manual_checks_complete=True,
+        report_json=Path("tmp/rc.json"),
+    ) == 0
+
+    output = capsys.readouterr().out
+    assert "manual release-candidate check evidence: passed" in output
+    assert "manual release-candidate check evidence: incomplete" not in output
+    report = json.loads((tmp_path / "tmp" / "rc.json").read_text(encoding="utf-8"))
+    assert report["ok"] is True
+    assert report["manual_release_candidate_check_status"] == "passed"
+    assert report["manual_release_candidate_checks_required"] is True
+
+
 def test_release_candidate_verifier_fails_failed_manual_check_evidence(
     tmp_path, monkeypatch, capsys
 ):

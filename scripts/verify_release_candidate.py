@@ -656,6 +656,7 @@ def verify_release_candidate(
     run_ui_smoke: bool = False,
     smoke_scripts: Sequence[Path] | None = None,
     manual_checks_json: Path | None = None,
+    require_manual_checks_complete: bool = False,
     report_json: Path | None = None,
 ) -> int:
     root = Path(root)
@@ -704,6 +705,7 @@ def verify_release_candidate(
         "manual_release_candidate_check_statuses": manual_checks,
         "manual_release_candidate_check_findings": _finding_report(manual_check_findings),
         "manual_release_candidate_checks_source": str(manual_checks_json) if manual_checks_json else "",
+        "manual_release_candidate_checks_required": require_manual_checks_complete,
     }
 
     source_only_conflicts: list[str] = []
@@ -995,8 +997,15 @@ def verify_release_candidate(
             print(f"- {finding.format()}")
     elif manual_checks_json is not None:
         print(f"manual release-candidate check evidence: {manual_check_status}")
+    if require_manual_checks_complete and manual_check_status != "passed":
+        print(
+            "manual release-candidate check evidence: incomplete\n"
+            "- final signoff requires every manual check to be passed or not_applicable"
+        )
 
-    failed = failed or manual_check_status == "failed"
+    failed = failed or manual_check_status == "failed" or (
+        require_manual_checks_complete and manual_check_status != "passed"
+    )
     report["ok"] = not failed
     if report_json is not None:
         try:
@@ -1061,6 +1070,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Merge manual release-candidate check evidence from a project-local JSON file.",
     )
     parser.add_argument(
+        "--require-manual-checks-complete",
+        action="store_true",
+        help="Fail unless every manual release-candidate check is passed or not_applicable.",
+    )
+    parser.add_argument(
         "--write-manual-checks-template",
         type=Path,
         help="Write a project-local manual release-candidate checks JSON template and exit.",
@@ -1086,6 +1100,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         run_provider_smoke=args.run_provider_smoke,
         run_ui_smoke=args.run_ui_smoke,
         manual_checks_json=args.manual_checks_json,
+        require_manual_checks_complete=args.require_manual_checks_complete,
         report_json=args.report_json,
     )
 

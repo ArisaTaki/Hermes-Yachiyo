@@ -580,6 +580,10 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document manual RC check template generation",
     ),
     (
+        "--require-manual-checks-complete",
+        "release packaging docs must document final manual RC signoff enforcement",
+    ),
+    (
         "gatekeeper_first_launch",
         "release packaging docs must document the Gatekeeper manual RC check id",
     ),
@@ -910,8 +914,16 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release candidate verifier must expose manual check evidence input",
     ),
     (
+        "require_manual_checks_complete",
+        "release candidate verifier must expose final manual signoff enforcement",
+    ),
+    (
         '"--manual-checks-json"',
         "release candidate verifier CLI must accept manual check evidence JSON",
+    ),
+    (
+        '"--require-manual-checks-complete"',
+        "release candidate verifier CLI must require complete manual checks for final signoff",
     ),
     (
         '"--write-manual-checks-template"',
