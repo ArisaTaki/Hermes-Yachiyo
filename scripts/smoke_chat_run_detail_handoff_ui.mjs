@@ -17,6 +17,7 @@ const SESSION_ID = 'session-chat-run-detail-handoff-ui-smoke';
 const RUN_GROUP_ID = 'group-chat-run-detail-handoff-ui-smoke';
 const RUN_GOAL = 'Open completed Chat message Run Detail from Electron UI smoke';
 const RUN_RESULT = 'Chat completed message Run Detail handoff smoke completed';
+const COMPLETED_MESSAGE_ID = 'assistant-chat-run-detail-handoff-message';
 const FAILED_RUN_ID = 'chat_run_detail_handoff_ui_smoke_failed_run';
 const FAILED_TASK_ID = 'task-chat-run-detail-handoff-ui-smoke-failed';
 const FAILED_RUN_GROUP_ID = 'group-chat-run-detail-handoff-ui-smoke-failed';
@@ -162,7 +163,7 @@ const messages = [
     metadata: { task_id: TASK_ID },
   },
   {
-    id: 'assistant-chat-run-detail-handoff-message',
+    id: COMPLETED_MESSAGE_ID,
     role: 'assistant',
     content: ASSISTANT_CONTENT,
     status: 'completed',
@@ -557,17 +558,23 @@ async function main() {
   await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '#/chat');
   console.log('[electron-smoke] chat loaded');
   await waitFor(win, () => {
-    const button = document.querySelector('[data-testid="chat-message-open-run-detail"]');
+    const completedArticle = document.querySelector('[data-message-id="${COMPLETED_MESSAGE_ID}"]');
+    const button = completedArticle?.querySelector('[data-testid="chat-message-open-run-detail"]');
     const failedArticle = document.querySelector('[data-message-id="${FAILED_MESSAGE_ID}"]');
+    const failedButton = failedArticle?.querySelector('[data-testid="chat-message-open-run-detail"]');
     return Boolean(button)
       && button.textContent.includes('运行详情')
+      && button.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
+      && button.getAttribute('data-run-status') === 'completed'
       && document.querySelector('[data-testid="chat-message-copy"]')
       && document.querySelector('[data-testid="chat-code-copy"]')
       && document.body.textContent.includes(${JSON.stringify(RUN_RESULT)})
       && failedArticle?.classList.contains('error')
       && failedArticle?.textContent.includes(${JSON.stringify(FAILED_RUN_ERROR)})
       && failedArticle?.querySelector('[data-testid="chat-message-retry"]')
-      && failedArticle?.querySelector('[data-testid="chat-message-open-run-detail"]');
+      && failedButton
+      && failedButton.getAttribute('data-run-id') === ${JSON.stringify(FAILED_RUN_ID)}
+      && failedButton.getAttribute('data-run-status') === 'failed';
   }, 'completed Chat message Run Detail action');
   await win.webContents.executeJavaScript(\`
     const retry = document.querySelector('[data-message-id="${FAILED_MESSAGE_ID}"] [data-testid="chat-message-retry"]');
@@ -578,6 +585,8 @@ async function main() {
   await win.webContents.executeJavaScript(\`
     const openFailedRun = document.querySelector('[data-message-id="${FAILED_MESSAGE_ID}"] [data-testid="chat-message-open-run-detail"]');
     if (!openFailedRun) throw new Error('missing failed Chat message Run Detail button');
+    if (openFailedRun.getAttribute('data-run-id') !== ${JSON.stringify(FAILED_RUN_ID)}) throw new Error('failed Chat message Run Detail button has wrong run id');
+    if (openFailedRun.getAttribute('data-run-status') !== 'failed') throw new Error('failed Chat message Run Detail button has wrong status');
     openFailedRun.click();
   \`, true);
   await waitFor(win, () => (
@@ -607,9 +616,12 @@ async function main() {
   console.log('[electron-smoke] failed Chat message opened matching Run Detail');
   await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '#/chat');
   await waitFor(win, () => {
-    const button = document.querySelector('[data-testid="chat-message-open-run-detail"]');
+    const completedArticle = document.querySelector('[data-message-id="${COMPLETED_MESSAGE_ID}"]');
+    const button = completedArticle?.querySelector('[data-testid="chat-message-open-run-detail"]');
     return Boolean(button)
       && button.textContent.includes('运行详情')
+      && button.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
+      && button.getAttribute('data-run-status') === 'completed'
       && document.querySelector('[data-testid="chat-message-copy"]')
       && document.querySelector('[data-testid="chat-code-copy"]')
       && document.body.textContent.includes(${JSON.stringify(RUN_RESULT)});
@@ -641,7 +653,13 @@ async function main() {
     && document.querySelector('[data-testid="chat-code-copy"].copied')
   ), 'completed Chat code block copied');
   console.log('[electron-smoke] completed Chat code block copied');
-  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-message-open-run-detail\\"]').click()", true);
+  await win.webContents.executeJavaScript(\`
+    const openRun = document.querySelector('[data-message-id="${COMPLETED_MESSAGE_ID}"] [data-testid="chat-message-open-run-detail"]');
+    if (!openRun) throw new Error('missing completed Chat message Run Detail button');
+    if (openRun.getAttribute('data-run-id') !== ${JSON.stringify(RUN_ID)}) throw new Error('completed Chat message Run Detail button has wrong run id');
+    if (openRun.getAttribute('data-run-status') !== 'completed') throw new Error('completed Chat message Run Detail button has wrong status');
+    openRun.click();
+  \`, true);
   await waitFor(win, () => (
     window.location.hash.includes('/agents')
     && window.location.hash.includes(${JSON.stringify(RUN_ID)})
