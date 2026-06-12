@@ -36,6 +36,105 @@ def test_release_candidate_verifier_runs_source_and_artifact_guards(tmp_path, mo
     assert "manual release-candidate checks:" in output
 
 
+def test_release_candidate_verifier_source_only_skips_existing_artifacts(tmp_path, monkeypatch, capsys):
+    (tmp_path / "dist" / "electron").mkdir(parents=True)
+    calls: list[dict[str, object]] = []
+
+    def fake_verify_release_artifacts(**kwargs):
+        calls.append(kwargs)
+        return []
+
+    monkeypatch.setattr(rc, "verify_release_artifacts", fake_verify_release_artifacts)
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        report_json=Path("tmp/source-only-rc.json"),
+    ) == 0
+
+    assert calls == [{"root": tmp_path}]
+    output = capsys.readouterr().out
+    assert "source release guards: passed" in output
+    assert "built artifact guards: skipped by --source-only" in output
+    report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
+    assert report["ok"] is True
+    assert report["source_release_guards"]["status"] == "passed"
+    assert report["built_artifact_guards"] == {
+        "status": "skipped",
+        "artifact_paths": [],
+        "findings": [],
+    }
+
+
+def test_release_candidate_verifier_source_only_rejects_require_artifacts(tmp_path, monkeypatch, capsys):
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **kwargs: calls.append(kwargs) or [])
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        require_artifacts=True,
+        report_json=Path("tmp/source-only-rc.json"),
+    ) == 1
+
+    assert calls == []
+    output = capsys.readouterr().out
+    assert "--source-only cannot be combined with --require-artifacts" in output
+    report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
+    assert report["ok"] is False
+    assert report["source_release_guards"]["status"] == "skipped"
+    assert report["built_artifact_guards"]["status"] == "failed"
+
+
+def test_release_candidate_verifier_source_only_rejects_artifact_paths(
+    tmp_path, monkeypatch, capsys
+):
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **kwargs: calls.append(kwargs) or [])
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        artifact_paths=(Path("release"),),
+        report_json=Path("tmp/source-only-rc.json"),
+    ) == 1
+
+    assert calls == []
+    output = capsys.readouterr().out
+    assert "--source-only cannot be combined with artifact paths" in output
+    report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
+    assert report["ok"] is False
+    assert report["source_release_guards"]["status"] == "skipped"
+    assert report["built_artifact_guards"]["status"] == "failed"
+
+
+def test_release_candidate_verifier_source_only_rejects_ui_smoke(
+    tmp_path, monkeypatch, capsys
+):
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **kwargs: calls.append(kwargs) or [])
+
+    def fail_run(*_args, **_kwargs):
+        raise AssertionError("source-only must not run UI smoke")
+
+    monkeypatch.setattr(rc.subprocess, "run", fail_run)
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        run_ui_smoke=True,
+        report_json=Path("tmp/source-only-rc.json"),
+    ) == 1
+
+    assert calls == []
+    output = capsys.readouterr().out
+    assert "--source-only cannot be combined with --run-ui-smoke" in output
+    report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
+    assert report["ok"] is False
+    assert report["source_release_guards"]["status"] == "skipped"
+    assert report["built_artifact_guards"]["status"] == "failed"
+
+
 def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
     (tmp_path / "release").mkdir()
 

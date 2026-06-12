@@ -146,6 +146,15 @@ python scripts/verify_release_candidate.py --require-artifacts
 python scripts/verify_release_candidate.py --require-artifacts --run-ui-smoke
 ```
 
+尚未重新打包、只想快速确认源码级 release guard 时，使用 source-only dry run：
+
+```bash
+python scripts/verify_release_candidate.py --source-only --report-json tmp/source-only-rc.json
+```
+
+`--source-only` 会跳过本机已有 `dist/` 或 `release/` 旧产物，避免 stale `.app` / DMG 干扰源码验收判断；最终 RC 仍必须重新打包并运行 `--require-artifacts`。
+`--source-only` 不能和 artifact path、`--require-artifacts` 或 `--run-ui-smoke` 混用；Electron UI smoke 只属于完整本地 RC 复验。
+
 macOS release workflow 会在生成 release metadata 后、上传 DMG 前运行 `python scripts/verify_release_candidate.py --require-artifacts --report-json release/rc-verification.json`，确保 CI 与本地 RC 验收入口一致，并把 `release/rc-verification.json` 作为可归档验收报告随 release artifacts 上传。带 `--run-ui-smoke` 的完整 Electron UI smoke 仍保留给本地 RC 复验，因为它会启动本地 Electron BrowserWindow。
 
 脚本仍会列出必须人工确认的首次启动 / Gatekeeper / 屏幕录制权限检查项。

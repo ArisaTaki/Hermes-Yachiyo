@@ -575,6 +575,7 @@ def test_verifier_requires_release_packaging_docs_for_release_gates(tmp_path):
     assert "release packaging docs must document per-DMG checksum file validation" in messages
     assert "release packaging docs must document the local RC verification entrypoint" in messages
     assert "release packaging docs must document the local RC Electron UI smoke gate" in messages
+    assert "release packaging docs must document the source-only RC dry run" in messages
     assert "release packaging docs must document the CI release-candidate gate before upload" in messages
     assert "release packaging docs must document the archived RC verification report" in messages
 

@@ -103,6 +103,7 @@ def verify_release_candidate(
     root: Path = PROJECT_ROOT,
     artifact_paths: Sequence[Path] | None = None,
     require_artifacts: bool = False,
+    source_only: bool = False,
     run_ui_smoke: bool = False,
     smoke_scripts: Sequence[Path] | None = None,
     report_json: Path | None = None,
@@ -126,6 +127,43 @@ def verify_release_candidate(
         "manual_release_candidate_checks": list(MANUAL_RELEASE_CANDIDATE_CHECKS),
     }
 
+    source_only_conflicts: list[str] = []
+    if source_only:
+        if artifact_paths:
+            source_only_conflicts.append("artifact paths")
+        if require_artifacts:
+            source_only_conflicts.append("--require-artifacts")
+        if run_ui_smoke:
+            source_only_conflicts.append("--run-ui-smoke")
+
+    if source_only_conflicts:
+        conflict_message = f"--source-only cannot be combined with {', '.join(source_only_conflicts)}"
+        print("source release guards: skipped")
+        print(f"built artifact guards: failed\n- {conflict_message}")
+        report["source_release_guards"] = {
+            "status": "skipped",
+            "findings": [],
+        }
+        report["built_artifact_guards"] = {
+            "status": "failed",
+            "artifact_paths": [],
+            "findings": [
+                {
+                    "path": str(root),
+                    "message": conflict_message,
+                }
+            ],
+        }
+        if report_json is not None:
+            try:
+                report_path = _resolve_report_path(root, report_json)
+                _write_report(report_path, report)
+            except (OSError, ValueError) as exc:
+                print(f"release candidate report: failed\n- {exc}")
+                return 1
+            print(f"release candidate report: {report_json}")
+        return 1
+
     source_findings = verify_release_artifacts(root=root)
     _print_findings("source release guards", source_findings)
     failed = failed or bool(source_findings)
@@ -134,7 +172,11 @@ def verify_release_candidate(
         "findings": _finding_report(source_findings),
     }
 
-    selected_artifacts = tuple(artifact_paths) if artifact_paths is not None else existing_artifact_paths(root)
+    selected_artifacts = (
+        ()
+        if source_only
+        else tuple(artifact_paths) if artifact_paths is not None else existing_artifact_paths(root)
+    )
     try:
         selected_artifacts = _validate_artifact_paths(root, selected_artifacts)
     except ValueError as exc:
@@ -146,7 +188,14 @@ def verify_release_candidate(
             "findings": [{"path": str(root), "message": str(exc)}],
         }
     if report["built_artifact_guards"]["status"] == "pending":
-        if selected_artifacts:
+        if source_only:
+            print("built artifact guards: skipped by --source-only")
+            report["built_artifact_guards"] = {
+                "status": "skipped",
+                "artifact_paths": [],
+                "findings": [],
+            }
+        elif selected_artifacts:
             artifact_findings = verify_release_artifacts(
                 root=root,
                 paths=selected_artifacts,
@@ -267,6 +316,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Fail when no built release artifacts are present.",
     )
     parser.add_argument(
+        "--source-only",
+        action="store_true",
+        help="Run source-level release guards only, rejecting built artifacts and UI smoke gates.",
+    )
+    parser.add_argument(
         "--run-ui-smoke",
         action="store_true",
         help="Run every scripts/smoke_*_ui.mjs Electron UI smoke.",
@@ -280,6 +334,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     return verify_release_candidate(
         artifact_paths=args.paths or None,
         require_artifacts=args.require_artifacts,
+        source_only=args.source_only,
         run_ui_smoke=args.run_ui_smoke,
         report_json=args.report_json,
     )

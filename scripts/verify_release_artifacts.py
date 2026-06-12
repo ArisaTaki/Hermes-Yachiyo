@@ -535,6 +535,10 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document the local RC Electron UI smoke gate",
     ),
     (
+        "python scripts/verify_release_candidate.py --source-only --report-json tmp/source-only-rc.json",
+        "release packaging docs must document the source-only RC dry run",
+    ),
+    (
         "上传 DMG 前运行 `python scripts/verify_release_candidate.py --require-artifacts --report-json release/rc-verification.json`",
         "release packaging docs must document the CI release-candidate gate before upload",
     ),
