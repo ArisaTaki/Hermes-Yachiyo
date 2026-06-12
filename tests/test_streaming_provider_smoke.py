@@ -1258,6 +1258,7 @@ def test_stream_smoke_summarizes_multiple_responses_tool_calls_without_leaking_a
             "output_index": 0,
             "item": {
                 "id": "fc_response_readme",
+                "index": 99,
                 "type": "function_call",
                 "call_id": "call_response_readme",
                 "name": "workspace_read",
@@ -1269,6 +1270,7 @@ def test_stream_smoke_summarizes_multiple_responses_tool_calls_without_leaking_a
             "output_index": 1,
             "item": {
                 "id": "fc_response_notes",
+                "index": 0,
                 "type": "function_call",
                 "call_id": "call_response_notes",
                 "name": "workspace_read",
@@ -1307,6 +1309,32 @@ def test_stream_smoke_summarizes_multiple_responses_tool_calls_without_leaking_a
     ]
     assert "README.md" not in json.dumps(public_summary)
     assert "NOTES.md" not in json.dumps(public_summary)
+
+
+def test_stream_smoke_preserves_zero_responses_indexes_before_fallback_indexes():
+    chunks = [
+        {
+            "type": "response.reasoning_summary_text.done",
+            "output_index": 0,
+            "summary_index": 0,
+            "content_index": 7,
+            "text": "zero summary",
+        },
+        {
+            "type": "response.reasoning_summary_text.done",
+            "output_index": 0,
+            "summary_index": 7,
+            "content_index": 0,
+            "text": "seven summary",
+        },
+    ]
+
+    summary = smoke.summarize_stream_chunks(chunks)
+
+    assert summary["ok"] is True
+    assert summary["reasoning_chars"] == len("zero summaryseven summary")
+    assert "zero summary" not in json.dumps(summary)
+    assert "seven summary" not in json.dumps(summary)
 
 
 def test_stream_smoke_parses_responses_style_sse_transport_without_leaking_arguments(monkeypatch):

@@ -29,6 +29,13 @@ def _field(value: Any, name: str) -> Any:
     return getattr(value, name, None)
 
 
+def _first_present(*values: Any) -> Any:
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
 def _content_part_type(value: Any) -> str:
     return str(_field(value, "type") or "").strip().lower()
 
@@ -136,7 +143,7 @@ def _responses_stream_reasoning_done(chunk: Any) -> str | None:
 def _responses_stream_reasoning_key(chunk: Any) -> tuple[int, int]:
     return (
         _normalized_index(_field(chunk, "output_index"), 0),
-        _normalized_index(_field(chunk, "summary_index") or _field(chunk, "content_index"), 0),
+        _normalized_index(_first_present(_field(chunk, "summary_index"), _field(chunk, "content_index")), 0),
     )
 
 
@@ -152,7 +159,7 @@ def _responses_stream_tool_call(chunk: Any) -> dict[str, Any] | None:
         item_id = _field(item, "id")
         call_id = _field(item, "call_id")
         return {
-            "index": _field(chunk, "output_index") or _field(item, "index") or 0,
+            "index": _first_present(_field(chunk, "output_index"), _field(item, "index"), 0),
             "id": str(item_id or call_id or ""),
             "item_id": str(item_id or "") if item_id else "",
             "call_id": str(call_id or "") if call_id else "",
@@ -175,7 +182,7 @@ def _responses_stream_tool_call(chunk: Any) -> dict[str, Any] | None:
         item_id = _field(chunk, "item_id")
         call_id = _field(chunk, "call_id")
         return {
-            "index": _field(chunk, "output_index") or _field(chunk, "index") or 0,
+            "index": _first_present(_field(chunk, "output_index"), _field(chunk, "index"), 0),
             "id": str(item_id or call_id or ""),
             "item_id": str(item_id or "") if item_id else "",
             "call_id": str(call_id or "") if call_id else "",

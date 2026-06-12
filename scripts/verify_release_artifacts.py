@@ -742,6 +742,10 @@ STREAMING_PROVIDER_SMOKE_SCRIPT_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "response.reasoning_summary_part.done",
         "real provider smoke helper must parse Responses reasoning summary part snapshots",
     ),
+    (
+        "_first_present(_field(chunk, \"output_index\")",
+        "real provider smoke helper must preserve zero-valued Responses indexes before fallback indexes",
+    ),
 )
 STREAMING_PROVIDER_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
@@ -787,6 +791,10 @@ STREAMING_PROVIDER_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "def test_stream_smoke_uses_responses_reasoning_output_item_done_snapshot",
         "provider smoke tests must cover Responses reasoning output item snapshots",
+    ),
+    (
+        "def test_stream_smoke_preserves_zero_responses_indexes_before_fallback_indexes",
+        "provider smoke tests must cover zero-valued Responses indexes before fallback indexes",
     ),
     (
         "def test_stream_smoke_uses_responses_content_part_done_snapshot",
