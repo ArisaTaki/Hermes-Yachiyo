@@ -122,7 +122,7 @@ CI 仍直接运行 `python scripts/prepare_app_build_metadata.py`、`python scri
 python scripts/refresh_local_rc_signoff.py --channel experimental --repository kuguya-AI-app-develop/oha-yachiyo
 ```
 
-该命令会生成 `tmp/rc-verification-<short-commit>-packaged-batch.json`、`tmp/rc-verification-<short-commit>-screen.json`、`tmp/rc-signoff-<short-commit>-current.json` 和 `tmp/rc-signoff-<short-commit>-preview.json`；如果 final signoff 只因为 Gatekeeper / Screen Recording 仍为 `manual_required` 而失败，命令仍返回成功，方便把“还差多少”作为状态刷新而不是构建失败处理。
+该命令会生成 `tmp/rc-verification-<short-commit>-packaged-batch.json`、`tmp/rc-verification-<short-commit>-screen.json`、`tmp/rc-signoff-<short-commit>-current.json`、`tmp/rc-signoff-<short-commit>-current.md` 和 `tmp/rc-signoff-<short-commit>-preview.json`；如果 final signoff 只因为 Gatekeeper / Screen Recording 仍为 `manual_required` 而失败，命令仍返回成功，方便把“还差多少”作为状态刷新而不是构建失败处理。签核人可以直接填写 Markdown checklist，再用 `--manual-checks-markdown` 进入最终 gate。
 
 固定下载链接：
 

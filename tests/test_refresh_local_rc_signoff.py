@@ -59,6 +59,11 @@ def test_refresh_local_rc_signoff_runs_batch_screen_draft_and_preview(
                     }
                 },
             )
+        if "--write-manual-checks-markdown" in command:
+            markdown_path = command[command.index("--write-manual-checks-markdown") + 1]
+            report_path = tmp_path / markdown_path
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path.write_text("# Manual Signoff\n", encoding="utf-8")
         return 0
 
     monkeypatch.setattr(refresh, "_run", fake_run)
@@ -72,6 +77,7 @@ def test_refresh_local_rc_signoff_runs_batch_screen_draft_and_preview(
     assert reports["batch_report"] == tmp_path / "tmp" / "rc-verification-abc12345-packaged-batch.json"
     assert reports["screen_report"] == tmp_path / "tmp" / "rc-verification-abc12345-screen.json"
     assert reports["signoff_draft"] == tmp_path / "tmp" / "rc-signoff-abc12345-current.json"
+    assert reports["signoff_markdown"] == tmp_path / "tmp" / "rc-signoff-abc12345-current.md"
     assert reports["signoff_preview"] == tmp_path / "tmp" / "rc-signoff-abc12345-preview.json"
     assert commands[0][0] == [
         sys.executable,
@@ -96,7 +102,18 @@ def test_refresh_local_rc_signoff_runs_batch_screen_draft_and_preview(
         True,
     )
     assert "--mark-provider-smoke-not-applicable-if-missing" in commands[2][0]
-    assert commands[3][1] is True
+    assert commands[3] == (
+        [
+            sys.executable,
+            "scripts/verify_release_candidate.py",
+            "--manual-checks-json",
+            "tmp/rc-signoff-abc12345-current.json",
+            "--write-manual-checks-markdown",
+            "tmp/rc-signoff-abc12345-current.md",
+        ],
+        False,
+    )
+    assert commands[4][1] is True
 
 
 def test_refresh_local_rc_signoff_rejects_non_manual_preview_failure(
@@ -137,6 +154,12 @@ def test_refresh_local_rc_signoff_rejects_non_manual_preview_failure(
                 command[command.index("--write-manual-checks-draft") + 1],
                 {"manual_release_candidate_check_summary": {"remaining_count": 2}},
             )
+        if "--write-manual-checks-markdown" in command:
+            markdown_path = tmp_path / command[
+                command.index("--write-manual-checks-markdown") + 1
+            ]
+            markdown_path.parent.mkdir(parents=True, exist_ok=True)
+            markdown_path.write_text("# Manual Signoff\n", encoding="utf-8")
         return 0
 
     monkeypatch.setattr(refresh, "_run", fake_run)

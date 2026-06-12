@@ -88,6 +88,7 @@ def refresh_local_rc_signoff(
     batch_report = tmp_dir / f"rc-verification-{label}-packaged-batch.json"
     screen_report = tmp_dir / f"rc-verification-{label}-screen.json"
     signoff_draft = tmp_dir / f"rc-signoff-{label}-current.json"
+    signoff_markdown = tmp_dir / f"rc-signoff-{label}-current.md"
     signoff_preview = tmp_dir / f"rc-signoff-{label}-preview.json"
 
     if not skip_build:
@@ -134,6 +135,16 @@ def refresh_local_rc_signoff(
     )
     _run(draft_command)
 
+    markdown_command = [
+        sys.executable,
+        "scripts/verify_release_candidate.py",
+        "--manual-checks-json",
+        str(signoff_draft.relative_to(ROOT)),
+        "--write-manual-checks-markdown",
+        str(signoff_markdown.relative_to(ROOT)),
+    ]
+    _run(markdown_command)
+
     preview_command = [
         sys.executable,
         "scripts/verify_release_candidate.py",
@@ -152,6 +163,7 @@ def refresh_local_rc_signoff(
         "batch_report": batch_report,
         "screen_report": screen_report,
         "signoff_draft": signoff_draft,
+        "signoff_markdown": signoff_markdown,
         "signoff_preview": signoff_preview,
     }
 
