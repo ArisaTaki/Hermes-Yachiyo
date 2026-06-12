@@ -878,6 +878,30 @@ def test_release_workflow_guard_reports_new_agent_run_provider_contract(tmp_path
     ) in messages
 
 
+def test_release_workflow_guard_reports_new_agent_run_provider_message_contract(tmp_path):
+    workflow = tmp_path / verifier.RELEASE_WORKFLOW_FILE
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text(
+        (verifier.ROOT / verifier.RELEASE_WORKFLOW_FILE).read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    test_file = tmp_path / "tests" / "test_agent_runtime.py"
+    test_file.parent.mkdir(parents=True)
+    test_file.write_text(
+        "def test_agent_run_executes_future_provider_message_tool_calls():\n"
+        "    pass\n",
+        encoding="utf-8",
+    )
+
+    findings = verifier._verify_release_workflow_guards(tmp_path)
+    messages = [finding.message for finding in findings]
+
+    assert (
+        "macOS release workflow smoke tests must run Agent Run provider contract "
+        "tests/test_agent_runtime.py::test_agent_run_executes_future_provider_message_tool_calls"
+    ) in messages
+
+
 def test_release_workflow_guard_accepts_new_agent_run_provider_contract_before_packaging(tmp_path):
     workflow = tmp_path / verifier.RELEASE_WORKFLOW_FILE
     workflow.parent.mkdir(parents=True)

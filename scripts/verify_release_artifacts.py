@@ -1690,7 +1690,7 @@ def _release_electron_ui_smoke_scripts(root: Path) -> tuple[str, ...]:
 
 
 AGENT_RUN_PROVIDER_CONTRACT_TEST_RE = re.compile(
-    r"^def (?P<name>test_agent_run_[A-Za-z0-9_]*(?:http_sse|streaming|responses|function_call)[A-Za-z0-9_]*)\(",
+    r"^def (?P<name>test_agent_run_[A-Za-z0-9_]*(?:http_sse|streaming|responses|function_call|provider_message|sdk|reasoning|refusal)[A-Za-z0-9_]*)\(",
     re.MULTILINE,
 )
 MAIN_CHAT_PROVIDER_CONTRACT_TEST_RE = re.compile(
