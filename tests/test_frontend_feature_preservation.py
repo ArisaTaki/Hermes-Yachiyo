@@ -533,6 +533,7 @@ def test_proactive_tts_ui_smoke_uses_screen_permission_tts_and_voice_import_path
             "proactivePayload.mode !== 'live2d'",
             "voiceImportPayload.path !== VOICE_ARCHIVE_PATH",
             "ttsTestPayload.text !== TEST_TEXT",
+            "Provider: GPT-SoVITS",
         ],
     )
 

@@ -500,6 +500,7 @@ async function main() {
   await waitFor(win, () => (
     document.querySelector('[data-testid="tts-test-result"]')?.textContent.includes('TTS smoke played')
     && document.querySelector('[data-testid="tts-test-result"]')?.textContent.includes(${JSON.stringify(TEST_TEXT)})
+    && document.querySelector('[data-testid="tts-test-result"]')?.textContent.includes('Provider: GPT-SoVITS')
     && document.querySelector('[data-testid="proactive-tts-status"]')?.textContent.includes('TTS smoke played')
   ), 'TTS test result');
   console.log('[electron-smoke] proactive TTS actions verified');
