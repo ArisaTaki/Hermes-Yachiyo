@@ -105,6 +105,7 @@ DEFAULT_SCAN_PATHS: tuple[Path, ...] = (
     Path("docs/release-packaging.md"),
     Path("apps/frontend/electron-builder.yml"),
     Path("scripts/build_backend.py"),
+    Path("scripts/verify_release_candidate.py"),
     Path("apps/frontend/public/oha-yachiyo-build.json"),
 )
 
@@ -524,6 +525,14 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "每个 DMG 的 `.sha256` 文件",
         "release packaging docs must document per-DMG checksum file validation",
+    ),
+    (
+        "python scripts/verify_release_candidate.py --require-artifacts",
+        "release packaging docs must document the local RC verification entrypoint",
+    ),
+    (
+        "python scripts/verify_release_candidate.py --require-artifacts --run-ui-smoke",
+        "release packaging docs must document the local RC Electron UI smoke gate",
     ),
 )
 RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (

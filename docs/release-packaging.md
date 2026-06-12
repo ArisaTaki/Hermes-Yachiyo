@@ -132,4 +132,20 @@ Release workflow 会基于当前渠道上一条 `stable-v*` / `alpha-v*` / `expe
 - `main-latest` / `alpha-latest` / `develop-latest` 滚动 release notes。
 - 固定 latest JSON 的 `changelog` 字段，应用内“应用更新”页面会直接展示这份更新内容。
 
+## 本地 RC 验收
+
+本地 release candidate 产物生成后，先运行统一验收入口：
+
+```bash
+python scripts/verify_release_candidate.py --require-artifacts
+```
+
+该命令会运行 source-level release guard，并对已生成的 `dist/backend`、`dist/electron` 和 `release` 执行 binary/package verifier。需要把 Electron UI smoke 也纳入本地 RC gate 时运行：
+
+```bash
+python scripts/verify_release_candidate.py --require-artifacts --run-ui-smoke
+```
+
+脚本仍会列出必须人工确认的首次启动 / Gatekeeper / 屏幕录制权限检查项。
+
 后续如果要面向普通用户无 Gatekeeper 警告地分发，需要再补 Apple Developer ID 签名与 notarization；当前链路先保证可重复构建和可安装 DMG。
