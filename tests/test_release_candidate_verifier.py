@@ -1565,6 +1565,7 @@ def test_release_candidate_verifier_runs_dmg_screen_recording_probe(
     assert report["dmg_screen_probe"] == {
         "status": "passed",
         "dmg_paths": ["release/Oha-Yachiyo-0.4.0-arm64.dmg"],
+        "bridge_ready_dmg_paths": ["release/Oha-Yachiyo-0.4.0-arm64.dmg"],
         "screens": [
             {
                 "dmg_path": "release/Oha-Yachiyo-0.4.0-arm64.dmg",
@@ -1591,6 +1592,101 @@ def test_release_candidate_verifier_runs_dmg_screen_recording_probe(
     assert report["manual_release_candidate_check_summary"]["automated_evidence_check_ids"] == [
         "packaged_bridge_isolation",
         "screen_recording_permission",
+    ]
+
+
+def test_release_candidate_verifier_keeps_bridge_evidence_when_dmg_screen_probe_fails_after_status(
+    tmp_path, monkeypatch, capsys
+):
+    release_dir = tmp_path / "release"
+    release_dir.mkdir()
+    (release_dir / "Oha-Yachiyo-0.4.0-arm64.dmg").write_bytes(b"fake dmg")
+
+    class FakeResponse:
+        def __init__(self, body: bytes):
+            self._body = body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return self._body
+
+    class FakeProcess:
+        returncode = None
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self):
+            self.returncode = 0
+
+        def wait(self, timeout=None):
+            self.returncode = 0
+            return 0
+
+        def kill(self):
+            self.returncode = -9
+
+        def communicate(self, timeout=None):
+            return "", ""
+
+    def fake_run(command, **_kwargs):
+        if command[:2] == ["hdiutil", "attach"]:
+            mount_dir = Path(command[command.index("-mountpoint") + 1])
+            executable = mount_dir / "Oha-Yachiyo.app" / "Contents" / "MacOS" / "Oha-Yachiyo"
+            executable.parent.mkdir(parents=True)
+            executable.write_text("#!/bin/sh\n", encoding="utf-8")
+            executable.chmod(0o755)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    def fake_urlopen(url, timeout):
+        if str(url).endswith("/status"):
+            return FakeResponse(
+                b'{"service":"oha-yachiyo","version":"0.4.0","uptime_seconds":1}'
+            )
+        if str(url).endswith("/screen/current"):
+            return FakeResponse(b'{"format":"png","width":0,"height":1080}')
+        raise AssertionError(f"unexpected URL: {url}")
+
+    monkeypatch.setattr(rc.sys, "platform", "darwin")
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+    monkeypatch.setattr(rc, "_allocate_loopback_port", lambda: 49126)
+    monkeypatch.setattr(rc.subprocess, "run", fake_run)
+    monkeypatch.setattr(rc.subprocess, "Popen", lambda *_args, **_kwargs: FakeProcess())
+    monkeypatch.setattr(rc.urllib.request, "urlopen", fake_urlopen)
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        artifact_paths=(Path("release"),),
+        run_dmg_screen_smoke=True,
+        report_json=Path("tmp/rc.json"),
+    ) == 1
+
+    output = capsys.readouterr().out
+    assert "DMG screen recording probe: failed" in output
+    report = json.loads((tmp_path / "tmp" / "rc.json").read_text(encoding="utf-8"))
+    assert report["ok"] is False
+    assert report["dmg_screen_probe"]["status"] == "failed"
+    assert report["dmg_screen_probe"]["bridge_ready_dmg_paths"] == [
+        "release/Oha-Yachiyo-0.4.0-arm64.dmg"
+    ]
+    assert report["dmg_screen_probe"]["screens"] == []
+    manual_statuses = {
+        check["id"]: check
+        for check in report["manual_release_candidate_check_statuses"]
+    }
+    assert manual_statuses["packaged_bridge_isolation"]["status"] == "passed"
+    assert "--run-dmg-screen-smoke reached packaged /status" in manual_statuses[
+        "packaged_bridge_isolation"
+    ]["evidence"]
+    assert manual_statuses["screen_recording_permission"]["status"] == "manual_required"
+    assert report["manual_release_candidate_check_summary"]["remaining_count"] == 5
+    assert report["manual_release_candidate_check_summary"]["automated_evidence_check_ids"] == [
+        "packaged_bridge_isolation"
     ]
 
 
@@ -1712,6 +1808,7 @@ def test_release_candidate_verifier_runs_dmg_ui_sampling_smoke(
     assert report["dmg_ui_sampling_smoke"] == {
         "status": "passed",
         "dmg_paths": ["release/Oha-Yachiyo-0.4.0-arm64.dmg"],
+        "bridge_ready_dmg_paths": ["release/Oha-Yachiyo-0.4.0-arm64.dmg"],
         "samples": [
             {
                 "dmg_path": "release/Oha-Yachiyo-0.4.0-arm64.dmg",

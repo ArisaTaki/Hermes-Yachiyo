@@ -1167,6 +1167,14 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release candidate verifier must auto-fill manual evidence from passed RC gates",
     ),
     (
+        "_auto_apply_packaged_bridge_ready_evidence",
+        "release candidate verifier must preserve packaged bridge evidence from partial DMG probes",
+    ),
+    (
+        '"bridge_ready_dmg_paths"',
+        "release candidate verifier must report packaged bridge readiness from DMG probes",
+    ),
+    (
         '"dmg_screen_probe"',
         "release candidate verifier must report packaged screen probe results",
     ),

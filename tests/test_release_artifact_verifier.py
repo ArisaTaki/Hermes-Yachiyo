@@ -186,6 +186,14 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
     )
     assert "release candidate verifier must not auto-pass native file picker from UI smoke" in messages
     assert "release candidate verifier must auto-fill manual evidence from passed RC gates" in messages
+    assert (
+        "release candidate verifier must preserve packaged bridge evidence from partial DMG probes"
+        in messages
+    )
+    assert (
+        "release candidate verifier must report packaged bridge readiness from DMG probes"
+        in messages
+    )
     assert "release candidate verifier must report packaged screen probe results" in messages
     assert "release candidate verifier must report packaged UI sampling smoke results" in messages
     assert "release candidate verifier must name the packaged UI sampling smoke helper" in messages
