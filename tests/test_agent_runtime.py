@@ -41,6 +41,7 @@ from apps.shell.agent_runtime import (
     WorkflowPathPlanner,
     WorkflowResumePlanner,
     WorkflowRunStartProjector,
+    _MAX_AGENT_TOOL_ITERATIONS,
 )
 from scripts.verify_secret_redaction import verify_secret_redaction
 
@@ -1183,6 +1184,22 @@ def test_tool_approval_resume_context_parses_pending_payload():
         budget=budget,
     )
     assert fallback_iteration.next_iteration == 0
+    negative_iteration = ToolApprovalResumeContext.from_run(
+        run,
+        {**pending, "next_iteration": "-3"},
+        broker=broker,
+        allowed_tools=[],
+        budget=budget,
+    )
+    assert negative_iteration.next_iteration == 0
+    capped_iteration = ToolApprovalResumeContext.from_run(
+        run,
+        {**pending, "next_iteration": "999"},
+        broker=broker,
+        allowed_tools=[],
+        budget=budget,
+    )
+    assert capped_iteration.next_iteration == _MAX_AGENT_TOOL_ITERATIONS
 
     with pytest.raises(AgentRuntimeError, match="Run 待审批上下文不完整，无法恢复"):
         ToolApprovalResumeContext.from_run(
