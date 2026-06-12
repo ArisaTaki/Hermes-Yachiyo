@@ -1080,6 +1080,10 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release candidate verifier must preserve supporting evidence from previous RC reports",
     ),
     (
+        "_append_electron_ui_smoke_supporting_evidence",
+        "release candidate verifier must attach UI smoke supporting evidence to current RC reports",
+    ),
+    (
         "the packaged native file picker still ",
         "release candidate verifier must not auto-pass native file picker from UI smoke",
     ),

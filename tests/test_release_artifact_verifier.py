@@ -178,6 +178,10 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
     assert "release candidate verifier must parse manual check Markdown evidence" in messages
     assert "release candidate verifier must accept previous RC reports as manual evidence input" in messages
     assert "release candidate verifier must preserve supporting evidence from previous RC reports" in messages
+    assert (
+        "release candidate verifier must attach UI smoke supporting evidence to current RC reports"
+        in messages
+    )
     assert "release candidate verifier must not auto-pass native file picker from UI smoke" in messages
     assert "release candidate verifier must auto-fill manual evidence from passed RC gates" in messages
     assert "release candidate verifier must label automatically supplied manual evidence" in messages

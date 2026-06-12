@@ -318,7 +318,7 @@ def _manual_release_candidate_checks_from_payload(raw_payload: Any) -> object:
 
 
 def _append_manual_release_candidate_check_note(
-    checks: list[Any],
+    checks: Sequence[Any],
     check_id: str,
     note: str,
 ) -> None:
@@ -332,17 +332,15 @@ def _append_manual_release_candidate_check_note(
         return
 
 
-def _manual_release_candidate_checks_with_supporting_evidence(
-    raw_checks: Sequence[Any],
-    raw_payload: dict[str, Any],
-) -> list[Any]:
-    checks = [dict(check) if isinstance(check, dict) else check for check in raw_checks]
-    electron_ui_smoke = raw_payload.get("electron_ui_smoke")
+def _append_electron_ui_smoke_supporting_evidence(
+    checks: Sequence[Any],
+    electron_ui_smoke: Any,
+) -> None:
     if not isinstance(electron_ui_smoke, dict) or electron_ui_smoke.get("status") != "passed":
-        return checks
+        return
     scripts = electron_ui_smoke.get("scripts")
     if not isinstance(scripts, list):
-        return checks
+        return
     passed_scripts = [
         str(script.get("script", "")).strip()
         for script in scripts
@@ -351,7 +349,7 @@ def _manual_release_candidate_checks_with_supporting_evidence(
         and str(script.get("script", "")).strip()
     ]
     if not passed_scripts:
-        return checks
+        return
     script_count = electron_ui_smoke.get("script_count")
     script_count_text = (
         str(script_count)
@@ -376,6 +374,17 @@ def _manual_release_candidate_checks_with_supporting_evidence(
                 "requires manual evidence."
             ),
         )
+
+
+def _manual_release_candidate_checks_with_supporting_evidence(
+    raw_checks: Sequence[Any],
+    raw_payload: dict[str, Any],
+) -> list[Any]:
+    checks = [dict(check) if isinstance(check, dict) else check for check in raw_checks]
+    _append_electron_ui_smoke_supporting_evidence(
+        checks,
+        raw_payload.get("electron_ui_smoke"),
+    )
     return checks
 
 
@@ -546,6 +555,11 @@ def _auto_apply_release_candidate_check_evidence(
                 f"{check_summary}. The archived provider_smoke report section is the release evidence."
             ),
         )
+
+    _append_electron_ui_smoke_supporting_evidence(
+        checks,
+        report.get("electron_ui_smoke"),
+    )
 
 
 def existing_artifact_paths(root: Path) -> tuple[Path, ...]:

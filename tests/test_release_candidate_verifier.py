@@ -1482,6 +1482,15 @@ def test_release_candidate_verifier_runs_electron_ui_smoke_scripts(tmp_path, mon
         ],
         "run_requested": True,
     }
+    manual_statuses = {
+        check["id"]: check
+        for check in report["manual_release_candidate_check_statuses"]
+    }
+    assert manual_statuses["packaged_ui_sampling"]["status"] == "manual_required"
+    assert "--run-ui-smoke passed 2 Electron UI smoke scripts" in manual_statuses[
+        "packaged_ui_sampling"
+    ]["notes"]
+    assert "scripts/smoke_alpha_ui.mjs" in manual_statuses["packaged_ui_sampling"]["notes"]
 
 
 def test_release_candidate_verifier_rejects_smoke_scripts_outside_root(
