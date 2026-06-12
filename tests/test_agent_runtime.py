@@ -46,6 +46,7 @@ from apps.shell.agent_runtime import (
     WorkflowCancellationProjectionCoordinator,
     WorkflowCancellationTarget,
     WorkflowContinuationCoordinator,
+    WorkflowContinuationFailureProjection,
     WorkflowParentResumeFailureProjection,
     WorkflowParentRunLocator,
     WorkflowParentResumeCoordinator,
@@ -2679,6 +2680,57 @@ def test_workflow_run_completion_projection_builds_update_and_replay_payloads():
         "timeline": timeline,
         "artifacts": artifacts,
     }
+
+
+def test_workflow_continuation_failure_projection_redacts_and_builds_update_fields():
+    leaked_secret = "sk-workflow-continuation-secret123456"
+    timeline: list[dict[str, object]] = [{"event": "workflow.node.start", "detail": "Start"}]
+    artifacts: list[dict[str, object]] = [{"kind": "workflow_artifact", "path": "report.md"}]
+    projection = WorkflowContinuationFailureProjection.from_error(
+        RuntimeError(f"provider failed token={leaked_secret}"),
+        {
+            "workflow_node_id": "bad",
+            "workflow_node_kind": f"custom_api_key={leaked_secret}",
+            "workflow_node_label": f"Bad {leaked_secret}",
+        },
+    )
+    event = projection.timeline_event(
+        lambda event, detail, **payload: {"event": event, "detail": detail, **payload}
+    )
+    timeline.append(event)
+
+    assert event == {
+        "event": "workflow.run.failed",
+        "detail": projection.safe_error,
+        "status": "failed",
+        "workflow_node_id": "bad",
+        "workflow_node_kind": "custom_api_key=[redacted]",
+        "workflow_node_label": "Bad [redacted]",
+    }
+    assert projection.event_payload() == {
+        "error": projection.safe_error,
+        "workflow_node_id": "bad",
+        "workflow_node_kind": "custom_api_key=[redacted]",
+        "workflow_node_label": "Bad [redacted]",
+    }
+    assert projection.update_fields(timeline=timeline, artifacts=artifacts) == {
+        "status": "failed",
+        "result": projection.safe_error,
+        "timeline": timeline,
+        "artifacts": artifacts,
+    }
+    serialized = json.dumps(
+        {
+            "safe_error": projection.safe_error,
+            "node_info": projection.node_info,
+            "event": event,
+            "payload": projection.event_payload(),
+            "update": projection.update_fields(timeline=timeline, artifacts=artifacts),
+        },
+        ensure_ascii=False,
+    )
+    assert leaked_secret not in serialized
+    assert "[redacted]" in serialized
 
 
 def test_workflow_continuation_coordinator_pauses_for_approval_node():

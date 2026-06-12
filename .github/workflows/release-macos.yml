@@ -113,6 +113,7 @@ jobs:
             tests/test_agent_runtime.py::test_workflow_approval_pause_projection_builds_private_and_public_payloads \
             tests/test_agent_runtime.py::test_workflow_start_node_projection_builds_timeline_and_replay_payloads \
             tests/test_agent_runtime.py::test_workflow_run_completion_projection_builds_update_and_replay_payloads \
+            tests/test_agent_runtime.py::test_workflow_continuation_failure_projection_redacts_and_builds_update_fields \
             tests/test_agent_runtime.py::test_workflow_continuation_coordinator_pauses_for_approval_node \
             tests/test_agent_runtime.py::test_workflow_continuation_coordinator_resumes_after_approval_node \
             tests/test_agent_runtime.py::test_workflow_continuation_coordinator_projects_background_failure_without_secret_leak \

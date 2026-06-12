@@ -1328,6 +1328,7 @@ RunEvent sequence:
   - `WorkflowApprovalPauseProjection` 负责 Workflow approval node 暂停时的 private pending approval、public replay payload、timeline event 和 Run update 字段。
   - `WorkflowArtifactNodeWrite` 负责 Workflow artifact node 的 artifact path 解析、文件写入、artifact record 和 replay payload。
   - `WorkflowRunCompletionProjection` 负责 Workflow completed timeline、RunEvent payload 和 Run update 字段。
+  - `WorkflowContinuationFailureProjection` 负责 Workflow continuation 节点执行异常时的错误清洗、failed timeline、RunEvent payload 和 Run update 字段。
   - 负责异步 Workflow 后台线程异常时的 failed Run、RunEvent 和 root RunGroup 投影。
   - `NativeRunEngine._continue_workflow_run()` 保留为薄 wrapper，成熟调用点不变。
 
@@ -2148,6 +2149,7 @@ compileall passed
 - release workflow smoke 现在也强制包含 sensitive HTTP `Idempotency-Key` 回归，确保 Chat route 不创建消息/Task，通用 `/runs`、Agent Run 和 Workflow Run route 不创建 Run / `runs.client_request_id`，Agent/Workflow route 的错误响应也不会回显 header secret。
 - release workflow smoke 现在也强制包含 WorkflowCancellationProjectionCoordinator child cancellation projection 回归，确保父 Workflow 取消等待中的子 Agent Run 时继续写入 child cancellation replay fact，并保留 workflow node metadata / child outcome 投影。
 - release workflow smoke 现在也强制包含 WorkflowContinuationCoordinator approval pause / resume、background failure projection 与 artifact node handoff 回归，确保 Workflow approval node、批准后 continuation、异步后台失败投影和 artifact 写入继续走显式 step continuation 边界。
+- release workflow smoke 现在也强制包含 Workflow continuation failure projection boundary 回归，确保 Workflow continuation 异常时的 failed timeline、RunEvent payload 和 Run update 字段继续由显式 projection boundary 维护。
 - release workflow smoke 现在也强制包含 WorkflowContinuationCoordinator failure redaction boundary 回归，确保 Workflow continuation 未知节点失败不会把 node kind 中的 secret 写入 Run projection、RunEvent、timeline 或 RunGroup summary。
 - release workflow smoke 现在也强制包含 `TaskRunLinkRepository` projection boundary 回归，确保 Task↔Run link、Run status projection 和 replay `last_event_sequence` 继续由显式边界维护。
 - release workflow smoke 现在也强制包含 `RunArtifactRepository` redaction / file read 和 `RunRepository` artifact cleanup callback 回归，确保 artifact 投影清洗、文件读取清洗和 Run 删除文件清理不从发布路径回退。

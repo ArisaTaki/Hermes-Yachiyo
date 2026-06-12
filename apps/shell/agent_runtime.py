@@ -4652,6 +4652,49 @@ class WorkflowRunCompletionProjection:
         }
 
 
+@dataclass(frozen=True)
+class WorkflowContinuationFailureProjection:
+    """Failed Workflow continuation projection."""
+
+    safe_error: str
+    node_info: dict[str, str]
+
+    @classmethod
+    def from_error(
+        cls,
+        error: Any,
+        node_info: dict[str, str],
+    ) -> "WorkflowContinuationFailureProjection":
+        return cls(
+            safe_error=redact_secrets(error),
+            node_info={key: redact_secrets(value) for key, value in node_info.items()},
+        )
+
+    def timeline_event(self, timeline_factory: Any) -> dict[str, Any]:
+        return timeline_factory(
+            "workflow.run.failed",
+            self.safe_error,
+            status="failed",
+            **self.node_info,
+        )
+
+    def event_payload(self) -> dict[str, Any]:
+        return {"error": self.safe_error, **self.node_info}
+
+    def update_fields(
+        self,
+        *,
+        timeline: list[dict[str, Any]],
+        artifacts: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        return {
+            "status": "failed",
+            "result": self.safe_error,
+            "timeline": timeline,
+            "artifacts": artifacts,
+        }
+
+
 class WorkflowContinuationCoordinator:
     """Executes Workflow nodes for a Workflow Run."""
 
@@ -4751,26 +4794,19 @@ class WorkflowContinuationCoordinator:
                 result = engine.get_run(result["run_id"])
             return result
         except Exception as exc:
-            safe_error = redact_secrets(exc)
-            safe_node_info = {
-                key: redact_secrets(value)
-                for key, value in current_node_info.items()
-            }
-            timeline.append(engine._timeline("workflow.run.failed", safe_error, status="failed", **safe_node_info))
+            failure = WorkflowContinuationFailureProjection.from_error(exc, current_node_info)
+            timeline.append(failure.timeline_event(engine._timeline))
             engine.append_run_event(
                 str(run["run_id"]),
                 "workflow.run.failed",
-                {"error": safe_error, **safe_node_info},
+                failure.event_payload(),
             )
             result = engine._update_run(
                 str(run["run_id"]),
-                status="failed",
-                result=safe_error,
-                timeline=timeline,
-                artifacts=artifacts,
+                **failure.update_fields(timeline=timeline, artifacts=artifacts),
             )
             if root_group:
-                engine._update_run_group(run_group_id, status="failed", summary=safe_error)
+                engine._update_run_group(run_group_id, status="failed", summary=failure.safe_error)
                 result = engine.get_run(result["run_id"])
             return result
 
