@@ -1,6 +1,7 @@
 """请求/响应 Schema 定义"""
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -18,6 +19,7 @@ class StatusResponse(BaseModel):
     uptime_seconds: float
     task_counts: dict[TaskStatus, int] = Field(default_factory=dict)
     native_agent_ready: bool = False
+    build_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 # ── 任务 ──────────────────────────────────────────────

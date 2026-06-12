@@ -6171,6 +6171,14 @@ async def test_status_route_uses_app_version(monkeypatch):
     monkeypatch.setattr(status_route, "get_app_version", lambda: "9.8.7")
     monkeypatch.setattr(
         status_route,
+        "load_build_metadata",
+        lambda: {
+            "commit": "abc1234567890abc1234567890abc1234567890a",
+            "short_commit": "abc1234",
+        },
+    )
+    monkeypatch.setattr(
+        status_route,
         "get_runtime",
         lambda: SimpleNamespace(
             uptime=1.25,
@@ -6184,6 +6192,7 @@ async def test_status_route_uses_app_version(monkeypatch):
     assert response.version == "9.8.7"
     assert response.service == "oha-yachiyo"
     assert response.native_agent_ready is True
+    assert response.build_metadata["short_commit"] == "abc1234"
 
 
 def test_live2d_asset_token_can_rotate():

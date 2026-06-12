@@ -3,6 +3,7 @@
 from fastapi import APIRouter
 
 from apps.bridge.deps import get_runtime
+from apps.core.build_metadata import load_build_metadata
 from apps.core.version import get_app_version
 from packages.protocol.schemas import StatusResponse
 
@@ -17,6 +18,7 @@ async def get_status() -> StatusResponse:
         uptime_seconds=rt.uptime,
         task_counts=rt.state.get_task_counts(),
         native_agent_ready=rt.is_native_agent_ready(),
+        build_metadata=load_build_metadata(),
     )
 
 

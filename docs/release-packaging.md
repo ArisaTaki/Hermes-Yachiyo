@@ -158,6 +158,8 @@ python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount
 python scripts/verify_release_candidate.py --require-artifacts --run-dmg-app-smoke
 ```
 
+`--run-dmg-app-smoke`、`--run-dmg-screen-smoke` 和 `--run-dmg-ui-sampling-smoke` 的 RC report 都会在对应 `dmg_*` section 写入 `bridge_statuses`，记录 DMG 路径、`service`、`version`、`native_agent_ready` 和 packaged Bridge `/status` 返回的 `build_metadata`。如果打包时已刷新 `oha-yachiyo-build.json`，这些记录会把真实启动的 DMG 内 Bridge 追溯到 commit / short commit，便于发现 stale DMG 或旧 backend 被误用于最终签核。
+
 需要从 DMG 内真实 `.app` 抽样 packaged renderer 关键页面时运行：
 
 ```bash

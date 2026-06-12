@@ -1632,6 +1632,19 @@ def _read_status_json(bridge_url: str) -> dict[str, Any]:
     return _read_json_url(f"{bridge_url}/status", timeout=1.0)
 
 
+def _bridge_status_report(dmg_path: Path, status: dict[str, Any]) -> dict[str, object]:
+    build_metadata = status.get("build_metadata")
+    return {
+        "dmg_path": str(dmg_path),
+        "service": str(status.get("service") or ""),
+        "version": str(status.get("version") or ""),
+        "native_agent_ready": status.get("native_agent_ready")
+        if isinstance(status.get("native_agent_ready"), bool)
+        else None,
+        "build_metadata": build_metadata if isinstance(build_metadata, dict) else {},
+    }
+
+
 def _read_screen_probe_metadata(bridge_url: str) -> dict[str, object]:
     data = _read_json_url(
         f"{bridge_url}/screen/current",
@@ -1673,7 +1686,7 @@ def _wait_for_dmg_app_status(
     bridge_url: str,
     dmg_path: Path,
     timeout_seconds: float,
-) -> Finding | None:
+) -> tuple[Finding | None, dict[str, Any] | None]:
     deadline = time.monotonic() + timeout_seconds
     last_error = ""
     while time.monotonic() < deadline:
@@ -1684,7 +1697,7 @@ def _wait_for_dmg_app_status(
             message = f"release candidate app exited before /status was ready: exit_code={exit_code}"
             if detail:
                 message = f"{message}: {detail}"
-            return Finding(dmg_path, message)
+            return Finding(dmg_path, message), None
         try:
             status = _read_status_json(bridge_url)
         except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
@@ -1692,13 +1705,13 @@ def _wait_for_dmg_app_status(
             time.sleep(0.5)
             continue
         if status.get("service") == "oha-yachiyo":
-            return None
+            return None, status
         last_error = redact_api_error_text(f"unexpected /status service={status.get('service')!r}")
         time.sleep(0.5)
     message = f"release candidate app did not expose /status within {timeout_seconds:.0f}s"
     if last_error:
         message = f"{message}: {last_error}"
-    return Finding(dmg_path, message)
+    return Finding(dmg_path, message), None
 
 
 def verify_dmg_app_startup(
@@ -1706,14 +1719,15 @@ def verify_dmg_app_startup(
     dmg_paths: Sequence[Path],
     *,
     timeout_seconds: float = DMG_APP_SMOKE_TIMEOUT_SECONDS,
-) -> list[Finding]:
+) -> tuple[list[Finding], list[dict[str, object]]]:
     findings: list[Finding] = []
+    bridge_statuses: list[dict[str, object]] = []
     if not dmg_paths:
         findings.append(Finding(root, "release candidate DMG app startup smoke requested but no .dmg artifacts were found"))
-        return findings
+        return findings, bridge_statuses
     if sys.platform != "darwin":
         findings.append(Finding(root, "release candidate DMG app startup smoke requires macOS"))
-        return findings
+        return findings, bridge_statuses
     for dmg_path in dmg_paths:
         absolute_dmg = _absolute_artifact_path(root, dmg_path)
         mount_dir = Path(tempfile.mkdtemp(prefix="oha-yachiyo-rc-app-"))
@@ -1769,7 +1783,7 @@ def verify_dmg_app_startup(
                     text=True,
                     start_new_session=True,
                 )
-                status_finding = _wait_for_dmg_app_status(
+                status_finding, status_payload = _wait_for_dmg_app_status(
                     process,
                     bridge_url=bridge_url,
                     dmg_path=dmg_path,
@@ -1777,6 +1791,9 @@ def verify_dmg_app_startup(
                 )
                 if status_finding is not None:
                     findings.append(status_finding)
+                    continue
+                if status_payload is not None:
+                    bridge_statuses.append(_bridge_status_report(dmg_path, status_payload))
         finally:
             if process is not None:
                 _terminate_process(process)
@@ -1795,7 +1812,7 @@ def verify_dmg_app_startup(
                         message = f"{message}: {detail}"
                     findings.append(Finding(dmg_path, message))
             shutil.rmtree(mount_dir, ignore_errors=True)
-    return findings
+    return findings, bridge_statuses
 
 
 def verify_dmg_screen_recording_probe(
@@ -1803,16 +1820,17 @@ def verify_dmg_screen_recording_probe(
     dmg_paths: Sequence[Path],
     *,
     timeout_seconds: float = DMG_APP_SMOKE_TIMEOUT_SECONDS,
-) -> tuple[list[Finding], list[dict[str, object]], list[str]]:
+) -> tuple[list[Finding], list[dict[str, object]], list[str], list[dict[str, object]]]:
     findings: list[Finding] = []
     screens: list[dict[str, object]] = []
     bridge_ready_dmg_paths: list[str] = []
+    bridge_statuses: list[dict[str, object]] = []
     if not dmg_paths:
         findings.append(Finding(root, "release candidate DMG screen probe requested but no .dmg artifacts were found"))
-        return findings, screens, bridge_ready_dmg_paths
+        return findings, screens, bridge_ready_dmg_paths, bridge_statuses
     if sys.platform != "darwin":
         findings.append(Finding(root, "release candidate DMG screen probe requires macOS"))
-        return findings, screens, bridge_ready_dmg_paths
+        return findings, screens, bridge_ready_dmg_paths, bridge_statuses
     for dmg_path in dmg_paths:
         absolute_dmg = _absolute_artifact_path(root, dmg_path)
         mount_dir = Path(tempfile.mkdtemp(prefix="oha-yachiyo-rc-screen-"))
@@ -1868,7 +1886,7 @@ def verify_dmg_screen_recording_probe(
                     text=True,
                     start_new_session=True,
                 )
-                status_finding = _wait_for_dmg_app_status(
+                status_finding, status_payload = _wait_for_dmg_app_status(
                     process,
                     bridge_url=bridge_url,
                     dmg_path=dmg_path,
@@ -1878,6 +1896,8 @@ def verify_dmg_screen_recording_probe(
                     findings.append(status_finding)
                     continue
                 bridge_ready_dmg_paths.append(str(dmg_path))
+                if status_payload is not None:
+                    bridge_statuses.append(_bridge_status_report(dmg_path, status_payload))
                 try:
                     metadata = _read_screen_probe_metadata(bridge_url)
                 except (
@@ -1913,7 +1933,7 @@ def verify_dmg_screen_recording_probe(
                         message = f"{message}: {detail}"
                     findings.append(Finding(dmg_path, message))
             shutil.rmtree(mount_dir, ignore_errors=True)
-    return findings, screens, bridge_ready_dmg_paths
+    return findings, screens, bridge_ready_dmg_paths, bridge_statuses
 
 
 def _read_packaged_ui_sampling_report(report_path: Path) -> dict[str, object]:
@@ -1926,21 +1946,22 @@ def verify_dmg_ui_sampling_smoke(
     dmg_paths: Sequence[Path],
     *,
     timeout_seconds: float = DMG_UI_SAMPLING_SMOKE_TIMEOUT_SECONDS,
-) -> tuple[list[Finding], list[dict[str, object]], list[str]]:
+) -> tuple[list[Finding], list[dict[str, object]], list[str], list[dict[str, object]]]:
     findings: list[Finding] = []
     samples: list[dict[str, object]] = []
     bridge_ready_dmg_paths: list[str] = []
+    bridge_statuses: list[dict[str, object]] = []
     if not dmg_paths:
         findings.append(Finding(root, "release candidate DMG UI sampling smoke requested but no .dmg artifacts were found"))
-        return findings, samples, bridge_ready_dmg_paths
+        return findings, samples, bridge_ready_dmg_paths, bridge_statuses
     if sys.platform != "darwin":
         findings.append(Finding(root, "release candidate DMG UI sampling smoke requires macOS"))
-        return findings, samples, bridge_ready_dmg_paths
+        return findings, samples, bridge_ready_dmg_paths, bridge_statuses
 
     script = root / DMG_UI_SAMPLING_SMOKE_SCRIPT
     if not script.is_file():
         findings.append(Finding(script, "packaged UI sampling smoke script not found"))
-        return findings, samples, bridge_ready_dmg_paths
+        return findings, samples, bridge_ready_dmg_paths, bridge_statuses
 
     for dmg_path in dmg_paths:
         absolute_dmg = _absolute_artifact_path(root, dmg_path)
@@ -2002,7 +2023,7 @@ def verify_dmg_ui_sampling_smoke(
                     text=True,
                     start_new_session=True,
                 )
-                status_finding = _wait_for_dmg_app_status(
+                status_finding, status_payload = _wait_for_dmg_app_status(
                     process,
                     bridge_url=bridge_url,
                     dmg_path=dmg_path,
@@ -2012,6 +2033,8 @@ def verify_dmg_ui_sampling_smoke(
                     findings.append(status_finding)
                     continue
                 bridge_ready_dmg_paths.append(str(dmg_path))
+                if status_payload is not None:
+                    bridge_statuses.append(_bridge_status_report(dmg_path, status_payload))
 
                 sample_report_path = Path(home_dir) / "packaged-ui-sampling.json"
                 command = [
@@ -2094,7 +2117,7 @@ def verify_dmg_ui_sampling_smoke(
                         message = f"{message}: {detail}"
                     findings.append(Finding(dmg_path, message))
             shutil.rmtree(mount_dir, ignore_errors=True)
-    return findings, samples, bridge_ready_dmg_paths
+    return findings, samples, bridge_ready_dmg_paths, bridge_statuses
 
 
 def verify_dmg_chat_native_file_upload_smoke(
@@ -2304,6 +2327,7 @@ def verify_release_candidate(
         "dmg_app_smoke": {
             "status": "pending",
             "dmg_paths": [],
+            "bridge_statuses": [],
             "findings": [],
             "run_requested": run_dmg_app_smoke,
         },
@@ -2311,6 +2335,7 @@ def verify_release_candidate(
             "status": "pending",
             "dmg_paths": [],
             "bridge_ready_dmg_paths": [],
+            "bridge_statuses": [],
             "screens": [],
             "findings": [],
             "run_requested": run_dmg_screen_smoke,
@@ -2319,6 +2344,7 @@ def verify_release_candidate(
             "status": "pending",
             "dmg_paths": [],
             "bridge_ready_dmg_paths": [],
+            "bridge_statuses": [],
             "samples": [],
             "findings": [],
             "run_requested": run_dmg_ui_sampling_smoke,
@@ -2399,6 +2425,7 @@ def verify_release_candidate(
         report["dmg_app_smoke"] = {
             "status": "skipped",
             "dmg_paths": [],
+            "bridge_statuses": [],
             "findings": [],
             "run_requested": run_dmg_app_smoke,
         }
@@ -2412,6 +2439,7 @@ def verify_release_candidate(
             "status": "skipped",
             "dmg_paths": [],
             "bridge_ready_dmg_paths": [],
+            "bridge_statuses": [],
             "screens": [],
             "findings": [],
             "run_requested": run_dmg_screen_smoke,
@@ -2420,6 +2448,7 @@ def verify_release_candidate(
             "status": "skipped",
             "dmg_paths": [],
             "bridge_ready_dmg_paths": [],
+            "bridge_statuses": [],
             "samples": [],
             "findings": [],
             "run_requested": run_dmg_ui_sampling_smoke,
@@ -2488,6 +2517,7 @@ def verify_release_candidate(
             report["dmg_app_smoke"] = {
                 "status": "skipped",
                 "dmg_paths": [],
+                "bridge_statuses": [],
                 "findings": [],
                 "run_requested": run_dmg_app_smoke,
             }
@@ -2501,6 +2531,7 @@ def verify_release_candidate(
                 "status": "skipped",
                 "dmg_paths": [],
                 "bridge_ready_dmg_paths": [],
+                "bridge_statuses": [],
                 "screens": [],
                 "findings": [],
                 "run_requested": run_dmg_screen_smoke,
@@ -2509,6 +2540,7 @@ def verify_release_candidate(
                 "status": "skipped",
                 "dmg_paths": [],
                 "bridge_ready_dmg_paths": [],
+                "bridge_statuses": [],
                 "samples": [],
                 "findings": [],
                 "run_requested": run_dmg_ui_sampling_smoke,
@@ -2591,17 +2623,19 @@ def verify_release_candidate(
         report["dmg_app_smoke"] = {
             "status": "skipped",
             "dmg_paths": [],
+            "bridge_statuses": [],
             "findings": [],
             "run_requested": run_dmg_app_smoke,
         }
     elif run_dmg_app_smoke:
         dmg_paths = release_candidate_dmg_paths(root, selected_artifacts)
-        startup_findings = verify_dmg_app_startup(root, dmg_paths)
+        startup_findings, startup_bridge_statuses = verify_dmg_app_startup(root, dmg_paths)
         _print_findings("DMG app startup smoke", startup_findings)
         failed = failed or bool(startup_findings)
         report["dmg_app_smoke"] = {
             "status": "failed" if startup_findings else "passed",
             "dmg_paths": [str(path) for path in dmg_paths],
+            "bridge_statuses": startup_bridge_statuses,
             "findings": _finding_report(startup_findings),
             "run_requested": run_dmg_app_smoke,
         }
@@ -2610,6 +2644,7 @@ def verify_release_candidate(
         report["dmg_app_smoke"] = {
             "status": "skipped",
             "dmg_paths": [],
+            "bridge_statuses": [],
             "findings": [],
             "run_requested": run_dmg_app_smoke,
         }
@@ -2620,13 +2655,14 @@ def verify_release_candidate(
             "status": "skipped",
             "dmg_paths": [],
             "bridge_ready_dmg_paths": [],
+            "bridge_statuses": [],
             "screens": [],
             "findings": [],
             "run_requested": run_dmg_screen_smoke,
         }
     elif run_dmg_screen_smoke:
         dmg_paths = release_candidate_dmg_paths(root, selected_artifacts)
-        screen_findings, screen_results, screen_bridge_ready_paths = (
+        screen_findings, screen_results, screen_bridge_ready_paths, screen_bridge_statuses = (
             verify_dmg_screen_recording_probe(root, dmg_paths)
         )
         _print_findings("DMG screen recording probe", screen_findings)
@@ -2635,6 +2671,7 @@ def verify_release_candidate(
             "status": "failed" if screen_findings else "passed",
             "dmg_paths": [str(path) for path in dmg_paths],
             "bridge_ready_dmg_paths": screen_bridge_ready_paths,
+            "bridge_statuses": screen_bridge_statuses,
             "screens": screen_results,
             "findings": _finding_report(screen_findings),
             "run_requested": run_dmg_screen_smoke,
@@ -2645,6 +2682,7 @@ def verify_release_candidate(
             "status": "skipped",
             "dmg_paths": [],
             "bridge_ready_dmg_paths": [],
+            "bridge_statuses": [],
             "screens": [],
             "findings": [],
             "run_requested": run_dmg_screen_smoke,
@@ -2656,13 +2694,14 @@ def verify_release_candidate(
             "status": "skipped",
             "dmg_paths": [],
             "bridge_ready_dmg_paths": [],
+            "bridge_statuses": [],
             "samples": [],
             "findings": [],
             "run_requested": run_dmg_ui_sampling_smoke,
         }
     elif run_dmg_ui_sampling_smoke:
         dmg_paths = release_candidate_dmg_paths(root, selected_artifacts)
-        ui_findings, ui_samples, ui_bridge_ready_paths = verify_dmg_ui_sampling_smoke(
+        ui_findings, ui_samples, ui_bridge_ready_paths, ui_bridge_statuses = verify_dmg_ui_sampling_smoke(
             root,
             dmg_paths,
         )
@@ -2672,6 +2711,7 @@ def verify_release_candidate(
             "status": "failed" if ui_findings else "passed",
             "dmg_paths": [str(path) for path in dmg_paths],
             "bridge_ready_dmg_paths": ui_bridge_ready_paths,
+            "bridge_statuses": ui_bridge_statuses,
             "samples": ui_samples,
             "findings": _finding_report(ui_findings),
             "run_requested": run_dmg_ui_sampling_smoke,
@@ -2682,6 +2722,7 @@ def verify_release_candidate(
             "status": "skipped",
             "dmg_paths": [],
             "bridge_ready_dmg_paths": [],
+            "bridge_statuses": [],
             "samples": [],
             "findings": [],
             "run_requested": run_dmg_ui_sampling_smoke,

@@ -1690,7 +1690,12 @@ def test_release_candidate_verifier_runs_dmg_app_startup_smoke(
             return False
 
         def read(self):
-            return b'{"service":"oha-yachiyo","version":"0.4.0","uptime_seconds":1,"task_counts":{},"native_agent_ready":false}'
+            return (
+                b'{"service":"oha-yachiyo","version":"0.4.0","uptime_seconds":1,'
+                b'"task_counts":{},"native_agent_ready":false,'
+                b'"build_metadata":{"commit":"abc1234567890abc1234567890abc1234567890a",'
+                b'"short_commit":"abc1234"}}'
+            )
 
     class FakeProcess:
         returncode = None
@@ -1762,6 +1767,18 @@ def test_release_candidate_verifier_runs_dmg_app_startup_smoke(
     assert report["dmg_app_smoke"] == {
         "status": "passed",
         "dmg_paths": ["release/Oha-Yachiyo-0.4.0-arm64.dmg"],
+        "bridge_statuses": [
+            {
+                "dmg_path": "release/Oha-Yachiyo-0.4.0-arm64.dmg",
+                "service": "oha-yachiyo",
+                "version": "0.4.0",
+                "native_agent_ready": False,
+                "build_metadata": {
+                    "commit": "abc1234567890abc1234567890abc1234567890a",
+                    "short_commit": "abc1234",
+                },
+            }
+        ],
         "findings": [],
         "run_requested": True,
     }
@@ -1843,7 +1860,10 @@ def test_release_candidate_verifier_runs_dmg_screen_recording_probe(
     def fake_urlopen(url, timeout):
         if str(url).endswith("/status"):
             return FakeResponse(
-                b'{"service":"oha-yachiyo","version":"0.4.0","uptime_seconds":1}'
+                b'{"service":"oha-yachiyo","version":"0.4.0","uptime_seconds":1,'
+                b'"native_agent_ready":true,'
+                b'"build_metadata":{"commit":"def1234567890abc1234567890abc1234567890a",'
+                b'"short_commit":"def1234"}}'
             )
         if str(url).endswith("/screen/current"):
             return FakeResponse(
@@ -1881,6 +1901,18 @@ def test_release_candidate_verifier_runs_dmg_screen_recording_probe(
         "status": "passed",
         "dmg_paths": ["release/Oha-Yachiyo-0.4.0-arm64.dmg"],
         "bridge_ready_dmg_paths": ["release/Oha-Yachiyo-0.4.0-arm64.dmg"],
+        "bridge_statuses": [
+            {
+                "dmg_path": "release/Oha-Yachiyo-0.4.0-arm64.dmg",
+                "service": "oha-yachiyo",
+                "version": "0.4.0",
+                "native_agent_ready": True,
+                "build_metadata": {
+                    "commit": "def1234567890abc1234567890abc1234567890a",
+                    "short_commit": "def1234",
+                },
+            }
+        ],
         "screens": [
             {
                 "dmg_path": "release/Oha-Yachiyo-0.4.0-arm64.dmg",
@@ -1961,7 +1993,10 @@ def test_release_candidate_verifier_keeps_bridge_evidence_when_dmg_screen_probe_
     def fake_urlopen(url, timeout):
         if str(url).endswith("/status"):
             return FakeResponse(
-                b'{"service":"oha-yachiyo","version":"0.4.0","uptime_seconds":1}'
+                b'{"service":"oha-yachiyo","version":"0.4.0","uptime_seconds":1,'
+                b'"native_agent_ready":true,'
+                b'"build_metadata":{"commit":"fed1234567890abc1234567890abc1234567890a",'
+                b'"short_commit":"fed1234"}}'
             )
         if str(url).endswith("/screen/current"):
             return FakeResponse(b'{"format":"png","width":0,"height":1080}')
@@ -1988,6 +2023,18 @@ def test_release_candidate_verifier_keeps_bridge_evidence_when_dmg_screen_probe_
     assert report["dmg_screen_probe"]["status"] == "failed"
     assert report["dmg_screen_probe"]["bridge_ready_dmg_paths"] == [
         "release/Oha-Yachiyo-0.4.0-arm64.dmg"
+    ]
+    assert report["dmg_screen_probe"]["bridge_statuses"] == [
+        {
+            "dmg_path": "release/Oha-Yachiyo-0.4.0-arm64.dmg",
+            "service": "oha-yachiyo",
+            "version": "0.4.0",
+            "native_agent_ready": True,
+            "build_metadata": {
+                "commit": "fed1234567890abc1234567890abc1234567890a",
+                "short_commit": "fed1234",
+            },
+        }
     ]
     assert report["dmg_screen_probe"]["screens"] == []
     manual_statuses = {
@@ -2034,7 +2081,12 @@ def test_release_candidate_verifier_runs_dmg_ui_sampling_smoke(
             return False
 
         def read(self):
-            return b'{"service":"oha-yachiyo","version":"0.4.0","uptime_seconds":1}'
+            return (
+                b'{"service":"oha-yachiyo","version":"0.4.0","uptime_seconds":1,'
+                b'"native_agent_ready":true,'
+                b'"build_metadata":{"commit":"1234abc567890abc1234567890abc1234567890a",'
+                b'"short_commit":"1234abc"}}'
+            )
 
     class FakeProcess:
         returncode = None
@@ -2130,6 +2182,18 @@ def test_release_candidate_verifier_runs_dmg_ui_sampling_smoke(
         "status": "passed",
         "dmg_paths": ["release/Oha-Yachiyo-0.4.0-arm64.dmg"],
         "bridge_ready_dmg_paths": ["release/Oha-Yachiyo-0.4.0-arm64.dmg"],
+        "bridge_statuses": [
+            {
+                "dmg_path": "release/Oha-Yachiyo-0.4.0-arm64.dmg",
+                "service": "oha-yachiyo",
+                "version": "0.4.0",
+                "native_agent_ready": True,
+                "build_metadata": {
+                    "commit": "1234abc567890abc1234567890abc1234567890a",
+                    "short_commit": "1234abc",
+                },
+            }
+        ],
         "samples": [
             {
                 "dmg_path": "release/Oha-Yachiyo-0.4.0-arm64.dmg",
@@ -2282,7 +2346,10 @@ def test_release_candidate_dmg_app_startup_smoke_requires_executable(
     monkeypatch.setattr(rc.subprocess, "run", fake_run)
     monkeypatch.setattr(rc.subprocess, "Popen", fail_popen)
 
-    findings = rc.verify_dmg_app_startup(tmp_path, (Path("release/Oha-Yachiyo-0.4.0-arm64.dmg"),))
+    findings, bridge_statuses = rc.verify_dmg_app_startup(
+        tmp_path,
+        (Path("release/Oha-Yachiyo-0.4.0-arm64.dmg"),),
+    )
 
     assert findings == [
         rc.Finding(
@@ -2290,6 +2357,7 @@ def test_release_candidate_dmg_app_startup_smoke_requires_executable(
             "mounted Oha-Yachiyo.app must contain executable Oha-Yachiyo",
         )
     ]
+    assert bridge_statuses == []
 
 
 def test_release_candidate_verifier_runs_provider_smoke(tmp_path, monkeypatch, capsys):

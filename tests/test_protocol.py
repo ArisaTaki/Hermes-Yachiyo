@@ -102,15 +102,18 @@ class TestStatusResponse:
         assert resp.service == "oha-yachiyo"
         assert resp.version == "0.4.0"
         assert resp.native_agent_ready is False
+        assert resp.build_metadata == {}
 
     def test_with_task_counts(self):
         resp = StatusResponse(
             uptime_seconds=60,
             task_counts={TaskStatus.PENDING: 3, TaskStatus.RUNNING: 1},
             native_agent_ready=True,
+            build_metadata={"commit": "abc1234567890abc1234567890abc1234567890a"},
         )
         assert resp.native_agent_ready is True
         assert resp.task_counts[TaskStatus.PENDING] == 3
+        assert resp.build_metadata["commit"] == "abc1234567890abc1234567890abc1234567890a"
 
 
 class TestErrorResponse:

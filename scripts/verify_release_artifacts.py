@@ -1122,6 +1122,10 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release candidate verifier must write source revision metadata to the RC report",
     ),
     (
+        '"bridge_statuses"',
+        "release candidate verifier must archive packaged Bridge status metadata from DMG smokes",
+    ),
+    (
         '"manual_release_candidate_check_source_revisions"',
         "release candidate verifier manual reports, drafts, and Markdown must preserve source revision metadata",
     ),

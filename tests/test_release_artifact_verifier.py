@@ -157,6 +157,10 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
     )
     assert "release candidate verifier must write source revision metadata to the RC report" in messages
     assert (
+        "release candidate verifier must archive packaged Bridge status metadata from DMG smokes"
+        in messages
+    )
+    assert (
         "release candidate verifier manual reports, drafts, and Markdown must preserve source revision metadata"
         in messages
     )
