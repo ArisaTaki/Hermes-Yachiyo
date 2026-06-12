@@ -1061,6 +1061,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover Workflow start node projection boundary",
     ),
     (
+        "tests/test_agent_runtime.py::test_workflow_run_completion_projection_builds_update_and_replay_payloads",
+        "macOS release workflow smoke tests must cover Workflow run completion projection boundary",
+    ),
+    (
         "tests/test_agent_runtime.py::test_workflow_continuation_coordinator_pauses_for_approval_node",
         "macOS release workflow smoke tests must cover WorkflowContinuationCoordinator approval pause projection",
     ),

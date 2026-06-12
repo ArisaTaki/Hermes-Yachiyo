@@ -4626,6 +4626,32 @@ class WorkflowStartNodeProjection:
         )
 
 
+@dataclass(frozen=True)
+class WorkflowRunCompletionProjection:
+    """Completed Workflow Run projection."""
+
+    result_text: str
+
+    def timeline_event(self, timeline_factory: Any) -> dict[str, Any]:
+        return timeline_factory("workflow.run.completed", "Workflow run completed")
+
+    def event_payload(self) -> dict[str, Any]:
+        return {"result": self.result_text}
+
+    def update_fields(
+        self,
+        *,
+        timeline: list[dict[str, Any]],
+        artifacts: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        return {
+            "status": "completed",
+            "result": self.result_text,
+            "timeline": timeline,
+            "artifacts": artifacts,
+        }
+
+
 class WorkflowContinuationCoordinator:
     """Executes Workflow nodes for a Workflow Run."""
 
@@ -4713,17 +4739,15 @@ class WorkflowContinuationCoordinator:
                     )
                     continue
                 raise AgentRuntimeError(f"未知 Workflow 节点类型：{kind}")
-            timeline.append(engine._timeline("workflow.run.completed", "Workflow run completed"))
-            engine.append_run_event(str(run["run_id"]), "workflow.run.completed", {"result": context})
+            completion = WorkflowRunCompletionProjection(context)
+            timeline.append(completion.timeline_event(engine._timeline))
+            engine.append_run_event(str(run["run_id"]), "workflow.run.completed", completion.event_payload())
             result = engine._update_run(
                 str(run["run_id"]),
-                status="completed",
-                result=context,
-                timeline=timeline,
-                artifacts=artifacts,
+                **completion.update_fields(timeline=timeline, artifacts=artifacts),
             )
             if root_group:
-                engine._update_run_group(run_group_id, status="completed", summary=context)
+                engine._update_run_group(run_group_id, status="completed", summary=completion.result_text)
                 result = engine.get_run(result["run_id"])
             return result
         except Exception as exc:
