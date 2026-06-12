@@ -610,6 +610,10 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document the archived manual RC check draft",
     ),
     (
+        "release/manual-rc-checks.md",
+        "release packaging docs must document the archived manual RC check Markdown checklist",
+    ),
+    (
         "manual_release_candidate_check_statuses",
         "release packaging docs must document structured manual RC check statuses",
     ),
@@ -624,6 +628,10 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "--write-manual-checks-draft",
         "release packaging docs must document manual RC check draft generation",
+    ),
+    (
+        "--write-manual-checks-markdown",
+        "release packaging docs must document manual RC check Markdown generation",
     ),
     (
         "--mark-provider-smoke-not-applicable-if-missing",
@@ -734,6 +742,10 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "--manual-checks-json release/rc-verification.json --write-manual-checks-draft release/manual-rc-checks.draft.json",
         "macOS release workflow must archive a manual RC check draft seeded from the RC report",
+    ),
+    (
+        "--manual-checks-json release/manual-rc-checks.draft.json --write-manual-checks-markdown release/manual-rc-checks.md",
+        "macOS release workflow must archive a manual RC check Markdown checklist seeded from the draft",
     ),
     (
         'cp "${dmg_files[0]}" "release/${VERSIONED_DMG}"',
@@ -988,6 +1000,14 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release candidate verifier must expose manual check draft writing",
     ),
     (
+        "_manual_release_candidate_checks_markdown",
+        "release candidate verifier must generate manual check Markdown checklists",
+    ),
+    (
+        "write_manual_release_candidate_checks_markdown",
+        "release candidate verifier must expose manual check Markdown writing",
+    ),
+    (
         '"evidence_prompt"',
         "release candidate verifier manual check templates must preserve evidence prompts",
     ),
@@ -1038,6 +1058,10 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         '"--write-manual-checks-draft"',
         "release candidate verifier CLI must write editable manual check drafts",
+    ),
+    (
+        '"--write-manual-checks-markdown"',
+        "release candidate verifier CLI must write manual check Markdown checklists",
     ),
     (
         '"--mark-provider-smoke-not-applicable-if-missing"',
@@ -3091,6 +3115,9 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
     write_signoff_draft = workflow.find(
         "--manual-checks-json release/rc-verification.json --write-manual-checks-draft release/manual-rc-checks.draft.json"
     )
+    write_signoff_markdown = workflow.find(
+        "--manual-checks-json release/manual-rc-checks.draft.json --write-manual-checks-markdown release/manual-rc-checks.md"
+    )
     upload_artifact = workflow.find("Upload DMG artifact")
     if (
         prepare_release < 0
@@ -3116,6 +3143,19 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
             Finding(
                 workflow_path,
                 "macOS release workflow must generate manual RC check draft after the RC report before upload",
+            )
+        )
+    if (
+        write_signoff_draft < 0
+        or write_signoff_markdown < 0
+        or upload_artifact < 0
+        or write_signoff_markdown < write_signoff_draft
+        or write_signoff_markdown > upload_artifact
+    ):
+        findings.append(
+            Finding(
+                workflow_path,
+                "macOS release workflow must generate manual RC check Markdown after the draft before upload",
             )
         )
     if (

@@ -629,6 +629,46 @@ def test_release_candidate_verifier_manual_check_draft_can_mark_provider_not_app
     assert loaded["real_provider_smoke"]["evidence_source"] == "credentials_unavailable"
 
 
+def test_release_candidate_verifier_writes_manual_check_markdown_from_draft(tmp_path):
+    draft_checks = rc._manual_release_candidate_check_report()
+    for check in draft_checks:
+        if check["id"] == "packaged_bridge_isolation":
+            check["status"] = "passed"
+            check["evidence"] = "Automated --run-dmg-app-smoke passed for release/Oha-Yachiyo.dmg"
+            check["evidence_source"] = "automated_rc_gate"
+        if check["id"] == "real_provider_smoke":
+            check["status"] = "not_applicable"
+            check["evidence"] = "missing environment variables: OHA_YACHIYO_SMOKE_API_KEY"
+            check["evidence_source"] = "credentials_unavailable"
+
+    draft_path = tmp_path / "tmp" / "final-rc-signoff.json"
+    draft_path.parent.mkdir(parents=True)
+    draft_path.write_text(
+        json.dumps({"checks": draft_checks}),
+        encoding="utf-8",
+    )
+
+    markdown_path = rc.write_manual_release_candidate_checks_markdown(
+        tmp_path,
+        Path("tmp/final-rc-signoff.md"),
+        Path("tmp/final-rc-signoff.json"),
+    )
+
+    assert markdown_path == tmp_path / "tmp" / "final-rc-signoff.md"
+    markdown = markdown_path.read_text(encoding="utf-8")
+    assert markdown.startswith("# Oha-Yachiyo Manual Release-Candidate Signoff\n")
+    assert "- Source: `tmp/final-rc-signoff.json`" in markdown
+    assert "- Remaining checks: 4" in markdown
+    assert "## Remaining Manual Checks" in markdown
+    assert "- [ ] `gatekeeper_first_launch`" in markdown
+    assert "Evidence to record:" in markdown
+    assert "## Completed Or Not Applicable Checks" in markdown
+    assert "- [x] `packaged_bridge_isolation` - passed" in markdown
+    assert "Evidence source: automated_rc_gate" in markdown
+    assert "- [x] `real_provider_smoke` - not_applicable" in markdown
+    assert "Evidence source: credentials_unavailable" in markdown
+
+
 def test_release_candidate_verifier_rejects_manual_check_template_outside_root(tmp_path):
     outside = tmp_path.parent / "manual-rc-checks.template.json"
 
@@ -667,7 +707,10 @@ def test_release_candidate_verifier_rejects_template_and_draft_cli_conflict(caps
     )
 
     output = capsys.readouterr().out
-    assert "choose either --write-manual-checks-template or --write-manual-checks-draft" in output
+    assert (
+        "choose only one of --write-manual-checks-template, --write-manual-checks-draft, "
+        "or --write-manual-checks-markdown"
+    ) in output
 
 
 def test_release_candidate_verifier_provider_not_applicable_flag_requires_draft(capsys):

@@ -192,6 +192,73 @@ def _manual_release_candidate_check_draft(
     return draft
 
 
+def _manual_release_candidate_checks_markdown(
+    checks: Sequence[dict[str, str]],
+    *,
+    source_path: Path | None = None,
+) -> str:
+    summary = _manual_release_candidate_check_summary(checks)
+    remaining_checks = [
+        check for check in checks if check.get("status") == "manual_required"
+    ]
+    completed_checks = [
+        check for check in checks if check.get("status") != "manual_required"
+    ]
+    automated_ids = summary.get("automated_evidence_check_ids", [])
+    failed_ids = summary.get("failed_check_ids", [])
+    lines = [
+        "# Oha-Yachiyo Manual Release-Candidate Signoff",
+        "",
+        f"- Source: `{source_path}`" if source_path is not None else "- Source: manual checks",
+        f"- Remaining checks: {summary['remaining_count']}",
+        f"- Failed checks: {len(failed_ids) if isinstance(failed_ids, list) else 0}",
+        "- Automated evidence: "
+        + (
+            ", ".join(f"`{check_id}`" for check_id in automated_ids)
+            if isinstance(automated_ids, list) and automated_ids
+            else "none"
+        ),
+        "",
+        "## Remaining Manual Checks",
+        "",
+    ]
+    if not remaining_checks:
+        lines.append("- None")
+    for check in remaining_checks:
+        lines.extend(
+            [
+                f"- [ ] `{check['id']}`",
+                f"  - Description: {check.get('description', '')}",
+                f"  - Next action: {check.get('next_action', '')}",
+                f"  - Evidence to record: {check.get('evidence_prompt', check.get('evidence', ''))}",
+                "  - Evidence:",
+                "  - Notes:",
+            ]
+        )
+
+    lines.extend(["", "## Completed Or Not Applicable Checks", ""])
+    if not completed_checks:
+        lines.append("- None")
+    for check in completed_checks:
+        evidence = str(check.get("evidence", "")).strip()
+        notes = str(check.get("notes", "")).strip()
+        lines.extend(
+            [
+                f"- [x] `{check['id']}` - {check.get('status', '')}",
+                f"  - Description: {check.get('description', '')}",
+            ]
+        )
+        evidence_source = str(check.get("evidence_source", "")).strip()
+        if evidence_source:
+            lines.append(f"  - Evidence source: {evidence_source}")
+        if evidence:
+            lines.append(f"  - Evidence: {evidence}")
+        if notes:
+            lines.append(f"  - Notes: {notes}")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def _mark_provider_smoke_not_applicable_if_missing(
     checks: Sequence[dict[str, str]],
 ) -> bool:
@@ -421,6 +488,28 @@ def write_manual_release_candidate_checks_draft(
     _write_report(
         resolved,
         _manual_release_candidate_check_draft(checks, source_path=source_path),
+    )
+    return resolved
+
+
+def write_manual_release_candidate_checks_markdown(
+    root: Path,
+    output_path: Path,
+    source_path: Path | None = None,
+) -> Path:
+    checks, findings = _load_manual_release_candidate_checks(root, source_path)
+    if findings:
+        formatted = "; ".join(finding.format() for finding in findings)
+        raise ValueError(f"manual release-candidate checks markdown source is invalid: {formatted}")
+    resolved = _resolve_project_file(
+        root,
+        output_path,
+        "manual release-candidate checks markdown",
+    )
+    resolved.parent.mkdir(parents=True, exist_ok=True)
+    resolved.write_text(
+        _manual_release_candidate_checks_markdown(checks, source_path=source_path),
+        encoding="utf-8",
     )
     return resolved
 
@@ -1290,6 +1379,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--write-manual-checks-markdown",
+        type=Path,
+        help=(
+            "Write a project-local manual release-candidate signoff checklist in Markdown, "
+            "optionally seeded from --manual-checks-json, and exit."
+        ),
+    )
+    parser.add_argument(
         "--mark-provider-smoke-not-applicable-if-missing",
         action="store_true",
         help=(
@@ -1307,10 +1404,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             "- --mark-provider-smoke-not-applicable-if-missing requires --write-manual-checks-draft"
         )
         return 1
-    if args.write_manual_checks_template is not None and args.write_manual_checks_draft is not None:
+    write_actions = [
+        args.write_manual_checks_template is not None,
+        args.write_manual_checks_draft is not None,
+        args.write_manual_checks_markdown is not None,
+    ]
+    if sum(1 for enabled in write_actions if enabled) > 1:
         print(
             "manual release-candidate checks: failed\n"
-            "- choose either --write-manual-checks-template or --write-manual-checks-draft"
+            "- choose only one of --write-manual-checks-template, "
+            "--write-manual-checks-draft, or --write-manual-checks-markdown"
         )
         return 1
     if args.write_manual_checks_template is not None:
@@ -1338,6 +1441,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"manual release-candidate checks draft: failed\n- {exc}")
             return 1
         print(f"manual release-candidate checks draft: {args.write_manual_checks_draft}")
+        return 0
+    if args.write_manual_checks_markdown is not None:
+        try:
+            write_manual_release_candidate_checks_markdown(
+                PROJECT_ROOT,
+                args.write_manual_checks_markdown,
+                args.manual_checks_json,
+            )
+        except (OSError, ValueError) as exc:
+            print(f"manual release-candidate checks markdown: failed\n- {exc}")
+            return 1
+        print(f"manual release-candidate checks markdown: {args.write_manual_checks_markdown}")
         return 0
     return verify_release_candidate(
         artifact_paths=args.paths or None,

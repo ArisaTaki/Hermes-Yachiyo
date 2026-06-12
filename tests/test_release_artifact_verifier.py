@@ -162,6 +162,8 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
     assert "release candidate verifier must expose manual check template writing" in messages
     assert "release candidate verifier must generate editable manual check drafts" in messages
     assert "release candidate verifier must expose manual check draft writing" in messages
+    assert "release candidate verifier must generate manual check Markdown checklists" in messages
+    assert "release candidate verifier must expose manual check Markdown writing" in messages
     assert "release candidate verifier manual check templates must preserve evidence prompts" in messages
     assert "release candidate verifier manual check templates must include next actions" in messages
     assert "release candidate verifier must load manual check evidence JSON" in messages
@@ -175,6 +177,7 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
     assert "release candidate verifier CLI must require complete manual checks for final signoff" in messages
     assert "release candidate verifier CLI must write manual check templates" in messages
     assert "release candidate verifier CLI must write editable manual check drafts" in messages
+    assert "release candidate verifier CLI must write manual check Markdown checklists" in messages
     assert (
         "release candidate verifier CLI must explicitly mark provider smoke not_applicable only when requested"
         in messages
@@ -668,10 +671,12 @@ def test_verifier_requires_release_packaging_docs_for_release_gates(tmp_path):
     assert "release packaging docs must document the archived RC verification report" in messages
     assert "release packaging docs must document the archived manual RC check template" in messages
     assert "release packaging docs must document the archived manual RC check draft" in messages
+    assert "release packaging docs must document the archived manual RC check Markdown checklist" in messages
     assert "release packaging docs must document structured manual RC check statuses" in messages
     assert "release packaging docs must document manual RC check evidence input" in messages
     assert "release packaging docs must document manual RC check template generation" in messages
     assert "release packaging docs must document manual RC check draft generation" in messages
+    assert "release packaging docs must document manual RC check Markdown generation" in messages
     assert (
         "release packaging docs must document explicit provider-smoke not_applicable draft evidence"
         in messages
@@ -1542,7 +1547,9 @@ def test_verifier_requires_release_workflow_binary_scans_packaged_outputs(tmp_pa
     assert "macOS release workflow must upload a release-candidate verification report" in messages
     assert "macOS release workflow must archive a manual RC check evidence template" in messages
     assert "macOS release workflow must archive a manual RC check draft seeded from the RC report" in messages
+    assert "macOS release workflow must archive a manual RC check Markdown checklist seeded from the draft" in messages
     assert "macOS release workflow must generate manual RC check draft after the RC report before upload" in messages
+    assert "macOS release workflow must generate manual RC check Markdown after the draft before upload" in messages
 
 
 def test_verifier_requires_release_workflow_guard_before_dependency_install(tmp_path):
@@ -1625,6 +1632,40 @@ def test_verifier_requires_release_workflow_manual_draft_after_rc_report(tmp_pat
 
     assert (
         "macOS release workflow must generate manual RC check draft after the RC report before upload"
+        in messages
+    )
+
+
+def test_verifier_requires_release_workflow_manual_markdown_after_draft(tmp_path):
+    workflow = tmp_path / verifier.RELEASE_WORKFLOW_FILE
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text(
+        "name: Build macOS DMG\n"
+        "jobs:\n"
+        "  package-macos:\n"
+        "    steps:\n"
+        "      - name: Verify release-facing product identity and security guards\n"
+        "        run: python scripts/verify_release_artifacts.py\n"
+        "      - name: Install Python dependencies\n"
+        "        run: python -m pip install -e .\n"
+        "      - name: Prepare release metadata\n"
+        "        run: mkdir -p release\n"
+        "      - name: Verify release candidate artifacts\n"
+        "        run: |\n"
+        "          provider_smoke_args+=(--run-provider-smoke)\n"
+        "          python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount --report-json release/rc-verification.json\n"
+        "          python scripts/verify_release_candidate.py --manual-checks-json release/manual-rc-checks.draft.json --write-manual-checks-markdown release/manual-rc-checks.md\n"
+        "          python scripts/verify_release_candidate.py --manual-checks-json release/rc-verification.json --write-manual-checks-draft release/manual-rc-checks.draft.json\n"
+        "      - name: Upload DMG artifact\n"
+        "        run: echo upload\n",
+        encoding="utf-8",
+    )
+
+    findings = verifier._verify_release_workflow_guards(tmp_path)
+    messages = [finding.message for finding in findings]
+
+    assert (
+        "macOS release workflow must generate manual RC check Markdown after the draft before upload"
         in messages
     )
 
