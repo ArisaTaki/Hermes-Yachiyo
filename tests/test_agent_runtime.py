@@ -10036,6 +10036,55 @@ def test_agent_run_consumes_split_utf8_http_sse_content_chunks(tmp_path, monkeyp
         service.close()
 
 
+def test_agent_run_consumes_split_http_sse_content_frame_chunks(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    requests = []
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            payload = json.dumps({"choices": [{"delta": {"content": "agent split frame"}}]})
+            frame = f"data: {payload}\n\ndata: [DONE]\n\n".encode("utf-8")
+            yield frame[:8]
+            yield frame[8:29]
+            yield frame[29:53]
+            yield frame[53:]
+
+    def fake_urlopen(request, **kwargs):
+        body = json.loads(request.data.decode("utf-8"))
+        requests.append({"request": request, "body": body, "kwargs": kwargs})
+        assert request.full_url == "https://api.example.test/v1/chat/completions"
+        assert request.get_header("Accept") == "text/event-stream"
+        assert body["stream"] is True
+        return FakeResponse()
+
+    monkeypatch.setattr("apps.core.tls.urlrequest.urlopen", fake_urlopen)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Split HTTP SSE Agent",
+                "model_mode": "custom_api",
+                "model_config": {"base_url": "https://api.example.test/v1", "model": "demo-model", "api_key": "sk-secret"},
+            }
+        )
+        run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Use split SSE"})
+        run_events = service.list_run_events(run["run_id"], include_internal=True)["events"]
+        completed_fact = next(event for event in run_events if event["event_type"] == "agent.run.completed")
+
+        assert run["status"] == "completed"
+        assert run["result"] == "agent split frame"
+        assert len(requests) == 1
+        assert completed_fact["payload"]["result"] == "agent split frame"
+        assert not any(str(event["event_type"]).endswith(".delta") for event in run_events)
+    finally:
+        service.close()
+
+
 def test_agent_run_consumes_coalesced_http_sse_content_frames(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     requests = []

@@ -1205,6 +1205,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover NativeRunEngine Agent Run split UTF-8 SSE content frames",
     ),
     (
+        "tests/test_agent_runtime.py::test_agent_run_consumes_split_http_sse_content_frame_chunks",
+        "macOS release workflow smoke tests must cover NativeRunEngine Agent Run split HTTP SSE content frames",
+    ),
+    (
         "tests/test_agent_runtime.py::test_agent_run_consumes_coalesced_http_sse_content_frames",
         "macOS release workflow smoke tests must cover NativeRunEngine Agent Run coalesced HTTP SSE content frames",
     ),
