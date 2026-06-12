@@ -255,6 +255,7 @@ jobs:
             tests/test_build_metadata.py \
             tests/test_prepare_app_build_metadata.py \
             tests/test_release_candidate_verifier.py \
+            tests/test_electron_ui_smoke_runner.py \
             tests/test_credential_store.py \
             tests/test_bridge_server.py::test_bridge_debug_routes_are_disabled_for_release_metadata \
             tests/test_bridge_server.py::test_bridge_debug_routes_are_disabled_for_release_channel_env \

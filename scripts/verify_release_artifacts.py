@@ -1868,6 +1868,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover local RC verification gate",
     ),
     (
+        "tests/test_electron_ui_smoke_runner.py",
+        "macOS release workflow smoke tests must cover the shared Electron UI smoke runner",
+    ),
+    (
         "tests/test_credential_store.py",
         "macOS release workflow smoke tests must cover release-like CredentialStore guards",
     ),

@@ -1969,6 +1969,7 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow smoke tests must cover packaged backend build command guards" in messages
     assert "macOS release workflow smoke tests must cover release-like build metadata guards" in messages
     assert "macOS release workflow smoke tests must cover local RC verification gate" in messages
+    assert "macOS release workflow smoke tests must cover the shared Electron UI smoke runner" in messages
     assert "macOS release workflow smoke tests must cover release-like CredentialStore guards" in messages
     assert "macOS release workflow smoke tests must cover Bridge debug routes release metadata guard" in messages
     assert "macOS release workflow smoke tests must cover Bridge debug routes release channel env guard" in messages
