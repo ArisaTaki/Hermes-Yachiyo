@@ -703,6 +703,10 @@ def test_release_candidate_verifier_accepts_complete_manual_markdown_for_signoff
             [
                 "# Oha-Yachiyo Manual Release-Candidate Signoff",
                 "",
+                "<!-- manual_release_candidate_check_source_revisions: "
+                '[{"available":true,"commit":"1111111111111111111111111111111111111111",'
+                '"dirty":false,"short_commit":"1111111","source":"tmp/final-rc.json"}] -->',
+                "",
                 "## Remaining Manual Checks",
                 "",
                 "- [x] `gatekeeper_first_launch` - passed",
@@ -741,6 +745,15 @@ def test_release_candidate_verifier_accepts_complete_manual_markdown_for_signoff
     report = json.loads((tmp_path / "tmp" / "rc.json").read_text(encoding="utf-8"))
     assert report["manual_release_candidate_check_status"] == "passed"
     assert report["manual_release_candidate_checks_source"] == "tmp/manual-checks.md"
+    assert report["manual_release_candidate_check_source_revisions"] == [
+        {
+            "source": "tmp/final-rc.json",
+            "available": True,
+            "commit": "1111111111111111111111111111111111111111",
+            "short_commit": "1111111",
+            "dirty": False,
+        }
+    ]
     assert report["manual_release_candidate_check_summary"]["remaining_count"] == 0
     statuses = {
         check["id"]: check for check in report["manual_release_candidate_check_statuses"]
@@ -1365,7 +1378,20 @@ def test_release_candidate_verifier_writes_manual_check_markdown_from_draft(tmp_
     draft_path = tmp_path / "tmp" / "final-rc-signoff.json"
     draft_path.parent.mkdir(parents=True)
     draft_path.write_text(
-        json.dumps({"checks": draft_checks}),
+        json.dumps(
+            {
+                "checks": draft_checks,
+                "manual_release_candidate_check_source_revisions": [
+                    {
+                        "source": "tmp/final-rc.json",
+                        "available": True,
+                        "commit": "2222222222222222222222222222222222222222",
+                        "short_commit": "2222222",
+                        "dirty": False,
+                    }
+                ],
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -1379,6 +1405,9 @@ def test_release_candidate_verifier_writes_manual_check_markdown_from_draft(tmp_
     markdown = markdown_path.read_text(encoding="utf-8")
     assert markdown.startswith("# Oha-Yachiyo Manual Release-Candidate Signoff\n")
     assert "- Source: `tmp/final-rc-signoff.json`" in markdown
+    assert "- Source revisions: `tmp/final-rc.json@2222222`" in markdown
+    assert "manual_release_candidate_check_source_revisions" in markdown
+    assert "2222222222222222222222222222222222222222" in markdown
     assert "- Remaining checks: 4" in markdown
     assert "## How To Fill" in markdown
     assert "omitted status defaults to `passed`" in markdown

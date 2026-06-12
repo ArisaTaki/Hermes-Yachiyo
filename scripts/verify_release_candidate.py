@@ -140,6 +140,10 @@ MANUAL_RELEASE_CANDIDATE_CHECKS: tuple[str, ...] = tuple(
 MANUAL_RELEASE_CANDIDATE_CHECK_MARKDOWN_RE = re.compile(
     r"^- \[(?P<checked>[ xX])\] `(?P<id>[^`]+)`(?: - (?P<status>[A-Za-z_]+))?\s*$"
 )
+MANUAL_RELEASE_CANDIDATE_CHECK_SOURCE_REVISIONS_MARKDOWN_PREFIX = (
+    "<!-- manual_release_candidate_check_source_revisions: "
+)
+MANUAL_RELEASE_CANDIDATE_CHECK_SOURCE_REVISIONS_MARKDOWN_SUFFIX = " -->"
 
 
 def _manual_release_candidate_check_report() -> list[dict[str, str]]:
@@ -273,6 +277,63 @@ def _manual_check_source_revisions(
     return revisions
 
 
+def _manual_check_source_revision_summary(
+    source_revisions: Sequence[dict[str, object]],
+) -> str:
+    labels: list[str] = []
+    for revision in source_revisions:
+        source = str(revision.get("source") or "unknown-source")
+        short_commit = str(revision.get("short_commit") or "").strip()
+        commit = str(revision.get("commit") or "").strip()
+        label_commit = short_commit or commit[:7] or "unavailable"
+        dirty_suffix = " dirty" if revision.get("dirty") is True else ""
+        labels.append(f"`{source}@{label_commit}{dirty_suffix}`")
+    return ", ".join(labels) if labels else "none"
+
+
+def _manual_check_source_revisions_from_markdown(
+    raw_text: str,
+) -> list[dict[str, object]]:
+    for line in raw_text.splitlines():
+        stripped = line.strip()
+        if not (
+            stripped.startswith(MANUAL_RELEASE_CANDIDATE_CHECK_SOURCE_REVISIONS_MARKDOWN_PREFIX)
+            and stripped.endswith(MANUAL_RELEASE_CANDIDATE_CHECK_SOURCE_REVISIONS_MARKDOWN_SUFFIX)
+        ):
+            continue
+        payload = stripped[
+            len(MANUAL_RELEASE_CANDIDATE_CHECK_SOURCE_REVISIONS_MARKDOWN_PREFIX) :
+            -len(MANUAL_RELEASE_CANDIDATE_CHECK_SOURCE_REVISIONS_MARKDOWN_SUFFIX)
+        ]
+        try:
+            raw_revisions = json.loads(payload)
+        except json.JSONDecodeError:
+            return []
+        if isinstance(raw_revisions, list):
+            return [dict(item) for item in raw_revisions if isinstance(item, dict)]
+        return []
+    return []
+
+
+def _manual_check_markdown_source_revisions(
+    root: Path,
+    markdown_path: Path | None,
+) -> list[dict[str, object]]:
+    if markdown_path is None:
+        return []
+    try:
+        evidence_path = _resolve_project_file(
+            root,
+            markdown_path,
+            "manual release-candidate checks markdown",
+        )
+        return _manual_check_source_revisions_from_markdown(
+            evidence_path.read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError):
+        return []
+
+
 def _manual_release_candidate_check_draft(
     checks: Sequence[dict[str, str]],
     *,
@@ -321,6 +382,7 @@ def _manual_release_candidate_checks_markdown(
     checks: Sequence[dict[str, str]],
     *,
     source_path: ManualChecksSource = None,
+    source_revisions: Sequence[dict[str, object]] | None = None,
     markdown_path: Path | None = None,
 ) -> str:
     summary = _manual_release_candidate_check_summary(checks)
@@ -333,12 +395,14 @@ def _manual_release_candidate_checks_markdown(
     automated_ids = summary.get("automated_evidence_check_ids", [])
     failed_ids = summary.get("failed_check_ids", [])
     manual_checks_arg = str(markdown_path) if markdown_path is not None else "<this-checklist.md>"
+    source_revision_items = list(source_revisions or [])
     lines = [
         "# Oha-Yachiyo Manual Release-Candidate Signoff",
         "",
         f"- Source: `{_manual_checks_source_label(source_path)}`"
         if source_path is not None
         else "- Source: manual checks",
+        f"- Source revisions: {_manual_check_source_revision_summary(source_revision_items)}",
         f"- Remaining checks: {summary['remaining_count']}",
         f"- Failed checks: {len(failed_ids) if isinstance(failed_ids, list) else 0}",
         "- Automated evidence: "
@@ -368,6 +432,21 @@ def _manual_release_candidate_checks_markdown(
         "## Remaining Manual Checks",
         "",
     ]
+    if source_revision_items:
+        lines.extend(
+            [
+                (
+                    MANUAL_RELEASE_CANDIDATE_CHECK_SOURCE_REVISIONS_MARKDOWN_PREFIX
+                    + json.dumps(
+                        source_revision_items,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    )
+                    + MANUAL_RELEASE_CANDIDATE_CHECK_SOURCE_REVISIONS_MARKDOWN_SUFFIX
+                ),
+                "",
+            ]
+        )
     if not remaining_checks:
         lines.append("- None")
     for check in remaining_checks:
@@ -1102,6 +1181,11 @@ def write_manual_release_candidate_checks_markdown(
         raise ValueError(f"manual release-candidate checks markdown source is invalid: {formatted}")
     if mark_provider_smoke_not_applicable_if_missing:
         _mark_provider_smoke_not_applicable_if_missing(checks)
+    source_revisions = (
+        _manual_check_markdown_source_revisions(root, source_path)
+        if source_is_markdown and isinstance(source_path, Path)
+        else _manual_check_source_revisions(root, source_path)
+    )
     resolved = _resolve_project_file(
         root,
         output_path,
@@ -1112,6 +1196,7 @@ def write_manual_release_candidate_checks_markdown(
         _manual_release_candidate_checks_markdown(
             checks,
             source_path=source_path,
+            source_revisions=source_revisions,
             markdown_path=output_path,
         ),
         encoding="utf-8",
@@ -2167,9 +2252,10 @@ def verify_release_candidate(
         if manual_checks_markdown is not None
         else _manual_checks_source_label(_manual_checks_json_paths(manual_checks_json))
     )
-    manual_check_source_revisions = _manual_check_source_revisions(
-        root,
-        manual_checks_json,
+    manual_check_source_revisions = (
+        _manual_check_markdown_source_revisions(root, manual_checks_markdown)
+        if manual_checks_markdown is not None
+        else _manual_check_source_revisions(root, manual_checks_json)
     )
     manual_check_status = _manual_release_candidate_check_status(
         manual_checks,
