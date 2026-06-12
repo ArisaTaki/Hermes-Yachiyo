@@ -53,6 +53,7 @@ def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
     assert report["built_artifact_guards"]["status"] == "passed"
     assert report["built_artifact_guards"]["artifact_paths"] == ["release"]
     assert report["electron_ui_smoke"]["status"] == "skipped"
+    assert report["manual_release_candidate_check_status"] == "manual_required"
     assert report["manual_release_candidate_checks"] == list(rc.MANUAL_RELEASE_CANDIDATE_CHECKS)
 
 
@@ -63,6 +64,27 @@ def test_release_candidate_verifier_requires_artifacts_when_requested(tmp_path, 
 
     output = capsys.readouterr().out
     assert "release candidate artifacts not found" in output
+
+
+def test_release_candidate_verifier_writes_failed_report_json(tmp_path, monkeypatch):
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        require_artifacts=True,
+        report_json=Path("release/rc-verification.json"),
+    ) == 1
+
+    report_path = tmp_path / "release" / "rc-verification.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["ok"] is False
+    assert report["built_artifact_guards"]["status"] == "failed"
+    assert report["built_artifact_guards"]["findings"] == [
+        {
+            "path": str(tmp_path),
+            "message": "release candidate artifacts not found under dist/backend, dist/electron, or release",
+        }
+    ]
 
 
 def test_release_candidate_verifier_runs_electron_ui_smoke_scripts(tmp_path, monkeypatch):

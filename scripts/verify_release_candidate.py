@@ -81,6 +81,7 @@ def verify_release_candidate(
             "scripts": [],
             "run_requested": run_ui_smoke,
         },
+        "manual_release_candidate_check_status": "manual_required",
         "manual_release_candidate_checks": list(MANUAL_RELEASE_CANDIDATE_CHECKS),
     }
 
