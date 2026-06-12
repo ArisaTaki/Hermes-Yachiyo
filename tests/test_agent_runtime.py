@@ -437,7 +437,7 @@ def test_workflow_run_start_projector_builds_timeline_and_replay_payload():
 
 
 def test_workflow_approval_resume_context_parses_pending_payload():
-    workflow = {"workflow_id": "workflow_resume"}
+    workflow = {"workflow_id": "workflow_resume", "nodes": [{"id": "gate"}]}
     run = {
         "run_id": "workflow_run",
         "result": "fallback context",
@@ -468,7 +468,8 @@ def test_workflow_approval_resume_context_parses_pending_payload():
         root_group=True,
     )
 
-    assert context.workflow is workflow
+    assert context.workflow == workflow
+    assert context.workflow is not workflow
     assert context.result_context == "approved context"
     assert context.start_index == 4
     assert context.root_group is True
@@ -478,6 +479,15 @@ def test_workflow_approval_resume_context_parses_pending_payload():
     assert context.approval.label == "Human Gate"
     assert context.approval.criteria == "Review before continuing."
     assert context.approval.input_preview == {"checkpoint": "Human Gate"}
+    assert context.approval.input_preview is not pending["input_preview"]
+    context.workflow["nodes"][0]["id"] = "changed"
+    context.timeline[0]["event"] = "changed"
+    context.artifacts[0]["path"] = "changed.md"
+    context.approval.input_preview["checkpoint"] = "changed"
+    assert workflow == {"workflow_id": "workflow_resume", "nodes": [{"id": "gate"}]}
+    assert run["timeline"][0] == {"event": "workflow.node.approval_required"}
+    assert run["artifacts"][0] == {"kind": "workflow_artifact", "path": "summary.md"}
+    assert pending["input_preview"] == {"checkpoint": "Human Gate"}
 
     bad_pending = {**pending, "workflow_next_index": "not-an-int"}
     with pytest.raises(AgentRuntimeError, match="Workflow Run 待审批恢复位置无效"):

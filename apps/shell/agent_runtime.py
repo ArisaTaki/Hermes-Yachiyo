@@ -2790,7 +2790,11 @@ class WorkflowApprovalTransitionContext:
             label=str(pending.get("workflow_node_label") or "Approval"),
             workflow_node_id=str(pending.get("workflow_node_id") or ""),
             criteria=str(pending.get("workflow_node_approval_criteria") or "").strip(),
-            input_preview=pending.get("input_preview") if isinstance(pending.get("input_preview"), dict) else {},
+            input_preview=(
+                deepcopy(pending.get("input_preview"))
+                if isinstance(pending.get("input_preview"), dict)
+                else {}
+            ),
         )
 
 
@@ -2823,7 +2827,7 @@ class WorkflowApprovalResumeContext:
             raise AgentRuntimeError("Workflow Run 待审批恢复位置无效")
         return cls(
             approval=approval,
-            workflow=workflow,
+            workflow=deepcopy(workflow),
             result_context=str(
                 raw_pending.get("workflow_context")
                 or run.get("result")
@@ -2831,11 +2835,15 @@ class WorkflowApprovalResumeContext:
                 or ""
             ),
             timeline=[
-                event
+                deepcopy(event)
                 for event in run.get("timeline") or []
                 if isinstance(event, dict)
             ],
-            artifacts=[item for item in run.get("artifacts") or [] if isinstance(item, dict)],
+            artifacts=[
+                deepcopy(item)
+                for item in run.get("artifacts") or []
+                if isinstance(item, dict)
+            ],
             start_index=start_index,
             root_group=root_group,
         )
