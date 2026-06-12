@@ -20,6 +20,13 @@ const WORKFLOW_CANCEL_RUN_ID = 'workflow_run_detail_ui_smoke_child_cancel';
 const WORKFLOW_CANCEL_CHILD_RUN_ID = 'agent_run_detail_ui_smoke_workflow_child_cancel';
 const ACTIVE_CANCEL_RUN_ID = 'agent_run_detail_ui_smoke_active_cancel';
 const RERUN_RUN_ID = 'agent_run_detail_ui_smoke_rerun';
+const RUN_TASK_ID = 'task-run-detail-ui-smoke';
+const RUN_SESSION_ID = 'session-run-detail-ui-smoke';
+const APPROVAL_TASK_ID = 'task-run-detail-ui-smoke-approval';
+const APPROVAL_SESSION_ID = 'session-run-detail-ui-smoke-approval';
+const ACTIVE_CANCEL_TASK_ID = 'task-run-detail-ui-smoke-active-cancel';
+const ACTIVE_CANCEL_SESSION_ID = 'session-run-detail-ui-smoke-active-cancel';
+const RERUN_TASK_ID = 'task-run-detail-ui-smoke-rerun';
 const RUN_GROUP_ID = 'run_group_detail_ui_smoke';
 const WORKFLOW_RUN_GROUP_ID = 'run_group_detail_ui_workflow_child_smoke';
 const WORKFLOW_REJECT_RUN_GROUP_ID = 'run_group_detail_ui_workflow_child_reject_smoke';
@@ -42,8 +49,8 @@ const run = {
   run_id: RUN_ID,
   run_group_id: RUN_GROUP_ID,
   run_group_source: 'agent',
-  task_id: 'task-run-detail-ui-smoke',
-  session_id: 'session-run-detail-ui-smoke',
+  task_id: RUN_TASK_ID,
+  session_id: RUN_SESSION_ID,
   task_run_link_run_status: 'completed',
   task_run_link_last_event_sequence: 201,
   kind: 'agent_run',
@@ -69,8 +76,8 @@ function approvalRun() {
     run_id: APPROVAL_RUN_ID,
     run_group_id: RUN_GROUP_ID,
     run_group_source: 'agent',
-    task_id: 'task-run-detail-ui-smoke-approval',
-    session_id: 'session-run-detail-ui-smoke-approval',
+    task_id: APPROVAL_TASK_ID,
+    session_id: APPROVAL_SESSION_ID,
     task_run_link_run_status: approvalApproved ? 'completed' : 'approval_required',
     task_run_link_last_event_sequence: approvalApproved ? 5 : 2,
     kind: 'agent_run',
@@ -221,8 +228,8 @@ function activeCancelRun() {
     run_id: ACTIVE_CANCEL_RUN_ID,
     run_group_id: RUN_GROUP_ID,
     run_group_source: 'agent',
-    task_id: 'task-run-detail-ui-smoke-active-cancel',
-    session_id: 'session-run-detail-ui-smoke-active-cancel',
+    task_id: ACTIVE_CANCEL_TASK_ID,
+    session_id: ACTIVE_CANCEL_SESSION_ID,
     task_run_link_run_status: activeRunCancelled ? 'cancelled' : 'running',
     task_run_link_last_event_sequence: activeRunCancelled ? 2 : 1,
     kind: 'agent_run',
@@ -491,7 +498,7 @@ function workflowCancelRunGroup() {
 const rerun = {
   ...run,
   run_id: RERUN_RUN_ID,
-  task_id: 'task-run-detail-ui-smoke-rerun',
+  task_id: RERUN_TASK_ID,
   result: 'Run Detail UI smoke rerun completed',
   task_run_link_last_event_sequence: 2,
   artifacts: [],
@@ -1573,6 +1580,8 @@ async function main() {
     const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
     return detail?.getAttribute('data-run-id') === ${JSON.stringify(ACTIVE_CANCEL_RUN_ID)}
       && detail?.getAttribute('data-run-status') === 'running'
+      && detail?.getAttribute('data-task-id') === ${JSON.stringify(ACTIVE_CANCEL_TASK_ID)}
+      && detail?.getAttribute('data-session-id') === ${JSON.stringify(ACTIVE_CANCEL_SESSION_ID)}
       && document.querySelector('[data-testid="agent-run-detail-task"]')?.textContent.includes('Cancel active Agent Run from Run Detail smoke')
       && cancel
       && !cancel.disabled
@@ -1598,6 +1607,8 @@ async function main() {
     const cancelledEvent = events.find((node) => node.getAttribute('data-run-event') === 'agent.run.cancelled');
     return detail?.getAttribute('data-run-id') === ${JSON.stringify(ACTIVE_CANCEL_RUN_ID)}
       && detail?.getAttribute('data-run-status') === 'cancelled'
+      && detail?.getAttribute('data-task-id') === ${JSON.stringify(ACTIVE_CANCEL_TASK_ID)}
+      && detail?.getAttribute('data-session-id') === ${JSON.stringify(ACTIVE_CANCEL_SESSION_ID)}
       && !document.querySelector('[data-testid="agent-run-detail-cancel"]')
       && result?.textContent.includes('Run Detail active Run cancelled from UI smoke')
       && eventTypes.includes('agent.run.started')
@@ -1610,7 +1621,13 @@ async function main() {
 
   await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '#/agents/' + encodeURIComponent(approvalRunId));
   console.log('[electron-smoke] approval run detail loaded');
-  await waitFor(win, () => document.querySelector('[data-testid="agent-run-detail"]')?.getAttribute('data-run-id') === ${JSON.stringify(APPROVAL_RUN_ID)}, 'approval run detail article');
+  await waitFor(win, () => {
+    const detail = document.querySelector('[data-testid="agent-run-detail"]');
+    return detail?.getAttribute('data-run-id') === ${JSON.stringify(APPROVAL_RUN_ID)}
+      && detail?.getAttribute('data-run-status') === 'approval_required'
+      && detail?.getAttribute('data-task-id') === ${JSON.stringify(APPROVAL_TASK_ID)}
+      && detail?.getAttribute('data-session-id') === ${JSON.stringify(APPROVAL_SESSION_ID)};
+  }, 'approval run detail article');
   await waitFor(win, () => {
     const approval = document.querySelector('[data-testid="agent-run-detail-approval"]');
     const request = document.querySelector('[data-testid="agent-run-approval-request"]');
@@ -1637,6 +1654,8 @@ async function main() {
     const toolCallEvent = events.find((node) => node.getAttribute('data-run-event') === 'agent.tool.call');
     const completedEvent = events.find((node) => node.getAttribute('data-run-event') === 'agent.run.completed');
     return detail?.getAttribute('data-run-id') === ${JSON.stringify(APPROVAL_RUN_ID)}
+      && detail?.getAttribute('data-task-id') === ${JSON.stringify(APPROVAL_TASK_ID)}
+      && detail?.getAttribute('data-session-id') === ${JSON.stringify(APPROVAL_SESSION_ID)}
       && !document.querySelector('[data-testid="agent-run-detail-approval"]')
       && result?.textContent.includes('Run Detail approval smoke completed')
       && eventTypes.includes('agent.tool.approval_required')
@@ -1815,7 +1834,12 @@ async function main() {
   await win.loadURL('about:blank');
   await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '#/agents/' + encodeURIComponent(runId));
   console.log('[electron-smoke] run detail loaded');
-  await waitFor(win, () => document.querySelector('[data-testid="agent-run-detail"]')?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}, 'run detail article');
+  await waitFor(win, () => {
+    const detail = document.querySelector('[data-testid="agent-run-detail"]');
+    return detail?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
+      && detail?.getAttribute('data-task-id') === ${JSON.stringify(RUN_TASK_ID)}
+      && detail?.getAttribute('data-session-id') === ${JSON.stringify(RUN_SESSION_ID)};
+  }, 'run detail article');
   await waitFor(win, () => document.querySelector('[data-testid="agent-run-detail-task"]')?.textContent.includes('Inspect Native RunEvent replay'), 'run task block');
   await waitFor(win, () => document.querySelector('[data-testid="agent-run-detail-result"]')?.textContent.includes('Run Detail UI smoke completed through replay facts'), 'run result block');
   await waitFor(win, () => {
@@ -1936,6 +1960,8 @@ async function main() {
   await waitFor(win, () => (
     window.location.hash.includes(${JSON.stringify(RERUN_RUN_ID)})
     && document.querySelector('[data-testid="agent-run-detail"]')?.getAttribute('data-run-id') === ${JSON.stringify(RERUN_RUN_ID)}
+    && document.querySelector('[data-testid="agent-run-detail"]')?.getAttribute('data-task-id') === ${JSON.stringify(RERUN_TASK_ID)}
+    && document.querySelector('[data-testid="agent-run-detail"]')?.getAttribute('data-session-id') === ${JSON.stringify(RUN_SESSION_ID)}
     && document.querySelector('[data-testid="agent-run-detail-result"]')?.textContent.includes('Run Detail UI smoke rerun completed')
   ), 'rerun run detail');
   await waitFor(win, () => {
