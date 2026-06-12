@@ -101,6 +101,7 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
     assert "real provider smoke helper must preserve zero-valued Responses indexes before fallback indexes" in messages
     assert "provider smoke tests must cover Responses reasoning summary done snapshots" in messages
     assert "provider smoke tests must cover Responses reasoning output item snapshots" in messages
+    assert "provider smoke tests must cover Responses output_text.done list snapshots" in messages
     assert "provider smoke tests must cover zero-valued Responses indexes before fallback indexes" in messages
     assert "provider smoke tests must cover Responses content part done snapshots" in messages
     assert "provider smoke tests must cover Responses refusal done snapshots" in messages

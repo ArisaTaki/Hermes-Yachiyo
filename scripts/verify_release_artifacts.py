@@ -1396,6 +1396,10 @@ STREAMING_PROVIDER_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "provider smoke tests must cover Responses reasoning output item snapshots",
     ),
     (
+        "def test_stream_smoke_uses_responses_output_text_done_list_snapshot",
+        "provider smoke tests must cover Responses output_text.done list snapshots",
+    ),
+    (
         "def test_stream_smoke_preserves_zero_responses_indexes_before_fallback_indexes",
         "provider smoke tests must cover zero-valued Responses indexes before fallback indexes",
     ),
