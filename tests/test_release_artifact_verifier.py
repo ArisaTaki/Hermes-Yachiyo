@@ -1533,6 +1533,7 @@ def test_verifier_requires_release_workflow_binary_scans_packaged_outputs(tmp_pa
     assert "macOS release workflow must upload a release-candidate verification report" in messages
     assert "macOS release workflow must archive a manual RC check evidence template" in messages
     assert "macOS release workflow must archive a manual RC check draft seeded from the RC report" in messages
+    assert "macOS release workflow must generate manual RC check draft after the RC report before upload" in messages
 
 
 def test_verifier_requires_release_workflow_guard_before_dependency_install(tmp_path):
@@ -1583,6 +1584,39 @@ def test_verifier_requires_release_workflow_guard_before_dependency_install(tmp_
             "macOS release workflow must verify release guards before installing dependencies",
         )
         in findings
+    )
+
+
+def test_verifier_requires_release_workflow_manual_draft_after_rc_report(tmp_path):
+    workflow = tmp_path / verifier.RELEASE_WORKFLOW_FILE
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text(
+        "name: Build macOS DMG\n"
+        "jobs:\n"
+        "  package-macos:\n"
+        "    steps:\n"
+        "      - name: Verify release-facing product identity and security guards\n"
+        "        run: python scripts/verify_release_artifacts.py\n"
+        "      - name: Install Python dependencies\n"
+        "        run: python -m pip install -e .\n"
+        "      - name: Prepare release metadata\n"
+        "        run: mkdir -p release\n"
+        "      - name: Verify release candidate artifacts\n"
+        "        run: |\n"
+        "          provider_smoke_args+=(--run-provider-smoke)\n"
+        "          python scripts/verify_release_candidate.py --manual-checks-json release/rc-verification.json --write-manual-checks-draft release/manual-rc-checks.draft.json\n"
+        "          python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount --report-json release/rc-verification.json\n"
+        "      - name: Upload DMG artifact\n"
+        "        run: echo upload\n",
+        encoding="utf-8",
+    )
+
+    findings = verifier._verify_release_workflow_guards(tmp_path)
+    messages = [finding.message for finding in findings]
+
+    assert (
+        "macOS release workflow must generate manual RC check draft after the RC report before upload"
+        in messages
     )
 
 

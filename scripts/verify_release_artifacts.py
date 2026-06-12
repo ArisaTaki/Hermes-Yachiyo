@@ -3076,6 +3076,9 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
             )
         )
     verify_rc = workflow.find("python scripts/verify_release_candidate.py --require-artifacts")
+    write_signoff_draft = workflow.find(
+        "--manual-checks-json release/rc-verification.json --write-manual-checks-draft release/manual-rc-checks.draft.json"
+    )
     upload_artifact = workflow.find("Upload DMG artifact")
     if (
         prepare_release < 0
@@ -3088,6 +3091,19 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
             Finding(
                 workflow_path,
                 "macOS release workflow must run local RC verification gate after preparing release artifacts before upload",
+            )
+        )
+    if (
+        verify_rc < 0
+        or write_signoff_draft < 0
+        or upload_artifact < 0
+        or write_signoff_draft < verify_rc
+        or write_signoff_draft > upload_artifact
+    ):
+        findings.append(
+            Finding(
+                workflow_path,
+                "macOS release workflow must generate manual RC check draft after the RC report before upload",
             )
         )
     if (
