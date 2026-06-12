@@ -1837,7 +1837,7 @@ def test_release_candidate_verifier_runs_dmg_app_startup_smoke(
     assert env["OHA_YACHIYO_HOME"].endswith("/.oha-yachiyo")
     output = capsys.readouterr().out
     assert "DMG app startup smoke: passed" in output
-    assert "DMG Bridge build metadata revision guards: passed" in output
+    assert "DMG packaged build metadata revision guards: passed" in output
     report = json.loads((tmp_path / "tmp" / "rc.json").read_text(encoding="utf-8"))
     assert report["ok"] is True
     assert report["source_revision"]["commit"] == source_commit
@@ -1918,7 +1918,7 @@ def test_release_candidate_verifier_rejects_stale_dmg_bridge_build_metadata(
 
     output = capsys.readouterr().out
     assert "DMG app startup smoke: passed" in output
-    assert "DMG Bridge build metadata revision guards: failed" in output
+    assert "DMG packaged build metadata revision guards: failed" in output
     report = json.loads((tmp_path / "tmp" / "rc.json").read_text(encoding="utf-8"))
     assert report["ok"] is False
     assert report["dmg_app_smoke"]["status"] == "failed"
@@ -2370,6 +2370,7 @@ def test_release_candidate_verifier_runs_dmg_ui_sampling_smoke(
 def test_release_candidate_verifier_runs_dmg_chat_native_file_smoke(
     tmp_path, monkeypatch, capsys
 ):
+    source_commit = "bbb1234567890abc1234567890abc1234567890a"
     release_dir = tmp_path / "release"
     release_dir.mkdir()
     (release_dir / "Oha-Yachiyo-0.4.0-arm64.dmg").write_bytes(b"fake dmg")
@@ -2402,6 +2403,11 @@ def test_release_candidate_verifier_runs_dmg_chat_native_file_smoke(
                         "image_viewer_verified": True,
                         "run_detail_verified": True,
                         "desktop_picker_ipc_verified": True,
+                        "app_build_metadata": {
+                            "commit": source_commit,
+                            "short_commit": "bbb1234",
+                            "version": "0.4.0",
+                        },
                     }
                 ),
                 encoding="utf-8",
@@ -2413,8 +2419,17 @@ def test_release_candidate_verifier_runs_dmg_chat_native_file_smoke(
             )
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
+    def fake_source_revision_run(command, *, root):
+        assert root == tmp_path
+        if command == ["git", "rev-parse", "HEAD"]:
+            return SimpleNamespace(stdout=f"{source_commit}\n")
+        if command == ["git", "status", "--short"]:
+            return SimpleNamespace(stdout="")
+        raise AssertionError(f"unexpected command: {command!r}")
+
     monkeypatch.setattr(rc.sys, "platform", "darwin")
     monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+    monkeypatch.setattr(rc, "_run_source_revision_git_command", fake_source_revision_run)
     monkeypatch.setattr(rc.subprocess, "run", fake_run)
 
     assert rc.verify_release_candidate(
@@ -2433,6 +2448,7 @@ def test_release_candidate_verifier_runs_dmg_chat_native_file_smoke(
     assert commands[2][:2] == ["hdiutil", "detach"]
     output = capsys.readouterr().out
     assert "DMG Chat native file smoke: passed" in output
+    assert "DMG packaged build metadata revision guards: passed" in output
     report = json.loads((tmp_path / "tmp" / "rc.json").read_text(encoding="utf-8"))
     assert report["ok"] is True
     assert report["dmg_chat_native_file_smoke"] == {
@@ -2449,6 +2465,11 @@ def test_release_candidate_verifier_runs_dmg_chat_native_file_smoke(
                 "image_viewer_verified": True,
                 "run_detail_verified": True,
                 "desktop_picker_ipc_verified": True,
+                "app_build_metadata": {
+                    "commit": source_commit,
+                    "short_commit": "bbb1234",
+                    "version": "0.4.0",
+                },
             }
         ],
         "findings": [],
@@ -2470,6 +2491,88 @@ def test_release_candidate_verifier_runs_dmg_chat_native_file_smoke(
     assert report["manual_release_candidate_check_summary"]["automated_evidence_check_ids"] == [
         "chat_native_file_upload",
     ]
+
+
+def test_release_candidate_verifier_rejects_stale_dmg_chat_native_file_app_metadata(
+    tmp_path, monkeypatch, capsys
+):
+    source_commit = "1111111222222233333334444444555555566666"
+    stale_commit = "bbbbbbbcccccccdddddddeeeeeeefffffffaaaaaaa"
+    release_dir = tmp_path / "release"
+    release_dir.mkdir()
+    (release_dir / "Oha-Yachiyo-0.4.0-arm64.dmg").write_bytes(b"fake dmg")
+
+    def fake_source_revision_run(command, *, root):
+        assert root == tmp_path
+        if command == ["git", "rev-parse", "HEAD"]:
+            return SimpleNamespace(stdout=f"{source_commit}\n")
+        if command == ["git", "status", "--short"]:
+            return SimpleNamespace(stdout="")
+        raise AssertionError(f"unexpected command: {command!r}")
+
+    def fake_verify_dmg_chat_native_file_upload_smoke(root, dmg_paths):
+        assert root == tmp_path
+        assert tuple(dmg_paths) == (Path("release/Oha-Yachiyo-0.4.0-arm64.dmg"),)
+        return [], [
+            {
+                "dmg_path": "release/Oha-Yachiyo-0.4.0-arm64.dmg",
+                "selected_file_name": "packaged-native-picker-smoke.svg",
+                "selected_file_count": 1,
+                "submitted_attachment_count": 1,
+                "run_id": "main_chat_run_packaged_native_file_smoke",
+                "task_id": "task-packaged-chat-native-file-smoke",
+                "image_viewer_verified": True,
+                "run_detail_verified": True,
+                "desktop_picker_ipc_verified": True,
+                "app_build_metadata": {
+                    "commit": stale_commit,
+                    "short_commit": "bbbbbbb",
+                    "version": "0.4.0",
+                },
+            }
+        ]
+
+    monkeypatch.setattr(rc, "_run_source_revision_git_command", fake_source_revision_run)
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+    monkeypatch.setattr(
+        rc,
+        "verify_dmg_chat_native_file_upload_smoke",
+        fake_verify_dmg_chat_native_file_upload_smoke,
+    )
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        artifact_paths=(Path("release"),),
+        run_dmg_chat_native_file_smoke=True,
+        report_json=Path("tmp/rc.json"),
+    ) == 1
+
+    output = capsys.readouterr().out
+    assert "DMG Chat native file smoke: passed" in output
+    assert "DMG packaged build metadata revision guards: failed" in output
+    report = json.loads((tmp_path / "tmp" / "rc.json").read_text(encoding="utf-8"))
+    assert report["ok"] is False
+    assert report["dmg_chat_native_file_smoke"]["status"] == "failed"
+    assert report["dmg_chat_native_file_smoke"]["uploads"][0]["app_build_metadata"][
+        "commit"
+    ] == stale_commit
+    assert report["dmg_chat_native_file_smoke"]["findings"] == [
+        {
+            "path": "release/Oha-Yachiyo-0.4.0-arm64.dmg",
+            "message": (
+                "dmg_chat_native_file_smoke packaged Electron app "
+                "app_build_metadata.commit bbbbbbb does not match "
+                "source_revision.commit 1111111; rebuild the DMG from the "
+                "current source before final signoff"
+            ),
+        }
+    ]
+    manual_statuses = {
+        check["id"]: check
+        for check in report["manual_release_candidate_check_statuses"]
+    }
+    assert manual_statuses["chat_native_file_upload"]["status"] == "manual_required"
+    assert report["manual_release_candidate_check_summary"]["automated_evidence_check_ids"] == []
 
 
 def test_release_candidate_dmg_app_startup_smoke_requires_executable(

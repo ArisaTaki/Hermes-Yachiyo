@@ -165,6 +165,10 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
         in messages
     )
     assert (
+        "release candidate verifier must archive packaged Electron app build metadata from Chat native file smoke"
+        in messages
+    )
+    assert (
         "release candidate verifier final signoff must reject dirty source revisions"
         in messages
     )

@@ -629,6 +629,18 @@ async function run() {
     await client.send('Page.enable');
     await client.send('Runtime.enable');
     await runPackagedChatSmoke(client, args.timeoutMs);
+    const appBuildMetadata = await evaluate(client, `
+      (async () => {
+        const info = await window.ohaDesktop?.getAppUpdateInfo?.();
+        return info?.current || null;
+      })()
+    `);
+    if (!appBuildMetadata || typeof appBuildMetadata !== 'object') {
+      throw new Error('packaged app build metadata is unavailable');
+    }
+    if (typeof appBuildMetadata.commit !== 'string' || !appBuildMetadata.commit.trim()) {
+      throw new Error('packaged app build metadata did not include commit');
+    }
 
     const payload = bridgeState.postPayloads[0];
     if (!payload) throw new Error('packaged Chat UI did not send a message');
@@ -660,6 +672,7 @@ async function run() {
       run_detail_verified: true,
       desktop_picker_ipc_verified: true,
       hidden_file_input_click_count: 0,
+      app_build_metadata: appBuildMetadata,
     };
     if (args.reportJson) {
       fs.mkdirSync(path.dirname(args.reportJson), { recursive: true });

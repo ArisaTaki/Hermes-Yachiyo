@@ -1130,6 +1130,10 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release candidate verifier must compare packaged Bridge build metadata with source revision",
     ),
     (
+        '"app_build_metadata"',
+        "release candidate verifier must archive packaged Electron app build metadata from Chat native file smoke",
+    ),
+    (
         '"source_revision_final_signoff_findings"',
         "release candidate verifier final signoff must reject dirty source revisions",
     ),

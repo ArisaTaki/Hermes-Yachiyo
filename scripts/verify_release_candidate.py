@@ -1159,6 +1159,25 @@ def _recorded_bridge_statuses(report: dict[str, Any]) -> list[dict[str, Any]]:
     return statuses
 
 
+def _recorded_packaged_build_metadata(report: dict[str, Any]) -> list[dict[str, Any]]:
+    metadata_items: list[dict[str, Any]] = []
+    for status in _recorded_bridge_statuses(report):
+        metadata = status.get("build_metadata")
+        if isinstance(metadata, dict):
+            metadata_items.append(metadata)
+    chat_native_file_smoke = report.get("dmg_chat_native_file_smoke")
+    if isinstance(chat_native_file_smoke, dict):
+        uploads = chat_native_file_smoke.get("uploads")
+        if isinstance(uploads, list):
+            for upload in uploads:
+                if not isinstance(upload, dict):
+                    continue
+                metadata = upload.get("app_build_metadata")
+                if isinstance(metadata, dict):
+                    metadata_items.append(metadata)
+    return metadata_items
+
+
 def _source_revision_commit(report: dict[str, Any]) -> str:
     source_revision = report.get("source_revision")
     if not isinstance(source_revision, dict) or source_revision.get("available") is not True:
@@ -1222,6 +1241,49 @@ def _bridge_status_source_revision_findings(
                         ),
                     )
                 )
+    chat_native_file_smoke = report.get("dmg_chat_native_file_smoke")
+    if isinstance(chat_native_file_smoke, dict):
+        uploads = chat_native_file_smoke.get("uploads")
+        if isinstance(uploads, list):
+            for upload in uploads:
+                if not isinstance(upload, dict):
+                    continue
+                dmg_path = Path(str(upload.get("dmg_path") or "dmg_chat_native_file_smoke"))
+                build_metadata = upload.get("app_build_metadata")
+                build_commit = (
+                    str(build_metadata.get("commit") or "").strip()
+                    if isinstance(build_metadata, dict)
+                    else ""
+                )
+                if not build_commit:
+                    findings.setdefault("dmg_chat_native_file_smoke", []).append(
+                        Finding(
+                            dmg_path,
+                            (
+                                "dmg_chat_native_file_smoke packaged Electron app "
+                                "metadata must include app_build_metadata.commit to "
+                                f"compare against source_revision {source_label}"
+                            ),
+                        )
+                    )
+                    continue
+                if build_commit != source_commit:
+                    build_label = (
+                        str(build_metadata.get("short_commit") or build_commit[:7]).strip()
+                        if isinstance(build_metadata, dict)
+                        else build_commit[:7]
+                    )
+                    findings.setdefault("dmg_chat_native_file_smoke", []).append(
+                        Finding(
+                            dmg_path,
+                            (
+                                "dmg_chat_native_file_smoke packaged Electron app "
+                                f"app_build_metadata.commit {build_label} does not "
+                                f"match source_revision.commit {source_label}; rebuild "
+                                "the DMG from the current source before final signoff"
+                            ),
+                        )
+                    )
     return findings
 
 
@@ -2365,6 +2427,7 @@ def verify_dmg_chat_native_file_upload_smoke(
                 if upload_report.get("ok") is not True:
                     findings.append(Finding(dmg_path, "release candidate packaged Chat native file smoke report did not pass"))
                     continue
+                app_build_metadata = upload_report.get("app_build_metadata")
                 uploads.append(
                     {
                         "dmg_path": str(dmg_path),
@@ -2376,6 +2439,9 @@ def verify_dmg_chat_native_file_upload_smoke(
                         "image_viewer_verified": upload_report.get("image_viewer_verified"),
                         "run_detail_verified": upload_report.get("run_detail_verified"),
                         "desktop_picker_ipc_verified": upload_report.get("desktop_picker_ipc_verified"),
+                        "app_build_metadata": app_build_metadata
+                        if isinstance(app_build_metadata, dict)
+                        else {},
                     }
                 )
         finally:
@@ -2862,16 +2928,6 @@ def verify_release_candidate(
             "run_requested": run_dmg_ui_sampling_smoke,
         }
 
-    bridge_revision_findings = _apply_bridge_status_source_revision_findings(report)
-    if bridge_revision_findings or (
-        _source_revision_commit(report) and _recorded_bridge_statuses(report)
-    ):
-        _print_findings(
-            "DMG Bridge build metadata revision guards",
-            bridge_revision_findings,
-        )
-    failed = failed or bool(bridge_revision_findings)
-
     if run_dmg_chat_native_file_smoke and not artifact_paths_valid:
         print("DMG Chat native file smoke: skipped because artifact paths failed validation")
         report["dmg_chat_native_file_smoke"] = {
@@ -2905,6 +2961,16 @@ def verify_release_candidate(
             "findings": [],
             "run_requested": run_dmg_chat_native_file_smoke,
         }
+
+    bridge_revision_findings = _apply_bridge_status_source_revision_findings(report)
+    if bridge_revision_findings or (
+        _source_revision_commit(report) and _recorded_packaged_build_metadata(report)
+    ):
+        _print_findings(
+            "DMG packaged build metadata revision guards",
+            bridge_revision_findings,
+        )
+    failed = failed or bool(bridge_revision_findings)
 
     if run_provider_smoke:
         provider_findings, provider_results = verify_provider_smoke(root)

@@ -158,7 +158,7 @@ python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount
 python scripts/verify_release_candidate.py --require-artifacts --run-dmg-app-smoke
 ```
 
-`--run-dmg-app-smoke`、`--run-dmg-screen-smoke` 和 `--run-dmg-ui-sampling-smoke` 的 RC report 都会在对应 `dmg_*` section 写入 `bridge_statuses`，记录 DMG 路径、`service`、`version`、`native_agent_ready` 和 packaged Bridge `/status` 返回的 `build_metadata`。如果打包时已刷新 `oha-yachiyo-build.json`，这些记录会把真实启动的 DMG 内 Bridge 追溯到 commit / short commit；当当前 `source_revision.commit` 可用时，RC gate 也会要求 packaged `build_metadata.commit` 与它一致，避免 stale DMG 或旧 backend 被误用于最终签核。
+`--run-dmg-app-smoke`、`--run-dmg-screen-smoke` 和 `--run-dmg-ui-sampling-smoke` 的 RC report 都会在对应 `dmg_*` section 写入 `bridge_statuses`，记录 DMG 路径、`service`、`version`、`native_agent_ready` 和 packaged Bridge `/status` 返回的 `build_metadata`。`--run-dmg-chat-native-file-smoke` 还会在 `dmg_chat_native_file_smoke.uploads[*].app_build_metadata` 归档 packaged Electron app 暴露的 build metadata。如果打包时已刷新 `oha-yachiyo-build.json`，这些记录会把真实启动的 DMG 内 Bridge 或 Electron app 追溯到 commit / short commit；当当前 `source_revision.commit` 可用时，RC gate 也会要求 packaged `build_metadata.commit` / `app_build_metadata.commit` 与它一致，避免 stale DMG、旧 backend 或旧 Electron app 被误用于最终签核。
 
 需要从 DMG 内真实 `.app` 抽样 packaged renderer 关键页面时运行：
 
@@ -174,7 +174,7 @@ python scripts/verify_release_candidate.py --require-artifacts --run-dmg-ui-samp
 python scripts/verify_release_candidate.py --require-artifacts --run-dmg-chat-native-file-smoke
 ```
 
-`--run-dmg-chat-native-file-smoke` 会启动 DMG 内 packaged Electron app，并在显式 smoke mode 下让主进程 `chooseChatImages` IPC 读取脚本生成的本地图片路径；随后通过 Chromium DevTools 点击 Chat 图片附件按钮，验证 attachment preview、发送 payload、message attachment、image viewer open/close 和 Run Detail replay handoff。通过时同一轮 gate 会把 `chat_native_file_upload` 自动标为 `passed`。正常用户运行不设置 smoke env，仍使用系统原生 file picker。
+`--run-dmg-chat-native-file-smoke` 会启动 DMG 内 packaged Electron app，并在显式 smoke mode 下让主进程 `chooseChatImages` IPC 读取脚本生成的本地图片路径；随后通过 Chromium DevTools 点击 Chat 图片附件按钮，验证 attachment preview、发送 payload、message attachment、image viewer open/close 和 Run Detail replay handoff。report 会同时归档 packaged Electron app 的 `app_build_metadata`，并在当前 `source_revision.commit` 可用时拒绝 stale app build。通过时同一轮 gate 会把 `chat_native_file_upload` 自动标为 `passed`。正常用户运行不设置 smoke env，仍使用系统原生 file picker。
 
 需要从 DMG 内真实 `.app` 验证屏幕录制权限和 `/screen/current` 路径时运行：
 
