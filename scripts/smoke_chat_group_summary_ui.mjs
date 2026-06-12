@@ -648,9 +648,14 @@ function requestBridgeJson(pathname, method = 'GET') {
     request.end();
   });
 }
-async function loadChat(win) {
+async function loadChat(win, params = {}) {
   chatLoadCounter += 1;
-  await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '&smokeLoad=' + chatLoadCounter + '#/chat');
+  const query = new URLSearchParams({
+    bridge: bridgeUrl,
+    smokeLoad: String(chatLoadCounter),
+    ...params,
+  });
+  await win.loadURL(devUrl + '?' + query.toString() + '#/chat');
   await waitFor(win, () => document.querySelector('[data-testid="chat-composer-input"]'), 'chat composer input');
 }
 function waitFor(win, predicate, label, timeout = 15000) {
@@ -674,6 +679,7 @@ function waitFor(win, predicate, label, timeout = 15000) {
               header: document.querySelector('.chat-header')?.textContent || '',
               messages: Array.from(document.querySelectorAll('[data-message-id]')).map((node) => ({
                 id: node.getAttribute('data-message-id'),
+                className: node.className,
                 text: node.textContent,
               })),
               summary: Array.from(document.querySelectorAll('[data-testid="chat-message-summary-status"]')).map((node) => ({
@@ -883,6 +889,18 @@ async function main() {
       && !document.body.textContent.includes('run_oha_agent');
   }, 'group completed summary status');
   console.log('[electron-smoke] group summary completion rendered');
+  await loadChat(win, {
+    session_id: ${JSON.stringify(GROUP_SESSION_ID)},
+    conversation_kind: 'group',
+    task_id: ${JSON.stringify(SUMMARY_TASK_ID)},
+  });
+  await waitFor(win, () => {
+    const summaryMessage = document.querySelector('[data-message-id="chat-group-ui-main-summary-message"]');
+    return summaryMessage?.className.includes('search-highlighted')
+      && summaryMessage.textContent.includes(${JSON.stringify(GROUP_SUMMARY_RESULT)})
+      && document.body.textContent.includes(${JSON.stringify(GROUP_NAME)});
+  }, 'launcher task handoff highlights group summary message');
+  console.log('[electron-smoke] launcher task handoff highlighted group summary');
   await win.webContents.executeJavaScript("document.querySelector('[data-message-id=\\"chat-group-ui-main-summary-message\\"] [data-testid=\\"chat-message-open-run-detail\\"]').click()", true);
   await waitForSummaryRunDetail(win);
   console.log('[electron-smoke] group summary Run Detail replay verified');

@@ -112,9 +112,11 @@ type ChatMessageMetadata = {
   group_dispatch_run_group_id?: string;
   group_dispatch_skipped?: string[];
   group_agent_summary_task_id?: string;
+  group_agent_summary_for_task_id?: string;
   group_agent_summary_pending?: boolean;
   group_agent_summary_status?: string;
   group_agent_summary_error?: string;
+  delegated_run_source_task_id?: string;
   group_followup_for_task_ids?: string[];
   group_followup_for_agent_message_ids?: string[];
   guidance_type?: string;
@@ -340,6 +342,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const [sessionQuery, setSessionQuery] = useState('');
   const [debouncedSessionQuery, setDebouncedSessionQuery] = useState('');
   const [routeSessionId, setRouteSessionId] = useState(() => currentParam('session_id').trim());
+  const [routeTaskId, setRouteTaskId] = useState(() => currentParam('task_id').trim());
   const [copiedMessageId, setCopiedMessageId] = useState('');
   const [copiedCodeBlockKey, setCopiedCodeBlockKey] = useState('');
   const [copiedSessionId, setCopiedSessionId] = useState('');
@@ -584,20 +587,24 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   }, [sessionQuery]);
 
   useEffect(() => {
-    const syncRouteSessionId = () => setRouteSessionId(currentParam('session_id').trim());
-    window.addEventListener('hashchange', syncRouteSessionId);
-    window.addEventListener('popstate', syncRouteSessionId);
-    window.addEventListener(ROUTE_CHANGE_EVENT, syncRouteSessionId);
-    syncRouteSessionId();
+    const syncRouteChatHandoffParams = () => {
+      setRouteSessionId(currentParam('session_id').trim());
+      setRouteTaskId(currentParam('task_id').trim());
+    };
+    window.addEventListener('hashchange', syncRouteChatHandoffParams);
+    window.addEventListener('popstate', syncRouteChatHandoffParams);
+    window.addEventListener(ROUTE_CHANGE_EVENT, syncRouteChatHandoffParams);
+    syncRouteChatHandoffParams();
     return () => {
-      window.removeEventListener('hashchange', syncRouteSessionId);
-      window.removeEventListener('popstate', syncRouteSessionId);
-      window.removeEventListener(ROUTE_CHANGE_EVENT, syncRouteSessionId);
+      window.removeEventListener('hashchange', syncRouteChatHandoffParams);
+      window.removeEventListener('popstate', syncRouteChatHandoffParams);
+      window.removeEventListener(ROUTE_CHANGE_EVENT, syncRouteChatHandoffParams);
     };
   }, []);
 
   useEffect(() => {
     const requestedSessionId = routeSessionId;
+    const requestedTaskId = routeTaskId;
     void (async () => {
       await Promise.all([loadAssistantProfile(), loadExecutor()]);
       if (requestedSessionId) {
@@ -610,9 +617,16 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
           setStatus(error instanceof Error ? error.message : '切换会话失败');
         }
       }
-      await Promise.all([refreshMessages(), loadSessions()]);
+      const [messagePayload] = await Promise.all([refreshMessages(), loadSessions()]);
+      if (requestedTaskId && messagePayload?.messages) {
+        const messageId = taskHandoffMessageId(messagePayload.messages, requestedTaskId);
+        if (messageId) {
+          revealMessage(messageId);
+          setStatus('已定位到关联任务消息');
+        }
+      }
     })();
-  }, [loadAssistantProfile, loadExecutor, loadSessions, refreshMessages, routeSessionId]);
+  }, [loadAssistantProfile, loadExecutor, loadSessions, refreshMessages, routeSessionId, routeTaskId]);
 
   useEffect(() => {
     const interval = isProcessing ? ACTIVE_POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS;
@@ -3977,6 +3991,27 @@ function isRetryableMessage(message: ChatMessage, messages: ChatMessage[]) {
     candidate.role === 'assistant'
     && candidate.task_id === message.task_id
   ));
+}
+
+function taskHandoffMessageId(messages: ChatMessage[], taskId: string) {
+  const clean = String(taskId || '').trim();
+  if (!clean) return '';
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (!message?.id) continue;
+    if (messageMatchesTaskHandoff(message, clean)) return message.id;
+  }
+  return '';
+}
+
+function messageMatchesTaskHandoff(message: ChatMessage, taskId: string) {
+  const metadata = message.metadata || {};
+  if (String(message.task_id || '').trim() === taskId) return true;
+  if (stringValue(metadata.group_agent_summary_task_id) === taskId) return true;
+  if (stringValue(metadata.group_agent_summary_for_task_id) === taskId) return true;
+  if (stringValue(metadata.delegated_run_source_task_id) === taskId) return true;
+  if (metadataListAttribute(metadata.group_followup_for_task_ids).split(',').includes(taskId)) return true;
+  return false;
 }
 
 function compactStatusText(text: string, maxLength = 96) {
