@@ -697,6 +697,10 @@ def test_verifier_requires_release_packaging_docs_for_release_gates(tmp_path):
     assert "release packaging docs must document the local RC Electron UI smoke gate" in messages
     assert "release packaging docs must document the archived Electron UI smoke runner report" in messages
     assert "release packaging docs must document the archived Electron UI smoke report" in messages
+    assert (
+        "release packaging docs must document standalone Electron UI smoke signoff evidence merging"
+        in messages
+    )
     assert "release packaging docs must document the source-only RC dry run" in messages
     assert (
         "release packaging docs must document the CI release-candidate gate and packaged app startup smoke before upload"
@@ -1598,7 +1602,10 @@ def test_verifier_requires_release_workflow_binary_scans_packaged_outputs(tmp_pa
     assert "macOS release workflow must run the local RC verification gate" in messages
     assert "macOS release workflow must upload a release-candidate verification report" in messages
     assert "macOS release workflow must archive a manual RC check evidence template" in messages
-    assert "macOS release workflow must archive a manual RC check draft seeded from the RC report" in messages
+    assert (
+        "macOS release workflow must archive a manual RC check draft seeded from the RC report and Electron UI smoke report"
+        in messages
+    )
     assert "macOS release workflow must archive a manual RC check Markdown checklist seeded from the draft" in messages
     assert "macOS release workflow must generate manual RC check draft after the RC report before upload" in messages
     assert "macOS release workflow must generate manual RC check Markdown after the draft before upload" in messages

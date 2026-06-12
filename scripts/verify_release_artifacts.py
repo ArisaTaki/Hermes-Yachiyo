@@ -602,6 +602,10 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document the archived Electron UI smoke report",
     ),
     (
+        "release/electron-ui-smoke.json` 作为额外 `--manual-checks-json`",
+        "release packaging docs must document standalone Electron UI smoke signoff evidence merging",
+    ),
+    (
         "python scripts/verify_release_candidate.py --source-only --report-json tmp/source-only-rc.json",
         "release packaging docs must document the source-only RC dry run",
     ),
@@ -670,7 +674,7 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document direct no-provider Markdown signoff draft generation",
     ),
     (
-        "草稿会把 `--run-ui-smoke` 通过的脚本列表预填到 `packaged_ui_sampling` 的 `Notes:`",
+        "草稿会把通过的脚本列表预填到 `packaged_ui_sampling` 的 `Notes:`",
         "release packaging docs must document UI smoke supporting evidence notes",
     ),
     (
@@ -796,8 +800,8 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow must archive a manual RC check evidence template",
     ),
     (
-        "--manual-checks-json release/rc-verification.json --write-manual-checks-draft release/manual-rc-checks.draft.json",
-        "macOS release workflow must archive a manual RC check draft seeded from the RC report",
+        "--manual-checks-json release/rc-verification.json --manual-checks-json release/electron-ui-smoke.json --write-manual-checks-draft release/manual-rc-checks.draft.json",
+        "macOS release workflow must archive a manual RC check draft seeded from the RC report and Electron UI smoke report",
     ),
     (
         "--manual-checks-json release/manual-rc-checks.draft.json --write-manual-checks-markdown release/manual-rc-checks.md",
@@ -1110,6 +1114,10 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "_manual_release_candidate_checks_from_payload",
         "release candidate verifier must accept previous RC reports as manual evidence input",
+    ),
+    (
+        "_standalone_electron_ui_smoke_report",
+        "release candidate verifier must accept standalone Electron UI smoke reports as supporting evidence",
     ),
     (
         "_manual_release_candidate_checks_with_supporting_evidence",
@@ -3237,7 +3245,7 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
         )
     verify_rc = workflow.find("python scripts/verify_release_candidate.py --require-artifacts")
     write_signoff_draft = workflow.find(
-        "--manual-checks-json release/rc-verification.json --write-manual-checks-draft release/manual-rc-checks.draft.json"
+        "--manual-checks-json release/rc-verification.json --manual-checks-json release/electron-ui-smoke.json --write-manual-checks-draft release/manual-rc-checks.draft.json"
     )
     write_signoff_markdown = workflow.find(
         "--manual-checks-json release/manual-rc-checks.draft.json --write-manual-checks-markdown release/manual-rc-checks.md"

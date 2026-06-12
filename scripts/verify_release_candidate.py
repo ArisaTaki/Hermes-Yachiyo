@@ -344,6 +344,21 @@ def _manual_release_candidate_checks_from_payload(raw_payload: Any) -> object:
     return raw_payload
 
 
+def _standalone_electron_ui_smoke_report(raw_payload: Any) -> dict[str, Any] | None:
+    if not isinstance(raw_payload, dict):
+        return None
+    if "manual_release_candidate_check_statuses" in raw_payload or "checks" in raw_payload:
+        return None
+    scripts = raw_payload.get("scripts")
+    if "ok" not in raw_payload or not isinstance(scripts, list):
+        return None
+    return {
+        "status": "passed" if raw_payload.get("ok") is True else "failed",
+        "script_count": raw_payload.get("script_count"),
+        "scripts": scripts,
+    }
+
+
 def _append_manual_release_candidate_check_note(
     checks: Sequence[Any],
     check_id: str,
@@ -946,6 +961,15 @@ def _load_manual_release_candidate_checks(
                 "manual release-candidate checks",
             )
             raw_payload = json.loads(evidence_path.read_text(encoding="utf-8"))
+            standalone_electron_ui_smoke = _standalone_electron_ui_smoke_report(
+                raw_payload
+            )
+            if standalone_electron_ui_smoke is not None:
+                _append_electron_ui_smoke_supporting_evidence(
+                    checks,
+                    standalone_electron_ui_smoke,
+                )
+                continue
             raw_checks = _manual_release_candidate_checks_from_payload(raw_payload)
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             findings.append(

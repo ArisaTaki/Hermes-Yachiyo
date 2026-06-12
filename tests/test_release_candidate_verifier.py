@@ -817,6 +817,70 @@ def test_release_candidate_verifier_writes_manual_check_draft_from_prior_report(
     ]["notes"]
 
 
+def test_release_candidate_verifier_draft_merges_standalone_electron_ui_smoke_report(
+    tmp_path,
+):
+    prior_statuses = rc._manual_release_candidate_check_report()
+    for check in prior_statuses:
+        if check["id"] == "packaged_bridge_isolation":
+            check["status"] = "passed"
+            check["evidence"] = "Automated --run-dmg-app-smoke passed for release/Oha-Yachiyo.dmg"
+            check["evidence_source"] = "automated_rc_gate"
+
+    prior_report_path = tmp_path / "release" / "rc-verification.json"
+    smoke_report_path = tmp_path / "release" / "electron-ui-smoke.json"
+    prior_report_path.parent.mkdir(parents=True)
+    prior_report_path.write_text(
+        json.dumps({"manual_release_candidate_check_statuses": prior_statuses}),
+        encoding="utf-8",
+    )
+    smoke_report_path.write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "script_count": 2,
+                "scripts": [
+                    {
+                        "script": "scripts/smoke_chat_image_attachment_ui.mjs",
+                        "exit_code": 0,
+                    },
+                    {
+                        "script": "scripts/smoke_workflow_save_run_ui.mjs",
+                        "exit_code": 0,
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    draft_path = rc.write_manual_release_candidate_checks_draft(
+        tmp_path,
+        Path("release/manual-rc-checks.draft.json"),
+        (
+            Path("release/rc-verification.json"),
+            Path("release/electron-ui-smoke.json"),
+        ),
+    )
+
+    draft = json.loads(draft_path.read_text(encoding="utf-8"))
+    assert (
+        draft["manual_release_candidate_checks_source"]
+        == "release/rc-verification.json, release/electron-ui-smoke.json"
+    )
+    checks = {check["id"]: check for check in draft["checks"]}
+    assert checks["packaged_ui_sampling"]["status"] == "manual_required"
+    assert "--run-ui-smoke passed 2 Electron UI smoke scripts" in checks[
+        "packaged_ui_sampling"
+    ]["notes"]
+    assert "scripts/smoke_workflow_save_run_ui.mjs" in checks[
+        "packaged_ui_sampling"
+    ]["notes"]
+    assert "desktop chooseChatImages API path" in checks[
+        "chat_native_file_upload"
+    ]["notes"]
+
+
 def test_release_candidate_verifier_manual_check_draft_can_mark_provider_not_applicable(
     tmp_path,
     monkeypatch,
