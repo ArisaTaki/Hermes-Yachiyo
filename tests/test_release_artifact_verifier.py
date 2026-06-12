@@ -177,6 +177,10 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
         in messages
     )
     assert (
+        "release candidate verifier final signoff must reject manual evidence without source revisions"
+        in messages
+    )
+    assert (
         "release candidate verifier must print stale manual evidence source revision findings"
         in messages
     )
@@ -808,6 +812,10 @@ def test_verifier_requires_release_packaging_docs_for_release_gates(tmp_path):
     assert "release packaging docs must document final manual RC signoff enforcement" in messages
     assert (
         "release packaging docs must document stale manual evidence source revision rejection"
+        in messages
+    )
+    assert (
+        "release packaging docs must document missing manual evidence source revision rejection"
         in messages
     )
     assert "release packaging docs must document the Gatekeeper manual RC check id" in messages

@@ -1226,17 +1226,47 @@ def _manual_evidence_source_revision_final_signoff_findings(
     current_commit = str(source_revision.get("commit") or "").strip()
     if not current_commit:
         return []
-    current_label = str(source_revision.get("short_commit") or current_commit[:7]).strip()
-    raw_revisions = report.get("manual_release_candidate_check_source_revisions")
-    if not isinstance(raw_revisions, list):
+    if source_revision.get("dirty") is True:
         return []
+    current_label = str(source_revision.get("short_commit") or current_commit[:7]).strip()
+    manual_source = str(report.get("manual_release_candidate_checks_source") or "").strip()
+    missing_source_revision_message = (
+        "final signoff requires manual release-candidate evidence source revisions; "
+        "regenerate the manual checks draft or Markdown from a current RC report "
+        "before final signoff"
+    )
 
+    def missing_source_revision_finding() -> Finding:
+        return Finding(
+            Path(manual_source or "manual release-candidate evidence"),
+            missing_source_revision_message,
+        )
+
+    raw_revisions = report.get("manual_release_candidate_check_source_revisions")
+    if raw_revisions is None:
+        return [missing_source_revision_finding()] if manual_source else []
+    if not isinstance(raw_revisions, list) or not raw_revisions:
+        return [missing_source_revision_finding()]
+
+    found_usable_source_revision = False
     findings: list[Finding] = []
     for revision in raw_revisions:
         if not isinstance(revision, dict) or revision.get("available") is not True:
             continue
-        source = Path(str(revision.get("source") or "manual release-candidate evidence"))
         evidence_commit = str(revision.get("commit") or "").strip()
+        if evidence_commit:
+            found_usable_source_revision = True
+
+    if not found_usable_source_revision:
+        findings.append(missing_source_revision_finding())
+
+    for revision in raw_revisions:
+        if not isinstance(revision, dict) or revision.get("available") is not True:
+            continue
+        evidence_commit = str(revision.get("commit") or "").strip()
+        if not evidence_commit:
+            continue
+        source = Path(str(revision.get("source") or "manual release-candidate evidence"))
         evidence_label = str(
             revision.get("short_commit") or evidence_commit[:7] or "unavailable"
         ).strip()

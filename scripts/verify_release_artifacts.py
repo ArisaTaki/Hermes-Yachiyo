@@ -800,6 +800,10 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document stale manual evidence source revision rejection",
     ),
     (
+        "final signoff requires manual release-candidate evidence source revisions",
+        "release packaging docs must document missing manual evidence source revision rejection",
+    ),
+    (
         "gatekeeper_first_launch",
         "release packaging docs must document the Gatekeeper manual RC check id",
     ),
@@ -1148,6 +1152,10 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         '"manual_release_candidate_check_source_revision_findings"',
         "release candidate verifier final signoff must reject stale manual evidence source revisions",
+    ),
+    (
+        "requires manual release-candidate evidence source revisions",
+        "release candidate verifier final signoff must reject manual evidence without source revisions",
     ),
     (
         "manual evidence source revision guard",
