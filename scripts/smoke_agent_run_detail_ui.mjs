@@ -27,6 +27,18 @@ const APPROVAL_SESSION_ID = 'session-run-detail-ui-smoke-approval';
 const ACTIVE_CANCEL_TASK_ID = 'task-run-detail-ui-smoke-active-cancel';
 const ACTIVE_CANCEL_SESSION_ID = 'session-run-detail-ui-smoke-active-cancel';
 const RERUN_TASK_ID = 'task-run-detail-ui-smoke-rerun';
+const WORKFLOW_TASK_ID = 'task-run-detail-ui-smoke-workflow';
+const WORKFLOW_SESSION_ID = 'session-run-detail-ui-smoke-workflow';
+const WORKFLOW_CHILD_TASK_ID = 'task-run-detail-ui-smoke-workflow-child';
+const WORKFLOW_CHILD_SESSION_ID = 'session-run-detail-ui-smoke-workflow-child';
+const WORKFLOW_REJECT_TASK_ID = 'task-run-detail-ui-smoke-workflow-reject';
+const WORKFLOW_REJECT_SESSION_ID = 'session-run-detail-ui-smoke-workflow-reject';
+const WORKFLOW_REJECT_CHILD_TASK_ID = 'task-run-detail-ui-smoke-workflow-child-reject';
+const WORKFLOW_REJECT_CHILD_SESSION_ID = 'session-run-detail-ui-smoke-workflow-child-reject';
+const WORKFLOW_CANCEL_TASK_ID = 'task-run-detail-ui-smoke-workflow-cancel';
+const WORKFLOW_CANCEL_SESSION_ID = 'session-run-detail-ui-smoke-workflow-cancel';
+const WORKFLOW_CANCEL_CHILD_TASK_ID = 'task-run-detail-ui-smoke-workflow-child-cancel';
+const WORKFLOW_CANCEL_CHILD_SESSION_ID = 'session-run-detail-ui-smoke-workflow-child-cancel';
 const RUN_GROUP_ID = 'run_group_detail_ui_smoke';
 const WORKFLOW_RUN_GROUP_ID = 'run_group_detail_ui_workflow_child_smoke';
 const WORKFLOW_REJECT_RUN_GROUP_ID = 'run_group_detail_ui_workflow_child_reject_smoke';
@@ -108,8 +120,8 @@ function workflowChildRun() {
     run_id: WORKFLOW_CHILD_RUN_ID,
     run_group_id: WORKFLOW_RUN_GROUP_ID,
     run_group_source: 'workflow',
-    task_id: 'task-run-detail-ui-smoke-workflow-child',
-    session_id: 'session-run-detail-ui-smoke-workflow-child',
+    task_id: WORKFLOW_CHILD_TASK_ID,
+    session_id: WORKFLOW_CHILD_SESSION_ID,
     task_run_link_run_status: workflowChildApproved ? 'completed' : 'approval_required',
     task_run_link_last_event_sequence: workflowChildApproved ? 5 : 2,
     kind: 'agent_run',
@@ -159,8 +171,8 @@ function workflowRun() {
     run_id: WORKFLOW_RUN_ID,
     run_group_id: WORKFLOW_RUN_GROUP_ID,
     run_group_source: 'workflow',
-    task_id: 'task-run-detail-ui-smoke-workflow',
-    session_id: 'session-run-detail-ui-smoke-workflow',
+    task_id: WORKFLOW_TASK_ID,
+    session_id: WORKFLOW_SESSION_ID,
     task_run_link_run_status: workflowChildApproved ? 'completed' : 'approval_required',
     task_run_link_last_event_sequence: workflowChildApproved ? 6 : 3,
     kind: 'workflow_run',
@@ -284,8 +296,8 @@ function workflowRejectChildRun() {
     run_id: WORKFLOW_REJECT_CHILD_RUN_ID,
     run_group_id: WORKFLOW_REJECT_RUN_GROUP_ID,
     run_group_source: 'workflow',
-    task_id: 'task-run-detail-ui-smoke-workflow-child-reject',
-    session_id: 'session-run-detail-ui-smoke-workflow-child-reject',
+    task_id: WORKFLOW_REJECT_CHILD_TASK_ID,
+    session_id: WORKFLOW_REJECT_CHILD_SESSION_ID,
     task_run_link_run_status: workflowChildRejected ? 'cancelled' : 'approval_required',
     task_run_link_last_event_sequence: workflowChildRejected ? 4 : 2,
     kind: 'agent_run',
@@ -335,8 +347,8 @@ function workflowRejectRun() {
     run_id: WORKFLOW_REJECT_RUN_ID,
     run_group_id: WORKFLOW_REJECT_RUN_GROUP_ID,
     run_group_source: 'workflow',
-    task_id: 'task-run-detail-ui-smoke-workflow-reject',
-    session_id: 'session-run-detail-ui-smoke-workflow-reject',
+    task_id: WORKFLOW_REJECT_TASK_ID,
+    session_id: WORKFLOW_REJECT_SESSION_ID,
     task_run_link_run_status: workflowChildRejected ? 'cancelled' : 'approval_required',
     task_run_link_last_event_sequence: 3,
     kind: 'workflow_run',
@@ -392,8 +404,8 @@ function workflowCancelChildRun() {
     run_id: WORKFLOW_CANCEL_CHILD_RUN_ID,
     run_group_id: WORKFLOW_CANCEL_RUN_GROUP_ID,
     run_group_source: 'workflow',
-    task_id: 'task-run-detail-ui-smoke-workflow-child-cancel',
-    session_id: 'session-run-detail-ui-smoke-workflow-child-cancel',
+    task_id: WORKFLOW_CANCEL_CHILD_TASK_ID,
+    session_id: WORKFLOW_CANCEL_CHILD_SESSION_ID,
     task_run_link_run_status: workflowChildCancelled ? 'cancelled' : 'approval_required',
     task_run_link_last_event_sequence: workflowChildCancelled ? 3 : 2,
     kind: 'agent_run',
@@ -443,8 +455,8 @@ function workflowCancelRun() {
     run_id: WORKFLOW_CANCEL_RUN_ID,
     run_group_id: WORKFLOW_CANCEL_RUN_GROUP_ID,
     run_group_source: 'workflow',
-    task_id: 'task-run-detail-ui-smoke-workflow-cancel',
-    session_id: 'session-run-detail-ui-smoke-workflow-cancel',
+    task_id: WORKFLOW_CANCEL_TASK_ID,
+    session_id: WORKFLOW_CANCEL_SESSION_ID,
     task_run_link_run_status: workflowChildCancelled ? 'cancelled' : 'approval_required',
     task_run_link_last_event_sequence: 3,
     kind: 'workflow_run',
@@ -1675,7 +1687,13 @@ async function main() {
 
   await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '#/agents/' + encodeURIComponent(workflowRejectRunId));
   console.log('[electron-smoke] workflow child reject run detail loaded');
-  await waitFor(win, () => document.querySelector('[data-testid="agent-run-detail"]')?.getAttribute('data-run-id') === ${JSON.stringify(WORKFLOW_REJECT_RUN_ID)}, 'workflow child reject parent run detail article');
+  await waitFor(win, () => {
+    const detail = document.querySelector('[data-testid="agent-run-detail"]');
+    return detail?.getAttribute('data-run-id') === ${JSON.stringify(WORKFLOW_REJECT_RUN_ID)}
+      && detail?.getAttribute('data-run-status') === 'approval_required'
+      && detail?.getAttribute('data-task-id') === ${JSON.stringify(WORKFLOW_REJECT_TASK_ID)}
+      && detail?.getAttribute('data-session-id') === ${JSON.stringify(WORKFLOW_REJECT_SESSION_ID)};
+  }, 'workflow child reject parent run detail article');
   await waitFor(win, () => {
     const childApproval = document.querySelector('[data-testid="agent-run-detail-workflow-child-approval"]');
     const request = childApproval?.querySelector('[data-testid="agent-run-approval-request"]');
@@ -1697,6 +1715,9 @@ async function main() {
     const runIds = events.map((node) => node.getAttribute('data-run-event-run-id'));
     const rejectCancelledEvent = events.find((node) => node.getAttribute('data-run-event') === 'workflow.run.cancelled');
     return detail?.getAttribute('data-run-id') === ${JSON.stringify(WORKFLOW_REJECT_RUN_ID)}
+      && detail?.getAttribute('data-run-status') === 'cancelled'
+      && detail?.getAttribute('data-task-id') === ${JSON.stringify(WORKFLOW_REJECT_TASK_ID)}
+      && detail?.getAttribute('data-session-id') === ${JSON.stringify(WORKFLOW_REJECT_SESSION_ID)}
       && !document.querySelector('[data-testid="agent-run-detail-workflow-child-approval"]')
       && result?.textContent.includes('Workflow child approval rejected from Electron smoke')
       && steps.some((node) => node.getAttribute('data-child-run-id') === ${JSON.stringify(WORKFLOW_REJECT_CHILD_RUN_ID)} && node.getAttribute('data-workflow-step-status') === 'cancelled')
@@ -1708,7 +1729,13 @@ async function main() {
 
   await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '#/agents/' + encodeURIComponent(workflowCancelRunId));
   console.log('[electron-smoke] workflow child cancel run detail loaded');
-  await waitFor(win, () => document.querySelector('[data-testid="agent-run-detail"]')?.getAttribute('data-run-id') === ${JSON.stringify(WORKFLOW_CANCEL_RUN_ID)}, 'workflow child cancel parent run detail article');
+  await waitFor(win, () => {
+    const detail = document.querySelector('[data-testid="agent-run-detail"]');
+    return detail?.getAttribute('data-run-id') === ${JSON.stringify(WORKFLOW_CANCEL_RUN_ID)}
+      && detail?.getAttribute('data-run-status') === 'approval_required'
+      && detail?.getAttribute('data-task-id') === ${JSON.stringify(WORKFLOW_CANCEL_TASK_ID)}
+      && detail?.getAttribute('data-session-id') === ${JSON.stringify(WORKFLOW_CANCEL_SESSION_ID)};
+  }, 'workflow child cancel parent run detail article');
   await waitFor(win, () => {
     const childApproval = document.querySelector('[data-testid="agent-run-detail-workflow-child-approval"]');
     const request = childApproval?.querySelector('[data-testid="agent-run-approval-request"]');
@@ -1730,6 +1757,9 @@ async function main() {
     const runIds = events.map((node) => node.getAttribute('data-run-event-run-id'));
     const cancelCancelledEvent = events.find((node) => node.getAttribute('data-run-event') === 'workflow.run.cancelled');
     return detail?.getAttribute('data-run-id') === ${JSON.stringify(WORKFLOW_CANCEL_RUN_ID)}
+      && detail?.getAttribute('data-run-status') === 'cancelled'
+      && detail?.getAttribute('data-task-id') === ${JSON.stringify(WORKFLOW_CANCEL_TASK_ID)}
+      && detail?.getAttribute('data-session-id') === ${JSON.stringify(WORKFLOW_CANCEL_SESSION_ID)}
       && !document.querySelector('[data-testid="agent-run-detail-workflow-child-approval"]')
       && result?.textContent.includes('Workflow child run cancelled from Electron smoke')
       && steps.some((node) => node.getAttribute('data-child-run-id') === ${JSON.stringify(WORKFLOW_CANCEL_CHILD_RUN_ID)} && node.getAttribute('data-workflow-step-status') === 'cancelled')
@@ -1741,7 +1771,13 @@ async function main() {
 
   await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '#/agents/' + encodeURIComponent(workflowRunId));
   console.log('[electron-smoke] workflow child approval run detail loaded');
-  await waitFor(win, () => document.querySelector('[data-testid="agent-run-detail"]')?.getAttribute('data-run-id') === ${JSON.stringify(WORKFLOW_RUN_ID)}, 'workflow parent run detail article');
+  await waitFor(win, () => {
+    const detail = document.querySelector('[data-testid="agent-run-detail"]');
+    return detail?.getAttribute('data-run-id') === ${JSON.stringify(WORKFLOW_RUN_ID)}
+      && detail?.getAttribute('data-run-status') === 'approval_required'
+      && detail?.getAttribute('data-task-id') === ${JSON.stringify(WORKFLOW_TASK_ID)}
+      && detail?.getAttribute('data-session-id') === ${JSON.stringify(WORKFLOW_SESSION_ID)};
+  }, 'workflow parent run detail article');
   await waitFor(win, () => {
     const childApproval = document.querySelector('[data-testid="agent-run-detail-workflow-child-approval"]');
     const request = childApproval?.querySelector('[data-testid="agent-run-approval-request"]');
@@ -1778,6 +1814,9 @@ async function main() {
     const artifactEvent = events.find((node) => node.getAttribute('data-run-event') === 'workflow.node.artifact');
     const completedEvent = events.find((node) => node.getAttribute('data-run-event') === 'workflow.run.completed');
     return detail?.getAttribute('data-run-id') === ${JSON.stringify(WORKFLOW_RUN_ID)}
+      && detail?.getAttribute('data-run-status') === 'completed'
+      && detail?.getAttribute('data-task-id') === ${JSON.stringify(WORKFLOW_TASK_ID)}
+      && detail?.getAttribute('data-session-id') === ${JSON.stringify(WORKFLOW_SESSION_ID)}
       && !document.querySelector('[data-testid="agent-run-detail-workflow-child-approval"]')
       && result?.textContent.includes('Workflow child approval Electron smoke complete')
       && steps.some((node) => node.getAttribute('data-child-run-id') === ${JSON.stringify(WORKFLOW_CHILD_RUN_ID)} && node.getAttribute('data-workflow-step-status') === 'completed')
@@ -1814,6 +1853,9 @@ async function main() {
     const parentOpen = document.querySelector('[data-testid="agent-run-detail-open-parent-run"]');
     return window.location.hash.includes(${JSON.stringify(WORKFLOW_CHILD_RUN_ID)})
       && detail?.getAttribute('data-run-id') === ${JSON.stringify(WORKFLOW_CHILD_RUN_ID)}
+      && detail?.getAttribute('data-run-status') === 'completed'
+      && detail?.getAttribute('data-task-id') === ${JSON.stringify(WORKFLOW_CHILD_TASK_ID)}
+      && detail?.getAttribute('data-session-id') === ${JSON.stringify(WORKFLOW_CHILD_SESSION_ID)}
       && parentOpen?.getAttribute('data-run-id') === ${JSON.stringify(WORKFLOW_RUN_ID)}
       && parentOpen?.getAttribute('data-run-status') === 'completed'
       && result?.textContent.includes('Workflow child approval Electron smoke complete')
