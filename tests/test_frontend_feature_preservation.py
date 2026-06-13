@@ -1428,7 +1428,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
         [
             "type StudioTab = 'agents' | 'skills' | 'skill-groups' | 'workflows' | 'runs';",
             "const studioTabs: StudioTab[] = ['agents', 'skills', 'workflows', 'runs'];",
-            "const workflowNodeTypes = new Set(['start', 'agent', 'approval', 'artifact']);",
+            "const workflowNodeTypes = new Set(['start', 'agent', 'approval', 'artifact', 'condition', 'parallel', 'workflow', 'loop']);",
             "createAgent",
             "updateAgent",
             "deleteAgent",

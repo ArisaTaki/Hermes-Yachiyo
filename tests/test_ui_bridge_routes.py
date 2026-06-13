@@ -3,15 +3,22 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import threading
 import zipfile
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
 import apps.locald.screenshot as screenshot_mod
 import apps.shell.config as config_mod
 import apps.shell.live2d_resources as live2d_resources
+import apps.shell.mode_settings as mode_settings
+import apps.shell.tts as tts_mod
+import apps.shell.tts_resources as tts_resources
 import apps.shell.chat_api as chat_api_mod
 from apps.bridge.routes import ui
 from apps.core.chat_session import ChatSession
@@ -26,6 +33,58 @@ def _create_live2d_model_dir(root: Path, model_name: str = "demo") -> Path:
     (root / f"{model_name}.model3.json").write_text("{}", encoding="utf-8")
     (root / f"{model_name}.moc3").write_text("stub", encoding="utf-8")
     return root
+
+
+class _GptSovitsHttpServer:
+    def __init__(self) -> None:
+        self.requests: list[dict[str, object]] = []
+        owner = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *_args) -> None:
+                return
+
+            def do_GET(self) -> None:
+                parsed = urlparse(self.path)
+                query = parse_qs(parsed.query)
+                owner.requests.append(
+                    {
+                        "method": "GET",
+                        "path": parsed.path,
+                        "query": {key: values[-1] for key, values in query.items()},
+                    }
+                )
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"ok": true}')
+
+            def do_POST(self) -> None:
+                body = self.rfile.read(int(self.headers.get("Content-Length") or "0"))
+                owner.requests.append(
+                    {
+                        "method": "POST",
+                        "path": urlparse(self.path).path,
+                        "body": json.loads(body.decode("utf-8") or "{}"),
+                    }
+                )
+                self.send_response(200)
+                self.send_header("Content-Type", "audio/wav")
+                self.end_headers()
+                self.wfile.write(b"RIFF\x24\x00\x00\x00WAVEfmt ")
+
+        self._server = HTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self._server.server_port}"
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+
+    def __enter__(self):
+        self._thread.start()
+        return self
+
+    def __exit__(self, *_args) -> None:
+        self._server.shutdown()
+        self._thread.join(timeout=5)
+        self._server.server_close()
 
 
 class _ChatRouteRuntime:
@@ -1131,6 +1190,109 @@ async def test_live2d_import_archive_route_returns_draft(monkeypatch, tmp_path):
     assert result["draft_changes"] == {"live2d_mode.model_path": str(imported_path)}
     assert result["preview"]["settings"]["config"]["model_path"] == str(imported_path)
     assert "已导入" in result["message"]
+
+
+@pytest.mark.asyncio
+async def test_live2d_and_tts_resource_routes_import_save_and_test(monkeypatch, tmp_path):
+    config = AppConfig(display_mode="bubble")
+    runtime = SimpleNamespace(config=config)
+    monkeypatch.setattr(ui, "get_runtime", lambda: runtime)
+    monkeypatch.setattr(mode_settings, "save_config", lambda _config: None)
+    monkeypatch.setattr(live2d_resources, "get_user_live2d_assets_dir", lambda: tmp_path / "live2d-assets")
+    monkeypatch.setattr(tts_resources, "get_user_tts_assets_dir", lambda: tmp_path / "tts-assets")
+    monkeypatch.setattr(tts_mod.TTSService, "_play_audio_file", lambda self, audio_path: None)
+
+    live2d_source = tmp_path / "live2d-release" / "yachiyo-live2d"
+    _create_live2d_model_dir(live2d_source, model_name="yachiyo")
+    live2d_archive = tmp_path / "yachiyo-live2d.zip"
+    with zipfile.ZipFile(live2d_archive, "w") as archive:
+        for file_path in live2d_source.rglob("*"):
+            archive.write(file_path, file_path.relative_to(live2d_source.parent))
+
+    live2d_import = await ui.import_live2d_archive_path(
+        ui.Live2DResourcePathRequest(path=str(live2d_archive))
+    )
+    live2d_changes = {
+        **live2d_import["draft_changes"],
+        "display_mode": "live2d",
+    }
+    live2d_save = await ui.update_settings(ui.SettingsUpdateRequest(changes=live2d_changes))
+
+    assert live2d_import["ok"] is True
+    assert live2d_save["ok"] is True
+    assert config.display_mode == "live2d"
+    assert Path(config.live2d_mode.model_path).is_dir()
+    assert Path(config.live2d_mode.model_path, "yachiyo.model3.json").is_file()
+
+    with _GptSovitsHttpServer() as gsv:
+        voice_root = tmp_path / "voice-package"
+        (voice_root / "GPT_weights_v4").mkdir(parents=True)
+        (voice_root / "SoVITS_weights_v4").mkdir(parents=True)
+        (voice_root / "refs").mkdir(parents=True)
+        (voice_root / "GPT_weights_v4" / "yachiyo.ckpt").write_bytes(b"gpt")
+        (voice_root / "SoVITS_weights_v4" / "yachiyo.pth").write_bytes(b"sovits")
+        (voice_root / "refs" / "yachiyo.wav").write_bytes(b"RIFFvoice")
+        (voice_root / "yachiyo-tts-preset.json").write_text(
+            json.dumps(
+                {
+                    "kind": tts_resources.TTS_PRESET_KIND,
+                    "schema_version": 1,
+                    "slug": "route-e2e-voice",
+                    "base_url": gsv.url,
+                    "files": {
+                        "gpt_weights": "GPT_weights_v4/yachiyo.ckpt",
+                        "sovits_weights": "SoVITS_weights_v4/yachiyo.pth",
+                        "ref_audio": "refs/yachiyo.wav",
+                    },
+                    "gpt_sovits": {
+                        "ref_audio_text": "月見八千代です。",
+                        "ref_audio_language": "ja",
+                        "text_language": "zh",
+                        "top_k": 9,
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        voice_archive = tmp_path / "route-e2e-voice.zip"
+        with zipfile.ZipFile(voice_archive, "w") as archive:
+            for file_path in voice_root.rglob("*"):
+                if file_path.is_file():
+                    archive.write(file_path, file_path.relative_to(voice_root))
+
+        voice_import = await ui.import_tts_voice_archive_path(
+            ui.TtsResourcePathRequest(path=str(voice_archive))
+        )
+        voice_save = await ui.update_settings(
+            ui.SettingsUpdateRequest(changes=voice_import["draft_changes"])
+        )
+        tts_result = await ui.test_proactive_tts(
+            ui.TtsTestRequest(text="Live2D 和 GPT-SoVITS 资源链路测试。")
+        )
+
+    assert voice_import["ok"] is True
+    assert voice_save["ok"] is True
+    assert config.tts.enabled is True
+    assert config.tts.provider == "gpt-sovits"
+    assert config.tts.gsv_base_url == gsv.url
+    assert Path(config.tts.gsv_gpt_weights_path).is_file()
+    assert Path(config.tts.gsv_sovits_weights_path).is_file()
+    assert Path(config.tts.gsv_ref_audio_path).is_file()
+    assert tts_result["ok"] is True
+    assert tts_result["success"] is True
+    assert tts_result["provider"] == "gpt-sovits"
+    assert tts_result["spoken_text"] == "Live2D 和 GPT-SoVITS 资源链路测试。"
+
+    weight_requests = [item for item in gsv.requests if item["method"] == "GET"]
+    tts_requests = [item for item in gsv.requests if item["method"] == "POST" and item["path"] == "/tts"]
+    assert [item["path"] for item in weight_requests] == ["/set_gpt_weights", "/set_sovits_weights"]
+    assert weight_requests[0]["query"]["weights_path"] == config.tts.gsv_gpt_weights_path
+    assert weight_requests[1]["query"]["weights_path"] == config.tts.gsv_sovits_weights_path
+    assert len(tts_requests) == 1
+    assert tts_requests[0]["body"]["text"] == "Live2D 和 GPT-SoVITS 资源链路测试。"
+    assert tts_requests[0]["body"]["ref_audio_path"] == config.tts.gsv_ref_audio_path
+    assert tts_requests[0]["body"]["prompt_text"] == "月見八千代です。"
+    assert tts_requests[0]["body"]["top_k"] == 9
 
 
 def test_live2d_zip_member_name_recovers_utf8_without_flag():

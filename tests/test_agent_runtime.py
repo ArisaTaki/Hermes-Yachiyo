@@ -51,8 +51,11 @@ from apps.shell.agent_runtime import (
     WorkflowChildStatusProjection,
     WorkflowCancellationProjectionCoordinator,
     WorkflowCancellationTarget,
+    WorkflowConditionNodeProjection,
     WorkflowContinuationCoordinator,
     WorkflowContinuationFailureProjection,
+    WorkflowLoopNodeProjection,
+    WorkflowParallelNodeProjection,
     WorkflowParentResumeFailureProjection,
     WorkflowParentRunLocator,
     WorkflowParentResumeCoordinator,
@@ -60,6 +63,7 @@ from apps.shell.agent_runtime import (
     WorkflowResumePlanner,
     WorkflowRunStartProjector,
     WorkflowStartNodeProjection,
+    WorkflowSubworkflowNodeExecution,
     WorkflowRunCompletionProjection,
     _MAX_AGENT_TOOL_ITERATIONS,
 )
@@ -389,6 +393,18 @@ def test_workflow_parent_run_locator_finds_waiting_parents_and_root_groups():
             }
         ],
     }
+    waiting_on_workflow_parent = {
+        "run_id": "workflow_waiting_on_workflow",
+        "kind": "workflow_run",
+        "run_group_id": "group",
+        "status": "approval_required",
+        "timeline": [
+            {
+                "event": "workflow.run.approval_required",
+                "child_run_id": "child_workflow",
+            }
+        ],
+    }
     completed_parent = {
         "run_id": "workflow_completed",
         "kind": "workflow_run",
@@ -404,8 +420,10 @@ def test_workflow_parent_run_locator_finds_waiting_parents_and_root_groups():
     runs = {
         "workflow_waiting": waiting_parent,
         "workflow_unrelated": running_unrelated,
+        "workflow_waiting_on_workflow": waiting_on_workflow_parent,
         "workflow_completed": completed_parent,
         "child_run": {"run_id": "child_run", "kind": "agent_run"},
+        "child_workflow": {"run_id": "child_workflow", "kind": "workflow_run"},
         "not_workflow": {"run_id": "not_workflow", "kind": "agent_run", "status": "approval_required"},
     }
     groups = {
@@ -415,6 +433,8 @@ def test_workflow_parent_run_locator_finds_waiting_parents_and_root_groups():
             "child_run_ids": [
                 "workflow_waiting",
                 "child_run",
+                "child_workflow",
+                "workflow_waiting_on_workflow",
                 "workflow_unrelated",
                 "missing_run",
                 "workflow_completed",
@@ -442,6 +462,9 @@ def test_workflow_parent_run_locator_finds_waiting_parents_and_root_groups():
     )
 
     assert parents == [waiting_parent]
+    assert locator.parent_runs_waiting_for_child(
+        {"run_id": "child_workflow", "kind": "workflow_run", "run_group_id": "group"}
+    ) == [waiting_on_workflow_parent]
     assert locator.parent_runs_waiting_for_child({"kind": "workflow_run", "run_group_id": "group"}) == []
     assert locator.parent_runs_waiting_for_child({"kind": "agent_run", "run_group_id": "missing"}) == []
     assert locator.workflow_run_is_group_root(waiting_parent) is True
@@ -556,6 +579,214 @@ def test_workflow_path_planner_builds_path_snapshot_and_artifact_paths():
     assert runtime_snapshot["edges"] is not workflow["edges"]
 
 
+def test_workflow_path_planner_supports_condition_branch_snapshot_and_selection():
+    planner = WorkflowPathPlanner(node_kind=lambda node: str(node.get("type") or ""))
+    workflow = {
+        "workflow_id": "workflow_condition_plan",
+        "name": "Condition Workflow",
+        "nodes": [
+            {"id": "start", "type": "start", "data": {"label": "Start"}},
+            {
+                "id": "route",
+                "type": "condition",
+                "data": {"label": "Route", "condition": "ship", "operator": "contains"},
+            },
+            {"id": "ship", "type": "agent", "data": {"label": "Ship"}},
+            {"id": "ship-report", "type": "artifact", "data": {"label": "Ship Report"}},
+            {"id": "skip", "type": "agent", "data": {"label": "Skip"}},
+            {"id": "skip-report", "type": "artifact", "data": {"label": "Skip Report"}},
+        ],
+        "edges": [
+            {"source": "start", "target": "route"},
+            {"source": "route", "target": "ship", "data": {"branch": "true"}},
+            {"source": "route", "target": "skip", "data": {"branch": "false"}},
+            {"source": "ship", "target": "ship-report"},
+            {"source": "skip", "target": "skip-report"},
+        ],
+    }
+
+    snapshot = planner.path_snapshot(workflow)
+    matched = planner.condition_selection(workflow, workflow["nodes"][1], "decision: SHIP")
+    missed = planner.condition_selection(workflow, workflow["nodes"][1], "decision: skip")
+    projection = WorkflowConditionNodeProjection.from_node(
+        SimpleNamespace(_workflow_condition_selection=planner.condition_selection),
+        workflow,
+        workflow["nodes"][1],
+        label="Route",
+        kind="condition",
+        context="decision: SHIP",
+    )
+
+    assert [step["id"] for step in snapshot] == [
+        "start",
+        "route",
+        "ship",
+        "ship-report",
+        "skip",
+        "skip-report",
+    ]
+    assert snapshot[1] == {
+        "id": "route",
+        "kind": "condition",
+        "label": "Route",
+        "condition": "ship",
+        "operator": "contains",
+    }
+    assert matched["matched"] is True
+    assert matched["branch"] == "true"
+    assert matched["target_node_id"] == "ship"
+    assert missed["matched"] is False
+    assert missed["branch"] == "false"
+    assert missed["target_node_id"] == "skip"
+    assert projection.event_payload()["workflow_node_selected_target"] == "ship"
+
+
+def test_workflow_path_planner_supports_parallel_fanout_plan_and_snapshot():
+    planner = WorkflowPathPlanner(node_kind=lambda node: str(node.get("type") or ""))
+    workflow = {
+        "workflow_id": "workflow_parallel_plan",
+        "name": "Parallel Workflow",
+        "nodes": [
+            {"id": "start", "type": "start", "data": {"label": "Start"}},
+            {"id": "fanout", "type": "parallel", "data": {"label": "Parallel Work"}},
+            {"id": "design", "type": "agent", "data": {"label": "Design"}},
+            {"id": "code", "type": "agent", "data": {"label": "Code"}},
+            {"id": "report", "type": "artifact", "data": {"label": "Report"}},
+        ],
+        "edges": [
+            {"source": "start", "target": "fanout"},
+            {"source": "fanout", "target": "design"},
+            {"source": "fanout", "target": "code"},
+            {"source": "design", "target": "report"},
+            {"source": "code", "target": "report"},
+        ],
+    }
+
+    plan = planner.parallel_plan(workflow, workflow["nodes"][1])
+    snapshot = planner.path_snapshot(workflow)
+    projection = WorkflowParallelNodeProjection(
+        node_id="fanout",
+        node_kind="parallel",
+        node_label="Parallel Work",
+        branch_count=2,
+        completed_count=2,
+        join_node_id="report",
+        branch_results=[
+            {"entry_node_id": "design", "label": "Design", "result": "Design ready"},
+            {"entry_node_id": "code", "label": "Code", "result": "Code ready"},
+        ],
+    )
+
+    assert plan == {
+        "join_node_id": "report",
+        "branches": [
+            {"entry_node_id": "design", "label": "Design", "node_ids": ["design"]},
+            {"entry_node_id": "code", "label": "Code", "node_ids": ["code"]},
+        ],
+    }
+    assert snapshot[1] == {
+        "id": "fanout",
+        "kind": "parallel",
+        "label": "Parallel Work",
+        "branch_count": "2",
+    }
+    assert projection.event_payload()["workflow_node_join_target"] == "report"
+    assert projection.event_payload()["workflow_node_completed_branch_count"] == 2
+
+
+def test_workflow_path_planner_supports_subworkflow_snapshot():
+    planner = WorkflowPathPlanner(node_kind=lambda node: str(node.get("type") or ""))
+    workflow = {
+        "workflow_id": "workflow_parent_plan",
+        "name": "Parent Workflow",
+        "nodes": [
+            {"id": "start", "type": "start", "data": {"label": "Start"}},
+            {
+                "id": "child",
+                "type": "workflow",
+                "data": {
+                    "label": "Child Workflow",
+                    "workflow_id": "workflow_child_plan",
+                    "task": "Run the child flow",
+                },
+            },
+            {"id": "report", "type": "artifact", "data": {"label": "Parent Report"}},
+        ],
+        "edges": [
+            {"source": "start", "target": "child"},
+            {"source": "child", "target": "report"},
+        ],
+    }
+
+    snapshot = planner.path_snapshot(workflow)
+
+    assert planner.workflow_id(workflow["nodes"][1]) == "workflow_child_plan"
+    assert snapshot[1] == {
+        "id": "child",
+        "kind": "workflow",
+        "label": "Child Workflow",
+        "workflow_id": "workflow_child_plan",
+        "task": "Run the child flow",
+    }
+
+
+def test_workflow_path_planner_supports_loop_snapshot_and_selection():
+    planner = WorkflowPathPlanner(node_kind=lambda node: str(node.get("type") or ""))
+    workflow = {
+        "workflow_id": "workflow_loop_plan",
+        "name": "Loop Workflow",
+        "nodes": [
+            {"id": "start", "type": "start", "data": {"label": "Start"}},
+            {"id": "worker", "type": "agent", "data": {"label": "Worker"}},
+            {
+                "id": "repeat",
+                "type": "loop",
+                "data": {"label": "Repeat While Needed", "condition": "again", "max_iterations": 2},
+            },
+            {"id": "report", "type": "artifact", "data": {"label": "Loop Report"}},
+        ],
+        "edges": [
+            {"source": "start", "target": "worker"},
+            {"source": "worker", "target": "repeat"},
+            {"source": "repeat", "target": "worker", "data": {"branch": "continue"}},
+            {"source": "repeat", "target": "report", "data": {"branch": "exit"}},
+        ],
+    }
+
+    snapshot = planner.path_snapshot(workflow)
+    continued = planner.loop_selection(workflow, workflow["nodes"][2], "again please", previous_iterations=0)
+    capped = planner.loop_selection(workflow, workflow["nodes"][2], "again please", previous_iterations=2)
+    exited = planner.loop_selection(workflow, workflow["nodes"][2], "done", previous_iterations=2)
+    projection = WorkflowLoopNodeProjection.from_node(
+        SimpleNamespace(_workflow_loop_selection=planner.loop_selection),
+        workflow,
+        workflow["nodes"][2],
+        label="Repeat While Needed",
+        kind="loop",
+        context="again please",
+        previous_iterations=0,
+    )
+
+    assert snapshot[2] == {
+        "id": "repeat",
+        "kind": "loop",
+        "label": "Repeat While Needed",
+        "condition": "again",
+        "operator": "contains",
+        "max_iterations": "2",
+    }
+    assert continued["branch"] == "continue"
+    assert continued["target_node_id"] == "worker"
+    assert continued["iteration"] == 1
+    assert capped["branch"] == "exit"
+    assert capped["target_node_id"] == "report"
+    assert capped["limit_reached"] is True
+    assert exited["branch"] == "exit"
+    assert exited["limit_reached"] is False
+    assert projection.event_payload()["workflow_node_loop_iteration"] == 1
+    assert projection.event_payload()["workflow_node_selected_branch"] == "continue"
+
+
 def test_workflow_run_start_projector_builds_timeline_and_replay_payload():
     workflow = {"workflow_id": "workflow_run_start", "name": "Start Projection"}
     workflow_path = [{"id": "start", "kind": "start"}, {"id": "agent", "kind": "agent"}]
@@ -603,6 +834,7 @@ def test_workflow_approval_resume_context_parses_pending_payload():
         "tool": "workflow.approval",
         "workflow_context": "approved context",
         "workflow_next_index": "4",
+        "workflow_next_node_id": "after-gate",
         "workflow_node_id": "gate",
         "workflow_node_label": "Human Gate",
         "workflow_node_approval_criteria": "Review before continuing.",
@@ -620,6 +852,7 @@ def test_workflow_approval_resume_context_parses_pending_payload():
     assert context.workflow is not workflow
     assert context.result_context == "approved context"
     assert context.start_index == 4
+    assert context.start_node_id == "after-gate"
     assert context.root_group is True
     assert context.timeline == [{"event": "workflow.node.approval_required"}]
     assert context.artifacts == [{"kind": "workflow_artifact", "path": "summary.md"}]
@@ -2922,6 +3155,7 @@ def test_workflow_approval_pause_projection_builds_private_and_public_payloads()
         criteria="Review output",
         context="Child result ready",
         next_index=4,
+        next_node_id="after-gate",
         requested_at="2026-06-12T00:00:00+00:00",
     )
     pending = projection.pending_approval()
@@ -2941,6 +3175,7 @@ def test_workflow_approval_pause_projection_builds_private_and_public_payloads()
         "requested_at": "2026-06-12T00:00:00+00:00",
         "workflow_context": "Child result ready",
         "workflow_next_index": 4,
+        "workflow_next_node_id": "after-gate",
         "workflow_node_id": "gate",
         "workflow_node_label": "Human Gate",
         "workflow_node_approval_criteria": "Review output",
@@ -3259,6 +3494,7 @@ def test_workflow_continuation_coordinator_pauses_for_approval_node():
     assert private_pending["approval_id"].startswith("approval_")
     assert private_pending["workflow_context"] == "Child result ready"
     assert private_pending["workflow_next_index"] == 1
+    assert private_pending["workflow_next_node_id"] == ""
     assert private_pending["workflow_node_id"] == "gate"
     assert private_pending["workflow_node_label"] == "Human Gate"
     assert private_pending["workflow_node_approval_criteria"] == "Review child output before continuing."
@@ -10572,6 +10808,24 @@ def test_workflow_validation_rejects_branch_and_cycle(tmp_path):
                     {"source": "b", "target": "a"},
                 ],
             )
+        assert service.validate_workflow(
+            [
+                {"id": "start", "type": "start", "data": {"label": "Start"}},
+                {"id": "a", "type": "agent", "data": {"label": "A"}},
+                {
+                    "id": "repeat",
+                    "type": "loop",
+                    "data": {"label": "Repeat", "condition": "again", "max_iterations": 2},
+                },
+                {"id": "done", "type": "artifact", "data": {"label": "Done"}},
+            ],
+            [
+                {"source": "start", "target": "a"},
+                {"source": "a", "target": "repeat"},
+                {"source": "repeat", "target": "a", "data": {"branch": "continue"}},
+                {"source": "repeat", "target": "done", "data": {"branch": "exit"}},
+            ],
+        ) == {"ok": True}
     finally:
         service.close()
 
@@ -17429,6 +17683,1000 @@ async def test_workflow_routes_accept_reactflow_node_types(tmp_path, monkeypatch
             {"id": "summary", "kind": "artifact", "label": "Summary", "artifact_path": "summary.md"},
         ]
         assert service.read_run_artifact(run["run_id"], "summary.md")["content"] == "ReactFlow route done"
+    finally:
+        service.close()
+
+
+def test_workflow_condition_node_routes_true_and_false_branches(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    calls: list[list[dict]] = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, **_kwargs):
+        calls.append(messages)
+        if len(calls) == 1:
+            return {"content": "decision: ship"}
+        if len(calls) == 2:
+            return {"content": "ship branch done"}
+        if len(calls) == 3:
+            return {"content": "decision: skip"}
+        return {"content": "skip branch done"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        model_config = {
+            "base_url": "https://api.example.test/v1",
+            "model": "demo-model",
+            "api_key": "sk-secret",
+        }
+        classifier = service.create_agent(
+            {"name": "Condition Classifier", "model_mode": "custom_api", "model_config": model_config}
+        )
+        ship_agent = service.create_agent(
+            {"name": "Ship Branch Agent", "model_mode": "custom_api", "model_config": model_config}
+        )
+        skip_agent = service.create_agent(
+            {"name": "Skip Branch Agent", "model_mode": "custom_api", "model_config": model_config}
+        )
+        workflow = service.create_workflow(
+            {
+                "name": "Condition Branch Flow",
+                "nodes": [
+                    {"id": "start", "type": "start", "data": {"label": "Start"}},
+                    {
+                        "id": "classify",
+                        "type": "agent",
+                        "data": {
+                            "label": "Classify",
+                            "agent_id": classifier["agent_id"],
+                            "task": "Return decision: ship or decision: skip.",
+                        },
+                    },
+                    {
+                        "id": "route",
+                        "type": "condition",
+                        "data": {"label": "Route", "condition": "ship", "operator": "contains"},
+                    },
+                    {
+                        "id": "ship",
+                        "type": "agent",
+                        "data": {"label": "Ship", "agent_id": ship_agent["agent_id"]},
+                    },
+                    {
+                        "id": "skip",
+                        "type": "agent",
+                        "data": {"label": "Skip", "agent_id": skip_agent["agent_id"]},
+                    },
+                    {
+                        "id": "report",
+                        "type": "artifact",
+                        "data": {"label": "Branch Report", "artifact_path": "reports/branch.md"},
+                    },
+                ],
+                "edges": [
+                    {"source": "start", "target": "classify"},
+                    {"source": "classify", "target": "route"},
+                    {"source": "route", "target": "ship", "data": {"branch": "true"}},
+                    {"source": "route", "target": "skip", "data": {"branch": "false"}},
+                    {"source": "ship", "target": "report"},
+                    {"source": "skip", "target": "report"},
+                ],
+            }
+        )
+
+        ship_run = service.create_workflow_run(
+            {"workflow_id": workflow["workflow_id"], "user_goal": "Use ship branch"}
+        )
+        skip_run = service.create_workflow_run(
+            {"workflow_id": workflow["workflow_id"], "user_goal": "Use skip branch"}
+        )
+
+        ship_steps = [
+            event for event in ship_run["timeline"]
+            if str(event.get("event") or "").startswith("workflow.node.")
+        ]
+        skip_steps = [
+            event for event in skip_run["timeline"]
+            if str(event.get("event") or "").startswith("workflow.node.")
+        ]
+        ship_condition = next(event for event in ship_steps if event["event"] == "workflow.node.condition")
+        skip_condition = next(event for event in skip_steps if event["event"] == "workflow.node.condition")
+
+        assert ship_run["status"] == "completed"
+        assert ship_run["result"] == "ship branch done"
+        assert service.read_run_artifact(ship_run["run_id"], "reports/branch.md")["content"] == "ship branch done"
+        assert [event.get("workflow_node_id") for event in ship_steps] == [
+            "start",
+            "classify",
+            "route",
+            "ship",
+            "report",
+        ]
+        assert ship_condition["workflow_node_condition_matched"] is True
+        assert ship_condition["workflow_node_selected_branch"] == "true"
+        assert ship_condition["workflow_node_selected_target"] == "ship"
+
+        assert skip_run["status"] == "completed"
+        assert skip_run["result"] == "skip branch done"
+        assert service.read_run_artifact(skip_run["run_id"], "reports/branch.md")["content"] == "skip branch done"
+        assert [event.get("workflow_node_id") for event in skip_steps] == [
+            "start",
+            "classify",
+            "route",
+            "skip",
+            "report",
+        ]
+        assert skip_condition["workflow_node_condition_matched"] is False
+        assert skip_condition["workflow_node_selected_branch"] == "false"
+        assert skip_condition["workflow_node_selected_target"] == "skip"
+        assert len(calls) == 4
+    finally:
+        service.close()
+
+
+def test_workflow_parallel_node_runs_branches_and_merges_into_artifact(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    calls: list[str] = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, **_kwargs):
+        context = str(messages[1]["content"])
+        calls.append(context)
+        if "Design branch" in context:
+            return {"content": "Design branch complete"}
+        if "Code branch" in context:
+            return {"content": "Code branch complete"}
+        return {"content": "unexpected"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        model_config = {
+            "base_url": "https://api.example.test/v1",
+            "model": "demo-model",
+            "api_key": "sk-secret",
+        }
+        design_agent = service.create_agent(
+            {"name": "Parallel Design Agent", "model_mode": "custom_api", "model_config": model_config}
+        )
+        code_agent = service.create_agent(
+            {"name": "Parallel Code Agent", "model_mode": "custom_api", "model_config": model_config}
+        )
+        workflow = service.create_workflow(
+            {
+                "name": "Parallel Branch Flow",
+                "nodes": [
+                    {"id": "start", "type": "start", "data": {"label": "Start"}},
+                    {"id": "fanout", "type": "parallel", "data": {"label": "Parallel Work"}},
+                    {
+                        "id": "design",
+                        "type": "agent",
+                        "data": {
+                            "label": "Design",
+                            "agent_id": design_agent["agent_id"],
+                            "task": "Design branch",
+                        },
+                    },
+                    {
+                        "id": "code",
+                        "type": "agent",
+                        "data": {
+                            "label": "Code",
+                            "agent_id": code_agent["agent_id"],
+                            "task": "Code branch",
+                        },
+                    },
+                    {
+                        "id": "report",
+                        "type": "artifact",
+                        "data": {"label": "Parallel Report", "artifact_path": "reports/parallel.md"},
+                    },
+                ],
+                "edges": [
+                    {"source": "start", "target": "fanout"},
+                    {"source": "fanout", "target": "design"},
+                    {"source": "fanout", "target": "code"},
+                    {"source": "design", "target": "report"},
+                    {"source": "code", "target": "report"},
+                ],
+            }
+        )
+
+        run = service.create_workflow_run(
+            {"workflow_id": workflow["workflow_id"], "user_goal": "Run parallel branches"}
+        )
+        steps = [
+            event for event in run["timeline"]
+            if str(event.get("event") or "").startswith("workflow.node.")
+        ]
+        parallel_event = next(event for event in steps if event["event"] == "workflow.node.parallel")
+        artifact = service.read_run_artifact(run["run_id"], "reports/parallel.md")
+
+        assert run["status"] == "completed"
+        assert [event.get("workflow_node_id") for event in steps] == [
+            "start",
+            "design",
+            "code",
+            "fanout",
+            "report",
+        ]
+        assert parallel_event["workflow_node_branch_count"] == 2
+        assert parallel_event["workflow_node_completed_branch_count"] == 2
+        assert parallel_event["workflow_node_join_target"] == "report"
+        assert [item["label"] for item in parallel_event["workflow_node_branch_results"]] == ["Design", "Code"]
+        assert "Parallel Parallel Work results:" in run["result"]
+        assert "- Design: Design branch complete" in run["result"]
+        assert "- Code: Code branch complete" in run["result"]
+        assert artifact["content"] == run["result"]
+        assert len(calls) == 2
+    finally:
+        service.close()
+
+
+def test_workflow_parallel_branch_approval_resumes_remaining_branches_and_fans_in(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    calls: list[list[dict]] = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        prompt = str(messages[1]["content"]) if len(messages) > 1 else ""
+        if len(calls) == 1:
+            assert "Design branch" in prompt
+            assert any((tool.get("function") or {}).get("name") == "terminal_run" for tool in tools or [])
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_terminal",
+                        "type": "function",
+                        "function": {
+                            "name": "terminal_run",
+                            "arguments": json.dumps({"command": "printf parallel-approved"}),
+                        },
+                    }
+                ],
+            }
+        if len(calls) == 2:
+            assert messages[-1]["role"] == "tool"
+            assert "parallel-approved" in messages[-1]["content"]
+            return {"content": "Design branch approved"}
+        assert "Code branch" in prompt
+        assert "Design branch approved" not in prompt
+        return {"content": "Code branch complete"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        model_config = {
+            "base_url": "https://api.example.test/v1",
+            "model": "demo-model",
+            "api_key": "sk-secret",
+        }
+        design_agent = service.create_agent(
+            {
+                "name": "Parallel Approval Design Agent",
+                "model_mode": "custom_api",
+                "model_config": model_config,
+                "tool_policy": {"allowed_tools": ["terminal.run"]},
+                "workspace_policy": {"default_workdir": str(workdir), "readable_scopes": ["."]},
+            }
+        )
+        code_agent = service.create_agent(
+            {"name": "Parallel Approval Code Agent", "model_mode": "custom_api", "model_config": model_config}
+        )
+        workflow = service.create_workflow(
+            {
+                "name": "Parallel Approval Branch Flow",
+                "nodes": [
+                    {"id": "start", "type": "start", "data": {"label": "Start"}},
+                    {"id": "fanout", "type": "parallel", "data": {"label": "Parallel Work"}},
+                    {
+                        "id": "design",
+                        "type": "agent",
+                        "data": {
+                            "label": "Design",
+                            "agent_id": design_agent["agent_id"],
+                            "task": "Design branch",
+                        },
+                    },
+                    {
+                        "id": "code",
+                        "type": "agent",
+                        "data": {
+                            "label": "Code",
+                            "agent_id": code_agent["agent_id"],
+                            "task": "Code branch",
+                        },
+                    },
+                    {
+                        "id": "report",
+                        "type": "artifact",
+                        "data": {
+                            "label": "Parallel Approval Report",
+                            "artifact_path": "reports/parallel-approval.md",
+                        },
+                    },
+                ],
+                "edges": [
+                    {"source": "start", "target": "fanout"},
+                    {"source": "fanout", "target": "design"},
+                    {"source": "fanout", "target": "code"},
+                    {"source": "design", "target": "report"},
+                    {"source": "code", "target": "report"},
+                ],
+            }
+        )
+
+        run = service.create_workflow_run(
+            {"workflow_id": workflow["workflow_id"], "user_goal": "Run parallel approval branches"}
+        )
+        group = service.get_run_group(run["run_group_id"])
+        design_run_id = next(
+            run_id
+            for run_id in group["child_run_ids"]
+            if run_id != run["run_id"] and service.get_run(run_id)["kind"] == "agent_run"
+        )
+        design_run = service.get_run(design_run_id)
+        initial_agent_event = next(
+            event for event in run["timeline"]
+            if event["event"] == "workflow.node.agent" and event["workflow_node_id"] == "design"
+        )
+
+        assert run["status"] == "approval_required"
+        assert design_run["status"] == "approval_required"
+        assert initial_agent_event["workflow_parent_node_id"] == "fanout"
+        assert initial_agent_event["workflow_parent_node_kind"] == "parallel"
+        assert initial_agent_event["workflow_parallel_branch_label"] == "Design"
+        assert len(calls) == 1
+
+        approved_design = service.approve_run_approval(design_run_id)
+        completed = service.get_run(run["run_id"])
+        completed_group = service.get_run_group(run["run_group_id"])
+        child_runs = [
+            service.get_run(run_id)
+            for run_id in completed_group["child_run_ids"]
+            if run_id != run["run_id"]
+        ]
+        steps = [
+            event for event in completed["timeline"]
+            if str(event.get("event") or "").startswith("workflow.node.")
+        ]
+        parallel_event = next(event for event in steps if event["event"] == "workflow.node.parallel")
+        design_event = next(
+            event for event in steps
+            if event["event"] == "workflow.node.agent" and event["workflow_node_id"] == "design"
+        )
+        parent_events = service.run_events.list(run["run_id"], after_sequence=0, limit=200)["events"]
+        parent_agent_events = [
+            event for event in parent_events
+            if event["event_type"] == "workflow.node.agent"
+            and event["payload"].get("workflow_node_id") == "design"
+        ]
+
+        assert approved_design["status"] == "completed"
+        assert completed["status"] == "completed"
+        assert completed["result"] == (
+            "Parallel Parallel Work results:\n"
+            "- Design: Design branch approved\n"
+            "- Code: Code branch complete"
+        )
+        assert [event.get("workflow_node_id") for event in steps] == [
+            "start",
+            "design",
+            "code",
+            "fanout",
+            "report",
+        ]
+        assert parallel_event["workflow_node_branch_count"] == 2
+        assert parallel_event["workflow_node_completed_branch_count"] == 2
+        assert parallel_event["workflow_node_join_target"] == "report"
+        assert [item["label"] for item in parallel_event["workflow_node_branch_results"]] == ["Design", "Code"]
+        assert design_event["status"] == "completed"
+        assert design_event["workflow_node_context"] == "Design branch approved"
+        assert design_event["workflow_parent_node_id"] == "fanout"
+        assert [event["payload"].get("status") for event in parent_agent_events] == [
+            "approval_required",
+            "running",
+            "completed",
+        ]
+        assert service.read_run_artifact(run["run_id"], "reports/parallel-approval.md")["content"] == completed["result"]
+        assert [child["runnable_id"] for child in child_runs] == [design_agent["agent_id"], code_agent["agent_id"]]
+        assert len(calls) == 3
+    finally:
+        service.close()
+
+
+def test_workflow_subworkflow_node_runs_child_workflow_and_projects_artifacts(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    calls: list[str] = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, **_kwargs):
+        context = str(messages[1]["content"])
+        calls.append(context)
+        return {"content": "child workflow agent done"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        model_config = {
+            "base_url": "https://api.example.test/v1",
+            "model": "demo-model",
+            "api_key": "sk-secret",
+        }
+        child_agent = service.create_agent(
+            {"name": "Child Workflow Agent", "model_mode": "custom_api", "model_config": model_config}
+        )
+        child_workflow = service.create_workflow(
+            {
+                "name": "Child Flow",
+                "nodes": [
+                    {"id": "start", "type": "start", "data": {"label": "Start"}},
+                    {
+                        "id": "child-agent",
+                        "type": "agent",
+                        "data": {
+                            "label": "Child Agent",
+                            "agent_id": child_agent["agent_id"],
+                            "task": "Do the child work",
+                        },
+                    },
+                    {
+                        "id": "child-report",
+                        "type": "artifact",
+                        "data": {"label": "Child Report", "artifact_path": "reports/child.md"},
+                    },
+                ],
+                "edges": [
+                    {"source": "start", "target": "child-agent"},
+                    {"source": "child-agent", "target": "child-report"},
+                ],
+            }
+        )
+        parent_workflow = service.create_workflow(
+            {
+                "name": "Parent Flow",
+                "nodes": [
+                    {"id": "start", "type": "start", "data": {"label": "Start"}},
+                    {
+                        "id": "child-flow",
+                        "type": "workflow",
+                        "data": {
+                            "label": "Run Child Flow",
+                            "workflow_id": child_workflow["workflow_id"],
+                            "task": "Run child flow first",
+                        },
+                    },
+                    {
+                        "id": "parent-report",
+                        "type": "artifact",
+                        "data": {"label": "Parent Report", "artifact_path": "reports/parent.md"},
+                    },
+                ],
+                "edges": [
+                    {"source": "start", "target": "child-flow"},
+                    {"source": "child-flow", "target": "parent-report"},
+                ],
+            }
+        )
+
+        run = service.create_workflow_run(
+            {"workflow_id": parent_workflow["workflow_id"], "user_goal": "Run parent flow"}
+        )
+        steps = [
+            event for event in run["timeline"]
+            if str(event.get("event") or "").startswith("workflow.node.")
+        ]
+        workflow_event = next(event for event in steps if event["event"] == "workflow.node.workflow")
+        child_run_id = workflow_event["child_run_id"]
+        child_run = service.get_run(child_run_id)
+        group = service.get_run_group(run["run_group_id"])
+        child_artifact_refs = [
+            artifact for artifact in run["artifacts"]
+            if artifact.get("kind") == "workflow_child_artifact"
+        ]
+
+        assert WorkflowSubworkflowNodeExecution.__name__ == "WorkflowSubworkflowNodeExecution"
+        assert run["status"] == "completed"
+        assert run["result"] == "child workflow agent done"
+        assert [event.get("workflow_node_id") for event in steps] == [
+            "start",
+            "child-flow",
+            "parent-report",
+        ]
+        assert workflow_event["child_workflow_id"] == child_workflow["workflow_id"]
+        assert workflow_event["child_workflow_name"] == "Child Flow"
+        assert workflow_event["status"] == "completed"
+        assert workflow_event["artifact_count"] == 1
+        assert child_run["kind"] == "workflow_run"
+        assert child_run["runnable_id"] == child_workflow["workflow_id"]
+        assert child_run["status"] == "completed"
+        assert child_run["run_group_id"] == run["run_group_id"]
+        assert child_run_id in group["child_run_ids"]
+        assert child_artifact_refs == [
+            {
+                "kind": "workflow_child_artifact",
+                "path": "reports/child.md",
+                "source_run_id": child_run_id,
+                "source_run_kind": "workflow_run",
+                "source_runnable_id": child_workflow["workflow_id"],
+                "source_runnable_name": "Child Flow",
+                "workflow_step_label": "Run Child Flow",
+                "artifact_kind": "workflow_artifact",
+            }
+        ]
+        assert service.read_run_artifact(child_run_id, "reports/child.md")["content"] == "child workflow agent done"
+        assert service.read_run_artifact(run["run_id"], "reports/parent.md")["content"] == "child workflow agent done"
+        assert len(calls) == 1
+    finally:
+        service.close()
+
+
+def test_workflow_subworkflow_child_approval_resumes_parent_workflow(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    calls: list[list[dict]] = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        if len(calls) == 1:
+            assert any((tool.get("function") or {}).get("name") == "terminal_run" for tool in tools or [])
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_terminal",
+                        "type": "function",
+                        "function": {
+                            "name": "terminal_run",
+                            "arguments": json.dumps({"command": "printf subworkflow-approved"}),
+                        },
+                    }
+                ],
+            }
+        assert messages[-1]["role"] == "tool"
+        assert "subworkflow-approved" in messages[-1]["content"]
+        return {"content": "Subworkflow child approved result"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        model_config = {
+            "base_url": "https://api.example.test/v1",
+            "model": "demo-model",
+            "api_key": "sk-secret",
+        }
+        child_agent = service.create_agent(
+            {
+                "name": "Subworkflow Approval Agent",
+                "model_mode": "custom_api",
+                "model_config": model_config,
+                "tool_policy": {"allowed_tools": ["terminal.run"]},
+                "workspace_policy": {"default_workdir": str(workdir), "readable_scopes": ["."]},
+            }
+        )
+        child_workflow = service.create_workflow(
+            {
+                "name": "Approval Child Flow",
+                "nodes": [
+                    {"id": "start", "type": "start", "data": {"label": "Start"}},
+                    {
+                        "id": "child-agent",
+                        "type": "agent",
+                        "data": {
+                            "label": "Subworkflow Approval Agent",
+                            "agent_id": child_agent["agent_id"],
+                        },
+                    },
+                    {
+                        "id": "child-report",
+                        "type": "artifact",
+                        "data": {"label": "Child Report", "artifact_path": "reports/child-approval.md"},
+                    },
+                ],
+                "edges": [
+                    {"source": "start", "target": "child-agent"},
+                    {"source": "child-agent", "target": "child-report"},
+                ],
+            }
+        )
+        parent_workflow = service.create_workflow(
+            {
+                "name": "Parent Approval Flow",
+                "nodes": [
+                    {"id": "start", "type": "start", "data": {"label": "Start"}},
+                    {
+                        "id": "child-flow",
+                        "type": "workflow",
+                        "data": {
+                            "label": "Run Approval Child Flow",
+                            "workflow_id": child_workflow["workflow_id"],
+                        },
+                    },
+                    {
+                        "id": "parent-report",
+                        "type": "artifact",
+                        "data": {"label": "Parent Report", "artifact_path": "reports/parent-approval.md"},
+                    },
+                ],
+                "edges": [
+                    {"source": "start", "target": "child-flow"},
+                    {"source": "child-flow", "target": "parent-report"},
+                ],
+            }
+        )
+
+        run = service.create_workflow_run(
+            {"workflow_id": parent_workflow["workflow_id"], "user_goal": "Run nested approval flow"}
+        )
+        group = service.get_run_group(run["run_group_id"])
+        child_workflow_run_id = next(
+            run_id
+            for run_id in group["child_run_ids"]
+            if service.get_run(run_id)["kind"] == "workflow_run" and run_id != run["run_id"]
+        )
+        child_workflow_run = service.get_run(child_workflow_run_id)
+        grandchild_agent_run_id = next(
+            run_id
+            for run_id in group["child_run_ids"]
+            if service.get_run(run_id)["kind"] == "agent_run"
+        )
+        grandchild_agent_run = service.get_run(grandchild_agent_run_id)
+        parent_wait_event = next(
+            event for event in run["timeline"]
+            if event["event"] == "workflow.run.approval_required"
+        )
+        child_wait_event = next(
+            event for event in child_workflow_run["timeline"]
+            if event["event"] == "workflow.run.approval_required"
+        )
+
+        assert run["status"] == "approval_required"
+        assert run["pending_approval"] == {}
+        assert child_workflow_run["status"] == "approval_required"
+        assert child_workflow_run["pending_approval"] == {}
+        assert grandchild_agent_run["status"] == "approval_required"
+        assert grandchild_agent_run["pending_approval"]["tool"] == "terminal.run"
+        assert parent_wait_event["child_run_id"] == child_workflow_run_id
+        assert parent_wait_event["workflow_node_kind"] == "workflow"
+        assert child_wait_event["child_run_id"] == grandchild_agent_run_id
+        assert child_wait_event["workflow_node_kind"] == "agent"
+
+        approved_grandchild = service.approve_run_approval(grandchild_agent_run_id)
+        completed_child_workflow = service.get_run(child_workflow_run_id)
+        completed_parent = service.get_run(run["run_id"])
+        completed_group = service.get_run_group(run["run_group_id"])
+        parent_events = service.run_events.list(run["run_id"], after_sequence=0, limit=200)["events"]
+        parent_workflow_node_events = [
+            event for event in parent_events
+            if event["event_type"] == "workflow.node.workflow"
+        ]
+
+        assert approved_grandchild["status"] == "completed"
+        assert approved_grandchild["pending_approval"] == {}
+        assert approved_grandchild["result"] == "Subworkflow child approved result"
+        assert completed_child_workflow["status"] == "completed"
+        assert completed_child_workflow["pending_approval"] == {}
+        assert completed_child_workflow["result"] == "Subworkflow child approved result"
+        assert completed_parent["status"] == "completed"
+        assert completed_parent["pending_approval"] == {}
+        assert completed_parent["result"] == "Subworkflow child approved result"
+        assert completed_group["status"] == "completed"
+        assert service.read_run_artifact(child_workflow_run_id, "reports/child-approval.md")["content"] == (
+            "Subworkflow child approved result"
+        )
+        assert service.read_run_artifact(run["run_id"], "reports/parent-approval.md")["content"] == (
+            "Subworkflow child approved result"
+        )
+        workflow_node = next(
+            event for event in completed_parent["timeline"]
+            if event["event"] == "workflow.node.workflow"
+        )
+        assert workflow_node["workflow_node_id"] == "child-flow"
+        assert workflow_node["status"] == "completed"
+        assert workflow_node["child_run_id"] == child_workflow_run_id
+        assert [event["payload"].get("status") for event in parent_workflow_node_events] == [
+            "approval_required",
+            "completed",
+        ]
+        assert parent_workflow_node_events[-1]["payload"]["workflow_node_kind"] == "workflow"
+        assert parent_workflow_node_events[-1]["payload"]["result"] == "Subworkflow child approved result"
+        assert len(calls) == 2
+    finally:
+        service.close()
+
+
+def test_workflow_loop_node_repeats_until_condition_exits_to_artifact(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    calls: list[str] = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, **_kwargs):
+        context = str(messages[1]["content"])
+        calls.append(context)
+        if len(calls) < 3:
+            return {"content": "again"}
+        return {"content": "done"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        model_config = {
+            "base_url": "https://api.example.test/v1",
+            "model": "demo-model",
+            "api_key": "sk-secret",
+        }
+        worker = service.create_agent(
+            {"name": "Loop Worker", "model_mode": "custom_api", "model_config": model_config}
+        )
+        workflow = service.create_workflow(
+            {
+                "name": "Loop Flow",
+                "nodes": [
+                    {"id": "start", "type": "start", "data": {"label": "Start"}},
+                    {
+                        "id": "worker",
+                        "type": "agent",
+                        "data": {
+                            "label": "Worker",
+                            "agent_id": worker["agent_id"],
+                            "task": "Return again until the work is done.",
+                        },
+                    },
+                    {
+                        "id": "repeat",
+                        "type": "loop",
+                        "data": {"label": "Repeat", "condition": "again", "max_iterations": 5},
+                    },
+                    {
+                        "id": "report",
+                        "type": "artifact",
+                        "data": {"label": "Loop Report", "artifact_path": "reports/loop.md"},
+                    },
+                ],
+                "edges": [
+                    {"source": "start", "target": "worker"},
+                    {"source": "worker", "target": "repeat"},
+                    {"source": "repeat", "target": "worker", "data": {"branch": "continue"}},
+                    {"source": "repeat", "target": "report", "data": {"branch": "exit"}},
+                ],
+            }
+        )
+
+        run = service.create_workflow_run(
+            {"workflow_id": workflow["workflow_id"], "user_goal": "Run loop workflow"}
+        )
+        steps = [
+            event for event in run["timeline"]
+            if str(event.get("event") or "").startswith("workflow.node.")
+        ]
+        loop_events = [event for event in steps if event["event"] == "workflow.node.loop"]
+        artifact = service.read_run_artifact(run["run_id"], "reports/loop.md")
+
+        assert run["status"] == "completed"
+        assert run["result"] == "done"
+        assert artifact["content"] == "done"
+        assert [event.get("workflow_node_id") for event in steps] == [
+            "start",
+            "worker",
+            "repeat",
+            "worker",
+            "repeat",
+            "worker",
+            "repeat",
+            "report",
+        ]
+        assert [event["workflow_node_selected_branch"] for event in loop_events] == [
+            "continue",
+            "continue",
+            "exit",
+        ]
+        assert [event["workflow_node_loop_iteration"] for event in loop_events] == [1, 2, 2]
+        assert [event["workflow_node_selected_target"] for event in loop_events] == [
+            "worker",
+            "worker",
+            "report",
+        ]
+        assert loop_events[-1]["workflow_node_condition_matched"] is False
+        assert loop_events[-1]["workflow_node_loop_limit_reached"] is False
+        assert len(calls) == 3
+    finally:
+        service.close()
+
+
+def test_workflow_run_fails_when_context_budget_is_exceeded(tmp_path):
+    service = make_service(tmp_path)
+    service.runtime_limits = service.runtime_limits.__class__(max_context_chars=20)
+    try:
+        workflow = service.create_workflow(
+            {
+                "name": "Workflow Context Budget",
+                "nodes": [
+                    {"id": "start", "type": "start", "data": {"label": "Start"}},
+                    {
+                        "id": "report",
+                        "type": "artifact",
+                        "data": {"label": "Context Report", "artifact_path": "reports/context-budget.md"},
+                    },
+                ],
+                "edges": [{"source": "start", "target": "report"}],
+            }
+        )
+
+        run = service.create_workflow_run(
+            {"workflow_id": workflow["workflow_id"], "user_goal": "large workflow context"}
+        )
+
+        assert run["status"] == "failed"
+        assert "max_context_chars=20" in run["result"]
+        assert not any(artifact.get("path") == "reports/context-budget.md" for artifact in run["artifacts"])
+        failure = next(event for event in run["timeline"] if event["event"] == "workflow.run.failed")
+        assert failure["workflow_node_id"] == "start"
+    finally:
+        service.close()
+
+
+def test_workflow_step_budget_survives_child_approval_resume(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    service.runtime_limits = service.runtime_limits.__class__(max_workflow_steps=2)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    calls: list[list[dict]] = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        if len(calls) == 1:
+            assert any((tool.get("function") or {}).get("name") == "terminal_run" for tool in tools or [])
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_terminal",
+                        "type": "function",
+                        "function": {
+                            "name": "terminal_run",
+                            "arguments": json.dumps({"command": "printf workflow-budget"}),
+                        },
+                    }
+                ],
+            }
+        assert messages[-1]["role"] == "tool"
+        assert "workflow-budget" in messages[-1]["content"]
+        return {"content": "Design approved"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        model_config = {
+            "base_url": "https://api.example.test/v1",
+            "model": "demo-model",
+            "api_key": "sk-secret",
+        }
+        design_agent = service.create_agent(
+            {
+                "name": "Workflow Budget Design Agent",
+                "model_mode": "custom_api",
+                "model_config": model_config,
+                "tool_policy": {"allowed_tools": ["terminal.run"]},
+                "workspace_policy": {"default_workdir": str(workdir), "readable_scopes": ["."]},
+            }
+        )
+        code_agent = service.create_agent(
+            {"name": "Workflow Budget Code Agent", "model_mode": "custom_api", "model_config": model_config}
+        )
+        workflow = service.create_workflow(
+            {
+                "name": "Workflow Step Budget",
+                "nodes": [
+                    {"id": "start", "type": "start", "data": {"label": "Start"}},
+                    {
+                        "id": "design",
+                        "type": "agent",
+                        "data": {"label": "Design", "agent_id": design_agent["agent_id"]},
+                    },
+                    {
+                        "id": "code",
+                        "type": "agent",
+                        "data": {"label": "Code", "agent_id": code_agent["agent_id"]},
+                    },
+                    {
+                        "id": "report",
+                        "type": "artifact",
+                        "data": {"label": "Budget Report", "artifact_path": "reports/workflow-budget.md"},
+                    },
+                ],
+                "edges": [
+                    {"source": "start", "target": "design"},
+                    {"source": "design", "target": "code"},
+                    {"source": "code", "target": "report"},
+                ],
+            }
+        )
+
+        run = service.create_workflow_run(
+            {"workflow_id": workflow["workflow_id"], "user_goal": "Run workflow step budget"}
+        )
+        group = service.get_run_group(run["run_group_id"])
+        design_run_id = next(
+            run_id
+            for run_id in group["child_run_ids"]
+            if run_id != run["run_id"] and service.get_run(run_id)["kind"] == "agent_run"
+        )
+
+        assert run["status"] == "approval_required"
+
+        approved_design = service.approve_run_approval(design_run_id)
+        failed_parent = service.get_run(run["run_id"])
+        failed_group = service.get_run_group(run["run_group_id"])
+        child_runs = [
+            service.get_run(run_id)
+            for run_id in failed_group["child_run_ids"]
+            if run_id != run["run_id"]
+        ]
+
+        assert approved_design["status"] == "completed"
+        assert failed_parent["status"] == "failed"
+        assert "max_workflow_steps=2" in failed_parent["result"]
+        assert [child["runnable_id"] for child in child_runs] == [design_agent["agent_id"]]
+        assert len(calls) == 2
+        failure = next(event for event in failed_parent["timeline"] if event["event"] == "workflow.run.failed")
+        assert failure["workflow_node_id"] == "code"
+    finally:
+        service.close()
+
+
+def test_workflow_run_fails_when_duration_budget_is_exceeded_between_nodes(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    service.runtime_limits = service.runtime_limits.__class__(max_run_duration_seconds=1)
+    clock = {"now": 1000.0}
+    calls: list[list[dict]] = []
+
+    def fake_time():
+        return clock["now"]
+
+    def fake_chat(_base_url, _model, _api_key, messages, **_kwargs):
+        calls.append(messages)
+        clock["now"] = 1002.0
+        return {"content": "Agent finished after timeout"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.time.time", fake_time)
+    monkeypatch.setattr("apps.shell.agent_runtime._iso_epoch", lambda _value: 1000.0)
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        model_config = {
+            "base_url": "https://api.example.test/v1",
+            "model": "demo-model",
+            "api_key": "sk-secret",
+        }
+        worker = service.create_agent(
+            {"name": "Workflow Duration Agent", "model_mode": "custom_api", "model_config": model_config}
+        )
+        workflow = service.create_workflow(
+            {
+                "name": "Workflow Duration Budget",
+                "nodes": [
+                    {"id": "start", "type": "start", "data": {"label": "Start"}},
+                    {
+                        "id": "worker",
+                        "type": "agent",
+                        "data": {"label": "Worker", "agent_id": worker["agent_id"]},
+                    },
+                    {
+                        "id": "report",
+                        "type": "artifact",
+                        "data": {"label": "Duration Report", "artifact_path": "reports/duration-budget.md"},
+                    },
+                ],
+                "edges": [
+                    {"source": "start", "target": "worker"},
+                    {"source": "worker", "target": "report"},
+                ],
+            }
+        )
+
+        run = service.create_workflow_run(
+            {"workflow_id": workflow["workflow_id"], "user_goal": "Run workflow duration budget"}
+        )
+
+        assert run["status"] == "failed"
+        assert "max_run_duration_seconds=1" in run["result"]
+        assert not any(artifact.get("path") == "reports/duration-budget.md" for artifact in run["artifacts"])
+        assert len(calls) == 1
+        failure = next(event for event in run["timeline"] if event["event"] == "workflow.run.failed")
+        assert failure["workflow_node_id"] == "report"
     finally:
         service.close()
 

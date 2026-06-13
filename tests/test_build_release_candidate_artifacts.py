@@ -16,6 +16,10 @@ def test_build_release_candidate_artifacts_restores_tracked_metadata(
     metadata_path.write_text('{"commit":"dev"}\n', encoding="utf-8")
     backend_path = tmp_path / "dist" / "backend" / "oha-yachiyo-backend"
     dmg_path = tmp_path / "dist" / "electron" / "Oha-Yachiyo-0.4.0-arm64.dmg"
+    legacy_dmg_path = tmp_path / "dist" / "electron" / "Hermes-Yachiyo-0.1.0-arm64.dmg"
+    legacy_app_path = tmp_path / "dist" / "electron" / "mac-arm64" / "Hermes-Yachiyo.app"
+    legacy_app_path.mkdir(parents=True)
+    legacy_dmg_path.write_text("legacy dmg", encoding="utf-8")
     commands: list[list[str]] = []
 
     monkeypatch.setattr(builder, "ROOT", tmp_path)
@@ -57,6 +61,8 @@ def test_build_release_candidate_artifacts_restores_tracked_metadata(
         ["npm", "--prefix", "apps/frontend", "run", "dist:mac"],
     ]
     assert metadata_path.read_text(encoding="utf-8") == '{"commit":"dev"}\n'
+    assert not legacy_dmg_path.exists()
+    assert not legacy_app_path.exists()
     assert artifacts == {
         "backend": backend_path,
         "dmg": dmg_path,
@@ -92,3 +98,38 @@ def test_build_release_candidate_artifacts_restores_metadata_after_failure(
         raise AssertionError("frontend build failure should propagate")
 
     assert metadata_path.read_text(encoding="utf-8") == '{"commit":"dev"}\n'
+
+
+def test_build_release_candidate_artifacts_can_preserve_electron_output(
+    monkeypatch,
+    tmp_path,
+):
+    metadata_path = tmp_path / "apps" / "frontend" / "public" / "oha-yachiyo-build.json"
+    metadata_path.parent.mkdir(parents=True)
+    metadata_path.write_text('{"commit":"dev"}\n', encoding="utf-8")
+    backend_path = tmp_path / "dist" / "backend" / "oha-yachiyo-backend"
+    dmg_path = tmp_path / "dist" / "electron" / "Oha-Yachiyo-0.4.0-arm64.dmg"
+    legacy_dmg_path = tmp_path / "dist" / "electron" / "Hermes-Yachiyo-0.1.0-arm64.dmg"
+    legacy_dmg_path.parent.mkdir(parents=True)
+    legacy_dmg_path.write_text("legacy dmg", encoding="utf-8")
+
+    monkeypatch.setattr(builder, "ROOT", tmp_path)
+    monkeypatch.setattr(builder, "BUILD_METADATA_FILE", metadata_path)
+    monkeypatch.setattr(builder, "BACKEND_ARTIFACT", backend_path)
+    monkeypatch.setattr(builder, "ELECTRON_DIST_DIR", dmg_path.parent)
+
+    def fake_run(command: list[str]) -> None:
+        if command[:2] == [sys.executable, "scripts/build_backend.py"]:
+            backend_path.parent.mkdir(parents=True)
+            backend_path.write_text("backend", encoding="utf-8")
+        elif command == ["npm", "--prefix", "apps/frontend", "run", "dist:mac"]:
+            dmg_path.write_text("dmg", encoding="utf-8")
+
+    monkeypatch.setattr(builder, "_run", fake_run)
+
+    builder.build_release_candidate_artifacts(
+        channel="experimental",
+        clean_electron=False,
+    )
+
+    assert legacy_dmg_path.exists()

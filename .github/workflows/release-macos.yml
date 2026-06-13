@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-      - develop
+      - oha-develop
   workflow_dispatch:
     inputs:
       channel:
@@ -274,6 +274,7 @@ jobs:
             tests/test_secret_redaction_verifier.py \
             tests/test_security_logging.py \
             tests/test_screenshot.py \
+            tests/test_astrbot_bridge_e2e.py \
             tests/test_proactive.py \
             tests/test_launcher_notifications.py \
             tests/test_chat_session.py \
@@ -518,7 +519,7 @@ jobs:
           else
             CHANNEL_LABEL="实验版"
             PRERELEASE="true"
-            LATEST_BRANCH="develop"
+            LATEST_BRANCH="oha-develop"
           fi
 
           TAG="${CHANNEL}-v${RELEASE_VERSION}-${BUILD_LABEL}-${SHORT_SHA}"
@@ -646,13 +647,13 @@ jobs:
           provider_smoke_args=()
           provider_smoke_status_args=()
           if [[ -z "${OHA_YACHIYO_SMOKE_BASE_URL}" || -z "${OHA_YACHIYO_SMOKE_MODEL}" || -z "${OHA_YACHIYO_SMOKE_API_KEY}" ]]; then
-            echo "Skipping opt-in real provider streaming smoke; OHA_YACHIYO_SMOKE_* secrets are not fully configured."
+            echo "Skipping opt-in real provider smoke; OHA_YACHIYO_SMOKE_* secrets are not fully configured."
             provider_smoke_status_args+=(--mark-provider-smoke-not-applicable-if-missing)
           else
             provider_smoke_args+=(--run-provider-smoke)
           fi
           python scripts/verify_release_candidate.py --write-manual-checks-template release/manual-rc-checks.template.json
-          python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount --run-dmg-app-smoke "${provider_smoke_args[@]}" "${provider_smoke_status_args[@]}" --report-json release/rc-verification.json
+          python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount --check-gatekeeper-readiness --run-packaged-backend-bridge-smoke --run-dmg-app-smoke "${provider_smoke_args[@]}" "${provider_smoke_status_args[@]}" --report-json release/rc-verification.json
           python scripts/verify_release_candidate.py --manual-checks-json release/rc-verification.json --manual-checks-json release/electron-ui-smoke.json --write-manual-checks-draft release/manual-rc-checks.draft.json "${provider_smoke_status_args[@]}"
           python scripts/verify_release_candidate.py --manual-checks-json release/manual-rc-checks.draft.json --write-manual-checks-markdown release/manual-rc-checks.md "${provider_smoke_status_args[@]}"
 

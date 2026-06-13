@@ -43,17 +43,26 @@ class OhaClient:
     def __init__(self, config: PluginConfig) -> None:
         self._base = config.oha_url.rstrip("/")
         self._timeout = config.timeout
+        self._headers = (
+            {"X-Oha-Yachiyo-Bridge-Token": config.bridge_token}
+            if config.bridge_token
+            else {}
+        )
 
     async def _get(self, path: str) -> Dict[str, Any]:
         async with httpx.AsyncClient(timeout=self._timeout) as client:
-            resp = await client.get(f"{self._base}{path}")
+            resp = await client.get(f"{self._base}{path}", headers=self._headers)
             if resp.is_error:
                 _raise_readable(resp)
             return resp.json()
 
     async def _post(self, path: str, body: Dict[str, Any]) -> Dict[str, Any]:
         async with httpx.AsyncClient(timeout=self._timeout) as client:
-            resp = await client.post(f"{self._base}{path}", json=body)
+            resp = await client.post(
+                f"{self._base}{path}",
+                json=body,
+                headers=self._headers,
+            )
             if resp.is_error:
                 _raise_readable(resp)
             return resp.json()

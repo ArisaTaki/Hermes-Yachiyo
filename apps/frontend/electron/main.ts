@@ -322,8 +322,8 @@ function rootAssetPath(...segments: string[]): string | null {
   return null;
 }
 
-function defaultLatestJsonUrl(branch = 'develop', repository = DEFAULT_UPDATE_REPOSITORY): string {
-  const latestBranch = branch === 'main' ? 'main' : 'develop';
+function defaultLatestJsonUrl(branch = 'oha-develop', repository = DEFAULT_UPDATE_REPOSITORY): string {
+  const latestBranch = branch === 'main' ? 'main' : branch === 'alpha' ? 'alpha' : 'oha-develop';
   return `https://github.com/${repository}/releases/download/${latestBranch}-latest/Oha-Yachiyo-${latestBranch}-latest.json`;
 }
 
@@ -331,7 +331,7 @@ function defaultAppBuildMetadata(): AppBuildMetadata {
   return {
     name: 'Oha-Yachiyo',
     channel: 'experimental',
-    branch: 'develop',
+    branch: 'oha-develop',
     version: app.getVersion() || '0.0.0-dev',
     commit: 'dev',
     short_commit: 'dev',

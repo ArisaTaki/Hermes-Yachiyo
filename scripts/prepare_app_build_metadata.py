@@ -74,7 +74,7 @@ def latest_branch_for_channel(channel: str) -> str:
         return "main"
     if channel == "alpha":
         return "alpha"
-    return "develop"
+    return "oha-develop"
 
 
 def build_metadata(

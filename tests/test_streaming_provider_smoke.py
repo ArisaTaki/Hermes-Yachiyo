@@ -56,6 +56,7 @@ def test_stream_smoke_summarizes_split_tool_call_without_secrets(monkeypatch):
 
     assert requests[0]["stream"] is True
     assert requests[0]["tools"][0]["function"]["name"] == "workspace_read"
+    assert requests[0]["tool_choice"] == {"type": "function", "function": {"name": "workspace_read"}}
     assert summary["ok"] is True
     assert summary["chunk_count"] == 3
     assert summary["content_chars"] == len("checking ")

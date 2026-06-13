@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -47,6 +48,7 @@ def build_release_candidate_artifacts(
     channel: str,
     repository: str | None = None,
     clean_backend: bool = True,
+    clean_electron: bool = True,
     built_at: str | None = None,
 ) -> dict[str, Path]:
     original_metadata = (
@@ -70,6 +72,8 @@ def build_release_candidate_artifacts(
             backend_command.append("--clean")
         _run(backend_command)
 
+        if clean_electron:
+            shutil.rmtree(ELECTRON_DIST_DIR, ignore_errors=True)
         _run(["npm", "--prefix", "apps/frontend", "run", "dist:mac"])
     finally:
         _restore_metadata(original_metadata)
@@ -102,11 +106,17 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Do not pass --clean to scripts/build_backend.py.",
     )
+    parser.add_argument(
+        "--no-clean-electron",
+        action="store_true",
+        help="Do not remove old dist/electron output before running electron-builder.",
+    )
     args = parser.parse_args(argv)
     artifacts = build_release_candidate_artifacts(
         channel=args.channel,
         repository=args.repository,
         clean_backend=not args.no_clean_backend,
+        clean_electron=not args.no_clean_electron,
         built_at=args.built_at,
     )
     print(f"packaged backend: {artifacts['backend']}")

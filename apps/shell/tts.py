@@ -660,6 +660,11 @@ def _http_error_body_detail(exc: HTTPError) -> str:
     except Exception:
         return body[:500]
     if isinstance(payload, dict):
+        message = payload.get("message")
+        exception = payload.get("Exception") or payload.get("exception")
+        if isinstance(message, str) and isinstance(exception, str) and exception.strip():
+            if exception.strip() != message.strip():
+                return f"{message}: {exception}"[:1000]
         for key in ("message", "error", "detail"):
             value = payload.get(key)
             if value:

@@ -9,6 +9,22 @@ from types import SimpleNamespace
 from scripts import verify_release_candidate as rc
 
 
+def _manual_check_ids() -> list[str]:
+    return [check["id"] for check in rc.MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS]
+
+
+def _external_integrations_passed_check() -> dict[str, str]:
+    return {
+        "id": "external_integrations_smoke",
+        "status": "passed",
+        "evidence": (
+            "External integration smoke passed with real Live2D, GPT-SoVITS, "
+            "and AstrBot plugin bridge resources."
+        ),
+        "evidence_source": "automated_rc_gate",
+    }
+
+
 def test_release_candidate_verifier_runs_source_and_artifact_guards(tmp_path, monkeypatch, capsys):
     (tmp_path / "release").mkdir()
     calls: list[dict[str, object]] = []
@@ -184,6 +200,29 @@ def test_release_candidate_verifier_source_only_rejects_dmg_mount(
     assert report["built_artifact_guards"]["status"] == "failed"
 
 
+def test_release_candidate_verifier_source_only_rejects_gatekeeper_readiness(
+    tmp_path, monkeypatch, capsys
+):
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **kwargs: calls.append(kwargs) or [])
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        check_gatekeeper_readiness=True,
+        report_json=Path("tmp/source-only-rc.json"),
+    ) == 1
+
+    assert calls == []
+    output = capsys.readouterr().out
+    assert "--source-only cannot be combined with --check-gatekeeper-readiness" in output
+    report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
+    assert report["ok"] is False
+    assert report["source_release_guards"]["status"] == "skipped"
+    assert report["built_artifact_guards"]["status"] == "failed"
+    assert report["gatekeeper_readiness"]["status"] == "skipped"
+
+
 def test_release_candidate_verifier_source_only_rejects_dmg_app_smoke(
     tmp_path, monkeypatch, capsys
 ):
@@ -205,6 +244,29 @@ def test_release_candidate_verifier_source_only_rejects_dmg_app_smoke(
     assert report["source_release_guards"]["status"] == "skipped"
     assert report["built_artifact_guards"]["status"] == "failed"
     assert report["dmg_app_smoke"]["status"] == "skipped"
+
+
+def test_release_candidate_verifier_source_only_rejects_packaged_backend_bridge_smoke(
+    tmp_path, monkeypatch, capsys
+):
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **kwargs: calls.append(kwargs) or [])
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        run_packaged_backend_bridge_smoke=True,
+        report_json=Path("tmp/source-only-rc.json"),
+    ) == 1
+
+    assert calls == []
+    output = capsys.readouterr().out
+    assert "--source-only cannot be combined with --run-packaged-backend-bridge-smoke" in output
+    report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
+    assert report["ok"] is False
+    assert report["source_release_guards"]["status"] == "skipped"
+    assert report["built_artifact_guards"]["status"] == "failed"
+    assert report["packaged_backend_bridge_smoke"]["status"] == "skipped"
 
 
 def test_release_candidate_verifier_source_only_rejects_provider_smoke(
@@ -279,14 +341,9 @@ def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
     assert report["manual_release_candidate_check_statuses"] == list(
         rc.MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS
     )
-    assert [check["id"] for check in report["manual_release_candidate_check_statuses"]] == [
-        "gatekeeper_first_launch",
-        "packaged_bridge_isolation",
-        "screen_recording_permission",
-        "chat_native_file_upload",
-        "packaged_ui_sampling",
-        "real_provider_smoke",
-    ]
+    assert [
+        check["id"] for check in report["manual_release_candidate_check_statuses"]
+    ] == _manual_check_ids()
     assert all(
         check["status"] == "manual_required"
         for check in report["manual_release_candidate_check_statuses"]
@@ -296,22 +353,15 @@ def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
         for check in report["manual_release_candidate_check_statuses"]
     )
     assert report["manual_release_candidate_check_summary"] == {
-        "total": 6,
+        "total": len(rc.MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS),
         "status_counts": {
-            "manual_required": 6,
+            "manual_required": len(rc.MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS),
             "passed": 0,
             "failed": 0,
             "not_applicable": 0,
         },
-        "remaining_count": 6,
-        "remaining_check_ids": [
-            "gatekeeper_first_launch",
-            "packaged_bridge_isolation",
-            "screen_recording_permission",
-            "chat_native_file_upload",
-            "packaged_ui_sampling",
-            "real_provider_smoke",
-        ],
+        "remaining_count": len(rc.MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS),
+        "remaining_check_ids": _manual_check_ids(),
         "remaining_next_actions": [
             {"id": check["id"], "next_action": check["next_action"]}
             for check in rc.MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS
@@ -366,6 +416,7 @@ def test_release_candidate_verifier_merges_manual_check_evidence(
                         "status": "not_applicable",
                         "evidence": "Provider credentials unavailable for this local RC pass.",
                     },
+                    _external_integrations_passed_check(),
                 ]
             }
         ),
@@ -397,6 +448,7 @@ def test_release_candidate_verifier_merges_manual_check_evidence(
         "chat_native_file_upload": "passed",
         "packaged_ui_sampling": "passed",
         "real_provider_smoke": "not_applicable",
+        "external_integrations_smoke": "passed",
     }
     assert report["manual_release_candidate_check_summary"]["remaining_count"] == 0
     assert report["manual_release_candidate_check_summary"]["remaining_check_ids"] == []
@@ -704,6 +756,61 @@ def test_release_candidate_verifier_accepts_previous_rc_report_manual_statuses(
     assert manual_statuses["packaged_bridge_isolation"]["evidence_source"] == "automated_rc_gate"
 
 
+def test_release_candidate_verifier_preserves_manual_source_capability_matrix(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    prior_statuses = rc._manual_release_candidate_check_report()
+    for check in prior_statuses:
+        if check["id"] == "real_provider_smoke":
+            check["status"] = "passed"
+            check["evidence"] = "Provider smoke passed with Native Agent matrix."
+            check["evidence_source"] = "automated_rc_gate"
+    evidence_path = tmp_path / "tmp" / "provider-rc.json"
+    evidence_path.parent.mkdir()
+    evidence_path.write_text(
+        json.dumps(
+            {
+                "manual_release_candidate_check_statuses": prior_statuses,
+                "native_agent_capability_matrix": {
+                    "status": "passed",
+                    "ok": True,
+                    "capability_count": 13,
+                    "status_counts": {"passed": 13, "missing": 0},
+                    "missing_capability_ids": [],
+                    "capabilities": [
+                        {
+                            "id": "agent_multi_tool_pipeline",
+                            "status": "passed",
+                            "evidence_summary": {"tool_call_count": 2},
+                        }
+                    ],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        manual_checks_json=Path("tmp/provider-rc.json"),
+        report_json=Path("tmp/rc.json"),
+    ) == 0
+
+    output = capsys.readouterr().out
+    assert "Native Agent capability matrix: passed (13 capabilities)" in output
+    report = json.loads((tmp_path / "tmp" / "rc.json").read_text(encoding="utf-8"))
+    matrix = report["native_agent_capability_matrix"]
+    assert matrix["status"] == "passed"
+    assert matrix["ok"] is True
+    assert matrix["capability_count"] == 13
+    assert matrix["missing_capability_ids"] == []
+    assert matrix["source_reports"] == ["tmp/provider-rc.json"]
+    assert matrix["capabilities"][0]["id"] == "agent_multi_tool_pipeline"
+
+
 def test_release_candidate_verifier_merges_multiple_manual_check_json_sources(
     tmp_path,
     monkeypatch,
@@ -769,6 +876,7 @@ def test_release_candidate_verifier_merges_multiple_manual_check_json_sources(
                         "evidence": "Provider credentials unavailable for this RC.",
                         "evidence_source": "credentials_unavailable",
                     },
+                    _external_integrations_passed_check(),
                 ]
             }
         ),
@@ -803,6 +911,7 @@ def test_release_candidate_verifier_merges_multiple_manual_check_json_sources(
     assert statuses["packaged_ui_sampling"]["status"] == "passed"
     assert "scripts/smoke_workflow_save_run_ui.mjs" in statuses["packaged_ui_sampling"]["notes"]
     assert statuses["real_provider_smoke"]["status"] == "not_applicable"
+    assert statuses["external_integrations_smoke"]["status"] == "passed"
 
 
 def test_release_candidate_verifier_accumulates_automated_evidence_from_multiple_rc_reports(
@@ -855,8 +964,15 @@ def test_release_candidate_verifier_accumulates_automated_evidence_from_multiple
         "gatekeeper_first_launch",
         "screen_recording_permission",
         "real_provider_smoke",
+        "external_integrations_smoke",
     ]
     assert summary["remaining_commands"] == [
+        {
+            "id": "gatekeeper_first_launch",
+            "command": rc.MANUAL_RELEASE_CANDIDATE_CHECK_AUTOMATION_COMMANDS[
+                "gatekeeper_first_launch"
+            ],
+        },
         {
             "id": "screen_recording_permission",
             "command": rc.MANUAL_RELEASE_CANDIDATE_CHECK_AUTOMATION_COMMANDS[
@@ -867,6 +983,12 @@ def test_release_candidate_verifier_accumulates_automated_evidence_from_multiple
             "id": "real_provider_smoke",
             "command": rc.MANUAL_RELEASE_CANDIDATE_CHECK_AUTOMATION_COMMANDS[
                 "real_provider_smoke"
+            ],
+        },
+        {
+            "id": "external_integrations_smoke",
+            "command": rc.MANUAL_RELEASE_CANDIDATE_CHECK_AUTOMATION_COMMANDS[
+                "external_integrations_smoke"
             ],
         },
     ]
@@ -971,6 +1093,9 @@ def test_release_candidate_verifier_accepts_complete_manual_markdown_for_signoff
                 "- [x] `real_provider_smoke` - not_applicable",
                 "  - Evidence source: credentials_unavailable",
                 "  - Evidence: OHA_YACHIYO_SMOKE_* credentials unavailable",
+                "- [x] `external_integrations_smoke` - passed",
+                "  - Evidence source: automated_rc_gate",
+                "  - Evidence: External integration smoke passed with real Live2D, GPT-SoVITS, and AstrBot plugin bridge resources",
                 "",
             ]
         ),
@@ -1008,6 +1133,8 @@ def test_release_candidate_verifier_accepts_complete_manual_markdown_for_signoff
     }
     assert statuses["real_provider_smoke"]["status"] == "not_applicable"
     assert statuses["real_provider_smoke"]["evidence_source"] == "credentials_unavailable"
+    assert statuses["external_integrations_smoke"]["status"] == "passed"
+    assert statuses["external_integrations_smoke"]["evidence_source"] == "automated_rc_gate"
 
 
 def test_release_candidate_verifier_markdown_checked_items_default_to_passed(
@@ -1038,6 +1165,8 @@ def test_release_candidate_verifier_markdown_checked_items_default_to_passed(
                 "- [x] `real_provider_smoke` - not_applicable",
                 "  - Evidence source: credentials_unavailable",
                 "  - Evidence: OHA_YACHIYO_SMOKE_* credentials unavailable",
+                "- [x] `external_integrations_smoke`",
+                "  - Evidence: External integration smoke passed with real resources",
                 "",
             ]
         ),
@@ -1062,6 +1191,7 @@ def test_release_candidate_verifier_markdown_checked_items_default_to_passed(
     assert statuses["gatekeeper_first_launch"]["status"] == "passed"
     assert statuses["packaged_ui_sampling"]["status"] == "passed"
     assert statuses["real_provider_smoke"]["status"] == "not_applicable"
+    assert statuses["external_integrations_smoke"]["status"] == "passed"
 
 
 def test_release_candidate_verifier_fails_failed_manual_check_evidence(
@@ -1108,14 +1238,7 @@ def test_release_candidate_verifier_writes_manual_check_template(tmp_path):
 
     assert template_path == tmp_path / "tmp" / "manual-rc-checks.template.json"
     template = json.loads(template_path.read_text(encoding="utf-8"))
-    assert [check["id"] for check in template["checks"]] == [
-        "gatekeeper_first_launch",
-        "packaged_bridge_isolation",
-        "screen_recording_permission",
-        "chat_native_file_upload",
-        "packaged_ui_sampling",
-        "real_provider_smoke",
-    ]
+    assert [check["id"] for check in template["checks"]] == _manual_check_ids()
     assert all(check["status"] == "manual_required" for check in template["checks"])
     assert all(check["evidence"] == "" for check in template["checks"])
     assert all(check["evidence_prompt"] for check in template["checks"])
@@ -1147,7 +1270,7 @@ def test_release_candidate_verifier_writes_manual_check_draft_from_prior_report(
                 },
                 "manual_release_candidate_check_statuses": prior_statuses,
                 "manual_release_candidate_check_summary": {
-                    "remaining_count": 5,
+                    "remaining_count": 6,
                     "automated_evidence_check_ids": ["packaged_bridge_isolation"],
                 },
                 "electron_ui_smoke": {
@@ -1191,7 +1314,7 @@ def test_release_candidate_verifier_writes_manual_check_draft_from_prior_report(
             "dirty": False,
         }
     ]
-    assert draft["manual_release_candidate_check_summary"]["remaining_count"] == 5
+    assert draft["manual_release_candidate_check_summary"]["remaining_count"] == 6
     assert draft["manual_release_candidate_check_summary"]["automated_evidence_check_ids"] == [
         "packaged_bridge_isolation"
     ]
@@ -1279,6 +1402,241 @@ def test_release_candidate_verifier_draft_merges_standalone_electron_ui_smoke_re
     ]["notes"]
 
 
+def test_release_candidate_verifier_merges_external_integration_smoke_report(
+    tmp_path,
+):
+    smoke_report_path = tmp_path / "tmp" / "external-integrations-smoke.json"
+    smoke_report_path.parent.mkdir(parents=True)
+    smoke_report_path.write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "bridge_url": "http://127.0.0.1:18420",
+                "checks": [
+                    {"id": "bridge_status", "status": "passed"},
+                    {"id": "live2d_resource", "status": "passed"},
+                    {"id": "gpt_sovits_tts", "status": "passed"},
+                    {"id": "astrbot_plugin_bridge", "status": "passed"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    checks, findings = rc._load_manual_release_candidate_checks(
+        tmp_path,
+        Path("tmp/external-integrations-smoke.json"),
+    )
+
+    assert findings == []
+    statuses = {check["id"]: check for check in checks}
+    external = statuses["external_integrations_smoke"]
+    assert external["status"] == "passed"
+    assert external["evidence_source"] == "automated_rc_gate"
+    assert "live2d_resource, gpt_sovits_tts, astrbot_plugin_bridge" in external["evidence"]
+    summary = rc._manual_release_candidate_check_summary(checks)
+    assert summary["remaining_count"] == 6
+    assert summary["automated_evidence_check_ids"] == ["external_integrations_smoke"]
+
+
+def test_release_candidate_verifier_marks_failed_external_integration_smoke_report(
+    tmp_path,
+):
+    smoke_report_path = tmp_path / "tmp" / "external-integrations-smoke.json"
+    smoke_report_path.parent.mkdir(parents=True)
+    smoke_report_path.write_text(
+        json.dumps(
+            {
+                "ok": False,
+                "bridge_url": "http://127.0.0.1:18420",
+                "checks": [
+                    {"id": "bridge_status", "status": "passed"},
+                    {"id": "live2d_resource", "status": "passed"},
+                    {
+                        "id": "gpt_sovits_tts",
+                        "status": "failed",
+                        "error": "GPT-SoVITS TTS test failed",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    checks, findings = rc._load_manual_release_candidate_checks(
+        tmp_path,
+        Path("tmp/external-integrations-smoke.json"),
+    )
+
+    assert findings == []
+    statuses = {check["id"]: check for check in checks}
+    external = statuses["external_integrations_smoke"]
+    assert external["status"] == "failed"
+    assert external["evidence_source"] == "automated_rc_gate"
+    assert "gpt_sovits_tts=failed" in external["evidence"]
+    assert "missing required checks: astrbot_plugin_bridge" in external["evidence"]
+    assert rc._manual_release_candidate_check_status(checks, []) == "failed"
+
+
+def test_release_candidate_verifier_keeps_partial_external_integration_smoke_manual(
+    tmp_path,
+):
+    smoke_report_path = tmp_path / "tmp" / "external-integrations-smoke.json"
+    smoke_report_path.parent.mkdir(parents=True)
+    smoke_report_path.write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "bridge_url": "http://127.0.0.1:18420",
+                "checks": [
+                    {"id": "bridge_status", "status": "passed"},
+                    {"id": "live2d_resource", "status": "passed"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    checks, findings = rc._load_manual_release_candidate_checks(
+        tmp_path,
+        Path("tmp/external-integrations-smoke.json"),
+    )
+
+    assert findings == []
+    statuses = {check["id"]: check for check in checks}
+    external = statuses["external_integrations_smoke"]
+    assert external["status"] == "manual_required"
+    assert "passed selected checks: live2d_resource" in external["notes"]
+    assert "gpt_sovits_tts, astrbot_plugin_bridge" in external["notes"]
+    summary = rc._manual_release_candidate_check_summary(checks)
+    assert summary["remaining_count"] == 7
+    assert summary["remaining_notes"] == [
+        {"id": "external_integrations_smoke", "notes": external["notes"]}
+    ]
+
+
+def test_release_candidate_verifier_merges_multiple_external_supporting_notes(
+    tmp_path,
+):
+    bridge_report_path = tmp_path / "tmp" / "external-bridge-preflight.json"
+    partial_report_path = tmp_path / "tmp" / "external-live2d-partial.json"
+    bridge_report_path.parent.mkdir(parents=True)
+    bridge_report_path.write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "complete": False,
+                "mode": "bridge_only",
+                "bridge_url": "http://127.0.0.1:18420",
+                "missing_required_check_ids": [
+                    "live2d_resource",
+                    "gpt_sovits_tts",
+                    "astrbot_plugin_bridge",
+                ],
+                "checks": [{"id": "bridge_status", "status": "passed"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    partial_report_path.write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "complete": False,
+                "bridge_url": "http://127.0.0.1:18421",
+                "missing_required_check_ids": [
+                    "gpt_sovits_tts",
+                    "astrbot_plugin_bridge",
+                ],
+                "checks": [
+                    {"id": "bridge_status", "status": "passed"},
+                    {"id": "live2d_resource", "status": "passed"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    checks, findings = rc._load_manual_release_candidate_checks(
+        tmp_path,
+        (bridge_report_path.relative_to(tmp_path), partial_report_path.relative_to(tmp_path)),
+    )
+
+    assert findings == []
+    statuses = {check["id"]: check for check in checks}
+    external = statuses["external_integrations_smoke"]
+    assert external["status"] == "manual_required"
+    assert "bridge-only preflight passed against http://127.0.0.1:18420" in external["notes"]
+    assert "passed selected checks: live2d_resource" in external["notes"]
+    assert "gpt_sovits_tts, astrbot_plugin_bridge" in external["notes"]
+
+    markdown_path = rc.write_manual_release_candidate_checks_markdown(
+        tmp_path,
+        Path("tmp/external-signoff.md"),
+        (bridge_report_path.relative_to(tmp_path), partial_report_path.relative_to(tmp_path)),
+    )
+    markdown = markdown_path.read_text(encoding="utf-8")
+    assert (
+        "  - Notes: Supporting automated evidence: external integration bridge-only "
+        "preflight passed against http://127.0.0.1:18420"
+    ) in markdown
+    assert (
+        "    Supporting automated evidence: external integration smoke passed selected "
+        "checks: live2d_resource"
+    ) in markdown
+
+    markdown_checks, markdown_findings = rc._load_manual_release_candidate_checks(
+        tmp_path,
+        None,
+        markdown_path.relative_to(tmp_path),
+    )
+    assert markdown_findings == []
+    markdown_statuses = {check["id"]: check for check in markdown_checks}
+    assert "bridge-only preflight passed" in markdown_statuses[
+        "external_integrations_smoke"
+    ]["notes"]
+    assert "passed selected checks: live2d_resource" in markdown_statuses[
+        "external_integrations_smoke"
+    ]["notes"]
+
+
+def test_release_candidate_verifier_keeps_external_bridge_only_report_manual(
+    tmp_path,
+):
+    smoke_report_path = tmp_path / "tmp" / "external-bridge-preflight.json"
+    smoke_report_path.parent.mkdir(parents=True)
+    smoke_report_path.write_text(
+        json.dumps(
+            {
+                "ok": False,
+                "mode": "bridge_only",
+                "bridge_url": "http://127.0.0.1:18420",
+                "checks": [
+                    {
+                        "id": "bridge_status",
+                        "status": "failed",
+                        "error": "/status returned service=legacy; expected oha-yachiyo",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    checks, findings = rc._load_manual_release_candidate_checks(
+        tmp_path,
+        Path("tmp/external-bridge-preflight.json"),
+    )
+
+    assert findings == []
+    statuses = {check["id"]: check for check in checks}
+    external = statuses["external_integrations_smoke"]
+    assert external["status"] == "manual_required"
+    assert "bridge-only preflight did not pass" in external["notes"]
+    assert "service=legacy" in external["notes"]
+    assert rc._manual_release_candidate_check_status(checks, []) == "manual_required"
+
+
 def test_release_candidate_verifier_manual_check_draft_can_mark_provider_not_applicable(
     tmp_path,
     monkeypatch,
@@ -1325,12 +1683,13 @@ def test_release_candidate_verifier_manual_check_draft_can_mark_provider_not_app
     )
 
     draft = json.loads(draft_path.read_text(encoding="utf-8"))
-    assert draft["manual_release_candidate_check_summary"]["remaining_count"] == 4
+    assert draft["manual_release_candidate_check_summary"]["remaining_count"] == 5
     assert draft["manual_release_candidate_check_summary"]["remaining_check_ids"] == [
         "gatekeeper_first_launch",
         "screen_recording_permission",
         "chat_native_file_upload",
         "packaged_ui_sampling",
+        "external_integrations_smoke",
     ]
     checks = {check["id"]: check for check in draft["checks"]}
     assert checks["real_provider_smoke"]["status"] == "not_applicable"
@@ -1431,10 +1790,11 @@ def test_release_candidate_verifier_draft_keeps_failed_dmg_screen_probe_notes(
     )
 
     draft = json.loads(draft_path.read_text(encoding="utf-8"))
-    assert draft["manual_release_candidate_check_summary"]["remaining_count"] == 2
+    assert draft["manual_release_candidate_check_summary"]["remaining_count"] == 3
     assert draft["manual_release_candidate_check_summary"]["remaining_check_ids"] == [
         "gatekeeper_first_launch",
         "screen_recording_permission",
+        "external_integrations_smoke",
     ]
     assert draft["manual_release_candidate_check_summary"]["remaining_notes"] == [
         {
@@ -1514,11 +1874,11 @@ def test_release_candidate_verifier_manual_check_write_actions_print_remaining_s
     )
     output = capsys.readouterr().out
     assert "manual release-candidate checks draft: tmp/final-rc-signoff.json" in output
-    assert "manual release-candidate check progress: 2/6 complete, 4 remaining" in output
+    assert "manual release-candidate check progress: 2/7 complete, 5 remaining" in output
     assert (
-        "manual release-candidate check summary: 4 remaining "
+        "manual release-candidate check summary: 5 remaining "
         "(gatekeeper_first_launch, screen_recording_permission, "
-        "chat_native_file_upload, packaged_ui_sampling)"
+        "chat_native_file_upload, packaged_ui_sampling, external_integrations_smoke)"
     ) in output
     assert "- [screen_recording_permission] Prefer rerunning the RC gate with --run-dmg-screen-smoke" in output
     assert "manual release-candidate recommended commands:" in output
@@ -1547,7 +1907,7 @@ def test_release_candidate_verifier_manual_check_write_actions_print_remaining_s
     )
     output = capsys.readouterr().out
     assert "manual release-candidate checks markdown: tmp/final-rc-signoff.md" in output
-    assert "manual release-candidate check progress: 2/6 complete, 4 remaining" in output
+    assert "manual release-candidate check progress: 2/7 complete, 5 remaining" in output
     assert "manual release-candidate next actions:" in output
     assert "manual release-candidate recommended commands:" in output
 
@@ -1587,11 +1947,11 @@ def test_release_candidate_verifier_manual_check_status_action_prints_without_ar
     )
     output = capsys.readouterr().out
     assert "manual release-candidate checks status:" in output
-    assert "manual release-candidate check progress: 2/6 complete, 4 remaining" in output
+    assert "manual release-candidate check progress: 2/7 complete, 5 remaining" in output
     assert (
-        "manual release-candidate check summary: 4 remaining "
+        "manual release-candidate check summary: 5 remaining "
         "(gatekeeper_first_launch, screen_recording_permission, "
-        "chat_native_file_upload, packaged_ui_sampling)"
+        "chat_native_file_upload, packaged_ui_sampling, external_integrations_smoke)"
     ) in output
     assert "- [gatekeeper_first_launch] Manually mount the final DMG" in output
     assert "manual release-candidate recommended commands:" in output
@@ -1649,7 +2009,7 @@ def test_release_candidate_verifier_manual_check_markdown_can_mark_provider_not_
     )
 
     markdown = markdown_path.read_text(encoding="utf-8")
-    assert "- Remaining checks: 4" in markdown
+    assert "- Remaining checks: 5" in markdown
     assert "## Remaining Automation Commands" in markdown
     assert "- `screen_recording_permission`" in markdown
     assert (
@@ -1667,6 +2027,8 @@ def test_release_candidate_verifier_manual_check_markdown_can_mark_provider_not_
         "python scripts/verify_release_candidate.py --require-artifacts "
         "--run-dmg-ui-sampling-smoke --report-json tmp/rc-verification-packaged-ui.json"
     ) in markdown
+    assert "- `external_integrations_smoke`" in markdown
+    assert "python scripts/smoke_external_integrations.py" in markdown
     assert "- `real_provider_smoke`" not in markdown
     assert "- [x] `real_provider_smoke` - not_applicable" in markdown
     assert "Evidence source: credentials_unavailable" in markdown
@@ -1723,7 +2085,7 @@ def test_release_candidate_verifier_writes_manual_check_markdown_from_draft(tmp_
     assert "- Source revisions: `tmp/final-rc.json@2222222`" in markdown
     assert "manual_release_candidate_check_source_revisions" in markdown
     assert "2222222222222222222222222222222222222222" in markdown
-    assert "- Remaining checks: 4" in markdown
+    assert "- Remaining checks: 5" in markdown
     assert "## How To Fill" in markdown
     assert "omitted status defaults to `passed`" in markdown
     assert "Every `passed`, `failed`, or `not_applicable` item needs non-empty `Evidence:`" in markdown
@@ -1740,6 +2102,8 @@ def test_release_candidate_verifier_writes_manual_check_markdown_from_draft(tmp_
     ) in markdown
     assert "- `packaged_ui_sampling`" in markdown
     assert "--run-dmg-ui-sampling-smoke --report-json tmp/rc-verification-packaged-ui.json" in markdown
+    assert "- `external_integrations_smoke`" in markdown
+    assert "python scripts/smoke_external_integrations.py" in markdown
     assert "## Remaining Manual Checks" in markdown
     assert "- [ ] `gatekeeper_first_launch`" in markdown
     assert "Evidence to record:" in markdown
@@ -1748,6 +2112,97 @@ def test_release_candidate_verifier_writes_manual_check_markdown_from_draft(tmp_
     assert "Evidence source: automated_rc_gate" in markdown
     assert "- [x] `real_provider_smoke` - not_applicable" in markdown
     assert "Evidence source: credentials_unavailable" in markdown
+
+
+def test_release_candidate_verifier_signoff_outputs_surface_native_agent_matrix(
+    tmp_path,
+    capsys,
+):
+    prior_statuses = rc._manual_release_candidate_check_report()
+    for check in prior_statuses:
+        if check["id"] == "real_provider_smoke":
+            check["status"] = "passed"
+            check["evidence"] = "Provider smoke passed with Native Agent matrix."
+            check["evidence_source"] = "automated_rc_gate"
+
+    source_path = tmp_path / "tmp" / "provider-rc.json"
+    source_path.parent.mkdir(parents=True)
+    source_path.write_text(
+        json.dumps(
+            {
+                "manual_release_candidate_check_statuses": prior_statuses,
+                "native_agent_capability_matrix": {
+                    "status": "passed",
+                    "ok": True,
+                    "capability_count": 13,
+                    "status_counts": {"passed": 13, "missing": 0},
+                    "missing_capability_ids": [],
+                    "capabilities": [
+                        {
+                            "id": "agent_multi_tool_pipeline",
+                            "label": "Sequential multi-tool Agent pipeline",
+                            "status": "passed",
+                            "evidence_summary": {"tool_call_count": 2},
+                        }
+                    ],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    draft_path = rc.write_manual_release_candidate_checks_draft(
+        tmp_path,
+        Path("tmp/final-rc-signoff.json"),
+        Path("tmp/provider-rc.json"),
+    )
+    draft = json.loads(draft_path.read_text(encoding="utf-8"))
+    assert draft["native_agent_capability_matrix"]["status"] == "passed"
+    assert draft["native_agent_capability_matrix"]["source_reports"] == [
+        "tmp/provider-rc.json"
+    ]
+
+    markdown_path = rc.write_manual_release_candidate_checks_markdown(
+        tmp_path,
+        Path("tmp/final-rc-signoff.md"),
+        Path("tmp/final-rc-signoff.json"),
+    )
+    markdown = markdown_path.read_text(encoding="utf-8")
+    assert "## Native Agent Capability Matrix" in markdown
+    assert "- Status: passed (13 capabilities)" in markdown
+    assert "- Capabilities: 13/13 passed" in markdown
+    assert "`tmp/provider-rc.json`" in markdown
+    assert "- Missing capabilities: none" in markdown
+    assert (
+        "- [x] `agent_multi_tool_pipeline` - Sequential multi-tool Agent pipeline"
+        in markdown
+    )
+    assert "<!-- native_agent_capability_matrix: " in markdown
+
+    matrix_from_markdown = rc._native_agent_capability_matrix_from_manual_inputs(
+        tmp_path,
+        None,
+        Path("tmp/final-rc-signoff.md"),
+        run_requested=False,
+    )
+    assert matrix_from_markdown is not None
+    assert matrix_from_markdown["status"] == "passed"
+
+    assert rc.print_manual_release_candidate_checks_status(
+        tmp_path,
+        Path("tmp/final-rc-signoff.json"),
+    )
+    output = capsys.readouterr().out
+    assert "Native Agent capability matrix: passed (13 capabilities)" in output
+    assert "Native Agent capability matrix sources: tmp/provider-rc.json" in output
+
+    assert rc.print_manual_release_candidate_checks_status(
+        tmp_path,
+        Path("tmp/final-rc-signoff.md"),
+    )
+    output = capsys.readouterr().out
+    assert "Native Agent capability matrix: passed (13 capabilities)" in output
+    assert "tmp/final-rc-signoff.md" in output
 
 
 def test_release_candidate_verifier_rejects_manual_check_template_outside_root(tmp_path):
@@ -1935,6 +2390,95 @@ def test_release_candidate_verifier_dmg_mount_fails_without_dmgs(tmp_path, monke
     assert report["dmg_mount_guards"]["status"] == "failed"
 
 
+def test_release_candidate_verifier_records_gatekeeper_readiness(
+    tmp_path, monkeypatch, capsys
+):
+    release_dir = tmp_path / "release"
+    release_dir.mkdir()
+    dmg_path = release_dir / "Oha-Yachiyo-0.4.0-arm64.dmg"
+    dmg_path.write_bytes(b"fake dmg")
+    commands: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        if command[:2] == ["hdiutil", "attach"]:
+            mount_dir = Path(command[command.index("-mountpoint") + 1])
+            executable = mount_dir / "Oha-Yachiyo.app" / "Contents" / "MacOS" / "Oha-Yachiyo"
+            executable.parent.mkdir(parents=True)
+            executable.write_text("#!/bin/sh\n", encoding="utf-8")
+            executable.chmod(0o755)
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if command[:2] == ["hdiutil", "detach"]:
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if command[:3] == ["xattr", "-p", "com.apple.quarantine"]:
+            if command[-1].endswith(".dmg"):
+                return SimpleNamespace(returncode=0, stdout="0081;Example;Safari;\n", stderr="")
+            return SimpleNamespace(returncode=1, stdout="", stderr="No such xattr")
+        if command[:2] == ["codesign", "--verify"]:
+            return SimpleNamespace(
+                returncode=0,
+                stdout="",
+                stderr="valid on disk\nsatisfies its Designated Requirement\n",
+            )
+        if command[:2] == ["codesign", "-dv"]:
+            return SimpleNamespace(
+                returncode=0,
+                stdout="",
+                stderr="Identifier=app.oha-yachiyo\nAuthority=Oha-Yachiyo Self Signed\n",
+            )
+        if command[:2] == ["spctl", "--assess"]:
+            return SimpleNamespace(
+                returncode=3,
+                stdout="",
+                stderr="rejected\nsource=no usable signature\n",
+            )
+        raise AssertionError(f"unexpected command: {command!r}")
+
+    monkeypatch.setattr(rc.sys, "platform", "darwin")
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+    monkeypatch.setattr(rc.subprocess, "run", fake_run)
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        artifact_paths=(Path("release"),),
+        check_gatekeeper_readiness=True,
+        report_json=Path("tmp/rc.json"),
+    ) == 0
+
+    output = capsys.readouterr().out
+    assert "Gatekeeper readiness: passed" in output
+    assert [command[:2] for command in commands[:2]] == [
+        ["hdiutil", "attach"],
+        ["xattr", "-p"],
+    ]
+    assert commands[-1][:2] == ["hdiutil", "detach"]
+    report = json.loads((tmp_path / "tmp" / "rc.json").read_text(encoding="utf-8"))
+    assert report["ok"] is True
+    assert report["gatekeeper_readiness"]["status"] == "passed"
+    assert report["gatekeeper_readiness"]["dmg_paths"] == [
+        "release/Oha-Yachiyo-0.4.0-arm64.dmg"
+    ]
+    assert report["gatekeeper_readiness"]["findings"] == []
+    assessment = report["gatekeeper_readiness"]["assessments"][0]
+    assert assessment["dmg_path"] == "release/Oha-Yachiyo-0.4.0-arm64.dmg"
+    assert assessment["dmg_quarantine"]["present"] is True
+    assert assessment["app_quarantine"]["present"] is False
+    assert assessment["codesign_verify"]["ok"] is True
+    assert "Oha-Yachiyo Self Signed" in assessment["codesign_display"]["output"]
+    assert assessment["spctl_assess"]["ok"] is False
+    assert assessment["spctl_assess"]["exit_code"] == 3
+    manual_statuses = {
+        check["id"]: check
+        for check in report["manual_release_candidate_check_statuses"]
+    }
+    gatekeeper = manual_statuses["gatekeeper_first_launch"]
+    assert gatekeeper["status"] == "manual_required"
+    assert "--check-gatekeeper-readiness collected codesign" in gatekeeper["notes"]
+    assert "does not replace Finder Control-click" in gatekeeper["notes"]
+    assert report["manual_release_candidate_check_summary"]["remaining_count"] == 7
+    assert report["manual_release_candidate_check_summary"]["automated_evidence_check_ids"] == []
+
+
 def test_release_candidate_verifier_terminates_packaged_app_process_group(monkeypatch):
     signals: list[tuple[int, int]] = []
 
@@ -1965,6 +2509,128 @@ def test_release_candidate_verifier_terminates_packaged_app_process_group(monkey
 
     assert signals == [(45678, rc.signal.SIGTERM)]
     assert process.terminated is False
+
+
+def test_release_candidate_verifier_runs_packaged_backend_bridge_smoke(
+    tmp_path, monkeypatch, capsys
+):
+    source_commit = "abc1234567890abc1234567890abc1234567890a"
+    backend_dir = tmp_path / "dist" / "backend"
+    backend_dir.mkdir(parents=True)
+    backend = backend_dir / "oha-yachiyo-backend"
+    backend.write_text("#!/bin/sh\n", encoding="utf-8")
+    backend.chmod(0o755)
+    popen_calls: list[dict[str, object]] = []
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return (
+                b'{"service":"oha-yachiyo","version":"0.4.0","uptime_seconds":1,'
+                b'"task_counts":{},"native_agent_ready":false,'
+                b'"build_metadata":{"commit":"abc1234567890abc1234567890abc1234567890a",'
+                b'"short_commit":"abc1234"}}'
+            )
+
+    class FakeProcess:
+        returncode = None
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self):
+            self.returncode = 0
+
+        def wait(self, timeout=None):
+            self.returncode = 0
+            return 0
+
+        def kill(self):
+            self.returncode = -9
+
+        def communicate(self, timeout=None):
+            return "", ""
+
+    def fake_popen(command, **kwargs):
+        popen_calls.append(
+            {
+                "command": command,
+                "cwd": kwargs.get("cwd"),
+                "env": kwargs.get("env"),
+                "start_new_session": kwargs.get("start_new_session"),
+            }
+        )
+        return FakeProcess()
+
+    def fake_source_revision_run(command, *, root):
+        assert root == tmp_path
+        if command == ["git", "rev-parse", "HEAD"]:
+            return SimpleNamespace(stdout=f"{source_commit}\n")
+        if command == ["git", "status", "--short"]:
+            return SimpleNamespace(stdout="")
+        raise AssertionError(f"unexpected command: {command!r}")
+
+    monkeypatch.setattr(rc.sys, "platform", "darwin")
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+    monkeypatch.setattr(rc, "_run_source_revision_git_command", fake_source_revision_run)
+    monkeypatch.setattr(rc, "_allocate_loopback_port", lambda: 49124)
+    monkeypatch.setattr(rc.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(rc.urllib.request, "urlopen", lambda url, timeout: FakeResponse())
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        artifact_paths=(Path("dist/backend"),),
+        run_packaged_backend_bridge_smoke=True,
+        report_json=Path("tmp/rc.json"),
+    ) == 0
+
+    assert len(popen_calls) == 1
+    assert popen_calls[0]["command"] == [str(backend)]
+    assert popen_calls[0]["cwd"] == str(backend_dir)
+    assert popen_calls[0]["start_new_session"] is True
+    env = popen_calls[0]["env"]
+    assert env["OHA_YACHIYO_BRIDGE_URL"] == "http://127.0.0.1:49124"
+    assert env["OHA_YACHIYO_HOME"].endswith("/.oha-yachiyo")
+    assert env["OHA_YACHIYO_BRIDGE_ACCESS_LOG"] == "0"
+    output = capsys.readouterr().out
+    assert "packaged backend bridge smoke: passed" in output
+    assert "DMG packaged build metadata revision guards: passed" in output
+    report = json.loads((tmp_path / "tmp" / "rc.json").read_text(encoding="utf-8"))
+    assert report["ok"] is True
+    assert report["packaged_backend_bridge_smoke"] == {
+        "status": "passed",
+        "backend_paths": ["dist/backend/oha-yachiyo-backend"],
+        "bridge_statuses": [
+            {
+                "backend_path": "dist/backend/oha-yachiyo-backend",
+                "bridge_url": "http://127.0.0.1:49124",
+                "service": "oha-yachiyo",
+                "version": "0.4.0",
+                "native_agent_ready": False,
+                "build_metadata": {
+                    "commit": "abc1234567890abc1234567890abc1234567890a",
+                    "short_commit": "abc1234",
+                },
+            }
+        ],
+        "findings": [],
+        "run_requested": True,
+    }
+    manual_statuses = {
+        check["id"]: check
+        for check in report["manual_release_candidate_check_statuses"]
+    }
+    external = manual_statuses["external_integrations_smoke"]
+    assert external["status"] == "manual_required"
+    assert "--run-packaged-backend-bridge-smoke started" in external["notes"]
+    assert "full release signoff still needs live2d_resource" in external["notes"]
+    assert report["manual_release_candidate_check_summary"]["remaining_count"] == 7
+    assert report["manual_release_candidate_check_summary"]["automated_evidence_check_ids"] == []
 
 
 def test_release_candidate_verifier_runs_dmg_app_startup_smoke(
@@ -2095,7 +2761,7 @@ def test_release_candidate_verifier_runs_dmg_app_startup_smoke(
     assert manual_statuses["packaged_bridge_isolation"]["status"] == "passed"
     assert manual_statuses["packaged_bridge_isolation"]["evidence_source"] == "automated_rc_gate"
     assert "--run-dmg-app-smoke passed" in manual_statuses["packaged_bridge_isolation"]["evidence"]
-    assert report["manual_release_candidate_check_summary"]["remaining_count"] == 5
+    assert report["manual_release_candidate_check_summary"]["remaining_count"] == 6
     assert report["manual_release_candidate_check_summary"]["automated_evidence_check_ids"] == [
         "packaged_bridge_isolation"
     ]
@@ -2339,7 +3005,7 @@ def test_release_candidate_verifier_runs_dmg_screen_recording_probe(
     assert manual_statuses["screen_recording_permission"]["evidence_source"] == "automated_rc_gate"
     assert "/screen/current 1920x1080 png" in manual_statuses["screen_recording_permission"]["evidence"]
     assert "Screenshot image bytes were not archived" in manual_statuses["screen_recording_permission"]["evidence"]
-    assert report["manual_release_candidate_check_summary"]["remaining_count"] == 4
+    assert report["manual_release_candidate_check_summary"]["remaining_count"] == 5
     assert report["manual_release_candidate_check_summary"]["automated_evidence_check_ids"] == [
         "packaged_bridge_isolation",
         "screen_recording_permission",
@@ -2474,7 +3140,7 @@ def test_release_candidate_verifier_keeps_bridge_evidence_when_dmg_screen_probe_
     assert "release/Oha-Yachiyo-0.4.0-arm64.dmg" in manual_statuses[
         "screen_recording_permission"
     ]["notes"]
-    assert report["manual_release_candidate_check_summary"]["remaining_count"] == 5
+    assert report["manual_release_candidate_check_summary"]["remaining_count"] == 6
     assert report["manual_release_candidate_check_summary"]["automated_evidence_check_ids"] == [
         "packaged_bridge_isolation"
     ]
@@ -2638,7 +3304,7 @@ def test_release_candidate_verifier_runs_dmg_ui_sampling_smoke(
     assert manual_statuses["packaged_ui_sampling"]["status"] == "passed"
     assert manual_statuses["packaged_ui_sampling"]["evidence_source"] == "automated_rc_gate"
     assert "#/agents/workflows" in manual_statuses["packaged_ui_sampling"]["evidence"]
-    assert report["manual_release_candidate_check_summary"]["remaining_count"] == 4
+    assert report["manual_release_candidate_check_summary"]["remaining_count"] == 5
     assert report["manual_release_candidate_check_summary"]["automated_evidence_check_ids"] == [
         "packaged_bridge_isolation",
         "packaged_ui_sampling",
@@ -2765,7 +3431,7 @@ def test_release_candidate_verifier_runs_dmg_chat_native_file_smoke(
     assert "main_chat_run_packaged_native_file_smoke" in manual_statuses[
         "chat_native_file_upload"
     ]["evidence"]
-    assert report["manual_release_candidate_check_summary"]["remaining_count"] == 5
+    assert report["manual_release_candidate_check_summary"]["remaining_count"] == 6
     assert report["manual_release_candidate_check_summary"]["automated_evidence_check_ids"] == [
         "chat_native_file_upload",
     ]
@@ -2939,20 +3605,41 @@ def test_release_candidate_verifier_runs_provider_smoke(tmp_path, monkeypatch, c
             "cwd": tmp_path,
             "text": True,
         },
+        {
+            "command": [
+                rc.sys.executable,
+                str(rc.NATIVE_AGENT_FULL_CHAIN_SMOKE_SCRIPT),
+            ],
+            "cwd": tmp_path,
+            "text": True,
+        },
+        {
+            "command": [
+                rc.sys.executable,
+                str(rc.NATIVE_WORKFLOW_FULL_CHAIN_SMOKE_SCRIPT),
+            ],
+            "cwd": tmp_path,
+            "text": True,
+        },
     ]
     output = capsys.readouterr().out
     assert "real provider smoke: passed" in output
+    assert "Native Agent capability matrix: incomplete" in output
     report = json.loads((tmp_path / "tmp" / "rc.json").read_text(encoding="utf-8"))
     assert report["ok"] is True
     assert report["provider_smoke"] == {
         "status": "passed",
         "checks": [
-            {"label": "text_stream", "exit_code": 0},
-            {"label": "tool_call_stream", "exit_code": 0},
+            {"label": "text_stream", "exit_code": 0, "summary": {"ok": True}},
+            {"label": "tool_call_stream", "exit_code": 0, "summary": {"ok": True}},
+            {"label": "native_agent_full_chain", "exit_code": 0, "summary": {"ok": True}},
+            {"label": "native_workflow_full_chain", "exit_code": 0, "summary": {"ok": True}},
         ],
         "findings": [],
         "run_requested": True,
     }
+    assert report["native_agent_capability_matrix"]["status"] == "incomplete"
+    assert "agent_multi_tool_pipeline" in report["native_agent_capability_matrix"]["missing_capability_ids"]
     manual_statuses = {
         check["id"]: check
         for check in report["manual_release_candidate_check_statuses"]
@@ -2960,10 +3647,21 @@ def test_release_candidate_verifier_runs_provider_smoke(tmp_path, monkeypatch, c
     assert manual_statuses["real_provider_smoke"]["status"] == "passed"
     assert manual_statuses["real_provider_smoke"]["evidence_source"] == "automated_rc_gate"
     assert "text_stream exit_code=0" in manual_statuses["real_provider_smoke"]["evidence"]
-    assert report["manual_release_candidate_check_summary"]["remaining_count"] == 5
+    assert "native_agent_full_chain exit_code=0" in manual_statuses["real_provider_smoke"]["evidence"]
+    assert "native_workflow_full_chain exit_code=0" in manual_statuses["real_provider_smoke"]["evidence"]
+    assert report["manual_release_candidate_check_summary"]["remaining_count"] == 6
     assert report["manual_release_candidate_check_summary"]["automated_evidence_check_ids"] == [
         "real_provider_smoke"
     ]
+
+
+def test_provider_smoke_summary_omits_sensitive_json():
+    summary = rc._provider_smoke_stdout_summary(
+        '{"ok": true, "api_key": "sk-test-provider-smoke-secret"}\n'
+    )
+
+    assert summary == {"ok": True, "api_key": "[redacted]"}
+    assert "sk-test-provider-smoke-secret" not in json.dumps(summary)
 
 
 def test_release_candidate_verifier_does_not_override_failed_manual_evidence(

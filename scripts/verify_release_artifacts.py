@@ -108,6 +108,8 @@ DEFAULT_SCAN_PATHS: tuple[Path, ...] = (
     Path("scripts/prepare_app_build_metadata.py"),
     Path("scripts/build_release_candidate_artifacts.py"),
     Path("scripts/refresh_local_rc_signoff.py"),
+    Path("scripts/run_provider_smoke_with_prompt.py"),
+    Path("scripts/smoke_external_integrations.py"),
     Path("scripts/verify_release_candidate.py"),
     Path("apps/frontend/public/oha-yachiyo-build.json"),
 )
@@ -630,6 +632,14 @@ MACOS_ENTITLEMENTS_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
 )
 RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
+        "`develop` 分支保留给彻底重构前的旧版发布线，不触发 Oha DMG",
+        "release packaging docs must document that legacy develop is not an Oha release branch",
+    ),
+    (
+        "Oha-Yachiyo-oha-develop-latest.dmg",
+        "release packaging docs must document the Oha experimental latest DMG name",
+    ),
+    (
         "release-facing product identity and security guards",
         "release packaging docs must document the pre-dependency release guard",
     ),
@@ -666,8 +676,16 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document local RC artifact build helper",
     ),
     (
+        "清理旧 `dist/electron`",
+        "release packaging docs must document local RC helper cleans stale Electron artifacts",
+    ),
+    (
         "python scripts/refresh_local_rc_signoff.py",
         "release packaging docs must document local RC signoff refresh helper",
+    ),
+    (
+        "Gatekeeper readiness diagnostics",
+        "release packaging docs must document local RC refresh includes Gatekeeper readiness diagnostics",
     ),
     (
         "--reuse-current-reports",
@@ -706,8 +724,16 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document the local RC DMG mount gate",
     ),
     (
+        "python scripts/verify_release_candidate.py --require-artifacts --check-gatekeeper-readiness",
+        "release packaging docs must document the local RC Gatekeeper readiness gate",
+    ),
+    (
         "python scripts/verify_release_candidate.py --require-artifacts --run-dmg-app-smoke",
         "release packaging docs must document the local RC packaged app startup smoke",
+    ),
+    (
+        "python scripts/verify_release_candidate.py --require-artifacts --run-packaged-backend-bridge-smoke",
+        "release packaging docs must document the local RC packaged backend bridge smoke",
     ),
     (
         "python scripts/verify_release_candidate.py --require-artifacts --run-dmg-screen-smoke",
@@ -718,8 +744,72 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document the local RC real provider smoke gate",
     ),
     (
+        "python scripts/run_provider_smoke_with_prompt.py",
+        "release packaging docs must document the safe provider smoke prompt wrapper",
+    ),
+    (
+        "避免把 key 放进 shell history 或进程参数",
+        "release packaging docs must document why the provider smoke prompt wrapper exists",
+    ),
+    (
+        "streaming/tool-call/native Agent/native Workflow full-chain provider smoke",
+        "release packaging docs must document native Agent and Workflow full-chain provider smoke coverage",
+    ),
+    (
+        "`native_agent_capability_matrix`",
+        "release packaging docs must document the Native Agent capability matrix section",
+    ),
+    (
+        "python scripts/summarize_native_agent_capabilities.py",
+        "release packaging docs must document standalone Native Agent capability matrix generation",
+    ),
+    (
         "python scripts/verify_release_candidate.py --require-artifacts --run-ui-smoke",
         "release packaging docs must document the local RC Electron UI smoke gate",
+    ),
+    (
+        "python scripts/smoke_external_integrations.py",
+        "release packaging docs must document the opt-in external integration smoke script",
+    ),
+    (
+        "--bridge-only",
+        "release packaging docs must document the external integration bridge identity preflight",
+    ),
+    (
+        "--live2d-archive",
+        "release packaging docs must document real Live2D archive external evidence input",
+    ),
+    (
+        "--tts-voice-archive",
+        "release packaging docs must document real GPT-SoVITS voice archive external evidence input",
+    ),
+    (
+        "--astrbot",
+        "release packaging docs must document AstrBot plugin bridge external evidence input",
+    ),
+    (
+        "`external_integrations_smoke`",
+        "release packaging docs must document the external integration manual check id",
+    ),
+    (
+        "`live2d_resource`、`gpt_sovits_tts` 和 `astrbot_plugin_bridge`",
+        "release packaging docs must document the required external smoke checks for automated signoff",
+    ),
+    (
+        "`missing_required_check_ids`",
+        "release packaging docs must document external smoke missing required check metadata",
+    ),
+    (
+        "`complete`",
+        "release packaging docs must document external smoke full-signoff completion metadata",
+    ),
+    (
+        "--manual-checks-json tmp/external-integrations-smoke.json",
+        "release packaging docs must document external smoke report manual evidence merging",
+    ),
+    (
+        "`/status.service` 是否为 `oha-yachiyo`",
+        "release packaging docs must document external smoke Oha bridge identity validation",
     ),
     (
         "python scripts/run_electron_ui_smokes.py --report-json release/electron-ui-smoke.json",
@@ -738,7 +828,7 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document the source-only RC dry run",
     ),
     (
-        "上传 DMG 前运行 `python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount --run-dmg-app-smoke --report-json release/rc-verification.json`",
+        "上传 DMG 前运行 `python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount --check-gatekeeper-readiness --run-packaged-backend-bridge-smoke --run-dmg-app-smoke --report-json release/rc-verification.json`",
         "release packaging docs must document the CI release-candidate gate and packaged app startup smoke before upload",
     ),
     (
@@ -864,6 +954,10 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow must run the release verifier before dependency installation",
     ),
     (
+        "      - oha-develop",
+        "macOS release workflow must auto-release Oha experimental builds from oha-develop",
+    ),
+    (
         "          - alpha",
         "macOS release workflow must expose an alpha release channel",
     ),
@@ -874,6 +968,10 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         'LATEST_BRANCH="alpha"',
         "macOS release workflow must publish alpha builds to alpha-latest metadata",
+    ),
+    (
+        'LATEST_BRANCH="oha-develop"',
+        "macOS release workflow must publish experimental Oha builds to oha-develop-latest metadata",
     ),
     (
         "Import macOS self-signing certificate",
@@ -932,7 +1030,15 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow must mount-check DMG contents during local RC verification",
     ),
     (
-        "python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount --run-dmg-app-smoke",
+        "python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount --check-gatekeeper-readiness",
+        "macOS release workflow must collect Gatekeeper readiness diagnostics during RC verification",
+    ),
+    (
+        "python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount --check-gatekeeper-readiness --run-packaged-backend-bridge-smoke",
+        "macOS release workflow must launch the packaged backend bridge during RC verification",
+    ),
+    (
+        "python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount --check-gatekeeper-readiness --run-packaged-backend-bridge-smoke --run-dmg-app-smoke",
         "macOS release workflow must launch the app inside DMG artifacts during RC verification",
     ),
     (
@@ -1008,7 +1114,7 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow provider smoke must skip unless all opt-in secrets are configured",
     ),
     (
-        "Skipping opt-in real provider streaming smoke; OHA_YACHIYO_SMOKE_* secrets are not fully configured.",
+        "Skipping opt-in real provider smoke; OHA_YACHIYO_SMOKE_* secrets are not fully configured.",
         "macOS release workflow provider smoke must report an explicit opt-in secret skip",
     ),
     (
@@ -1030,6 +1136,22 @@ RELEASE_CANDIDATE_PROVIDER_SMOKE_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release candidate verifier must run the real provider streaming smoke helper",
     ),
     (
+        "NATIVE_AGENT_FULL_CHAIN_SMOKE_SCRIPT",
+        "release candidate verifier must define the native Agent full-chain smoke helper",
+    ),
+    (
+        "NATIVE_WORKFLOW_FULL_CHAIN_SMOKE_SCRIPT",
+        "release candidate verifier must define the native Workflow full-chain smoke helper",
+    ),
+    (
+        "scripts/smoke_native_agent_full_chain.py",
+        "release candidate verifier must run the native Agent full-chain smoke helper",
+    ),
+    (
+        "scripts/smoke_native_workflow_full_chain.py",
+        "release candidate verifier must run the native Workflow full-chain smoke helper",
+    ),
+    (
         '"text_stream"',
         "release candidate verifier must run real provider text stream smoke",
     ),
@@ -1048,6 +1170,14 @@ RELEASE_CANDIDATE_PROVIDER_SMOKE_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         '"tool_call_stream"',
         "release candidate verifier must run real provider tool-call stream smoke",
+    ),
+    (
+        '"native_agent_full_chain"',
+        "release candidate verifier must run native Agent full-chain provider smoke",
+    ),
+    (
+        '"native_workflow_full_chain"',
+        "release candidate verifier must run native Workflow full-chain provider smoke",
     ),
     (
         '"--require-tool-call"',
@@ -1102,6 +1232,14 @@ RELEASE_CANDIDATE_PROVIDER_SMOKE_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release candidate verifier must report whether provider smoke was requested",
     ),
     (
+        '"native_agent_capability_matrix"',
+        "release candidate verifier must archive the Native Agent capability matrix",
+    ),
+    (
+        "summarize_capabilities(report)",
+        "release candidate verifier must derive the Native Agent capability matrix from RC evidence",
+    ),
+    (
         "run_electron_ui_smoke_report",
         "release candidate verifier must reuse the shared Electron UI smoke runner",
     ),
@@ -1152,6 +1290,18 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release candidate verifier must track real provider smoke manual status",
     ),
     (
+        '"external_integrations_smoke"',
+        "release candidate verifier must track external integration smoke manual status",
+    ),
+    (
+        "_external_integrations_smoke_manual_check",
+        "release candidate verifier must accept external integration smoke reports as manual evidence input",
+    ),
+    (
+        '"missing_required_check_ids"',
+        "release candidate verifier must honor external smoke missing required check metadata",
+    ),
+    (
         '"manual_required"',
         "release candidate verifier manual checks must default to manual_required",
     ),
@@ -1174,6 +1324,18 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         '"bridge_statuses"',
         "release candidate verifier must archive packaged Bridge status metadata from DMG smokes",
+    ),
+    (
+        '"packaged_backend_bridge_smoke"',
+        "release candidate verifier must archive packaged backend bridge smoke metadata",
+    ),
+    (
+        "verify_packaged_backend_bridge_smoke",
+        "release candidate verifier must run the packaged backend bridge smoke",
+    ),
+    (
+        "--run-packaged-backend-bridge-smoke",
+        "release candidate verifier must expose the packaged backend bridge smoke flag",
     ),
     (
         "build_metadata.commit",
@@ -1466,6 +1628,10 @@ STREAMING_PROVIDER_SMOKE_SCRIPT_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "real provider smoke helper must send a streamed tool-result follow-up request",
     ),
     (
+        "tool_choice=_workspace_read_tool_choice() if tool_call else None",
+        "real provider smoke helper must force the workspace_read tool during tool-call smoke",
+    ),
+    (
         'call.pop("arguments", None)',
         "real provider smoke helper must strip tool-call arguments before printing summaries",
     ),
@@ -1498,6 +1664,10 @@ STREAMING_PROVIDER_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         'assert "synthetic workspace_read result" not in summary_json',
         "provider smoke tests must prove synthetic tool-result content stays out of printed summaries",
+    ),
+    (
+        'assert requests[0]["tool_choice"] == {"type": "function", "function": {"name": "workspace_read"}}',
+        "provider smoke tests must assert forced workspace_read tool_choice wiring",
     ),
     (
         "def test_stream_smoke_uses_responses_call_id_for_tool_result_followup",
@@ -1566,6 +1736,388 @@ STREAMING_PROVIDER_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "assert leaked_secret not in captured.err",
         "provider smoke tests must prove provider errors do not print API keys",
+    ),
+)
+NATIVE_AGENT_FULL_CHAIN_SMOKE_SCRIPT_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
+    (
+        "tempfile.TemporaryDirectory",
+        "native Agent full-chain smoke must keep runtime state in a temporary directory",
+    ),
+    (
+        "MemoryCredentialStore",
+        "native Agent full-chain smoke must use an in-memory credential store",
+    ),
+    (
+        "ModelProfileService",
+        "native Agent full-chain smoke must exercise ModelProfileService readiness",
+    ),
+    (
+        "NativeRunEngine",
+        "native Agent full-chain smoke must exercise NativeRunEngine",
+    ),
+    (
+        "_run_workspace_read",
+        "native Agent full-chain smoke must exercise workspace.read",
+    ),
+    (
+        "_run_artifact_write",
+        "native Agent full-chain smoke must exercise artifact.write",
+    ),
+    (
+        "_run_multi_tool_pipeline",
+        "native Agent full-chain smoke must exercise sequential multi-tool pipelines",
+    ),
+    (
+        "_run_workflow",
+        "native Agent full-chain smoke must exercise Workflow child Agent artifact flow",
+    ),
+    (
+        "_run_terminal_approval",
+        "native Agent full-chain smoke must exercise terminal approval resume",
+    ),
+    (
+        "_run_main_chat",
+        "native Agent full-chain smoke must exercise main chat model loop",
+    ),
+    (
+        "contains_sensitive_text(text)",
+        "native Agent full-chain smoke must fail instead of printing sensitive output",
+    ),
+)
+NATIVE_AGENT_FULL_CHAIN_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
+    (
+        "test_full_chain_smoke_reports_missing_environment",
+        "native Agent full-chain smoke tests must cover missing opt-in credentials",
+    ),
+    (
+        "test_full_chain_smoke_cli_never_prints_sensitive_summary",
+        "native Agent full-chain smoke tests must prove sensitive summaries are not printed",
+    ),
+    (
+        "test_full_chain_smoke_check_redacts_sensitive_details",
+        "native Agent full-chain smoke tests must cover nested sensitive detail redaction",
+    ),
+    (
+        "test_multi_tool_pipeline_check_requires_read_then_artifact",
+        "native Agent full-chain smoke tests must cover sequential multi-tool pipeline evidence",
+    ),
+)
+NATIVE_WORKFLOW_FULL_CHAIN_SMOKE_SCRIPT_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
+    (
+        "tempfile.TemporaryDirectory",
+        "native Workflow full-chain smoke must keep runtime state in a temporary directory",
+    ),
+    (
+        "MemoryCredentialStore",
+        "native Workflow full-chain smoke must use an in-memory credential store",
+    ),
+    (
+        "ModelProfileService",
+        "native Workflow full-chain smoke must exercise ModelProfileService readiness",
+    ),
+    (
+        "NativeRunEngine",
+        "native Workflow full-chain smoke must exercise NativeRunEngine",
+    ),
+    (
+        "_run_advanced_workflow",
+        "native Workflow full-chain smoke must exercise advanced Workflow orchestration",
+    ),
+    (
+        '"workflow.node.condition"',
+        "native Workflow full-chain smoke must require condition node replay events",
+    ),
+    (
+        '"workflow.node.workflow"',
+        "native Workflow full-chain smoke must require subworkflow replay events",
+    ),
+    (
+        '"workflow.node.parallel"',
+        "native Workflow full-chain smoke must require parallel replay events",
+    ),
+    (
+        '"workflow.node.loop"',
+        "native Workflow full-chain smoke must require loop replay events",
+    ),
+    (
+        "_run_workflow_budget_boundary",
+        "native Workflow full-chain smoke must exercise Workflow budget boundaries",
+    ),
+    (
+        "contains_sensitive_text(text)",
+        "native Workflow full-chain smoke must fail instead of printing sensitive output",
+    ),
+)
+NATIVE_WORKFLOW_FULL_CHAIN_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
+    (
+        "test_workflow_full_chain_smoke_reports_missing_environment",
+        "native Workflow full-chain smoke tests must cover missing opt-in credentials",
+    ),
+    (
+        "test_workflow_full_chain_smoke_cli_never_prints_sensitive_summary",
+        "native Workflow full-chain smoke tests must prove sensitive summaries are not printed",
+    ),
+    (
+        "test_workflow_full_chain_smoke_check_redacts_sensitive_details",
+        "native Workflow full-chain smoke tests must cover nested sensitive detail redaction",
+    ),
+)
+NATIVE_AGENT_CAPABILITY_SUMMARY_SCRIPT_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
+    (
+        "CAPABILITY_DEFINITIONS",
+        "native Agent capability summary must define a stable capability matrix",
+    ),
+    (
+        "agent_multi_tool_pipeline",
+        "native Agent capability summary must include sequential multi-tool evidence",
+    ),
+    (
+        "packaged_backend_bridge_smoke",
+        "native Agent capability summary must include packaged backend Bridge evidence",
+    ),
+    (
+        "summarize_capabilities",
+        "native Agent capability summary must expose a reusable summarizer",
+    ),
+)
+NATIVE_AGENT_CAPABILITY_SUMMARY_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
+    (
+        "test_capability_summary_reports_full_native_agent_matrix",
+        "native Agent capability summary tests must cover a complete matrix",
+    ),
+    (
+        "test_capability_summary_marks_missing_multi_tool_pipeline",
+        "native Agent capability summary tests must catch missing multi-tool evidence",
+    ),
+    (
+        "test_capability_summary_cli_writes_json",
+        "native Agent capability summary tests must cover CLI JSON output",
+    ),
+)
+UI_BRIDGE_RESOURCE_CHAIN_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
+    (
+        "test_live2d_and_tts_resource_routes_import_save_and_test",
+        "UI bridge route tests must cover Live2D and GPT-SoVITS resource import-save-test chain",
+    ),
+    (
+        "_GptSovitsHttpServer",
+        "UI bridge route tests must exercise GPT-SoVITS HTTP endpoints during TTS test",
+    ),
+    (
+        "import_live2d_archive_path",
+        "UI bridge route tests must import a Live2D archive through the public route handler",
+    ),
+    (
+        "import_tts_voice_archive_path",
+        "UI bridge route tests must import a GPT-SoVITS voice archive through the public route handler",
+    ),
+    (
+        "test_proactive_tts",
+        "UI bridge route tests must exercise proactive TTS test playback through the public route handler",
+    ),
+)
+WORKFLOW_CONDITION_ORCHESTRATION_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
+    (
+        '"condition"',
+        "Native workflow runtime must recognize condition nodes as first-class Workflow nodes",
+    ),
+    (
+        '"parallel"',
+        "Native workflow runtime must recognize parallel nodes as first-class Workflow nodes",
+    ),
+    (
+        '"workflow"',
+        "Native workflow runtime must recognize subworkflow nodes as first-class Workflow nodes",
+    ),
+    (
+        '"loop"',
+        "Native workflow runtime must recognize loop nodes as first-class Workflow nodes",
+    ),
+    (
+        "WorkflowConditionNodeProjection",
+        "Native workflow runtime must project condition node execution into timeline and replay events",
+    ),
+    (
+        "condition_selection",
+        "Native workflow runtime must select true/false condition branches from current context",
+    ),
+    (
+        "WorkflowParallelNodeProjection",
+        "Native workflow runtime must project parallel node execution into timeline and replay events",
+    ),
+    (
+        "parallel_plan",
+        "Native workflow runtime must plan parallel fan-out branches and fan-in targets",
+    ),
+    (
+        "workflow_parent_node_id",
+        "Native workflow runtime must tag parallel child events with parent branch context",
+    ),
+    (
+        "_parallel_completed_agent_context",
+        "Native workflow runtime must reuse completed parallel branch Agent results after approval",
+    ),
+    (
+        "WorkflowSubworkflowNodeExecution",
+        "Native workflow runtime must execute child Workflow nodes and project their run status",
+    ),
+    (
+        "workflow.node.workflow",
+        "Native workflow runtime must emit subworkflow node execution timeline events",
+    ),
+    (
+        "_workflow_for_node",
+        "Native workflow runtime must validate subworkflow node references before execution",
+    ),
+    (
+        "WorkflowLoopNodeProjection",
+        "Native workflow runtime must project loop node execution into timeline and replay events",
+    ),
+    (
+        "loop_selection",
+        "Native workflow runtime must route loop continue/exit branches from current context",
+    ),
+    (
+        "loop_step_limit",
+        "Native workflow runtime must enforce bounded loop execution",
+    ),
+    (
+        "_WorkflowRunBudget",
+        "Native workflow runtime must enforce Workflow-level execution budgets",
+    ),
+    (
+        "max_workflow_steps",
+        "Native workflow runtime must expose a bounded Workflow step budget",
+    ),
+    (
+        "_workflow_next_node_id",
+        "Native workflow runtime must resume branch-aware Workflow execution by next node id",
+    ),
+    (
+        "parent_runs_waiting_for_child",
+        "Native workflow runtime must locate parent Workflows waiting on child Workflow runs",
+    ),
+)
+WORKFLOW_CONDITION_FRONTEND_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
+    (
+        "workflowNodeTypes = new Set(['start', 'agent', 'approval', 'artifact', 'condition', 'parallel', 'workflow', 'loop'])",
+        "Agent Studio must recognize condition, parallel, subworkflow, and loop nodes in the frontend contract",
+    ),
+    (
+        "workflowEdgeBranch",
+        "Agent Studio must preserve true/false Workflow branch metadata",
+    ),
+    (
+        "workflow.node.condition",
+        "Agent Studio Run Detail must display condition Workflow execution events",
+    ),
+    (
+        "workflow.node.parallel",
+        "Agent Studio Run Detail must display parallel Workflow execution events",
+    ),
+    (
+        "workflow.node.workflow",
+        "Agent Studio Run Detail must display subworkflow execution events",
+    ),
+    (
+        "workflow.node.loop",
+        "Agent Studio Run Detail must display loop execution events",
+    ),
+)
+WORKFLOW_CONDITION_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
+    (
+        "test_workflow_condition_node_routes_true_and_false_branches",
+        "Native workflow tests must execute both true and false condition branches",
+    ),
+    (
+        "workflow_node_selected_branch",
+        "Native workflow tests must assert condition branch selection replay payloads",
+    ),
+    (
+        "reports/branch.md",
+        "Native workflow tests must verify condition branches can merge into a shared artifact node",
+    ),
+    (
+        "test_workflow_parallel_node_runs_branches_and_merges_into_artifact",
+        "Native workflow tests must execute parallel fan-out branches and merge them into a shared artifact node",
+    ),
+    (
+        "workflow_node_join_target",
+        "Native workflow tests must assert parallel fan-in replay payloads",
+    ),
+    (
+        "test_workflow_parallel_branch_approval_resumes_remaining_branches_and_fans_in",
+        "Native workflow tests must resume remaining parallel branches after child Agent approvals",
+    ),
+    (
+        "reports/parallel-approval.md",
+        "Native workflow tests must verify parallel approval results reach fan-in artifacts",
+    ),
+    (
+        "workflow_parallel_branch_label",
+        "Native workflow tests must assert parallel child branch replay payloads",
+    ),
+    (
+        "test_workflow_subworkflow_node_runs_child_workflow_and_projects_artifacts",
+        "Native workflow tests must execute subworkflow nodes and project child artifacts",
+    ),
+    (
+        "child_workflow_id",
+        "Native workflow tests must assert subworkflow child Workflow replay payloads",
+    ),
+    (
+        "reports/child.md",
+        "Native workflow tests must verify subworkflow child artifacts are linked into the parent run",
+    ),
+    (
+        "test_workflow_subworkflow_child_approval_resumes_parent_workflow",
+        "Native workflow tests must resume parent Workflows after nested subworkflow child approvals",
+    ),
+    (
+        "reports/parent-approval.md",
+        "Native workflow tests must verify nested subworkflow approval results reach parent artifacts",
+    ),
+    (
+        "test_workflow_loop_node_repeats_until_condition_exits_to_artifact",
+        "Native workflow tests must execute loop nodes until they exit into a shared artifact node",
+    ),
+    (
+        "workflow_node_loop_iteration",
+        "Native workflow tests must assert loop iteration replay payloads",
+    ),
+    (
+        "reports/loop.md",
+        "Native workflow tests must verify loop nodes can exit into a shared artifact node",
+    ),
+    (
+        "test_workflow_run_fails_when_context_budget_is_exceeded",
+        "Native workflow tests must enforce Workflow context budget failures",
+    ),
+    (
+        "test_workflow_step_budget_survives_child_approval_resume",
+        "Native workflow tests must preserve Workflow step budgets across child approval resume",
+    ),
+    (
+        "test_workflow_run_fails_when_duration_budget_is_exceeded_between_nodes",
+        "Native workflow tests must enforce Workflow duration budget failures between nodes",
+    ),
+)
+RELEASE_WORKFLOW_FORBIDDEN_TEXT: tuple[tuple[str, str], ...] = (
+    (
+        "      - develop\n",
+        "macOS release workflow must not auto-release Oha from the legacy develop branch",
+    ),
+    (
+        'LATEST_BRANCH="develop"',
+        "macOS release workflow must not publish Oha experimental metadata to develop-latest",
+    ),
+    (
+        "/develop-latest/",
+        "macOS release workflow must not publish Oha experimental downloads under develop-latest",
+    ),
+    (
+        "Oha-Yachiyo-develop-latest",
+        "macOS release workflow must not publish Oha experimental DMGs as develop-latest",
     ),
 )
 RELEASE_WORKFLOW_METADATA_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
@@ -2368,6 +2920,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover screenshot behavior",
     ),
     (
+        "tests/test_astrbot_bridge_e2e.py",
+        "macOS release workflow smoke tests must cover AstrBot plugin Bridge HTTP E2E",
+    ),
+    (
         "tests/test_proactive.py",
         "macOS release workflow smoke tests must cover proactive care",
     ),
@@ -3149,6 +3705,46 @@ def _verify_streaming_provider_smoke_contract_guards(root: Path) -> list[Finding
             STREAMING_PROVIDER_SMOKE_TEST_REQUIRED_TEXT,
         ),
         (
+            Path("scripts/smoke_native_agent_full_chain.py"),
+            NATIVE_AGENT_FULL_CHAIN_SMOKE_SCRIPT_REQUIRED_TEXT,
+        ),
+        (
+            Path("tests/test_native_agent_full_chain_smoke.py"),
+            NATIVE_AGENT_FULL_CHAIN_SMOKE_TEST_REQUIRED_TEXT,
+        ),
+        (
+            Path("scripts/smoke_native_workflow_full_chain.py"),
+            NATIVE_WORKFLOW_FULL_CHAIN_SMOKE_SCRIPT_REQUIRED_TEXT,
+        ),
+        (
+            Path("tests/test_native_workflow_full_chain_smoke.py"),
+            NATIVE_WORKFLOW_FULL_CHAIN_SMOKE_TEST_REQUIRED_TEXT,
+        ),
+        (
+            Path("scripts/summarize_native_agent_capabilities.py"),
+            NATIVE_AGENT_CAPABILITY_SUMMARY_SCRIPT_REQUIRED_TEXT,
+        ),
+        (
+            Path("tests/test_native_agent_capability_summary.py"),
+            NATIVE_AGENT_CAPABILITY_SUMMARY_TEST_REQUIRED_TEXT,
+        ),
+        (
+            Path("tests/test_ui_bridge_routes.py"),
+            UI_BRIDGE_RESOURCE_CHAIN_TEST_REQUIRED_TEXT,
+        ),
+        (
+            Path("apps/shell/agent_runtime.py"),
+            WORKFLOW_CONDITION_ORCHESTRATION_REQUIRED_TEXT,
+        ),
+        (
+            Path("apps/frontend/src/views/AgentStudioView.tsx"),
+            WORKFLOW_CONDITION_FRONTEND_REQUIRED_TEXT,
+        ),
+        (
+            Path("tests/test_agent_runtime.py"),
+            WORKFLOW_CONDITION_TEST_REQUIRED_TEXT,
+        ),
+        (
             Path("scripts/verify_release_candidate.py"),
             RELEASE_CANDIDATE_PROVIDER_SMOKE_REQUIRED_TEXT,
         ),
@@ -3397,6 +3993,9 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
 
     for required_text, message in RELEASE_WORKFLOW_REQUIRED_TEXT:
         if required_text not in workflow:
+            findings.append(Finding(workflow_path, message))
+    for forbidden_text, message in RELEASE_WORKFLOW_FORBIDDEN_TEXT:
+        if forbidden_text in workflow:
             findings.append(Finding(workflow_path, message))
     for required_text, message in RELEASE_WORKFLOW_METADATA_REQUIRED_TEXT:
         if required_text not in workflow:

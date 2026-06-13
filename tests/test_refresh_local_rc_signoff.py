@@ -84,6 +84,8 @@ def test_refresh_local_rc_signoff_runs_batch_screen_draft_and_preview(
         "scripts/verify_release_candidate.py",
         "--require-artifacts",
         "--check-dmg-mount",
+        "--check-gatekeeper-readiness",
+        "--run-packaged-backend-bridge-smoke",
         "--run-dmg-app-smoke",
         "--run-dmg-ui-sampling-smoke",
         "--run-dmg-chat-native-file-smoke",
@@ -333,6 +335,8 @@ def test_refresh_local_rc_signoff_does_not_reuse_failed_batch_report(
         "scripts/verify_release_candidate.py",
         "--require-artifacts",
         "--check-dmg-mount",
+        "--check-gatekeeper-readiness",
+        "--run-packaged-backend-bridge-smoke",
         "--run-dmg-app-smoke",
         "--run-dmg-ui-sampling-smoke",
         "--run-dmg-chat-native-file-smoke",
@@ -458,6 +462,7 @@ def test_refresh_local_rc_signoff_print_status_uses_current_draft(
                     "remaining_check_ids": [
                         "gatekeeper_first_launch",
                         "screen_recording_permission",
+                        "external_integrations_smoke",
                     ]
                 },
             }
@@ -467,7 +472,7 @@ def test_refresh_local_rc_signoff_print_status_uses_current_draft(
 
     assert refresh.main(["--short-commit", "abc12345", "--print-status"]) == 0
     output = capsys.readouterr().out
-    assert "manual release-candidate check progress: 4/6 complete, 2 remaining" in output
+    assert "manual release-candidate check progress: 4/7 complete, 3 remaining" in output
     assert (
         f"{sys.executable} scripts/verify_release_candidate.py --require-artifacts "
         "--run-dmg-screen-smoke --report-json "
@@ -505,6 +510,7 @@ def test_refresh_local_rc_signoff_prints_os_signoff_guide(
                     "remaining_check_ids": [
                         "gatekeeper_first_launch",
                         "screen_recording_permission",
+                        "external_integrations_smoke",
                     ]
                 },
             }
@@ -545,6 +551,8 @@ def test_refresh_local_rc_signoff_prints_os_signoff_guide(
     assert "local RC OS signoff guide:" in output
     assert "signoff draft: tmp/rc-signoff-abc12345-current.json" in output
     assert "Finder Control-click -> Open" in output
+    assert "--check-gatekeeper-readiness" in output
+    assert "tmp/rc-verification-abc12345-gatekeeper-readiness.json" in output
     assert (
         "stable Screen Recording app path: "
         "tmp/rc-screen-smoke/Oha-Yachiyo-0.4.0-arm64/Oha-Yachiyo.app"
@@ -567,9 +575,50 @@ def test_refresh_local_rc_signoff_prints_os_signoff_guide(
     assert "--run-dmg-screen-smoke" in output
     assert "placeholder values are rejected" in output
     assert "--write-os-evidence tmp/rc-signoff-abc12345-os-evidence.json" in output
+    assert (
+        "non-OS checks still required before final signoff: external_integrations_smoke"
+        in output
+    )
+    assert "python scripts/smoke_external_integrations.py" in output
+    assert "--bridge-only --report-json tmp/external-integrations-bridge-preflight.json" in output
+    assert "--report-json tmp/external-integrations-smoke.json" in output
     assert "--manual-checks-json tmp/rc-signoff-abc12345-current.json" in output
     assert "--manual-checks-json tmp/rc-signoff-abc12345-os-evidence.json" in output
+    assert "--manual-checks-json tmp/external-integrations-smoke.json" in output
     assert "--require-manual-checks-complete" in output
+
+
+def test_refresh_local_rc_signoff_prints_external_only_final_command(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    monkeypatch.setattr(refresh, "ROOT", tmp_path)
+    draft = tmp_path / "tmp" / "rc-signoff-abc12345-current.json"
+    draft.parent.mkdir(parents=True, exist_ok=True)
+    draft.write_text(
+        json.dumps(
+            {
+                "manual_release_candidate_check_summary": {
+                    "remaining_check_ids": ["external_integrations_smoke"]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert (
+        refresh.main(["--short-commit", "abc12345", "--print-os-signoff-guide"])
+        == 0
+    )
+
+    output = capsys.readouterr().out
+    assert "non-OS checks still required before final signoff: external_integrations_smoke" in output
+    assert "python scripts/smoke_external_integrations.py" in output
+    assert "--bridge-only --report-json tmp/external-integrations-bridge-preflight.json" in output
+    assert "--manual-checks-json tmp/rc-signoff-abc12345-current.json" in output
+    assert "--manual-checks-json tmp/external-integrations-smoke.json" in output
+    assert "--manual-checks-json tmp/rc-signoff-abc12345-os-evidence.json" not in output
 
 
 def test_refresh_local_rc_signoff_writes_os_evidence_with_source_revisions(

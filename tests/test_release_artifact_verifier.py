@@ -76,6 +76,24 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
     tests = tmp_path / "tests" / "test_streaming_provider_smoke.py"
     tests.parent.mkdir(parents=True)
     tests.write_text("def test_placeholder():\n    pass\n", encoding="utf-8")
+    native_script = tmp_path / "scripts" / "smoke_native_agent_full_chain.py"
+    native_script.write_text("def main():\n    return 0\n", encoding="utf-8")
+    native_tests = tmp_path / "tests" / "test_native_agent_full_chain_smoke.py"
+    native_tests.write_text("def test_placeholder():\n    pass\n", encoding="utf-8")
+    workflow_script = tmp_path / "scripts" / "smoke_native_workflow_full_chain.py"
+    workflow_script.write_text("def main():\n    return 0\n", encoding="utf-8")
+    workflow_tests = tmp_path / "tests" / "test_native_workflow_full_chain_smoke.py"
+    workflow_tests.write_text("def test_placeholder():\n    pass\n", encoding="utf-8")
+    ui_bridge_tests = tmp_path / "tests" / "test_ui_bridge_routes.py"
+    ui_bridge_tests.write_text("def test_placeholder():\n    pass\n", encoding="utf-8")
+    agent_runtime = tmp_path / "apps" / "shell" / "agent_runtime.py"
+    agent_runtime.parent.mkdir(parents=True)
+    agent_runtime.write_text("def placeholder():\n    pass\n", encoding="utf-8")
+    agent_studio = tmp_path / "apps" / "frontend" / "src" / "views" / "AgentStudioView.tsx"
+    agent_studio.parent.mkdir(parents=True)
+    agent_studio.write_text("export const placeholder = true;\n", encoding="utf-8")
+    agent_runtime_tests = tmp_path / "tests" / "test_agent_runtime.py"
+    agent_runtime_tests.write_text("def test_placeholder():\n    pass\n", encoding="utf-8")
     rc_verifier = tmp_path / "scripts" / "verify_release_candidate.py"
     rc_verifier.write_text("def main():\n    return 0\n", encoding="utf-8")
     ui_runner = tmp_path / "scripts" / "run_electron_ui_smokes.py"
@@ -87,9 +105,11 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
     messages = [finding.message for finding in findings]
 
     assert "real provider smoke helper must send a streamed tool-result follow-up request" in messages
+    assert "real provider smoke helper must force the workspace_read tool during tool-call smoke" in messages
     assert "real provider smoke helper must strip tool-call arguments before printing summaries" in messages
     assert "real provider smoke helper must redact provider errors before printing stderr" in messages
     assert "provider smoke tests must cover tool-result follow-up without leaking arguments" in messages
+    assert "provider smoke tests must assert forced workspace_read tool_choice wiring" in messages
     assert (
         "provider smoke tests must prove synthetic tool-result content stays out of printed summaries"
         in messages
@@ -109,14 +129,124 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
     assert "provider smoke tests must cover indexless interleaved streaming tool-call deltas without leaks" in messages
     assert "provider smoke tests must cover SSE events split across response chunks" in messages
     assert "provider smoke tests must prove provider errors do not print API keys" in messages
+    assert "native Agent full-chain smoke must keep runtime state in a temporary directory" in messages
+    assert "native Agent full-chain smoke must use an in-memory credential store" in messages
+    assert "native Agent full-chain smoke must exercise ModelProfileService readiness" in messages
+    assert "native Agent full-chain smoke must exercise NativeRunEngine" in messages
+    assert "native Agent full-chain smoke must exercise workspace.read" in messages
+    assert "native Agent full-chain smoke must exercise artifact.write" in messages
+    assert "native Agent full-chain smoke must exercise Workflow child Agent artifact flow" in messages
+    assert "native Agent full-chain smoke must exercise terminal approval resume" in messages
+    assert "native Agent full-chain smoke must exercise main chat model loop" in messages
+    assert "native Agent full-chain smoke must fail instead of printing sensitive output" in messages
+    assert "native Agent full-chain smoke tests must cover missing opt-in credentials" in messages
+    assert "native Agent full-chain smoke tests must prove sensitive summaries are not printed" in messages
+    assert "native Agent full-chain smoke tests must cover nested sensitive detail redaction" in messages
+    assert "native Workflow full-chain smoke must keep runtime state in a temporary directory" in messages
+    assert "native Workflow full-chain smoke must use an in-memory credential store" in messages
+    assert "native Workflow full-chain smoke must exercise ModelProfileService readiness" in messages
+    assert "native Workflow full-chain smoke must exercise NativeRunEngine" in messages
+    assert "native Workflow full-chain smoke must exercise advanced Workflow orchestration" in messages
+    assert "native Workflow full-chain smoke must require condition node replay events" in messages
+    assert "native Workflow full-chain smoke must require subworkflow replay events" in messages
+    assert "native Workflow full-chain smoke must require parallel replay events" in messages
+    assert "native Workflow full-chain smoke must require loop replay events" in messages
+    assert "native Workflow full-chain smoke must exercise Workflow budget boundaries" in messages
+    assert "native Workflow full-chain smoke must fail instead of printing sensitive output" in messages
+    assert "native Workflow full-chain smoke tests must cover missing opt-in credentials" in messages
+    assert "native Workflow full-chain smoke tests must prove sensitive summaries are not printed" in messages
+    assert "native Workflow full-chain smoke tests must cover nested sensitive detail redaction" in messages
+    assert (
+        "UI bridge route tests must cover Live2D and GPT-SoVITS resource import-save-test chain"
+        in messages
+    )
+    assert (
+        "UI bridge route tests must exercise GPT-SoVITS HTTP endpoints during TTS test"
+        in messages
+    )
+    assert (
+        "UI bridge route tests must import a Live2D archive through the public route handler"
+        in messages
+    )
+    assert (
+        "UI bridge route tests must import a GPT-SoVITS voice archive through the public route handler"
+        in messages
+    )
+    assert (
+        "UI bridge route tests must exercise proactive TTS test playback through the public route handler"
+        in messages
+    )
+    assert "Native workflow runtime must recognize condition nodes as first-class Workflow nodes" in messages
+    assert "Native workflow runtime must recognize parallel nodes as first-class Workflow nodes" in messages
+    assert "Native workflow runtime must recognize subworkflow nodes as first-class Workflow nodes" in messages
+    assert "Native workflow runtime must recognize loop nodes as first-class Workflow nodes" in messages
+    assert (
+        "Native workflow runtime must project condition node execution into timeline and replay events"
+        in messages
+    )
+    assert "Native workflow runtime must select true/false condition branches from current context" in messages
+    assert (
+        "Native workflow runtime must project parallel node execution into timeline and replay events"
+        in messages
+    )
+    assert "Native workflow runtime must plan parallel fan-out branches and fan-in targets" in messages
+    assert "Native workflow runtime must tag parallel child events with parent branch context" in messages
+    assert "Native workflow runtime must reuse completed parallel branch Agent results after approval" in messages
+    assert "Native workflow runtime must execute child Workflow nodes and project their run status" in messages
+    assert "Native workflow runtime must emit subworkflow node execution timeline events" in messages
+    assert "Native workflow runtime must validate subworkflow node references before execution" in messages
+    assert "Native workflow runtime must project loop node execution into timeline and replay events" in messages
+    assert "Native workflow runtime must route loop continue/exit branches from current context" in messages
+    assert "Native workflow runtime must enforce bounded loop execution" in messages
+    assert "Native workflow runtime must enforce Workflow-level execution budgets" in messages
+    assert "Native workflow runtime must expose a bounded Workflow step budget" in messages
+    assert "Native workflow runtime must resume branch-aware Workflow execution by next node id" in messages
+    assert "Native workflow runtime must locate parent Workflows waiting on child Workflow runs" in messages
+    assert "Agent Studio must recognize condition, parallel, subworkflow, and loop nodes in the frontend contract" in messages
+    assert "Agent Studio must preserve true/false Workflow branch metadata" in messages
+    assert "Agent Studio Run Detail must display condition Workflow execution events" in messages
+    assert "Agent Studio Run Detail must display parallel Workflow execution events" in messages
+    assert "Agent Studio Run Detail must display subworkflow execution events" in messages
+    assert "Agent Studio Run Detail must display loop execution events" in messages
+    assert "Native workflow tests must execute both true and false condition branches" in messages
+    assert "Native workflow tests must assert condition branch selection replay payloads" in messages
+    assert "Native workflow tests must verify condition branches can merge into a shared artifact node" in messages
+    assert (
+        "Native workflow tests must execute parallel fan-out branches and merge them into a shared artifact node"
+        in messages
+    )
+    assert "Native workflow tests must assert parallel fan-in replay payloads" in messages
+    assert (
+        "Native workflow tests must resume remaining parallel branches after child Agent approvals"
+        in messages
+    )
+    assert "Native workflow tests must verify parallel approval results reach fan-in artifacts" in messages
+    assert "Native workflow tests must assert parallel child branch replay payloads" in messages
+    assert "Native workflow tests must execute subworkflow nodes and project child artifacts" in messages
+    assert "Native workflow tests must assert subworkflow child Workflow replay payloads" in messages
+    assert "Native workflow tests must verify subworkflow child artifacts are linked into the parent run" in messages
+    assert "Native workflow tests must resume parent Workflows after nested subworkflow child approvals" in messages
+    assert "Native workflow tests must verify nested subworkflow approval results reach parent artifacts" in messages
+    assert "Native workflow tests must execute loop nodes until they exit into a shared artifact node" in messages
+    assert "Native workflow tests must assert loop iteration replay payloads" in messages
+    assert "Native workflow tests must verify loop nodes can exit into a shared artifact node" in messages
+    assert "Native workflow tests must enforce Workflow context budget failures" in messages
+    assert "Native workflow tests must preserve Workflow step budgets across child approval resume" in messages
+    assert "Native workflow tests must enforce Workflow duration budget failures between nodes" in messages
     assert "release candidate verifier must define opt-in provider smoke environment variables" in messages
     assert "release candidate verifier must define provider smoke command contracts" in messages
     assert "release candidate verifier must run the real provider streaming smoke helper" in messages
+    assert "release candidate verifier must define the native Agent full-chain smoke helper" in messages
+    assert "release candidate verifier must run the native Agent full-chain smoke helper" in messages
+    assert "release candidate verifier must define the native Workflow full-chain smoke helper" in messages
+    assert "release candidate verifier must run the native Workflow full-chain smoke helper" in messages
     assert "release candidate verifier must run real provider text stream smoke" in messages
     assert "release candidate verifier text smoke must require streamed content" in messages
     assert "release candidate verifier provider smoke must assert finish_reason values" in messages
     assert "release candidate verifier provider smoke must assert stop finish_reason" in messages
     assert "release candidate verifier must run real provider tool-call stream smoke" in messages
+    assert "release candidate verifier must run native Agent full-chain provider smoke" in messages
+    assert "release candidate verifier must run native Workflow full-chain provider smoke" in messages
     assert "release candidate verifier tool-call smoke must require streamed tool calls" in messages
     assert (
         "release candidate verifier tool-call smoke must verify streamed content after a tool result"
@@ -413,7 +543,7 @@ def test_verifier_reports_release_latest_json_metadata_mismatches(tmp_path):
             {
                 "name": "Wrong App",
                 "channel": "experimental",
-                "branch": "develop",
+                "branch": "oha-develop",
                 "source_branch": "../feature branch",
                 "version": "not-semver",
                 "base_version": "not-semver",
@@ -424,10 +554,10 @@ def test_verifier_reports_release_latest_json_metadata_mismatches(tmp_path):
                 "run_id": "run-1",
                 "tag": "experimental-v0.4.0-build.1-def9999",
                 "signing": "notarized",
-                "dmg_name": "Oha-Yachiyo-develop-latest.dmg",
+                "dmg_name": "Oha-Yachiyo-oha-develop-latest.dmg",
                 "sha256": digest,
-                "download_url": "https://github.example/releases/download/develop-latest/Oha-Yachiyo-develop-latest.dmg",
-                "latest_json_url": "https://github.example/releases/download/develop-latest/Oha-Yachiyo-main-latest.json",
+                "download_url": "https://github.example/releases/download/oha-develop-latest/Oha-Yachiyo-oha-develop-latest.dmg",
+                "latest_json_url": "https://github.example/releases/download/oha-develop-latest/Oha-Yachiyo-main-latest.json",
                 "published_at": "2026-06-12 00:00:00",
                 "changelog": [],
             }
@@ -761,6 +891,8 @@ def test_verifier_requires_release_packaging_docs_for_release_gates(tmp_path):
     findings = verifier._verify_release_packaging_documentation(tmp_path)
     messages = [finding.message for finding in findings]
 
+    assert "release packaging docs must document that legacy develop is not an Oha release branch" in messages
+    assert "release packaging docs must document the Oha experimental latest DMG name" in messages
     assert "release packaging docs must document the pre-dependency release guard" in messages
     assert "release packaging docs must document debug route guard coverage" in messages
     assert "release packaging docs must document release CredentialStore fallback guard coverage" in messages
@@ -780,6 +912,8 @@ def test_verifier_requires_release_packaging_docs_for_release_gates(tmp_path):
     assert "release packaging docs must document the local RC packaged app startup smoke" in messages
     assert "release packaging docs must document the local RC packaged screen recording smoke" in messages
     assert "release packaging docs must document the local RC real provider smoke gate" in messages
+    assert "release packaging docs must document local RC helper cleans stale Electron artifacts" in messages
+    assert "release packaging docs must document native Agent and Workflow full-chain provider smoke coverage" in messages
     assert "release packaging docs must document the local RC Electron UI smoke gate" in messages
     assert "release packaging docs must document the archived Electron UI smoke runner report" in messages
     assert "release packaging docs must document the archived Electron UI smoke report" in messages
@@ -1704,9 +1838,11 @@ def test_verifier_requires_release_workflow_binary_scans_packaged_outputs(tmp_pa
     findings = verifier._verify_release_workflow_guards(tmp_path)
     messages = [finding.message for finding in findings]
 
+    assert "macOS release workflow must auto-release Oha experimental builds from oha-develop" in messages
     assert "macOS release workflow must expose an alpha release channel" in messages
     assert "macOS release workflow must label alpha releases separately" in messages
     assert "macOS release workflow must publish alpha builds to alpha-latest metadata" in messages
+    assert "macOS release workflow must publish experimental Oha builds to oha-develop-latest metadata" in messages
     assert "macOS release workflow must scan the packaged backend binary" in messages
     assert "macOS release workflow must discover packaged app resource directories" in messages
     assert "macOS release workflow must binary-scan packaged app resources" in messages
@@ -1723,6 +1859,37 @@ def test_verifier_requires_release_workflow_binary_scans_packaged_outputs(tmp_pa
     assert "macOS release workflow must archive a manual RC check Markdown checklist seeded from the draft" in messages
     assert "macOS release workflow must generate manual RC check draft after the RC report before upload" in messages
     assert "macOS release workflow must generate manual RC check Markdown after the draft before upload" in messages
+
+
+def test_verifier_rejects_oha_release_workflow_on_legacy_develop_branch(tmp_path):
+    workflow = tmp_path / verifier.RELEASE_WORKFLOW_FILE
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text(
+        "name: Build macOS DMG\n"
+        "on:\n"
+        "  push:\n"
+        "    branches:\n"
+        "      - main\n"
+        "      - develop\n"
+        "jobs:\n"
+        "  package-macos:\n"
+        "    steps:\n"
+        "      - name: Verify release-facing product identity and security guards\n"
+        "        run: python scripts/verify_release_artifacts.py\n"
+        "      - name: Prepare release metadata\n"
+        "        run: |\n"
+        "          LATEST_BRANCH=\"develop\"\n"
+        "          echo \"https://github.example/releases/download/develop-latest/Oha-Yachiyo-develop-latest.dmg\"\n",
+        encoding="utf-8",
+    )
+
+    findings = verifier._verify_release_workflow_guards(tmp_path)
+    messages = [finding.message for finding in findings]
+
+    assert "macOS release workflow must not auto-release Oha from the legacy develop branch" in messages
+    assert "macOS release workflow must not publish Oha experimental metadata to develop-latest" in messages
+    assert "macOS release workflow must not publish Oha experimental downloads under develop-latest" in messages
+    assert "macOS release workflow must not publish Oha experimental DMGs as develop-latest" in messages
 
 
 def test_verifier_requires_release_workflow_guard_before_dependency_install(tmp_path):
@@ -2312,6 +2479,7 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow smoke tests must cover runtime secret redaction verifier" in messages
     assert "macOS release workflow smoke tests must cover security logging redaction" in messages
     assert "macOS release workflow smoke tests must cover screenshot behavior" in messages
+    assert "macOS release workflow smoke tests must cover AstrBot plugin Bridge HTTP E2E" in messages
     assert "macOS release workflow smoke tests must cover proactive care" in messages
     assert "macOS release workflow smoke tests must cover launcher notifications and proactive attention" in messages
     assert "macOS release workflow smoke tests must cover ChatSession persistence" in messages

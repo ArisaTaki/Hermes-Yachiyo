@@ -84,14 +84,14 @@ def test_main_writes_metadata_from_explicit_arguments(tmp_path, monkeypatch):
 
     result = json.loads(output.read_text(encoding="utf-8"))
     assert result["channel"] == "experimental"
-    assert result["branch"] == "develop"
+    assert result["branch"] == "oha-develop"
     assert result["source_branch"] == "phase-5/oha-yachiyo-runtime"
     assert result["version"] == "0.4.0"
     assert result["base_version"] == "0.4.0"
     assert result["commit"] == "b7c9cedd00000000000000000000000000000000"
     assert result["short_commit"] == "b7c9ced"
     assert result["latest_json_url"].endswith(
-        "/develop-latest/Oha-Yachiyo-develop-latest.json"
+        "/oha-develop-latest/Oha-Yachiyo-oha-develop-latest.json"
     )
 
 

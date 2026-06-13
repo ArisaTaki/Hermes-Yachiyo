@@ -77,7 +77,7 @@ type WorkflowChildRunRef = {
 
 type WorkflowStepRef = {
   key: string;
-  kind: 'start' | 'agent' | 'approval' | 'artifact' | 'unknown';
+  kind: 'start' | 'agent' | 'approval' | 'artifact' | 'condition' | 'parallel' | 'workflow' | 'loop' | 'unknown';
   nodeId?: string;
   label: string;
   status: string;
@@ -199,8 +199,8 @@ type SkillSourceFilter = 'installed' | 'native';
 const studioRouteTabs: StudioTab[] = ['agents', 'skills', 'skill-groups', 'workflows', 'runs'];
 const studioTabs: StudioTab[] = ['agents', 'skills', 'workflows', 'runs'];
 const skillFolderNameMaxLength = 120;
-const workflowNodeTypes = new Set(['start', 'agent', 'approval', 'artifact']);
-const workflowRunnableNodeTypes = new Set(['agent', 'approval', 'artifact']);
+const workflowNodeTypes = new Set(['start', 'agent', 'approval', 'artifact', 'condition', 'parallel', 'workflow', 'loop']);
+const workflowRunnableNodeTypes = new Set(['agent', 'approval', 'artifact', 'condition', 'parallel', 'workflow', 'loop']);
 const defaultAgentIds = new Set([
   'agent_yachiyo_orchestrator',
   'agent_coding',
@@ -210,11 +210,11 @@ const defaultAgentIds = new Set([
   'agent_office',
   'agent_custom',
 ]);
-const workflowRunnableStepRequiredMessage = 'Workflow 至少需要一个可执行节点（Agent、Approval 或 Artifact）';
+const workflowRunnableStepRequiredMessage = 'Workflow 至少需要一个可执行节点（Agent、Approval、Artifact、Condition、Parallel、Workflow 或 Loop）';
 
 function workflowStepKind(value: unknown): WorkflowStepRef['kind'] {
   const kind = String(value || '').trim();
-  if (kind === 'start' || kind === 'agent' || kind === 'approval' || kind === 'artifact') return kind;
+  if (kind === 'start' || kind === 'agent' || kind === 'approval' || kind === 'artifact' || kind === 'condition' || kind === 'parallel' || kind === 'workflow' || kind === 'loop') return kind;
   return 'unknown';
 }
 
@@ -484,6 +484,9 @@ function workflowEdges(workflow: WorkflowSpec | null): Edge[] {
     id: edge.id || `edge-${index}`,
     source: edge.source,
     target: edge.target,
+    sourceHandle: edge.sourceHandle || undefined,
+    data: edge.data,
+    label: edge.label,
   }));
 }
 
@@ -498,8 +501,86 @@ function workflowNodeKindLabel(kind: string): string {
   if (kind === 'agent') return 'Agent';
   if (kind === 'approval') return 'Approval';
   if (kind === 'artifact') return 'Artifact';
+  if (kind === 'condition') return 'Condition';
+  if (kind === 'parallel') return 'Parallel';
+  if (kind === 'workflow') return 'Workflow';
+  if (kind === 'loop') return 'Loop';
   if (kind === 'start') return 'Start';
   return kind || 'Node';
+}
+
+function workflowConditionText(data: Record<string, unknown> | undefined): string {
+  if (!data) return '';
+  for (const key of ['condition', 'contains', 'match', 'criteria', 'expression', 'if', 'prompt']) {
+    const value = data[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return '';
+}
+
+function workflowChildWorkflowIdFromData(data: Record<string, unknown> | undefined): string {
+  if (!data) return '';
+  for (const key of ['workflow_id', 'workflowId', 'child_workflow_id', 'childWorkflowId', 'runnable_id', 'runnableId']) {
+    const value = data[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return '';
+}
+
+function workflowEdgeBranch(edge: Edge): 'true' | 'false' | '' {
+  const edgeWithMeta = edge as Edge & {
+    branch?: unknown;
+    condition?: unknown;
+    label?: unknown;
+  };
+  const data = edge.data && typeof edge.data === 'object' ? edge.data as Record<string, unknown> : {};
+  const raw = (
+    edgeWithMeta.branch
+    || edgeWithMeta.condition
+    || edgeWithMeta.label
+    || edge.sourceHandle
+    || data.branch
+    || data.condition
+    || data.label
+    || data.sourceHandle
+    || ''
+  );
+  const value = String(raw || '').trim().toLowerCase();
+  if (['true', 'yes', 'y', 'pass', 'passed', 'match', 'matched', 'ok', 'success'].includes(value)) return 'true';
+  if (['false', 'no', 'n', 'fail', 'failed', 'miss', 'unmatched', 'else', 'fallback'].includes(value)) return 'false';
+  return '';
+}
+
+function workflowLoopEdgeRole(edge: Edge): 'continue' | 'exit' | '' {
+  const edgeWithMeta = edge as Edge & {
+    branch?: unknown;
+    condition?: unknown;
+    label?: unknown;
+  };
+  const data = edge.data && typeof edge.data === 'object' ? edge.data as Record<string, unknown> : {};
+  const raw = (
+    edgeWithMeta.branch
+    || edgeWithMeta.condition
+    || edgeWithMeta.label
+    || edge.sourceHandle
+    || data.branch
+    || data.condition
+    || data.label
+    || data.sourceHandle
+    || ''
+  );
+  const value = String(raw || '').trim().toLowerCase();
+  if (['true', 'yes', 'y', 'pass', 'passed', 'match', 'matched', 'ok', 'success', 'continue', 'loop', 'repeat', 'again', 'next'].includes(value)) return 'continue';
+  if (['false', 'no', 'n', 'fail', 'failed', 'miss', 'unmatched', 'else', 'fallback', 'exit', 'done', 'break', 'stop', 'finish'].includes(value)) return 'exit';
+  return '';
+}
+
+function workflowLoopMaxIterations(data: Record<string, unknown> | undefined): number {
+  if (!data) return 3;
+  const raw = data.max_iterations || data.maxIterations || data.iteration_limit || data.iterationLimit || data.limit || 3;
+  const value = Number(raw);
+  if (!Number.isFinite(value)) return 3;
+  return Math.max(1, Math.min(Math.round(value), 25));
 }
 
 function isSafeWorkflowArtifactPath(value: string): boolean {
@@ -537,7 +618,13 @@ function uniqueWorkflowArtifactPath(basePath: string, existingPaths: Set<string>
   return candidate;
 }
 
-function validateWorkflowDraft(nodes: Node[], edges: Edge[], agents: AgentSpec[]): WorkflowValidationReport {
+function validateWorkflowDraft(
+  nodes: Node[],
+  edges: Edge[],
+  agents: AgentSpec[],
+  workflows: WorkflowSpec[] = [],
+  currentWorkflowId = '',
+): WorkflowValidationReport {
   const errors: string[] = [];
   const warnings: string[] = [];
   if (!nodes.length) {
@@ -556,6 +643,7 @@ function validateWorkflowDraft(nodes: Node[], edges: Edge[], agents: AgentSpec[]
   }
 
   const agentById = new Map(agents.map((agent) => [agent.agent_id, agent]));
+  const workflowById = new Map(workflows.map((workflow) => [workflow.workflow_id, workflow]));
   nodes.forEach((node) => {
     const kind = workflowNodeKind(node);
     const label = String(node.data?.label || node.id || workflowNodeKindLabel(kind)).trim();
@@ -575,6 +663,20 @@ function validateWorkflowDraft(nodes: Node[], edges: Edge[], agents: AgentSpec[]
       if (artifactPath && !isSafeWorkflowArtifactPath(artifactPath)) {
         errors.push(`${label} 的产物路径必须是相对路径，且不能越界`);
       }
+    }
+    if (kind === 'condition' && !workflowConditionText(node.data as Record<string, unknown> | undefined)) {
+      errors.push(`${label} 缺少条件文本`);
+    }
+    if (kind === 'loop' && !workflowConditionText(node.data as Record<string, unknown> | undefined)) {
+      errors.push(`${label} 缺少循环条件文本`);
+    }
+    if (kind === 'workflow') {
+      const workflowId = workflowChildWorkflowIdFromData(node.data as Record<string, unknown> | undefined);
+      const workflow = workflowById.get(workflowId);
+      if (!workflowId) errors.push(`${label} 没有选择子 Workflow`);
+      else if (currentWorkflowId && workflowId === currentWorkflowId) errors.push(`${label} 不能引用当前 Workflow`);
+      else if (!workflow) errors.push(`${label} 引用了不存在的子 Workflow`);
+      else if (workflow.enabled === false) errors.push(`${label} 选择的子 Workflow 已停用`);
     }
   });
 
@@ -604,32 +706,64 @@ function validateWorkflowDraft(nodes: Node[], edges: Edge[], agents: AgentSpec[]
     const sources = incoming.get(nodeId) || [];
     const node = nodes.find((item) => item.id === nodeId);
     const label = String(node?.data?.label || nodeId || '节点');
-    if (targets.length > 1) errors.push(`${label} 有多个下一步，Workflow v1 只支持线性流程`);
-    if (nodeId !== startId && sources.length !== 1) errors.push(`${label} 必须且只能有一个上一节点`);
+    const kind = node ? workflowNodeKind(node) : '';
+    if (kind === 'condition') {
+      if (targets.length !== 2) errors.push(`${label} 必须有 true/false 两个下一步`);
+      const branchRoles = edges
+        .filter((edge) => String(edge.source || '').trim() === nodeId)
+        .map(workflowEdgeBranch)
+        .filter(Boolean);
+      const uniqueBranches = new Set(branchRoles);
+      if (branchRoles.length && (uniqueBranches.size !== branchRoles.length || uniqueBranches.size !== 2)) {
+        errors.push(`${label} 的分支标注必须是一条 true 和一条 false`);
+      }
+    } else if (kind === 'parallel') {
+      if (targets.length < 2) errors.push(`${label} 至少需要两个并行分支`);
+    } else if (kind === 'loop') {
+      if (targets.length !== 2) errors.push(`${label} 必须有 continue/exit 两个下一步`);
+      const branchRoles = edges
+        .filter((edge) => String(edge.source || '').trim() === nodeId)
+        .map(workflowLoopEdgeRole)
+        .filter(Boolean);
+      const uniqueBranches = new Set(branchRoles);
+      if (branchRoles.length && (uniqueBranches.size !== branchRoles.length || uniqueBranches.size !== 2)) {
+        errors.push(`${label} 的分支标注必须是一条 continue 和一条 exit`);
+      }
+    } else if (targets.length > 1) {
+      errors.push(`${label} 有多个下一步，只有 Condition、Parallel 或 Loop 节点支持分支`);
+    }
+    if (nodeId !== startId && sources.length < 1) errors.push(`${label} 必须至少有一个上一节点`);
   });
 
   if (startId && !errors.some((item) => item.includes('edge 引用'))) {
     const seen = new Set<string>();
     const active = new Set<string>();
-    const visit = (nodeId: string) => {
+    const nodeById = new Map(nodes.map((node) => [String(node.id || ''), node]));
+    const visit = (nodeId: string, incomingEdge?: Edge) => {
       if (active.has(nodeId)) {
-        errors.push('Workflow 不能包含环');
+        const sourceNode = incomingEdge ? nodeById.get(String(incomingEdge.source || '')) : undefined;
+        if (incomingEdge && sourceNode && workflowNodeKind(sourceNode) === 'loop' && workflowLoopEdgeRole(incomingEdge) === 'continue') {
+          return;
+        }
+        errors.push('Workflow 不能包含非 Loop 控制的环');
         return;
       }
       if (seen.has(nodeId)) return;
       active.add(nodeId);
-      (outgoing.get(nodeId) || []).forEach(visit);
+      edges
+        .filter((edge) => String(edge.source || '').trim() === nodeId)
+        .forEach((edge) => visit(String(edge.target || '').trim(), edge));
       active.delete(nodeId);
       seen.add(nodeId);
     };
     visit(startId);
     if (seen.size !== nodeIdSet.size) {
-      errors.push('Workflow v1 必须是一条从 Start 出发的单一路径');
+      errors.push('Workflow 必须从 Start 触达所有节点');
     }
   }
 
   if (!workflowHasRunnableSteps(nodes)) {
-    warnings.push('当前没有可执行节点；可以保存草稿，但运行前需要添加 Agent、Approval 或 Artifact。');
+    warnings.push('当前没有可执行节点；可以保存草稿，但运行前需要添加 Agent、Approval、Artifact、Condition、Parallel、Workflow 或 Loop。');
   }
 
   return {
@@ -656,6 +790,8 @@ function workflowRequestEdges(edges: Edge[]): WorkflowSpec['edges'] {
     id: edge.id,
     source: edge.source,
     target: edge.target,
+    ...(edge.sourceHandle ? { sourceHandle: edge.sourceHandle } : {}),
+    ...(edge.data && typeof edge.data === 'object' ? { data: edge.data as Record<string, unknown> } : {}),
   }));
 }
 
@@ -1190,6 +1326,10 @@ function timelineEventTitle(event: Record<string, unknown>): string {
   if (name === 'workflow.run.started') return 'Workflow 已启动';
   if (name === 'workflow.node.start') return 'Workflow 起点';
   if (name === 'workflow.node.agent') return detail ? `Agent 节点 · ${detail}` : 'Agent 节点';
+  if (name === 'workflow.node.workflow') return detail ? `子 Workflow · ${detail}` : '子 Workflow';
+  if (name === 'workflow.node.condition') return detail ? `条件节点 · ${detail}` : '条件节点';
+  if (name === 'workflow.node.parallel') return detail ? `并行节点 · ${detail}` : '并行节点';
+  if (name === 'workflow.node.loop') return detail ? `循环节点 · ${detail}` : '循环节点';
   if (name === 'workflow.node.artifact') return detail ? `产物节点 · ${detail}` : '产物节点';
   if (name === 'workflow.node.approval_required') return detail ? `人工审批 · ${detail}` : '人工审批';
   if (name === 'workflow.node.approval_approved') return detail ? `审批已通过 · ${detail}` : '审批已通过';
@@ -1408,25 +1548,36 @@ function workflowApprovalCriteriaFromData(data: Record<string, unknown> | undefi
 function workflowSpecStepRefs(workflow: WorkflowSpec | null): WorkflowStepRef[] {
   if (!workflow) return [];
   const nodesById = new Map(workflow.nodes.map((node) => [String(node.id || ''), node]));
-  const outgoing = new Map<string, string>();
+  const outgoing = new Map<string, WorkflowSpec['edges']>();
   workflow.edges.forEach((edge) => {
     const source = String(edge.source || '');
     const target = String(edge.target || '');
-    if (source && target && !outgoing.has(source)) outgoing.set(source, target);
+    if (!source || !target) return;
+    const next = outgoing.get(source) || [];
+    next.push(edge);
+    next.sort((left, right) => {
+      const leftBranch = workflowEdgeBranch(left as Edge);
+      const rightBranch = workflowEdgeBranch(right as Edge);
+      const branchOrder = (branch: string) => branch === 'true' ? 0 : branch === 'false' ? 1 : 2;
+      return branchOrder(leftBranch) - branchOrder(rightBranch);
+    });
+    outgoing.set(source, next);
   });
   const start = workflow.nodes.find((node) => workflowSpecNodeKind(node) === 'start') || workflow.nodes[0];
   if (!start) return [];
   const ordered: WorkflowSpec['nodes'] = [];
   const seen = new Set<string>();
-  let current: WorkflowSpec['nodes'][number] | undefined = start;
-  while (current) {
+  const visit = (current: WorkflowSpec['nodes'][number] | undefined) => {
+    if (!current) return;
     const nodeId = String(current.id || '');
-    if (!nodeId || seen.has(nodeId)) break;
+    if (!nodeId || seen.has(nodeId)) return;
     ordered.push(current);
     seen.add(nodeId);
-    const nextId = outgoing.get(nodeId);
-    current = nextId ? nodesById.get(nextId) : undefined;
-  }
+    (outgoing.get(nodeId) || []).forEach((edge) => {
+      visit(nodesById.get(String(edge.target || '')));
+    });
+  };
+  visit(start);
   const existingArtifactPaths = new Set<string>();
   return ordered.map((node, index) => {
     const kind = workflowSpecNodeKind(node);
@@ -1442,7 +1593,13 @@ function workflowSpecStepRefs(workflow: WorkflowSpec | null): WorkflowStepRef[] 
       ? workflowNodeTaskFromData(node.data)
       : kind === 'approval'
         ? workflowApprovalCriteriaFromData(node.data)
-        : '';
+        : kind === 'condition'
+          ? workflowConditionText(node.data)
+          : kind === 'workflow'
+            ? workflowNodeTaskFromData(node.data)
+            : kind === 'loop'
+              ? workflowConditionText(node.data)
+          : '';
     return {
       key: `${kind}:${nodeId || label || index}`,
       kind,
@@ -1472,7 +1629,13 @@ function workflowSnapshotStepRefs(run: RunSpec | null): WorkflowStepRef[] {
         ? String(row.task || row.step_task || '').trim()
         : kind === 'approval'
           ? String(row.criteria || row.approval_criteria || row.instructions || '').trim()
-          : '';
+          : kind === 'condition'
+            ? String(row.condition || row.criteria || row.expression || '').trim()
+            : kind === 'workflow'
+              ? String(row.task || row.step_task || '').trim()
+              : kind === 'loop'
+                ? String(row.condition || row.criteria || row.expression || '').trim()
+            : '';
       return {
         key: `${kind}:${nodeId || label || index}`,
         kind,
@@ -1606,6 +1769,23 @@ function workflowStepRefs(run: RunSpec | null, workflow: WorkflowSpec | null = n
       });
       return;
     }
+    if (name === 'workflow.node.workflow') {
+      const childRunId = timelineChildRunId(event);
+      const task = String(event.workflow_node_task || event.step_task || '').trim();
+      const childWorkflowName = String(event.child_workflow_name || event.child_workflow_id || '').trim();
+      upsertWorkflowStep(steps, indexByKey, {
+        key: `workflow:${nodeId || childRunId || detail || index}`,
+        kind: 'workflow',
+        nodeId,
+        label: detail || childWorkflowName || 'Workflow',
+        status: timelineStatus(event) || 'processing',
+        childRunId,
+        payload: timelineEventPayload(event),
+        artifactCount: Number(event.artifact_count || 0),
+        task,
+      });
+      return;
+    }
     if (name === 'workflow.node.approval_required' || name === 'workflow.node.approval_approved' || name === 'workflow.node.approval_rejected') {
       const label = normalizeWorkflowApprovalLabel(name, detail);
       const task = String(event.workflow_node_approval_criteria || event.criteria || '').trim();
@@ -1617,6 +1797,54 @@ function workflowStepRefs(run: RunSpec | null, workflow: WorkflowSpec | null = n
         status: timelineStatus(event) || (name === 'workflow.node.approval_required' ? 'approval_required' : name === 'workflow.node.approval_rejected' ? 'cancelled' : 'completed'),
         payload: workflowApprovalPayloadSummary(event),
         task,
+      });
+      return;
+    }
+    if (name === 'workflow.node.condition') {
+      const condition = String(event.workflow_node_condition || event.condition || '').trim();
+      const branch = String(event.workflow_node_selected_branch || '').trim();
+      const target = String(event.workflow_node_selected_target || '').trim();
+      const matched = event.workflow_node_condition_matched === true;
+      upsertWorkflowStep(steps, indexByKey, {
+        key: `condition:${nodeId || detail || index}`,
+        kind: 'condition',
+        nodeId,
+        label: detail || 'Condition',
+        status: timelineStatus(event) || 'completed',
+        payload: `条件${matched ? '命中' : '未命中'}，选择 ${branch || 'unknown'}${target ? ` -> ${target}` : ''}`,
+        task: condition,
+      });
+      return;
+    }
+    if (name === 'workflow.node.parallel') {
+      const branchCount = Number(event.workflow_node_branch_count || 0);
+      const completedCount = Number(event.workflow_node_completed_branch_count || 0);
+      const joinTarget = String(event.workflow_node_join_target || '').trim();
+      upsertWorkflowStep(steps, indexByKey, {
+        key: `parallel:${nodeId || detail || index}`,
+        kind: 'parallel',
+        nodeId,
+        label: detail || 'Parallel',
+        status: timelineStatus(event) || 'completed',
+        payload: `并行分支完成 ${completedCount}/${branchCount}${joinTarget ? `，汇合到 ${joinTarget}` : ''}`,
+      });
+      return;
+    }
+    if (name === 'workflow.node.loop') {
+      const condition = String(event.workflow_node_condition || event.condition || '').trim();
+      const branch = String(event.workflow_node_selected_branch || '').trim();
+      const target = String(event.workflow_node_selected_target || '').trim();
+      const iteration = Number(event.workflow_node_loop_iteration || 0);
+      const maxIterations = Number(event.workflow_node_loop_max_iterations || 0);
+      const limitReached = event.workflow_node_loop_limit_reached === true;
+      upsertWorkflowStep(steps, indexByKey, {
+        key: `loop:${nodeId || detail || index}:${iteration}:${branch}`,
+        kind: 'loop',
+        nodeId,
+        label: detail || 'Loop',
+        status: timelineStatus(event) || 'completed',
+        payload: `循环${branch === 'continue' ? '继续' : '退出'} · ${iteration}/${maxIterations || '?'}${limitReached ? ' · 已达到上限' : ''}${target ? ` -> ${target}` : ''}`,
+        task: condition,
       });
       return;
     }
@@ -1663,6 +1891,10 @@ function workflowStepKindLabel(kind: WorkflowStepRef['kind']): string {
   if (kind === 'agent') return 'Agent';
   if (kind === 'approval') return 'Approval';
   if (kind === 'artifact') return 'Artifact';
+  if (kind === 'condition') return 'Condition';
+  if (kind === 'parallel') return 'Parallel';
+  if (kind === 'workflow') return 'Workflow';
+  if (kind === 'loop') return 'Loop';
   return 'Unknown';
 }
 
@@ -1674,6 +1906,16 @@ function workflowStepSummary(step: WorkflowStepRef, childRun: RunSpec | null): s
       return step.artifactPath
         ? `等待前置节点完成后写出 Workflow artifact：${step.artifactPath}`
         : '等待前置节点完成后写出 artifact。';
+    }
+    if (step.kind === 'condition') {
+      return step.task ? `等待前置节点完成后判断条件：${step.task}` : '等待前置节点完成后判断条件。';
+    }
+    if (step.kind === 'parallel') return '等待前置节点完成后并行执行多个分支。';
+    if (step.kind === 'workflow') {
+      return step.task ? `等待前置节点完成后运行子 Workflow：${step.task}` : '等待前置节点完成后运行子 Workflow。';
+    }
+    if (step.kind === 'loop') {
+      return step.task ? `等待前置节点完成后判断循环条件：${step.task}` : '等待前置节点完成后判断循环条件。';
     }
     if (step.kind === 'unknown') return '等待修复或确认未知 Workflow 节点。';
     if (step.task) return `等待前置节点完成后执行：${step.task}`;
@@ -1688,6 +1930,18 @@ function workflowStepSummary(step: WorkflowStepRef, childRun: RunSpec | null): s
   }
   if (step.kind === 'artifact') {
     return step.artifactPath ? `写出 Workflow artifact：${step.artifactPath}` : '写出 Workflow artifact。';
+  }
+  if (step.kind === 'condition') {
+    return step.payload || (step.task ? `判断条件：${step.task}` : '条件节点已执行。');
+  }
+  if (step.kind === 'parallel') {
+    return step.payload || '并行分支已完成。';
+  }
+  if (step.kind === 'workflow') {
+    return childRun?.result || step.payload || '子 Workflow 正在执行或等待继续。';
+  }
+  if (step.kind === 'loop') {
+    return step.payload || (step.task ? `循环条件已判断：${step.task}` : '循环节点已执行。');
   }
   if (step.kind === 'unknown') return step.payload || '未知 Workflow 节点，建议检查 Workflow 定义或导入数据。';
   return childRun?.result || step.payload || 'No result yet.';
@@ -1761,7 +2015,15 @@ function WorkflowRunPreview({
                 ? step.artifactPath
                   ? `写出 artifact：${step.artifactPath}`
                   : '按节点名称自动生成 artifact 路径。'
-                : '未知节点类型，运行前需要修复 Workflow 定义。';
+                : step.kind === 'condition'
+                  ? step.task || '根据上游上下文选择 true/false 分支。'
+                  : step.kind === 'parallel'
+                    ? '并行执行多个分支，并把结果汇总到后续节点。'
+                    : step.kind === 'workflow'
+                      ? step.task || '运行子 Workflow，并把结果传给后续节点。'
+                      : step.kind === 'loop'
+                        ? step.task || '根据上游上下文决定继续循环或退出。'
+                      : '未知节点类型，运行前需要修复 Workflow 定义。';
           return (
             <li className={`workflow-run-preview-step ${step.kind}`} data-testid="workflow-run-preview-step" key={step.key}>
               <span className="workflow-run-preview-index">{index + 1}</span>
@@ -1785,7 +2047,8 @@ function workflowChildRunRefs(run: RunSpec | null): WorkflowChildRunRef[] {
   const refs: WorkflowChildRunRef[] = [];
   const seen = new Set<string>();
   (run.timeline || []).forEach((event) => {
-    if (String(event.event || '') !== 'workflow.node.agent') return;
+    const eventName = String(event.event || '');
+    if (eventName !== 'workflow.node.agent' && eventName !== 'workflow.node.workflow') return;
     const childRunId = timelineChildRunId(event);
     if (!childRunId || seen.has(childRunId)) return;
     seen.add(childRunId);
@@ -1942,8 +2205,8 @@ export function AgentStudioView() {
     [modelProfiles],
   );
   const workflowValidation = useMemo(
-    () => validateWorkflowDraft(nodes, edges, agents),
-    [agents, edges, nodes],
+    () => validateWorkflowDraft(nodes, edges, agents, workflows, selectedWorkflow?.workflow_id || ''),
+    [agents, edges, nodes, selectedWorkflow?.workflow_id, workflows],
   );
   const workflowNameError = workflowName.trim() ? '' : 'Workflow 名称不能为空';
   const workflowErrors = workflowNameError ? [workflowNameError, ...workflowValidation.errors] : workflowValidation.errors;
@@ -2037,9 +2300,15 @@ export function AgentStudioView() {
   );
   const selectedRunTargetWorkflowValidation = useMemo(
     () => selectedRunTargetWorkflow
-      ? validateWorkflowDraft(selectedRunTargetWorkflowNodes, selectedRunTargetWorkflowEdges, agents)
+      ? validateWorkflowDraft(
+        selectedRunTargetWorkflowNodes,
+        selectedRunTargetWorkflowEdges,
+        agents,
+        workflows,
+        selectedRunTargetWorkflow.workflow_id,
+      )
       : { errors: [], warnings: [] },
-    [agents, selectedRunTargetWorkflow, selectedRunTargetWorkflowEdges, selectedRunTargetWorkflowNodes],
+    [agents, selectedRunTargetWorkflow, selectedRunTargetWorkflowEdges, selectedRunTargetWorkflowNodes, workflows],
   );
   const selectedRunTargetWorkflowAgentIssue = useMemo(
     () => selectedRunTargetWorkflow
@@ -2222,7 +2491,13 @@ export function AgentStudioView() {
     }
     const workflow = workflows.find((item) => item.workflow_id === selectedRunRerunTarget.id);
     if (!workflow) return '找不到 Workflow 定义，无法重跑。';
-    const validation = validateWorkflowDraft(workflowNodes(workflow), workflowEdges(workflow), agents);
+    const validation = validateWorkflowDraft(
+      workflowNodes(workflow),
+      workflowEdges(workflow),
+      agents,
+      workflows,
+      workflow.workflow_id,
+    );
     if (validation.errors.length) return validation.errors[0] || '当前 Workflow 存在校验错误。';
     if (!workflowHasRunnableSteps(workflowNodes(workflow))) return workflowRunnableStepRequiredMessage;
     return workflowAgentRunReadinessIssue(workflowNodes(workflow), agentRunIssueById);
@@ -3436,7 +3711,7 @@ export function AgentStudioView() {
     };
   }
 
-  function addFlowNode(kind: 'agent' | 'approval' | 'artifact', agentId = '') {
+  function addFlowNode(kind: 'agent' | 'approval' | 'artifact' | 'workflow' | 'loop', agentId = '') {
     const agent = agentId
       ? agents.find((candidate) => candidate.agent_id === agentId)
       : undefined;
@@ -3450,7 +3725,15 @@ export function AgentStudioView() {
       type: kind === 'artifact' ? 'output' : 'default',
       position: { x: 120 + nodes.length * 180, y: 140 },
       data: {
-        label: kind === 'agent' ? agent?.name || '选择 Agent' : kind === 'approval' ? '人工审批' : 'Artifact',
+        label: kind === 'agent'
+          ? agent?.name || '选择 Agent'
+          : kind === 'approval'
+            ? '人工审批'
+            : kind === 'workflow'
+              ? '子 Workflow'
+              : kind === 'loop'
+                ? 'Loop'
+              : 'Artifact',
         kind,
         ...(kind === 'agent' && agent ? { agent_id: agent.agent_id } : {}),
       },
@@ -4404,6 +4687,8 @@ export function AgentStudioView() {
               <button type="button" data-testid="workflow-add-agent-node" disabled={busy} onClick={() => addFlowNode('agent')}>Agent</button>
               <button type="button" data-testid="workflow-add-approval-node" disabled={busy} onClick={() => addFlowNode('approval')}>Approval</button>
               <button type="button" data-testid="workflow-add-artifact-node" disabled={busy} onClick={() => addFlowNode('artifact')}>Artifact</button>
+              <button type="button" data-testid="workflow-add-workflow-node" disabled={busy} onClick={() => addFlowNode('workflow')}>Workflow</button>
+              <button type="button" data-testid="workflow-add-loop-node" disabled={busy} onClick={() => addFlowNode('loop')}>Loop</button>
               <button
                 type="button"
                 className="primary-action"
@@ -4473,6 +4758,13 @@ export function AgentStudioView() {
                   ? agents.find((agent) => agent.agent_id === String(node.data?.agent_id || '')) || null
                   : null;
                 const selectedNodeAgentIssue = selectedNodeAgent ? agentRunIssueById.get(selectedNodeAgent.agent_id) || '' : '';
+                const selectedNodeWorkflowId = kind === 'workflow'
+                  ? workflowChildWorkflowIdFromData(node.data as Record<string, unknown> | undefined)
+                  : '';
+                const selectedNodeWorkflow = selectedNodeWorkflowId
+                  ? workflows.find((workflow) => workflow.workflow_id === selectedNodeWorkflowId) || null
+                  : null;
+                const childWorkflowOptions = workflows.filter((workflow) => workflow.workflow_id !== selectedWorkflow?.workflow_id);
                 return (
                   <div className="workflow-node-setting-row" data-testid="workflow-node-setting-row" key={node.id}>
                     <div className="workflow-node-setting-main">
@@ -4537,6 +4829,70 @@ export function AgentStudioView() {
                           />
                         </label>
                       ) : null}
+                      {kind === 'loop' ? (
+                        <>
+                          <label>
+                            <span>Loop Condition</span>
+                            <textarea
+                              className="hy-input agent-textarea compact"
+                              data-testid="workflow-node-loop-condition-input"
+                              value={workflowConditionText(node.data as Record<string, unknown> | undefined)}
+                              onChange={(event) => setNodes((current) => current.map((item) => item.id === node.id ? { ...item, data: { ...item.data, condition: event.target.value } } : item))}
+                            />
+                          </label>
+                          <label>
+                            <span>Max Iterations</span>
+                            <input
+                              className="hy-input"
+                              data-testid="workflow-node-loop-max-iterations-input"
+                              type="number"
+                              min={1}
+                              max={25}
+                              value={workflowLoopMaxIterations(node.data as Record<string, unknown> | undefined)}
+                              onChange={(event) => setNodes((current) => current.map((item) => item.id === node.id ? { ...item, data: { ...item.data, max_iterations: workflowLoopMaxIterations({ max_iterations: event.target.value }) } } : item))}
+                            />
+                          </label>
+                        </>
+                      ) : null}
+                      {kind === 'workflow' ? (
+                        <>
+                          <label>
+                            <span>Workflow</span>
+                            <select
+                              className="hy-select"
+                              data-testid="workflow-node-workflow-select"
+                              value={selectedNodeWorkflowId}
+                              onChange={(event) => {
+                                const nextWorkflow = workflows.find((workflow) => workflow.workflow_id === event.target.value) || null;
+                                setNodes((current) => current.map((item) => item.id === node.id ? {
+                                  ...item,
+                                  data: {
+                                    ...item.data,
+                                    workflow_id: event.target.value,
+                                    label: nextWorkflow?.name || item.data?.label,
+                                  },
+                                } : item));
+                              }}
+                            >
+                              <option value="">选择子 Workflow</option>
+                              {childWorkflowOptions.map((workflow) => (
+                                <option value={workflow.workflow_id} key={workflow.workflow_id} disabled={workflow.enabled === false}>
+                                  {workflow.name}{workflow.enabled === false ? ' · 已停用' : ''}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label>
+                            <span>Step Task</span>
+                            <textarea
+                              className="hy-input agent-textarea compact"
+                              data-testid="workflow-node-workflow-task-input"
+                              value={String(node.data?.task || '')}
+                              onChange={(event) => setNodes((current) => current.map((item) => item.id === node.id ? { ...item, data: { ...item.data, task: event.target.value } } : item))}
+                            />
+                          </label>
+                        </>
+                      ) : null}
                       {selectedNodeAgent ? (
                         <div className="workflow-node-agent-preview">
                           <strong>{selectedNodeAgent.nickname || selectedNodeAgent.name}</strong>
@@ -4545,13 +4901,20 @@ export function AgentStudioView() {
                           {selectedNodeAgent.description ? <p>{selectedNodeAgent.description}</p> : null}
                         </div>
                       ) : null}
+                      {selectedNodeWorkflow ? (
+                        <div className="workflow-node-agent-preview">
+                          <strong>{selectedNodeWorkflow.name}</strong>
+                          <span>{selectedNodeWorkflow.nodes.length} nodes · {selectedNodeWorkflow.edges.length} edges</span>
+                          {selectedNodeWorkflow.description ? <p>{selectedNodeWorkflow.description}</p> : null}
+                        </div>
+                      ) : null}
                     </div>
                     <button type="button" data-testid="workflow-node-remove" disabled={busy} onClick={() => removeFlowNode(node.id)}>移除</button>
                   </div>
                 );
               })}
               {!nodes.some((node) => workflowNodeKind(node) !== 'start') ? (
-                <div className="empty-state inline-empty">点击 Agent、Approval 或 Artifact 添加可配置节点。</div>
+                <div className="empty-state inline-empty">点击 Agent、Approval、Artifact、Workflow 或 Loop 添加可配置节点。</div>
               ) : null}
             </div>
             <section className="agent-quick-run" data-testid="workflow-quick-run">

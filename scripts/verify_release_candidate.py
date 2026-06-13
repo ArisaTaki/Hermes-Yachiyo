@@ -28,8 +28,9 @@ from scripts.run_electron_ui_smokes import (
     electron_ui_smoke_scripts as release_ui_smoke_scripts,
     run_electron_ui_smoke_report,
 )
+from scripts.summarize_native_agent_capabilities import summarize_capabilities
 from scripts.verify_release_artifacts import Finding, verify_release_artifacts
-from packages.security import redact_api_error_text
+from packages.security import contains_sensitive_text, redact_api_error_text, sanitize_sensitive_value
 
 DEFAULT_ARTIFACT_PATHS: tuple[Path, ...] = (
     Path("dist/backend"),
@@ -38,15 +39,20 @@ DEFAULT_ARTIFACT_PATHS: tuple[Path, ...] = (
 )
 PACKAGED_APP_NAME = "Oha-Yachiyo.app"
 PACKAGED_APP_EXECUTABLE_NAME = "Oha-Yachiyo"
+PACKAGED_BACKEND_BINARY_NAME = "oha-yachiyo-backend"
+PACKAGED_BACKEND_ARTIFACT_PATH = Path("dist/backend") / PACKAGED_BACKEND_BINARY_NAME
 PACKAGED_BACKEND_RELATIVE_PATH = Path("Contents/Resources/backend/oha-yachiyo-backend")
 DMG_APP_SMOKE_TIMEOUT_SECONDS = 45.0
+PACKAGED_BACKEND_BRIDGE_SMOKE_TIMEOUT_SECONDS = 45.0
 DMG_SCREEN_PROBE_REQUEST_TIMEOUT_SECONDS = 10.0
 DMG_UI_SAMPLING_SMOKE_TIMEOUT_SECONDS = 60.0
 DMG_UI_SAMPLING_PARENT_TIMEOUT_FACTOR = 3.0
 DMG_UI_SAMPLING_SMOKE_SCRIPT = Path("scripts/smoke_packaged_ui_sampling.mjs")
 DMG_CHAT_NATIVE_FILE_SMOKE_TIMEOUT_SECONDS = 60.0
 DMG_CHAT_NATIVE_FILE_SMOKE_SCRIPT = Path("scripts/smoke_packaged_chat_native_file_upload.mjs")
+GATEKEEPER_READINESS_COMMAND_TIMEOUT_SECONDS = 15.0
 DMG_BRIDGE_STATUS_REPORT_SECTIONS: tuple[str, ...] = (
+    "packaged_backend_bridge_smoke",
     "dmg_app_smoke",
     "dmg_screen_probe",
     "dmg_ui_sampling_smoke",
@@ -57,9 +63,12 @@ PROVIDER_SMOKE_ENV_VARS: tuple[str, ...] = (
     "OHA_YACHIYO_SMOKE_API_KEY",
 )
 PROVIDER_SMOKE_SCRIPT = Path("scripts/smoke_openai_compatible_stream.py")
-PROVIDER_SMOKE_COMMANDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+NATIVE_AGENT_FULL_CHAIN_SMOKE_SCRIPT = Path("scripts/smoke_native_agent_full_chain.py")
+NATIVE_WORKFLOW_FULL_CHAIN_SMOKE_SCRIPT = Path("scripts/smoke_native_workflow_full_chain.py")
+PROVIDER_SMOKE_COMMANDS: tuple[tuple[str, Path, tuple[str, ...]], ...] = (
     (
         "text_stream",
+        PROVIDER_SMOKE_SCRIPT,
         (
             "--require-content",
             "--expect-finish-reason",
@@ -68,6 +77,7 @@ PROVIDER_SMOKE_COMMANDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
     (
         "tool_call_stream",
+        PROVIDER_SMOKE_SCRIPT,
         (
             "--tool-call",
             "--require-tool-call",
@@ -83,6 +93,16 @@ PROVIDER_SMOKE_COMMANDS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "--expect-tool-result-finish-reason",
             "stop",
         ),
+    ),
+    (
+        "native_agent_full_chain",
+        NATIVE_AGENT_FULL_CHAIN_SMOKE_SCRIPT,
+        (),
+    ),
+    (
+        "native_workflow_full_chain",
+        NATIVE_WORKFLOW_FULL_CHAIN_SMOKE_SCRIPT,
+        (),
     ),
 )
 MANUAL_RELEASE_CANDIDATE_CHECK_STATUS_VALUES: tuple[str, ...] = (
@@ -136,12 +156,33 @@ MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS: tuple[dict[str, str], ...] = (
         "id": "real_provider_smoke",
         "status": "manual_required",
         "required_before": "public_release_signoff",
-        "description": "If real provider credentials are available, run --run-provider-smoke for the opt-in streaming/tool-call provider gate.",
+        "description": "If real provider credentials are available, run --run-provider-smoke for the opt-in streaming/tool-call/native Agent and advanced Workflow provider gate.",
         "evidence": "Archive the RC report provider_smoke section from a credentialed run, or record that provider credentials were unavailable.",
         "next_action": "If OHA_YACHIYO_SMOKE_* credentials are available, rerun the RC gate with --run-provider-smoke; otherwise mark not_applicable with credentials-unavailable evidence.",
     },
+    {
+        "id": "external_integrations_smoke",
+        "status": "manual_required",
+        "required_before": "public_release_signoff",
+        "description": "Run the opt-in external integrations smoke against a live Bridge with real Live2D, GPT-SoVITS, and AstrBot plugin bridge resources.",
+        "evidence": "Archive tmp/external-integrations-smoke.json from real resource/service checks; include QQ host send/receive logs or screenshots if host-level AstrBot evidence is required.",
+        "next_action": "Run scripts/smoke_external_integrations.py with real Live2D ZIP, GPT-SoVITS voice archive/API service, and --astrbot, then pass the report with --manual-checks-json.",
+    },
+)
+EXTERNAL_INTEGRATION_SMOKE_REQUIRED_CHECK_IDS: tuple[str, ...] = (
+    "live2d_resource",
+    "gpt_sovits_tts",
+    "astrbot_plugin_bridge",
+)
+EXTERNAL_INTEGRATION_SMOKE_KNOWN_CHECK_IDS: frozenset[str] = frozenset(
+    ("bridge_status", *EXTERNAL_INTEGRATION_SMOKE_REQUIRED_CHECK_IDS)
 )
 MANUAL_RELEASE_CANDIDATE_CHECK_AUTOMATION_COMMANDS: dict[str, str] = {
+    "gatekeeper_first_launch": (
+        "python scripts/verify_release_candidate.py --require-artifacts "
+        "--check-gatekeeper-readiness "
+        "--report-json tmp/rc-verification-gatekeeper-readiness.json"
+    ),
     "packaged_bridge_isolation": (
         "python scripts/verify_release_candidate.py --require-artifacts "
         "--run-dmg-app-smoke --report-json tmp/rc-verification-dmg-app.json"
@@ -164,6 +205,14 @@ MANUAL_RELEASE_CANDIDATE_CHECK_AUTOMATION_COMMANDS: dict[str, str] = {
         "--check-dmg-mount --run-provider-smoke "
         "--report-json tmp/rc-verification-provider-smoke.json"
     ),
+    "external_integrations_smoke": (
+        "python scripts/smoke_external_integrations.py "
+        "--bridge-url http://127.0.0.1:18420 "
+        "--live2d-archive /path/to/yachiyo-live2d.zip "
+        "--tts-voice-archive /path/to/yachiyo-gpt-sovits.zip "
+        "--gpt-sovits-base-url http://127.0.0.1:9880 "
+        "--astrbot --report-json tmp/external-integrations-smoke.json"
+    ),
 }
 MANUAL_RELEASE_CANDIDATE_CHECKS: tuple[str, ...] = tuple(
     check["description"] for check in MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS
@@ -175,6 +224,10 @@ MANUAL_RELEASE_CANDIDATE_CHECK_SOURCE_REVISIONS_MARKDOWN_PREFIX = (
     "<!-- manual_release_candidate_check_source_revisions: "
 )
 MANUAL_RELEASE_CANDIDATE_CHECK_SOURCE_REVISIONS_MARKDOWN_SUFFIX = " -->"
+MANUAL_RELEASE_CANDIDATE_CHECK_CAPABILITY_MATRIX_MARKDOWN_PREFIX = (
+    "<!-- native_agent_capability_matrix: "
+)
+MANUAL_RELEASE_CANDIDATE_CHECK_CAPABILITY_MATRIX_MARKDOWN_SUFFIX = " -->"
 
 
 def _manual_release_candidate_check_report() -> list[dict[str, str]]:
@@ -346,6 +399,79 @@ def _manual_check_source_revisions_from_markdown(
     return []
 
 
+def _native_agent_capability_matrix_with_source(
+    matrix: dict[str, Any],
+    *,
+    source_label: str | None = None,
+    run_requested: bool,
+) -> dict[str, Any]:
+    result = dict(matrix)
+    if source_label:
+        raw_source_reports = result.get("source_reports")
+        source_reports = (
+            [str(item) for item in raw_source_reports if item]
+            if isinstance(raw_source_reports, list)
+            else []
+        )
+        if source_label not in source_reports:
+            source_reports.append(source_label)
+        result["source_reports"] = source_reports
+    result["run_requested"] = run_requested
+    return result
+
+
+def _native_agent_capability_matrix_from_payload(
+    payload: dict[str, Any],
+    *,
+    source_label: str | None = None,
+    run_requested: bool,
+) -> dict[str, Any] | None:
+    raw_matrix = payload.get("native_agent_capability_matrix")
+    if isinstance(raw_matrix, dict) and isinstance(raw_matrix.get("capabilities"), list):
+        matrix = dict(raw_matrix)
+    elif isinstance(payload.get("provider_smoke"), dict):
+        matrix = summarize_capabilities(payload)
+        matrix["status"] = "passed" if matrix.get("ok") is True else "incomplete"
+    else:
+        return None
+    return _native_agent_capability_matrix_with_source(
+        matrix,
+        source_label=source_label,
+        run_requested=run_requested,
+    )
+
+
+def _native_agent_capability_matrix_from_markdown(
+    raw_text: str,
+    *,
+    source_label: str | None = None,
+    run_requested: bool,
+) -> dict[str, Any] | None:
+    for line in raw_text.splitlines():
+        stripped = line.strip()
+        if not (
+            stripped.startswith(MANUAL_RELEASE_CANDIDATE_CHECK_CAPABILITY_MATRIX_MARKDOWN_PREFIX)
+            and stripped.endswith(MANUAL_RELEASE_CANDIDATE_CHECK_CAPABILITY_MATRIX_MARKDOWN_SUFFIX)
+        ):
+            continue
+        payload = stripped[
+            len(MANUAL_RELEASE_CANDIDATE_CHECK_CAPABILITY_MATRIX_MARKDOWN_PREFIX) :
+            -len(MANUAL_RELEASE_CANDIDATE_CHECK_CAPABILITY_MATRIX_MARKDOWN_SUFFIX)
+        ]
+        try:
+            raw_matrix = json.loads(payload)
+        except json.JSONDecodeError:
+            return None
+        if isinstance(raw_matrix, dict) and isinstance(raw_matrix.get("capabilities"), list):
+            return _native_agent_capability_matrix_with_source(
+                raw_matrix,
+                source_label=source_label,
+                run_requested=run_requested,
+            )
+        return None
+    return None
+
+
 def _manual_check_markdown_source_revisions(
     root: Path,
     markdown_path: Path | None,
@@ -365,11 +491,35 @@ def _manual_check_markdown_source_revisions(
         return []
 
 
+def _native_agent_capability_matrix_from_markdown_source(
+    root: Path,
+    markdown_path: Path | None,
+    *,
+    run_requested: bool,
+) -> dict[str, Any] | None:
+    if markdown_path is None:
+        return None
+    try:
+        evidence_path = _resolve_project_file(
+            root,
+            markdown_path,
+            "manual release-candidate checks markdown",
+        )
+        return _native_agent_capability_matrix_from_markdown(
+            evidence_path.read_text(encoding="utf-8"),
+            source_label=str(markdown_path),
+            run_requested=run_requested,
+        )
+    except (OSError, ValueError):
+        return None
+
+
 def _manual_release_candidate_check_draft(
     checks: Sequence[dict[str, str]],
     *,
     source_path: ManualChecksSource = None,
     source_revisions: Sequence[dict[str, object]] | None = None,
+    capability_matrix: dict[str, Any] | None = None,
 ) -> dict[str, object]:
     check_details = {check["id"]: check for check in MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS}
     draft_checks: list[dict[str, str]] = []
@@ -406,7 +556,133 @@ def _manual_release_candidate_check_draft(
         draft["manual_release_candidate_checks_source"] = source_label
     if source_revisions:
         draft["manual_release_candidate_check_source_revisions"] = list(source_revisions)
+    if capability_matrix is not None:
+        draft["native_agent_capability_matrix"] = capability_matrix
     return draft
+
+
+def _native_agent_capability_matrix_source_reports(
+    capability_matrix: dict[str, Any],
+) -> list[str]:
+    source_reports: list[str] = []
+    raw_source_reports = capability_matrix.get("source_reports")
+    if isinstance(raw_source_reports, list):
+        source_reports.extend(str(item) for item in raw_source_reports if item)
+    source_report = str(capability_matrix.get("source_report") or "").strip()
+    if source_report and source_report not in source_reports:
+        source_reports.append(source_report)
+    return source_reports
+
+
+def _native_agent_capability_matrix_summary_label(
+    capability_matrix: dict[str, Any] | None,
+) -> str:
+    if not isinstance(capability_matrix, dict):
+        return ""
+    status = str(capability_matrix.get("status") or "").strip()
+    if status not in {"passed", "incomplete"}:
+        return ""
+    raw_capability_count = capability_matrix.get("capability_count")
+    capability_count = raw_capability_count if isinstance(raw_capability_count, int) else 0
+    raw_counts = capability_matrix.get("status_counts")
+    passed_count = 0
+    if isinstance(raw_counts, dict):
+        raw_passed_count = raw_counts.get("passed")
+        passed_count = raw_passed_count if isinstance(raw_passed_count, int) else 0
+    if status == "passed" and capability_count:
+        return f"passed ({capability_count} capabilities)"
+    if capability_count:
+        return f"{status} ({passed_count}/{capability_count} passed)"
+    return status
+
+
+def _print_native_agent_capability_matrix_summary(
+    capability_matrix: dict[str, Any] | None,
+) -> None:
+    summary_label = _native_agent_capability_matrix_summary_label(capability_matrix)
+    if not summary_label or not isinstance(capability_matrix, dict):
+        return
+    print(f"Native Agent capability matrix: {summary_label}")
+    missing_ids = capability_matrix.get("missing_capability_ids")
+    if isinstance(missing_ids, list) and missing_ids:
+        print("- missing: " + ", ".join(str(item) for item in missing_ids))
+    source_reports = _native_agent_capability_matrix_source_reports(capability_matrix)
+    if source_reports:
+        print(
+            "Native Agent capability matrix sources: "
+            + ", ".join(source_reports)
+        )
+
+
+def _native_agent_capability_matrix_markdown_lines(
+    capability_matrix: dict[str, Any] | None,
+) -> list[str]:
+    summary_label = _native_agent_capability_matrix_summary_label(capability_matrix)
+    if not summary_label or not isinstance(capability_matrix, dict):
+        return []
+    raw_capability_count = capability_matrix.get("capability_count")
+    capability_count = raw_capability_count if isinstance(raw_capability_count, int) else 0
+    raw_counts = capability_matrix.get("status_counts")
+    passed_count = 0
+    if isinstance(raw_counts, dict):
+        raw_passed_count = raw_counts.get("passed")
+        passed_count = raw_passed_count if isinstance(raw_passed_count, int) else 0
+    missing_ids = capability_matrix.get("missing_capability_ids")
+    source_reports = _native_agent_capability_matrix_source_reports(capability_matrix)
+    lines = [
+        "## Native Agent Capability Matrix",
+        "",
+        (
+            MANUAL_RELEASE_CANDIDATE_CHECK_CAPABILITY_MATRIX_MARKDOWN_PREFIX
+            + json.dumps(
+                capability_matrix,
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+            + MANUAL_RELEASE_CANDIDATE_CHECK_CAPABILITY_MATRIX_MARKDOWN_SUFFIX
+        ),
+        "",
+        f"- Status: {summary_label}",
+    ]
+    if capability_count:
+        lines.append(f"- Capabilities: {passed_count}/{capability_count} passed")
+    if source_reports:
+        lines.append(
+            "- Source reports: "
+            + ", ".join(f"`{source_report}`" for source_report in source_reports)
+        )
+    if isinstance(missing_ids, list) and missing_ids:
+        lines.append(
+            "- Missing capabilities: "
+            + ", ".join(f"`{capability_id}`" for capability_id in missing_ids)
+        )
+    else:
+        lines.append("- Missing capabilities: none")
+    capabilities = capability_matrix.get("capabilities")
+    if isinstance(capabilities, list) and capabilities:
+        lines.extend(["", "### Capability Evidence", ""])
+        for capability in capabilities:
+            if not isinstance(capability, dict):
+                continue
+            capability_id = str(capability.get("id") or "").strip()
+            if not capability_id:
+                continue
+            status = str(capability.get("status") or "").strip()
+            marker = "x" if status == "passed" else " "
+            label = str(capability.get("label") or "").strip()
+            suffix = f" - {label}" if label else ""
+            lines.append(f"- [{marker}] `{capability_id}`{suffix}")
+    return lines
+
+
+def _manual_check_markdown_field_lines(label: str, value: object = "") -> list[str]:
+    text = str(value or "").strip()
+    if not text:
+        return [f"  - {label}:"]
+    first, *rest = text.splitlines()
+    lines = [f"  - {label}: {first}"]
+    lines.extend(f"    {line}" if line else "    " for line in rest)
+    return lines
 
 
 def _manual_release_candidate_checks_markdown(
@@ -415,6 +691,7 @@ def _manual_release_candidate_checks_markdown(
     source_path: ManualChecksSource = None,
     source_revisions: Sequence[dict[str, object]] | None = None,
     markdown_path: Path | None = None,
+    capability_matrix: dict[str, Any] | None = None,
 ) -> str:
     summary = _manual_release_candidate_check_summary(checks)
     remaining_checks = [
@@ -484,6 +761,11 @@ def _manual_release_candidate_checks_markdown(
             )
     else:
         lines.append("- None")
+    capability_lines = _native_agent_capability_matrix_markdown_lines(
+        capability_matrix
+    )
+    if capability_lines:
+        lines.extend(["", *capability_lines])
     lines.extend(["", "## Remaining Manual Checks", ""])
     if source_revision_items:
         lines.extend(
@@ -510,8 +792,8 @@ def _manual_release_candidate_checks_markdown(
                 f"  - Description: {check.get('description', '')}",
                 f"  - Next action: {check.get('next_action', '')}",
                 f"  - Evidence to record: {check.get('evidence_prompt', check.get('evidence', ''))}",
-                "  - Evidence:",
-                f"  - Notes: {notes}" if notes else "  - Notes:",
+                *_manual_check_markdown_field_lines("Evidence"),
+                *_manual_check_markdown_field_lines("Notes", notes),
             ]
         )
 
@@ -531,9 +813,9 @@ def _manual_release_candidate_checks_markdown(
         if evidence_source:
             lines.append(f"  - Evidence source: {evidence_source}")
         if evidence:
-            lines.append(f"  - Evidence: {evidence}")
+            lines.extend(_manual_check_markdown_field_lines("Evidence", evidence))
         if notes:
-            lines.append(f"  - Notes: {notes}")
+            lines.extend(_manual_check_markdown_field_lines("Notes", notes))
     lines.append("")
     return "\n".join(lines)
 
@@ -585,6 +867,160 @@ def _standalone_electron_ui_smoke_report(raw_payload: Any) -> dict[str, Any] | N
         "script_count": raw_payload.get("script_count"),
         "scripts": scripts,
     }
+
+
+def _external_integrations_smoke_manual_check(
+    raw_payload: Any,
+) -> list[dict[str, str]] | None:
+    if not isinstance(raw_payload, dict) or "ok" not in raw_payload:
+        return None
+    raw_checks = raw_payload.get("checks")
+    if not isinstance(raw_checks, list):
+        return None
+
+    external_checks: list[dict[str, Any]] = []
+    for item in raw_checks:
+        if not isinstance(item, dict):
+            continue
+        check_id = str(item.get("id", "")).strip()
+        if check_id in EXTERNAL_INTEGRATION_SMOKE_KNOWN_CHECK_IDS:
+            external_checks.append(item)
+
+    top_level_error = str(raw_payload.get("error") or "").strip()
+    bridge_url = str(raw_payload.get("bridge_url") or "").strip()
+    if not external_checks and not (bridge_url and top_level_error):
+        return None
+
+    checks_by_id = {
+        str(item.get("id", "")).strip(): item
+        for item in external_checks
+        if str(item.get("id", "")).strip()
+    }
+    raw_missing_required_ids = raw_payload.get("missing_required_check_ids")
+    reported_missing_required_ids = (
+        [
+            str(check_id)
+            for check_id in raw_missing_required_ids
+            if str(check_id) in EXTERNAL_INTEGRATION_SMOKE_REQUIRED_CHECK_IDS
+        ]
+        if isinstance(raw_missing_required_ids, list)
+        else []
+    )
+    if raw_payload.get("mode") == "bridge_only":
+        bridge_check = checks_by_id.get("bridge_status")
+        status = str(bridge_check.get("status") or "").strip() if bridge_check else "unknown"
+        error = (
+            redact_api_error_text(str(bridge_check.get("error") or "").strip())
+            if bridge_check
+            else ""
+        )
+        bridge_label = f" against {bridge_url}" if bridge_url else ""
+        missing_required_label = ", ".join(
+            reported_missing_required_ids
+            or list(EXTERNAL_INTEGRATION_SMOKE_REQUIRED_CHECK_IDS)
+        )
+        if status == "passed":
+            note = (
+                "Supporting automated evidence: external integration bridge-only "
+                f"preflight passed{bridge_label}; full release signoff still needs "
+                f"{missing_required_label}."
+            )
+        else:
+            detail = f" ({error})" if error else ""
+            note = (
+                "Supporting automated evidence: external integration bridge-only "
+                f"preflight did not pass{bridge_label}: bridge_status={status}{detail}. "
+                "Full release signoff still needs a live Oha Bridge and real external "
+                f"checks: {missing_required_label}."
+            )
+        return [
+            {
+                "id": "external_integrations_smoke",
+                "status": "manual_required",
+                "notes": note,
+            }
+        ]
+
+    selected_required_ids = [
+        check_id
+        for check_id in EXTERNAL_INTEGRATION_SMOKE_REQUIRED_CHECK_IDS
+        if check_id in checks_by_id
+    ]
+    passed_required_ids = [
+        check_id
+        for check_id in selected_required_ids
+        if checks_by_id[check_id].get("status") == "passed"
+    ]
+    failed_labels: list[str] = []
+    for check_id in ("bridge_status", *EXTERNAL_INTEGRATION_SMOKE_REQUIRED_CHECK_IDS):
+        item = checks_by_id.get(check_id)
+        if item is None:
+            continue
+        status = str(item.get("status") or "").strip() or "unknown"
+        if status == "passed":
+            continue
+        error = redact_api_error_text(str(item.get("error") or "").strip())
+        failed_labels.append(f"{check_id}={status}{': ' + error if error else ''}")
+    if top_level_error:
+        failed_labels.append(f"error: {redact_api_error_text(top_level_error)}")
+
+    missing_required_ids = [
+        check_id
+        for check_id in EXTERNAL_INTEGRATION_SMOKE_REQUIRED_CHECK_IDS
+        if check_id not in checks_by_id or check_id in reported_missing_required_ids
+    ]
+    all_required_passed = (
+        raw_payload.get("ok") is True
+        and not missing_required_ids
+        and passed_required_ids == list(EXTERNAL_INTEGRATION_SMOKE_REQUIRED_CHECK_IDS)
+    )
+    bridge_label = f" against {bridge_url}" if bridge_url else ""
+    if all_required_passed:
+        return [
+            {
+                "id": "external_integrations_smoke",
+                "status": "passed",
+                "evidence": (
+                    "External integration smoke passed"
+                    f"{bridge_label}: {', '.join(EXTERNAL_INTEGRATION_SMOKE_REQUIRED_CHECK_IDS)} "
+                    "all completed with status=passed. Archive this report with any "
+                    "host-level AstrBot QQ send/receive evidence required by the release."
+                ),
+                "evidence_source": "automated_rc_gate",
+            }
+        ]
+
+    if failed_labels or raw_payload.get("ok") is False:
+        failure_summary = "; ".join(failed_labels) if failed_labels else "report ok=false"
+        if missing_required_ids:
+            failure_summary = (
+                f"{failure_summary}; missing required checks: "
+                f"{', '.join(missing_required_ids)}"
+            )
+        return [
+            {
+                "id": "external_integrations_smoke",
+                "status": "failed",
+                "evidence": (
+                    f"External integration smoke failed{bridge_label}: {failure_summary}"
+                ),
+                "evidence_source": "automated_rc_gate",
+            }
+        ]
+
+    notes = (
+        "Supporting automated evidence: external integration smoke passed selected "
+        f"checks: {', '.join(passed_required_ids) if passed_required_ids else 'none'}. "
+        "Full release signoff still needs: "
+        f"{', '.join(missing_required_ids) if missing_required_ids else 'none'}."
+    )
+    return [
+        {
+            "id": "external_integrations_smoke",
+            "status": "manual_required",
+            "notes": notes,
+        }
+    ]
 
 
 def _append_manual_release_candidate_check_note(
@@ -883,7 +1319,10 @@ def _print_manual_release_candidate_check_summary(summary: dict[str, Any]) -> No
                 check_id = str(item.get("id", "")).strip()
                 notes = str(item.get("notes", "")).strip()
                 if check_id and notes:
-                    print(f"- [{check_id}] {notes}")
+                    note_lines = notes.splitlines()
+                    print(f"- [{check_id}] {note_lines[0]}")
+                    for continuation in note_lines[1:]:
+                        print(f"  {continuation}")
     else:
         print("manual release-candidate check summary: complete")
 
@@ -910,6 +1349,14 @@ def _print_manual_release_candidate_checks_for_write_action(
     _print_manual_release_candidate_check_summary(
         _manual_release_candidate_check_summary(checks)
     )
+    _print_native_agent_capability_matrix_summary(
+        _native_agent_capability_matrix_from_manual_inputs(
+            root,
+            None if source_is_markdown else source_path,
+            source_path if source_is_markdown and isinstance(source_path, Path) else None,
+            run_requested=False,
+        )
+    )
 
 
 def print_manual_release_candidate_checks_status(
@@ -935,6 +1382,14 @@ def print_manual_release_candidate_checks_status(
     print("manual release-candidate checks status:")
     _print_manual_release_candidate_check_summary(
         _manual_release_candidate_check_summary(checks)
+    )
+    _print_native_agent_capability_matrix_summary(
+        _native_agent_capability_matrix_from_manual_inputs(
+            root,
+            None if source_is_markdown else source_path,
+            source_path if source_is_markdown and isinstance(source_path, Path) else None,
+            run_requested=False,
+        )
     )
     return True
 
@@ -1003,6 +1458,62 @@ def _auto_apply_release_candidate_check_evidence(
     report: dict[str, Any],
     checks: Sequence[dict[str, str]],
 ) -> None:
+    gatekeeper_readiness = report.get("gatekeeper_readiness")
+    if (
+        isinstance(gatekeeper_readiness, dict)
+        and gatekeeper_readiness.get("status") == "passed"
+    ):
+        dmg_paths = gatekeeper_readiness.get("dmg_paths")
+        artifact_label = (
+            ", ".join(str(path) for path in dmg_paths)
+            if isinstance(dmg_paths, list) and dmg_paths
+            else "selected DMG artifacts"
+        )
+        assessments = gatekeeper_readiness.get("assessments")
+        assessment_count = len(assessments) if isinstance(assessments, list) else 0
+        _append_manual_release_candidate_check_note(
+            checks,
+            "gatekeeper_first_launch",
+            (
+                "Automated --check-gatekeeper-readiness collected codesign, "
+                f"spctl, and quarantine diagnostics for {artifact_label} "
+                f"({assessment_count} assessment(s)). This supports the "
+                "Gatekeeper signoff but does not replace Finder Control-click -> "
+                "Open or System Settings allow-open first-launch evidence."
+            ),
+        )
+
+    packaged_backend_bridge_smoke = report.get("packaged_backend_bridge_smoke")
+    if (
+        isinstance(packaged_backend_bridge_smoke, dict)
+        and packaged_backend_bridge_smoke.get("status") == "passed"
+    ):
+        raw_statuses = packaged_backend_bridge_smoke.get("bridge_statuses")
+        bridge_labels: list[str] = []
+        if isinstance(raw_statuses, list):
+            for item in raw_statuses:
+                if not isinstance(item, dict):
+                    continue
+                backend_path = str(item.get("backend_path") or "").strip()
+                bridge_url = str(item.get("bridge_url") or "").strip()
+                version = str(item.get("version") or "").strip()
+                label = backend_path or "packaged backend"
+                if bridge_url:
+                    label = f"{label} at {bridge_url}"
+                if version:
+                    label = f"{label} (version {version})"
+                bridge_labels.append(label)
+        bridge_summary = ", ".join(bridge_labels) if bridge_labels else "packaged backend /status returned service=oha-yachiyo"
+        _append_manual_release_candidate_check_note(
+            checks,
+            "external_integrations_smoke",
+            (
+                "Supporting automated evidence: --run-packaged-backend-bridge-smoke "
+                f"started {bridge_summary}; full release signoff still needs "
+                "live2d_resource, gpt_sovits_tts, astrbot_plugin_bridge."
+            ),
+        )
+
     dmg_app_smoke = report.get("dmg_app_smoke")
     if isinstance(dmg_app_smoke, dict) and dmg_app_smoke.get("status") == "passed":
         dmg_paths = dmg_app_smoke.get("dmg_paths")
@@ -1376,7 +1887,14 @@ def _bridge_status_source_revision_findings(
         for status in raw_statuses:
             if not isinstance(status, dict):
                 continue
-            dmg_path = Path(str(status.get("dmg_path") or section_name))
+            artifact_path = Path(
+                str(
+                    status.get("dmg_path")
+                    or status.get("backend_path")
+                    or status.get("artifact_path")
+                    or section_name
+                )
+            )
             build_metadata = status.get("build_metadata")
             build_commit = (
                 str(build_metadata.get("commit") or "").strip()
@@ -1386,7 +1904,7 @@ def _bridge_status_source_revision_findings(
             if not build_commit:
                 findings.setdefault(section_name, []).append(
                     Finding(
-                        dmg_path,
+                        artifact_path,
                         (
                             f"{section_name} packaged Bridge /status must include "
                             f"build_metadata.commit to compare against source_revision "
@@ -1403,7 +1921,7 @@ def _bridge_status_source_revision_findings(
                 )
                 findings.setdefault(section_name, []).append(
                     Finding(
-                        dmg_path,
+                        artifact_path,
                         (
                             f"{section_name} packaged Bridge build_metadata.commit "
                             f"{build_label} does not match source_revision.commit "
@@ -1542,6 +2060,11 @@ def write_manual_release_candidate_checks_draft(
             checks,
             source_path=source_path,
             source_revisions=_manual_check_source_revisions(root, source_path),
+            capability_matrix=_native_agent_capability_matrix_from_manual_sources(
+                root,
+                source_path,
+                run_requested=False,
+            ),
         ),
     )
     return resolved
@@ -1573,6 +2096,12 @@ def write_manual_release_candidate_checks_markdown(
         if source_is_markdown and isinstance(source_path, Path)
         else _manual_check_source_revisions(root, source_path)
     )
+    capability_matrix = _native_agent_capability_matrix_from_manual_inputs(
+        root,
+        None if source_is_markdown else source_path,
+        source_path if source_is_markdown and isinstance(source_path, Path) else None,
+        run_requested=False,
+    )
     resolved = _resolve_project_file(
         root,
         output_path,
@@ -1585,6 +2114,7 @@ def write_manual_release_candidate_checks_markdown(
             source_path=source_path,
             source_revisions=source_revisions,
             markdown_path=output_path,
+            capability_matrix=capability_matrix,
         ),
         encoding="utf-8",
     )
@@ -1693,11 +2223,7 @@ def _load_manual_release_candidate_checks(
 
             target = known[check_id]
             notes = raw_check.get("notes")
-            if (
-                preserve_existing_when_manual_required
-                and status == "manual_required"
-                and target.get("status") != "manual_required"
-            ):
+            if preserve_existing_when_manual_required and status == "manual_required":
                 if notes is not None:
                     existing_notes = str(target.get("notes", "")).strip()
                     note_text = str(notes).strip()
@@ -1753,6 +2279,16 @@ def _load_manual_release_candidate_checks(
                 "manual release-candidate checks",
             )
             raw_payload = json.loads(evidence_path.read_text(encoding="utf-8"))
+            external_integrations_smoke = _external_integrations_smoke_manual_check(
+                raw_payload
+            )
+            if external_integrations_smoke is not None:
+                apply_raw_checks(
+                    external_integrations_smoke,
+                    manual_checks_path,
+                    preserve_existing_when_manual_required=True,
+                )
+                continue
             standalone_electron_ui_smoke = _standalone_electron_ui_smoke_report(
                 raw_payload
             )
@@ -1850,6 +2386,106 @@ def _provider_smoke_missing_env() -> list[str]:
     return [name for name in PROVIDER_SMOKE_ENV_VARS if not os.getenv(name, "").strip()]
 
 
+def _provider_smoke_stdout_summary(stdout: str) -> Any | None:
+    text = str(stdout or "").strip()
+    if not text:
+        return None
+    last_line = text.splitlines()[-1].strip()
+    if not last_line:
+        return None
+    try:
+        parsed = json.loads(last_line)
+    except json.JSONDecodeError:
+        return None
+    summary = sanitize_sensitive_value(parsed, max_depth=8)
+    if contains_sensitive_text(json.dumps(summary, ensure_ascii=False), hide_tool_calls=False):
+        return {"omitted": True, "reason": "sensitive_summary"}
+    return summary
+
+
+def _native_agent_capability_matrix_section(
+    report: dict[str, Any],
+    *,
+    run_requested: bool,
+) -> dict[str, Any]:
+    provider_smoke = report.get("provider_smoke")
+    if not isinstance(provider_smoke, dict) or not provider_smoke.get("checks"):
+        return {
+            "status": "skipped",
+            "ok": False,
+            "capability_count": 0,
+            "status_counts": {"passed": 0, "missing": 0},
+            "missing_capability_ids": [],
+            "capabilities": [],
+            "run_requested": run_requested,
+        }
+    matrix = summarize_capabilities(report)
+    return {
+        "status": "passed" if matrix.get("ok") is True else "incomplete",
+        **matrix,
+        "run_requested": run_requested,
+    }
+
+
+def _native_agent_capability_matrix_from_manual_sources(
+    root: Path,
+    manual_checks_json: ManualChecksJsonInput,
+    *,
+    run_requested: bool,
+) -> dict[str, Any] | None:
+    matrices: list[dict[str, Any]] = []
+    for source_path in _manual_checks_json_paths(manual_checks_json):
+        try:
+            evidence_path = _resolve_project_file(
+                root,
+                source_path,
+                "Native Agent capability matrix source",
+            )
+            payload = json.loads(evidence_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        matrix = _native_agent_capability_matrix_from_payload(
+            payload,
+            source_label=str(source_path),
+            run_requested=run_requested,
+        )
+        if matrix is None:
+            continue
+        matrices.append(matrix)
+    if not matrices:
+        return None
+
+    def rank(matrix: dict[str, Any]) -> tuple[int, int]:
+        ok_score = 1 if matrix.get("ok") is True or matrix.get("status") == "passed" else 0
+        counts = matrix.get("status_counts")
+        passed = int(counts.get("passed") or 0) if isinstance(counts, dict) else 0
+        return ok_score, passed
+
+    return max(matrices, key=rank)
+
+
+def _native_agent_capability_matrix_from_manual_inputs(
+    root: Path,
+    manual_checks_json: ManualChecksJsonInput,
+    manual_checks_markdown: Path | None,
+    *,
+    run_requested: bool,
+) -> dict[str, Any] | None:
+    if manual_checks_markdown is not None:
+        return _native_agent_capability_matrix_from_markdown_source(
+            root,
+            manual_checks_markdown,
+            run_requested=run_requested,
+        )
+    return _native_agent_capability_matrix_from_manual_sources(
+        root,
+        manual_checks_json,
+        run_requested=run_requested,
+    )
+
+
 def verify_provider_smoke(root: Path) -> tuple[list[Finding], list[dict[str, object]]]:
     findings: list[Finding] = []
     results: list[dict[str, object]] = []
@@ -1864,9 +2500,9 @@ def verify_provider_smoke(root: Path) -> tuple[list[Finding], list[dict[str, obj
         )
         return findings, results
 
-    script = root / PROVIDER_SMOKE_SCRIPT
-    for label, args in PROVIDER_SMOKE_COMMANDS:
-        command = [sys.executable, str(PROVIDER_SMOKE_SCRIPT), *args]
+    for label, script_path, args in PROVIDER_SMOKE_COMMANDS:
+        script = root / script_path
+        command = [sys.executable, str(script_path), *args]
         try:
             result = subprocess.run(
                 command,
@@ -1881,7 +2517,11 @@ def verify_provider_smoke(root: Path) -> tuple[list[Finding], list[dict[str, obj
             findings.append(Finding(script, f"real provider {label} smoke could not start: {detail}"))
             results.append({"label": label, "exit_code": None})
             continue
-        results.append({"label": label, "exit_code": result.returncode})
+        smoke_result: dict[str, object] = {"label": label, "exit_code": result.returncode}
+        summary = _provider_smoke_stdout_summary(result.stdout)
+        if summary is not None:
+            smoke_result["summary"] = summary
+        results.append(smoke_result)
         if result.returncode != 0:
             detail = _redacted_process_detail(result.stdout, result.stderr)
             message = f"real provider {label} smoke failed with exit code {result.returncode}"
@@ -1912,6 +2552,38 @@ def release_candidate_dmg_paths(root: Path, artifact_paths: Sequence[Path]) -> t
                     dmg_paths.append(dmg)
                 seen.add(resolved)
     return tuple(dmg_paths)
+
+
+def release_candidate_backend_paths(
+    root: Path,
+    artifact_paths: Sequence[Path],
+) -> tuple[Path, ...]:
+    backend_paths: list[Path] = []
+    seen: set[Path] = set()
+
+    def add_backend(path: Path) -> None:
+        resolved = path.resolve(strict=False)
+        if resolved in seen:
+            return
+        seen.add(resolved)
+        try:
+            backend_paths.append(path.relative_to(root))
+        except ValueError:
+            backend_paths.append(path)
+
+    for artifact_path in artifact_paths:
+        candidate = _absolute_artifact_path(root, artifact_path)
+        if candidate.is_file() and candidate.name == PACKAGED_BACKEND_BINARY_NAME:
+            add_backend(candidate)
+        elif candidate.is_dir():
+            direct_backend = candidate / PACKAGED_BACKEND_BINARY_NAME
+            if direct_backend.is_file():
+                add_backend(direct_backend)
+
+    default_backend = root / PACKAGED_BACKEND_ARTIFACT_PATH
+    if default_backend.is_file():
+        add_backend(default_backend)
+    return tuple(backend_paths)
 
 
 def verify_dmg_mount_artifacts(root: Path, dmg_paths: Sequence[Path]) -> list[Finding]:
@@ -1988,6 +2660,162 @@ def verify_dmg_mount_artifacts(root: Path, dmg_paths: Sequence[Path]) -> list[Fi
     return findings
 
 
+def _gatekeeper_command_report(
+    label: str,
+    command: Sequence[str],
+    *,
+    ok_return_codes: set[int] | None = None,
+    timeout_seconds: float = GATEKEEPER_READINESS_COMMAND_TIMEOUT_SECONDS,
+) -> dict[str, object]:
+    expected_return_codes = ok_return_codes or {0}
+    report: dict[str, object] = {
+        "label": label,
+        "command": list(command),
+        "exit_code": None,
+        "ok": False,
+        "output": "",
+    }
+    try:
+        result = subprocess.run(
+            list(command),
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired as exc:
+        report["error"] = f"timed out after {timeout_seconds:.0f}s"
+        report["output"] = _redacted_process_detail(
+            _process_output_text(exc.stdout),
+            _process_output_text(exc.stderr),
+        )
+        return report
+    except OSError as exc:
+        report["error"] = redact_api_error_text(str(exc))
+        return report
+    report["exit_code"] = result.returncode
+    report["ok"] = result.returncode in expected_return_codes
+    report["output"] = _redacted_process_detail(result.stdout, result.stderr)
+    return report
+
+
+def _xattr_quarantine_report(path: Path) -> dict[str, object]:
+    report = _gatekeeper_command_report(
+        "xattr_quarantine",
+        ["xattr", "-p", "com.apple.quarantine", str(path)],
+        ok_return_codes={0, 1},
+    )
+    report["present"] = report.get("exit_code") == 0
+    return report
+
+
+def _gatekeeper_readiness_assessment(
+    dmg_path: Path,
+    absolute_dmg: Path,
+    app_path: Path,
+) -> dict[str, object]:
+    executable_path = app_path / "Contents" / "MacOS" / PACKAGED_APP_EXECUTABLE_NAME
+    return {
+        "dmg_path": str(dmg_path),
+        "mounted_app_path": str(app_path),
+        "executable_path": str(executable_path),
+        "note": (
+            "This records macOS signing/Gatekeeper diagnostics only. It does not "
+            "replace the required Finder Control-click -> Open or System Settings "
+            "allow-open first-launch confirmation."
+        ),
+        "dmg_quarantine": _xattr_quarantine_report(absolute_dmg),
+        "app_quarantine": _xattr_quarantine_report(app_path),
+        "codesign_verify": _gatekeeper_command_report(
+            "codesign_verify",
+            ["codesign", "--verify", "--deep", "--strict", "--verbose=2", str(app_path)],
+        ),
+        "codesign_display": _gatekeeper_command_report(
+            "codesign_display",
+            ["codesign", "-dv", str(app_path)],
+        ),
+        "spctl_assess": _gatekeeper_command_report(
+            "spctl_assess",
+            ["spctl", "--assess", "--type", "execute", "--verbose=4", str(app_path)],
+        ),
+    }
+
+
+def verify_dmg_gatekeeper_readiness(
+    root: Path,
+    dmg_paths: Sequence[Path],
+) -> tuple[list[Finding], list[dict[str, object]]]:
+    findings: list[Finding] = []
+    assessments: list[dict[str, object]] = []
+    if not dmg_paths:
+        findings.append(Finding(root, "release candidate Gatekeeper readiness check requested but no .dmg artifacts were found"))
+        return findings, assessments
+    if sys.platform != "darwin":
+        findings.append(Finding(root, "release candidate Gatekeeper readiness check requires macOS"))
+        return findings, assessments
+    for dmg_path in dmg_paths:
+        absolute_dmg = _absolute_artifact_path(root, dmg_path)
+        mount_dir = Path(tempfile.mkdtemp(prefix="oha-yachiyo-rc-gatekeeper-"))
+        attached = False
+        try:
+            attach = subprocess.run(
+                [
+                    "hdiutil",
+                    "attach",
+                    str(absolute_dmg),
+                    "-nobrowse",
+                    "-readonly",
+                    "-mountpoint",
+                    str(mount_dir),
+                    "-quiet",
+                ],
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            if attach.returncode != 0:
+                detail = redact_api_error_text((attach.stderr or attach.stdout or "").strip())
+                message = "release candidate DMG could not be mounted for Gatekeeper readiness"
+                if detail:
+                    message = f"{message}: {detail}"
+                findings.append(Finding(dmg_path, message))
+                continue
+            attached = True
+            app_path = mount_dir / PACKAGED_APP_NAME
+            executable_path = app_path / "Contents" / "MacOS" / PACKAGED_APP_EXECUTABLE_NAME
+            if not app_path.is_dir():
+                findings.append(Finding(dmg_path, f"mounted release candidate DMG must contain {PACKAGED_APP_NAME}"))
+                continue
+            if not executable_path.is_file():
+                findings.append(Finding(dmg_path, f"mounted {PACKAGED_APP_NAME} must contain executable {PACKAGED_APP_EXECUTABLE_NAME}"))
+                continue
+            if not os.access(executable_path, os.X_OK):
+                findings.append(Finding(dmg_path, f"mounted {PACKAGED_APP_NAME} executable is not executable"))
+                continue
+            assessments.append(
+                _gatekeeper_readiness_assessment(dmg_path, absolute_dmg, app_path)
+            )
+        finally:
+            if attached:
+                detach = subprocess.run(
+                    ["hdiutil", "detach", str(mount_dir), "-quiet"],
+                    check=False,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                if detach.returncode != 0:
+                    detail = redact_api_error_text((detach.stderr or detach.stdout or "").strip())
+                    message = "release candidate DMG could not be detached after Gatekeeper readiness"
+                    if detail:
+                        message = f"{message}: {detail}"
+                    findings.append(Finding(dmg_path, message))
+            shutil.rmtree(mount_dir, ignore_errors=True)
+    return findings, assessments
+
+
 def _read_json_url(url: str, *, timeout: float) -> dict[str, Any]:
     with urllib.request.urlopen(url, timeout=timeout) as response:
         body = response.read().decode("utf-8")
@@ -2003,6 +2831,24 @@ def _bridge_status_report(dmg_path: Path, status: dict[str, Any]) -> dict[str, o
     build_metadata = status.get("build_metadata")
     return {
         "dmg_path": str(dmg_path),
+        "service": str(status.get("service") or ""),
+        "version": str(status.get("version") or ""),
+        "native_agent_ready": status.get("native_agent_ready")
+        if isinstance(status.get("native_agent_ready"), bool)
+        else None,
+        "build_metadata": build_metadata if isinstance(build_metadata, dict) else {},
+    }
+
+
+def _backend_bridge_status_report(
+    backend_path: Path,
+    bridge_url: str,
+    status: dict[str, Any],
+) -> dict[str, object]:
+    build_metadata = status.get("build_metadata")
+    return {
+        "backend_path": str(backend_path),
+        "bridge_url": bridge_url,
         "service": str(status.get("service") or ""),
         "version": str(status.get("version") or ""),
         "native_agent_ready": status.get("native_agent_ready")
@@ -2079,6 +2925,110 @@ def _wait_for_dmg_app_status(
     if last_error:
         message = f"{message}: {last_error}"
     return Finding(dmg_path, message), None
+
+
+def _wait_for_packaged_backend_status(
+    process: subprocess.Popen[str],
+    *,
+    bridge_url: str,
+    backend_path: Path,
+    timeout_seconds: float,
+) -> tuple[Finding | None, dict[str, Any] | None]:
+    deadline = time.monotonic() + timeout_seconds
+    last_error = ""
+    while time.monotonic() < deadline:
+        exit_code = process.poll()
+        if exit_code is not None:
+            stdout, stderr = _read_process_output(process)
+            detail = _redacted_process_detail(stdout, stderr)
+            message = f"release candidate packaged backend exited before /status was ready: exit_code={exit_code}"
+            if detail:
+                message = f"{message}: {detail}"
+            return Finding(backend_path, message), None
+        try:
+            status = _read_status_json(bridge_url)
+        except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
+            last_error = _redacted_url_error_detail(exc)
+            time.sleep(0.5)
+            continue
+        if status.get("service") == "oha-yachiyo":
+            return None, status
+        last_error = redact_api_error_text(f"unexpected /status service={status.get('service')!r}")
+        time.sleep(0.5)
+    message = f"release candidate packaged backend did not expose /status within {timeout_seconds:.0f}s"
+    if last_error:
+        message = f"{message}: {last_error}"
+    return Finding(backend_path, message), None
+
+
+def verify_packaged_backend_bridge_smoke(
+    root: Path,
+    backend_paths: Sequence[Path],
+    *,
+    timeout_seconds: float = PACKAGED_BACKEND_BRIDGE_SMOKE_TIMEOUT_SECONDS,
+) -> tuple[list[Finding], list[dict[str, object]]]:
+    findings: list[Finding] = []
+    bridge_statuses: list[dict[str, object]] = []
+    if not backend_paths:
+        findings.append(Finding(root, "release candidate packaged backend bridge smoke requested but no backend artifacts were found"))
+        return findings, bridge_statuses
+    if sys.platform != "darwin":
+        findings.append(Finding(root, "release candidate packaged backend bridge smoke requires macOS"))
+        return findings, bridge_statuses
+    for backend_path in backend_paths:
+        absolute_backend = _absolute_artifact_path(root, backend_path)
+        process: subprocess.Popen[str] | None = None
+        if not absolute_backend.is_file():
+            findings.append(Finding(backend_path, "packaged backend binary was not found"))
+            continue
+        if not os.access(absolute_backend, os.X_OK):
+            findings.append(Finding(backend_path, "packaged backend binary is not executable"))
+            continue
+        bridge_url = f"http://127.0.0.1:{_allocate_loopback_port()}"
+        with tempfile.TemporaryDirectory(prefix="oha-yachiyo-rc-backend-") as home_dir:
+            env = {
+                **os.environ,
+                "HOME": home_dir,
+                "OHA_YACHIYO_HOME": str(Path(home_dir) / ".oha-yachiyo"),
+                "OHA_YACHIYO_BRIDGE_URL": bridge_url,
+                "OHA_YACHIYO_BRIDGE_ACCESS_LOG": "0",
+            }
+            try:
+                process = subprocess.Popen(
+                    [str(absolute_backend)],
+                    cwd=str(absolute_backend.parent),
+                    env=env,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    start_new_session=True,
+                )
+            except OSError as exc:
+                detail = redact_api_error_text(str(exc))
+                findings.append(Finding(backend_path, f"packaged backend bridge smoke could not start: {detail}"))
+                continue
+            try:
+                status_finding, status_payload = _wait_for_packaged_backend_status(
+                    process,
+                    bridge_url=bridge_url,
+                    backend_path=backend_path,
+                    timeout_seconds=timeout_seconds,
+                )
+                if status_finding is not None:
+                    findings.append(status_finding)
+                    continue
+                if status_payload is not None:
+                    bridge_statuses.append(
+                        _backend_bridge_status_report(
+                            backend_path,
+                            bridge_url,
+                            status_payload,
+                        )
+                    )
+            finally:
+                if process is not None:
+                    _terminate_process(process)
+    return findings, bridge_statuses
 
 
 def verify_dmg_app_startup(
@@ -2679,6 +3629,8 @@ def verify_release_candidate(
     require_artifacts: bool = False,
     source_only: bool = False,
     check_dmg_mount: bool = False,
+    check_gatekeeper_readiness: bool = False,
+    run_packaged_backend_bridge_smoke: bool = False,
     run_dmg_app_smoke: bool = False,
     run_dmg_screen_smoke: bool = False,
     run_dmg_ui_sampling_smoke: bool = False,
@@ -2733,12 +3685,26 @@ def verify_release_candidate(
             "findings": [],
             "run_requested": check_dmg_mount,
         },
+        "gatekeeper_readiness": {
+            "status": "pending",
+            "dmg_paths": [],
+            "assessments": [],
+            "findings": [],
+            "run_requested": check_gatekeeper_readiness,
+        },
         "dmg_app_smoke": {
             "status": "pending",
             "dmg_paths": [],
             "bridge_statuses": [],
             "findings": [],
             "run_requested": run_dmg_app_smoke,
+        },
+        "packaged_backend_bridge_smoke": {
+            "status": "pending",
+            "backend_paths": [],
+            "bridge_statuses": [],
+            "findings": [],
+            "run_requested": run_packaged_backend_bridge_smoke,
         },
         "dmg_screen_probe": {
             "status": "pending",
@@ -2772,6 +3738,15 @@ def verify_release_candidate(
             "findings": [],
             "run_requested": run_provider_smoke,
         },
+        "native_agent_capability_matrix": {
+            "status": "pending",
+            "ok": False,
+            "capability_count": 0,
+            "status_counts": {"passed": 0, "missing": 0},
+            "missing_capability_ids": [],
+            "capabilities": [],
+            "run_requested": run_provider_smoke,
+        },
         "manual_release_candidate_check_status": manual_check_status,
         "manual_release_candidate_checks": list(MANUAL_RELEASE_CANDIDATE_CHECKS),
         "manual_release_candidate_check_statuses": manual_checks,
@@ -2786,6 +3761,14 @@ def verify_release_candidate(
         report["manual_release_candidate_check_source_revisions"] = (
             manual_check_source_revisions
         )
+    manual_capability_matrix = _native_agent_capability_matrix_from_manual_inputs(
+        root,
+        manual_checks_json,
+        manual_checks_markdown,
+        run_requested=run_provider_smoke,
+    )
+    if manual_capability_matrix is not None:
+        report["native_agent_capability_matrix"] = manual_capability_matrix
 
     source_only_conflicts: list[str] = []
     if source_only:
@@ -2795,6 +3778,10 @@ def verify_release_candidate(
             source_only_conflicts.append("--require-artifacts")
         if check_dmg_mount:
             source_only_conflicts.append("--check-dmg-mount")
+        if check_gatekeeper_readiness:
+            source_only_conflicts.append("--check-gatekeeper-readiness")
+        if run_packaged_backend_bridge_smoke:
+            source_only_conflicts.append("--run-packaged-backend-bridge-smoke")
         if run_dmg_app_smoke:
             source_only_conflicts.append("--run-dmg-app-smoke")
         if run_dmg_screen_smoke:
@@ -2832,6 +3819,13 @@ def verify_release_candidate(
             "findings": [],
             "run_requested": check_dmg_mount,
         }
+        report["gatekeeper_readiness"] = {
+            "status": "skipped",
+            "dmg_paths": [],
+            "assessments": [],
+            "findings": [],
+            "run_requested": check_gatekeeper_readiness,
+        }
         report["dmg_app_smoke"] = {
             "status": "skipped",
             "dmg_paths": [],
@@ -2839,12 +3833,23 @@ def verify_release_candidate(
             "findings": [],
             "run_requested": run_dmg_app_smoke,
         }
+        report["packaged_backend_bridge_smoke"] = {
+            "status": "skipped",
+            "backend_paths": [],
+            "bridge_statuses": [],
+            "findings": [],
+            "run_requested": run_packaged_backend_bridge_smoke,
+        }
         report["provider_smoke"] = {
             "status": "skipped",
             "checks": [],
             "findings": [],
             "run_requested": run_provider_smoke,
         }
+        report["native_agent_capability_matrix"] = _native_agent_capability_matrix_section(
+            report,
+            run_requested=run_provider_smoke,
+        )
         report["dmg_screen_probe"] = {
             "status": "skipped",
             "dmg_paths": [],
@@ -2925,12 +3930,26 @@ def verify_release_candidate(
                 "findings": [],
                 "run_requested": check_dmg_mount,
             }
+            report["gatekeeper_readiness"] = {
+                "status": "skipped",
+                "dmg_paths": [],
+                "assessments": [],
+                "findings": [],
+                "run_requested": check_gatekeeper_readiness,
+            }
             report["dmg_app_smoke"] = {
                 "status": "skipped",
                 "dmg_paths": [],
                 "bridge_statuses": [],
                 "findings": [],
                 "run_requested": run_dmg_app_smoke,
+            }
+            report["packaged_backend_bridge_smoke"] = {
+                "status": "skipped",
+                "backend_paths": [],
+                "bridge_statuses": [],
+                "findings": [],
+                "run_requested": run_packaged_backend_bridge_smoke,
             }
             report["provider_smoke"] = {
                 "status": "skipped",
@@ -3030,6 +4049,40 @@ def verify_release_candidate(
             "run_requested": check_dmg_mount,
         }
 
+    if check_gatekeeper_readiness and not artifact_paths_valid:
+        print("Gatekeeper readiness: skipped because artifact paths failed validation")
+        report["gatekeeper_readiness"] = {
+            "status": "skipped",
+            "dmg_paths": [],
+            "assessments": [],
+            "findings": [],
+            "run_requested": check_gatekeeper_readiness,
+        }
+    elif check_gatekeeper_readiness:
+        dmg_paths = release_candidate_dmg_paths(root, selected_artifacts)
+        gatekeeper_findings, gatekeeper_assessments = verify_dmg_gatekeeper_readiness(
+            root,
+            dmg_paths,
+        )
+        _print_findings("Gatekeeper readiness", gatekeeper_findings)
+        failed = failed or bool(gatekeeper_findings)
+        report["gatekeeper_readiness"] = {
+            "status": "failed" if gatekeeper_findings else "passed",
+            "dmg_paths": [str(path) for path in dmg_paths],
+            "assessments": gatekeeper_assessments,
+            "findings": _finding_report(gatekeeper_findings),
+            "run_requested": check_gatekeeper_readiness,
+        }
+    else:
+        print("Gatekeeper readiness: skipped; pass --check-gatekeeper-readiness to record codesign/spctl diagnostics")
+        report["gatekeeper_readiness"] = {
+            "status": "skipped",
+            "dmg_paths": [],
+            "assessments": [],
+            "findings": [],
+            "run_requested": check_gatekeeper_readiness,
+        }
+
     if run_dmg_app_smoke and not artifact_paths_valid:
         print("DMG app startup smoke: skipped because artifact paths failed validation")
         report["dmg_app_smoke"] = {
@@ -3059,6 +4112,40 @@ def verify_release_candidate(
             "bridge_statuses": [],
             "findings": [],
             "run_requested": run_dmg_app_smoke,
+        }
+
+    if run_packaged_backend_bridge_smoke and not artifact_paths_valid:
+        print("packaged backend bridge smoke: skipped because artifact paths failed validation")
+        report["packaged_backend_bridge_smoke"] = {
+            "status": "skipped",
+            "backend_paths": [],
+            "bridge_statuses": [],
+            "findings": [],
+            "run_requested": run_packaged_backend_bridge_smoke,
+        }
+    elif run_packaged_backend_bridge_smoke:
+        backend_paths = release_candidate_backend_paths(root, selected_artifacts)
+        backend_findings, backend_bridge_statuses = verify_packaged_backend_bridge_smoke(
+            root,
+            backend_paths,
+        )
+        _print_findings("packaged backend bridge smoke", backend_findings)
+        failed = failed or bool(backend_findings)
+        report["packaged_backend_bridge_smoke"] = {
+            "status": "failed" if backend_findings else "passed",
+            "backend_paths": [str(path) for path in backend_paths],
+            "bridge_statuses": backend_bridge_statuses,
+            "findings": _finding_report(backend_findings),
+            "run_requested": run_packaged_backend_bridge_smoke,
+        }
+    else:
+        print("packaged backend bridge smoke: skipped; pass --run-packaged-backend-bridge-smoke to launch the built backend and verify /status")
+        report["packaged_backend_bridge_smoke"] = {
+            "status": "skipped",
+            "backend_paths": [],
+            "bridge_statuses": [],
+            "findings": [],
+            "run_requested": run_packaged_backend_bridge_smoke,
         }
 
     if run_dmg_screen_smoke and not artifact_paths_valid:
@@ -3210,6 +4297,39 @@ def verify_release_candidate(
             "run_requested": run_provider_smoke,
         }
 
+    existing_capability_matrix = report.get("native_agent_capability_matrix")
+    if (
+        not run_provider_smoke
+        and isinstance(existing_capability_matrix, dict)
+        and existing_capability_matrix.get("status") in {"passed", "incomplete"}
+        and isinstance(existing_capability_matrix.get("capabilities"), list)
+        and existing_capability_matrix.get("capabilities")
+    ):
+        capability_matrix = existing_capability_matrix
+        capability_matrix["run_requested"] = run_provider_smoke
+    else:
+        capability_matrix = _native_agent_capability_matrix_section(
+            report,
+            run_requested=run_provider_smoke,
+        )
+    report["native_agent_capability_matrix"] = capability_matrix
+    capability_status = str(capability_matrix.get("status") or "skipped")
+    if capability_status == "passed":
+        print(
+            "Native Agent capability matrix: passed "
+            f"({capability_matrix.get('capability_count', 0)} capabilities)"
+        )
+    elif capability_status == "incomplete":
+        missing_ids = capability_matrix.get("missing_capability_ids")
+        missing_label = (
+            ", ".join(str(item) for item in missing_ids)
+            if isinstance(missing_ids, list)
+            else "unknown"
+        )
+        print(f"Native Agent capability matrix: incomplete\n- missing: {missing_label}")
+    else:
+        print("Native Agent capability matrix: skipped; run --run-provider-smoke with summary-capable smokes to populate it")
+
     selected_smoke_scripts = tuple(smoke_scripts) if smoke_scripts is not None else release_ui_smoke_scripts(root)
     if run_ui_smoke:
         smoke_report = run_electron_ui_smoke_report(
@@ -3336,9 +4456,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Mount every discovered DMG and verify the packaged app inside it.",
     )
     parser.add_argument(
+        "--check-gatekeeper-readiness",
+        action="store_true",
+        help=(
+            "Mount every discovered DMG and record codesign, spctl, and "
+            "quarantine diagnostics for Gatekeeper first-launch signoff."
+        ),
+    )
+    parser.add_argument(
         "--run-dmg-app-smoke",
         action="store_true",
         help="Launch the app inside discovered DMGs and wait for its packaged /status endpoint.",
+    )
+    parser.add_argument(
+        "--run-packaged-backend-bridge-smoke",
+        action="store_true",
+        help="Launch the built packaged backend artifact on a temporary loopback port and verify /status.",
     )
     parser.add_argument(
         "--run-dmg-screen-smoke",
@@ -3358,7 +4491,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--run-provider-smoke",
         action="store_true",
-        help="Run opt-in real provider streaming and tool-call smoke using OHA_YACHIYO_SMOKE_* credentials.",
+        help="Run opt-in real provider streaming, tool-call, native Agent, and advanced Workflow smoke using OHA_YACHIYO_SMOKE_* credentials.",
     )
     parser.add_argument(
         "--report-json",
@@ -3511,6 +4644,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         require_artifacts=args.require_artifacts,
         source_only=args.source_only,
         check_dmg_mount=args.check_dmg_mount,
+        check_gatekeeper_readiness=args.check_gatekeeper_readiness,
+        run_packaged_backend_bridge_smoke=args.run_packaged_backend_bridge_smoke,
         run_dmg_app_smoke=args.run_dmg_app_smoke,
         run_dmg_screen_smoke=args.run_dmg_screen_smoke,
         run_dmg_ui_sampling_smoke=args.run_dmg_ui_sampling_smoke,

@@ -74,7 +74,7 @@ _TOOL_FUNCTION_NAMES = {
 _TOOL_NAME_ALIASES = {value: key for key, value in _TOOL_FUNCTION_NAMES.items()}
 _MAX_AGENT_TOOL_ITERATIONS = 50
 _FINAL_RUN_STATUSES = {"completed", "failed", "cancelled"}
-_WORKFLOW_NODE_TYPES = {"start", "agent", "approval", "artifact"}
+_WORKFLOW_NODE_TYPES = {"start", "agent", "approval", "artifact", "condition", "parallel", "workflow", "loop"}
 _NATIVE_LIBRARY_SOURCE_TYPES = {"native_global", "native_project"}
 _SKILL_SOURCE_TYPES = {*_NATIVE_LIBRARY_SOURCE_TYPES, "npx_skills", "local_zip", "local_dir"}
 _SHELL_METACHARS = {"&&", "||", "&", ";", "|", ">", ">>", "<", "$(", "`", "\n", "\r"}
@@ -102,6 +102,7 @@ class _RunBudgetLimits:
     max_tool_calls: int = 100
     max_terminal_calls: int = 10
     max_run_duration_seconds: int = 600
+    max_workflow_steps: int = 200
     max_model_output_chars: int = 200_000
     max_tool_output_chars: int = 100_000
     max_context_chars: int = 200_000
@@ -146,6 +147,35 @@ class _RunBudget:
         self.tool_calls_used += 1
         if terminal_execution:
             self.terminal_calls_used += 1
+
+
+@dataclass
+class _WorkflowRunBudget:
+    limits: _RunBudgetLimits
+    started_at_epoch: float
+    steps_used: int = 0
+
+    def check_duration(self) -> None:
+        elapsed = max(0.0, time.time() - self.started_at_epoch)
+        if elapsed > max(1, int(self.limits.max_run_duration_seconds)):
+            raise AgentRuntimeError(
+                f"Workflow 已超过 max_run_duration_seconds={self.limits.max_run_duration_seconds} 的执行预算"
+            )
+
+    def check_context(self, context_chars: int) -> None:
+        self.check_duration()
+        if context_chars > max(1, int(self.limits.max_context_chars)):
+            raise AgentRuntimeError(
+                f"Workflow 上下文超过 max_context_chars={self.limits.max_context_chars} 的执行预算"
+            )
+
+    def claim_step(self) -> None:
+        self.check_duration()
+        if self.steps_used >= max(1, int(self.limits.max_workflow_steps)):
+            raise AgentRuntimeError(
+                f"Workflow 已超过 max_workflow_steps={self.limits.max_workflow_steps} 的执行预算"
+            )
+        self.steps_used += 1
 
 
 def cancel_terminal_process_groups() -> None:
@@ -3256,6 +3286,7 @@ class WorkflowApprovalResumeContext:
     artifacts: list[dict[str, Any]]
     start_index: int
     root_group: bool
+    start_node_id: str = ""
 
     @classmethod
     def from_run(
@@ -3295,6 +3326,7 @@ class WorkflowApprovalResumeContext:
             ],
             start_index=start_index,
             root_group=root_group,
+            start_node_id=str(raw_pending.get("workflow_next_node_id") or "").strip(),
         )
 
 
@@ -3328,6 +3360,7 @@ class WorkflowApprovalResumeCoordinator:
             timeline=context.timeline,
             artifacts=context.artifacts,
             start_index=context.start_index,
+            start_node_id=context.start_node_id,
             root_group=context.root_group,
             workflow_node_id=context.approval.workflow_node_id,
             label=context.approval.label,
@@ -3347,6 +3380,7 @@ class WorkflowApprovalPauseProjection:
     criteria: str
     context: str
     next_index: int
+    next_node_id: str
     requested_at: str
 
     @classmethod
@@ -3359,6 +3393,7 @@ class WorkflowApprovalPauseProjection:
         kind: str,
         context: str,
         next_index: int,
+        next_node_id: str = "",
     ) -> "WorkflowApprovalPauseProjection":
         return cls(
             approval_id=f"approval_{uuid4().hex[:12]}",
@@ -3368,6 +3403,7 @@ class WorkflowApprovalPauseProjection:
             criteria=engine._workflow_approval_criteria(node),
             context=context,
             next_index=next_index,
+            next_node_id=next_node_id,
             requested_at=_now(),
         )
 
@@ -3383,6 +3419,7 @@ class WorkflowApprovalPauseProjection:
             "requested_at": self.requested_at,
             "workflow_context": self.context,
             "workflow_next_index": self.next_index,
+            "workflow_next_node_id": self.next_node_id,
             "workflow_node_id": self.node_id,
             "workflow_node_label": self.label,
             "workflow_node_approval_criteria": self.criteria,
@@ -3788,12 +3825,12 @@ class WorkflowChildOutcomeCoordinator:
         child_run: dict[str, Any],
     ) -> tuple[str, dict[str, str]]:
         child_run_id = str(child_run.get("run_id") or "")
-        child_label = str(child_run.get("runnable_name") or child_run.get("runnable_id") or "Agent")
+        child_label = str(child_run.get("runnable_name") or child_run.get("runnable_id") or "Run")
         child_node_info: dict[str, str] = {}
         for event in timeline:
             if (
                 isinstance(event, dict)
-                and event.get("event") == "workflow.node.agent"
+                and event.get("event") in {"workflow.node.agent", "workflow.node.workflow"}
                 and str(event.get("child_run_id") or "") == child_run_id
             ):
                 child_label = str(event.get("detail") or child_label).strip() or child_label
@@ -3804,6 +3841,17 @@ class WorkflowChildOutcomeCoordinator:
                         "workflow_node_kind": str(event.get("workflow_node_kind") or "agent"),
                         "workflow_node_label": str(event.get("workflow_node_label") or child_label),
                     }
+                    for key in (
+                        "workflow_parent_node_id",
+                        "workflow_parent_node_kind",
+                        "workflow_parent_node_label",
+                        "workflow_parallel_branch_entry_node_id",
+                        "workflow_parallel_branch_label",
+                        "workflow_parent_node_context",
+                    ):
+                        value = str(event.get(key) or "")
+                        if value:
+                            child_node_info[key] = value
                 break
         return child_label, child_node_info
 
@@ -3823,12 +3871,14 @@ class WorkflowChildOutcomeCoordinator:
         for event in timeline:
             if not isinstance(event, dict):
                 continue
-            if event.get("event") != "workflow.node.agent":
+            if event.get("event") not in {"workflow.node.agent", "workflow.node.workflow"}:
                 continue
             if str(event.get("child_run_id") or "") != child_run_id:
                 continue
             event["status"] = child_status
             event["result"] = _tool_input_preview(child_result, limit=1800)
+            if str(event.get("workflow_parent_node_id") or ""):
+                event["workflow_node_context"] = child_result
             event["artifact_count"] = len(child_artifacts)
         existing_refs = {
             (
@@ -3851,7 +3901,7 @@ class WorkflowChildOutcomeCoordinator:
 
 
 class WorkflowParentRunLocator:
-    """Locates parent Workflow Runs waiting on a child Agent Run."""
+    """Locates parent Workflow Runs waiting on a child Agent or Workflow Run."""
 
     def __init__(
         self,
@@ -3866,7 +3916,7 @@ class WorkflowParentRunLocator:
         self,
         child_run: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        if child_run.get("kind") != "agent_run" or not child_run.get("run_group_id"):
+        if child_run.get("kind") not in {"agent_run", "workflow_run"} or not child_run.get("run_group_id"):
             return []
         try:
             group = self._get_run_group(str(child_run["run_group_id"]))
@@ -3950,21 +4000,22 @@ class WorkflowResumePlanner:
         workflow_run: dict[str, Any],
         child_run_id: str,
     ) -> int | None:
-        target_agent_ordinal = 0
+        child_node_events = {"workflow.node.agent", "workflow.node.workflow"}
+        target_child_ordinal = 0
         for event in workflow_run.get("timeline") or []:
-            if not isinstance(event, dict) or event.get("event") != "workflow.node.agent":
+            if not isinstance(event, dict) or event.get("event") not in child_node_events:
                 continue
-            target_agent_ordinal += 1
+            target_child_ordinal += 1
             if str(event.get("child_run_id") or "") == child_run_id:
                 break
         else:
             return None
-        seen_agent_nodes = 0
+        seen_child_nodes = 0
         for index, node in enumerate(self._workflow_path(workflow)):
-            if self._node_kind(node) != "agent":
+            if self._node_kind(node) not in {"agent", "workflow"}:
                 continue
-            seen_agent_nodes += 1
-            if seen_agent_nodes == target_agent_ordinal:
+            seen_child_nodes += 1
+            if seen_child_nodes == target_child_ordinal:
                 return index + 1
         return None
 
@@ -3976,15 +4027,343 @@ class WorkflowPathPlanner:
         self._node_kind = node_kind
 
     def workflow_path(self, workflow: dict[str, Any]) -> list[dict[str, Any]]:
-        nodes = {str(node["id"]): node for node in workflow["nodes"]}
-        outgoing = {str(edge["source"]): str(edge["target"]) for edge in workflow["edges"]}
-        start = next(node for node in workflow["nodes"] if self._node_kind(node) == "start")
+        nodes = self.nodes_by_id(workflow)
+        outgoing = self.outgoing_edges(workflow)
+        start = self.start_node(workflow)
         result = [start]
         current = str(start["id"])
+        seen = {current}
         while current in outgoing:
-            current = outgoing[current]
+            current = str(outgoing[current][0].get("target") or "")
+            if not current or current not in nodes or current in seen:
+                break
+            seen.add(current)
             result.append(nodes[current])
         return result
+
+    def workflow_order(self, workflow: dict[str, Any]) -> list[dict[str, Any]]:
+        nodes = self.nodes_by_id(workflow)
+        outgoing = self.outgoing_edges(workflow)
+        start = self.start_node(workflow)
+        result: list[dict[str, Any]] = []
+        seen: set[str] = set()
+
+        def visit(node_id: str) -> None:
+            if not node_id or node_id in seen or node_id not in nodes:
+                return
+            seen.add(node_id)
+            node = nodes[node_id]
+            result.append(node)
+            for edge in outgoing.get(node_id, []):
+                visit(str(edge.get("target") or ""))
+
+        visit(str(start["id"]))
+        return result
+
+    @staticmethod
+    def nodes_by_id(workflow: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        return {str(node["id"]): node for node in workflow["nodes"]}
+
+    @staticmethod
+    def start_node(workflow: dict[str, Any]) -> dict[str, Any]:
+        for node in workflow["nodes"]:
+            data = node.get("data") if isinstance(node.get("data"), dict) else {}
+            data_kind = str(data.get("kind") or data.get("node_type") or "").strip()
+            node_type = str(node.get("type") or "").strip()
+            kind = data_kind if data_kind and node_type in {"", "input", "default", "output"} else node_type or data_kind
+            if str(node.get("id") or "") and kind == "start":
+                return node
+        raise StopIteration("Workflow 缺少 Start 节点")
+
+    @staticmethod
+    def outgoing_edges(workflow: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+        outgoing: dict[str, list[dict[str, Any]]] = {}
+        for index, edge in enumerate(workflow.get("edges") or []):
+            if not isinstance(edge, dict):
+                continue
+            source = str(edge.get("source") or "")
+            if not source:
+                continue
+            outgoing.setdefault(source, []).append({**edge, "_order": index})
+        for edges in outgoing.values():
+            edges.sort(key=WorkflowPathPlanner._edge_sort_key)
+        return outgoing
+
+    @staticmethod
+    def _edge_sort_key(edge: dict[str, Any]) -> tuple[int, int]:
+        branch = WorkflowPathPlanner.edge_branch(edge)
+        branch_order = 0 if branch == "true" else 1 if branch == "false" else 2
+        try:
+            order = int(edge.get("_order") or 0)
+        except (TypeError, ValueError):
+            order = 0
+        return branch_order, order
+
+    @staticmethod
+    def edge_branch(edge: dict[str, Any]) -> str:
+        data = edge.get("data") if isinstance(edge.get("data"), dict) else {}
+        raw = (
+            edge.get("branch")
+            or edge.get("condition")
+            or edge.get("label")
+            or edge.get("sourceHandle")
+            or data.get("branch")
+            or data.get("condition")
+            or data.get("label")
+            or data.get("sourceHandle")
+            or ""
+        )
+        value = str(raw or "").strip().lower()
+        if value in {"true", "yes", "y", "pass", "passed", "match", "matched", "ok", "success"}:
+            return "true"
+        if value in {"false", "no", "n", "fail", "failed", "miss", "unmatched", "else", "fallback"}:
+            return "false"
+        return ""
+
+    @staticmethod
+    def condition_text(node: dict[str, Any]) -> str:
+        data = node.get("data") if isinstance(node.get("data"), dict) else {}
+        for key in ("condition", "contains", "match", "criteria", "expression", "if", "prompt"):
+            value = str(data.get(key) or "").strip()
+            if value:
+                return value
+        return ""
+
+    @staticmethod
+    def condition_operator(node: dict[str, Any]) -> str:
+        data = node.get("data") if isinstance(node.get("data"), dict) else {}
+        operator = str(data.get("operator") or data.get("mode") or "").strip().lower()
+        return operator or "contains"
+
+    @classmethod
+    def condition_matches(cls, node: dict[str, Any], context: str) -> bool:
+        condition = cls.condition_text(node)
+        operator = cls.condition_operator(node)
+        haystack = str(context or "")
+        if not condition:
+            return bool(haystack.strip())
+        if operator in {"equals", "eq", "=="}:
+            return haystack.strip().lower() == condition.lower()
+        if operator in {"not_equals", "ne", "!="}:
+            return haystack.strip().lower() != condition.lower()
+        if operator in {"regex", "re"}:
+            try:
+                return re.search(condition, haystack, flags=re.IGNORECASE | re.MULTILINE) is not None
+            except re.error as exc:
+                raise AgentRuntimeError(f"Condition 节点正则表达式无效：{exc}") from exc
+        matched = condition.lower() in haystack.lower()
+        if operator in {"not_contains", "not", "!"}:
+            return not matched
+        return matched
+
+    def condition_selection(
+        self,
+        workflow: dict[str, Any],
+        node: dict[str, Any],
+        context: str,
+    ) -> dict[str, Any]:
+        node_id = str(node.get("id") or "")
+        outgoing = self.outgoing_edges(workflow).get(node_id, [])
+        matched = self.condition_matches(node, context)
+        desired = "true" if matched else "false"
+        selected_edge = next((edge for edge in outgoing if self.edge_branch(edge) == desired), None)
+        if selected_edge is None and outgoing:
+            selected_edge = outgoing[0 if matched else min(1, len(outgoing) - 1)]
+        target_node_id = str(selected_edge.get("target") or "") if selected_edge else ""
+        return {
+            "condition": self.condition_text(node),
+            "operator": self.condition_operator(node),
+            "matched": matched,
+            "branch": desired,
+            "target_node_id": target_node_id,
+        }
+
+    @staticmethod
+    def loop_max_iterations(node: dict[str, Any]) -> int:
+        data = node.get("data") if isinstance(node.get("data"), dict) else {}
+        raw = (
+            data.get("max_iterations")
+            or data.get("maxIterations")
+            or data.get("iteration_limit")
+            or data.get("iterationLimit")
+            or data.get("limit")
+            or 3
+        )
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            value = 3
+        return max(1, min(value, 25))
+
+    @staticmethod
+    def loop_edge_role(edge: dict[str, Any]) -> str:
+        data = edge.get("data") if isinstance(edge.get("data"), dict) else {}
+        raw = (
+            edge.get("branch")
+            or edge.get("condition")
+            or edge.get("label")
+            or edge.get("sourceHandle")
+            or data.get("branch")
+            or data.get("condition")
+            or data.get("label")
+            or data.get("sourceHandle")
+            or ""
+        )
+        value = str(raw or "").strip().lower()
+        if value in {
+            "true",
+            "yes",
+            "y",
+            "pass",
+            "passed",
+            "match",
+            "matched",
+            "ok",
+            "success",
+            "continue",
+            "loop",
+            "repeat",
+            "again",
+            "next",
+        }:
+            return "continue"
+        if value in {
+            "false",
+            "no",
+            "n",
+            "fail",
+            "failed",
+            "miss",
+            "unmatched",
+            "else",
+            "fallback",
+            "exit",
+            "done",
+            "break",
+            "stop",
+            "finish",
+        }:
+            return "exit"
+        return ""
+
+    def loop_selection(
+        self,
+        workflow: dict[str, Any],
+        node: dict[str, Any],
+        context: str,
+        *,
+        previous_iterations: int = 0,
+    ) -> dict[str, Any]:
+        node_id = str(node.get("id") or "")
+        outgoing = self.outgoing_edges(workflow).get(node_id, [])
+        matched = self.condition_matches(node, context)
+        max_iterations = self.loop_max_iterations(node)
+        previous_iterations = max(0, int(previous_iterations or 0))
+        limit_reached = matched and previous_iterations >= max_iterations
+        selected_role = "continue" if matched and not limit_reached else "exit"
+        selected_edge = next((edge for edge in outgoing if self.loop_edge_role(edge) == selected_role), None)
+        if selected_edge is None:
+            fallback_role = "exit" if selected_role == "continue" else "continue"
+            selected_edge = next((edge for edge in outgoing if self.loop_edge_role(edge) == fallback_role), None)
+        if selected_edge is None and outgoing:
+            selected_edge = outgoing[0 if selected_role == "continue" else min(1, len(outgoing) - 1)]
+        target_node_id = str(selected_edge.get("target") or "") if selected_edge else ""
+        next_iterations = previous_iterations + 1 if selected_role == "continue" else previous_iterations
+        return {
+            "condition": self.condition_text(node),
+            "operator": self.condition_operator(node),
+            "matched": matched,
+            "branch": selected_role,
+            "target_node_id": target_node_id,
+            "previous_iterations": previous_iterations,
+            "iteration": next_iterations,
+            "max_iterations": max_iterations,
+            "limit_reached": limit_reached,
+        }
+
+    def loop_step_limit(self, workflow: dict[str, Any]) -> int:
+        nodes = list(workflow.get("nodes") or [])
+        loop_budget = sum(
+            self.loop_max_iterations(node)
+            for node in nodes
+            if self._node_kind(node) == "loop"
+        )
+        return max(len(nodes) + 1, len(nodes) * (loop_budget + 2) + 5)
+
+    @staticmethod
+    def loop_iterations_from_timeline(timeline: list[dict[str, Any]]) -> dict[str, int]:
+        iterations: dict[str, int] = {}
+        for event in timeline:
+            if not isinstance(event, dict) or event.get("event") != "workflow.node.loop":
+                continue
+            node_id = str(event.get("workflow_node_id") or "")
+            if not node_id:
+                continue
+            try:
+                iteration = int(event.get("workflow_node_loop_iteration") or 0)
+            except (TypeError, ValueError):
+                iteration = 0
+            iterations[node_id] = max(iterations.get(node_id, 0), max(0, iteration))
+        return iterations
+
+    def next_node_id(
+        self,
+        workflow: dict[str, Any],
+        node: dict[str, Any],
+        context: str,
+    ) -> str:
+        if self._node_kind(node) == "condition":
+            return str(self.condition_selection(workflow, node, context).get("target_node_id") or "")
+        edges = self.outgoing_edges(workflow).get(str(node.get("id") or ""), [])
+        if not edges:
+            return ""
+        return str(edges[0].get("target") or "")
+
+    def parallel_plan(self, workflow: dict[str, Any], node: dict[str, Any]) -> dict[str, Any]:
+        nodes = self.nodes_by_id(workflow)
+        outgoing = self.outgoing_edges(workflow)
+        node_id = str(node.get("id") or "")
+        branches: list[dict[str, Any]] = []
+        raw_branch_paths: list[list[str]] = []
+        for edge in outgoing.get(node_id, []):
+            entry_node_id = str(edge.get("target") or "")
+            path: list[str] = []
+            seen: set[str] = set()
+            current = entry_node_id
+            while current and current in nodes and current not in seen:
+                seen.add(current)
+                path.append(current)
+                next_edges = outgoing.get(current, [])
+                if len(next_edges) != 1:
+                    break
+                current = str(next_edges[0].get("target") or "")
+            raw_branch_paths.append(path)
+        common_nodes = set(raw_branch_paths[0]) if raw_branch_paths else set()
+        for path in raw_branch_paths[1:]:
+            common_nodes &= set(path)
+        join_node_id = ""
+        if common_nodes and raw_branch_paths:
+            join_node_id = next((node_id for node_id in raw_branch_paths[0] if node_id in common_nodes), "")
+        for path in raw_branch_paths:
+            branch_nodes = path
+            if join_node_id in branch_nodes:
+                branch_nodes = branch_nodes[:branch_nodes.index(join_node_id)]
+            entry_node_id = branch_nodes[0] if branch_nodes else (path[0] if path else "")
+            branch_label = ""
+            if entry_node_id and entry_node_id in nodes:
+                data = nodes[entry_node_id].get("data") if isinstance(nodes[entry_node_id].get("data"), dict) else {}
+                branch_label = str(data.get("label") or entry_node_id).strip()
+            branches.append(
+                {
+                    "entry_node_id": entry_node_id,
+                    "label": branch_label or entry_node_id or "Branch",
+                    "node_ids": branch_nodes,
+                }
+            )
+        return {
+            "join_node_id": join_node_id,
+            "branches": branches,
+        }
 
     @staticmethod
     def artifact_path(label: str, artifacts: list[dict[str, Any]], configured_path: str = "") -> str:
@@ -4023,6 +4402,15 @@ class WorkflowPathPlanner:
         return ""
 
     @staticmethod
+    def workflow_id(node: dict[str, Any]) -> str:
+        data = node.get("data") if isinstance(node.get("data"), dict) else {}
+        for key in ("workflow_id", "workflowId", "child_workflow_id", "childWorkflowId", "runnable_id", "runnableId"):
+            value = str(data.get(key) or "").strip()
+            if value:
+                return value
+        return ""
+
+    @staticmethod
     def approval_criteria(node: dict[str, Any]) -> str:
         data = node.get("data") if isinstance(node.get("data"), dict) else {}
         for key in ("criteria", "approval_criteria", "instructions", "task", "prompt"):
@@ -4044,7 +4432,7 @@ class WorkflowPathPlanner:
     def path_snapshot(self, workflow: dict[str, Any]) -> list[dict[str, str]]:
         snapshot: list[dict[str, str]] = []
         planned_artifacts: list[dict[str, Any]] = []
-        for node in self.workflow_path(workflow):
+        for node in self.workflow_order(workflow):
             data = node.get("data") if isinstance(node.get("data"), dict) else {}
             kind = self._node_kind(node)
             node_id = str(node.get("id") or "")
@@ -4070,6 +4458,26 @@ class WorkflowPathPlanner:
                 criteria = self.approval_criteria(node)
                 if criteria:
                     item["criteria"] = criteria
+            if kind == "condition":
+                condition = self.condition_text(node)
+                if condition:
+                    item["condition"] = condition
+                    item["operator"] = self.condition_operator(node)
+            if kind == "loop":
+                condition = self.condition_text(node)
+                if condition:
+                    item["condition"] = condition
+                    item["operator"] = self.condition_operator(node)
+                item["max_iterations"] = str(self.loop_max_iterations(node))
+            if kind == "parallel":
+                item["branch_count"] = str(len(self.outgoing_edges(workflow).get(node_id, [])))
+            if kind == "workflow":
+                workflow_id = self.workflow_id(node)
+                if workflow_id:
+                    item["workflow_id"] = workflow_id
+                step_task = self.node_task(node)
+                if step_task:
+                    item["task"] = step_task
             snapshot.append(item)
         return snapshot
 
@@ -4291,6 +4699,7 @@ class WorkflowParentResumeCoordinator:
         append_run_event: Any,
         update_run: Any,
         update_run_group: Any,
+        workflow_next_node_id: Any | None = None,
     ) -> None:
         self._parent_runs_waiting_for_child = parent_runs_waiting_for_child
         self._workflow_run_is_group_root = workflow_run_is_group_root
@@ -4298,6 +4707,7 @@ class WorkflowParentResumeCoordinator:
         self._merge_workflow_child_run_outcome = merge_workflow_child_run_outcome
         self._workflow_for_run_resume = workflow_for_run_resume
         self._workflow_resume_start_index = workflow_resume_start_index
+        self._workflow_next_node_id = workflow_next_node_id or (lambda _workflow, _node_id, _context: "")
         self._continue_workflow_run = continue_workflow_run
         self._timeline = timeline_factory
         self._append_run_event = append_run_event
@@ -4309,8 +4719,22 @@ class WorkflowParentResumeCoordinator:
             self._mark_parent_child_running(workflow_run, child_run)
 
     def resume_after_child_update(self, child_run: dict[str, Any]) -> None:
-        for workflow_run in self._parent_runs_waiting_for_child(child_run):
-            self.resume_parent_after_child_update(workflow_run, child_run)
+        queue = [child_run]
+        seen: set[tuple[str, str, str]] = set()
+        while queue:
+            current_child = queue.pop(0)
+            current_child_id = str(current_child.get("run_id") or "")
+            current_status = str(current_child.get("status") or "")
+            current_result = str(current_child.get("result") or "")
+            key = (current_child_id, current_status, current_result)
+            if not current_child_id or key in seen:
+                continue
+            seen.add(key)
+            for workflow_run in self._parent_runs_waiting_for_child(current_child):
+                result = self.resume_parent_after_child_update(workflow_run, current_child)
+                result_run_id = str(result.get("run_id") or "")
+                if result_run_id and result_run_id != current_child_id:
+                    queue.append(result)
 
     @staticmethod
     def _timeline_has_child_event(timeline: list[dict[str, Any]], event_name: str, child_run_id: str) -> bool:
@@ -4333,9 +4757,11 @@ class WorkflowParentResumeCoordinator:
         projection = WorkflowChildRunProjection.from_child_run(child_run, child_node_info, artifacts)
         if projection is None:
             return
+        node_kind = str(child_node_info.get("workflow_node_kind") or "").strip()
+        event_type = "workflow.node.workflow" if node_kind == "workflow" else "workflow.node.agent"
         self._append_run_event(
             str(workflow_run["run_id"]),
-            "workflow.node.agent",
+            event_type,
             projection.agent_event_payload(),
         )
 
@@ -4509,8 +4935,22 @@ class WorkflowParentResumeCoordinator:
         try:
             workflow = self._workflow_for_run_resume(workflow_run)
             start_index = self._workflow_resume_start_index(workflow, workflow_run, child_run_id)
+            start_node_id = ""
+            resume_context = child_result
+            current_node_id = str(child_node_info.get("workflow_node_id") or "")
+            parent_node_id = str(child_node_info.get("workflow_parent_node_id") or "")
+            parent_node_kind = str(child_node_info.get("workflow_parent_node_kind") or "")
+            if parent_node_id and parent_node_kind == "parallel":
+                start_node_id = parent_node_id
+                resume_context = str(child_node_info.get("workflow_parent_node_context") or child_result)
+            elif current_node_id:
+                start_node_id = str(
+                    self._workflow_next_node_id(workflow, current_node_id, child_result) or ""
+                )
             if start_index is None:
-                return workflow_run
+                if not start_node_id:
+                    return workflow_run
+                start_index = 0
             self._append_child_agent_state_event(
                 workflow_run,
                 child_run,
@@ -4530,14 +4970,19 @@ class WorkflowParentResumeCoordinator:
                 "workflow.run.resumed",
                 resumed_payload,
             )
+            continue_kwargs = {
+                "context": resume_context,
+                "timeline": timeline,
+                "artifacts": artifacts,
+                "start_index": start_index,
+                "root_group": root_group,
+            }
+            if start_node_id:
+                continue_kwargs["start_node_id"] = start_node_id
             return self._continue_workflow_run(
                 workflow_run,
                 workflow,
-                context=child_result,
-                timeline=timeline,
-                artifacts=artifacts,
-                start_index=start_index,
-                root_group=root_group,
+                **continue_kwargs,
             )
         except Exception as exc:
             failure = WorkflowParentResumeFailureProjection.from_error(
@@ -4734,19 +5179,19 @@ class WorkflowCancellationProjectionCoordinator:
         for event in timeline:
             if (
                 isinstance(event, dict)
-                and event.get("event") == "workflow.node.agent"
+                and event.get("event") in {"workflow.node.agent", "workflow.node.workflow"}
                 and str(event.get("child_run_id") or "") == child_run_id
             ):
                 label = (
-                    str(event.get("detail") or event.get("workflow_node_label") or "Agent").strip()
-                    or "Agent"
+                    str(event.get("detail") or event.get("workflow_node_label") or "Run").strip()
+                    or "Run"
                 )
                 return label, {
                     "workflow_node_id": str(event.get("workflow_node_id") or ""),
-                    "workflow_node_kind": str(event.get("workflow_node_kind") or "agent"),
+                    "workflow_node_kind": str(event.get("workflow_node_kind") or ""),
                     "workflow_node_label": str(event.get("workflow_node_label") or label),
                 }
-        return "Agent", {}
+        return "Run", {}
 
     def _cancel_child_run(self, parent_run_id: str, child_run: dict[str, Any]) -> dict[str, Any]:
         child_run_id = str(child_run.get("run_id") or "")
@@ -4782,6 +5227,7 @@ class WorkflowAgentNodeHandoff:
     step_task: str
     child_goal: str
     upstream: str
+    node_info_extra: dict[str, str] | None = None
 
     @classmethod
     def from_node(
@@ -4794,6 +5240,7 @@ class WorkflowAgentNodeHandoff:
         workflow_goal: str,
         context: str,
         has_agent_upstream: bool,
+        node_info_extra: dict[str, str] | None = None,
     ) -> "WorkflowAgentNodeHandoff":
         data = node.get("data") if isinstance(node.get("data"), dict) else {}
         agent = engine._workflow_agent_for_node(node)
@@ -4808,14 +5255,17 @@ class WorkflowAgentNodeHandoff:
             step_task=step_task,
             child_goal=engine._workflow_child_goal(workflow_goal, step_task),
             upstream=context if has_agent_upstream else "",
+            node_info_extra=dict(node_info_extra or {}),
         )
 
     def node_info(self) -> dict[str, str]:
-        return {
+        info = {
             "workflow_node_id": self.node_id,
             "workflow_node_kind": self.node_kind,
             "workflow_node_label": self.node_label,
         }
+        info.update(dict(self.node_info_extra or {}))
+        return info
 
     def agent_event_payload(self, child_run: dict[str, Any], *, artifact_count: int) -> dict[str, Any]:
         return {
@@ -4883,6 +5333,104 @@ class WorkflowAgentNodeExecution:
 
 
 @dataclass(frozen=True)
+class WorkflowSubworkflowNodeExecution:
+    """Executed child Workflow result for a Workflow node."""
+
+    child_workflow: dict[str, Any]
+    workflow_id: str
+    node_id: str
+    node_kind: str
+    node_label: str
+    step_task: str
+    child_goal: str
+    child_run: dict[str, Any]
+    artifact_count: int
+
+    @classmethod
+    def from_node(
+        cls,
+        engine: Any,
+        run: dict[str, Any],
+        node: dict[str, Any],
+        *,
+        label: str,
+        kind: str,
+        workflow_goal: str,
+        run_group_id: str,
+    ) -> "WorkflowSubworkflowNodeExecution":
+        child_workflow = engine._workflow_for_node(node)
+        workflow_id = str(child_workflow.get("workflow_id") or "")
+        step_task = engine._workflow_node_task(node)
+        child_goal = engine._workflow_child_goal(workflow_goal, step_task)
+        child = engine._insert_run(
+            kind="workflow_run",
+            runnable_id=workflow_id,
+            user_goal=child_goal,
+            run_group_id=run_group_id,
+        )
+        child_timeline, started_payload = engine.workflow_run_start_projector.started_projection(
+            workflow_id,
+            child_workflow,
+        )
+        engine.append_run_event(child["run_id"], "workflow.run.started", started_payload)
+        child = engine._continue_workflow_run(
+            child,
+            child_workflow,
+            context=child_goal,
+            timeline=child_timeline,
+            artifacts=[],
+            start_index=0,
+            root_group=False,
+        )
+        return cls(
+            child_workflow=child_workflow,
+            workflow_id=workflow_id,
+            node_id=str(node.get("id") or ""),
+            node_kind=kind,
+            node_label=label,
+            step_task=step_task,
+            child_goal=child_goal,
+            child_run=child,
+            artifact_count=len(engine._workflow_child_artifact_refs(child, label)),
+        )
+
+    @property
+    def status(self) -> str:
+        return str(self.child_run.get("status") or "")
+
+    @property
+    def next_context(self) -> str:
+        return str(self.child_run.get("result") or "")
+
+    def node_info(self) -> dict[str, str]:
+        return {
+            "workflow_node_id": self.node_id,
+            "workflow_node_kind": self.node_kind,
+            "workflow_node_label": self.node_label,
+        }
+
+    def event_payload(self) -> dict[str, Any]:
+        return {
+            **self.node_info(),
+            "workflow_node_task": self.step_task,
+            "child_workflow_id": self.workflow_id,
+            "child_workflow_name": str(self.child_workflow.get("name") or self.workflow_id),
+            "child_run_id": str(self.child_run.get("run_id") or ""),
+            "status": self.status,
+            "result": _tool_input_preview(self.next_context, limit=1800),
+            "artifact_count": self.artifact_count,
+        }
+
+    def status_event_payload(self) -> dict[str, Any]:
+        return {
+            **self.node_info(),
+            "child_workflow_id": self.workflow_id,
+            "child_run_id": str(self.child_run.get("run_id") or ""),
+            "status": self.status,
+        }
+
+
+@dataclass(frozen=True)
 class WorkflowArtifactNodeWrite:
     """Artifact write result for a Workflow artifact node."""
 
@@ -4890,6 +5438,7 @@ class WorkflowArtifactNodeWrite:
     node_kind: str
     node_label: str
     artifact: dict[str, Any]
+    node_info_extra: dict[str, str] | None = None
 
     @classmethod
     def from_node(
@@ -4902,6 +5451,7 @@ class WorkflowArtifactNodeWrite:
         kind: str,
         context: str,
         artifacts: list[dict[str, Any]],
+        node_info_extra: dict[str, str] | None = None,
     ) -> "WorkflowArtifactNodeWrite":
         data = node.get("data") if isinstance(node.get("data"), dict) else {}
         broker = ToolBroker(
@@ -4918,6 +5468,7 @@ class WorkflowArtifactNodeWrite:
             node_kind=kind,
             node_label=label,
             artifact=broker.artifact_write(artifact_path, context),
+            node_info_extra=dict(node_info_extra or {}),
         )
 
     def artifact_record(self) -> dict[str, Any]:
@@ -4935,6 +5486,7 @@ class WorkflowArtifactNodeWrite:
             "workflow_node_label": self.node_label,
             "status": "completed",
             "artifact": self.artifact,
+            **dict(self.node_info_extra or {}),
         }
 
     def timeline_event(self, timeline_factory: Any) -> dict[str, Any]:
@@ -4981,6 +5533,170 @@ class WorkflowStartNodeProjection:
             self.node_label,
             workflow_node_id=self.node_id,
             status="completed",
+        )
+
+
+@dataclass(frozen=True)
+class WorkflowConditionNodeProjection:
+    """Replay payload for a completed Workflow condition node."""
+
+    node_id: str
+    node_kind: str
+    node_label: str
+    condition: str
+    operator: str
+    matched: bool
+    branch: str
+    target_node_id: str
+
+    @classmethod
+    def from_node(
+        cls,
+        engine: Any,
+        workflow: dict[str, Any],
+        node: dict[str, Any],
+        *,
+        label: str,
+        kind: str,
+        context: str,
+    ) -> "WorkflowConditionNodeProjection":
+        selection = engine._workflow_condition_selection(workflow, node, context)
+        return cls(
+            node_id=str(node.get("id") or ""),
+            node_kind=kind,
+            node_label=label,
+            condition=str(selection.get("condition") or ""),
+            operator=str(selection.get("operator") or "contains"),
+            matched=bool(selection.get("matched")),
+            branch=str(selection.get("branch") or ""),
+            target_node_id=str(selection.get("target_node_id") or ""),
+        )
+
+    def event_payload(self) -> dict[str, Any]:
+        return {
+            "workflow_node_id": self.node_id,
+            "workflow_node_kind": self.node_kind,
+            "workflow_node_label": self.node_label,
+            "workflow_node_condition": self.condition,
+            "workflow_node_condition_operator": self.operator,
+            "workflow_node_condition_matched": self.matched,
+            "workflow_node_selected_branch": self.branch,
+            "workflow_node_selected_target": self.target_node_id,
+            "status": "completed",
+        }
+
+    def timeline_event(self, timeline_factory: Any) -> dict[str, Any]:
+        return timeline_factory(
+            "workflow.node.condition",
+            self.node_label,
+            **self.event_payload(),
+        )
+
+
+@dataclass(frozen=True)
+class WorkflowParallelNodeProjection:
+    """Replay payload for a completed Workflow parallel fan-out node."""
+
+    node_id: str
+    node_kind: str
+    node_label: str
+    branch_count: int
+    completed_count: int
+    join_node_id: str
+    branch_results: list[dict[str, str]]
+
+    def event_payload(self) -> dict[str, Any]:
+        return {
+            "workflow_node_id": self.node_id,
+            "workflow_node_kind": self.node_kind,
+            "workflow_node_label": self.node_label,
+            "workflow_node_branch_count": self.branch_count,
+            "workflow_node_completed_branch_count": self.completed_count,
+            "workflow_node_join_target": self.join_node_id,
+            "workflow_node_branch_results": self.branch_results,
+            "status": "completed",
+        }
+
+    def timeline_event(self, timeline_factory: Any) -> dict[str, Any]:
+        return timeline_factory(
+            "workflow.node.parallel",
+            self.node_label,
+            **self.event_payload(),
+        )
+
+
+@dataclass(frozen=True)
+class WorkflowLoopNodeProjection:
+    """Replay payload for a completed Workflow loop routing decision."""
+
+    node_id: str
+    node_kind: str
+    node_label: str
+    condition: str
+    operator: str
+    matched: bool
+    branch: str
+    target_node_id: str
+    previous_iterations: int
+    iteration: int
+    max_iterations: int
+    limit_reached: bool
+
+    @classmethod
+    def from_node(
+        cls,
+        engine: Any,
+        workflow: dict[str, Any],
+        node: dict[str, Any],
+        *,
+        label: str,
+        kind: str,
+        context: str,
+        previous_iterations: int,
+    ) -> "WorkflowLoopNodeProjection":
+        selection = engine._workflow_loop_selection(
+            workflow,
+            node,
+            context,
+            previous_iterations=previous_iterations,
+        )
+        return cls(
+            node_id=str(node.get("id") or ""),
+            node_kind=kind,
+            node_label=label,
+            condition=str(selection.get("condition") or ""),
+            operator=str(selection.get("operator") or "contains"),
+            matched=bool(selection.get("matched")),
+            branch=str(selection.get("branch") or ""),
+            target_node_id=str(selection.get("target_node_id") or ""),
+            previous_iterations=int(selection.get("previous_iterations") or 0),
+            iteration=int(selection.get("iteration") or 0),
+            max_iterations=int(selection.get("max_iterations") or 1),
+            limit_reached=bool(selection.get("limit_reached")),
+        )
+
+    def event_payload(self) -> dict[str, Any]:
+        return {
+            "workflow_node_id": self.node_id,
+            "workflow_node_kind": self.node_kind,
+            "workflow_node_label": self.node_label,
+            "workflow_node_condition": self.condition,
+            "workflow_node_condition_operator": self.operator,
+            "workflow_node_condition_matched": self.matched,
+            "workflow_node_selected_branch": self.branch,
+            "workflow_node_selected_target": self.target_node_id,
+            "workflow_node_loop_previous_iterations": self.previous_iterations,
+            "workflow_node_loop_iteration": self.iteration,
+            "workflow_node_loop_max_iterations": self.max_iterations,
+            "workflow_node_loop_limit_reached": self.limit_reached,
+            "status": "completed",
+        }
+
+    def timeline_event(self, timeline_factory: Any) -> dict[str, Any]:
+        return timeline_factory(
+            "workflow.node.loop",
+            self.node_label,
+            **self.event_payload(),
         )
 
 
@@ -5059,6 +5775,35 @@ class WorkflowContinuationCoordinator:
     def __init__(self, engine: Any) -> None:
         self._engine = engine
 
+    @staticmethod
+    def _workflow_steps_used(timeline: list[dict[str, Any]]) -> int:
+        return sum(
+            1
+            for event in timeline
+            if isinstance(event, dict)
+            and str(event.get("event") or "").startswith("workflow.node.")
+            and str(event.get("event") or "") not in {
+                "workflow.node.approval_rejected",
+                "workflow.node.approval_timeout",
+            }
+        )
+
+    @staticmethod
+    def _workflow_context_chars(context: str) -> int:
+        return _json_chars(_redact_json_value({"context": context}))
+
+    def _workflow_budget(
+        self,
+        run: dict[str, Any],
+        timeline: list[dict[str, Any]],
+    ) -> _WorkflowRunBudget:
+        limits = getattr(self._engine, "runtime_limits", _RunBudgetLimits())
+        return _WorkflowRunBudget(
+            limits=limits,
+            started_at_epoch=_iso_epoch(run.get("created_at")),
+            steps_used=self._workflow_steps_used(timeline),
+        )
+
     def continue_run(
         self,
         run: dict[str, Any],
@@ -5069,6 +5814,7 @@ class WorkflowContinuationCoordinator:
         artifacts: list[dict[str, Any]],
         start_index: int,
         root_group: bool,
+        start_node_id: str = "",
     ) -> dict[str, Any]:
         engine = self._engine
         run_group_id = str(run.get("run_group_id") or "")
@@ -5078,8 +5824,51 @@ class WorkflowContinuationCoordinator:
             path = engine._workflow_path(workflow)
             if start_index < 0 or start_index > len(path):
                 raise AgentRuntimeError("Workflow Run 待审批恢复位置无效")
-            has_agent_upstream = start_index > 0
-            for index, node in enumerate(path[start_index:], start=start_index):
+            try:
+                nodes_by_id = engine._workflow_nodes_by_id(workflow)
+            except AttributeError:
+                nodes_by_id = {str(node.get("id") or index): node for index, node in enumerate(path)}
+
+            def next_node_id_for(current_node: dict[str, Any], current_context: str) -> str:
+                try:
+                    return str(engine._workflow_next_node_id(workflow, current_node, current_context) or "")
+                except AttributeError:
+                    try:
+                        current_index = path.index(current_node)
+                    except ValueError:
+                        return ""
+                    if current_index + 1 >= len(path):
+                        return ""
+                    return str(path[current_index + 1].get("id") or "")
+
+            if start_node_id:
+                node = nodes_by_id.get(start_node_id)
+                if node is None:
+                    raise AgentRuntimeError("Workflow Run 待审批恢复节点不存在")
+                current_node_id = start_node_id
+                has_agent_upstream = True
+            elif start_index < len(path):
+                node = path[start_index]
+                current_node_id = str(node.get("id") or "")
+                has_agent_upstream = start_index > 0
+            else:
+                node = None
+                current_node_id = ""
+                has_agent_upstream = start_index > 0
+            try:
+                loop_iterations = engine._workflow_loop_iterations_from_timeline(timeline)
+            except AttributeError:
+                loop_iterations = {}
+            try:
+                max_step_count = engine._workflow_loop_step_limit(workflow)
+            except AttributeError:
+                max_step_count = len(nodes_by_id) + 1
+            budget = self._workflow_budget(run, timeline)
+            step_count = 0
+            while node is not None:
+                step_count += 1
+                if step_count > max_step_count:
+                    raise AgentRuntimeError("Workflow 执行步骤超过 Loop 上限")
                 kind = engine._node_kind(node)
                 label = str((node.get("data") or {}).get("label") or node.get("id"))
                 current_node_info = {
@@ -5087,6 +5876,8 @@ class WorkflowContinuationCoordinator:
                     "workflow_node_kind": kind,
                     "workflow_node_label": label,
                 }
+                budget.check_context(self._workflow_context_chars(context))
+                budget.claim_step()
                 if kind == "start":
                     projection = WorkflowStartNodeProjection.from_node(node, label=label, kind=kind)
                     timeline.append(projection.timeline_event(engine._timeline))
@@ -5095,6 +5886,9 @@ class WorkflowContinuationCoordinator:
                         "workflow.node.start",
                         projection.event_payload(),
                     )
+                    next_id = next_node_id_for(node, context)
+                    node = nodes_by_id.get(next_id) if next_id else None
+                    current_node_id = next_id
                     continue
                 if kind == "agent":
                     result = self._run_agent_node(
@@ -5114,8 +5908,84 @@ class WorkflowContinuationCoordinator:
                         return result["run"]
                     context = str(result.get("context") or "")
                     has_agent_upstream = True
+                    next_id = next_node_id_for(node, context)
+                    node = nodes_by_id.get(next_id) if next_id else None
+                    current_node_id = next_id
+                    continue
+                if kind == "condition":
+                    next_id = self._run_condition_node(
+                        run,
+                        workflow,
+                        node,
+                        label=label,
+                        kind=kind,
+                        context=context,
+                        timeline=timeline,
+                    )
+                    node = nodes_by_id.get(next_id) if next_id else None
+                    current_node_id = next_id
+                    continue
+                if kind == "loop":
+                    result = self._run_loop_node(
+                        run,
+                        workflow,
+                        node,
+                        label=label,
+                        kind=kind,
+                        context=context,
+                        previous_iterations=loop_iterations.get(current_node_id, 0),
+                        timeline=timeline,
+                    )
+                    loop_iterations[current_node_id] = int(result.get("iteration") or 0)
+                    next_id = str(result.get("next_node_id") or "")
+                    node = nodes_by_id.get(next_id) if next_id else None
+                    current_node_id = next_id
+                    continue
+                if kind == "parallel":
+                    result = self._run_parallel_node(
+                        run,
+                        workflow,
+                        node,
+                        label=label,
+                        kind=kind,
+                        workflow_goal=workflow_goal,
+                        context=context,
+                        has_agent_upstream=has_agent_upstream,
+                        run_group_id=run_group_id,
+                        timeline=timeline,
+                        artifacts=artifacts,
+                        root_group=root_group,
+                    )
+                    if result.get("done"):
+                        return result["run"]
+                    context = str(result.get("context") or "")
+                    has_agent_upstream = True
+                    next_id = str(result.get("next_node_id") or "")
+                    node = nodes_by_id.get(next_id) if next_id else None
+                    current_node_id = next_id
+                    continue
+                if kind == "workflow":
+                    result = self._run_workflow_node(
+                        run,
+                        node,
+                        label=label,
+                        kind=kind,
+                        workflow_goal=workflow_goal,
+                        run_group_id=run_group_id,
+                        timeline=timeline,
+                        artifacts=artifacts,
+                        root_group=root_group,
+                    )
+                    if result.get("done"):
+                        return result["run"]
+                    context = str(result.get("context") or "")
+                    has_agent_upstream = True
+                    next_id = next_node_id_for(node, context)
+                    node = nodes_by_id.get(next_id) if next_id else None
+                    current_node_id = next_id
                     continue
                 if kind == "approval":
+                    next_id = next_node_id_for(node, context)
                     return self._pause_for_approval_node(
                         run,
                         node,
@@ -5126,7 +5996,8 @@ class WorkflowContinuationCoordinator:
                         timeline=timeline,
                         artifacts=artifacts,
                         root_group=root_group,
-                        node_index=index,
+                        node_index=self._path_index(path, str(node.get("id") or "")),
+                        next_node_id=next_id,
                     )
                 if kind == "artifact":
                     self._write_artifact_node(
@@ -5138,6 +6009,9 @@ class WorkflowContinuationCoordinator:
                         artifacts=artifacts,
                         timeline=timeline,
                     )
+                    next_id = next_node_id_for(node, context)
+                    node = nodes_by_id.get(next_id) if next_id else None
+                    current_node_id = next_id
                     continue
                 raise AgentRuntimeError(f"未知 Workflow 节点类型：{kind}")
             completion = WorkflowRunCompletionProjection(context)
@@ -5168,6 +6042,13 @@ class WorkflowContinuationCoordinator:
                 result = engine.get_run(result["run_id"])
             return result
 
+    @staticmethod
+    def _path_index(path: list[dict[str, Any]], node_id: str) -> int:
+        for index, node in enumerate(path):
+            if str(node.get("id") or "") == node_id:
+                return index
+        return len(path)
+
     def resume_after_approval_node(
         self,
         run: dict[str, Any],
@@ -5182,6 +6063,7 @@ class WorkflowContinuationCoordinator:
         label: str,
         criteria: str,
         input_preview: dict[str, Any],
+        start_node_id: str = "",
     ) -> dict[str, Any]:
         engine = self._engine
         run_id = str(run["run_id"])
@@ -5209,6 +6091,7 @@ class WorkflowContinuationCoordinator:
             timeline=timeline,
             artifacts=artifacts,
             start_index=start_index,
+            start_node_id=start_node_id,
             root_group=root_group,
         )
 
@@ -5244,6 +6127,66 @@ class WorkflowContinuationCoordinator:
             )
         return failed
 
+    @staticmethod
+    def _parallel_node_resume_context(
+        timeline: list[dict[str, Any]],
+        *,
+        parallel_node_id: str,
+        fallback: str,
+    ) -> str:
+        if not parallel_node_id:
+            return fallback
+        for event in reversed(timeline):
+            if not isinstance(event, dict):
+                continue
+            if str(event.get("workflow_parent_node_id") or "") != parallel_node_id:
+                continue
+            context = str(event.get("workflow_parent_node_context") or "")
+            if context:
+                return context
+        return fallback
+
+    @staticmethod
+    def _parallel_completed_agent_context(
+        timeline: list[dict[str, Any]],
+        *,
+        parallel_node_id: str,
+        branch_node_id: str,
+    ) -> str | None:
+        if not parallel_node_id or not branch_node_id:
+            return None
+        for event in reversed(timeline):
+            if not isinstance(event, dict):
+                continue
+            if event.get("event") != "workflow.node.agent":
+                continue
+            if str(event.get("workflow_parent_node_id") or "") != parallel_node_id:
+                continue
+            if str(event.get("workflow_node_id") or "") != branch_node_id:
+                continue
+            if str(event.get("status") or "") != "completed":
+                continue
+            return str(event.get("workflow_node_context") or event.get("result") or "")
+        return None
+
+    @staticmethod
+    def _parallel_completed_artifact_exists(
+        timeline: list[dict[str, Any]],
+        *,
+        parallel_node_id: str,
+        branch_node_id: str,
+    ) -> bool:
+        if not parallel_node_id or not branch_node_id:
+            return False
+        return any(
+            isinstance(event, dict)
+            and event.get("event") == "workflow.node.artifact"
+            and str(event.get("workflow_parent_node_id") or "") == parallel_node_id
+            and str(event.get("workflow_node_id") or "") == branch_node_id
+            and str(event.get("status") or "") == "completed"
+            for event in timeline
+        )
+
     def _run_agent_node(
         self,
         run: dict[str, Any],
@@ -5258,6 +6201,7 @@ class WorkflowContinuationCoordinator:
         timeline: list[dict[str, Any]],
         artifacts: list[dict[str, Any]],
         root_group: bool,
+        node_info_extra: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         engine = self._engine
         handoff = WorkflowAgentNodeHandoff.from_node(
@@ -5268,6 +6212,7 @@ class WorkflowContinuationCoordinator:
             workflow_goal=workflow_goal,
             context=context,
             has_agent_upstream=has_agent_upstream,
+            node_info_extra=node_info_extra,
         )
         execution = WorkflowAgentNodeExecution.from_handoff(
             engine,
@@ -5276,6 +6221,8 @@ class WorkflowContinuationCoordinator:
         )
         next_context = execution.next_context
         agent_payload = execution.agent_event_payload()
+        if node_info_extra and str(node_info_extra.get("workflow_parent_node_id") or ""):
+            agent_payload["workflow_node_context"] = next_context
         timeline.append(
             engine._timeline(
                 "workflow.node.agent",
@@ -5345,6 +6292,86 @@ class WorkflowContinuationCoordinator:
             return {"done": True, "run": result}
         return {"done": False, "context": next_context}
 
+    def _run_workflow_node(
+        self,
+        run: dict[str, Any],
+        node: dict[str, Any],
+        *,
+        label: str,
+        kind: str,
+        workflow_goal: str,
+        run_group_id: str,
+        timeline: list[dict[str, Any]],
+        artifacts: list[dict[str, Any]],
+        root_group: bool,
+    ) -> dict[str, Any]:
+        engine = self._engine
+        execution = WorkflowSubworkflowNodeExecution.from_node(
+            engine,
+            run,
+            node,
+            label=label,
+            kind=kind,
+            workflow_goal=workflow_goal,
+            run_group_id=run_group_id,
+        )
+        next_context = execution.next_context
+        payload = execution.event_payload()
+        timeline.append(engine._timeline("workflow.node.workflow", label, **payload))
+        engine.append_run_event(str(run["run_id"]), "workflow.node.workflow", payload)
+        engine._merge_workflow_child_run_outcome(timeline, artifacts, execution.child_run, label)
+        if execution.status == "approval_required":
+            event_payload = execution.status_event_payload()
+            timeline.append(
+                engine._timeline(
+                    "workflow.run.approval_required",
+                    label,
+                    **event_payload,
+                )
+            )
+            engine.append_run_event(str(run["run_id"]), "workflow.run.approval_required", event_payload)
+            result = engine._update_run(
+                str(run["run_id"]),
+                status="approval_required",
+                result=next_context,
+                timeline=timeline,
+                artifacts=artifacts,
+            )
+            if root_group:
+                engine._update_run_group(run_group_id, status="approval_required", summary=next_context)
+                result = engine.get_run(result["run_id"])
+            return {"done": True, "run": result}
+        if execution.status != "completed":
+            status = "cancelled" if execution.status == "cancelled" else "failed"
+            detail = f"{label}: {next_context or execution.status}"
+            timeline.append(
+                engine._timeline(
+                    f"workflow.run.{status}",
+                    detail,
+                    **execution.status_event_payload(),
+                )
+            )
+            engine.append_run_event(
+                str(run["run_id"]),
+                f"workflow.run.{status}",
+                {
+                    **execution.status_event_payload(),
+                    "result": _tool_input_preview(next_context or execution.status, limit=1800),
+                },
+            )
+            result = engine._update_run(
+                str(run["run_id"]),
+                status=status,
+                result=next_context,
+                timeline=timeline,
+                artifacts=artifacts,
+            )
+            if root_group:
+                engine._update_run_group(run_group_id, status=status, summary=next_context)
+                result = engine.get_run(result["run_id"])
+            return {"done": True, "run": result}
+        return {"done": False, "context": next_context}
+
     def _pause_for_approval_node(
         self,
         run: dict[str, Any],
@@ -5358,6 +6385,7 @@ class WorkflowContinuationCoordinator:
         artifacts: list[dict[str, Any]],
         root_group: bool,
         node_index: int,
+        next_node_id: str,
     ) -> dict[str, Any]:
         engine = self._engine
         projection = WorkflowApprovalPauseProjection.from_node(
@@ -5367,6 +6395,7 @@ class WorkflowContinuationCoordinator:
             kind=kind,
             context=context,
             next_index=node_index + 1,
+            next_node_id=next_node_id,
         )
         timeline.append(projection.timeline_event(engine._timeline))
         engine.append_run_event(
@@ -5387,6 +6416,184 @@ class WorkflowContinuationCoordinator:
             result = engine.get_run(result["run_id"])
         return result
 
+    def _run_parallel_node(
+        self,
+        run: dict[str, Any],
+        workflow: dict[str, Any],
+        node: dict[str, Any],
+        *,
+        label: str,
+        kind: str,
+        workflow_goal: str,
+        context: str,
+        has_agent_upstream: bool,
+        run_group_id: str,
+        timeline: list[dict[str, Any]],
+        artifacts: list[dict[str, Any]],
+        root_group: bool,
+    ) -> dict[str, Any]:
+        engine = self._engine
+        plan = engine._workflow_parallel_plan(workflow, node)
+        nodes_by_id = engine._workflow_nodes_by_id(workflow)
+        parallel_node_id = str(node.get("id") or "")
+        parallel_context = self._parallel_node_resume_context(
+            timeline,
+            parallel_node_id=parallel_node_id,
+            fallback=context,
+        )
+        branch_results: list[dict[str, str]] = []
+        for branch in plan.get("branches") or []:
+            branch_context = parallel_context
+            branch_entry_node_id = str(branch.get("entry_node_id") or "")
+            branch_label = str(branch.get("label") or branch.get("entry_node_id") or "Branch")
+            for branch_node_id in branch.get("node_ids") or []:
+                branch_node_id_text = str(branch_node_id)
+                branch_node = nodes_by_id.get(branch_node_id_text)
+                if branch_node is None:
+                    raise AgentRuntimeError(f"Parallel 分支引用了不存在的节点：{branch_node_id}")
+                branch_kind = engine._node_kind(branch_node)
+                branch_node_label = str((branch_node.get("data") or {}).get("label") or branch_node.get("id"))
+                node_info_extra = {
+                    "workflow_parent_node_id": parallel_node_id,
+                    "workflow_parent_node_kind": kind,
+                    "workflow_parent_node_label": label,
+                    "workflow_parallel_branch_entry_node_id": branch_entry_node_id,
+                    "workflow_parallel_branch_label": branch_label,
+                    "workflow_parent_node_context": parallel_context,
+                }
+                if branch_kind == "agent":
+                    completed_context = self._parallel_completed_agent_context(
+                        timeline,
+                        parallel_node_id=parallel_node_id,
+                        branch_node_id=branch_node_id_text,
+                    )
+                    if completed_context is not None:
+                        branch_context = completed_context
+                        continue
+                    result = self._run_agent_node(
+                        run,
+                        branch_node,
+                        label=branch_node_label,
+                        kind=branch_kind,
+                        workflow_goal=workflow_goal,
+                        context=branch_context,
+                        has_agent_upstream=has_agent_upstream,
+                        run_group_id=run_group_id,
+                        timeline=timeline,
+                        artifacts=artifacts,
+                        root_group=root_group,
+                        node_info_extra=node_info_extra,
+                    )
+                    if result.get("done"):
+                        return result
+                    branch_context = str(result.get("context") or "")
+                    continue
+                if branch_kind == "artifact":
+                    if self._parallel_completed_artifact_exists(
+                        timeline,
+                        parallel_node_id=parallel_node_id,
+                        branch_node_id=branch_node_id_text,
+                    ):
+                        continue
+                    self._write_artifact_node(
+                        run,
+                        branch_node,
+                        label=branch_node_label,
+                        kind=branch_kind,
+                        context=branch_context,
+                        artifacts=artifacts,
+                        timeline=timeline,
+                        node_info_extra=node_info_extra,
+                    )
+                    continue
+                raise AgentRuntimeError(
+                    f"Parallel 分支暂不支持 {branch_kind or 'unknown'} 节点：{branch_node_label}"
+                )
+            branch_results.append(
+                {
+                    "entry_node_id": str(branch.get("entry_node_id") or ""),
+                    "label": branch_label,
+                    "result": _tool_input_preview(branch_context, limit=1800),
+                }
+            )
+        aggregate_context = "\n".join(
+            f"- {item['label']}: {item['result']}"
+            for item in branch_results
+        ).strip()
+        if aggregate_context:
+            aggregate_context = f"Parallel {label} results:\n{aggregate_context}"
+        else:
+            aggregate_context = context
+        projection = WorkflowParallelNodeProjection(
+            node_id=str(node.get("id") or ""),
+            node_kind=kind,
+            node_label=label,
+            branch_count=len(plan.get("branches") or []),
+            completed_count=len(branch_results),
+            join_node_id=str(plan.get("join_node_id") or ""),
+            branch_results=branch_results,
+        )
+        timeline.append(projection.timeline_event(engine._timeline))
+        engine.append_run_event(str(run["run_id"]), "workflow.node.parallel", projection.event_payload())
+        return {
+            "done": False,
+            "context": aggregate_context,
+            "next_node_id": str(plan.get("join_node_id") or ""),
+        }
+
+    def _run_condition_node(
+        self,
+        run: dict[str, Any],
+        workflow: dict[str, Any],
+        node: dict[str, Any],
+        *,
+        label: str,
+        kind: str,
+        context: str,
+        timeline: list[dict[str, Any]],
+    ) -> str:
+        engine = self._engine
+        projection = WorkflowConditionNodeProjection.from_node(
+            engine,
+            workflow,
+            node,
+            label=label,
+            kind=kind,
+            context=context,
+        )
+        timeline.append(projection.timeline_event(engine._timeline))
+        engine.append_run_event(str(run["run_id"]), "workflow.node.condition", projection.event_payload())
+        return projection.target_node_id
+
+    def _run_loop_node(
+        self,
+        run: dict[str, Any],
+        workflow: dict[str, Any],
+        node: dict[str, Any],
+        *,
+        label: str,
+        kind: str,
+        context: str,
+        previous_iterations: int,
+        timeline: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        engine = self._engine
+        projection = WorkflowLoopNodeProjection.from_node(
+            engine,
+            workflow,
+            node,
+            label=label,
+            kind=kind,
+            context=context,
+            previous_iterations=previous_iterations,
+        )
+        timeline.append(projection.timeline_event(engine._timeline))
+        engine.append_run_event(str(run["run_id"]), "workflow.node.loop", projection.event_payload())
+        return {
+            "next_node_id": projection.target_node_id,
+            "iteration": projection.iteration,
+        }
+
     def _write_artifact_node(
         self,
         run: dict[str, Any],
@@ -5397,6 +6604,7 @@ class WorkflowContinuationCoordinator:
         context: str,
         artifacts: list[dict[str, Any]],
         timeline: list[dict[str, Any]],
+        node_info_extra: dict[str, str] | None = None,
     ) -> None:
         engine = self._engine
         write = WorkflowArtifactNodeWrite.from_node(
@@ -5407,6 +6615,7 @@ class WorkflowContinuationCoordinator:
             kind=kind,
             context=context,
             artifacts=artifacts,
+            node_info_extra=node_info_extra,
         )
         artifacts.append(write.artifact_record())
         timeline.append(write.timeline_event(engine._timeline))
@@ -5553,6 +6762,9 @@ class NativeRunEngine:
             workflow_for_run_resume=lambda workflow_run: self._workflow_for_run_resume(workflow_run),
             workflow_resume_start_index=lambda workflow, workflow_run, child_run_id: (
                 self._workflow_resume_start_index(workflow, workflow_run, child_run_id)
+            ),
+            workflow_next_node_id=lambda workflow, node_id, context: (
+                self._workflow_next_node_id(workflow, node_id, context)
             ),
             continue_workflow_run=lambda run, workflow, **kwargs: self.workflow_continuation.continue_run(run, workflow, **kwargs),
             timeline_factory=lambda event, detail="", **extra: self._timeline(event, detail, **extra),
@@ -7877,10 +9089,11 @@ class NativeRunEngine:
         self._ensure_global_name_available(name)
         nodes = payload.get("nodes") or []
         edges = payload.get("edges") or []
+        workflow_id = str(payload.get("workflow_id") or f"workflow_{_slug(name, 'workflow')}_{uuid4().hex[:8]}")
         self.validate_workflow(nodes, edges)
         self._validate_workflow_agent_nodes(nodes)
+        self._validate_workflow_subworkflow_nodes(nodes, parent_workflow_id=workflow_id)
         now = _now()
-        workflow_id = str(payload.get("workflow_id") or f"workflow_{_slug(name, 'workflow')}_{uuid4().hex[:8]}")
         self._conn.execute(
             """
             INSERT INTO workflows (
@@ -7915,6 +9128,10 @@ class NativeRunEngine:
         next_workflow = {**current, **next_payload}
         self.validate_workflow(next_workflow.get("nodes") or [], next_workflow.get("edges") or [])
         self._validate_workflow_agent_nodes(next_workflow.get("nodes") or [])
+        self._validate_workflow_subworkflow_nodes(
+            next_workflow.get("nodes") or [],
+            parent_workflow_id=workflow_id,
+        )
         self._conn.execute(
             """
             UPDATE workflows
@@ -7972,6 +9189,18 @@ class NativeRunEngine:
                         _safe_rel_path(artifact_path)
                     except AgentRuntimeError as exc:
                         raise AgentRuntimeError(f"Artifact 节点 {label} 的产物路径无效：{exc}") from exc
+            if kind == "condition":
+                data = node.get("data") or {}
+                condition = WorkflowPathPlanner.condition_text(node)
+                if not condition:
+                    label = str(data.get("label") or node.get("id") or "Condition").strip() or "Condition"
+                    raise AgentRuntimeError(f"Condition 节点 {label} 缺少条件文本")
+            if kind == "loop":
+                data = node.get("data") or {}
+                condition = WorkflowPathPlanner.condition_text(node)
+                if not condition:
+                    label = str(data.get("label") or node.get("id") or "Loop").strip() or "Loop"
+                    raise AgentRuntimeError(f"Loop 节点 {label} 缺少条件文本")
         starts = [node for node in nodes if self._node_kind(node) == "start"]
         if len(starts) != 1:
             raise AgentRuntimeError("Workflow 必须且只能有一个 Start 节点")
@@ -7988,28 +9217,66 @@ class NativeRunEngine:
         if incoming[start_id]:
             raise AgentRuntimeError("Start 节点不能有入边")
         for node_id, targets in outgoing.items():
-            if len(targets) > 1:
-                raise AgentRuntimeError("Workflow v1 只允许线性流程，每个节点最多一个下一步")
+            node = next(item for item in nodes if str(item.get("id") or "") == node_id)
+            kind = self._node_kind(node)
+            if kind == "condition":
+                if len(targets) != 2:
+                    raise AgentRuntimeError("Condition 节点必须有 true/false 两个下一步")
+                branch_roles = [
+                    WorkflowPathPlanner.edge_branch(edge)
+                    for edge in edges
+                    if str(edge.get("source") or "") == node_id
+                ]
+                labelled_roles = [role for role in branch_roles if role]
+                if labelled_roles and set(labelled_roles) != {"true", "false"}:
+                    raise AgentRuntimeError("Condition 节点分支必须标注 true/false")
+                if len(labelled_roles) != len(set(labelled_roles)):
+                    raise AgentRuntimeError("Condition 节点分支标注不能重复")
+            elif kind == "parallel":
+                if len(targets) < 2:
+                    raise AgentRuntimeError("Parallel 节点必须至少有两个并行分支")
+            elif kind == "loop":
+                if len(targets) != 2:
+                    raise AgentRuntimeError("Loop 节点必须有 continue/exit 两个下一步")
+                branch_roles = [
+                    WorkflowPathPlanner.loop_edge_role(edge)
+                    for edge in edges
+                    if str(edge.get("source") or "") == node_id
+                ]
+                labelled_roles = [role for role in branch_roles if role]
+                if labelled_roles and set(labelled_roles) != {"continue", "exit"}:
+                    raise AgentRuntimeError("Loop 节点分支必须标注 continue/exit")
+                if len(labelled_roles) != len(set(labelled_roles)):
+                    raise AgentRuntimeError("Loop 节点分支标注不能重复")
+            elif len(targets) > 1:
+                raise AgentRuntimeError("只有 Condition、Parallel 或 Loop 节点允许多个下一步")
         for node_id, sources in incoming.items():
-            if node_id != start_id and len(sources) != 1:
-                raise AgentRuntimeError("Workflow v1 不允许断链或多入口节点")
+            if node_id != start_id and len(sources) < 1:
+                raise AgentRuntimeError("Workflow 不允许断链节点")
         seen: set[str] = set()
         active: set[str] = set()
 
-        def visit(node_id: str) -> None:
+        def visit(node_id: str, incoming_edge: dict[str, Any] | None = None) -> None:
             if node_id in active:
-                raise AgentRuntimeError("Workflow 不能包含环")
+                source = str((incoming_edge or {}).get("source") or "")
+                source_node = next((item for item in nodes if str(item.get("id") or "") == source), {})
+                source_kind = self._node_kind(source_node) if source_node else ""
+                if source_kind == "loop" and WorkflowPathPlanner.loop_edge_role(incoming_edge or {}) == "continue":
+                    return
+                raise AgentRuntimeError("Workflow 不能包含非 Loop 控制的环")
             if node_id in seen:
                 return
             active.add(node_id)
-            for target in outgoing[node_id]:
-                visit(target)
+            for edge in (edge for edge in edges if str(edge.get("source") or "") == node_id):
+                target = str(edge.get("target") or "")
+                if target:
+                    visit(target, edge)
             active.remove(node_id)
             seen.add(node_id)
 
         visit(start_id)
         if seen != set(node_ids):
-            raise AgentRuntimeError("Workflow v1 必须是一条从 Start 出发的单一路径")
+            raise AgentRuntimeError("Workflow 必须从 Start 触达所有节点")
         return {"ok": True}
 
     def _workflow_agent_for_node(self, node: dict[str, Any]) -> dict[str, Any]:
@@ -8026,10 +9293,46 @@ class NativeRunEngine:
             raise AgentRuntimeError(f"Agent 节点 {label} 选择的 Agent 已停用")
         return agent
 
+    @staticmethod
+    def _workflow_id_for_node(node: dict[str, Any]) -> str:
+        return WorkflowPathPlanner.workflow_id(node)
+
+    def _workflow_for_node(self, node: dict[str, Any]) -> dict[str, Any]:
+        data = node.get("data") or {}
+        label = str(data.get("label") or node.get("id") or "Workflow").strip() or "Workflow"
+        workflow_id = self._workflow_id_for_node(node)
+        if not workflow_id:
+            raise AgentRuntimeError(f"Workflow 节点 {label} 没有选择子 Workflow")
+        try:
+            workflow = self.get_workflow(workflow_id)
+        except KeyError as exc:
+            raise AgentRuntimeError(f"Workflow 节点 {label} 引用了不存在的子 Workflow") from exc
+        if not workflow.get("enabled", True):
+            raise AgentRuntimeError(f"Workflow 节点 {label} 选择的子 Workflow 已停用")
+        return workflow
+
     def _validate_workflow_agent_nodes(self, nodes: list[dict[str, Any]]) -> None:
         for node in nodes:
             if self._node_kind(node) == "agent":
                 self._workflow_agent_for_node(node)
+
+    def _validate_workflow_subworkflow_nodes(
+        self,
+        nodes: list[dict[str, Any]],
+        *,
+        parent_workflow_id: str = "",
+    ) -> None:
+        for node in nodes:
+            if self._node_kind(node) != "workflow":
+                continue
+            data = node.get("data") or {}
+            label = str(data.get("label") or node.get("id") or "Workflow").strip() or "Workflow"
+            workflow_id = self._workflow_id_for_node(node)
+            if not workflow_id:
+                raise AgentRuntimeError(f"Workflow 节点 {label} 没有选择子 Workflow")
+            if parent_workflow_id and workflow_id == parent_workflow_id:
+                raise AgentRuntimeError(f"Workflow 节点 {label} 不能引用当前 Workflow")
+            self._workflow_for_node(node)
 
     def _validate_agent_run_readiness(
         self,
@@ -8080,7 +9383,9 @@ class NativeRunEngine:
 
     def _validate_workflow_runnable_steps(self, nodes: list[dict[str, Any]]) -> None:
         if not any(self._node_kind(node) != "start" for node in nodes):
-            raise AgentRuntimeError("Workflow 至少需要一个可执行节点（Agent、Approval 或 Artifact）")
+            raise AgentRuntimeError(
+                "Workflow 至少需要一个可执行节点（Agent、Approval、Artifact、Condition、Parallel、Workflow 或 Loop）"
+            )
 
     def list_runs(self, limit: int = 50) -> dict[str, Any]:
         return self.runs.list(limit)
@@ -9512,6 +10817,7 @@ class NativeRunEngine:
             raise AgentRuntimeError("Workflow 已停用")
         self.validate_workflow(workflow["nodes"], workflow["edges"])
         self._validate_workflow_agent_nodes(workflow["nodes"])
+        self._validate_workflow_subworkflow_nodes(workflow["nodes"], parent_workflow_id=workflow_id)
         self._validate_workflow_runnable_steps(workflow["nodes"])
         self._validate_workflow_agent_run_readiness(workflow["nodes"])
         run_group_id = str(payload.get("run_group_id") or "").strip()
@@ -9575,6 +10881,7 @@ class NativeRunEngine:
             raise AgentRuntimeError("Workflow 已停用")
         self.validate_workflow(workflow["nodes"], workflow["edges"])
         self._validate_workflow_agent_nodes(workflow["nodes"])
+        self._validate_workflow_subworkflow_nodes(workflow["nodes"], parent_workflow_id=workflow_id)
         self._validate_workflow_runnable_steps(workflow["nodes"])
         self._validate_workflow_agent_run_readiness(workflow["nodes"])
 
@@ -9721,6 +11028,7 @@ class NativeRunEngine:
         artifacts: list[dict[str, Any]],
         start_index: int,
         root_group: bool,
+        start_node_id: str = "",
     ) -> dict[str, Any]:
         return self.workflow_continuation.continue_run(
             run,
@@ -9730,10 +11038,58 @@ class NativeRunEngine:
             artifacts=artifacts,
             start_index=start_index,
             root_group=root_group,
+            start_node_id=start_node_id,
         )
 
     def _workflow_path(self, workflow: dict[str, Any]) -> list[dict[str, Any]]:
         return self.workflow_path_planner.workflow_path(workflow)
+
+    def _workflow_nodes_by_id(self, workflow: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        return self.workflow_path_planner.nodes_by_id(workflow)
+
+    def _workflow_next_node_id(
+        self,
+        workflow: dict[str, Any],
+        node: dict[str, Any] | str,
+        context: str,
+    ) -> str:
+        if isinstance(node, str):
+            node = self._workflow_nodes_by_id(workflow).get(node) or {}
+        if not node:
+            return ""
+        return self.workflow_path_planner.next_node_id(workflow, node, context)
+
+    def _workflow_condition_selection(
+        self,
+        workflow: dict[str, Any],
+        node: dict[str, Any],
+        context: str,
+    ) -> dict[str, Any]:
+        return self.workflow_path_planner.condition_selection(workflow, node, context)
+
+    def _workflow_parallel_plan(self, workflow: dict[str, Any], node: dict[str, Any]) -> dict[str, Any]:
+        return self.workflow_path_planner.parallel_plan(workflow, node)
+
+    def _workflow_loop_selection(
+        self,
+        workflow: dict[str, Any],
+        node: dict[str, Any],
+        context: str,
+        *,
+        previous_iterations: int = 0,
+    ) -> dict[str, Any]:
+        return self.workflow_path_planner.loop_selection(
+            workflow,
+            node,
+            context,
+            previous_iterations=previous_iterations,
+        )
+
+    def _workflow_loop_step_limit(self, workflow: dict[str, Any]) -> int:
+        return self.workflow_path_planner.loop_step_limit(workflow)
+
+    def _workflow_loop_iterations_from_timeline(self, timeline: list[dict[str, Any]]) -> dict[str, int]:
+        return self.workflow_path_planner.loop_iterations_from_timeline(timeline)
 
     @staticmethod
     def _workflow_node_task(node: dict[str, Any]) -> str:

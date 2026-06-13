@@ -644,6 +644,24 @@ def _workspace_read_tool() -> dict[str, Any]:
     }
 
 
+def _workspace_read_tool_choice() -> dict[str, Any]:
+    return {"type": "function", "function": {"name": "workspace_read"}}
+
+
+def _workspace_read_messages(prompt: str) -> list[dict[str, str]]:
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You are running an Oha-Yachiyo provider smoke test. "
+                "You must call the available function workspace_read exactly once with JSON "
+                'arguments {"path":"README.md"}. Do not answer with plain text before the tool call.'
+            ),
+        },
+        {"role": "user", "content": prompt},
+    ]
+
+
 def _tool_result_followup_messages(prompt: str, tool_call: dict[str, Any]) -> list[dict[str, Any]]:
     function_name = str(tool_call.get("name") or "workspace_read")
     arguments = str(tool_call.get("arguments") or '{"path":"README.md"}')
@@ -750,8 +768,9 @@ def run_stream_smoke(
         base_url,
         model,
         api_key,
-        [{"role": "user", "content": prompt}],
+        _workspace_read_messages(prompt) if tool_call else [{"role": "user", "content": prompt}],
         tools=[_workspace_read_tool()] if tool_call else None,
+        tool_choice=_workspace_read_tool_choice() if tool_call else None,
         stream=True,
     )
     summary = summarize_stream_chunks(

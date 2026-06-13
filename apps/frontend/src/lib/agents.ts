@@ -120,6 +120,11 @@ export type WorkflowEdge = {
   id?: string;
   source: string;
   target: string;
+  data?: Record<string, unknown>;
+  branch?: string;
+  condition?: string;
+  label?: string;
+  sourceHandle?: string | null;
 };
 
 export type WorkflowSpec = {

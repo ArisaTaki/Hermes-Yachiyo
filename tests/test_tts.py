@@ -301,6 +301,50 @@ def test_import_tts_voice_archive_returns_gpt_sovits_settings(monkeypatch, tmp_p
     assert result["draft_changes"]["tts.provider"] == "gpt-sovits"
 
 
+def test_import_tts_voice_archive_accepts_legacy_hermes_manifest_kind(monkeypatch, tmp_path):
+    assets_root = tmp_path / "assets" / "tts"
+    package_root = tmp_path / "legacy" / "voice"
+    (package_root / "GPT_weights_v4").mkdir(parents=True)
+    (package_root / "SoVITS_weights_v4").mkdir(parents=True)
+    (package_root / "refs").mkdir(parents=True)
+    (package_root / "GPT_weights_v4" / "voice.ckpt").write_bytes(b"gpt")
+    (package_root / "SoVITS_weights_v4" / "voice.pth").write_bytes(b"sovits")
+    (package_root / "refs" / "ref.wav").write_bytes(b"ref")
+    (package_root / "yachiyo-tts-preset.json").write_text(
+        json.dumps(
+            {
+                "kind": "hermes-yachiyo-gpt-sovits-voice",
+                "schema_version": 1,
+                "slug": "legacy-voice",
+                "files": {
+                    "gpt_weights": "GPT_weights_v4/voice.ckpt",
+                    "sovits_weights": "SoVITS_weights_v4/voice.pth",
+                    "ref_audio": "refs/ref.wav",
+                },
+                "gpt_sovits": {
+                    "ref_audio_text": "参考音频",
+                    "ref_audio_language": "ja",
+                    "text_language": "zh",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    archive = tmp_path / "legacy-voice.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        for path in package_root.rglob("*"):
+            if path.is_file():
+                zf.write(path, path.relative_to(package_root))
+
+    monkeypatch.setattr(tts_resources, "get_user_tts_assets_dir", lambda: assets_root)
+
+    result = tts_resources.import_tts_voice_archive_draft(archive)
+
+    assert result["ok"] is True
+    assert result["draft_changes"]["tts.provider"] == "gpt-sovits"
+    assert Path(result["tts_settings"]["gsv_ref_audio_path"]).is_file()
+
+
 def test_gpt_sovits_service_status_reports_local_requirements(monkeypatch, tmp_path):
     workdir = tmp_path / "GPT-SoVITS"
     workdir.mkdir()
@@ -791,3 +835,35 @@ def test_tts_gpt_sovits_http_error_reports_json_body(monkeypatch):
     assert result["ok"] is False
     assert "HTTP 400" in result["error"]
     assert "ref_audio_path is required" in result["error"]
+
+
+def test_tts_gpt_sovits_http_error_reports_exception_field(monkeypatch):
+    def fake_urlopen(request, timeout):
+        if request.full_url.endswith("/tts"):
+            raise HTTPError(
+                request.full_url,
+                400,
+                "Bad Request",
+                hdrs=None,
+                fp=BytesIO(
+                    b'{"message":"tts failed","Exception":"missing nltk averaged_perceptron_tagger_eng"}'
+                ),
+            )
+        return _FakeHTTPResponse()
+
+    monkeypatch.setattr(tts_mod, "urlopen", fake_urlopen)
+    service = TTSService(
+        TTSConfig(
+            enabled=True,
+            provider="gpt-sovits",
+            gsv_base_url="http://127.0.0.1:9880",
+            gsv_ref_audio_path="/voices/ref.wav",
+            gsv_ref_audio_text="ref text",
+        )
+    )
+
+    result = service.speak_sync("测试语音调用。")
+
+    assert result["ok"] is False
+    assert "tts failed" in result["error"]
+    assert "averaged_perceptron_tagger_eng" in result["error"]

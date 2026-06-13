@@ -1650,6 +1650,7 @@ def _openai_compatible_chat_payload(
     messages: list[dict[str, Any]],
     *,
     tools: list[dict[str, Any]] | None = None,
+    tool_choice: str | dict[str, Any] | None = None,
     stream: bool = False,
 ) -> dict[str, Any] | Iterator[dict[str, Any]]:
     url = f"{base_url.rstrip('/')}/chat/completions"
@@ -1657,7 +1658,7 @@ def _openai_compatible_chat_payload(
     payload: dict[str, Any] = {"model": model, "messages": messages, "temperature": 0.2}
     if tools:
         payload["tools"] = tools
-        payload["tool_choice"] = "auto"
+        payload["tool_choice"] = tool_choice or "auto"
     if stream:
         payload["stream"] = True
     headers = _openai_compatible_auth_headers(base_url, api_key)
@@ -1828,9 +1829,18 @@ def openai_compatible_chat_message(
     messages: list[dict[str, Any]],
     *,
     tools: list[dict[str, Any]] | None = None,
+    tool_choice: str | dict[str, Any] | None = None,
     stream: bool = False,
 ) -> dict[str, Any] | Iterator[dict[str, Any]]:
-    payload = _openai_compatible_chat_payload(base_url, model, api_key, messages, tools=tools, stream=stream)
+    payload = _openai_compatible_chat_payload(
+        base_url,
+        model,
+        api_key,
+        messages,
+        tools=tools,
+        tool_choice=tool_choice,
+        stream=stream,
+    )
     if stream:
         return payload if not isinstance(payload, dict) else iter(())
     choices = payload.get("choices")

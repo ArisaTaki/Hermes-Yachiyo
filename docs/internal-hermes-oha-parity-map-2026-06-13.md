@@ -1,0 +1,92 @@
+# Hermes to Oha-Yachiyo Parity Map
+
+日期：2026-06-13
+
+目标：在保留旧版 `develop` 发布线的同时，把当前重构分支固化为 `Oha-Yachiyo`，并判断自研 Native Agent Runtime 是否能承接旧版功能面。
+
+## 当前判定
+
+- Oha 的 active runtime 已切到 `NativeRunEngine`，不是旧执行内核的薄封装。
+- Oha 的 macOS 发布身份已经是 `io.github.arisataki.oha-yachiyo` / `Oha-Yachiyo` / `Oha-Yachiyo-*.dmg`。
+- 本轮把 Oha experimental release line 从 `develop-latest` 挪到 `oha-develop-latest`，避免占用旧版 `develop` 发布线。
+- 真实 provider smoke 已验证 OpenAI-compatible streaming、Agent tool use、artifact write、workflow child agent、approval resume、main chat model loop。
+- 本地重建的 `Oha-Yachiyo-0.4.0-arm64.dmg` 已通过 source/built artifact guard、DMG mount、packaged bridge startup、screen probe、packaged UI sampling、Chat native file upload、真实 provider full-chain smoke。
+- 当前 RC 手工/自动签核项已 7/7 通过；AstrBot 真实 QQ 宿主收发仍建议做现场联调，但 Live2D、GPT-SoVITS 和 AstrBot Bridge 外部集成 smoke 已通过。
+
+## 功能对照
+
+| 功能面 | 旧版行为 | Oha 当前对应 | 证据 | 状态 |
+| --- | --- | --- | --- | --- |
+| 产品身份 | Hermes-Yachiyo app/release | Oha-Yachiyo app/release | `apps/frontend/electron-builder.yml`, `apps/frontend/electron/main.ts`, `scripts/verify_release_artifacts.py` | 已落地 |
+| 发布分支 | `develop` 可发布旧版 DMG | Oha 自动发布改为 `main` / `oha-develop`，`develop` 保留旧版线 | `.github/workflows/release-macos.yml`, `docs/release-packaging.md` | 本轮修正 |
+| 更新 metadata | latest JSON 指向 `develop-latest` | experimental 指向 `oha-develop-latest` | `scripts/prepare_app_build_metadata.py`, `apps/frontend/electron/main.ts` | 本轮修正 |
+| 外部内核安装 | `/installer/*`, `/hermes/setup` 安装外部环境 | 删除外部安装流，改为内置 Native Runtime | route diff: Oha 141 routes, old branch 149 routes,缺口均为 installer/setup | 有意替代 |
+| 状态/诊断 | `/status`, install info, diagnostics | `/status`, `/native-agent/readiness`, `/ui/native-agent/*` | `apps/bridge/routes/status.py`, `apps/bridge/routes/ui.py` | 已替代 |
+| Chat 主链路 | 任务创建、消息、取消、附件、群聊 | `ChatAPI` + `TaskRunner` + `NativeAgentExecutor` + `NativeRunEngine` | `tests/test_chat_api.py`, `tests/test_task_runner.py`, live main chat run | 核心已验证 |
+| Model Profile | provider/source/profile/defaults | 统一 ModelProfile + CredentialStore，public payload 不暴露 key | `apps/shell/model_profiles.py`, `apps/shell/credential_store.py`, live profile readiness | 核心已验证 |
+| Agent Studio | Agent/Skill/Workflow/Run CRUD | 同名 UI contract 保留，runtime 后端变成 NativeRunEngine | `apps/bridge/routes/agents.py`, `apps/frontend/src/lib/agents.ts`, `tests/test_frontend_feature_preservation.py` | 已保留 |
+| Agent tool calls | 旧内核工具执行 | ToolBroker: `workspace.list/read/write_patch`, `terminal.run`, `artifact.write` | `apps/shell/agent_runtime.py`, live `workspace.read` / `artifact.write` / `terminal.run` approval | 核心已验证 |
+| 审批 | 高风险动作等待审批，批准/拒绝/恢复 | durable approval + idempotent resume coordinator | `tests/test_agent_runtime.py`, live approval resume | 已验证 |
+| Run replay | Run detail/timeline/artifact | SQLite run events + `/runs/{run_id}/events` | `apps/bridge/routes/runs.py`, live workflow event replay | 已验证 |
+| Workflow | Agent/approval/artifact 节点 | v1 线性 workflow，可 child Agent、approval、artifact | `apps/shell/agent_runtime.py`, workflow route tests, live child Agent workflow | 核心已验证 |
+| Workflow 高级编排 | 旧版如果依赖复杂规划/分支，需要对照 | Condition true/false 分支、Parallel fan-out/fan-in、Subworkflow、Loop 节点已进入 Native runtime；子流程内审批可逐层恢复到父 Workflow；Parallel 分支 child Agent 审批后可恢复剩余分支并 fan-in；Workflow 级 context/step/duration budget 可阻止失控编排并跨审批恢复保持计数 | `tests/test_agent_runtime.py::test_workflow_condition_node_routes_true_and_false_branches`, `tests/test_agent_runtime.py::test_workflow_parallel_node_runs_branches_and_merges_into_artifact`, `tests/test_agent_runtime.py::test_workflow_parallel_branch_approval_resumes_remaining_branches_and_fans_in`, `tests/test_agent_runtime.py::test_workflow_subworkflow_node_runs_child_workflow_and_projects_artifacts`, `tests/test_agent_runtime.py::test_workflow_subworkflow_child_approval_resumes_parent_workflow`, `tests/test_agent_runtime.py::test_workflow_loop_node_repeats_until_condition_exits_to_artifact`, `tests/test_agent_runtime.py::test_workflow_run_fails_when_context_budget_is_exceeded`, `tests/test_agent_runtime.py::test_workflow_step_budget_survives_child_approval_resume`, `tests/test_agent_runtime.py::test_workflow_run_fails_when_duration_budget_is_exceeded_between_nodes`, `apps/shell/agent_runtime.py`, `AgentStudioView.tsx` | 分支/并行/子流程/循环、审批恢复、预算/超时策略已落地 |
+| Skills | skill import/sync/install/folders | Oha skill library + whitelisted install command + folders | `apps/bridge/routes/agents.py`, `tests/test_agent_runtime.py` | 已保留 |
+| 屏幕截图 | `/screen/current` | 保留 `/screen/current` 和 proactive permission check | `apps/bridge/routes/screen.py`, `tests/test_ui_mature_flow_contract.py` | 合同已保留 |
+| Live2D | Live2D assets/runtime/import/settings | 路由和 UI 保留，preview/runtime helper 保留 | `apps/bridge/routes/live2d.py`, `ModeSettingsView.tsx`, `tests/test_ui_bridge_routes.py::test_live2d_and_tts_resource_routes_import_save_and_test`, packaged UI sampling, `tmp/external-integrations-smoke-current.json` | 旧 Hermes Live2D ZIP 导入/保存已通过 |
+| 主动关怀 | proactive state + desktop launcher | ProactiveDesktopService、launcher summary、TTS attachment 保留 | `apps/shell/proactive.py`, `apps/bridge/routes/ui.py`, packaged UI sampling | UI 合同已验 |
+| TTS/GPT-SoVITS | voice resource/test/service install | Oha-managed LaunchAgent + voice package import/test | `apps/shell/tts.py`, `apps/shell/gpt_sovits_service.py`, `tests/test_ui_bridge_routes.py::test_live2d_and_tts_resource_routes_import_save_and_test`, `ProactiveTtsSettingsView.tsx`, packaged UI sampling, `tmp/external-integrations-smoke-current.json` | 旧 Hermes GPT-SoVITS v4 voice ZIP 导入、权重切换、真实 `/tts` 已通过 |
+| AstrBot | 插件通过 Bridge 调用状态/任务/屏幕 | OhaClient + `/assistant/intent` + status text switched to Native Agent | `tests/test_astrbot_bridge_e2e.py`, `integrations/astrbot_plugin`, `apps/bridge/routes/assistant.py`, `tmp/external-integrations-smoke-current.json` | 插件命令到 Oha Bridge 已验；真实 QQ 宿主收发建议现场补截图/日志 |
+| 备份/卸载 | backup restore/delete, uninstall app data | Backup/uninstall routes preserved under Oha naming | `apps/installer/backup.py`, `apps/installer/uninstall.py`, `ModeSettingsView.tsx` | 合同已保留 |
+| DMG/packaged app | 打包、更新、Gatekeeper、权限 | Oha build metadata, backend binary, release candidate verifier | `tmp/rc-verification-xiaomi-current-provider.json`, `tmp/rc-verification-screen-current.json`, `tmp/rc-verification-packaged-ui-current.json`, `tmp/rc-verification-chat-native-file-current.json`, `tmp/rc-verification-backend-bridge-current.json`, `tmp/external-integrations-smoke-current.json`, `tmp/rc-signoff-0ef22732-current.json`, `tmp/rc-signoff-0ef22732-os-evidence.json` | 自动 RC gate、外部集成 smoke 与本地 Finder 首启 evidence 已验；clean revision final signoff 仍需提交当前改动后重建 |
+
+## 本轮真实 provider 验证摘要
+
+- `/models` 返回可用模型列表，选择 `mimo-v2.5`。
+- streaming text smoke：通过，返回内容并正常 stop。
+- Agent run：调用 `workspace.read` 读取临时工作区文件，通过。
+- Agent artifact：调用 `artifact.write` 写入 artifact，通过。
+- Workflow：start -> child Agent -> artifact，通过，event replay 可读。
+- Approval：`terminal.run` 首次进入 `approval_required`，批准后恢复完成，重复批准保持幂等。
+- Main Chat：临时 ModelProfile 设置默认 chat profile，readiness ready，main chat loop 返回 `MAIN_CHAT_OK`。
+- 凭据处理：临时 API key 未写入仓库，public profile payload 未暴露 key。
+- 可重复入口：`python scripts/smoke_native_agent_full_chain.py`，使用 `OHA_YACHIYO_SMOKE_BASE_URL` / `OHA_YACHIYO_SMOKE_MODEL` / `OHA_YACHIYO_SMOKE_API_KEY`，全程使用临时目录和内存 credential store；`python scripts/verify_release_candidate.py --run-provider-smoke` 会把它和 streaming/tool-call provider smoke 一起纳入 RC gate。
+- 临时 provider key 现场复验优先使用 `python scripts/run_provider_smoke_with_prompt.py --base-url https://token-plan-cn.xiaomimimo.com/v1 --model mimo-v2.5-pro -- --require-artifacts --check-dmg-mount --run-dmg-app-smoke --report-json tmp/rc-verification-xiaomi-current-provider.json`，由隐藏 prompt 读取 `OHA_YACHIYO_SMOKE_API_KEY`，避免把 key 放进 shell history 或进程参数。
+
+## 本轮本地 Oha RC 验证摘要
+
+- `python scripts/build_release_candidate_artifacts.py --channel experimental --repository kuguya-AI-app-develop/oha-yachiyo`：生成 `dist/backend/oha-yachiyo-backend` 和 `dist/electron/Oha-Yachiyo-0.4.0-arm64.dmg`，并恢复 tracked build metadata。
+- `python scripts/verify_release_artifacts.py --allow-binary --check-packaged-app dist/backend dist/electron/mac-arm64/Oha-Yachiyo.app/Contents/Resources`：通过。
+- `python scripts/build_release_candidate_artifacts.py --channel experimental --repository kuguya-AI-app-develop/oha-yachiyo`：重新生成当前源码对应的 backend 和 `dist/electron/Oha-Yachiyo-0.4.0-arm64.dmg`。
+- `python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount --run-packaged-backend-bridge-smoke --run-dmg-app-smoke --run-provider-smoke --report-json tmp/rc-verification-xiaomi-current-provider.json`（API key 通过关闭回显的 stdin 注入）：source/built artifact、DMG mount、packaged backend bridge identity、packaged app startup、build metadata revision guards、Xiaomi `mimo-v2.5-pro` text stream、forced workspace_read tool-call stream、native Agent full-chain、native Workflow full-chain 均通过；report 未包含 API key。`provider_smoke.checks[*].summary` 已归档脱敏子 smoke JSON，其中 `native_agent_full_chain` 包含 `agent_multi_tool_pipeline`，证明真实模型完成 workspace_read -> artifact_write 的连续多工具链路，两次 `agent.tool.call` 后写入 `pipeline-report.md`。
+- `tmp/rc-verification-xiaomi-current-provider.json` 已内嵌 `native_agent_capability_matrix`；`python scripts/summarize_native_agent_capabilities.py tmp/rc-verification-xiaomi-current-provider.json --output-json tmp/native-agent-capability-matrix-current.json` 可从同一份真实 provider RC report 单独重建 Native Agent 能力矩阵。当前 13/13 通过，覆盖 provider text stream、provider tool-call stream、model profile readiness、workspace read、artifact write、multi-tool pipeline、Workflow child Agent artifact、terminal approval resume、main chat model loop、advanced Workflow orchestration、Workflow budget boundary、packaged backend bridge identity、packaged app bridge isolation。
+- `python scripts/verify_release_candidate.py --require-artifacts --run-dmg-screen-smoke --report-json tmp/rc-verification-screen-current.json`：packaged `/screen/current` 通过。
+- `python scripts/verify_release_candidate.py --require-artifacts --run-dmg-ui-sampling-smoke --report-json tmp/rc-verification-packaged-ui-current.json`：Chat、Run Detail、Workflow、Agent Studio、group/delegation/session summary、manual TTS、Live2D route sampling 通过。
+- `python scripts/verify_release_candidate.py --require-artifacts --run-dmg-chat-native-file-smoke --report-json tmp/rc-verification-chat-native-file-current.json`：Chat 原生图片选择、预览、消息附件、图片查看器、Run Detail handoff 通过。
+- `python scripts/verify_release_candidate.py --require-artifacts --check-gatekeeper-readiness --report-json tmp/rc-verification-gatekeeper-readiness-current.json`：当前 DMG 已采集 Gatekeeper readiness 诊断，报告包含 `codesign`、`spctl` 和 quarantine supporting note；该 evidence 不替代 Finder Control-click -> Open 或 System Settings allow-open 首启人工签核。
+- `python scripts/verify_release_candidate.py --require-artifacts --run-packaged-backend-bridge-smoke --report-json tmp/rc-verification-backend-bridge-current.json`：打包 backend `dist/backend/oha-yachiyo-backend` 可在临时 HOME/OHA_YACHIYO_HOME 和随机 loopback bridge URL 下启动，`/status.service=oha-yachiyo`、`version=0.4.0`，并归档 build metadata；该证据只作为外部集成前置 supporting note，不替代真实 Live2D/GPT-SoVITS/AstrBot 全链路。
+- `python scripts/verify_release_candidate.py --manual-checks-json tmp/rc-verification-gatekeeper-readiness-current.json --manual-checks-json tmp/rc-verification-xiaomi-current-provider.json --manual-checks-json tmp/rc-verification-screen-current.json --manual-checks-json tmp/rc-verification-packaged-ui-current.json --manual-checks-json tmp/rc-verification-chat-native-file-current.json --manual-checks-json tmp/rc-verification-backend-bridge-current.json --report-json tmp/rc-verification-oha-current-consolidated.json`：合并自动 evidence 后 5/7 完成；后续 `tmp/external-integrations-smoke-current.json` 和 `tmp/rc-signoff-0ef22732-os-evidence.json` 已补齐外部集成与 Gatekeeper/Finder 首启 evidence。consolidated report 会从 provider RC evidence 保留 `native_agent_capability_matrix`，当前为 13/13 通过。
+- `python scripts/refresh_local_rc_signoff.py --write-os-evidence tmp/rc-signoff-0ef22732-os-evidence.json --gatekeeper-evidence ...`：本地最终 DMG 挂载到 `tmp/gatekeeper-first-launch/Oha-Yachiyo-0.4.0-arm64`，通过 Finder AppleScript 打开挂载卷内 `Oha-Yachiyo.app`；DMG 与 mounted app 均无 `com.apple.quarantine`，因此本地 build 没有 Gatekeeper allow-open 弹窗，应用进程从 mounted app path 启动并退出干净。
+- `python scripts/verify_release_candidate.py --manual-checks-json tmp/rc-signoff-0ef22732-current.json --manual-checks-json tmp/rc-signoff-0ef22732-os-evidence.json --write-manual-checks-draft tmp/rc-signoff-0ef22732-current.json`、`python scripts/verify_release_candidate.py --manual-checks-json tmp/rc-signoff-0ef22732-current.json --write-manual-checks-markdown tmp/rc-signoff-0ef22732-current.md`：当前签核 draft/Markdown 已更新为 7/7 complete。
+- `python scripts/summarize_oha_parity.py tmp/rc-signoff-0ef22732-current.json --output-json tmp/oha-parity-summary-current.json`：从当前 signoff draft 重建机器可读 parity/readiness 摘要。当前结果为 `status=passed`、`passed_area_count=9` / `area_count=9`；`product_release_identity`、`native_agent_capability_matrix`、`external_integrations` 和 `gatekeeper_first_launch` 均已通过，其中 Native Agent 能力矩阵为 13/13，通过项覆盖真实 provider 文本流、tool-call、workspace read、artifact write、多工具 pipeline、child Workflow、approval resume、main chat、advanced Workflow 与 packaged Bridge。
+- `python scripts/verify_release_candidate.py --require-artifacts --manual-checks-json tmp/rc-signoff-0ef22732-current.json --manual-checks-json tmp/rc-signoff-0ef22732-os-evidence.json --require-manual-checks-complete --report-json tmp/rc-signoff-0ef22732-final.json`：人工/自动签核项 7/7 通过，但 final report 当前 `ok=false`，原因是 `source_revision_final_signoff_findings` 提示工作区 dirty；提交或丢弃当前改动并按 clean revision 重建 artifacts 后，才能得到最终 clean source revision signoff。
+- `python scripts/smoke_external_integrations.py --bridge-url <packaged-bridge> --bridge-token <session-token> --live2d-archive /Users/hacchiroku/Downloads/hermes-yachiyo-live2d-yachiyo-20260423.zip --tts-voice-archive /Users/hacchiroku/Downloads/Hermes-Yachiyo-yachiyo-gpt-sovits-v4.zip --gpt-sovits-base-url http://127.0.0.1:9880 --astrbot --report-json tmp/external-integrations-smoke-current.json`：真实外部集成验收已通过，归档 Live2D 导入保存、旧 Hermes GPT-SoVITS v4 voice ZIP 导入、真实 `/set_gpt_weights` / `/set_sovits_weights` / `/tts`、AstrBot 插件命令到 Oha Bridge 的 evidence。现场 GPT-SoVITS 缺少 NLTK `averaged_perceptron_tagger_eng` 时已补到 `/Users/hacchiroku/AI/GPT-SoVITS/.venv/nltk_data` 后复验通过。真实 QQ 宿主收发仍建议在 AstrBot 环境中补截图/日志。
+- `python scripts/smoke_external_integrations.py --bridge-url http://127.0.0.1:18420 --bridge-only --report-json tmp/external-integrations-legacy-bridge-current.json`：当前本机 18420 返回的 `/status.service` 不是 `oha-yachiyo`，脚本已在 `bridge_status` 阶段失败并停止；后续已用 `tmp/rc-verification-backend-bridge-current.json` 证明 Oha packaged backend 本身可在独立 loopback port 启动，避免两套应用共存时误把非 Oha Bridge 当作外部集成 evidence。
+- `python -m pytest tests/test_astrbot_bridge_e2e.py`：AstrBot `/y status`、`/y tasks`、`/y do`、`/y check`、`/y cancel`、`/y ask`、`/y screen`、`/y window` 经 OhaClient 到 Bridge HTTP routes 的本机 E2E 通过。
+- `python -m pytest tests/test_ui_bridge_routes.py::test_live2d_and_tts_resource_routes_import_save_and_test`：Live2D ZIP 导入、settings 保存、GPT-SoVITS voice ZIP 导入、settings 保存、`/set_gpt_weights`、`/set_sovits_weights`、`/tts` HTTP 请求链通过。
+- `python -m pytest tests/test_agent_runtime.py::test_workflow_condition_node_routes_true_and_false_branches`：Native Workflow condition 节点按上游 Agent 输出分别执行 true/false 分支，两个分支可汇合到同一个 artifact 节点，并记录 `workflow.node.condition` replay payload。
+- `python -m pytest tests/test_agent_runtime.py::test_workflow_parallel_node_runs_branches_and_merges_into_artifact`：Native Workflow parallel 节点 fan-out 到多个 Agent 分支，汇总分支结果后 fan-in 到共享 artifact，并记录 `workflow.node.parallel` replay payload。
+- `python -m pytest tests/test_agent_runtime.py::test_workflow_parallel_branch_approval_resumes_remaining_branches_and_fans_in`：Parallel 分支 child Agent 工具审批完成后，会回到 fanout 节点复用已完成分支，继续运行剩余分支，fan-in 汇总并写入共享 artifact。
+- `python -m pytest tests/test_agent_runtime.py::test_workflow_subworkflow_node_runs_child_workflow_and_projects_artifacts`：Native Workflow subworkflow 节点启动同组子 Workflow Run，合并子 Run artifact 引用，父 Workflow 后续 artifact 可消费子流程结果，并记录 `workflow.node.workflow` replay payload。
+- `python -m pytest tests/test_agent_runtime.py::test_workflow_subworkflow_child_approval_resumes_parent_workflow`：子 Workflow 内 child Agent 工具审批完成后，会先恢复子 Workflow，再继续恢复父 Workflow，并把结果写入父 Workflow artifact。
+- `python -m pytest tests/test_agent_runtime.py::test_workflow_loop_node_repeats_until_condition_exits_to_artifact`：Native Workflow loop 节点按上游 Agent 输出受控重复执行，记录 `workflow.node.loop` iteration/max/branch replay payload，并在退出后写入共享 artifact。
+- `python -m pytest tests/test_agent_runtime.py::test_workflow_run_fails_when_context_budget_is_exceeded`：Workflow 入口上下文超过 `max_context_chars` 时会失败并定位到当前节点，不写 artifact。
+- `python -m pytest tests/test_agent_runtime.py::test_workflow_step_budget_survives_child_approval_resume`：Workflow step budget 会从 timeline 重建，child Agent 审批恢复后仍能阻止后续节点超预算执行。
+- `python -m pytest tests/test_agent_runtime.py::test_workflow_run_fails_when_duration_budget_is_exceeded_between_nodes`：Workflow 总运行时长超过 `max_run_duration_seconds` 后，会在下一节点前失败，避免继续 fan-in 或写 artifact。
+- `python scripts/smoke_native_workflow_full_chain.py`：真实 provider 下的 advanced Workflow 链路已通过，覆盖 condition、subworkflow、workflow approval、parallel fan-in、loop exit、artifact 写入和 Workflow budget 边界。
+- `python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount --run-packaged-backend-bridge-smoke --run-dmg-app-smoke --run-provider-smoke --report-json tmp/rc-verification-xiaomi-current-provider.json`：真实 Xiaomi provider RC gate 已通过，`provider_smoke.checks` 记录 `text_stream`、`tool_call_stream`、`native_agent_full_chain`、`native_workflow_full_chain` 全部 `exit_code=0`，并在 summary 中保留 `agent_workspace_read`、`agent_artifact_write`、`agent_multi_tool_pipeline`、`workflow_child_agent_artifact`、`terminal_approval_resume`、`main_chat_model_loop`、`advanced_workflow_orchestration` 和 `workflow_budget_boundary` 的脱敏通过证据。
+
+## 下一轮建议验收
+
+1. 提交当前 Oha 重构/验收改动，在 clean revision 上重新构建 backend 与 DMG，再重跑最终 `--require-manual-checks-complete`，让 `tmp/rc-signoff-0ef22732-final.json` 不再因为 dirty source revision guard 失败。
+2. 做 AstrBot 真实 QQ 宿主联调：插件加载、消息收发、图片消息包装策略、错误提示；脚本已覆盖插件 handler 到 Bridge 的命令链，QQ 宿主层仍建议现场截图/日志。
+3. 后续 RC 固定使用 consolidated report 汇总自动 evidence；真实外部宿主联调仍需现场设备/账号配合。

@@ -187,6 +187,14 @@ def _local_screen_smoke_command(*, label: str) -> str:
     )
 
 
+def _local_gatekeeper_readiness_command(*, label: str) -> str:
+    return (
+        f"{sys.executable} scripts/verify_release_candidate.py "
+        "--require-artifacts --check-gatekeeper-readiness "
+        f"--report-json tmp/rc-verification-{label}-gatekeeper-readiness.json"
+    )
+
+
 def _is_placeholder_evidence(value: str) -> bool:
     text = value.strip()
     return text.startswith("<record ") and text.endswith(">")
@@ -243,21 +251,25 @@ def print_local_os_signoff_guide(*, short_commit: str | None = None) -> bool:
         for check_id in ("gatekeeper_first_launch", "screen_recording_permission")
         if check_id in remaining_ids
     ]
+    non_os_remaining = sorted(set(remaining_ids) - set(os_remaining))
     print("local RC OS signoff guide:")
     print(f"- signoff draft: {signoff_draft.relative_to(ROOT)}")
-    if not os_remaining:
+    if not os_remaining and not non_os_remaining:
         print("- no Gatekeeper or Screen Recording manual checks remain")
         return True
 
     dmg_path, app_path, backend_path = _screen_probe_launch_paths(label=label)
-    print(f"- DMG: {dmg_path}")
-    print(f"- stable Screen Recording app path: {app_path}")
-    print(f"- stable Screen Recording backend path: {backend_path}")
+    if os_remaining:
+        print(f"- DMG: {dmg_path}")
+        print(f"- stable Screen Recording app path: {app_path}")
+        print(f"- stable Screen Recording backend path: {backend_path}")
     if "gatekeeper_first_launch" in os_remaining:
         print(
             "- Gatekeeper: mount the DMG and launch Oha-Yachiyo.app via Finder "
             "Control-click -> Open or the System Settings allow-open flow."
         )
+        print("- Gatekeeper readiness diagnostics:")
+        print(f"  {_local_gatekeeper_readiness_command(label=label)}")
     if "screen_recording_permission" in os_remaining:
         print(
             "- Screen Recording: reveal the stable app path, grant permission, "
@@ -268,6 +280,34 @@ def print_local_os_signoff_guide(*, short_commit: str | None = None) -> bool:
         print(f"  open \"{SCREEN_RECORDING_SETTINGS_URL}\"")
         print(f"  {_local_screen_smoke_command(label=label)}")
 
+    extra_manual_json_args: list[str] = []
+    if non_os_remaining:
+        print(
+            "- non-OS checks still required before final signoff: "
+            + ", ".join(non_os_remaining)
+        )
+    if "external_integrations_smoke" in non_os_remaining:
+        extra_manual_json_args.append("tmp/external-integrations-smoke.json")
+        print("- external integrations evidence:")
+        print(
+            "  python scripts/verify_release_candidate.py "
+            "--require-artifacts --run-packaged-backend-bridge-smoke "
+            f"--report-json tmp/rc-verification-{label}-backend-bridge.json"
+        )
+        print(
+            "  python scripts/smoke_external_integrations.py "
+            "--bridge-url http://127.0.0.1:18420 "
+            "--bridge-only --report-json tmp/external-integrations-bridge-preflight.json"
+        )
+        print(
+            "  python scripts/smoke_external_integrations.py "
+            "--bridge-url http://127.0.0.1:18420 "
+            "--live2d-archive /path/to/yachiyo-live2d.zip "
+            "--tts-voice-archive /path/to/yachiyo-gpt-sovits.zip "
+            "--gpt-sovits-base-url http://127.0.0.1:9880 "
+            "--astrbot --report-json tmp/external-integrations-smoke.json"
+        )
+
     command = _os_evidence_command_parts(label=label, signoff_draft=signoff_draft)
     if command:
         print("- after OS evidence is true, write the project-local evidence JSON:")
@@ -276,16 +316,31 @@ def print_local_os_signoff_guide(*, short_commit: str | None = None) -> bool:
             "placeholder values are rejected."
         )
         print("  " + " ".join(command))
-    print("- final signoff command:")
-    print(
-        "  "
-        f"{sys.executable} scripts/verify_release_candidate.py "
-        "--require-artifacts "
-        f"--manual-checks-json tmp/rc-signoff-{label}-current.json "
-        f"--manual-checks-json tmp/rc-signoff-{label}-os-evidence.json "
-        "--require-manual-checks-complete "
-        f"--report-json tmp/rc-signoff-{label}-final.json"
+    final_command = [
+        sys.executable,
+        "scripts/verify_release_candidate.py",
+        "--require-artifacts",
+        "--manual-checks-json",
+        f"tmp/rc-signoff-{label}-current.json",
+    ]
+    if command:
+        final_command.extend(
+            [
+                "--manual-checks-json",
+                f"tmp/rc-signoff-{label}-os-evidence.json",
+            ]
+        )
+    for manual_json in extra_manual_json_args:
+        final_command.extend(["--manual-checks-json", manual_json])
+    final_command.extend(
+        [
+            "--require-manual-checks-complete",
+            "--report-json",
+            f"tmp/rc-signoff-{label}-final.json",
+        ]
     )
+    print("- final signoff command:")
+    print("  " + " ".join(final_command))
     return True
 
 
@@ -331,6 +386,8 @@ def refresh_local_rc_signoff(
             "scripts/verify_release_candidate.py",
             "--require-artifacts",
             "--check-dmg-mount",
+            "--check-gatekeeper-readiness",
+            "--run-packaged-backend-bridge-smoke",
             "--run-dmg-app-smoke",
             "--run-dmg-ui-sampling-smoke",
             "--run-dmg-chat-native-file-smoke",
@@ -414,13 +471,24 @@ def print_local_rc_signoff_status(*, short_commit: str | None = None) -> bool:
     from scripts import verify_release_candidate as rc
 
     automation_commands = rc.MANUAL_RELEASE_CANDIDATE_CHECK_AUTOMATION_COMMANDS
+    previous_gatekeeper_command = automation_commands.get("gatekeeper_first_launch")
     previous_screen_command = automation_commands.get("screen_recording_permission")
+    automation_commands["gatekeeper_first_launch"] = _local_gatekeeper_readiness_command(
+        label=label
+    )
     automation_commands["screen_recording_permission"] = _local_screen_smoke_command(
         label=label
     )
     try:
-        ok = rc.print_manual_release_candidate_checks_status(ROOT, signoff_draft)
+        ok = rc.print_manual_release_candidate_checks_status(
+            ROOT,
+            signoff_draft.relative_to(ROOT),
+        )
     finally:
+        if previous_gatekeeper_command is None:
+            automation_commands.pop("gatekeeper_first_launch", None)
+        else:
+            automation_commands["gatekeeper_first_launch"] = previous_gatekeeper_command
         if previous_screen_command is None:
             automation_commands.pop("screen_recording_permission", None)
         else:

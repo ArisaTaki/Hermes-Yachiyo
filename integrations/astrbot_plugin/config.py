@@ -18,6 +18,8 @@ class PluginConfig:
 
     # Oha-Yachiyo Bridge 地址
     oha_url: str = DEFAULT_OHA_URL
+    # Oha-Yachiyo Bridge 本地会话 token；打包版 mutating routes 需要此 header
+    bridge_token: str = ""
     # Hapi（Codex 执行后端）地址
     hapi_url: str = DEFAULT_HAPI_URL
     # 允许使用命令的发送者 QQ 号列表；空列表 = 不限制

@@ -12,6 +12,7 @@ from apps.shell.assets import TTS_RELEASES_URL, get_user_tts_assets_dir, project
 from packages.security import redact_api_error_text
 
 TTS_PRESET_KIND = "oha-yachiyo-gpt-sovits-voice"
+LEGACY_TTS_PRESET_KINDS = ("hermes-yachiyo-gpt-sovits-voice",)
 TTS_PRESET_MANIFEST_NAMES = ("yachiyo-tts-preset.json", "tts-preset.json")
 
 
@@ -104,7 +105,7 @@ def read_tts_voice_manifest(path: Path) -> dict[str, Any]:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except Exception as exc:
         raise ValueError("音色包 manifest 解析失败") from exc
-    if payload.get("kind") != TTS_PRESET_KIND:
+    if payload.get("kind") not in (TTS_PRESET_KIND, *LEGACY_TTS_PRESET_KINDS):
         raise ValueError("音色包 manifest 类型不匹配")
     return payload
 
