@@ -22,6 +22,13 @@ SCREEN_RECORDING_SETTINGS_URL = (
 DEFAULT_SCREEN_SMOKE_APP_PATH = Path(
     "tmp/rc-screen-smoke/Oha-Yachiyo-0.4.0-arm64/Oha-Yachiyo.app"
 )
+DEFAULT_SCREEN_SMOKE_BACKEND_PATH = (
+    DEFAULT_SCREEN_SMOKE_APP_PATH
+    / "Contents"
+    / "Resources"
+    / "backend"
+    / "oha-yachiyo-backend"
+)
 DEFAULT_DMG_PATH = Path("dist/electron/Oha-Yachiyo-0.4.0-arm64.dmg")
 
 if str(ROOT) not in sys.path:
@@ -168,30 +175,39 @@ def _print_os_evidence_command(*, label: str, signoff_draft: Path) -> None:
     print(" ".join(command))
 
 
-def _screen_probe_launch_paths(*, label: str) -> tuple[str, str]:
+def _screen_probe_launch_paths(*, label: str) -> tuple[str, str, str]:
     screen_report = ROOT / "tmp" / f"rc-verification-{label}-screen.json"
+    fallback = (
+        str(DEFAULT_DMG_PATH),
+        str(DEFAULT_SCREEN_SMOKE_APP_PATH),
+        str(DEFAULT_SCREEN_SMOKE_BACKEND_PATH),
+    )
     if not screen_report.exists():
-        return (str(DEFAULT_DMG_PATH), str(DEFAULT_SCREEN_SMOKE_APP_PATH))
+        return fallback
     try:
         report = _load_report(screen_report)
     except (OSError, json.JSONDecodeError):
-        return (str(DEFAULT_DMG_PATH), str(DEFAULT_SCREEN_SMOKE_APP_PATH))
+        return fallback
     probe = report.get("dmg_screen_probe")
     if not isinstance(probe, dict):
-        return (str(DEFAULT_DMG_PATH), str(DEFAULT_SCREEN_SMOKE_APP_PATH))
+        return fallback
     launch_paths = probe.get("app_launch_paths")
     if not isinstance(launch_paths, list) or not launch_paths:
-        return (str(DEFAULT_DMG_PATH), str(DEFAULT_SCREEN_SMOKE_APP_PATH))
+        return fallback
     first = launch_paths[0]
     if not isinstance(first, dict):
-        return (str(DEFAULT_DMG_PATH), str(DEFAULT_SCREEN_SMOKE_APP_PATH))
+        return fallback
     dmg_path = first.get("dmg_path")
     app_path = first.get("app_path")
+    backend_path = first.get("backend_path")
     return (
         dmg_path if isinstance(dmg_path, str) and dmg_path else str(DEFAULT_DMG_PATH),
         app_path
         if isinstance(app_path, str) and app_path
         else str(DEFAULT_SCREEN_SMOKE_APP_PATH),
+        backend_path
+        if isinstance(backend_path, str) and backend_path
+        else str(DEFAULT_SCREEN_SMOKE_BACKEND_PATH),
     )
 
 
@@ -216,9 +232,10 @@ def print_local_os_signoff_guide(*, short_commit: str | None = None) -> bool:
         print("- no Gatekeeper or Screen Recording manual checks remain")
         return True
 
-    dmg_path, app_path = _screen_probe_launch_paths(label=label)
+    dmg_path, app_path, backend_path = _screen_probe_launch_paths(label=label)
     print(f"- DMG: {dmg_path}")
     print(f"- stable Screen Recording app path: {app_path}")
+    print(f"- stable Screen Recording backend path: {backend_path}")
     if "gatekeeper_first_launch" in os_remaining:
         print(
             "- Gatekeeper: mount the DMG and launch Oha-Yachiyo.app via Finder "
@@ -230,6 +247,7 @@ def print_local_os_signoff_guide(*, short_commit: str | None = None) -> bool:
             "then rerun the screen smoke."
         )
         print(f"  open -R \"{app_path}\"")
+        print(f"  open -R \"{backend_path}\"")
         print(f"  open \"{SCREEN_RECORDING_SETTINGS_URL}\"")
         print(
             "  "

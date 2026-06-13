@@ -505,6 +505,11 @@ def test_refresh_local_rc_signoff_prints_os_signoff_guide(
                                 "tmp/rc-screen-smoke/Oha-Yachiyo-0.4.0-arm64/"
                                 "Oha-Yachiyo.app"
                             ),
+                            "backend_path": (
+                                "tmp/rc-screen-smoke/Oha-Yachiyo-0.4.0-arm64/"
+                                "Oha-Yachiyo.app/Contents/Resources/backend/"
+                                "oha-yachiyo-backend"
+                            ),
                         }
                     ]
                 }
@@ -527,7 +532,17 @@ def test_refresh_local_rc_signoff_prints_os_signoff_guide(
         "tmp/rc-screen-smoke/Oha-Yachiyo-0.4.0-arm64/Oha-Yachiyo.app"
     ) in output
     assert (
+        "stable Screen Recording backend path: "
+        "tmp/rc-screen-smoke/Oha-Yachiyo-0.4.0-arm64/"
+        "Oha-Yachiyo.app/Contents/Resources/backend/oha-yachiyo-backend"
+    ) in output
+    assert (
         'open -R "tmp/rc-screen-smoke/Oha-Yachiyo-0.4.0-arm64/Oha-Yachiyo.app"'
+        in output
+    )
+    assert (
+        'open -R "tmp/rc-screen-smoke/Oha-Yachiyo-0.4.0-arm64/'
+        'Oha-Yachiyo.app/Contents/Resources/backend/oha-yachiyo-backend"'
         in output
     )
     assert refresh.SCREEN_RECORDING_SETTINGS_URL in output

@@ -2311,6 +2311,10 @@ def test_release_candidate_verifier_runs_dmg_screen_recording_probe(
             {
                 "dmg_path": "release/Oha-Yachiyo-0.4.0-arm64.dmg",
                 "app_path": "tmp/rc-screen-smoke/Oha-Yachiyo-0.4.0-arm64/Oha-Yachiyo.app",
+                "backend_path": (
+                    "tmp/rc-screen-smoke/Oha-Yachiyo-0.4.0-arm64/"
+                    "Oha-Yachiyo.app/Contents/Resources/backend/oha-yachiyo-backend"
+                ),
             }
         ],
         "screens": [
@@ -2440,6 +2444,10 @@ def test_release_candidate_verifier_keeps_bridge_evidence_when_dmg_screen_probe_
         {
             "dmg_path": "release/Oha-Yachiyo-0.4.0-arm64.dmg",
             "app_path": "tmp/rc-screen-smoke/Oha-Yachiyo-0.4.0-arm64/Oha-Yachiyo.app",
+            "backend_path": (
+                "tmp/rc-screen-smoke/Oha-Yachiyo-0.4.0-arm64/"
+                "Oha-Yachiyo.app/Contents/Resources/backend/oha-yachiyo-backend"
+            ),
         }
     ]
     assert report["dmg_screen_probe"]["screens"] == []
@@ -2456,8 +2464,12 @@ def test_release_candidate_verifier_keeps_bridge_evidence_when_dmg_screen_probe_
         "screen_recording_permission"
     ]["notes"]
     assert (
-        "Stable app path for macOS Screen Recording permission: "
+        "Stable app/backend paths for macOS Screen Recording permission: "
         "tmp/rc-screen-smoke/Oha-Yachiyo-0.4.0-arm64/Oha-Yachiyo.app"
+    ) in manual_statuses["screen_recording_permission"]["notes"]
+    assert (
+        "tmp/rc-screen-smoke/Oha-Yachiyo-0.4.0-arm64/"
+        "Oha-Yachiyo.app/Contents/Resources/backend/oha-yachiyo-backend"
     ) in manual_statuses["screen_recording_permission"]["notes"]
     assert "release/Oha-Yachiyo-0.4.0-arm64.dmg" in manual_statuses[
         "screen_recording_permission"

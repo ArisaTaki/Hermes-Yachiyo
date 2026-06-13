@@ -682,6 +682,10 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document local RC OS signoff guide shortcut",
     ),
     (
+        "稳定 backend executable path",
+        "release packaging docs must document the backend helper screen-recording permission target",
+    ),
+    (
         "--write-os-evidence",
         "release packaging docs must document local RC OS evidence shortcut",
     ),

@@ -38,6 +38,7 @@ DEFAULT_ARTIFACT_PATHS: tuple[Path, ...] = (
 )
 PACKAGED_APP_NAME = "Oha-Yachiyo.app"
 PACKAGED_APP_EXECUTABLE_NAME = "Oha-Yachiyo"
+PACKAGED_BACKEND_RELATIVE_PATH = Path("Contents/Resources/backend/oha-yachiyo-backend")
 DMG_APP_SMOKE_TIMEOUT_SECONDS = 45.0
 DMG_SCREEN_PROBE_REQUEST_TIMEOUT_SECONDS = 10.0
 DMG_UI_SAMPLING_SMOKE_TIMEOUT_SECONDS = 60.0
@@ -687,11 +688,12 @@ def _append_dmg_screen_probe_failure_supporting_evidence(
         for item in raw_launch_paths:
             if not isinstance(item, dict):
                 continue
-            launch_path = str(item.get("app_path") or "").strip()
-            if launch_path:
-                launch_labels.append(launch_path)
+            for key in ("app_path", "backend_path"):
+                launch_path = str(item.get(key) or "").strip()
+                if launch_path and launch_path not in launch_labels:
+                    launch_labels.append(launch_path)
     launch_note = (
-        " Stable app path for macOS Screen Recording permission: "
+        " Stable app/backend paths for macOS Screen Recording permission: "
         + ", ".join(launch_labels)
         + "."
         if launch_labels
@@ -2261,6 +2263,11 @@ def verify_dmg_screen_recording_probe(
                 {
                     "dmg_path": str(dmg_path),
                     "app_path": str(launch_app_path.relative_to(root)),
+                    "backend_path": str(
+                        (launch_app_path / PACKAGED_BACKEND_RELATIVE_PATH).relative_to(
+                            root
+                        )
+                    ),
                 }
             )
             bridge_url = f"http://127.0.0.1:{_allocate_loopback_port()}"

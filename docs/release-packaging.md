@@ -138,7 +138,7 @@ python scripts/refresh_local_rc_signoff.py --print-status
 python scripts/refresh_local_rc_signoff.py --print-os-signoff-guide
 ```
 
-输出会列出当前 `tmp/rc-signoff-<short-commit>-current.json`、DMG、稳定 Screen Recording app path、可执行的 `open -R ...` / System Settings Screen Recording URL、授权后要 rerun 的 `--run-dmg-screen-smoke` 命令、`--write-os-evidence` 命令和最终 `--require-manual-checks-complete` 命令。只有在签核人实际完成 Finder Gatekeeper 首启和 Screen Recording 授权验证后，才能把对应 evidence 写入 OS evidence JSON。
+输出会列出当前 `tmp/rc-signoff-<short-commit>-current.json`、DMG、稳定 Screen Recording app path、稳定 backend executable path、可执行的 `open -R ...` / System Settings Screen Recording URL、授权后要 rerun 的 `--run-dmg-screen-smoke` 命令、`--write-os-evidence` 命令和最终 `--require-manual-checks-complete` 命令。只有在签核人实际完成 Finder Gatekeeper 首启和 Screen Recording 授权验证后，才能把对应 evidence 写入 OS evidence JSON。
 
 Gatekeeper / Screen Recording 已人工确认后，可以生成只包含剩余 OS evidence 的小 JSON；该文件会继承当前 `tmp/rc-signoff-<short-commit>-current.json` 里的 `manual_release_candidate_check_source_revisions`，避免最终 gate 因人工证据缺少源码版本而失败：
 
@@ -147,7 +147,7 @@ SHORT_COMMIT="$(git rev-parse --short=8 HEAD)"
 python scripts/refresh_local_rc_signoff.py \
   --write-os-evidence "tmp/rc-signoff-${SHORT_COMMIT}-os-evidence.json" \
   --gatekeeper-evidence "Mounted dist/electron/Oha-Yachiyo-0.4.0-arm64.dmg and opened Oha-Yachiyo.app through Finder Control-click -> Open." \
-  --screen-recording-evidence "Granted Screen Recording to tmp/rc-screen-smoke/Oha-Yachiyo-0.4.0-arm64/Oha-Yachiyo.app and reran --run-dmg-screen-smoke successfully."
+  --screen-recording-evidence "Granted Screen Recording to tmp/rc-screen-smoke/Oha-Yachiyo-0.4.0-arm64/Oha-Yachiyo.app and its Contents/Resources/backend/oha-yachiyo-backend helper, then reran --run-dmg-screen-smoke successfully."
 ```
 
 最终签核时先传当前自动 evidence draft，再传这个 OS evidence 文件，让后者只覆盖两个手动 OS 项：
@@ -236,7 +236,7 @@ python scripts/verify_release_candidate.py --require-artifacts --run-dmg-chat-na
 python scripts/verify_release_candidate.py --require-artifacts --run-dmg-screen-smoke
 ```
 
-`--run-dmg-screen-smoke` 会从 DMG 内复制 `.app` 到稳定的 `tmp/rc-screen-smoke/<dmg-name>/Oha-Yachiyo.app`，再启动该副本、等待 packaged Bridge `/status`，并请求 `/screen/current`。如果 macOS Screen Recording 权限未授权，RC report 会在 `dmg_screen_probe.app_launch_paths` 和 manual checklist supporting note 中写入这个稳定 app path，方便签核人对同一路径授权后复跑，而不是每次授权随机 mount path。通过时 RC report 只记录截图 `width`、`height`、`format`、`captured_at` 等元数据，不归档 `image_base64`；同一轮 gate 会把 `packaged_bridge_isolation` 和 `screen_recording_permission` 自动标为 `passed`。
+`--run-dmg-screen-smoke` 会从 DMG 内复制 `.app` 到稳定的 `tmp/rc-screen-smoke/<dmg-name>/Oha-Yachiyo.app`，再启动该副本、等待 packaged Bridge `/status`，并请求 `/screen/current`。如果 macOS Screen Recording 权限未授权，RC report 会在 `dmg_screen_probe.app_launch_paths` 和 manual checklist supporting note 中写入这个稳定 app path 以及 `Contents/Resources/backend/oha-yachiyo-backend` backend executable path，方便签核人对实际执行截图的 helper 进程授权后复跑，而不是每次授权随机 mount path。通过时 RC report 只记录截图 `width`、`height`、`format`、`captured_at` 等元数据，不归档 `image_base64`；同一轮 gate 会把 `packaged_bridge_isolation` 和 `screen_recording_permission` 自动标为 `passed`。
 
 具备真实 OpenAI-compatible provider smoke 凭据时，运行：
 
