@@ -475,6 +475,7 @@ def test_refresh_local_rc_signoff_print_status_uses_current_draft(
     ) in output
     assert "tmp/rc-verification-screen.json" not in output
     assert "local RC OS evidence command:" in output
+    assert "placeholder values are rejected" in output
     assert "--write-os-evidence tmp/rc-signoff-abc12345-os-evidence.json" in output
     assert "--gatekeeper-evidence" in output
     assert "--screen-recording-evidence" in output
@@ -564,6 +565,7 @@ def test_refresh_local_rc_signoff_prints_os_signoff_guide(
     )
     assert refresh.SCREEN_RECORDING_SETTINGS_URL in output
     assert "--run-dmg-screen-smoke" in output
+    assert "placeholder values are rejected" in output
     assert "--write-os-evidence tmp/rc-signoff-abc12345-os-evidence.json" in output
     assert "--manual-checks-json tmp/rc-signoff-abc12345-current.json" in output
     assert "--manual-checks-json tmp/rc-signoff-abc12345-os-evidence.json" in output

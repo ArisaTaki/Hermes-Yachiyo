@@ -142,6 +142,8 @@ python scripts/refresh_local_rc_signoff.py --print-os-signoff-guide
 
 Gatekeeper / Screen Recording 已人工确认后，可以生成只包含剩余 OS evidence 的小 JSON；该文件会继承当前 `tmp/rc-signoff-<short-commit>-current.json` 里的 `manual_release_candidate_check_source_revisions`，避免最终 gate 因人工证据缺少源码版本而失败：
 
+如果从 `--print-status` 或 `--print-os-signoff-guide` 复制命令，必须先把 `<record ...>` 占位符替换成真实 evidence；占位 evidence 会被拒绝，不会写入 OS evidence JSON。
+
 ```bash
 SHORT_COMMIT="$(git rev-parse --short=8 HEAD)"
 python scripts/refresh_local_rc_signoff.py \

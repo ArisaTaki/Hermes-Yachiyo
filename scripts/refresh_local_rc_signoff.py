@@ -172,6 +172,10 @@ def _print_os_evidence_command(*, label: str, signoff_draft: Path) -> None:
     if not command:
         return
     print("local RC OS evidence command:")
+    print(
+        "replace the <record ...> placeholders with real OS evidence before "
+        "running this command; placeholder values are rejected."
+    )
     print(" ".join(command))
 
 
@@ -267,6 +271,10 @@ def print_local_os_signoff_guide(*, short_commit: str | None = None) -> bool:
     command = _os_evidence_command_parts(label=label, signoff_draft=signoff_draft)
     if command:
         print("- after OS evidence is true, write the project-local evidence JSON:")
+        print(
+            "  replace the <record ...> placeholders with real OS evidence; "
+            "placeholder values are rejected."
+        )
         print("  " + " ".join(command))
     print("- final signoff command:")
     print(
