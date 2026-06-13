@@ -418,14 +418,42 @@ def test_refresh_local_rc_signoff_print_status_uses_current_draft(
     tmp_path,
     capsys,
 ):
-    commands: list[tuple[list[str], bool]] = []
     monkeypatch.setattr(refresh, "ROOT", tmp_path)
     draft = tmp_path / "tmp" / "rc-signoff-abc12345-current.json"
     draft.parent.mkdir(parents=True, exist_ok=True)
     draft.write_text(
         json.dumps(
             {
-                "manual_release_candidate_check_statuses": [],
+                "checks": [
+                    {
+                        "id": "gatekeeper_first_launch",
+                        "status": "manual_required",
+                    },
+                    {
+                        "id": "packaged_bridge_isolation",
+                        "status": "passed",
+                        "evidence": "Packaged Bridge smoke passed.",
+                    },
+                    {
+                        "id": "screen_recording_permission",
+                        "status": "manual_required",
+                    },
+                    {
+                        "id": "chat_native_file_upload",
+                        "status": "passed",
+                        "evidence": "Packaged Chat native file smoke passed.",
+                    },
+                    {
+                        "id": "packaged_ui_sampling",
+                        "status": "passed",
+                        "evidence": "Packaged UI sampling smoke passed.",
+                    },
+                    {
+                        "id": "real_provider_smoke",
+                        "status": "not_applicable",
+                        "evidence": "Provider smoke credentials were unavailable.",
+                    },
+                ],
                 "manual_release_candidate_check_summary": {
                     "remaining_check_ids": [
                         "gatekeeper_first_launch",
@@ -437,26 +465,15 @@ def test_refresh_local_rc_signoff_print_status_uses_current_draft(
         encoding="utf-8",
     )
 
-    def fake_run(command: list[str], *, allow_failure: bool = False) -> int:
-        commands.append((command, allow_failure))
-        return 0
-
-    monkeypatch.setattr(refresh, "_run", fake_run)
-
     assert refresh.main(["--short-commit", "abc12345", "--print-status"]) == 0
-    assert commands == [
-        (
-            [
-                sys.executable,
-                "scripts/verify_release_candidate.py",
-                "--manual-checks-json",
-                "tmp/rc-signoff-abc12345-current.json",
-                "--print-manual-checks-status",
-            ],
-            True,
-        )
-    ]
     output = capsys.readouterr().out
+    assert "manual release-candidate check progress: 4/6 complete, 2 remaining" in output
+    assert (
+        f"{sys.executable} scripts/verify_release_candidate.py --require-artifacts "
+        "--run-dmg-screen-smoke --report-json "
+        "tmp/rc-verification-abc12345-screen.json"
+    ) in output
+    assert "tmp/rc-verification-screen.json" not in output
     assert "local RC OS evidence command:" in output
     assert "--write-os-evidence tmp/rc-signoff-abc12345-os-evidence.json" in output
     assert "--gatekeeper-evidence" in output

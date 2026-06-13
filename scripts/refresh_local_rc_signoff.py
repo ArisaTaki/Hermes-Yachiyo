@@ -175,6 +175,14 @@ def _print_os_evidence_command(*, label: str, signoff_draft: Path) -> None:
     print(" ".join(command))
 
 
+def _local_screen_smoke_command(*, label: str) -> str:
+    return (
+        f"{sys.executable} scripts/verify_release_candidate.py "
+        "--require-artifacts --run-dmg-screen-smoke "
+        f"--report-json tmp/rc-verification-{label}-screen.json"
+    )
+
+
 def _screen_probe_launch_paths(*, label: str) -> tuple[str, str, str]:
     screen_report = ROOT / "tmp" / f"rc-verification-{label}-screen.json"
     fallback = (
@@ -249,12 +257,7 @@ def print_local_os_signoff_guide(*, short_commit: str | None = None) -> bool:
         print(f"  open -R \"{app_path}\"")
         print(f"  open -R \"{backend_path}\"")
         print(f"  open \"{SCREEN_RECORDING_SETTINGS_URL}\"")
-        print(
-            "  "
-            f"{sys.executable} scripts/verify_release_candidate.py "
-            "--require-artifacts --run-dmg-screen-smoke "
-            f"--report-json tmp/rc-verification-{label}-screen.json"
-        )
+        print(f"  {_local_screen_smoke_command(label=label)}")
 
     command = _os_evidence_command_parts(label=label, signoff_draft=signoff_draft)
     if command:
@@ -394,14 +397,21 @@ def print_local_rc_signoff_status(*, short_commit: str | None = None) -> bool:
             file=sys.stderr,
         )
         return False
-    command = [
-        sys.executable,
-        "scripts/verify_release_candidate.py",
-        "--manual-checks-json",
-        str(signoff_draft.relative_to(ROOT)),
-        "--print-manual-checks-status",
-    ]
-    ok = _run(command, allow_failure=True) == 0
+
+    from scripts import verify_release_candidate as rc
+
+    automation_commands = rc.MANUAL_RELEASE_CANDIDATE_CHECK_AUTOMATION_COMMANDS
+    previous_screen_command = automation_commands.get("screen_recording_permission")
+    automation_commands["screen_recording_permission"] = _local_screen_smoke_command(
+        label=label
+    )
+    try:
+        ok = rc.print_manual_release_candidate_checks_status(ROOT, signoff_draft)
+    finally:
+        if previous_screen_command is None:
+            automation_commands.pop("screen_recording_permission", None)
+        else:
+            automation_commands["screen_recording_permission"] = previous_screen_command
     if ok:
         _print_os_evidence_command(label=label, signoff_draft=signoff_draft)
     return ok
