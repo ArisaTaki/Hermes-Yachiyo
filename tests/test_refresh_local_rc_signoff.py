@@ -666,6 +666,54 @@ def test_refresh_local_rc_signoff_rejects_empty_os_evidence(monkeypatch, tmp_pat
     assert not (tmp_path / "tmp" / "rc-signoff-abc12345-os-evidence.json").exists()
 
 
+def test_refresh_local_rc_signoff_rejects_placeholder_os_evidence(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    monkeypatch.setattr(refresh, "ROOT", tmp_path)
+    draft = tmp_path / "tmp" / "rc-signoff-abc12345-current.json"
+    draft.parent.mkdir(parents=True, exist_ok=True)
+    draft.write_text(
+        json.dumps(
+            {
+                "manual_release_candidate_check_source_revisions": [
+                    {
+                        "source": "tmp/rc-verification-abc12345-packaged-batch.json",
+                        "available": True,
+                        "commit": "abc12345deadbeef",
+                        "short_commit": "abc1234",
+                        "dirty": False,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert (
+        refresh.main(
+            [
+                "--short-commit",
+                "abc12345",
+                "--write-os-evidence",
+                "tmp/rc-signoff-abc12345-os-evidence.json",
+                "--gatekeeper-evidence",
+                "<record Gatekeeper/Finder first-launch evidence>",
+                "--screen-recording-evidence",
+                "<record Screen Recording evidence after rerunning --run-dmg-screen-smoke or a manual screenshot/proactive probe>",
+            ]
+        )
+        == 1
+    )
+
+    assert not (tmp_path / "tmp" / "rc-signoff-abc12345-os-evidence.json").exists()
+    stderr = capsys.readouterr().err
+    assert "replace placeholder OS evidence" in stderr
+    assert "--gatekeeper-evidence" in stderr
+    assert "--screen-recording-evidence" in stderr
+
+
 def test_refresh_local_rc_signoff_requires_provider_credentials(monkeypatch):
     for name in refresh.PROVIDER_SMOKE_ENV_VARS:
         monkeypatch.delenv(name, raising=False)

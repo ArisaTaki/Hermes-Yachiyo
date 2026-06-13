@@ -183,6 +183,11 @@ def _local_screen_smoke_command(*, label: str) -> str:
     )
 
 
+def _is_placeholder_evidence(value: str) -> bool:
+    text = value.strip()
+    return text.startswith("<record ") and text.endswith(">")
+
+
 def _screen_probe_launch_paths(*, label: str) -> tuple[str, str, str]:
     screen_report = ROOT / "tmp" / f"rc-verification-{label}-screen.json"
     fallback = (
@@ -435,6 +440,16 @@ def write_local_os_manual_evidence(
     if not gatekeeper_evidence and not screen_recording_evidence:
         raise ValueError(
             "provide --gatekeeper-evidence, --screen-recording-evidence, or both"
+        )
+    placeholder_fields = []
+    if gatekeeper_evidence and _is_placeholder_evidence(gatekeeper_evidence):
+        placeholder_fields.append("--gatekeeper-evidence")
+    if screen_recording_evidence and _is_placeholder_evidence(screen_recording_evidence):
+        placeholder_fields.append("--screen-recording-evidence")
+    if placeholder_fields:
+        raise ValueError(
+            "replace placeholder OS evidence before writing final signoff evidence: "
+            + ", ".join(placeholder_fields)
         )
 
     draft = _load_report(signoff_draft)
