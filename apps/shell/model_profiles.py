@@ -1152,9 +1152,48 @@ class ModelProfileService:
         """内部方法，调用时必须已持有 self._lock"""
         rows = self._conn.execute("SELECT capability, profile_id FROM model_profile_defaults").fetchall()
         defaults = {str(row["capability"]): str(row["profile_id"]) for row in rows}
+        repaired = False
         for capability in ("chat", "vision", "tts"):
             defaults.setdefault(capability, "")
+            if defaults[capability]:
+                continue
+            profile_id = self._single_available_profile_id_locked(capability)
+            if not profile_id:
+                continue
+            self._conn.execute(
+                """
+                INSERT INTO model_profile_defaults (capability, profile_id)
+                VALUES (?, ?)
+                ON CONFLICT(capability) DO UPDATE SET profile_id=excluded.profile_id
+                """,
+                (capability, profile_id),
+            )
+            defaults[capability] = profile_id
+            repaired = True
+        if repaired:
+            self._conn.commit()
         return defaults
+
+    def _single_available_profile_id_locked(self, capability: str) -> str:
+        """Return the only available profile for a capability, or empty when ambiguous."""
+        rows = self._conn.execute(
+            """
+            SELECT p.profile_id
+              FROM model_profiles p
+         LEFT JOIN model_sources s
+                ON p.source_id=s.source_id
+             WHERE p.capability=?
+               AND p.enabled=1
+               AND p.status='available'
+               AND (p.source_id='' OR s.enabled=1)
+             ORDER BY p.updated_at DESC, p.name
+             LIMIT 2
+            """,
+            (capability,),
+        ).fetchall()
+        if len(rows) != 1:
+            return ""
+        return str(rows[0]["profile_id"] or "")
 
     def set_defaults(self, payload: dict[str, Any]) -> dict[str, Any]:
         for capability in ("chat", "vision", "tts"):
@@ -1177,6 +1216,28 @@ class ModelProfileService:
             )
         self._conn.commit()
         return {"ok": True, "defaults": self.get_defaults()}
+
+    def _set_default_if_missing(self, profile_id: str) -> dict[str, str]:
+        profile = self.get_profile(profile_id)
+        capability = str(profile.get("capability") or "").strip()
+        if capability not in {"chat", "vision", "tts"}:
+            return self.get_defaults()
+        current = self._conn.execute(
+            "SELECT profile_id FROM model_profile_defaults WHERE capability=?",
+            (capability,),
+        ).fetchone()
+        if current is not None and str(current["profile_id"] or "").strip():
+            return self.get_defaults()
+        self._conn.execute(
+            """
+            INSERT INTO model_profile_defaults (capability, profile_id)
+            VALUES (?, ?)
+            ON CONFLICT(capability) DO UPDATE SET profile_id=excluded.profile_id
+            """,
+            (capability, profile_id),
+        )
+        self._conn.commit()
+        return self.get_defaults()
 
     def sync_tts_provider(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Register a TTS provider that already passed the dedicated TTS test."""
@@ -1587,6 +1648,8 @@ class ModelProfileService:
             )
         self._conn.commit()
         payload = {"ok": ok, "success": ok, "message": message, "profile": self.get_profile(profile_id)}
+        if ok:
+            payload["defaults"] = self._set_default_if_missing(profile_id)
         if extra:
             payload.update(extra)
         return payload

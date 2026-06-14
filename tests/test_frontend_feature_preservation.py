@@ -76,7 +76,7 @@ def test_frontend_preserves_top_level_product_routes_and_navigation() -> None:
             "| 'bubble'",
             "| 'bubble-menu'",
             "| 'live2d'",
-            "['agents', 'skills', 'skill-groups', 'workflows', 'runs']",
+            "['agents', 'skills', 'skill-groups', 'workflows', 'runs', 'memory']",
         ],
     )
     _assert_contains(
@@ -570,7 +570,13 @@ def test_diagnostics_screenshot_ui_smoke_uses_local_screen_probe_path() -> None:
         "apps/frontend/src/views/DiagnosticsView.tsx",
         [
             "apiGet<ScreenshotProbe>('/screen/current')",
+            "listModelProfiles()",
             "apiPost<DiagnosticResult>('/ui/native-agent/diagnostic-command'",
+            "if (payload.dashboard) setOverview(payload.dashboard);",
+            "void loadModelProfileSnapshot();",
+            "function modelDiagnosticStatus(",
+            "defaultChatProfile(modelProfiles)",
+            "availableChatProfiles(modelProfiles)",
             "await copyText(text);",
             "setScreenProbe(null);",
             'data-testid="diagnostics-status"',
@@ -1426,8 +1432,8 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
     _assert_contains(
         "apps/frontend/src/views/AgentStudioView.tsx",
         [
-            "type StudioTab = 'agents' | 'skills' | 'skill-groups' | 'workflows' | 'runs';",
-            "const studioTabs: StudioTab[] = ['agents', 'skills', 'workflows', 'runs'];",
+            "type StudioTab = 'agents' | 'skills' | 'skill-groups' | 'workflows' | 'runs' | 'memory';",
+            "const studioTabs: StudioTab[] = ['agents', 'skills', 'workflows', 'runs', 'memory'];",
             "const workflowNodeTypes = new Set(['start', 'agent', 'approval', 'artifact', 'condition', 'parallel', 'workflow', 'loop']);",
             "createAgent",
             "updateAgent",
@@ -1537,6 +1543,66 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "selectedAgentDeletable",
             "系统 Agent 只能查看，不能删除。",
             "系统 Agent 由 oha-yachiyo 管理",
+        ],
+    )
+
+
+def test_agent_studio_exposes_runtime_memory_and_future_task_management() -> None:
+    _assert_contains(
+        "apps/frontend/src/lib/agents.ts",
+        [
+            "export type MemorySpec = {",
+            "export type FutureTaskSpec = {",
+            "export async function listMemories()",
+            "'/ui/memories'",
+            "export async function deleteMemory(",
+            "apiDelete(`/ui/memories/${encodeURIComponent(memoryId)}${query}`)",
+            "export async function listFutureTasks()",
+            "'/ui/future-tasks'",
+            "export async function cancelFutureTask(",
+            "/ui/future-tasks/${encodeURIComponent(futureTaskId)}/cancel",
+            "export async function triggerDueFutureTasks()",
+            "'/ui/future-tasks/trigger-due'",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/views/AgentStudioView.tsx",
+        [
+            "const [memories, setMemories] = useState<MemorySpec[]>([]);",
+            "const [futureTasks, setFutureTasks] = useState<FutureTaskSpec[]>([]);",
+            "listMemories()",
+            "listFutureTasks()",
+            "setMemories(nextMemories);",
+            "setFutureTasks(nextFutureTasks);",
+            "function requestDeleteMemory(memory: MemorySpec)",
+            "await deleteMemory(memory.memory_id, 'studio_user_delete');",
+            "function requestCancelFutureTask(futureTask: FutureTaskSpec)",
+            "await cancelFutureTask(futureTask.future_task_id, 'studio_user_cancel');",
+            "async function triggerDueFutureTaskRuns(): Promise<StudioRefreshOptions>",
+            "const result = await triggerDueFutureTasks();",
+            "openRunDetail(firstRunId, { revealInHistory: true });",
+            "data-testid=\"agent-runtime-memory\"",
+            "data-testid=\"agent-memory-list\"",
+            "data-testid=\"agent-memory-delete\"",
+            "data-testid=\"agent-future-task-list\"",
+            "data-testid=\"agent-future-task-trigger-due\"",
+            "data-testid=\"agent-future-task-cancel\"",
+            "data-testid=\"agent-future-task-open-run\"",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/lib/view.ts",
+        [
+            "['agents', 'skills', 'skill-groups', 'workflows', 'runs', 'memory']",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/styles/app.css",
+        [
+            ".agent-runtime-grid",
+            ".runtime-management-list",
+            ".runtime-management-row",
+            ".runtime-management-actions",
         ],
     )
 
@@ -2202,6 +2268,8 @@ def test_model_profiles_ui_preserves_profile_lifecycle_paths() -> None:
             "apiPost(`/ui/model-profiles/${encodeURIComponent(profileId)}/test`)",
             "export async function updateModelProfileDefaults(",
             "return apiPatch('/ui/model-profiles/defaults', defaults);",
+            "export async function syncNativeProfileDefault(",
+            "return apiPost('/ui/native-agent/config', capability === 'chat' ? { chat_profile_id: profileId } : { vision_profile_id: profileId });",
         ],
     )
     _assert_contains(
@@ -2213,6 +2281,7 @@ def test_model_profiles_ui_preserves_profile_lifecycle_paths() -> None:
             "const test = await testModelProfile(model.profile_id);",
             "await deleteModelProfile(profileId);",
             "const result = await updateModelProfileDefaults({ [profile.capability]: profile.profile_id });",
+            "const nativeResult = await syncNativeProfileDefault(profile.capability, profile.profile_id);",
         ],
     )
 
@@ -2350,6 +2419,61 @@ def test_tool_center_copy_preserves_builtin_native_runtime_boundary() -> None:
             "不再启动 Native Runtime",
             "不再运行 Native Runtime 更新",
             "Native Runtime仍在运行。停止终端会中断 Native Runtime。",
+        ],
+    )
+
+
+def test_tool_center_uses_oha_agent_runtime_capability_names() -> None:
+    tool_center = "apps/frontend/src/views/ToolCenterView.tsx"
+    _assert_contains(
+        tool_center,
+        [
+            "<h1>能力中心</h1>",
+            "管理记忆、提醒、文件、语音和 Agent 协作。",
+            "const LEGACY_TOOL_CATEGORIES = new Set(['外部服务', '第三方扩展']);",
+            ").filter(isUserFacingTool);",
+            "return !LEGACY_TOOL_CATEGORIES.has(item.category);",
+            "label: '语音播报'",
+            "label: '文件与工作区'",
+            "id: 'artifact'",
+            "label: '产物输出'",
+            "label: 'Long-term Memory'",
+            "由 memory.add/replace/remove 维护持久化记忆，并在 Agent Studio 里管理。",
+            "id: 'future_task'",
+            "label: 'FutureTask 排程'",
+            "future_task.schedule/list/cancel",
+            "aliases: ['future-task', 'cronjob', 'cron', 'future_task.schedule', 'future_task.list', 'future_task.cancel']",
+            "label: 'Agent / Workflow 委派'",
+            "把主聊天任务派给 Agent Studio 的 Agent 或 Workflow，并把结果回收进当前会话。",
+            "requiredCapabilities: ['tts', 'future_task', 'memory']",
+            "if (item.category === 'Agent Runtime') return true;",
+            "const planned = capabilities.find((capability) => capability.status.kind === 'planned');",
+            "<h2>常用能力</h2>",
+        ],
+    )
+    _assert_not_contains(
+        tool_center,
+        [
+            "Agent Runtime 能力中心",
+            "展示 Oha 自研 Agent Runtime 的记忆、排程、委派和本机工具状态；外部工具只作为推荐环境显示。",
+            "Native toolset 是这些链路的底座",
+            "requiredCapabilities: ['tts', 'todo', 'cronjob', 'memory']",
+            "label: '定时任务'",
+            "需要 cronjob 工具集配置",
+        ],
+    )
+    _assert_contains(
+        "apps/shell/main_api.py",
+        [
+            '"terminal": ("terminal", "terminal.run", "process"),',
+            '"workspace.list",',
+            '"workspace.read",',
+            '"workspace.write_patch",',
+            '"artifact": ("artifact", "artifact.write", "artifacts"),',
+            '"memory": ("memory", "memory.add", "memory.replace", "memory.remove"),',
+            '"future_task.schedule",',
+            '"future_task.list",',
+            '"future_task.cancel",',
         ],
     )
 

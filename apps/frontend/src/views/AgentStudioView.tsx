@@ -16,12 +16,14 @@ import {
   attachSkill,
   approveRunApproval,
   cancelRun,
+  cancelFutureTask,
   createSkillFolder,
   createAgent,
   createAgentRun,
   createWorkflow,
   createWorkflowRun,
   deleteAgent,
+  deleteMemory,
   deleteRun,
   deleteSkillFolder,
   deleteSkill,
@@ -34,6 +36,8 @@ import {
   importSkill,
   installSkillCommand,
   listAgents,
+  listFutureTasks,
+  listMemories,
   listRunGroups,
   listRunnables,
   listRuns,
@@ -45,11 +49,14 @@ import {
   rerunRun,
   syncNativeSkills,
   testAgentModel,
+  triggerDueFutureTasks,
   updateAgent,
   updateSkill,
   updateSkillFolder,
   updateWorkflow,
   type AgentSpec,
+  type FutureTaskSpec,
+  type MemorySpec,
   type RunnableSummary,
   type RunGroupSpec,
   type RunEventSpec,
@@ -64,7 +71,7 @@ import { chooseAvatarImage, chooseSkillSources, openAppView, openPath } from '..
 import { listModelProfiles, type ModelProfile, type ModelProfileDefaults } from '../lib/modelProfiles';
 import { currentParam, navigateTo } from '../lib/view';
 
-type StudioTab = 'agents' | 'skills' | 'skill-groups' | 'workflows' | 'runs';
+type StudioTab = 'agents' | 'skills' | 'skill-groups' | 'workflows' | 'runs' | 'memory';
 type SkillFolderFilter = 'all' | 'uncategorized' | string;
 type RunKindFilter = 'all' | 'workflow' | 'agent';
 type RunStatusFilter = 'all' | 'completed' | 'failed' | 'active';
@@ -196,8 +203,8 @@ type SkillImportResult = {
 };
 
 type SkillSourceFilter = 'installed' | 'native';
-const studioRouteTabs: StudioTab[] = ['agents', 'skills', 'skill-groups', 'workflows', 'runs'];
-const studioTabs: StudioTab[] = ['agents', 'skills', 'workflows', 'runs'];
+const studioRouteTabs: StudioTab[] = ['agents', 'skills', 'skill-groups', 'workflows', 'runs', 'memory'];
+const studioTabs: StudioTab[] = ['agents', 'skills', 'workflows', 'runs', 'memory'];
 const skillFolderNameMaxLength = 120;
 const workflowNodeTypes = new Set(['start', 'agent', 'approval', 'artifact', 'condition', 'parallel', 'workflow', 'loop']);
 const workflowRunnableNodeTypes = new Set(['agent', 'approval', 'artifact', 'condition', 'parallel', 'workflow', 'loop']);
@@ -1220,6 +1227,31 @@ function formatRunDate(value?: string): string {
   }).format(timestamp);
 }
 
+function formatEpochDate(value?: number): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '未知时间';
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(Number(value) * 1000);
+}
+
+function futureTaskStatusLabel(status?: string): string {
+  if (status === 'scheduled') return '已排程';
+  if (status === 'triggered') return '已触发';
+  if (status === 'cancelled') return '已取消';
+  if (status === 'failed') return '失败';
+  return status || '未知';
+}
+
+function futureTaskStatusTone(status?: string): string {
+  if (status === 'scheduled') return 'running';
+  if (status === 'triggered') return 'ready';
+  if (status === 'failed' || status === 'cancelled') return 'danger';
+  return '';
+}
+
 function formatApprovalInput(value: unknown): string {
   if (typeof value === 'string') return value;
   try {
@@ -2108,6 +2140,8 @@ export function AgentStudioView() {
   const [runnables, setRunnables] = useState<RunnableSummary[]>([]);
   const [runs, setRuns] = useState<RunSpec[]>([]);
   const [runGroups, setRunGroups] = useState<RunGroupSpec[]>([]);
+  const [memories, setMemories] = useState<MemorySpec[]>([]);
+  const [futureTasks, setFutureTasks] = useState<FutureTaskSpec[]>([]);
   const [runDetailCache, setRunDetailCache] = useState<RunSpec[]>([]);
   const [runEventReplayByRunId, setRunEventReplayByRunId] = useState<Record<string, RunEventReplayState>>({});
   const approvedApprovalGuardsRef = useRef<Map<string, ApprovedApprovalGuard>>(new Map());
@@ -2773,7 +2807,19 @@ export function AgentStudioView() {
   }
 
   const refresh = useCallback(async (options: StudioRefreshOptions = {}) => {
-    const [nextAgents, nextSkills, nextProfiles, nextWorkflows, nextRunnables, nextRuns, nextRunGroups, nextSkillSources, nextSkillFolders] = await Promise.all([
+    const [
+      nextAgents,
+      nextSkills,
+      nextProfiles,
+      nextWorkflows,
+      nextRunnables,
+      nextRuns,
+      nextRunGroups,
+      nextSkillSources,
+      nextSkillFolders,
+      nextMemories,
+      nextFutureTasks,
+    ] = await Promise.all([
       listAgents(),
       listSkills(),
       listModelProfiles(),
@@ -2783,6 +2829,8 @@ export function AgentStudioView() {
       listRunGroups(),
       listSkillSources(),
       listSkillFolders(),
+      listMemories(),
+      listFutureTasks(),
     ]);
     setAgents(nextAgents);
     setSkills(nextSkills);
@@ -2794,6 +2842,8 @@ export function AgentStudioView() {
     setRunnables(nextRunnables);
     setRuns(nextRuns);
     setRunGroups(nextRunGroups);
+    setMemories(nextMemories);
+    setFutureTasks(nextFutureTasks);
     setSelectedAgentId((current) => {
       const desired = options.selectedAgentId !== undefined ? options.selectedAgentId : current;
       if (desired && nextAgents.some((agent) => agent.agent_id === desired)) return desired;
@@ -3484,6 +3534,49 @@ export function AgentStudioView() {
     });
   }
 
+  function requestDeleteMemory(memory: MemorySpec) {
+    const memoryLabel = memory.content.trim() || memory.memory_id;
+    showConfirmDialog({
+      title: `删除 Memory「${memoryLabel.slice(0, 32)}」？`,
+      description: '这条长期记忆会从 Agent Runtime 的主动回忆范围中移除；历史 Run 不会被删除。',
+      confirmLabel: '删除 Memory',
+      variant: 'danger',
+      onConfirm: () => void runAction(async () => {
+        await deleteMemory(memory.memory_id, 'studio_user_delete');
+        return { statusMessage: 'Memory 已删除。' };
+      }, '删除 Memory'),
+    });
+  }
+
+  function requestCancelFutureTask(futureTask: FutureTaskSpec) {
+    const taskLabel = futureTask.title.trim() || futureTask.future_task_id;
+    showConfirmDialog({
+      title: `取消 FutureTask「${taskLabel.slice(0, 40)}」？`,
+      description: '这个 FutureTask 不会再自动触发；已经生成的 Run 不会被删除。',
+      confirmLabel: '取消 FutureTask',
+      variant: 'danger',
+      onConfirm: () => void runAction(async () => {
+        await cancelFutureTask(futureTask.future_task_id, 'studio_user_cancel');
+        return { statusMessage: 'FutureTask 已取消。' };
+      }, '取消 FutureTask'),
+    });
+  }
+
+  async function triggerDueFutureTaskRuns(): Promise<StudioRefreshOptions> {
+    const result = await triggerDueFutureTasks();
+    const triggered = result.triggered || [];
+    const firstRunId = triggered.map((item) => item.run?.run_id || '').find(Boolean) || '';
+    const failedCount = triggered.filter((item) => item.error || item.ok === false).length;
+    const statusMessage = triggered.length
+      ? `已触发 ${triggered.length} 个 FutureTask${failedCount ? `，${failedCount} 个失败` : ''}。`
+      : '没有到期 FutureTask。';
+    if (firstRunId) {
+      openRunDetail(firstRunId, { revealInHistory: true });
+      return { selectedRunId: firstRunId, statusMessage };
+    }
+    return { statusMessage };
+  }
+
   function requestDeleteSkillFolder(folder: SkillFolderSpec, deleteSkills: boolean) {
     const count = folder.skill_count || skills.filter((skill) => skill.folder_id === folder.folder_id).length;
     if (deleteSkills) {
@@ -3969,7 +4062,7 @@ export function AgentStudioView() {
             key={item}
             onClick={() => activateTab(item)}
           >
-            {item === 'agents' ? 'Agents' : item === 'skills' ? 'Skill Library' : item === 'workflows' ? 'Workflow Studio' : 'Runs'}
+            {item === 'agents' ? 'Agents' : item === 'skills' ? 'Skill Library' : item === 'workflows' ? 'Workflow Studio' : item === 'runs' ? 'Runs' : 'Memory'}
           </button>
         ))}
       </div>
@@ -4953,6 +5046,132 @@ export function AgentStudioView() {
               </button>
             </section>
           </div>
+        </section>
+      ) : null}
+
+      {!loading && tab === 'memory' ? (
+        <section className="agent-studio-grid agent-runtime-grid" data-testid="agent-runtime-memory">
+          <aside className="agent-studio-panel agent-runtime-panel">
+            <div className="section-heading-row">
+              <h2>Long-term Memory</h2>
+              <span className="agent-section-count">{memories.filter((memory) => !memory.deleted_at).length} active</span>
+            </div>
+            <div className="runtime-management-list" data-testid="agent-memory-list">
+              {memories.map((memory) => {
+                const sourceRunId = memory.source_run_id || '';
+                return (
+                  <article
+                    className={memory.deleted_at ? 'runtime-management-row muted' : 'runtime-management-row'}
+                    data-memory-id={memory.memory_id}
+                    data-memory-kind={memory.kind}
+                    data-memory-scope={memory.scope}
+                    data-testid="agent-memory-item"
+                    key={memory.memory_id}
+                  >
+                    <div className="runtime-management-main">
+                      <div className="runtime-management-title">
+                        <strong>{memory.kind || 'memory'}</strong>
+                        <span>{memory.scope || 'local'}</span>
+                        {memory.pinned ? <em>pinned</em> : null}
+                        {memory.user_confirmed ? <em>confirmed</em> : null}
+                        {memory.deleted_at ? <em>deleted</em> : null}
+                      </div>
+                      <p>{memory.content || 'Empty memory'}</p>
+                      <div className="runtime-management-meta">
+                        <code>{memory.memory_id}</code>
+                        <span>{formatRunDate(memory.updated_at || memory.created_at)}</span>
+                        {typeof memory.confidence === 'number' ? <span>{Math.round(memory.confidence * 100)}% confidence</span> : null}
+                        {sourceRunId ? (
+                          <button type="button" disabled={busy} onClick={() => openRunDetail(sourceRunId)}>
+                            Source Run
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                    {!memory.deleted_at ? (
+                      <div className="runtime-management-actions">
+                        <button
+                          type="button"
+                          className="danger-action"
+                          data-testid="agent-memory-delete"
+                          disabled={busy}
+                          onClick={() => requestDeleteMemory(memory)}
+                        >
+                          删除
+                        </button>
+                      </div>
+                    ) : null}
+                  </article>
+                );
+              })}
+              {!memories.length ? <div className="empty-state inline-empty">暂无长期记忆。</div> : null}
+            </div>
+          </aside>
+          <section className="agent-studio-panel agent-runtime-panel">
+            <div className="section-heading-row">
+              <h2>Future Tasks</h2>
+              <div className="studio-heading-actions">
+                <span className="agent-section-count">{futureTasks.filter((task) => task.status === 'scheduled').length} scheduled</span>
+                <button
+                  type="button"
+                  data-testid="agent-future-task-trigger-due"
+                  disabled={busy}
+                  onClick={() => void runAction(triggerDueFutureTaskRuns, '触发到期 FutureTask')}
+                >
+                  触发到期
+                </button>
+              </div>
+            </div>
+            <div className="runtime-management-list" data-testid="agent-future-task-list">
+              {futureTasks.map((futureTask) => {
+                const lastRunId = futureTask.last_run_id || '';
+                return (
+                  <article
+                    className={`runtime-management-row ${futureTask.status === 'scheduled' ? 'scheduled' : ''}`}
+                    data-future-task-id={futureTask.future_task_id}
+                    data-future-task-status={futureTask.status}
+                    data-testid="agent-future-task-item"
+                    key={futureTask.future_task_id}
+                  >
+                    <div className="runtime-management-main">
+                      <div className="runtime-management-title">
+                        <strong>{futureTask.title || 'FutureTask'}</strong>
+                        <em className={`run-status-pill ${futureTaskStatusTone(futureTask.status)}`}>{futureTaskStatusLabel(futureTask.status)}</em>
+                      </div>
+                      <p>{futureTask.prompt || 'No prompt'}</p>
+                      <div className="runtime-management-meta">
+                        <span>Due {formatEpochDate(futureTask.scheduled_at_epoch)}</span>
+                        {futureTask.cron ? <span>{futureTask.cron}</span> : null}
+                        {futureTask.runnable_name || futureTask.runnable_id ? <span>{futureTask.runnable_name || futureTask.runnable_id}</span> : null}
+                        {typeof futureTask.run_count === 'number' ? <span>{futureTask.run_count} runs</span> : null}
+                        <code>{futureTask.future_task_id}</code>
+                      </div>
+                      {futureTask.error ? <div className="agent-inline-note warn">{futureTask.error}</div> : null}
+                    </div>
+                    <div className="runtime-management-actions">
+                      {lastRunId ? (
+                        <button type="button" data-testid="agent-future-task-open-run" disabled={busy} onClick={() => openRunDetail(lastRunId)}>
+                          打开 Run
+                        </button>
+                      ) : null}
+                      {futureTask.status === 'scheduled' ? (
+                        <button
+                          type="button"
+                          className="danger-action"
+                          data-testid="agent-future-task-cancel"
+                          disabled={busy}
+                          onClick={() => requestCancelFutureTask(futureTask)}
+                        >
+                          取消
+                        </button>
+                      ) : null}
+                    </div>
+                  </article>
+                );
+              })}
+              {!futureTasks.length ? <div className="empty-state inline-empty">暂无 FutureTask。</div> : null}
+            </div>
+          </section>
         </section>
       ) : null}
 

@@ -2210,7 +2210,7 @@ button:hover {
   align-content: start;
   gap: 11px;
   min-width: 0;
-  min-height: 232px;
+  min-height: 152px;
   padding: 13px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
@@ -2600,7 +2600,7 @@ button:hover {
 
 .tool-action-row {
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -14224,6 +14224,132 @@ button.activity-item {
   font-size: 13px;
 }
 
+.agent-runtime-grid {
+  grid-template-columns: minmax(320px, 0.95fr) minmax(360px, 1.05fr);
+}
+
+.agent-runtime-panel {
+  align-content: start;
+}
+
+.runtime-management-list {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.runtime-management-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 8px;
+  background: oklch(255 0 0 / 0.025);
+}
+
+.runtime-management-row.scheduled {
+  border-color: oklch(66% 0.12 188 / 0.28);
+  background: oklch(66% 0.12 188 / 0.07);
+}
+
+.runtime-management-row.muted {
+  opacity: 0.62;
+}
+
+.runtime-management-main {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.runtime-management-title {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  align-items: center;
+  min-width: 0;
+}
+
+.runtime-management-title strong {
+  overflow: hidden;
+  color: var(--hy-fg);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime-management-title span,
+.runtime-management-title em:not(.run-status-pill) {
+  padding: 2px 7px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 999px;
+  color: var(--hy-faint);
+  font-size: 10px;
+  font-style: normal;
+  line-height: 1.35;
+}
+
+.runtime-management-row p {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 0;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  color: var(--hy-subtle);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.runtime-management-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.runtime-management-meta span,
+.runtime-management-meta code,
+.runtime-management-meta button {
+  min-height: 24px;
+  padding: 4px 7px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 999px;
+  background: oklch(255 0 0 / 0.025);
+  color: var(--hy-faint);
+  font-size: 10px;
+  line-height: 1.25;
+}
+
+.runtime-management-meta code {
+  max-width: 100%;
+  overflow: hidden;
+  font-family: var(--hy-mono);
+  text-overflow: ellipsis;
+}
+
+.runtime-management-meta button {
+  cursor: pointer;
+}
+
+.runtime-management-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.runtime-management-actions button {
+  min-height: 30px;
+  white-space: nowrap;
+}
+
 .agent-editor,
 .workflow-editor {
   align-content: start;
@@ -18043,9 +18169,14 @@ button.activity-item {
 @media (max-width: 720px) {
   .skill-folder-create,
   .skill-folder-manager-row,
+  .runtime-management-row,
   .workflow-node-setting-row,
   .workflow-node-setting-main {
     grid-template-columns: 1fr;
+  }
+
+  .runtime-management-actions {
+    justify-content: flex-start;
   }
 
   .workflow-approval-request-grid {

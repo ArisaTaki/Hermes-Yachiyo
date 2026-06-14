@@ -208,6 +208,67 @@ def test_proactive_service_trigger_now_requires_enabled_watch():
     assert runtime.state.list_tasks() == []
 
 
+def test_proactive_service_schedules_and_triggers_future_task(monkeypatch):
+    now = [1000.0]
+    monkeypatch.setattr(proactive_mod.time, "time", lambda: now[0])
+    runtime = _RuntimeStub()
+    runtime.config.bubble_mode.proactive_enabled = True
+    runtime.config.bubble_mode.proactive_desktop_watch_enabled = False
+    service = ProactiveDesktopService(runtime, runtime.config.bubble_mode)
+
+    created = service.schedule_future_task(
+        "Stretch break",
+        "提醒用户保存进度并休息一下。",
+        delay_seconds=60,
+    )
+    early = service.trigger_due_future_tasks(now_epoch=1059.0)
+    due = service.trigger_due_future_tasks(now_epoch=1060.0)
+    tasks = runtime.state.list_tasks()
+    messages = runtime.chat_session.get_messages()
+    listed = service.list_future_tasks()["future_tasks"]
+
+    assert created["ok"] is True
+    assert created["future_task"]["status"] == "scheduled"
+    assert created["future_task"]["cron"] == ""
+    assert early["triggered"] == []
+    assert len(due["triggered"]) == 1
+    assert due["triggered"][0]["scheduled"] is False
+    assert listed[0]["status"] == "triggered"
+    assert tasks[0].task_type == TaskType.GENERAL
+    assert tasks[0].risk_level == RiskLevel.LOW
+    assert "FutureTask: Stretch break" in tasks[0].description
+    assert "提醒用户保存进度" in tasks[0].description
+    assert messages[0].content == "已到时间，正在处理：Stretch break"
+    assert messages[0].status == MessageStatus.PROCESSING
+
+
+def test_proactive_service_reschedules_cron_future_task(monkeypatch):
+    now = [2000.0]
+    monkeypatch.setattr(proactive_mod.time, "time", lambda: now[0])
+    runtime = _RuntimeStub()
+    runtime.config.live2d_mode.proactive_enabled = True
+    runtime.config.live2d_mode.proactive_desktop_watch_enabled = False
+    service = ProactiveDesktopService(runtime, runtime.config.live2d_mode)
+
+    created = service.schedule_future_task(
+        "Hourly summary",
+        "总结最近一小时的工作线索。",
+        scheduled_at_epoch=2005.0,
+        cron="@hourly",
+    )
+    due = service.trigger_due_future_tasks(now_epoch=2005.0)
+    future_task = service.list_future_tasks()["future_tasks"][0]
+
+    assert created["future_task"]["status"] == "scheduled"
+    assert created["future_task"]["cron"] == "@hourly"
+    assert len(due["triggered"]) == 1
+    assert due["triggered"][0]["scheduled"] is True
+    assert future_task["status"] == "scheduled"
+    assert future_task["run_count"] == 1
+    assert future_task["last_run_task_id"] == runtime.state.list_tasks()[0].task_id
+    assert future_task["scheduled_at_epoch"] == 5605.0
+
+
 def test_proactive_service_creates_low_risk_screenshot_task(monkeypatch):
     now = _advance_to_first_check(monkeypatch)
     runtime = _RuntimeStub()

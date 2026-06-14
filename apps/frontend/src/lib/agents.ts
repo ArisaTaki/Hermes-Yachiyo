@@ -218,6 +218,41 @@ export type RunGroupSpec = {
   updated_at?: string;
 };
 
+export type MemorySpec = {
+  memory_id: string;
+  scope: string;
+  kind: string;
+  content: string;
+  source_session_id?: string;
+  source_message_id?: string;
+  source_task_id?: string;
+  source_run_id?: string;
+  confidence?: number;
+  pinned?: boolean;
+  user_confirmed?: boolean;
+  created_at?: string;
+  updated_at?: string;
+  deleted_at?: string;
+};
+
+export type FutureTaskSpec = {
+  future_task_id: string;
+  title: string;
+  prompt: string;
+  runnable_id?: string;
+  runnable_name?: string;
+  status: 'scheduled' | 'triggered' | 'cancelled' | 'failed' | string;
+  scheduled_at_epoch: number;
+  cron?: string;
+  source_run_id?: string;
+  last_run_id?: string;
+  run_count?: number;
+  error?: string;
+  created_at?: string;
+  updated_at?: string;
+  cancelled_at?: string;
+};
+
 function uniqueByKey<T>(items: T[], getKey: (item: T) => string): T[] {
   const indexByKey = new Map<string, number>();
   const uniqueItems: T[] = [];
@@ -335,6 +370,29 @@ export async function deleteWorkflow(workflowId: string): Promise<{ ok?: boolean
 export async function listRunnables(): Promise<RunnableSummary[]> {
   const payload = await apiGet<{ runnables?: RunnableSummary[] }>('/ui/runnables');
   return payload.runnables || [];
+}
+
+export async function listMemories(): Promise<MemorySpec[]> {
+  const payload = await apiGet<{ memories?: MemorySpec[] }>('/ui/memories');
+  return payload.memories || [];
+}
+
+export async function deleteMemory(memoryId: string, reason = ''): Promise<{ ok?: boolean }> {
+  const query = reason ? `?reason=${encodeURIComponent(reason)}` : '';
+  return apiDelete(`/ui/memories/${encodeURIComponent(memoryId)}${query}`);
+}
+
+export async function listFutureTasks(): Promise<FutureTaskSpec[]> {
+  const payload = await apiGet<{ future_tasks?: FutureTaskSpec[] }>('/ui/future-tasks');
+  return payload.future_tasks || [];
+}
+
+export async function cancelFutureTask(futureTaskId: string, reason = ''): Promise<{ ok?: boolean; future_task?: FutureTaskSpec }> {
+  return apiPost(`/ui/future-tasks/${encodeURIComponent(futureTaskId)}/cancel`, reason ? { reason } : {});
+}
+
+export async function triggerDueFutureTasks(): Promise<{ ok?: boolean; triggered?: Array<{ ok?: boolean; future_task?: FutureTaskSpec; run?: RunSpec; error?: string }> }> {
+  return apiPost('/ui/future-tasks/trigger-due', {});
 }
 
 export async function listRuns(): Promise<RunSpec[]> {

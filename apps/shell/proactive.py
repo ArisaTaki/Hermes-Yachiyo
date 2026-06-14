@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import logging
 import random
+import re
 import time
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
 from apps.core.chat_session import ChatSession, MessageStatus
 from apps.core.executor import execution_capabilities
@@ -33,6 +36,34 @@ _DESKTOP_WATCH_PROMPT = (
 )
 _MIN_PROACTIVE_INTERVAL_SECONDS = 300
 _DESKTOP_WATCH_VISIBLE_MESSAGE = "正在查看当前状态。"
+
+
+@dataclass
+class FutureTask:
+    """A lightweight proactive self-wakeup scheduled by the Agent layer."""
+
+    future_task_id: str
+    title: str
+    prompt: str
+    scheduled_at_epoch: float
+    cron: str = ""
+    status: str = "scheduled"
+    created_at_epoch: float = 0.0
+    last_run_task_id: str = ""
+    run_count: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "future_task_id": self.future_task_id,
+            "title": self.title,
+            "prompt": self.prompt,
+            "scheduled_at_epoch": self.scheduled_at_epoch,
+            "cron": self.cron,
+            "status": self.status,
+            "created_at_epoch": self.created_at_epoch,
+            "last_run_task_id": self.last_run_task_id,
+            "run_count": self.run_count,
+        }
 
 
 def get_proactive_chat_session(runtime: Any) -> ChatSession | Any | None:
@@ -98,6 +129,7 @@ class ProactiveDesktopService:
         self._attention_task_id: str | None = None
         self._acknowledged_task_id: str | None = None
         self._reported_failed_task_id: str | None = None
+        self._future_tasks: dict[str, FutureTask] = {}
 
     @property
     def last_task_id(self) -> str | None:
@@ -112,6 +144,74 @@ class ProactiveDesktopService:
         if self._attention_task_id:
             self._acknowledged_task_id = self._attention_task_id
         self._attention_task_id = None
+
+    def schedule_future_task(
+        self,
+        title: str,
+        prompt: str,
+        *,
+        delay_seconds: int | float | None = None,
+        scheduled_at_epoch: int | float | None = None,
+        cron: str = "",
+    ) -> dict[str, Any]:
+        """Schedule a low-risk FutureTask self-wakeup for the proactive session."""
+        clean_title = str(title or "").strip() or "Future task"
+        clean_prompt = str(prompt or "").strip()
+        if not clean_prompt:
+            raise ValueError("FutureTask prompt 不能为空")
+        now = time.time()
+        clean_cron = str(cron or "").strip()
+        if clean_cron and scheduled_at_epoch is not None:
+            self._next_cron_epoch(clean_cron, now)
+        scheduled_at = self._coerce_future_task_epoch(
+            now,
+            delay_seconds=delay_seconds,
+            scheduled_at_epoch=scheduled_at_epoch,
+            cron=clean_cron,
+        )
+        future_task = FutureTask(
+            future_task_id=f"future_{uuid4().hex[:12]}",
+            title=clean_title,
+            prompt=clean_prompt,
+            scheduled_at_epoch=scheduled_at,
+            cron=clean_cron,
+            status="scheduled",
+            created_at_epoch=now,
+        )
+        self._future_tasks[future_task.future_task_id] = future_task
+        return {"ok": True, "future_task": future_task.to_dict()}
+
+    def list_future_tasks(self) -> dict[str, Any]:
+        """List scheduled and triggered FutureTask entries for UI/bridge surfaces."""
+        tasks = sorted(
+            self._future_tasks.values(),
+            key=lambda item: (item.scheduled_at_epoch, item.created_at_epoch, item.future_task_id),
+        )
+        return {"ok": True, "future_tasks": [task.to_dict() for task in tasks]}
+
+    def trigger_due_future_tasks(self, *, now_epoch: int | float | None = None) -> dict[str, Any]:
+        """Create product Tasks for every due FutureTask and reschedule cron entries."""
+        now = float(now_epoch if now_epoch is not None else time.time())
+        triggered: list[dict[str, Any]] = []
+        for future_task in sorted(self._future_tasks.values(), key=lambda item: item.scheduled_at_epoch):
+            if future_task.status != "scheduled" or future_task.scheduled_at_epoch > now:
+                continue
+            product_task = self._create_future_task_run(future_task)
+            future_task.last_run_task_id = product_task.task_id
+            future_task.run_count += 1
+            if future_task.cron:
+                future_task.scheduled_at_epoch = self._next_cron_epoch(future_task.cron, now)
+                future_task.status = "scheduled"
+            else:
+                future_task.status = "triggered"
+            triggered.append(
+                {
+                    "future_task": future_task.to_dict(),
+                    "task_id": product_task.task_id,
+                    "scheduled": bool(future_task.cron),
+                }
+            )
+        return {"ok": True, "triggered": triggered}
 
     def trigger_now(self) -> dict[str, Any]:
         """立即安排一次主动桌面观察，跳过间隔和触发概率。"""
@@ -171,6 +271,11 @@ class ProactiveDesktopService:
         desktop_watch_enabled = bool(
             getattr(self._mode_config, "proactive_desktop_watch_enabled", False)
         )
+        future_task_result = (
+            self.trigger_due_future_tasks()
+            if enabled
+            else {"ok": True, "triggered": []}
+        )
         if not enabled:
             self._reset_wait_baseline()
             return {
@@ -180,6 +285,7 @@ class ProactiveDesktopService:
                 "status": "disabled",
                 "has_attention": False,
                 "message": "主动关怀已关闭",
+                "future_task": future_task_result,
             }
 
         if not desktop_watch_enabled:
@@ -191,6 +297,7 @@ class ProactiveDesktopService:
                 "status": "idle",
                 "has_attention": False,
                 "message": "主动关怀已开启，桌面观察未开启",
+                "future_task": future_task_result,
             }
 
         blocker = self._desktop_watch_blocker()
@@ -295,6 +402,74 @@ class ProactiveDesktopService:
         except (TypeError, ValueError):
             value = 0.6
         return max(0.0, min(1.0, value))
+
+    def _coerce_future_task_epoch(
+        self,
+        now: float,
+        *,
+        delay_seconds: int | float | None,
+        scheduled_at_epoch: int | float | None,
+        cron: str,
+    ) -> float:
+        if scheduled_at_epoch is not None:
+            try:
+                return max(now, float(scheduled_at_epoch))
+            except (TypeError, ValueError):
+                raise ValueError("scheduled_at_epoch 必须是 Unix epoch 秒数") from None
+        if delay_seconds is not None:
+            try:
+                return now + max(0.0, float(delay_seconds))
+            except (TypeError, ValueError):
+                raise ValueError("delay_seconds 必须是数字") from None
+        if cron:
+            return self._next_cron_epoch(cron, now)
+        return now
+
+    @staticmethod
+    def _next_cron_epoch(cron: str, now: float) -> float:
+        clean = str(cron or "").strip().lower()
+        if clean == "@hourly":
+            return now + 3600
+        if clean == "@daily":
+            return now + 86400
+        if clean == "@weekly":
+            return now + 7 * 86400
+        match = re.fullmatch(r"every\s+(\d+)\s+(minute|minutes|hour|hours|day|days)", clean)
+        if not match:
+            raise ValueError("cron 目前支持 @hourly、@daily、@weekly 或 every N minutes/hours/days")
+        amount = max(1, int(match.group(1)))
+        unit = match.group(2)
+        if unit.startswith("minute"):
+            return now + amount * 60
+        if unit.startswith("hour"):
+            return now + amount * 3600
+        return now + amount * 86400
+
+    def _create_future_task_run(self, future_task: FutureTask):
+        chat_session = get_proactive_chat_session(self._runtime)
+        prompt = (
+            f"FutureTask: {future_task.title}\n\n"
+            f"{future_task.prompt}\n\n"
+            "请以主动任务的身份处理这件事；如果需要用户继续确认，给出简短、可操作的下一步。"
+        )
+        task = self._runtime.state.create_task(
+            prompt,
+            task_type=TaskType.GENERAL,
+            risk_level=RiskLevel.LOW,
+            attachments=[],
+            chat_session_id=getattr(chat_session, "session_id", None),
+        )
+        if chat_session is not None:
+            try:
+                chat_session.upsert_assistant_message(
+                    task_id=task.task_id,
+                    content=f"已到时间，正在处理：{future_task.title}",
+                    status=MessageStatus.PROCESSING,
+                    attachments=[],
+                )
+            except Exception:
+                logger.debug("FutureTask 写入主动会话消息失败", exc_info=True)
+        return task
 
     @staticmethod
     def _scheduled_state(task_id: str) -> dict[str, Any]:

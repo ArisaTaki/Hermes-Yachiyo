@@ -97,6 +97,82 @@ def test_model_profile_defaults_validate_capability(tmp_path):
         service.close()
 
 
+def test_model_profile_test_sets_default_when_missing(tmp_path):
+    service = make_profile_service(tmp_path)
+    try:
+        profile = service.create_profile(
+            {
+                "name": "Chat",
+                "capability": "chat",
+                "base_url": "https://api.example.test/v1",
+                "model": "demo-model",
+                "api_key": "sk-secret",
+            }
+        )
+
+        result = service._record_test_result(profile["profile_id"], ok=True, message="OK")
+
+        assert result["defaults"]["chat"] == profile["profile_id"]
+        assert service.get_defaults()["chat"] == profile["profile_id"]
+    finally:
+        service.close()
+
+
+def test_model_profile_defaults_repair_single_available_profile(tmp_path):
+    service = make_profile_service(tmp_path)
+    try:
+        profile = service.create_profile(
+            {
+                "name": "Chat",
+                "capability": "chat",
+                "base_url": "https://api.example.test/v1",
+                "model": "demo-model",
+                "api_key": "sk-secret",
+            }
+        )
+        service._conn.execute(
+            "UPDATE model_profiles SET status='available', last_tested_at='now', updated_at='now' WHERE profile_id=?",
+            (profile["profile_id"],),
+        )
+        service._conn.commit()
+
+        assert service.get_defaults()["chat"] == profile["profile_id"]
+    finally:
+        service.close()
+
+
+def test_model_profile_defaults_do_not_guess_between_multiple_available_profiles(tmp_path):
+    service = make_profile_service(tmp_path)
+    try:
+        first = service.create_profile(
+            {
+                "name": "Chat One",
+                "capability": "chat",
+                "base_url": "https://api.example.test/v1",
+                "model": "demo-model-a",
+                "api_key": "sk-secret-a",
+            }
+        )
+        second = service.create_profile(
+            {
+                "name": "Chat Two",
+                "capability": "chat",
+                "base_url": "https://api.example.test/v1",
+                "model": "demo-model-b",
+                "api_key": "sk-secret-b",
+            }
+        )
+        service._conn.execute(
+            "UPDATE model_profiles SET status='available', last_tested_at='now', updated_at='now' WHERE profile_id IN (?, ?)",
+            (first["profile_id"], second["profile_id"]),
+        )
+        service._conn.commit()
+
+        assert service.get_defaults()["chat"] == ""
+    finally:
+        service.close()
+
+
 def test_model_source_owns_credentials_and_models_reference_it(tmp_path):
     service = make_profile_service(tmp_path)
     try:

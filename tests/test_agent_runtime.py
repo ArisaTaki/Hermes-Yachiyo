@@ -10303,7 +10303,11 @@ def test_import_skill_directory_and_mount_to_agent(tmp_path, monkeypatch):
         assert run["result"] == "Demo Skill used"
         artifact = service.read_run_artifact(run["run_id"], "agent-context.md")
         assert artifact["ok"] is True
-        assert "Useful instruction" in artifact["content"]
+        assert "Skill summary index (progressive disclosure)" in artifact["content"]
+        assert f"skill_id: {skill['skill_id']}" in artifact["content"]
+        assert "Call skill.read with skill_id" in artifact["content"]
+        assert "skill_markdown" not in artifact["content"]
+        assert "# Demo Skill\n\nUseful instruction" not in artifact["content"]
         assert run["run_group_id"]
         group = service.get_run_group(run["run_group_id"])
         assert group["source"] == "agent"
@@ -10317,6 +10321,289 @@ def test_import_skill_directory_and_mount_to_agent(tmp_path, monkeypatch):
             service.attach_skill(other_agent["agent_id"], skill["skill_id"])
         with pytest.raises(AgentRuntimeError):
             service.read_run_artifact(run["run_id"], "../escape.md")
+    finally:
+        service.close()
+
+
+def test_agent_can_read_mounted_skill_progressively(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    source = tmp_path / "demo-skill"
+    source.mkdir()
+    (source / "SKILL.md").write_text(
+        "---\nname: Demo Skill\ndescription: Use the demo operation.\n---\n\n# Demo Skill\n\nUseful instruction.",
+        encoding="utf-8",
+    )
+    calls = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append({"messages": messages, "tools": tools})
+        if len(calls) == 1:
+            assert any(
+                tool["function"]["name"] == "skill_read"
+                for tool in tools or []
+            )
+            assert "skill_markdown" not in messages[1]["content"]
+            assert "# Demo Skill\n\nUseful instruction" not in messages[1]["content"]
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_skill_read",
+                        "type": "function",
+                        "function": {
+                            "name": "skill_read",
+                            "arguments": json.dumps({"name": "Demo Skill"}),
+                        },
+                    }
+                ],
+            }
+        assert messages[-1]["role"] == "tool"
+        tool_result = json.loads(messages[-1]["content"])
+        assert tool_result["ok"] is True
+        assert tool_result["name"] == "Demo Skill"
+        assert "Useful instruction" in tool_result["skill_markdown"]
+        return {"content": "Skill instruction applied"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        skill = service.import_skill(str(source))
+        agent = service.create_agent(
+            {
+                "name": "Progressive Skill Agent",
+                "model_mode": "custom_api",
+                "model_config": {
+                    "base_url": "https://api.example.test/v1",
+                    "model": "demo-model",
+                    "api_key": "sk-secret",
+                },
+            }
+        )
+        service.attach_skill(agent["agent_id"], skill["skill_id"])
+
+        run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Use Demo Skill"})
+
+        assert run["status"] == "completed"
+        assert run["result"] == "Skill instruction applied"
+        assert any(event["event"] == "agent.tool.call" and event["detail"] == "skill.read" for event in run["timeline"])
+    finally:
+        service.close()
+
+
+def test_tool_broker_memory_add_replace_remove_persists_audited_items(tmp_path):
+    service = make_service(tmp_path)
+    try:
+        broker = ToolBroker(
+            {"default_workdir": str(tmp_path), "readable_scopes": ["."]},
+            tmp_path / "artifacts",
+            memory_store=service._memory_store(source_run_id="run-memory-direct"),
+        )
+
+        added = broker.call(
+            "memory.add",
+            {"content": "User prefers concise Chinese replies. sk-direct-secret", "kind": "preference"},
+        )
+        memory_id = added["memory"]["memory_id"]
+        replaced = broker.call(
+            "memory.replace",
+            {"memory_id": memory_id, "content": "User prefers concise bilingual replies.", "kind": "preference"},
+        )
+        removed = broker.call("memory.remove", {"memory_id": memory_id, "reason": "user correction"})
+        active = service.list_memory_items()
+        all_items = service.list_memory_items(include_deleted=True)
+        events = service._conn.execute(
+            "SELECT action, payload_json, source_run_id FROM memory_events WHERE memory_id=? ORDER BY created_at",
+            (memory_id,),
+        ).fetchall()
+
+        assert added["ok"] is True
+        assert added["memory"]["kind"] == "preference"
+        assert "sk-direct-secret" not in added["memory"]["content"]
+        assert "[redacted]" in added["memory"]["content"]
+        assert replaced["ok"] is True
+        assert replaced["memory"]["content"] == "User prefers concise bilingual replies."
+        assert removed["ok"] is True
+        assert active["memories"] == []
+        assert all_items["memories"][0]["deleted_at"]
+        assert [event["action"] for event in events] == ["memory.add", "memory.replace", "memory.remove"]
+        assert {event["source_run_id"] for event in events} == {"run-memory-direct"}
+        assert not any("sk-direct-secret" in event["payload_json"] for event in events)
+    finally:
+        service.close()
+
+
+def test_agent_can_manage_long_term_memory_and_recall_it_next_run(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    calls = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append({"messages": messages, "tools": tools})
+        if len(calls) == 1:
+            assert any(tool["function"]["name"] == "memory_add" for tool in tools or [])
+            assert "No durable memories yet." in messages[1]["content"]
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_memory_add",
+                        "type": "function",
+                        "function": {
+                            "name": "memory_add",
+                            "arguments": json.dumps(
+                                {
+                                    "content": "User calls the project Oha-Yachiyo.",
+                                    "kind": "fact",
+                                    "scope": "global",
+                                }
+                            ),
+                        },
+                    }
+                ],
+            }
+        if len(calls) == 2:
+            assert messages[-1]["role"] == "tool"
+            tool_result = json.loads(messages[-1]["content"])
+            assert tool_result["ok"] is True
+            assert tool_result["memory"]["content"] == "User calls the project Oha-Yachiyo."
+            return {"content": "Memory saved"}
+        assert "User calls the project Oha-Yachiyo." in messages[1]["content"]
+        assert "memory_" in messages[1]["content"]
+        return {"content": "I remembered it"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Memory Agent",
+                "model_mode": "custom_api",
+                "model_config": {
+                    "base_url": "https://api.example.test/v1",
+                    "model": "demo-model",
+                    "api_key": "sk-secret",
+                },
+            }
+        )
+        first = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Remember this project name"})
+        memories = service.list_memory_items()["memories"]
+        second = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "What do you remember?"})
+
+        assert first["status"] == "completed"
+        assert first["result"] == "Memory saved"
+        assert memories[0]["content"] == "User calls the project Oha-Yachiyo."
+        assert second["status"] == "completed"
+        assert second["result"] == "I remembered it"
+        assert any(event["event"] == "agent.tool.call" and event["detail"] == "memory.add" for event in first["timeline"])
+    finally:
+        service.close()
+
+
+def test_agent_can_schedule_and_trigger_durable_future_task(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    calls = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append({"messages": messages, "tools": tools})
+        if len(calls) == 1:
+            assert any(tool["function"]["name"] == "future_task_schedule" for tool in tools or [])
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_future_task_schedule",
+                        "type": "function",
+                        "function": {
+                            "name": "future_task_schedule",
+                            "arguments": json.dumps(
+                                {
+                                    "title": "Follow up",
+                                    "prompt": "Check the release checklist tomorrow.",
+                                    "delay_seconds": 0,
+                                }
+                            ),
+                        },
+                    }
+                ],
+            }
+        if len(calls) == 2:
+            assert messages[-1]["role"] == "tool"
+            tool_result = json.loads(messages[-1]["content"])
+            assert tool_result["ok"] is True
+            assert tool_result["future_task"]["status"] == "scheduled"
+            return {"content": "FutureTask scheduled"}
+        assert "Check the release checklist tomorrow." in messages[1]["content"]
+        return {"content": "FutureTask run completed"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "FutureTask Agent",
+                "model_mode": "custom_api",
+                "model_config": {
+                    "base_url": "https://api.example.test/v1",
+                    "model": "demo-model",
+                    "api_key": "sk-secret",
+                },
+            }
+        )
+        first = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Remind me tomorrow"})
+        future_tasks = service.list_future_tasks()["future_tasks"]
+        triggered = service.trigger_due_future_tasks()
+        updated = service.list_future_tasks()["future_tasks"][0]
+
+        assert first["status"] == "completed"
+        assert first["result"] == "FutureTask scheduled"
+        assert future_tasks[0]["title"] == "Follow up"
+        assert future_tasks[0]["runnable_id"] == agent["agent_id"]
+        assert len(triggered["triggered"]) == 1
+        assert triggered["triggered"][0]["ok"] is True
+        assert triggered["triggered"][0]["run"]["status"] == "completed"
+        assert triggered["triggered"][0]["run"]["result"] == "FutureTask run completed"
+        assert updated["status"] == "triggered"
+        assert updated["run_count"] == 1
+        assert updated["last_run_id"] == triggered["triggered"][0]["run"]["run_id"]
+        assert any(event["event"] == "agent.tool.call" and event["detail"] == "future_task.schedule" for event in first["timeline"])
+    finally:
+        service.close()
+
+
+@pytest.mark.asyncio
+async def test_agent_bridge_exposes_memory_and_future_task_management(tmp_path, monkeypatch):
+    from apps.bridge.routes import agents as agent_routes
+
+    service = make_service(tmp_path)
+    monkeypatch.setattr(agent_routes, "get_agent_runtime_service", lambda: service)
+    try:
+        memory = await agent_routes.create_memory(
+            agent_routes.MemoryRequest(content="User prefers compact status reports.", kind="preference")
+        )
+        memory_id = memory["memory"]["memory_id"]
+        listed_memories = await agent_routes.list_memories()
+        updated_memory = await agent_routes.update_memory(
+            memory_id,
+            agent_routes.MemoryRequest(content="User prefers compact bilingual status reports.", kind="preference"),
+        )
+        deleted_memory = await agent_routes.delete_memory(memory_id, reason="manual cleanup")
+        future = await agent_routes.schedule_future_task(
+            agent_routes.FutureTaskRequest(
+                title="Daily review",
+                prompt="Summarize today's open Agent work.",
+                runnable_id="builtin:yachiyo-main",
+                delay_seconds=3600,
+            )
+        )
+        future_task_id = future["future_task"]["future_task_id"]
+        listed_future_tasks = await agent_routes.list_future_tasks()
+        cancelled = await agent_routes.cancel_future_task(
+            future_task_id,
+            agent_routes.FutureTaskCancelRequest(reason="user cancelled"),
+        )
+
+        assert listed_memories["memories"][0]["memory_id"] == memory_id
+        assert updated_memory["memory"]["content"] == "User prefers compact bilingual status reports."
+        assert deleted_memory["ok"] is True
+        assert future["future_task"]["title"] == "Daily review"
+        assert listed_future_tasks["future_tasks"][0]["future_task_id"] == future_task_id
+        assert cancelled["future_task"]["status"] == "cancelled"
     finally:
         service.close()
 
@@ -10347,6 +10634,11 @@ def test_agent_context_includes_nickname_and_persona_prompt(tmp_path, monkeypatc
         assert "Always inspect the local brief." in artifact["content"]
         assert "# Persona Prompt" in artifact["content"]
         assert "Speak like a careful reviewer." in artifact["content"]
+        assert "# Operating Doctrine" in artifact["content"]
+        assert "Market-grade Agent operating doctrine" in artifact["content"]
+        assert "Respect safety boundaries" in artifact["content"]
+        assert "# Long-term Memory" in artifact["content"]
+        assert "No durable memories yet." in artifact["content"]
     finally:
         service.close()
 
@@ -15354,6 +15646,8 @@ def test_agent_output_contract_expands_diff_rules_in_runtime_context(tmp_path, m
         assert calls
         system_prompt = calls[0]["messages"][0]["content"]
         context = calls[0]["messages"][1]["content"]
+        assert "Market-grade Agent operating doctrine" in system_prompt
+        assert "Treat Skills as task manuals and tools as external actions" in system_prompt
         assert "Do not request a tool solely because of the output contract" in system_prompt
         assert "If the user asks not to create, save, write, or modify files" in system_prompt
         assert "If the user asks not to run or execute commands" in system_prompt

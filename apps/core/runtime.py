@@ -228,6 +228,12 @@ class AppRuntime:
                 "workspace.read",
                 "workspace.write_patch",
                 "terminal.run",
+                "memory.add",
+                "memory.replace",
+                "memory.remove",
+                "future_task.schedule",
+                "future_task.list",
+                "future_task.cancel",
                 "artifact.write",
             ],
             "approval_required": {

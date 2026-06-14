@@ -13,6 +13,7 @@ import {
   listModelProfiles,
   testAndSaveModelProfile,
   testModelProfile,
+  syncNativeProfileDefault,
   updateModelProfile,
   updateModelProfileDefaults,
   updateModelSource,
@@ -1220,6 +1221,10 @@ export function ModelProfilesView() {
     setBusy('default');
     try {
       const result = await updateModelProfileDefaults({ [profile.capability]: profile.profile_id });
+      if (profile.capability === 'chat' || profile.capability === 'vision') {
+        const nativeResult = await syncNativeProfileDefault(profile.capability, profile.profile_id);
+        if (!nativeResult.ok) throw new Error(nativeResult.error || nativeResult.message || '同步 Native 默认模型失败');
+      }
       setDefaults(result.defaults || {});
       setStatus(`${capabilityLabels[profile.capability]}默认模型已更新`);
     } catch (err) {

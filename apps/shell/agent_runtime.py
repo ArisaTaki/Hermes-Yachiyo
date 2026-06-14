@@ -57,6 +57,13 @@ class AgentApprovalRequired(AgentRuntimeError):
 
 _EXECUTION_BACKENDS = {"native_profile", "yachiyo_profile", "external_cli"}
 _KNOWN_AGENT_TOOLS = {
+    "skill.read",
+    "memory.add",
+    "memory.replace",
+    "memory.remove",
+    "future_task.schedule",
+    "future_task.list",
+    "future_task.cancel",
     "workspace.list",
     "workspace.read",
     "workspace.write_patch",
@@ -64,7 +71,21 @@ _KNOWN_AGENT_TOOLS = {
     "artifact.write",
 }
 _HIGH_RISK_AGENT_TOOLS = {"terminal.run", "workspace.write_patch"}
+_MEMORY_TOOL_NAMES = ("memory.add", "memory.replace", "memory.remove")
+_MEMORY_SCOPES = {"global", "project", "session"}
+_MEMORY_KINDS = {"preference", "fact", "task", "summary"}
+_MEMORY_CONTEXT_LIMIT = 12
+_MEMORY_CONTENT_MAX_CHARS = 4000
+_FUTURE_TASK_TOOL_NAMES = ("future_task.schedule", "future_task.list", "future_task.cancel")
+_FUTURE_TASK_STATUSES = {"scheduled", "triggered", "cancelled", "failed"}
 _TOOL_FUNCTION_NAMES = {
+    "skill.read": "skill_read",
+    "memory.add": "memory_add",
+    "memory.replace": "memory_replace",
+    "memory.remove": "memory_remove",
+    "future_task.schedule": "future_task_schedule",
+    "future_task.list": "future_task_list",
+    "future_task.cancel": "future_task_cancel",
     "workspace.list": "workspace_list",
     "workspace.read": "workspace_read",
     "workspace.write_patch": "workspace_write_patch",
@@ -94,6 +115,20 @@ _DEFAULT_AGENT_IDS = {
 _TERMINAL_PROCESS_LOCK = threading.RLock()
 _TERMINAL_PROCESSES: set[subprocess.Popen[Any]] = set()
 _RUNTIME_JSON_REDACTION_MAX_ITEMS = 1000
+
+_MARKET_AGENT_OPERATING_DOCTRINE = (
+    "Market-grade Agent operating doctrine:\n"
+    "- Act as a persistent personal agent, not a one-shot chatbot: preserve user intent, "
+    "handoff context, and reusable outputs when the task has follow-up value.\n"
+    "- Prefer the smallest reliable action loop: reason from available context, inspect before "
+    "acting, use tools only when they materially improve the answer, and do not fabricate tool results.\n"
+    "- Treat Skills as task manuals and tools as external actions; use mounted Skills when relevant, "
+    "but keep direct answers lightweight when no Skill is needed.\n"
+    "- For multi-step work, expose progress through concise summaries, artifacts, or workflow handoffs "
+    "instead of hiding important intermediate decisions.\n"
+    "- Respect safety boundaries: approval gates, workspace scopes, credential redaction, and user "
+    "instructions outrank autonomy."
+)
 
 
 @dataclass(frozen=True)
@@ -1394,6 +1429,484 @@ def _public_pending_approval(value: Any) -> dict[str, Any]:
     }
 
 
+class AgentMemoryStore:
+    """Durable, explicit memories managed through controlled Agent tools."""
+
+    def __init__(
+        self,
+        conn: _LockedConnection,
+        db_lock: threading.RLock,
+        *,
+        source_run_id: str = "",
+    ) -> None:
+        self._conn = conn
+        self._db_lock = db_lock
+        self.source_run_id = str(source_run_id or "").strip()
+
+    @staticmethod
+    def _normalize_scope(value: Any) -> str:
+        scope = str(value or "global").strip().lower()
+        return scope if scope in _MEMORY_SCOPES else "global"
+
+    @staticmethod
+    def _normalize_kind(value: Any) -> str:
+        kind = str(value or "fact").strip().lower()
+        return kind if kind in _MEMORY_KINDS else "fact"
+
+    @staticmethod
+    def _clean_content(value: Any) -> str:
+        content = redact_secrets(value).strip()
+        if not content:
+            raise AgentRuntimeError("memory 内容不能为空")
+        if len(content) > _MEMORY_CONTENT_MAX_CHARS:
+            content = content[:_MEMORY_CONTENT_MAX_CHARS].rstrip() + "\n\n[truncated]"
+        return content
+
+    @staticmethod
+    def _row_to_memory(row: Any) -> dict[str, Any]:
+        return {
+            "memory_id": str(row["memory_id"]),
+            "scope": str(row["scope"] or "global"),
+            "kind": str(row["kind"] or "fact"),
+            "content": str(row["content"] or ""),
+            "source_session_id": str(row["source_session_id"] or ""),
+            "source_message_id": str(row["source_message_id"] or ""),
+            "source_task_id": str(row["source_task_id"] or ""),
+            "source_run_id": str(row["source_run_id"] or ""),
+            "confidence": float(row["confidence"] or 0.0),
+            "pinned": bool(row["pinned"]),
+            "user_confirmed": bool(row["user_confirmed"]),
+            "created_at": str(row["created_at"] or ""),
+            "updated_at": str(row["updated_at"] or ""),
+            "deleted_at": str(row["deleted_at"] or ""),
+        }
+
+    def _record_event(self, memory_id: str, action: str, payload: dict[str, Any]) -> None:
+        self._conn.execute(
+            """
+            INSERT INTO memory_events (
+                event_id, memory_id, action, actor, payload_json, source_run_id, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                f"memory_event_{uuid4().hex[:16]}",
+                str(memory_id or ""),
+                str(action or ""),
+                "agent_tool",
+                _json_dump(_redact_json_value(payload)),
+                self.source_run_id,
+                _now(),
+            ),
+        )
+
+    def _active_row_by_reference(self, *, memory_id: str = "", content: str = "") -> Any | None:
+        clean_memory_id = str(memory_id or "").strip()
+        if clean_memory_id:
+            return self._conn.execute(
+                "SELECT * FROM memory_items WHERE memory_id=? AND deleted_at=''",
+                (clean_memory_id,),
+            ).fetchone()
+        clean_content = str(content or "").strip().lower()
+        if not clean_content:
+            return None
+        rows = self._conn.execute(
+            """
+            SELECT *
+              FROM memory_items
+             WHERE deleted_at=''
+             ORDER BY pinned DESC, updated_at DESC
+             LIMIT 200
+            """
+        ).fetchall()
+        for row in rows:
+            if str(row["content"] or "").strip().lower() == clean_content:
+                return row
+        return None
+
+    def _available_memory_refs(self, *, limit: int = 20) -> list[dict[str, str]]:
+        return [
+            {
+                "memory_id": str(row["memory_id"]),
+                "scope": str(row["scope"] or "global"),
+                "kind": str(row["kind"] or "fact"),
+                "content_preview": str(row["content"] or "")[:160],
+            }
+            for row in self._conn.execute(
+                """
+                SELECT memory_id, scope, kind, content
+                  FROM memory_items
+                 WHERE deleted_at=''
+                 ORDER BY pinned DESC, updated_at DESC
+                 LIMIT ?
+                """,
+                (max(1, min(int(limit or 20), 100)),),
+            ).fetchall()
+        ]
+
+    def add(self, *, content: str, kind: str = "", scope: str = "") -> dict[str, Any]:
+        safe_content = self._clean_content(content)
+        clean_kind = self._normalize_kind(kind)
+        clean_scope = self._normalize_scope(scope)
+        memory_id = f"memory_{uuid4().hex[:16]}"
+        now = _now()
+        with self._db_lock:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                self._conn.execute(
+                    """
+                    INSERT INTO memory_items (
+                        memory_id, scope, kind, content, source_run_id,
+                        confidence, pinned, user_confirmed, created_at, updated_at, deleted_at
+                    ) VALUES (?, ?, ?, ?, ?, 1.0, 0, 0, ?, ?, '')
+                    """,
+                    (memory_id, clean_scope, clean_kind, safe_content, self.source_run_id, now, now),
+                )
+                self._record_event(
+                    memory_id,
+                    "memory.add",
+                    {"scope": clean_scope, "kind": clean_kind, "content_preview": safe_content[:300]},
+                )
+                row = self._conn.execute("SELECT * FROM memory_items WHERE memory_id=?", (memory_id,)).fetchone()
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+        return {"ok": True, "action": "memory.add", "memory": self._row_to_memory(row)}
+
+    def replace(
+        self,
+        *,
+        content: str,
+        memory_id: str = "",
+        old_content: str = "",
+        kind: str = "",
+        scope: str = "",
+    ) -> dict[str, Any]:
+        safe_content = self._clean_content(content)
+        with self._db_lock:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                row = self._active_row_by_reference(memory_id=memory_id, content=old_content)
+                if row is None:
+                    self._conn.rollback()
+                    return {
+                        "ok": False,
+                        "action": "memory.replace",
+                        "error": "找不到要替换的长期记忆",
+                        "available_memories": self._available_memory_refs(),
+                    }
+                clean_kind = self._normalize_kind(kind or row["kind"])
+                clean_scope = self._normalize_scope(scope or row["scope"])
+                now = _now()
+                self._conn.execute(
+                    """
+                    UPDATE memory_items
+                       SET scope=?, kind=?, content=?, updated_at=?
+                     WHERE memory_id=?
+                    """,
+                    (clean_scope, clean_kind, safe_content, now, row["memory_id"]),
+                )
+                self._record_event(
+                    str(row["memory_id"]),
+                    "memory.replace",
+                    {
+                        "scope": clean_scope,
+                        "kind": clean_kind,
+                        "old_content_preview": str(row["content"] or "")[:300],
+                        "content_preview": safe_content[:300],
+                    },
+                )
+                updated = self._conn.execute("SELECT * FROM memory_items WHERE memory_id=?", (row["memory_id"],)).fetchone()
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+        return {"ok": True, "action": "memory.replace", "memory": self._row_to_memory(updated)}
+
+    def remove(self, *, memory_id: str = "", content: str = "", reason: str = "") -> dict[str, Any]:
+        with self._db_lock:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                row = self._active_row_by_reference(memory_id=memory_id, content=content)
+                if row is None:
+                    self._conn.rollback()
+                    return {
+                        "ok": False,
+                        "action": "memory.remove",
+                        "error": "找不到要删除的长期记忆",
+                        "available_memories": self._available_memory_refs(),
+                    }
+                now = _now()
+                self._conn.execute(
+                    "UPDATE memory_items SET deleted_at=?, updated_at=? WHERE memory_id=?",
+                    (now, now, row["memory_id"]),
+                )
+                self._record_event(
+                    str(row["memory_id"]),
+                    "memory.remove",
+                    {
+                        "reason": str(reason or "")[:300],
+                        "content_preview": str(row["content"] or "")[:300],
+                    },
+                )
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+        return {
+            "ok": True,
+            "action": "memory.remove",
+            "memory_id": str(row["memory_id"]),
+            "deleted_at": now,
+        }
+
+    def list_items(self, *, include_deleted: bool = False, limit: int = 100) -> list[dict[str, Any]]:
+        where = "" if include_deleted else "WHERE deleted_at=''"
+        rows = self._conn.execute(
+            f"""
+            SELECT *
+              FROM memory_items
+              {where}
+             ORDER BY pinned DESC, updated_at DESC
+             LIMIT ?
+            """,
+            (max(1, min(int(limit or 100), 500)),),
+        ).fetchall()
+        return [self._row_to_memory(row) for row in rows]
+
+    def context_block(self, *, limit: int = _MEMORY_CONTEXT_LIMIT) -> str:
+        memories = self.list_items(include_deleted=False, limit=limit)
+        if not memories:
+            return "No durable memories yet."
+        return "\n".join(
+            f"- {item['kind']}/{item['scope']} [{item['memory_id']}]: {item['content']}"
+            for item in memories
+        )
+
+
+class AgentFutureTaskStore:
+    """Durable FutureTask control store for proactive Agent self-wakeups."""
+
+    def __init__(
+        self,
+        conn: _LockedConnection,
+        db_lock: threading.RLock,
+        *,
+        source_run_id: str = "",
+        default_runnable_id: str = "",
+    ) -> None:
+        self._conn = conn
+        self._db_lock = db_lock
+        self.source_run_id = str(source_run_id or "").strip()
+        self.default_runnable_id = str(default_runnable_id or "").strip()
+
+    @staticmethod
+    def _next_cron_epoch(cron: str, now: float) -> float:
+        clean = str(cron or "").strip().lower()
+        if clean == "@hourly":
+            return now + 3600
+        if clean == "@daily":
+            return now + 86400
+        if clean == "@weekly":
+            return now + 7 * 86400
+        match = re.fullmatch(r"every\s+(\d+)\s+(minute|minutes|hour|hours|day|days)", clean)
+        if not match:
+            raise AgentRuntimeError("FutureTask cron 目前支持 @hourly、@daily、@weekly 或 every N minutes/hours/days")
+        amount = max(1, int(match.group(1)))
+        unit = match.group(2)
+        if unit.startswith("minute"):
+            return now + amount * 60
+        if unit.startswith("hour"):
+            return now + amount * 3600
+        return now + amount * 86400
+
+    @classmethod
+    def _coerce_scheduled_epoch(
+        cls,
+        *,
+        delay_seconds: Any = None,
+        scheduled_at_epoch: Any = None,
+        cron: str = "",
+        now: float | None = None,
+    ) -> float:
+        current = time.time() if now is None else float(now)
+        clean_cron = str(cron or "").strip()
+        if scheduled_at_epoch not in (None, ""):
+            try:
+                epoch = float(scheduled_at_epoch)
+            except (TypeError, ValueError) as exc:
+                raise AgentRuntimeError("FutureTask scheduled_at_epoch 必须是 Unix epoch 秒数") from exc
+            if clean_cron:
+                cls._next_cron_epoch(clean_cron, current)
+            return max(current, epoch)
+        if delay_seconds not in (None, ""):
+            try:
+                delay = max(0.0, float(delay_seconds))
+            except (TypeError, ValueError) as exc:
+                raise AgentRuntimeError("FutureTask delay_seconds 必须是数字") from exc
+            if clean_cron:
+                cls._next_cron_epoch(clean_cron, current)
+            return current + delay
+        if clean_cron:
+            return cls._next_cron_epoch(clean_cron, current)
+        return current
+
+    @staticmethod
+    def _row_to_future_task(row: Any) -> dict[str, Any]:
+        return {
+            "future_task_id": str(row["future_task_id"]),
+            "title": str(row["title"] or ""),
+            "prompt": str(row["prompt"] or ""),
+            "runnable_id": str(row["runnable_id"] or ""),
+            "runnable_name": str(row["runnable_name"] or ""),
+            "status": str(row["status"] or "scheduled"),
+            "scheduled_at_epoch": float(row["scheduled_at_epoch"] or 0.0),
+            "cron": str(row["cron"] or ""),
+            "source_run_id": str(row["source_run_id"] or ""),
+            "last_run_id": str(row["last_run_id"] or ""),
+            "run_count": int(row["run_count"] or 0),
+            "error": str(row["error"] or ""),
+            "created_at": str(row["created_at"] or ""),
+            "updated_at": str(row["updated_at"] or ""),
+            "cancelled_at": str(row["cancelled_at"] or ""),
+        }
+
+    def _record_event(self, future_task_id: str, action: str, payload: dict[str, Any]) -> None:
+        self._conn.execute(
+            """
+            INSERT INTO future_task_events (
+                event_id, future_task_id, action, actor, payload_json, source_run_id, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                f"future_event_{uuid4().hex[:16]}",
+                str(future_task_id or ""),
+                str(action or ""),
+                "agent_runtime",
+                _json_dump(_redact_json_value(payload)),
+                self.source_run_id,
+                _now(),
+            ),
+        )
+
+    def schedule(
+        self,
+        *,
+        title: str,
+        prompt: str,
+        runnable_id: str = "",
+        runnable_name: str = "",
+        delay_seconds: Any = None,
+        scheduled_at_epoch: Any = None,
+        cron: str = "",
+    ) -> dict[str, Any]:
+        clean_prompt = redact_secrets(prompt).strip()
+        if not clean_prompt:
+            raise AgentRuntimeError("FutureTask prompt 不能为空")
+        clean_title = redact_secrets(title).strip() or clean_prompt[:80] or "Future task"
+        clean_runnable_id = str(runnable_id or self.default_runnable_id or "").strip()
+        clean_runnable_name = str(runnable_name or "").strip()
+        if not clean_runnable_id and not clean_runnable_name:
+            raise AgentRuntimeError("FutureTask 需要 runnable_id 或 runnable_name")
+        clean_cron = str(cron or "").strip()
+        scheduled_epoch = self._coerce_scheduled_epoch(
+            delay_seconds=delay_seconds,
+            scheduled_at_epoch=scheduled_at_epoch,
+            cron=clean_cron,
+        )
+        future_task_id = f"future_{uuid4().hex[:16]}"
+        now = _now()
+        with self._db_lock:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                self._conn.execute(
+                    """
+                    INSERT INTO future_tasks (
+                        future_task_id, title, prompt, runnable_id, runnable_name,
+                        status, scheduled_at_epoch, cron, source_run_id, last_run_id,
+                        run_count, error, created_at, updated_at, cancelled_at
+                    ) VALUES (?, ?, ?, ?, ?, 'scheduled', ?, ?, ?, '', 0, '', ?, ?, '')
+                    """,
+                    (
+                        future_task_id,
+                        clean_title,
+                        clean_prompt,
+                        clean_runnable_id,
+                        clean_runnable_name,
+                        scheduled_epoch,
+                        clean_cron,
+                        self.source_run_id,
+                        now,
+                        now,
+                    ),
+                )
+                self._record_event(
+                    future_task_id,
+                    "future_task.schedule",
+                    {
+                        "title": clean_title,
+                        "runnable_id": clean_runnable_id,
+                        "runnable_name": clean_runnable_name,
+                        "scheduled_at_epoch": scheduled_epoch,
+                        "cron": clean_cron,
+                    },
+                )
+                row = self._conn.execute(
+                    "SELECT * FROM future_tasks WHERE future_task_id=?",
+                    (future_task_id,),
+                ).fetchone()
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+        return {"ok": True, "future_task": self._row_to_future_task(row)}
+
+    def list_tasks(self, *, include_finished: bool = True, limit: int = 100) -> list[dict[str, Any]]:
+        where = "" if include_finished else "WHERE status='scheduled'"
+        rows = self._conn.execute(
+            f"""
+            SELECT *
+              FROM future_tasks
+              {where}
+             ORDER BY status='scheduled' DESC, scheduled_at_epoch ASC, updated_at DESC
+             LIMIT ?
+            """,
+            (max(1, min(int(limit or 100), 500)),),
+        ).fetchall()
+        return [self._row_to_future_task(row) for row in rows]
+
+    def cancel(self, future_task_id: str, *, reason: str = "") -> dict[str, Any]:
+        clean_id = str(future_task_id or "").strip()
+        if not clean_id:
+            raise AgentRuntimeError("future_task.cancel 需要 future_task_id")
+        with self._db_lock:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                row = self._conn.execute("SELECT * FROM future_tasks WHERE future_task_id=?", (clean_id,)).fetchone()
+                if row is None:
+                    self._conn.rollback()
+                    raise KeyError(clean_id)
+                if str(row["status"] or "") != "scheduled":
+                    self._conn.rollback()
+                    return {"ok": True, "future_task": self._row_to_future_task(row), "already_terminal": True}
+                now = _now()
+                self._conn.execute(
+                    """
+                    UPDATE future_tasks
+                       SET status='cancelled', error=?, updated_at=?, cancelled_at=?
+                     WHERE future_task_id=?
+                    """,
+                    (redact_secrets(reason).strip(), now, now, clean_id),
+                )
+                self._record_event(clean_id, "future_task.cancel", {"reason": reason})
+                updated = self._conn.execute("SELECT * FROM future_tasks WHERE future_task_id=?", (clean_id,)).fetchone()
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+        return {"ok": True, "future_task": self._row_to_future_task(updated)}
+
+
 @dataclass(frozen=True)
 class ToolDescriptor:
     name: str
@@ -1446,6 +1959,44 @@ class ToolDescriptor:
             if hash_values.get("expected_sha256") and hash_values.get("base_sha256"):
                 if hash_values["expected_sha256"].lower() != hash_values["base_sha256"].lower():
                     raise AgentRuntimeError("workspace.write_patch 参数 expected_sha256 与 base_sha256 不一致")
+        if self.name == "skill.read":
+            value = str(payload.get("skill_id") or payload.get("name") or "").strip()
+            if not value:
+                raise AgentRuntimeError("skill.read 参数 skill_id 或 name 必须是非空字符串")
+        if self.name.startswith("memory."):
+            for key in ("memory_id", "content", "old_content", "kind", "scope", "reason"):
+                if key in payload and not isinstance(payload.get(key), str):
+                    raise AgentRuntimeError(f"{self.name} 参数 {key} 必须是字符串")
+            scope = str(payload.get("scope") or "").strip().lower()
+            if scope and scope not in _MEMORY_SCOPES:
+                raise AgentRuntimeError(f"{self.name} 参数 scope 必须是 global、project 或 session")
+            kind = str(payload.get("kind") or "").strip().lower()
+            if kind and kind not in _MEMORY_KINDS:
+                raise AgentRuntimeError(f"{self.name} 参数 kind 必须是 preference、fact、task 或 summary")
+            if self.name == "memory.replace":
+                if not str(payload.get("content") or "").strip():
+                    raise AgentRuntimeError("memory.replace 参数 content 必须是非空字符串")
+                if not str(payload.get("memory_id") or payload.get("old_content") or "").strip():
+                    raise AgentRuntimeError("memory.replace 参数 memory_id 或 old_content 必须是非空字符串")
+            if self.name == "memory.remove" and not str(payload.get("memory_id") or payload.get("content") or "").strip():
+                raise AgentRuntimeError("memory.remove 参数 memory_id 或 content 必须是非空字符串")
+        if self.name.startswith("future_task."):
+            for key in ("future_task_id", "title", "prompt", "runnable_id", "runnable_name", "cron", "reason"):
+                if key in payload and not isinstance(payload.get(key), str):
+                    raise AgentRuntimeError(f"{self.name} 参数 {key} 必须是字符串")
+            for key in ("delay_seconds", "scheduled_at_epoch"):
+                if key in payload and payload.get(key) not in (None, ""):
+                    value = payload.get(key)
+                    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+                        raise AgentRuntimeError(f"{self.name} 参数 {key} 必须是数字")
+                    try:
+                        float(value)
+                    except (TypeError, ValueError) as exc:
+                        raise AgentRuntimeError(f"{self.name} 参数 {key} 必须是数字") from exc
+            if self.name == "future_task.schedule" and not str(payload.get("prompt") or "").strip():
+                raise AgentRuntimeError("future_task.schedule 参数 prompt 必须是非空字符串")
+            if self.name == "future_task.cancel" and not str(payload.get("future_task_id") or "").strip():
+                raise AgentRuntimeError("future_task.cancel 参数 future_task_id 必须是非空字符串")
         if "path" in payload and not isinstance(payload.get("path"), str):
             raise AgentRuntimeError(f"{self.name} 参数 path 必须是字符串")
         if "timeout_seconds" in payload:
@@ -1460,6 +2011,104 @@ class ToolDescriptor:
 
 
 TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
+    "skill.read": ToolDescriptor(
+        name="skill.read",
+        description=(
+            "Read the full SKILL.md instructions for a mounted Agent Skill. "
+            "Use this only after the skill summary index looks relevant to the task."
+        ),
+        properties={
+            "skill_id": {"type": "string", "description": "Mounted skill id from the Skill summary index."},
+            "name": {"type": "string", "description": "Optional mounted skill name if skill_id is unavailable."},
+        },
+    ),
+    "memory.add": ToolDescriptor(
+        name="memory.add",
+        description=(
+            "Persist a stable user preference, durable fact, task commitment, or reusable summary "
+            "for future Agent sessions. Never store secrets or one-off transient details."
+        ),
+        properties={
+            "content": {"type": "string", "description": "Concise memory content to preserve."},
+            "kind": {
+                "type": "string",
+                "enum": ["preference", "fact", "task", "summary"],
+                "description": "Memory category. Defaults to fact.",
+            },
+            "scope": {
+                "type": "string",
+                "enum": ["global", "project", "session"],
+                "description": "Recall scope. Defaults to global.",
+            },
+        },
+        required=("content",),
+    ),
+    "memory.replace": ToolDescriptor(
+        name="memory.replace",
+        description="Replace an existing durable memory by memory_id or exact old_content when the user corrects it.",
+        properties={
+            "memory_id": {"type": "string", "description": "Existing memory id from Long-term Memory context."},
+            "old_content": {"type": "string", "description": "Exact old memory content if memory_id is unavailable."},
+            "content": {"type": "string", "description": "Replacement memory content."},
+            "kind": {
+                "type": "string",
+                "enum": ["preference", "fact", "task", "summary"],
+                "description": "Optional replacement category.",
+            },
+            "scope": {
+                "type": "string",
+                "enum": ["global", "project", "session"],
+                "description": "Optional replacement recall scope.",
+            },
+        },
+        required=("content",),
+    ),
+    "memory.remove": ToolDescriptor(
+        name="memory.remove",
+        description="Soft-delete an existing durable memory by memory_id or exact content when the user asks to forget it.",
+        properties={
+            "memory_id": {"type": "string", "description": "Existing memory id from Long-term Memory context."},
+            "content": {"type": "string", "description": "Exact memory content if memory_id is unavailable."},
+            "reason": {"type": "string", "description": "Optional short reason for the audit log."},
+        },
+    ),
+    "future_task.schedule": ToolDescriptor(
+        name="future_task.schedule",
+        description=(
+            "Schedule a durable FutureTask self-wakeup for this Agent or another runnable. "
+            "Use for reminders, standing orders, periodic summaries, and follow-up commitments."
+        ),
+        properties={
+            "title": {"type": "string", "description": "Short user-facing FutureTask title."},
+            "prompt": {"type": "string", "description": "Goal to execute when the FutureTask wakes up."},
+            "delay_seconds": {"type": "number", "description": "Optional delay from now in seconds."},
+            "scheduled_at_epoch": {"type": "number", "description": "Optional Unix epoch seconds for the wakeup."},
+            "cron": {
+                "type": "string",
+                "description": "Optional repeat schedule: @hourly, @daily, @weekly, or every N minutes/hours/days.",
+            },
+            "runnable_id": {"type": "string", "description": "Optional target Agent/Workflow id. Defaults to current Agent."},
+            "runnable_name": {"type": "string", "description": "Optional target Agent/Workflow name."},
+        },
+        required=("prompt",),
+    ),
+    "future_task.list": ToolDescriptor(
+        name="future_task.list",
+        description="List durable FutureTasks visible to the Agent, including scheduled and recently finished entries.",
+        properties={
+            "include_finished": {"type": "boolean", "description": "Include triggered/cancelled/failed tasks. Defaults true."},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+        },
+    ),
+    "future_task.cancel": ToolDescriptor(
+        name="future_task.cancel",
+        description="Cancel a scheduled FutureTask by id.",
+        properties={
+            "future_task_id": {"type": "string", "description": "FutureTask id to cancel."},
+            "reason": {"type": "string", "description": "Optional short reason for the audit log."},
+        },
+        required=("future_task_id",),
+    ),
     "workspace.list": ToolDescriptor(
         name="workspace.list",
         description="List entries in an allowed workspace directory. Use this before workspace.read when you only know a directory path.",
@@ -1539,10 +2188,14 @@ class ToolBroker:
     workspace_policy: dict[str, Any]
     artifact_root: Path
     approvals: dict[str, bool] | None = None
+    skills: list[dict[str, Any]] | None = None
+    memory_store: AgentMemoryStore | None = None
+    future_task_store: AgentFutureTaskStore | None = None
 
     def __post_init__(self) -> None:
         self.artifact_root.mkdir(parents=True, exist_ok=True)
         self.approvals = self.approvals or {}
+        self.skills = self.skills or []
 
     @property
     def workdir(self) -> Path:
@@ -1590,6 +2243,122 @@ class ToolBroker:
         for child in sorted(target.iterdir(), key=lambda item: item.name.lower())[:200]:
             entries.append({"name": child.name, "type": "dir" if child.is_dir() else "file"})
         return {"ok": True, "path": display_path, "entries": entries}
+
+    def skill_read(self, skill_id: str = "", name: str = "") -> dict[str, Any]:
+        wanted = str(skill_id or name or "").strip()
+        if not wanted:
+            return {
+                "ok": False,
+                "error": "skill.read 需要 skill_id 或 name",
+                "available_skills": self._available_skill_refs(),
+            }
+        wanted_key = wanted.lower()
+        for skill in self.skills or []:
+            refs = {
+                str(skill.get("skill_id") or "").strip().lower(),
+                str(skill.get("name") or "").strip().lower(),
+                str(skill.get("source_ref") or "").strip().lower(),
+            }
+            if wanted_key not in refs:
+                continue
+            markdown = redact_secrets(str(skill.get("skill_markdown") or ""))
+            return {
+                "ok": True,
+                "skill_id": str(skill.get("skill_id") or ""),
+                "name": str(skill.get("name") or ""),
+                "description": str(skill.get("description") or ""),
+                "skill_markdown": markdown,
+                "asset_paths": skill.get("asset_paths") or [],
+            }
+        return {
+            "ok": False,
+            "error": "Skill 未挂载到当前 Agent，不能读取完整手册",
+            "requested": wanted,
+            "available_skills": self._available_skill_refs(),
+        }
+
+    def memory_add(self, content: str, kind: str = "", scope: str = "") -> dict[str, Any]:
+        if self.memory_store is None:
+            return {"ok": False, "error": "当前运行未启用长期记忆存储"}
+        return self.memory_store.add(content=content, kind=kind, scope=scope)
+
+    def memory_replace(
+        self,
+        content: str,
+        *,
+        memory_id: str = "",
+        old_content: str = "",
+        kind: str = "",
+        scope: str = "",
+    ) -> dict[str, Any]:
+        if self.memory_store is None:
+            return {"ok": False, "error": "当前运行未启用长期记忆存储"}
+        return self.memory_store.replace(
+            memory_id=memory_id,
+            old_content=old_content,
+            content=content,
+            kind=kind,
+            scope=scope,
+        )
+
+    def memory_remove(self, *, memory_id: str = "", content: str = "", reason: str = "") -> dict[str, Any]:
+        if self.memory_store is None:
+            return {"ok": False, "error": "当前运行未启用长期记忆存储"}
+        return self.memory_store.remove(memory_id=memory_id, content=content, reason=reason)
+
+    def future_task_schedule(
+        self,
+        *,
+        title: str = "",
+        prompt: str,
+        delay_seconds: Any = None,
+        scheduled_at_epoch: Any = None,
+        cron: str = "",
+        runnable_id: str = "",
+        runnable_name: str = "",
+    ) -> dict[str, Any]:
+        if self.future_task_store is None:
+            return {"ok": False, "error": "当前运行未启用 FutureTask 存储"}
+        return self.future_task_store.schedule(
+            title=title,
+            prompt=prompt,
+            runnable_id=runnable_id,
+            runnable_name=runnable_name,
+            delay_seconds=delay_seconds,
+            scheduled_at_epoch=scheduled_at_epoch,
+            cron=cron,
+        )
+
+    def future_task_list(self, *, include_finished: bool = True, limit: int = 100) -> dict[str, Any]:
+        if self.future_task_store is None:
+            return {"ok": False, "error": "当前运行未启用 FutureTask 存储"}
+        return {
+            "ok": True,
+            "future_tasks": self.future_task_store.list_tasks(
+                include_finished=include_finished,
+                limit=limit,
+            ),
+        }
+
+    def future_task_cancel(self, future_task_id: str, *, reason: str = "") -> dict[str, Any]:
+        if self.future_task_store is None:
+            return {"ok": False, "error": "当前运行未启用 FutureTask 存储"}
+        try:
+            return self.future_task_store.cancel(future_task_id, reason=reason)
+        except KeyError:
+            return {"ok": False, "error": "FutureTask 不存在", "future_task_id": future_task_id}
+
+    def _available_skill_refs(self) -> list[dict[str, str]]:
+        refs: list[dict[str, str]] = []
+        for skill in self.skills or []:
+            refs.append(
+                {
+                    "skill_id": str(skill.get("skill_id") or ""),
+                    "name": str(skill.get("name") or ""),
+                    "description": str(skill.get("description") or ""),
+                }
+            )
+        return refs
 
     def workspace_read(self, path: str) -> dict[str, Any]:
         target = self._resolve_workspace_path(path)
@@ -1746,6 +2515,51 @@ class ToolBroker:
         return {"ok": True, "path": rel, "bytes": len(safe_content.encode("utf-8"))}
 
     def call(self, name: str, payload: dict[str, Any], *, approved: bool = False) -> dict[str, Any]:
+        if name == "skill.read":
+            return self.skill_read(
+                str(payload.get("skill_id") or ""),
+                str(payload.get("name") or ""),
+            )
+        if name == "memory.add":
+            return self.memory_add(
+                str(payload.get("content") or ""),
+                kind=str(payload.get("kind") or ""),
+                scope=str(payload.get("scope") or ""),
+            )
+        if name == "memory.replace":
+            return self.memory_replace(
+                str(payload.get("content") or ""),
+                memory_id=str(payload.get("memory_id") or ""),
+                old_content=str(payload.get("old_content") or ""),
+                kind=str(payload.get("kind") or ""),
+                scope=str(payload.get("scope") or ""),
+            )
+        if name == "memory.remove":
+            return self.memory_remove(
+                memory_id=str(payload.get("memory_id") or ""),
+                content=str(payload.get("content") or ""),
+                reason=str(payload.get("reason") or ""),
+            )
+        if name == "future_task.schedule":
+            return self.future_task_schedule(
+                title=str(payload.get("title") or ""),
+                prompt=str(payload.get("prompt") or ""),
+                delay_seconds=payload.get("delay_seconds"),
+                scheduled_at_epoch=payload.get("scheduled_at_epoch"),
+                cron=str(payload.get("cron") or ""),
+                runnable_id=str(payload.get("runnable_id") or ""),
+                runnable_name=str(payload.get("runnable_name") or ""),
+            )
+        if name == "future_task.list":
+            return self.future_task_list(
+                include_finished=bool(payload.get("include_finished", True)),
+                limit=int(payload.get("limit") or 100),
+            )
+        if name == "future_task.cancel":
+            return self.future_task_cancel(
+                str(payload.get("future_task_id") or ""),
+                reason=str(payload.get("reason") or ""),
+            )
         if name == "workspace.list":
             return self.workspace_list(str(payload.get("path") or "."))
         if name == "workspace.read":
@@ -6999,6 +7813,72 @@ class NativeRunEngine:
                 trusted_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS memory_items (
+                memory_id TEXT PRIMARY KEY,
+                scope TEXT NOT NULL DEFAULT 'global',
+                kind TEXT NOT NULL DEFAULT 'fact',
+                content TEXT NOT NULL,
+                project_id TEXT NOT NULL DEFAULT '',
+                source_session_id TEXT NOT NULL DEFAULT '',
+                source_message_id TEXT NOT NULL DEFAULT '',
+                source_task_id TEXT NOT NULL DEFAULT '',
+                source_run_id TEXT NOT NULL DEFAULT '',
+                confidence REAL NOT NULL DEFAULT 1.0,
+                pinned INTEGER NOT NULL DEFAULT 0,
+                user_confirmed INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                deleted_at TEXT NOT NULL DEFAULT ''
+            );
+            CREATE TABLE IF NOT EXISTS memory_projects (
+                project_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS memory_project_sessions (
+                session_id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (project_id) REFERENCES memory_projects(project_id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS memory_events (
+                event_id TEXT PRIMARY KEY,
+                memory_id TEXT NOT NULL DEFAULT '',
+                action TEXT NOT NULL,
+                actor TEXT NOT NULL DEFAULT 'agent_tool',
+                payload_json TEXT NOT NULL DEFAULT '{}',
+                source_run_id TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS future_tasks (
+                future_task_id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                prompt TEXT NOT NULL,
+                runnable_id TEXT NOT NULL DEFAULT '',
+                runnable_name TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'scheduled',
+                scheduled_at_epoch REAL NOT NULL,
+                cron TEXT NOT NULL DEFAULT '',
+                source_run_id TEXT NOT NULL DEFAULT '',
+                last_run_id TEXT NOT NULL DEFAULT '',
+                run_count INTEGER NOT NULL DEFAULT 0,
+                error TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                cancelled_at TEXT NOT NULL DEFAULT ''
+            );
+            CREATE TABLE IF NOT EXISTS future_task_events (
+                event_id TEXT PRIMARY KEY,
+                future_task_id TEXT NOT NULL DEFAULT '',
+                action TEXT NOT NULL,
+                actor TEXT NOT NULL DEFAULT 'agent_runtime',
+                payload_json TEXT NOT NULL DEFAULT '{}',
+                source_run_id TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS runtime_schema_metadata (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL,
@@ -7024,6 +7904,13 @@ class NativeRunEngine:
             CREATE INDEX IF NOT EXISTS idx_run_approvals_run_status ON run_approvals (run_id, status);
             CREATE INDEX IF NOT EXISTS idx_run_artifacts_run_sequence ON run_artifacts (run_id, sequence);
             CREATE INDEX IF NOT EXISTS idx_trusted_workspaces_updated ON trusted_workspaces (updated_at);
+            CREATE INDEX IF NOT EXISTS idx_memory_items_scope_kind_updated ON memory_items (scope, kind, deleted_at, updated_at);
+            CREATE INDEX IF NOT EXISTS idx_memory_items_source_run ON memory_items (source_run_id);
+            CREATE INDEX IF NOT EXISTS idx_memory_project_sessions_project ON memory_project_sessions (project_id);
+            CREATE INDEX IF NOT EXISTS idx_memory_events_memory_created ON memory_events (memory_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_future_tasks_status_due ON future_tasks (status, scheduled_at_epoch);
+            CREATE INDEX IF NOT EXISTS idx_future_tasks_runnable_updated ON future_tasks (runnable_id, updated_at);
+            CREATE INDEX IF NOT EXISTS idx_future_task_events_task_created ON future_task_events (future_task_id, created_at);
             """
         )
         self._conn.execute(
@@ -7540,11 +8427,21 @@ class NativeRunEngine:
 
     @staticmethod
     def _default_tool_policy(category: str = "custom") -> dict[str, Any]:
-        tools = ["artifact.write"]
+        memory_tools = list(_MEMORY_TOOL_NAMES)
+        future_task_tools = list(_FUTURE_TASK_TOOL_NAMES)
+        tools = [*memory_tools, *future_task_tools, "artifact.write"]
         if category in {"coding", "review"}:
-            tools = ["workspace.list", "workspace.read", "workspace.write_patch", "terminal.run", "artifact.write"]
+            tools = [
+                "workspace.list",
+                "workspace.read",
+                "workspace.write_patch",
+                "terminal.run",
+                *memory_tools,
+                *future_task_tools,
+                "artifact.write",
+            ]
         elif category in {"research", "design", "office", "orchestrator"}:
-            tools = ["workspace.list", "workspace.read", "artifact.write"]
+            tools = ["workspace.list", "workspace.read", *memory_tools, *future_task_tools, "artifact.write"]
         return {
             "allowed_tools": tools,
             "approval_required": {"terminal.run": True, "workspace.write_patch": True},
@@ -7704,6 +8601,188 @@ class NativeRunEngine:
             "readable_scopes": [str(item or ".").strip() or "." for item in readable],
             "writable_scopes": [str(item or "").strip() for item in writable if str(item or "").strip()],
         }
+
+    def _memory_store(self, *, source_run_id: str = "") -> AgentMemoryStore:
+        return AgentMemoryStore(self._conn, self._db_lock, source_run_id=source_run_id)
+
+    def _future_task_store(
+        self,
+        *,
+        source_run_id: str = "",
+        default_runnable_id: str = "",
+    ) -> AgentFutureTaskStore:
+        return AgentFutureTaskStore(
+            self._conn,
+            self._db_lock,
+            source_run_id=source_run_id,
+            default_runnable_id=default_runnable_id,
+        )
+
+    def list_memory_items(self, *, include_deleted: bool = False, limit: int = 100) -> dict[str, Any]:
+        memories = self._memory_store().list_items(include_deleted=include_deleted, limit=limit)
+        return {"ok": True, "memories": memories}
+
+    def create_memory_item(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._memory_store(source_run_id="manual").add(
+            content=str(payload.get("content") or ""),
+            kind=str(payload.get("kind") or ""),
+            scope=str(payload.get("scope") or ""),
+        )
+
+    def update_memory_item(self, memory_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._memory_store(source_run_id="manual").replace(
+            memory_id=memory_id,
+            old_content=str(payload.get("old_content") or ""),
+            content=str(payload.get("content") or ""),
+            kind=str(payload.get("kind") or ""),
+            scope=str(payload.get("scope") or ""),
+        )
+
+    def delete_memory_item(self, memory_id: str, *, reason: str = "") -> dict[str, Any]:
+        return self._memory_store(source_run_id="manual").remove(memory_id=memory_id, reason=reason)
+
+    def _long_term_memory_context(self) -> str:
+        return self._memory_store().context_block(limit=_MEMORY_CONTEXT_LIMIT)
+
+    def schedule_future_task(self, payload: dict[str, Any], *, source_run_id: str = "") -> dict[str, Any]:
+        runnable_name = str(payload.get("runnable_name") or payload.get("name") or "").strip()
+        runnable_id = str(payload.get("runnable_id") or ("" if runnable_name else _MAIN_CHAT_AGENT_ID)).strip()
+        if self.resolve_runnable(runnable_id=runnable_id, name=runnable_name) is None:
+            raise AgentRuntimeError("FutureTask 指向的 Agent 或 Workflow 不存在")
+        return self._future_task_store(
+            source_run_id=source_run_id or "manual",
+            default_runnable_id=runnable_id,
+        ).schedule(
+            title=str(payload.get("title") or ""),
+            prompt=str(payload.get("prompt") or payload.get("user_goal") or payload.get("goal") or ""),
+            runnable_id=runnable_id,
+            runnable_name=runnable_name,
+            delay_seconds=payload.get("delay_seconds"),
+            scheduled_at_epoch=payload.get("scheduled_at_epoch"),
+            cron=str(payload.get("cron") or ""),
+        )
+
+    def list_future_tasks(self, *, include_finished: bool = True, limit: int = 100) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "future_tasks": self._future_task_store().list_tasks(
+                include_finished=include_finished,
+                limit=limit,
+            ),
+        }
+
+    def cancel_future_task(self, future_task_id: str, *, reason: str = "") -> dict[str, Any]:
+        return self._future_task_store(source_run_id="manual").cancel(future_task_id, reason=reason)
+
+    def trigger_due_future_tasks(self, *, now_epoch: float | None = None, limit: int = 20) -> dict[str, Any]:
+        current = time.time() if now_epoch is None else float(now_epoch)
+        rows = self._conn.execute(
+            """
+            SELECT *
+              FROM future_tasks
+             WHERE status='scheduled' AND scheduled_at_epoch<=?
+             ORDER BY scheduled_at_epoch ASC
+             LIMIT ?
+            """,
+            (current, max(1, min(int(limit or 20), 100))),
+        ).fetchall()
+        triggered: list[dict[str, Any]] = []
+        for row in rows:
+            future_task = AgentFutureTaskStore._row_to_future_task(row)
+            future_task_id = future_task["future_task_id"]
+            next_run_number = int(future_task.get("run_count") or 0) + 1
+            try:
+                run = self.create_run_for_runnable(
+                    runnable_id=str(future_task.get("runnable_id") or ""),
+                    name=str(future_task.get("runnable_name") or ""),
+                    user_goal=str(future_task.get("prompt") or ""),
+                    client_run_id=f"future-task-{future_task_id}-{next_run_number}",
+                )
+                run_id = str(run.get("run_id") or "")
+                cron = str(future_task.get("cron") or "").strip()
+                if cron:
+                    next_epoch = AgentFutureTaskStore._next_cron_epoch(cron, current)
+                    status = "scheduled"
+                    error_text = ""
+                    cancelled_at = ""
+                else:
+                    next_epoch = float(future_task.get("scheduled_at_epoch") or current)
+                    status = "triggered"
+                    error_text = ""
+                    cancelled_at = ""
+                updated = self._persist_future_task_trigger(
+                    future_task_id,
+                    status=status,
+                    scheduled_at_epoch=next_epoch,
+                    last_run_id=run_id,
+                    run_count=next_run_number,
+                    error=error_text,
+                    cancelled_at=cancelled_at,
+                    event_action="future_task.trigger",
+                    event_payload={"run_id": run_id, "cron": cron, "scheduled_at_epoch": next_epoch},
+                )
+                triggered.append({"ok": True, "future_task": updated, "run": run})
+            except Exception as exc:
+                safe_error = redact_secrets(exc)
+                updated = self._persist_future_task_trigger(
+                    future_task_id,
+                    status="failed",
+                    scheduled_at_epoch=float(future_task.get("scheduled_at_epoch") or current),
+                    last_run_id=str(future_task.get("last_run_id") or ""),
+                    run_count=int(future_task.get("run_count") or 0),
+                    error=safe_error,
+                    cancelled_at="",
+                    event_action="future_task.failed",
+                    event_payload={"error": safe_error},
+                )
+                triggered.append({"ok": False, "future_task": updated, "error": safe_error})
+        return {"ok": True, "triggered": triggered}
+
+    def _persist_future_task_trigger(
+        self,
+        future_task_id: str,
+        *,
+        status: str,
+        scheduled_at_epoch: float,
+        last_run_id: str,
+        run_count: int,
+        error: str,
+        cancelled_at: str,
+        event_action: str,
+        event_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        if status not in _FUTURE_TASK_STATUSES:
+            raise AgentRuntimeError("FutureTask 状态无效")
+        store = self._future_task_store(source_run_id=last_run_id or "future_task_scheduler")
+        now = _now()
+        with self._db_lock:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                self._conn.execute(
+                    """
+                    UPDATE future_tasks
+                       SET status=?, scheduled_at_epoch=?, last_run_id=?, run_count=?,
+                           error=?, updated_at=?, cancelled_at=?
+                     WHERE future_task_id=?
+                    """,
+                    (
+                        status,
+                        scheduled_at_epoch,
+                        last_run_id,
+                        run_count,
+                        error,
+                        now,
+                        cancelled_at,
+                        future_task_id,
+                    ),
+                )
+                store._record_event(future_task_id, event_action, event_payload)
+                row = self._conn.execute("SELECT * FROM future_tasks WHERE future_task_id=?", (future_task_id,)).fetchone()
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+        return AgentFutureTaskStore._row_to_future_task(row)
 
     def _row_to_agent(self, row: Any) -> dict[str, Any]:
         return {
@@ -9750,7 +10829,15 @@ class NativeRunEngine:
         return compiled
 
     def _main_chat_tool_policy(self, policy: dict[str, Any] | None = None) -> dict[str, Any]:
-        raw = policy if isinstance(policy, dict) else {"allowed_tools": ["workspace.list", "workspace.read", "artifact.write"]}
+        raw = policy if isinstance(policy, dict) else {
+            "allowed_tools": [
+                "workspace.list",
+                "workspace.read",
+                *_MEMORY_TOOL_NAMES,
+                *_FUTURE_TASK_TOOL_NAMES,
+                "artifact.write",
+            ]
+        }
         return self._compile_tool_policy("custom", raw)
 
     def _main_chat_agent_config(
@@ -9848,7 +10935,15 @@ class NativeRunEngine:
                 "message_count": len(messages),
             },
         )
-        broker = ToolBroker(runtime["workspace_policy"], self.agent_artifacts_dir / run_id)
+        broker = ToolBroker(
+            runtime["workspace_policy"],
+            self.agent_artifacts_dir / run_id,
+            memory_store=self._memory_store(source_run_id=run_id),
+            future_task_store=self._future_task_store(
+                source_run_id=run_id,
+                default_runnable_id=_MAIN_CHAT_AGENT_ID,
+            ),
+        )
         artifacts = [item for item in run.get("artifacts") or [] if isinstance(item, dict)]
         try:
             result_text = self._run_custom_api_agent(
@@ -9982,6 +11077,11 @@ class NativeRunEngine:
     def _compile_agent_runtime(self, agent: dict[str, Any]) -> dict[str, Any]:
         category = str(agent.get("category") or "custom")
         tool_policy = self._compile_tool_policy(category, agent.get("tool_policy"))
+        if agent.get("skill_ids") and "skill.read" not in tool_policy["allowed_tools"]:
+            tool_policy = {
+                **tool_policy,
+                "allowed_tools": ["skill.read", *tool_policy["allowed_tools"]],
+            }
         workspace_policy = self._compile_workspace_policy(agent.get("workspace_policy"))
         return {
             "runtime": "oha_agent",
@@ -9998,23 +11098,44 @@ class NativeRunEngine:
             ],
         }
 
-    def _agent_context(self, agent: dict[str, Any], user_goal: str, upstream: str = "") -> str:
-        skills = self._load_agent_skills(agent.get("skill_ids") or [])
+    def _agent_context(
+        self,
+        agent: dict[str, Any],
+        user_goal: str,
+        upstream: str = "",
+        *,
+        skills: list[dict[str, Any]] | None = None,
+    ) -> str:
+        skills = skills if skills is not None else self._load_agent_skills(agent.get("skill_ids") or [])
         runtime = self._compile_agent_runtime(agent)
         tool_policy = runtime["tool_policy"]
         workspace_policy = runtime["workspace_policy"]
         skill_blocks = []
         for skill in skills:
+            summary = str(skill.get("content_summary") or skill.get("description") or "").strip()
             skill_blocks.append(
-                f"## Skill: {skill['name']}\n\n{skill['skill_markdown']}\n\n"
-                f"Assets/Templates: {', '.join(skill.get('asset_paths') or []) or 'none'}"
+                f"- skill_id: {skill['skill_id']}\n"
+                f"  name: {skill['name']}\n"
+                f"  description: {skill.get('description') or 'No description.'}\n"
+                f"  summary: {summary[:600] or 'No summary.'}\n"
+                f"  assets/templates: {', '.join(skill.get('asset_paths') or []) or 'none'}"
             )
+        mounted_skills = (
+            "Skill summary index (progressive disclosure). "
+            "Call skill.read with skill_id before relying on detailed Skill instructions.\n"
+            + "\n".join(skill_blocks)
+            if skill_blocks
+            else "No mounted skills."
+        )
+        memory_context = self._long_term_memory_context()
         return "\n\n".join(
             [
                 f"# Agent\nName: {agent['name']}\nNickname: {agent.get('nickname') or agent['name']}\nCategory: {agent.get('category') or 'custom'}",
                 f"# Functional Instructions\n{agent.get('instructions') or 'No extra functional instructions.'}",
                 f"# Persona Prompt\n{agent.get('persona_prompt') or 'No persona override.'}",
-                f"# Mounted Skills\n{chr(10).join(skill_blocks) if skill_blocks else 'No mounted skills.'}",
+                f"# Operating Doctrine\n{_MARKET_AGENT_OPERATING_DOCTRINE}",
+                f"# Mounted Skills\n{mounted_skills}",
+                f"# Long-term Memory\n{memory_context}",
                 "# Runtime\n"
                 "Runtime: Oha Agent Runtime\n"
                 f"Allowed tools: {', '.join(tool_policy.get('allowed_tools') or [])}\n"
@@ -10190,8 +11311,18 @@ class NativeRunEngine:
             )
         )
         artifact_root = self.agent_artifacts_dir / run_id
-        context = self._agent_context(agent, user_goal, upstream)
-        broker = ToolBroker(runtime["workspace_policy"], artifact_root)
+        skills = self._load_agent_skills(agent.get("skill_ids") or [])
+        context = self._agent_context(agent, user_goal, upstream, skills=skills)
+        broker = ToolBroker(
+            runtime["workspace_policy"],
+            artifact_root,
+            skills=skills,
+            memory_store=self._memory_store(source_run_id=run_id),
+            future_task_store=self._future_task_store(
+                source_run_id=run_id,
+                default_runnable_id=str(agent.get("agent_id") or ""),
+            ),
+        )
         artifacts: list[dict[str, Any]] = []
         try:
             artifact = broker.artifact_write("agent-context.md", context)
@@ -10271,14 +11402,28 @@ class NativeRunEngine:
         api_key = str(model_config.get("api_key") or "").strip()
         if not base_url or not model or not api_key:
             raise AgentRuntimeError("Agent 模型 Profile 缺少 base_url、model 或 API Key")
-        allowed_tools = (agent.get("tool_policy") or {}).get("allowed_tools") or []
+        runtime = self._compile_agent_runtime(agent)
+        allowed_tools = runtime["tool_policy"].get("allowed_tools") or []
         if messages is None:
             allowed_tool_text = ", ".join(allowed_tools) or "none"
+            memory_tool_guidance = (
+                "Use memory.add, memory.replace, and memory.remove only for stable user preferences, durable facts, "
+                "task commitments, reusable summaries, or explicit forget/correction requests; never store secrets. "
+                if any(tool in allowed_tools for tool in _MEMORY_TOOL_NAMES)
+                else ""
+            )
+            future_task_guidance = (
+                "Use future_task.schedule/list/cancel for explicit reminders, follow-up commitments, standing orders, "
+                "or recurring summaries; do not schedule hidden future work without user intent. "
+                if any(tool in allowed_tools for tool in _FUTURE_TASK_TOOL_NAMES)
+                else ""
+            )
             system_prompt = (
                 "You are running inside Oha-Yachiyo Agent Runtime. "
                 "Follow the Agent functional instructions, persona prompt, user goal, and exact output requests. "
                 "If those instructions require an exact phrase or format, return exactly that final output. "
                 "Return concise final output unless the Agent instructions require otherwise. "
+                f"{_MARKET_AGENT_OPERATING_DOCTRINE}\n"
                 "Prefer native tool_calls when available. "
                 "If the model endpoint does not support tool_calls and a controlled tool is needed, respond as JSON "
                 "{\"action\":\"tool\",\"tool\":\"workspace.list\",\"input\":{}}. "
@@ -10286,6 +11431,8 @@ class NativeRunEngine:
                 "If no tools are allowed, do not request tools. "
                 "Do not request a tool solely because of the output contract; use tools only when the user goal "
                 "or an explicit deliverable requires them. "
+                f"{memory_tool_guidance}"
+                f"{future_task_guidance}"
                 "If the user asks not to create, save, write, or modify files, provide the content inline and do "
                 "not request file-writing tools. If the user asks not to run or execute commands, do not request "
                 "command-execution tools. "
@@ -11169,12 +12316,22 @@ class NativeRunEngine:
         pending: dict[str, Any],
         *,
         runtime: dict[str, Any],
+        skills: list[dict[str, Any]] | None = None,
     ) -> ToolApprovalResumeContext:
         run_id = str(run["run_id"])
         return ToolApprovalResumeContext.from_run(
             run,
             pending,
-            broker=ToolBroker(runtime["workspace_policy"], self.agent_artifacts_dir / run_id),
+            broker=ToolBroker(
+                runtime["workspace_policy"],
+                self.agent_artifacts_dir / run_id,
+                skills=skills,
+                memory_store=self._memory_store(source_run_id=run_id),
+                future_task_store=self._future_task_store(
+                    source_run_id=run_id,
+                    default_runnable_id=str((run.get("runnable_id") or _MAIN_CHAT_AGENT_ID)),
+                ),
+            ),
             allowed_tools=runtime["tool_policy"].get("allowed_tools") or [],
             budget_factory=lambda context_run_id, context_timeline: self._run_budget(
                 context_run_id,
@@ -11212,7 +12369,13 @@ class NativeRunEngine:
             raise AgentRuntimeError("Run 缺少待审批工具信息")
         agent = self._get_agent_private(str(run["runnable_id"]))
         runtime = self._compile_agent_runtime(agent)
-        resume_context = self._tool_approval_resume_context(run, pending, runtime=runtime)
+        skills = self._load_agent_skills(agent.get("skill_ids") or [])
+        resume_context = self._tool_approval_resume_context(
+            run,
+            pending,
+            runtime=runtime,
+            skills=skills,
+        )
         return self._resume_approved_tool_run(
             run_id=run_id,
             pending=pending,

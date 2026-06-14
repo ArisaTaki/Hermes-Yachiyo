@@ -256,24 +256,34 @@ const NATIVE_TOOL_CATALOG: NativeToolCatalogItem[] = [
   },
   {
     id: 'tts',
-    label: 'Native 文本转语音',
-    category: '多模态',
-    description: 'Native Agent 自己暴露的文本转音频工具；不等同于 Yachiyo 主动关怀的 GPT-SoVITS 播报配置。',
-    requirement: '需要 Native tts 工具启用',
+    label: '语音播报',
+    category: '体验能力',
+    description: '配置 Yachiyo 的主动关怀语音和桌面播报。',
+    requirement: '需要主动关怀语音配置',
   },
   {
     id: 'terminal',
     label: '终端执行',
-    category: '本地工作',
-    description: '经过 Native PolicyGate 和审批后执行命令并读取结果。',
-    requirement: '需要 Native terminal.run 工具权限',
+    category: 'Agent Runtime',
+    description: '在用户批准后运行命令并读取结果。',
+    requirement: '需要 terminal.run 工具权限',
+    aliases: ['terminal.run', 'process'],
   },
   {
     id: 'file',
-    label: '文件读写',
-    category: '本地工作',
-    description: '读取、生成和修改本地工作文件。',
-    requirement: '需要 Native 文件工具权限',
+    label: '文件与工作区',
+    category: 'Agent Runtime',
+    description: '读取工作区文件，并在允许时生成可审查的修改。',
+    requirement: '需要 workspace.* 工具权限',
+    aliases: ['workspace', 'workspace.list', 'workspace.read', 'workspace.write_patch'],
+  },
+  {
+    id: 'artifact',
+    label: '产物输出',
+    category: 'Agent Runtime',
+    description: '把报告、Markdown、上下文和交付物保存到 Run 产物里。',
+    requirement: '需要 artifact.write 工具启用',
+    aliases: ['artifact.write', 'artifacts'],
   },
   {
     id: 'skills',
@@ -299,45 +309,49 @@ const NATIVE_TOOL_CATALOG: NativeToolCatalogItem[] = [
   },
   {
     id: 'memory',
-    label: '记忆',
-    category: '长期上下文',
-    description: '读取和维护 Native 记忆信息。',
-    requirement: '需要 memory 工具集启用',
+    label: 'Long-term Memory',
+    category: 'Agent Runtime',
+    description: '由 memory.add/replace/remove 维护持久化记忆，并在 Agent Studio 里管理。',
+    requirement: '需要 Agent Runtime memory.* 工具启用',
   },
   {
     id: 'session_search',
     label: '会话检索',
-    category: '长期上下文',
+    category: 'Agent Runtime',
     description: '检索历史会话，帮助跨会话延续上下文。',
     requirement: '需要会话索引可用',
   },
   {
     id: 'todo',
     label: '任务清单',
-    category: '长期上下文',
-    description: '维护 Native 内部的待办与计划状态。',
-    requirement: '需要 todo 工具集启用',
+    category: 'Agent Runtime 规划',
+    description: '用于后续把轻量待办、任务状态和 FutureTask 结果统一成用户可管理清单。',
+    requirement: '规划中；当前以 FutureTask 和 Run History 承接',
+    planned: true,
   },
   {
-    id: 'cronjob',
-    label: '定时任务',
-    category: '自动化',
-    description: '创建或管理 Native 侧的定时自动化。',
-    requirement: '需要 cronjob 工具集配置',
+    id: 'future_task',
+    label: 'FutureTask 排程',
+    category: 'Agent Runtime',
+    description: '用 future_task.schedule/list/cancel 创建提醒、回访和周期任务，到期后生成真实 Run。',
+    requirement: '需要 Agent Runtime FutureTask 工具启用',
+    aliases: ['future-task', 'cronjob', 'cron', 'future_task.schedule', 'future_task.list', 'future_task.cancel'],
   },
   {
     id: 'clarify',
     label: '澄清问题',
-    category: '自动化',
-    description: '让 Native 在缺少关键信息时向用户提问。',
-    requirement: '需要 clarify 工具集启用',
+    category: 'Agent Runtime 规划',
+    description: '把缺失信息的追问做成可审计的运行时节点，而不是旧工具清单里的独立插件。',
+    requirement: '规划中；当前由 Agent/Workflow prompt 和审批节点承接',
+    planned: true,
   },
   {
     id: 'delegation',
-    label: '任务委派',
-    category: '自动化',
-    description: '让 Native 将任务拆分给子 agent 或协作流程。',
-    requirement: '需要 delegation 工具集启用',
+    label: 'Agent / Workflow 委派',
+    category: 'Agent Runtime',
+    description: '把主聊天任务派给 Agent Studio 的 Agent 或 Workflow，并把结果回收进当前会话。',
+    requirement: '需要 Oha delegation runtime 与 Agent Studio 目标',
+    aliases: ['delegate_task', 'oha.delegation', 'delegate_agent', 'delegate_workflow'],
   },
   {
     id: 'messaging',
@@ -401,12 +415,13 @@ const NATIVE_TOOL_CATALOG: NativeToolCatalogItem[] = [
 ];
 
 const HIDDEN_NATIVE_TOOLS = new Set(['vision', 'vision_analyze']);
+const LEGACY_TOOL_CATEGORIES = new Set(['外部服务', '第三方扩展']);
 
 const YACHIYO_WORKFLOWS: YachiyoWorkflowDefinition[] = [
   {
     id: 'desktop-companion',
-    title: '桌面伴随',
-    summary: '把 Live2D、气泡、TTS 和对话串成八千代的第一层存在感；这里管理的是 Yachiyo 自己的桌面体验。',
+    title: '桌面陪伴',
+    summary: '管理 Live2D、气泡和语音。',
     primaryAction: { label: '配置 Live2D', target: 'live2d' },
     requiredCapabilities: ['tts', 'memory', 'computer_use'],
     ownedSettingsRoute: 'Live2D 模式 / 气泡模式 / 主动关怀语音',
@@ -415,16 +430,16 @@ const YACHIYO_WORKFLOWS: YachiyoWorkflowDefinition[] = [
   {
     id: 'proactive-care',
     title: '主动关怀',
-    summary: '围绕提醒、待办、语音播报和情绪化反馈，做成 Yachiyo 主动出现的轻工作链路。',
+    summary: '管理提醒、回访和语音反馈。',
     primaryAction: { label: '配置主动关怀语音', target: 'proactive-tts' },
-    requiredCapabilities: ['tts', 'todo', 'cronjob', 'memory'],
+    requiredCapabilities: ['tts', 'future_task', 'memory'],
     ownedSettingsRoute: '主动关怀语音 / 对话',
-    externalRecommendations: ['Native 自动化工具集', '本机 TTS 或 GPT-SoVITS'],
+    externalRecommendations: ['Agent Studio Memory / FutureTask', '本机 TTS 或 GPT-SoVITS'],
   },
   {
     id: 'context-awareness',
-    title: '上下文感知',
-    summary: '让八千代能理解当前工作、历史会话和本机状态，再把结果交给聊天、资源与工作区体验。',
+    title: '上下文与工作区',
+    summary: '管理聊天、文件和工作区上下文。',
     primaryAction: { label: '打开对话', target: 'chat' },
     requiredCapabilities: ['browser', 'file', 'session_search', 'computer_use'],
     ownedSettingsRoute: '对话 / 资源管理 / 工作区',
@@ -1032,7 +1047,7 @@ export function ToolCenterView() {
     NATIVE_TOOL_CATALOG,
     nativeToolsets,
     doctorReferencedTools,
-  );
+  ).filter(isUserFacingTool);
   const selectedCatalogItem = selectedToolId
     ? visibleToolCatalog.find((item) => toolNameAliases(item).some((alias) => canonicalToolName(alias) === canonicalToolName(selectedToolId)))
     : undefined;
@@ -1069,7 +1084,7 @@ export function ToolCenterView() {
         <header className="topbar dashboard-topbar">
           <div>
             <h1>{selectedToolConfig?.title || selectedCatalogItem?.label || '工具配置'}</h1>
-            <p>{selectedToolConfig?.summary || selectedCatalogItem?.requirement || '读取 Native 工具配置中。'}</p>
+            <p>{selectedToolConfig?.summary || selectedCatalogItem?.requirement || '读取配置中。'}</p>
           </div>
           <div className="topbar-actions">
             <button type="button" onClick={() => requestNavigation({ type: 'overview' })}>返回工具概览</button>
@@ -1128,7 +1143,7 @@ export function ToolCenterView() {
       <header className="topbar dashboard-topbar">
         <div>
           <h1>能力中心</h1>
-          <p>从 Yachiyo 自己的桌面伴随、主动关怀和上下文感知开始；外部工具只作为推荐环境显示。</p>
+          <p>管理记忆、提醒、文件、语音和 Agent 协作。</p>
         </div>
         <div className="topbar-actions">
           <button type="button" onClick={() => requestNavigation({ type: 'main' })}>主控台</button>
@@ -1168,40 +1183,41 @@ export function ToolCenterView() {
       <section className="tool-center-panel">
         <div className="section-heading-row">
           <div>
-            <h2>基础设施状态</h2>
-            <p className="section-caption">Native Runtime、Doctor 和 tools list 继续保留在这里；排障详情仍由诊断页承接。</p>
+            <h2>系统状态</h2>
           </div>
           <StatusPill
             active={!attentionCount && checked}
-            label={checked ? `${attentionCount} 个需处理` : '待 Doctor'}
+            label={checked ? (attentionCount ? `${attentionCount} 个需处理` : '正常') : '待检测'}
           />
         </div>
 
         <div className="tool-center-summary" aria-label="工具概览">
-          <ToolSummaryCard label="Native 工具组" value={`${visibleToolCatalog.length}`} detail={nativeToolsets.length ? '来自 Native 工具投影' : '等待 Native 工具投影'} />
+          <ToolSummaryCard label="常用能力" value={`${visibleToolCatalog.length}`} detail="已隐藏旧外部服务和实验扩展" />
           <ToolSummaryCard
-            label="Doctor 受限"
+            label="需要处理"
             value={cacheStale ? '需重检' : `${attentionCount}`}
-            detail={doctorCache?.cached_at ? `上次检查 ${formatShortDateTime(doctorCache.cached_at)}` : checked ? `${issueCount} 项诊断提示` : '尚未完成 Doctor 分级'}
+            detail={doctorCache?.cached_at ? `上次检测 ${formatShortDateTime(doctorCache.cached_at)}` : checked ? `${issueCount} 项提示` : '尚未检测'}
             warn={Boolean(cacheStale || attentionCount)}
           />
-          <ToolSummaryCard label="配置入口" value={`${visibleConfigCount}`} detail={toolConfig?.env_path ? '已连接 Native 配置' : '等待 Native 配置路径'} muted />
+          <ToolSummaryCard label="可配置项" value={`${visibleConfigCount}`} detail="高级连接不在普通视图显示" muted />
         </div>
 
-        <NativeUpdatePanel
-          version={nativeAgent?.version}
-          releaseDate={nativeAgent?.release_date}
-          result={nativeUpdate}
-          busy={updateBusy}
-          mode={updateMode}
-          elapsedSeconds={updateElapsedSeconds}
-          fullBackup={updateWithFullBackup}
-          terminalSupported={hasEmbeddedTerminal()}
-          commandExists={commandExists}
-          onFullBackupChange={setUpdateWithFullBackup}
-          onCheck={() => void checkNativeUpdate()}
-          onUpdate={() => void updateNativeAgent()}
-        />
+        {nativeUpdate || updateBusy ? (
+          <NativeUpdatePanel
+            version={nativeAgent?.version}
+            releaseDate={nativeAgent?.release_date}
+            result={nativeUpdate}
+            busy={updateBusy}
+            mode={updateMode}
+            elapsedSeconds={updateElapsedSeconds}
+            fullBackup={updateWithFullBackup}
+            terminalSupported={hasEmbeddedTerminal()}
+            commandExists={commandExists}
+            onFullBackupChange={setUpdateWithFullBackup}
+            onCheck={() => void checkNativeUpdate()}
+            onUpdate={() => void updateNativeAgent()}
+          />
+        ) : null}
 
         {(updateTerminalStatus !== 'idle' || updateTerminalSession) ? (
           <NativeUpdateTerminalPanel
@@ -1234,12 +1250,7 @@ export function ToolCenterView() {
               ))}
             </div>
           </div>
-        ) : (
-          <div className="tool-empty-banner">
-            <strong>{checked ? '当前没有受限工具记录' : '还没有 Doctor 结果'}</strong>
-            <span>{checked ? '如果扩展能力表现异常，可以重新运行 Doctor。' : '运行 Doctor 后，这里会把受限工具整理成可读的配置清单。'}</span>
-          </div>
-        )}
+        ) : null}
 
         <div className="tool-action-row">
           <button
@@ -1248,17 +1259,10 @@ export function ToolCenterView() {
             disabled={!commandExists}
             onClick={() => void openAppView('diagnostics', { command: 'native doctor', return_to: 'tools' })}
           >
-            运行 Doctor 并查看结果
-          </button>
-          <button
-            type="button"
-            disabled={!commandExists}
-            onClick={() => void openAppView('diagnostics', { command: 'native config check', return_to: 'tools' })}
-          >
-            检查配置结构
+            诊断
           </button>
           <button type="button" disabled={busy} onClick={() => void recheckNative()}>
-            {busy ? '检测中...' : '重新检测'}
+            {busy ? '检测中...' : '刷新'}
           </button>
         </div>
 
@@ -1305,8 +1309,7 @@ function YachiyoWorkflowPanel({
     <section className="yachiyo-workflow-panel">
       <div className="section-heading-row">
         <div>
-          <h2>Yachiyo 工作链路</h2>
-          <p className="section-caption">先看八千代自己能陪你完成什么；Native toolset 是这些链路的底座，不是这里的主角。</p>
+          <h2>常用能力</h2>
         </div>
         <button type="button" onClick={() => navigateTo('settings')}>打开设置</button>
       </div>
@@ -1333,20 +1336,6 @@ function YachiyoWorkflowPanel({
                 <span className={`tool-status-pill ${status.kind}`}>{status.label}</span>
               </div>
               <p>{workflow.summary}</p>
-              <div className="workflow-capability-list" aria-label={`${workflow.title} 依赖能力`}>
-                {capabilities.map((capability) => (
-                  <span
-                    className={`workflow-capability-pill ${capability.status.kind}`}
-                    title={capability.status.detail}
-                    key={`${workflow.id}-${capability.id}`}
-                  >
-                    {capability.label}
-                  </span>
-                ))}
-              </div>
-              <div className="workflow-recommendations">
-                {workflow.externalRecommendations.map((item) => <span key={item}>{item}</span>)}
-              </div>
               <div className="workflow-card-actions">
                 <button
                   type="button"
@@ -1355,7 +1344,6 @@ function YachiyoWorkflowPanel({
                 >
                   {workflow.primaryAction.label}
                 </button>
-                <small>{status.detail}</small>
               </div>
             </article>
           );
@@ -1999,6 +1987,14 @@ function workflowStatusFromCapabilities(
       detail: `${pending.label} 尚未给出可用性结论。`,
     };
   }
+  const planned = capabilities.find((capability) => capability.status.kind === 'planned');
+  if (planned) {
+    return {
+      kind: 'planned',
+      label: '规划中',
+      detail: `${planned.label} 仍是规划能力，当前链路会用已落地的 Runtime 能力承接。`,
+    };
+  }
   return {
     kind: 'ready',
     label: '可推进',
@@ -2025,6 +2021,7 @@ function catalogForNativeToolsets(
   );
   const referenced = new Set((doctorReferencedTools || []).filter((tool) => !isHiddenNativeTool(tool)).map(canonicalToolName));
   const visible = baseCatalog.filter((item) => {
+    if (item.category === 'Agent Runtime') return true;
     const aliases = toolNameAliases(item).map(canonicalToolName);
     if (item.id === 'browser-cdp') {
       return supported.has('browser') || supported.has('browser-cdp') || referenced.has('browser-cdp');
@@ -2046,6 +2043,10 @@ function catalogForNativeToolsets(
     knownAliases.add(canonical);
   }
   return visible;
+}
+
+function isUserFacingTool(item: NativeToolCatalogItem): boolean {
+  return !LEGACY_TOOL_CATEGORIES.has(item.category);
 }
 
 function toolsetEnabledForItem(item: NativeToolCatalogItem, toolsets?: NativeToolsetItem[]): boolean {

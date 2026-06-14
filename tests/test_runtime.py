@@ -157,6 +157,12 @@ def test_main_chat_runtime_policies_enable_native_tools_with_approval(tmp_path, 
         "workspace.read",
         "workspace.write_patch",
         "terminal.run",
+        "memory.add",
+        "memory.replace",
+        "memory.remove",
+        "future_task.schedule",
+        "future_task.list",
+        "future_task.cancel",
         "artifact.write",
     }
     assert tool_policy["approval_required"]["workspace.write_patch"] is True

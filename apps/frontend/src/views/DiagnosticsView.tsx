@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { apiGet, apiPost, copyText } from '../lib/bridge';
+import { listModelProfiles, type ModelProfile, type ModelProfilesPayload } from '../lib/modelProfiles';
 import { currentParam, navigateTo } from '../lib/view';
 
 type DiagnosticAction = {
@@ -28,6 +29,7 @@ type DiagnosticResult = {
   stale?: boolean;
   diagnostic_cache?: DiagnosticCache;
   doctor_summary?: DoctorSummary;
+  dashboard?: DashboardStatus;
 };
 
 type DoctorSummary = {
@@ -56,6 +58,14 @@ type DashboardStatus = {
     limited_tools?: string[];
     limited_tool_details?: Record<string, string>;
     doctor_issues_count?: number;
+    native_agent?: {
+      ready?: boolean;
+      reason?: string;
+      message?: string;
+      profile_id?: string;
+      model?: string;
+      provider?: string;
+    };
   };
   workspace?: { initialized?: boolean; path?: string };
 };
@@ -390,6 +400,7 @@ export function DiagnosticsView() {
   const [result, setResult] = useState<DiagnosticResult | null>(null);
   const [diagnosticCache, setDiagnosticCache] = useState<DiagnosticCache | null>(null);
   const [overview, setOverview] = useState<DashboardStatus | null>(null);
+  const [modelProfiles, setModelProfiles] = useState<ModelProfilesPayload | null>(null);
   const [settingsOverview, setSettingsOverview] = useState<SettingsOverviewPayload | null>(null);
   const [overviewLoading, setOverviewLoading] = useState(true);
   const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus | null>(null);
@@ -440,17 +451,15 @@ export function DiagnosticsView() {
 
   useEffect(() => {
     let disposed = false;
-    setOverviewLoading(true);
-    apiGet<DashboardStatus>('/ui/dashboard')
-      .then((payload) => {
-        if (!disposed) setOverview(payload);
-      })
-      .catch(() => {
-        if (!disposed) setOverview(null);
-      })
-      .finally(() => {
-        if (!disposed) setOverviewLoading(false);
-      });
+    void loadDashboardSnapshot(() => disposed);
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    void loadModelProfileSnapshot(() => disposed);
     return () => {
       disposed = true;
     };
@@ -510,6 +519,9 @@ export function DiagnosticsView() {
       const payload = await apiPost<DiagnosticResult>('/ui/native-agent/diagnostic-command', { command: action.command });
       setResult(payload);
       if (payload.diagnostic_cache) setDiagnosticCache(payload.diagnostic_cache);
+      if (payload.dashboard) setOverview(payload.dashboard);
+      else void loadDashboardSnapshot();
+      void loadModelProfileSnapshot();
       setStatus(payload.success ? payload.message || `${action.label} 完成` : payload.error || `${action.label} 失败`);
       void refreshToolConfig();
     } catch (err) {
@@ -517,6 +529,27 @@ export function DiagnosticsView() {
       setStatus(err instanceof Error ? err.message : `${action.label} 失败`);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function loadDashboardSnapshot(isDisposed: () => boolean = () => false) {
+    setOverviewLoading(true);
+    try {
+      const payload = await apiGet<DashboardStatus>('/ui/dashboard');
+      if (!isDisposed()) setOverview(payload);
+    } catch {
+      if (!isDisposed()) setOverview(null);
+    } finally {
+      if (!isDisposed()) setOverviewLoading(false);
+    }
+  }
+
+  async function loadModelProfileSnapshot(isDisposed: () => boolean = () => false) {
+    try {
+      const payload = await listModelProfiles();
+      if (!isDisposed()) setModelProfiles(payload);
+    } catch {
+      if (!isDisposed()) setModelProfiles(null);
     }
   }
 
@@ -681,7 +714,7 @@ export function DiagnosticsView() {
       {status ? <div className={diagnosticNoticeClass(status)} data-testid="diagnostics-status">{status}</div> : null}
 
       <section className="hy-diagnostic-grid hy-stagger" aria-label="系统检测">
-        {diagnosticOverviewItems(overview, diagnosticCache, settingsOverview).map((item) => (
+        {diagnosticOverviewItems(overview, diagnosticCache, settingsOverview, modelProfiles).map((item) => (
           <article className={`hy-diagnostic-check ${item.status}`} key={item.label}>
             <span>{item.label}</span>
             <strong>{diagnosticStatusLabel(item.status)}</strong>
@@ -1179,15 +1212,16 @@ function diagnosticOverviewItems(
   data: DashboardStatus | null,
   cache: DiagnosticCache | null,
   settings: SettingsOverviewPayload | null,
+  modelProfiles: ModelProfilesPayload | null,
 ): DiagnosticOverviewItem[] {
   const bridge = data?.bridge?.state || data?.bridge?.status || data?.bridge?.running || '';
   const bridgeOk = /running|listening|ready|ok/i.test(bridge);
   const nativeAgent = data?.native_agent;
-  const nativeAgentReady = Boolean(nativeAgent?.ready);
   const commandExists = Boolean(nativeAgent?.command_exists);
   const workspaceReady = Boolean(data?.workspace?.initialized);
   const doctorIssues = Number(nativeAgent?.doctor_issues_count || 0);
   const hasDoctorCache = Boolean(cache?.commands?.doctor);
+  const model = modelDiagnosticStatus(data, modelProfiles);
   const live2d = live2dDiagnosticStatus(settings);
   const tts = ttsDiagnosticStatus(settings);
 
@@ -1209,8 +1243,8 @@ function diagnosticOverviewItems(
     },
     {
       label: '模型',
-      status: nativeAgentReady ? 'passed' : commandExists ? 'warning' : 'error',
-      detail: nativeAgentReady ? '基础链路可用' : commandExists ? '需要连接测试' : 'Native Agent 未就绪',
+      status: model.status,
+      detail: model.detail,
     },
     {
       label: 'GPU',
@@ -1233,6 +1267,53 @@ function diagnosticOverviewItems(
       detail: tts.detail,
     },
   ];
+}
+
+function modelDiagnosticStatus(
+  data: DashboardStatus | null,
+  modelProfiles: ModelProfilesPayload | null,
+): DiagnosticOverviewItem {
+  const nativeAgent = data?.native_agent;
+  const commandExists = Boolean(nativeAgent?.command_exists);
+  if (!commandExists && data) return { label: '模型', status: 'error', detail: 'Native Agent 未就绪' };
+  const runtimeReadiness = nativeAgent?.native_agent;
+  if (nativeAgent?.ready) {
+    const model = runtimeReadiness?.model || defaultChatProfile(modelProfiles)?.model || '';
+    return { label: '模型', status: 'passed', detail: model ? `默认模型：${model}` : '基础链路可用' };
+  }
+  const defaultProfile = defaultChatProfile(modelProfiles);
+  if (defaultProfile) {
+    if (defaultProfile.enabled === false) return { label: '模型', status: 'warning', detail: '默认模型已暂停' };
+    if (!defaultProfile.api_key_configured) return { label: '模型', status: 'warning', detail: '默认模型缺少密钥' };
+    if (!defaultProfile.base_url || !defaultProfile.model) return { label: '模型', status: 'warning', detail: '默认模型配置不完整' };
+    if (defaultProfile.status !== 'available') return { label: '模型', status: 'warning', detail: '默认模型待测试' };
+    return { label: '模型', status: 'passed', detail: `默认模型：${defaultProfile.model}` };
+  }
+  const availableProfiles = availableChatProfiles(modelProfiles);
+  if (availableProfiles.length === 1) {
+    return { label: '模型', status: 'passed', detail: `可用模型：${availableProfiles[0].model}` };
+  }
+  if (availableProfiles.length > 1) {
+    return { label: '模型', status: 'warning', detail: '请选择默认对话模型' };
+  }
+  const readinessMessage = runtimeReadiness?.message || '';
+  if (readinessMessage) return { label: '模型', status: 'warning', detail: readinessMessage };
+  return { label: '模型', status: modelProfiles ? 'warning' : 'error', detail: modelProfiles ? '未找到可用对话模型' : '等待模型配置' };
+}
+
+function defaultChatProfile(modelProfiles: ModelProfilesPayload | null): ModelProfile | null {
+  const profileId = String(modelProfiles?.defaults?.chat || '').trim();
+  if (!profileId) return null;
+  return (modelProfiles?.profiles || []).find((profile) => profile.profile_id === profileId && profile.capability === 'chat') || null;
+}
+
+function availableChatProfiles(modelProfiles: ModelProfilesPayload | null): ModelProfile[] {
+  return (modelProfiles?.profiles || []).filter((profile) => profile.capability === 'chat'
+    && profile.enabled !== false
+    && profile.status === 'available'
+    && Boolean(profile.api_key_configured)
+    && Boolean(profile.model)
+    && Boolean(profile.base_url));
 }
 
 function live2dDiagnosticStatus(settings: SettingsOverviewPayload | null): DiagnosticOverviewItem {

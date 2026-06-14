@@ -98,6 +98,33 @@ class ApprovalRejectRequest(BaseModel):
     reason: str | None = Field(default=None, max_length=2000)
 
 
+class MemoryRequest(BaseModel):
+    content: str | None = Field(default=None, max_length=60000)
+    old_content: str | None = Field(default=None, max_length=60000)
+    kind: str | None = Field(default=None, max_length=40)
+    scope: str | None = Field(default=None, max_length=40)
+    reason: str | None = Field(default=None, max_length=2000)
+
+
+class FutureTaskRequest(BaseModel):
+    title: str | None = Field(default=None, max_length=1000)
+    prompt: str | None = Field(default=None, max_length=60000)
+    runnable_id: str | None = Field(default=None, max_length=160)
+    runnable_name: str | None = Field(default=None, max_length=160)
+    delay_seconds: float | None = None
+    scheduled_at_epoch: float | None = None
+    cron: str | None = Field(default=None, max_length=80)
+
+
+class FutureTaskCancelRequest(BaseModel):
+    reason: str | None = Field(default=None, max_length=2000)
+
+
+class FutureTaskTriggerRequest(BaseModel):
+    now_epoch: float | None = None
+    limit: int | None = Field(default=20, ge=1, le=100)
+
+
 def _payload(model: BaseModel) -> dict[str, Any]:
     return model.model_dump(exclude_unset=True, exclude_none=True, by_alias=True)
 
@@ -412,6 +439,120 @@ async def delete_workflow(
 @router.get("/runnables")
 async def list_runnables(http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
     return await asyncio.to_thread(_agent_runtime_service(http_request).list_runnables)
+
+
+@router.get("/memories")
+async def list_memories(
+    include_deleted: bool = False,
+    limit: int = 100,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    return await asyncio.to_thread(
+        _agent_runtime_service(http_request).list_memory_items,
+        include_deleted=include_deleted,
+        limit=limit,
+    )
+
+
+@router.post("/memories")
+async def create_memory(
+    request: MemoryRequest,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(_agent_runtime_service(http_request).create_memory_item, _payload(request))
+    except AgentRuntimeError as exc:
+        raise _bad_request(exc) from exc
+
+
+@router.patch("/memories/{memory_id}")
+async def update_memory(
+    memory_id: str,
+    request: MemoryRequest,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(
+            _agent_runtime_service(http_request).update_memory_item,
+            memory_id,
+            _payload(request),
+        )
+    except AgentRuntimeError as exc:
+        raise _bad_request(exc) from exc
+
+
+@router.delete("/memories/{memory_id}")
+async def delete_memory(
+    memory_id: str,
+    reason: str = "",
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(
+            _agent_runtime_service(http_request).delete_memory_item,
+            memory_id,
+            reason=reason,
+        )
+    except AgentRuntimeError as exc:
+        raise _bad_request(exc) from exc
+
+
+@router.get("/future-tasks")
+async def list_future_tasks(
+    include_finished: bool = True,
+    limit: int = 100,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    return await asyncio.to_thread(
+        _agent_runtime_service(http_request).list_future_tasks,
+        include_finished=include_finished,
+        limit=limit,
+    )
+
+
+@router.post("/future-tasks")
+async def schedule_future_task(
+    request: FutureTaskRequest,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(_agent_runtime_service(http_request).schedule_future_task, _payload(request))
+    except AgentRuntimeError as exc:
+        raise _bad_request(exc) from exc
+
+
+@router.post("/future-tasks/trigger-due")
+async def trigger_due_future_tasks(
+    request: FutureTaskTriggerRequest | None = None,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    payload = _payload(request) if request is not None else {}
+    try:
+        return await asyncio.to_thread(
+            _agent_runtime_service(http_request).trigger_due_future_tasks,
+            now_epoch=payload.get("now_epoch"),
+            limit=payload.get("limit") or 20,
+        )
+    except AgentRuntimeError as exc:
+        raise _bad_request(exc) from exc
+
+
+@router.post("/future-tasks/{future_task_id}/cancel")
+async def cancel_future_task(
+    future_task_id: str,
+    request: FutureTaskCancelRequest | None = None,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(
+            _agent_runtime_service(http_request).cancel_future_task,
+            future_task_id,
+            reason=(request.reason if request is not None else "") or "",
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="FutureTask 不存在") from exc
+    except AgentRuntimeError as exc:
+        raise _bad_request(exc) from exc
 
 
 @router.get("/runs")
