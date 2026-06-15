@@ -2,7 +2,6 @@ import { useEffect, type Dispatch, type SetStateAction } from 'react';
 
 import type { RunGroupSpec, RunSpec } from '../types';
 import { getStudioRunForView } from '../utils/studioData';
-import { isPotentialWorkflowChildAgentRun } from '../utils/runs';
 import type { WorkflowChildRunRef } from '../utils/workflow';
 
 type ArtifactPreview = { path: string; content: string; truncated?: boolean } | null;
@@ -20,6 +19,7 @@ type UseRunDetailSynchronizationOptions = {
   runById: Map<string, RunSpec>;
   runGroups: RunGroupSpec[];
   selectedRun: RunSpec | null;
+  selectedRouteGroupRunId: string;
   selectedRunId: string;
   selectedWorkflowApprovalChildRunId: string;
   selectedWorkflowChildRefs: WorkflowChildRunRef[];
@@ -35,6 +35,7 @@ export function useRunDetailSynchronization({
   runById,
   runGroups,
   selectedRun,
+  selectedRouteGroupRunId,
   selectedRunId,
   selectedWorkflowApprovalChildRunId,
   selectedWorkflowChildRefs,
@@ -56,8 +57,7 @@ export function useRunDetailSynchronization({
   }, [selectedRun, selectedRunId, upsertRunDetailCache]);
 
   useEffect(() => {
-    if (!isPotentialWorkflowChildAgentRun(selectedRun)) return;
-    const runGroupId = selectedRun.run_group_id || '';
+    const runGroupId = selectedRouteGroupRunId || selectedRun?.run_group_id || '';
     if (!runGroupId) return;
     if (runGroups.some((group) => group.run_group_id === runGroupId)) return;
     let disposed = false;
@@ -66,7 +66,7 @@ export function useRunDetailSynchronization({
     return () => {
       disposed = true;
     };
-  }, [refreshRunGroupById, runGroups, selectedRun]);
+  }, [refreshRunGroupById, runGroups, selectedRouteGroupRunId, selectedRun]);
 
   useEffect(() => {
     if (!selectedWorkflowParentRunId || runById.has(selectedWorkflowParentRunId)) return;

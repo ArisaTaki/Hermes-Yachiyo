@@ -133,6 +133,7 @@ export function AgentStudioView() {
   const {
     runGoal,
     runTarget,
+    selectedRouteGroupRunId,
     selectedRunId,
     setRunGoal,
     setRunTarget,
@@ -425,6 +426,7 @@ export function AgentStudioView() {
     runGroups,
     runnables,
     selectedPublicRunTimeline,
+    selectedRouteGroupRunId,
     selectedRun,
     selectedRunId,
     selectedRunReplayEvents,
@@ -790,6 +792,7 @@ export function AgentStudioView() {
     runById,
     runGroups,
     selectedRun,
+    selectedRouteGroupRunId,
     selectedRunId,
     selectedWorkflowApprovalChildRunId,
     selectedWorkflowChildRefs,
@@ -1134,6 +1137,7 @@ export function AgentStudioView() {
           runnableOptionLabel={runnableOptionLabel}
           selectedHistoryRunCount={selectedHistoryRuns.length}
           selectedPublicRunTimeline={selectedPublicRunTimeline}
+          selectedRouteGroupRunId={selectedRouteGroupRunId}
           selectedRun={selectedRun}
           selectedRunApproval={selectedRunApproval}
           selectedRunArtifacts={selectedRunArtifacts}

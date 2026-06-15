@@ -37,6 +37,7 @@ type UseSelectedRunDetailStateOptions = {
   runGroups: RunGroupSpec[];
   runnables: RunnableSummary[];
   selectedPublicRunTimeline: YachiyoRunTimelineSnapshot | null;
+  selectedRouteGroupRunId: string;
   selectedRun: RunSpec | null;
   selectedRunId: string;
   selectedRunReplayEvents: PublicRunEvent[];
@@ -50,6 +51,7 @@ export function useSelectedRunDetailState({
   runGroups,
   runnables,
   selectedPublicRunTimeline,
+  selectedRouteGroupRunId,
   selectedRun,
   selectedRunId,
   selectedRunReplayEvents,
@@ -95,9 +97,13 @@ export function useSelectedRunDetailState({
     [selectedRun, workflows],
   );
   const selectedRunGroup = useMemo(() => {
+    const routeGroup = selectedRouteGroupRunId
+      ? runGroups.find((group) => group.run_group_id === selectedRouteGroupRunId) || null
+      : null;
+    if (routeGroup) return routeGroup;
     if (!selectedRun?.run_group_id) return null;
     return runGroups.find((group) => group.run_group_id === selectedRun.run_group_id) || null;
-  }, [runGroups, selectedRun]);
+  }, [runGroups, selectedRouteGroupRunId, selectedRun]);
   const selectedWorkflowSteps = useMemo(
     () => workflowStepRefs(selectedRun, selectedRunWorkflow),
     [selectedRun, selectedRunWorkflow],

@@ -62,6 +62,7 @@ export function RunDetailPanel({
   runStatusLabel,
   runStatusTone,
   selectedPublicRunTimeline,
+  selectedRouteGroupRunId,
   selectedRun,
   selectedRunApproval,
   selectedRunArtifacts,
@@ -112,6 +113,7 @@ export function RunDetailPanel({
   runStatusLabel: (status: string) => string;
   runStatusTone: (status: string) => string;
   selectedPublicRunTimeline: YachiyoRunTimelineSnapshot | null;
+  selectedRouteGroupRunId: string;
   selectedRun: RunSpec | null;
   selectedRunApproval: RunPendingApproval | null;
   selectedRunArtifacts: Array<Record<string, unknown>>;
@@ -275,6 +277,7 @@ export function RunDetailPanel({
             <section
               className="run-detail-block run-group-overview"
               data-run-group-id={selectedRunGroup.run_group_id}
+              data-route-group-run-id={selectedRouteGroupRunId}
               data-testid="agent-run-detail-group-run-overview"
             >
               <div className="run-detail-section-head">
@@ -291,6 +294,9 @@ export function RunDetailPanel({
               <p>{selectedRunGroup.summary || selectedRunGroup.title || 'No GroupRun summary recorded.'}</p>
               <div className="run-group-overview-meta" data-testid="agent-run-detail-group-run-meta">
                 <code>{selectedRunGroup.run_group_id}</code>
+                {selectedRouteGroupRunId ? (
+                  <span data-testid="agent-run-detail-group-run-route">Deep link {selectedRouteGroupRunId}</span>
+                ) : null}
                 {selectedRunGroup.updated_at || selectedRunGroup.created_at ? (
                   <span>Updated {formatRunDate(selectedRunGroup.updated_at || selectedRunGroup.created_at)}</span>
                 ) : null}
