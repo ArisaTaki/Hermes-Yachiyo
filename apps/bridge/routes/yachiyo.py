@@ -8,10 +8,14 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from apps.bridge.deps import get_runtime
+from apps.bridge.routes.yachiyo_services import (
+    agent_service as _agent_service,
+    bad_request as _bad_request,
+    snapshot as _snapshot,
+    studio_service as _studio_service,
+)
 from apps.shell.agent_runtime import AgentRuntimeError
 from apps.shell.yachiyo_agent import (
-    AgentStudioService,
     ApprovalDecision,
     SaveAgentGroupRequest,
     SaveAgentRequest,
@@ -20,14 +24,7 @@ from apps.shell.yachiyo_agent import (
     StartChatTaskRequest,
     StartGroupRunRequest,
     StartWorkflowRunRequest,
-    YachiyoAgentService,
 )
-from apps.shell.yachiyo_agent.legacy_ports import (
-    LegacyChatTaskStarter,
-    LegacyRuntimePort,
-    LegacyStudioPort,
-)
-from packages.security import redact_api_error_detail
 
 router = APIRouter(prefix="/yachiyo", tags=["Yachiyo Agent"])
 
@@ -106,51 +103,6 @@ class StartWorkflowRunBody(BaseModel):
     objective: str = Field(..., min_length=1, max_length=60000)
     title: str | None = Field(default=None, max_length=1000)
     client_run_id: str | None = Field(default=None, max_length=160)
-
-
-def _app_runtime_from_request(request: Request | None = None) -> Any:
-    state = getattr(getattr(request, "app", None), "state", None)
-    app_runtime = getattr(state, "runtime", None)
-    if app_runtime is None:
-        try:
-            app_runtime = get_runtime()
-        except RuntimeError as exc:
-            raise HTTPException(status_code=503, detail="Yachiyo runtime unavailable") from exc
-    return app_runtime
-
-
-def _runtime_from_request(request: Request | None = None) -> Any:
-    app_runtime = _app_runtime_from_request(request)
-    service = getattr(app_runtime, "agent_runtime_service", None)
-    if service is not None:
-        return service
-    getter = getattr(app_runtime, "get_agent_runtime_service", None)
-    if callable(getter):
-        service = getter()
-        if service is not None:
-            return service
-    raise HTTPException(status_code=503, detail="Yachiyo agent runtime unavailable")
-
-
-def _agent_service(request: Request | None = None) -> YachiyoAgentService:
-    app_runtime = _app_runtime_from_request(request)
-    runtime = _runtime_from_request(request)
-    return YachiyoAgentService(
-        LegacyRuntimePort(runtime),
-        chat_task_starter=LegacyChatTaskStarter(app_runtime, runtime),
-    )
-
-
-def _studio_service(request: Request | None = None) -> AgentStudioService:
-    return AgentStudioService(LegacyStudioPort(_runtime_from_request(request)))
-
-
-def _snapshot(model: Any) -> dict[str, Any]:
-    return model.model_dump(mode="json")
-
-
-def _bad_request(exc: Exception) -> HTTPException:
-    return HTTPException(status_code=400, detail=redact_api_error_detail(exc))
 
 
 @router.get("/readiness")
