@@ -86,6 +86,9 @@ def test_agent_goal_helpers_remain_behaviorally_compatible() -> None:
         {"role": "user", "content": "# User Goal\nShow code inline only.\n# Runtime\nx"},
     ]
 
+    assert agent_runtime._user_goal_from_agent_messages is user_goal_from_agent_messages
+    assert agent_runtime._agent_output_contract_rules is agent_output_contract_rules
+    assert agent_runtime._agent_goal_disallows_tool is agent_goal_disallows_tool
     assert user_goal_from_agent_messages(messages) == "Show code inline only."
     assert agent_runtime._user_goal_from_agent_messages(messages) == "Show code inline only."
     assert agent_output_contract_rules("diff") == agent_runtime._agent_output_contract_rules("diff")

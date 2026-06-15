@@ -86,9 +86,9 @@ from apps.shell.agent.runtime.approval_snapshots import (
 from apps.shell.agent.runtime.approval_transitions import RuntimeApprovalTransitionService
 from apps.shell.agent.runtime.agent_context import (
     AgentContextBuilder,
-    agent_goal_disallows_tool as _runtime_agent_goal_disallows_tool,
-    agent_output_contract_rules as _runtime_agent_output_contract_rules,
-    user_goal_from_agent_messages as _runtime_user_goal_from_agent_messages,
+    agent_goal_disallows_tool as _agent_goal_disallows_tool,
+    agent_output_contract_rules as _agent_output_contract_rules,
+    user_goal_from_agent_messages as _user_goal_from_agent_messages,
 )
 from apps.shell.agent.runtime.agent_outcomes import RuntimeAgentRunOutcomeProjector
 from apps.shell.agent.runtime.agent_preparation import RuntimeAgentRunPreparer
@@ -409,18 +409,6 @@ logger = logging.getLogger(__name__)
 
 
 _UNSET = object()
-
-
-def _agent_output_contract_rules(contract: Any) -> str:
-    return _runtime_agent_output_contract_rules(contract)
-
-
-def _user_goal_from_agent_messages(messages: list[dict[str, Any]]) -> str:
-    return _runtime_user_goal_from_agent_messages(messages)
-
-
-def _agent_goal_disallows_tool(user_goal: str, tool_name: str) -> str:
-    return _runtime_agent_goal_disallows_tool(user_goal, tool_name)
 
 
 def _call_model_profile_chat_message(
