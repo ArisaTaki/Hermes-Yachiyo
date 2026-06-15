@@ -817,11 +817,19 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
     _assert_contains(
         "apps/frontend/src/features/yachiyo-chat/api.ts",
         [
-            "/yachiyo/tasks",
-            "/yachiyo/readiness",
+            "/yachiyo/chat/tasks",
+            "/yachiyo/chat/readiness",
             "approveYachiyoTask",
             "rejectYachiyoTask",
             "cancelYachiyoTask",
+        ],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/features/yachiyo-chat/api.ts",
+        [
+            "'/yachiyo/readiness'",
+            "'/yachiyo/tasks'",
+            "`/yachiyo/tasks",
         ],
     )
 
