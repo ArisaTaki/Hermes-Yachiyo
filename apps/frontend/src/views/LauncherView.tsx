@@ -6,6 +6,8 @@ import {
   LauncherAgentTaskLight,
   launcherAgentTaskSummary,
 } from '../features/yachiyo-chat/components/LauncherAgentTaskLight';
+import { listYachiyoTasks } from '../features/yachiyo-chat/api';
+import type { AgentTaskSnapshot } from '../features/yachiyo-chat/types';
 import type { AppView } from '../lib/view';
 import {
   LIVE2D_DEFAULT_RENDER_FPS,
@@ -131,17 +133,26 @@ export function LauncherView({ view }: { view: AppView }) {
     };
   }, []);
 
-  if (mode === 'live2d') return <Live2DLauncher data={launcher.data} refresh={launcher.refresh} />;
-  return <BubbleLauncher data={launcher.data} refresh={launcher.refresh} />;
+  if (mode === 'live2d') return <Live2DLauncher agentTask={launcher.agentTask} data={launcher.data} refresh={launcher.refresh} />;
+  return <BubbleLauncher agentTask={launcher.agentTask} data={launcher.data} refresh={launcher.refresh} />;
 }
 
 function useLauncher(mode: 'bubble' | 'live2d') {
   const [data, setData] = useState<LauncherPayload | null>(null);
+  const [publicAgentTask, setPublicAgentTask] = useState<AgentTaskSnapshot | null>(null);
 
   const refresh = useCallback(async () => {
     try {
       const payload = await apiGet<LauncherPayload>(`/ui/launcher?mode=${mode}`);
-      if (payload.ok !== false) setData(payload);
+      if (payload.ok !== false) {
+        setData(payload);
+        try {
+          const tasks = await listYachiyoTasks();
+          setPublicAgentTask(launcherAgentTaskFromPublicTasks(tasks, payload.chat?.agent_task || null));
+        } catch {
+          setPublicAgentTask((current) => payload.chat?.agent_task || current || null);
+        }
+      }
     } catch {
       setData((current) => current || { ok: false, mode });
     }
@@ -152,12 +163,38 @@ function useLauncher(mode: 'bubble' | 'live2d') {
   }, [refresh]);
 
   useEffect(() => {
-    const processing = Boolean(data?.chat?.is_processing);
+    const processing = Boolean(data?.chat?.is_processing || launcherAgentTaskIsActive(publicAgentTask || data?.chat?.agent_task));
     const timer = window.setInterval(refresh, processing ? ACTIVE_POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS);
     return () => window.clearInterval(timer);
-  }, [data?.chat?.is_processing, refresh]);
+  }, [data?.chat?.agent_task, data?.chat?.is_processing, publicAgentTask, refresh]);
 
-  return { data, refresh };
+  return { agentTask: publicAgentTask || data?.chat?.agent_task || null, data, refresh };
+}
+
+function launcherAgentTaskFromPublicTasks(
+  tasks: AgentTaskSnapshot[],
+  fallback: AgentTaskSnapshot | null,
+): AgentTaskSnapshot | null {
+  const snapshots = Array.isArray(tasks) ? tasks.filter(Boolean) : [];
+  if (!snapshots.length) return fallback;
+  const fallbackTaskId = String(fallback?.task_id || '').trim();
+  const matchingFallbackTask = fallbackTaskId
+    ? snapshots.find((task) => String(task.task_id || '').trim() === fallbackTaskId)
+    : null;
+  if (matchingFallbackTask) return matchingFallbackTask;
+  const activeTask = snapshots.find(launcherAgentTaskIsActive);
+  if (activeTask) return activeTask;
+  const fallbackConversationId = String(fallback?.conversation_id || '').trim();
+  const matchingConversationTask = fallbackConversationId
+    ? snapshots.find((task) => String(task.conversation_id || '').trim() === fallbackConversationId)
+    : null;
+  return matchingConversationTask || fallback || snapshots[0] || null;
+}
+
+function launcherAgentTaskIsActive(task: AgentTaskSnapshot | null | undefined) {
+  if (!task) return false;
+  if (task.needs_user_action || task.pending_approvals?.length) return true;
+  return task.status === 'queued' || task.status === 'running' || task.status === 'waiting_approval';
 }
 
 async function acknowledgeAndOpenChat(mode: 'bubble' | 'live2d', data: LauncherPayload | null) {
@@ -193,7 +230,15 @@ function handleContextMenu(event: MouseEvent, mode: LauncherMode) {
   void openLauncherMenu(mode);
 }
 
-function BubbleLauncher({ data, refresh }: { data: LauncherPayload | null; refresh: () => Promise<void> }) {
+function BubbleLauncher({
+  agentTask: publicAgentTask,
+  data,
+  refresh,
+}: {
+  agentTask?: AgentTaskSnapshot | null;
+  data: LauncherPayload | null;
+  refresh: () => Promise<void>;
+}) {
   const launcher = data?.launcher || {};
   const proactive = data?.proactive || {};
   const buttonRef = useRef<HTMLButtonElement | null>(null);
@@ -219,9 +264,10 @@ function BubbleLauncher({ data, refresh }: { data: LauncherPayload | null; refre
   const displayMode = launcher.default_display || 'summary';
   const statusLabel = normalizedStatusLabel(data?.chat);
   const recentSessions = launcherRecentSessions(data?.chat);
-  const agentTask = data?.chat?.agent_task || null;
+  const payloadAgentTask = data?.chat?.agent_task || null;
+  const agentTask = publicAgentTask || payloadAgentTask;
   const latestReply = latestAssistantText(data?.chat, launcher);
-  const taskSummary = launcherAgentTaskSummary(agentTask);
+  const taskSummary = launcherAgentTaskSummary(payloadAgentTask);
   const summaryText = taskSummary || latestReply || latestLauncherSessionSummary(data?.chat) || statusLabel;
   const showSummary = displayMode !== 'icon' && Boolean(summaryText);
   const [quickText, setQuickText] = useState('');
@@ -439,7 +485,15 @@ function bubbleTitle(
   return titleParts.join('\n');
 }
 
-function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refresh: () => Promise<void> }) {
+function Live2DLauncher({
+  agentTask: publicAgentTask,
+  data,
+  refresh,
+}: {
+  agentTask?: AgentTaskSnapshot | null;
+  data: LauncherPayload | null;
+  refresh: () => Promise<void>;
+}) {
   const launcher = data?.launcher || {};
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const characterRef = useRef<HTMLDivElement | null>(null);
@@ -482,7 +536,7 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
   const latestReply = latestAssistantText(data?.chat, launcher);
   const statusLabel = normalizedStatusLabel(data?.chat);
   const recentSessions = launcherRecentSessions(data?.chat);
-  const agentTask = data?.chat?.agent_task || null;
+  const agentTask = publicAgentTask || data?.chat?.agent_task || null;
   const status = launcher.latest_status || (data?.chat?.is_processing ? 'processing' : 'empty');
   const hasAttention = Boolean(data?.notification?.has_unread);
   const proactiveAttention = Boolean(data?.proactive?.has_attention);

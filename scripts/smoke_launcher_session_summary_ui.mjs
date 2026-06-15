@@ -15,6 +15,9 @@ const GROUP_SESSION_ID = 'launcher_group_summary';
 const DELEGATED_SESSION_ID = 'launcher_delegated_summary';
 const GROUP_TASK_ID = 'launcher_group_summary_task';
 const DELEGATED_TASK_ID = 'launcher_delegated_summary_task';
+const PUBLIC_TASK_ID = 'launcher_public_agent_task';
+const PUBLIC_RUN_ID = 'launcher_public_agent_run';
+const PUBLIC_TASK_TITLE = 'Public launcher task from Yachiyo facade';
 const BUBBLE_SUMMARY = 'Group summary: Design and Coding finished Native dispatch.';
 const DELEGATED_SUMMARY = 'Delegated summary: Coding finished Native delegated run.';
 const BUBBLE_QUICK_TEXT = 'Bubble quick input from launcher smoke';
@@ -28,6 +31,7 @@ const bridgeState = {
   bubbleDefaultOpenBehavior: 'reply_bubble',
   live2dClickAction: 'toggle_reply',
   modeRequests: [],
+  taskRequests: [],
   quickMessagePayload: null,
   quickMessagePayloads: [],
 };
@@ -124,6 +128,45 @@ function launcherPayload(mode) {
   };
 }
 
+function publicAgentTasks() {
+  return [
+    {
+      task_id: PUBLIC_TASK_ID,
+      conversation_id: DELEGATED_SESSION_ID,
+      title: PUBLIC_TASK_TITLE,
+      status: 'waiting_approval',
+      summary: 'Launcher can observe public Yachiyo task snapshots.',
+      current_step: 'Awaiting launcher smoke approval',
+      progress_text: 'Waiting for approval',
+      needs_user_action: true,
+      pending_approvals: [
+        {
+          approval_id: 'launcher-public-approval',
+          run_id: PUBLIC_RUN_ID,
+          title: 'Approve launcher smoke task',
+          tool_name: 'workspace.write_patch',
+          risk_level: 'high',
+          status: 'pending',
+        },
+      ],
+      recent_events: [
+        {
+          event_id: 'launcher-public-event',
+          run_id: PUBLIC_RUN_ID,
+          sequence: 1,
+          event_type: 'tool.approval_required',
+          title: 'Approval required',
+          detail: 'Launcher public task smoke',
+        },
+      ],
+      artifacts: [],
+      open_in_studio_url: `#/agents?run_id=${PUBLIC_RUN_ID}`,
+      created_at: now,
+      updated_at: now,
+    },
+  ];
+}
+
 function pickPort() {
   return new Promise((resolve, reject) => {
     const server = http.createServer();
@@ -181,6 +224,11 @@ async function startMockBridge() {
         sendJson(response, 200, launcherPayload(mode));
         return;
       }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/chat/tasks') {
+        bridgeState.taskRequests.push(url.search);
+        sendJson(response, 200, { ok: true, tasks: publicAgentTasks() });
+        return;
+      }
       if (request.method === 'POST' && url.pathname === '/ui/launcher/ack') {
         const body = await readRequestJson(request);
         bridgeState.ackPayloads.push(body);
@@ -203,6 +251,7 @@ async function startMockBridge() {
           bubbleDefaultOpenBehavior: bridgeState.bubbleDefaultOpenBehavior,
           live2dClickAction: bridgeState.live2dClickAction,
           modeRequests: bridgeState.modeRequests,
+          taskRequests: bridgeState.taskRequests,
           quickMessagePayload: bridgeState.quickMessagePayload,
           quickMessagePayloads: bridgeState.quickMessagePayloads,
         });
@@ -406,12 +455,18 @@ async function main() {
     const summary = document.querySelector('[data-testid="bubble-launcher-summary"]');
     const probe = document.querySelector('[data-testid="bubble-launcher-session-summary-probe"]');
     const status = document.querySelector('[data-testid="bubble-launcher-status-label"]');
+    const taskLight = document.querySelector('[data-testid="bubble-launcher-agent-task-light"]');
     const sessions = Array.from(document.querySelectorAll('[data-testid="bubble-launcher-recent-session"]'));
     const bodyText = document.body.textContent || '';
     return summary
       && summary.textContent.includes(${JSON.stringify(BUBBLE_SUMMARY)})
       && probe
       && status?.textContent.includes('2 recent sessions')
+      && taskLight
+      && taskLight.getAttribute('data-task-id') === ${JSON.stringify(PUBLIC_TASK_ID)}
+      && taskLight.getAttribute('data-run-id') === ${JSON.stringify(PUBLIC_RUN_ID)}
+      && taskLight.textContent.includes(${JSON.stringify(PUBLIC_TASK_TITLE)})
+      && taskLight.textContent.includes('待处理')
       && sessions.length === 2
       && sessions[0].getAttribute('data-session-id') === ${JSON.stringify(GROUP_SESSION_ID)}
       && sessions[0].getAttribute('data-task-id') === ${JSON.stringify(GROUP_TASK_ID)}
@@ -495,6 +550,7 @@ async function main() {
     const latestReply = document.querySelector('[data-testid="live2d-launcher-latest-reply"]');
     const probe = document.querySelector('[data-testid="live2d-launcher-session-summary-probe"]');
     const preview = document.querySelector('[data-testid="live2d-launcher-preview-fallback"]');
+    const taskLight = document.querySelector('[data-testid="live2d-launcher-agent-task-light"]');
     const sessions = Array.from(document.querySelectorAll('[data-testid="live2d-launcher-recent-session"]'));
     const bodyText = document.body.textContent || '';
     return quickInput
@@ -503,6 +559,11 @@ async function main() {
       && latestReply?.textContent.includes(${JSON.stringify(LIVE2D_REPLY)})
       && probe
       && preview
+      && taskLight
+      && taskLight.getAttribute('data-task-id') === ${JSON.stringify(PUBLIC_TASK_ID)}
+      && taskLight.getAttribute('data-run-id') === ${JSON.stringify(PUBLIC_RUN_ID)}
+      && taskLight.textContent.includes(${JSON.stringify(PUBLIC_TASK_TITLE)})
+      && taskLight.textContent.includes('待处理')
       && sessions.length === 2
       && sessions[0].getAttribute('data-session-id') === ${JSON.stringify(GROUP_SESSION_ID)}
       && sessions[0].getAttribute('data-task-id') === ${JSON.stringify(GROUP_TASK_ID)}
@@ -634,6 +695,9 @@ function assertMockBridgeContract() {
   }
   if (!bridgeState.modeRequests.includes('live2d')) {
     throw new Error('live2d launcher payload was not requested');
+  }
+  if (!bridgeState.taskRequests.length) {
+    throw new Error('launcher public Yachiyo task snapshots were not requested');
   }
   const ackModes = bridgeState.ackPayloads.map((payload) => payload?.mode);
   if (!ackModes.includes('bubble')) {
