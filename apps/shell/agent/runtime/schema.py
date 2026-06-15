@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from apps.shell.credential_store import CredentialStoreError
+
 
 _RUNTIME_TABLE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS agents (
@@ -255,6 +257,190 @@ CREATE INDEX IF NOT EXISTS idx_future_tasks_status_due ON future_tasks (status, 
 CREATE INDEX IF NOT EXISTS idx_future_tasks_runnable_updated ON future_tasks (runnable_id, updated_at);
 CREATE INDEX IF NOT EXISTS idx_future_task_events_task_created ON future_task_events (future_task_id, created_at);
 """
+
+
+def agent_model_credential_ref(agent_id: str) -> str:
+    return f"agent:{agent_id}:model_api_key"
+
+
+class RuntimeSchemaMigrator:
+    """Applies compatibility migrations after base Runtime tables exist."""
+
+    def __init__(
+        self,
+        conn: Any,
+        *,
+        now: Callable[[], str],
+        redact_secrets: Callable[[Any], str],
+        credential_store: Any,
+    ) -> None:
+        self._conn = conn
+        self._now = now
+        self._redact_secrets = redact_secrets
+        self._credential_store = credential_store
+
+    def ensure_runtime_columns(self) -> bool:
+        columns = {str(row["name"]) for row in self._conn.execute("PRAGMA table_info(agents)").fetchall()}
+        if "nickname" not in columns:
+            self._conn.execute("ALTER TABLE agents ADD COLUMN nickname TEXT NOT NULL DEFAULT ''")
+        if "persona_prompt" not in columns:
+            self._conn.execute("ALTER TABLE agents ADD COLUMN persona_prompt TEXT NOT NULL DEFAULT ''")
+        if "execution_backend" not in columns:
+            self._conn.execute("ALTER TABLE agents ADD COLUMN execution_backend TEXT NOT NULL DEFAULT 'native_profile'")
+        if "model_profile_id" not in columns:
+            self._conn.execute("ALTER TABLE agents ADD COLUMN model_profile_id TEXT NOT NULL DEFAULT ''")
+        if "vision_model_profile_id" not in columns:
+            self._conn.execute("ALTER TABLE agents ADD COLUMN vision_model_profile_id TEXT NOT NULL DEFAULT ''")
+        if "model_credential_ref" not in columns:
+            self._conn.execute("ALTER TABLE agents ADD COLUMN model_credential_ref TEXT NOT NULL DEFAULT ''")
+        skill_columns = {str(row["name"]) for row in self._conn.execute("PRAGMA table_info(skills)").fetchall()}
+        if "local_path" not in skill_columns:
+            self._conn.execute("ALTER TABLE skills ADD COLUMN local_path TEXT NOT NULL DEFAULT ''")
+        if "folder_id" not in skill_columns:
+            self._conn.execute("ALTER TABLE skills ADD COLUMN folder_id TEXT NOT NULL DEFAULT ''")
+        if "enabled" not in skill_columns:
+            self._conn.execute("ALTER TABLE skills ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1")
+        if "source_type" not in skill_columns:
+            self._conn.execute("ALTER TABLE skills ADD COLUMN source_type TEXT NOT NULL DEFAULT 'local_dir'")
+        if "origin_path" not in skill_columns:
+            self._conn.execute("ALTER TABLE skills ADD COLUMN origin_path TEXT NOT NULL DEFAULT ''")
+        if "source_ref" not in skill_columns:
+            self._conn.execute("ALTER TABLE skills ADD COLUMN source_ref TEXT NOT NULL DEFAULT ''")
+        if "content_hash" not in skill_columns:
+            self._conn.execute("ALTER TABLE skills ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''")
+        if "last_synced_at" not in skill_columns:
+            self._conn.execute("ALTER TABLE skills ADD COLUMN last_synced_at TEXT NOT NULL DEFAULT ''")
+        if "sync_status" not in skill_columns:
+            self._conn.execute("ALTER TABLE skills ADD COLUMN sync_status TEXT NOT NULL DEFAULT 'imported'")
+        run_columns = {str(row["name"]) for row in self._conn.execute("PRAGMA table_info(runs)").fetchall()}
+        if "run_group_id" not in run_columns:
+            self._conn.execute("ALTER TABLE runs ADD COLUMN run_group_id TEXT NOT NULL DEFAULT ''")
+        if "client_request_id" not in run_columns:
+            self._conn.execute("ALTER TABLE runs ADD COLUMN client_request_id TEXT NOT NULL DEFAULT ''")
+        if "pending_approval_json" not in run_columns:
+            self._conn.execute("ALTER TABLE runs ADD COLUMN pending_approval_json TEXT NOT NULL DEFAULT '{}'")
+        task_run_link_columns = {
+            str(row["name"]) for row in self._conn.execute("PRAGMA table_info(task_run_links)").fetchall()
+        }
+        if "run_status" not in task_run_link_columns:
+            self._conn.execute("ALTER TABLE task_run_links ADD COLUMN run_status TEXT NOT NULL DEFAULT ''")
+        if "last_event_sequence" not in task_run_link_columns:
+            self._conn.execute(
+                "ALTER TABLE task_run_links ADD COLUMN last_event_sequence INTEGER NOT NULL DEFAULT 0"
+            )
+        if "updated_at" not in task_run_link_columns:
+            self._conn.execute("ALTER TABLE task_run_links ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''")
+        self._conn.execute(
+            """
+            UPDATE task_run_links
+               SET run_status=COALESCE((SELECT status FROM runs WHERE runs.run_id=task_run_links.run_id), '')
+             WHERE run_status=''
+            """
+        )
+        self._conn.execute(
+            """
+            UPDATE task_run_links
+               SET last_event_sequence=COALESCE(
+                    (SELECT MAX(sequence) FROM run_events WHERE run_events.run_id=task_run_links.run_id),
+                    0
+               )
+             WHERE last_event_sequence=0
+            """
+        )
+        self._conn.execute(
+            """
+            UPDATE task_run_links
+               SET updated_at=created_at
+             WHERE updated_at=''
+            """
+        )
+        self.migrate_native_execution_and_skill_sources()
+        scrubbed_run_groups = self.migrate_run_group_secret_projections()
+        scrubbed_agent_credentials = self.migrate_agent_model_credentials()
+        return scrubbed_run_groups or scrubbed_agent_credentials
+
+    def migrate_native_execution_and_skill_sources(self) -> None:
+        self._conn.execute(
+            """
+            UPDATE agents
+               SET execution_backend='native_profile'
+             WHERE execution_backend IN ('yachiyo_profile', 'external_cli', '')
+            """
+        )
+        self._conn.execute(
+            """
+            UPDATE skill_folders
+               SET source_scope='installed'
+             WHERE source_scope='yachiyo'
+            """
+        )
+        self._conn.execute(
+            """
+            UPDATE studio_deletions
+               SET item_key='installed:' || substr(item_key, 9)
+             WHERE item_type='skill_source'
+               AND item_key LIKE 'yachiyo:%'
+            """
+        )
+
+    def migrate_run_group_secret_projections(self) -> bool:
+        scrubbed = False
+        rows = self._conn.execute(
+            "SELECT run_group_id, title, source, workspace_dir, summary FROM run_groups"
+        ).fetchall()
+        for row in rows:
+            clean_title = self._redact_secrets(row["title"])[:180]
+            clean_source = self._redact_secrets(row["source"])[:80]
+            clean_workspace_dir = self._redact_secrets(row["workspace_dir"])
+            clean_summary = self._redact_secrets(row["summary"])
+            if (
+                clean_title == row["title"]
+                and clean_source == row["source"]
+                and clean_workspace_dir == row["workspace_dir"]
+                and clean_summary == row["summary"]
+            ):
+                continue
+            self._conn.execute(
+                """
+                UPDATE run_groups
+                   SET title=?, source=?, workspace_dir=?, summary=?, updated_at=?
+                 WHERE run_group_id=?
+                """,
+                (
+                    clean_title,
+                    clean_source,
+                    clean_workspace_dir,
+                    clean_summary,
+                    self._now(),
+                    str(row["run_group_id"]),
+                ),
+            )
+            scrubbed = True
+        return scrubbed
+
+    def migrate_agent_model_credentials(self) -> bool:
+        scrubbed = False
+        rows = self._conn.execute(
+            "SELECT agent_id, model_api_key, model_credential_ref FROM agents WHERE model_api_key<>''"
+        ).fetchall()
+        for row in rows:
+            secret = str(row["model_api_key"] or "").strip()
+            if not secret:
+                continue
+            credential_ref = (
+                str(row["model_credential_ref"] or "").strip()
+                or agent_model_credential_ref(str(row["agent_id"]))
+            )
+            try:
+                self._credential_store.set(credential_ref, secret)
+            except CredentialStoreError:
+                continue
+            self._conn.execute(
+                "UPDATE agents SET model_credential_ref=?, model_api_key='' WHERE agent_id=?",
+                (credential_ref, str(row["agent_id"])),
+            )
+            scrubbed = True
+        return scrubbed
 
 
 def initialize_runtime_schema(
