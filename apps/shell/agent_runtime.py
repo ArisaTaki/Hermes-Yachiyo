@@ -106,6 +106,10 @@ from apps.shell.agent.runtime.definition_services import (
     RuntimeDefinitionServiceBundle,
     build_runtime_definition_services as _build_runtime_definition_services,
 )
+from apps.shell.agent.runtime.engine_state import (
+    RuntimeEngineStateBundle,
+    build_runtime_engine_state as _build_runtime_engine_state,
+)
 from apps.shell.agent.runtime.errors import AgentApprovalRequired, AgentRuntimeError
 from apps.shell.agent.runtime.events import (
     RuntimeAgentRunEventRecorder,
@@ -482,31 +486,17 @@ class NativeRunEngine:
         credential_store: CredentialStore | None = None,
         seed_templates: bool = True,
     ) -> None:
-        layout = _runtime_directory_layout(workspace_dir, db_path)
-        self.workspace_dir = layout.root
-        self.db_path = layout.db_path
-        self._credential_store = credential_store or create_credential_store(layout.root)
-        self.skills_dir = layout.skills_dir
-        self.skill_installs_dir = layout.skill_installs_dir
-        self.skill_installs_native_home = layout.skill_installs_native_home
-        self.agent_artifacts_dir = layout.agent_artifacts_dir
-        self.workflow_artifacts_dir = layout.workflow_artifacts_dir
-        self.agent_workspaces_dir = layout.agent_workspaces_dir
-        self._accepting_runs = True
-        self._closed = False
-        self.runtime_limits = _RunBudgetLimits()
-        self._db_lock = threading.RLock()
-        self._approval_execution_lock = threading.RLock()
-        self._approval_execution_in_progress: set[str] = set()
-        self._run_cancel_locks: dict[str, threading.RLock] = {}
-        self._run_cancel_locks_guard = threading.RLock()
+        engine_state = _build_runtime_engine_state(
+            db_path=db_path,
+            workspace_dir=workspace_dir,
+            credential_store=credential_store,
+        )
+        self._install_runtime_engine_state(engine_state)
         recorders = _build_runtime_recorders(
             append_run_event=self.append_run_event,
             now=_now,
         )
         self._install_runtime_recorders(recorders)
-        self._conn = _open_runtime_sqlite_connection(self.db_path, self._db_lock)
-        self._conn.row_factory = _named_row_factory
         definition_services = _build_runtime_definition_services(
             conn=self._conn,
             ensure_row_factory=self._ensure_row_factory,
@@ -736,6 +726,26 @@ class NativeRunEngine:
         self._migrate_agent_workspace_policies()
         if seed_templates:
             self._seed_templates()
+
+    def _install_runtime_engine_state(self, state: RuntimeEngineStateBundle) -> None:
+        self.workspace_dir = state.workspace_dir
+        self.db_path = state.db_path
+        self._credential_store = state.credential_store
+        self.skills_dir = state.skills_dir
+        self.skill_installs_dir = state.skill_installs_dir
+        self.skill_installs_native_home = state.skill_installs_native_home
+        self.agent_artifacts_dir = state.agent_artifacts_dir
+        self.workflow_artifacts_dir = state.workflow_artifacts_dir
+        self.agent_workspaces_dir = state.agent_workspaces_dir
+        self._accepting_runs = state.accepting_runs
+        self._closed = state.closed
+        self.runtime_limits = state.runtime_limits
+        self._db_lock = state.db_lock
+        self._approval_execution_lock = state.approval_execution_lock
+        self._approval_execution_in_progress = state.approval_execution_in_progress
+        self._run_cancel_locks = state.run_cancel_locks
+        self._run_cancel_locks_guard = state.run_cancel_locks_guard
+        self._conn = state.conn
 
     def _install_runtime_recorders(self, recorders: RuntimeRecorderBundle) -> None:
         self.tool_request_parser = recorders.tool_request_parser
