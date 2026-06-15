@@ -53,6 +53,10 @@ class StartAgentRunBody(BaseModel):
     client_run_id: str | None = Field(default=None, max_length=160)
 
 
+class AgentSkillBody(BaseModel):
+    skill_id: str = Field(..., min_length=1, max_length=160)
+
+
 class StartWorkflowRunBody(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -297,6 +301,55 @@ async def delete_studio_agent(
         raise HTTPException(status_code=404, detail="Agent 不存在") from exc
     except AgentRuntimeError as exc:
         raise _bad_request(exc) from exc
+
+
+@router.post("/studio/agents/{agent_id}/test-model")
+async def test_studio_agent_model(
+    agent_id: str,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(_studio_service(http_request).test_agent_model, agent_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Agent 不存在") from exc
+    except AgentRuntimeError as exc:
+        raise _bad_request(exc) from exc
+
+
+@router.post("/studio/agents/{agent_id}/skills")
+async def attach_studio_agent_skill(
+    agent_id: str,
+    request: AgentSkillBody,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    try:
+        snapshot = await asyncio.to_thread(
+            _studio_service(http_request).attach_skill,
+            agent_id,
+            request.skill_id,
+        )
+        return _snapshot(snapshot)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Agent 或 Skill 不存在") from exc
+    except AgentRuntimeError as exc:
+        raise _bad_request(exc) from exc
+
+
+@router.delete("/studio/agents/{agent_id}/skills/{skill_id}")
+async def detach_studio_agent_skill(
+    agent_id: str,
+    skill_id: str,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    try:
+        snapshot = await asyncio.to_thread(
+            _studio_service(http_request).detach_skill,
+            agent_id,
+            skill_id,
+        )
+        return _snapshot(snapshot)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Agent 不存在") from exc
 
 
 @router.post("/studio/agents/{agent_id}/runs")

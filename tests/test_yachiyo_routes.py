@@ -127,6 +127,18 @@ class _FakeAgentRuntime:
         self.calls.append(("delete_agent", agent_id))
         return {"ok": True, "agent_id": agent_id}
 
+    def test_agent_model(self, agent_id: str) -> dict[str, Any]:
+        self.calls.append(("test_agent_model", agent_id))
+        return {"ok": True, "message": "Model ready"}
+
+    def attach_skill(self, agent_id: str, skill_id: str) -> dict[str, Any]:
+        self.calls.append(("attach_skill", {"agent_id": agent_id, "skill_id": skill_id}))
+        return _agent_payload(agent_id=agent_id, skill_ids=[skill_id])
+
+    def detach_skill(self, agent_id: str, skill_id: str) -> dict[str, Any]:
+        self.calls.append(("detach_skill", {"agent_id": agent_id, "skill_id": skill_id}))
+        return _agent_payload(agent_id=agent_id, skill_ids=[])
+
     def create_agent_run(self, payload: dict[str, Any]) -> dict[str, Any]:
         self.calls.append(("create_agent_run", payload))
         return _run_payload(
@@ -345,6 +357,13 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
         request,
     )
     deleted_agent = await yachiyo.delete_studio_agent("agent-1", request)
+    model_test = await yachiyo.test_studio_agent_model("agent-1", request)
+    agent_with_skill = await yachiyo.attach_studio_agent_skill(
+        "agent-1",
+        yachiyo.AgentSkillBody(skill_id="skill-1"),
+        request,
+    )
+    agent_without_skill = await yachiyo.detach_studio_agent_skill("agent-1", "skill-1", request)
     agent_run = await yachiyo.start_studio_agent_run(
         "agent-1",
         yachiyo.StartAgentRunBody(objective="Draft summary", client_run_id="client-agent-1"),
@@ -386,6 +405,9 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     assert deleted_agent == {"ok": True, "agent_id": "agent-1"}
     assert agent_run["run_id"] == "agent-run-1"
     assert agent_run["agent_id"] == "agent-1"
+    assert model_test == {"ok": True, "message": "Model ready"}
+    assert agent_with_skill["skill_ids"] == ["skill-1"]
+    assert agent_without_skill["skill_ids"] == []
     assert workflows["workflows"][0]["workflow_id"] == "workflow-1"
     assert deleted_workflow == {"ok": True, "workflow_id": "workflow-1"}
     assert workflow_run["workflow_run_id"] == "workflow-run-1"
@@ -412,6 +434,9 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     assert ("approve_run_approval", "run-1") in runtime.calls
     assert ("reject_run_approval", {"run_id": "run-1", "reason": "No"}) in runtime.calls
     assert ("delete_agent", "agent-1") in runtime.calls
+    assert ("test_agent_model", "agent-1") in runtime.calls
+    assert ("attach_skill", {"agent_id": "agent-1", "skill_id": "skill-1"}) in runtime.calls
+    assert ("detach_skill", {"agent_id": "agent-1", "skill_id": "skill-1"}) in runtime.calls
     assert ("delete_workflow", "workflow-1") in runtime.calls
     assert ("list_runs", 5) in runtime.calls
     assert ("list_run_groups", 5) in runtime.calls
@@ -487,6 +512,9 @@ def test_yachiyo_studio_routes_include_run_action_facade() -> None:
 
     assert '@router.post("/studio/agents/{agent_id}/runs")' in source
     assert '@router.delete("/studio/agents/{agent_id}")' in source
+    assert '@router.post("/studio/agents/{agent_id}/test-model")' in source
+    assert '@router.post("/studio/agents/{agent_id}/skills")' in source
+    assert '@router.delete("/studio/agents/{agent_id}/skills/{skill_id}")' in source
     assert '@router.get("/studio/group-runs")' in source
     assert '@router.get("/studio/group-runs/{group_run_id}")' in source
     assert '@router.get("/studio/runs")' in source
@@ -508,14 +536,18 @@ def _request(runtime: _FakeAgentRuntime) -> SimpleNamespace:
     )
 
 
-def _agent_payload(agent_id: str = "agent-1", name: str = "Planner") -> dict[str, Any]:
+def _agent_payload(
+    agent_id: str = "agent-1",
+    name: str = "Planner",
+    skill_ids: list[str] | None = None,
+) -> dict[str, Any]:
     return {
         "agent_id": agent_id,
         "name": name,
         "model_mode": "profile",
         "execution_backend": "native_profile",
         "model_config": {"provider": "model_profile"},
-        "skill_ids": [],
+        "skill_ids": [] if skill_ids is None else skill_ids,
         "enabled": True,
     }
 

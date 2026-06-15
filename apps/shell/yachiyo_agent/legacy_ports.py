@@ -135,6 +135,15 @@ class LegacyStudioPort:
     def delete_agent(self, agent_id: str) -> dict[str, Any]:
         return self._runtime.delete_agent(agent_id)
 
+    def test_agent_model(self, agent_id: str) -> dict[str, Any]:
+        return self._runtime.test_agent_model(agent_id)
+
+    def attach_skill(self, agent_id: str, skill_id: str) -> dict[str, Any]:
+        return self._runtime.attach_skill(agent_id, skill_id)
+
+    def detach_skill(self, agent_id: str, skill_id: str) -> dict[str, Any]:
+        return self._runtime.detach_skill(agent_id, skill_id)
+
     def start_agent_run(self, request: dict[str, Any]) -> dict[str, Any]:
         return self._runtime.create_agent_run(
             {

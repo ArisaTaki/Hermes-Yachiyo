@@ -301,15 +301,21 @@ export async function deleteAgent(agentId: string): Promise<{ ok?: boolean }> {
 }
 
 export async function testAgentModel(agentId: string): Promise<{ ok?: boolean; message?: string; missing?: string[] }> {
-  return apiPost(`/ui/agents/${encodeURIComponent(agentId)}/test-model`);
+  return apiPost(`/yachiyo/studio/agents/${encodeURIComponent(agentId)}/test-model`).catch(() => (
+    apiPost(`/ui/agents/${encodeURIComponent(agentId)}/test-model`)
+  ));
 }
 
 export async function attachSkill(agentId: string, skillId: string): Promise<AgentSpec> {
-  return apiPost(`/ui/agents/${encodeURIComponent(agentId)}/skills`, { skill_id: skillId });
+  return apiPost<AgentSpec>(`/yachiyo/studio/agents/${encodeURIComponent(agentId)}/skills`, { skill_id: skillId }).catch(() => (
+    apiPost<AgentSpec>(`/ui/agents/${encodeURIComponent(agentId)}/skills`, { skill_id: skillId })
+  ));
 }
 
 export async function detachSkill(agentId: string, skillId: string): Promise<AgentSpec> {
-  return apiDelete(`/ui/agents/${encodeURIComponent(agentId)}/skills/${encodeURIComponent(skillId)}`);
+  return apiDelete<AgentSpec>(`/yachiyo/studio/agents/${encodeURIComponent(agentId)}/skills/${encodeURIComponent(skillId)}`).catch(() => (
+    apiDelete<AgentSpec>(`/ui/agents/${encodeURIComponent(agentId)}/skills/${encodeURIComponent(skillId)}`)
+  ));
 }
 
 export async function listSkills(): Promise<SkillSpec[]> {

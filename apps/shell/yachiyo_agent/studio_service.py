@@ -53,6 +53,19 @@ class AgentStudioService:
     def delete_agent(self, agent_id: str) -> dict[str, Any]:
         return dict(self._studio_port.delete_agent(agent_id))
 
+    def test_agent_model(self, agent_id: str) -> dict[str, Any]:
+        return dict(self._studio_port.test_agent_model(agent_id))
+
+    def attach_skill(self, agent_id: str, skill_id: str) -> AgentDefinitionSnapshot:
+        return agent_definition_snapshot_from_payload(
+            self._studio_port.attach_skill(agent_id, skill_id)
+        )
+
+    def detach_skill(self, agent_id: str, skill_id: str) -> AgentDefinitionSnapshot:
+        return agent_definition_snapshot_from_payload(
+            self._studio_port.detach_skill(agent_id, skill_id)
+        )
+
     def start_agent_run(
         self,
         request: StartAgentRunRequest | Mapping[str, Any],

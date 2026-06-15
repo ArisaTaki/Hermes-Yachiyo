@@ -36,6 +36,18 @@ class _FakeStudioPort:
         self.calls.append(("delete_agent", agent_id))
         return {"ok": True, "agent_id": agent_id}
 
+    def test_agent_model(self, agent_id: str) -> dict[str, Any]:
+        self.calls.append(("test_agent_model", agent_id))
+        return {"ok": True, "message": "Model ready"}
+
+    def attach_skill(self, agent_id: str, skill_id: str) -> dict[str, Any]:
+        self.calls.append(("attach_skill", {"agent_id": agent_id, "skill_id": skill_id}))
+        return _agent_payload(agent_id=agent_id, skill_ids=[skill_id])
+
+    def detach_skill(self, agent_id: str, skill_id: str) -> dict[str, Any]:
+        self.calls.append(("detach_skill", {"agent_id": agent_id, "skill_id": skill_id}))
+        return _agent_payload(agent_id=agent_id, skill_ids=[])
+
     def start_agent_run(self, request: dict[str, Any]) -> dict[str, Any]:
         self.calls.append(("start_agent_run", request))
         return _run_payload(
@@ -171,6 +183,9 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
         )
     )
     deleted_agent = service.delete_agent("agent-2")
+    model_test = service.test_agent_model("agent-2")
+    agent_with_skill = service.attach_skill("agent-2", "skill-2")
+    agent_without_skill = service.detach_skill("agent-2", "skill-2")
     groups = service.list_groups()
     group = service.get_group("group-1")
     saved_group = service.save_group(
@@ -205,6 +220,9 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
     assert agent.name == "Fetched"
     assert saved_agent.agent_id == "agent-2"
     assert deleted_agent == {"ok": True, "agent_id": "agent-2"}
+    assert model_test == {"ok": True, "message": "Model ready"}
+    assert agent_with_skill.skill_ids == ["skill-2"]
+    assert agent_without_skill.skill_ids == []
     assert groups[0].members[0].agent_id == "agent-1"
     assert group.mode == "debate"
     assert saved_group.name == "Team"
@@ -223,6 +241,9 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
         },
     ) in port.calls
     assert ("delete_agent", "agent-2") in port.calls
+    assert ("test_agent_model", "agent-2") in port.calls
+    assert ("attach_skill", {"agent_id": "agent-2", "skill_id": "skill-2"}) in port.calls
+    assert ("detach_skill", {"agent_id": "agent-2", "skill_id": "skill-2"}) in port.calls
     assert (
         "save_group",
         {
@@ -346,13 +367,17 @@ def test_agent_studio_service_reads_run_artifact_through_port() -> None:
     ) in port.calls
 
 
-def _agent_payload(agent_id: str = "agent-1", name: str = "Planner") -> dict[str, Any]:
+def _agent_payload(
+    agent_id: str = "agent-1",
+    name: str = "Planner",
+    skill_ids: list[str] | None = None,
+) -> dict[str, Any]:
     return {
         "agent_id": agent_id,
         "name": name,
         "model_mode": "profile",
         "execution_backend": "native_profile",
-        "skill_ids": ["skill-1"],
+        "skill_ids": ["skill-1"] if skill_ids is None else skill_ids,
         "enabled": True,
     }
 
