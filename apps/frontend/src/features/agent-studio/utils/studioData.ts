@@ -1,6 +1,7 @@
 import type {
   AgentSpec,
   MemorySpec,
+  RunnableSummary,
   RunGroupSpec,
   RunSpec,
   SkillFolderSpec,
@@ -71,6 +72,85 @@ export async function listStudioMemoriesForView(): Promise<MemorySpec[]> {
 
 export async function listStudioGroupsForView(): Promise<AgentGroupSnapshot[]> {
   return listYachiyoAgentGroups();
+}
+
+function studioRunnableToolPolicy(policy: AgentSpec['tool_policy']): RunnableSummary['tool_policy'] | undefined {
+  if (!policy || typeof policy !== 'object') return undefined;
+  const raw = policy as { allowed_tools?: unknown; approval_required?: unknown };
+  const allowedTools = Array.isArray(raw.allowed_tools)
+    ? raw.allowed_tools.map((tool) => String(tool || '').trim()).filter(Boolean)
+    : undefined;
+  const approvalRequired: Record<string, boolean> = {};
+  if (raw.approval_required && typeof raw.approval_required === 'object' && !Array.isArray(raw.approval_required)) {
+    Object.entries(raw.approval_required as Record<string, unknown>).forEach(([tool, required]) => {
+      if (tool.trim()) approvalRequired[tool] = required === true;
+    });
+  }
+  const normalized: RunnableSummary['tool_policy'] = {};
+  if (allowedTools?.length) normalized.allowed_tools = allowedTools;
+  if (Object.keys(approvalRequired).length) normalized.approval_required = approvalRequired;
+  return normalized.allowed_tools || normalized.approval_required ? normalized : undefined;
+}
+
+function studioAgentRunnable(agent: AgentSpec): RunnableSummary {
+  return {
+    id: agent.agent_id,
+    name: agent.name,
+    nickname: agent.nickname,
+    description: agent.description,
+    avatar_url: agent.avatar_url,
+    category: agent.category,
+    output_contract: agent.output_contract,
+    kind: 'agent',
+    enabled: agent.enabled,
+    tool_policy: studioRunnableToolPolicy(agent.tool_policy),
+  };
+}
+
+function workflowNodeKind(node: WorkflowSpec['nodes'][number]): string {
+  const data = node.data || {};
+  return String(data.kind || data.node_type || node.type || 'agent').trim();
+}
+
+function workflowNodeAgentId(node: WorkflowSpec['nodes'][number]): string {
+  if (workflowNodeKind(node) !== 'agent') return '';
+  const data = node.data || {};
+  for (const key of ['agent_id', 'agentId', 'runnable_id', 'runnableId']) {
+    const value = data[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return '';
+}
+
+function workflowParticipantsForView(
+  workflow: WorkflowSpec,
+  agentRunnables: Map<string, RunnableSummary>,
+): RunnableSummary[] {
+  const participants: RunnableSummary[] = [];
+  const seen = new Set<string>();
+  workflow.nodes.forEach((node) => {
+    const agentId = workflowNodeAgentId(node);
+    const participant = agentId ? agentRunnables.get(agentId) : undefined;
+    if (!participant || seen.has(participant.id)) return;
+    seen.add(participant.id);
+    participants.push(participant);
+  });
+  return participants;
+}
+
+export function studioRunnablesForView(agents: AgentSpec[], workflows: WorkflowSpec[]): RunnableSummary[] {
+  const agentRunnables = agents.map(studioAgentRunnable);
+  const agentById = new Map(agentRunnables.map((agent) => [agent.id, agent]));
+  const workflowRunnables = workflows.map((workflow): RunnableSummary => ({
+    id: workflow.workflow_id,
+    name: workflow.name,
+    description: workflow.description,
+    output_contract: 'workflow',
+    kind: 'workflow',
+    enabled: workflow.enabled,
+    participants: workflowParticipantsForView(workflow, agentById),
+  }));
+  return [...agentRunnables, ...workflowRunnables];
 }
 
 export async function listStudioRunsForView(): Promise<RunSpec[]> {

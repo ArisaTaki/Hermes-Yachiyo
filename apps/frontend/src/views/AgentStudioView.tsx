@@ -112,11 +112,9 @@ import {
   listStudioSkillsForView,
   listStudioSkillSourcesForView,
   listStudioWorkflowsForView,
+  studioRunnablesForView,
 } from '../features/agent-studio/utils/studioData';
-import {
-  listFutureTasks,
-  listRunnables,
-} from '../lib/agents';
+import { listFutureTasks } from '../lib/agents';
 import type {
   FutureTaskSpec,
   MemorySpec,
@@ -794,7 +792,6 @@ export function AgentStudioView() {
       nextProfiles,
       nextWorkflows,
       ,
-      nextRunnables,
       nextRuns,
       nextRunGroups,
       nextSkillSources,
@@ -807,7 +804,6 @@ export function AgentStudioView() {
       listModelProfiles(),
       listStudioWorkflowsForView(),
       loadAgentGroups(),
-      listRunnables(),
       listStudioRunsForView(),
       listStudioRunGroupsForView(),
       listStudioSkillSourcesForView(),
@@ -822,6 +818,7 @@ export function AgentStudioView() {
     setModelProfiles(nextProfiles.profiles || []);
     setModelDefaults(nextProfiles.defaults || {});
     applyWorkflows(nextWorkflows, options);
+    const nextRunnables = studioRunnablesForView(nextAgents, nextWorkflows);
     setRunnables(nextRunnables);
     setRuns(nextRuns);
     setRunGroups(nextRunGroups);
