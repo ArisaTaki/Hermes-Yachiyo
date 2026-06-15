@@ -171,6 +171,10 @@ from apps.shell.agent.runtime.run_projections import (
     RunProjectionCoordinator,
 )
 from apps.shell.agent.runtime.run_readiness import RuntimeRunReadinessValidator
+from apps.shell.agent.runtime.runnable_services import (
+    RuntimeRunnableServiceBundle,
+    build_runtime_runnable_services as _build_runtime_runnable_services,
+)
 from apps.shell.agent.runtime.runnables import RuntimeRunnableCatalog, RuntimeRunnableRunCoordinator
 from apps.shell.agent.runtime.paths import (
     RuntimeDirectoryLayout,
@@ -770,30 +774,24 @@ class NativeRunEngine:
             workflow_path=self._workflow_path,
         )
         self._install_runtime_workflow_planning_services(workflow_planning_services)
-        self.future_task_scheduler = FutureTaskTriggerScheduler(
-            self._conn,
-            self._db_lock,
+        runnable_services = _build_runtime_runnable_services(
+            conn=self._conn,
+            db_lock=self._db_lock,
             create_run_for_runnable=lambda **kwargs: self.create_run_for_runnable(**kwargs),
             future_task_store=lambda **kwargs: self._future_task_store(**kwargs),
             now=_now,
             redact_secrets=redact_secrets,
             error_type=AgentRuntimeError,
-        )
-        self.chat_runnable_parser = ChatRunnableMentionParser(
             list_runnables=lambda: list(self.list_runnables().get("runnables") or []),
-        )
-        self.runnable_catalog = RuntimeRunnableCatalog(
             node_kind=self._node_kind,
             get_agent=self.get_agent,
-        )
-        self.runnable_run_coordinator = RuntimeRunnableRunCoordinator(
             resolve_runnable=lambda **kwargs: self.resolve_runnable(**kwargs),
             create_agent_run=self.create_agent_run,
             create_workflow_run=self.create_workflow_run,
             create_agent_run_async=self.create_agent_run_async,
             create_workflow_run_async=self.create_workflow_run_async,
-            error_type=AgentRuntimeError,
         )
+        self._install_runtime_runnable_services(runnable_services)
         self.workflow_parent_resume = WorkflowParentResumeCoordinator(
             parent_runs_waiting_for_child=lambda child_run: self._workflow_parent_runs_waiting_for_child(child_run),
             workflow_run_is_group_root=lambda workflow_run: self._workflow_run_is_group_root(workflow_run),
@@ -885,6 +883,12 @@ class NativeRunEngine:
         self.workflow_run_start_projector = workflow_services.workflow_run_start_projector
         self.workflow_run_starter = workflow_services.workflow_run_starter
         self.workflow_resume_planner = workflow_services.workflow_resume_planner
+
+    def _install_runtime_runnable_services(self, runnable_services: RuntimeRunnableServiceBundle) -> None:
+        self.future_task_scheduler = runnable_services.future_task_scheduler
+        self.chat_runnable_parser = runnable_services.chat_runnable_parser
+        self.runnable_catalog = runnable_services.runnable_catalog
+        self.runnable_run_coordinator = runnable_services.runnable_run_coordinator
 
     def close(self) -> None:
         self.shutdown()
