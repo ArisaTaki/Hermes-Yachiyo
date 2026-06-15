@@ -8,7 +8,6 @@ import json
 import logging
 import os
 import re
-import shlex
 import shutil
 import sqlite3
 import subprocess
@@ -66,6 +65,7 @@ from apps.shell.agent.runtime.run_projections import (
     ApprovalResumeProjectionCoordinator,
     RunProjectionCoordinator,
 )
+from apps.shell.agent.runtime.skill_install import SkillInstallCommandValidator
 from apps.shell.agent.runtime.tool_approvals import (
     ToolApprovalClaimProjection,
     ToolApprovalContinuationHandoff,
@@ -186,7 +186,6 @@ _FINAL_RUN_STATUSES = {"completed", "failed", "cancelled"}
 _WORKFLOW_NODE_TYPES = {"start", "agent", "approval", "artifact", "condition", "parallel", "workflow", "loop"}
 _NATIVE_LIBRARY_SOURCE_TYPES = {"native_global", "native_project"}
 _SKILL_SOURCE_TYPES = {*_NATIVE_LIBRARY_SOURCE_TYPES, "npx_skills", "local_zip", "local_dir"}
-_SHELL_METACHARS = {"&&", "||", "&", ";", "|", ">", ">>", "<", "$(", "`", "\n", "\r"}
 _UNSET = object()
 _MAIN_CHAT_AGENT_ID = "builtin:yachiyo-main"
 _SYSTEM_AGENT_IDS = {_MAIN_CHAT_AGENT_ID}
@@ -1723,6 +1722,9 @@ class NativeRunEngine:
             clear_studio_deletion=self._clear_studio_deletion,
             system_agent_ids=_SYSTEM_AGENT_IDS,
             main_chat_agent_id=_MAIN_CHAT_AGENT_ID,
+            error_type=AgentRuntimeError,
+        )
+        self.skill_install_validator = SkillInstallCommandValidator(
             error_type=AgentRuntimeError,
         )
         self.run_groups = RunGroupRepository(
@@ -3757,51 +3759,10 @@ class NativeRunEngine:
         return sum(1 for _ in root.rglob("SKILL.md"))
 
     def _validated_skill_install_argv(self, command: str) -> tuple[list[str], str]:
-        if not command.strip():
-            raise AgentRuntimeError("请输入 Skill 来源或安装命令")
-        if any(token in command for token in _SHELL_METACHARS):
-            raise AgentRuntimeError("Skill 安装命令不能包含 shell 管道、重定向或串联操作")
-        try:
-            argv = shlex.split(command)
-        except ValueError as exc:
-            raise AgentRuntimeError("Skill 安装命令格式无效") from exc
-        if not argv:
-            raise AgentRuntimeError("请输入 Skill 来源或安装命令")
-        if re.fullmatch(r"skills(@[A-Za-z0-9._~-]+)?", argv[0]):
-            argv = ["npx", *argv]
-        if argv[0] == "npx":
-            return self._validated_npx_skills_argv(argv), "npx_skills"
-        if argv[0] in {"npm", "pnpm", "yarn", "bun", "curl", "bash", "sh", "zsh"}:
-            raise AgentRuntimeError("只允许 skills 来源或 npx skills add")
-        return self._validated_npx_skills_argv(["npx", "skills@latest", "add", *argv]), "npx_skills"
+        return self.skill_install_validator.validate(command)
 
-    @staticmethod
-    def _skill_install_source_ref(argv: list[str], installer: str) -> str:
-        if installer != "npx_skills":
-            return ""
-        index = 1
-        while index < len(argv) and argv[index] in {"-y", "--yes"}:
-            index += 1
-        if index + 1 >= len(argv):
-            return ""
-        install_args = argv[index + 2:]
-        clean_args: list[str] = []
-        skip_next = False
-        for arg in install_args:
-            if skip_next:
-                skip_next = False
-                continue
-            if arg in {"-a", "--agent"}:
-                skip_next = True
-                continue
-            if arg.startswith("--agent=") or arg in {"--copy", "-y", "--yes"}:
-                continue
-            clean_args.append(arg)
-        if not clean_args:
-            return ""
-        if re.fullmatch(r"[^/\s]+/[^/\s]+", clean_args[0]):
-            clean_args[0] = f"https://github.com/{clean_args[0]}"
-        return " ".join(clean_args)
+    def _skill_install_source_ref(self, argv: list[str], installer: str) -> str:
+        return self.skill_install_validator.source_ref(argv, installer)
 
     @staticmethod
     def _metadata_skill_source_ref(metadata: dict[str, Any], fallback: str) -> str:
@@ -3811,41 +3772,15 @@ class NativeRunEngine:
                 return value.strip()
         return fallback
 
-    @staticmethod
-    def _validated_npx_skills_argv(argv: list[str]) -> list[str]:
-        normalized = list(argv)
-        index = 1
-        while index < len(normalized) and normalized[index] in {"-y", "--yes"}:
-            index += 1
-        if index + 1 >= len(normalized) or not re.fullmatch(r"skills(@[A-Za-z0-9._~-]+)?", normalized[index]):
-            raise AgentRuntimeError("只允许 Skill 来源、npx skills add 或 npx skills@latest add")
-        if normalized[index + 1] not in {"add", "install"}:
-            raise AgentRuntimeError("只允许 Skill 来源、npx skills add 或 npx skills@latest add")
-        install_args = normalized[index + 2:]
-        if not install_args:
-            raise AgentRuntimeError("请提供要安装的 Skill 来源")
-        NativeRunEngine._validate_skill_install_agent_target(install_args)
-        if not NativeRunEngine._has_agent_target(install_args):
-            normalized.extend(["-a", "oha-yachiyo"])
-        if "--copy" not in install_args:
-            normalized.append("--copy")
-        if "-y" not in normalized and "--yes" not in normalized:
-            normalized.append("-y")
-        return normalized
+    def _validated_npx_skills_argv(self, argv: list[str]) -> list[str]:
+        return self.skill_install_validator.validate_npx_skills_argv(argv)
 
     @staticmethod
     def _has_agent_target(args: list[str]) -> bool:
-        return any(arg in {"-a", "--agent"} or arg.startswith("--agent=") for arg in args)
+        return SkillInstallCommandValidator.has_agent_target(args)
 
-    @staticmethod
-    def _validate_skill_install_agent_target(args: list[str]) -> None:
-        for index, arg in enumerate(args):
-            if arg == "-a" or arg == "--agent":
-                value = args[index + 1] if index + 1 < len(args) else ""
-                if value != "oha-yachiyo":
-                    raise AgentRuntimeError("Yachiyo 安装入口固定使用 oha-yachiyo 目标")
-            elif arg.startswith("--agent=") and arg != "--agent=oha-yachiyo":
-                raise AgentRuntimeError("Yachiyo 安装入口固定使用 oha-yachiyo 目标")
+    def _validate_skill_install_agent_target(self, args: list[str]) -> None:
+        self.skill_install_validator.validate_agent_target(args)
 
     def _normalize_skill_folder_id(self, folder_id: str | None) -> str:
         return self.skill_folders.normalize_id(folder_id)
