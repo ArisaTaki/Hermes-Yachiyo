@@ -14,6 +14,7 @@ from .contracts import (
     GroupRunSnapshot,
     MemorySnapshot,
     PublicRunEvent,
+    RunEventPageSnapshot,
     RunTimelineSnapshot,
     SaveAgentGroupRequest,
     SaveAgentRequest,
@@ -309,6 +310,32 @@ class AgentStudioService:
         raw_events = self._studio_port.get_run_event_stream(run_id)
         for event in _payload_items(raw_events, "events"):
             yield public_run_event_from_payload(event, run_id=run_id)
+
+    def get_run_event_page(
+        self,
+        run_id: str,
+        after_sequence: int = 0,
+        limit: int = 200,
+    ) -> RunEventPageSnapshot:
+        clean_after_sequence = max(0, int(after_sequence or 0))
+        clean_limit = max(1, min(500, int(limit or 200)))
+        filtered_events = [
+            event
+            for event in self.get_run_event_stream(run_id)
+            if int(event.sequence or 0) > clean_after_sequence
+        ]
+        page = filtered_events[:clean_limit]
+        next_after_sequence = max(
+            [int(event.sequence or 0) for event in page] or [clean_after_sequence]
+        )
+        return RunEventPageSnapshot(
+            run_id=run_id,
+            after_sequence=clean_after_sequence,
+            limit=clean_limit,
+            next_after_sequence=next_after_sequence,
+            has_more=len(filtered_events) > clean_limit,
+            events=page,
+        )
 
 
 def _request_payload(request: Any) -> dict[str, Any]:

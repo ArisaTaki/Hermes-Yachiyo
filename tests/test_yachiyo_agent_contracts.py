@@ -16,6 +16,7 @@ from apps.shell.yachiyo_agent import (
     GroupRunSnapshot,
     MemorySnapshot,
     PublicRunEvent,
+    RunEventPageSnapshot,
     RunTimelineChildSnapshot,
     RunTimelineSnapshot,
     SaveAgentGroupMemberRequest,
@@ -177,6 +178,41 @@ def test_run_timeline_snapshot_json_shape_covers_runtime_debug_objects() -> None
     assert payload["task_run_link_last_event_sequence"] == 7
     assert payload["tool_calls"][0]["tool_name"] == "workspace.read"
     assert payload["children"][0]["run_id"] == "child-run-1"
+
+
+def test_run_event_page_snapshot_json_shape_is_stable() -> None:
+    snapshot = RunEventPageSnapshot(
+        run_id="run-1",
+        after_sequence=1,
+        limit=2,
+        next_after_sequence=3,
+        has_more=True,
+        events=[
+            PublicRunEvent(
+                event_id="event-2",
+                run_id="run-1",
+                sequence=2,
+                event_type="agent.tool.call",
+                title="Tool call",
+            )
+        ],
+    )
+
+    payload = _json(snapshot)
+
+    assert list(payload) == [
+        "run_id",
+        "after_sequence",
+        "limit",
+        "next_after_sequence",
+        "has_more",
+        "events",
+    ]
+    assert payload["run_id"] == "run-1"
+    assert payload["after_sequence"] == 1
+    assert payload["next_after_sequence"] == 3
+    assert payload["has_more"] is True
+    assert payload["events"][0]["event_type"] == "agent.tool.call"
 
 
 def test_public_run_event_mapping_preserves_runtime_trace_payload_fields() -> None:

@@ -49,6 +49,15 @@ class PublicRunEvent(_PublicSnapshot):
     created_at: str = ""
 
 
+class RunEventPageSnapshot(_PublicSnapshot):
+    run_id: str
+    after_sequence: int = 0
+    limit: int = 200
+    next_after_sequence: int = 0
+    has_more: bool = False
+    events: list[PublicRunEvent] = Field(default_factory=list)
+
+
 class ApprovalCardSnapshot(_PublicSnapshot):
     approval_id: str
     run_id: str | None = None

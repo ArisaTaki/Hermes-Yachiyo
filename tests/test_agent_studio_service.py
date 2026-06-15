@@ -300,9 +300,23 @@ class _FakeStudioPort:
                 {
                     "event_id": "event-stream-1",
                     "run_id": run_id,
-                    "sequence": 10,
+                    "sequence": 1,
                     "event_type": "agent.started",
                     "payload": {"status": "running"},
+                },
+                {
+                    "event_id": "event-stream-2",
+                    "run_id": run_id,
+                    "sequence": 2,
+                    "event_type": "agent.tool.call",
+                    "payload": {"tool": "workspace.read"},
+                },
+                {
+                    "event_id": "event-stream-3",
+                    "run_id": run_id,
+                    "sequence": 3,
+                    "event_type": "agent.completed",
+                    "payload": {"status": "completed"},
                 }
             ],
         }
@@ -524,6 +538,7 @@ def test_agent_studio_service_maps_group_run_workflow_run_timeline_and_events() 
     timelines = service.list_run_timelines(10)
     timeline = service.get_run_timeline("run-1")
     events = list(service.get_run_event_stream("run-1"))
+    event_page = service.get_run_event_page("run-1", after_sequence=1, limit=1)
 
     assert agent_run.run_id == "agent-run-1"
     assert agent_run.agent_id == "agent-1"
@@ -554,6 +569,13 @@ def test_agent_studio_service_maps_group_run_workflow_run_timeline_and_events() 
     assert timeline.artifacts[0].path == "report.md"
     assert timeline.children[0].run_id == "child-run-1"
     assert events[0].event_type == "agent.started"
+    assert event_page.run_id == "run-1"
+    assert event_page.after_sequence == 1
+    assert event_page.limit == 1
+    assert event_page.next_after_sequence == 2
+    assert event_page.has_more is True
+    assert event_page.events[0].sequence == 2
+    assert event_page.events[0].event_type == "agent.tool.call"
     assert (
         "start_group_run",
         {
