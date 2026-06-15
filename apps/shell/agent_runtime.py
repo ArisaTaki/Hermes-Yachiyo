@@ -191,6 +191,10 @@ from apps.shell.agent.runtime.tool_approvals import (
     ToolApprovalTransitionContext,
 )
 from apps.shell.agent.runtime.tool_execution import RuntimeToolCallExecutor, RuntimeToolRequestRunner
+from apps.shell.agent.runtime.tooling import (
+    RuntimeToolingBundle,
+    build_runtime_tooling as _build_runtime_tooling,
+)
 from apps.shell.agent.runtime.tool_loop import (
     RuntimeToolLoopProjectionBuilder,
     append_tool_result_message as _runtime_append_tool_result_message,
@@ -647,8 +651,7 @@ class NativeRunEngine:
             default_agent_ids=_DEFAULT_AGENT_IDS,
             error_type=AgentRuntimeError,
         )
-        self.tool_loop_projection = RuntimeToolLoopProjectionBuilder()
-        self.tool_call_executor = RuntimeToolCallExecutor(
+        tooling = _build_runtime_tooling(
             normalize_tool_name=_normalize_tool_name,
             input_preview=_tool_input_preview,
             run_budget=self._run_budget,
@@ -658,19 +661,12 @@ class NativeRunEngine:
             tool_call_events=self.runtime_tool_call_events,
             trace_events=self.runtime_trace_events,
             append_run_event=self.append_run_event,
-        )
-        self.tool_request_runner = RuntimeToolRequestRunner(
-            normalize_tool_name=_normalize_tool_name,
-            input_preview=_tool_input_preview,
-            run_budget=self._run_budget,
             user_goal_from_messages=_user_goal_from_agent_messages,
             goal_disallows_tool=_agent_goal_disallows_tool,
-            timeline_factory=self._timeline,
-            append_run_event=self.append_run_event,
-            tool_loop_projection=self.tool_loop_projection,
             pending_approval_builder=self.tool_pending_approvals,
             call_agent_tool=self._call_agent_tool,
         )
+        self._install_runtime_tooling(tooling)
         self.agent_skill_loader = RuntimeAgentSkillLoader(
             get_skill=self.get_skill,
             error_type=AgentRuntimeError,
@@ -867,6 +863,11 @@ class NativeRunEngine:
         self.runtime_task_events = recorders.runtime_task_events
         self.runtime_trace_events = recorders.runtime_trace_events
         self.tool_pending_approvals = recorders.tool_pending_approvals
+
+    def _install_runtime_tooling(self, tooling: RuntimeToolingBundle) -> None:
+        self.tool_loop_projection = tooling.tool_loop_projection
+        self.tool_call_executor = tooling.tool_call_executor
+        self.tool_request_runner = tooling.tool_request_runner
 
     def close(self) -> None:
         self.shutdown()
