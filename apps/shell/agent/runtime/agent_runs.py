@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import threading
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
@@ -128,4 +130,101 @@ class RuntimeAgentRunCoordinator:
         )
         if start.root_group:
             result = self._project_agent_run_group_if_root(result)
+        return result
+
+
+class RuntimeAgentRunAsyncCoordinator:
+    """Starts Agent Runs for background execution while preserving return shape."""
+
+    def __init__(
+        self,
+        *,
+        get_agent_private: Callable[[str], dict[str, Any]],
+        validate_agent_run_readiness: Callable[[dict[str, Any]], None],
+        starter: RuntimeAgentRunStarter,
+        execute_agent_run: Callable[..., dict[str, Any]],
+        project_agent_run_group_if_root: Callable[[dict[str, Any]], dict[str, Any]],
+        resolve_runnable: Callable[..., dict[str, Any] | None],
+        update_run: Callable[..., dict[str, Any]],
+        runtime_agent_timeline: Any,
+        runtime_agent_run_events: Any,
+        redact_error: Callable[[Any], str],
+        error_type: type[Exception],
+        thread_factory: Callable[..., Any] = threading.Thread,
+        logger: logging.Logger | None = None,
+    ) -> None:
+        self._get_agent_private = get_agent_private
+        self._validate_agent_run_readiness = validate_agent_run_readiness
+        self._starter = starter
+        self._execute_agent_run = execute_agent_run
+        self._project_agent_run_group_if_root = project_agent_run_group_if_root
+        self._resolve_runnable = resolve_runnable
+        self._update_run = update_run
+        self._runtime_agent_timeline = runtime_agent_timeline
+        self._runtime_agent_run_events = runtime_agent_run_events
+        self._redact_error = redact_error
+        self._error_type = error_type
+        self._thread_factory = thread_factory
+        self._logger = logger or logging.getLogger(__name__)
+
+    def create_async(
+        self,
+        payload: dict[str, Any],
+        *,
+        on_complete: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        agent_id = str(payload.get("agent_id") or payload.get("runnable_id") or "")
+        user_goal = str(payload.get("user_goal") or payload.get("goal") or "").strip()
+        if not agent_id:
+            raise self._error_type("缺少 agent_id")
+        if not user_goal:
+            raise self._error_type("运行目标不能为空")
+        agent = self._get_agent_private(agent_id)
+        self._validate_agent_run_readiness(agent)
+        start = self._starter.start_async(payload, agent=agent)
+        run = start.run
+        result = {
+            **run,
+            "status": "processing",
+            "runnable": self._resolve_runnable(runnable_id=agent_id),
+            "agent_run_id": run["run_id"],
+        }
+
+        def execute_in_background() -> None:
+            try:
+                exec_result = self._execute_agent_run(
+                    run["run_id"],
+                    agent,
+                    user_goal,
+                    upstream=str(payload.get("upstream") or ""),
+                )
+                if start.root_group:
+                    exec_result = self._project_agent_run_group_if_root(exec_result)
+                if on_complete:
+                    on_complete(exec_result)
+            except Exception as exc:
+                self._logger.error("异步 Agent Run 执行失败: %s", exc, exc_info=True)
+                safe_error = self._redact_error(exc)
+                self._runtime_agent_run_events.failed(run["run_id"], safe_error)
+                self._update_run(
+                    run["run_id"],
+                    status="failed",
+                    result=safe_error,
+                    timeline=[self._runtime_agent_timeline.failed(safe_error)],
+                    artifacts=[],
+                    pending_approval=None,
+                )
+                if on_complete:
+                    on_complete({
+                        **run,
+                        "status": "failed",
+                        "result": safe_error,
+                    })
+
+        thread = self._thread_factory(
+            target=execute_in_background,
+            name=f"agent-run-{run['run_id'][:8]}",
+            daemon=True,
+        )
+        thread.start()
         return result

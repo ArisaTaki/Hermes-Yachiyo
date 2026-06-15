@@ -6,9 +6,24 @@ import threading
 from typing import Any
 
 from apps.shell import agent_runtime
-from apps.shell.agent.runtime.agent_runs import AgentRunStart, RuntimeAgentRunCoordinator, RuntimeAgentRunStarter
+from apps.shell.agent.runtime.agent_runs import (
+    AgentRunStart,
+    RuntimeAgentRunAsyncCoordinator,
+    RuntimeAgentRunCoordinator,
+    RuntimeAgentRunStarter,
+)
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
+
+
+class _ImmediateThread:
+    def __init__(self, *, target: Any, name: str, daemon: bool) -> None:
+        self._target = target
+        self.name = name
+        self.daemon = daemon
+
+    def start(self) -> None:
+        self._target()
 
 
 def _starter(
@@ -169,6 +184,106 @@ def test_agent_run_coordinator_returns_existing_idempotent_run_without_execution
     }
 
 
+def test_agent_run_async_coordinator_returns_processing_and_completes_in_background() -> None:
+    completions: list[dict[str, Any]] = []
+
+    class _Starter:
+        def start_async(self, payload: dict[str, Any], *, agent: dict[str, Any]) -> AgentRunStart:
+            return AgentRunStart({"run_id": "run-1", "kind": "agent_run"}, root_group=True)
+
+    coordinator = RuntimeAgentRunAsyncCoordinator(
+        get_agent_private=lambda agent_id: {"agent_id": agent_id, "name": "Runner"},
+        validate_agent_run_readiness=lambda _agent: None,
+        starter=_Starter(),  # type: ignore[arg-type]
+        execute_agent_run=lambda run_id, agent, user_goal, **kwargs: {
+            "run_id": run_id,
+            "status": "completed",
+            "user_goal": user_goal,
+            **kwargs,
+        },
+        project_agent_run_group_if_root=lambda result: {**result, "group_projected": True},
+        resolve_runnable=lambda **kwargs: {"id": kwargs["runnable_id"], "kind": "agent"},
+        update_run=lambda *_args, **_kwargs: {},
+        runtime_agent_timeline=object(),
+        runtime_agent_run_events=object(),
+        redact_error=str,
+        error_type=agent_runtime.AgentRuntimeError,
+        thread_factory=_ImmediateThread,
+    )
+
+    result = coordinator.create_async(
+        {"agent_id": "agent-1", "user_goal": "Ship", "upstream": "Context"},
+        on_complete=completions.append,
+    )
+
+    assert result["status"] == "processing"
+    assert result["agent_run_id"] == "run-1"
+    assert result["runnable"] == {"id": "agent-1", "kind": "agent"}
+    assert completions == [
+        {
+            "run_id": "run-1",
+            "status": "completed",
+            "user_goal": "Ship",
+            "upstream": "Context",
+            "group_projected": True,
+        }
+    ]
+
+
+def test_agent_run_async_coordinator_projects_background_failure() -> None:
+    completions: list[dict[str, Any]] = []
+    failed_events: list[tuple[str, str]] = []
+    updates: list[dict[str, Any]] = []
+
+    class _Starter:
+        def start_async(self, payload: dict[str, Any], *, agent: dict[str, Any]) -> AgentRunStart:
+            return AgentRunStart({"run_id": "run-fail", "kind": "agent_run"}, root_group=False)
+
+    class _Timeline:
+        @staticmethod
+        def failed(error: str) -> dict[str, str]:
+            return {"event": "agent.run.failed", "detail": error}
+
+    class _Events:
+        @staticmethod
+        def failed(run_id: str, error: str) -> None:
+            failed_events.append((run_id, error))
+
+    def fail_execute(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("secret failure")
+
+    coordinator = RuntimeAgentRunAsyncCoordinator(
+        get_agent_private=lambda agent_id: {"agent_id": agent_id, "name": "Runner"},
+        validate_agent_run_readiness=lambda _agent: None,
+        starter=_Starter(),  # type: ignore[arg-type]
+        execute_agent_run=fail_execute,
+        project_agent_run_group_if_root=lambda result: result,
+        resolve_runnable=lambda **kwargs: {"id": kwargs["runnable_id"]},
+        update_run=lambda run_id, **kwargs: updates.append({"run_id": run_id, **kwargs}) or {"run_id": run_id},
+        runtime_agent_timeline=_Timeline(),
+        runtime_agent_run_events=_Events(),
+        redact_error=lambda error: str(error).replace("secret", "[redacted]"),
+        error_type=agent_runtime.AgentRuntimeError,
+        thread_factory=_ImmediateThread,
+    )
+
+    result = coordinator.create_async({"agent_id": "agent-1", "user_goal": "Ship"}, on_complete=completions.append)
+
+    assert result["status"] == "processing"
+    assert failed_events == [("run-fail", "[redacted] failure")]
+    assert updates == [
+        {
+            "run_id": "run-fail",
+            "status": "failed",
+            "result": "[redacted] failure",
+            "timeline": [{"event": "agent.run.failed", "detail": "[redacted] failure"}],
+            "artifacts": [],
+            "pending_approval": None,
+        }
+    ]
+    assert completions == [{"run_id": "run-fail", "kind": "agent_run", "status": "failed", "result": "[redacted] failure"}]
+
+
 def test_native_runtime_uses_split_agent_run_starter(tmp_path, monkeypatch) -> None:
     service = AgentRuntimeService(
         db_path=tmp_path / "agent-runtime.db",
@@ -192,8 +307,10 @@ def test_native_runtime_uses_split_agent_run_starter(tmp_path, monkeypatch) -> N
     try:
         assert agent_runtime.RuntimeAgentRunStarter is RuntimeAgentRunStarter
         assert agent_runtime.RuntimeAgentRunCoordinator is RuntimeAgentRunCoordinator
+        assert agent_runtime.RuntimeAgentRunAsyncCoordinator is RuntimeAgentRunAsyncCoordinator
         assert isinstance(service.agent_run_starter, RuntimeAgentRunStarter)
         assert isinstance(service.agent_run_coordinator, RuntimeAgentRunCoordinator)
+        assert isinstance(service.agent_run_async_coordinator, RuntimeAgentRunAsyncCoordinator)
         agent = service.create_agent(
             {
                 "name": "Starter Agent",

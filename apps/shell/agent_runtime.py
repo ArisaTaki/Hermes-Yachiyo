@@ -93,7 +93,11 @@ from apps.shell.agent.runtime.agent_context import (
 )
 from apps.shell.agent.runtime.agent_outcomes import RuntimeAgentRunOutcomeProjector
 from apps.shell.agent.runtime.agent_preparation import RuntimeAgentRunPreparer
-from apps.shell.agent.runtime.agent_runs import RuntimeAgentRunCoordinator, RuntimeAgentRunStarter
+from apps.shell.agent.runtime.agent_runs import (
+    RuntimeAgentRunAsyncCoordinator,
+    RuntimeAgentRunCoordinator,
+    RuntimeAgentRunStarter,
+)
 from apps.shell.agent.runtime.agent_services import (
     RuntimeAgentServiceBundle,
     build_runtime_agent_services as _build_runtime_agent_services,
@@ -633,6 +637,24 @@ class NativeRunEngine:
             error_type=AgentRuntimeError,
         )
         self._install_runtime_core_services(core_services)
+        self.agent_run_async_coordinator = RuntimeAgentRunAsyncCoordinator(
+            get_agent_private=lambda agent_id: self._get_agent_private(agent_id),
+            validate_agent_run_readiness=lambda agent: self._validate_agent_run_readiness(agent),
+            starter=self.agent_run_starter,
+            execute_agent_run=lambda run_id, agent, user_goal, **kwargs: self._execute_agent_run(
+                run_id,
+                agent,
+                user_goal,
+                **kwargs,
+            ),
+            project_agent_run_group_if_root=lambda result: self._project_agent_run_group_if_root(result),
+            resolve_runnable=lambda **kwargs: self.resolve_runnable(**kwargs),
+            update_run=lambda run_id, **kwargs: self._update_run(run_id, **kwargs),
+            runtime_agent_timeline=self.runtime_agent_timeline,
+            runtime_agent_run_events=self.runtime_agent_run_events,
+            redact_error=redact_secrets,
+            error_type=AgentRuntimeError,
+        )
         self.agent_model_tester = RuntimeAgentModelTester(
             profile_service_factory=lambda: get_model_profile_service(),
             default_agent_ids=_DEFAULT_AGENT_IDS,
@@ -2138,79 +2160,7 @@ class NativeRunEngine:
         payload: dict[str, Any],
         on_complete: "Callable[[dict[str, Any]], None] | None" = None,
     ) -> dict[str, Any]:
-        """创建 Agent Run 并立即返回，异步执行实际任务。
-
-        Args:
-            payload: Agent Run 配置
-            on_complete: 执行完成后的回调函数（在后台线程中调用）
-
-        Returns:
-            包含 run_id 和 status="processing" 的 run 信息
-        """
-        agent_id = str(payload.get("agent_id") or payload.get("runnable_id") or "")
-        user_goal = str(payload.get("user_goal") or payload.get("goal") or "").strip()
-        if not agent_id:
-            raise AgentRuntimeError("缺少 agent_id")
-        if not user_goal:
-            raise AgentRuntimeError("运行目标不能为空")
-        agent = self._get_agent_private(agent_id)
-        self._validate_agent_run_readiness(agent)
-
-        start = self.agent_run_starter.start_async(payload, agent=agent)
-        run = start.run
-
-        # 立即返回 processing 状态
-        result = {
-            **run,
-            "status": "processing",
-            "runnable": self.resolve_runnable(runnable_id=agent_id),
-            "agent_run_id": run["run_id"],
-        }
-
-        # 启动后台线程执行
-        def _execute_in_background() -> None:
-            try:
-                exec_result = self._execute_agent_run(
-                    run["run_id"],
-                    agent,
-                    user_goal,
-                    upstream=str(payload.get("upstream") or ""),
-                )
-                if start.root_group:
-                    exec_result = self._project_agent_run_group_if_root(exec_result)
-                if on_complete:
-                    on_complete(exec_result)
-            except Exception as exc:
-                import logging
-                logging.getLogger(__name__).error(
-                    "异步 Agent Run 执行失败: %s", exc, exc_info=True
-                )
-                safe_error = redact_secrets(exc)
-                # 更新 run 状态为 failed
-                self.runtime_agent_run_events.failed(run["run_id"], safe_error)
-                self._update_run(
-                    run["run_id"],
-                    status="failed",
-                    result=safe_error,
-                    timeline=[self.runtime_agent_timeline.failed(safe_error)],
-                    artifacts=[],
-                    pending_approval=None,
-                )
-                if on_complete:
-                    on_complete({
-                        **run,
-                        "status": "failed",
-                        "result": safe_error,
-                    })
-
-        thread = threading.Thread(
-            target=_execute_in_background,
-            name=f"agent-run-{run['run_id'][:8]}",
-            daemon=True,
-        )
-        thread.start()
-
-        return result
+        return self.agent_run_async_coordinator.create_async(payload, on_complete=on_complete)
 
     def _execute_agent_run(self, run_id: str, agent: dict[str, Any], user_goal: str, upstream: str = "") -> dict[str, Any]:
         preparation = self.agent_run_preparer.prepare(
