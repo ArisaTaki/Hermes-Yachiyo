@@ -644,7 +644,6 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
     _assert_contains(
         "apps/frontend/src/views/AgentStudioView.tsx",
         [
-            "from '../features/agent-studio/studioTabs';",
             "AgentStudioChrome",
             "onActivateTab={activateTab}",
             "onBack={() => void openAppView('main')}",
@@ -657,6 +656,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "useAgentStudioRefresh({",
             "useAgentStudioRouteState()",
             "useAgentStudioSelectionSynchronization({",
+            "useAgentStudioTabActions({",
             "useApprovedRunGuard",
             "useRunApprovalActions",
             "useRunDetailSynchronization({",
@@ -706,6 +706,8 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "读取 Agent Studio 失败",
             "function startNewAgent()",
             "function selectAgent(agentId: string)",
+            "function activateTab(nextTab",
+            "navigateTo('agents', nextTab === 'agents'",
             "async function saveAgentGroup()",
             "async function runCurrentAgentGroup()",
             "listStudioAgentsForView()",
@@ -723,6 +725,16 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "setStatus('正在编辑新的 Agent 草稿');",
             "function useAgentDraftActions",
             "const selectAgent = useCallback((agentId: string) => {",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useAgentStudioTabActions.ts",
+        [
+            "export function useAgentStudioTabActions",
+            "const activateTab = useCallback((nextTab: StudioTab) => {",
+            "navigateTo('agents', nextTab === 'agents' ? {} : { tab: nextTab }, ['run', 'tab', 'target', 'goal']);",
+            "if (nextTab === 'agents')",
+            "刷新 Agent 列表失败",
         ],
     )
     _assert_contains(
@@ -2384,7 +2396,6 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
     _assert_contains(
         "apps/frontend/src/views/AgentStudioView.tsx",
         [
-            "from '../features/agent-studio/studioTabs';",
             "AgentStudioChrome",
             "useAgentAvatarActions",
             "useAgentDeletionActions",
@@ -2394,6 +2405,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "useAgentStudioRefresh",
             "useAgentStudioRouteState",
             "useAgentStudioSelectionSynchronization",
+            "useAgentStudioTabActions",
             "useAgentRunReadiness",
             "useAgentSaveActions",
             "useAgentSkillMountActions",

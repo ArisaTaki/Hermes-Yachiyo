@@ -28,6 +28,7 @@ import { useAgentStudioLoadLifecycle } from '../features/agent-studio/hooks/useA
 import { useAgentStudioRefresh, type StudioRefreshOptions } from '../features/agent-studio/hooks/useAgentStudioRefresh';
 import { useAgentStudioRouteState } from '../features/agent-studio/hooks/useAgentStudioRouteState';
 import { useAgentStudioSelectionSynchronization } from '../features/agent-studio/hooks/useAgentStudioSelectionSynchronization';
+import { useAgentStudioTabActions } from '../features/agent-studio/hooks/useAgentStudioTabActions';
 import { useApprovedRunGuard } from '../features/agent-studio/hooks/useApprovedRunGuard';
 import { useRunApprovalActions } from '../features/agent-studio/hooks/useRunApprovalActions';
 import { useRunApprovalFollowup } from '../features/agent-studio/hooks/useRunApprovalFollowup';
@@ -56,9 +57,6 @@ import { useWorkflowDraftActions } from '../features/agent-studio/hooks/useWorkf
 import { useWorkflowRunReadiness } from '../features/agent-studio/hooks/useWorkflowRunReadiness';
 import { useWorkflowSaveActions } from '../features/agent-studio/hooks/useWorkflowSaveActions';
 import { useWorkflowCanvasActions } from '../features/agent-studio/hooks/useWorkflowCanvasActions';
-import {
-  type StudioTab,
-} from '../features/agent-studio/studioTabs';
 import {
   agentCapabilityLine,
   runnableCapabilityLine,
@@ -103,7 +101,6 @@ import type {
 } from '../features/agent-studio/types';
 import { openAppView } from '../lib/bridge';
 import type { ModelProfile, ModelProfileDefaults } from '../lib/modelProfiles';
-import { navigateTo } from '../lib/view';
 
 type ConfirmDialogState = {
   title: string;
@@ -800,18 +797,12 @@ export function AgentStudioView() {
     setLoading,
     tab,
   });
-
-  function activateTab(nextTab: StudioTab) {
-    setTab(nextTab);
-    setStatus('');
-    setError('');
-    navigateTo('agents', nextTab === 'agents' ? {} : { tab: nextTab }, ['run', 'tab', 'target', 'goal']);
-    if (nextTab === 'agents') {
-      void refresh().catch((err: unknown) => {
-        setError(err instanceof Error ? err.message : '刷新 Agent 列表失败');
-      });
-    }
-  }
+  const { activateTab } = useAgentStudioTabActions({
+    refresh,
+    setError,
+    setStatus,
+    setTab,
+  });
 
   async function runAction(action: () => Promise<StudioRefreshOptions | void>, label: string) {
     setBusyAction(label);
