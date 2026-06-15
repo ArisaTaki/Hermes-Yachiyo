@@ -1710,19 +1710,7 @@ def test_chat_ui_exposes_stable_e2e_selectors_for_image_cancel_approval_flow() -
             "data-testid=\"chat-message-approval-reject\"",
             "data-testid=\"chat-message-retry\"",
             "data-testid=\"chat-message-open-run-detail\"",
-            "data-testid=\"chat-composer-approval-notice\"",
-            "data-approval-id={approvalId || ''}",
-            "data-approval-item-id={itemId || ''}",
-            "data-approval-source={source || ''}",
-            "data-approval-tool={details.tool}",
-            "data-run-id={runId || ''}",
-            "data-run-status={runStatus || ''}",
-            "data-testid=\"chat-composer-approval-approve\"",
-            "data-testid=\"chat-composer-approval-reject\"",
-            "data-testid=\"chat-composer-approval-open-run-detail\"",
-            "data-testid=\"chat-composer-approval-reveal\"",
-            "data-testid=\"chat-composer-approval-previous\"",
-            "data-testid=\"chat-composer-approval-next\"",
+            "ComposerApprovalNotice",
         ],
     )
     _assert_contains(
@@ -1954,6 +1942,26 @@ def test_chat_cancel_ui_smoke_uses_stop_buttons_and_cancel_route() -> None:
             "data-run-id={runId}",
             "data-run-status={runStatus}",
             "data-testid=\"chat-message-approval-open-run-detail\"",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/ComposerApprovalNotice.tsx",
+        [
+            "export function ComposerApprovalNotice",
+            "export function composerApprovalStatusText",
+            "data-testid=\"chat-composer-approval-notice\"",
+            "data-approval-id={approvalId || ''}",
+            "data-approval-item-id={itemId || ''}",
+            "data-approval-source={source || ''}",
+            "data-approval-tool={details.tool}",
+            "data-run-id={runId || ''}",
+            "data-run-status={runStatus || ''}",
+            "data-testid=\"chat-composer-approval-approve\"",
+            "data-testid=\"chat-composer-approval-reject\"",
+            "data-testid=\"chat-composer-approval-open-run-detail\"",
+            "data-testid=\"chat-composer-approval-reveal\"",
+            "data-testid=\"chat-composer-approval-previous\"",
+            "data-testid=\"chat-composer-approval-next\"",
         ],
     )
 
