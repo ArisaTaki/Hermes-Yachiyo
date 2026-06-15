@@ -14614,6 +14614,33 @@ button.activity-item {
   line-height: 1.2;
 }
 
+.group-run-event-page-actions {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.group-run-event-page-actions button {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 7px;
+  background: oklch(255 0 0 / 0.035);
+  color: var(--hy-muted);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.group-run-event-page-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.group-run-event-page-error {
+  color: var(--hy-danger);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .agent-list,
 .skill-list,
 .run-list {

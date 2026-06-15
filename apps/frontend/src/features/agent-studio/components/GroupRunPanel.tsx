@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { RuntimeTimelineSummary } from '../../runtime-shared/components/RuntimeTimelineSummary';
 import { listYachiyoGroupRunEvents } from '../../yachiyo-studio/api';
@@ -25,26 +25,60 @@ export function GroupRunPanel({
   onRunAgentGroup,
 }: GroupRunPanelProps) {
   const [groupRunEventPage, setGroupRunEventPage] = useState<RunEventPageSnapshot | null>(null);
+  const [groupRunEventError, setGroupRunEventError] = useState('');
+  const [groupRunEventLoading, setGroupRunEventLoading] = useState(false);
   const latestGroupRunId = latestAgentGroupRun?.group_run_id || '';
   const latestGroupRunUpdatedAt = latestAgentGroupRun?.updated_at || '';
   useEffect(() => {
     if (!latestGroupRunId) {
       setGroupRunEventPage(null);
+      setGroupRunEventError('');
+      setGroupRunEventLoading(false);
       return;
     }
     let disposed = false;
+    setGroupRunEventError('');
     listYachiyoGroupRunEvents(latestGroupRunId, 0, 25)
       .then((page) => {
         if (!disposed) setGroupRunEventPage(page);
       })
       .catch(() => {
-        if (!disposed) setGroupRunEventPage(null);
+        if (!disposed) {
+          setGroupRunEventPage(null);
+          setGroupRunEventError('GroupRun events 暂时不可用。');
+        }
       });
     return () => {
       disposed = true;
     };
   }, [latestGroupRunId, latestGroupRunUpdatedAt]);
+
+  const loadMoreGroupRunEvents = useCallback(async () => {
+    if (!latestGroupRunId || !groupRunEventPage?.has_more || groupRunEventLoading) return;
+    setGroupRunEventLoading(true);
+    setGroupRunEventError('');
+    try {
+      const page = await listYachiyoGroupRunEvents(
+        latestGroupRunId,
+        groupRunEventPage.next_after_sequence,
+        25,
+      );
+      setGroupRunEventPage((current) => (
+        current && current.run_id === latestGroupRunId
+          ? mergeGroupRunEventPages(current, page)
+          : page
+      ));
+    } catch {
+      setGroupRunEventError('加载更多 GroupRun events 失败。');
+    } finally {
+      setGroupRunEventLoading(false);
+    }
+  }, [groupRunEventLoading, groupRunEventPage, latestGroupRunId]);
+
   const latestEvents = groupRunEventPage?.events ?? latestAgentGroupRun?.events ?? [];
+  const groupRunEventDisplayLimit = groupRunEventPage
+    ? Math.max(4, groupRunEventPage.events.length)
+    : 4;
   const latestStatus = latestAgentGroupRun?.status || 'unknown';
   return (
     <section className="group-run-panel" data-testid="agent-group-run-panel">
@@ -75,7 +109,7 @@ export function GroupRunPanel({
             <RuntimeTimelineSummary
               className="group-run-event-summary"
               events={latestEvents}
-              limit={4}
+              limit={groupRunEventDisplayLimit}
               testId="agent-group-run-event-summary"
             />
           ) : null}
@@ -89,8 +123,46 @@ export function GroupRunPanel({
               {groupRunEventPage.has_more ? <span>more</span> : null}
             </div>
           ) : null}
+          {groupRunEventError ? (
+            <div className="group-run-event-page-error" data-testid="agent-group-run-event-page-error">
+              {groupRunEventError}
+            </div>
+          ) : null}
+          {groupRunEventPage?.has_more ? (
+            <div className="group-run-event-page-actions">
+              <button
+                type="button"
+                data-testid="agent-group-run-load-more-events"
+                disabled={busy || groupRunEventLoading}
+                onClick={() => void loadMoreGroupRunEvents()}
+              >
+                {groupRunEventLoading ? '加载中...' : '加载更多事件'}
+              </button>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </section>
   );
+}
+
+function mergeGroupRunEventPages(
+  current: RunEventPageSnapshot,
+  next: RunEventPageSnapshot,
+): RunEventPageSnapshot {
+  const eventsByKey = new Map<string, RunEventPageSnapshot['events'][number]>();
+  [...current.events, ...next.events].forEach((event) => {
+    const key = [
+      event.event_id || '',
+      event.run_id || '',
+      event.sequence,
+      event.event_type,
+    ].join(':');
+    if (!eventsByKey.has(key)) eventsByKey.set(key, event);
+  });
+  return {
+    ...next,
+    after_sequence: current.after_sequence,
+    events: Array.from(eventsByKey.values()),
+  };
 }
