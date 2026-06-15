@@ -271,7 +271,10 @@ from apps.shell.agent.runtime.tool_loop import (
 )
 from apps.shell.agent.runtime.timeline import RuntimeAgentTimelineBuilder
 
-from apps.shell.agent.runtime.workflow_continuation import WorkflowContinuationCoordinator
+from apps.shell.agent.runtime.workflow_continuation import (
+    WorkflowContinuationCoordinator,
+    WorkflowContinuationPortBundle,
+)
 from apps.shell.agent.runtime.workflow_approval_execution import (
     RuntimeWorkflowApprovalExecutionService,
 )

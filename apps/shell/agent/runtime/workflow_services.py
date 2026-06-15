@@ -9,7 +9,10 @@ from apps.shell.agent.runtime.cancellation import WorkflowCancellationProjection
 from apps.shell.agent.runtime.run_projections import ApprovalResumeProjectionCoordinator
 from apps.shell.agent.runtime.run_readiness import RuntimeRunReadinessValidator
 from apps.shell.agent.runtime.workflow_approvals import WorkflowApprovalResumeCoordinator
-from apps.shell.agent.runtime.workflow_continuation import WorkflowContinuationCoordinator
+from apps.shell.agent.runtime.workflow_continuation import (
+    WorkflowContinuationCoordinator,
+    WorkflowContinuationPortBundle,
+)
 from apps.shell.agent.runtime.workflow_outcomes import WorkflowChildOutcomeCoordinator
 from apps.shell.agent.runtime.workflow_parent_resume import WorkflowParentResumeCoordinator
 from apps.shell.agent.runtime.workflow_path import WorkflowDefinitionValidator, WorkflowPathPlanner
@@ -125,8 +128,7 @@ def build_runtime_workflow_execution_services(
     update_run_group: Callable[..., dict[str, Any]],
     approve_workflow_node: Callable[..., dict[str, Any]],
 ) -> RuntimeWorkflowExecutionServiceBundle:
-    workflow_continuation = WorkflowContinuationCoordinator(
-        engine,
+    continuation_ports = WorkflowContinuationPortBundle(
         iso_epoch=iso_epoch,
         workflow_path=lambda workflow: engine._workflow_path(workflow),
         workflow_nodes_by_id=lambda workflow: engine._workflow_nodes_by_id(workflow),
@@ -190,6 +192,10 @@ def build_runtime_workflow_execution_services(
         ),
         workflow_loop_step_limit=lambda workflow: engine._workflow_loop_step_limit(workflow),
         node_kind=lambda node: engine._node_kind(node),
+    )
+    workflow_continuation = WorkflowContinuationCoordinator(
+        engine,
+        ports=continuation_ports,
     )
     return RuntimeWorkflowExecutionServiceBundle(
         workflow_continuation=workflow_continuation,

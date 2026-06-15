@@ -6,7 +6,10 @@ from typing import Any
 
 from apps.shell import agent_runtime
 from apps.shell.agent.runtime.budget import RunBudgetLimits
-from apps.shell.agent.runtime.workflow_continuation import WorkflowContinuationCoordinator
+from apps.shell.agent.runtime.workflow_continuation import (
+    WorkflowContinuationCoordinator,
+    WorkflowContinuationPortBundle,
+)
 from apps.shell.agent.runtime.workflow_projections import (
     WorkflowContinuationFailureProjection,
     WorkflowRunCompletionProjection,
@@ -16,6 +19,7 @@ from apps.shell.agent.runtime.workflow_run_outcomes import WorkflowRunOutcomePro
 
 def test_workflow_continuation_coordinator_remains_exported_from_legacy_module() -> None:
     assert agent_runtime.WorkflowContinuationCoordinator is WorkflowContinuationCoordinator
+    assert agent_runtime.WorkflowContinuationPortBundle is WorkflowContinuationPortBundle
     assert agent_runtime.WorkflowRunOutcomeProjector is WorkflowRunOutcomeProjector
 
 
@@ -274,6 +278,43 @@ def test_workflow_continuation_uses_injected_traversal_callbacks() -> None:
         ),
         ("workflow_run", "workflow.run.completed", {"result": "Initial context"}),
     ]
+
+
+def test_workflow_continuation_accepts_port_bundle_with_keyword_overrides() -> None:
+    engine = FakeWorkflowTraversalEngine()
+    workflow = {
+        "nodes": [
+            {"id": "start", "type": "start", "data": {"label": "Bundled Start"}},
+        ]
+    }
+    path = list(workflow["nodes"])
+    calls: list[str] = []
+    ports = WorkflowContinuationPortBundle(
+        workflow_path=lambda current_workflow: calls.append("bundle:path")
+        or list(current_workflow["nodes"]),
+        workflow_nodes_by_id=lambda _workflow: calls.append("bundle:nodes") or {"start": path[0]},
+        workflow_next_node_id=lambda _workflow, _node, _context: calls.append("bundle:next") or "",
+        workflow_parallel_plan=lambda _workflow, _node: calls.append("bundle:parallel") or {},
+        node_kind=lambda node: calls.append(f"bundle:kind:{node['id']}") or str(node["type"]),
+    )
+    coordinator = WorkflowContinuationCoordinator(
+        engine,
+        ports=ports,
+        workflow_next_node_id=lambda _workflow, _node, _context: calls.append("override:next") or "",
+    )
+
+    result = coordinator.continue_run(
+        {"run_id": "workflow_run", "user_goal": "Run bundled traversal"},
+        workflow,
+        context="Bundled context",
+        timeline=[],
+        artifacts=[],
+        start_index=0,
+        root_group=False,
+    )
+
+    assert result["status"] == "completed"
+    assert calls == ["bundle:path", "bundle:nodes", "bundle:kind:start", "override:next"]
 
 
 def test_workflow_continuation_uses_injected_condition_selection() -> None:

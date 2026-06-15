@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -61,6 +62,44 @@ def _tool_input_preview(value: Any, *, limit: int = 1200) -> Any:
     return text
 
 
+@dataclass(frozen=True)
+class WorkflowContinuationPortBundle:
+    """Injected continuation ports for decoupling Workflow execution from the engine."""
+
+    iso_epoch: Any | None = None
+    workflow_path: Any | None = None
+    workflow_nodes_by_id: Any | None = None
+    workflow_next_node_id: Any | None = None
+    workflow_parallel_plan: Any | None = None
+    workflow_condition_selection: Any | None = None
+    workflow_loop_selection: Any | None = None
+    workflow_approval_criteria: Any | None = None
+    default_workspace_policy: Any | None = None
+    workflow_artifacts_dir: Any | None = None
+    workflow_artifact_path: Any | None = None
+    workflow_artifact_write: Any | None = None
+    workflow_agent_for_node: Any | None = None
+    workflow_node_task: Any | None = None
+    workflow_child_goal: Any | None = None
+    insert_run: Any | None = None
+    execute_agent_run: Any | None = None
+    workflow_child_artifact_refs: Any | None = None
+    merge_workflow_child_run_outcome: Any | None = None
+    workflow_for_node: Any | None = None
+    workflow_run_started_projection: Any | None = None
+    continue_workflow_run: Any | None = None
+    timeline_factory: Any | None = None
+    append_run_event: Any | None = None
+    update_run: Any | None = None
+    update_run_group: Any | None = None
+    get_run: Any | None = None
+    approve_workflow_node: Any | None = None
+    runtime_limits: Any | None = None
+    workflow_loop_iterations_from_timeline: Any | None = None
+    workflow_loop_step_limit: Any | None = None
+    node_kind: Any | None = None
+
+
 class WorkflowContinuationCoordinator:
     """Executes Workflow nodes for a Workflow Run."""
 
@@ -68,6 +107,7 @@ class WorkflowContinuationCoordinator:
         self,
         engine: Any,
         *,
+        ports: WorkflowContinuationPortBundle | None = None,
         iso_epoch: Any | None = None,
         workflow_path: Any | None = None,
         workflow_nodes_by_id: Any | None = None,
@@ -101,39 +141,103 @@ class WorkflowContinuationCoordinator:
         workflow_loop_step_limit: Any | None = None,
         node_kind: Any | None = None,
     ) -> None:
+        def port_value(value: Any | None, name: str) -> Any | None:
+            if value is not None:
+                return value
+            if ports is None:
+                return None
+            return getattr(ports, name)
+
         self._engine = engine
-        self._iso_epoch = iso_epoch or _iso_epoch
-        self._workflow_path_callback = workflow_path
-        self._workflow_nodes_by_id_callback = workflow_nodes_by_id
-        self._workflow_next_node_id_callback = workflow_next_node_id
-        self._workflow_parallel_plan_callback = workflow_parallel_plan
-        self._workflow_condition_selection_callback = workflow_condition_selection
-        self._workflow_loop_selection_callback = workflow_loop_selection
-        self._workflow_approval_criteria_callback = workflow_approval_criteria
-        self._default_workspace_policy_callback = default_workspace_policy
-        self._workflow_artifacts_dir_source = workflow_artifacts_dir
-        self._workflow_artifact_path_callback = workflow_artifact_path
-        self._workflow_artifact_write_callback = workflow_artifact_write
-        self._workflow_agent_for_node_callback = workflow_agent_for_node
-        self._workflow_node_task_callback = workflow_node_task
-        self._workflow_child_goal_callback = workflow_child_goal
-        self._insert_run_callback = insert_run
-        self._execute_agent_run_callback = execute_agent_run
-        self._workflow_child_artifact_refs_callback = workflow_child_artifact_refs
-        self._merge_workflow_child_run_outcome_callback = merge_workflow_child_run_outcome
-        self._workflow_for_node_callback = workflow_for_node
-        self._workflow_run_started_projection_callback = workflow_run_started_projection
-        self._continue_workflow_run_callback = continue_workflow_run
-        self._timeline_callback = timeline_factory
-        self._append_run_event_callback = append_run_event
-        self._update_run_callback = update_run
-        self._update_run_group_callback = update_run_group
-        self._get_run_callback = get_run
-        self._approve_workflow_node_callback = approve_workflow_node
-        self._runtime_limits_source = runtime_limits
-        self._workflow_loop_iterations_from_timeline_callback = workflow_loop_iterations_from_timeline
-        self._workflow_loop_step_limit_callback = workflow_loop_step_limit
-        self._node_kind_callback = node_kind
+        self._iso_epoch = port_value(iso_epoch, "iso_epoch") or _iso_epoch
+        self._workflow_path_callback = port_value(workflow_path, "workflow_path")
+        self._workflow_nodes_by_id_callback = port_value(
+            workflow_nodes_by_id,
+            "workflow_nodes_by_id",
+        )
+        self._workflow_next_node_id_callback = port_value(
+            workflow_next_node_id,
+            "workflow_next_node_id",
+        )
+        self._workflow_parallel_plan_callback = port_value(
+            workflow_parallel_plan,
+            "workflow_parallel_plan",
+        )
+        self._workflow_condition_selection_callback = port_value(
+            workflow_condition_selection,
+            "workflow_condition_selection",
+        )
+        self._workflow_loop_selection_callback = port_value(
+            workflow_loop_selection,
+            "workflow_loop_selection",
+        )
+        self._workflow_approval_criteria_callback = port_value(
+            workflow_approval_criteria,
+            "workflow_approval_criteria",
+        )
+        self._default_workspace_policy_callback = port_value(
+            default_workspace_policy,
+            "default_workspace_policy",
+        )
+        self._workflow_artifacts_dir_source = port_value(
+            workflow_artifacts_dir,
+            "workflow_artifacts_dir",
+        )
+        self._workflow_artifact_path_callback = port_value(
+            workflow_artifact_path,
+            "workflow_artifact_path",
+        )
+        self._workflow_artifact_write_callback = port_value(
+            workflow_artifact_write,
+            "workflow_artifact_write",
+        )
+        self._workflow_agent_for_node_callback = port_value(
+            workflow_agent_for_node,
+            "workflow_agent_for_node",
+        )
+        self._workflow_node_task_callback = port_value(workflow_node_task, "workflow_node_task")
+        self._workflow_child_goal_callback = port_value(
+            workflow_child_goal,
+            "workflow_child_goal",
+        )
+        self._insert_run_callback = port_value(insert_run, "insert_run")
+        self._execute_agent_run_callback = port_value(execute_agent_run, "execute_agent_run")
+        self._workflow_child_artifact_refs_callback = port_value(
+            workflow_child_artifact_refs,
+            "workflow_child_artifact_refs",
+        )
+        self._merge_workflow_child_run_outcome_callback = port_value(
+            merge_workflow_child_run_outcome,
+            "merge_workflow_child_run_outcome",
+        )
+        self._workflow_for_node_callback = port_value(workflow_for_node, "workflow_for_node")
+        self._workflow_run_started_projection_callback = port_value(
+            workflow_run_started_projection,
+            "workflow_run_started_projection",
+        )
+        self._continue_workflow_run_callback = port_value(
+            continue_workflow_run,
+            "continue_workflow_run",
+        )
+        self._timeline_callback = port_value(timeline_factory, "timeline_factory")
+        self._append_run_event_callback = port_value(append_run_event, "append_run_event")
+        self._update_run_callback = port_value(update_run, "update_run")
+        self._update_run_group_callback = port_value(update_run_group, "update_run_group")
+        self._get_run_callback = port_value(get_run, "get_run")
+        self._approve_workflow_node_callback = port_value(
+            approve_workflow_node,
+            "approve_workflow_node",
+        )
+        self._runtime_limits_source = port_value(runtime_limits, "runtime_limits")
+        self._workflow_loop_iterations_from_timeline_callback = port_value(
+            workflow_loop_iterations_from_timeline,
+            "workflow_loop_iterations_from_timeline",
+        )
+        self._workflow_loop_step_limit_callback = port_value(
+            workflow_loop_step_limit,
+            "workflow_loop_step_limit",
+        )
+        self._node_kind_callback = port_value(node_kind, "node_kind")
         self._outcomes = WorkflowRunOutcomeProjector(
             engine,
             timeline_factory=self._timeline,
