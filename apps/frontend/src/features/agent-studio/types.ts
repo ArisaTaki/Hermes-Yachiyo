@@ -187,7 +187,12 @@ export type RunSpec = {
   created_at?: string;
   updated_at?: string;
   agent_run_id?: string;
+  workflow_id?: string;
   workflow_run_id?: string;
+  objective?: string;
+  current_node_id?: string;
+  current_node_label?: string;
+  final_answer?: string;
 };
 
 export type RunGroupSpec = {

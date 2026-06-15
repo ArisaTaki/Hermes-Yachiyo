@@ -94,6 +94,10 @@ export function publicRunTimelineToRunSpec(
   const kind = fallback.kind || (snapshot.workflow_run_id ? 'workflow_run' : 'agent_run');
   const pendingApproval = snapshot.pending_approval || snapshot.approvals?.find((approval) => approval.approval_id);
   const workflowId = 'workflow_id' in snapshot ? String(snapshot.workflow_id || '').trim() : '';
+  const workflowObjective = 'objective' in snapshot ? String(snapshot.objective || '').trim() : '';
+  const currentNodeId = 'current_node_id' in snapshot ? String(snapshot.current_node_id || '').trim() : '';
+  const currentNodeLabel = 'current_node_label' in snapshot ? String(snapshot.current_node_label || '').trim() : '';
+  const finalAnswer = 'final_answer' in snapshot ? String(snapshot.final_answer || '').trim() : '';
   return {
     run_id: snapshot.run_id,
     run_group_id: snapshot.run_group_id || snapshot.group_run_id || undefined,
@@ -116,7 +120,8 @@ export function publicRunTimelineToRunSpec(
     runnable_id: fallback.runnableId || workflowId || snapshot.workflow_run_id || snapshot.agent_id || snapshot.run_id,
     runnable_name: snapshot.title || fallback.runnableName || undefined,
     status: snapshot.status || 'processing',
-    user_goal: fallback.userGoal ?? snapshot.title ?? '',
+    user_goal: (fallback.userGoal ?? workflowObjective) || snapshot.title || '',
+    result: finalAnswer || undefined,
     timeline: (snapshot.events || []).map(publicRunEventToTimelineEvent),
     artifacts: publicArtifactsOrLegacy(snapshot.artifacts, undefined),
     pending_approval: pendingApproval
@@ -125,7 +130,12 @@ export function publicRunTimelineToRunSpec(
     created_at: snapshot.created_at,
     updated_at: snapshot.updated_at,
     agent_run_id: kind === 'agent_run' ? snapshot.run_id : undefined,
+    workflow_id: kind === 'workflow_run' ? workflowId || undefined : undefined,
     workflow_run_id: kind === 'workflow_run' ? snapshot.workflow_run_id || snapshot.run_id : undefined,
+    objective: workflowObjective || undefined,
+    current_node_id: currentNodeId || undefined,
+    current_node_label: currentNodeLabel || undefined,
+    final_answer: finalAnswer || undefined,
   };
 }
 
