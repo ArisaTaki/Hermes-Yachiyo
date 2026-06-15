@@ -68,6 +68,7 @@ from apps.shell.agent.runtime.skill_import import SkillImportPreparer, SkillImpo
 from apps.shell.agent.runtime.skill_install import SkillInstallCommandValidator
 from apps.shell.agent.runtime.skill_sources import SkillSourceDiscovery
 from apps.shell.agent.runtime.skill_sync import SkillSyncPlanner
+from apps.shell.agent.runtime.tool_requests import ToolRequestParser
 from apps.shell.agent.runtime.tool_approvals import (
     ToolApprovalClaimProjection,
     ToolApprovalContinuationHandoff,
@@ -1627,6 +1628,7 @@ class NativeRunEngine:
         self._approval_execution_in_progress: set[str] = set()
         self._run_cancel_locks: dict[str, threading.RLock] = {}
         self._run_cancel_locks_guard = threading.RLock()
+        self.tool_request_parser = ToolRequestParser()
         raw_conn = sqlite3.connect(self.db_path, check_same_thread=False)
         raw_conn.execute("PRAGMA foreign_keys=ON")
         raw_conn.execute("PRAGMA journal_mode=WAL")
@@ -5234,46 +5236,11 @@ class NativeRunEngine:
         }
 
     def _tool_requests_from_message(self, message: dict[str, Any], content: str) -> list[dict[str, Any]]:
-        native = self._parse_tool_calls(message.get("tool_calls"))
-        if native:
-            return native
-        fallback = self._parse_tool_request(content)
-        return [fallback] if fallback else []
+        return self.tool_request_parser.requests_from_message(message, content)
 
     @staticmethod
     def _parse_tool_calls(tool_calls: Any) -> list[dict[str, Any]]:
-        if not isinstance(tool_calls, list):
-            return []
-        requests = []
-        for index, call in enumerate(tool_calls):
-            if not isinstance(call, dict):
-                continue
-            function = call.get("function") if isinstance(call.get("function"), dict) else {}
-            function_name = str(function.get("name") or "").strip()
-            if not function_name:
-                continue
-            raw_arguments = function.get("arguments") or "{}"
-            if isinstance(raw_arguments, str):
-                try:
-                    arguments = json.loads(raw_arguments or "{}")
-                except json.JSONDecodeError as exc:
-                    raise AgentRuntimeError(f"工具参数不是合法 JSON：{function_name}") from exc
-            elif isinstance(raw_arguments, dict):
-                arguments = raw_arguments
-            else:
-                raise AgentRuntimeError(f"工具参数格式无效：{function_name}")
-            if not isinstance(arguments, dict):
-                raise AgentRuntimeError(f"工具参数必须是对象：{function_name}")
-            requests.append(
-                {
-                    "protocol": "tool_calls",
-                    "tool": _normalize_tool_name(function_name),
-                    "input": arguments,
-                    "tool_call_id": str(call.get("id") or f"call_{index}"),
-                    "function_name": function_name,
-                }
-            )
-        return requests
+        return ToolRequestParser().parse_tool_calls(tool_calls)
 
     @staticmethod
     def _model_profile_config_private(profile_id: str, *, capability: str) -> dict[str, Any]:
@@ -5317,20 +5284,7 @@ class NativeRunEngine:
 
     @staticmethod
     def _parse_tool_request(content: str) -> dict[str, Any] | None:
-        clean = content.strip()
-        if clean.startswith("```"):
-            clean = re.sub(r"^```(?:json)?\s*|\s*```$", "", clean, flags=re.DOTALL).strip()
-        try:
-            payload = json.loads(clean)
-        except json.JSONDecodeError:
-            return None
-        if payload.get("action") == "tool" and payload.get("tool"):
-            payload["protocol"] = "json_fallback"
-            payload["tool"] = _normalize_tool_name(payload.get("tool"))
-            if not isinstance(payload.get("input"), dict):
-                payload["input"] = {}
-            return payload
-        return None
+        return ToolRequestParser().parse_json_fallback(content)
 
     @staticmethod
     def _openai_compatible_chat(base_url: str, model: str, api_key: str, messages: list[dict[str, str]]) -> str:
