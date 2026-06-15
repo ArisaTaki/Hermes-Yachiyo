@@ -86,36 +86,22 @@ export function AgentTaskCard({
           {approvals.slice(0, 2).map((approval) => {
             const pending = (approval.status || 'pending') === 'pending';
             const actionable = pending && (onApproveApproval || onRejectApproval);
-            const actions = actionable ? (
-              <>
-                {onApproveApproval ? (
-                  <button
-                    type="button"
-                    data-approval-id={approval.approval_id}
-                    data-testid="yachiyo-task-approval-approve"
-                    disabled={busy}
-                    onClick={() => void onApproveApproval(task, approval)}
-                  >
-                    <UiIcon name="check" />
-                    <span>批准</span>
-                  </button>
-                ) : null}
-                {onRejectApproval ? (
-                  <button
-                    type="button"
-                    data-approval-id={approval.approval_id}
-                    data-testid="yachiyo-task-approval-reject"
-                    disabled={busy}
-                    onClick={() => void onRejectApproval(task, approval)}
-                  >
-                    <UiIcon name="close" />
-                    <span>拒绝</span>
-                  </button>
-                ) : null}
-              </>
-            ) : null;
             return (
-              <ApprovalCard actions={actions} approval={approval} key={approval.approval_id} />
+              <ApprovalCard
+                approval={approval}
+                busy={busy}
+                key={approval.approval_id}
+                onApprove={
+                  actionable && onApproveApproval
+                    ? () => void onApproveApproval(task, approval)
+                    : undefined
+                }
+                onReject={
+                  actionable && onRejectApproval
+                    ? () => void onRejectApproval(task, approval)
+                    : undefined
+                }
+              />
             );
           })}
         </div>

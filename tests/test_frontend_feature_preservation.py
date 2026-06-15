@@ -585,10 +585,10 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             'data-testid="yachiyo-agent-task-card"',
             'data-testid="yachiyo-agent-task-open-studio"',
             'data-testid="yachiyo-agent-task-cancel"',
-            'data-testid="yachiyo-task-approval-approve"',
-            'data-testid="yachiyo-task-approval-reject"',
             'testId="yachiyo-agent-task-timeline"',
-            "<ApprovalCard actions={actions}",
+            "<ApprovalCard",
+            "onApprove={",
+            "onReject={",
             "onApproveApproval(task, approval)",
             "onRejectApproval(task, approval)",
             "onCancelTask?.(task)",
@@ -625,10 +625,17 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
     _assert_contains(
         "apps/frontend/src/features/yachiyo-chat/components/ApprovalCard.tsx",
         [
+            "RuntimeApprovalGate",
             "RuntimeApprovalCard",
             "actions={actions}",
+            'approveTestId="yachiyo-task-approval-approve"',
+            'rejectTestId="yachiyo-task-approval-reject"',
             'actionsTestId="yachiyo-task-approval-actions"',
+            'testId="yachiyo-task-approval-gate"',
+            'cardTestId="yachiyo-task-approval-card"',
             'testId="yachiyo-task-approval-card"',
+            'approveContent={<><UiIcon name="check" /><span>批准</span></>}',
+            'rejectContent={<><UiIcon name="close" /><span>拒绝</span></>}',
         ],
     )
     _assert_contains(
@@ -655,11 +662,16 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
         [
             "export function RuntimeApprovalGate",
             "RuntimeApprovalCard",
+            "approveContent?: ReactNode;",
+            "rejectContent?: ReactNode;",
             "data-testid={testId}",
+            "data-approval-id={approval.approval_id}",
             "actionsClassName={actionsClassName}",
             "actionsTestId={actionsTestId}",
             "data-testid={approveTestId}",
             "data-testid={rejectTestId}",
+            "{approveContent || approveLabel}",
+            "{rejectContent || rejectLabel}",
             "disabled={busy}",
         ],
     )

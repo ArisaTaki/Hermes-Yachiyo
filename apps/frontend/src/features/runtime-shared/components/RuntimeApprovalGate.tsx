@@ -7,6 +7,7 @@ type RuntimeApprovalGateProps = {
   actionsTestId?: string;
   approval: RuntimeApprovalCardSnapshot;
   approveButtonClassName?: string;
+  approveContent?: ReactNode;
   approveLabel?: string;
   approveTestId?: string;
   busy?: boolean;
@@ -17,6 +18,7 @@ type RuntimeApprovalGateProps = {
   onApprove?: () => void;
   onReject?: () => void;
   rejectButtonClassName?: string;
+  rejectContent?: ReactNode;
   rejectLabel?: string;
   rejectTestId?: string;
   testId?: string;
@@ -27,6 +29,7 @@ export function RuntimeApprovalGate({
   actionsTestId = 'runtime-approval-actions',
   approval,
   approveButtonClassName,
+  approveContent,
   approveLabel = '批准',
   approveTestId,
   busy = false,
@@ -37,6 +40,7 @@ export function RuntimeApprovalGate({
   onApprove,
   onReject,
   rejectButtonClassName,
+  rejectContent,
   rejectLabel = '拒绝',
   rejectTestId,
   testId = 'runtime-approval-gate',
@@ -47,22 +51,24 @@ export function RuntimeApprovalGate({
         <button
           type="button"
           className={approveButtonClassName}
+          data-approval-id={approval.approval_id}
           data-testid={approveTestId}
           disabled={busy}
           onClick={onApprove}
         >
-          {approveLabel}
+          {approveContent || approveLabel}
         </button>
       ) : null}
       {onReject ? (
         <button
           type="button"
           className={rejectButtonClassName}
+          data-approval-id={approval.approval_id}
           data-testid={rejectTestId}
           disabled={busy}
           onClick={onReject}
         >
-          {rejectLabel}
+          {rejectContent || rejectLabel}
         </button>
       ) : null}
     </>
