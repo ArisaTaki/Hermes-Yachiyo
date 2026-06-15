@@ -62,6 +62,14 @@ class SkillUpdateBody(BaseModel):
     folder_id: str | None = Field(default=None, max_length=160)
 
 
+class SkillFolderBody(BaseModel):
+    folder_id: str | None = Field(default=None, max_length=160)
+    name: str | None = Field(default=None, max_length=160)
+    description: str | None = Field(default=None, max_length=1000)
+    source_scope: str | None = Field(default=None, max_length=40)
+    sort_order: int | None = None
+
+
 class StartWorkflowRunBody(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -392,6 +400,68 @@ async def delete_studio_skill(
         return await asyncio.to_thread(_studio_service(http_request).delete_skill, skill_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Skill 不存在") from exc
+
+
+@router.get("/studio/skill-folders")
+async def list_studio_skill_folders(http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
+    payload = await asyncio.to_thread(_studio_service(http_request).list_skill_folders)
+    uncategorized = payload.get("uncategorized")
+    return {
+        "folders": [_snapshot(folder) for folder in payload.get("folders") or []],
+        "uncategorized": _snapshot(uncategorized) if uncategorized is not None else None,
+    }
+
+
+@router.post("/studio/skill-folders")
+async def create_studio_skill_folder(
+    request: SkillFolderBody,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    try:
+        payload = request.model_dump(exclude_none=True)
+        snapshot = await asyncio.to_thread(
+            _studio_service(http_request).create_skill_folder,
+            payload,
+        )
+        return _snapshot(snapshot)
+    except AgentRuntimeError as exc:
+        raise _bad_request(exc) from exc
+
+
+@router.patch("/studio/skill-folders/{folder_id}")
+async def update_studio_skill_folder(
+    folder_id: str,
+    request: SkillFolderBody,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    try:
+        payload = request.model_dump(exclude_none=True)
+        snapshot = await asyncio.to_thread(
+            _studio_service(http_request).update_skill_folder,
+            folder_id,
+            payload,
+        )
+        return _snapshot(snapshot)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Skill 文件夹不存在") from exc
+    except AgentRuntimeError as exc:
+        raise _bad_request(exc) from exc
+
+
+@router.delete("/studio/skill-folders/{folder_id}")
+async def delete_studio_skill_folder(
+    folder_id: str,
+    delete_skills: bool = False,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(
+            _studio_service(http_request).delete_skill_folder,
+            folder_id,
+            delete_skills,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Skill 文件夹不存在") from exc
 
 
 @router.post("/studio/agents/{agent_id}/runs")

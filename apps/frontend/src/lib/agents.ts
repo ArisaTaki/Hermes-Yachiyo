@@ -335,21 +335,29 @@ export async function listSkillSources(): Promise<SkillSourceRoot[]> {
 }
 
 export async function listSkillFolders(): Promise<SkillFolderSpec[]> {
-  const payload = await apiGet<{ folders?: SkillFolderSpec[] }>('/ui/skill-folders');
+  const payload = await apiGet<{ folders?: SkillFolderSpec[] }>('/yachiyo/studio/skill-folders').catch(() => (
+    apiGet<{ folders?: SkillFolderSpec[] }>('/ui/skill-folders')
+  ));
   return payload.folders || [];
 }
 
 export async function createSkillFolder(request: Partial<SkillFolderSpec>): Promise<SkillFolderSpec> {
-  return apiPost('/ui/skill-folders', request);
+  return apiPost<SkillFolderSpec>('/yachiyo/studio/skill-folders', request).catch(() => (
+    apiPost<SkillFolderSpec>('/ui/skill-folders', request)
+  ));
 }
 
 export async function updateSkillFolder(folderId: string, request: Partial<SkillFolderSpec>): Promise<SkillFolderSpec> {
-  return apiPatch(`/ui/skill-folders/${encodeURIComponent(folderId)}`, request);
+  return apiPatch<SkillFolderSpec>(`/yachiyo/studio/skill-folders/${encodeURIComponent(folderId)}`, request).catch(() => (
+    apiPatch<SkillFolderSpec>(`/ui/skill-folders/${encodeURIComponent(folderId)}`, request)
+  ));
 }
 
 export async function deleteSkillFolder(folderId: string, options: { deleteSkills?: boolean } = {}): Promise<{ ok?: boolean; deleted_skill_count?: number }> {
   const query = options.deleteSkills ? '?delete_skills=true' : '';
-  return apiDelete(`/ui/skill-folders/${encodeURIComponent(folderId)}${query}`);
+  return apiDelete(`/yachiyo/studio/skill-folders/${encodeURIComponent(folderId)}${query}`).catch(() => (
+    apiDelete(`/ui/skill-folders/${encodeURIComponent(folderId)}${query}`)
+  ));
 }
 
 export async function syncNativeSkills(): Promise<SkillSyncResponse> {

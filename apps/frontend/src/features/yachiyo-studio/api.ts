@@ -5,6 +5,7 @@ import type {
   GroupRunSnapshot,
   RunTimelineSnapshot,
   SaveAgentGroupRequest,
+  SkillFolderSnapshot,
   SkillSnapshot,
 } from './types';
 
@@ -37,6 +38,32 @@ export async function updateYachiyoSkill(
 
 export async function deleteYachiyoSkill(skillId: string): Promise<{ ok?: boolean }> {
   return apiDelete(`/yachiyo/studio/skills/${encodeURIComponent(skillId)}`);
+}
+
+export async function listYachiyoSkillFolders(): Promise<SkillFolderSnapshot[]> {
+  const payload = await apiGet<{ folders?: SkillFolderSnapshot[] }>('/yachiyo/studio/skill-folders');
+  return payload.folders || [];
+}
+
+export async function createYachiyoSkillFolder(
+  request: Partial<SkillFolderSnapshot>,
+): Promise<SkillFolderSnapshot> {
+  return apiPost('/yachiyo/studio/skill-folders', request);
+}
+
+export async function updateYachiyoSkillFolder(
+  folderId: string,
+  request: Partial<SkillFolderSnapshot>,
+): Promise<SkillFolderSnapshot> {
+  return apiPatch(`/yachiyo/studio/skill-folders/${encodeURIComponent(folderId)}`, request);
+}
+
+export async function deleteYachiyoSkillFolder(
+  folderId: string,
+  options: { deleteSkills?: boolean } = {},
+): Promise<{ ok?: boolean; deleted_skill_count?: number }> {
+  const query = options.deleteSkills ? '?delete_skills=true' : '';
+  return apiDelete(`/yachiyo/studio/skill-folders/${encodeURIComponent(folderId)}${query}`);
 }
 
 export async function listYachiyoAgentGroups(): Promise<AgentGroupSnapshot[]> {

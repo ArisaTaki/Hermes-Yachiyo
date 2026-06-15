@@ -15,6 +15,7 @@ from .contracts import (
     SaveAgentGroupRequest,
     SaveAgentRequest,
     SaveWorkflowRequest,
+    SkillFolderSnapshot,
     SkillSnapshot,
     StartAgentRunRequest,
     StartGroupRunRequest,
@@ -24,7 +25,7 @@ from .contracts import (
 from .events import public_run_event_from_payload
 from .groups import agent_group_snapshot_from_payload, group_run_snapshot_from_payload
 from .ports import StudioPort
-from .skills import skill_snapshot_from_payload
+from .skills import skill_folder_snapshot_from_payload, skill_snapshot_from_payload
 from .timelines import run_timeline_snapshot_from_payload
 from .workflows import workflow_snapshot_from_payload
 
@@ -79,6 +80,44 @@ class AgentStudioService:
 
     def delete_skill(self, skill_id: str) -> dict[str, Any]:
         return dict(self._studio_port.delete_skill(skill_id))
+
+    def list_skill_folders(self) -> dict[str, Any]:
+        payload = self._studio_port.list_skill_folders()
+        folders = [
+            skill_folder_snapshot_from_payload(item)
+            for item in _payload_items(payload, "folders")
+        ]
+        uncategorized_payload = payload.get("uncategorized") if isinstance(payload, Mapping) else None
+        uncategorized = (
+            skill_folder_snapshot_from_payload(uncategorized_payload)
+            if isinstance(uncategorized_payload, Mapping)
+            else None
+        )
+        return {
+            "folders": folders,
+            "uncategorized": uncategorized,
+        }
+
+    def create_skill_folder(self, request: Mapping[str, Any]) -> SkillFolderSnapshot:
+        return skill_folder_snapshot_from_payload(
+            self._studio_port.create_skill_folder(dict(request))
+        )
+
+    def update_skill_folder(
+        self,
+        folder_id: str,
+        request: Mapping[str, Any],
+    ) -> SkillFolderSnapshot:
+        return skill_folder_snapshot_from_payload(
+            self._studio_port.update_skill_folder(folder_id, dict(request))
+        )
+
+    def delete_skill_folder(
+        self,
+        folder_id: str,
+        delete_skills: bool = False,
+    ) -> dict[str, Any]:
+        return dict(self._studio_port.delete_skill_folder(folder_id, delete_skills))
 
     def start_agent_run(
         self,

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from .contracts import SkillSnapshot
+from .contracts import SkillFolderSnapshot, SkillSnapshot
 
 
 def skill_snapshot_from_payload(payload: Mapping[str, Any] | SkillSnapshot) -> SkillSnapshot:
@@ -33,6 +33,33 @@ def skill_snapshot_from_payload(payload: Mapping[str, Any] | SkillSnapshot) -> S
         created_at=_text(payload.get("created_at")),
         updated_at=_text(payload.get("updated_at")),
     )
+
+
+def skill_folder_snapshot_from_payload(
+    payload: Mapping[str, Any] | SkillFolderSnapshot,
+) -> SkillFolderSnapshot:
+    if isinstance(payload, SkillFolderSnapshot):
+        return payload
+
+    return SkillFolderSnapshot(
+        folder_id=_text(payload.get("folder_id")),
+        name=_text(payload.get("name") or "Skill Folder"),
+        description=_optional_text(payload.get("description")),
+        source_scope=_text(payload.get("source_scope") or "all"),
+        sort_order=_int(payload.get("sort_order")),
+        skill_count=_int(payload.get("skill_count")),
+        installed_count=_int(payload.get("installed_count")),
+        native_count=_int(payload.get("native_count")),
+        created_at=_text(payload.get("created_at")),
+        updated_at=_text(payload.get("updated_at")),
+    )
+
+
+def _int(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _text(value: Any) -> str:

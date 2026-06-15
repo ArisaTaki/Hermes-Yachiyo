@@ -19,6 +19,7 @@ from apps.shell.yachiyo_agent import (
     SaveAgentGroupRequest,
     SaveAgentRequest,
     SaveWorkflowRequest,
+    SkillFolderSnapshot,
     SkillSnapshot,
     ToolCallSnapshot,
     WorkflowSnapshot,
@@ -272,6 +273,37 @@ def test_skill_snapshot_keeps_skill_library_fields() -> None:
         "updated_at",
     ]
     assert payload["asset_paths"] == ["assets/icon.png"]
+
+
+def test_skill_folder_snapshot_keeps_skill_library_grouping_fields() -> None:
+    snapshot = SkillFolderSnapshot(
+        folder_id="folder-1",
+        name="Review",
+        description="Review skills",
+        source_scope="installed",
+        sort_order=2,
+        skill_count=3,
+        installed_count=2,
+        native_count=1,
+        created_at="2026-06-14T00:00:00Z",
+        updated_at="2026-06-14T00:00:01Z",
+    )
+
+    payload = _json(snapshot)
+
+    assert list(payload) == [
+        "folder_id",
+        "name",
+        "description",
+        "source_scope",
+        "sort_order",
+        "skill_count",
+        "installed_count",
+        "native_count",
+        "created_at",
+        "updated_at",
+    ]
+    assert payload["source_scope"] == "installed"
 
 
 def test_studio_save_requests_keep_public_field_names() -> None:

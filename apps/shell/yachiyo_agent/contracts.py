@@ -190,6 +190,19 @@ class SkillSnapshot(_PublicSnapshot):
     updated_at: str = ""
 
 
+class SkillFolderSnapshot(_PublicSnapshot):
+    folder_id: str
+    name: str
+    description: str | None = None
+    source_scope: Literal["all", "installed", "native"] | str = "all"
+    sort_order: int = 0
+    skill_count: int = 0
+    installed_count: int = 0
+    native_count: int = 0
+    created_at: str = ""
+    updated_at: str = ""
+
+
 class AgentGroupMemberSnapshot(_PublicSnapshot):
     agent_id: str
     name: str

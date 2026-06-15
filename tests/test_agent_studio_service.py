@@ -63,6 +63,38 @@ class _FakeStudioPort:
         self.calls.append(("delete_skill", skill_id))
         return {"ok": True, "skill_id": skill_id}
 
+    def list_skill_folders(self) -> dict[str, Any]:
+        self.calls.append(("list_skill_folders", None))
+        return {
+            "ok": True,
+            "folders": [_skill_folder_payload()],
+            "uncategorized": _skill_folder_payload(
+                folder_id="",
+                name="Uncategorized",
+                source_scope="all",
+                sort_order=-1,
+            ),
+        }
+
+    def create_skill_folder(self, request: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append(("create_skill_folder", request))
+        return _skill_folder_payload(
+            folder_id=request.get("folder_id") or "folder-new",
+            name=request["name"],
+        )
+
+    def update_skill_folder(self, folder_id: str, request: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append(
+            ("update_skill_folder", {"folder_id": folder_id, "request": request})
+        )
+        return _skill_folder_payload(folder_id=folder_id, name=request.get("name") or "Updated")
+
+    def delete_skill_folder(self, folder_id: str, delete_skills: bool = False) -> dict[str, Any]:
+        self.calls.append(
+            ("delete_skill_folder", {"folder_id": folder_id, "delete_skills": delete_skills})
+        )
+        return {"ok": True, "deleted_skill_count": 2 if delete_skills else 0}
+
     def start_agent_run(self, request: dict[str, Any]) -> dict[str, Any]:
         self.calls.append(("start_agent_run", request))
         return _run_payload(
@@ -204,6 +236,10 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
     skills = service.list_skills()
     updated_skill = service.update_skill("skill-1", {"enabled": False, "folder_id": "folder-2"})
     deleted_skill = service.delete_skill("skill-1")
+    skill_folders_payload = service.list_skill_folders()
+    saved_skill_folder = service.create_skill_folder({"name": "New Folder"})
+    updated_skill_folder = service.update_skill_folder("folder-1", {"name": "Renamed"})
+    deleted_skill_folder = service.delete_skill_folder("folder-1", delete_skills=True)
     groups = service.list_groups()
     group = service.get_group("group-1")
     saved_group = service.save_group(
@@ -246,6 +282,11 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
     assert updated_skill.enabled is False
     assert updated_skill.folder_id == "folder-2"
     assert deleted_skill == {"ok": True, "skill_id": "skill-1"}
+    assert skill_folders_payload["folders"][0].folder_id == "folder-1"
+    assert skill_folders_payload["uncategorized"].folder_id == ""
+    assert saved_skill_folder.name == "New Folder"
+    assert updated_skill_folder.name == "Renamed"
+    assert deleted_skill_folder == {"ok": True, "deleted_skill_count": 2}
     assert groups[0].members[0].agent_id == "agent-1"
     assert group.mode == "debate"
     assert saved_group.name == "Team"
@@ -273,6 +314,16 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
         {"skill_id": "skill-1", "request": {"enabled": False, "folder_id": "folder-2"}},
     ) in port.calls
     assert ("delete_skill", "skill-1") in port.calls
+    assert ("list_skill_folders", None) in port.calls
+    assert ("create_skill_folder", {"name": "New Folder"}) in port.calls
+    assert (
+        "update_skill_folder",
+        {"folder_id": "folder-1", "request": {"name": "Renamed"}},
+    ) in port.calls
+    assert (
+        "delete_skill_folder",
+        {"folder_id": "folder-1", "delete_skills": True},
+    ) in port.calls
     assert (
         "save_group",
         {
@@ -430,6 +481,26 @@ def _skill_payload(skill_id: str = "skill-1", name: str = "Workspace Reviewer") 
         "skill_markdown": "# Workspace Reviewer",
         "asset_paths": ["assets/icon.png"],
         "enabled": True,
+        "created_at": "2026-06-14T00:00:00Z",
+        "updated_at": "2026-06-14T00:00:01Z",
+    }
+
+
+def _skill_folder_payload(
+    folder_id: str = "folder-1",
+    name: str = "Review",
+    source_scope: str = "installed",
+    sort_order: int = 2,
+) -> dict[str, Any]:
+    return {
+        "folder_id": folder_id,
+        "name": name,
+        "description": "Review skills",
+        "source_scope": source_scope,
+        "sort_order": sort_order,
+        "skill_count": 3,
+        "installed_count": 2,
+        "native_count": 1,
         "created_at": "2026-06-14T00:00:00Z",
         "updated_at": "2026-06-14T00:00:01Z",
     }

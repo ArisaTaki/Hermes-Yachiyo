@@ -153,6 +153,18 @@ class LegacyStudioPort:
     def delete_skill(self, skill_id: str) -> dict[str, Any]:
         return self._runtime.delete_skill(skill_id)
 
+    def list_skill_folders(self) -> dict[str, Any]:
+        return self._runtime.list_skill_folders()
+
+    def create_skill_folder(self, request: dict[str, Any]) -> dict[str, Any]:
+        return self._runtime.create_skill_folder(request)
+
+    def update_skill_folder(self, folder_id: str, request: dict[str, Any]) -> dict[str, Any]:
+        return self._runtime.update_skill_folder(folder_id, request)
+
+    def delete_skill_folder(self, folder_id: str, delete_skills: bool = False) -> dict[str, Any]:
+        return self._runtime.delete_skill_folder(folder_id, delete_skills=delete_skills)
+
     def start_agent_run(self, request: dict[str, Any]) -> dict[str, Any]:
         return self._runtime.create_agent_run(
             {

@@ -154,6 +154,38 @@ class _FakeAgentRuntime:
         self.calls.append(("delete_skill", skill_id))
         return {"ok": True, "skill_id": skill_id}
 
+    def list_skill_folders(self) -> dict[str, Any]:
+        self.calls.append(("list_skill_folders", None))
+        return {
+            "ok": True,
+            "folders": [_skill_folder_payload()],
+            "uncategorized": _skill_folder_payload(
+                folder_id="",
+                name="Uncategorized",
+                source_scope="all",
+                sort_order=-1,
+            ),
+        }
+
+    def create_skill_folder(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append(("create_skill_folder", payload))
+        return _skill_folder_payload(
+            folder_id=payload.get("folder_id") or "folder-new",
+            name=payload["name"],
+        )
+
+    def update_skill_folder(self, folder_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append(
+            ("update_skill_folder", {"folder_id": folder_id, "payload": payload})
+        )
+        return _skill_folder_payload(folder_id=folder_id, name=payload.get("name") or "Updated")
+
+    def delete_skill_folder(self, folder_id: str, *, delete_skills: bool = False) -> dict[str, Any]:
+        self.calls.append(
+            ("delete_skill_folder", {"folder_id": folder_id, "delete_skills": delete_skills})
+        )
+        return {"ok": True, "deleted_skill_count": 2 if delete_skills else 0}
+
     def create_agent_run(self, payload: dict[str, Any]) -> dict[str, Any]:
         self.calls.append(("create_agent_run", payload))
         return _run_payload(
@@ -386,6 +418,21 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
         request,
     )
     deleted_skill = await yachiyo.delete_studio_skill("skill-1", request)
+    skill_folders = await yachiyo.list_studio_skill_folders(request)
+    saved_skill_folder = await yachiyo.create_studio_skill_folder(
+        yachiyo.SkillFolderBody(name="New Folder"),
+        request,
+    )
+    updated_skill_folder = await yachiyo.update_studio_skill_folder(
+        "folder-1",
+        yachiyo.SkillFolderBody(name="Renamed"),
+        request,
+    )
+    deleted_skill_folder = await yachiyo.delete_studio_skill_folder(
+        "folder-1",
+        True,
+        request,
+    )
     agent_run = await yachiyo.start_studio_agent_run(
         "agent-1",
         yachiyo.StartAgentRunBody(objective="Draft summary", client_run_id="client-agent-1"),
@@ -435,6 +482,11 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     assert updated_skill["enabled"] is False
     assert updated_skill["folder_id"] == "folder-2"
     assert deleted_skill == {"ok": True, "skill_id": "skill-1"}
+    assert skill_folders["folders"][0]["folder_id"] == "folder-1"
+    assert skill_folders["uncategorized"]["folder_id"] == ""
+    assert saved_skill_folder["name"] == "New Folder"
+    assert updated_skill_folder["name"] == "Renamed"
+    assert deleted_skill_folder == {"ok": True, "deleted_skill_count": 2}
     assert workflows["workflows"][0]["workflow_id"] == "workflow-1"
     assert deleted_workflow == {"ok": True, "workflow_id": "workflow-1"}
     assert workflow_run["workflow_run_id"] == "workflow-run-1"
@@ -470,6 +522,16 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
         {"skill_id": "skill-1", "payload": {"enabled": False, "folder_id": "folder-2"}},
     ) in runtime.calls
     assert ("delete_skill", "skill-1") in runtime.calls
+    assert ("list_skill_folders", None) in runtime.calls
+    assert ("create_skill_folder", {"name": "New Folder"}) in runtime.calls
+    assert (
+        "update_skill_folder",
+        {"folder_id": "folder-1", "payload": {"name": "Renamed"}},
+    ) in runtime.calls
+    assert (
+        "delete_skill_folder",
+        {"folder_id": "folder-1", "delete_skills": True},
+    ) in runtime.calls
     assert ("delete_workflow", "workflow-1") in runtime.calls
     assert ("list_runs", 5) in runtime.calls
     assert ("list_run_groups", 5) in runtime.calls
@@ -551,6 +613,10 @@ def test_yachiyo_studio_routes_include_run_action_facade() -> None:
     assert '@router.get("/studio/skills")' in source
     assert '@router.patch("/studio/skills/{skill_id}")' in source
     assert '@router.delete("/studio/skills/{skill_id}")' in source
+    assert '@router.get("/studio/skill-folders")' in source
+    assert '@router.post("/studio/skill-folders")' in source
+    assert '@router.patch("/studio/skill-folders/{folder_id}")' in source
+    assert '@router.delete("/studio/skill-folders/{folder_id}")' in source
     assert '@router.get("/studio/group-runs")' in source
     assert '@router.get("/studio/group-runs/{group_run_id}")' in source
     assert '@router.get("/studio/runs")' in source
@@ -607,6 +673,26 @@ def _skill_payload(skill_id: str = "skill-1", name: str = "Workspace Reviewer") 
         "skill_markdown": "# Workspace Reviewer",
         "asset_paths": ["assets/icon.png"],
         "enabled": True,
+        "created_at": "2026-06-14T00:00:00Z",
+        "updated_at": "2026-06-14T00:00:01Z",
+    }
+
+
+def _skill_folder_payload(
+    folder_id: str = "folder-1",
+    name: str = "Review",
+    source_scope: str = "installed",
+    sort_order: int = 2,
+) -> dict[str, Any]:
+    return {
+        "folder_id": folder_id,
+        "name": name,
+        "description": "Review skills",
+        "source_scope": source_scope,
+        "sort_order": sort_order,
+        "skill_count": 3,
+        "installed_count": 2,
+        "native_count": 1,
         "created_at": "2026-06-14T00:00:00Z",
         "updated_at": "2026-06-14T00:00:01Z",
     }

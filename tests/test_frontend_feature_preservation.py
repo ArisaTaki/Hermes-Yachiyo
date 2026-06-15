@@ -443,6 +443,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
         [
             "/yachiyo/studio/agents",
             "/yachiyo/studio/skills",
+            "/yachiyo/studio/skill-folders",
             "/yachiyo/studio/groups",
             "/yachiyo/studio/group-runs",
             "/yachiyo/studio/workflows/${encodeURIComponent(workflowId)}/runs",
@@ -453,6 +454,10 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "listYachiyoSkills",
             "updateYachiyoSkill",
             "deleteYachiyoSkill",
+            "listYachiyoSkillFolders",
+            "createYachiyoSkillFolder",
+            "updateYachiyoSkillFolder",
+            "deleteYachiyoSkillFolder",
             "listYachiyoAgentGroups",
             "saveYachiyoAgentGroup",
             "startYachiyoGroupRun",
@@ -487,6 +492,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
         [
             "export type AgentDefinitionSnapshot",
             "export type SkillSnapshot",
+            "export type SkillFolderSnapshot",
             "export type AgentGroupSnapshot",
             "export type GroupRunSnapshot",
             "export type PublicRunEvent",
@@ -1810,12 +1816,16 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "apiDelete(`/yachiyo/studio/skills/${encodeURIComponent(skillId)}`)",
             "apiDelete(`/ui/skills/${encodeURIComponent(skillId)}`)",
             "export async function listSkillFolders()",
+            "'/yachiyo/studio/skill-folders'",
             "'/ui/skill-folders'",
             "export async function createSkillFolder(",
-            "return apiPost('/ui/skill-folders', request);",
+            "apiPost<SkillFolderSpec>('/yachiyo/studio/skill-folders', request)",
+            "apiPost<SkillFolderSpec>('/ui/skill-folders', request)",
             "export async function updateSkillFolder(",
-            "apiPatch(`/ui/skill-folders/${encodeURIComponent(folderId)}`, request)",
+            "apiPatch<SkillFolderSpec>(`/yachiyo/studio/skill-folders/${encodeURIComponent(folderId)}`, request)",
+            "apiPatch<SkillFolderSpec>(`/ui/skill-folders/${encodeURIComponent(folderId)}`, request)",
             "export async function deleteSkillFolder(",
+            "apiDelete(`/yachiyo/studio/skill-folders/${encodeURIComponent(folderId)}${query}`)",
             "apiDelete(`/ui/skill-folders/${encodeURIComponent(folderId)}${query}`)",
             "export async function listWorkflows()",
             "'/yachiyo/studio/workflows'",
@@ -1882,6 +1892,38 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
         [
             "apiDelete(`/yachiyo/studio/skills/${encodeURIComponent(skillId)}`)",
             "apiDelete(`/ui/skills/${encodeURIComponent(skillId)}`)",
+        ],
+    )
+    _assert_function_contains(
+        "apps/frontend/src/lib/agents.ts",
+        "listSkillFolders",
+        [
+            "apiGet<{ folders?: SkillFolderSpec[] }>('/yachiyo/studio/skill-folders')",
+            "apiGet<{ folders?: SkillFolderSpec[] }>('/ui/skill-folders')",
+        ],
+    )
+    _assert_function_contains(
+        "apps/frontend/src/lib/agents.ts",
+        "createSkillFolder",
+        [
+            "apiPost<SkillFolderSpec>('/yachiyo/studio/skill-folders', request)",
+            "apiPost<SkillFolderSpec>('/ui/skill-folders', request)",
+        ],
+    )
+    _assert_function_contains(
+        "apps/frontend/src/lib/agents.ts",
+        "updateSkillFolder",
+        [
+            "apiPatch<SkillFolderSpec>(`/yachiyo/studio/skill-folders/${encodeURIComponent(folderId)}`",
+            "apiPatch<SkillFolderSpec>(`/ui/skill-folders/${encodeURIComponent(folderId)}`",
+        ],
+    )
+    _assert_function_contains(
+        "apps/frontend/src/lib/agents.ts",
+        "deleteSkillFolder",
+        [
+            "apiDelete(`/yachiyo/studio/skill-folders/${encodeURIComponent(folderId)}${query}`)",
+            "apiDelete(`/ui/skill-folders/${encodeURIComponent(folderId)}${query}`)",
         ],
     )
     _assert_contains(
