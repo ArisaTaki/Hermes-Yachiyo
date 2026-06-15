@@ -151,21 +151,18 @@ from apps.shell.agent.tools.broker import (
     cancel_terminal_process_groups,
 )
 from apps.shell.agent.tools.policy import (
+    FUTURE_TASK_TOOL_NAMES as _FUTURE_TASK_TOOL_NAMES,
+    HIGH_RISK_AGENT_TOOLS as _HIGH_RISK_AGENT_TOOLS,
+    KNOWN_AGENT_TOOLS as _KNOWN_AGENT_TOOLS,
     MEMORY_KINDS as _MEMORY_KINDS,
-)
-from apps.shell.agent.tools.policy import (
+    MEMORY_TOOL_NAMES as _MEMORY_TOOL_NAMES,
     MEMORY_SCOPES as _MEMORY_SCOPES,
-)
-from apps.shell.agent.tools.policy import (
+    RuntimePolicyCompiler,
     TOOL_DESCRIPTORS,
     PolicyGate,
     ToolDescriptor,
     ToolDescriptorRegistry,
-)
-from apps.shell.agent.tools.policy import (
     TOOL_FUNCTION_NAMES as _TOOL_FUNCTION_NAMES,
-)
-from apps.shell.agent.tools.policy import (
     TOOL_NAME_ALIASES as _TOOL_NAME_ALIASES,
 )
 from apps.shell.credential_store import (
@@ -190,25 +187,8 @@ logger = logging.getLogger(__name__)
 
 
 _EXECUTION_BACKENDS = {"native_profile", "yachiyo_profile", "external_cli"}
-_KNOWN_AGENT_TOOLS = {
-    "skill.read",
-    "memory.add",
-    "memory.replace",
-    "memory.remove",
-    "future_task.schedule",
-    "future_task.list",
-    "future_task.cancel",
-    "workspace.list",
-    "workspace.read",
-    "workspace.write_patch",
-    "terminal.run",
-    "artifact.write",
-}
-_HIGH_RISK_AGENT_TOOLS = {"terminal.run", "workspace.write_patch"}
-_MEMORY_TOOL_NAMES = ("memory.add", "memory.replace", "memory.remove")
 _MEMORY_CONTEXT_LIMIT = 12
 _MEMORY_CONTENT_MAX_CHARS = 4000
-_FUTURE_TASK_TOOL_NAMES = ("future_task.schedule", "future_task.list", "future_task.cancel")
 _MAX_AGENT_TOOL_ITERATIONS = 50
 _FINAL_RUN_STATUSES = {"completed", "failed", "cancelled"}
 _WORKFLOW_NODE_TYPES = {"start", "agent", "approval", "artifact", "condition", "parallel", "workflow", "loop"}
@@ -1698,6 +1678,7 @@ class NativeRunEngine:
         self.runtime_agent_timeline = RuntimeAgentTimelineBuilder(
             timeline_factory=self._timeline,
         )
+        self.runtime_policy = RuntimePolicyCompiler()
         self.workflows = WorkflowRepository(
             self._conn,
             ensure_row_factory=self._ensure_row_factory,
@@ -2621,29 +2602,11 @@ class NativeRunEngine:
 
     @staticmethod
     def _default_tool_policy(category: str = "custom") -> dict[str, Any]:
-        memory_tools = list(_MEMORY_TOOL_NAMES)
-        future_task_tools = list(_FUTURE_TASK_TOOL_NAMES)
-        tools = [*memory_tools, *future_task_tools, "artifact.write"]
-        if category in {"coding", "review"}:
-            tools = [
-                "workspace.list",
-                "workspace.read",
-                "workspace.write_patch",
-                "terminal.run",
-                *memory_tools,
-                *future_task_tools,
-                "artifact.write",
-            ]
-        elif category in {"research", "design", "office", "orchestrator"}:
-            tools = ["workspace.list", "workspace.read", *memory_tools, *future_task_tools, "artifact.write"]
-        return {
-            "allowed_tools": tools,
-            "approval_required": {"terminal.run": True, "workspace.write_patch": True},
-        }
+        return RuntimePolicyCompiler.default_tool_policy(category)
 
     @staticmethod
     def _default_workspace_policy() -> dict[str, Any]:
-        return {"default_workdir": "", "readable_scopes": ["."], "writable_scopes": []}
+        return RuntimePolicyCompiler.default_workspace_policy()
 
     def _default_agent_workdir(self, agent_id: str) -> Path:
         raw_id = str(agent_id or "")
@@ -2720,46 +2683,10 @@ class NativeRunEngine:
         return ToolDescriptorRegistry.model_tool_schemas(allowed_tools)
 
     def _compile_tool_policy(self, category: str, policy: Any = None) -> dict[str, Any]:
-        raw = policy if isinstance(policy, dict) else {}
-        default_policy = self._default_tool_policy(category)
-        allowed = raw.get("allowed_tools")
-        if isinstance(allowed, str):
-            allowed = [allowed]
-        if not isinstance(allowed, list):
-            allowed = default_policy["allowed_tools"]
-        normalized_allowed = []
-        for tool in allowed:
-            name = str(tool or "").strip()
-            if name in _KNOWN_AGENT_TOOLS and name not in normalized_allowed:
-                normalized_allowed.append(name)
-
-        raw_approval = raw.get("approval_required")
-        approval_required = dict(raw_approval) if isinstance(raw_approval, dict) else {}
-        for tool in _HIGH_RISK_AGENT_TOOLS:
-            if tool in normalized_allowed:
-                approval_required[tool] = True
-            else:
-                approval_required.pop(tool, None)
-        return {"allowed_tools": normalized_allowed, "approval_required": approval_required}
+        return self.runtime_policy.compile_tool_policy(category, policy)
 
     def _compile_workspace_policy(self, policy: Any = None) -> dict[str, Any]:
-        raw = policy if isinstance(policy, dict) else {}
-        default_policy = self._default_workspace_policy()
-        readable = raw.get("readable_scopes", default_policy["readable_scopes"])
-        writable = raw.get("writable_scopes", default_policy["writable_scopes"])
-        if isinstance(readable, str):
-            readable = [item.strip() for item in readable.split(",") if item.strip()]
-        if isinstance(writable, str):
-            writable = [item.strip() for item in writable.split(",") if item.strip()]
-        if not isinstance(readable, list):
-            readable = default_policy["readable_scopes"]
-        if not isinstance(writable, list):
-            writable = default_policy["writable_scopes"]
-        return {
-            "default_workdir": str(raw.get("default_workdir") or "").strip(),
-            "readable_scopes": [str(item or ".").strip() or "." for item in readable],
-            "writable_scopes": [str(item or "").strip() for item in writable if str(item or "").strip()],
-        }
+        return self.runtime_policy.compile_workspace_policy(policy)
 
     def _memory_store(self, *, source_run_id: str = "") -> AgentMemoryStore:
         return AgentMemoryStore(
@@ -4321,28 +4248,7 @@ class NativeRunEngine:
         return skills
 
     def _compile_agent_runtime(self, agent: dict[str, Any]) -> dict[str, Any]:
-        category = str(agent.get("category") or "custom")
-        tool_policy = self._compile_tool_policy(category, agent.get("tool_policy"))
-        if agent.get("skill_ids") and "skill.read" not in tool_policy["allowed_tools"]:
-            tool_policy = {
-                **tool_policy,
-                "allowed_tools": ["skill.read", *tool_policy["allowed_tools"]],
-            }
-        workspace_policy = self._compile_workspace_policy(agent.get("workspace_policy"))
-        return {
-            "runtime": "oha_agent",
-            "tool_policy": tool_policy,
-            "workspace_policy": workspace_policy,
-            "progress_events": [
-                "agent.run.started",
-                "agent.runtime.compiled",
-                "agent.model.response",
-                "agent.tool.call",
-                "agent.artifact.write",
-                "agent.run.completed",
-                "agent.run.failed",
-            ],
-        }
+        return self.runtime_policy.compile_agent_runtime(agent)
 
     def _agent_context(
         self,

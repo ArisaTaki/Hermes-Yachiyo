@@ -28,6 +28,10 @@ TOOL_FUNCTION_NAMES = {
     "artifact.write": "artifact_write",
 }
 TOOL_NAME_ALIASES = {value: key for key, value in TOOL_FUNCTION_NAMES.items()}
+KNOWN_AGENT_TOOLS = set(TOOL_FUNCTION_NAMES)
+HIGH_RISK_AGENT_TOOLS = {"terminal.run", "workspace.write_patch"}
+MEMORY_TOOL_NAMES = ("memory.add", "memory.replace", "memory.remove")
+FUTURE_TASK_TOOL_NAMES = ("future_task.schedule", "future_task.list", "future_task.cancel")
 
 
 def _redact_secrets(value: Any) -> str:
@@ -405,3 +409,109 @@ class PolicyGate:
     @staticmethod
     def allows_tool(tool_name: str, allowed_tools: list[str]) -> bool:
         return tool_name in set(str(tool or "").strip() for tool in allowed_tools)
+
+
+class RuntimePolicyCompiler:
+    """Compiles persisted Agent policies into runtime-safe execution policy snapshots."""
+
+    @staticmethod
+    def default_tool_policy(category: str = "custom") -> dict[str, Any]:
+        memory_tools = list(MEMORY_TOOL_NAMES)
+        future_task_tools = list(FUTURE_TASK_TOOL_NAMES)
+        tools = [*memory_tools, *future_task_tools, "artifact.write"]
+        if category in {"coding", "review"}:
+            tools = [
+                "workspace.list",
+                "workspace.read",
+                "workspace.write_patch",
+                "terminal.run",
+                *memory_tools,
+                *future_task_tools,
+                "artifact.write",
+            ]
+        elif category in {"research", "design", "office", "orchestrator"}:
+            tools = [
+                "workspace.list",
+                "workspace.read",
+                *memory_tools,
+                *future_task_tools,
+                "artifact.write",
+            ]
+        return {
+            "allowed_tools": tools,
+            "approval_required": {"terminal.run": True, "workspace.write_patch": True},
+        }
+
+    @staticmethod
+    def default_workspace_policy() -> dict[str, Any]:
+        return {"default_workdir": "", "readable_scopes": ["."], "writable_scopes": []}
+
+    def compile_tool_policy(self, category: str, policy: Any = None) -> dict[str, Any]:
+        raw = policy if isinstance(policy, dict) else {}
+        default_policy = self.default_tool_policy(category)
+        allowed = raw.get("allowed_tools")
+        if isinstance(allowed, str):
+            allowed = [allowed]
+        if not isinstance(allowed, list):
+            allowed = default_policy["allowed_tools"]
+        normalized_allowed = []
+        for tool in allowed:
+            name = str(tool or "").strip()
+            if name in KNOWN_AGENT_TOOLS and name not in normalized_allowed:
+                normalized_allowed.append(name)
+
+        raw_approval = raw.get("approval_required")
+        approval_required = dict(raw_approval) if isinstance(raw_approval, dict) else {}
+        for tool in HIGH_RISK_AGENT_TOOLS:
+            if tool in normalized_allowed:
+                approval_required[tool] = True
+            else:
+                approval_required.pop(tool, None)
+        return {"allowed_tools": normalized_allowed, "approval_required": approval_required}
+
+    def compile_workspace_policy(self, policy: Any = None) -> dict[str, Any]:
+        raw = policy if isinstance(policy, dict) else {}
+        default_policy = self.default_workspace_policy()
+        readable = raw.get("readable_scopes", default_policy["readable_scopes"])
+        writable = raw.get("writable_scopes", default_policy["writable_scopes"])
+        if isinstance(readable, str):
+            readable = [item.strip() for item in readable.split(",") if item.strip()]
+        if isinstance(writable, str):
+            writable = [item.strip() for item in writable.split(",") if item.strip()]
+        if not isinstance(readable, list):
+            readable = default_policy["readable_scopes"]
+        if not isinstance(writable, list):
+            writable = default_policy["writable_scopes"]
+        return {
+            "default_workdir": str(raw.get("default_workdir") or "").strip(),
+            "readable_scopes": [str(item or ".").strip() or "." for item in readable],
+            "writable_scopes": [
+                str(item or "").strip()
+                for item in writable
+                if str(item or "").strip()
+            ],
+        }
+
+    def compile_agent_runtime(self, agent: dict[str, Any]) -> dict[str, Any]:
+        category = str(agent.get("category") or "custom")
+        tool_policy = self.compile_tool_policy(category, agent.get("tool_policy"))
+        if agent.get("skill_ids") and "skill.read" not in tool_policy["allowed_tools"]:
+            tool_policy = {
+                **tool_policy,
+                "allowed_tools": ["skill.read", *tool_policy["allowed_tools"]],
+            }
+        workspace_policy = self.compile_workspace_policy(agent.get("workspace_policy"))
+        return {
+            "runtime": "oha_agent",
+            "tool_policy": tool_policy,
+            "workspace_policy": workspace_policy,
+            "progress_events": [
+                "agent.run.started",
+                "agent.runtime.compiled",
+                "agent.model.response",
+                "agent.tool.call",
+                "agent.artifact.write",
+                "agent.run.completed",
+                "agent.run.failed",
+            ],
+        }
