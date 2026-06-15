@@ -3135,9 +3135,7 @@ def test_agent_studio_skills_ui_smoke_uses_skill_library_paths() -> None:
     _assert_contains(
         "apps/frontend/src/views/AgentStudioView.tsx",
         [
-            'data-testid="skill-library"',
-            "SkillImportPanel",
-            "SkillLibraryPanel",
+            "SkillLibraryTab",
             "onInstallSkill={() => void runAction(installSkillFromCommand, '安装 Skill')}",
             "onSyncNativeSkillLibrary={() => void runAction(syncNativeSkillLibrary, '同步 Native Skills')}",
             "onMoveSkillFolder={(skill, folderId) => void runAction(async () => {",
@@ -3148,6 +3146,9 @@ def test_agent_studio_skills_ui_smoke_uses_skill_library_paths() -> None:
         "apps/frontend/src/views/AgentStudioView.tsx",
         [
             "function SkillCard",
+            "SkillImportPanel",
+            "SkillLibraryPanel",
+            'data-testid="skill-library"',
             'data-testid="skill-library-panel"',
             'data-testid="skill-list"',
         ],
@@ -3155,6 +3156,19 @@ def test_agent_studio_skills_ui_smoke_uses_skill_library_paths() -> None:
     _assert_not_contains(
         "apps/frontend/src/views/AgentStudioView.tsx",
         ['data-testid="skill-import-panel"'],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/SkillLibraryTab.tsx",
+        [
+            "export function SkillLibraryTab",
+            'data-testid="skill-library"',
+            "SkillImportPanel",
+            "SkillLibraryPanel",
+            "onInstallSkill={onInstallSkill}",
+            "onSyncNativeSkillLibrary={onSyncNativeSkillLibrary}",
+            "onMoveSkillFolder={onMoveSkillFolder}",
+            "onToggleSkillEnabled={onToggleSkillEnabled}",
+        ],
     )
     _assert_contains(
         "apps/frontend/src/features/agent-studio/components/SkillImportPanel.tsx",

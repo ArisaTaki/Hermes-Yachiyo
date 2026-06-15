@@ -16,8 +16,7 @@ import { RuntimeMemoryPanel } from '../features/agent-studio/components/RuntimeM
 import { RunDetailPanel } from '../features/agent-studio/components/RunDetailPanel';
 import { RunLauncherPanel } from '../features/agent-studio/components/RunLauncherPanel';
 import { SkillFolderPanel } from '../features/agent-studio/components/SkillFolderPanel';
-import { SkillImportPanel } from '../features/agent-studio/components/SkillImportPanel';
-import { SkillLibraryPanel } from '../features/agent-studio/components/SkillLibraryPanel';
+import { SkillLibraryTab } from '../features/agent-studio/components/SkillLibraryTab';
 import { WorkflowEditorPanel, WorkflowRunPreview } from '../features/agent-studio/components/WorkflowEditorPanel';
 import { useAgentAvatarActions } from '../features/agent-studio/hooks/useAgentAvatarActions';
 import { useAgentDeletionActions } from '../features/agent-studio/hooks/useAgentDeletionActions';
@@ -1473,56 +1472,50 @@ export function AgentStudioView() {
       ) : null}
 
       {!loading && tab === 'skills' ? (
-        <section className="agent-studio-grid" data-testid="skill-library">
-          <SkillImportPanel
-            busy={busy}
-            installingSkill={installingSkill}
-            skillFolders={skillFolders}
-            skillImportResults={skillImportResults}
-            skillInstallCommand={skillInstallCommand}
-            skillSources={skillSources}
-            skillTargetFolderId={skillTargetFolderId}
-            onDropSkillSources={dropSkillSources}
-            onInstallSkill={() => void runAction(installSkillFromCommand, '安装 Skill')}
-            onPickSkillSources={() => void pickSkillSources()}
-            onSetSkillInstallCommand={setSkillInstallCommand}
-            onSetSkillTargetFolderId={setSkillTargetFolderId}
-            onSyncNativeSkillLibrary={() => void runAction(syncNativeSkillLibrary, '同步 Native Skills')}
-          />
-          <SkillLibraryPanel
-            allLibrarySkillsSelected={allLibrarySkillsSelected}
-            busy={busy}
-            filteredLibrarySkillIds={filteredLibrarySkillIds}
-            filteredLibrarySkills={filteredLibrarySkills}
-            installedSkillCount={installedSkillCount}
-            nativeSkillCount={nativeSkillCount}
-            selectedLibrarySkills={selectedLibrarySkills}
-            selectedSkillIdSet={selectedSkillIdSet}
-            skillFolders={skillFolders}
-            skillLibraryFilter={skillLibraryFilter}
-            skillLibraryFolderFilter={skillLibraryFolderFilter}
-            skillLibrarySearch={skillLibrarySearch}
-            skillManagementMode={skillManagementMode}
-            onDeleteSkill={requestDeleteSkill}
-            onDeleteSelectedSkills={requestDeleteSelectedSkills}
-            onFinishSkillManagement={finishSkillManagement}
-            onMoveSkillFolder={(skill, folderId) => void runAction(async () => {
-              await updateSkill(skill.skill_id, { folder_id: folderId });
-            }, '移动 Skill')}
-            onOpenSkillLocation={(skill) => void runAction(async () => {
-              await openPath(skill.local_path || '');
-            }, '打开 Skill 路径')}
-            onSetSelectedSkillIds={setSelectedSkillIds}
-            onSetSkillLibraryFilter={setSkillLibraryFilter}
-            onSetSkillLibraryFolderFilter={setSkillLibraryFolderFilter}
-            onSetSkillLibrarySearch={setSkillLibrarySearch}
-            onSetSkillManagementMode={setSkillManagementMode}
-            onToggleSkillEnabled={(skill) => void runAction(async () => {
-              await updateSkill(skill.skill_id, { enabled: skill.enabled === false });
-            }, skill.enabled === false ? '启用 Skill' : '停用 Skill')}
-            onToggleSkillSelected={toggleSkillSelected}
-          />
-        </section>
+        <SkillLibraryTab
+          allLibrarySkillsSelected={allLibrarySkillsSelected}
+          busy={busy}
+          filteredLibrarySkillIds={filteredLibrarySkillIds}
+          filteredLibrarySkills={filteredLibrarySkills}
+          installedSkillCount={installedSkillCount}
+          installingSkill={installingSkill}
+          nativeSkillCount={nativeSkillCount}
+          selectedLibrarySkills={selectedLibrarySkills}
+          selectedSkillIdSet={selectedSkillIdSet}
+          skillFolders={skillFolders}
+          skillImportResults={skillImportResults}
+          skillInstallCommand={skillInstallCommand}
+          skillLibraryFilter={skillLibraryFilter}
+          skillLibraryFolderFilter={skillLibraryFolderFilter}
+          skillLibrarySearch={skillLibrarySearch}
+          skillManagementMode={skillManagementMode}
+          skillSources={skillSources}
+          skillTargetFolderId={skillTargetFolderId}
+          onDeleteSkill={requestDeleteSkill}
+          onDeleteSelectedSkills={requestDeleteSelectedSkills}
+          onDropSkillSources={dropSkillSources}
+          onFinishSkillManagement={finishSkillManagement}
+          onInstallSkill={() => void runAction(installSkillFromCommand, '安装 Skill')}
+          onMoveSkillFolder={(skill, folderId) => void runAction(async () => {
+            await updateSkill(skill.skill_id, { folder_id: folderId });
+          }, '移动 Skill')}
+          onOpenSkillLocation={(skill) => void runAction(async () => {
+            await openPath(skill.local_path || '');
+          }, '打开 Skill 路径')}
+          onPickSkillSources={() => void pickSkillSources()}
+          onSetSelectedSkillIds={setSelectedSkillIds}
+          onSetSkillInstallCommand={setSkillInstallCommand}
+          onSetSkillLibraryFilter={setSkillLibraryFilter}
+          onSetSkillLibraryFolderFilter={setSkillLibraryFolderFilter}
+          onSetSkillLibrarySearch={setSkillLibrarySearch}
+          onSetSkillManagementMode={setSkillManagementMode}
+          onSetSkillTargetFolderId={setSkillTargetFolderId}
+          onSyncNativeSkillLibrary={() => void runAction(syncNativeSkillLibrary, '同步 Native Skills')}
+          onToggleSkillEnabled={(skill) => void runAction(async () => {
+            await updateSkill(skill.skill_id, { enabled: skill.enabled === false });
+          }, skill.enabled === false ? '启用 Skill' : '停用 Skill')}
+          onToggleSkillSelected={toggleSkillSelected}
+        />
       ) : null}
 
       {!loading && tab === 'skill-groups' ? (
