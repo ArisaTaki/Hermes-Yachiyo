@@ -13,6 +13,8 @@ from apps.shell.agent.runtime.events import (
     canonical_run_event_aliases,
     memory_retrieved_payload,
     memory_skill_trace_event,
+    model_request_failed_payload,
+    model_request_started_payload,
     model_output_completed_payload,
     redact_json_value,
     redact_run_event_payload,
@@ -196,6 +198,15 @@ def test_legacy_trace_event_helpers_delegate_to_runtime_builder() -> None:
 def test_runtime_task_model_event_builder_projects_task_and_model_payloads() -> None:
     builder = RuntimeTaskModelEventBuilder()
 
+    request_payload = builder.model_request_started_payload(
+        profile_id="profile-chat",
+        model="demo-model",
+        capability="chat",
+        message_count=2,
+    )
+    failed_request_payload = builder.model_request_failed_payload(
+        "api_key=sk-runtime-model-request123456",
+    )
     model_payload = builder.model_output_completed_payload(
         "hello",
         truncated=True,
@@ -227,6 +238,22 @@ def test_runtime_task_model_event_builder_projects_task_and_model_payloads() -> 
         ensure_ascii=False,
     )
 
+    assert request_payload == {
+        "profile_id": "profile-chat",
+        "model": "demo-model",
+        "capability": "chat",
+        "message_count": 2,
+    }
+    assert request_payload == model_request_started_payload(
+        profile_id="profile-chat",
+        model="demo-model",
+        capability="chat",
+        message_count=2,
+    )
+    assert "sk-runtime-model-request123456" not in failed_request_payload["error"]
+    assert failed_request_payload == model_request_failed_payload(
+        "api_key=sk-runtime-model-request123456",
+    )
     assert model_payload == {
         "content": "hello",
         "output_chars": 5,

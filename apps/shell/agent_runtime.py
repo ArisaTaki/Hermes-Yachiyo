@@ -3990,12 +3990,12 @@ class NativeRunEngine:
         self.append_run_event(
             run_id,
             "model.request.started",
-            {
-                "profile_id": default_profile_id,
-                "model": str(model_config.get("model") or ""),
-                "capability": capability,
-                "message_count": len(messages),
-            },
+            self.runtime_task_model_events.model_request_started_payload(
+                profile_id=default_profile_id,
+                model=str(model_config.get("model") or ""),
+                capability=capability,
+                message_count=len(messages),
+            ),
         )
         try:
             message = _coalesce_model_message(
@@ -4019,7 +4019,11 @@ class NativeRunEngine:
             safe_error = redact_secrets(exc)
             timeline.append(self._timeline("model.request.failed", safe_error))
             self._update_run(run_id, timeline=timeline)
-            self.append_run_event(run_id, "model.request.failed", {"error": safe_error})
+            self.append_run_event(
+                run_id,
+                "model.request.failed",
+                self.runtime_task_model_events.model_request_failed_payload(safe_error),
+            )
             raise
         terminal = self._terminal_run_or_none(run_id)
         if terminal is not None:
@@ -4169,12 +4173,12 @@ class NativeRunEngine:
         self.append_run_event(
             run_id,
             "model.request.started",
-            {
-                "profile_id": default_profile_id,
-                "model": str(model_config.get("model") or ""),
-                "capability": "chat",
-                "message_count": len(messages),
-            },
+            self.runtime_task_model_events.model_request_started_payload(
+                profile_id=default_profile_id,
+                model=str(model_config.get("model") or ""),
+                capability="chat",
+                message_count=len(messages),
+            ),
         )
         broker = ToolBroker(
             runtime["workspace_policy"],
@@ -4217,7 +4221,11 @@ class NativeRunEngine:
             safe_error = redact_secrets(exc)
             timeline.append(self._timeline("model.request.failed", safe_error))
             self._update_run(run_id, status="failed", result=safe_error, timeline=timeline, artifacts=artifacts, pending_approval=None)
-            self.append_run_event(run_id, "model.request.failed", {"error": safe_error})
+            self.append_run_event(
+                run_id,
+                "model.request.failed",
+                self.runtime_task_model_events.model_request_failed_payload(safe_error),
+            )
             raise
         terminal = self._terminal_run_or_none(run_id)
         if terminal is not None:

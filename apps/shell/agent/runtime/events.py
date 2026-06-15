@@ -149,6 +149,25 @@ def model_output_completed_payload(
     return payload
 
 
+def model_request_started_payload(
+    *,
+    profile_id: str,
+    model: str,
+    capability: str,
+    message_count: int,
+) -> dict[str, Any]:
+    return {
+        "profile_id": str(profile_id or ""),
+        "model": str(model or ""),
+        "capability": str(capability or ""),
+        "message_count": max(0, int(message_count or 0)),
+    }
+
+
+def model_request_failed_payload(error: Any) -> dict[str, Any]:
+    return {"error": redact_secrets(error)}
+
+
 def task_run_event_payload(
     *,
     task_id: str = "",
@@ -174,6 +193,24 @@ def task_run_event_payload(
 
 class RuntimeTaskModelEventBuilder:
     """Builds RunEvent payloads shared by Chat task and model execution facts."""
+
+    def model_request_started_payload(
+        self,
+        *,
+        profile_id: str,
+        model: str,
+        capability: str,
+        message_count: int,
+    ) -> dict[str, Any]:
+        return model_request_started_payload(
+            profile_id=profile_id,
+            model=model,
+            capability=capability,
+            message_count=message_count,
+        )
+
+    def model_request_failed_payload(self, error: Any) -> dict[str, Any]:
+        return model_request_failed_payload(error)
 
     def model_output_completed_payload(
         self,
