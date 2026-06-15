@@ -3,6 +3,10 @@ import type {
   YachiyoGroupRunSnapshot,
   YachiyoRunTimelineSnapshot,
 } from '../features/yachiyo-studio/types';
+import type {
+  PublicRunEvent,
+  RunEventPageSnapshot,
+} from '../features/runtime-shared/types';
 import {
   publicGroupRunToRunGroupSpec,
   publicRunTimelineToRunSpec,
@@ -194,29 +198,9 @@ export type RunSpec = {
   workflow_run_id?: string;
 };
 
-export type RunEventSpec = {
-  event_id?: string;
-  run_id: string;
-  sequence: number;
-  schema_version?: number;
-  event_type: string;
-  title?: string | null;
-  detail?: string | null;
-  actor?: string;
-  visibility?: string;
-  sensitivity?: string;
-  payload?: Record<string, unknown>;
-  created_at?: string;
-};
+export type RunEventSpec = PublicRunEvent;
 
-export type RunEventsPage = {
-  run_id: string;
-  after_sequence: number;
-  limit: number;
-  next_after_sequence?: number;
-  has_more?: boolean;
-  events: RunEventSpec[];
-};
+export type RunEventsPage = RunEventPageSnapshot;
 
 export type RunGroupSpec = {
   run_group_id: string;

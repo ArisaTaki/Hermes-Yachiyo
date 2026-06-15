@@ -6,7 +6,7 @@ import type {
   FutureTaskTriggerResultSnapshot,
   GroupRunSnapshot,
   MemorySnapshot,
-  PublicRunEvent,
+  RunEventPageSnapshot,
   RunTimelineSnapshot,
   SaveAgentGroupRequest,
   SkillFolderSnapshot,
@@ -15,14 +15,7 @@ import type {
   WorkflowSnapshot,
 } from './types';
 
-export type YachiyoRunEventsPage = {
-  run_id: string;
-  after_sequence: number;
-  limit: number;
-  next_after_sequence?: number;
-  has_more?: boolean;
-  events: PublicRunEvent[];
-};
+export type YachiyoRunEventsPage = RunEventPageSnapshot;
 
 export type YachiyoRunArtifactPayload = {
   ok?: boolean;

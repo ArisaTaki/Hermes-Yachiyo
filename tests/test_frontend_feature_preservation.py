@@ -896,9 +896,8 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "/yachiyo/studio/group-runs",
             "/yachiyo/studio/workflows/${encodeURIComponent(workflowId)}/runs",
             "/yachiyo/studio/runs/${encodeURIComponent(runId)}/timeline",
-            "export type YachiyoRunEventsPage",
-            "next_after_sequence?: number;",
-            "has_more?: boolean;",
+            "RunEventPageSnapshot",
+            "export type YachiyoRunEventsPage = RunEventPageSnapshot;",
             "listYachiyoStudioAgents",
             "getYachiyoStudioAgent",
             "/yachiyo/studio/agents/${encodeURIComponent(agentId)}",
@@ -992,6 +991,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "export type AgentGroupSnapshot",
             "export type GroupRunSnapshot",
             "export type PublicRunEvent",
+            "export type RunEventPageSnapshot",
             "export type ToolCallSnapshot",
             "export type RunTimelineSnapshot",
             "export type ApprovalCardSnapshot",
@@ -1008,6 +1008,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
         [
             "RunTimelineSnapshot as RuntimeRunTimelineSnapshot",
             "GroupRunSnapshot as RuntimeGroupRunSnapshot",
+            "RunEventPageSnapshot",
             "export type YachiyoRunTimelineSnapshot = RuntimeRunTimelineSnapshot &",
             "task_id?: string | null;",
             "session_id?: string | null;",
@@ -1024,6 +1025,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "AgentDefinitionSnapshot",
             "AgentGroupSnapshot",
             "GroupRunSnapshot",
+            "RunEventPageSnapshot",
             "RunTimelineSnapshot",
             "WorkflowSnapshot",
             "ApprovalCardSnapshot",
@@ -4562,9 +4564,9 @@ def test_agent_frontend_run_helpers_preserve_native_run_bridge_contract() -> Non
     _assert_contains(
         agents_lib,
         [
-            "export type RunEventsPage = {",
-            "next_after_sequence?: number;",
-            "has_more?: boolean;",
+            "RunEventPageSnapshot",
+            "export type RunEventSpec = PublicRunEvent;",
+            "export type RunEventsPage = RunEventPageSnapshot;",
         ],
     )
     _assert_function_contains(

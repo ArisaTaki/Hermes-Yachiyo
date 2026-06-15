@@ -25,6 +25,15 @@ export type PublicRunEvent = {
   created_at?: string;
 };
 
+export type RunEventPageSnapshot = {
+  run_id: string;
+  after_sequence: number;
+  limit: number;
+  next_after_sequence: number;
+  has_more: boolean;
+  events: PublicRunEvent[];
+};
+
 export type ApprovalCardSnapshot = {
   approval_id: string;
   run_id?: string | null;

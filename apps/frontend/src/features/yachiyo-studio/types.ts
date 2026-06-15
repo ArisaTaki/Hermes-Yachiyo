@@ -16,6 +16,7 @@ export type {
   GroupRunSnapshot,
   MemorySnapshot,
   PublicRunEvent,
+  RunEventPageSnapshot,
   RunTimelineChildSnapshot,
   RunTimelineSnapshot,
   SkillFolderSnapshot,
