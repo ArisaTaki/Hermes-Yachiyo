@@ -62,6 +62,14 @@ import {
   runnableResultStatus,
 } from '../features/yachiyo-chat/messageState';
 import {
+  chatRunCompletionProcessingState,
+  chatRunCompletionStatusText,
+  chatRunLabel,
+  chatRunPollingTimeoutStatusText,
+  chatRunProgressStatusText,
+  isChatRunTerminalStatus,
+} from '../features/yachiyo-chat/runPolling';
+import {
   activeMentions,
   mentionKindLabel,
   mentionOptionsForQuery,
@@ -1176,12 +1184,12 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       try {
         const run = await getRun(runId);
         const status = normalizeRunStatus(run.status);
-        const runLabel = run.kind === 'workflow_run' ? 'Workflow Run' : 'Agent Run';
+        const runLabel = chatRunLabel(run);
         if (status === 'approval_required' && options.ignoreInitialApprovalRequired && attempt < 3) {
           await new Promise((resolve) => setTimeout(resolve, interval));
           continue;
         }
-        if (status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'approval_required') {
+        if (isChatRunTerminalStatus(status)) {
           // 执行完成，刷新消息
           const refreshed = await refreshMessages();
           await loadSessions();
@@ -1198,38 +1206,26 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
             const delegatedSummary = options.summarizeDelegatedRun
               ? await createDelegatedRunSummary(runId, delegatedRunSummaryOptions())
               : { created: false, error: '', taskId: '', isProcessing: false, processingCount: 0 };
-            const nextProcessing = delegatedSummary.created ? delegatedSummary.isProcessing : chatStillProcessing;
-            const nextProcessingCount = delegatedSummary.created ? delegatedSummary.processingCount : chatProcessingCount;
+            const { nextProcessing, nextProcessingCount } = chatRunCompletionProcessingState(
+              delegatedSummary,
+              chatStillProcessing,
+              chatProcessingCount,
+            );
             isProcessingRef.current = nextProcessing;
             setIsProcessing(nextProcessing);
             setProcessingCount(nextProcessingCount);
-            if (delegatedSummary.created) {
-              setStatus(`${runLabel} 已结束，等待主模型整理委派结果...`);
-            } else if (delegatedSummary.error) {
-              setStatus(`审批后执行结束，但整理任务未创建：${delegatedSummary.error}`);
-            } else if (chatStillProcessing) {
-              setStatus(
-                status === 'completed'
-                  ? `${runLabel} 已完成，等待主模型汇总...`
-                  : status === 'cancelled'
-                    ? `${runLabel} 已取消，等待主模型整理结果...`
-                    : `${runLabel} 执行失败，等待主模型整理结果...`,
-              );
-            } else {
-              setStatus(
-                status === 'completed'
-                  ? `${runLabel} 已完成。`
-                  : status === 'cancelled'
-                    ? `${runLabel} 已取消。`
-                    : `${runLabel} 执行失败。`,
-              );
-            }
+            setStatus(chatRunCompletionStatusText({
+              chatStillProcessing,
+              delegatedSummary,
+              runLabel,
+              status,
+            }));
           }
           return;
         }
         // 更新状态文本
         if (attempt % 10 === 0) {
-          setStatus(`${runLabel} 执行中... (${Math.floor(attempt * interval / 1000)}s)`);
+          setStatus(chatRunProgressStatusText(runLabel, attempt, interval));
         }
       } catch (error) {
         console.error('轮询 Agent Run 状态失败:', error);
@@ -1244,7 +1240,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     isProcessingRef.current = chatStillProcessing;
     setIsProcessing(chatStillProcessing);
     setProcessingCount(chatProcessingCount);
-    setStatus(chatStillProcessing ? 'Agent Run 轮询超时，仍在等待后续处理...' : 'Agent Run 轮询超时');
+    setStatus(chatRunPollingTimeoutStatusText(chatStillProcessing));
   }
 
   function pollAgentRunInBackground(runId: string, options: { summarizeDelegatedRun?: boolean; ignoreInitialApprovalRequired?: boolean } = {}) {

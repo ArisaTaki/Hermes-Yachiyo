@@ -2465,8 +2465,10 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
         [
             "createDelegatedRunSummary(runId, delegatedRunSummaryOptions())",
             "function delegatedRunSummaryOptions()",
-            "const nextProcessing = delegatedSummary.created ? delegatedSummary.isProcessing : chatStillProcessing;",
-            "const nextProcessingCount = delegatedSummary.created ? delegatedSummary.processingCount : chatProcessingCount;",
+            "chatRunCompletionProcessingState(",
+            "chatRunCompletionStatusText({",
+            "chatRunProgressStatusText(runLabel, attempt, interval)",
+            "chatRunPollingTimeoutStatusText(chatStillProcessing)",
             "let delegatedSummaryIsProcessing = false;",
             "let delegatedSummaryProcessingCount = 0;",
             "delegatedSummaryIsProcessing = summary.isProcessing;",
@@ -2502,6 +2504,24 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
             "const refreshedProcessingCount = Math.max(0, Number(refreshed?.processing_count || 0));",
             "isProcessing: created ? (refreshed ? Boolean(refreshed.is_processing || refreshedProcessingCount > 0) : true) : false,",
             "processingCount: created ? (refreshed ? refreshedProcessingCount : 1) : 0,",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/runPolling.ts",
+        [
+            "export function chatRunLabel",
+            "export function isChatRunTerminalStatus",
+            "export function chatRunProgressStatusText",
+            "export function chatRunPollingTimeoutStatusText",
+            "export function chatRunCompletionProcessingState",
+            "export function chatRunCompletionStatusText",
+            "nextProcessing: delegatedSummary.created ? delegatedSummary.isProcessing : chatStillProcessing",
+            "nextProcessingCount: delegatedSummary.created ? delegatedSummary.processingCount : chatProcessingCount",
+            "if (delegatedSummary.created) return `${runLabel} 已结束，等待主模型整理委派结果...`;",
+            "if (delegatedSummary.error) return `审批后执行结束，但整理任务未创建：${delegatedSummary.error}`;",
+            "if (status === 'completed') return `${runLabel} 已完成，等待主模型汇总...`;",
+            "if (status === 'cancelled') return `${runLabel} 已取消，等待主模型整理结果...`;",
+            "return `${runLabel} 执行失败，等待主模型整理结果...`;",
         ],
     )
     _assert_contains(
