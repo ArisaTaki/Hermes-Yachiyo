@@ -153,6 +153,7 @@ from apps.shell.agent.runtime.events import (
     memory_skill_trace_event as _memory_skill_trace_event,
     memory_trace_result as _memory_trace_result,
     redact_json_value as _redact_json_value,
+    redact_secrets,
     runtime_trace_input_preview as _runtime_trace_input_preview,
     skill_trace_result as _skill_trace_result,
     task_run_event_payload as _task_run_event_payload,
@@ -398,7 +399,6 @@ from apps.shell.model_profiles import (
 from packages.security import (
     contains_sensitive_text,
     redact_api_error_text,
-    redact_sensitive_text,
 )
 
 logger = logging.getLogger(__name__)
@@ -417,15 +417,6 @@ def _user_goal_from_agent_messages(messages: list[dict[str, Any]]) -> str:
 
 def _agent_goal_disallows_tool(user_goal: str, tool_name: str) -> str:
     return _runtime_agent_goal_disallows_tool(user_goal, tool_name)
-
-
-def redact_secrets(value: Any) -> str:
-    return redact_sensitive_text(
-        value,
-        limit=0,
-        collapse_whitespace=False,
-        trim=False,
-    )
 
 
 def _skill_content_hash(root: Path) -> str:

@@ -26,6 +26,7 @@ from apps.shell.agent.runtime.events import (
     model_output_completed_payload,
     redact_json_value,
     redact_run_event_payload,
+    redact_secrets,
     runtime_trace_input_preview,
     skill_trace_result,
     task_run_event_payload,
@@ -58,6 +59,7 @@ def test_runtime_event_redaction_helpers_match_runtime_json_alias() -> None:
     assert "sk-runtime-event-secret123456" not in serialized
     assert "sk-runtime-event-nested123456" not in serialized
     assert split_json == legacy_json
+    assert agent_runtime.redact_secrets is redact_secrets
 
 
 def test_runtime_run_event_recorder_appends_compatibility_aliases() -> None:
