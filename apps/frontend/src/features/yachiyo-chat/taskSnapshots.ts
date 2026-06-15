@@ -1,4 +1,5 @@
 import type { AgentTaskSnapshot, TaskStatus } from './types';
+import { runIdFromStudioUrl, studioRunUrl } from '../runtime-shared/studioLinks';
 
 type YachiyoTaskChatParticipant = {
   id?: string;
@@ -91,7 +92,7 @@ export function agentTaskSnapshotFromMessage(
     pending_approvals: messageTaskApprovals(message, runId),
     recent_events: messageTaskEvents(message, runId),
     artifacts: messageTaskArtifacts(message, runId),
-    open_in_studio_url: `#/agents?run_id=${encodeURIComponent(runId)}`,
+    open_in_studio_url: studioRunUrl(runId),
     created_at: message.created_at || '',
     updated_at: message.created_at || '',
   };
@@ -187,7 +188,7 @@ function messageTaskApprovals(
       tool_name: tool,
       input_preview: recordPreview(pending.input_preview),
       requested_at: pending.requested_at || '',
-      open_in_studio_url: `#/agents?run_id=${encodeURIComponent(runId)}`,
+      open_in_studio_url: studioRunUrl(runId),
     });
   }
   const workflowPending = message.metadata?.workflow_waiting_pending_approval;
@@ -202,7 +203,7 @@ function messageTaskApprovals(
       tool_name: tool,
       input_preview: recordPreview(workflowPending.input_preview),
       requested_at: workflowPending.requested_at || '',
-      open_in_studio_url: `#/agents?run_id=${encodeURIComponent(childRunId)}`,
+      open_in_studio_url: studioRunUrl(childRunId),
     });
   }
   return approvals;
@@ -255,11 +256,6 @@ function messageRunId(message?: YachiyoTaskChatMessage | null) {
 
 function activityRunId(event?: YachiyoTaskChatActivityEvent | null) {
   return String(event?.metadata?.run_id || event?.metadata?.workflow_run_id || '').trim();
-}
-
-function runIdFromStudioUrl(value?: string | null) {
-  const match = String(value || '').match(/[?&](?:run|run_id)=([^&#]+)/);
-  return match ? decodeURIComponent(match[1]) : '';
 }
 
 function participantDisplayName(participant?: YachiyoTaskChatParticipant | null) {

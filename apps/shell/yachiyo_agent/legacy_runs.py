@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from .links import studio_run_url
+
 
 class LegacyRunPayloadProjector:
     """Normalizes legacy runtime run payloads before public snapshot projection."""
@@ -21,9 +23,7 @@ class LegacyRunPayloadProjector:
             "title": str(run.get("user_goal") or run.get("runnable_name") or "Yachiyo task"),
             "summary": run.get("summary") or run.get("result") or "",
             "recent_events": run.get("timeline") or [],
-            "open_in_studio_url": (
-                f"#/agents?run_id={run.get('run_id')}" if run.get("run_id") else None
-            ),
+            "open_in_studio_url": studio_run_url(str(run.get("run_id") or "")),
         }
 
     def group_artifacts(self, runs: list[dict[str, Any]]) -> list[dict[str, Any]]:

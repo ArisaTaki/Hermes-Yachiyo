@@ -30,6 +30,7 @@ from .contracts import (
     ToolCallSnapshot,
     WorkflowSnapshot,
 )
+from .links import studio_run_url
 from .service import YachiyoAgentService
 from .studio_service import AgentStudioService
 
@@ -64,4 +65,5 @@ __all__ = [
     "ToolCallSnapshot",
     "WorkflowSnapshot",
     "YachiyoAgentService",
+    "studio_run_url",
 ]

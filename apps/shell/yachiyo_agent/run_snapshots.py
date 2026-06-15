@@ -15,6 +15,7 @@ from .contracts import (
     ToolCallSnapshot,
 )
 from .events import public_run_event_from_payload
+from .links import studio_run_url
 
 
 class RunSnapshotProjector:
@@ -475,7 +476,7 @@ def _tool_status_from_event_type(event_type: str) -> str:
 
 
 def _studio_url(run_id: str) -> str | None:
-    return f"#/agents?run_id={run_id}" if run_id else None
+    return studio_run_url(run_id)
 
 
 def _text(value: Any) -> str:

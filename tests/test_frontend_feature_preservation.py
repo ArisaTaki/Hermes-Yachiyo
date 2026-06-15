@@ -610,9 +610,18 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "pending_approvals: messageTaskApprovals(message, runId)",
             "recent_events: messageTaskEvents(message, runId)",
             "artifacts: messageTaskArtifacts(message, runId)",
-            "open_in_studio_url: `#/agents?run_id=${encodeURIComponent(runId)}`",
+            "import { runIdFromStudioUrl, studioRunUrl } from '../runtime-shared/studioLinks';",
+            "open_in_studio_url: studioRunUrl(runId)",
+            "open_in_studio_url: studioRunUrl(childRunId)",
             "runIdFromStudioUrl(task.open_in_studio_url)",
-            "function runIdFromStudioUrl",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/runtime-shared/studioLinks.ts",
+        [
+            "export function studioRunUrl",
+            "`#/agents?run_id=${encodeURIComponent(cleanRunId)}`",
+            "export function runIdFromStudioUrl",
         ],
     )
     _assert_contains(

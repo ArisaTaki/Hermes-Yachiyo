@@ -7,7 +7,10 @@ from apps.shell.yachiyo_agent.run_snapshots import (
     agent_task_snapshot_from_payload,
     run_timeline_snapshot_from_payload,
 )
+from apps.shell.yachiyo_agent.approvals import approval_card_from_payload
 from apps.shell.yachiyo_agent.groups import group_run_snapshot_from_payload
+from apps.shell.yachiyo_agent.legacy_runs import LegacyRunPayloadProjector
+from apps.shell.yachiyo_agent.links import studio_run_url
 from apps.shell.yachiyo_agent.task_cards import (
     agent_task_snapshot_from_payload as legacy_task_snapshot_from_payload,
 )
@@ -82,6 +85,22 @@ def test_run_snapshot_projector_drives_chat_task_and_studio_timeline_shapes() ->
     assert timeline.tool_calls[0].output_preview == {"ok": True}
     assert timeline.artifacts[0].path == "reports/final.md"
     assert timeline.children[0].run_id == "child-1"
+
+
+def test_studio_run_url_is_shared_by_run_task_and_approval_snapshots() -> None:
+    run_id = "run with/slash"
+    expected_url = "#/agents?run_id=run%20with%2Fslash"
+
+    assert studio_run_url(run_id) == expected_url
+    assert studio_run_url("") is None
+
+    task = agent_task_snapshot_from_payload({"run_id": run_id, "status": "completed"})
+    approval = approval_card_from_payload({"tool": "workspace.read"}, run_id=run_id)
+    legacy_payload = LegacyRunPayloadProjector().chat_task_payload({"run_id": run_id})
+
+    assert task.open_in_studio_url == expected_url
+    assert approval.open_in_studio_url == expected_url
+    assert legacy_payload["open_in_studio_url"] == expected_url
 
 
 def test_legacy_task_and_timeline_functions_delegate_to_shared_projector() -> None:

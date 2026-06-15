@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from .contracts import ApprovalCardSnapshot
+from .links import studio_run_url
 
 
 def approval_card_from_payload(
@@ -67,7 +68,7 @@ def _mapping(value: Any) -> dict[str, Any]:
 
 
 def _studio_url(run_id: str | None) -> str | None:
-    return f"#/agents?run_id={run_id}" if run_id else None
+    return studio_run_url(run_id)
 
 
 def _text(value: Any) -> str:
