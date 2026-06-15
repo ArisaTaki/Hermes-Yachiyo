@@ -23,6 +23,7 @@ import { useAgentGroups } from '../features/agent-studio/hooks/useAgentGroups';
 import { useAgentRunReadiness } from '../features/agent-studio/hooks/useAgentRunReadiness';
 import { useAgentSaveActions } from '../features/agent-studio/hooks/useAgentSaveActions';
 import { useAgentSkillMountActions } from '../features/agent-studio/hooks/useAgentSkillMountActions';
+import { useAgentStudioRefresh, type StudioRefreshOptions } from '../features/agent-studio/hooks/useAgentStudioRefresh';
 import { useApprovedRunGuard } from '../features/agent-studio/hooks/useApprovedRunGuard';
 import { useRunApprovalActions } from '../features/agent-studio/hooks/useRunApprovalActions';
 import { useRunApprovalFollowup } from '../features/agent-studio/hooks/useRunApprovalFollowup';
@@ -92,19 +93,7 @@ import {
   testYachiyoStudioAgentModel,
   updateYachiyoSkill,
 } from '../features/yachiyo-studio/api';
-import {
-  getStudioRunForView,
-  listStudioAgentsForView,
-  listStudioFutureTasksForView,
-  listStudioMemoriesForView,
-  listStudioRunGroupsForView,
-  listStudioRunsForView,
-  listStudioSkillFoldersForView,
-  listStudioSkillsForView,
-  listStudioSkillSourcesForView,
-  listStudioWorkflowsForView,
-  studioRunnablesForView,
-} from '../features/agent-studio/utils/studioData';
+import { getStudioRunForView } from '../features/agent-studio/utils/studioData';
 import type {
   FutureTaskSpec,
   MemorySpec,
@@ -116,19 +105,8 @@ import type {
   SkillSpec,
 } from '../features/agent-studio/types';
 import { openAppView, openPath } from '../lib/bridge';
-import { listModelProfiles, type ModelProfile, type ModelProfileDefaults } from '../lib/modelProfiles';
+import type { ModelProfile, ModelProfileDefaults } from '../lib/modelProfiles';
 import { currentParam, navigateTo } from '../lib/view';
-
-type StudioRefreshOptions = {
-  selectedAgentId?: string;
-  selectFirstAgent?: boolean;
-  selectedWorkflowId?: string;
-  selectFirstWorkflow?: boolean;
-  runTarget?: string;
-  selectedRunId?: string;
-  statusMessage?: string;
-  skipRefresh?: boolean;
-};
 
 type ConfirmDialogState = {
   title: string;
@@ -670,56 +648,23 @@ export function AgentStudioView() {
     setRuns,
   });
 
-  const refresh = useCallback(async (options: StudioRefreshOptions = {}) => {
-    const [
-      nextAgents,
-      nextSkills,
-      nextProfiles,
-      nextWorkflows,
-      ,
-      nextRuns,
-      nextRunGroups,
-      nextSkillSources,
-      nextSkillFolders,
-      nextMemories,
-      nextFutureTasks,
-    ] = await Promise.all([
-      listStudioAgentsForView(),
-      listStudioSkillsForView(),
-      listModelProfiles(),
-      listStudioWorkflowsForView(),
-      loadAgentGroups(),
-      listStudioRunsForView(),
-      listStudioRunGroupsForView(),
-      listStudioSkillSourcesForView(),
-      listStudioSkillFoldersForView(),
-      listStudioMemoriesForView(),
-      listStudioFutureTasksForView(),
-    ]);
-    applyAgents(nextAgents, options);
-    setSkills(nextSkills);
-    setSkillSources(nextSkillSources);
-    setSkillFolders(nextSkillFolders);
-    setModelProfiles(nextProfiles.profiles || []);
-    setModelDefaults(nextProfiles.defaults || {});
-    applyWorkflows(nextWorkflows, options);
-    const nextRunnables = studioRunnablesForView(nextAgents, nextWorkflows);
-    setRunnables(nextRunnables);
-    setRuns(nextRuns);
-    setRunGroups(nextRunGroups);
-    setMemories(nextMemories);
-    setFutureTasks(nextFutureTasks);
-    setRunTarget((current) => {
-      const desired = options.runTarget !== undefined ? options.runTarget : current;
-      if (desired && nextRunnables.some((item) => item.id === desired)) return desired;
-      return '';
-    });
-    setSelectedRunId((current) => {
-      const desired = options.selectedRunId !== undefined ? options.selectedRunId : current;
-      if (desired) return desired;
-      return '';
-    });
-  }, [applyAgents, applyWorkflows, loadAgentGroups]);
+  const refresh = useAgentStudioRefresh({
+    applyAgents,
+    applyWorkflows,
+    loadAgentGroups,
+    setFutureTasks,
+    setMemories,
+    setModelDefaults,
+    setModelProfiles,
+    setRunnables,
+    setRunGroups,
+    setRuns,
+    setRunTarget,
+    setSelectedRunId,
+    setSkillFolders,
+    setSkillSources,
+    setSkills,
+  });
 
   const {
     approvalFollowupRefreshOptions,
