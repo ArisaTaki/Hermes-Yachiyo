@@ -25,6 +25,7 @@ from apps.shell.agent.runtime.workflow_projections import (
     WorkflowRunCompletionProjection,
     WorkflowStartNodeProjection,
 )
+from apps.shell.agent.runtime.workflow_run_outcomes import WorkflowRunOutcomeProjector
 
 
 def _iso_epoch(value: Any) -> float:
@@ -63,6 +64,7 @@ class WorkflowContinuationCoordinator:
     def __init__(self, engine: Any, *, iso_epoch: Any | None = None) -> None:
         self._engine = engine
         self._iso_epoch = iso_epoch or _iso_epoch
+        self._outcomes = WorkflowRunOutcomeProjector(engine)
 
     @staticmethod
     def _workflow_steps_used(timeline: list[dict[str, Any]]) -> int:
@@ -333,33 +335,21 @@ class WorkflowContinuationCoordinator:
                     current_node_id = next_id
                     continue
                 raise AgentRuntimeError(f"未知 Workflow 节点类型：{kind}")
-            completion = WorkflowRunCompletionProjection(context)
-            timeline.append(completion.timeline_event(engine._timeline))
-            engine.append_run_event(str(run["run_id"]), "workflow.run.completed", completion.event_payload())
-            result = engine._update_run(
-                str(run["run_id"]),
-                **completion.update_fields(timeline=timeline, artifacts=artifacts),
+            return self._outcomes.completed(
+                run,
+                WorkflowRunCompletionProjection(context),
+                timeline=timeline,
+                artifacts=artifacts,
+                root_group=root_group,
             )
-            if root_group:
-                engine._update_run_group(run_group_id, status="completed", summary=completion.result_text)
-                result = engine.get_run(result["run_id"])
-            return result
         except Exception as exc:
-            failure = WorkflowContinuationFailureProjection.from_error(exc, current_node_info)
-            timeline.append(failure.timeline_event(engine._timeline))
-            engine.append_run_event(
-                str(run["run_id"]),
-                "workflow.run.failed",
-                failure.event_payload(),
+            return self._outcomes.failed(
+                run,
+                WorkflowContinuationFailureProjection.from_error(exc, current_node_info),
+                timeline=timeline,
+                artifacts=artifacts,
+                root_group=root_group,
             )
-            result = engine._update_run(
-                str(run["run_id"]),
-                **failure.update_fields(timeline=timeline, artifacts=artifacts),
-            )
-            if root_group:
-                engine._update_run_group(run_group_id, status="failed", summary=failure.safe_error)
-                result = engine.get_run(result["run_id"])
-            return result
 
     @staticmethod
     def _path_index(path: list[dict[str, Any]], node_id: str) -> int:
@@ -422,29 +412,12 @@ class WorkflowContinuationCoordinator:
         error: Any,
         root_group: bool,
     ) -> dict[str, Any]:
-        engine = self._engine
-        run_id = str(run["run_id"])
-        safe_error = redact_secrets(error)
-        failed_timeline = [
-            *timeline,
-            engine._timeline("workflow.run.failed", safe_error, status="failed"),
-        ]
-        failed = engine._update_run(
-            run_id,
-            status="failed",
-            result=safe_error,
-            timeline=failed_timeline,
-            artifacts=[],
-            pending_approval=None,
+        return self._outcomes.background_failed(
+            run,
+            timeline=timeline,
+            error=error,
+            root_group=root_group,
         )
-        engine.append_run_event(run_id, "workflow.run.failed", {"error": safe_error})
-        if root_group:
-            engine._update_run_group(
-                str(run.get("run_group_id") or ""),
-                status="failed",
-                summary=safe_error,
-            )
-        return failed
 
     @staticmethod
     def _parallel_node_resume_context(

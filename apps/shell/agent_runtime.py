@@ -163,6 +163,7 @@ from apps.shell.agent.runtime.workflow_resume import (
     WorkflowParentRunLocator,
     WorkflowResumePlanner,
 )
+from apps.shell.agent.runtime.workflow_run_outcomes import WorkflowRunOutcomeProjector
 from apps.shell.agent.runtime.workflow_start import WorkflowRunStartProjector
 from apps.shell.agent.tools.broker import (
     _TERMINAL_PROCESS_LOCK,
