@@ -14598,6 +14598,22 @@ button.activity-item {
   white-space: nowrap;
 }
 
+.group-run-event-page-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
+.group-run-event-page-meta span {
+  padding: 3px 6px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 7px;
+  color: var(--hy-faint);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
 .agent-list,
 .skill-list,
 .run-list {

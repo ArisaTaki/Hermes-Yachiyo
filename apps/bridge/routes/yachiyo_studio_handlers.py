@@ -14,6 +14,7 @@ from apps.bridge.routes.yachiyo_studio_agent_handlers import (
 from apps.bridge.routes.yachiyo_studio_group_handlers import (
     get_group,
     get_group_run,
+    get_group_run_events,
     list_group_runs,
     list_groups,
     save_group,
@@ -77,6 +78,7 @@ __all__ = [
     "get_agent",
     "get_group",
     "get_group_run",
+    "get_group_run_events",
     "get_run_events",
     "get_run_timeline",
     "get_workflow",

@@ -254,6 +254,32 @@ class AgentStudioService:
     def get_group_run(self, group_run_id: str) -> GroupRunSnapshot:
         return group_run_snapshot_from_payload(self._studio_port.get_group_run(group_run_id))
 
+    def get_group_run_event_page(
+        self,
+        group_run_id: str,
+        after_sequence: int = 0,
+        limit: int = 200,
+    ) -> RunEventPageSnapshot:
+        clean_after_sequence = max(0, int(after_sequence or 0))
+        clean_limit = max(1, min(500, int(limit or 200)))
+        events = [
+            event
+            for event in self.get_group_run(group_run_id).events
+            if int(event.sequence or 0) > clean_after_sequence
+        ]
+        page = events[:clean_limit]
+        next_after_sequence = max(
+            [int(event.sequence or 0) for event in page] or [clean_after_sequence]
+        )
+        return RunEventPageSnapshot(
+            run_id=group_run_id,
+            after_sequence=clean_after_sequence,
+            limit=clean_limit,
+            next_after_sequence=next_after_sequence,
+            has_more=len(events) > clean_limit,
+            events=page,
+        )
+
     def list_workflows(self) -> list[WorkflowSnapshot]:
         return [
             workflow_snapshot_from_payload(item)

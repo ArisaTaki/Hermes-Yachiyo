@@ -346,6 +346,22 @@ class _FakeAgentRuntime:
             "source": "workflow",
             "status": "running",
             "summary": "Summary",
+            "events": [
+                {
+                    "event": "group.member.started",
+                    "run_id": run_group_id,
+                    "sequence": 1,
+                    "member_agent_id": "agent-1",
+                    "payload": {"step": "plan"},
+                },
+                {
+                    "event": "group.member.completed",
+                    "run_id": run_group_id,
+                    "sequence": 2,
+                    "member_agent_id": "agent-1",
+                    "payload": {"step": "plan"},
+                },
+            ],
             "child_run_ids": ["run-1"],
             "created_at": "2026-06-14T00:00:00Z",
             "updated_at": "2026-06-14T00:00:01Z",
@@ -675,6 +691,12 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     workflow_timeline = await yachiyo.get_studio_run_timeline("workflow-run-1", request)
     group_runs = await yachiyo.list_studio_group_runs(request, limit=5)
     group_run = await yachiyo.get_studio_group_run("group-run-1", request)
+    group_run_events = await yachiyo.get_studio_group_run_events(
+        "group-run-1",
+        request,
+        after_sequence=0,
+        limit=1,
+    )
     events = await yachiyo.get_studio_run_events("run-1", request, after_sequence=0, limit=1)
     rerun = await yachiyo.rerun_studio_run("run-1", request)
     cancelled = await yachiyo.cancel_studio_run("run-1", request)
@@ -747,6 +769,12 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     assert group_runs["group_runs"][0]["runs"][0]["run_id"] == "run-1"
     assert group_run["run_group_id"] == "group-run-1"
     assert group_run["child_run_ids"] == ["run-1"]
+    assert group_run_events["run_id"] == "group-run-1"
+    assert group_run_events["after_sequence"] == 0
+    assert group_run_events["limit"] == 1
+    assert group_run_events["next_after_sequence"] == 1
+    assert group_run_events["has_more"] is True
+    assert group_run_events["events"][0]["event_type"] == "group.member.started"
     assert events["after_sequence"] == 0
     assert events["limit"] == 1
     assert events["next_after_sequence"] == 1
@@ -915,6 +943,7 @@ def test_yachiyo_studio_routes_include_run_action_facade() -> None:
     assert '@router.get("/studio/groups/{group_id}")' in source
     assert '@router.get("/studio/group-runs")' in source
     assert '@router.get("/studio/group-runs/{group_run_id}")' in source
+    assert '@router.get("/studio/group-runs/{group_run_id}/events")' in source
     assert '@router.get("/studio/runs")' in source
     assert '@router.get("/studio/runs/{run_id}")' in source
     assert '@router.post("/studio/runs/{run_id}/rerun")' in source

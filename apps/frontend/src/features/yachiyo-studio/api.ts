@@ -265,6 +265,18 @@ export async function getYachiyoGroupRun(groupRunId: string): Promise<GroupRunSn
   return apiGet(`/yachiyo/studio/group-runs/${encodeURIComponent(groupRunId)}`);
 }
 
+export async function listYachiyoGroupRunEvents(
+  groupRunId: string,
+  afterSequence = 0,
+  limit = 200,
+): Promise<YachiyoRunEventsPage> {
+  const query = new URLSearchParams({
+    after_sequence: String(Math.max(0, afterSequence)),
+    limit: String(Math.max(1, limit)),
+  });
+  return apiGet(`/yachiyo/studio/group-runs/${encodeURIComponent(groupRunId)}/events?${query.toString()}`);
+}
+
 export async function getYachiyoRunTimeline(runId: string): Promise<YachiyoRunTimelineSnapshot> {
   return apiGet(`/yachiyo/studio/runs/${encodeURIComponent(runId)}/timeline`);
 }

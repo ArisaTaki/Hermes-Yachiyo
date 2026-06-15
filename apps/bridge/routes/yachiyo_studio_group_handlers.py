@@ -95,3 +95,21 @@ async def get_group_run(
         return snapshot(group_run_snapshot)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="GroupRun 不存在") from exc
+
+
+async def get_group_run_events(
+    group_run_id: str,
+    http_request: Request | None = None,
+    after_sequence: int = 0,
+    limit: int = 200,
+) -> dict[str, Any]:
+    try:
+        event_page = await asyncio.to_thread(
+            studio_service(http_request).get_group_run_event_page,
+            group_run_id,
+            after_sequence,
+            limit,
+        )
+        return snapshot(event_page)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="GroupRun 不存在") from exc

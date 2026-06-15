@@ -1,5 +1,8 @@
+import { useEffect, useState } from 'react';
+
 import { RuntimeTimelineSummary } from '../../runtime-shared/components/RuntimeTimelineSummary';
-import type { GroupRunSnapshot } from '../../yachiyo-studio/types';
+import { listYachiyoGroupRunEvents } from '../../yachiyo-studio/api';
+import type { GroupRunSnapshot, RunEventPageSnapshot } from '../../yachiyo-studio/types';
 import { runStatusLabel, runStatusTone } from '../utils/runs';
 
 type GroupRunPanelProps = {
@@ -21,7 +24,27 @@ export function GroupRunPanel({
   onOpenAgentGroupRunTimeline,
   onRunAgentGroup,
 }: GroupRunPanelProps) {
-  const latestEvents = latestAgentGroupRun?.events || [];
+  const [groupRunEventPage, setGroupRunEventPage] = useState<RunEventPageSnapshot | null>(null);
+  const latestGroupRunId = latestAgentGroupRun?.group_run_id || '';
+  const latestGroupRunUpdatedAt = latestAgentGroupRun?.updated_at || '';
+  useEffect(() => {
+    if (!latestGroupRunId) {
+      setGroupRunEventPage(null);
+      return;
+    }
+    let disposed = false;
+    listYachiyoGroupRunEvents(latestGroupRunId, 0, 25)
+      .then((page) => {
+        if (!disposed) setGroupRunEventPage(page);
+      })
+      .catch(() => {
+        if (!disposed) setGroupRunEventPage(null);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [latestGroupRunId, latestGroupRunUpdatedAt]);
+  const latestEvents = groupRunEventPage?.events ?? latestAgentGroupRun?.events ?? [];
   const latestStatus = latestAgentGroupRun?.status || 'unknown';
   return (
     <section className="group-run-panel" data-testid="agent-group-run-panel">
@@ -55,6 +78,16 @@ export function GroupRunPanel({
               limit={4}
               testId="agent-group-run-event-summary"
             />
+          ) : null}
+          {groupRunEventPage ? (
+            <div
+              className="group-run-event-page-meta"
+              data-testid="agent-group-run-event-page-meta"
+            >
+              <span>events {groupRunEventPage.events.length}</span>
+              <span>cursor {groupRunEventPage.next_after_sequence}</span>
+              {groupRunEventPage.has_more ? <span>more</span> : null}
+            </div>
           ) : null}
         </div>
       ) : null}

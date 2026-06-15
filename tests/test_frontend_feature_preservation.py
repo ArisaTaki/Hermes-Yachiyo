@@ -904,6 +904,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "/yachiyo/studio/memories",
             "/yachiyo/studio/groups",
             "/yachiyo/studio/group-runs",
+            "/yachiyo/studio/group-runs/${encodeURIComponent(groupRunId)}/events",
             "/yachiyo/studio/workflows/${encodeURIComponent(workflowId)}/runs",
             "/yachiyo/studio/runs/${encodeURIComponent(runId)}/timeline",
             "RunEventPageSnapshot",
@@ -942,6 +943,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "startYachiyoGroupRun",
             "listYachiyoGroupRuns",
             "getYachiyoGroupRun",
+            "listYachiyoGroupRunEvents",
             "getYachiyoRunTimeline",
             "getYachiyoWorkflow",
             "/yachiyo/studio/workflows/${encodeURIComponent(workflowId)}",
@@ -970,6 +972,15 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
         "getYachiyoWorkflow",
         [
             "/yachiyo/studio/workflows/${encodeURIComponent(workflowId)}",
+        ],
+    )
+    _assert_function_contains(
+        "apps/frontend/src/features/yachiyo-studio/api.ts",
+        "listYachiyoGroupRunEvents",
+        [
+            "after_sequence: String(Math.max(0, afterSequence))",
+            "limit: String(Math.max(1, limit))",
+            "/yachiyo/studio/group-runs/${encodeURIComponent(groupRunId)}/events?${query.toString()}",
         ],
     )
     _assert_function_contains(
@@ -1587,6 +1598,10 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             'data-testid="agent-group-run-panel"',
             'data-testid="agent-group-run"',
             'data-testid="agent-group-open-run"',
+            "listYachiyoGroupRunEvents(latestGroupRunId, 0, 25)",
+            "const latestGroupRunUpdatedAt = latestAgentGroupRun?.updated_at || '';",
+            "const latestEvents = groupRunEventPage?.events ?? latestAgentGroupRun?.events ?? [];",
+            'data-testid="agent-group-run-event-page-meta"',
             "打开 Run Timeline",
         ],
     )

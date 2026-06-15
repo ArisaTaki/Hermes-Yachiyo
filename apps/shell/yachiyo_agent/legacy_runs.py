@@ -86,6 +86,12 @@ class LegacyRunPayloadProjector:
             "title": run_group.get("title") or "Run group",
             "status": run_group.get("status") or "unknown",
             "objective": run_group.get("summary") or run_group.get("title") or "",
+            "events": (
+                run_group.get("events")
+                or run_group.get("run_events")
+                or run_group.get("timeline")
+                or []
+            ),
             "runs": child_runs,
             "child_run_ids": run_group.get("child_run_ids") or [],
             "shared_artifacts": self.group_artifacts(child_runs),

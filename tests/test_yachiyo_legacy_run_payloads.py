@@ -78,6 +78,7 @@ def test_legacy_run_projector_preserves_group_run_payload_shape() -> None:
         "title": "Studio group run",
         "summary": "Final answer",
         "status": "completed",
+        "events": [{"event": "group.member.started", "member_agent_id": "agent-1"}],
         "child_run_ids": ["run-1", "missing-run", "run-2"],
         "created_at": "2026-06-14T00:00:00Z",
         "updated_at": "2026-06-14T00:01:00Z",
@@ -96,6 +97,7 @@ def test_legacy_run_projector_preserves_group_run_payload_shape() -> None:
     assert payload["title"] == "Studio group run"
     assert payload["status"] == "completed"
     assert payload["objective"] == "Final answer"
+    assert payload["events"] == [{"event": "group.member.started", "member_agent_id": "agent-1"}]
     assert [run["run_id"] for run in payload["runs"]] == ["run-1", "run-2"]
     assert payload["child_run_ids"] == ["run-1", "missing-run", "run-2"]
     assert payload["pending_approvals"] == [{"approval_id": "approval-1"}]

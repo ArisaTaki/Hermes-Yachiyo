@@ -364,6 +364,21 @@ async def get_studio_group_run(
     return await yachiyo_studio_handlers.get_group_run(group_run_id, http_request)
 
 
+@router.get("/studio/group-runs/{group_run_id}/events")
+async def get_studio_group_run_events(
+    group_run_id: str,
+    http_request: Request = None,  # type: ignore[assignment]
+    after_sequence: int = 0,
+    limit: int = 200,
+) -> dict[str, Any]:
+    return await yachiyo_studio_handlers.get_group_run_events(
+        group_run_id,
+        http_request,
+        after_sequence,
+        limit,
+    )
+
+
 @router.get("/studio/workflows")
 async def list_studio_workflows(http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
     return await yachiyo_studio_handlers.list_workflows(http_request)
