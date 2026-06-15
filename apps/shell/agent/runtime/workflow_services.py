@@ -68,12 +68,13 @@ def build_runtime_workflow_planning_services(
     client_request_id_from_payload: Callable[[dict[str, Any]], str],
     workflow_path: Callable[[dict[str, Any]], list[dict[str, Any]]],
 ) -> RuntimeWorkflowPlanningServiceBundle:
+    workflow_path_planner = WorkflowPathPlanner(node_kind=node_kind)
     return RuntimeWorkflowPlanningServiceBundle(
         workflow_parent_locator=WorkflowParentRunLocator(
             get_run_group=get_run_group,
             get_run=get_run,
         ),
-        workflow_path_planner=WorkflowPathPlanner(node_kind=node_kind),
+        workflow_path_planner=workflow_path_planner,
         workflow_definition_validator=WorkflowDefinitionValidator(
             node_kind=node_kind,
             node_types=node_types,
@@ -102,6 +103,8 @@ def build_runtime_workflow_planning_services(
             get_workflow=get_workflow,
             workflow_path=workflow_path,
             node_kind=node_kind,
+            nodes_by_id=workflow_path_planner.nodes_by_id,
+            next_node_id=workflow_path_planner.next_node_id,
         ),
     )
 

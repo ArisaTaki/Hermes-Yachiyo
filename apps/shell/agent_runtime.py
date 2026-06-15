@@ -2680,11 +2680,7 @@ class NativeRunEngine:
         node: dict[str, Any] | str,
         context: str,
     ) -> str:
-        if isinstance(node, str):
-            node = self._workflow_nodes_by_id(workflow).get(node) or {}
-        if not node:
-            return ""
-        return self.workflow_path_planner.next_node_id(workflow, node, context)
+        return self.workflow_resume_planner.next_node_id(workflow, node, context)
 
     def _workflow_condition_selection(
         self,

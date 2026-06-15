@@ -77,6 +77,8 @@ def test_build_runtime_workflow_planning_services_wires_planners_and_starters() 
     assert bundle.workflow_run_start_projector._timeline is timeline_factory
     assert bundle.workflow_run_starter._get_run_group is get_run_group
     assert bundle.workflow_resume_planner._workflow_path is workflow_path
+    assert bundle.workflow_resume_planner._nodes_by_id is WorkflowPathPlanner.nodes_by_id
+    assert bundle.workflow_resume_planner._next_node_id.__self__ is bundle.workflow_path_planner
 
 
 def test_native_runtime_installs_workflow_planning_services_under_legacy_attribute_names(tmp_path) -> None:
@@ -99,5 +101,7 @@ def test_native_runtime_installs_workflow_planning_services_under_legacy_attribu
         assert service.run_readiness_validator._get_workflow.__self__ is service
         assert service.workflow_run_starter._insert_run.__self__ is service
         assert service.workflow_resume_planner._workflow_path.__self__ is service
+        assert service.workflow_resume_planner._nodes_by_id is WorkflowPathPlanner.nodes_by_id
+        assert service.workflow_resume_planner._next_node_id.__self__ is service.workflow_path_planner
     finally:
         service.close()

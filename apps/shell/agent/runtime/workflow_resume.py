@@ -120,10 +120,14 @@ class WorkflowResumePlanner:
         get_workflow: Any,
         workflow_path: Any,
         node_kind: Any,
+        nodes_by_id: Any | None = None,
+        next_node_id: Any | None = None,
     ) -> None:
         self._get_workflow = get_workflow
         self._workflow_path = workflow_path
         self._node_kind = node_kind
+        self._nodes_by_id = nodes_by_id or self._default_nodes_by_id
+        self._next_node_id = next_node_id
 
     def workflow_for_run_resume(self, workflow_run: dict[str, Any]) -> dict[str, Any]:
         for event in workflow_run.get("timeline") or []:
@@ -168,3 +172,22 @@ class WorkflowResumePlanner:
             if seen_child_nodes == target_child_ordinal:
                 return index + 1
         return None
+
+    def next_node_id(
+        self,
+        workflow: dict[str, Any],
+        node: dict[str, Any] | str,
+        context: str,
+    ) -> str:
+        if isinstance(node, str):
+            node = self._nodes_by_id(workflow).get(node) or {}
+        if not node or self._next_node_id is None:
+            return ""
+        return str(self._next_node_id(workflow, node, context) or "")
+
+    def _default_nodes_by_id(self, workflow: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        return {
+            str(node.get("id") or ""): node
+            for node in self._workflow_path(workflow)
+            if isinstance(node, dict)
+        }
