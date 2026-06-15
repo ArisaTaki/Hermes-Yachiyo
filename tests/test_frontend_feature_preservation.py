@@ -528,6 +528,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "AgentGroupPanel",
             "useAgentDefinitions",
             "useAgentGroups",
+            "useApprovedRunGuard",
             "useRunEventReplay(selectedRunId, selectedRunReplayRefreshKey)",
             "useRunTimeline(selectedRunId, selectedRunReplayRefreshKey)",
             "useWorkflowDefinitions",
@@ -574,6 +575,17 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "mergeRunEventReplayPages(previous?.events || currentEvents, incomingEvents)",
             "clearRunEventReplay",
             "selectedReplayEvents",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useApprovedRunGuard.ts",
+        [
+            "export function useApprovedRunGuard",
+            "const approvedApprovalStaleWindowMs = 6000;",
+            "runApprovalSignature(run)",
+            "normalizeRunStatus(run.status) !== 'approval_required'",
+            "approvedApprovalGuardsRef.current.delete(run.run_id)",
+            "nextRuns.filter((run) => shouldAcceptRunUpdate(run))",
         ],
     )
     _assert_contains(

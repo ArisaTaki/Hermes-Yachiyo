@@ -17,6 +17,7 @@ import { RunLauncherPanel } from '../features/agent-studio/components/RunLaunche
 import { WorkflowEditorPanel, WorkflowRunPreview } from '../features/agent-studio/components/WorkflowEditorPanel';
 import { useAgentDefinitions } from '../features/agent-studio/hooks/useAgentDefinitions';
 import { useAgentGroups } from '../features/agent-studio/hooks/useAgentGroups';
+import { useApprovedRunGuard } from '../features/agent-studio/hooks/useApprovedRunGuard';
 import { useRunEventReplay } from '../features/agent-studio/hooks/useRunEventReplay';
 import { useRunTimeline } from '../features/agent-studio/hooks/useRunTimeline';
 import { useWorkflowDefinitions } from '../features/agent-studio/hooks/useWorkflowDefinitions';
@@ -40,7 +41,6 @@ import {
   publicApprovalToRunPendingApproval,
   publicArtifactsOrLegacy,
   publicRunEventToTimelineEvent,
-  runApprovalSignature,
   runHistoryGroupKey,
   runHistoryGroupsFor,
   runHistoryGroupSummary,
@@ -173,12 +173,6 @@ type StudioRefreshOptions = {
   skipRefresh?: boolean;
 };
 
-type ApprovedApprovalGuard = {
-  signature: string;
-  staleUntil: number;
-};
-
-const approvedApprovalStaleWindowMs = 6000;
 const runApprovalPollAttempts = 100;
 const runApprovalPollIntervalMs = 1200;
 
@@ -287,7 +281,6 @@ export function AgentStudioView() {
   const [memories, setMemories] = useState<MemorySpec[]>([]);
   const [futureTasks, setFutureTasks] = useState<FutureTaskSpec[]>([]);
   const [runDetailCache, setRunDetailCache] = useState<RunSpec[]>([]);
-  const approvedApprovalGuardsRef = useRef<Map<string, ApprovedApprovalGuard>>(new Map());
   const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
   const [selectedRunIds, setSelectedRunIds] = useState<string[]>([]);
   const [skillManagementMode, setSkillManagementMode] = useState(false);
@@ -457,6 +450,10 @@ export function AgentStudioView() {
     selectedReplayHasMore: selectedRunReplayHasMore,
     selectedReplayLoading: selectedRunReplayLoading,
   } = useRunEventReplay(selectedRunId, selectedRunReplayRefreshKey);
+  const {
+    acceptedRunUpdates,
+    rememberApprovedRun,
+  } = useApprovedRunGuard();
   const selectedRunExecutionEvents = useMemo(
     () => selectedRunReplayEvents.length
       ? selectedRunReplayEvents.map(runEventReplayToTimelineEvent)
@@ -858,32 +855,6 @@ export function AgentStudioView() {
     () => skillFolderNameError(editingSkillFolderName, skillFolders, editingSkillFolderId),
     [editingSkillFolderId, editingSkillFolderName, skillFolders],
   );
-
-  function rememberApprovedRun(run: RunSpec | null | undefined) {
-    if (!run) return;
-    approvedApprovalGuardsRef.current.set(run.run_id, {
-      signature: runApprovalSignature(run),
-      staleUntil: Date.now() + approvedApprovalStaleWindowMs,
-    });
-  }
-
-  function shouldAcceptRunUpdate(run: RunSpec): boolean {
-    const guard = approvedApprovalGuardsRef.current.get(run.run_id);
-    if (!guard) return true;
-    if (normalizeRunStatus(run.status) !== 'approval_required') {
-      approvedApprovalGuardsRef.current.delete(run.run_id);
-      return true;
-    }
-    const signature = runApprovalSignature(run);
-    if (guard.signature && signature === guard.signature) return false;
-    if (!guard.signature && Date.now() < guard.staleUntil) return false;
-    approvedApprovalGuardsRef.current.delete(run.run_id);
-    return true;
-  }
-
-  function acceptedRunUpdates(nextRuns: RunSpec[]): RunSpec[] {
-    return nextRuns.filter((run) => shouldAcceptRunUpdate(run));
-  }
 
   function upsertRunDetailCache(nextRuns: RunSpec[]) {
     const visibleRuns = acceptedRunUpdates(nextRuns);
