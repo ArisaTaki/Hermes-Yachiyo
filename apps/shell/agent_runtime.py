@@ -83,6 +83,10 @@ from apps.shell.agent.runtime.agent_context import (
 from apps.shell.agent.runtime.agent_outcomes import RuntimeAgentRunOutcomeProjector
 from apps.shell.agent.runtime.agent_preparation import RuntimeAgentRunPreparer
 from apps.shell.agent.runtime.agent_runs import RuntimeAgentRunStarter
+from apps.shell.agent.runtime.agent_services import (
+    RuntimeAgentServiceBundle,
+    build_runtime_agent_services as _build_runtime_agent_services,
+)
 from apps.shell.agent.runtime.agent_skills import RuntimeAgentSkillLoader
 from apps.shell.agent.runtime.cancellation import (
     RunCancellationProjection,
@@ -669,21 +673,15 @@ class NativeRunEngine:
             call_agent_tool=self._call_agent_tool,
         )
         self._install_runtime_tooling(tooling)
-        self.agent_skill_loader = RuntimeAgentSkillLoader(
+        agent_services = _build_runtime_agent_services(
             get_skill=self.get_skill,
             error_type=AgentRuntimeError,
-        )
-        self.agent_context_builder = AgentContextBuilder(
             compile_agent_runtime=self._compile_agent_runtime,
             load_agent_skills=self._load_agent_skills,
             long_term_memory_context=self._long_term_memory_context,
             operating_doctrine=_MARKET_AGENT_OPERATING_DOCTRINE,
-        )
-        self.agent_run_preparer = RuntimeAgentRunPreparer(
             agent_artifacts_dir=self.agent_artifacts_dir,
             normalize_execution_backend=_normalize_execution_backend,
-            compile_agent_runtime=self._compile_agent_runtime,
-            load_agent_skills=self._load_agent_skills,
             agent_context=self._agent_context,
             memory_store=self._memory_store,
             future_task_store=self._future_task_store,
@@ -694,16 +692,12 @@ class NativeRunEngine:
             append_run_event=self.append_run_event,
             timeline_factory=self._timeline,
             memory_context_limit=_MEMORY_CONTEXT_LIMIT,
-        )
-        self.agent_run_outcomes = RuntimeAgentRunOutcomeProjector(
-            append_run_event=self.append_run_event,
             runtime_task_model_events=self.runtime_task_model_events,
-            runtime_agent_timeline=self.runtime_agent_timeline,
-            runtime_agent_run_events=self.runtime_agent_run_events,
             update_run=self._update_run,
             model_output_metadata=_model_output_metadata,
             redact_secrets=redact_secrets,
         )
+        self._install_runtime_agent_services(agent_services)
         self.workflows = WorkflowRepository(
             self._conn,
             ensure_row_factory=self._ensure_row_factory,
@@ -876,6 +870,12 @@ class NativeRunEngine:
         self.tool_loop_projection = tooling.tool_loop_projection
         self.tool_call_executor = tooling.tool_call_executor
         self.tool_request_runner = tooling.tool_request_runner
+
+    def _install_runtime_agent_services(self, agent_services: RuntimeAgentServiceBundle) -> None:
+        self.agent_skill_loader = agent_services.agent_skill_loader
+        self.agent_context_builder = agent_services.agent_context_builder
+        self.agent_run_preparer = agent_services.agent_run_preparer
+        self.agent_run_outcomes = agent_services.agent_run_outcomes
 
     def close(self) -> None:
         self.shutdown()
