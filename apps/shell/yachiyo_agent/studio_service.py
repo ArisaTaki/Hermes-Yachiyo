@@ -50,6 +50,9 @@ class AgentStudioService:
             self._studio_port.save_agent(_request_payload(request))
         )
 
+    def delete_agent(self, agent_id: str) -> dict[str, Any]:
+        return dict(self._studio_port.delete_agent(agent_id))
+
     def start_agent_run(
         self,
         request: StartAgentRunRequest | Mapping[str, Any],
@@ -83,6 +86,12 @@ class AgentStudioService:
             self._studio_port.start_group_run(_request_payload(request))
         )
 
+    def list_group_runs(self, limit: int = 50) -> list[GroupRunSnapshot]:
+        return [
+            group_run_snapshot_from_payload(item)
+            for item in _payload_items(self._studio_port.list_group_runs(limit), "group_runs")
+        ]
+
     def get_group_run(self, group_run_id: str) -> GroupRunSnapshot:
         return group_run_snapshot_from_payload(self._studio_port.get_group_run(group_run_id))
 
@@ -102,6 +111,9 @@ class AgentStudioService:
         return workflow_snapshot_from_payload(
             self._studio_port.save_workflow(_request_payload(request))
         )
+
+    def delete_workflow(self, workflow_id: str) -> dict[str, Any]:
+        return dict(self._studio_port.delete_workflow(workflow_id))
 
     def start_workflow_run(
         self,

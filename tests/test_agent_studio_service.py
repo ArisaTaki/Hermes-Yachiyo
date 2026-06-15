@@ -32,6 +32,10 @@ class _FakeStudioPort:
         self.calls.append(("save_agent", request))
         return _agent_payload(agent_id=request.get("agent_id") or "agent-new", name=request["name"])
 
+    def delete_agent(self, agent_id: str) -> dict[str, Any]:
+        self.calls.append(("delete_agent", agent_id))
+        return {"ok": True, "agent_id": agent_id}
+
     def start_agent_run(self, request: dict[str, Any]) -> dict[str, Any]:
         self.calls.append(("start_agent_run", request))
         return _run_payload(
@@ -57,6 +61,10 @@ class _FakeStudioPort:
         self.calls.append(("start_group_run", request))
         return _group_run_payload(group_id=request["group_id"], objective=request["objective"])
 
+    def list_group_runs(self, limit: int = 50) -> dict[str, Any]:
+        self.calls.append(("list_group_runs", limit))
+        return {"ok": True, "group_runs": [_group_run_payload(group_run_id="group-run-listed")]}
+
     def get_group_run(self, group_run_id: str) -> dict[str, Any]:
         self.calls.append(("get_group_run", group_run_id))
         return {
@@ -81,6 +89,10 @@ class _FakeStudioPort:
             workflow_id=request.get("workflow_id") or "workflow-new",
             name=request["name"],
         )
+
+    def delete_workflow(self, workflow_id: str) -> dict[str, Any]:
+        self.calls.append(("delete_workflow", workflow_id))
+        return {"ok": True, "workflow_id": workflow_id}
 
     def start_workflow_run(self, request: dict[str, Any]) -> dict[str, Any]:
         self.calls.append(("start_workflow_run", request))
@@ -154,6 +166,7 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
             skill_ids=["skill-1"],
         )
     )
+    deleted_agent = service.delete_agent("agent-2")
     groups = service.list_groups()
     group = service.get_group("group-1")
     saved_group = service.save_group(
@@ -182,16 +195,19 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
             default_input_schema={"type": "object"},
         )
     )
+    deleted_workflow = service.delete_workflow("workflow-2")
 
     assert agents[0].agent_id == "agent-1"
     assert agent.name == "Fetched"
     assert saved_agent.agent_id == "agent-2"
+    assert deleted_agent == {"ok": True, "agent_id": "agent-2"}
     assert groups[0].members[0].agent_id == "agent-1"
     assert group.mode == "debate"
     assert saved_group.name == "Team"
     assert workflows[0].nodes[0]["type"] == "start"
     assert workflow.workflow_id == "workflow-1"
     assert saved_workflow.name == "Saved workflow"
+    assert deleted_workflow == {"ok": True, "workflow_id": "workflow-2"}
     assert (
         "save_agent",
         {
@@ -202,6 +218,7 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
             "skill_ids": ["skill-1"],
         },
     ) in port.calls
+    assert ("delete_agent", "agent-2") in port.calls
     assert (
         "save_group",
         {
@@ -219,6 +236,7 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
             "memory_scope": "hybrid",
         },
     ) in port.calls
+    assert ("delete_workflow", "workflow-2") in port.calls
     assert (
         "save_workflow",
         {
@@ -245,6 +263,7 @@ def test_agent_studio_service_maps_group_run_workflow_run_timeline_and_events() 
             client_run_id="client-group-1",
         )
     )
+    group_runs = service.list_group_runs(5)
     fetched_group_run = service.get_group_run("group-run-1")
     workflow_run = service.start_workflow_run(
         StartWorkflowRunRequest(workflow_id="workflow-1", objective="Build report")
@@ -261,6 +280,7 @@ def test_agent_studio_service_maps_group_run_workflow_run_timeline_and_events() 
     assert group_run.objective == "Compare designs"
     assert group_run.runs[0].events[0].event_type == "agent.tool.call"
     assert group_run.pending_approvals[0].approval_id == "approval-1"
+    assert group_runs[0].group_run_id == "group-run-listed"
     assert fetched_group_run.group_run_id == "group-run-1"
     assert fetched_group_run.run_group_id == "group-run-1"
     assert fetched_group_run.child_run_ids == ["child-run-1"]
@@ -283,6 +303,7 @@ def test_agent_studio_service_maps_group_run_workflow_run_timeline_and_events() 
             "client_run_id": "client-group-1",
         },
     ) in port.calls
+    assert ("list_group_runs", 5) in port.calls
     assert ("list_run_timelines", 10) in port.calls
 
 

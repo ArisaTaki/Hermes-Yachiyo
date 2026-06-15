@@ -133,8 +133,28 @@ async function startMockBridge() {
         return;
       }
       const url = new URL(request.url || '/', 'http://127.0.0.1');
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/agents') {
+        sendJson(response, 200, { agents });
+        return;
+      }
       if (request.method === 'GET' && url.pathname === '/ui/agents') {
         sendJson(response, 200, { agents });
+        return;
+      }
+      if (request.method === 'POST' && url.pathname === '/yachiyo/studio/agents') {
+        const payload = await readJson(request);
+        if (payload.agent_id === CREATED_AGENT_ID) {
+          updateAgentRequest = payload;
+          const current = agents.find((agent) => agent.agent_id === CREATED_AGENT_ID) || agentSpec(createAgentRequest || {});
+          const updated = { ...current, ...updateAgentRequest, agent_id: CREATED_AGENT_ID, updated_at: now };
+          agents = [systemAgent, updated];
+          sendJson(response, 200, updated);
+          return;
+        }
+        createAgentRequest = payload;
+        const created = agentSpec(createAgentRequest);
+        agents = [systemAgent, created];
+        sendJson(response, 200, created);
         return;
       }
       if (request.method === 'POST' && url.pathname === '/ui/agents') {
@@ -150,6 +170,12 @@ async function startMockBridge() {
         const updated = { ...current, ...updateAgentRequest, agent_id: CREATED_AGENT_ID, updated_at: now };
         agents = [systemAgent, updated];
         sendJson(response, 200, updated);
+        return;
+      }
+      if (request.method === 'DELETE' && url.pathname === `/yachiyo/studio/agents/${CREATED_AGENT_ID}`) {
+        deletedAgentId = CREATED_AGENT_ID;
+        agents = [systemAgent];
+        sendJson(response, 200, { ok: true, agent_id: CREATED_AGENT_ID });
         return;
       }
       if (request.method === 'DELETE' && url.pathname === `/ui/agents/${CREATED_AGENT_ID}`) {

@@ -286,6 +286,19 @@ async def get_studio_agent(
         raise HTTPException(status_code=404, detail="Agent 不存在") from exc
 
 
+@router.delete("/studio/agents/{agent_id}")
+async def delete_studio_agent(
+    agent_id: str,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(_studio_service(http_request).delete_agent, agent_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Agent 不存在") from exc
+    except AgentRuntimeError as exc:
+        raise _bad_request(exc) from exc
+
+
 @router.post("/studio/agents/{agent_id}/runs")
 async def start_studio_agent_run(
     agent_id: str,
@@ -364,6 +377,18 @@ async def start_studio_group_run(
         raise _bad_request(exc) from exc
 
 
+@router.get("/studio/group-runs")
+async def list_studio_group_runs(
+    http_request: Request = None,  # type: ignore[assignment]
+    limit: int = 50,
+) -> dict[str, Any]:
+    group_runs = await asyncio.to_thread(
+        _studio_service(http_request).list_group_runs,
+        max(1, min(200, int(limit or 50))),
+    )
+    return {"group_runs": [_snapshot(group_run) for group_run in group_runs]}
+
+
 @router.get("/studio/group-runs/{group_run_id}")
 async def get_studio_group_run(
     group_run_id: str,
@@ -407,6 +432,19 @@ async def get_studio_workflow(
         return _snapshot(snapshot)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Workflow 不存在") from exc
+
+
+@router.delete("/studio/workflows/{workflow_id}")
+async def delete_studio_workflow(
+    workflow_id: str,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(_studio_service(http_request).delete_workflow, workflow_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Workflow 不存在") from exc
+    except AgentRuntimeError as exc:
+        raise _bad_request(exc) from exc
 
 
 @router.post("/studio/workflows/{workflow_id}/runs")

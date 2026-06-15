@@ -295,7 +295,9 @@ export async function updateAgent(agentId: string, request: Partial<AgentSpec>):
 }
 
 export async function deleteAgent(agentId: string): Promise<{ ok?: boolean }> {
-  return apiDelete(`/ui/agents/${encodeURIComponent(agentId)}`);
+  return apiDelete(`/yachiyo/studio/agents/${encodeURIComponent(agentId)}`).catch(() => (
+    apiDelete(`/ui/agents/${encodeURIComponent(agentId)}`)
+  ));
 }
 
 export async function testAgentModel(agentId: string): Promise<{ ok?: boolean; message?: string; missing?: string[] }> {
@@ -372,7 +374,9 @@ export async function updateWorkflow(workflowId: string, request: Partial<Workfl
 }
 
 export async function deleteWorkflow(workflowId: string): Promise<{ ok?: boolean }> {
-  return apiDelete(`/ui/workflows/${encodeURIComponent(workflowId)}`);
+  return apiDelete(`/yachiyo/studio/workflows/${encodeURIComponent(workflowId)}`).catch(() => (
+    apiDelete(`/ui/workflows/${encodeURIComponent(workflowId)}`)
+  ));
 }
 
 export async function listRunnables(): Promise<RunnableSummary[]> {
@@ -413,12 +417,18 @@ export async function listRuns(): Promise<RunSpec[]> {
 }
 
 export async function listRunGroups(): Promise<RunGroupSpec[]> {
-  const payload = await apiGet<{ run_groups?: RunGroupSpec[] }>('/ui/run-groups');
-  return payload.run_groups || [];
+  return apiGet<{ group_runs?: GroupRunPublicSnapshot[] }>('/yachiyo/studio/group-runs')
+    .then((payload) => (payload.group_runs || []).map(runGroupSpecFromPublicGroupRun))
+    .catch(async () => {
+      const payload = await apiGet<{ run_groups?: RunGroupSpec[] }>('/ui/run-groups');
+      return payload.run_groups || [];
+    });
 }
 
 export async function getRunGroup(runGroupId: string): Promise<RunGroupSpec> {
-  return apiGet(`/ui/run-groups/${encodeURIComponent(runGroupId)}`);
+  return apiGet<GroupRunPublicSnapshot>(`/yachiyo/studio/group-runs/${encodeURIComponent(runGroupId)}`)
+    .then(runGroupSpecFromPublicGroupRun)
+    .catch(() => apiGet(`/ui/run-groups/${encodeURIComponent(runGroupId)}`));
 }
 
 export async function getRun(runId: string): Promise<RunSpec> {
@@ -503,6 +513,36 @@ type RunTimelinePublicSnapshot = {
   created_at?: string;
   updated_at?: string;
 };
+
+type GroupRunPublicSnapshot = {
+  group_run_id: string;
+  run_group_id?: string | null;
+  group_id?: string;
+  title?: string | null;
+  status?: string;
+  objective?: string;
+  runs?: RunTimelinePublicSnapshot[];
+  child_run_ids?: string[];
+  final_answer?: string | null;
+  created_at?: string;
+  updated_at?: string;
+};
+
+function runGroupSpecFromPublicGroupRun(snapshot: GroupRunPublicSnapshot): RunGroupSpec {
+  const childRunIds = snapshot.child_run_ids?.length
+    ? snapshot.child_run_ids
+    : (snapshot.runs || []).map((run) => run.run_id).filter(Boolean);
+  return {
+    run_group_id: snapshot.run_group_id || snapshot.group_run_id,
+    title: snapshot.title || snapshot.objective || 'Group run',
+    source: 'yachiyo_studio',
+    status: snapshot.status || 'unknown',
+    summary: snapshot.final_answer || snapshot.objective || '',
+    child_run_ids: childRunIds,
+    created_at: snapshot.created_at,
+    updated_at: snapshot.updated_at,
+  };
+}
 
 function runSpecFromPublicTimelineSnapshot(snapshot: RunTimelinePublicSnapshot): RunSpec {
   return runSpecFromPublicTimeline(

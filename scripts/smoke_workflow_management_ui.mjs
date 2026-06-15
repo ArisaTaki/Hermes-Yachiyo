@@ -125,8 +125,17 @@ async function startMockBridge() {
         sendJson(response, 200, { workflows });
         return;
       }
-      if (request.method === 'DELETE' && url.pathname.startsWith('/ui/workflows/')) {
-        const workflowId = decodeURIComponent(url.pathname.slice('/ui/workflows/'.length));
+      if (
+        request.method === 'DELETE'
+        && (
+          url.pathname.startsWith('/yachiyo/studio/workflows/')
+          || url.pathname.startsWith('/ui/workflows/')
+        )
+      ) {
+        const prefix = url.pathname.startsWith('/yachiyo/studio/workflows/')
+          ? '/yachiyo/studio/workflows/'
+          : '/ui/workflows/';
+        const workflowId = decodeURIComponent(url.pathname.slice(prefix.length));
         if (!workflows.some((workflow) => workflow.workflow_id === workflowId)) {
           sendJson(response, 404, { ok: false, error: `workflow not found: ${workflowId}` });
           return;

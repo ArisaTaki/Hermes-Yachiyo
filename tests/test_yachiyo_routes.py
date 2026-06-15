@@ -119,6 +119,10 @@ class _FakeAgentRuntime:
         self.calls.append(("update_agent", {"agent_id": agent_id, "payload": payload}))
         return _agent_payload(agent_id=agent_id, name=payload.get("name") or "Updated")
 
+    def delete_agent(self, agent_id: str) -> dict[str, Any]:
+        self.calls.append(("delete_agent", agent_id))
+        return {"ok": True, "agent_id": agent_id}
+
     def create_agent_run(self, payload: dict[str, Any]) -> dict[str, Any]:
         self.calls.append(("create_agent_run", payload))
         return _run_payload(
@@ -143,6 +147,10 @@ class _FakeAgentRuntime:
     def update_workflow(self, workflow_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         self.calls.append(("update_workflow", {"workflow_id": workflow_id, "payload": payload}))
         return _workflow_payload(workflow_id=workflow_id, name=payload.get("name") or "Updated")
+
+    def delete_workflow(self, workflow_id: str) -> dict[str, Any]:
+        self.calls.append(("delete_workflow", workflow_id))
+        return {"ok": True, "workflow_id": workflow_id}
 
     def create_workflow_run(self, payload: dict[str, Any]) -> dict[str, Any]:
         self.calls.append(("create_workflow_run", payload))
@@ -332,12 +340,14 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
         yachiyo.SaveAgentRequest(agent_id="agent-1", name="Writer"),
         request,
     )
+    deleted_agent = await yachiyo.delete_studio_agent("agent-1", request)
     agent_run = await yachiyo.start_studio_agent_run(
         "agent-1",
         yachiyo.StartAgentRunBody(objective="Draft summary", client_run_id="client-agent-1"),
         request,
     )
     workflows = await yachiyo.list_studio_workflows(request)
+    deleted_workflow = await yachiyo.delete_studio_workflow("workflow-1", request)
     workflow_run = await yachiyo.start_studio_workflow_run(
         "workflow-1",
         yachiyo.StartWorkflowRunBody(objective="Build report"),
@@ -346,6 +356,7 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     runs = await yachiyo.list_studio_runs(request, limit=5)
     run_detail = await yachiyo.get_studio_run("run-1", request)
     timeline = await yachiyo.get_studio_run_timeline("run-1", request)
+    group_runs = await yachiyo.list_studio_group_runs(request, limit=5)
     group_run = await yachiyo.get_studio_group_run("group-run-1", request)
     events = await yachiyo.get_studio_run_events("run-1", request, after_sequence=0, limit=1)
     rerun = await yachiyo.rerun_studio_run("run-1", request)
@@ -367,14 +378,18 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     assert started_group_run["participants"][0]["agent_id"] == "agent-1"
     assert started_group_run["runs"][0]["run_id"] == "run-1"
     assert saved_agent["model_config"] == {"provider": "model_profile"}
+    assert deleted_agent == {"ok": True, "agent_id": "agent-1"}
     assert agent_run["run_id"] == "agent-run-1"
     assert agent_run["agent_id"] == "agent-1"
     assert workflows["workflows"][0]["workflow_id"] == "workflow-1"
+    assert deleted_workflow == {"ok": True, "workflow_id": "workflow-1"}
     assert workflow_run["workflow_run_id"] == "workflow-run-1"
     assert runs["runs"][0]["run_id"] == "studio-run"
     assert run_detail["run_id"] == "run-1"
     assert timeline["run_group_id"] == "group-run-1"
     assert timeline["pending_approval"]["tool_name"] == "terminal.run"
+    assert group_runs["group_runs"][0]["group_run_id"] == "group-run-1"
+    assert group_runs["group_runs"][0]["runs"][0]["run_id"] == "run-1"
     assert group_run["run_group_id"] == "group-run-1"
     assert group_run["child_run_ids"] == ["run-1"]
     assert events["after_sequence"] == 0
@@ -389,7 +404,10 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     assert ("cancel_run", "run-1") in runtime.calls
     assert ("approve_run_approval", "run-1") in runtime.calls
     assert ("reject_run_approval", {"run_id": "run-1", "reason": "No"}) in runtime.calls
+    assert ("delete_agent", "agent-1") in runtime.calls
+    assert ("delete_workflow", "workflow-1") in runtime.calls
     assert ("list_runs", 5) in runtime.calls
+    assert ("list_run_groups", 5) in runtime.calls
     assert (
         "create_agent_run",
         {
@@ -461,6 +479,9 @@ def test_yachiyo_studio_routes_include_run_action_facade() -> None:
     source = Path(yachiyo.__file__).read_text(encoding="utf-8")
 
     assert '@router.post("/studio/agents/{agent_id}/runs")' in source
+    assert '@router.delete("/studio/agents/{agent_id}")' in source
+    assert '@router.get("/studio/group-runs")' in source
+    assert '@router.get("/studio/group-runs/{group_run_id}")' in source
     assert '@router.get("/studio/runs")' in source
     assert '@router.get("/studio/runs/{run_id}")' in source
     assert '@router.post("/studio/runs/{run_id}/rerun")' in source
@@ -468,6 +489,7 @@ def test_yachiyo_studio_routes_include_run_action_facade() -> None:
     assert '@router.post("/studio/runs/{run_id}/approval/approve")' in source
     assert '@router.post("/studio/runs/{run_id}/approval/reject")' in source
     assert '@router.get("/studio/runs/{run_id}/artifacts/{artifact_path:path}")' in source
+    assert '@router.delete("/studio/workflows/{workflow_id}")' in source
 
 
 def _request(runtime: _FakeAgentRuntime) -> SimpleNamespace:

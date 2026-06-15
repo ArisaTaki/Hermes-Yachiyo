@@ -132,6 +132,9 @@ class LegacyStudioPort:
             return self._runtime.update_agent(agent_id, request)
         return self._runtime.create_agent(request)
 
+    def delete_agent(self, agent_id: str) -> dict[str, Any]:
+        return self._runtime.delete_agent(agent_id)
+
     def start_agent_run(self, request: dict[str, Any]) -> dict[str, Any]:
         return self._runtime.create_agent_run(
             {
@@ -310,33 +313,27 @@ class LegacyStudioPort:
             "updated_at": run_group.get("updated_at") or "",
         }
 
+    def list_group_runs(self, limit: int = 50) -> dict[str, Any]:
+        list_run_groups = getattr(self._runtime, "list_run_groups", None)
+        if not callable(list_run_groups):
+            return {"ok": True, "group_runs": []}
+
+        payload = list_run_groups(max(1, min(200, int(limit or 50))))
+        raw_items = payload.get("run_groups") if isinstance(payload, dict) else payload
+        if not isinstance(raw_items, list):
+            raw_items = []
+        return {
+            "ok": True,
+            "group_runs": [
+                _group_run_from_legacy_run_group(item, self._runtime)
+                for item in raw_items
+                if isinstance(item, dict)
+            ],
+        }
+
     def get_group_run(self, group_run_id: str) -> dict[str, Any]:
         run_group = self._runtime.get_run_group(group_run_id)
-        child_runs = []
-        for run_id in run_group.get("child_run_ids") or []:
-            try:
-                child_runs.append(self._runtime.get_run(str(run_id)))
-            except KeyError:
-                continue
-        return {
-            "run_group_id": run_group.get("run_group_id"),
-            "group_run_id": run_group.get("run_group_id"),
-            "group_id": "",
-            "title": run_group.get("title") or "Run group",
-            "status": run_group.get("status") or "unknown",
-            "objective": run_group.get("summary") or run_group.get("title") or "",
-            "runs": child_runs,
-            "child_run_ids": run_group.get("child_run_ids") or [],
-            "shared_artifacts": _group_artifacts(child_runs),
-            "pending_approvals": [
-                run.get("pending_approval")
-                for run in child_runs
-                if run.get("pending_approval")
-            ],
-            "final_answer": run_group.get("summary") or "",
-            "created_at": run_group.get("created_at") or "",
-            "updated_at": run_group.get("updated_at") or "",
-        }
+        return _group_run_from_legacy_run_group(run_group, self._runtime)
 
     def list_workflows(self) -> dict[str, Any]:
         return self._runtime.list_workflows()
@@ -353,6 +350,9 @@ class LegacyStudioPort:
                 return self._runtime.create_workflow(request)
             return self._runtime.update_workflow(workflow_id, request)
         return self._runtime.create_workflow(request)
+
+    def delete_workflow(self, workflow_id: str) -> dict[str, Any]:
+        return self._runtime.delete_workflow(workflow_id)
 
     def start_workflow_run(self, request: dict[str, Any]) -> dict[str, Any]:
         return self._runtime.create_workflow_run(
@@ -412,6 +412,43 @@ def _group_artifacts(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
             if isinstance(artifact, dict):
                 artifacts.append({**artifact, "source_run_id": run_id})
     return artifacts
+
+
+def _group_run_from_legacy_run_group(
+    run_group: dict[str, Any],
+    runtime: Any,
+) -> dict[str, Any]:
+    child_runs = _child_runs_for_run_group(run_group, runtime)
+    run_group_id = str(run_group.get("run_group_id") or run_group.get("group_run_id") or "")
+    return {
+        "run_group_id": run_group_id,
+        "group_run_id": run_group_id,
+        "group_id": str(run_group.get("group_id") or ""),
+        "title": run_group.get("title") or "Run group",
+        "status": run_group.get("status") or "unknown",
+        "objective": run_group.get("summary") or run_group.get("title") or "",
+        "runs": child_runs,
+        "child_run_ids": run_group.get("child_run_ids") or [],
+        "shared_artifacts": _group_artifacts(child_runs),
+        "pending_approvals": [
+            run.get("pending_approval")
+            for run in child_runs
+            if run.get("pending_approval")
+        ],
+        "final_answer": run_group.get("summary") or "",
+        "created_at": run_group.get("created_at") or "",
+        "updated_at": run_group.get("updated_at") or "",
+    }
+
+
+def _child_runs_for_run_group(run_group: dict[str, Any], runtime: Any) -> list[dict[str, Any]]:
+    child_runs = []
+    for run_id in run_group.get("child_run_ids") or []:
+        try:
+            child_runs.append(runtime.get_run(str(run_id)))
+        except KeyError:
+            continue
+    return child_runs
 
 
 def _chat_group_snapshots(runtime: Any) -> list[dict[str, Any]]:

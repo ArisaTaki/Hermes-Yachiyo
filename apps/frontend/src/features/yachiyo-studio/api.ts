@@ -1,4 +1,4 @@
-import { apiGet, apiPost } from '../../lib/bridge';
+import { apiDelete, apiGet, apiPost } from '../../lib/bridge';
 import type {
   AgentDefinitionSnapshot,
   AgentGroupSnapshot,
@@ -16,6 +16,10 @@ export async function saveYachiyoStudioAgent(
   request: Partial<AgentDefinitionSnapshot>,
 ): Promise<AgentDefinitionSnapshot> {
   return apiPost('/yachiyo/studio/agents', request);
+}
+
+export async function deleteYachiyoStudioAgent(agentId: string): Promise<{ ok?: boolean }> {
+  return apiDelete(`/yachiyo/studio/agents/${encodeURIComponent(agentId)}`);
 }
 
 export async function listYachiyoAgentGroups(): Promise<AgentGroupSnapshot[]> {
@@ -46,6 +50,16 @@ export async function startYachiyoGroupRun(
   });
 }
 
+export async function listYachiyoGroupRuns(limit = 50): Promise<GroupRunSnapshot[]> {
+  const query = new URLSearchParams({ limit: String(Math.max(1, Math.min(200, limit))) });
+  const payload = await apiGet<{ group_runs?: GroupRunSnapshot[] }>(`/yachiyo/studio/group-runs?${query.toString()}`);
+  return payload.group_runs || [];
+}
+
+export async function getYachiyoGroupRun(groupRunId: string): Promise<GroupRunSnapshot> {
+  return apiGet(`/yachiyo/studio/group-runs/${encodeURIComponent(groupRunId)}`);
+}
+
 export async function getYachiyoRunTimeline(runId: string): Promise<RunTimelineSnapshot> {
   return apiGet(`/yachiyo/studio/runs/${encodeURIComponent(runId)}/timeline`);
 }
@@ -61,6 +75,10 @@ export async function startYachiyoWorkflowRun(
     title: title || undefined,
     client_run_id: clientRunId,
   });
+}
+
+export async function deleteYachiyoWorkflow(workflowId: string): Promise<{ ok?: boolean }> {
+  return apiDelete(`/yachiyo/studio/workflows/${encodeURIComponent(workflowId)}`);
 }
 
 function createClientRunId() {
