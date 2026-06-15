@@ -193,6 +193,7 @@ from apps.shell.agent.runtime.run_services import (
     RuntimeRunServiceBundle,
     build_runtime_run_services as _build_runtime_run_services,
 )
+from apps.shell.agent.runtime.run_timeline import RuntimeRunTimelineService
 from apps.shell.agent.runtime.runnable_services import (
     RuntimeRunnableServiceBundle,
     build_runtime_runnable_services as _build_runtime_runnable_services,
@@ -618,6 +619,14 @@ class NativeRunEngine:
             error_type=AgentRuntimeError,
         )
         self._install_runtime_core_services(core_services)
+        self._install_runtime_run_timeline(
+            RuntimeRunTimelineService(
+                runs=self.runs,
+                run_groups=self.run_groups,
+                runtime_events=self.runtime_events,
+                run_artifacts=self.run_artifacts,
+            )
+        )
         self._install_runtime_main_chat_config(
             MainChatRuntimeConfigBuilder(
                 main_chat_agent_id=_MAIN_CHAT_AGENT_ID,
@@ -1070,6 +1079,12 @@ class NativeRunEngine:
         self.runtime_agent_timeline = core_services.runtime_agent_timeline
         self.runtime_policy = core_services.runtime_policy
         self.model_profile_resolver = core_services.model_profile_resolver
+
+    def _install_runtime_run_timeline(
+        self,
+        run_timeline: RuntimeRunTimelineService,
+    ) -> None:
+        self.run_timeline = run_timeline
 
     def _install_runtime_main_chat_config(self, main_chat_config: MainChatRuntimeConfigBuilder) -> None:
         self.main_chat_config = main_chat_config
@@ -2687,19 +2702,19 @@ class NativeRunEngine:
         self.run_readiness_validator.validate_workflow_runnable_steps(nodes)
 
     def list_runs(self, limit: int = 50) -> dict[str, Any]:
-        return self.runs.list(limit)
+        return self.run_timeline.list_runs(limit)
 
     def list_run_groups(self, limit: int = 50) -> dict[str, Any]:
-        return self.run_groups.list(limit)
+        return self.run_timeline.list_run_groups(limit)
 
     def get_run_group(self, run_group_id: str) -> dict[str, Any]:
-        return self.run_groups.get(run_group_id)
+        return self.run_timeline.get_run_group(run_group_id)
 
     def _run_group_source(self, run_group_id: str) -> str:
-        return self.run_groups.source(run_group_id)
+        return self.run_timeline.run_group_source(run_group_id)
 
     def get_run(self, run_id: str) -> dict[str, Any]:
-        return self.runs.get(run_id)
+        return self.run_timeline.get_run(run_id)
 
     def link_task_run(self, *, task_id: str, run_id: str, session_id: str = "") -> dict[str, Any]:
         return self.task_run_links.link(task_id=task_id, run_id=run_id, session_id=session_id)
@@ -2717,7 +2732,7 @@ class NativeRunEngine:
         visibility: str = "user",
         sensitivity: str = "public",
     ) -> dict[str, Any]:
-        return self.runtime_events.append(
+        return self.run_timeline.append_event(
             run_id,
             event_type,
             payload,
@@ -2734,7 +2749,7 @@ class NativeRunEngine:
         limit: int = 200,
         include_internal: bool = False,
     ) -> dict[str, Any]:
-        return self.runtime_events.list(
+        return self.run_timeline.list_events(
             run_id,
             after_sequence=after_sequence,
             limit=limit,
@@ -2745,7 +2760,7 @@ class NativeRunEngine:
         return self.run_deletion.delete(run_id)
 
     def read_run_artifact(self, run_id: str, artifact_path: str) -> dict[str, Any]:
-        return self.run_artifacts.read(run_id, artifact_path)
+        return self.run_timeline.read_artifact(run_id, artifact_path)
 
     def _insert_run_group(
         self,
