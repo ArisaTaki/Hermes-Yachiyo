@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from apps.shell import agent_runtime
+from apps.shell.agent.runtime.budget import RunBudgetLimits
 from apps.shell.agent.runtime.workflow_continuation import WorkflowContinuationCoordinator
 from apps.shell.agent.runtime.workflow_projections import (
     WorkflowContinuationFailureProjection,
@@ -383,6 +384,76 @@ def test_workflow_continuation_uses_injected_loop_selection() -> None:
     ]
     assert loop_event[2]["workflow_node_selected_branch"] == "exit"
     assert loop_event[2]["workflow_node_loop_limit_reached"] is True
+
+
+def test_workflow_continuation_uses_injected_loop_budget_ports() -> None:
+    engine = FakeWorkflowTraversalEngine()
+    workflow = {
+        "nodes": [
+            {"id": "start", "type": "start"},
+            {"id": "repeat", "type": "loop", "data": {"label": "Repeat"}},
+        ]
+    }
+    nodes_by_id = {str(node["id"]): node for node in workflow["nodes"]}
+    budget_calls: list[str] = []
+    selection_calls: list[dict[str, object]] = []
+    coordinator = WorkflowContinuationCoordinator(
+        engine,
+        workflow_path=lambda current_workflow: list(current_workflow["nodes"]),
+        workflow_nodes_by_id=lambda _workflow: nodes_by_id,
+        workflow_next_node_id=lambda _workflow, node, _context: (
+            "repeat" if node["id"] == "start" else ""
+        ),
+        workflow_condition_selection=lambda *_args, **_kwargs: {},
+        workflow_loop_selection=lambda _workflow, node, context, *, previous_iterations: (
+            selection_calls.append(
+                {
+                    "node_id": str(node["id"]),
+                    "context": context,
+                    "previous_iterations": previous_iterations,
+                }
+            )
+            or {
+                "condition": "again",
+                "operator": "contains",
+                "matched": False,
+                "branch": "exit",
+                "target_node_id": "",
+                "previous_iterations": previous_iterations,
+                "iteration": previous_iterations,
+                "max_iterations": 5,
+                "limit_reached": False,
+            }
+        ),
+        runtime_limits=lambda: budget_calls.append("limits")
+        or RunBudgetLimits(max_workflow_steps=5),
+        workflow_loop_iterations_from_timeline=lambda timeline: budget_calls.append(
+            f"iterations:{len(timeline)}"
+        )
+        or {"repeat": 2},
+        workflow_loop_step_limit=lambda current_workflow: budget_calls.append(
+            f"limit:{len(current_workflow['nodes'])}"
+        )
+        or 3,
+        node_kind=lambda node: str(node["type"]),
+    )
+    timeline = [{"event": "workflow.node.loop", "workflow_node_id": "repeat"}]
+
+    result = coordinator.continue_run(
+        {"run_id": "workflow_run", "user_goal": "Loop again"},
+        workflow,
+        context="done",
+        timeline=timeline,
+        artifacts=[],
+        start_index=0,
+        root_group=False,
+    )
+
+    assert result["status"] == "completed"
+    assert budget_calls == ["iterations:1", "limit:2", "limits"]
+    assert selection_calls == [
+        {"node_id": "repeat", "context": "done", "previous_iterations": 2}
+    ]
 
 
 def test_workflow_continuation_uses_injected_approval_criteria() -> None:

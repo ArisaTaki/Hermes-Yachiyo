@@ -179,6 +179,11 @@ def build_runtime_workflow_execution_services(
         update_run_group=update_run_group,
         get_run=get_run,
         approve_workflow_node=approve_workflow_node,
+        runtime_limits=lambda: engine.runtime_limits,
+        workflow_loop_iterations_from_timeline=lambda timeline: (
+            engine._workflow_loop_iterations_from_timeline(timeline)
+        ),
+        workflow_loop_step_limit=lambda workflow: engine._workflow_loop_step_limit(workflow),
         node_kind=lambda node: engine._node_kind(node),
     )
     return RuntimeWorkflowExecutionServiceBundle(

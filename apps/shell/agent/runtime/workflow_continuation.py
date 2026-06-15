@@ -95,6 +95,9 @@ class WorkflowContinuationCoordinator:
         update_run_group: Any | None = None,
         get_run: Any | None = None,
         approve_workflow_node: Any | None = None,
+        runtime_limits: Any | None = None,
+        workflow_loop_iterations_from_timeline: Any | None = None,
+        workflow_loop_step_limit: Any | None = None,
         node_kind: Any | None = None,
     ) -> None:
         self._engine = engine
@@ -125,6 +128,9 @@ class WorkflowContinuationCoordinator:
         self._update_run_group_callback = update_run_group
         self._get_run_callback = get_run
         self._approve_workflow_node_callback = approve_workflow_node
+        self._runtime_limits_source = runtime_limits
+        self._workflow_loop_iterations_from_timeline_callback = workflow_loop_iterations_from_timeline
+        self._workflow_loop_step_limit_callback = workflow_loop_step_limit
         self._node_kind_callback = node_kind
         self._outcomes = WorkflowRunOutcomeProjector(
             engine,
@@ -397,6 +403,35 @@ class WorkflowContinuationCoordinator:
             return self._approve_workflow_node_callback(run_id, **kwargs)
         return self._engine.approvals.approve_workflow_node(run_id, **kwargs)
 
+    def _runtime_limits(self) -> RunBudgetLimits:
+        source = self._runtime_limits_source
+        if source is not None:
+            return source() if callable(source) else source
+        return getattr(self._engine, "runtime_limits", RunBudgetLimits())
+
+    def _workflow_loop_iterations_from_timeline(
+        self,
+        timeline: list[dict[str, Any]],
+    ) -> dict[str, int]:
+        if self._workflow_loop_iterations_from_timeline_callback is not None:
+            return self._workflow_loop_iterations_from_timeline_callback(timeline)
+        try:
+            return self._engine._workflow_loop_iterations_from_timeline(timeline)
+        except AttributeError:
+            return {}
+
+    def _workflow_loop_step_limit(
+        self,
+        workflow: dict[str, Any],
+        nodes_by_id: dict[str, dict[str, Any]],
+    ) -> int:
+        if self._workflow_loop_step_limit_callback is not None:
+            return int(self._workflow_loop_step_limit_callback(workflow))
+        try:
+            return int(self._engine._workflow_loop_step_limit(workflow))
+        except AttributeError:
+            return len(nodes_by_id) + 1
+
     def _node_kind(self, node: dict[str, Any]) -> str:
         if self._node_kind_callback is not None:
             return self._node_kind_callback(node)
@@ -424,9 +459,8 @@ class WorkflowContinuationCoordinator:
         run: dict[str, Any],
         timeline: list[dict[str, Any]],
     ) -> WorkflowRunBudget:
-        limits = getattr(self._engine, "runtime_limits", RunBudgetLimits())
         return WorkflowRunBudget(
-            limits=limits,
+            limits=self._runtime_limits(),
             started_at_epoch=self._iso_epoch(run.get("created_at")),
             steps_used=self._workflow_steps_used(timeline),
         )
@@ -494,14 +528,8 @@ class WorkflowContinuationCoordinator:
                 node = None
                 current_node_id = ""
                 has_agent_upstream = start_index > 0
-            try:
-                loop_iterations = engine._workflow_loop_iterations_from_timeline(timeline)
-            except AttributeError:
-                loop_iterations = {}
-            try:
-                max_step_count = engine._workflow_loop_step_limit(workflow)
-            except AttributeError:
-                max_step_count = len(nodes_by_id) + 1
+            loop_iterations = self._workflow_loop_iterations_from_timeline(timeline)
+            max_step_count = self._workflow_loop_step_limit(workflow, nodes_by_id)
             budget = self._workflow_budget(run, timeline)
             step_count = 0
             while node is not None:
