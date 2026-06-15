@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import threading
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
@@ -173,3 +175,123 @@ class RuntimeWorkflowRunCoordinator:
             start_index=0,
             root_group=start.root_group,
         )
+
+
+class RuntimeWorkflowRunAsyncCoordinator:
+    """Starts Workflow Runs for background execution while preserving return shape."""
+
+    def __init__(
+        self,
+        *,
+        get_workflow: Callable[[str], dict[str, Any]],
+        validate_workflow: Callable[[list[dict[str, Any]], list[dict[str, Any]]], dict[str, Any]],
+        validate_workflow_agent_nodes: Callable[[list[dict[str, Any]]], None],
+        validate_workflow_subworkflow_nodes: Callable[..., None],
+        validate_workflow_runnable_steps: Callable[[list[dict[str, Any]]], None],
+        validate_workflow_agent_run_readiness: Callable[[list[dict[str, Any]]], None],
+        starter: RuntimeWorkflowRunStarter,
+        start_projector: Any,
+        append_run_event: Callable[[str, str, dict[str, Any]], Any],
+        update_run: Callable[..., dict[str, Any]],
+        continue_workflow_run: Callable[..., dict[str, Any]],
+        project_background_failure: Callable[..., dict[str, Any]],
+        resolve_runnable: Callable[..., dict[str, Any] | None],
+        error_type: type[Exception],
+        thread_factory: Callable[..., Any] = threading.Thread,
+        logger: logging.Logger | None = None,
+    ) -> None:
+        self._get_workflow = get_workflow
+        self._validate_workflow = validate_workflow
+        self._validate_workflow_agent_nodes = validate_workflow_agent_nodes
+        self._validate_workflow_subworkflow_nodes = validate_workflow_subworkflow_nodes
+        self._validate_workflow_runnable_steps = validate_workflow_runnable_steps
+        self._validate_workflow_agent_run_readiness = validate_workflow_agent_run_readiness
+        self._starter = starter
+        self._start_projector = start_projector
+        self._append_run_event = append_run_event
+        self._update_run = update_run
+        self._continue_workflow_run = continue_workflow_run
+        self._project_background_failure = project_background_failure
+        self._resolve_runnable = resolve_runnable
+        self._error_type = error_type
+        self._thread_factory = thread_factory
+        self._logger = logger or logging.getLogger(__name__)
+
+    def create_async(
+        self,
+        payload: dict[str, Any],
+        *,
+        on_complete: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        workflow_id = str(payload.get("workflow_id") or payload.get("runnable_id") or "")
+        user_goal = str(payload.get("user_goal") or payload.get("goal") or "").strip()
+        if not workflow_id:
+            raise self._error_type("缺少 workflow_id")
+        if not user_goal:
+            raise self._error_type("运行目标不能为空")
+        workflow = self._get_workflow(workflow_id)
+        if not workflow.get("enabled", True):
+            raise self._error_type("Workflow 已停用")
+        nodes = workflow["nodes"]
+        self._validate_workflow(nodes, workflow["edges"])
+        self._validate_workflow_agent_nodes(nodes)
+        self._validate_workflow_subworkflow_nodes(nodes, parent_workflow_id=workflow_id)
+        self._validate_workflow_runnable_steps(nodes)
+        self._validate_workflow_agent_run_readiness(nodes)
+        start = self._starter.start_async(
+            payload,
+            workflow=workflow,
+            workflow_id=workflow_id,
+        )
+        run = start.run
+        timeline, started_payload = self._start_projector.started_projection(workflow_id, workflow)
+        self._append_run_event(
+            run["run_id"],
+            "workflow.run.started",
+            started_payload,
+        )
+        run = self._update_run(
+            run["run_id"],
+            status="running",
+            timeline=timeline,
+            artifacts=[],
+            pending_approval=None,
+        )
+        result = {
+            **run,
+            "status": "processing",
+            "workflow_run_id": run["run_id"],
+            "runnable": self._resolve_runnable(runnable_id=workflow_id),
+        }
+
+        def execute_in_background() -> None:
+            try:
+                exec_result = self._continue_workflow_run(
+                    run,
+                    workflow,
+                    context=user_goal,
+                    timeline=list(timeline),
+                    artifacts=[],
+                    start_index=0,
+                    root_group=start.root_group,
+                )
+                if on_complete:
+                    on_complete(exec_result)
+            except Exception as exc:
+                self._logger.error("异步 Workflow Run 执行失败: %s", exc, exc_info=True)
+                failed = self._project_background_failure(
+                    run,
+                    timeline=timeline,
+                    error=exc,
+                    root_group=start.root_group,
+                )
+                if on_complete:
+                    on_complete(failed)
+
+        thread = self._thread_factory(
+            target=execute_in_background,
+            name=f"workflow-run-{run['run_id'][:8]}",
+            daemon=True,
+        )
+        thread.start()
+        return result

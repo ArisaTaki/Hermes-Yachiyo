@@ -7,7 +7,6 @@ import logging
 import os
 import sqlite3
 import subprocess
-import threading
 import time
 from copy import deepcopy
 from dataclasses import dataclass
@@ -375,7 +374,11 @@ from apps.shell.agent.runtime.workflow_resume import (
     WorkflowParentRunLocator,
     WorkflowResumePlanner,
 )
-from apps.shell.agent.runtime.workflow_runs import RuntimeWorkflowRunCoordinator, RuntimeWorkflowRunStarter
+from apps.shell.agent.runtime.workflow_runs import (
+    RuntimeWorkflowRunAsyncCoordinator,
+    RuntimeWorkflowRunCoordinator,
+    RuntimeWorkflowRunStarter,
+)
 from apps.shell.agent.runtime.workflow_run_outcomes import WorkflowRunOutcomeProjector
 from apps.shell.agent.runtime.workflow_services import (
     RuntimeWorkflowExecutionServiceBundle,
@@ -1010,6 +1013,31 @@ class NativeRunEngine:
             approve_workflow_node=lambda run_id, **kwargs: self.approvals.approve_workflow_node(run_id, **kwargs),
         )
         self._install_runtime_workflow_execution_services(workflow_execution_services)
+        self.workflow_run_async_coordinator = RuntimeWorkflowRunAsyncCoordinator(
+            get_workflow=lambda workflow_id: self.get_workflow(workflow_id),
+            validate_workflow=lambda nodes, edges: self.validate_workflow(nodes, edges),
+            validate_workflow_agent_nodes=lambda nodes: self._validate_workflow_agent_nodes(nodes),
+            validate_workflow_subworkflow_nodes=lambda nodes, **kwargs: (
+                self._validate_workflow_subworkflow_nodes(nodes, **kwargs)
+            ),
+            validate_workflow_runnable_steps=lambda nodes: self._validate_workflow_runnable_steps(nodes),
+            validate_workflow_agent_run_readiness=lambda nodes: self._validate_workflow_agent_run_readiness(nodes),
+            starter=self.workflow_run_starter,
+            start_projector=self.workflow_run_start_projector,
+            append_run_event=lambda run_id, event_type, payload: self.append_run_event(run_id, event_type, payload),
+            update_run=lambda run_id, **kwargs: self._update_run(run_id, **kwargs),
+            continue_workflow_run=lambda run, workflow, **kwargs: self._continue_workflow_run(
+                run,
+                workflow,
+                **kwargs,
+            ),
+            project_background_failure=lambda run, **kwargs: self.workflow_continuation.project_background_failure(
+                run,
+                **kwargs,
+            ),
+            resolve_runnable=lambda **kwargs: self.resolve_runnable(**kwargs),
+            error_type=AgentRuntimeError,
+        )
         self.workflow_approval_execution = RuntimeWorkflowApprovalExecutionService(
             pending_approval_private=lambda run_id: self.runs.pending_approval_private(run_id),
             workflow_for_run_resume=lambda run: self._workflow_for_run_resume(run),
@@ -2354,82 +2382,7 @@ class NativeRunEngine:
         payload: dict[str, Any],
         on_complete: "Callable[[dict[str, Any]], None] | None" = None,
     ) -> dict[str, Any]:
-        workflow_id = str(payload.get("workflow_id") or payload.get("runnable_id") or "")
-        user_goal = str(payload.get("user_goal") or payload.get("goal") or "").strip()
-        if not workflow_id:
-            raise AgentRuntimeError("缺少 workflow_id")
-        if not user_goal:
-            raise AgentRuntimeError("运行目标不能为空")
-        workflow = self.get_workflow(workflow_id)
-        if not workflow.get("enabled", True):
-            raise AgentRuntimeError("Workflow 已停用")
-        self.validate_workflow(workflow["nodes"], workflow["edges"])
-        self._validate_workflow_agent_nodes(workflow["nodes"])
-        self._validate_workflow_subworkflow_nodes(workflow["nodes"], parent_workflow_id=workflow_id)
-        self._validate_workflow_runnable_steps(workflow["nodes"])
-        self._validate_workflow_agent_run_readiness(workflow["nodes"])
-
-        start = self.workflow_run_starter.start_async(
-            payload,
-            workflow=workflow,
-            workflow_id=workflow_id,
-        )
-        run = start.run
-        timeline, started_payload = self.workflow_run_start_projector.started_projection(workflow_id, workflow)
-        self.append_run_event(
-            run["run_id"],
-            "workflow.run.started",
-            started_payload,
-        )
-        run = self._update_run(
-            run["run_id"],
-            status="running",
-            timeline=timeline,
-            artifacts=[],
-            pending_approval=None,
-        )
-        result = {
-            **run,
-            "status": "processing",
-            "workflow_run_id": run["run_id"],
-            "runnable": self.resolve_runnable(runnable_id=workflow_id),
-        }
-
-        def _execute_in_background() -> None:
-            try:
-                exec_result = self._continue_workflow_run(
-                    run,
-                    workflow,
-                    context=user_goal,
-                    timeline=list(timeline),
-                    artifacts=[],
-                    start_index=0,
-                    root_group=start.root_group,
-                )
-                if on_complete:
-                    on_complete(exec_result)
-            except Exception as exc:
-                import logging
-                logging.getLogger(__name__).error(
-                    "异步 Workflow Run 执行失败: %s", exc, exc_info=True
-                )
-                failed = self.workflow_continuation.project_background_failure(
-                    run,
-                    timeline=timeline,
-                    error=exc,
-                    root_group=start.root_group,
-                )
-                if on_complete:
-                    on_complete(failed)
-
-        thread = threading.Thread(
-            target=_execute_in_background,
-            name=f"workflow-run-{run['run_id'][:8]}",
-            daemon=True,
-        )
-        thread.start()
-
-        return result
+        return self.workflow_run_async_coordinator.create_async(payload, on_complete=on_complete)
 
     def _workflow_parent_runs_waiting_for_child(
         self,

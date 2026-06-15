@@ -7,12 +7,23 @@ from typing import Any
 
 from apps.shell import agent_runtime
 from apps.shell.agent.runtime.workflow_runs import (
+    RuntimeWorkflowRunAsyncCoordinator,
     RuntimeWorkflowRunCoordinator,
     RuntimeWorkflowRunStarter,
     WorkflowRunStart,
 )
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
+
+
+class _ImmediateThread:
+    def __init__(self, *, target: Any, name: str, daemon: bool) -> None:
+        self._target = target
+        self.name = name
+        self.daemon = daemon
+
+    def start(self) -> None:
+        self._target()
 
 
 def _starter(
@@ -212,6 +223,147 @@ def test_workflow_run_coordinator_returns_existing_idempotent_run_without_projec
     }
 
 
+def test_workflow_run_async_coordinator_returns_processing_and_completes_in_background() -> None:
+    completions: list[dict[str, Any]] = []
+    calls: list[tuple[str, Any]] = []
+    workflow = {
+        "workflow_id": "workflow-1",
+        "name": "Flow",
+        "enabled": True,
+        "nodes": [{"id": "start", "type": "start"}],
+        "edges": [],
+    }
+
+    class _Starter:
+        def start_async(
+            self,
+            payload: dict[str, Any],
+            *,
+            workflow: dict[str, Any],
+            workflow_id: str,
+        ) -> WorkflowRunStart:
+            calls.append(("start", payload, workflow_id))
+            return WorkflowRunStart({"run_id": "run-async", "kind": "workflow_run"}, root_group=True)
+
+    class _Projector:
+        @staticmethod
+        def started_projection(
+            workflow_id: str,
+            workflow: dict[str, Any],
+        ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+            calls.append(("project", workflow_id, workflow["name"]))
+            return [{"event": "workflow.run.started"}], {"workflow_id": workflow_id}
+
+    coordinator = RuntimeWorkflowRunAsyncCoordinator(
+        get_workflow=lambda workflow_id: calls.append(("workflow", workflow_id)) or workflow,
+        validate_workflow=lambda nodes, edges: calls.append(("validate", nodes, edges)) or {"ok": True},
+        validate_workflow_agent_nodes=lambda nodes: calls.append(("agent_nodes", nodes)),
+        validate_workflow_subworkflow_nodes=lambda nodes, **kwargs: calls.append(("subworkflows", nodes, kwargs)),
+        validate_workflow_runnable_steps=lambda nodes: calls.append(("runnable_steps", nodes)),
+        validate_workflow_agent_run_readiness=lambda nodes: calls.append(("readiness", nodes)),
+        starter=_Starter(),  # type: ignore[arg-type]
+        start_projector=_Projector(),
+        append_run_event=lambda run_id, event_type, payload: calls.append(("event", run_id, event_type, payload)),
+        update_run=lambda run_id, **kwargs: calls.append(("update", run_id, kwargs))
+        or {"run_id": run_id, "status": kwargs["status"], "timeline": kwargs["timeline"]},
+        continue_workflow_run=lambda run, workflow, **kwargs: calls.append(("continue", run["run_id"], kwargs))
+        or {"run_id": run["run_id"], "status": "completed"},
+        project_background_failure=lambda *_args, **_kwargs: {},
+        resolve_runnable=lambda **kwargs: {"id": kwargs["runnable_id"], "kind": "workflow"},
+        error_type=agent_runtime.AgentRuntimeError,
+        thread_factory=_ImmediateThread,
+    )
+
+    result = coordinator.create_async({"workflow_id": "workflow-1", "user_goal": "Ship"}, on_complete=completions.append)
+
+    assert result["status"] == "processing"
+    assert result["workflow_run_id"] == "run-async"
+    assert result["runnable"] == {"id": "workflow-1", "kind": "workflow"}
+    assert calls[0] == ("workflow", "workflow-1")
+    assert calls[7][0] == "project"
+    assert calls[8] == ("event", "run-async", "workflow.run.started", {"workflow_id": "workflow-1"})
+    assert calls[9][0] == "update"
+    assert calls[10][0] == "continue"
+    assert calls[10][2]["root_group"] is True
+    assert completions == [{"run_id": "run-async", "status": "completed"}]
+
+
+def test_workflow_run_async_coordinator_projects_background_failure() -> None:
+    completions: list[dict[str, Any]] = []
+    failures: list[dict[str, Any]] = []
+    workflow = {
+        "workflow_id": "workflow-1",
+        "name": "Flow",
+        "enabled": True,
+        "nodes": [{"id": "start", "type": "start"}],
+        "edges": [],
+    }
+
+    class _Starter:
+        def start_async(
+            self,
+            payload: dict[str, Any],
+            *,
+            workflow: dict[str, Any],
+            workflow_id: str,
+        ) -> WorkflowRunStart:
+            return WorkflowRunStart({"run_id": "run-fail", "kind": "workflow_run"}, root_group=False)
+
+    class _Projector:
+        @staticmethod
+        def started_projection(
+            workflow_id: str,
+            workflow: dict[str, Any],
+        ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+            return [{"event": "workflow.run.started"}], {"workflow_id": workflow_id}
+
+    def fail_continue(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("workflow failure")
+
+    def project_background_failure(run: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        failure = {
+            "run_id": run["run_id"],
+            "status": "failed",
+            "error": str(kwargs["error"]),
+            "timeline": kwargs["timeline"],
+            "root_group": kwargs["root_group"],
+        }
+        failures.append(failure)
+        return failure
+
+    coordinator = RuntimeWorkflowRunAsyncCoordinator(
+        get_workflow=lambda _workflow_id: workflow,
+        validate_workflow=lambda _nodes, _edges: {"ok": True},
+        validate_workflow_agent_nodes=lambda _nodes: None,
+        validate_workflow_subworkflow_nodes=lambda _nodes, **_kwargs: None,
+        validate_workflow_runnable_steps=lambda _nodes: None,
+        validate_workflow_agent_run_readiness=lambda _nodes: None,
+        starter=_Starter(),  # type: ignore[arg-type]
+        start_projector=_Projector(),
+        append_run_event=lambda *_args, **_kwargs: None,
+        update_run=lambda run_id, **kwargs: {"run_id": run_id, "status": kwargs["status"]},
+        continue_workflow_run=fail_continue,
+        project_background_failure=project_background_failure,
+        resolve_runnable=lambda **kwargs: {"id": kwargs["runnable_id"]},
+        error_type=agent_runtime.AgentRuntimeError,
+        thread_factory=_ImmediateThread,
+    )
+
+    result = coordinator.create_async({"workflow_id": "workflow-1", "user_goal": "Ship"}, on_complete=completions.append)
+
+    assert result["status"] == "processing"
+    assert failures == [
+        {
+            "run_id": "run-fail",
+            "status": "failed",
+            "error": "workflow failure",
+            "timeline": [{"event": "workflow.run.started"}],
+            "root_group": False,
+        }
+    ]
+    assert completions == failures
+
+
 def test_native_runtime_uses_split_workflow_run_starter_and_keeps_sync_idempotency(tmp_path) -> None:
     service = AgentRuntimeService(
         db_path=tmp_path / "agent-runtime.db",
@@ -222,8 +374,10 @@ def test_native_runtime_uses_split_workflow_run_starter_and_keeps_sync_idempoten
     try:
         assert agent_runtime.RuntimeWorkflowRunStarter is RuntimeWorkflowRunStarter
         assert agent_runtime.RuntimeWorkflowRunCoordinator is RuntimeWorkflowRunCoordinator
+        assert agent_runtime.RuntimeWorkflowRunAsyncCoordinator is RuntimeWorkflowRunAsyncCoordinator
         assert isinstance(service.workflow_run_starter, RuntimeWorkflowRunStarter)
         assert isinstance(service.workflow_run_coordinator, RuntimeWorkflowRunCoordinator)
+        assert isinstance(service.workflow_run_async_coordinator, RuntimeWorkflowRunAsyncCoordinator)
         workflow = service.create_workflow(
             {
                 "name": "Starter Flow",
