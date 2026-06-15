@@ -101,6 +101,7 @@ from apps.shell.agent.runtime.core_services import (
     RuntimeCoreServiceBundle,
     build_runtime_core_services as _build_runtime_core_services,
 )
+from apps.shell.agent.runtime.custom_api_agent import RuntimeCustomApiAgentLoop
 from apps.shell.agent.runtime.delegation import ChatRunnableMentionParser
 from apps.shell.agent.runtime.definition_services import (
     RuntimeDefinitionServiceBundle,
@@ -694,6 +695,37 @@ class NativeRunEngine:
             call_agent_tool=self._call_agent_tool,
         )
         self._install_runtime_tooling(tooling)
+        self._install_runtime_custom_api_agent_loop(
+            RuntimeCustomApiAgentLoop(
+                agent_model_config_private=self._agent_model_config_private,
+                compile_agent_runtime=self._compile_agent_runtime,
+                run_budget=self._run_budget,
+                check_context_budget=self._check_context_budget,
+                tool_schemas=self._tool_schemas,
+                normalize_tool_iteration=_normalize_tool_iteration,
+                max_tool_iterations=_MAX_AGENT_TOOL_ITERATIONS,
+                operating_doctrine=_MARKET_AGENT_OPERATING_DOCTRINE,
+                memory_tool_names=_MEMORY_TOOL_NAMES,
+                future_task_tool_names=_FUTURE_TASK_TOOL_NAMES,
+                call_model=lambda base_url, model, api_key, messages, **kwargs: _call_model_profile_chat_message(
+                    base_url,
+                    model,
+                    api_key,
+                    messages,
+                    **kwargs,
+                ),
+                coalesce_model_message=_coalesce_model_message,
+                message_visible_content_text=_message_visible_content_text,
+                model_message_metadata=_model_message_metadata,
+                tool_requests_from_message=self._tool_requests_from_message,
+                timeline_factory=self._timeline,
+                limit_model_output=self._limit_model_output,
+                model_output_text_factory=_ModelOutputText,
+                tool_loop_projection=self.tool_loop_projection,
+                run_tool_requests=self._run_tool_requests,
+                error_type=AgentRuntimeError,
+            )
+        )
         agent_services = _build_runtime_agent_services(
             get_skill=self.get_skill,
             error_type=AgentRuntimeError,
@@ -927,6 +959,9 @@ class NativeRunEngine:
         self.tool_loop_projection = tooling.tool_loop_projection
         self.tool_call_executor = tooling.tool_call_executor
         self.tool_request_runner = tooling.tool_request_runner
+
+    def _install_runtime_custom_api_agent_loop(self, custom_api_agent_loop: RuntimeCustomApiAgentLoop) -> None:
+        self.custom_api_agent_loop = custom_api_agent_loop
 
     def _install_runtime_agent_services(self, agent_services: RuntimeAgentServiceBundle) -> None:
         self.agent_skill_loader = agent_services.agent_skill_loader
@@ -2970,113 +3005,16 @@ class NativeRunEngine:
         run_id: str = "",
         budget: _RunBudget | None = None,
     ) -> str:
-        model_config = self._agent_model_config_private(agent)
-        base_url = str(model_config.get("base_url") or "").rstrip("/")
-        model = str(model_config.get("model") or "").strip()
-        api_key = str(model_config.get("api_key") or "").strip()
-        if not base_url or not model or not api_key:
-            raise AgentRuntimeError("Agent 模型 Profile 缺少 base_url、model 或 API Key")
-        runtime = self._compile_agent_runtime(agent)
-        allowed_tools = runtime["tool_policy"].get("allowed_tools") or []
-        if messages is None:
-            allowed_tool_text = ", ".join(allowed_tools) or "none"
-            memory_tool_guidance = (
-                "Use memory.add, memory.replace, and memory.remove only for stable user preferences, durable facts, "
-                "task commitments, reusable summaries, or explicit forget/correction requests; never store secrets. "
-                if any(tool in allowed_tools for tool in _MEMORY_TOOL_NAMES)
-                else ""
-            )
-            future_task_guidance = (
-                "Use future_task.schedule/list/cancel for explicit reminders, follow-up commitments, standing orders, "
-                "or recurring summaries; do not schedule hidden future work without user intent. "
-                if any(tool in allowed_tools for tool in _FUTURE_TASK_TOOL_NAMES)
-                else ""
-            )
-            system_prompt = (
-                "You are running inside Oha-Yachiyo Agent Runtime. "
-                "Follow the Agent functional instructions, persona prompt, user goal, and exact output requests. "
-                "If those instructions require an exact phrase or format, return exactly that final output. "
-                "Return concise final output unless the Agent instructions require otherwise. "
-                f"{_MARKET_AGENT_OPERATING_DOCTRINE}\n"
-                "Prefer native tool_calls when available. "
-                "If the model endpoint does not support tool_calls and a controlled tool is needed, respond as JSON "
-                "{\"action\":\"tool\",\"tool\":\"workspace.list\",\"input\":{}}. "
-                "Do not request tools that are not listed as allowed. "
-                "If no tools are allowed, do not request tools. "
-                "Do not request a tool solely because of the output contract; use tools only when the user goal "
-                "or an explicit deliverable requires them. "
-                f"{memory_tool_guidance}"
-                f"{future_task_guidance}"
-                "If the user asks not to create, save, write, or modify files, provide the content inline and do "
-                "not request file-writing tools. If the user asks not to run or execute commands, do not request "
-                "command-execution tools. "
-                "Workspace tools only accept paths relative to the configured Default Workdir. Never pass absolute "
-                "paths to workspace tools. If a required target is outside that workspace and terminal.run is "
-                "allowed, use terminal.run instead. A failed workspace tool call is recoverable: follow its hint "
-                "or switch tools instead of stopping or retrying the same invalid path. "
-                f"Request at most one high-risk tool per turn.\n\nAllowed tools: {allowed_tool_text}"
-            )
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": context},
-            ]
-        budget = budget or self._run_budget(run_id, timeline)
-        self._check_context_budget(budget, messages)
-        tools = self._tool_schemas(allowed_tools)
-        start_iteration = _normalize_tool_iteration(start_iteration)
-        for iteration in range(start_iteration, _MAX_AGENT_TOOL_ITERATIONS):
-            self._check_context_budget(budget, messages)
-            budget.claim_model_call()
-            message = _coalesce_model_message(
-                _call_model_profile_chat_message(base_url, model, api_key, messages, tools=tools, stream=True)
-            )
-            content = _message_visible_content_text(message)
-            tool_requests = self._tool_requests_from_message(message, content)
-            detail = content[:500] if content else ", ".join(request["tool"] for request in tool_requests)[:500]
-            timeline.append(self._timeline("agent.model.response", detail))
-            if not tool_requests:
-                if not content.strip():
-                    raise AgentRuntimeError("Native Agent 模型返回了空回复")
-                result_text, truncated = self._limit_model_output(content)
-                return _ModelOutputText(
-                    result_text,
-                    metadata=_model_message_metadata(message),
-                    truncated=truncated,
-                )
-
-            if tool_requests[0].get("protocol") == "tool_calls":
-                messages.append(self.tool_loop_projection.assistant_message_for_history(message))
-            else:
-                messages.append({"role": "assistant", "content": content})
-            self._run_tool_requests(
-                tool_requests,
-                allowed_tools,
-                broker,
-                messages,
-                timeline,
-                artifacts,
-                next_iteration=iteration + 1,
-                run_id=run_id,
-                budget=budget,
-            )
-        artifact_completion = self.tool_loop_projection.artifact_completion(timeline, artifacts)
-        if artifact_completion:
-            timeline.append(
-                self._timeline(
-                    "agent.tool.loop_limit_completed",
-                    "artifact.write completed before model final output",
-                    artifact_paths=[
-                        str(artifact.get("path") or "")
-                        for artifact in artifacts
-                        if artifact.get("kind") != "context" and str(artifact.get("path") or "").strip()
-                    ],
-                    loop_limit_detail=self.tool_loop_projection.loop_limit_detail(timeline),
-                )
-            )
-            return artifact_completion
-        raise AgentRuntimeError(
-            "custom_api Agent 工具循环超过上限；"
-            f"{self.tool_loop_projection.loop_limit_detail(timeline)}"
+        return self.custom_api_agent_loop.run(
+            agent,
+            context,
+            broker,
+            timeline,
+            artifacts,
+            messages=messages,
+            start_iteration=start_iteration,
+            run_id=run_id,
+            budget=budget,
         )
 
     @staticmethod
