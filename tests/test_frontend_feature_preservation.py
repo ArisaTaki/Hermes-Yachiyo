@@ -421,8 +421,22 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
         [
             "export function RuntimeTimelineSummary",
             "export type RuntimeTimelineEventSnapshot",
-            "data-run-event={eventType}",
-            "data-run-event-run-id={event.run_id || ''}",
+            "RuntimeTimelineEventList",
+            "eventTestId={`${testId}-event`}",
+            "variant=\"compact\"",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/runtime-shared/components/RuntimeTimelineEventList.tsx",
+        [
+            "export function RuntimeTimelineEventList",
+            "variant = 'compact'",
+            "variant === 'full'",
+            "ExpandableRuntimeContent",
+            "data-testid={eventTestId}",
+            "data-run-event={eventName}",
+            "data-run-event-run-id={eventRunId}",
+            "data-run-event-sequence={eventSequence}",
         ],
     )
     _assert_contains(
@@ -808,8 +822,10 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
     _assert_contains(
         "apps/frontend/src/features/agent-studio/components/RunTimeline.tsx",
         [
-            "ExpandableRuntimeContent as RunExpandableContent",
-            'data-testid="agent-run-detail-execution-event"',
+            "RuntimeTimelineEventList",
+            'eventTestId="agent-run-detail-execution-event"',
+            'childRunTestId="agent-run-detail-execution-open-child-run"',
+            'testId="agent-run-detail-execution-events"',
             'data-testid="agent-run-detail-load-more-events"',
         ],
     )
@@ -2686,21 +2702,29 @@ def test_agent_studio_exposes_stable_e2e_selectors_for_run_detail_and_approval_f
         "apps/frontend/src/features/agent-studio/components/RunTimeline.tsx",
         [
             "data-testid=\"agent-run-detail-execution\"",
-            "data-testid=\"agent-run-detail-execution-events\"",
-            "data-testid=\"agent-run-detail-execution-event\"",
+            "testId=\"agent-run-detail-execution-events\"",
+            "eventTestId=\"agent-run-detail-execution-event\"",
+            "childRunTestId=\"agent-run-detail-execution-open-child-run\"",
+            "data-testid=\"agent-run-detail-load-more-events\"",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/runtime-shared/components/RuntimeTimelineEventList.tsx",
+        [
+            "data-testid={testId}",
+            "data-testid={eventTestId}",
             "data-run-event={eventName}",
             "data-run-event-id={eventId}",
             "data-run-event-run-id={eventRunId}",
             "data-run-event-sequence={eventSequence}",
-            "data-run-event-schema-version={eventSchemaVersion}",
-            "data-run-event-actor={eventActor}",
-            "data-run-event-visibility={eventVisibility}",
-            "data-run-event-sensitivity={eventSensitivity}",
+            "data-run-event-schema-version={defaultEventSchemaVersion(event)}",
+            "data-run-event-actor={defaultEventActor(event)}",
+            "data-run-event-visibility={defaultEventVisibility(event)}",
+            "data-run-event-sensitivity={defaultEventSensitivity(event)}",
             "data-run-event-status={eventStatus || ''}",
             "data-run-event-tone={eventTone}",
             "data-child-run-id={childRunId || ''}",
-            "data-testid=\"agent-run-detail-execution-open-child-run\"",
-            "data-testid=\"agent-run-detail-load-more-events\"",
+            "data-testid={childRunTestId || `${eventTestId}-open-child-run`}",
         ],
     )
 

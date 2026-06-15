@@ -1,3 +1,5 @@
+import { RuntimeTimelineEventList, type RuntimeTimelineEventRecord } from './RuntimeTimelineEventList';
+
 export type RuntimeTimelineEventSnapshot = {
   event_id?: string | null;
   run_id?: string | null;
@@ -24,27 +26,17 @@ export function RuntimeTimelineSummary({
   const visibleEvents = (events || []).slice(0, Math.max(1, limit));
   if (!visibleEvents.length) return null;
   return (
-    <ol className={className} data-testid={testId}>
-      {visibleEvents.map((event, index) => {
-        const eventType = String(event.event_type || event.title || 'event').trim();
-        const status = String(event.status || '').trim();
-        return (
-          <li
-            data-run-event={eventType}
-            data-run-event-id={event.event_id || ''}
-            data-run-event-run-id={event.run_id || ''}
-            data-run-event-sequence={event.sequence ?? ''}
-            data-run-event-status={status}
-            data-testid={`${testId}-event`}
-            key={event.event_id || `${eventType}-${event.sequence ?? index}`}
-          >
-            <span>{runtimeTimelineEventLabel(event)}</span>
-            {event.detail ? <p>{event.detail}</p> : null}
-            {status ? <em>{runtimeTimelineStatusLabel(status)}</em> : null}
-          </li>
-        );
-      })}
-    </ol>
+    <RuntimeTimelineEventList
+      className={className}
+      eventTestId={`${testId}-event`}
+      events={visibleEvents as RuntimeTimelineEventRecord[]}
+      getEventName={(event) => String(event.event_type || event.title || 'event').trim()}
+      getEventStatus={(event) => String(event.status || '').trim()}
+      getEventTitle={(event) => runtimeTimelineEventLabel(event as RuntimeTimelineEventSnapshot)}
+      runStatusLabel={runtimeTimelineStatusLabel}
+      testId={testId}
+      variant="compact"
+    />
   );
 }
 
