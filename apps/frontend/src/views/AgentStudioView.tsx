@@ -38,6 +38,7 @@ import { useSkillImportActions } from '../features/agent-studio/hooks/useSkillIm
 import { useSkillSourceInputActions } from '../features/agent-studio/hooks/useSkillSourceInputActions';
 import { useWorkflowDeletionActions } from '../features/agent-studio/hooks/useWorkflowDeletionActions';
 import { useWorkflowDefinitions } from '../features/agent-studio/hooks/useWorkflowDefinitions';
+import { useWorkflowDraftActions } from '../features/agent-studio/hooks/useWorkflowDraftActions';
 import { useWorkflowSaveActions } from '../features/agent-studio/hooks/useWorkflowSaveActions';
 import { useWorkflowCanvasActions } from '../features/agent-studio/hooks/useWorkflowCanvasActions';
 import {
@@ -90,8 +91,6 @@ import {
 } from '../features/agent-studio/utils/skills';
 import type { AgentDraft } from '../features/agent-studio/types';
 import {
-  buildPhase4WorkflowNodes,
-  linearEdgesForNodes,
   skippedWorkflowArtifactLabel,
   starterNodes,
   validateWorkflowDraft,
@@ -378,6 +377,24 @@ export function AgentStudioView() {
     workflowEnabled,
     workflowErrors,
     workflowName,
+  });
+  const {
+    loadPhase4WorkflowTemplate,
+    openWorkflowDesign,
+    selectWorkflow,
+    startNewWorkflow,
+  } = useWorkflowDraftActions({
+    agents,
+    setEdges,
+    setError,
+    setNodes,
+    setSelectedWorkflowId,
+    setStatus,
+    setTab,
+    setWorkflowDescription,
+    setWorkflowEnabled,
+    setWorkflowName,
+    workflows,
   });
   const {
     addFlowNode,
@@ -1373,53 +1390,6 @@ export function AgentStudioView() {
     setSelectedAgentId(agentId);
     setStatus('');
     setError('');
-  }
-
-  function startNewWorkflow() {
-    setSelectedWorkflowId('');
-    setNodes(starterNodes);
-    setEdges([]);
-    setWorkflowName('New Workflow');
-    setWorkflowDescription('');
-    setWorkflowEnabled(true);
-    setStatus('正在编辑新的 Workflow 草稿');
-    setError('');
-  }
-
-  function loadPhase4WorkflowTemplate() {
-    const nextNodes = buildPhase4WorkflowNodes(agents);
-    const agentNodeCount = nextNodes.filter((node) => node.data?.kind === 'agent').length;
-    if (!agentNodeCount) {
-      setError('当前没有可用 Agent，无法生成全线测试模板。');
-      return;
-    }
-    setSelectedWorkflowId('');
-    setWorkflowName('Phase 4 Agent 全线流通测试');
-    setWorkflowDescription('依次调用 Orchestrator、Research、Design、Coding、Review、Office，并写出最终 Artifact。');
-    setWorkflowEnabled(true);
-    setNodes(nextNodes);
-    setEdges(linearEdgesForNodes(nextNodes));
-    setStatus(`已生成全线测试模板：${agentNodeCount} 个启用 Agent 节点`);
-    setError('');
-  }
-
-  function selectWorkflow(workflowId: string) {
-    setSelectedWorkflowId(workflowId);
-    setStatus('');
-    setError('');
-  }
-
-  function openWorkflowDesign(workflowId: string) {
-    const workflow = workflows.find((item) => item.workflow_id === workflowId);
-    if (!workflow) {
-      setError('找不到对应的 Workflow 定义，可能已被删除。');
-      return;
-    }
-    setSelectedWorkflowId(workflow.workflow_id);
-    setTab('workflows');
-    setStatus(`已打开 Workflow Studio：${workflow.name || workflow.workflow_id}`);
-    setError('');
-    navigateTo('agents', { tab: 'workflows' }, ['run', 'target', 'goal']);
   }
 
   function activateTab(nextTab: StudioTab) {

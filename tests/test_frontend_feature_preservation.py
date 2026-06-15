@@ -2091,6 +2091,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "useSkillSourceInputActions",
             "useWorkflowCanvasActions",
             "useWorkflowDeletionActions",
+            "useWorkflowDraftActions",
             "useWorkflowSaveActions",
             "saveAgent",
             "requestDeleteAgent",
@@ -2125,6 +2126,26 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "selectedAgentReadOnly",
             "selectedAgentDeletable",
             "AgentEditorPanel",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useWorkflowDraftActions.ts",
+        [
+            "export function useWorkflowDraftActions",
+            "function startNewWorkflow()",
+            "setNodes(starterNodes);",
+            "setWorkflowName('New Workflow');",
+            "setStatus('正在编辑新的 Workflow 草稿');",
+            "function loadPhase4WorkflowTemplate()",
+            "const nextNodes = buildPhase4WorkflowNodes(agents);",
+            "setError('当前没有可用 Agent，无法生成全线测试模板。');",
+            "setWorkflowName('Phase 4 Agent 全线流通测试');",
+            "setEdges(linearEdgesForNodes(nextNodes));",
+            "function selectWorkflow(workflowId: string)",
+            "function openWorkflowDesign(workflowId: string)",
+            "setError('找不到对应的 Workflow 定义，可能已被删除。');",
+            "setTab('workflows');",
+            "navigateTo('agents', { tab: 'workflows' }, ['run', 'target', 'goal']);",
         ],
     )
     _assert_contains(
