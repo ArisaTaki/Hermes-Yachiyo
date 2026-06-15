@@ -32,6 +32,7 @@ import { useSkillFolderManagement } from '../features/agent-studio/hooks/useSkil
 import { useSkillImportActions } from '../features/agent-studio/hooks/useSkillImportActions';
 import { useWorkflowDeletionActions } from '../features/agent-studio/hooks/useWorkflowDeletionActions';
 import { useWorkflowDefinitions } from '../features/agent-studio/hooks/useWorkflowDefinitions';
+import { useWorkflowSaveActions } from '../features/agent-studio/hooks/useWorkflowSaveActions';
 import {
   agentCapabilityLine,
   agentRunReadinessIssue,
@@ -112,7 +113,6 @@ import {
 import type { GroupRunSnapshot } from '../features/yachiyo-studio/types';
 import {
   createAgent,
-  createWorkflow,
   getRun,
   getRunArtifact,
   getRunGroup,
@@ -129,7 +129,6 @@ import {
   testAgentModel,
   updateAgent,
   updateSkill,
-  updateWorkflow,
   type AgentSpec,
   type FutureTaskSpec,
   type MemorySpec,
@@ -139,7 +138,6 @@ import {
   type SkillFolderSpec,
   type SkillSourceRoot,
   type SkillSpec,
-  type WorkflowSpec,
 } from '../lib/agents';
 import { chooseAvatarImage, chooseSkillSources, openAppView, openPath } from '../lib/bridge';
 import { listModelProfiles, type ModelProfile, type ModelProfileDefaults } from '../lib/modelProfiles';
@@ -371,6 +369,19 @@ export function AgentStudioView() {
   );
   const workflowNameError = workflowName.trim() ? '' : 'Workflow 名称不能为空';
   const workflowErrors = workflowNameError ? [workflowNameError, ...workflowValidation.errors] : workflowValidation.errors;
+  const {
+    saveWorkflow,
+    saveWorkflowDraft,
+  } = useWorkflowSaveActions({
+    edges,
+    nodes,
+    selectedWorkflow,
+    setSelectedWorkflowId,
+    workflowDescription,
+    workflowEnabled,
+    workflowErrors,
+    workflowName,
+  });
   const workflowRunPreviewSteps = useMemo(
     () => workflowSpecStepRefs({
       workflow_id: selectedWorkflow?.workflow_id || 'draft',
@@ -1469,31 +1480,6 @@ export function AgentStudioView() {
   async function saveAgentGroup(): Promise<StudioRefreshOptions> {
     const { statusMessage } = await saveAgentGroupDraft();
     return { statusMessage };
-  }
-
-  function workflowDraftRequest(): Partial<WorkflowSpec> {
-    return {
-      name: workflowName.trim(),
-      description: workflowDescription.trim(),
-      nodes: workflowRequestNodes(nodes),
-      edges: workflowRequestEdges(edges),
-      enabled: workflowEnabled,
-    };
-  }
-
-  async function saveWorkflowDraft(): Promise<WorkflowSpec> {
-    if (workflowErrors.length) {
-      throw new Error(workflowErrors[0]);
-    }
-    const request = workflowDraftRequest();
-    const saved = selectedWorkflow ? await updateWorkflow(selectedWorkflow.workflow_id, request) : await createWorkflow(request);
-    setSelectedWorkflowId(saved.workflow_id);
-    return saved;
-  }
-
-  async function saveWorkflow(): Promise<StudioRefreshOptions> {
-    const saved = await saveWorkflowDraft();
-    return { selectedWorkflowId: saved.workflow_id };
   }
 
   function openRunDetail(runId: string, options: { revealInHistory?: boolean } = {}) {

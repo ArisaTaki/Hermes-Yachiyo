@@ -2062,8 +2062,6 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "listSkills",
             "updateSkill",
             "listSkillFolders",
-            "createWorkflow",
-            "updateWorkflow",
             "listWorkflows",
             "listRuns",
             "listRunGroups",
@@ -2078,6 +2076,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "useSkillFolderManagement",
             "useSkillImportActions",
             "useWorkflowDeletionActions",
+            "useWorkflowSaveActions",
             "saveAgent",
             "const saved = draft.agent_id ? await updateAgent(draft.agent_id, request) : await createAgent(request);",
             "requestDeleteAgent",
@@ -2093,7 +2092,6 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "requestDeleteSkillFolder",
             "toggleAgentSkillMount",
             "saveWorkflowDraft",
-            "const saved = selectedWorkflow ? await updateWorkflow(selectedWorkflow.workflow_id, request) : await createWorkflow(request);",
             "requestDeleteWorkflow",
             "requestDeleteSelectedWorkflows",
             "refreshRunGroupsForRuns",
@@ -2613,9 +2611,10 @@ def test_workflow_studio_exposes_stable_e2e_selectors_for_edit_and_run_flow() ->
 
 def test_workflow_studio_save_and_run_uses_persisted_workflow_id() -> None:
     _assert_function_contains(
-        "apps/frontend/src/views/AgentStudioView.tsx",
+        "apps/frontend/src/features/agent-studio/hooks/useWorkflowSaveActions.ts",
         "saveWorkflowDraft",
         [
+            "if (workflowErrors.length)",
             "const saved = selectedWorkflow ? await updateWorkflow(selectedWorkflow.workflow_id, request) : await createWorkflow(request);",
             "setSelectedWorkflowId(saved.workflow_id);",
             "return saved;",
