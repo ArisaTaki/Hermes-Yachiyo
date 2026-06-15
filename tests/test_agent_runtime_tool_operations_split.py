@@ -15,6 +15,10 @@ from apps.shell.credential_store import MemoryCredentialStore
 
 def test_runtime_tool_operations_remains_exported_from_legacy_module() -> None:
     assert agent_runtime.RuntimeToolOperations is RuntimeToolOperations
+    assert agent_runtime.NativeRunEngine._tool_schemas is RuntimeToolOperations.model_tool_schemas
+    assert agent_runtime.NativeRunEngine._validate_tool_payload is RuntimeToolOperations.validate_tool_payload
+    assert agent_runtime.NativeRunEngine._parse_tool_calls is RuntimeToolOperations.parse_tool_calls
+    assert agent_runtime.NativeRunEngine._parse_tool_request is RuntimeToolOperations.parse_tool_request
 
 
 def test_native_runtime_installs_split_tool_operations(tmp_path) -> None:

@@ -441,6 +441,11 @@ class NativeRunEngine:
     routes, tests, and UI-facing APIs still use the service label.
     """
 
+    _tool_schemas = staticmethod(RuntimeToolOperations.model_tool_schemas)
+    _validate_tool_payload = staticmethod(RuntimeToolOperations.validate_tool_payload)
+    _parse_tool_calls = staticmethod(RuntimeToolOperations.parse_tool_calls)
+    _parse_tool_request = staticmethod(RuntimeToolOperations.parse_tool_request)
+
     def __init__(
         self,
         db_path: Path | str | None = None,
@@ -1414,10 +1419,6 @@ class NativeRunEngine:
     def _migrate_agent_workspace_policies(self) -> None:
         self.workspace_policy_service.migrate_agent_workspace_policies()
 
-    @staticmethod
-    def _tool_schemas(allowed_tools: list[str]) -> list[dict[str, Any]]:
-        return RuntimeToolOperations.model_tool_schemas(allowed_tools)
-
     def _compile_tool_policy(self, category: str, policy: Any = None) -> dict[str, Any]:
         return self.runtime_policy.compile_tool_policy(category, policy)
 
@@ -2357,10 +2358,6 @@ class NativeRunEngine:
         )
 
     @staticmethod
-    def _validate_tool_payload(tool_name: str, payload: dict[str, Any]) -> None:
-        RuntimeToolOperations.validate_tool_payload(tool_name, payload)
-
-    @staticmethod
     def _make_pending_approval(
         tool_request: dict[str, Any],
         *,
@@ -2380,10 +2377,6 @@ class NativeRunEngine:
         return self.tool_operations.tool_requests_from_message(message, content)
 
     @staticmethod
-    def _parse_tool_calls(tool_calls: Any) -> list[dict[str, Any]]:
-        return RuntimeToolOperations.parse_tool_calls(tool_calls)
-
-    @staticmethod
     def _model_profile_config_private(profile_id: str, *, capability: str) -> dict[str, Any]:
         return RuntimeModelProfileResolver(
             profile_service_factory=lambda: get_model_profile_service(),
@@ -2398,10 +2391,6 @@ class NativeRunEngine:
 
     def _agent_model_config_private(self, agent: dict[str, Any]) -> dict[str, Any]:
         return self.model_profile_resolver.agent_model_config_private(agent)
-
-    @staticmethod
-    def _parse_tool_request(content: str) -> dict[str, Any] | None:
-        return RuntimeToolOperations.parse_tool_request(content)
 
     @staticmethod
     def _openai_compatible_chat(base_url: str, model: str, api_key: str, messages: list[dict[str, str]]) -> str:
