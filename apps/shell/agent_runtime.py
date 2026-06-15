@@ -329,7 +329,11 @@ from apps.shell.agent.runtime.workflow_outcomes import (
     WorkflowChildStatusProjection,
     WorkflowParentResumeFailureProjection,
 )
-from apps.shell.agent.runtime.workflow_path import WorkflowDefinitionValidator, WorkflowPathPlanner
+from apps.shell.agent.runtime.workflow_path import (
+    WorkflowDefinitionValidator,
+    WorkflowPathPlanner,
+    workflow_node_kind as _workflow_node_kind,
+)
 from apps.shell.agent.runtime.workflow_nodes import (
     WorkflowAgentNodeExecution,
     WorkflowAgentNodeHandoff,
@@ -449,6 +453,7 @@ class NativeRunEngine:
     _parse_tool_request = staticmethod(RuntimeToolOperations.parse_tool_request)
     _default_tool_policy = staticmethod(RuntimePolicyCompiler.default_tool_policy)
     _default_workspace_policy = staticmethod(RuntimePolicyCompiler.default_workspace_policy)
+    _node_kind = staticmethod(_workflow_node_kind)
 
     def __init__(
         self,
@@ -1751,15 +1756,6 @@ class NativeRunEngine:
 
     def delete_workflow(self, workflow_id: str) -> dict[str, Any]:
         return self.workflows.delete(workflow_id)
-
-    @staticmethod
-    def _node_kind(node: dict[str, Any]) -> str:
-        data = node.get("data") or {}
-        data_kind = str(data.get("kind") or data.get("node_type") or "").strip()
-        node_type = str(node.get("type") or "").strip()
-        if data_kind and node_type in {"", "input", "default", "output"}:
-            return data_kind
-        return node_type or data_kind
 
     def validate_workflow(self, nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> dict[str, Any]:
         return self.workflow_definition_validator.validate(nodes, edges)

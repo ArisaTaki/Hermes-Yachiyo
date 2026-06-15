@@ -25,6 +25,15 @@ DEFAULT_WORKFLOW_NODE_TYPES = {
 }
 
 
+def workflow_node_kind(node: dict[str, Any]) -> str:
+    data = node.get("data") if isinstance(node.get("data"), dict) else {}
+    data_kind = str(data.get("kind") or data.get("node_type") or "").strip()
+    node_type = str(node.get("type") or "").strip()
+    if data_kind and node_type in {"", "input", "default", "output"}:
+        return data_kind
+    return node_type or data_kind
+
+
 def _safe_rel_path(value: str) -> str:
     candidate = str(value or "").replace("\\", "/").strip()
     if not candidate or candidate.startswith("/") or candidate.startswith("../") or "/../" in candidate:
@@ -79,11 +88,7 @@ class WorkflowPathPlanner:
     @staticmethod
     def start_node(workflow: dict[str, Any]) -> dict[str, Any]:
         for node in workflow["nodes"]:
-            data = node.get("data") if isinstance(node.get("data"), dict) else {}
-            data_kind = str(data.get("kind") or data.get("node_type") or "").strip()
-            node_type = str(node.get("type") or "").strip()
-            kind = data_kind if data_kind and node_type in {"", "input", "default", "output"} else node_type or data_kind
-            if str(node.get("id") or "") and kind == "start":
+            if str(node.get("id") or "") and workflow_node_kind(node) == "start":
                 return node
         raise StopIteration("Workflow 缺少 Start 节点")
 

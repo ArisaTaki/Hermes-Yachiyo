@@ -6,16 +6,27 @@ import pytest
 
 from apps.shell import agent_runtime
 from apps.shell.agent.runtime.errors import AgentRuntimeError
-from apps.shell.agent.runtime.workflow_path import WorkflowDefinitionValidator, WorkflowPathPlanner
+from apps.shell.agent.runtime.workflow_path import (
+    WorkflowDefinitionValidator,
+    WorkflowPathPlanner,
+    workflow_node_kind,
+)
 
 
 def test_workflow_path_planner_remains_exported_from_legacy_module() -> None:
     assert agent_runtime.WorkflowPathPlanner is WorkflowPathPlanner
     assert agent_runtime.WorkflowDefinitionValidator is WorkflowDefinitionValidator
+    assert agent_runtime._workflow_node_kind is workflow_node_kind
+
+
+def test_workflow_node_kind_normalizes_legacy_node_shapes() -> None:
+    assert workflow_node_kind({"id": "start", "type": "start"}) == "start"
+    assert workflow_node_kind({"id": "agent", "type": "input", "data": {"kind": "agent"}}) == "agent"
+    assert workflow_node_kind({"id": "workflow", "type": "", "data": {"node_type": "workflow"}}) == "workflow"
 
 
 def test_workflow_definition_validator_rejects_non_loop_cycle() -> None:
-    validator = WorkflowDefinitionValidator(node_kind=_node_kind)
+    validator = WorkflowDefinitionValidator(node_kind=workflow_node_kind)
     nodes = [
         {"id": "start", "type": "start", "data": {"label": "Start"}},
         {"id": "a", "type": "agent", "data": {"label": "A"}},
@@ -34,7 +45,7 @@ def test_workflow_definition_validator_rejects_non_loop_cycle() -> None:
 
 
 def test_workflow_definition_validator_allows_loop_continue_cycle() -> None:
-    validator = WorkflowDefinitionValidator(node_kind=_node_kind)
+    validator = WorkflowDefinitionValidator(node_kind=workflow_node_kind)
 
     assert validator.validate(
         [
@@ -54,12 +65,3 @@ def test_workflow_definition_validator_allows_loop_continue_cycle() -> None:
             {"source": "repeat", "target": "done", "data": {"branch": "exit"}},
         ],
     ) == {"ok": True}
-
-
-def _node_kind(node: dict[str, object]) -> str:
-    data = node.get("data") if isinstance(node.get("data"), dict) else {}
-    data_kind = str(data.get("kind") or data.get("node_type") or "").strip()
-    node_type = str(node.get("type") or "").strip()
-    if data_kind and node_type in {"", "input", "default", "output"}:
-        return data_kind
-    return node_type or data_kind
