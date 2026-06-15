@@ -25,6 +25,7 @@ import { useApprovedRunGuard } from '../features/agent-studio/hooks/useApprovedR
 import { useRunApprovalActions } from '../features/agent-studio/hooks/useRunApprovalActions';
 import { useRunApprovalFollowup } from '../features/agent-studio/hooks/useRunApprovalFollowup';
 import { useRunArtifactActions } from '../features/agent-studio/hooks/useRunArtifactActions';
+import { useRunCacheActions } from '../features/agent-studio/hooks/useRunCacheActions';
 import { useRunDebugActions } from '../features/agent-studio/hooks/useRunDebugActions';
 import { useRunEventReplay } from '../features/agent-studio/hooks/useRunEventReplay';
 import { useRunHistoryManagement } from '../features/agent-studio/hooks/useRunHistoryManagement';
@@ -113,7 +114,6 @@ import {
 } from '../features/agent-studio/utils/workflow';
 import {
   getRun,
-  getRunGroup,
   listAgents,
   listFutureTasks,
   listMemories,
@@ -1031,40 +1031,16 @@ export function AgentStudioView() {
     () => skillFolderNameError(editingSkillFolderName, skillFolders, editingSkillFolderId),
     [editingSkillFolderId, editingSkillFolderName, skillFolders],
   );
-
-  function upsertRunDetailCache(nextRuns: RunSpec[]) {
-    const visibleRuns = acceptedRunUpdates(nextRuns);
-    if (!visibleRuns.length) return;
-    setRunDetailCache((current) => {
-      const nextById = new Map(current.map((run) => [run.run_id, run]));
-      visibleRuns.forEach((run) => nextById.set(run.run_id, run));
-      return Array.from(nextById.values());
-    });
-    setRuns((current) => {
-      const nextById = new Map(visibleRuns.map((run) => [run.run_id, run]));
-      let changed = false;
-      const merged = current.map((run) => {
-        const next = nextById.get(run.run_id);
-        if (!next) return run;
-        changed = true;
-        return next;
-      });
-      return changed ? merged : current;
-    });
-  }
-
-  async function refreshRunGroupsForRuns(nextRuns: RunSpec[]) {
-    const groupIds = Array.from(new Set(nextRuns.map((run) => String(run.run_group_id || '')).filter(Boolean)));
-    if (!groupIds.length) return;
-    const loadedGroups = (await Promise.all(groupIds.map((groupId) => getRunGroup(groupId).catch(() => null))))
-      .filter((group): group is RunGroupSpec => Boolean(group));
-    if (!loadedGroups.length) return;
-    setRunGroups((current) => {
-      const nextById = new Map(current.map((group) => [group.run_group_id, group]));
-      loadedGroups.forEach((group) => nextById.set(group.run_group_id, group));
-      return Array.from(nextById.values());
-    });
-  }
+  const {
+    refreshRunGroupById,
+    refreshRunGroupsForRuns,
+    upsertRunDetailCache,
+  } = useRunCacheActions({
+    acceptedRunUpdates,
+    setRunDetailCache,
+    setRunGroups,
+    setRuns,
+  });
 
   const refresh = useCallback(async (options: StudioRefreshOptions = {}) => {
     const [
@@ -1267,20 +1243,12 @@ export function AgentStudioView() {
     if (!runGroupId) return;
     if (runGroups.some((group) => group.run_group_id === runGroupId)) return;
     let disposed = false;
-    getRunGroup(runGroupId)
-      .then((group) => {
-        if (disposed) return;
-        setRunGroups((current) => {
-          const nextById = new Map(current.map((item) => [item.run_group_id, item]));
-          nextById.set(group.run_group_id, group);
-          return Array.from(nextById.values());
-        });
-      })
+    refreshRunGroupById(runGroupId, () => !disposed)
       .catch(() => undefined);
     return () => {
       disposed = true;
     };
-  }, [runGroups, selectedRun]);
+  }, [refreshRunGroupById, runGroups, selectedRun]);
 
   useEffect(() => {
     if (!selectedWorkflowParentRunId || runById.has(selectedWorkflowParentRunId)) return;
@@ -1293,7 +1261,7 @@ export function AgentStudioView() {
     return () => {
       disposed = true;
     };
-  }, [runById, selectedWorkflowParentRunId]);
+  }, [runById, selectedWorkflowParentRunId, upsertRunDetailCache]);
 
   useEffect(() => {
     const childRunIds = [
@@ -1313,7 +1281,7 @@ export function AgentStudioView() {
     return () => {
       disposed = true;
     };
-  }, [selectedWorkflowApprovalChildRunId, selectedWorkflowChildRefs]);
+  }, [selectedWorkflowApprovalChildRunId, selectedWorkflowChildRefs, upsertRunDetailCache]);
 
   useEffect(() => {
     const pollRunIds = activeRunPollKey.split('|').filter(Boolean);
@@ -1328,15 +1296,7 @@ export function AgentStudioView() {
           .filter((run): run is RunSpec => Boolean(run));
         if (disposed || !loadedRuns.length) return;
         upsertRunDetailCache(loadedRuns);
-        const groupIds = Array.from(new Set(loadedRuns.map((run) => String(run.run_group_id || '')).filter(Boolean)));
-        const loadedGroups = (await Promise.all(groupIds.map((groupId) => getRunGroup(groupId).catch(() => null))))
-          .filter((group): group is RunGroupSpec => Boolean(group));
-        if (disposed || !loadedGroups.length) return;
-        setRunGroups((current) => {
-          const nextById = new Map(current.map((group) => [group.run_group_id, group]));
-          loadedGroups.forEach((group) => nextById.set(group.run_group_id, group));
-          return Array.from(nextById.values());
-        });
+        await refreshRunGroupsForRuns(loadedRuns, () => !disposed);
       } finally {
         inFlight = false;
       }
@@ -1349,7 +1309,7 @@ export function AgentStudioView() {
       disposed = true;
       window.clearInterval(timer);
     };
-  }, [activeRunPollKey]);
+  }, [activeRunPollKey, refreshRunGroupsForRuns, upsertRunDetailCache]);
 
   useEffect(() => {
     setArtifactPreview(null);
