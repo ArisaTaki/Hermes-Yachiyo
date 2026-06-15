@@ -32,6 +32,47 @@ def _tool_input_preview(value: Any, *, limit: int = 1200) -> Any:
 
 
 @dataclass(frozen=True)
+class WorkflowNodePortBundle:
+    """Ports used by legacy Workflow node projection helpers."""
+
+    workflow_agent_for_node: Any | None = None
+    workflow_node_task: Any | None = None
+    workflow_child_goal: Any | None = None
+    insert_run: Any | None = None
+    execute_agent_run: Any | None = None
+    workflow_child_artifact_refs: Any | None = None
+    workflow_for_node: Any | None = None
+    workflow_run_started_projection: Any | None = None
+    append_run_event: Any | None = None
+    continue_workflow_run: Any | None = None
+    default_workspace_policy: Any | None = None
+    workflow_artifacts_dir: Any | None = None
+    workflow_artifact_path: Any | None = None
+    workflow_artifact_write: Any | None = None
+
+
+def _port_callback(
+    ports: WorkflowNodePortBundle | None,
+    name: str,
+    engine: Any,
+    legacy_name: str,
+) -> Any:
+    callback = getattr(ports, name) if ports is not None else None
+    if callback is not None:
+        return callback
+    return getattr(engine, legacy_name)
+
+
+def _port_source(
+    ports: WorkflowNodePortBundle | None,
+    name: str,
+    fallback: Any,
+) -> Any:
+    source = getattr(ports, name) if ports is not None else None
+    return fallback if source is None else source
+
+
+@dataclass(frozen=True)
 class WorkflowAgentNodeHandoff:
     """Child Agent run payload derived from a Workflow agent node."""
 
@@ -85,16 +126,35 @@ class WorkflowAgentNodeHandoff:
         context: str,
         has_agent_upstream: bool,
         node_info_extra: dict[str, str] | None = None,
+        ports: WorkflowNodePortBundle | None = None,
     ) -> "WorkflowAgentNodeHandoff":
-        agent = engine._workflow_agent_for_node(node)
-        step_task = engine._workflow_node_task(node)
+        workflow_agent_for_node = _port_callback(
+            ports,
+            "workflow_agent_for_node",
+            engine,
+            "_workflow_agent_for_node",
+        )
+        workflow_node_task = _port_callback(
+            ports,
+            "workflow_node_task",
+            engine,
+            "_workflow_node_task",
+        )
+        workflow_child_goal = _port_callback(
+            ports,
+            "workflow_child_goal",
+            engine,
+            "_workflow_child_goal",
+        )
+        agent = workflow_agent_for_node(node)
+        step_task = workflow_node_task(node)
         return cls.from_agent(
             node,
             agent=agent,
             label=label,
             kind=kind,
             step_task=step_task,
-            child_goal=engine._workflow_child_goal(workflow_goal, step_task),
+            child_goal=workflow_child_goal(workflow_goal, step_task),
             context=context,
             has_agent_upstream=has_agent_upstream,
             node_info_extra=node_info_extra,
@@ -158,14 +218,28 @@ class WorkflowAgentNodeExecution:
         handoff: WorkflowAgentNodeHandoff,
         *,
         run_group_id: str,
+        ports: WorkflowNodePortBundle | None = None,
     ) -> "WorkflowAgentNodeExecution":
-        child = engine._insert_run(
+        insert_run = _port_callback(ports, "insert_run", engine, "_insert_run")
+        execute_agent_run = _port_callback(
+            ports,
+            "execute_agent_run",
+            engine,
+            "_execute_agent_run",
+        )
+        workflow_child_artifact_refs = _port_callback(
+            ports,
+            "workflow_child_artifact_refs",
+            engine,
+            "_workflow_child_artifact_refs",
+        )
+        child = insert_run(
             kind="agent_run",
             runnable_id=handoff.agent_id,
             user_goal=handoff.child_goal,
             run_group_id=run_group_id,
         )
-        child = engine._execute_agent_run(
+        child = execute_agent_run(
             child["run_id"],
             handoff.agent,
             handoff.child_goal,
@@ -174,7 +248,7 @@ class WorkflowAgentNodeExecution:
         return cls.from_child_run(
             handoff,
             child,
-            artifact_count=len(engine._workflow_child_artifact_refs(child, handoff.node_label)),
+            artifact_count=len(workflow_child_artifact_refs(child, handoff.node_label)),
         )
 
     @property
@@ -238,23 +312,61 @@ class WorkflowSubworkflowNodeExecution:
         kind: str,
         workflow_goal: str,
         run_group_id: str,
+        ports: WorkflowNodePortBundle | None = None,
     ) -> "WorkflowSubworkflowNodeExecution":
-        child_workflow = engine._workflow_for_node(node)
+        workflow_for_node = _port_callback(
+            ports,
+            "workflow_for_node",
+            engine,
+            "_workflow_for_node",
+        )
+        workflow_node_task = _port_callback(
+            ports,
+            "workflow_node_task",
+            engine,
+            "_workflow_node_task",
+        )
+        workflow_child_goal = _port_callback(
+            ports,
+            "workflow_child_goal",
+            engine,
+            "_workflow_child_goal",
+        )
+        insert_run = _port_callback(ports, "insert_run", engine, "_insert_run")
+        workflow_run_started_projection = (
+            ports.workflow_run_started_projection
+            if ports is not None and ports.workflow_run_started_projection is not None
+            else engine.workflow_run_start_projector.started_projection
+        )
+        append_run_event = _port_callback(ports, "append_run_event", engine, "append_run_event")
+        continue_workflow_run = _port_callback(
+            ports,
+            "continue_workflow_run",
+            engine,
+            "_continue_workflow_run",
+        )
+        workflow_child_artifact_refs = _port_callback(
+            ports,
+            "workflow_child_artifact_refs",
+            engine,
+            "_workflow_child_artifact_refs",
+        )
+        child_workflow = workflow_for_node(node)
         workflow_id = str(child_workflow.get("workflow_id") or "")
-        step_task = engine._workflow_node_task(node)
-        child_goal = engine._workflow_child_goal(workflow_goal, step_task)
-        child = engine._insert_run(
+        step_task = workflow_node_task(node)
+        child_goal = workflow_child_goal(workflow_goal, step_task)
+        child = insert_run(
             kind="workflow_run",
             runnable_id=workflow_id,
             user_goal=child_goal,
             run_group_id=run_group_id,
         )
-        child_timeline, started_payload = engine.workflow_run_start_projector.started_projection(
+        child_timeline, started_payload = workflow_run_started_projection(
             workflow_id,
             child_workflow,
         )
-        engine.append_run_event(child["run_id"], "workflow.run.started", started_payload)
-        child = engine._continue_workflow_run(
+        append_run_event(child["run_id"], "workflow.run.started", started_payload)
+        child = continue_workflow_run(
             child,
             child_workflow,
             context=child_goal,
@@ -271,7 +383,7 @@ class WorkflowSubworkflowNodeExecution:
             kind=kind,
             step_task=step_task,
             child_goal=child_goal,
-            artifact_count=len(engine._workflow_child_artifact_refs(child, label)),
+            artifact_count=len(workflow_child_artifact_refs(child, label)),
         )
 
     @property
@@ -355,19 +467,43 @@ class WorkflowArtifactNodeWrite:
         context: str,
         artifacts: list[dict[str, Any]],
         node_info_extra: dict[str, str] | None = None,
+        ports: WorkflowNodePortBundle | None = None,
     ) -> "WorkflowArtifactNodeWrite":
-        broker = ToolBroker(
-            engine._default_workspace_policy(),
-            engine.workflow_artifacts_dir / str(run["run_id"]),
+        workflow_artifact_path = _port_callback(
+            ports,
+            "workflow_artifact_path",
+            engine,
+            "_workflow_artifact_path",
         )
-        artifact_path = engine._workflow_artifact_path(
+        workflow_artifact_write = _port_source(ports, "workflow_artifact_write", None)
+        artifact_path = workflow_artifact_path(
             label,
             artifacts,
             cls.configured_path(node),
         )
+        if workflow_artifact_write is None:
+            default_workspace_policy = _port_callback(
+                ports,
+                "default_workspace_policy",
+                engine,
+                "_default_workspace_policy",
+            )
+            artifacts_dir = (
+                ports.workflow_artifacts_dir
+                if ports is not None and ports.workflow_artifacts_dir is not None
+                else engine.workflow_artifacts_dir
+            )
+            artifacts_dir = artifacts_dir() if callable(artifacts_dir) else artifacts_dir
+            broker = ToolBroker(
+                default_workspace_policy(),
+                artifacts_dir / str(run["run_id"]),
+            )
+            artifact = broker.artifact_write(artifact_path, context)
+        else:
+            artifact = workflow_artifact_write(run, artifact_path, context)
         return cls.from_artifact(
             node,
-            broker.artifact_write(artifact_path, context),
+            artifact,
             label=label,
             kind=kind,
             node_info_extra=dict(node_info_extra or {}),

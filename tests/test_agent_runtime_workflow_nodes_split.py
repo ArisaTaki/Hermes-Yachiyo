@@ -7,6 +7,7 @@ from apps.shell.agent.runtime.workflow_nodes import (
     WorkflowAgentNodeExecution,
     WorkflowAgentNodeHandoff,
     WorkflowArtifactNodeWrite,
+    WorkflowNodePortBundle,
     WorkflowSubworkflowNodeExecution,
 )
 
@@ -16,6 +17,7 @@ def test_workflow_node_handoffs_remain_exported_from_legacy_module() -> None:
     assert agent_runtime.WorkflowAgentNodeExecution is WorkflowAgentNodeExecution
     assert agent_runtime.WorkflowSubworkflowNodeExecution is WorkflowSubworkflowNodeExecution
     assert agent_runtime.WorkflowArtifactNodeWrite is WorkflowArtifactNodeWrite
+    assert agent_runtime.WorkflowNodePortBundle is WorkflowNodePortBundle
 
 
 def test_workflow_agent_node_handoff_accepts_prepared_agent_goal_and_task() -> None:
@@ -102,6 +104,64 @@ def test_workflow_agent_node_execution_accepts_prepared_child_run() -> None:
     }
 
 
+def test_workflow_agent_node_legacy_helpers_accept_port_bundle() -> None:
+    agent = {"agent_id": "agent_research", "name": "Research Agent"}
+    child_run = {
+        "run_id": "child_run",
+        "status": "completed",
+        "result": "Launch risk summary",
+        "artifacts": [{"kind": "artifact", "path": "risk.md"}],
+    }
+    calls: list[tuple[str, str]] = []
+    ports = WorkflowNodePortBundle(
+        workflow_agent_for_node=lambda node: calls.append(("agent", str(node["id"]))) or agent,
+        workflow_node_task=lambda node: calls.append(("task", str(node["id"])))
+        or "Summarize launch risk.",
+        workflow_child_goal=lambda workflow_goal, step_task: calls.append(("goal", step_task))
+        or f"{workflow_goal}\n\nStep: {step_task}",
+        insert_run=lambda **kwargs: calls.append(("insert", str(kwargs["runnable_id"])))
+        or {"run_id": "child_run"},
+        execute_agent_run=lambda run_id, _agent, _goal, *, upstream: calls.append(
+            ("execute", f"{run_id}:{upstream}")
+        )
+        or child_run,
+        workflow_child_artifact_refs=lambda run, label: calls.append(
+            ("artifacts", f"{run['run_id']}:{label}")
+        )
+        or run.get("artifacts", []),
+    )
+
+    handoff = WorkflowAgentNodeHandoff.from_node(
+        object(),
+        {"id": "research", "type": "agent"},
+        label="Research",
+        kind="agent",
+        workflow_goal="Ship release candidate",
+        context="Previous result",
+        has_agent_upstream=True,
+        ports=ports,
+    )
+    execution = WorkflowAgentNodeExecution.from_handoff(
+        object(),
+        handoff,
+        run_group_id="workflow_group",
+        ports=ports,
+    )
+
+    assert handoff.agent is agent
+    assert handoff.child_goal == "Ship release candidate\n\nStep: Summarize launch risk."
+    assert execution.child_run is child_run
+    assert execution.artifact_count == 1
+    assert calls == [
+        ("agent", "research"),
+        ("task", "research"),
+        ("goal", "Summarize launch risk."),
+        ("insert", "agent_research"),
+        ("execute", "child_run:Previous result"),
+        ("artifacts", "child_run:Research"),
+    ]
+
+
 def test_workflow_subworkflow_node_execution_accepts_prepared_child_run() -> None:
     child_workflow = {"workflow_id": "workflow_child", "name": "Child Flow"}
     child_run = {
@@ -140,6 +200,68 @@ def test_workflow_subworkflow_node_execution_accepts_prepared_child_run() -> Non
     }
 
 
+def test_workflow_subworkflow_node_legacy_helper_accepts_port_bundle() -> None:
+    child_workflow = {"workflow_id": "workflow_child", "name": "Child Flow"}
+    child_run = {
+        "run_id": "child_workflow_run",
+        "kind": "workflow_run",
+        "status": "completed",
+        "result": "Child flow result",
+        "artifacts": [{"kind": "workflow_artifact", "path": "child.md"}],
+    }
+    calls: list[tuple[str, str]] = []
+    ports = WorkflowNodePortBundle(
+        workflow_for_node=lambda node: calls.append(("workflow", str(node["id"])))
+        or child_workflow,
+        workflow_node_task=lambda node: calls.append(("task", str(node["id"])))
+        or "Run child flow",
+        workflow_child_goal=lambda workflow_goal, step_task: calls.append(("goal", step_task))
+        or f"{workflow_goal}\n\nStep: {step_task}",
+        insert_run=lambda **kwargs: calls.append(("insert", str(kwargs["runnable_id"])))
+        or {"run_id": "child_workflow_run"},
+        workflow_run_started_projection=lambda workflow_id, _workflow: calls.append(
+            ("started", workflow_id)
+        )
+        or ([{"event": "workflow.run.started"}], {"workflow_id": workflow_id}),
+        append_run_event=lambda run_id, event_type, _payload: calls.append(
+            ("event", f"{run_id}:{event_type}")
+        ),
+        continue_workflow_run=lambda run, _workflow, **kwargs: calls.append(
+            ("continue", f"{run['run_id']}:{kwargs['context']}")
+        )
+        or child_run,
+        workflow_child_artifact_refs=lambda run, label: calls.append(
+            ("artifacts", f"{run['run_id']}:{label}")
+        )
+        or run.get("artifacts", []),
+    )
+
+    execution = WorkflowSubworkflowNodeExecution.from_node(
+        object(),
+        {"run_id": "parent"},
+        {"id": "child-flow", "type": "workflow"},
+        label="Run Child Flow",
+        kind="workflow",
+        workflow_goal="Run parent flow",
+        run_group_id="workflow_group",
+        ports=ports,
+    )
+
+    assert execution.child_workflow is child_workflow
+    assert execution.child_run is child_run
+    assert execution.artifact_count == 1
+    assert calls == [
+        ("workflow", "child-flow"),
+        ("task", "child-flow"),
+        ("goal", "Run child flow"),
+        ("insert", "workflow_child"),
+        ("started", "workflow_child"),
+        ("event", "child_workflow_run:workflow.run.started"),
+        ("continue", "child_workflow_run:Run parent flow\n\nStep: Run child flow"),
+        ("artifacts", "child_workflow_run:Run Child Flow"),
+    ]
+
+
 def test_workflow_artifact_node_write_accepts_prepared_artifact() -> None:
     write = WorkflowArtifactNodeWrite.from_artifact(
         {
@@ -172,3 +294,39 @@ def test_workflow_artifact_node_write_accepts_prepared_artifact() -> None:
         "artifact": {"ok": True, "path": "reports/final.md", "bytes": 12},
         "workflow_parent_node_id": "fanout",
     }
+
+
+def test_workflow_artifact_node_legacy_helper_accepts_write_port() -> None:
+    calls: list[tuple[str, str]] = []
+    ports = WorkflowNodePortBundle(
+        workflow_artifact_path=lambda label, _artifacts, requested: calls.append(
+            ("path", f"{label}:{requested}")
+        )
+        or requested,
+        workflow_artifact_write=lambda run, artifact_path, context: calls.append(
+            ("write", f"{run['run_id']}:{artifact_path}:{context}")
+        )
+        or {"ok": True, "path": artifact_path, "bytes": len(context.encode("utf-8"))},
+    )
+
+    write = WorkflowArtifactNodeWrite.from_node(
+        object(),
+        {"run_id": "workflow_run"},
+        {
+            "id": "report",
+            "type": "artifact",
+            "data": {"artifact_path": "reports/final.md"},
+        },
+        label="Final Report",
+        kind="artifact",
+        context="Final workflow summary",
+        artifacts=[],
+        ports=ports,
+    )
+
+    assert write.artifact_record()["path"] == "reports/final.md"
+    assert write.artifact_record()["bytes"] == len("Final workflow summary".encode("utf-8"))
+    assert calls == [
+        ("path", "Final Report:reports/final.md"),
+        ("write", "workflow_run:reports/final.md:Final workflow summary"),
+    ]

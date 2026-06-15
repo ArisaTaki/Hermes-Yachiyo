@@ -295,6 +295,7 @@ from apps.shell.agent.runtime.workflow_nodes import (
     WorkflowAgentNodeExecution,
     WorkflowAgentNodeHandoff,
     WorkflowArtifactNodeWrite,
+    WorkflowNodePortBundle,
     WorkflowSubworkflowNodeExecution,
 )
 from apps.shell.agent.runtime.workflow_parent_resume import WorkflowParentResumeCoordinator
