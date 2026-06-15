@@ -1675,6 +1675,8 @@ class NativeRunEngine:
             skill_deletion_key=self._skill_deletion_key,
             is_native_library_source_type=_is_native_library_source_type,
             skills_dir=self.skills_dir,
+            skill_id_factory=lambda name: f"skill_{_slug(name, 'skill')}_{uuid4().hex[:8]}",
+            asset_paths_for=SkillContentInspector.asset_paths,
         )
         self.agent_definitions = AgentDefinitionRepository(
             self._conn,
@@ -3445,112 +3447,27 @@ class NativeRunEngine:
         last_synced_at = prepared.last_synced_at
         markdown = prepared.markdown
         target_folder_id = self._normalize_skill_folder_id(folder_id) if folder_id is not None else ""
-        if existing is None:
-            skill_id = f"skill_{_slug(name, 'skill')}_{uuid4().hex[:8]}"
-            target = self.skills_dir / skill_id if copy_to_managed else source_root
-            if copy_to_managed:
-                shutil.copytree(source_root, target)
-            asset_paths = self.skill_content.asset_paths(target)
-            self._conn.execute(
-                """
-                INSERT INTO skills (
-                    skill_id, name, description, source_path, local_path, folder_id, source_type, origin_path,
-                    source_ref, content_hash, last_synced_at, sync_status, content_summary,
-                    skill_markdown, asset_paths_json, enabled, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    skill_id,
-                    name,
-                    description,
-                    source_path,
-                    str(target.resolve()),
-                    target_folder_id,
-                    source_type,
-                    origin_path,
-                    source_ref,
-                    content_hash,
-                    last_synced_at,
-                    sync_status,
-                    summary,
-                    markdown,
-                    _json_dump(asset_paths),
-                    1,
-                    now,
-                    now,
-                ),
-            )
-            final_status = "imported"
-        elif existing["content_hash"] == content_hash:
-            skill_id = str(existing["skill_id"])
-            target = Path(str(existing["local_path"] or self.skills_dir / skill_id))
-            next_local_path = str(target.resolve()) if copy_to_managed else origin_path
-            if not copy_to_managed:
-                self._remove_managed_copy_if_safe(target, origin_path)
-            next_folder_id = target_folder_id if folder_id is not None else existing["folder_id"]
-            self._conn.execute(
-                """
-                UPDATE skills
-                   SET source_path=?, local_path=?, source_type=?, origin_path=?, source_ref=?,
-                       folder_id=?, last_synced_at=?, sync_status=?
-                 WHERE skill_id=?
-                """,
-                (
-                    source_path if existing["origin_path"] == origin_path else existing["source_path"],
-                    next_local_path if existing["origin_path"] == origin_path else existing["local_path"],
-                    source_type if existing["origin_path"] == origin_path else existing["source_type"],
-                    origin_path if existing["origin_path"] == origin_path else existing["origin_path"],
-                    source_ref if existing["origin_path"] == origin_path else existing["source_ref"],
-                    next_folder_id,
-                    last_synced_at or existing["last_synced_at"],
-                    "skipped",
-                    skill_id,
-                ),
-            )
-            final_status = "skipped"
-        else:
-            skill_id = str(existing["skill_id"])
-            target = Path(str(existing["local_path"] or self.skills_dir / skill_id))
-            if copy_to_managed and target.exists():
-                shutil.rmtree(target, ignore_errors=True)
-            elif not copy_to_managed:
-                self._remove_managed_copy_if_safe(target, origin_path)
-                target = source_root
-            if copy_to_managed:
-                shutil.copytree(source_root, target)
-            asset_paths = self.skill_content.asset_paths(target)
-            next_folder_id = target_folder_id if folder_id is not None else existing["folder_id"]
-            self._conn.execute(
-                """
-                UPDATE skills
-                   SET name=?, description=?, source_path=?, local_path=?, folder_id=?, source_type=?, origin_path=?,
-                       source_ref=?, content_hash=?, last_synced_at=?, sync_status=?, content_summary=?,
-                       skill_markdown=?, asset_paths_json=?, updated_at=?
-                 WHERE skill_id=?
-                """,
-                (
-                    name,
-                    description,
-                    source_path,
-                    str(target.resolve()),
-                    next_folder_id,
-                    source_type,
-                    origin_path,
-                    source_ref,
-                    content_hash,
-                    last_synced_at,
-                    sync_status,
-                    summary,
-                    markdown,
-                    _json_dump(asset_paths),
-                    now,
-                    skill_id,
-                ),
-            )
-            final_status = "updated"
-        self._conn.commit()
-        skill = self.get_skill(skill_id)
-        skill["sync_status"] = final_status
+        saved = self.skill_records.save_import(
+            source_root=source_root,
+            source_path=source_path,
+            source_type=source_type,
+            origin_path=origin_path,
+            source_ref=source_ref,
+            name=name,
+            description=description,
+            content_hash=content_hash,
+            last_synced_at=last_synced_at,
+            sync_status=sync_status,
+            summary=summary,
+            markdown=markdown,
+            now=now,
+            existing=existing,
+            copy_to_managed=copy_to_managed,
+            folder_id_was_provided=folder_id is not None,
+            target_folder_id=target_folder_id,
+        )
+        skill = self.get_skill(saved["skill_id"])
+        skill["sync_status"] = saved["sync_status"]
         return skill
 
     def _find_existing_skill(self, origin_path: str, content_hash: str, source_type: str) -> sqlite3.Row | None:

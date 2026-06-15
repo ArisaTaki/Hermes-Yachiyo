@@ -296,6 +296,132 @@ def test_skill_repository_finds_existing_import_by_origin_or_hash_with_library_s
     assert repo.find_existing_import(origin_path="", content_hash="", source_type="local_dir") is None
 
 
+def test_skill_repository_save_import_inserts_skips_and_updates_managed_copy(tmp_path: Path) -> None:
+    conn = _connect_skills_db()
+    managed_dir = tmp_path / "managed"
+    source = tmp_path / "source-skill"
+    (source / "assets").mkdir(parents=True)
+    (source / "SKILL.md").write_text("# Source Skill\n", encoding="utf-8")
+    (source / "assets" / "v1.txt").write_text("v1", encoding="utf-8")
+
+    def asset_paths(root: Path) -> list[str]:
+        assets = root / "assets"
+        if not assets.exists():
+            return []
+        return sorted(path.relative_to(root).as_posix() for path in assets.rglob("*") if path.is_file())
+
+    repo = SkillRepository(
+        conn,
+        ensure_row_factory=lambda: None,
+        row_to_skill=_row_to_skill,
+        now=lambda: "2026-06-15T10:00:00Z",
+        json_dump=_json_dump,
+        json_load=_json_load,
+        normalize_skill_folder_id=lambda value: str(value or ""),
+        installed_skill_source_map=lambda: {},
+        remove_managed_copy_if_safe=lambda _path, _origin: None,
+        skill_path_owned_by_runtime=lambda _path: False,
+        record_studio_deletion=lambda _kind, _key: None,
+        skill_deletion_key=lambda source_type, origin_path: f"{source_type}:{origin_path}",
+        is_native_library_source_type=lambda value: str(value) in {"native_global", "native_project"},
+        skills_dir=managed_dir,
+        skill_id_factory=lambda _name: "skill-imported",
+        asset_paths_for=asset_paths,
+    )
+
+    inserted = repo.save_import(
+        source_root=source,
+        source_path="local:source-skill",
+        source_type="local_dir",
+        origin_path=str(source.resolve()),
+        source_ref="source-skill",
+        name="Source Skill",
+        description="Description v1",
+        content_hash="hash-v1",
+        last_synced_at="",
+        sync_status="imported",
+        summary="Summary v1",
+        markdown="# Source Skill\n",
+        now="2026-06-15T10:00:00Z",
+        existing=None,
+        copy_to_managed=True,
+        folder_id_was_provided=True,
+        target_folder_id="folder-a",
+    )
+    row = conn.execute("SELECT * FROM skills WHERE skill_id='skill-imported'").fetchone()
+    managed_copy = managed_dir / "skill-imported"
+
+    assert inserted == {"skill_id": "skill-imported", "sync_status": "imported"}
+    assert row["local_path"] == str(managed_copy.resolve())
+    assert row["folder_id"] == "folder-a"
+    assert _json_load(row["asset_paths_json"], []) == ["assets/v1.txt"]
+    assert (managed_copy / "assets" / "v1.txt").read_text(encoding="utf-8") == "v1"
+
+    existing = repo.find_existing_import(
+        origin_path=str(source.resolve()),
+        content_hash="hash-v1",
+        source_type="local_dir",
+    )
+    skipped = repo.save_import(
+        source_root=source,
+        source_path="local:source-skill",
+        source_type="local_dir",
+        origin_path=str(source.resolve()),
+        source_ref="source-skill",
+        name="Source Skill",
+        description="Description v1",
+        content_hash="hash-v1",
+        last_synced_at="",
+        sync_status="imported",
+        summary="Summary v1",
+        markdown="# Source Skill\n",
+        now="2026-06-15T10:01:00Z",
+        existing=existing,
+        copy_to_managed=True,
+        folder_id_was_provided=False,
+        target_folder_id="ignored-folder",
+    )
+    row = conn.execute("SELECT * FROM skills WHERE skill_id='skill-imported'").fetchone()
+    assert skipped == {"skill_id": "skill-imported", "sync_status": "skipped"}
+    assert row["folder_id"] == "folder-a"
+    assert row["sync_status"] == "skipped"
+
+    (source / "assets" / "v1.txt").unlink()
+    (source / "assets" / "v2.txt").write_text("v2", encoding="utf-8")
+    existing = repo.find_existing_import(
+        origin_path=str(source.resolve()),
+        content_hash="hash-v1",
+        source_type="local_dir",
+    )
+    updated = repo.save_import(
+        source_root=source,
+        source_path="local:source-skill",
+        source_type="local_dir",
+        origin_path=str(source.resolve()),
+        source_ref="source-skill",
+        name="Source Skill Updated",
+        description="Description v2",
+        content_hash="hash-v2",
+        last_synced_at="",
+        sync_status="imported",
+        summary="Summary v2",
+        markdown="# Source Skill Updated\n",
+        now="2026-06-15T10:02:00Z",
+        existing=existing,
+        copy_to_managed=True,
+        folder_id_was_provided=True,
+        target_folder_id="folder-b",
+    )
+    row = conn.execute("SELECT * FROM skills WHERE skill_id='skill-imported'").fetchone()
+    assert updated == {"skill_id": "skill-imported", "sync_status": "updated"}
+    assert row["name"] == "Source Skill Updated"
+    assert row["folder_id"] == "folder-b"
+    assert row["content_hash"] == "hash-v2"
+    assert _json_load(row["asset_paths_json"], []) == ["assets/v2.txt"]
+    assert not (managed_copy / "assets" / "v1.txt").exists()
+    assert (managed_copy / "assets" / "v2.txt").read_text(encoding="utf-8") == "v2"
+
+
 def test_native_runtime_uses_split_skill_repository(tmp_path: Path) -> None:
     service = AgentRuntimeService(
         db_path=tmp_path / "agent-runtime.db",

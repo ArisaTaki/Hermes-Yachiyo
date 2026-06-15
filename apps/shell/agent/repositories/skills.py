@@ -28,6 +28,9 @@ class SkillRepository:
         skill_deletion_key: Callable[[str, str], str],
         is_native_library_source_type: Callable[[Any], bool],
         skills_dir: Path,
+        skill_id_factory: Callable[[str], str] | None = None,
+        asset_paths_for: Callable[[Path], list[str]] | None = None,
+        copy_tree: Callable[..., Any] = shutil.copytree,
         delete_tree: Callable[..., Any] = shutil.rmtree,
     ) -> None:
         self._conn = conn
@@ -44,6 +47,9 @@ class SkillRepository:
         self._skill_deletion_key = skill_deletion_key
         self._is_native_library_source_type = is_native_library_source_type
         self._skills_dir = skills_dir
+        self._skill_id_factory = skill_id_factory or (lambda name: f"skill_{str(name or 'skill').strip() or 'skill'}")
+        self._asset_paths_for = asset_paths_for or (lambda _root: [])
+        self._copy_tree = copy_tree
         self._delete_tree = delete_tree
 
     def list(self) -> dict[str, Any]:
@@ -97,6 +103,133 @@ class SkillRepository:
                 (content_hash,),
             ).fetchone()
         return None
+
+    def save_import(
+        self,
+        *,
+        source_root: Path,
+        source_path: str,
+        source_type: str,
+        origin_path: str,
+        source_ref: str,
+        name: str,
+        description: str,
+        content_hash: str,
+        last_synced_at: str,
+        sync_status: str,
+        summary: str,
+        markdown: str,
+        now: str,
+        existing: Any | None,
+        copy_to_managed: bool,
+        folder_id_was_provided: bool,
+        target_folder_id: str,
+    ) -> dict[str, str]:
+        if existing is None:
+            skill_id = self._skill_id_factory(name)
+            target = self._skills_dir / skill_id if copy_to_managed else source_root
+            if copy_to_managed:
+                self._copy_tree(source_root, target)
+            asset_paths = self._asset_paths_for(target)
+            self._conn.execute(
+                """
+                INSERT INTO skills (
+                    skill_id, name, description, source_path, local_path, folder_id, source_type, origin_path,
+                    source_ref, content_hash, last_synced_at, sync_status, content_summary,
+                    skill_markdown, asset_paths_json, enabled, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    skill_id,
+                    name,
+                    description,
+                    source_path,
+                    str(target.resolve()),
+                    target_folder_id,
+                    source_type,
+                    origin_path,
+                    source_ref,
+                    content_hash,
+                    last_synced_at,
+                    sync_status,
+                    summary,
+                    markdown,
+                    self._json_dump(asset_paths),
+                    1,
+                    now,
+                    now,
+                ),
+            )
+            final_status = "imported"
+        elif existing["content_hash"] == content_hash:
+            skill_id = str(existing["skill_id"])
+            target = Path(str(existing["local_path"] or self._skills_dir / skill_id))
+            next_local_path = str(target.resolve()) if copy_to_managed else origin_path
+            if not copy_to_managed:
+                self._remove_managed_copy_if_safe(target, origin_path)
+            next_folder_id = target_folder_id if folder_id_was_provided else existing["folder_id"]
+            self._conn.execute(
+                """
+                UPDATE skills
+                   SET source_path=?, local_path=?, source_type=?, origin_path=?, source_ref=?,
+                       folder_id=?, last_synced_at=?, sync_status=?
+                 WHERE skill_id=?
+                """,
+                (
+                    source_path if existing["origin_path"] == origin_path else existing["source_path"],
+                    next_local_path if existing["origin_path"] == origin_path else existing["local_path"],
+                    source_type if existing["origin_path"] == origin_path else existing["source_type"],
+                    origin_path if existing["origin_path"] == origin_path else existing["origin_path"],
+                    source_ref if existing["origin_path"] == origin_path else existing["source_ref"],
+                    next_folder_id,
+                    last_synced_at or existing["last_synced_at"],
+                    "skipped",
+                    skill_id,
+                ),
+            )
+            final_status = "skipped"
+        else:
+            skill_id = str(existing["skill_id"])
+            target = Path(str(existing["local_path"] or self._skills_dir / skill_id))
+            if copy_to_managed and target.exists():
+                self._delete_tree(target, ignore_errors=True)
+            elif not copy_to_managed:
+                self._remove_managed_copy_if_safe(target, origin_path)
+                target = source_root
+            if copy_to_managed:
+                self._copy_tree(source_root, target)
+            asset_paths = self._asset_paths_for(target)
+            next_folder_id = target_folder_id if folder_id_was_provided else existing["folder_id"]
+            self._conn.execute(
+                """
+                UPDATE skills
+                   SET name=?, description=?, source_path=?, local_path=?, folder_id=?, source_type=?, origin_path=?,
+                       source_ref=?, content_hash=?, last_synced_at=?, sync_status=?, content_summary=?,
+                       skill_markdown=?, asset_paths_json=?, updated_at=?
+                 WHERE skill_id=?
+                """,
+                (
+                    name,
+                    description,
+                    source_path,
+                    str(target.resolve()),
+                    next_folder_id,
+                    source_type,
+                    origin_path,
+                    source_ref,
+                    content_hash,
+                    last_synced_at,
+                    sync_status,
+                    summary,
+                    markdown,
+                    self._json_dump(asset_paths),
+                    now,
+                    skill_id,
+                ),
+            )
+            final_status = "updated"
+        self._conn.commit()
+        return {"skill_id": skill_id, "sync_status": final_status}
 
     def update(self, skill_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         current = self.get(skill_id)
