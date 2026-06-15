@@ -603,8 +603,9 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
         "apps/frontend/src/views/AgentStudioView.tsx",
         [
             "from '../features/agent-studio/studioTabs';",
-            "isStudioTopTabActive(tab, item)",
-            "studioTabLabel(item)",
+            "AgentStudioChrome",
+            "onActivateTab={activateTab}",
+            "onBack={() => void openAppView('main')}",
             "AgentGroupPanel",
             "useAgentDefinitions",
             "useAgentGroups",
@@ -617,6 +618,20 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "RunDetailPanel",
             "selectedPublicRunTimeline={selectedPublicRunTimeline}",
             "selectedRunArtifacts",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/AgentStudioChrome.tsx",
+        [
+            "export function AgentStudioChrome",
+            "isStudioTopTabActive(tab, item)",
+            "studioTabLabel(item)",
+            "AgentStudioLoadingState",
+            'className="agent-studio-hero"',
+            'className="agent-studio-tabs"',
+            'className="skill-library-subnav"',
+            "Skills 列表",
+            "分组管理",
         ],
     )
     _assert_not_contains(
@@ -2156,7 +2171,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
         "apps/frontend/src/views/AgentStudioView.tsx",
         [
             "from '../features/agent-studio/studioTabs';",
-            "studioTabs.map((item) => (",
+            "AgentStudioChrome",
             "listSkills",
             "updateSkill",
             "listSkillFolders",
@@ -2215,6 +2230,14 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "selectedAgentReadOnly",
             "selectedAgentDeletable",
             "AgentEditorPanel",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/AgentStudioChrome.tsx",
+        [
+            "studioTabs.map((item) => (",
+            "isStudioTopTabActive(tab, item)",
+            "studioTabLabel(item)",
         ],
     )
     _assert_contains(

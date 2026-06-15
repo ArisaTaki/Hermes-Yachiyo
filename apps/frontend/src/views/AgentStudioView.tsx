@@ -11,6 +11,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { AgentEditorPanel } from '../features/agent-studio/components/AgentEditorPanel';
 import { AgentGroupPanel } from '../features/agent-studio/components/AgentGroupPanel';
 import { AgentListPanel } from '../features/agent-studio/components/AgentListPanel';
+import { AgentStudioChrome } from '../features/agent-studio/components/AgentStudioChrome';
 import { RuntimeMemoryPanel } from '../features/agent-studio/components/RuntimeMemoryPanel';
 import { RunDetailPanel } from '../features/agent-studio/components/RunDetailPanel';
 import { RunLauncherPanel } from '../features/agent-studio/components/RunLauncherPanel';
@@ -46,11 +47,7 @@ import { useWorkflowDraftActions } from '../features/agent-studio/hooks/useWorkf
 import { useWorkflowSaveActions } from '../features/agent-studio/hooks/useWorkflowSaveActions';
 import { useWorkflowCanvasActions } from '../features/agent-studio/hooks/useWorkflowCanvasActions';
 import {
-  AgentStudioLoadingState,
-  isStudioTopTabActive,
   normalizeStudioTab,
-  studioTabLabel,
-  studioTabs,
   type StudioTab,
 } from '../features/agent-studio/studioTabs';
 import {
@@ -257,7 +254,6 @@ export function AgentStudioView() {
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const busy = loading || Boolean(busyAction);
   const installingSkill = busyAction === '安装 Skill';
-  const isSkillLibraryTab = tab === 'skills' || tab === 'skill-groups';
   const {
     agentGroups,
     agentGroupMemberIds,
@@ -1374,38 +1370,14 @@ export function AgentStudioView() {
 
   return (
     <section className="agent-studio-page hy-route-page">
-      <header className="agent-studio-hero">
-        <button type="button" className="page-back-link" onClick={() => void openAppView('main')}>← 返回主控台</button>
-        <div>
-          <span className="section-eyebrow">Agent Runtime</span>
-          <h1>Agent Studio</h1>
-          <p>创建可配置 Agent，导入本地 Skills，并用线性 Workflow 把多个 Agent 编排成可运行链路。</p>
-        </div>
-      </header>
-
-      <div className="agent-studio-tabs" role="tablist" aria-label="Agent Studio">
-        {studioTabs.map((item) => (
-          <button
-            type="button"
-            className={isStudioTopTabActive(tab, item) ? 'active' : ''}
-            key={item}
-            onClick={() => activateTab(item)}
-          >
-            {studioTabLabel(item)}
-          </button>
-        ))}
-      </div>
-
-      {loading ? <AgentStudioLoadingState /> : null}
-      {status ? <div className="notice">{status}</div> : null}
-      {error ? <div className="notice danger">{error}</div> : null}
-
-      {!loading && isSkillLibraryTab ? (
-        <div className="skill-library-subnav" role="tablist" aria-label="Skill Library">
-          <button type="button" className={tab === 'skills' ? 'active' : ''} onClick={() => activateTab('skills')}>Skills 列表</button>
-          <button type="button" className={tab === 'skill-groups' ? 'active' : ''} onClick={() => activateTab('skill-groups')}>分组管理</button>
-        </div>
-      ) : null}
+      <AgentStudioChrome
+        error={error}
+        loading={loading}
+        status={status}
+        tab={tab}
+        onActivateTab={activateTab}
+        onBack={() => void openAppView('main')}
+      />
 
       {!loading && tab === 'groups' ? (
         <AgentGroupPanel
