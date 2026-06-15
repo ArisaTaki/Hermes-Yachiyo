@@ -4255,7 +4255,10 @@ def test_agent_frontend_run_helpers_preserve_native_run_bridge_contract() -> Non
             "/yachiyo/studio/agents/${encodeURIComponent(agentId)}/runs",
             "objective: userGoal",
             "client_run_id: clientRunId",
-            "runSpecFromPublicTimeline(snapshot, agentId, userGoal, 'agent_run')",
+            "publicRunTimelineToRunSpec(snapshot, {",
+            "kind: 'agent_run'",
+            "runnableId: agentId",
+            "userGoal",
             "apiPost('/ui/agent-runs'",
             "agent_id: agentId",
             "user_goal: userGoal",
@@ -4277,10 +4280,39 @@ def test_agent_frontend_run_helpers_preserve_native_run_bridge_contract() -> Non
             "const clientRunId = createClientRunId();",
             "/yachiyo/studio/workflows/${encodeURIComponent(workflowId)}/runs",
             "client_run_id: clientRunId",
+            "publicRunTimelineToRunSpec(snapshot, {",
+            "kind: 'workflow_run'",
+            "runnableId: workflowId",
+            "userGoal",
             "apiPost('/ui/workflow-runs'",
             "workflow_id: workflowId",
             "user_goal: userGoal",
             "client_run_id: clientRunId",
+        ],
+    )
+    _assert_contains(
+        agents_lib,
+        [
+            "function runGroupSpecFromPublicGroupRun(snapshot: YachiyoGroupRunSnapshot): RunGroupSpec {",
+            "return publicGroupRunToRunGroupSpec(snapshot);",
+        ],
+    )
+    _assert_contains(
+        agents_lib,
+        [
+            "function runSpecFromPublicTimelineSnapshot(snapshot: YachiyoRunTimelineSnapshot): RunSpec {",
+            "return publicRunTimelineToRunSpec(snapshot);",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/utils/runs.ts",
+        [
+            "snapshot: RunTimelineSnapshot | YachiyoRunTimelineSnapshot",
+            "snapshot: GroupRunSnapshot | YachiyoGroupRunSnapshot",
+            "task_id: 'task_id' in snapshot ? snapshot.task_id || undefined : undefined",
+            "session_id: 'session_id' in snapshot ? snapshot.session_id || undefined : undefined",
+            "task_run_link_created_at: 'task_run_link_created_at' in snapshot",
+            "task_run_link_last_event_sequence: 'task_run_link_last_event_sequence' in snapshot",
         ],
     )
     _assert_function_contains(

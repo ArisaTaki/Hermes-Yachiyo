@@ -11,6 +11,8 @@ import type {
   GroupRunSnapshot,
   PublicRunEvent,
   RunTimelineSnapshot,
+  YachiyoGroupRunSnapshot,
+  YachiyoRunTimelineSnapshot,
 } from '../../yachiyo-studio/types';
 
 import {
@@ -81,7 +83,7 @@ export function approvedRunStatusMessage(run: RunSpec): string {
 }
 
 export function publicRunTimelineToRunSpec(
-  snapshot: RunTimelineSnapshot,
+  snapshot: RunTimelineSnapshot | YachiyoRunTimelineSnapshot,
   fallback: {
     kind?: RunSpec['kind'];
     runnableId?: string;
@@ -95,6 +97,20 @@ export function publicRunTimelineToRunSpec(
     run_id: snapshot.run_id,
     run_group_id: snapshot.run_group_id || snapshot.group_run_id || undefined,
     run_group_source: kind === 'workflow_run' ? 'workflow' : undefined,
+    task_id: 'task_id' in snapshot ? snapshot.task_id || undefined : undefined,
+    session_id: 'session_id' in snapshot ? snapshot.session_id || undefined : undefined,
+    task_run_link_created_at: 'task_run_link_created_at' in snapshot
+      ? snapshot.task_run_link_created_at || undefined
+      : undefined,
+    task_run_link_updated_at: 'task_run_link_updated_at' in snapshot
+      ? snapshot.task_run_link_updated_at || undefined
+      : undefined,
+    task_run_link_run_status: 'task_run_link_run_status' in snapshot
+      ? snapshot.task_run_link_run_status || undefined
+      : undefined,
+    task_run_link_last_event_sequence: 'task_run_link_last_event_sequence' in snapshot
+      ? snapshot.task_run_link_last_event_sequence ?? undefined
+      : undefined,
     kind,
     runnable_id: fallback.runnableId || snapshot.workflow_run_id || snapshot.agent_id || snapshot.run_id,
     runnable_name: snapshot.title || fallback.runnableName || undefined,
@@ -112,7 +128,9 @@ export function publicRunTimelineToRunSpec(
   };
 }
 
-export function publicGroupRunToRunGroupSpec(snapshot: GroupRunSnapshot): RunGroupSpec {
+export function publicGroupRunToRunGroupSpec(
+  snapshot: GroupRunSnapshot | YachiyoGroupRunSnapshot,
+): RunGroupSpec {
   const childRunIds = snapshot.child_run_ids?.length
     ? snapshot.child_run_ids
     : (snapshot.runs || []).map((run) => run.run_id).filter(Boolean);
