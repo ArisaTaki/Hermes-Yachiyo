@@ -6,11 +6,77 @@ import pytest
 
 from apps.shell import agent_runtime
 from apps.shell.agent.runtime.errors import AgentRuntimeError
-from apps.shell.agent.runtime.run_readiness import RuntimeRunReadinessValidator
+from apps.shell.agent.runtime.run_readiness import RuntimeRunReadinessValidator, native_agent_readiness
 
 
 def test_run_readiness_validator_remains_exported_from_legacy_module() -> None:
     assert agent_runtime.RuntimeRunReadinessValidator is RuntimeRunReadinessValidator
+
+
+def test_native_agent_readiness_projects_model_profile_state() -> None:
+    service = FakeProfileService()
+
+    assert native_agent_readiness(
+        profile_service_factory=lambda: service,
+        supports_openai_compatible_api=lambda _provider: True,
+        redact_error=str,
+    ) == {
+        "ready": False,
+        "code": "native_agent_not_ready",
+        "reason": "model_profile_required",
+        "message": "请先配置并选择默认对话模型。",
+        "capabilities": {
+            "model": False,
+            "image_input": False,
+            "tools": False,
+            "approval": False,
+        },
+    }
+
+    service.defaults["chat"] = "chat-1"
+    service.profiles["chat-1"] = {
+        "enabled": True,
+        "status": "available",
+        "capability": "chat",
+        "provider": "openai_compatible",
+        "base_url": "https://api.example.test/v1",
+        "model": "demo-model",
+        "api_key": "sk-demo",
+    }
+
+    readiness = native_agent_readiness(
+        profile_service_factory=lambda: service,
+        supports_openai_compatible_api=lambda provider: provider == "openai_compatible",
+        redact_error=str,
+    )
+
+    assert readiness == {
+        "ready": True,
+        "code": "",
+        "reason": "",
+        "message": "",
+        "profile_id": "chat-1",
+        "model": "demo-model",
+        "provider": "openai_compatible",
+        "capabilities": {
+            "model": True,
+            "image_input": True,
+            "tools": False,
+            "approval": False,
+        },
+    }
+
+    service.profiles["chat-1"]["provider"] = "native_only"
+    unsupported = native_agent_readiness(
+        profile_service_factory=lambda: service,
+        supports_openai_compatible_api=lambda _provider: False,
+        redact_error=str,
+    )
+    assert unsupported["ready"] is False
+    assert unsupported["code"] == "native_agent_not_ready"
+    assert unsupported["reason"] == "model_profile_unavailable"
+    assert unsupported["message"] == "Native Agent 当前仅支持 OpenAI-compatible 对话模型。"
+    assert unsupported["capabilities"]["model"] is False
 
 
 def test_run_readiness_validator_projects_workflow_agent_node() -> None:
@@ -134,3 +200,17 @@ def _node_kind(node: dict[str, object]) -> str:
     if data_kind and node_type in {"", "input", "default", "output"}:
         return data_kind
     return node_type or data_kind
+
+
+class FakeProfileService:
+    def __init__(self) -> None:
+        self.defaults: dict[str, str] = {}
+        self.profiles: dict[str, dict[str, object]] = {}
+
+    def get_defaults(self) -> dict[str, str]:
+        return dict(self.defaults)
+
+    def get_profile_private(self, profile_id: str) -> dict[str, object]:
+        if profile_id not in self.profiles:
+            raise KeyError(profile_id)
+        return self.profiles[profile_id]

@@ -9,6 +9,77 @@ from apps.shell.agent.runtime.errors import AgentRuntimeError
 from apps.shell.agent.runtime.workflow_path import WorkflowPathPlanner
 
 
+def native_agent_readiness(
+    *,
+    profile_service_factory: Callable[[], Any],
+    supports_openai_compatible_api: Callable[[str], bool],
+    redact_error: Callable[[Any], str],
+) -> dict[str, Any]:
+    """Project native main-agent readiness from the model profile service."""
+    try:
+        profile_service = profile_service_factory()
+        profile_id = str(profile_service.get_defaults().get("chat") or "").strip()
+        if not profile_id:
+            return native_agent_not_ready(
+                reason="model_profile_required",
+                message="请先配置并选择默认对话模型。",
+            )
+        profile = profile_service.get_profile_private(profile_id)
+    except KeyError:
+        return native_agent_not_ready(
+            reason="model_profile_required",
+            message="默认对话模型不存在，请重新选择。",
+        )
+    except Exception as exc:
+        return native_agent_not_ready(
+            reason="model_profile_unavailable",
+            message=redact_error(exc),
+        )
+
+    reason = ""
+    if not profile.get("enabled", True):
+        reason = "默认对话模型已停用。"
+    elif str(profile.get("status") or "") != "available":
+        reason = "默认对话模型尚未通过连接测试。"
+    elif str(profile.get("capability") or "") != "chat":
+        reason = "默认模型不是对话模型。"
+    elif not supports_openai_compatible_api(str(profile.get("provider") or "openai_compatible")):
+        reason = "Native Agent 当前仅支持 OpenAI-compatible 对话模型。"
+    elif not all(str(profile.get(key) or "").strip() for key in ("base_url", "model", "api_key")):
+        reason = "默认对话模型配置不完整。"
+
+    ready = not reason
+    return {
+        "ready": ready,
+        "code": "" if ready else "native_agent_not_ready",
+        "reason": "" if ready else "model_profile_unavailable",
+        "message": reason,
+        "profile_id": profile_id,
+        "model": str(profile.get("model") or ""),
+        "provider": str(profile.get("provider") or ""),
+        "capabilities": native_agent_capabilities(ready),
+    }
+
+
+def native_agent_not_ready(reason: str, message: str) -> dict[str, Any]:
+    return {
+        "ready": False,
+        "code": "native_agent_not_ready",
+        "reason": reason,
+        "message": message,
+        "capabilities": native_agent_capabilities(False),
+    }
+
+
+def native_agent_capabilities(model_ready: bool) -> dict[str, bool]:
+    return {
+        "model": bool(model_ready),
+        "image_input": bool(model_ready),
+        "tools": False,
+        "approval": False,
+    }
+
+
 class RuntimeRunReadinessValidator:
     """Validates Agent and Workflow runnable dependencies before execution."""
 

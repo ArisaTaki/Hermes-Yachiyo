@@ -216,7 +216,10 @@ from apps.shell.agent.runtime.run_projections import (
     ApprovalResumeProjectionCoordinator,
     RunProjectionCoordinator,
 )
-from apps.shell.agent.runtime.run_readiness import RuntimeRunReadinessValidator
+from apps.shell.agent.runtime.run_readiness import (
+    RuntimeRunReadinessValidator,
+    native_agent_readiness as _runtime_native_agent_readiness,
+)
 from apps.shell.agent.runtime.run_cancellation import RuntimeRunCancellationService
 from apps.shell.agent.runtime.run_deletion import RuntimeRunDeletionService
 from apps.shell.agent.runtime.run_rerun import RuntimeRunRerunService
@@ -2958,78 +2961,11 @@ _global_agent_runtime_service: NativeRunEngine | None = None
 
 def get_native_agent_readiness() -> dict[str, Any]:
     """Return native main-agent readiness."""
-    try:
-        profile_service = get_model_profile_service()
-        profile_id = str(profile_service.get_defaults().get("chat") or "").strip()
-        if not profile_id:
-            return {
-                "ready": False,
-                "code": "native_agent_not_ready",
-                "reason": "model_profile_required",
-                "message": "请先配置并选择默认对话模型。",
-                "capabilities": {
-                    "model": False,
-                    "image_input": False,
-                    "tools": False,
-                    "approval": False,
-                },
-            }
-        profile = profile_service.get_profile_private(profile_id)
-    except KeyError:
-        return {
-            "ready": False,
-            "code": "native_agent_not_ready",
-            "reason": "model_profile_required",
-            "message": "默认对话模型不存在，请重新选择。",
-            "capabilities": {
-                "model": False,
-                "image_input": False,
-                "tools": False,
-                "approval": False,
-            },
-        }
-    except Exception as exc:
-        return {
-            "ready": False,
-            "code": "native_agent_not_ready",
-            "reason": "model_profile_unavailable",
-            "message": redact_secrets(exc),
-            "capabilities": {
-                "model": False,
-                "image_input": False,
-                "tools": False,
-                "approval": False,
-            },
-        }
-
-    reason = ""
-    if not profile.get("enabled", True):
-        reason = "默认对话模型已停用。"
-    elif str(profile.get("status") or "") != "available":
-        reason = "默认对话模型尚未通过连接测试。"
-    elif str(profile.get("capability") or "") != "chat":
-        reason = "默认模型不是对话模型。"
-    elif not supports_openai_compatible_api(str(profile.get("provider") or "openai_compatible")):
-        reason = "Native Agent 当前仅支持 OpenAI-compatible 对话模型。"
-    elif not all(str(profile.get(key) or "").strip() for key in ("base_url", "model", "api_key")):
-        reason = "默认对话模型配置不完整。"
-
-    ready = not reason
-    return {
-        "ready": ready,
-        "code": "" if ready else "native_agent_not_ready",
-        "reason": "" if ready else "model_profile_unavailable",
-        "message": reason,
-        "profile_id": profile_id,
-        "model": str(profile.get("model") or ""),
-        "provider": str(profile.get("provider") or ""),
-        "capabilities": {
-            "model": ready,
-            "image_input": ready,
-            "tools": False,
-            "approval": False,
-        },
-    }
+    return _runtime_native_agent_readiness(
+        profile_service_factory=lambda: get_model_profile_service(),
+        supports_openai_compatible_api=supports_openai_compatible_api,
+        redact_error=redact_secrets,
+    )
 
 
 def get_native_run_engine() -> NativeRunEngine:
