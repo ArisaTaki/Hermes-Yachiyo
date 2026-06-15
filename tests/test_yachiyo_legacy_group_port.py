@@ -6,6 +6,7 @@ import json
 from types import SimpleNamespace
 from typing import Any
 
+from apps.shell.yachiyo_agent.legacy_groups import chat_group_snapshot, chat_group_snapshots
 from apps.shell.yachiyo_agent.legacy_ports import LegacyStudioPort
 
 
@@ -60,6 +61,26 @@ def test_legacy_studio_port_persists_groups_in_existing_chat_store(monkeypatch) 
     assert len(stored_config) == 1
     assert stored_config[0]["mode"] == "pipeline"
     assert stored_config[0]["memory_scope"] == "hybrid"
+
+
+def test_legacy_group_adapters_read_chat_group_snapshots_directly(monkeypatch) -> None:
+    store = _FakeChatStore()
+    runtime = _FakeRuntime()
+    monkeypatch.setattr("apps.core.chat_store.get_chat_store", lambda: store)
+
+    saved = LegacyStudioPort(runtime).save_group(
+        {
+            "name": "Direct Adapter Group",
+            "participant_ids": ["agent-writer"],
+        }
+    )
+    snapshots = chat_group_snapshots(runtime)
+    fetched = chat_group_snapshot(saved["group_id"], runtime)
+
+    assert snapshots[0]["group_id"] == saved["group_id"]
+    assert snapshots[0]["members"][0]["agent_id"] == "agent-writer"
+    assert fetched is not None
+    assert fetched["name"] == "Direct Adapter Group"
 
 
 def test_legacy_studio_port_updates_existing_chat_group_and_starts_member_runs(
