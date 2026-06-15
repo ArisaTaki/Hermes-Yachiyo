@@ -3287,6 +3287,23 @@ def test_agent_studio_skill_folders_ui_smoke_uses_folder_management_paths() -> N
     _assert_contains(
         "apps/frontend/src/views/AgentStudioView.tsx",
         [
+            "SkillFolderPanel",
+            "useSkillFolderManagement",
+            "createSkillFolderFromDraft",
+            "updateSkillFolderFromDraft",
+            "requestDeleteSkillFolder",
+            "onCreateSkillFolder={() => void runAction(createSkillFolderFromDraft, '创建 Skill 文件夹')}",
+            "onUpdateSkillFolder={(folderId) => {",
+        ],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/views/AgentStudioView.tsx",
+        ['data-testid="skill-folder-page"'],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/SkillFolderPanel.tsx",
+        [
+            "export function SkillFolderPanel",
             'data-testid="skill-folder-page"',
             'data-testid="skill-folder-name-input"',
             'data-testid="skill-folder-create"',
@@ -3299,10 +3316,6 @@ def test_agent_studio_skill_folders_ui_smoke_uses_folder_management_paths() -> N
             'data-testid="skill-folder-open"',
             'data-testid="skill-folder-delete-with-skills"',
             'data-testid="skill-folder-delete"',
-            "useSkillFolderManagement",
-            "createSkillFolderFromDraft",
-            "updateSkillFolderFromDraft",
-            "requestDeleteSkillFolder",
         ],
     )
     _assert_contains(
