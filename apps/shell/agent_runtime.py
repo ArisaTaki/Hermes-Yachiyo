@@ -179,6 +179,7 @@ from apps.shell.agent.runtime.main_chat_runs import MainChatRunLifecycle
 from apps.shell.agent.runtime.memory_services import RuntimeMemoryService
 from apps.shell.agent.runtime.model_calling import (
     RuntimeModelProfileChatAdapter,
+    RuntimeOpenAICompatibleChatAdapter,
     call_model_profile_chat_message as _runtime_call_model_profile_chat_message,
     callable_accepts_keyword as _callable_accepts_keyword,
     openai_compatible_chat as _runtime_openai_compatible_chat,
@@ -444,6 +445,11 @@ _UNSET = object()
 _legacy_model_profile_chat_adapter = RuntimeModelProfileChatAdapter(
     chat_message_provider=lambda: openai_compatible_chat_message,
 )
+_legacy_openai_compatible_chat_adapter = RuntimeOpenAICompatibleChatAdapter(
+    timeout_provider=lambda: read_openai_compatible_chat_timeout(),
+    urlopen=lambda *args, **kwargs: urlopen_with_bundled_ca(*args, **kwargs),
+    redact_error=lambda value: redact_secrets(value),
+)
 
 
 def _call_model_profile_chat_message(
@@ -490,6 +496,11 @@ class NativeRunEngine:
     ) -> None:
         self.model_profile_chat_adapter = RuntimeModelProfileChatAdapter(
             chat_message_provider=lambda: openai_compatible_chat_message,
+        )
+        self.openai_compatible_chat_adapter = RuntimeOpenAICompatibleChatAdapter(
+            timeout_provider=lambda: read_openai_compatible_chat_timeout(),
+            urlopen=lambda *args, **kwargs: urlopen_with_bundled_ca(*args, **kwargs),
+            redact_error=lambda value: redact_secrets(value),
         )
         engine_state = _build_runtime_engine_state(
             db_path=db_path,
@@ -668,7 +679,7 @@ class NativeRunEngine:
         self.agent_model_tester = RuntimeAgentModelTester(
             profile_service_factory=lambda: get_model_profile_service(),
             default_agent_ids=_DEFAULT_AGENT_IDS,
-            call_custom_api=self._openai_compatible_chat,
+            call_custom_api=self.openai_compatible_chat_adapter.call,
             now_seconds=time.time,
             redact_error=redact_api_error_text,
             error_type=AgentRuntimeError,
@@ -2329,14 +2340,11 @@ class NativeRunEngine:
 
     @staticmethod
     def _openai_compatible_chat(base_url: str, model: str, api_key: str, messages: list[dict[str, str]]) -> str:
-        return _runtime_openai_compatible_chat(
+        return _legacy_openai_compatible_chat_adapter.call(
             base_url,
             model,
             api_key,
             messages,
-            timeout=read_openai_compatible_chat_timeout(),
-            urlopen=urlopen_with_bundled_ca,
-            redact_error=redact_secrets,
         )
 
     def test_agent_model(self, agent_id: str) -> dict[str, Any]:

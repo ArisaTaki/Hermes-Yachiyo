@@ -11,6 +11,7 @@ from apps.shell import agent_runtime
 from apps.shell.agent.runtime.errors import AgentRuntimeError
 from apps.shell.agent.runtime.model_calling import (
     RuntimeModelProfileChatAdapter,
+    RuntimeOpenAICompatibleChatAdapter,
     call_model_profile_chat_message,
     callable_accepts_keyword,
     openai_compatible_chat,
@@ -19,6 +20,7 @@ from apps.shell.agent.runtime.model_calling import (
 
 def test_model_calling_helpers_remain_exported_from_legacy_module() -> None:
     assert agent_runtime.RuntimeModelProfileChatAdapter is RuntimeModelProfileChatAdapter
+    assert agent_runtime.RuntimeOpenAICompatibleChatAdapter is RuntimeOpenAICompatibleChatAdapter
     assert agent_runtime._runtime_call_model_profile_chat_message is call_model_profile_chat_message
     assert agent_runtime._callable_accepts_keyword is callable_accepts_keyword
 
@@ -65,6 +67,78 @@ def test_model_profile_chat_adapter_uses_current_provider() -> None:
     assert calls == [
         {"chat": "first", "kwargs": {}},
         {"chat": "second", "kwargs": {"tools": [{"type": "function"}], "stream": True}},
+    ]
+
+
+def test_openai_compatible_chat_adapter_uses_runtime_dependencies() -> None:
+    calls: list[dict[str, Any]] = []
+    timeouts = [5.0, 8.0]
+
+    def fake_urlopen(request: Any, *, timeout: float) -> FakeResponse:
+        calls.append({
+            "url": request.full_url,
+            "timeout": timeout,
+        })
+        return FakeResponse(b'{"choices":[{"message":{"content":"custom ok"}}]}')
+
+    adapter = RuntimeOpenAICompatibleChatAdapter(
+        timeout_provider=lambda: timeouts.pop(0),
+        urlopen=fake_urlopen,
+        redact_error=str,
+    )
+
+    assert adapter.call(
+        "https://api.example.test/v1/",
+        "demo-model",
+        "sk-test",
+        [{"role": "user", "content": "hello"}],
+    ) == "custom ok"
+    assert adapter.call(
+        "https://api.example.test/v1/",
+        "demo-model",
+        "sk-test",
+        [{"role": "user", "content": "again"}],
+    ) == "custom ok"
+    assert calls == [
+        {"url": "https://api.example.test/v1/chat/completions", "timeout": 5.0},
+        {"url": "https://api.example.test/v1/chat/completions", "timeout": 8.0},
+    ]
+
+
+def test_legacy_openai_compatible_chat_wrapper_delegates_to_adapter(monkeypatch) -> None:
+    calls: list[dict[str, Any]] = []
+
+    class FakeAdapter:
+        def call(
+            self,
+            base_url: str,
+            model: str,
+            api_key: str,
+            messages: list[dict[str, str]],
+        ) -> str:
+            calls.append({
+                "base_url": base_url,
+                "model": model,
+                "api_key": api_key,
+                "messages": messages,
+            })
+            return "legacy ok"
+
+    monkeypatch.setattr(agent_runtime, "_legacy_openai_compatible_chat_adapter", FakeAdapter())
+
+    assert agent_runtime.NativeRunEngine._openai_compatible_chat(
+        "https://api.example.test/v1",
+        "demo-model",
+        "sk-test",
+        [{"role": "user", "content": "hello"}],
+    ) == "legacy ok"
+    assert calls == [
+        {
+            "base_url": "https://api.example.test/v1",
+            "model": "demo-model",
+            "api_key": "sk-test",
+            "messages": [{"role": "user", "content": "hello"}],
+        }
     ]
 
 

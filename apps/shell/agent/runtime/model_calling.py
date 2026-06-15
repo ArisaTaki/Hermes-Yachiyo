@@ -64,6 +64,38 @@ class RuntimeModelProfileChatAdapter:
         )
 
 
+class RuntimeOpenAICompatibleChatAdapter:
+    """Binds custom API chat calls to runtime transport dependencies."""
+
+    def __init__(
+        self,
+        *,
+        timeout_provider: Callable[[], float],
+        urlopen: Callable[..., Any],
+        redact_error: Callable[[Any], str],
+    ) -> None:
+        self._timeout_provider = timeout_provider
+        self._urlopen = urlopen
+        self._redact_error = redact_error
+
+    def call(
+        self,
+        base_url: str,
+        model: str,
+        api_key: str,
+        messages: list[dict[str, str]],
+    ) -> str:
+        return openai_compatible_chat(
+            base_url,
+            model,
+            api_key,
+            messages,
+            timeout=self._timeout_provider(),
+            urlopen=self._urlopen,
+            redact_error=self._redact_error,
+        )
+
+
 def openai_compatible_chat(
     base_url: str,
     model: str,
