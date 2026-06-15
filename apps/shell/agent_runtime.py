@@ -1600,20 +1600,7 @@ class NativeRunEngine:
         return self.skill_records.list()
 
     def list_native_skill_sources(self) -> dict[str, Any]:
-        roots = self._native_skill_root_specs()
-        return {
-            "ok": True,
-            "roots": [
-                {
-                    "path": str(root["path"]),
-                    "source_type": root["source_type"],
-                    "library": "native",
-                    "exists": root["path"].exists(),
-                    "skill_count": self._count_skill_files(root["path"]),
-                }
-                for root in roots
-            ],
-        }
+        return self.skill_sources.list_native_sources()
 
     def get_skill(self, skill_id: str) -> dict[str, Any]:
         return self.skill_records.get(skill_id)

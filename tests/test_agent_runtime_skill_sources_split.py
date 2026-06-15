@@ -76,6 +76,19 @@ def test_skill_source_discovery_roots_counts_and_installed_source_map(tmp_path: 
     ]
     assert discovery.count_skill_files(native_project_root) == 1
     assert discovery.count_skill_files(tmp_path / "missing") == 0
+    native_sources = discovery.list_native_sources([native_project_root])
+    assert native_sources == {
+        "ok": True,
+        "roots": [
+            {
+                "path": str(native_project_root),
+                "source_type": "native_project",
+                "library": "native",
+                "exists": True,
+                "skill_count": 1,
+            }
+        ],
+    }
 
     source_map = discovery.installed_source_map()
     assert source_map["installed-skill"] == "https://github.com/owner/repo/blob/main/skills/dev/installed-skill/SKILL.md"
@@ -95,6 +108,10 @@ def test_native_runtime_uses_split_skill_source_discovery(tmp_path: Path) -> Non
     try:
         assert isinstance(service.skill_sources, SkillSourceDiscovery)
         assert service._count_skill_files(tmp_path / "missing") == 0
+        native_sources = service.list_native_skill_sources()
+        assert native_sources["ok"] is True
+        assert native_sources["roots"][0]["library"] == "native"
+        assert "skill_count" in native_sources["roots"][0]
         roots = service._installed_skill_root_specs(source_type="npx_skills", source_ref_override="override")
         assert roots[0]["path"] == service.skill_installs_dir / ".skills" / "skills"
         assert roots[1]["path"] == service.skill_installs_native_home / "skills"

@@ -53,6 +53,21 @@ class SkillSourceDiscovery:
             specs.append({"path": path, "source_type": source_type})
         return specs
 
+    def list_native_sources(self, roots: list[Any] | None = None) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "roots": [
+                {
+                    "path": str(root["path"]),
+                    "source_type": root["source_type"],
+                    "library": "native",
+                    "exists": root["path"].exists(),
+                    "skill_count": self.count_skill_files(root["path"]),
+                }
+                for root in self.native_root_specs(roots)
+            ],
+        }
+
     def installed_root_specs(self, *, source_type: str, source_ref_override: str = "") -> list[dict[str, Any]]:
         roots = [
             self._skill_installs_dir / ".skills" / "skills",
