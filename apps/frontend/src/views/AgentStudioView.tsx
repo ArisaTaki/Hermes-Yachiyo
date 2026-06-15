@@ -38,6 +38,7 @@ import { useSkillImportActions } from '../features/agent-studio/hooks/useSkillIm
 import { useWorkflowDeletionActions } from '../features/agent-studio/hooks/useWorkflowDeletionActions';
 import { useWorkflowDefinitions } from '../features/agent-studio/hooks/useWorkflowDefinitions';
 import { useWorkflowSaveActions } from '../features/agent-studio/hooks/useWorkflowSaveActions';
+import { useWorkflowCanvasActions } from '../features/agent-studio/hooks/useWorkflowCanvasActions';
 import {
   agentCapabilityLine,
   agentRunReadinessIssue,
@@ -92,8 +93,6 @@ import {
   linearEdgesForNodes,
   skippedWorkflowArtifactLabel,
   starterNodes,
-  terminalNodeId,
-  uniqueWorkflowNodeId,
   validateWorkflowDraft,
   workflowAgentRunReadinessIssue,
   workflowChildRunRefs,
@@ -378,6 +377,16 @@ export function AgentStudioView() {
     workflowEnabled,
     workflowErrors,
     workflowName,
+  });
+  const {
+    addFlowNode,
+    removeFlowNode,
+  } = useWorkflowCanvasActions({
+    agents,
+    edges,
+    nodes,
+    setEdges,
+    setNodes,
   });
   const workflowRunPreviewSteps = useMemo(
     () => workflowSpecStepRefs({
@@ -1487,64 +1496,6 @@ export function AgentStudioView() {
       selectedRunId: runId || undefined,
       statusMessage,
     };
-  }
-
-  function addFlowNode(kind: 'agent' | 'approval' | 'artifact' | 'workflow' | 'loop', agentId = '') {
-    const agent = agentId
-      ? agents.find((candidate) => candidate.agent_id === agentId)
-      : undefined;
-    const nodeSeed = kind === 'agent'
-      ? `${kind}-${agent?.agent_id || Date.now().toString(36)}`
-      : `${kind}-${Date.now().toString(36)}`;
-    const id = uniqueWorkflowNodeId(nodeSeed, nodes);
-    const sourceId = terminalNodeId(nodes, edges);
-    const nextNode: Node = {
-      id,
-      type: kind === 'artifact' ? 'output' : 'default',
-      position: { x: 120 + nodes.length * 180, y: 140 },
-      data: {
-        label: kind === 'agent'
-          ? agent?.name || '选择 Agent'
-          : kind === 'approval'
-            ? '人工审批'
-            : kind === 'workflow'
-              ? '子 Workflow'
-              : kind === 'loop'
-                ? 'Loop'
-              : 'Artifact',
-        kind,
-        ...(kind === 'agent' && agent ? { agent_id: agent.agent_id } : {}),
-      },
-    };
-    setNodes((current) => [...current, nextNode]);
-    if (sourceId) {
-      setEdges((current) => [
-        ...current,
-        {
-          id: `edge-${sourceId}-${id}`,
-          source: sourceId,
-          target: id,
-        },
-      ]);
-    }
-  }
-
-  function removeFlowNode(nodeId: string) {
-    if (nodeId === 'start') return;
-    const incoming = edges.find((edge) => edge.target === nodeId);
-    const outgoing = edges.find((edge) => edge.source === nodeId);
-    setNodes((current) => current.filter((node) => node.id !== nodeId));
-    setEdges((current) => {
-      const nextEdges = current.filter((edge) => edge.source !== nodeId && edge.target !== nodeId);
-      if (incoming?.source && outgoing?.target && incoming.source !== outgoing.target) {
-        nextEdges.push({
-          id: `edge-${incoming.source}-${outgoing.target}`,
-          source: incoming.source,
-          target: outgoing.target,
-        });
-      }
-      return nextEdges;
-    });
   }
 
   return (

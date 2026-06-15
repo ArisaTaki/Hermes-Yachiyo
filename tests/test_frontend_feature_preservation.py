@@ -2088,6 +2088,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "useSkillDeletionActions",
             "useSkillFolderManagement",
             "useSkillImportActions",
+            "useWorkflowCanvasActions",
             "useWorkflowDeletionActions",
             "useWorkflowSaveActions",
             "saveAgent",
@@ -2123,6 +2124,26 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "selectedAgentReadOnly",
             "selectedAgentDeletable",
             "AgentEditorPanel",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useWorkflowCanvasActions.ts",
+        [
+            "export function useWorkflowCanvasActions",
+            "function addFlowNode(kind: WorkflowCanvasNodeKind, agentId = '')",
+            "const id = uniqueWorkflowNodeId(nodeSeed, nodes);",
+            "const sourceId = terminalNodeId(nodes, edges);",
+            "type: kind === 'artifact' ? 'output' : 'default',",
+            "position: { x: 120 + nodes.length * 180, y: 140 },",
+            "agent?.name || '选择 Agent'",
+            "setNodes((current) => [...current, nextNode]);",
+            "id: `edge-${sourceId}-${id}`",
+            "function removeFlowNode(nodeId: string)",
+            "if (nodeId === 'start') return;",
+            "const incoming = edges.find((edge) => edge.target === nodeId);",
+            "const outgoing = edges.find((edge) => edge.source === nodeId);",
+            "const nextEdges = current.filter((edge) => edge.source !== nodeId && edge.target !== nodeId);",
+            "id: `edge-${incoming.source}-${outgoing.target}`",
         ],
     )
     _assert_contains(
