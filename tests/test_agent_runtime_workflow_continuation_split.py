@@ -168,6 +168,67 @@ def test_workflow_run_outcome_projector_projects_background_failure_without_muta
     assert result["status"] == "failed"
 
 
+def test_workflow_run_outcome_projector_accepts_side_effect_ports() -> None:
+    timeline_events: list[dict[str, Any]] = []
+    appended_events: list[tuple[str, str, dict[str, Any]]] = []
+    run_updates: list[tuple[str, dict[str, Any]]] = []
+    group_updates: list[tuple[str, dict[str, Any]]] = []
+    get_calls: list[str] = []
+    projector = WorkflowRunOutcomeProjector(
+        object(),
+        timeline_factory=lambda event, detail="", **payload: timeline_events.append(
+            {"event": event, "detail": detail, **payload}
+        )
+        or timeline_events[-1],
+        append_run_event=lambda run_id, event_type, payload: appended_events.append(
+            (run_id, event_type, payload)
+        ),
+        update_run=lambda run_id, **fields: run_updates.append((run_id, fields))
+        or {"run_id": run_id, "run_group_id": "run_group", **fields},
+        update_run_group=lambda run_group_id, **fields: group_updates.append(
+            (run_group_id, fields)
+        ),
+        get_run=lambda run_id: get_calls.append(run_id)
+        or {
+            "run_id": run_id,
+            "run_group_id": "run_group",
+            **run_updates[-1][1],
+            "refetched": True,
+        },
+    )
+    timeline: list[dict[str, Any]] = []
+    artifacts = [{"kind": "workflow_artifact", "path": "report.md"}]
+
+    result = projector.completed(
+        {"run_id": "workflow_run", "run_group_id": "run_group"},
+        WorkflowRunCompletionProjection("Workflow result"),
+        timeline=timeline,
+        artifacts=artifacts,
+        root_group=True,
+    )
+
+    assert result["refetched"] is True
+    assert timeline == timeline_events
+    assert appended_events == [
+        ("workflow_run", "workflow.run.completed", {"result": "Workflow result"})
+    ]
+    assert run_updates == [
+        (
+            "workflow_run",
+            {
+                "status": "completed",
+                "result": "Workflow result",
+                "timeline": timeline,
+                "artifacts": artifacts,
+            },
+        )
+    ]
+    assert group_updates == [
+        ("run_group", {"status": "completed", "summary": "Workflow result"})
+    ]
+    assert get_calls == ["workflow_run"]
+
+
 def test_workflow_continuation_uses_injected_traversal_callbacks() -> None:
     engine = FakeWorkflowTraversalEngine()
     workflow = {

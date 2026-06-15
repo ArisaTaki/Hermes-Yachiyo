@@ -126,7 +126,14 @@ class WorkflowContinuationCoordinator:
         self._get_run_callback = get_run
         self._approve_workflow_node_callback = approve_workflow_node
         self._node_kind_callback = node_kind
-        self._outcomes = WorkflowRunOutcomeProjector(engine)
+        self._outcomes = WorkflowRunOutcomeProjector(
+            engine,
+            timeline_factory=self._timeline,
+            append_run_event=self._append_run_event,
+            update_run=self._update_run,
+            update_run_group=self._update_run_group,
+            get_run=self._get_run,
+        )
 
     def _workflow_path(self, workflow: dict[str, Any]) -> list[dict[str, Any]]:
         if self._workflow_path_callback is not None:
