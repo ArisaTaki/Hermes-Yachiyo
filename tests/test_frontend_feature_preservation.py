@@ -1219,7 +1219,18 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "export function agentGroupMemberSummary",
             "export function nextSelectedAgentGroupId",
             "export function buildAgentGroupSaveRequest",
+            "currentGroup: AgentGroupSnapshot | null = null",
+            "moderator_agent_id: moderatorAgentId || null",
+            "default_model: currentGroup?.default_model || null",
+            "tool_policy_id: currentGroup?.tool_policy_id || null",
             "export function groupRunTimelineRunId",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useAgentGroups.ts",
+        [
+            "buildAgentGroupSaveRequest(selectedAgentGroupId, name, memberIds, selectedAgentGroup)",
+            "selectedAgentGroup, selectedAgentGroupId",
         ],
     )
     _assert_contains(

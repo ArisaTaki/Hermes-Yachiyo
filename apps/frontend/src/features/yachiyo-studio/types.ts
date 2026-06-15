@@ -28,6 +28,9 @@ export type SaveAgentGroupRequest = {
   members?: Array<{ agent_id: string; role?: string; sort_order?: number; enabled?: boolean }>;
   participant_ids?: string[];
   mode?: RuntimeAgentGroupSnapshot['mode'];
+  moderator_agent_id?: string | null;
+  default_model?: string | null;
   memory_scope?: RuntimeAgentGroupSnapshot['memory_scope'];
+  tool_policy_id?: string | null;
   enabled?: boolean;
 };

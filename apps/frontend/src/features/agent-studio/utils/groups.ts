@@ -39,19 +39,28 @@ export function buildAgentGroupSaveRequest(
   groupId: string,
   name: string,
   memberIds: string[],
+  currentGroup: AgentGroupSnapshot | null = null,
 ): SaveAgentGroupRequest {
+  const currentModeratorId = currentGroup?.moderator_agent_id;
+  const moderatorAgentId = currentModeratorId && memberIds.includes(currentModeratorId)
+    ? currentModeratorId
+    : memberIds[0];
   return {
     group_id: groupId || undefined,
     name,
+    description: currentGroup?.description || undefined,
     members: memberIds.map((agentId, index) => ({
       agent_id: agentId,
-      role: index === 0 ? 'moderator' : 'member',
+      role: agentId === moderatorAgentId ? 'moderator' : 'member',
       sort_order: index,
       enabled: true,
     })),
-    mode: 'moderated',
-    memory_scope: 'shared',
-    enabled: true,
+    mode: currentGroup?.mode || 'moderated',
+    moderator_agent_id: moderatorAgentId || null,
+    default_model: currentGroup?.default_model || null,
+    memory_scope: currentGroup?.memory_scope || 'shared',
+    tool_policy_id: currentGroup?.tool_policy_id || null,
+    enabled: currentGroup?.enabled ?? true,
   };
 }
 

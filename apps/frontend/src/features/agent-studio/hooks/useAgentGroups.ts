@@ -72,7 +72,9 @@ export function useAgentGroups() {
     const memberIds = agentGroupMemberIds.filter(Boolean);
     if (!name) throw new Error('Group 名称不能为空');
     if (!memberIds.length) throw new Error('Group 至少需要一个 Agent 成员');
-    const saved = await saveYachiyoAgentGroup(buildAgentGroupSaveRequest(selectedAgentGroupId, name, memberIds));
+    const saved = await saveYachiyoAgentGroup(
+      buildAgentGroupSaveRequest(selectedAgentGroupId, name, memberIds, selectedAgentGroup),
+    );
     setSelectedAgentGroupId(saved.group_id);
     setAgentGroupName(saved.name);
     setAgentGroupMemberIds(memberIdsForAgentGroup(saved));
@@ -85,7 +87,7 @@ export function useAgentGroups() {
       saved,
       statusMessage: `已保存 Agent Group：${saved.name}`,
     };
-  }, [agentGroupMemberIds, agentGroupName, selectedAgentGroupId]);
+  }, [agentGroupMemberIds, agentGroupName, selectedAgentGroup, selectedAgentGroupId]);
 
   const runAgentGroup = useCallback(async (): Promise<AgentGroupRunResult> => {
     const groupId = selectedAgentGroupId.trim();
