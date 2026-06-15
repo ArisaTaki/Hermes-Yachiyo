@@ -62,6 +62,7 @@ from apps.shell.agent.runtime.agent_context import (
     agent_output_contract_rules as _runtime_agent_output_contract_rules,
     user_goal_from_agent_messages as _runtime_user_goal_from_agent_messages,
 )
+from apps.shell.agent.runtime.agent_skills import RuntimeAgentSkillLoader
 from apps.shell.agent.runtime.cancellation import (
     RunCancellationProjection,
     WorkflowCancellationProjectionCoordinator,
@@ -1649,6 +1650,10 @@ class NativeRunEngine:
             tool_loop_projection=self.tool_loop_projection,
             pending_approval_builder=self.tool_pending_approvals,
             call_agent_tool=self._call_agent_tool,
+        )
+        self.agent_skill_loader = RuntimeAgentSkillLoader(
+            get_skill=self.get_skill,
+            error_type=AgentRuntimeError,
         )
         self.agent_context_builder = AgentContextBuilder(
             compile_agent_runtime=self._compile_agent_runtime,
@@ -4213,16 +4218,7 @@ class NativeRunEngine:
         return failed
 
     def _load_agent_skills(self, skill_ids: list[str]) -> list[dict[str, Any]]:
-        skills = []
-        for skill_id in skill_ids:
-            try:
-                skill = self.get_skill(skill_id)
-            except KeyError as exc:
-                raise AgentRuntimeError(f"Agent 挂载的 Skill 不存在：{skill_id}") from exc
-            if not skill.get("enabled", True):
-                raise AgentRuntimeError(f"Agent 挂载的 Skill 已停用：{skill.get('name') or skill_id}")
-            skills.append(skill)
-        return skills
+        return self.agent_skill_loader.load(skill_ids)
 
     def _compile_agent_runtime(self, agent: dict[str, Any]) -> dict[str, Any]:
         return self.runtime_policy.compile_agent_runtime(agent)
