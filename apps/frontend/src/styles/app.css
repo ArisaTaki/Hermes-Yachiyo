@@ -9079,6 +9079,14 @@ body.electron-window .hy-traffic {
   height: 14px;
 }
 
+.hy-content .open-chat-shell .yachiyo-agent-task-card-head .yachiyo-agent-task-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: min(220px, 100%);
+}
+
 .hy-content .open-chat-shell .yachiyo-agent-task-approvals,
 .hy-content .open-chat-shell .yachiyo-agent-task-artifacts {
   display: grid;
@@ -9182,6 +9190,49 @@ body.electron-window .hy-traffic {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-approval-item {
+  display: grid;
+  gap: 6px;
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-approval-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid oklch(82% 0.135 76 / 0.25);
+  border-radius: 6px;
+  background: oklch(82% 0.135 76 / 0.08);
+  color: var(--hy-warning);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-approval-actions button:hover {
+  border-color: oklch(82% 0.135 76 / 0.42);
+  color: var(--hy-fg);
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-approval-actions button:disabled,
+.hy-content .open-chat-shell .yachiyo-agent-task-card-head button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-approval-actions .ui-icon {
+  width: 14px;
+  height: 14px;
 }
 
 .hy-content .open-chat-shell .message-agent-progress-icon {

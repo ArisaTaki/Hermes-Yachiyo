@@ -10,9 +10,16 @@ import type {
 import { ImageAttachmentViewer } from '../components/ImageAttachmentViewer';
 import { useConfirmDialog } from '../components/ConfirmDialog';
 import { UiIcon } from '../components/UiIcon';
-import { getYachiyoTask, listYachiyoTasks, startYachiyoTask } from '../features/yachiyo-chat/api';
+import {
+  approveYachiyoTask,
+  cancelYachiyoTask,
+  getYachiyoTask,
+  listYachiyoTasks,
+  rejectYachiyoTask,
+  startYachiyoTask,
+} from '../features/yachiyo-chat/api';
 import { AgentTaskCard } from '../features/yachiyo-chat/components/AgentTaskCard';
-import type { AgentTaskSnapshot, TaskStatus } from '../features/yachiyo-chat/types';
+import type { AgentTaskSnapshot, ApprovalCardSnapshot, TaskStatus } from '../features/yachiyo-chat/types';
 import logoUrl from '../../../../docs/open-design/logo.png';
 import { type AssistantProfileSeed, useAssistantProfileSeed } from '../lib/assistantProfileSeed';
 import { approveRunApproval, listRunnables, type RunnableSummary, type RunSpec, getRun, rejectRunApproval } from '../lib/agents';
@@ -569,6 +576,54 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     ids.forEach((runId) => {
       void refreshYachiyoTaskById(runId);
     });
+  }
+
+  async function resolveYachiyoTaskApproval(
+    task: AgentTaskSnapshot,
+    approval: ApprovalCardSnapshot,
+    action: 'approve' | 'reject',
+  ) {
+    if (!task.task_id || !approval.approval_id || approvalActionMessageId) return;
+    const busyId = `task:${task.task_id}:${approval.approval_id}:${action}`;
+    setApprovalActionMessageId(busyId);
+    setStatus(action === 'approve' ? '正在批准 Agent 任务审批...' : '正在拒绝 Agent 任务审批...');
+    try {
+      const nextTask = action === 'approve'
+        ? await approveYachiyoTask(task.task_id, approval.approval_id)
+        : await rejectYachiyoTask(task.task_id, approval.approval_id, 'Rejected from chat task card');
+      rememberYachiyoTasks([nextTask]);
+      const nextRunId = yachiyoTaskRunId(nextTask) || approval.run_id || task.task_id;
+      setStatus(yachiyoTaskStatusMessage(nextTask, action));
+      await refreshMessages();
+      await loadSessions();
+      if (nextRunId && ['queued', 'running', 'waiting_approval'].includes(nextTask.status)) {
+        pollAgentRunInBackground(nextRunId, { ignoreInitialApprovalRequired: action === 'approve' });
+      }
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '处理 Agent 任务审批失败');
+    } finally {
+      setApprovalActionMessageId('');
+      focusComposerSoon();
+    }
+  }
+
+  async function cancelYachiyoTaskFromCard(task: AgentTaskSnapshot) {
+    if (!task.task_id || approvalActionMessageId) return;
+    const busyId = `task:${task.task_id}:cancel`;
+    setApprovalActionMessageId(busyId);
+    setStatus('正在取消 Agent 任务...');
+    try {
+      const nextTask = await cancelYachiyoTask(task.task_id);
+      rememberYachiyoTasks([nextTask]);
+      setStatus(yachiyoTaskStatusMessage(nextTask, 'cancel'));
+      await refreshMessages();
+      await loadSessions();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '取消 Agent 任务失败');
+    } finally {
+      setApprovalActionMessageId('');
+      focusComposerSoon();
+    }
   }
 
   useEffect(() => {
@@ -2583,7 +2638,10 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                     onCopy={() => void copyMessage(message)}
                     onRetry={() => void retryMessage(message)}
                     onApprove={() => void resolveApprovalMessage(message, 'approve')}
+                    onApproveTaskApproval={(task, approval) => void resolveYachiyoTaskApproval(task, approval, 'approve')}
+                    onCancelTask={cancelYachiyoTaskFromCard}
                     onReject={() => void resolveApprovalMessage(message, 'reject')}
+                    onRejectTaskApproval={(task, approval) => void resolveYachiyoTaskApproval(task, approval, 'reject')}
                     onOpenRunDetails={openRunDetails}
                     onOpenWorkflowStudio={openWorkflowStudio}
                     registerMessageNode={registerMessageNode}
@@ -3122,7 +3180,7 @@ function SessionIdDialog({ copied, error, sessionId, onClose, onCopy }: {
   );
 }
 
-function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading, copied, copiedCodeBlockKey, displayContent, highlighted, message, publicTaskSnapshot = null, retryDisabled, retrying, showRetry, onApprove, onCopy, onOpenRunDetails, onOpenWorkflowStudio, onReject, onRetry, registerMessageNode, runnables }: {
+function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading, copied, copiedCodeBlockKey, displayContent, highlighted, message, publicTaskSnapshot = null, retryDisabled, retrying, showRetry, onApprove, onApproveTaskApproval, onCancelTask, onCopy, onOpenRunDetails, onOpenWorkflowStudio, onReject, onRejectTaskApproval, onRetry, registerMessageNode, runnables }: {
   approvalBusy: boolean;
   assistantProfile: AssistantProfilePayload | null;
   assistantProfileLoading: boolean;
@@ -3136,10 +3194,13 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
   retrying: boolean;
   showRetry: boolean;
   onApprove: () => void;
+  onApproveTaskApproval: (task: AgentTaskSnapshot, approval: ApprovalCardSnapshot) => void;
+  onCancelTask: (task: AgentTaskSnapshot) => void;
   onCopy: () => void;
   onOpenRunDetails: (runId: string) => void;
   onOpenWorkflowStudio: (runnableId?: string, suggestedGoal?: string) => void;
   onReject: () => void;
+  onRejectTaskApproval: (task: AgentTaskSnapshot, approval: ApprovalCardSnapshot) => void;
   onRetry: () => void;
   registerMessageNode: (messageId: string | undefined, node: HTMLElement | null) => void;
   runnables: RunnableSummary[];
@@ -3232,7 +3293,16 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
           onOpenRunDetails={onOpenRunDetails}
           progressLabel={message.progress_label}
         />
-        {taskSnapshot ? <AgentTaskCard task={taskSnapshot} onOpenStudio={onOpenRunDetails} /> : null}
+        {taskSnapshot ? (
+          <AgentTaskCard
+            busy={approvalBusy}
+            onApproveApproval={onApproveTaskApproval}
+            onCancelTask={onCancelTask}
+            onOpenStudio={onOpenRunDetails}
+            onRejectApproval={onRejectTaskApproval}
+            task={taskSnapshot}
+          />
+        ) : null}
         {followupNotice ? (
           <div
             className="message-followup-status"
@@ -3728,6 +3798,36 @@ function yachiyoTaskCacheKeys(task: AgentTaskSnapshot): string[] {
     ...((task.pending_approvals || []).map((approval) => approval.run_id || '')),
     ...artifactKeys,
   ]);
+}
+
+function yachiyoTaskRunId(task: AgentTaskSnapshot): string {
+  const artifactRun = (task.artifacts || []).find((artifact) => artifact.run_id || artifact.source_run_id);
+  return uniqueStrings([
+    ...(task.recent_events || []).map((event) => event.run_id),
+    ...(task.pending_approvals || []).map((approval) => approval.run_id || ''),
+    artifactRun?.run_id,
+    artifactRun?.source_run_id,
+    task.task_id,
+  ])[0] || '';
+}
+
+function yachiyoTaskStatusMessage(
+  task: AgentTaskSnapshot,
+  action: 'approve' | 'reject' | 'cancel',
+): string {
+  if (action === 'cancel') {
+    if (task.status === 'cancelled') return 'Agent 任务已取消。';
+    if (task.status === 'failed') return 'Agent 任务取消失败。';
+    return '已请求取消 Agent 任务。';
+  }
+  if (task.status === 'waiting_approval') return 'Agent 任务需要处理下一次审批。';
+  if (task.status === 'running' || task.status === 'queued') {
+    return action === 'approve' ? '已批准，Agent 任务正在继续执行...' : '已拒绝，Agent 任务正在整理结果...';
+  }
+  if (task.status === 'completed') return 'Agent 任务已完成。';
+  if (task.status === 'failed') return 'Agent 任务失败。';
+  if (task.status === 'cancelled') return 'Agent 任务已取消。';
+  return task.progress_text || task.current_step || 'Agent 任务状态已更新。';
 }
 
 function taskStatusFromRunStatus(status: string): TaskStatus {

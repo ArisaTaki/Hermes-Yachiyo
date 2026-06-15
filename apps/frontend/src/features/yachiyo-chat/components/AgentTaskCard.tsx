@@ -1,11 +1,22 @@
 import { UiIcon } from '../../../components/UiIcon';
 import { RuntimeTimelineSummary } from '../../runtime-shared/components/RuntimeTimelineSummary';
-import type { AgentTaskSnapshot } from '../types';
+import type { AgentTaskSnapshot, ApprovalCardSnapshot } from '../types';
 import { ApprovalCard } from './ApprovalCard';
 import { ArtifactPreview } from './ArtifactPreview';
 
-export function AgentTaskCard({ onOpenStudio, task }: {
+export function AgentTaskCard({
+  busy = false,
+  onApproveApproval,
+  onCancelTask,
+  onOpenStudio,
+  onRejectApproval,
+  task,
+}: {
+  busy?: boolean;
+  onApproveApproval?: (task: AgentTaskSnapshot, approval: ApprovalCardSnapshot) => void | Promise<void>;
+  onCancelTask?: (task: AgentTaskSnapshot) => void | Promise<void>;
   onOpenStudio?: (runId: string) => void;
+  onRejectApproval?: (task: AgentTaskSnapshot, approval: ApprovalCardSnapshot) => void | Promise<void>;
   task: AgentTaskSnapshot;
 }) {
   const status = task.status || 'running';
@@ -13,6 +24,8 @@ export function AgentTaskCard({ onOpenStudio, task }: {
   const approvals = task.pending_approvals || [];
   const artifacts = task.artifacts || [];
   const recentEvents = task.recent_events || [];
+  const canCancel = onCancelTask && ['queued', 'running', 'waiting_approval'].includes(status);
+  const hasHeaderActions = Boolean((runId && onOpenStudio) || canCancel);
   return (
     <section
       className={`yachiyo-agent-task-card ${status}`}
@@ -29,16 +42,32 @@ export function AgentTaskCard({ onOpenStudio, task }: {
             <p>{task.current_step || task.progress_text}</p>
           ) : null}
         </div>
-        {runId && onOpenStudio ? (
-          <button
-            type="button"
-            data-run-id={runId}
-            data-testid="yachiyo-agent-task-open-studio"
-            onClick={() => onOpenStudio(runId)}
-          >
-            <UiIcon name="activity" />
-            <span>在 Agent Studio 中查看</span>
-          </button>
+        {hasHeaderActions ? (
+          <div className="yachiyo-agent-task-card-actions">
+            {runId && onOpenStudio ? (
+              <button
+                type="button"
+                data-run-id={runId}
+                data-testid="yachiyo-agent-task-open-studio"
+                onClick={() => onOpenStudio(runId)}
+              >
+                <UiIcon name="activity" />
+                <span>在 Agent Studio 中查看</span>
+              </button>
+            ) : null}
+            {canCancel ? (
+              <button
+                type="button"
+                data-task-id={task.task_id}
+                data-testid="yachiyo-agent-task-cancel"
+                disabled={busy}
+                onClick={() => void onCancelTask?.(task)}
+              >
+                <UiIcon name="stop" />
+                <span>取消任务</span>
+              </button>
+            ) : null}
+          </div>
         ) : null}
       </header>
       {task.summary ? <p className="yachiyo-agent-task-summary">{task.summary}</p> : null}
@@ -51,9 +80,43 @@ export function AgentTaskCard({ onOpenStudio, task }: {
       ) : null}
       {approvals.length ? (
         <div className="yachiyo-agent-task-approvals">
-          {approvals.slice(0, 2).map((approval) => (
-            <ApprovalCard approval={approval} key={approval.approval_id} />
-          ))}
+          {approvals.slice(0, 2).map((approval) => {
+            const pending = (approval.status || 'pending') === 'pending';
+            const actionable = pending && (onApproveApproval || onRejectApproval);
+            return (
+              <div className="yachiyo-agent-task-approval-item" data-approval-id={approval.approval_id} key={approval.approval_id}>
+                <ApprovalCard approval={approval} />
+                {actionable ? (
+                  <div className="yachiyo-agent-task-approval-actions">
+                    {onApproveApproval ? (
+                      <button
+                        type="button"
+                        data-approval-id={approval.approval_id}
+                        data-testid="yachiyo-task-approval-approve"
+                        disabled={busy}
+                        onClick={() => void onApproveApproval(task, approval)}
+                      >
+                        <UiIcon name="check" />
+                        <span>批准</span>
+                      </button>
+                    ) : null}
+                    {onRejectApproval ? (
+                      <button
+                        type="button"
+                        data-approval-id={approval.approval_id}
+                        data-testid="yachiyo-task-approval-reject"
+                        disabled={busy}
+                        onClick={() => void onRejectApproval(task, approval)}
+                      >
+                        <UiIcon name="close" />
+                        <span>拒绝</span>
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
         </div>
       ) : null}
       {artifacts.length ? (
