@@ -165,6 +165,18 @@ class LegacyStudioPort:
     def delete_skill_folder(self, folder_id: str, delete_skills: bool = False) -> dict[str, Any]:
         return self._runtime.delete_skill_folder(folder_id, delete_skills=delete_skills)
 
+    def list_skill_sources(self) -> dict[str, Any]:
+        return self._runtime.list_native_skill_sources()
+
+    def import_skill(self, source_path: str, folder_id: str | None = None) -> dict[str, Any]:
+        return self._runtime.import_skill(source_path, folder_id)
+
+    def sync_native_skills(self) -> dict[str, Any]:
+        return self._runtime.sync_native_skills()
+
+    def install_skill_command(self, command: str, folder_id: str | None = None) -> dict[str, Any]:
+        return self._runtime.install_skill_command(command, folder_id)
+
     def start_agent_run(self, request: dict[str, Any]) -> dict[str, Any]:
         return self._runtime.create_agent_run(
             {

@@ -326,11 +326,15 @@ export async function listSkills(): Promise<SkillSpec[]> {
 }
 
 export async function importSkill(sourcePath: string, folderId?: string): Promise<SkillSpec> {
-  return apiPost('/ui/skills/import', { source_path: sourcePath, folder_id: folderId || undefined });
+  return apiPost<SkillSpec>('/yachiyo/studio/skills/import', { source_path: sourcePath, folder_id: folderId || undefined }).catch(() => (
+    apiPost<SkillSpec>('/ui/skills/import', { source_path: sourcePath, folder_id: folderId || undefined })
+  ));
 }
 
 export async function listSkillSources(): Promise<SkillSourceRoot[]> {
-  const payload = await apiGet<{ roots?: SkillSourceRoot[] }>('/ui/skills/sources');
+  const payload = await apiGet<{ roots?: SkillSourceRoot[] }>('/yachiyo/studio/skills/sources').catch(() => (
+    apiGet<{ roots?: SkillSourceRoot[] }>('/ui/skills/sources')
+  ));
   return payload.roots || [];
 }
 
@@ -361,11 +365,15 @@ export async function deleteSkillFolder(folderId: string, options: { deleteSkill
 }
 
 export async function syncNativeSkills(): Promise<SkillSyncResponse> {
-  return apiPost('/ui/skills/sync', {});
+  return apiPost<SkillSyncResponse>('/yachiyo/studio/skills/sync', {}).catch(() => (
+    apiPost<SkillSyncResponse>('/ui/skills/sync', {})
+  ));
 }
 
 export async function installSkillCommand(command: string, folderId?: string): Promise<SkillInstallResponse> {
-  return apiPost('/ui/skills/install', { command, folder_id: folderId || undefined });
+  return apiPost<SkillInstallResponse>('/yachiyo/studio/skills/install', { command, folder_id: folderId || undefined }).catch(() => (
+    apiPost<SkillInstallResponse>('/ui/skills/install', { command, folder_id: folderId || undefined })
+  ));
 }
 
 export async function updateSkill(skillId: string, request: Partial<SkillSpec>): Promise<SkillSpec> {

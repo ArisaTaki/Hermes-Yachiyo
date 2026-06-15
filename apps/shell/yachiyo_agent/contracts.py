@@ -203,6 +203,14 @@ class SkillFolderSnapshot(_PublicSnapshot):
     updated_at: str = ""
 
 
+class SkillSourceRootSnapshot(_PublicSnapshot):
+    path: str
+    source_type: str
+    library: str | None = None
+    exists: bool = False
+    skill_count: int = 0
+
+
 class AgentGroupMemberSnapshot(_PublicSnapshot):
     agent_id: str
     name: str

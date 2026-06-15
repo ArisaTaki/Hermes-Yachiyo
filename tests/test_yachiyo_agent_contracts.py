@@ -21,6 +21,7 @@ from apps.shell.yachiyo_agent import (
     SaveWorkflowRequest,
     SkillFolderSnapshot,
     SkillSnapshot,
+    SkillSourceRootSnapshot,
     ToolCallSnapshot,
     WorkflowSnapshot,
 )
@@ -304,6 +305,21 @@ def test_skill_folder_snapshot_keeps_skill_library_grouping_fields() -> None:
         "updated_at",
     ]
     assert payload["source_scope"] == "installed"
+
+
+def test_skill_source_root_snapshot_keeps_skill_discovery_fields() -> None:
+    snapshot = SkillSourceRootSnapshot(
+        path="/skills/native",
+        source_type="native_global",
+        library="native",
+        exists=True,
+        skill_count=4,
+    )
+
+    payload = _json(snapshot)
+
+    assert list(payload) == ["path", "source_type", "library", "exists", "skill_count"]
+    assert payload["library"] == "native"
 
 
 def test_studio_save_requests_keep_public_field_names() -> None:

@@ -443,6 +443,10 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
         [
             "/yachiyo/studio/agents",
             "/yachiyo/studio/skills",
+            "/yachiyo/studio/skills/sources",
+            "/yachiyo/studio/skills/import",
+            "/yachiyo/studio/skills/sync",
+            "/yachiyo/studio/skills/install",
             "/yachiyo/studio/skill-folders",
             "/yachiyo/studio/groups",
             "/yachiyo/studio/group-runs",
@@ -458,6 +462,10 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "createYachiyoSkillFolder",
             "updateYachiyoSkillFolder",
             "deleteYachiyoSkillFolder",
+            "listYachiyoSkillSources",
+            "importYachiyoSkill",
+            "syncYachiyoNativeSkills",
+            "installYachiyoSkillCommand",
             "listYachiyoAgentGroups",
             "saveYachiyoAgentGroup",
             "startYachiyoGroupRun",
@@ -493,6 +501,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "export type AgentDefinitionSnapshot",
             "export type SkillSnapshot",
             "export type SkillFolderSnapshot",
+            "export type SkillSourceRootSnapshot",
             "export type AgentGroupSnapshot",
             "export type GroupRunSnapshot",
             "export type PublicRunEvent",
@@ -1802,13 +1811,17 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "'/yachiyo/studio/skills'",
             "'/ui/skills'",
             "export async function importSkill(",
-            "apiPost('/ui/skills/import'",
+            "apiPost<SkillSpec>('/yachiyo/studio/skills/import'",
+            "apiPost<SkillSpec>('/ui/skills/import'",
             "export async function listSkillSources()",
+            "'/yachiyo/studio/skills/sources'",
             "'/ui/skills/sources'",
             "export async function syncNativeSkills()",
-            "apiPost('/ui/skills/sync'",
+            "apiPost<SkillSyncResponse>('/yachiyo/studio/skills/sync'",
+            "apiPost<SkillSyncResponse>('/ui/skills/sync'",
             "export async function installSkillCommand(",
-            "apiPost('/ui/skills/install'",
+            "apiPost<SkillInstallResponse>('/yachiyo/studio/skills/install'",
+            "apiPost<SkillInstallResponse>('/ui/skills/install'",
             "export async function updateSkill(",
             "/yachiyo/studio/skills/${encodeURIComponent(skillId)}",
             "apiPatch<SkillSpec>(`/ui/skills/${encodeURIComponent(skillId)}`, request)",
@@ -1876,6 +1889,38 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
         [
             "apiGet<{ skills?: SkillSpec[] }>('/yachiyo/studio/skills')",
             "apiGet<{ skills?: SkillSpec[] }>('/ui/skills')",
+        ],
+    )
+    _assert_function_contains(
+        "apps/frontend/src/lib/agents.ts",
+        "importSkill",
+        [
+            "apiPost<SkillSpec>('/yachiyo/studio/skills/import'",
+            "apiPost<SkillSpec>('/ui/skills/import'",
+        ],
+    )
+    _assert_function_contains(
+        "apps/frontend/src/lib/agents.ts",
+        "listSkillSources",
+        [
+            "apiGet<{ roots?: SkillSourceRoot[] }>('/yachiyo/studio/skills/sources')",
+            "apiGet<{ roots?: SkillSourceRoot[] }>('/ui/skills/sources')",
+        ],
+    )
+    _assert_function_contains(
+        "apps/frontend/src/lib/agents.ts",
+        "syncNativeSkills",
+        [
+            "apiPost<SkillSyncResponse>('/yachiyo/studio/skills/sync'",
+            "apiPost<SkillSyncResponse>('/ui/skills/sync'",
+        ],
+    )
+    _assert_function_contains(
+        "apps/frontend/src/lib/agents.ts",
+        "installSkillCommand",
+        [
+            "apiPost<SkillInstallResponse>('/yachiyo/studio/skills/install'",
+            "apiPost<SkillInstallResponse>('/ui/skills/install'",
         ],
     )
     _assert_function_contains(

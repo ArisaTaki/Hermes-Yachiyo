@@ -17,6 +17,7 @@ from .contracts import (
     SaveWorkflowRequest,
     SkillFolderSnapshot,
     SkillSnapshot,
+    SkillSourceRootSnapshot,
     StartAgentRunRequest,
     StartGroupRunRequest,
     StartWorkflowRunRequest,
@@ -25,7 +26,11 @@ from .contracts import (
 from .events import public_run_event_from_payload
 from .groups import agent_group_snapshot_from_payload, group_run_snapshot_from_payload
 from .ports import StudioPort
-from .skills import skill_folder_snapshot_from_payload, skill_snapshot_from_payload
+from .skills import (
+    skill_folder_snapshot_from_payload,
+    skill_snapshot_from_payload,
+    skill_source_root_snapshot_from_payload,
+)
 from .timelines import run_timeline_snapshot_from_payload
 from .workflows import workflow_snapshot_from_payload
 
@@ -118,6 +123,21 @@ class AgentStudioService:
         delete_skills: bool = False,
     ) -> dict[str, Any]:
         return dict(self._studio_port.delete_skill_folder(folder_id, delete_skills))
+
+    def list_skill_sources(self) -> list[SkillSourceRootSnapshot]:
+        return [
+            skill_source_root_snapshot_from_payload(item)
+            for item in _payload_items(self._studio_port.list_skill_sources(), "roots")
+        ]
+
+    def import_skill(self, source_path: str, folder_id: str | None = None) -> SkillSnapshot:
+        return skill_snapshot_from_payload(self._studio_port.import_skill(source_path, folder_id))
+
+    def sync_native_skills(self) -> dict[str, Any]:
+        return dict(self._studio_port.sync_native_skills())
+
+    def install_skill_command(self, command: str, folder_id: str | None = None) -> dict[str, Any]:
+        return dict(self._studio_port.install_skill_command(command, folder_id))
 
     def start_agent_run(
         self,

@@ -69,6 +69,14 @@ export type SkillFolderSnapshot = {
   updated_at?: string;
 };
 
+export type SkillSourceRootSnapshot = {
+  path: string;
+  source_type: string;
+  library?: 'native' | 'installed' | string | null;
+  exists?: boolean;
+  skill_count?: number;
+};
+
 export type AgentGroupSnapshot = {
   group_id: string;
   name: string;

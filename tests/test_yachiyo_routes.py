@@ -186,6 +186,27 @@ class _FakeAgentRuntime:
         )
         return {"ok": True, "deleted_skill_count": 2 if delete_skills else 0}
 
+    def list_native_skill_sources(self) -> dict[str, Any]:
+        self.calls.append(("list_native_skill_sources", None))
+        return {"ok": True, "roots": [_skill_source_payload()]}
+
+    def import_skill(self, source_path: str, folder_id: str | None = None) -> dict[str, Any]:
+        self.calls.append(("import_skill", {"source_path": source_path, "folder_id": folder_id}))
+        return _skill_payload(skill_id="skill-imported", name="Imported Skill") | {
+            "source_path": source_path,
+            "folder_id": folder_id or "",
+        }
+
+    def sync_native_skills(self) -> dict[str, Any]:
+        self.calls.append(("sync_native_skills", None))
+        return {"ok": True, "summary": {"imported": 1}}
+
+    def install_skill_command(self, command: str, folder_id: str | None = None) -> dict[str, Any]:
+        self.calls.append(
+            ("install_skill_command", {"command": command, "folder_id": folder_id})
+        )
+        return {"ok": True, "installer": "npx_skills", "command": command.split()}
+
     def create_agent_run(self, payload: dict[str, Any]) -> dict[str, Any]:
         self.calls.append(("create_agent_run", payload))
         return _run_payload(
@@ -433,6 +454,16 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
         True,
         request,
     )
+    skill_sources = await yachiyo.list_studio_skill_sources(request)
+    imported_skill = await yachiyo.import_studio_skill(
+        yachiyo.SkillImportBody(source_path="/skills/imported", folder_id="folder-1"),
+        request,
+    )
+    sync_result = await yachiyo.sync_studio_native_skills(request)
+    install_result = await yachiyo.install_studio_skill(
+        yachiyo.SkillInstallBody(command="npx skills add reviewer", folder_id="folder-1"),
+        request,
+    )
     agent_run = await yachiyo.start_studio_agent_run(
         "agent-1",
         yachiyo.StartAgentRunBody(objective="Draft summary", client_run_id="client-agent-1"),
@@ -487,6 +518,11 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     assert saved_skill_folder["name"] == "New Folder"
     assert updated_skill_folder["name"] == "Renamed"
     assert deleted_skill_folder == {"ok": True, "deleted_skill_count": 2}
+    assert skill_sources["roots"][0]["path"] == "/skills/native"
+    assert imported_skill["skill_id"] == "skill-imported"
+    assert imported_skill["folder_id"] == "folder-1"
+    assert sync_result == {"ok": True, "summary": {"imported": 1}}
+    assert install_result["installer"] == "npx_skills"
     assert workflows["workflows"][0]["workflow_id"] == "workflow-1"
     assert deleted_workflow == {"ok": True, "workflow_id": "workflow-1"}
     assert workflow_run["workflow_run_id"] == "workflow-run-1"
@@ -531,6 +567,16 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     assert (
         "delete_skill_folder",
         {"folder_id": "folder-1", "delete_skills": True},
+    ) in runtime.calls
+    assert ("list_native_skill_sources", None) in runtime.calls
+    assert (
+        "import_skill",
+        {"source_path": "/skills/imported", "folder_id": "folder-1"},
+    ) in runtime.calls
+    assert ("sync_native_skills", None) in runtime.calls
+    assert (
+        "install_skill_command",
+        {"command": "npx skills add reviewer", "folder_id": "folder-1"},
     ) in runtime.calls
     assert ("delete_workflow", "workflow-1") in runtime.calls
     assert ("list_runs", 5) in runtime.calls
@@ -611,6 +657,10 @@ def test_yachiyo_studio_routes_include_run_action_facade() -> None:
     assert '@router.post("/studio/agents/{agent_id}/skills")' in source
     assert '@router.delete("/studio/agents/{agent_id}/skills/{skill_id}")' in source
     assert '@router.get("/studio/skills")' in source
+    assert '@router.get("/studio/skills/sources")' in source
+    assert '@router.post("/studio/skills/import")' in source
+    assert '@router.post("/studio/skills/sync")' in source
+    assert '@router.post("/studio/skills/install")' in source
     assert '@router.patch("/studio/skills/{skill_id}")' in source
     assert '@router.delete("/studio/skills/{skill_id}")' in source
     assert '@router.get("/studio/skill-folders")' in source
@@ -695,6 +745,16 @@ def _skill_folder_payload(
         "native_count": 1,
         "created_at": "2026-06-14T00:00:00Z",
         "updated_at": "2026-06-14T00:00:01Z",
+    }
+
+
+def _skill_source_payload() -> dict[str, Any]:
+    return {
+        "path": "/skills/native",
+        "source_type": "native_global",
+        "library": "native",
+        "exists": True,
+        "skill_count": 4,
     }
 
 

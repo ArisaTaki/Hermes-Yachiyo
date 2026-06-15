@@ -7,6 +7,7 @@ import type {
   SaveAgentGroupRequest,
   SkillFolderSnapshot,
   SkillSnapshot,
+  SkillSourceRootSnapshot,
 } from './types';
 
 export async function listYachiyoStudioAgents(): Promise<AgentDefinitionSnapshot[]> {
@@ -64,6 +65,35 @@ export async function deleteYachiyoSkillFolder(
 ): Promise<{ ok?: boolean; deleted_skill_count?: number }> {
   const query = options.deleteSkills ? '?delete_skills=true' : '';
   return apiDelete(`/yachiyo/studio/skill-folders/${encodeURIComponent(folderId)}${query}`);
+}
+
+export async function listYachiyoSkillSources(): Promise<SkillSourceRootSnapshot[]> {
+  const payload = await apiGet<{ roots?: SkillSourceRootSnapshot[] }>('/yachiyo/studio/skills/sources');
+  return payload.roots || [];
+}
+
+export async function importYachiyoSkill(
+  sourcePath: string,
+  folderId?: string,
+): Promise<SkillSnapshot> {
+  return apiPost('/yachiyo/studio/skills/import', {
+    source_path: sourcePath,
+    folder_id: folderId || undefined,
+  });
+}
+
+export async function syncYachiyoNativeSkills(): Promise<{ ok?: boolean }> {
+  return apiPost('/yachiyo/studio/skills/sync', {});
+}
+
+export async function installYachiyoSkillCommand(
+  command: string,
+  folderId?: string,
+): Promise<{ ok?: boolean }> {
+  return apiPost('/yachiyo/studio/skills/install', {
+    command,
+    folder_id: folderId || undefined,
+  });
 }
 
 export async function listYachiyoAgentGroups(): Promise<AgentGroupSnapshot[]> {

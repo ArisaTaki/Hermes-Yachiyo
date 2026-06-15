@@ -70,6 +70,16 @@ class SkillFolderBody(BaseModel):
     sort_order: int | None = None
 
 
+class SkillImportBody(BaseModel):
+    source_path: str = Field(..., min_length=1, max_length=4000)
+    folder_id: str | None = Field(default=None, max_length=160)
+
+
+class SkillInstallBody(BaseModel):
+    command: str = Field(..., min_length=1, max_length=4000)
+    folder_id: str | None = Field(default=None, max_length=160)
+
+
 class StartWorkflowRunBody(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -369,6 +379,51 @@ async def detach_studio_agent_skill(
 async def list_studio_skills(http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
     skills = await asyncio.to_thread(_studio_service(http_request).list_skills)
     return {"skills": [_snapshot(skill) for skill in skills]}
+
+
+@router.get("/studio/skills/sources")
+async def list_studio_skill_sources(http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
+    roots = await asyncio.to_thread(_studio_service(http_request).list_skill_sources)
+    return {"roots": [_snapshot(root) for root in roots]}
+
+
+@router.post("/studio/skills/import")
+async def import_studio_skill(
+    request: SkillImportBody,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    try:
+        snapshot = await asyncio.to_thread(
+            _studio_service(http_request).import_skill,
+            request.source_path,
+            request.folder_id,
+        )
+        return _snapshot(snapshot)
+    except AgentRuntimeError as exc:
+        raise _bad_request(exc) from exc
+
+
+@router.post("/studio/skills/sync")
+async def sync_studio_native_skills(http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
+    try:
+        return await asyncio.to_thread(_studio_service(http_request).sync_native_skills)
+    except AgentRuntimeError as exc:
+        raise _bad_request(exc) from exc
+
+
+@router.post("/studio/skills/install")
+async def install_studio_skill(
+    request: SkillInstallBody,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(
+            _studio_service(http_request).install_skill_command,
+            request.command,
+            request.folder_id,
+        )
+    except AgentRuntimeError as exc:
+        raise _bad_request(exc) from exc
 
 
 @router.patch("/studio/skills/{skill_id}")

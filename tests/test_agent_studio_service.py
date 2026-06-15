@@ -95,6 +95,27 @@ class _FakeStudioPort:
         )
         return {"ok": True, "deleted_skill_count": 2 if delete_skills else 0}
 
+    def list_skill_sources(self) -> dict[str, Any]:
+        self.calls.append(("list_skill_sources", None))
+        return {"ok": True, "roots": [_skill_source_payload()]}
+
+    def import_skill(self, source_path: str, folder_id: str | None = None) -> dict[str, Any]:
+        self.calls.append(("import_skill", {"source_path": source_path, "folder_id": folder_id}))
+        return _skill_payload(skill_id="skill-imported", name="Imported Skill") | {
+            "source_path": source_path,
+            "folder_id": folder_id or "",
+        }
+
+    def sync_native_skills(self) -> dict[str, Any]:
+        self.calls.append(("sync_native_skills", None))
+        return {"ok": True, "summary": {"imported": 1}}
+
+    def install_skill_command(self, command: str, folder_id: str | None = None) -> dict[str, Any]:
+        self.calls.append(
+            ("install_skill_command", {"command": command, "folder_id": folder_id})
+        )
+        return {"ok": True, "installer": "npx_skills", "command": command.split()}
+
     def start_agent_run(self, request: dict[str, Any]) -> dict[str, Any]:
         self.calls.append(("start_agent_run", request))
         return _run_payload(
@@ -240,6 +261,10 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
     saved_skill_folder = service.create_skill_folder({"name": "New Folder"})
     updated_skill_folder = service.update_skill_folder("folder-1", {"name": "Renamed"})
     deleted_skill_folder = service.delete_skill_folder("folder-1", delete_skills=True)
+    skill_sources = service.list_skill_sources()
+    imported_skill = service.import_skill("/skills/imported", "folder-1")
+    sync_result = service.sync_native_skills()
+    install_result = service.install_skill_command("npx skills add reviewer", "folder-1")
     groups = service.list_groups()
     group = service.get_group("group-1")
     saved_group = service.save_group(
@@ -287,6 +312,11 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
     assert saved_skill_folder.name == "New Folder"
     assert updated_skill_folder.name == "Renamed"
     assert deleted_skill_folder == {"ok": True, "deleted_skill_count": 2}
+    assert skill_sources[0].path == "/skills/native"
+    assert imported_skill.skill_id == "skill-imported"
+    assert imported_skill.folder_id == "folder-1"
+    assert sync_result == {"ok": True, "summary": {"imported": 1}}
+    assert install_result["installer"] == "npx_skills"
     assert groups[0].members[0].agent_id == "agent-1"
     assert group.mode == "debate"
     assert saved_group.name == "Team"
@@ -323,6 +353,16 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
     assert (
         "delete_skill_folder",
         {"folder_id": "folder-1", "delete_skills": True},
+    ) in port.calls
+    assert ("list_skill_sources", None) in port.calls
+    assert (
+        "import_skill",
+        {"source_path": "/skills/imported", "folder_id": "folder-1"},
+    ) in port.calls
+    assert ("sync_native_skills", None) in port.calls
+    assert (
+        "install_skill_command",
+        {"command": "npx skills add reviewer", "folder_id": "folder-1"},
     ) in port.calls
     assert (
         "save_group",
@@ -503,6 +543,16 @@ def _skill_folder_payload(
         "native_count": 1,
         "created_at": "2026-06-14T00:00:00Z",
         "updated_at": "2026-06-14T00:00:01Z",
+    }
+
+
+def _skill_source_payload() -> dict[str, Any]:
+    return {
+        "path": "/skills/native",
+        "source_type": "native_global",
+        "library": "native",
+        "exists": True,
+        "skill_count": 4,
     }
 
 
