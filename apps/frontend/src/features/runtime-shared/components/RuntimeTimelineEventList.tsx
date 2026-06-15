@@ -247,12 +247,49 @@ function runtimeEventMetadata(
   eventSequence: string,
   eventRunId: string,
 ): Array<{ label: string; value: string }> {
+  const payload = runtimeEventPayloadRecord(event);
   return [
     { label: '#', value: eventSequence },
     { label: 'run', value: eventRunId },
+    { label: 'tool', value: runtimeEventString(event, payload, 'tool_call_id') },
+    {
+      label: 'approval',
+      value: runtimeEventString(event, payload, 'approval_id')
+        || runtimeEventNestedString(payload, 'pending_approval', 'approval_id'),
+    },
+    { label: 'artifact', value: runtimeEventString(event, payload, 'artifact_id') },
+    { label: 'memory', value: runtimeEventString(event, payload, 'memory_id') },
+    { label: 'skill', value: runtimeEventString(event, payload, 'skill_id') },
+    { label: 'node', value: runtimeEventString(event, payload, 'workflow_node_id') },
+    { label: 'child', value: defaultChildRunId(event) || runtimeEventString(event, payload, 'child_run_id') },
     { label: 'actor', value: defaultEventActor(event) },
     { label: 'visibility', value: defaultEventVisibility(event) },
     { label: 'sensitivity', value: defaultEventSensitivity(event) },
     { label: 'schema', value: defaultEventSchemaVersion(event) },
   ].filter((item) => item.value);
+}
+
+function runtimeEventPayloadRecord(event: RuntimeTimelineEventRecord): RuntimeTimelineEventRecord {
+  const payload = event.payload;
+  return payload && typeof payload === 'object' && !Array.isArray(payload)
+    ? payload as RuntimeTimelineEventRecord
+    : {};
+}
+
+function runtimeEventString(
+  event: RuntimeTimelineEventRecord,
+  payload: RuntimeTimelineEventRecord,
+  key: string,
+): string {
+  return defaultString(event[key]) || defaultString(payload[key]);
+}
+
+function runtimeEventNestedString(
+  payload: RuntimeTimelineEventRecord,
+  key: string,
+  nestedKey: string,
+): string {
+  const value = payload[key];
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return '';
+  return defaultString((value as RuntimeTimelineEventRecord)[nestedKey]);
 }
