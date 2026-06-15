@@ -531,6 +531,8 @@ def test_agent_studio_service_maps_group_run_workflow_run_timeline_and_events() 
     assert group_run.group_id == "group-1"
     assert group_run.run_group_id == "group-run-1"
     assert group_run.objective == "Compare designs"
+    assert group_run.events[0].event_type == "group.member.started"
+    assert group_run.events[0].payload["member_agent_id"] == "agent-1"
     assert group_run.runs[0].events[0].event_type == "agent.tool.call"
     assert group_run.pending_approvals[0].approval_id == "approval-1"
     assert group_runs[0].group_run_id == "group-run-listed"
@@ -735,6 +737,13 @@ def _group_run_payload(
         "status": "running",
         "objective": objective,
         "participants": [{"agent_id": "agent-1", "name": "Planner"}],
+        "events": [
+            {
+                "event_type": "group.member.started",
+                "detail": "Planner started",
+                "payload": {"member_agent_id": "agent-1"},
+            }
+        ],
         "runs": [_run_payload()],
         "shared_artifacts": [{"artifact_id": "shared-1", "kind": "markdown", "path": "team.md"}],
         "pending_approvals": [{"approval_id": "approval-1", "tool": "terminal.run"}],
