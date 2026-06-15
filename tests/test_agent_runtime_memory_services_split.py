@@ -48,3 +48,41 @@ def test_native_runtime_installs_memory_service_under_legacy_methods(tmp_path) -
         assert "Remember to keep Agent Studio" in service._long_term_memory_context()
     finally:
         service.close()
+
+
+def test_runtime_memory_service_exposes_public_crud_operations(tmp_path) -> None:
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime.db",
+        workspace_dir=tmp_path / "runtime",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    try:
+        created = service.memory_services.create_item(
+            {
+                "content": "User prefers concise progress reports.",
+                "kind": "preference",
+                "scope": "global",
+            }
+        )
+        memory_id = created["memory"]["memory_id"]
+        listed = service.memory_services.list_items()
+        updated = service.memory_services.update_item(
+            memory_id,
+            {
+                "old_content": "User prefers concise progress reports.",
+                "content": "User prefers concise bilingual progress reports.",
+                "kind": "preference",
+                "scope": "global",
+            },
+        )
+        deleted = service.memory_services.delete_item(memory_id, reason="manual cleanup")
+        all_items = service.memory_services.list_items(include_deleted=True)
+
+        assert listed["memories"][0]["memory_id"] == memory_id
+        assert updated["memory"]["content"] == "User prefers concise bilingual progress reports."
+        assert deleted["ok"] is True
+        assert all_items["memories"][0]["deleted_at"]
+        assert service.list_memory_items(include_deleted=True)["memories"][0]["memory_id"] == memory_id
+    finally:
+        service.close()

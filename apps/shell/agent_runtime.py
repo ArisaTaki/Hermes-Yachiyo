@@ -1440,27 +1440,16 @@ class NativeRunEngine:
         )
 
     def list_memory_items(self, *, include_deleted: bool = False, limit: int = 100) -> dict[str, Any]:
-        memories = self._memory_store().list_items(include_deleted=include_deleted, limit=limit)
-        return {"ok": True, "memories": memories}
+        return self.memory_services.list_items(include_deleted=include_deleted, limit=limit)
 
     def create_memory_item(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._memory_store(source_run_id="manual").add(
-            content=str(payload.get("content") or ""),
-            kind=str(payload.get("kind") or ""),
-            scope=str(payload.get("scope") or ""),
-        )
+        return self.memory_services.create_item(payload)
 
     def update_memory_item(self, memory_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._memory_store(source_run_id="manual").replace(
-            memory_id=memory_id,
-            old_content=str(payload.get("old_content") or ""),
-            content=str(payload.get("content") or ""),
-            kind=str(payload.get("kind") or ""),
-            scope=str(payload.get("scope") or ""),
-        )
+        return self.memory_services.update_item(memory_id, payload)
 
     def delete_memory_item(self, memory_id: str, *, reason: str = "") -> dict[str, Any]:
-        return self._memory_store(source_run_id="manual").remove(memory_id=memory_id, reason=reason)
+        return self.memory_services.delete_item(memory_id, reason=reason)
 
     def _long_term_memory_context(self) -> str:
         return self.memory_services.long_term_memory_context()

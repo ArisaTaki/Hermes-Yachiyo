@@ -72,5 +72,28 @@ class RuntimeMemoryService:
             error_type=self._error_type,
         )
 
+    def list_items(self, *, include_deleted: bool = False, limit: int = 100) -> dict[str, Any]:
+        memories = self.memory_store().list_items(include_deleted=include_deleted, limit=limit)
+        return {"ok": True, "memories": memories}
+
+    def create_item(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self.memory_store(source_run_id="manual").add(
+            content=str(payload.get("content") or ""),
+            kind=str(payload.get("kind") or ""),
+            scope=str(payload.get("scope") or ""),
+        )
+
+    def update_item(self, memory_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return self.memory_store(source_run_id="manual").replace(
+            memory_id=memory_id,
+            old_content=str(payload.get("old_content") or ""),
+            content=str(payload.get("content") or ""),
+            kind=str(payload.get("kind") or ""),
+            scope=str(payload.get("scope") or ""),
+        )
+
+    def delete_item(self, memory_id: str, *, reason: str = "") -> dict[str, Any]:
+        return self.memory_store(source_run_id="manual").remove(memory_id=memory_id, reason=reason)
+
     def long_term_memory_context(self) -> str:
         return self.memory_store().context_block(limit=self._context_limit)
