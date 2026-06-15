@@ -157,6 +157,120 @@ class ToolEventPayloadBuilder:
         )
 
 
+def artifact_created_payload(
+    tool_result: dict[str, Any],
+    *,
+    run_id: str,
+) -> dict[str, Any]:
+    return {
+        "artifact_id": str(tool_result.get("artifact_id") or tool_result.get("path") or ""),
+        "run_id": run_id,
+        "kind": "tool_artifact",
+        "path": str(tool_result.get("path") or ""),
+        "size_bytes": int(tool_result.get("bytes") or 0),
+        "source_tool": "artifact.write",
+    }
+
+
+def tool_trace_status(tool_result: dict[str, Any]) -> str:
+    return "completed" if tool_result.get("ok") else "failed"
+
+
+def skill_trace_result(tool_result: dict[str, Any]) -> dict[str, Any]:
+    result = {
+        "ok": bool(tool_result.get("ok")),
+        "skill_id": str(tool_result.get("skill_id") or ""),
+        "name": str(tool_result.get("name") or ""),
+        "description": str(tool_result.get("description") or ""),
+        "asset_paths": list(tool_result.get("asset_paths") or []),
+    }
+    if tool_result.get("error"):
+        result["error"] = str(tool_result.get("error") or "")
+    return result
+
+
+def memory_trace_result(tool_result: dict[str, Any]) -> dict[str, Any]:
+    memory = tool_result.get("memory") if isinstance(tool_result.get("memory"), dict) else {}
+    result = {
+        "ok": bool(tool_result.get("ok")),
+        "action": str(tool_result.get("action") or ""),
+        "memory_id": str(memory.get("memory_id") or ""),
+        "kind": str(memory.get("kind") or ""),
+        "scope": str(memory.get("scope") or ""),
+        "deleted": bool(memory.get("deleted_at")),
+    }
+    if tool_result.get("error"):
+        result["error"] = str(tool_result.get("error") or "")
+    return result
+
+
+def memory_skill_trace_event(
+    tool_name: str,
+    input_preview: Any,
+    tool_result: dict[str, Any],
+) -> dict[str, Any] | None:
+    if tool_name == "skill.read":
+        return {
+            "event_type": "skill.dispatch.read",
+            "payload": {
+                "tool": tool_name,
+                "status": tool_trace_status(tool_result),
+                "input_preview": runtime_trace_input_preview(tool_name, input_preview),
+                "result": skill_trace_result(tool_result),
+            },
+        }
+    if tool_name in _MEMORY_TOOL_NAMES:
+        action = tool_name.split(".", 1)[1]
+        return {
+            "event_type": f"memory.write.{action}",
+            "payload": {
+                "tool": tool_name,
+                "status": tool_trace_status(tool_result),
+                "input_preview": runtime_trace_input_preview(tool_name, input_preview),
+                "result": memory_trace_result(tool_result),
+            },
+        }
+    return None
+
+
+def memory_retrieved_payload(memories: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "count": len(memories),
+        "memories": [
+            {
+                "memory_id": str(memory.get("memory_id") or ""),
+                "kind": str(memory.get("kind") or ""),
+                "scope": str(memory.get("scope") or ""),
+                "deleted": bool(memory.get("deleted_at")),
+            }
+            for memory in memories
+        ],
+    }
+
+
+class RuntimeTraceEventBuilder:
+    """Builds compact RunEvent payloads for Artifact, Memory, and Skill facts."""
+
+    def artifact_created_payload(
+        self,
+        tool_result: dict[str, Any],
+        *,
+        run_id: str,
+    ) -> dict[str, Any]:
+        return artifact_created_payload(tool_result, run_id=run_id)
+
+    def memory_skill_trace_event(
+        self,
+        tool_name: str,
+        input_preview: Any,
+        tool_result: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        return memory_skill_trace_event(tool_name, input_preview, tool_result)
+
+    def memory_retrieved_payload(self, memories: list[dict[str, Any]]) -> dict[str, Any]:
+        return memory_retrieved_payload(memories)
+
+
 def canonical_run_event_aliases(
     event_type: str,
     payload: dict[str, Any] | None = None,

@@ -57,12 +57,19 @@ from apps.shell.agent.runtime.cancellation import (
 from apps.shell.agent.runtime.errors import AgentApprovalRequired, AgentRuntimeError
 from apps.shell.agent.runtime.events import (
     RuntimeRunEventRecorder,
+    RuntimeTraceEventBuilder,
     ToolEventPayloadBuilder,
+    artifact_created_payload as _runtime_artifact_created_payload,
     canonical_run_event_aliases as _runtime_canonical_run_event_aliases,
     canonical_tool_event_payload as _runtime_canonical_tool_event_payload,
     canonical_tool_input_preview as _runtime_canonical_tool_input_preview,
+    memory_retrieved_payload as _runtime_memory_retrieved_payload,
+    memory_skill_trace_event as _runtime_memory_skill_trace_event,
+    memory_trace_result as _runtime_memory_trace_result,
     redact_json_value as _redact_json_value,
     runtime_trace_input_preview as _runtime_event_trace_input_preview,
+    skill_trace_result as _runtime_skill_trace_result,
+    tool_trace_status as _runtime_tool_trace_status,
 )
 from apps.shell.agent.runtime.future_task_scheduler import FutureTaskTriggerScheduler
 from apps.shell.agent.runtime.run_projections import (
@@ -1389,14 +1396,7 @@ def _artifact_created_payload(
     *,
     run_id: str,
 ) -> dict[str, Any]:
-    return {
-        "artifact_id": str(tool_result.get("artifact_id") or tool_result.get("path") or ""),
-        "run_id": run_id,
-        "kind": "tool_artifact",
-        "path": str(tool_result.get("path") or ""),
-        "size_bytes": int(tool_result.get("bytes") or 0),
-        "source_tool": "artifact.write",
-    }
+    return _runtime_artifact_created_payload(tool_result, run_id=run_id)
 
 
 def _task_run_event_payload(
@@ -1431,28 +1431,7 @@ def _memory_skill_trace_event(
     input_preview: Any,
     tool_result: dict[str, Any],
 ) -> dict[str, Any] | None:
-    if tool_name == "skill.read":
-        return {
-            "event_type": "skill.dispatch.read",
-            "payload": {
-                "tool": tool_name,
-                "status": _tool_trace_status(tool_result),
-                "input_preview": _runtime_trace_input_preview(tool_name, input_preview),
-                "result": _skill_trace_result(tool_result),
-            },
-        }
-    if tool_name in _MEMORY_TOOL_NAMES:
-        action = tool_name.split(".", 1)[1]
-        return {
-            "event_type": f"memory.write.{action}",
-            "payload": {
-                "tool": tool_name,
-                "status": _tool_trace_status(tool_result),
-                "input_preview": _runtime_trace_input_preview(tool_name, input_preview),
-                "result": _memory_trace_result(tool_result),
-            },
-        }
-    return None
+    return _runtime_memory_skill_trace_event(tool_name, input_preview, tool_result)
 
 
 def _runtime_trace_input_preview(tool_name: str, input_preview: Any) -> Any:
@@ -1460,50 +1439,19 @@ def _runtime_trace_input_preview(tool_name: str, input_preview: Any) -> Any:
 
 
 def _tool_trace_status(tool_result: dict[str, Any]) -> str:
-    return "completed" if tool_result.get("ok") else "failed"
+    return _runtime_tool_trace_status(tool_result)
 
 
 def _skill_trace_result(tool_result: dict[str, Any]) -> dict[str, Any]:
-    result = {
-        "ok": bool(tool_result.get("ok")),
-        "skill_id": str(tool_result.get("skill_id") or ""),
-        "name": str(tool_result.get("name") or ""),
-        "description": str(tool_result.get("description") or ""),
-        "asset_paths": list(tool_result.get("asset_paths") or []),
-    }
-    if tool_result.get("error"):
-        result["error"] = str(tool_result.get("error") or "")
-    return result
+    return _runtime_skill_trace_result(tool_result)
 
 
 def _memory_trace_result(tool_result: dict[str, Any]) -> dict[str, Any]:
-    memory = tool_result.get("memory") if isinstance(tool_result.get("memory"), dict) else {}
-    result = {
-        "ok": bool(tool_result.get("ok")),
-        "action": str(tool_result.get("action") or ""),
-        "memory_id": str(memory.get("memory_id") or ""),
-        "kind": str(memory.get("kind") or ""),
-        "scope": str(memory.get("scope") or ""),
-        "deleted": bool(memory.get("deleted_at")),
-    }
-    if tool_result.get("error"):
-        result["error"] = str(tool_result.get("error") or "")
-    return result
+    return _runtime_memory_trace_result(tool_result)
 
 
 def _memory_retrieved_payload(memories: list[dict[str, Any]]) -> dict[str, Any]:
-    return {
-        "count": len(memories),
-        "memories": [
-            {
-                "memory_id": str(memory.get("memory_id") or ""),
-                "kind": str(memory.get("kind") or ""),
-                "scope": str(memory.get("scope") or ""),
-                "deleted": bool(memory.get("deleted_at")),
-            }
-            for memory in memories
-        ],
-    }
+    return _runtime_memory_retrieved_payload(memories)
 
 
 def _normalize_tool_iteration(value: Any) -> int:
@@ -1573,6 +1521,7 @@ class NativeRunEngine:
         self._run_cancel_locks_guard = threading.RLock()
         self.tool_request_parser = ToolRequestParser()
         self.tool_event_payloads = ToolEventPayloadBuilder()
+        self.runtime_trace_events = RuntimeTraceEventBuilder()
         self.tool_pending_approvals = ToolPendingApprovalBuilder(
             approval_id_factory=lambda: f"approval_{uuid4().hex[:12]}",
             now=_now,
@@ -4646,7 +4595,7 @@ class NativeRunEngine:
             self.append_run_event(
                 run_id,
                 "memory.retrieved",
-                _memory_retrieved_payload(retrieved_memories),
+                self.runtime_trace_events.memory_retrieved_payload(retrieved_memories),
             )
             artifact = broker.artifact_write("agent-context.md", context)
             artifacts.append({"kind": "context", **artifact})
@@ -5134,7 +5083,11 @@ class NativeRunEngine:
                     "approved": bool(approved),
                 },
             )
-            trace_event = _memory_skill_trace_event(tool_name, input_preview, tool_result)
+            trace_event = self.runtime_trace_events.memory_skill_trace_event(
+                tool_name,
+                input_preview,
+                tool_result,
+            )
             if trace_event is not None:
                 self.append_run_event(run_id, trace_event["event_type"], trace_event["payload"])
         if artifacts is not None and tool_name == "artifact.write" and tool_result.get("ok"):
@@ -5145,7 +5098,10 @@ class NativeRunEngine:
                 self.append_run_event(
                     run_id,
                     "artifact.created",
-                    _artifact_created_payload(tool_result, run_id=run_id),
+                    self.runtime_trace_events.artifact_created_payload(
+                        tool_result,
+                        run_id=run_id,
+                    ),
                 )
         return tool_result
 

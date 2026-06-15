@@ -7,7 +7,11 @@ import json
 from apps.shell import agent_runtime
 from apps.shell.agent.runtime.events import (
     RuntimeRunEventRecorder,
+    RuntimeTraceEventBuilder,
+    artifact_created_payload,
     canonical_run_event_aliases,
+    memory_retrieved_payload,
+    memory_skill_trace_event,
     redact_json_value,
     redact_run_event_payload,
 )
@@ -76,6 +80,114 @@ def test_runtime_run_event_recorder_appends_compatibility_aliases() -> None:
     ]
     assert canonical_run_event_aliases("model.output.completed") == ["model.completed"]
     assert agent_runtime._canonical_run_event_aliases("model.output.completed") == ["model.completed"]
+
+
+def test_runtime_trace_event_builder_projects_artifact_memory_and_skill_facts() -> None:
+    builder = RuntimeTraceEventBuilder()
+    artifact_result = {
+        "ok": True,
+        "artifact_id": "artifact-1",
+        "path": "notes.md",
+        "bytes": 42,
+        "content": "do not expose",
+    }
+    memory_result = {
+        "ok": True,
+        "action": "memory.add",
+        "memory": {
+            "memory_id": "mem-1",
+            "kind": "preference",
+            "scope": "global",
+            "content": "private memory body",
+        },
+    }
+    skill_result = {
+        "ok": True,
+        "skill_id": "skill-1",
+        "name": "Demo Skill",
+        "description": "Useful",
+        "skill_markdown": "private skill body",
+    }
+    memories = [
+        {
+            "memory_id": "mem-1",
+            "kind": "preference",
+            "scope": "global",
+            "content": "private memory body",
+        }
+    ]
+
+    artifact_payload = builder.artifact_created_payload(artifact_result, run_id="run-1")
+    memory_event = builder.memory_skill_trace_event(
+        "memory.add",
+        {"kind": "preference", "content": "private memory body"},
+        memory_result,
+    )
+    skill_event = builder.memory_skill_trace_event(
+        "skill.read",
+        {"name": "Demo Skill"},
+        skill_result,
+    )
+    retrieved_payload = builder.memory_retrieved_payload(memories)
+    serialized = json.dumps(
+        {
+            "artifact": artifact_payload,
+            "memory": memory_event,
+            "skill": skill_event,
+            "retrieved": retrieved_payload,
+        },
+        ensure_ascii=False,
+    )
+
+    assert artifact_payload == artifact_created_payload(artifact_result, run_id="run-1")
+    assert artifact_payload["source_tool"] == "artifact.write"
+    assert memory_event == memory_skill_trace_event(
+        "memory.add",
+        {"kind": "preference", "content": "private memory body"},
+        memory_result,
+    )
+    assert memory_event is not None
+    assert memory_event["event_type"] == "memory.write.add"
+    assert memory_event["payload"]["input_preview"] == {"kind": "preference"}
+    assert skill_event is not None
+    assert skill_event["event_type"] == "skill.dispatch.read"
+    assert skill_event["payload"]["result"]["skill_id"] == "skill-1"
+    assert retrieved_payload == memory_retrieved_payload(memories)
+    assert "do not expose" not in serialized
+    assert "private memory body" not in serialized
+    assert "private skill body" not in serialized
+    assert "content" not in serialized
+
+
+def test_legacy_trace_event_helpers_delegate_to_runtime_builder() -> None:
+    artifact_result = {"ok": True, "path": "report.md", "bytes": 12}
+    memory_result = {
+        "ok": True,
+        "action": "memory.remove",
+        "memory": {
+            "memory_id": "mem-2",
+            "kind": "fact",
+            "scope": "project",
+            "deleted_at": "2026-06-15T00:00:00Z",
+            "content": "removed secret body",
+        },
+    }
+    memories = [memory_result["memory"]]
+
+    assert agent_runtime._artifact_created_payload(
+        artifact_result,
+        run_id="run-2",
+    ) == artifact_created_payload(artifact_result, run_id="run-2")
+    assert agent_runtime._memory_skill_trace_event(
+        "memory.remove",
+        {"old_content": "removed secret body"},
+        memory_result,
+    ) == memory_skill_trace_event(
+        "memory.remove",
+        {"old_content": "removed secret body"},
+        memory_result,
+    )
+    assert agent_runtime._memory_retrieved_payload(memories) == memory_retrieved_payload(memories)
 
 
 def test_agent_runtime_service_uses_runtime_event_recorder_from_legacy_entrypoint(tmp_path) -> None:
