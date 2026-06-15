@@ -30,7 +30,9 @@ export function timelineEventTitle(event: Record<string, unknown>): string {
   if (name === 'agent.tool.approval_required') return detail ? `请求审批 · ${detail}` : '请求审批';
   if (name === 'agent.tool.approval_approved') return detail ? `审批已通过 · ${detail}` : '审批已通过';
   if (name === 'agent.tool.approval_rejected') return detail ? `审批已拒绝 · ${detail}` : '审批已拒绝';
+  if (name === 'skill.selected') return detail ? `Skill 已选择 · ${detail}` : 'Skill 已选择';
   if (name === 'skill.dispatch.read') return detail ? `Skill 调度 · ${detail}` : 'Skill 调度';
+  if (name === 'memory.retrieved') return detail ? `Memory 检索 · ${detail}` : 'Memory 检索';
   if (name === 'memory.write.add') return detail ? `Memory 新增 · ${detail}` : 'Memory 新增';
   if (name === 'memory.write.replace') return detail ? `Memory 更新 · ${detail}` : 'Memory 更新';
   if (name === 'memory.write.remove') return detail ? `Memory 删除 · ${detail}` : 'Memory 删除';
@@ -129,6 +131,10 @@ export function timelineEventPayload(event: Record<string, unknown>): string {
   if (result) return formatTimelinePayload(result);
   const pendingApproval = event.pending_approval;
   if (pendingApproval) return formatTimelinePayload(pendingApproval);
+  const payload = event.payload;
+  if (payload && typeof payload === 'object') {
+    return `事件内容：\n${formatTimelinePayload(payload)}`;
+  }
   return '';
 }
 
@@ -144,6 +150,7 @@ export function publicRunEventPayloadDetail(event: PublicRunEvent): string {
     || publicRunEventPayloadString(payload, 'workflow_node_id')
     || publicRunEventPayloadString(payload, 'skill_name')
     || publicRunEventPayloadString(payload, 'skill_id')
+    || publicRunEventMemorySummary(payload)
     || publicRunEventPayloadString(payload, 'memory_id')
     || publicRunEventPayloadString(payload, 'memory_kind')
     || publicRunEventPayloadString(payload, 'agent_name')
@@ -175,7 +182,7 @@ export function runEventReplayToTimelineEvent(event: PublicRunEvent): Record<str
     sequence: event.sequence,
     input_preview: payload.input_preview,
     result: payload.result || payload.content || payload.error || '',
-    pending_approval: payload.pending_approval || payload,
+    pending_approval: payload.pending_approval || null,
     child_run_id: payload.child_run_id,
     workflow_node_id: payload.workflow_node_id,
     workflow_node_kind: payload.workflow_node_kind,
@@ -199,4 +206,25 @@ export function mergeRunEventReplayPages(
 function publicRunEventPayloadString(payload: Record<string, unknown>, key: string): string {
   const value = payload[key];
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function publicRunEventMemorySummary(payload: Record<string, unknown>): string {
+  const memories = payload.memories;
+  const countValue = payload.count;
+  const count = typeof countValue === 'number' && Number.isFinite(countValue)
+    ? countValue
+    : Array.isArray(memories) ? memories.length : 0;
+  if (!Array.isArray(memories) || !memories.length) {
+    return count ? `Memory × ${count}` : '';
+  }
+  const labels = memories
+    .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+    .slice(0, 3)
+    .map((item) => [
+      publicRunEventPayloadString(item, 'kind'),
+      publicRunEventPayloadString(item, 'memory_id'),
+    ].filter(Boolean).join(':'))
+    .filter(Boolean)
+    .join('、');
+  return labels ? `Memory × ${count || memories.length} · ${labels}` : `Memory × ${count || memories.length}`;
 }
