@@ -610,6 +610,56 @@ def test_agent_studio_service_run_actions_return_public_timeline_snapshots() -> 
     assert ("reject_run_approval", {"run_id": "run-1", "reason": "No"}) in port.calls
 
 
+def test_agent_studio_service_run_actions_preserve_workflow_run_snapshots() -> None:
+    class _WorkflowActionPort(_FakeStudioPort):
+        def rerun_run(self, run_id: str) -> dict[str, Any]:
+            self.calls.append(("rerun_run", run_id))
+            return _workflow_run_payload(run_id=f"{run_id}-rerun", status="running")
+
+        def cancel_run(self, run_id: str) -> dict[str, Any]:
+            self.calls.append(("cancel_run", run_id))
+            return _workflow_run_payload(run_id=run_id, status="cancelled")
+
+        def approve_run_approval(self, run_id: str) -> dict[str, Any]:
+            self.calls.append(("approve_run_approval", run_id))
+            return _workflow_run_payload(
+                run_id=run_id,
+                status="completed",
+                final_answer="Workflow approved",
+            )
+
+        def reject_run_approval(self, run_id: str, reason: str = "") -> dict[str, Any]:
+            self.calls.append(("reject_run_approval", {"run_id": run_id, "reason": reason}))
+            return _workflow_run_payload(
+                run_id=run_id,
+                status="failed",
+                final_answer=f"Rejected: {reason}",
+            )
+
+    port = _WorkflowActionPort()
+    service = AgentStudioService(port)
+
+    rerun = service.rerun_run("workflow-run-1")
+    cancelled = service.cancel_run("workflow-run-1")
+    approved = service.approve_run_approval("workflow-run-1")
+    rejected = service.reject_run_approval("workflow-run-1", "No")
+
+    assert rerun.workflow_run_id == "workflow-run-1-rerun"
+    assert rerun.workflow_id == "workflow-1"
+    assert rerun.current_node_id == "review"
+    assert cancelled.status == "cancelled"
+    assert cancelled.objective == "Review docs"
+    assert approved.final_answer == "Workflow approved"
+    assert rejected.final_answer == "Rejected: No"
+    assert ("rerun_run", "workflow-run-1") in port.calls
+    assert ("cancel_run", "workflow-run-1") in port.calls
+    assert ("approve_run_approval", "workflow-run-1") in port.calls
+    assert (
+        "reject_run_approval",
+        {"run_id": "workflow-run-1", "reason": "No"},
+    ) in port.calls
+
+
 def test_agent_studio_service_reads_run_artifact_through_port() -> None:
     port = _FakeStudioPort()
     service = AgentStudioService(port)
@@ -821,4 +871,24 @@ def _run_payload(
         "children": [{"run_id": "child-run-1", "status": "completed"}],
         "created_at": "2026-06-14T00:00:00Z",
         "updated_at": "2026-06-14T00:00:01Z",
+    }
+
+
+def _workflow_run_payload(
+    run_id: str = "workflow-run-1",
+    status: str = "approval_required",
+    final_answer: str = "",
+) -> dict[str, Any]:
+    return _run_payload(
+        run_id=run_id,
+        runnable_id="workflow-1",
+        kind="workflow_run",
+        user_goal="Review docs",
+    ) | {
+        "status": status,
+        "workflow_id": "workflow-1",
+        "workflow_run_id": run_id,
+        "current_node_id": "review",
+        "current_node_label": "Review",
+        "final_answer": final_answer,
     }

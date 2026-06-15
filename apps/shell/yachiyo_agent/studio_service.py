@@ -310,30 +310,31 @@ class AgentStudioService:
 
     def list_run_timelines(self, limit: int = 50) -> list[RunTimelineSnapshot]:
         return [
-            run_timeline_snapshot_from_payload(item)
+            _public_run_snapshot_from_payload(item)
             for item in _payload_items(self._studio_port.list_run_timelines(limit), "runs")
         ]
 
     def get_run_timeline(self, run_id: str) -> RunTimelineSnapshot | WorkflowRunSnapshot:
-        payload = self._studio_port.get_run_timeline(run_id)
-        if is_workflow_run_payload(payload):
-            return workflow_run_snapshot_from_payload(payload)
-        return run_timeline_snapshot_from_payload(payload)
+        return _public_run_snapshot_from_payload(self._studio_port.get_run_timeline(run_id))
 
-    def rerun_run(self, run_id: str) -> RunTimelineSnapshot:
-        return run_timeline_snapshot_from_payload(self._studio_port.rerun_run(run_id))
+    def rerun_run(self, run_id: str) -> RunTimelineSnapshot | WorkflowRunSnapshot:
+        return _public_run_snapshot_from_payload(self._studio_port.rerun_run(run_id))
 
-    def cancel_run(self, run_id: str) -> RunTimelineSnapshot:
-        return run_timeline_snapshot_from_payload(self._studio_port.cancel_run(run_id))
+    def cancel_run(self, run_id: str) -> RunTimelineSnapshot | WorkflowRunSnapshot:
+        return _public_run_snapshot_from_payload(self._studio_port.cancel_run(run_id))
 
     def delete_run(self, run_id: str) -> dict[str, Any]:
         return dict(self._studio_port.delete_run(run_id))
 
-    def approve_run_approval(self, run_id: str) -> RunTimelineSnapshot:
-        return run_timeline_snapshot_from_payload(self._studio_port.approve_run_approval(run_id))
+    def approve_run_approval(self, run_id: str) -> RunTimelineSnapshot | WorkflowRunSnapshot:
+        return _public_run_snapshot_from_payload(self._studio_port.approve_run_approval(run_id))
 
-    def reject_run_approval(self, run_id: str, reason: str | None = None) -> RunTimelineSnapshot:
-        return run_timeline_snapshot_from_payload(
+    def reject_run_approval(
+        self,
+        run_id: str,
+        reason: str | None = None,
+    ) -> RunTimelineSnapshot | WorkflowRunSnapshot:
+        return _public_run_snapshot_from_payload(
             self._studio_port.reject_run_approval(run_id, reason or "")
         )
 
@@ -376,6 +377,14 @@ def _request_payload(request: Any) -> dict[str, Any]:
     if hasattr(request, "model_dump"):
         return request.model_dump(exclude_none=True, by_alias=True)
     return dict(request)
+
+
+def _public_run_snapshot_from_payload(
+    payload: Mapping[str, Any],
+) -> RunTimelineSnapshot | WorkflowRunSnapshot:
+    if is_workflow_run_payload(payload):
+        return workflow_run_snapshot_from_payload(payload)
+    return run_timeline_snapshot_from_payload(payload)
 
 
 def _payload_items(payload: Any, key: str) -> list[dict[str, Any]]:
