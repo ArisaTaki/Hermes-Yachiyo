@@ -17090,6 +17090,98 @@ button.activity-item {
   gap: 8px;
 }
 
+.run-memory-skill-trace-list {
+  display: grid;
+  gap: 8px;
+}
+
+.run-memory-skill-trace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 12px;
+  align-items: start;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 8px;
+  background: oklch(255 0 0 / 0.025);
+}
+
+.run-memory-skill-trace.memory {
+  border-color: oklch(66% 0.12 188 / 0.24);
+}
+
+.run-memory-skill-trace.skill {
+  border-color: oklch(74% 0.13 138 / 0.24);
+}
+
+.run-memory-skill-trace > div:first-child {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.run-memory-skill-trace span,
+.run-memory-skill-trace em {
+  color: var(--hy-faint);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.run-memory-skill-trace strong {
+  min-width: 0;
+  color: var(--hy-fg);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-memory-skill-trace p {
+  margin: 0;
+  color: var(--hy-muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.run-memory-skill-trace-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+  min-width: 0;
+}
+
+.run-memory-skill-trace-meta code,
+.run-memory-skill-trace-meta span,
+.run-memory-skill-trace-meta em {
+  max-width: 180px;
+  padding: 2px 6px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 999px;
+  color: var(--hy-muted);
+  font-family: var(--hy-font-mono);
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-memory-skill-trace.ready .run-memory-skill-trace-meta em {
+  border-color: oklch(74% 0.13 138 / 0.34);
+  color: oklch(80% 0.14 138);
+}
+
+.run-memory-skill-trace.danger .run-memory-skill-trace-meta em {
+  border-color: oklch(68% 0.16 26 / 0.34);
+  color: oklch(76% 0.15 26);
+}
+
+.run-memory-skill-trace .run-expandable-content {
+  grid-column: 1 / -1;
+}
+
 .studio-runtime-tool-call {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;

@@ -1523,6 +1523,8 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
             "ExpandableRuntimeContent as RunExpandableContent",
             "ArtifactInspector",
             "ToolCallInspector",
+            "MemorySkillTraceInspector",
+            "events={selectedPublicRunTimeline.events || []}",
         ],
     )
     _assert_contains(
@@ -1558,6 +1560,23 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
             "RuntimeToolCallCard",
             "agent-run-detail-tool-calls",
             'testId="agent-run-detail-tool-call-card"',
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/MemorySkillTraceInspector.tsx",
+        [
+            "export function MemorySkillTraceInspector",
+            "PublicRunEvent",
+            "agent-run-detail-memory-skill-traces",
+            "agent-run-detail-memory-skill-trace-list",
+            "agent-run-detail-memory-skill-trace",
+            "memory.retrieved",
+            "memory.write.add",
+            "memory.write.replace",
+            "memory.write.remove",
+            "skill.selected",
+            "skill.dispatch.read",
+            "ExpandableRuntimeContent",
         ],
     )
     _assert_contains(
@@ -3416,6 +3435,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "ApprovalInspector",
             "ArtifactInspector",
             "ToolCallInspector",
+            "MemorySkillTraceInspector",
             "selectedRun.task_id ? <code>Task {selectedRun.task_id}</code> : null",
             "selectedRun.session_id ? <code>Session {selectedRun.session_id}</code> : null",
             "selectedRun.task_run_link_run_status ? <span>Task link {runStatusLabel(selectedRun.task_run_link_run_status)}</span> : null",
@@ -3649,6 +3669,19 @@ def test_agent_studio_exposes_stable_e2e_selectors_for_run_detail_and_approval_f
             "data-testid=\"agent-run-detail-tool-call-list\"",
             "agent-run-detail-tool-call-card",
             "RuntimeToolCallCard",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/MemorySkillTraceInspector.tsx",
+        [
+            "data-testid=\"agent-run-detail-memory-skill-traces\"",
+            "data-testid=\"agent-run-detail-memory-skill-trace-list\"",
+            "data-testid=\"agent-run-detail-memory-skill-trace\"",
+            "data-runtime-trace-kind={trace.kind}",
+            "data-run-event={trace.eventType}",
+            "Memory / Skill Trace",
+            "memory.retrieved",
+            "skill.dispatch.read",
         ],
     )
     _assert_contains(

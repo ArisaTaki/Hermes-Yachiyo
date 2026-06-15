@@ -6,6 +6,7 @@ import { ExpandableRuntimeContent as RunExpandableContent } from '../../runtime-
 import { RuntimeApprovalGate } from '../../runtime-shared/components/RuntimeApprovalGate';
 import { ApprovalInspector, type RunPendingApproval } from './ApprovalInspector';
 import { ArtifactInspector } from './ArtifactInspector';
+import { MemorySkillTraceInspector } from './MemorySkillTraceInspector';
 import { RunApprovalRequest } from './RunApprovalRequest';
 import { RunTimeline } from './RunTimeline';
 import { ToolCallInspector } from './ToolCallInspector';
@@ -356,6 +357,7 @@ export function RunDetailPanel({
             </section>
           ) : null}
           {selectedPublicRunTimeline ? <ToolCallInspector toolCalls={selectedPublicRunTimeline.tool_calls || []} /> : null}
+          {selectedPublicRunTimeline ? <MemorySkillTraceInspector events={selectedPublicRunTimeline.events || []} /> : null}
           <section className="run-detail-block run-task-block" data-testid="agent-run-detail-task">
             <div className="run-detail-section-head">
               <div>
