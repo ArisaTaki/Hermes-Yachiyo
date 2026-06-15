@@ -141,6 +141,16 @@ export function yachiyoTaskRunId(task: AgentTaskSnapshot): string {
   ])[0] || '';
 }
 
+export function yachiyoTaskStudioUrl(task: AgentTaskSnapshot): string {
+  const publicUrl = String(task.open_in_studio_url || '').trim();
+  if (publicUrl) return publicUrl;
+  return studioRunUrl(yachiyoTaskRunId(task)) || '';
+}
+
+export function yachiyoTaskStudioRunId(task: AgentTaskSnapshot): string {
+  return runIdFromStudioUrl(yachiyoTaskStudioUrl(task)) || yachiyoTaskRunId(task);
+}
+
 export function yachiyoTaskStatusMessage(
   task: AgentTaskSnapshot,
   action: 'approve' | 'reject' | 'cancel',

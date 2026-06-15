@@ -9164,7 +9164,8 @@ body.electron-window .hy-traffic {
   white-space: nowrap;
 }
 
-.hy-content .open-chat-shell .yachiyo-agent-task-card-head button {
+.hy-content .open-chat-shell .yachiyo-agent-task-card-head button,
+.hy-content .open-chat-shell .yachiyo-agent-task-card-head a {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -9178,10 +9179,12 @@ body.electron-window .hy-traffic {
   cursor: pointer;
   font-size: 11px;
   line-height: 1;
+  text-decoration: none;
   white-space: nowrap;
 }
 
-.hy-content .open-chat-shell .yachiyo-agent-task-card-head button:hover {
+.hy-content .open-chat-shell .yachiyo-agent-task-card-head button:hover,
+.hy-content .open-chat-shell .yachiyo-agent-task-card-head a:hover {
   border-color: oklch(66% 0.12 188 / 0.44);
   color: var(--hy-fg);
 }

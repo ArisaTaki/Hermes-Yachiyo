@@ -1,6 +1,6 @@
 import { UiIcon } from '../../../components/UiIcon';
 import { RuntimeTimelineSummary } from '../../runtime-shared/components/RuntimeTimelineSummary';
-import { yachiyoTaskRunId } from '../taskSnapshots';
+import { yachiyoTaskRunId, yachiyoTaskStudioRunId, yachiyoTaskStudioUrl } from '../taskSnapshots';
 import type { AgentTaskSnapshot, ApprovalCardSnapshot } from '../types';
 import { ApprovalCard } from './ApprovalCard';
 import { ArtifactPreview } from './ArtifactPreview';
@@ -23,17 +23,19 @@ export function AgentTaskCard({
 }) {
   const status = task.status || 'running';
   const runId = yachiyoTaskRunId(task);
+  const studioRunId = yachiyoTaskStudioRunId(task);
+  const studioUrl = yachiyoTaskStudioUrl(task);
   const approvals = task.pending_approvals || [];
   const artifacts = task.artifacts || [];
   const recentEvents = task.recent_events || [];
   const canCancel = onCancelTask && ['queued', 'running', 'waiting_approval'].includes(status);
-  const hasHeaderActions = Boolean((runId && onOpenStudio) || canCancel);
+  const hasHeaderActions = Boolean((studioRunId && studioUrl && onOpenStudio) || canCancel);
   return (
     <section
       className={`yachiyo-agent-task-card ${status}`}
       data-task-id={task.task_id}
       data-task-status={status}
-      data-run-id={runId}
+      data-run-id={studioRunId || runId}
       data-testid="yachiyo-agent-task-card"
     >
       <header className="yachiyo-agent-task-card-head">
@@ -46,16 +48,20 @@ export function AgentTaskCard({
         </div>
         {hasHeaderActions ? (
           <div className="yachiyo-agent-task-card-actions">
-            {runId && onOpenStudio ? (
-              <button
-                type="button"
-                data-run-id={runId}
+            {studioRunId && studioUrl && onOpenStudio ? (
+              <a
+                href={studioUrl}
+                data-run-id={studioRunId}
+                data-studio-url={studioUrl}
                 data-testid="yachiyo-agent-task-open-studio"
-                onClick={() => onOpenStudio(runId)}
+                onClick={(event) => {
+                  event.preventDefault();
+                  onOpenStudio(studioRunId);
+                }}
               >
                 <UiIcon name="activity" />
                 <span>在 Agent Studio 中查看</span>
-              </button>
+              </a>
             ) : null}
             {canCancel ? (
               <button

@@ -1,5 +1,5 @@
 import { openAppView } from '../../../lib/bridge';
-import { yachiyoTaskRunId } from '../taskSnapshots';
+import { yachiyoTaskStudioRunId, yachiyoTaskStudioUrl } from '../taskSnapshots';
 import type { AgentTaskSnapshot } from '../types';
 
 type LauncherTaskMode = 'bubble' | 'live2d';
@@ -48,7 +48,8 @@ export function LauncherAgentTaskLight({
   variant?: 'launcher' | 'panel';
 }) {
   if (!task) return null;
-  const runId = yachiyoTaskRunId(task);
+  const runId = yachiyoTaskStudioRunId(task);
+  const studioUrl = yachiyoTaskStudioUrl(task);
   const status = String(task.status || '');
   const needsAction = Boolean(task.needs_user_action || task.pending_approvals?.length);
   const detail = launcherAgentTaskDetail(task);
@@ -77,11 +78,12 @@ export function LauncherAgentTaskLight({
         ) : null}
         {needsAction ? <em>待处理</em> : null}
       </button>
-      {runId ? (
-        <button
-          type="button"
+      {runId && studioUrl ? (
+        <a
+          href={studioUrl}
           className="launcher-agent-task-studio"
           data-run-id={runId}
+          data-studio-url={studioUrl}
           data-testid={`${testIdPrefix}-agent-task-open-studio`}
           onClick={(event) => {
             event.preventDefault();
@@ -91,7 +93,7 @@ export function LauncherAgentTaskLight({
           title="在 Agent Studio 中查看"
         >
           Studio
-        </button>
+        </a>
       ) : null}
     </div>
   );
