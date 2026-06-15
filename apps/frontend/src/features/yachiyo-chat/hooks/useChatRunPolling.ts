@@ -1,7 +1,6 @@
 import { useCallback } from 'react';
 
-import { getRun, type RunSpec } from '../../../lib/agents';
-import { nextApprovalStatusText } from '../approvalItems';
+import { nextApprovalStatusText, type ChatApprovalRun } from '../approvalItems';
 import { createDelegatedRunSummary } from '../delegatedSummary';
 import { normalizeRunStatus } from '../messageState';
 import {
@@ -12,6 +11,7 @@ import {
   chatRunProgressStatusText,
   isChatRunTerminalStatus,
 } from '../runPolling';
+import { getChatRunSnapshot } from '../runSnapshots';
 
 type ChatRunPollingOptions = {
   summarizeDelegatedRun?: boolean;
@@ -30,7 +30,7 @@ type UseChatRunPollingOptions = {
   isProcessingRef: { current: boolean };
   loadSessions: () => Promise<void>;
   refreshMessages: () => Promise<ChatRunMessagesRefresh>;
-  rememberRunApprovalDetails: (run: RunSpec) => void;
+  rememberRunApprovalDetails: (run: ChatApprovalRun) => void;
   setIsProcessing: (value: boolean) => void;
   setProcessingCount: (value: number) => void;
   setStatus: (value: string) => void;
@@ -56,7 +56,7 @@ export function useChatRunPolling({
     const interval = activePollIntervalMs;
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       try {
-        const run = await getRun(runId);
+        const run = await getChatRunSnapshot(runId);
         const status = normalizeRunStatus(run.status);
         const runLabel = chatRunLabel(run);
         if (status === 'approval_required' && options.ignoreInitialApprovalRequired && attempt < 3) {

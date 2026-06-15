@@ -273,8 +273,8 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "apiPost<{",
             "`/ui/chat/groups/${encodeURIComponent(currentSessionId)}`",
             "'/ui/chat/groups'",
-            "approveRunApproval(runId)",
-            "rejectRunApproval(runId, 'Rejected from chat')",
+            "approveChatRunApproval(runId)",
+            "rejectChatRunApproval(runId, 'Rejected from chat')",
             "ComposerApprovalNotice",
             "approvalId={composerApprovalItem.approvalId}",
             "itemId={composerApprovalItem.id}",
@@ -2058,8 +2058,8 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
             "setMessages(result.messages || []);",
             "setProcessingCount(nextProcessingCount);",
             "onClick={() => void cancelProcessing()}",
-            "const approvalPromise = approveRunApproval(runId);",
-            "const run = await rejectRunApproval(runId, 'Rejected from chat');",
+            "const approvalPromise = approveChatRunApproval(runId);",
+            "const run = await rejectChatRunApproval(runId, 'Rejected from chat');",
             "pollAgentRunInBackground(runId, { summarizeDelegatedRun, ignoreInitialApprovalRequired: true });",
             "onApprove={() => void resolveApprovalMessage(message, 'approve')}",
             "onReject={() => void resolveApprovalMessage(message, 'reject')}",
@@ -2821,7 +2821,7 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
         [
             "export function useChatRunPolling",
             "const maxAttempts = 600;",
-            "const run = await getRun(runId);",
+            "const run = await getChatRunSnapshot(runId);",
             "if (status === 'approval_required' && options.ignoreInitialApprovalRequired && attempt < 3)",
             "if (isChatRunTerminalStatus(status))",
             "rememberRunApprovalDetails(run)",
@@ -2833,6 +2833,17 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
             "chatRunPollingTimeoutStatusText(chatStillProcessing)",
             "void pollAgentRunCompletion(runId, options).catch((error) =>",
             "setStatus(error instanceof Error ? error.message : 'Agent Run 状态刷新失败')",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/runSnapshots.ts",
+        [
+            "getYachiyoRunTimeline",
+            "approveYachiyoRunApproval",
+            "rejectYachiyoRunApproval",
+            "export function chatRunSnapshotFromTimeline",
+            "pending_approval: chatPendingApprovalFromTimeline(snapshot)",
+            "tool: approval.tool_name",
         ],
     )
     _assert_contains(

@@ -41,6 +41,7 @@ import {
   rememberRunApprovalOverride,
   messageApprovalSignature,
   nextApprovalStatusText,
+  type ChatApprovalRun,
   type ComposerApprovalItem,
   type RunApprovalDetailOverride,
 } from '../features/yachiyo-chat/approvalItems';
@@ -95,6 +96,7 @@ import { useYachiyoTaskActions } from '../features/yachiyo-chat/hooks/useYachiyo
 import { useChatRunPolling } from '../features/yachiyo-chat/hooks/useChatRunPolling';
 import { useYachiyoTaskSnapshots } from '../features/yachiyo-chat/hooks/useYachiyoTaskSnapshots';
 import { useYachiyoTaskSubmit } from '../features/yachiyo-chat/hooks/useYachiyoTaskSubmit';
+import { approveChatRunApproval, rejectChatRunApproval } from '../features/yachiyo-chat/runSnapshots';
 import { publicTaskSnapshotForMessage } from '../features/yachiyo-chat/taskSnapshots';
 import type {
   AgentTaskSnapshot,
@@ -115,7 +117,7 @@ import type {
 } from '../features/yachiyo-chat/types';
 import logoUrl from '../../../../docs/open-design/logo.png';
 import { type AssistantProfileSeed, useAssistantProfileSeed } from '../lib/assistantProfileSeed';
-import { approveRunApproval, listRunnables, type RunnableSummary, type RunSpec, rejectRunApproval } from '../lib/agents';
+import { listRunnables, type RunnableSummary } from '../lib/agents';
 import { apiGet, apiPatch, apiPost, bridgeUrl, canChooseChatImages, chooseAvatarImage, chooseChatImages, copyText, openAppView, openExternalUrl, restartDesktopBridge, type ChatImageSelection } from '../lib/bridge';
 import { ROUTE_CHANGE_EVENT, currentParam, navigateTo } from '../lib/view';
 
@@ -1366,7 +1368,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     setApprovalActionMessageId(busyId);
     setStatus(action === 'approve' ? '正在批准工具调用...' : '正在拒绝工具调用...');
     if (action === 'approve') {
-      const approvalPromise = approveRunApproval(runId);
+      const approvalPromise = approveChatRunApproval(runId);
       const approvalTargetLabel = fallbackApprovalDetails && isWorkflowApprovalDetails(fallbackApprovalDetails) ? 'Workflow' : 'Agent';
       if (composerItemId) {
         setResolvedComposerApprovalIds((current) => (
@@ -1416,7 +1418,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       return;
     }
     try {
-      const run = await rejectRunApproval(runId, 'Rejected from chat');
+      const run = await rejectChatRunApproval(runId, 'Rejected from chat');
       const refreshed = await refreshMessages();
       await loadSessions();
       const chatStillProcessing = Boolean(refreshed?.is_processing);
@@ -1682,7 +1684,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     };
   }
 
-  function rememberRunApprovalDetails(run: RunSpec, fallbackDetails: ApprovalRequestDetails | null = null) {
+  function rememberRunApprovalDetails(run: ChatApprovalRun, fallbackDetails: ApprovalRequestDetails | null = null) {
     setRunApprovalDetailOverrides((current) => rememberRunApprovalOverride(current, run, fallbackDetails));
   }
 
