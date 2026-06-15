@@ -176,6 +176,22 @@ def limit_tool_result(
     return limited if isinstance(limited, dict) else {"ok": False, "error": str(limited)}
 
 
+def tool_result_limiter(
+    *,
+    limits: RunBudgetLimits | Callable[[], RunBudgetLimits],
+    redact_json_value: Callable[[Any], Any],
+) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    def limit_runtime_tool_result(result: dict[str, Any]) -> dict[str, Any]:
+        current_limits = limits() if callable(limits) else limits
+        return limit_tool_result(
+            result,
+            limits=current_limits,
+            redact_json_value=redact_json_value,
+        )
+
+    return limit_runtime_tool_result
+
+
 @dataclass
 class WorkflowRunBudget:
     limits: RunBudgetLimits

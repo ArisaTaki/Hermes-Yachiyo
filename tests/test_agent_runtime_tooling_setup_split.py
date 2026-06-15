@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from apps.shell import agent_runtime
+from apps.shell.agent.runtime.budget import RunBudgetLimits
 from apps.shell.agent.runtime.tool_execution import RuntimeToolCallExecutor, RuntimeToolRequestRunner
 from apps.shell.agent.runtime.tool_loop import RuntimeToolLoopProjectionBuilder
 from apps.shell.agent.runtime.tool_operations import RuntimeToolOperations
@@ -66,5 +67,11 @@ def test_native_runtime_installs_tooling_bundle_under_legacy_attribute_names(tmp
         assert service.tool_call_executor._trace_events is service.runtime_trace_events
         assert service.tool_call_executor._allows_tool is agent_runtime.PolicyGate.allows_tool
         assert service.tool_call_executor._validate_tool_payload is RuntimeToolOperations.validate_tool_payload
+        assert getattr(service.tool_call_executor._limit_tool_result, "__self__", None) is not service
+
+        service.runtime_limits = RunBudgetLimits(max_tool_output_chars=5)
+        limited = service.tool_call_executor._limit_tool_result({"ok": True, "content": "abcdefghi"})
+        assert limited["truncated"] is True
+        assert limited["content"] == "abcde"
     finally:
         service.close()

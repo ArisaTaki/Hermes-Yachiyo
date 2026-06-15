@@ -65,6 +65,7 @@ from apps.shell.agent.runtime.budget import (
     limit_model_output as _runtime_limit_model_output,
     limit_tool_result as _runtime_limit_tool_result,
     run_budget_from_timeline as _runtime_run_budget_from_timeline,
+    tool_result_limiter as _runtime_tool_result_limiter,
     truncate_text as _truncate_text,
 )
 from apps.shell.agent.runtime.approval_lifecycle import (
@@ -726,7 +727,10 @@ class NativeRunEngine:
             input_preview=_tool_input_preview,
             run_budget=self._run_budget,
             validate_tool_payload=RuntimeToolOperations.validate_tool_payload,
-            limit_tool_result=self._limit_tool_result,
+            limit_tool_result=_runtime_tool_result_limiter(
+                limits=lambda: self.runtime_limits,
+                redact_json_value=_redact_json_value,
+            ),
             timeline_factory=self._timeline,
             tool_call_events=self.runtime_tool_call_events,
             trace_events=self.runtime_trace_events,

@@ -17,6 +17,7 @@ from apps.shell.agent.runtime.budget import (
     limit_model_output,
     limit_tool_result,
     run_budget_from_timeline,
+    tool_result_limiter,
     truncate_text,
 )
 from apps.shell.agent.runtime.errors import AgentApprovalRequired, AgentRuntimeError
@@ -99,6 +100,16 @@ def test_budget_helpers_limit_runtime_context_and_outputs() -> None:
     )
     assert limited["truncated"] is True
     assert limited["nested"]["content"] == "abcdef"
+
+
+def test_tool_result_limiter_closes_over_current_runtime_limits() -> None:
+    limits = RunBudgetLimits(max_tool_output_chars=4)
+    limiter = tool_result_limiter(limits=lambda: limits, redact_json_value=lambda value: value)
+
+    limited = limiter({"ok": True, "content": "abcdef"})
+
+    assert limited["truncated"] is True
+    assert limited["content"] == "abcd"
 
 
 def test_run_budget_reconstructs_usage_from_timeline() -> None:
