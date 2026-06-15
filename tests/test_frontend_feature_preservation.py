@@ -619,9 +619,12 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
     _assert_contains(
         "apps/frontend/src/features/runtime-shared/studioLinks.ts",
         [
+            "import { routePath } from '../../lib/view';",
             "export function studioRunUrl",
-            "`#/agents?run_id=${encodeURIComponent(cleanRunId)}`",
+            "return routePath('agents', { run: cleanRunId });",
             "export function runIdFromStudioUrl",
+            "url.match(/[?&](?:run|run_id)=([^&#]+)/)",
+            "url.match(/^#\\/agents\\/([^?&#]+)/)",
         ],
     )
     _assert_contains(
