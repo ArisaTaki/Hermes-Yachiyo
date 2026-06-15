@@ -1,9 +1,11 @@
 import { useCallback, type Dispatch, type SetStateAction } from 'react';
 
-import type { AgentDraft } from '../types';
+import type { AgentDraft, AgentSpec } from '../types';
+import { getStudioAgentForView } from '../utils/studioData';
 
 type UseAgentDraftActionsOptions = {
   emptyAgentDraft: AgentDraft;
+  mergeAgent: (agent: AgentSpec) => void;
   setDraft: Dispatch<SetStateAction<AgentDraft>>;
   setError: (message: string) => void;
   setSelectedAgentId: (agentId: string) => void;
@@ -12,6 +14,7 @@ type UseAgentDraftActionsOptions = {
 
 export function useAgentDraftActions({
   emptyAgentDraft,
+  mergeAgent,
   setDraft,
   setError,
   setSelectedAgentId,
@@ -32,7 +35,14 @@ export function useAgentDraftActions({
     setSelectedAgentId(agentId);
     setStatus('');
     setError('');
-  }, [setError, setSelectedAgentId, setStatus]);
+    void getStudioAgentForView(agentId)
+      .then((agent) => {
+        mergeAgent(agent);
+      })
+      .catch(() => {
+        setStatus('读取 Agent 详情失败，已使用列表快照。');
+      });
+  }, [mergeAgent, setError, setSelectedAgentId, setStatus]);
 
   return {
     resetAgentDraft,

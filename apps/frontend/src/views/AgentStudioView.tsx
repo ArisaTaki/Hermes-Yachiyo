@@ -229,6 +229,7 @@ export function AgentStudioView() {
     applyAgents,
     deletableAgentIds,
     finishAgentManagement,
+    mergeAgent,
     selectedAgent,
     selectedAgentDeletable,
     selectedAgentId,
@@ -602,6 +603,7 @@ export function AgentStudioView() {
     startNewAgent,
   } = useAgentDraftActions({
     emptyAgentDraft,
+    mergeAgent,
     setDraft,
     setError,
     setSelectedAgentId,

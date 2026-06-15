@@ -17,6 +17,15 @@ function toggleSelectedId(current: string[], id: string): string[] {
   return [...current, id];
 }
 
+function mergeAgentById(current: AgentSpec[], nextAgent: AgentSpec): AgentSpec[] {
+  if (!nextAgent.agent_id) return current;
+  const index = current.findIndex((agent) => agent.agent_id === nextAgent.agent_id);
+  if (index < 0) return [...current, nextAgent];
+  const next = [...current];
+  next[index] = nextAgent;
+  return next;
+}
+
 export function useAgentDefinitions() {
   const [agents, setAgents] = useState<AgentSpec[]>([]);
   const [selectedAgentId, setSelectedAgentId] = useState('');
@@ -57,6 +66,10 @@ export function useAgentDefinitions() {
     });
   }, []);
 
+  const mergeAgent = useCallback((nextAgent: AgentSpec) => {
+    setAgents((current) => mergeAgentById(current, nextAgent));
+  }, []);
+
   const toggleAgentSelected = useCallback((agentId: string) => {
     if (!deletableAgentIds.includes(agentId)) return;
     setSelectedAgentIds((current) => toggleSelectedId(current, agentId));
@@ -74,6 +87,7 @@ export function useAgentDefinitions() {
     applyAgents,
     deletableAgentIds,
     finishAgentManagement,
+    mergeAgent,
     selectedAgent,
     selectedAgentDeletable,
     selectedAgentId,

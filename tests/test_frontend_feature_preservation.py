@@ -997,6 +997,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "onBack={() => void openAppView('main')}",
             "AgentGroupPanel",
             "useAgentDefinitions",
+            "mergeAgent",
             "useAgentDraftActions({",
             "useAgentGroupActions({",
             "useAgentGroups",
@@ -1101,6 +1102,9 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "setStatus('正在编辑新的 Agent 草稿');",
             "function useAgentDraftActions",
             "const selectAgent = useCallback((agentId: string) => {",
+            "getStudioAgentForView(agentId)",
+            "mergeAgent(agent)",
+            "读取 Agent 详情失败，已使用列表快照。",
         ],
     )
     _assert_contains(
@@ -1154,6 +1158,8 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
         [
             "export function useAgentDefinitions",
             "applyAgents",
+            "mergeAgentById",
+            "const mergeAgent = useCallback",
             "selectedAgentReadOnly",
             "selectedAgentDeletable",
             "toggleAgentSelected",
@@ -1165,6 +1171,8 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
         [
             "export function useAgentGroups",
             "listYachiyoAgentGroups().catch(() => [])",
+            "getStudioGroupForView(groupId)",
+            "mergeAgentGroupById",
             "saveYachiyoAgentGroup",
             "startYachiyoGroupRun",
             "runAgentGroup",

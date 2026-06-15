@@ -6,6 +6,7 @@ import {
   startYachiyoGroupRun,
 } from '../../yachiyo-studio/api';
 import type { AgentGroupSnapshot, GroupRunSnapshot } from '../../yachiyo-studio/types';
+import { getStudioGroupForView } from '../utils/studioData';
 import {
   agentGroupMemberIds as memberIdsForAgentGroup,
   buildAgentGroupSaveRequest,
@@ -19,6 +20,18 @@ export type AgentGroupRunResult = {
   runId: string;
   statusMessage: string;
 };
+
+function mergeAgentGroupById(
+  current: AgentGroupSnapshot[],
+  nextGroup: AgentGroupSnapshot,
+): AgentGroupSnapshot[] {
+  if (!nextGroup.group_id) return current;
+  const index = current.findIndex((group) => group.group_id === nextGroup.group_id);
+  if (index < 0) return [...current, nextGroup];
+  const next = [...current];
+  next[index] = nextGroup;
+  return next;
+}
 
 export function useAgentGroups() {
   const [agentGroups, setAgentGroups] = useState<AgentGroupSnapshot[]>([]);
@@ -82,6 +95,11 @@ export function useAgentGroups() {
   const selectAgentGroup = useCallback((groupId: string) => {
     setSelectedAgentGroupId(groupId);
     setLatestAgentGroupRun(null);
+    void getStudioGroupForView(groupId)
+      .then((group) => {
+        setAgentGroups((current) => mergeAgentGroupById(current, group));
+      })
+      .catch(() => undefined);
   }, []);
 
   const toggleAgentGroupMember = useCallback((agentId: string) => {
