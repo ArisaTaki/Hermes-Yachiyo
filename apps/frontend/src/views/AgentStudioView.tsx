@@ -62,6 +62,8 @@ import {
   isActiveRunStatus,
   isPotentialWorkflowChildAgentRun,
   normalizeRunStatus,
+  publicGroupRunToRunGroupSpec,
+  publicRunTimelineToRunSpec,
   runHistoryGroupsFor,
   runHistoryGroupSummary,
   runKindLabel,
@@ -99,13 +101,15 @@ import {
   workflowStepSummary,
 } from '../features/agent-studio/utils/workflow';
 import {
-  getRun,
+  getYachiyoRunTimeline,
+  listYachiyoGroupRuns,
+  listYachiyoRunTimelines,
+} from '../features/yachiyo-studio/api';
+import {
   listAgents,
   listFutureTasks,
   listMemories,
-  listRunGroups,
   listRunnables,
-  listRuns,
   listSkillFolders,
   listSkillSources,
   listSkills,
@@ -168,6 +172,18 @@ const emptyAgentDraft: AgentDraft = {
   writable_scopes: '',
   enabled: true,
 };
+
+async function listStudioRunsForView(): Promise<RunSpec[]> {
+  return (await listYachiyoRunTimelines()).map((snapshot) => publicRunTimelineToRunSpec(snapshot));
+}
+
+async function listStudioRunGroupsForView(): Promise<RunGroupSpec[]> {
+  return (await listYachiyoGroupRuns()).map(publicGroupRunToRunGroupSpec);
+}
+
+async function getStudioRunForView(runId: string): Promise<RunSpec> {
+  return publicRunTimelineToRunSpec(await getYachiyoRunTimeline(runId));
+}
 
 function toggleSelectedId(current: string[], id: string): string[] {
   if (!id) return current;
@@ -802,8 +818,8 @@ export function AgentStudioView() {
       listWorkflows(),
       loadAgentGroups(),
       listRunnables(),
-      listRuns(),
-      listRunGroups(),
+      listStudioRunsForView(),
+      listStudioRunGroupsForView(),
       listSkillSources(),
       listSkillFolders(),
       listMemories(),
@@ -966,7 +982,7 @@ export function AgentStudioView() {
   useEffect(() => {
     if (!selectedRunId || selectedRun) return;
     let disposed = false;
-    getRun(selectedRunId)
+    getStudioRunForView(selectedRunId)
       .then((run) => {
         if (!disposed) upsertRunDetailCache([run]);
       })
@@ -992,7 +1008,7 @@ export function AgentStudioView() {
   useEffect(() => {
     if (!selectedWorkflowParentRunId || runById.has(selectedWorkflowParentRunId)) return;
     let disposed = false;
-    getRun(selectedWorkflowParentRunId)
+    getStudioRunForView(selectedWorkflowParentRunId)
       .then((run) => {
         if (!disposed) upsertRunDetailCache([run]);
       })
@@ -1010,7 +1026,7 @@ export function AgentStudioView() {
     const uniqueChildRunIds = Array.from(new Set(childRunIds));
     if (!uniqueChildRunIds.length) return;
     let disposed = false;
-    Promise.all(uniqueChildRunIds.map((runId) => getRun(runId).catch(() => null)))
+    Promise.all(uniqueChildRunIds.map((runId) => getStudioRunForView(runId).catch(() => null)))
       .then((childRuns) => {
         if (disposed) return;
         const loaded = childRuns.filter((run): run is RunSpec => Boolean(run));
@@ -1031,7 +1047,7 @@ export function AgentStudioView() {
       if (inFlight) return;
       inFlight = true;
       try {
-        const loadedRuns = (await Promise.all(pollRunIds.map((runId) => getRun(runId).catch(() => null))))
+        const loadedRuns = (await Promise.all(pollRunIds.map((runId) => getStudioRunForView(runId).catch(() => null))))
           .filter((run): run is RunSpec => Boolean(run));
         if (disposed || !loadedRuns.length) return;
         upsertRunDetailCache(loadedRuns);

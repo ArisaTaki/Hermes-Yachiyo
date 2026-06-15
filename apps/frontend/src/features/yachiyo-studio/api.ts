@@ -187,6 +187,12 @@ export async function getYachiyoRunTimeline(runId: string): Promise<RunTimelineS
   return apiGet(`/yachiyo/studio/runs/${encodeURIComponent(runId)}/timeline`);
 }
 
+export async function listYachiyoRunTimelines(limit = 50): Promise<RunTimelineSnapshot[]> {
+  const query = new URLSearchParams({ limit: String(Math.max(1, Math.min(200, limit))) });
+  const payload = await apiGet<{ runs?: RunTimelineSnapshot[] }>(`/yachiyo/studio/runs?${query.toString()}`);
+  return payload.runs || [];
+}
+
 export async function startYachiyoAgentRun(
   agentId: string,
   objective: string,
