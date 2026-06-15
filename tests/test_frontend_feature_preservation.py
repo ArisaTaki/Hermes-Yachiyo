@@ -1682,11 +1682,21 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
             "RunTimelineSnapshot + RunEvent replay tool facts",
             "toolCalls={selectedRunToolCalls}",
             "MemorySkillTraceInspector",
+            "GroupRunDetailPanel",
             "const memorySkillTraceEvents = selectedRunReplayEvents.length",
             "RunEvent replay trace facts · Memory / Skill",
             "RunTimelineSnapshot trace facts · Memory / Skill",
             "events={memorySkillTraceEvents}",
             "sourceLabel={memorySkillTraceSource}",
+            "selectedGroupRunSnapshot={selectedGroupRunSnapshot}",
+            "selectedRouteGroupRunId={selectedRouteGroupRunId}",
+            "selectedRunGroup={selectedRunGroup}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/GroupRunDetailPanel.tsx",
+        [
+            "export function GroupRunDetailPanel",
             "RuntimeTimelineSummary",
             "RuntimeApprovalCard",
             "RuntimeArtifactList",
