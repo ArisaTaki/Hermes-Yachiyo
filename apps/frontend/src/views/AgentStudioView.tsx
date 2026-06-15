@@ -21,6 +21,7 @@ import { useApprovedRunGuard } from '../features/agent-studio/hooks/useApprovedR
 import { useRunApprovalActions } from '../features/agent-studio/hooks/useRunApprovalActions';
 import { useRunApprovalFollowup } from '../features/agent-studio/hooks/useRunApprovalFollowup';
 import { useRunEventReplay } from '../features/agent-studio/hooks/useRunEventReplay';
+import { useRunLaunchActions } from '../features/agent-studio/hooks/useRunLaunchActions';
 import { useRunTimeline } from '../features/agent-studio/hooks/useRunTimeline';
 import { useWorkflowDefinitions } from '../features/agent-studio/hooks/useWorkflowDefinitions';
 import {
@@ -109,9 +110,7 @@ import {
   cancelFutureTask,
   createSkillFolder,
   createAgent,
-  createAgentRun,
   createWorkflow,
-  createWorkflowRun,
   deleteAgent,
   deleteMemory,
   deleteRun,
@@ -134,7 +133,6 @@ import {
   listSkillSources,
   listSkills,
   listWorkflows,
-  rerunRun,
   syncNativeSkills,
   testAgentModel,
   triggerDueFutureTasks,
@@ -981,6 +979,36 @@ export function AgentStudioView() {
     upsertRunDetailCache,
   });
 
+  const {
+    createRunFromTarget,
+    prepareSelectedRunRerun,
+    rerunSelectedRun,
+    runCurrentAgent,
+    runCurrentWorkflow,
+  } = useRunLaunchActions({
+    agentQuickRunDisabledReason,
+    agentRunGoal,
+    draftAgentId: draft.agent_id || '',
+    openRunDetail,
+    refreshRunGroupsForRuns,
+    runGoal,
+    runnables,
+    runTarget,
+    saveWorkflowDraft,
+    selectedRun,
+    selectedRunRerunDisabledReason,
+    selectedRunRerunTarget,
+    setAgentRunGoal,
+    setError,
+    setRunGoal,
+    setRunTarget,
+    setStatus,
+    setWorkflowRunGoal,
+    upsertRunDetailCache,
+    workflowRunDisabledReason,
+    workflowRunGoal,
+  });
+
   useEffect(() => {
     setLoading(true);
     refresh()
@@ -1807,28 +1835,6 @@ export function AgentStudioView() {
     }
   }
 
-  async function runCurrentAgent(): Promise<StudioRefreshOptions> {
-    if (agentQuickRunDisabledReason) throw new Error(agentQuickRunDisabledReason);
-    const agentId = draft.agent_id || '';
-    const goal = agentRunGoal.trim();
-    const run = await createAgentRun(agentId, goal);
-    setAgentRunGoal('');
-    setRunTarget(agentId);
-    openRunDetail(run.run_id, { revealInHistory: true });
-    return { selectedAgentId: agentId, runTarget: agentId, selectedRunId: run.run_id };
-  }
-
-  async function runCurrentWorkflow(): Promise<StudioRefreshOptions> {
-    if (workflowRunDisabledReason) throw new Error(workflowRunDisabledReason);
-    const goal = workflowRunGoal.trim();
-    const saved = await saveWorkflowDraft();
-    const run = await createWorkflowRun(saved.workflow_id, goal);
-    setWorkflowRunGoal('');
-    setRunTarget(saved.workflow_id);
-    openRunDetail(run.run_id, { revealInHistory: true });
-    return { selectedWorkflowId: saved.workflow_id, runTarget: saved.workflow_id, selectedRunId: run.run_id };
-  }
-
   async function runCurrentAgentGroup(): Promise<StudioRefreshOptions> {
     const { runId, statusMessage } = await runAgentGroup();
     if (runId) {
@@ -1838,42 +1844,6 @@ export function AgentStudioView() {
     return {
       selectedRunId: runId || undefined,
       statusMessage,
-    };
-  }
-
-  function prepareSelectedRunRerun() {
-    if (!selectedRun) return;
-    if (!selectedRunRerunTarget) {
-      setError('找不到原 Run 对应的 Agent 或 Workflow，无法准备重跑。');
-      return;
-    }
-    setRunTarget(selectedRunRerunTarget.id);
-    setRunGoal(selectedRun.user_goal || '');
-    setStatus(`已把「${selectedRunRerunTarget.name || selectedRun.runnable_name || selectedRun.runnable_id}」和原任务填回 Run 面板。`);
-    setError('');
-  }
-
-  async function rerunSelectedRun(): Promise<StudioRefreshOptions> {
-    if (!selectedRun) throw new Error('请选择要重跑的 Run');
-    if (selectedRunRerunDisabledReason) throw new Error(selectedRunRerunDisabledReason);
-    if (!selectedRunRerunTarget) throw new Error('找不到原 Run 对应的 Agent 或 Workflow，无法重跑。');
-    const run = await rerunRun(selectedRun.run_id);
-    upsertRunDetailCache([run]);
-    await refreshRunGroupsForRuns([run]);
-    openRunDetail(run.run_id, { revealInHistory: true });
-    if (selectedRunRerunTarget.kind === 'agent') {
-      return {
-        selectedAgentId: selectedRunRerunTarget.id,
-        selectedRunId: run.run_id,
-        runTarget: selectedRunRerunTarget.id,
-        statusMessage: '已按原任务重新运行 Agent。',
-      };
-    }
-    return {
-      selectedWorkflowId: selectedRunRerunTarget.id,
-      selectedRunId: run.run_id,
-      runTarget: selectedRunRerunTarget.id,
-      statusMessage: '已按原任务重新运行 Workflow。',
     };
   }
 
@@ -2477,17 +2447,7 @@ export function AgentStudioView() {
                 steps={selectedRunTargetWorkflowPreviewSteps}
               />
             ) : null}
-            onCreateRun={() => void runAction(async () => {
-              const target = runnables.find((item) => item.id === runTarget);
-              if (!target) return;
-              const goal = runGoal.trim();
-              const run = target.kind === 'agent'
-                ? await createAgentRun(target.id, goal)
-                : await createWorkflowRun(target.id, goal);
-              openRunDetail(run.run_id, { revealInHistory: true });
-              setRunGoal('');
-              return { selectedRunId: run.run_id, runTarget: target.id };
-            }, '创建 Run')}
+            onCreateRun={() => void runAction(createRunFromTarget, '创建 Run')}
             onFinishRunHistoryManagement={finishRunHistoryManagement}
             onOpenRunDetail={openRunDetail}
             onRequestDeleteSelectedRuns={requestDeleteSelectedRuns}
