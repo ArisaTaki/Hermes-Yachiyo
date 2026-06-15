@@ -268,7 +268,7 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "aria-label=\"添加附件，当前仅支持图片\"",
             "type=\"file\"",
             "accept=\"image/*\"",
-            "listRunnables()",
+            "listYachiyoChatRunnables()",
             "const [sessionTab, setSessionTab] = useState<'agents' | 'groups'>('agents');",
             "apiPost<{",
             "`/ui/chat/groups/${encodeURIComponent(currentSessionId)}`",
@@ -2844,6 +2844,17 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
             "export function chatRunSnapshotFromTimeline",
             "pending_approval: chatPendingApprovalFromTimeline(snapshot)",
             "tool: approval.tool_name",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/runnables.ts",
+        [
+            "export async function listYachiyoChatRunnables",
+            "listYachiyoStudioAgents",
+            "listYachiyoWorkflows",
+            "return chatRunnablesFromPublicSnapshots(agents, workflows)",
+            "return listLegacyRunnables()",
+            "participants: workflowParticipants(workflow, agentById)",
         ],
     )
     _assert_contains(

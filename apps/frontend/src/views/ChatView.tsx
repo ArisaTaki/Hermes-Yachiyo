@@ -97,6 +97,7 @@ import { useChatRunPolling } from '../features/yachiyo-chat/hooks/useChatRunPoll
 import { useYachiyoTaskSnapshots } from '../features/yachiyo-chat/hooks/useYachiyoTaskSnapshots';
 import { useYachiyoTaskSubmit } from '../features/yachiyo-chat/hooks/useYachiyoTaskSubmit';
 import { approveChatRunApproval, rejectChatRunApproval } from '../features/yachiyo-chat/runSnapshots';
+import { listYachiyoChatRunnables, type ChatRunnableSummary as RunnableSummary } from '../features/yachiyo-chat/runnables';
 import { publicTaskSnapshotForMessage } from '../features/yachiyo-chat/taskSnapshots';
 import type {
   AgentTaskSnapshot,
@@ -117,7 +118,6 @@ import type {
 } from '../features/yachiyo-chat/types';
 import logoUrl from '../../../../docs/open-design/logo.png';
 import { type AssistantProfileSeed, useAssistantProfileSeed } from '../lib/assistantProfileSeed';
-import { listRunnables, type RunnableSummary } from '../lib/agents';
 import { apiGet, apiPatch, apiPost, bridgeUrl, canChooseChatImages, chooseAvatarImage, chooseChatImages, copyText, openAppView, openExternalUrl, restartDesktopBridge, type ChatImageSelection } from '../lib/bridge';
 import { ROUTE_CHANGE_EVENT, currentParam, navigateTo } from '../lib/view';
 
@@ -459,7 +459,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     let disposed = false;
     async function refreshRunnables() {
       try {
-        const payload = await listRunnables();
+        const payload = await listYachiyoChatRunnables();
         if (disposed) return;
         setRunnables(payload.filter((item) => item.enabled !== false));
       } catch {
