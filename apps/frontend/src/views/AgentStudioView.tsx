@@ -193,11 +193,16 @@ export function AgentStudioView() {
   } = useAgentStudioConfirmDialog();
   const {
     agentGroups,
+    agentGroupDefaultModel,
+    agentGroupDescription,
+    agentGroupEnabled,
     agentGroupMemoryScope,
     agentGroupMemberIds,
     agentGroupMode,
+    agentGroupModeratorId,
     agentGroupName,
     agentGroupRunGoal,
+    agentGroupToolPolicyId,
     latestAgentGroupRun,
     loadAgentGroups,
     runAgentGroup,
@@ -205,10 +210,15 @@ export function AgentStudioView() {
     selectAgentGroup,
     selectedAgentGroup,
     selectedAgentGroupId,
+    setAgentGroupDefaultModel,
+    setAgentGroupDescription,
+    setAgentGroupEnabled,
     setAgentGroupMemoryScope,
     setAgentGroupMode,
+    setAgentGroupModeratorId,
     setAgentGroupName,
     setAgentGroupRunGoal,
+    setAgentGroupToolPolicyId,
     startNewAgentGroup,
     toggleAgentGroupMember,
   } = useAgentGroups();
@@ -828,19 +838,29 @@ export function AgentStudioView() {
         <AgentGroupPanel
           agents={agents}
           agentGroups={agentGroups}
+          agentGroupDefaultModel={agentGroupDefaultModel}
+          agentGroupDescription={agentGroupDescription}
+          agentGroupEnabled={agentGroupEnabled}
           agentGroupMemoryScope={agentGroupMemoryScope || 'shared'}
           agentGroupMemberIds={agentGroupMemberIds}
           agentGroupMode={agentGroupMode || 'moderated'}
+          agentGroupModeratorId={agentGroupModeratorId}
           agentGroupName={agentGroupName}
           agentGroupRunGoal={agentGroupRunGoal}
+          agentGroupToolPolicyId={agentGroupToolPolicyId}
           busy={busy}
           latestAgentGroupRun={latestAgentGroupRun}
           selectedAgentGroup={selectedAgentGroup}
           selectedAgentGroupId={selectedAgentGroupId}
+          onAgentGroupDefaultModelChange={setAgentGroupDefaultModel}
+          onAgentGroupDescriptionChange={setAgentGroupDescription}
+          onAgentGroupEnabledChange={setAgentGroupEnabled}
           onAgentGroupMemoryScopeChange={setAgentGroupMemoryScope}
           onAgentGroupModeChange={setAgentGroupMode}
+          onAgentGroupModeratorChange={setAgentGroupModeratorId}
           onAgentGroupNameChange={setAgentGroupName}
           onAgentGroupRunGoalChange={setAgentGroupRunGoal}
+          onAgentGroupToolPolicyIdChange={setAgentGroupToolPolicyId}
           onOpenAgentGroupRunTimeline={openAgentGroupRunTimeline}
           onRunAgentGroup={() => void runAction(runCurrentAgentGroup, '启动 Group Run')}
           onSaveAgentGroup={() => void runAction(saveAgentGroup, '保存 Agent Group')}

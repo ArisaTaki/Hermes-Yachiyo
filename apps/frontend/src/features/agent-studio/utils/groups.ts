@@ -42,27 +42,31 @@ export function buildAgentGroupSaveRequest(
   currentGroup: AgentGroupSnapshot | null = null,
   mode: AgentGroupSnapshot['mode'] = currentGroup?.mode || 'moderated',
   memoryScope: AgentGroupSnapshot['memory_scope'] = currentGroup?.memory_scope || 'shared',
+  description = currentGroup?.description || '',
+  moderatorAgentId = currentGroup?.moderator_agent_id || '',
+  defaultModel = currentGroup?.default_model || '',
+  toolPolicyId = currentGroup?.tool_policy_id || '',
+  enabled = currentGroup?.enabled ?? true,
 ): SaveAgentGroupRequest {
-  const currentModeratorId = currentGroup?.moderator_agent_id;
-  const moderatorAgentId = currentModeratorId && memberIds.includes(currentModeratorId)
-    ? currentModeratorId
+  const selectedModeratorId = moderatorAgentId && memberIds.includes(moderatorAgentId)
+    ? moderatorAgentId
     : memberIds[0];
   return {
     group_id: groupId || undefined,
     name,
-    description: currentGroup?.description || undefined,
+    description: description.trim() || undefined,
     members: memberIds.map((agentId, index) => ({
       agent_id: agentId,
-      role: agentId === moderatorAgentId ? 'moderator' : 'member',
+      role: agentId === selectedModeratorId ? 'moderator' : 'member',
       sort_order: index,
       enabled: true,
     })),
     mode,
-    moderator_agent_id: moderatorAgentId || null,
-    default_model: currentGroup?.default_model || null,
+    moderator_agent_id: selectedModeratorId || null,
+    default_model: defaultModel.trim() || null,
     memory_scope: memoryScope,
-    tool_policy_id: currentGroup?.tool_policy_id || null,
-    enabled: currentGroup?.enabled ?? true,
+    tool_policy_id: toolPolicyId.trim() || null,
+    enabled,
   };
 }
 

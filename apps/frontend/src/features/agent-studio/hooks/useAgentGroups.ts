@@ -24,9 +24,14 @@ export function useAgentGroups() {
   const [agentGroups, setAgentGroups] = useState<AgentGroupSnapshot[]>([]);
   const [selectedAgentGroupId, setSelectedAgentGroupId] = useState('');
   const [agentGroupName, setAgentGroupName] = useState('New Group');
+  const [agentGroupDescription, setAgentGroupDescription] = useState('');
   const [agentGroupMemberIds, setAgentGroupMemberIds] = useState<string[]>([]);
   const [agentGroupMode, setAgentGroupMode] = useState<AgentGroupSnapshot['mode']>('moderated');
   const [agentGroupMemoryScope, setAgentGroupMemoryScope] = useState<AgentGroupSnapshot['memory_scope']>('shared');
+  const [agentGroupModeratorId, setAgentGroupModeratorId] = useState('');
+  const [agentGroupDefaultModel, setAgentGroupDefaultModel] = useState('');
+  const [agentGroupToolPolicyId, setAgentGroupToolPolicyId] = useState('');
+  const [agentGroupEnabled, setAgentGroupEnabled] = useState(true);
   const [agentGroupRunGoal, setAgentGroupRunGoal] = useState('');
   const [latestAgentGroupRun, setLatestAgentGroupRun] = useState<GroupRunSnapshot | null>(null);
 
@@ -49,17 +54,27 @@ export function useAgentGroups() {
   useEffect(() => {
     if (!selectedAgentGroup) return;
     setAgentGroupName(selectedAgentGroup.name || 'Agent Group');
+    setAgentGroupDescription(selectedAgentGroup.description || '');
     setAgentGroupMemberIds(memberIdsForAgentGroup(selectedAgentGroup));
     setAgentGroupMode(selectedAgentGroup.mode || 'moderated');
     setAgentGroupMemoryScope(selectedAgentGroup.memory_scope || 'shared');
+    setAgentGroupModeratorId(selectedAgentGroup.moderator_agent_id || '');
+    setAgentGroupDefaultModel(selectedAgentGroup.default_model || '');
+    setAgentGroupToolPolicyId(selectedAgentGroup.tool_policy_id || '');
+    setAgentGroupEnabled(selectedAgentGroup.enabled !== false);
   }, [selectedAgentGroup]);
 
   const startNewAgentGroup = useCallback(() => {
     setSelectedAgentGroupId('');
     setAgentGroupName('New Group');
+    setAgentGroupDescription('');
     setAgentGroupMemberIds([]);
     setAgentGroupMode('moderated');
     setAgentGroupMemoryScope('shared');
+    setAgentGroupModeratorId('');
+    setAgentGroupDefaultModel('');
+    setAgentGroupToolPolicyId('');
+    setAgentGroupEnabled(true);
     setAgentGroupRunGoal('');
     setLatestAgentGroupRun(null);
   }, []);
@@ -86,11 +101,23 @@ export function useAgentGroups() {
         selectedAgentGroup,
         agentGroupMode,
         agentGroupMemoryScope,
+        agentGroupDescription,
+        agentGroupModeratorId,
+        agentGroupDefaultModel,
+        agentGroupToolPolicyId,
+        agentGroupEnabled,
       ),
     );
     setSelectedAgentGroupId(saved.group_id);
     setAgentGroupName(saved.name);
+    setAgentGroupDescription(saved.description || '');
     setAgentGroupMemberIds(memberIdsForAgentGroup(saved));
+    setAgentGroupMode(saved.mode || 'moderated');
+    setAgentGroupMemoryScope(saved.memory_scope || 'shared');
+    setAgentGroupModeratorId(saved.moderator_agent_id || '');
+    setAgentGroupDefaultModel(saved.default_model || '');
+    setAgentGroupToolPolicyId(saved.tool_policy_id || '');
+    setAgentGroupEnabled(saved.enabled !== false);
     setAgentGroups((current) => {
       const nextById = new Map(current.map((group) => [group.group_id, group]));
       nextById.set(saved.group_id, saved);
@@ -101,10 +128,15 @@ export function useAgentGroups() {
       statusMessage: `已保存 Agent Group：${saved.name}`,
     };
   }, [
+    agentGroupDefaultModel,
+    agentGroupDescription,
+    agentGroupEnabled,
     agentGroupMemberIds,
     agentGroupMemoryScope,
     agentGroupMode,
+    agentGroupModeratorId,
     agentGroupName,
+    agentGroupToolPolicyId,
     selectedAgentGroup,
     selectedAgentGroupId,
   ]);
@@ -127,11 +159,16 @@ export function useAgentGroups() {
 
   return {
     agentGroups,
+    agentGroupDefaultModel,
+    agentGroupDescription,
+    agentGroupEnabled,
     agentGroupMemberIds,
     agentGroupMemoryScope,
     agentGroupMode,
+    agentGroupModeratorId,
     agentGroupName,
     agentGroupRunGoal,
+    agentGroupToolPolicyId,
     applyAgentGroups,
     latestAgentGroupRun,
     loadAgentGroups,
@@ -140,10 +177,15 @@ export function useAgentGroups() {
     selectAgentGroup,
     selectedAgentGroup,
     selectedAgentGroupId,
+    setAgentGroupDefaultModel,
+    setAgentGroupDescription,
+    setAgentGroupEnabled,
     setAgentGroupMemoryScope,
     setAgentGroupMode,
+    setAgentGroupModeratorId,
     setAgentGroupName,
     setAgentGroupRunGoal,
+    setAgentGroupToolPolicyId,
     startNewAgentGroup,
     toggleAgentGroupMember,
   };

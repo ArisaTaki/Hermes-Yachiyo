@@ -14,19 +14,29 @@ import { GroupRunPanel } from './GroupRunPanel';
 type AgentGroupPanelProps = {
   agents: AgentSpec[];
   agentGroups: AgentGroupSnapshot[];
+  agentGroupDefaultModel: string;
+  agentGroupDescription: string;
+  agentGroupEnabled: boolean;
   agentGroupMemoryScope: string;
   agentGroupMemberIds: string[];
   agentGroupMode: string;
+  agentGroupModeratorId: string;
   agentGroupName: string;
   agentGroupRunGoal: string;
+  agentGroupToolPolicyId: string;
   busy: boolean;
   latestAgentGroupRun: GroupRunSnapshot | null;
   selectedAgentGroup: AgentGroupSnapshot | null;
   selectedAgentGroupId: string;
+  onAgentGroupDefaultModelChange: (value: string) => void;
+  onAgentGroupDescriptionChange: (value: string) => void;
+  onAgentGroupEnabledChange: (value: boolean) => void;
   onAgentGroupMemoryScopeChange: (value: string) => void;
   onAgentGroupModeChange: (value: string) => void;
+  onAgentGroupModeratorChange: (value: string) => void;
   onAgentGroupNameChange: (value: string) => void;
   onAgentGroupRunGoalChange: (value: string) => void;
+  onAgentGroupToolPolicyIdChange: (value: string) => void;
   onOpenAgentGroupRunTimeline: (groupRun: GroupRunSnapshot) => void;
   onRunAgentGroup: () => void;
   onSaveAgentGroup: () => void;
@@ -61,19 +71,29 @@ function AgentGroupAvatar({ avatarUrl, name }: { avatarUrl?: string; name: strin
 export function AgentGroupPanel({
   agents,
   agentGroups,
+  agentGroupDefaultModel,
+  agentGroupDescription,
+  agentGroupEnabled,
   agentGroupMemoryScope,
   agentGroupMemberIds,
   agentGroupMode,
+  agentGroupModeratorId,
   agentGroupName,
   agentGroupRunGoal,
+  agentGroupToolPolicyId,
   busy,
   latestAgentGroupRun,
   selectedAgentGroup,
   selectedAgentGroupId,
+  onAgentGroupDefaultModelChange,
+  onAgentGroupDescriptionChange,
+  onAgentGroupEnabledChange,
   onAgentGroupMemoryScopeChange,
   onAgentGroupModeChange,
+  onAgentGroupModeratorChange,
   onAgentGroupNameChange,
   onAgentGroupRunGoalChange,
+  onAgentGroupToolPolicyIdChange,
   onOpenAgentGroupRunTimeline,
   onRunAgentGroup,
   onSaveAgentGroup,
@@ -82,6 +102,10 @@ export function AgentGroupPanel({
   onToggleAgentGroupMember,
 }: AgentGroupPanelProps) {
   const agentGroupMemberIdSet = new Set(agentGroupMemberIds);
+  const agentById = new Map(agents.map((agent) => [agent.agent_id, agent]));
+  const moderatorValue = agentGroupMemberIdSet.has(agentGroupModeratorId)
+    ? agentGroupModeratorId
+    : '';
   return (
     <section className="agent-studio-grid" data-testid="agent-studio-groups">
       <aside className="agent-studio-panel">
@@ -127,6 +151,18 @@ export function AgentGroupPanel({
           />
         </label>
 
+        <label>
+          <span>描述</span>
+          <textarea
+            className="hy-input"
+            data-testid="agent-group-description"
+            value={agentGroupDescription}
+            rows={3}
+            maxLength={1000}
+            onChange={(event) => onAgentGroupDescriptionChange(event.target.value)}
+          />
+        </label>
+
         <div className="agent-group-settings-grid">
           <label>
             <span>运行模式</span>
@@ -141,6 +177,25 @@ export function AgentGroupPanel({
             </select>
           </label>
           <label>
+            <span>主持 Agent</span>
+            <select
+              className="hy-select"
+              data-testid="agent-group-moderator"
+              value={moderatorValue}
+              onChange={(event) => onAgentGroupModeratorChange(event.target.value)}
+            >
+              <option value="">自动</option>
+              {agentGroupMemberIds.map((agentId) => {
+                const agent = agentById.get(agentId);
+                return (
+                  <option key={agentId} value={agentId}>
+                    {agent?.nickname || agent?.name || agentId}
+                  </option>
+                );
+              })}
+            </select>
+          </label>
+          <label>
             <span>记忆范围</span>
             <select
               className="hy-select"
@@ -151,6 +206,34 @@ export function AgentGroupPanel({
                 <option key={value} value={value}>{label}</option>
               ))}
             </select>
+          </label>
+          <label>
+            <span>默认模型</span>
+            <input
+              className="hy-input"
+              data-testid="agent-group-default-model"
+              value={agentGroupDefaultModel}
+              maxLength={160}
+              onChange={(event) => onAgentGroupDefaultModelChange(event.target.value)}
+            />
+          </label>
+          <label>
+            <span>Tool Policy</span>
+            <input
+              className="hy-input"
+              data-testid="agent-group-tool-policy"
+              value={agentGroupToolPolicyId}
+              maxLength={160}
+              onChange={(event) => onAgentGroupToolPolicyIdChange(event.target.value)}
+            />
+          </label>
+          <label className="agent-checkbox-row" data-testid="agent-group-enabled-toggle">
+            <input
+              type="checkbox"
+              checked={agentGroupEnabled}
+              onChange={(event) => onAgentGroupEnabledChange(event.target.checked)}
+            />
+            <span>启用群组</span>
           </label>
         </div>
 
