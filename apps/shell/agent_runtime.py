@@ -31,6 +31,9 @@ from apps.shell.agent.repositories.groups import RunGroupRepository
 from apps.shell.agent.repositories.memories import AgentMemoryStore
 from apps.shell.agent.repositories.runs import RunRepository
 from apps.shell.agent.repositories.row_projections import (
+    row_to_agent as _project_agent_row,
+    row_to_agent_private as _project_agent_private_row,
+    row_to_run as _project_run_row,
     row_to_run_group as _project_run_group_row,
     row_to_skill as _project_skill_row,
     row_to_skill_folder as _project_skill_folder_row,
@@ -1693,46 +1696,22 @@ class NativeRunEngine:
         )
 
     def _row_to_agent(self, row: Any) -> dict[str, Any]:
-        return {
-            "agent_id": row["agent_id"],
-            "name": row["name"],
-            "nickname": row["nickname"] or row["name"],
-            "description": row["description"],
-            "avatar_url": row["avatar_url"],
-            "category": row["category"],
-            "instructions": row["instructions"],
-            "persona_prompt": row["persona_prompt"],
-            "model_mode": row["model_mode"],
-            "execution_backend": _normalize_execution_backend(row["execution_backend"], model_mode=row["model_mode"]),
-            "model_profile_id": row["model_profile_id"],
-            "vision_model_profile_id": row["vision_model_profile_id"],
-            "model_config": {
-                "provider": row["model_provider"],
-                "base_url": row["model_base_url"],
-                "model": row["model_name"],
-                "api_key_configured": bool(str(row["model_credential_ref"] or "").strip() or str(row["model_api_key"] or "").strip()),
-            },
-            "tool_policy": self._compile_tool_policy(
-                row["category"],
-                _json_load(row["tool_policy_json"], self._default_tool_policy(row["category"])),
-            ),
-            "workspace_policy": self._compile_workspace_policy(
-                _json_load(row["workspace_policy_json"], self._default_workspace_policy()),
-            ),
-            "skill_ids": _json_load(row["skill_ids_json"], []),
-            "output_contract": row["output_contract"],
-            "enabled": bool(row["enabled"]),
-            "created_at": row["created_at"],
-            "updated_at": row["updated_at"],
-        }
+        return _project_agent_row(
+            row,
+            json_load=_json_load,
+            default_tool_policy=self._default_tool_policy,
+            default_workspace_policy=self._default_workspace_policy,
+            compile_tool_policy=self._compile_tool_policy,
+            compile_workspace_policy=self._compile_workspace_policy,
+            normalize_execution_backend=_normalize_execution_backend,
+        )
 
     def _row_to_agent_private(self, row: Any) -> dict[str, Any]:
-        agent = self._row_to_agent(row)
-        agent["model_config"]["credential_ref"] = row["model_credential_ref"]
-        agent["model_config"]["api_key"] = (
-            self._read_credential(str(row["model_credential_ref"] or "")) or str(row["model_api_key"] or "")
+        return _project_agent_private_row(
+            row,
+            row_to_agent=self._row_to_agent,
+            read_credential=self._read_credential,
         )
-        return agent
 
     def _main_chat_virtual_agent(self) -> dict[str, Any]:
         try:
@@ -1751,40 +1730,14 @@ class NativeRunEngine:
         return _project_workflow_row(row, json_load=_json_load)
 
     def _row_to_run(self, row: sqlite3.Row) -> dict[str, Any]:
-        row_keys = row.keys() if hasattr(row, "keys") else []
-        run_group_id = row["run_group_id"]
-        run_group_source = (
-            str(row["run_group_source"] or "")
-            if "run_group_source" in row_keys
-            else self._run_group_source(str(run_group_id or ""))
+        return _project_run_row(
+            row,
+            json_load=_json_load,
+            public_pending_approval=_public_pending_approval,
+            task_run_link_for_run=self.task_run_links.for_run,
+            run_group_source=self._run_group_source,
+            runnable_name=self._runnable_name,
         )
-        task_link = self.task_run_links.for_run(str(row["run_id"] or ""))
-        run = {
-            "run_id": row["run_id"],
-            "task_id": str(task_link["task_id"] or "") if task_link is not None else "",
-            "session_id": str(task_link["session_id"] or "") if task_link is not None else "",
-            "task_run_link_created_at": str(task_link["created_at"] or "") if task_link is not None else "",
-            "task_run_link_updated_at": str(task_link["updated_at"] or "") if task_link is not None else "",
-            "task_run_link_run_status": str(task_link["run_status"] or "") if task_link is not None else "",
-            "task_run_link_last_event_sequence": (
-                int(task_link["last_event_sequence"] or 0) if task_link is not None else 0
-            ),
-            "run_group_id": run_group_id,
-            "run_group_source": run_group_source,
-            "client_request_id": str(row["client_request_id"] or "") if "client_request_id" in row_keys else "",
-            "kind": row["kind"],
-            "runnable_id": row["runnable_id"],
-            "runnable_name": self._runnable_name(str(row["kind"]), str(row["runnable_id"])),
-            "status": row["status"],
-            "user_goal": row["user_goal"],
-            "result": row["result"],
-            "timeline": _json_load(row["timeline_json"], []),
-            "artifacts": _json_load(row["artifacts_json"], []),
-            "pending_approval": _public_pending_approval(_json_load(row["pending_approval_json"], {})),
-            "created_at": row["created_at"],
-            "updated_at": row["updated_at"],
-        }
-        return run
 
     def _row_to_run_group(self, row: sqlite3.Row) -> dict[str, Any]:
         return _project_run_group_row(row, json_load=_json_load)
