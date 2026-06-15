@@ -213,6 +213,13 @@ def test_group_run_snapshot_reuses_shared_run_projection_for_children_artifacts_
             "title": "Team review",
             "status": "running",
             "objective": "Compare options",
+            "events": [
+                {
+                    "event_type": "group.member.started",
+                    "detail": "Planner started",
+                    "payload": {"member_agent_id": "agent-1"},
+                }
+            ],
             "runs": [_run_payload()],
             "shared_artifacts": [{"kind": "markdown", "path": "team.md"}],
             "pending_approvals": [{"approval_id": "approval-group", "tool": "terminal.run"}],
@@ -220,6 +227,8 @@ def test_group_run_snapshot_reuses_shared_run_projection_for_children_artifacts_
     )
 
     assert group_run.group_run_id == "group-run-1"
+    assert group_run.events[0].event_type == "group.member.started"
+    assert group_run.events[0].payload["member_agent_id"] == "agent-1"
     assert group_run.runs[0].run_id == "run-1"
     assert group_run.runs[0].tool_calls[0].tool_name == "workspace.read"
     assert group_run.runs[0].pending_approval is not None

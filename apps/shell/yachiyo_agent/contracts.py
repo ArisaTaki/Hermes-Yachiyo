@@ -278,6 +278,7 @@ class GroupRunSnapshot(_PublicSnapshot):
     objective: str
     participants: list[AgentGroupMemberSnapshot] = Field(default_factory=list)
     active_speaker_agent_id: str | None = None
+    events: list[PublicRunEvent] = Field(default_factory=list)
     runs: list[RunTimelineSnapshot] = Field(default_factory=list)
     child_run_ids: list[str] = Field(default_factory=list)
     shared_artifacts: list[ArtifactSnapshot] = Field(default_factory=list)

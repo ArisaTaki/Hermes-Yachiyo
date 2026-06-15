@@ -246,6 +246,13 @@ def test_group_run_and_workflow_snapshots_keep_group_and_workflow_fields() -> No
         status="running",
         objective="Find the safest option",
         participants=[member],
+        events=[
+            PublicRunEvent(
+                run_id="group-run-1",
+                event_type="group.member.started",
+                detail="Planner started",
+            )
+        ],
     )
     workflow = WorkflowSnapshot(
         workflow_id="workflow-1",
@@ -258,6 +265,7 @@ def test_group_run_and_workflow_snapshots_keep_group_and_workflow_fields() -> No
     assert _json(group)["mode"] == "debate"
     assert _json(group)["members"][0]["role"] == "planner"
     assert _json(group_run)["participants"][0]["agent_id"] == "agent-1"
+    assert _json(group_run)["events"][0]["event_type"] == "group.member.started"
     assert _json(workflow)["default_input_schema"] == {"type": "object"}
 
 

@@ -69,6 +69,11 @@ def group_run_snapshot_from_payload(
         objective=_text(payload.get("objective") or payload.get("user_goal")),
         participants=agent_group_members_from_payloads(payload.get("participants")),
         active_speaker_agent_id=_optional_text(payload.get("active_speaker_agent_id")),
+        events=_RUN_PROJECTOR.events_from_payload(
+            payload,
+            run_id=group_run_id,
+            keys=("events", "run_events", "recent_events", "timeline"),
+        ),
         runs=[
             _RUN_PROJECTOR.timeline_snapshot_from_payload(item)
             for item in runs_payload

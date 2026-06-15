@@ -250,6 +250,7 @@ export type GroupRunSnapshot = {
   objective: string;
   participants: AgentGroupMemberSnapshot[];
   active_speaker_agent_id?: string | null;
+  events?: PublicRunEvent[];
   runs?: RunTimelineSnapshot[];
   child_run_ids?: string[];
   shared_artifacts?: ArtifactSnapshot[];
