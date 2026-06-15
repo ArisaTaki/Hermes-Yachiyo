@@ -528,6 +528,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "AgentGroupPanel",
             "useAgentDefinitions",
             "useAgentGroups",
+            "useRunEventReplay(selectedRunId, selectedRunReplayRefreshKey)",
             "useRunTimeline(selectedRunId, selectedRunReplayRefreshKey)",
             "useWorkflowDefinitions",
             "RunDetailPanel",
@@ -563,6 +564,16 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "export function useRunTimeline",
             "getYachiyoRunTimeline(runId)",
             "selectedPublicRunTimeline",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useRunEventReplay.ts",
+        [
+            "export function useRunEventReplay",
+            "getRunEvents(runId, 0, pageSize)",
+            "mergeRunEventReplayPages(previous?.events || currentEvents, incomingEvents)",
+            "clearRunEventReplay",
+            "selectedReplayEvents",
         ],
     )
     _assert_contains(
@@ -1712,11 +1723,7 @@ def test_chat_approval_run_detail_handoff_preserves_route_and_replay_wiring() ->
             "setSelectedRunId((current) => current === routeRunId ? current : routeRunId);",
             "if (!selectedRunId || selectedRun) return;",
             "getRun(selectedRunId)",
-            "if (!selectedRunId) return;",
-            "getRunEvents(selectedRunId, 0, RUN_EVENT_REPLAY_PAGE_SIZE)",
-            "[selectedRunId]: {",
-            "events: current[selectedRunId]?.events || [],",
-            "events: current[selectedRunId]?.events || currentEvents,",
+            "useRunEventReplay(selectedRunId, selectedRunReplayRefreshKey)",
             "selectedRunExecutionEvents",
             "function approvalFollowupRefreshOptions(selectedAfterAction: string): StudioRefreshOptions",
             "return isApprovalFollowupCurrent(selectedAfterAction) ? { selectedRunId: selectedAfterAction } : {};",
@@ -1727,6 +1734,15 @@ def test_chat_approval_run_detail_handoff_preserves_route_and_replay_wiring() ->
         "apps/frontend/src/features/agent-studio/components/RunTimeline.tsx",
         [
             "RunEvent replay facts",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useRunEventReplay.ts",
+        [
+            "getRunEvents(runId, 0, pageSize)",
+            "[runId]: {",
+            "events: current[runId]?.events || [],",
+            "events: current[runId]?.events || currentEvents,",
         ],
     )
 
@@ -2013,7 +2029,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "rerunRun",
             "approveRunApproval",
             "rejectRunApproval",
-            "getRunEvents",
+            "useRunEventReplay",
             "saveAgent",
             "const saved = draft.agent_id ? await updateAgent(draft.agent_id, request) : await createAgent(request);",
             "await deleteAgent(agentId);",
@@ -2037,26 +2053,14 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "Promise.all(groupIds.map((groupId) => getRunGroup(groupId).catch(() => null)))",
             "function pruneDeletedRunState(deletedRunIds: Set<string>)",
             "setRunDetailCache((current) => current.filter((run) => !deletedRunIds.has(run.run_id)))",
-            "setRunEventReplayByRunId((current) => {",
-            "delete next[runId];",
+            "clearRunEventReplay(deletedRunIds);",
             "childRunIds.some((runId) => !deletedRunIds.has(runId))",
             "const result = await deleteRun(run.run_id);",
-            "type RunEventReplayState = {",
-            "const RUN_EVENT_REPLAY_PAGE_SIZE = 200;",
             "runEventReplayToTimelineEvent",
-            "mergeRunEventReplayPages",
             "selectedRunExecutionEvents",
             "selectedRunReplayHasMore",
             "selectedRunReplayRefreshKey",
-            "events: current[selectedRunId]?.events || [],",
-            "hasMore: events.length >= limit,",
-            "error: err instanceof Error ? err.message : '读取 RunEvent replay 失败',",
             "loadMoreSelectedRunEvents",
-            "const afterSequence = currentEvents.reduce((max, event) => Math.max(max, Number(event.sequence) || 0), 0);",
-            "getRunEvents(selectedRunId, afterSequence, RUN_EVENT_REPLAY_PAGE_SIZE)",
-            "const events = mergeRunEventReplayPages(previous?.events || currentEvents, incomingEvents);",
-            "hasMore: incomingEvents.length >= limit,",
-            "error: err instanceof Error ? err.message : '读取更多 RunEvent replay 失败',",
             "const run = await rerunRun(selectedRun.run_id);",
             "upsertRunDetailCache([run]);",
             "await refreshRunGroupsForRuns([run]);",
@@ -2067,6 +2071,24 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "selectedAgentDeletable",
             "系统 Agent 只能查看，不能删除。",
             "AgentEditorPanel",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useRunEventReplay.ts",
+        [
+            "type RunEventReplayState = {",
+            "const defaultRunEventReplayPageSize = 200;",
+            "getRunEvents(runId, 0, pageSize)",
+            "events: current[runId]?.events || [],",
+            "hasMore: events.length >= limit,",
+            "error: err instanceof Error ? err.message : '读取 RunEvent replay 失败',",
+            "const afterSequence = currentEvents.reduce(",
+            "getRunEvents(runId, afterSequence, pageSize)",
+            "const events = mergeRunEventReplayPages(previous?.events || currentEvents, incomingEvents);",
+            "hasMore: incomingEvents.length >= limit,",
+            "error: err instanceof Error ? err.message : '读取更多 RunEvent replay 失败',",
+            "for (const runIdToDelete of runIds)",
+            "delete next[runIdToDelete];",
         ],
     )
     _assert_contains(

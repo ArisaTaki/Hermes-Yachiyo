@@ -17,6 +17,7 @@ import { RunLauncherPanel } from '../features/agent-studio/components/RunLaunche
 import { WorkflowEditorPanel, WorkflowRunPreview } from '../features/agent-studio/components/WorkflowEditorPanel';
 import { useAgentDefinitions } from '../features/agent-studio/hooks/useAgentDefinitions';
 import { useAgentGroups } from '../features/agent-studio/hooks/useAgentGroups';
+import { useRunEventReplay } from '../features/agent-studio/hooks/useRunEventReplay';
 import { useRunTimeline } from '../features/agent-studio/hooks/useRunTimeline';
 import { useWorkflowDefinitions } from '../features/agent-studio/hooks/useWorkflowDefinitions';
 import {
@@ -55,7 +56,6 @@ import {
   type RunStatusFilter,
 } from '../features/agent-studio/utils/runs';
 import {
-  mergeRunEventReplayPages,
   runEventReplayToTimelineEvent,
 } from '../features/agent-studio/utils/runTimeline';
 import {
@@ -123,7 +123,6 @@ import {
   detachSkill,
   getRun,
   getRunArtifact,
-  getRunEvents,
   getRunGroup,
   importSkill,
   installSkillCommand,
@@ -151,7 +150,6 @@ import {
   type MemorySpec,
   type RunnableSummary,
   type RunGroupSpec,
-  type RunEventSpec,
   type RunSpec,
   type SkillFolderSpec,
   type SkillSourceRoot,
@@ -163,14 +161,6 @@ import { listModelProfiles, type ModelProfile, type ModelProfileDefaults } from 
 import { currentParam, navigateTo } from '../lib/view';
 
 type StudioTab = 'agents' | 'groups' | 'skills' | 'skill-groups' | 'workflows' | 'runs' | 'memory';
-
-type RunEventReplayState = {
-  events: RunEventSpec[];
-  limit: number;
-  hasMore: boolean;
-  loading: boolean;
-  error?: string;
-};
 
 type StudioRefreshOptions = {
   selectedAgentId?: string;
@@ -188,7 +178,6 @@ type ApprovedApprovalGuard = {
   staleUntil: number;
 };
 
-const RUN_EVENT_REPLAY_PAGE_SIZE = 200;
 const approvedApprovalStaleWindowMs = 6000;
 const runApprovalPollAttempts = 100;
 const runApprovalPollIntervalMs = 1200;
@@ -298,7 +287,6 @@ export function AgentStudioView() {
   const [memories, setMemories] = useState<MemorySpec[]>([]);
   const [futureTasks, setFutureTasks] = useState<FutureTaskSpec[]>([]);
   const [runDetailCache, setRunDetailCache] = useState<RunSpec[]>([]);
-  const [runEventReplayByRunId, setRunEventReplayByRunId] = useState<Record<string, RunEventReplayState>>({});
   const approvedApprovalGuardsRef = useRef<Map<string, ApprovedApprovalGuard>>(new Map());
   const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
   const [selectedRunIds, setSelectedRunIds] = useState<string[]>([]);
@@ -461,17 +449,14 @@ export function AgentStudioView() {
     [selectedRun, selectedRunId],
   );
   const { selectedPublicRunTimeline } = useRunTimeline(selectedRunId, selectedRunReplayRefreshKey);
-  const selectedRunReplayState = useMemo(
-    () => selectedRunId ? runEventReplayByRunId[selectedRunId] || null : null,
-    [runEventReplayByRunId, selectedRunId],
-  );
-  const selectedRunReplayEvents = useMemo(
-    () => selectedRunReplayState?.events || [],
-    [selectedRunReplayState],
-  );
-  const selectedRunReplayHasMore = Boolean(selectedRunReplayState?.hasMore);
-  const selectedRunReplayLoading = Boolean(selectedRunReplayState?.loading);
-  const selectedRunReplayError = selectedRunReplayState?.error || '';
+  const {
+    clearRunEventReplay,
+    loadMoreSelectedRunEvents: loadMoreRunReplayEvents,
+    selectedReplayError: selectedRunReplayError,
+    selectedReplayEvents: selectedRunReplayEvents,
+    selectedReplayHasMore: selectedRunReplayHasMore,
+    selectedReplayLoading: selectedRunReplayLoading,
+  } = useRunEventReplay(selectedRunId, selectedRunReplayRefreshKey);
   const selectedRunExecutionEvents = useMemo(
     () => selectedRunReplayEvents.length
       ? selectedRunReplayEvents.map(runEventReplayToTimelineEvent)
@@ -938,17 +923,7 @@ export function AgentStudioView() {
     if (!deletedRunIds.size) return;
     setRuns((current) => current.filter((run) => !deletedRunIds.has(run.run_id)));
     setRunDetailCache((current) => current.filter((run) => !deletedRunIds.has(run.run_id)));
-    setRunEventReplayByRunId((current) => {
-      let changed = false;
-      const next = { ...current };
-      deletedRunIds.forEach((runId) => {
-        if (Object.prototype.hasOwnProperty.call(next, runId)) {
-          delete next[runId];
-          changed = true;
-        }
-      });
-      return changed ? next : current;
-    });
+    clearRunEventReplay(deletedRunIds);
     setRunGroups((current) => current.filter((group) => {
       const childRunIds = group.child_run_ids || [];
       return !childRunIds.length || childRunIds.some((runId) => !deletedRunIds.has(runId));
@@ -1121,55 +1096,6 @@ export function AgentStudioView() {
       disposed = true;
     };
   }, [selectedRun, selectedRunId]);
-
-  useEffect(() => {
-    if (!selectedRunId) return;
-    let disposed = false;
-    setRunEventReplayByRunId((current) => ({
-      ...current,
-      [selectedRunId]: {
-        events: current[selectedRunId]?.events || [],
-        limit: RUN_EVENT_REPLAY_PAGE_SIZE,
-        hasMore: current[selectedRunId]?.hasMore || false,
-        loading: true,
-        error: '',
-      },
-    }));
-    getRunEvents(selectedRunId, 0, RUN_EVENT_REPLAY_PAGE_SIZE)
-      .then((page) => {
-        if (!disposed) {
-          const events = page.events || [];
-          const limit = page.limit || RUN_EVENT_REPLAY_PAGE_SIZE;
-          setRunEventReplayByRunId((current) => ({
-            ...current,
-            [selectedRunId]: {
-              events,
-              limit,
-              hasMore: events.length >= limit,
-              loading: false,
-              error: '',
-            },
-          }));
-        }
-      })
-      .catch((err: unknown) => {
-        if (!disposed) {
-          setRunEventReplayByRunId((current) => ({
-            ...current,
-            [selectedRunId]: {
-              events: current[selectedRunId]?.events || [],
-              limit: current[selectedRunId]?.limit || RUN_EVENT_REPLAY_PAGE_SIZE,
-              hasMore: current[selectedRunId]?.hasMore || false,
-              loading: false,
-              error: err instanceof Error ? err.message : '读取 RunEvent replay 失败',
-            },
-          }));
-        }
-      });
-    return () => {
-      disposed = true;
-    };
-  }, [selectedRunId, selectedRunReplayRefreshKey]);
 
   useEffect(() => {
     if (!isPotentialWorkflowChildAgentRun(selectedRun)) return;
@@ -2076,51 +2002,8 @@ export function AgentStudioView() {
   }
 
   async function loadMoreSelectedRunEvents() {
-    if (!selectedRunId) return;
-    const currentState = runEventReplayByRunId[selectedRunId];
-    const currentEvents = currentState?.events || [];
-    const afterSequence = currentEvents.reduce((max, event) => Math.max(max, Number(event.sequence) || 0), 0);
-    setRunEventReplayByRunId((current) => ({
-      ...current,
-      [selectedRunId]: {
-        events: current[selectedRunId]?.events || currentEvents,
-        limit: current[selectedRunId]?.limit || RUN_EVENT_REPLAY_PAGE_SIZE,
-        hasMore: current[selectedRunId]?.hasMore ?? true,
-        loading: true,
-        error: '',
-      },
-    }));
-    try {
-      const page = await getRunEvents(selectedRunId, afterSequence, RUN_EVENT_REPLAY_PAGE_SIZE);
-      const incomingEvents = page.events || [];
-      const limit = page.limit || RUN_EVENT_REPLAY_PAGE_SIZE;
-      setRunEventReplayByRunId((current) => {
-        const previous = current[selectedRunId];
-        const events = mergeRunEventReplayPages(previous?.events || currentEvents, incomingEvents);
-        return {
-          ...current,
-          [selectedRunId]: {
-            events,
-            limit,
-            hasMore: incomingEvents.length >= limit,
-            loading: false,
-            error: '',
-          },
-        };
-      });
-      setStatus(incomingEvents.length ? `已加载 ${incomingEvents.length} 条 RunEvent replay` : '没有更多 RunEvent replay');
-    } catch (err) {
-      setRunEventReplayByRunId((current) => ({
-        ...current,
-        [selectedRunId]: {
-          events: current[selectedRunId]?.events || currentEvents,
-          limit: current[selectedRunId]?.limit || RUN_EVENT_REPLAY_PAGE_SIZE,
-          hasMore: current[selectedRunId]?.hasMore ?? true,
-          loading: false,
-          error: err instanceof Error ? err.message : '读取更多 RunEvent replay 失败',
-        },
-      }));
-    }
+    const loadedCount = await loadMoreRunReplayEvents();
+    setStatus(loadedCount ? `已加载 ${loadedCount} 条 RunEvent replay` : '没有更多 RunEvent replay');
   }
 
   async function approveRunById(runId: string, nextSelectedRunId?: string): Promise<StudioRefreshOptions> {
