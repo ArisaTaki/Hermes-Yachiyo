@@ -99,3 +99,77 @@ class RuntimeWorkflowRunStarter:
             client_request_id=client_request_id,
         )
         return WorkflowRunStart(run, root_group=root_group)
+
+
+class RuntimeWorkflowRunCoordinator:
+    """Coordinates synchronous Workflow Run validation, projection, and continuation."""
+
+    def __init__(
+        self,
+        *,
+        get_workflow: Callable[[str], dict[str, Any]],
+        validate_workflow: Callable[[list[dict[str, Any]], list[dict[str, Any]]], dict[str, Any]],
+        validate_workflow_agent_nodes: Callable[[list[dict[str, Any]]], None],
+        validate_workflow_subworkflow_nodes: Callable[..., None],
+        validate_workflow_runnable_steps: Callable[[list[dict[str, Any]]], None],
+        validate_workflow_agent_run_readiness: Callable[[list[dict[str, Any]]], None],
+        starter: RuntimeWorkflowRunStarter,
+        start_projector: Any,
+        append_run_event: Callable[[str, str, dict[str, Any]], Any],
+        continue_workflow_run: Callable[..., dict[str, Any]],
+        lock: AbstractContextManager[Any],
+        error_type: type[Exception],
+    ) -> None:
+        self._get_workflow = get_workflow
+        self._validate_workflow = validate_workflow
+        self._validate_workflow_agent_nodes = validate_workflow_agent_nodes
+        self._validate_workflow_subworkflow_nodes = validate_workflow_subworkflow_nodes
+        self._validate_workflow_runnable_steps = validate_workflow_runnable_steps
+        self._validate_workflow_agent_run_readiness = validate_workflow_agent_run_readiness
+        self._starter = starter
+        self._start_projector = start_projector
+        self._append_run_event = append_run_event
+        self._continue_workflow_run = continue_workflow_run
+        self._lock = lock
+        self._error_type = error_type
+
+    def create_sync(self, payload: dict[str, Any]) -> dict[str, Any]:
+        workflow_id = str(payload.get("workflow_id") or payload.get("runnable_id") or "")
+        user_goal = str(payload.get("user_goal") or payload.get("goal") or "").strip()
+        if not workflow_id:
+            raise self._error_type("缺少 workflow_id")
+        if not user_goal:
+            raise self._error_type("运行目标不能为空")
+        workflow = self._get_workflow(workflow_id)
+        if not workflow.get("enabled", True):
+            raise self._error_type("Workflow 已停用")
+        nodes = workflow["nodes"]
+        self._validate_workflow(nodes, workflow["edges"])
+        self._validate_workflow_agent_nodes(nodes)
+        self._validate_workflow_subworkflow_nodes(nodes, parent_workflow_id=workflow_id)
+        self._validate_workflow_runnable_steps(nodes)
+        self._validate_workflow_agent_run_readiness(nodes)
+        start = self._starter.start_sync(
+            payload,
+            workflow=workflow,
+            workflow_id=workflow_id,
+            lock=self._lock,
+        )
+        if start.existing:
+            return start.run
+        run = start.run
+        timeline, started_payload = self._start_projector.started_projection(workflow_id, workflow)
+        self._append_run_event(
+            run["run_id"],
+            "workflow.run.started",
+            started_payload,
+        )
+        return self._continue_workflow_run(
+            run,
+            workflow,
+            context=user_goal,
+            timeline=timeline,
+            artifacts=[],
+            start_index=0,
+            root_group=start.root_group,
+        )

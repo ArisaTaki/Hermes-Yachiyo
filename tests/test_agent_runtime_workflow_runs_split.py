@@ -6,7 +6,11 @@ import threading
 from typing import Any
 
 from apps.shell import agent_runtime
-from apps.shell.agent.runtime.workflow_runs import RuntimeWorkflowRunStarter
+from apps.shell.agent.runtime.workflow_runs import (
+    RuntimeWorkflowRunCoordinator,
+    RuntimeWorkflowRunStarter,
+    WorkflowRunStart,
+)
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
 
@@ -111,6 +115,103 @@ def test_workflow_run_starter_async_preserves_legacy_non_idempotent_behavior() -
     assert len(state["runs"]) == 1
 
 
+def test_workflow_run_coordinator_validates_projects_and_continues() -> None:
+    calls: list[tuple[str, Any]] = []
+    workflow = {
+        "workflow_id": "workflow-1",
+        "name": "Flow",
+        "enabled": True,
+        "nodes": [{"id": "start", "type": "start"}],
+        "edges": [],
+    }
+
+    class _Starter:
+        def start_sync(
+            self,
+            payload: dict[str, Any],
+            *,
+            workflow: dict[str, Any],
+            workflow_id: str,
+            lock: Any,
+        ) -> WorkflowRunStart:
+            calls.append(("start", payload, workflow_id, lock))
+            return WorkflowRunStart({"run_id": "run-1"}, root_group=True)
+
+    class _Projector:
+        @staticmethod
+        def started_projection(
+            workflow_id: str,
+            workflow: dict[str, Any],
+        ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+            calls.append(("project", workflow_id, workflow["name"]))
+            return [{"event": "workflow.run.started"}], {"workflow_id": workflow_id}
+
+    coordinator = RuntimeWorkflowRunCoordinator(
+        get_workflow=lambda workflow_id: calls.append(("workflow", workflow_id)) or workflow,
+        validate_workflow=lambda nodes, edges: calls.append(("validate", nodes, edges)) or {"ok": True},
+        validate_workflow_agent_nodes=lambda nodes: calls.append(("agent_nodes", nodes)),
+        validate_workflow_subworkflow_nodes=lambda nodes, **kwargs: calls.append(("subworkflows", nodes, kwargs)),
+        validate_workflow_runnable_steps=lambda nodes: calls.append(("runnable_steps", nodes)),
+        validate_workflow_agent_run_readiness=lambda nodes: calls.append(("readiness", nodes)),
+        starter=_Starter(),  # type: ignore[arg-type]
+        start_projector=_Projector(),
+        append_run_event=lambda run_id, event_type, payload: calls.append(("event", run_id, event_type, payload)),
+        continue_workflow_run=lambda run, workflow, **kwargs: calls.append(("continue", run["run_id"], kwargs))
+        or {"run_id": run["run_id"], "status": "completed"},
+        lock=object(),
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = coordinator.create_sync({"workflow_id": "workflow-1", "user_goal": "Ship"})
+
+    assert result == {"run_id": "run-1", "status": "completed"}
+    assert calls[0] == ("workflow", "workflow-1")
+    assert calls[1][0] == "validate"
+    assert calls[7][0] == "project"
+    assert calls[8] == ("event", "run-1", "workflow.run.started", {"workflow_id": "workflow-1"})
+    assert calls[9][0] == "continue"
+    assert calls[9][2]["root_group"] is True
+
+
+def test_workflow_run_coordinator_returns_existing_idempotent_run_without_projection() -> None:
+    class _Starter:
+        def start_sync(
+            self,
+            payload: dict[str, Any],
+            *,
+            workflow: dict[str, Any],
+            workflow_id: str,
+            lock: Any,
+        ) -> WorkflowRunStart:
+            return WorkflowRunStart({"run_id": "existing", "idempotent": True}, root_group=False, existing=True)
+
+    coordinator = RuntimeWorkflowRunCoordinator(
+        get_workflow=lambda workflow_id: {
+            "workflow_id": workflow_id,
+            "name": "Flow",
+            "enabled": True,
+            "nodes": [{"id": "start", "type": "start"}],
+            "edges": [],
+        },
+        validate_workflow=lambda _nodes, _edges: {"ok": True},
+        validate_workflow_agent_nodes=lambda _nodes: None,
+        validate_workflow_subworkflow_nodes=lambda _nodes, **_kwargs: None,
+        validate_workflow_runnable_steps=lambda _nodes: None,
+        validate_workflow_agent_run_readiness=lambda _nodes: None,
+        starter=_Starter(),  # type: ignore[arg-type]
+        start_projector=object(),
+        append_run_event=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not append")),
+        continue_workflow_run=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not continue")),
+        lock=object(),
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    assert coordinator.create_sync({"workflow_id": "workflow-1", "user_goal": "Ship"}) == {
+        "run_id": "existing",
+        "idempotent": True,
+    }
+
+
 def test_native_runtime_uses_split_workflow_run_starter_and_keeps_sync_idempotency(tmp_path) -> None:
     service = AgentRuntimeService(
         db_path=tmp_path / "agent-runtime.db",
@@ -120,7 +221,9 @@ def test_native_runtime_uses_split_workflow_run_starter_and_keeps_sync_idempoten
     )
     try:
         assert agent_runtime.RuntimeWorkflowRunStarter is RuntimeWorkflowRunStarter
+        assert agent_runtime.RuntimeWorkflowRunCoordinator is RuntimeWorkflowRunCoordinator
         assert isinstance(service.workflow_run_starter, RuntimeWorkflowRunStarter)
+        assert isinstance(service.workflow_run_coordinator, RuntimeWorkflowRunCoordinator)
         workflow = service.create_workflow(
             {
                 "name": "Starter Flow",
