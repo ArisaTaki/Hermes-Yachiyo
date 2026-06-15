@@ -1,0 +1,107 @@
+"""Tests for main chat runtime config split out of the legacy runtime."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from apps.shell import agent_runtime
+from apps.shell.agent.runtime.main_chat_config import MainChatRuntimeConfigBuilder
+from apps.shell.agent.tools.policy import (
+    FUTURE_TASK_TOOL_NAMES,
+    MEMORY_TOOL_NAMES,
+    RuntimePolicyCompiler,
+)
+from apps.shell.agent_runtime import AgentRuntimeService
+from apps.shell.credential_store import MemoryCredentialStore
+
+
+def test_main_chat_config_builder_projects_daily_entrypoint_runtime(tmp_path) -> None:
+    compiler = RuntimePolicyCompiler()
+    trusted: list[tuple[dict[str, Any], str, bool]] = []
+    projects_dir = tmp_path / "projects"
+
+    builder = MainChatRuntimeConfigBuilder(
+        main_chat_agent_id="builtin:yachiyo-main",
+        agent_workspaces_dir=tmp_path / "agent-workspaces",
+        workspace_status=lambda: {"initialized": True, "dirs": {"projects": str(projects_dir)}},
+        compile_tool_policy=compiler.compile_tool_policy,
+        compile_workspace_policy=compiler.compile_workspace_policy,
+        trust_workspace_from_policy=lambda policy, *, source, commit: trusted.append(
+            (policy, source, commit)
+        ),
+        memory_tool_names=sorted(MEMORY_TOOL_NAMES),
+        future_task_tool_names=sorted(FUTURE_TASK_TOOL_NAMES),
+    )
+
+    config = builder.agent_config(model_profile_id=" profile-chat ")
+
+    assert config["agent_id"] == "builtin:yachiyo-main"
+    assert config["model_profile_id"] == "profile-chat"
+    assert config["output_contract"] == "chat"
+    assert config["workspace_policy"] == {
+        "default_workdir": str(projects_dir),
+        "readable_scopes": ["."],
+        "writable_scopes": [],
+    }
+    assert projects_dir.exists()
+    assert trusted == [(config["workspace_policy"], "main_chat", True)]
+    assert "workspace.read" in config["tool_policy"]["allowed_tools"]
+    assert "artifact.write" in config["tool_policy"]["allowed_tools"]
+    allowed_tools = set(config["tool_policy"]["allowed_tools"])
+    assert set(MEMORY_TOOL_NAMES).issubset(allowed_tools)
+    assert set(FUTURE_TASK_TOOL_NAMES).issubset(allowed_tools)
+
+
+def test_main_chat_config_builder_projects_virtual_agent_without_trusting_workspace(tmp_path) -> None:
+    compiler = RuntimePolicyCompiler()
+    trusted: list[tuple[dict[str, Any], str, bool]] = []
+    builder = MainChatRuntimeConfigBuilder(
+        main_chat_agent_id="builtin:yachiyo-main",
+        agent_workspaces_dir=tmp_path / "agent-workspaces",
+        workspace_status=lambda: {},
+        compile_tool_policy=compiler.compile_tool_policy,
+        compile_workspace_policy=compiler.compile_workspace_policy,
+        trust_workspace_from_policy=lambda policy, *, source, commit: trusted.append(
+            (policy, source, commit)
+        ),
+        memory_tool_names=sorted(MEMORY_TOOL_NAMES),
+        future_task_tool_names=sorted(FUTURE_TASK_TOOL_NAMES),
+    )
+
+    agent = builder.virtual_agent(default_profile_id="profile-chat")
+
+    assert agent["virtual"] is True
+    assert agent["system"] is True
+    assert agent["builtin"] is True
+    assert agent["model_config"]["api_key_configured"] is True
+    assert agent["workspace_policy"]["default_workdir"] == str(
+        tmp_path / "agent-workspaces" / "builtin-yachiyo-main"
+    )
+    assert trusted == []
+
+
+def test_native_runtime_installs_main_chat_config_builder(tmp_path) -> None:
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime.db",
+        workspace_dir=tmp_path / "runtime",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    try:
+        assert agent_runtime.MainChatRuntimeConfigBuilder is MainChatRuntimeConfigBuilder
+        assert isinstance(service.main_chat_config, MainChatRuntimeConfigBuilder)
+
+        config = service._main_chat_agent_config(
+            model_profile_id="profile-chat",
+            workspace_policy={
+                "default_workdir": str(tmp_path / "daily"),
+                "readable_scopes": ".",
+                "writable_scopes": [],
+            },
+        )
+
+        assert config["agent_id"] == "builtin:yachiyo-main"
+        assert config["workspace_policy"]["readable_scopes"] == ["."]
+        assert config["tool_policy"] == service._main_chat_tool_policy()
+    finally:
+        service.close()

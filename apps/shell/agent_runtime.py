@@ -134,6 +134,7 @@ from apps.shell.agent.runtime.events import (
     tool_trace_status as _tool_trace_status,
 )
 from apps.shell.agent.runtime.future_task_scheduler import FutureTaskTriggerScheduler
+from apps.shell.agent.runtime.main_chat_config import MainChatRuntimeConfigBuilder
 from apps.shell.agent.runtime.memory_services import RuntimeMemoryService
 from apps.shell.agent.runtime.model_profiles import RuntimeModelProfileResolver
 from apps.shell.agent.runtime.model_messages import (
@@ -606,6 +607,18 @@ class NativeRunEngine:
             error_type=AgentRuntimeError,
         )
         self._install_runtime_core_services(core_services)
+        self._install_runtime_main_chat_config(
+            MainChatRuntimeConfigBuilder(
+                main_chat_agent_id=_MAIN_CHAT_AGENT_ID,
+                agent_workspaces_dir=self.agent_workspaces_dir,
+                workspace_status=get_workspace_status,
+                compile_tool_policy=self._compile_tool_policy,
+                compile_workspace_policy=self._compile_workspace_policy,
+                trust_workspace_from_policy=self._trust_workspace_from_policy,
+                memory_tool_names=list(_MEMORY_TOOL_NAMES),
+                future_task_tool_names=list(_FUTURE_TASK_TOOL_NAMES),
+            )
+        )
         tooling = _build_runtime_tooling(
             normalize_tool_name=_normalize_tool_name,
             input_preview=_tool_input_preview,
@@ -806,6 +819,9 @@ class NativeRunEngine:
         self.runtime_agent_timeline = core_services.runtime_agent_timeline
         self.runtime_policy = core_services.runtime_policy
         self.model_profile_resolver = core_services.model_profile_resolver
+
+    def _install_runtime_main_chat_config(self, main_chat_config: MainChatRuntimeConfigBuilder) -> None:
+        self.main_chat_config = main_chat_config
 
     def _install_runtime_tooling(self, tooling: RuntimeToolingBundle) -> None:
         self.tool_loop_projection = tooling.tool_loop_projection
@@ -1856,44 +1872,7 @@ class NativeRunEngine:
             default_profile_id = str(get_model_profile_service().get_defaults().get("chat") or "").strip()
         except Exception:
             default_profile_id = ""
-        return {
-            "agent_id": _MAIN_CHAT_AGENT_ID,
-            "name": "Yachiyo",
-            "nickname": "Yachiyo",
-            "description": "Oha-Yachiyo main chat system agent.",
-            "avatar_url": "",
-            "category": "orchestrator",
-            "instructions": "Main chat native agent.",
-            "persona_prompt": "",
-            "model_mode": "profile",
-            "execution_backend": "native_profile",
-            "model_profile_id": default_profile_id,
-            "vision_model_profile_id": "",
-            "model_config": {
-                "provider": "model_profile",
-                "base_url": "",
-                "model": "",
-                "api_key_configured": bool(default_profile_id),
-            },
-            "tool_policy": self._main_chat_tool_policy(),
-            "workspace_policy": self._compile_workspace_policy(
-                {
-                    "default_workdir": str(self.agent_workspaces_dir / "builtin-yachiyo-main"),
-                    "readable_scopes": ["."],
-                    "writable_scopes": [],
-                }
-            ),
-            "skill_ids": [],
-            "output_contract": "chat",
-            "enabled": True,
-            "virtual": True,
-            "system": True,
-            "builtin": True,
-            "editable": False,
-            "deletable": False,
-            "created_at": "",
-            "updated_at": "",
-        }
+        return self.main_chat_config.virtual_agent(default_profile_id=default_profile_id)
 
     def _row_to_skill(self, row: sqlite3.Row) -> dict[str, Any]:
         return _project_skill_row(row, skills_dir=self.skills_dir, json_load=_json_load)
@@ -2753,41 +2732,10 @@ class NativeRunEngine:
         return content
 
     def _main_chat_workspace_policy(self, policy: dict[str, Any] | None = None) -> dict[str, Any]:
-        if isinstance(policy, dict):
-            compiled = self._compile_workspace_policy(policy)
-        else:
-            workspace = get_workspace_status()
-            dirs = workspace.get("dirs") if isinstance(workspace.get("dirs"), dict) else {}
-            if workspace.get("initialized") and dirs.get("projects"):
-                workdir = Path(str(dirs["projects"]))
-            else:
-                workdir = self.agent_workspaces_dir / "builtin-yachiyo-main"
-            workdir.mkdir(parents=True, exist_ok=True)
-            compiled = self._compile_workspace_policy(
-                {
-                    "default_workdir": str(workdir),
-                    "readable_scopes": ["."],
-                    "writable_scopes": [],
-                }
-            )
-        if not str(compiled.get("default_workdir") or "").strip():
-            workdir = self.agent_workspaces_dir / "builtin-yachiyo-main"
-            workdir.mkdir(parents=True, exist_ok=True)
-            compiled = {**compiled, "default_workdir": str(workdir)}
-        self._trust_workspace_from_policy(compiled, source="main_chat", commit=True)
-        return compiled
+        return self.main_chat_config.workspace_policy(policy)
 
     def _main_chat_tool_policy(self, policy: dict[str, Any] | None = None) -> dict[str, Any]:
-        raw = policy if isinstance(policy, dict) else {
-            "allowed_tools": [
-                "workspace.list",
-                "workspace.read",
-                *_MEMORY_TOOL_NAMES,
-                *_FUTURE_TASK_TOOL_NAMES,
-                "artifact.write",
-            ]
-        }
-        return self._compile_tool_policy("custom", raw)
+        return self.main_chat_config.tool_policy(policy)
 
     def _main_chat_agent_config(
         self,
@@ -2796,24 +2744,11 @@ class NativeRunEngine:
         tool_policy: dict[str, Any] | None = None,
         workspace_policy: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        return {
-            "agent_id": _MAIN_CHAT_AGENT_ID,
-            "name": "Yachiyo",
-            "nickname": "Yachiyo",
-            "category": "orchestrator",
-            "instructions": "Main chat native agent.",
-            "persona_prompt": "",
-            "model_mode": "profile",
-            "execution_backend": "native_profile",
-            "model_profile_id": str(model_profile_id or "").strip(),
-            "vision_model_profile_id": "",
-            "model_config": {},
-            "tool_policy": self._main_chat_tool_policy(tool_policy),
-            "workspace_policy": self._main_chat_workspace_policy(workspace_policy),
-            "skill_ids": [],
-            "output_contract": "chat",
-            "enabled": True,
-        }
+        return self.main_chat_config.agent_config(
+            model_profile_id=model_profile_id,
+            tool_policy=tool_policy,
+            workspace_policy=workspace_policy,
+        )
 
     @staticmethod
     def _main_chat_pending_approval(
