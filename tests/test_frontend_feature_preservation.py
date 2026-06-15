@@ -768,6 +768,18 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
         ],
     )
     _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useSkillLibraryDerivedState.ts",
+        [
+            "export function useSkillLibraryDerivedState",
+            "skillMatchesSourceFilter(skill, skillLibraryFilter)",
+            "skillMatchesFolderFilter(skill, skillLibraryFolderFilter)",
+            "skillMatchesQuery(skill, skillLibrarySearch)",
+            "skillFolderNameError(newSkillFolderName, skillFolders)",
+            "visibleMountSkillIds",
+            "ungroupedSkillStats",
+        ],
+    )
+    _assert_contains(
         "apps/frontend/src/features/agent-studio/utils/groups.ts",
         [
             "export function agentGroupListMeta",
@@ -2205,6 +2217,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "useSkillDeletionActions",
             "useSkillFolderManagement",
             "useSkillImportActions",
+            "useSkillLibraryDerivedState",
             "useSkillSourceInputActions",
             "useWorkflowCanvasActions",
             "useWorkflowDeletionActions",

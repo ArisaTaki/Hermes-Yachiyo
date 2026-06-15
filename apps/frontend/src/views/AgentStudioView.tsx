@@ -37,6 +37,7 @@ import { useRuntimeMemoryManagement } from '../features/agent-studio/hooks/useRu
 import { useSkillDeletionActions } from '../features/agent-studio/hooks/useSkillDeletionActions';
 import { useSkillFolderManagement } from '../features/agent-studio/hooks/useSkillFolderManagement';
 import { useSkillImportActions } from '../features/agent-studio/hooks/useSkillImportActions';
+import { useSkillLibraryDerivedState } from '../features/agent-studio/hooks/useSkillLibraryDerivedState';
 import { useSkillSourceInputActions } from '../features/agent-studio/hooks/useSkillSourceInputActions';
 import { useWorkflowDeletionActions } from '../features/agent-studio/hooks/useWorkflowDeletionActions';
 import { useWorkflowDefinitions } from '../features/agent-studio/hooks/useWorkflowDefinitions';
@@ -80,12 +81,6 @@ import {
   runEventReplayToTimelineEvent,
 } from '../features/agent-studio/utils/runTimeline';
 import {
-  isInstalledSkill,
-  isNativeSkill,
-  skillFolderNameError,
-  skillMatchesFolderFilter,
-  skillMatchesQuery,
-  skillMatchesSourceFilter,
   type SkillFolderFilter,
   type SkillImportResult,
   type SkillSourceFilter,
@@ -772,30 +767,37 @@ export function AgentStudioView() {
     if (!workflowHasRunnableSteps(workflowNodes(workflow))) return workflowRunnableStepRequiredMessage;
     return workflowAgentRunReadinessIssue(workflowNodes(workflow), agentRunIssueById);
   }, [agentRunIssueById, agents, selectedRun, selectedRunRerunTarget, workflows]);
-  const mountedSkillCount = useMemo(
-    () => skills.filter((skill) => skill.enabled !== false && selectedAgent?.skill_ids?.includes(skill.skill_id)).length,
-    [selectedAgent, skills],
-  );
-  const enabledSkills = useMemo(() => skills.filter((skill) => skill.enabled !== false), [skills]);
-  const installedSkillCount = useMemo(() => skills.filter(isInstalledSkill).length, [skills]);
-  const nativeSkillCount = useMemo(() => skills.filter(isNativeSkill).length, [skills]);
-  const filteredLibrarySkills = useMemo(
-    () => skills.filter((skill) => (
-      skillMatchesSourceFilter(skill, skillLibraryFilter)
-      && skillMatchesFolderFilter(skill, skillLibraryFolderFilter)
-      && skillMatchesQuery(skill, skillLibrarySearch)
-    )),
-    [skills, skillLibraryFilter, skillLibraryFolderFilter, skillLibrarySearch],
-  );
-  const filteredLibrarySkillIds = useMemo(
-    () => filteredLibrarySkills.map((skill) => skill.skill_id).filter(Boolean),
-    [filteredLibrarySkills],
-  );
-  const selectedSkillIdSet = useMemo(() => new Set(selectedSkillIds), [selectedSkillIds]);
-  const selectedLibrarySkills = useMemo(
-    () => filteredLibrarySkills.filter((skill) => selectedSkillIdSet.has(skill.skill_id)),
-    [filteredLibrarySkills, selectedSkillIdSet],
-  );
+  const {
+    allLibrarySkillsSelected,
+    disabledMountedSkills,
+    editingSkillFolderError,
+    filteredLibrarySkillIds,
+    filteredLibrarySkills,
+    filteredMountSkills,
+    installedSkillCount,
+    mountedSkillCount,
+    nativeSkillCount,
+    newSkillFolderError,
+    selectedLibrarySkills,
+    selectedSkillIdSet,
+    ungroupedSkillStats,
+    visibleMountedCount,
+    visibleMountSkillIds,
+  } = useSkillLibraryDerivedState({
+    editingSkillFolderId,
+    editingSkillFolderName,
+    newSkillFolderName,
+    selectedAgent,
+    selectedSkillIds,
+    skillFolders,
+    skillLibraryFilter,
+    skillLibraryFolderFilter,
+    skillLibrarySearch,
+    skillMountFilter,
+    skillMountFolderFilter,
+    skillMountSearch,
+    skills,
+  });
   const {
     requestDeleteSelectedSkills,
     requestDeleteSkill,
@@ -852,19 +854,6 @@ export function AgentStudioView() {
     setSelectedWorkflowIds,
     showConfirmDialog,
   });
-  const allLibrarySkillsSelected = filteredLibrarySkillIds.length > 0 && selectedLibrarySkills.length === filteredLibrarySkillIds.length;
-  const filteredMountSkills = useMemo(
-    () => enabledSkills.filter((skill) => (
-      skillMatchesSourceFilter(skill, skillMountFilter)
-      && skillMatchesFolderFilter(skill, skillMountFolderFilter)
-      && skillMatchesQuery(skill, skillMountSearch)
-    )),
-    [enabledSkills, skillMountFilter, skillMountFolderFilter, skillMountSearch],
-  );
-  const disabledMountedSkills = useMemo(
-    () => skills.filter((skill) => skill.enabled === false && selectedAgent?.skill_ids?.includes(skill.skill_id)),
-    [selectedAgent, skills],
-  );
   const agentReadinessNotices = useMemo(() => {
     const notices: Array<{ tone: 'danger' | 'warn' | 'info'; text: string }> = [];
     const selectedProfileAvailable = draft.model_profile_id
@@ -948,14 +937,6 @@ export function AgentStudioView() {
     selectedAgentReadOnly,
   ]);
   const agentQuickRunDisabled = busy || Boolean(agentQuickRunDisabledReason);
-  const visibleMountSkillIds = useMemo(
-    () => filteredMountSkills.map((skill) => skill.skill_id),
-    [filteredMountSkills],
-  );
-  const visibleMountedCount = useMemo(
-    () => visibleMountSkillIds.filter((skillId) => selectedAgent?.skill_ids?.includes(skillId)).length,
-    [selectedAgent, visibleMountSkillIds],
-  );
   const {
     mountVisibleSkills,
     toggleAgentSkillMount,
@@ -968,22 +949,6 @@ export function AgentStudioView() {
     setStatus,
     visibleMountSkillIds,
   });
-  const ungroupedSkillStats = useMemo(() => {
-    const ungrouped = skills.filter((skill) => !skill.folder_id);
-    return {
-      total: ungrouped.length,
-      installed: ungrouped.filter(isInstalledSkill).length,
-      native: ungrouped.filter(isNativeSkill).length,
-    };
-  }, [skills]);
-  const newSkillFolderError = useMemo(
-    () => skillFolderNameError(newSkillFolderName, skillFolders),
-    [newSkillFolderName, skillFolders],
-  );
-  const editingSkillFolderError = useMemo(
-    () => skillFolderNameError(editingSkillFolderName, skillFolders, editingSkillFolderId),
-    [editingSkillFolderId, editingSkillFolderName, skillFolders],
-  );
   const {
     refreshRunGroupById,
     refreshRunGroupsForRuns,
