@@ -319,7 +319,9 @@ export async function detachSkill(agentId: string, skillId: string): Promise<Age
 }
 
 export async function listSkills(): Promise<SkillSpec[]> {
-  const payload = await apiGet<{ skills?: SkillSpec[] }>('/ui/skills');
+  const payload = await apiGet<{ skills?: SkillSpec[] }>('/yachiyo/studio/skills').catch(() => (
+    apiGet<{ skills?: SkillSpec[] }>('/ui/skills')
+  ));
   return payload.skills || [];
 }
 

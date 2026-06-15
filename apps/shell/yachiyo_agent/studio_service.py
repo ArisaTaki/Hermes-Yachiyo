@@ -15,6 +15,7 @@ from .contracts import (
     SaveAgentGroupRequest,
     SaveAgentRequest,
     SaveWorkflowRequest,
+    SkillSnapshot,
     StartAgentRunRequest,
     StartGroupRunRequest,
     StartWorkflowRunRequest,
@@ -23,6 +24,7 @@ from .contracts import (
 from .events import public_run_event_from_payload
 from .groups import agent_group_snapshot_from_payload, group_run_snapshot_from_payload
 from .ports import StudioPort
+from .skills import skill_snapshot_from_payload
 from .timelines import run_timeline_snapshot_from_payload
 from .workflows import workflow_snapshot_from_payload
 
@@ -65,6 +67,12 @@ class AgentStudioService:
         return agent_definition_snapshot_from_payload(
             self._studio_port.detach_skill(agent_id, skill_id)
         )
+
+    def list_skills(self) -> list[SkillSnapshot]:
+        return [
+            skill_snapshot_from_payload(item)
+            for item in _payload_items(self._studio_port.list_skills(), "skills")
+        ]
 
     def start_agent_run(
         self,

@@ -144,6 +144,9 @@ class LegacyStudioPort:
     def detach_skill(self, agent_id: str, skill_id: str) -> dict[str, Any]:
         return self._runtime.detach_skill(agent_id, skill_id)
 
+    def list_skills(self) -> dict[str, Any]:
+        return self._runtime.list_skills()
+
     def start_agent_run(self, request: dict[str, Any]) -> dict[str, Any]:
         return self._runtime.create_agent_run(
             {

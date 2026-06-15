@@ -5,6 +5,7 @@ import type {
   GroupRunSnapshot,
   RunTimelineSnapshot,
   SaveAgentGroupRequest,
+  SkillSnapshot,
 } from './types';
 
 export async function listYachiyoStudioAgents(): Promise<AgentDefinitionSnapshot[]> {
@@ -20,6 +21,11 @@ export async function saveYachiyoStudioAgent(
 
 export async function deleteYachiyoStudioAgent(agentId: string): Promise<{ ok?: boolean }> {
   return apiDelete(`/yachiyo/studio/agents/${encodeURIComponent(agentId)}`);
+}
+
+export async function listYachiyoSkills(): Promise<SkillSnapshot[]> {
+  const payload = await apiGet<{ skills?: SkillSnapshot[] }>('/yachiyo/studio/skills');
+  return payload.skills || [];
 }
 
 export async function listYachiyoAgentGroups(): Promise<AgentGroupSnapshot[]> {

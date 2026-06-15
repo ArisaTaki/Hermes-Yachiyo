@@ -7,6 +7,7 @@ from typing import Any
 
 from .contracts import AgentDefinitionSnapshot, ReadinessSnapshot
 from .groups import agent_group_snapshot_from_payload, group_run_snapshot_from_payload
+from .skills import skill_snapshot_from_payload
 from .task_cards import agent_task_snapshot_from_payload
 from .timelines import run_timeline_snapshot_from_payload
 from .workflows import workflow_snapshot_from_payload
@@ -18,6 +19,7 @@ __all__ = [
     "group_run_snapshot_from_payload",
     "readiness_snapshot_from_payload",
     "run_timeline_snapshot_from_payload",
+    "skill_snapshot_from_payload",
     "workflow_snapshot_from_payload",
 ]
 

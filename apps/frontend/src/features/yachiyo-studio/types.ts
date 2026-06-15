@@ -34,6 +34,28 @@ export type AgentDefinitionSnapshot = {
   updated_at?: string;
 };
 
+export type SkillSnapshot = {
+  skill_id: string;
+  name: string;
+  description?: string | null;
+  source_path?: string | null;
+  local_path?: string | null;
+  folder_id?: string | null;
+  folder_name?: string | null;
+  source_type?: string | null;
+  origin_path?: string | null;
+  source_ref?: string | null;
+  content_hash?: string | null;
+  last_synced_at?: string | null;
+  sync_status?: string | null;
+  content_summary?: string | null;
+  skill_markdown?: string | null;
+  asset_paths?: string[];
+  enabled?: boolean;
+  created_at?: string;
+  updated_at?: string;
+};
+
 export type AgentGroupSnapshot = {
   group_id: string;
   name: string;

@@ -442,6 +442,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
         "apps/frontend/src/features/yachiyo-studio/api.ts",
         [
             "/yachiyo/studio/agents",
+            "/yachiyo/studio/skills",
             "/yachiyo/studio/groups",
             "/yachiyo/studio/group-runs",
             "/yachiyo/studio/workflows/${encodeURIComponent(workflowId)}/runs",
@@ -449,6 +450,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "listYachiyoStudioAgents",
             "saveYachiyoStudioAgent",
             "deleteYachiyoStudioAgent",
+            "listYachiyoSkills",
             "listYachiyoAgentGroups",
             "saveYachiyoAgentGroup",
             "startYachiyoGroupRun",
@@ -482,6 +484,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
         "apps/frontend/src/features/yachiyo-studio/types.ts",
         [
             "export type AgentDefinitionSnapshot",
+            "export type SkillSnapshot",
             "export type AgentGroupSnapshot",
             "export type GroupRunSnapshot",
             "export type PublicRunEvent",
@@ -1788,6 +1791,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "/yachiyo/studio/agents/${encodeURIComponent(agentId)}/skills/${encodeURIComponent(skillId)}",
             "/ui/agents/${encodeURIComponent(agentId)}/skills/${encodeURIComponent(skillId)}",
             "export async function listSkills()",
+            "'/yachiyo/studio/skills'",
             "'/ui/skills'",
             "export async function importSkill(",
             "apiPost('/ui/skills/import'",
@@ -1850,6 +1854,14 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "/approval/approve",
             "export async function rejectRunApproval(",
             "/approval/reject",
+        ],
+    )
+    _assert_function_contains(
+        "apps/frontend/src/lib/agents.ts",
+        "listSkills",
+        [
+            "apiGet<{ skills?: SkillSpec[] }>('/yachiyo/studio/skills')",
+            "apiGet<{ skills?: SkillSpec[] }>('/ui/skills')",
         ],
     )
     _assert_contains(

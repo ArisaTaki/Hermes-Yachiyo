@@ -139,6 +139,10 @@ class _FakeAgentRuntime:
         self.calls.append(("detach_skill", {"agent_id": agent_id, "skill_id": skill_id}))
         return _agent_payload(agent_id=agent_id, skill_ids=[])
 
+    def list_skills(self) -> dict[str, Any]:
+        self.calls.append(("list_skills", None))
+        return {"ok": True, "skills": [_skill_payload()]}
+
     def create_agent_run(self, payload: dict[str, Any]) -> dict[str, Any]:
         self.calls.append(("create_agent_run", payload))
         return _run_payload(
@@ -364,6 +368,7 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
         request,
     )
     agent_without_skill = await yachiyo.detach_studio_agent_skill("agent-1", "skill-1", request)
+    skills = await yachiyo.list_studio_skills(request)
     agent_run = await yachiyo.start_studio_agent_run(
         "agent-1",
         yachiyo.StartAgentRunBody(objective="Draft summary", client_run_id="client-agent-1"),
@@ -408,6 +413,8 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     assert model_test == {"ok": True, "message": "Model ready"}
     assert agent_with_skill["skill_ids"] == ["skill-1"]
     assert agent_without_skill["skill_ids"] == []
+    assert skills["skills"][0]["skill_id"] == "skill-1"
+    assert skills["skills"][0]["asset_paths"] == ["assets/icon.png"]
     assert workflows["workflows"][0]["workflow_id"] == "workflow-1"
     assert deleted_workflow == {"ok": True, "workflow_id": "workflow-1"}
     assert workflow_run["workflow_run_id"] == "workflow-run-1"
@@ -437,6 +444,7 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     assert ("test_agent_model", "agent-1") in runtime.calls
     assert ("attach_skill", {"agent_id": "agent-1", "skill_id": "skill-1"}) in runtime.calls
     assert ("detach_skill", {"agent_id": "agent-1", "skill_id": "skill-1"}) in runtime.calls
+    assert ("list_skills", None) in runtime.calls
     assert ("delete_workflow", "workflow-1") in runtime.calls
     assert ("list_runs", 5) in runtime.calls
     assert ("list_run_groups", 5) in runtime.calls
@@ -515,6 +523,7 @@ def test_yachiyo_studio_routes_include_run_action_facade() -> None:
     assert '@router.post("/studio/agents/{agent_id}/test-model")' in source
     assert '@router.post("/studio/agents/{agent_id}/skills")' in source
     assert '@router.delete("/studio/agents/{agent_id}/skills/{skill_id}")' in source
+    assert '@router.get("/studio/skills")' in source
     assert '@router.get("/studio/group-runs")' in source
     assert '@router.get("/studio/group-runs/{group_run_id}")' in source
     assert '@router.get("/studio/runs")' in source
@@ -549,6 +558,30 @@ def _agent_payload(
         "model_config": {"provider": "model_profile"},
         "skill_ids": [] if skill_ids is None else skill_ids,
         "enabled": True,
+    }
+
+
+def _skill_payload(skill_id: str = "skill-1", name: str = "Workspace Reviewer") -> dict[str, Any]:
+    return {
+        "skill_id": skill_id,
+        "name": name,
+        "description": "Reviews workspace files",
+        "source_path": "/skills/workspace-reviewer",
+        "local_path": "/managed/skills/workspace-reviewer",
+        "folder_id": "folder-1",
+        "folder_name": "Review",
+        "source_type": "local_dir",
+        "origin_path": "/skills/workspace-reviewer",
+        "source_ref": "workspace-reviewer",
+        "content_hash": "hash-1",
+        "last_synced_at": "2026-06-14T00:00:00Z",
+        "sync_status": "imported",
+        "content_summary": "Review project files",
+        "skill_markdown": "# Workspace Reviewer",
+        "asset_paths": ["assets/icon.png"],
+        "enabled": True,
+        "created_at": "2026-06-14T00:00:00Z",
+        "updated_at": "2026-06-14T00:00:01Z",
     }
 
 

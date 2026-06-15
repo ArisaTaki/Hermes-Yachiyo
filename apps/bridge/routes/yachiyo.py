@@ -352,6 +352,12 @@ async def detach_studio_agent_skill(
         raise HTTPException(status_code=404, detail="Agent 不存在") from exc
 
 
+@router.get("/studio/skills")
+async def list_studio_skills(http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
+    skills = await asyncio.to_thread(_studio_service(http_request).list_skills)
+    return {"skills": [_snapshot(skill) for skill in skills]}
+
+
 @router.post("/studio/agents/{agent_id}/runs")
 async def start_studio_agent_run(
     agent_id: str,

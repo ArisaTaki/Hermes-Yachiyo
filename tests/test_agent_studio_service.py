@@ -48,6 +48,10 @@ class _FakeStudioPort:
         self.calls.append(("detach_skill", {"agent_id": agent_id, "skill_id": skill_id}))
         return _agent_payload(agent_id=agent_id, skill_ids=[])
 
+    def list_skills(self) -> dict[str, Any]:
+        self.calls.append(("list_skills", None))
+        return {"ok": True, "skills": [_skill_payload()]}
+
     def start_agent_run(self, request: dict[str, Any]) -> dict[str, Any]:
         self.calls.append(("start_agent_run", request))
         return _run_payload(
@@ -186,6 +190,7 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
     model_test = service.test_agent_model("agent-2")
     agent_with_skill = service.attach_skill("agent-2", "skill-2")
     agent_without_skill = service.detach_skill("agent-2", "skill-2")
+    skills = service.list_skills()
     groups = service.list_groups()
     group = service.get_group("group-1")
     saved_group = service.save_group(
@@ -223,6 +228,8 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
     assert model_test == {"ok": True, "message": "Model ready"}
     assert agent_with_skill.skill_ids == ["skill-2"]
     assert agent_without_skill.skill_ids == []
+    assert skills[0].skill_id == "skill-1"
+    assert skills[0].asset_paths == ["assets/icon.png"]
     assert groups[0].members[0].agent_id == "agent-1"
     assert group.mode == "debate"
     assert saved_group.name == "Team"
@@ -244,6 +251,7 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
     assert ("test_agent_model", "agent-2") in port.calls
     assert ("attach_skill", {"agent_id": "agent-2", "skill_id": "skill-2"}) in port.calls
     assert ("detach_skill", {"agent_id": "agent-2", "skill_id": "skill-2"}) in port.calls
+    assert ("list_skills", None) in port.calls
     assert (
         "save_group",
         {
@@ -379,6 +387,30 @@ def _agent_payload(
         "execution_backend": "native_profile",
         "skill_ids": ["skill-1"] if skill_ids is None else skill_ids,
         "enabled": True,
+    }
+
+
+def _skill_payload(skill_id: str = "skill-1", name: str = "Workspace Reviewer") -> dict[str, Any]:
+    return {
+        "skill_id": skill_id,
+        "name": name,
+        "description": "Reviews workspace files",
+        "source_path": "/skills/workspace-reviewer",
+        "local_path": "/managed/skills/workspace-reviewer",
+        "folder_id": "folder-1",
+        "folder_name": "Review",
+        "source_type": "local_dir",
+        "origin_path": "/skills/workspace-reviewer",
+        "source_ref": "workspace-reviewer",
+        "content_hash": "hash-1",
+        "last_synced_at": "2026-06-14T00:00:00Z",
+        "sync_status": "imported",
+        "content_summary": "Review project files",
+        "skill_markdown": "# Workspace Reviewer",
+        "asset_paths": ["assets/icon.png"],
+        "enabled": True,
+        "created_at": "2026-06-14T00:00:00Z",
+        "updated_at": "2026-06-14T00:00:01Z",
     }
 
 

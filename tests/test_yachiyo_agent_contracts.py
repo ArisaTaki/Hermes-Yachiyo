@@ -19,6 +19,7 @@ from apps.shell.yachiyo_agent import (
     SaveAgentGroupRequest,
     SaveAgentRequest,
     SaveWorkflowRequest,
+    SkillSnapshot,
     ToolCallSnapshot,
     WorkflowSnapshot,
 )
@@ -222,6 +223,55 @@ def test_agent_definition_snapshot_serializes_model_config_alias() -> None:
     assert "model_config" in payload
     assert "model_settings" not in payload
     assert payload["model_config"] == {"provider": "model_profile"}
+
+
+def test_skill_snapshot_keeps_skill_library_fields() -> None:
+    snapshot = SkillSnapshot(
+        skill_id="skill-1",
+        name="Workspace Reviewer",
+        description="Reviews workspace files",
+        source_path="/skills/workspace-reviewer",
+        local_path="/managed/skills/workspace-reviewer",
+        folder_id="folder-1",
+        folder_name="Review",
+        source_type="local_dir",
+        origin_path="/skills/workspace-reviewer",
+        source_ref="workspace-reviewer",
+        content_hash="hash-1",
+        last_synced_at="2026-06-14T00:00:00Z",
+        sync_status="imported",
+        content_summary="Review project files",
+        skill_markdown="# Workspace Reviewer",
+        asset_paths=["assets/icon.png"],
+        enabled=True,
+        created_at="2026-06-14T00:00:00Z",
+        updated_at="2026-06-14T00:00:01Z",
+    )
+
+    payload = _json(snapshot)
+
+    assert list(payload) == [
+        "skill_id",
+        "name",
+        "description",
+        "source_path",
+        "local_path",
+        "folder_id",
+        "folder_name",
+        "source_type",
+        "origin_path",
+        "source_ref",
+        "content_hash",
+        "last_synced_at",
+        "sync_status",
+        "content_summary",
+        "skill_markdown",
+        "asset_paths",
+        "enabled",
+        "created_at",
+        "updated_at",
+    ]
+    assert payload["asset_paths"] == ["assets/icon.png"]
 
 
 def test_studio_save_requests_keep_public_field_names() -> None:

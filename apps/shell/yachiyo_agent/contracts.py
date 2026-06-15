@@ -168,6 +168,28 @@ class AgentDefinitionSnapshot(_PublicSnapshot):
     updated_at: str = ""
 
 
+class SkillSnapshot(_PublicSnapshot):
+    skill_id: str
+    name: str
+    description: str | None = None
+    source_path: str | None = None
+    local_path: str | None = None
+    folder_id: str | None = None
+    folder_name: str | None = None
+    source_type: str | None = None
+    origin_path: str | None = None
+    source_ref: str | None = None
+    content_hash: str | None = None
+    last_synced_at: str | None = None
+    sync_status: str | None = None
+    content_summary: str | None = None
+    skill_markdown: str | None = None
+    asset_paths: list[str] = Field(default_factory=list)
+    enabled: bool = True
+    created_at: str = ""
+    updated_at: str = ""
+
+
 class AgentGroupMemberSnapshot(_PublicSnapshot):
     agent_id: str
     name: str
