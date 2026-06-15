@@ -2059,8 +2059,6 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "'workflows', 'runs', 'memory'];",
             "createAgent",
             "updateAgent",
-            "attachSkill",
-            "detachSkill",
             "listSkills",
             "updateSkill",
             "listSkillFolders",
@@ -2071,6 +2069,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "listRunGroups",
             "getRunGroup",
             "useAgentDeletionActions",
+            "useAgentSkillMountActions",
             "useRunApprovalActions",
             "useRunEventReplay",
             "useRunHistoryManagement",
@@ -2092,8 +2091,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "createSkillFolderFromDraft",
             "updateSkillFolderFromDraft",
             "requestDeleteSkillFolder",
-            "if (mounted) await detachSkill(draft.agent_id, skill.skill_id);",
-            "else await attachSkill(draft.agent_id, skill.skill_id);",
+            "toggleAgentSkillMount",
             "saveWorkflowDraft",
             "const saved = selectedWorkflow ? await updateWorkflow(selectedWorkflow.workflow_id, request) : await createWorkflow(request);",
             "requestDeleteWorkflow",
@@ -2115,6 +2113,21 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "selectedAgentReadOnly",
             "selectedAgentDeletable",
             "AgentEditorPanel",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useAgentSkillMountActions.ts",
+        [
+            "export function useAgentSkillMountActions",
+            "async function mountVisibleSkills()",
+            "if (!draftAgentId || !selectedAgent) return;",
+            "setStatus('系统 Agent 只能查看，不能修改 Skill 挂载。');",
+            "await updateAgent(draftAgentId, { skill_ids: nextSkillIds });",
+            "async function unmountVisibleSkills()",
+            "const visible = new Set(visibleMountSkillIds);",
+            "function toggleAgentSkillMount(skill: SkillSpec, mounted: boolean)",
+            "if (mounted) await detachSkill(draftAgentId, skill.skill_id);",
+            "else await attachSkill(draftAgentId, skill.skill_id);",
         ],
     )
     _assert_contains(
@@ -2903,12 +2916,21 @@ def test_agent_studio_skill_mount_ui_smoke_uses_attach_detach_and_bulk_paths() -
         "apps/frontend/src/views/AgentStudioView.tsx",
         [
             "AgentEditorPanel",
+            "useAgentSkillMountActions",
+            "mountVisibleSkills",
+            "toggleAgentSkillMount",
+            "unmountVisibleSkills",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useAgentSkillMountActions.ts",
+        [
             "function toggleAgentSkillMount(skill: SkillSpec, mounted: boolean)",
             "if (selectedAgentReadOnly) {",
             "setStatus('系统 Agent 只能查看，不能修改 Skill 挂载。');",
-            "if (mounted) await detachSkill(draft.agent_id, skill.skill_id);",
-            "else await attachSkill(draft.agent_id, skill.skill_id);",
-            "await updateAgent(draft.agent_id, { skill_ids: nextSkillIds });",
+            "if (mounted) await detachSkill(draftAgentId, skill.skill_id);",
+            "else await attachSkill(draftAgentId, skill.skill_id);",
+            "await updateAgent(draftAgentId, { skill_ids: nextSkillIds });",
         ],
     )
     _assert_contains(

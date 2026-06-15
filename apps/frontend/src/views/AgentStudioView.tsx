@@ -18,6 +18,7 @@ import { WorkflowEditorPanel, WorkflowRunPreview } from '../features/agent-studi
 import { useAgentDeletionActions } from '../features/agent-studio/hooks/useAgentDeletionActions';
 import { useAgentDefinitions } from '../features/agent-studio/hooks/useAgentDefinitions';
 import { useAgentGroups } from '../features/agent-studio/hooks/useAgentGroups';
+import { useAgentSkillMountActions } from '../features/agent-studio/hooks/useAgentSkillMountActions';
 import { useApprovedRunGuard } from '../features/agent-studio/hooks/useApprovedRunGuard';
 import { useRunApprovalActions } from '../features/agent-studio/hooks/useRunApprovalActions';
 import { useRunApprovalFollowup } from '../features/agent-studio/hooks/useRunApprovalFollowup';
@@ -110,10 +111,8 @@ import {
 } from '../features/agent-studio/utils/workflow';
 import type { GroupRunSnapshot } from '../features/yachiyo-studio/types';
 import {
-  attachSkill,
   createAgent,
   createWorkflow,
-  detachSkill,
   getRun,
   getRunArtifact,
   getRunGroup,
@@ -918,6 +917,18 @@ export function AgentStudioView() {
     () => visibleMountSkillIds.filter((skillId) => selectedAgent?.skill_ids?.includes(skillId)).length,
     [selectedAgent, visibleMountSkillIds],
   );
+  const {
+    mountVisibleSkills,
+    toggleAgentSkillMount,
+    unmountVisibleSkills,
+  } = useAgentSkillMountActions({
+    draftAgentId: draft.agent_id || '',
+    runAction,
+    selectedAgent,
+    selectedAgentReadOnly,
+    setStatus,
+    visibleMountSkillIds,
+  });
   const ungroupedSkillStats = useMemo(() => {
     const ungrouped = skills.filter((skill) => !skill.folder_id);
     return {
@@ -1414,39 +1425,6 @@ export function AgentStudioView() {
     const action = confirmDialog?.onConfirm;
     setConfirmDialog(null);
     if (action) action();
-  }
-
-  async function mountVisibleSkills(): Promise<StudioRefreshOptions | void> {
-    if (!draft.agent_id || !selectedAgent) return;
-    if (selectedAgentReadOnly) {
-      setStatus('系统 Agent 只能查看，不能修改 Skill 挂载。');
-      return;
-    }
-    const nextSkillIds = Array.from(new Set([...(selectedAgent.skill_ids || []), ...visibleMountSkillIds]));
-    await updateAgent(draft.agent_id, { skill_ids: nextSkillIds });
-  }
-
-  async function unmountVisibleSkills(): Promise<StudioRefreshOptions | void> {
-    if (!draft.agent_id || !selectedAgent) return;
-    if (selectedAgentReadOnly) {
-      setStatus('系统 Agent 只能查看，不能修改 Skill 挂载。');
-      return;
-    }
-    const visible = new Set(visibleMountSkillIds);
-    const nextSkillIds = (selectedAgent.skill_ids || []).filter((skillId) => !visible.has(skillId));
-    await updateAgent(draft.agent_id, { skill_ids: nextSkillIds });
-  }
-
-  function toggleAgentSkillMount(skill: SkillSpec, mounted: boolean) {
-    void runAction(async () => {
-      if (!draft.agent_id) return;
-      if (selectedAgentReadOnly) {
-        setStatus('系统 Agent 只能查看，不能修改 Skill 挂载。');
-        return;
-      }
-      if (mounted) await detachSkill(draft.agent_id, skill.skill_id);
-      else await attachSkill(draft.agent_id, skill.skill_id);
-    }, mounted ? '移除 Skill' : '挂载 Skill');
   }
 
   async function saveAgent(): Promise<StudioRefreshOptions> {
