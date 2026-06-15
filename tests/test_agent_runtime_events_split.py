@@ -7,13 +7,16 @@ import json
 from apps.shell import agent_runtime
 from apps.shell.agent.runtime.events import (
     RuntimeRunEventRecorder,
+    RuntimeTaskModelEventBuilder,
     RuntimeTraceEventBuilder,
     artifact_created_payload,
     canonical_run_event_aliases,
     memory_retrieved_payload,
     memory_skill_trace_event,
+    model_output_completed_payload,
     redact_json_value,
     redact_run_event_payload,
+    task_run_event_payload,
 )
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
@@ -190,6 +193,89 @@ def test_legacy_trace_event_helpers_delegate_to_runtime_builder() -> None:
     assert agent_runtime._memory_retrieved_payload(memories) == memory_retrieved_payload(memories)
 
 
+def test_runtime_task_model_event_builder_projects_task_and_model_payloads() -> None:
+    builder = RuntimeTaskModelEventBuilder()
+
+    model_payload = builder.model_output_completed_payload(
+        "hello",
+        truncated=True,
+        metadata={
+            "finish_reason": "stop",
+            "usage": {"prompt_tokens": 3, "completion_tokens": 2},
+            "ignored": None,
+        },
+    )
+    task_payload = builder.task_run_event_payload(
+        task_id="task-1",
+        run_id="run-1",
+        session_id="session-1",
+        status="completed",
+        result="done sk-runtime-task-secret123456",
+    )
+    failed_payload = builder.task_run_event_payload(
+        task_id="task-2",
+        run_id="run-2",
+        session_id="session-2",
+        status="failed",
+        error="api_key=sk-runtime-task-error123456",
+    )
+    serialized = json.dumps(
+        {
+            "task": task_payload,
+            "failed": failed_payload,
+        },
+        ensure_ascii=False,
+    )
+
+    assert model_payload == {
+        "content": "hello",
+        "output_chars": 5,
+        "truncated": True,
+        "finish_reason": "stop",
+        "usage": {"prompt_tokens": 3, "completion_tokens": 2},
+    }
+    assert "ignored" not in model_payload
+    assert model_payload == model_output_completed_payload(
+        "hello",
+        truncated=True,
+        metadata={
+            "finish_reason": "stop",
+            "usage": {"prompt_tokens": 3, "completion_tokens": 2},
+            "ignored": None,
+        },
+    )
+    assert task_payload["task_id"] == "task-1"
+    assert task_payload["status"] == "completed"
+    assert "sk-runtime-task-secret123456" not in task_payload["result"]
+    assert failed_payload["status"] == "failed"
+    assert "sk-runtime-task-error123456" not in failed_payload["error"]
+    assert "sk-runtime-task-secret123456" not in serialized
+    assert "sk-runtime-task-error123456" not in serialized
+
+
+def test_legacy_task_model_helpers_delegate_to_runtime_builder() -> None:
+    assert agent_runtime._model_output_completed_payload(
+        "hello",
+        truncated=True,
+        metadata={"finish_reason": "stop", "ignored": None},
+    ) == model_output_completed_payload(
+        "hello",
+        truncated=True,
+        metadata={"finish_reason": "stop", "ignored": None},
+    )
+    assert agent_runtime._task_run_event_payload(
+        task_id="task-3",
+        run_id="run-3",
+        session_id="session-3",
+        status="running",
+    ) == task_run_event_payload(
+        task_id="task-3",
+        run_id="run-3",
+        session_id="session-3",
+        status="running",
+    )
+
+
 def test_agent_runtime_service_uses_runtime_event_recorder_from_legacy_entrypoint(tmp_path) -> None:
     service = AgentRuntimeService(
         db_path=tmp_path / "agent-runtime.db",
@@ -213,5 +299,18 @@ def test_agent_runtime_service_uses_runtime_event_recorder_from_legacy_entrypoin
 
         assert "workflow.run.completed" in event_types
         assert "workflow.completed" in event_types
+    finally:
+        service.close()
+
+
+def test_agent_runtime_service_uses_task_model_event_builder(tmp_path) -> None:
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime.db",
+        workspace_dir=tmp_path / "runtime",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    try:
+        assert isinstance(service.runtime_task_model_events, RuntimeTaskModelEventBuilder)
     finally:
         service.close()

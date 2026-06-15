@@ -132,6 +132,82 @@ def canonical_tool_event_payload(
     return payload
 
 
+def model_output_completed_payload(
+    content: str,
+    *,
+    truncated: bool = False,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "content": content,
+        "output_chars": len(content),
+        "truncated": truncated,
+    }
+    for key, value in (metadata or {}).items():
+        if value is not None:
+            payload[key] = value
+    return payload
+
+
+def task_run_event_payload(
+    *,
+    task_id: str = "",
+    run_id: str = "",
+    session_id: str = "",
+    status: str = "",
+    result: Any = None,
+    error: Any = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "task_id": str(task_id or ""),
+        "run_id": str(run_id or ""),
+        "session_id": str(session_id or ""),
+    }
+    if status:
+        payload["status"] = status
+    if result is not None:
+        payload["result"] = redact_secrets(result)
+    if error is not None:
+        payload["error"] = redact_secrets(error)
+    return payload
+
+
+class RuntimeTaskModelEventBuilder:
+    """Builds RunEvent payloads shared by Chat task and model execution facts."""
+
+    def model_output_completed_payload(
+        self,
+        content: str,
+        *,
+        truncated: bool = False,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return model_output_completed_payload(
+            content,
+            truncated=truncated,
+            metadata=metadata,
+        )
+
+    def task_run_event_payload(
+        self,
+        *,
+        task_id: str = "",
+        run_id: str = "",
+        session_id: str = "",
+        status: str = "",
+        result: Any = None,
+        error: Any = None,
+    ) -> dict[str, Any]:
+        return task_run_event_payload(
+            task_id=task_id,
+            run_id=run_id,
+            session_id=session_id,
+            status=status,
+            result=result,
+            error=error,
+        )
+
+
 class ToolEventPayloadBuilder:
     """Builds canonical ToolCall RunEvent payloads."""
 

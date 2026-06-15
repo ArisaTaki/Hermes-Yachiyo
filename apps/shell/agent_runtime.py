@@ -57,6 +57,7 @@ from apps.shell.agent.runtime.cancellation import (
 from apps.shell.agent.runtime.errors import AgentApprovalRequired, AgentRuntimeError
 from apps.shell.agent.runtime.events import (
     RuntimeRunEventRecorder,
+    RuntimeTaskModelEventBuilder,
     RuntimeTraceEventBuilder,
     ToolEventPayloadBuilder,
     artifact_created_payload as _runtime_artifact_created_payload,
@@ -66,9 +67,11 @@ from apps.shell.agent.runtime.events import (
     memory_retrieved_payload as _runtime_memory_retrieved_payload,
     memory_skill_trace_event as _runtime_memory_skill_trace_event,
     memory_trace_result as _runtime_memory_trace_result,
+    model_output_completed_payload as _runtime_model_output_completed_payload,
     redact_json_value as _redact_json_value,
     runtime_trace_input_preview as _runtime_event_trace_input_preview,
     skill_trace_result as _runtime_skill_trace_result,
+    task_run_event_payload as _runtime_task_run_event_payload,
     tool_trace_status as _runtime_tool_trace_status,
 )
 from apps.shell.agent.runtime.future_task_scheduler import FutureTaskTriggerScheduler
@@ -743,15 +746,11 @@ def _model_output_completed_payload(
     truncated: bool = False,
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "content": content,
-        "output_chars": len(content),
-        "truncated": truncated,
-    }
-    for key, value in (metadata or {}).items():
-        if value is not None:
-            payload[key] = value
-    return payload
+    return _runtime_model_output_completed_payload(
+        content,
+        truncated=truncated,
+        metadata=metadata,
+    )
 
 
 def _message_content_part_type(value: Any) -> str:
@@ -1408,18 +1407,14 @@ def _task_run_event_payload(
     result: Any = None,
     error: Any = None,
 ) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "task_id": str(task_id or ""),
-        "run_id": str(run_id or ""),
-        "session_id": str(session_id or ""),
-    }
-    if status:
-        payload["status"] = status
-    if result is not None:
-        payload["result"] = redact_secrets(result)
-    if error is not None:
-        payload["error"] = redact_secrets(error)
-    return payload
+    return _runtime_task_run_event_payload(
+        task_id=task_id,
+        run_id=run_id,
+        session_id=session_id,
+        status=status,
+        result=result,
+        error=error,
+    )
 
 
 def _canonical_run_event_aliases(event_type: str, payload: dict[str, Any] | None = None) -> list[str]:
@@ -1521,6 +1516,7 @@ class NativeRunEngine:
         self._run_cancel_locks_guard = threading.RLock()
         self.tool_request_parser = ToolRequestParser()
         self.tool_event_payloads = ToolEventPayloadBuilder()
+        self.runtime_task_model_events = RuntimeTaskModelEventBuilder()
         self.runtime_trace_events = RuntimeTraceEventBuilder()
         self.tool_pending_approvals = ToolPendingApprovalBuilder(
             approval_id_factory=lambda: f"approval_{uuid4().hex[:12]}",
@@ -3940,7 +3936,7 @@ class NativeRunEngine:
             "run.started",
             {"task_id": str(task_id or ""), "session_id": str(session_id or "")},
         )
-        task_payload = _task_run_event_payload(
+        task_payload = self.runtime_task_model_events.task_run_event_payload(
             task_id=str(task_id or ""),
             run_id=str(run["run_id"]),
             session_id=str(session_id or ""),
@@ -4034,7 +4030,7 @@ class NativeRunEngine:
         self.append_run_event(
             run_id,
             "model.output.completed",
-            _model_output_completed_payload(
+            self.runtime_task_model_events.model_output_completed_payload(
                 content,
                 truncated=output_truncated,
                 metadata=output_metadata,
@@ -4246,7 +4242,7 @@ class NativeRunEngine:
         self.append_run_event(
             run_id,
             "model.output.completed",
-            _model_output_completed_payload(
+            self.runtime_task_model_events.model_output_completed_payload(
                 str(result_text),
                 truncated=bool(getattr(result_text, "output_truncated", False)),
                 metadata=_model_output_metadata(result_text),
@@ -4282,7 +4278,7 @@ class NativeRunEngine:
         self.append_run_event(
             run_id,
             "task.completed",
-            _task_run_event_payload(
+            self.runtime_task_model_events.task_run_event_payload(
                 task_id=str((link or {}).get("task_id") or ""),
                 run_id=run_id,
                 session_id=str((link or {}).get("session_id") or ""),
@@ -4314,7 +4310,7 @@ class NativeRunEngine:
         self.append_run_event(
             run_id,
             "task.failed",
-            _task_run_event_payload(
+            self.runtime_task_model_events.task_run_event_payload(
                 task_id=str((link or {}).get("task_id") or ""),
                 run_id=run_id,
                 session_id=str((link or {}).get("session_id") or ""),
@@ -4605,7 +4601,7 @@ class NativeRunEngine:
             self.append_run_event(
                 run_id,
                 "model.output.completed",
-                _model_output_completed_payload(
+                self.runtime_task_model_events.model_output_completed_payload(
                     result_text,
                     truncated=bool(getattr(result, "output_truncated", False)),
                     metadata=_model_output_metadata(result),
