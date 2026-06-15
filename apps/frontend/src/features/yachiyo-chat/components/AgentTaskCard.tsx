@@ -1,8 +1,8 @@
 import { UiIcon } from '../../../components/UiIcon';
+import { RuntimeArtifactList } from '../../runtime-shared/components/RuntimeArtifactList';
 import { RuntimeTimelineSummary } from '../../runtime-shared/components/RuntimeTimelineSummary';
 import type { AgentTaskSnapshot, ApprovalCardSnapshot } from '../types';
 import { ApprovalCard } from './ApprovalCard';
-import { ArtifactPreview } from './ArtifactPreview';
 
 export function AgentTaskCard({
   busy = false,
@@ -118,11 +118,13 @@ export function AgentTaskCard({
         </div>
       ) : null}
       {artifacts.length ? (
-        <div className="yachiyo-agent-task-artifacts">
-          {artifacts.slice(0, 3).map((artifact) => (
-            <ArtifactPreview artifact={artifact} key={artifact.artifact_id} />
-          ))}
-        </div>
+        <RuntimeArtifactList
+          artifacts={artifacts}
+          className="yachiyo-agent-task-artifacts"
+          limit={3}
+          previewClassName="yachiyo-task-artifact"
+          previewTestId="yachiyo-task-artifact-preview"
+        />
       ) : null}
     </section>
   );

@@ -1,0 +1,99 @@
+import { RuntimeArtifactPreview, type RuntimeArtifactSnapshot } from './RuntimeArtifactPreview';
+
+export type RuntimeArtifactSource = RuntimeArtifactSnapshot | Record<string, unknown>;
+
+export type RuntimeArtifactListItem = RuntimeArtifactSnapshot & {
+  run_id?: string | null;
+  source_label?: string | null;
+  source_run_id?: string | null;
+};
+
+type RuntimeArtifactListProps = {
+  artifacts: RuntimeArtifactSource[];
+  className: string;
+  emptyLabel?: string;
+  fallbackRunId?: string;
+  itemTestId?: string;
+  limit?: number;
+  onOpenArtifact?: (runId: string, path: string) => Promise<void> | void;
+  previewClassName?: string;
+  previewTestId?: string;
+  testId?: string;
+};
+
+export function RuntimeArtifactList({
+  artifacts,
+  className,
+  emptyLabel,
+  fallbackRunId = '',
+  itemTestId,
+  limit,
+  onOpenArtifact,
+  previewClassName,
+  previewTestId,
+  testId,
+}: RuntimeArtifactListProps) {
+  const visibleArtifacts = artifacts.slice(0, limit ? Math.max(0, limit) : artifacts.length);
+  return (
+    <div className={className} data-testid={testId}>
+      {visibleArtifacts.map((artifact, index) => {
+        const item = runtimeArtifactListItem(artifact, index, fallbackRunId);
+        const preview = (
+          <RuntimeArtifactPreview
+            artifact={item}
+            className={previewClassName}
+            testId={previewTestId}
+          />
+        );
+        if (!onOpenArtifact) {
+          return <div data-artifact-source-run-id={item.source_run_id || ''} key={`${item.artifact_id}-${index}`}>{preview}</div>;
+        }
+        return (
+          <button
+            type="button"
+            data-artifact-kind={item.kind}
+            data-artifact-path={item.path || ''}
+            data-artifact-source-label={item.source_label || ''}
+            data-artifact-source-run-id={item.source_run_id || ''}
+            data-testid={itemTestId}
+            disabled={!item.path}
+            key={`${item.artifact_id}-${index}`}
+            onClick={() => item.path ? void onOpenArtifact(item.source_run_id || fallbackRunId, item.path) : undefined}
+          >
+            {preview}
+          </button>
+        );
+      })}
+      {!visibleArtifacts.length && emptyLabel ? <span>{emptyLabel}</span> : null}
+    </div>
+  );
+}
+
+export function runtimeArtifactListItem(
+  artifact: RuntimeArtifactSource,
+  index: number,
+  fallbackRunId = '',
+): RuntimeArtifactListItem {
+  const path = artifactStringValue(artifact, 'path');
+  const kind = artifactStringValue(artifact, 'kind') || artifactStringValue(artifact, 'artifact_kind') || 'artifact';
+  const runId = artifactStringValue(artifact, 'run_id');
+  const sourceRunId = artifactStringValue(artifact, 'source_run_id') || runId || fallbackRunId;
+  const sourceLabel = artifactStringValue(artifact, 'source_runnable_name') || artifactStringValue(artifact, 'workflow_step_label');
+  const artifactId = artifactStringValue(artifact, 'artifact_id') || `${sourceRunId}:${path || kind}:${index}`;
+  const title = artifactStringValue(artifact, 'title')
+    || (sourceLabel ? `${sourceLabel} / ${path || 'artifact'}` : path || kind || 'Artifact');
+  return {
+    artifact_id: artifactId,
+    kind,
+    path,
+    run_id: runId,
+    source_label: sourceLabel,
+    source_run_id: sourceRunId,
+    title,
+  };
+}
+
+function artifactStringValue(artifact: RuntimeArtifactSource, key: string) {
+  const value = (artifact as Record<string, unknown>)[key];
+  return typeof value === 'string' ? value.trim() : '';
+}

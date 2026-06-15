@@ -1,5 +1,5 @@
 import type { RunSpec } from '../types';
-import { RuntimeArtifactPreview } from '../../runtime-shared/components/RuntimeArtifactPreview';
+import { RuntimeArtifactList } from '../../runtime-shared/components/RuntimeArtifactList';
 
 type ArtifactPreview = {
   path: string;
@@ -28,41 +28,17 @@ export function ArtifactInspector({
           <span>上下文、工具产物和可预览文件</span>
         </div>
       </summary>
-      <div className="run-detail-fold-body run-artifacts" data-testid="agent-run-detail-artifact-list">
-        {selectedRunArtifacts.map((artifact, index) => {
-          const path = String(artifact.path || '');
-          const artifactKind = String(artifact.kind || artifact.artifact_kind || 'artifact').trim();
-          const sourceRunId = String(artifact.source_run_id || artifact.run_id || selectedRun.run_id);
-          const sourceLabel = String(artifact.source_runnable_name || artifact.workflow_step_label || '').trim();
-          const artifactId = String(artifact.artifact_id || `${sourceRunId}:${path || artifactKind}:${index}`);
-          const artifactTitle = sourceLabel ? `${sourceLabel} / ${path || 'artifact'}` : path || 'artifact';
-          return (
-            <button
-              type="button"
-              data-artifact-kind={artifactKind}
-              data-artifact-path={path}
-              data-artifact-source-label={sourceLabel}
-              data-artifact-source-run-id={sourceRunId}
-              data-testid="agent-run-detail-artifact"
-              disabled={!path}
-              key={`${path}-${index}`}
-              onClick={() => path ? void onOpenArtifact(sourceRunId, path) : undefined}
-            >
-              <RuntimeArtifactPreview
-                artifact={{
-                  artifact_id: artifactId,
-                  kind: artifactKind,
-                  path,
-                  title: artifactTitle,
-                }}
-                className="studio-runtime-artifact"
-                testId="agent-run-detail-artifact-preview-card"
-              />
-            </button>
-          );
-        })}
-        {!selectedRunArtifacts.length ? <span>No artifacts</span> : null}
-      </div>
+      <RuntimeArtifactList
+        artifacts={selectedRunArtifacts}
+        className="run-detail-fold-body run-artifacts"
+        emptyLabel="No artifacts"
+        fallbackRunId={selectedRun.run_id}
+        itemTestId="agent-run-detail-artifact"
+        onOpenArtifact={onOpenArtifact}
+        previewClassName="studio-runtime-artifact"
+        previewTestId="agent-run-detail-artifact-preview-card"
+        testId="agent-run-detail-artifact-list"
+      />
       {artifactPreview ? (
         <div className="run-detail-fold-body artifact-preview" data-testid="agent-run-detail-artifact-preview">
           <strong>{artifactPreview.path}{artifactPreview.truncated ? ' · truncated' : ''}</strong>

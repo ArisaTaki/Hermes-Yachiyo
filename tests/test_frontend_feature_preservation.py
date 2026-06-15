@@ -465,7 +465,9 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "onApproveApproval(task, approval)",
             "onRejectApproval(task, approval)",
             "onCancelTask?.(task)",
+            "RuntimeArtifactList",
             "RuntimeTimelineSummary",
+            'previewTestId="yachiyo-task-artifact-preview"',
             "在 Agent Studio 中查看",
         ],
     )
@@ -503,6 +505,19 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "export function RuntimeArtifactPreview",
             "data-artifact-id={artifact.artifact_id}",
             "data-artifact-path={artifact.path || ''}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/runtime-shared/components/RuntimeArtifactList.tsx",
+        [
+            "export function RuntimeArtifactList",
+            "export function runtimeArtifactListItem",
+            "RuntimeArtifactPreview",
+            "data-artifact-kind={item.kind}",
+            "data-artifact-path={item.path || ''}",
+            "data-artifact-source-label={item.source_label || ''}",
+            "data-artifact-source-run-id={item.source_run_id || ''}",
+            "data-testid={itemTestId}",
         ],
     )
     _assert_contains(
@@ -1105,9 +1120,9 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
         "apps/frontend/src/features/agent-studio/components/ArtifactInspector.tsx",
         [
             "export function ArtifactInspector",
-            "RuntimeArtifactPreview",
+            "RuntimeArtifactList",
             "agent-run-detail-artifact",
-            'testId="agent-run-detail-artifact-preview-card"',
+            'previewTestId="agent-run-detail-artifact-preview-card"',
         ],
     )
     _assert_contains(
@@ -3037,15 +3052,12 @@ def test_agent_studio_exposes_stable_e2e_selectors_for_run_detail_and_approval_f
         [
             "Artifacts ·",
             "data-testid=\"agent-run-detail-artifacts\"",
-            "data-testid=\"agent-run-detail-artifact-list\"",
-            "data-testid=\"agent-run-detail-artifact\"",
-            "data-artifact-kind={artifactKind}",
-            "data-artifact-path={path}",
-            "data-artifact-source-label={sourceLabel}",
-            "data-artifact-source-run-id={sourceRunId}",
+            "RuntimeArtifactList",
+            "testId=\"agent-run-detail-artifact-list\"",
+            "itemTestId=\"agent-run-detail-artifact\"",
+            "fallbackRunId={selectedRun.run_id}",
             "data-testid=\"agent-run-detail-artifact-preview\"",
-            "RuntimeArtifactPreview",
-            'testId="agent-run-detail-artifact-preview-card"',
+            'previewTestId="agent-run-detail-artifact-preview-card"',
         ],
     )
     _assert_contains(
