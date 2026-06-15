@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 from typing import Any
 
 from apps.shell.agent.runtime.errors import AgentRuntimeError
+from apps.shell.agent.runtime.serialization import (
+    json_dump_compact as _json_dump,
+    json_load as _json_load,
+    slug as _slug,
+)
 
 DEFAULT_WORKFLOW_NODE_TYPES = {
     "start",
@@ -21,29 +25,11 @@ DEFAULT_WORKFLOW_NODE_TYPES = {
 }
 
 
-def _json_load(value: str | None, default: Any) -> Any:
-    if value is None:
-        return default
-    try:
-        return json.loads(value)
-    except Exception:
-        return default
-
-
-def _json_dump(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
-
-
 def _safe_rel_path(value: str) -> str:
     candidate = str(value or "").replace("\\", "/").strip()
     if not candidate or candidate.startswith("/") or candidate.startswith("../") or "/../" in candidate:
         raise AgentRuntimeError("路径必须是相对路径，且不能越界")
     return candidate
-
-
-def _slug(value: str, fallback: str) -> str:
-    normalized = re.sub(r"[^a-z0-9]+", "-", (value or "").strip().lower()).strip("-")
-    return normalized[:48] or fallback
 
 
 class WorkflowPathPlanner:

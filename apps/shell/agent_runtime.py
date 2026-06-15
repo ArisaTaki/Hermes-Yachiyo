@@ -149,6 +149,11 @@ from apps.shell.agent.runtime.run_projections import (
 )
 from apps.shell.agent.runtime.run_readiness import RuntimeRunReadinessValidator
 from apps.shell.agent.runtime.runnables import RuntimeRunnableCatalog, RuntimeRunnableRunCoordinator
+from apps.shell.agent.runtime.serialization import (
+    json_dump_sorted as _json_dump,
+    json_load as _json_load,
+    slug as _slug,
+)
 from apps.shell.agent.runtime.skill_content import SkillContentInspector
 from apps.shell.agent.runtime.skill_import import SkillImportPreparer, SkillImportSourceResolver
 from apps.shell.agent.runtime.skill_install import SkillInstallCommandValidator
@@ -330,24 +335,6 @@ def _oha_yachiyo_home() -> Path:
 
 def _native_skill_home() -> Path:
     return _oha_yachiyo_home() / "skill-library"
-
-
-def _slug(value: str, fallback: str) -> str:
-    normalized = re.sub(r"[^a-z0-9]+", "-", (value or "").strip().lower()).strip("-")
-    return normalized[:48] or fallback
-
-
-def _json_load(value: str | None, default: Any) -> Any:
-    if not value:
-        return default
-    try:
-        return json.loads(value)
-    except json.JSONDecodeError:
-        return default
-
-
-def _json_dump(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
 def _normalize_execution_backend(value: Any, *, model_mode: str = "") -> str:

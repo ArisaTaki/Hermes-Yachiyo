@@ -2,21 +2,10 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
-
-def _json_load(value: str | None, default: Any) -> Any:
-    if value is None:
-        return default
-    try:
-        return json.loads(value)
-    except Exception:
-        return default
-
-
-def _json_dump(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+from apps.shell.agent.runtime.serialization import json_dump_compact as _json_dump
+from apps.shell.agent.runtime.serialization import json_load as _json_load
 
 
 class WorkflowRunStartProjector:
