@@ -114,7 +114,7 @@ from apps.shell.agent.runtime.tool_approvals import (
     ToolApprovalResumeContext,
     ToolApprovalTransitionContext,
 )
-from apps.shell.agent.runtime.tool_execution import RuntimeToolCallExecutor
+from apps.shell.agent.runtime.tool_execution import RuntimeToolCallExecutor, RuntimeToolRequestRunner
 from apps.shell.agent.runtime.tool_loop import (
     RuntimeToolLoopProjectionBuilder,
     append_tool_result_message as _runtime_append_tool_result_message,
@@ -1637,6 +1637,18 @@ class NativeRunEngine:
             tool_call_events=self.runtime_tool_call_events,
             trace_events=self.runtime_trace_events,
             append_run_event=self.append_run_event,
+        )
+        self.tool_request_runner = RuntimeToolRequestRunner(
+            normalize_tool_name=_normalize_tool_name,
+            input_preview=_tool_input_preview,
+            run_budget=self._run_budget,
+            user_goal_from_messages=_user_goal_from_agent_messages,
+            goal_disallows_tool=_agent_goal_disallows_tool,
+            timeline_factory=self._timeline,
+            append_run_event=self.append_run_event,
+            tool_loop_projection=self.tool_loop_projection,
+            pending_approval_builder=self.tool_pending_approvals,
+            call_agent_tool=self._call_agent_tool,
         )
         self.agent_context_builder = AgentContextBuilder(
             compile_agent_runtime=self._compile_agent_runtime,
@@ -4617,70 +4629,17 @@ class NativeRunEngine:
         run_id: str = "",
         budget: _RunBudget | None = None,
     ) -> None:
-        budget = budget or self._run_budget(run_id, timeline)
-        user_goal = _user_goal_from_agent_messages(messages)
-        for index, tool_request in enumerate(tool_requests):
-            tool_name = _normalize_tool_name(tool_request.get("tool"))
-            raw_input = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
-            input_preview = _tool_input_preview(raw_input)
-            goal_block_reason = _agent_goal_disallows_tool(user_goal, tool_name)
-            if goal_block_reason:
-                budget.claim_tool_call(tool_name)
-                tool_result = {
-                    "ok": False,
-                    "blocked_by_user_goal": True,
-                    "tool": tool_name,
-                    "error": goal_block_reason,
-                    "hint": "Do not ask for approval. Continue with an inline answer that follows the user's stated constraint.",
-                }
-                timeline.append(self._timeline("agent.tool.skipped", tool_name, input_preview=input_preview, result=tool_result))
-                if run_id:
-                    self.append_run_event(
-                        run_id,
-                        "agent.tool.skipped",
-                        {"tool": tool_name, "input_preview": input_preview, "result": tool_result},
-                    )
-                self.tool_loop_projection.append_tool_result_message(
-                    messages,
-                    {**tool_request, "tool": tool_name},
-                    tool_result,
-                )
-                continue
-            tool_result = self._call_agent_tool(
-                tool_request,
-                allowed_tools,
-                broker,
-                timeline,
-                artifacts=artifacts,
-                run_id=run_id,
-                budget=budget,
-            )
-            if tool_result.get("approval_required"):
-                raise AgentApprovalRequired(
-                    self.tool_pending_approvals.build(
-                        tool_request,
-                        messages=messages,
-                        next_iteration=next_iteration,
-                        remaining_tool_requests=tool_requests[index + 1 :],
-                    )
-                )
-            fatal_failure = self.tool_loop_projection.fatal_failure_detail(
-                tool_name,
-                tool_request,
-                tool_result,
-            )
-            if fatal_failure:
-                timeline.append(
-                    self._timeline(
-                        "agent.tool.failed",
-                        tool_name,
-                        input_preview=input_preview,
-                        result=tool_result,
-                        status="failed",
-                    )
-                )
-                raise AgentRuntimeError(fatal_failure)
-            self.tool_loop_projection.append_tool_result_message(messages, tool_request, tool_result)
+        self.tool_request_runner.run(
+            tool_requests,
+            allowed_tools,
+            broker,
+            messages,
+            timeline,
+            artifacts,
+            next_iteration=next_iteration,
+            run_id=run_id,
+            budget=budget,
+        )
 
     def _call_agent_tool(
         self,
