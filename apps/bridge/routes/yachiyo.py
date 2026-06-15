@@ -7,6 +7,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 
+from apps.bridge.routes import yachiyo_chat_handlers
 from apps.bridge.routes.yachiyo_models import (
     AgentSkillBody,
     FutureTaskCancelBody,
@@ -22,14 +23,12 @@ from apps.bridge.routes.yachiyo_models import (
     TaskApprovalRequest,
 )
 from apps.bridge.routes.yachiyo_services import (
-    agent_service as _agent_service,
     bad_request as _bad_request,
     snapshot as _snapshot,
     studio_service as _studio_service,
 )
 from apps.shell.agent_runtime import AgentRuntimeError
 from apps.shell.yachiyo_agent import (
-    ApprovalDecision,
     SaveAgentGroupRequest,
     SaveAgentRequest,
     SaveWorkflowRequest,
@@ -45,7 +44,7 @@ router = APIRouter(prefix="/yachiyo", tags=["Yachiyo Agent"])
 @router.get("/readiness")
 @router.get("/chat/readiness")
 async def readiness(http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
-    return _snapshot(await asyncio.to_thread(_agent_service(http_request).readiness))
+    return await yachiyo_chat_handlers.readiness(http_request)
 
 
 @router.get("/tasks")
@@ -54,11 +53,7 @@ async def list_tasks(
     conversation_id: str | None = None,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    tasks = await asyncio.to_thread(
-        _agent_service(http_request).list_recent_tasks,
-        conversation_id,
-    )
-    return {"tasks": [_snapshot(task) for task in tasks]}
+    return await yachiyo_chat_handlers.list_tasks(conversation_id, http_request)
 
 
 @router.post("/tasks")
@@ -67,21 +62,13 @@ async def start_task(
     request: StartChatTaskRequest,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    try:
-        snapshot = await asyncio.to_thread(_agent_service(http_request).start_chat_task, request)
-        return _snapshot(snapshot)
-    except (AgentRuntimeError, KeyError, ValueError) as exc:
-        raise _bad_request(exc) from exc
+    return await yachiyo_chat_handlers.start_task(request, http_request)
 
 
 @router.get("/tasks/{task_id}")
 @router.get("/chat/tasks/{task_id}")
 async def get_task(task_id: str, http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
-    try:
-        snapshot = await asyncio.to_thread(_agent_service(http_request).get_task_snapshot, task_id)
-        return _snapshot(snapshot)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Task 不存在") from exc
+    return await yachiyo_chat_handlers.get_task(task_id, http_request)
 
 
 @router.post("/tasks/{task_id}/approve")
@@ -91,23 +78,7 @@ async def approve_task(
     request: TaskApprovalRequest | None = None,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    metadata = dict(request.metadata) if request is not None else {}
-    if request is not None and request.approval_id:
-        metadata.setdefault("approval_id", request.approval_id)
-    decision = ApprovalDecision(
-        approved=True,
-        reason=request.reason if request is not None else None,
-        metadata=metadata,
-    )
-    try:
-        snapshot = await asyncio.to_thread(
-            _agent_service(http_request).approve,
-            task_id,
-            decision,
-        )
-        return _snapshot(snapshot)
-    except (AgentRuntimeError, KeyError) as exc:
-        raise _bad_request(exc) from exc
+    return await yachiyo_chat_handlers.approve_task(task_id, request, http_request)
 
 
 @router.post("/tasks/{task_id}/reject")
@@ -117,15 +88,7 @@ async def reject_task(
     request: TaskApprovalRequest | None = None,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    try:
-        snapshot = await asyncio.to_thread(
-            _agent_service(http_request).reject,
-            task_id,
-            request.reason if request is not None else "",
-        )
-        return _snapshot(snapshot)
-    except (AgentRuntimeError, KeyError) as exc:
-        raise _bad_request(exc) from exc
+    return await yachiyo_chat_handlers.reject_task(task_id, request, http_request)
 
 
 @router.post("/tasks/{task_id}/cancel")
@@ -134,11 +97,7 @@ async def cancel_task(
     task_id: str,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    try:
-        snapshot = await asyncio.to_thread(_agent_service(http_request).cancel, task_id)
-        return _snapshot(snapshot)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Task 不存在") from exc
+    return await yachiyo_chat_handlers.cancel_task(task_id, http_request)
 
 
 @router.get("/studio/agents")
