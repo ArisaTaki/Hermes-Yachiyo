@@ -79,6 +79,7 @@ class WorkflowContinuationCoordinator:
         default_workspace_policy: Any | None = None,
         workflow_artifacts_dir: Any | None = None,
         workflow_artifact_path: Any | None = None,
+        workflow_artifact_write: Any | None = None,
         workflow_agent_for_node: Any | None = None,
         workflow_node_task: Any | None = None,
         workflow_child_goal: Any | None = None,
@@ -112,6 +113,7 @@ class WorkflowContinuationCoordinator:
         self._default_workspace_policy_callback = default_workspace_policy
         self._workflow_artifacts_dir_source = workflow_artifacts_dir
         self._workflow_artifact_path_callback = workflow_artifact_path
+        self._workflow_artifact_write_callback = workflow_artifact_write
         self._workflow_agent_for_node_callback = workflow_agent_for_node
         self._workflow_node_task_callback = workflow_node_task
         self._workflow_child_goal_callback = workflow_child_goal
@@ -268,6 +270,20 @@ class WorkflowContinuationCoordinator:
                 or ""
             )
         return self._engine._workflow_artifact_path(label, artifacts, configured_path)
+
+    def _workflow_artifact_write(
+        self,
+        run: dict[str, Any],
+        artifact_path: str,
+        context: str,
+    ) -> dict[str, Any]:
+        if self._workflow_artifact_write_callback is not None:
+            return self._workflow_artifact_write_callback(run, artifact_path, context)
+        broker = ToolBroker(
+            self._default_workspace_policy(),
+            Path(self._workflow_artifacts_dir()) / str(run["run_id"]),
+        )
+        return broker.artifact_write(artifact_path, context)
 
     def _workflow_agent_for_node(self, node: dict[str, Any]) -> dict[str, Any]:
         if self._workflow_agent_for_node_callback is not None:
@@ -1289,10 +1305,6 @@ class WorkflowContinuationCoordinator:
         timeline: list[dict[str, Any]],
         node_info_extra: dict[str, str] | None = None,
     ) -> None:
-        broker = ToolBroker(
-            self._default_workspace_policy(),
-            Path(self._workflow_artifacts_dir()) / str(run["run_id"]),
-        )
         artifact_path = self._workflow_artifact_path(
             label,
             artifacts,
@@ -1300,7 +1312,7 @@ class WorkflowContinuationCoordinator:
         )
         write = WorkflowArtifactNodeWrite.from_artifact(
             node,
-            broker.artifact_write(artifact_path, context),
+            self._workflow_artifact_write(run, artifact_path, context),
             label=label,
             kind=kind,
             node_info_extra=node_info_extra,

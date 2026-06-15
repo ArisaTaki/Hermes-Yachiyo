@@ -20,6 +20,7 @@ from apps.shell.agent.runtime.workflow_resume import (
 )
 from apps.shell.agent.runtime.workflow_runs import RuntimeWorkflowRunStarter
 from apps.shell.agent.runtime.workflow_start import WorkflowRunStartProjector
+from apps.shell.agent.tools.broker import ToolBroker
 
 
 @dataclass(frozen=True)
@@ -153,6 +154,10 @@ def build_runtime_workflow_execution_services(
         workflow_artifact_path=lambda label, artifacts, requested: (
             engine._workflow_artifact_path(label, artifacts, requested)
         ),
+        workflow_artifact_write=lambda run, artifact_path, context: ToolBroker(
+            engine._default_workspace_policy(),
+            engine.workflow_artifacts_dir / str(run["run_id"]),
+        ).artifact_write(artifact_path, context),
         workflow_agent_for_node=lambda node: engine._workflow_agent_for_node(node),
         workflow_node_task=lambda node: engine._workflow_node_task(node),
         workflow_child_goal=lambda workflow_goal, step_task: (

@@ -642,6 +642,64 @@ def test_workflow_continuation_uses_injected_artifact_io(tmp_path) -> None:
     assert timeline[0]["event"] == "workflow.node.artifact"
 
 
+def test_workflow_continuation_uses_injected_artifact_writer() -> None:
+    engine = FakeWorkflowTraversalEngine()
+    workflow = {
+        "nodes": [
+            {
+                "id": "report",
+                "type": "artifact",
+                "data": {"label": "Final Report", "artifact_path": "reports/final.md"},
+            },
+        ]
+    }
+    writes: list[tuple[str, str, str]] = []
+    coordinator = WorkflowContinuationCoordinator(
+        engine,
+        workflow_path=lambda current_workflow: list(current_workflow["nodes"]),
+        workflow_nodes_by_id=lambda current_workflow: {
+            str(node["id"]): node for node in current_workflow["nodes"]
+        },
+        workflow_next_node_id=lambda _workflow, _node, _context: "",
+        workflow_artifact_path=lambda _label, _artifacts, requested: requested,
+        workflow_artifact_write=lambda run, artifact_path, context: writes.append(
+            (str(run["run_id"]), artifact_path, context)
+        )
+        or {
+            "ok": True,
+            "path": artifact_path,
+            "bytes": len(context.encode("utf-8")),
+        },
+        node_kind=lambda node: str(node["type"]),
+    )
+    artifacts: list[dict[str, Any]] = []
+
+    result = coordinator.continue_run(
+        {"run_id": "workflow_run", "user_goal": "Write report"},
+        workflow,
+        context="Final workflow summary",
+        timeline=[],
+        artifacts=artifacts,
+        start_index=0,
+        root_group=False,
+    )
+
+    assert result["status"] == "completed"
+    assert writes == [
+        ("workflow_run", "reports/final.md", "Final workflow summary")
+    ]
+    assert artifacts == [
+        {
+            "kind": "workflow_artifact",
+            "workflow_node_id": "report",
+            "workflow_node_label": "Final Report",
+            "ok": True,
+            "path": "reports/final.md",
+            "bytes": len("Final workflow summary".encode("utf-8")),
+        }
+    ]
+
+
 def test_workflow_continuation_uses_injected_agent_handoff_inputs() -> None:
     engine = FakeWorkflowAgentExecutionEngine()
     agent = {"agent_id": "agent_research", "name": "Research Agent"}
