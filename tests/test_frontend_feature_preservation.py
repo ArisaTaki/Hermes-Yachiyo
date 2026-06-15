@@ -248,7 +248,6 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "onClick={onReject}",
             "openRunDetails(runId",
             "openWorkflowStudio(runnableId",
-            "group_dispatch_count",
             "group_agent_summary_pending",
         ],
     )
@@ -349,6 +348,12 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "function conversationDisplayName",
             "function groupDefaultName",
             "function deleteTargetLabel",
+            "type PendingAttachment =",
+            "type ChatE2EImageDetail =",
+            "type ChatMessage =",
+            "type SessionItem =",
+            "type ChatSessionContext =",
+            "type DelegatedRunSummaryResult =",
         ],
     )
 
@@ -816,6 +821,15 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "ApprovalCardSnapshot",
             "ArtifactSnapshot",
             "export type YachiyoReadinessSnapshot = ReadinessSnapshot;",
+            "export type PendingAttachment = {",
+            "export type ChatE2EImageDetail = {",
+            "export type ChatMessage = {",
+            "export type MessagesPayload = {",
+            "export type SessionItem = {",
+            "export type SessionsPayload = {",
+            "export type ChatSessionContext = {",
+            "export type AssistantProfilePayload = {",
+            "export type ExecutorPayload = {",
         ],
     )
     _assert_contains(
@@ -1704,7 +1718,6 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
         [
             "const [attachments, setAttachments] = useState<PendingAttachment[]>(() => [...retainedComposerDraft.attachments]);",
             "const CHAT_E2E_ADD_IMAGE_EVENT = 'oha-chat-e2e-add-image';",
-            "type ChatE2EImageDetail = {",
             "async function fileFromE2EImageDetail(detail: ChatE2EImageDetail | undefined): Promise<File | null>",
             "if (!import.meta.env.DEV) return undefined;",
             "window.addEventListener(CHAT_E2E_ADD_IMAGE_EVENT, handleE2EAddImage as EventListener);",
@@ -1750,12 +1763,8 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
             "onReject={() => void resolveApprovalItem(composerApprovalItem, 'reject')}",
             "onOpenDetails={() => openRunDetails(composerApprovalItem.runId)}",
             "onReveal={() => revealMessage(composerApprovalItem.messageId)}",
-            "className=\"composer-approval-nav\"",
             "className=\"chat-stop-btn\"",
             "aria-label={processingCount > 1 ? `停止当前 ${processingCount} 项任务` : '停止当前任务'}",
-            "const eventStatus = String(event?.status || '').trim();",
-            "if (['completed', 'success', 'failed', 'error', 'cancelled'].includes(eventStatus)) return false;",
-            "(eventStatus === 'approval_required' || String(event?.metadata?.run_status || '').trim() === 'approval_required')",
         ],
     )
     _assert_occurs(chat_view, "onClick={() => void openImageAttachmentPicker()}", 2)
@@ -1763,6 +1772,14 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
     _assert_occurs(chat_view, "disabled={imageAttachDisabled}", 3)
     _assert_occurs(chat_view, "if (imageAttachDisabled) {", 3)
     _assert_occurs(chat_view, "import.meta.env.DEV", 1)
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/types.ts",
+        [
+            "export type PendingAttachment = {",
+            "export type ChatE2EImageDetail = {",
+            "export type ChatAttachment = {",
+        ],
+    )
 
 
 def test_chat_ui_exposes_stable_e2e_selectors_for_image_cancel_approval_flow() -> None:
@@ -2032,6 +2049,7 @@ def test_chat_cancel_ui_smoke_uses_stop_buttons_and_cancel_route() -> None:
         [
             "export function ComposerApprovalNotice",
             "export function composerApprovalStatusText",
+            "className=\"composer-approval-nav\"",
             "data-testid=\"chat-composer-approval-notice\"",
             "data-approval-id={approvalId || ''}",
             "data-approval-item-id={itemId || ''}",
@@ -2062,6 +2080,9 @@ def test_chat_cancel_ui_smoke_uses_stop_buttons_and_cancel_route() -> None:
             "function approvalRequestDetailsFromActivity",
             "function approvalRequestDetailsFromWorkflowWaitingChild",
             "function hasActionableActivityApproval",
+            "const eventStatus = String(event?.status || '').trim();",
+            "if (['completed', 'success', 'failed', 'error', 'cancelled'].includes(eventStatus)) return false;",
+            "(eventStatus === 'approval_required' || String(event?.metadata?.run_status || '').trim() === 'approval_required')",
         ],
     )
     _assert_not_contains(
@@ -2411,7 +2432,6 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
     _assert_contains(
         "apps/frontend/src/views/ChatView.tsx",
         [
-            "type DelegatedRunSummaryResult = {",
             "async function createDelegatedRunSummary(runId: string): Promise<DelegatedRunSummaryResult>",
             "let refreshed: Awaited<ReturnType<typeof refreshMessages>> | undefined;",
             "refreshed = await refreshMessages();",
@@ -2436,6 +2456,12 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
             'data-testid="chat-message-followup-status"',
             "data-followup-task-ids={followupTaskIds}",
             "data-followup-agent-message-ids={followupAgentMessageIds}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/types.ts",
+        [
+            "export type DelegatedRunSummaryResult = {",
         ],
     )
     _assert_contains(

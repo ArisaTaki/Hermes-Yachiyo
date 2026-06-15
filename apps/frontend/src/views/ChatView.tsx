@@ -82,245 +82,37 @@ import { useYachiyoTaskActions } from '../features/yachiyo-chat/hooks/useYachiyo
 import { useYachiyoTaskSnapshots } from '../features/yachiyo-chat/hooks/useYachiyoTaskSnapshots';
 import { useYachiyoTaskSubmit } from '../features/yachiyo-chat/hooks/useYachiyoTaskSubmit';
 import { publicTaskSnapshotForMessage } from '../features/yachiyo-chat/taskSnapshots';
-import type { AgentTaskSnapshot, ApprovalCardSnapshot } from '../features/yachiyo-chat/types';
+import type {
+  AgentTaskSnapshot,
+  ApprovalCardSnapshot,
+  AssistantProfilePayload,
+  ChatActivityEvent,
+  ChatE2EImageDetail,
+  ChatMessage,
+  ChatNotice,
+  ChatParticipant,
+  ChatSessionContext,
+  DelegatedRunSummaryResult,
+  ExecutorPayload,
+  MessagesPayload,
+  PendingAttachment,
+  RenderState,
+  SessionItem,
+  SessionsPayload,
+} from '../features/yachiyo-chat/types';
 import logoUrl from '../../../../docs/open-design/logo.png';
 import { type AssistantProfileSeed, useAssistantProfileSeed } from '../lib/assistantProfileSeed';
 import { approveRunApproval, listRunnables, type RunnableSummary, type RunSpec, getRun, rejectRunApproval } from '../lib/agents';
 import { apiGet, apiPatch, apiPost, bridgeUrl, canChooseChatImages, chooseAvatarImage, chooseChatImages, copyText, openAppView, openExternalUrl, restartDesktopBridge, type ChatImageSelection } from '../lib/bridge';
 import { ROUTE_CHANGE_EVENT, currentParam, navigateTo } from '../lib/view';
 
-type PendingAttachment = {
-  id: string;
-  name: string;
-  mime_type: string;
-  size: number;
-  width?: number;
-  height?: number;
-  data_url: string;
-};
-
-type ChatE2EImageDetail = {
-  name?: string;
-  mime_type?: string;
-  mimeType?: string;
-  data_url?: string;
-  dataUrl?: string;
-  base64?: string;
-};
-
-type ChatAttachment = {
-  id?: string;
-  kind?: string;
-  name?: string;
-  mime_type?: string;
-  size?: number;
-  url?: string;
-  source?: string;
-  spoken_text?: string;
-};
-
-type ChatActivityEvent = {
-  event_id?: string;
-  session_id?: string;
-  task_id?: string;
-  tool_name?: string;
-  phase?: string;
-  title?: string;
-  detail?: string;
-  status?: string;
-  duration_seconds?: number | null;
-  created_at?: string;
-  metadata?: {
-    run_id?: string;
-    workflow_run_id?: string;
-    run_status?: string;
-    pending_approval?: Record<string, unknown>;
-  } & Record<string, unknown>;
-};
-
-type ChatParticipant = {
-  kind?: 'main' | 'agent' | 'workflow' | 'group' | string;
-  id?: string;
-  name?: string;
-  nickname?: string;
-  description?: string;
-  avatar_url?: string;
-  category?: string;
-  participants?: ChatParticipant[];
-};
-
-type ChatMessageMetadata = {
-  sender?: ChatParticipant;
-  target?: ChatParticipant;
-  runnable_kind?: string;
-  runnable_id?: string;
-  run_id?: string;
-  run_group_id?: string;
-  run_status?: string;
-  group_goal?: string;
-  delegated_goal?: string;
-  pending_approval?: {
-    approval_id?: string;
-    tool?: string;
-    input_preview?: unknown;
-    requested_at?: string;
-  };
-  run_progress_title?: string;
-  run_progress_detail?: string;
-  run_artifact_count?: number;
-  run_artifacts?: Array<{ path?: string; kind?: string }>;
-  workflow_run_id?: string;
-  workflow_status?: string;
-  workflow_node?: string;
-  workflow_waiting_child_run_id?: string;
-  workflow_waiting_node?: string;
-  workflow_waiting_tool?: string;
-  workflow_waiting_pending_approval?: {
-    approval_id?: string;
-    tool?: string;
-    input_preview?: unknown;
-    requested_at?: string;
-  };
-  group_dispatch_count?: number;
-  group_dispatch_run_group_id?: string;
-  group_dispatch_skipped?: string[];
-  group_agent_summary_task_id?: string;
-  group_agent_summary_for_task_id?: string;
-  group_agent_summary_pending?: boolean;
-  group_agent_summary_status?: string;
-  group_agent_summary_error?: string;
-  delegated_run_source_task_id?: string;
-  group_followup_for_task_ids?: string[];
-  group_followup_for_agent_message_ids?: string[];
-  guidance_type?: string;
-  suggested_goal?: string;
-};
-
-type ChatMessage = {
-  id?: string;
-  role?: string;
-  content?: string;
-  text?: string;
-  status?: string;
-  error?: string;
-  created_at?: string;
-  task_id?: string;
-  token_count?: number;
-  progress_label?: string;
-  activity_events?: ChatActivityEvent[];
-  attachments?: ChatAttachment[];
-  metadata?: ChatMessageMetadata;
-};
-
 function metadataListAttribute(value: unknown): string {
   if (!Array.isArray(value)) return '';
   return value.map((item) => String(item || '').trim()).filter(Boolean).join(',');
 }
 
-type MessagesPayload = {
-  ok?: boolean;
-  error?: string;
-  is_processing?: boolean;
-  processing_count?: number;
-  messages?: ChatMessage[];
-  token_count?: number;
-  anchor_message_id?: string;
-  session_context?: ChatSessionContext;
-};
-
-type DelegatedRunSummaryResult = {
-  created: boolean;
-  error: string;
-  taskId: string;
-  isProcessing: boolean;
-  processingCount: number;
-};
-
-type SessionSearchMatch = {
-  kind?: string;
-  query?: string;
-  message_id?: string;
-  role?: string;
-  snippet?: string;
-  created_at?: string;
-  match_count?: number;
-};
-
-type SessionItem = {
-  session_id: string;
-  title?: string;
-  conversation_kind?: 'main' | 'agent' | 'workflow' | 'group' | string;
-  runnable_id?: string;
-  runnable_name?: string;
-  run_group_id?: string;
-  avatar_url?: string;
-  participants?: ChatParticipant[];
-  created_at?: string;
-  updated_at?: string;
-  message_count?: number;
-  token_count?: number;
-  is_processing?: boolean;
-  processing_count?: number;
-  approval_count?: number;
-  latest_activity?: ChatActivityEvent | null;
-  latest_message_preview?: string;
-  latest_message_status?: string;
-  search_match?: SessionSearchMatch | null;
-};
-
-type SessionsPayload = {
-  ok?: boolean;
-  current_session_id?: string;
-  sessions?: SessionItem[];
-};
-
-type ChatSessionContext = {
-  conversation_kind?: 'main' | 'agent' | 'workflow' | 'group' | 'unassigned' | string;
-  runnable_id?: string;
-  runnable_name?: string;
-  run_group_id?: string;
-  avatar_url?: string;
-  participants?: ChatParticipant[];
-};
-
-type ImageInputPayload = {
-  can_attach_images?: boolean;
-  mode?: string;
-  route?: string;
-  supports_native_vision?: boolean | null;
-  requires_vision_pipeline?: boolean;
-  label?: string;
-  reason?: string;
-};
-
-type ExecutorPayload = {
-  executor?: string;
-  available?: boolean;
-  image_input?: ImageInputPayload;
-};
-
-type AssistantProfilePayload = {
-  ok?: boolean;
-  agent_name?: string;
-  agent_nickname?: string;
-  agent_avatar_url?: string;
-  user_avatar_url?: string;
-};
-
-type RenderState = {
-  shown: string;
-  target: string;
-};
-
 type ChatViewProps = {
   embedded?: boolean;
-};
-
-type ChatNotice = {
-  id: number;
-  kind: 'warn' | 'danger';
-  title: string;
-  detail: string;
 };
 
 let cachedAssistantProfile: AssistantProfilePayload | null = null;

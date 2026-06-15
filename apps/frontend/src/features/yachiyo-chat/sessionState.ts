@@ -3,56 +3,19 @@ import {
   messageText,
   type YachiyoChatMessage,
 } from './messageState';
+import type {
+  AssistantProfilePayload,
+  ChatParticipant,
+  ChatSessionContext,
+  SessionItem,
+  SessionSearchMatch,
+} from './types';
 
-export type YachiyoChatParticipant = {
-  kind?: 'main' | 'agent' | 'workflow' | 'group' | string;
-  id?: string;
-  name?: string;
-  nickname?: string;
-  avatar_url?: string;
-};
-
-export type YachiyoChatSessionContext = {
-  conversation_kind?: 'main' | 'agent' | 'workflow' | 'group' | 'unassigned' | string;
-  runnable_id?: string;
-  runnable_name?: string;
-  run_group_id?: string;
-  avatar_url?: string;
-  participants?: YachiyoChatParticipant[];
-};
-
-export type YachiyoChatSessionSearchMatch = {
-  kind?: string;
-  role?: string;
-  snippet?: string;
-  match_count?: number;
-};
-
-export type YachiyoChatSessionItem = {
-  session_id: string;
-  title?: string;
-  conversation_kind?: 'main' | 'agent' | 'workflow' | 'group' | string;
-  runnable_id?: string;
-  runnable_name?: string;
-  run_group_id?: string;
-  avatar_url?: string;
-  participants?: YachiyoChatParticipant[];
-  created_at?: string;
-  updated_at?: string;
-  message_count?: number;
-  token_count?: number;
-  is_processing?: boolean;
-  processing_count?: number;
-  approval_count?: number;
-  latest_message_preview?: string;
-  latest_message_status?: string;
-  search_match?: YachiyoChatSessionSearchMatch | null;
-};
-
-export type YachiyoChatAssistantProfile = {
-  agent_name?: string;
-  agent_nickname?: string;
-};
+export type YachiyoChatParticipant = ChatParticipant;
+export type YachiyoChatSessionContext = ChatSessionContext;
+export type YachiyoChatSessionSearchMatch = SessionSearchMatch;
+export type YachiyoChatSessionItem = SessionItem;
+export type YachiyoChatAssistantProfile = AssistantProfilePayload;
 
 export type YachiyoChatRunnable = {
   id: string;

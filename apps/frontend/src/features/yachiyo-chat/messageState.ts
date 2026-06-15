@@ -1,45 +1,16 @@
 import {
   approvalRequiredMessages,
   nextApprovalStatusText,
-  type ChatApprovalActivityEvent,
-  type ChatApprovalMessage,
-  type ChatApprovalMetadata,
 } from './approvalItems';
+import type {
+  ChatActivityEvent,
+  ChatMessage,
+  ChatMessageMetadata,
+} from './types';
 
-export type YachiyoChatActivityEvent = Omit<ChatApprovalActivityEvent, 'metadata'> & {
-  session_id?: string;
-  task_id?: string;
-  phase?: string;
-  duration_seconds?: number | null;
-  metadata?: {
-    run_id?: string;
-    workflow_run_id?: string;
-    run_status?: string;
-    pending_approval?: Record<string, unknown>;
-  } & Record<string, unknown>;
-};
-
-export type YachiyoChatMessageMetadata = ChatApprovalMetadata & {
-  runnable_kind?: string;
-  group_dispatch_count?: number;
-  group_dispatch_run_group_id?: string;
-  group_dispatch_skipped?: string[];
-  group_agent_summary_pending?: boolean;
-  group_agent_summary_status?: string;
-  group_agent_summary_error?: string;
-  group_followup_for_task_ids?: string[];
-  group_followup_for_agent_message_ids?: string[];
-};
-
-export type YachiyoChatMessage = Omit<ChatApprovalMessage, 'activity_events' | 'metadata'> & {
-  status?: string;
-  error?: string;
-  task_id?: string;
-  token_count?: number;
-  progress_label?: string;
-  activity_events?: YachiyoChatActivityEvent[];
-  metadata?: YachiyoChatMessageMetadata;
-};
+export type YachiyoChatActivityEvent = ChatActivityEvent;
+export type YachiyoChatMessageMetadata = ChatMessageMetadata;
+export type YachiyoChatMessage = ChatMessage;
 
 export type GroupAgentSummaryNotice = {
   tone: 'pending' | 'failed' | 'completed';
