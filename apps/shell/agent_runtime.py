@@ -261,6 +261,7 @@ from apps.shell.agent.runtime.schema import (
     agent_model_credential_ref as _agent_model_credential_ref,
     initialize_runtime_schema as _initialize_runtime_schema,
 )
+from apps.shell.agent.runtime.service_lifecycle import RuntimeServiceLifecycle
 from apps.shell.agent.runtime.seed_templates import RuntimeSeedTemplateService
 from apps.shell.agent.runtime.paths import (
     RuntimeDirectoryLayout,
@@ -2731,6 +2732,7 @@ class NativeRunEngine:
 AgentRuntimeService = NativeRunEngine
 
 _global_agent_runtime_service: NativeRunEngine | None = None
+_runtime_service_lifecycle = RuntimeServiceLifecycle(factory=NativeRunEngine)
 
 
 def get_native_agent_readiness() -> dict[str, Any]:
@@ -2744,8 +2746,10 @@ def get_native_agent_readiness() -> dict[str, Any]:
 
 def get_native_run_engine() -> NativeRunEngine:
     global _global_agent_runtime_service
-    if _global_agent_runtime_service is None:
-        _global_agent_runtime_service = NativeRunEngine()
+    if _global_agent_runtime_service is not None:
+        _runtime_service_lifecycle.set_current(_global_agent_runtime_service)
+        return _global_agent_runtime_service
+    _global_agent_runtime_service = _runtime_service_lifecycle.get()
     return _global_agent_runtime_service
 
 
@@ -2757,5 +2761,6 @@ def get_agent_runtime_service() -> NativeRunEngine:
 def close_agent_runtime_service() -> None:
     global _global_agent_runtime_service
     if _global_agent_runtime_service is not None:
-        _global_agent_runtime_service.close()
-        _global_agent_runtime_service = None
+        _runtime_service_lifecycle.set_current(_global_agent_runtime_service)
+    _runtime_service_lifecycle.close()
+    _global_agent_runtime_service = None
