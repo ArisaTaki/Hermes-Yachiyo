@@ -16,6 +16,7 @@ from apps.shell.agent.runtime.skill_import import (
     SkillImportPreparer,
     SkillImportSourceResolver,
 )
+from apps.shell.agent.runtime.skill_import_service import RuntimeSkillImportService
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
 
@@ -32,6 +33,7 @@ def _resolver(workspace_dir: Path, ids: list[str] | None = None) -> SkillImportS
 def test_skill_import_source_resolver_remains_exported_from_legacy_runtime_module() -> None:
     assert agent_runtime.SkillImportSourceResolver is SkillImportSourceResolver
     assert agent_runtime.SkillImportPreparer is SkillImportPreparer
+    assert agent_runtime.RuntimeSkillImportService is RuntimeSkillImportService
 
 
 def test_skill_import_source_resolver_accepts_directory_and_nested_zip(tmp_path: Path) -> None:
@@ -102,6 +104,7 @@ def test_native_runtime_uses_split_skill_import_source_resolver(tmp_path: Path) 
     try:
         assert isinstance(service.skill_import_sources, SkillImportSourceResolver)
         assert isinstance(service.skill_import_preparer, SkillImportPreparer)
+        assert isinstance(service.skill_import_service, RuntimeSkillImportService)
         skill = service.import_skill(str(archive))
 
         assert skill["name"] == "Runtime Zip Skill"
@@ -180,3 +183,109 @@ def test_skill_import_preparer_rejects_unknown_type_and_missing_skill_md(tmp_pat
         preparer.prepare(root, source_type="unknown", source_ref="fallback")
     with pytest.raises(AgentRuntimeError, match="SKILL.md"):
         preparer.prepare(root, source_type="local_dir", source_ref="fallback")
+
+
+def test_runtime_skill_import_service_imports_source_and_cleans_up(tmp_path: Path) -> None:
+    source = tmp_path / "source-skill"
+    source.mkdir()
+    source_root = tmp_path / "resolved-skill"
+    source_root.mkdir()
+    resolved = ResolvedSkillImportSource(
+        source=source,
+        source_root=source_root,
+        source_path="local:source-skill",
+        source_type="local_dir",
+        source_ref="source-skill",
+        origin_path=str(source.resolve()),
+        temp_dir=None,
+    )
+    prepared = PreparedSkillImport(
+        source_ref="https://example.test/source-skill",
+        markdown="# Source Skill",
+        metadata={},
+        name="Source Skill",
+        description="Demo",
+        content_hash="hash-1",
+        summary="summary",
+        now="now",
+        last_synced_at="",
+    )
+    cleanup_calls: list[ResolvedSkillImportSource] = []
+    clear_calls: list[tuple[str, str]] = []
+    commits: list[str] = []
+    save_calls: list[dict[str, object]] = []
+
+    class FakeResolver:
+        def resolve(self, source_path: str) -> ResolvedSkillImportSource:
+            assert source_path == str(source)
+            return resolved
+
+        def cleanup(self, value: ResolvedSkillImportSource) -> None:
+            cleanup_calls.append(value)
+
+    class FakePreparer:
+        def prepare(self, root: Path, **kwargs) -> PreparedSkillImport:
+            assert root == source_root
+            assert kwargs == {"source_type": "local_dir", "source_ref": "source-skill", "synced_at": ""}
+            return prepared
+
+    class FakeSkillRecords:
+        def find_existing_import(self, **kwargs):
+            assert kwargs == {
+                "origin_path": str(source.resolve()),
+                "content_hash": "hash-1",
+                "source_type": "local_dir",
+            }
+            return None
+
+        def save_import(self, **kwargs):
+            save_calls.append(kwargs)
+            return {"skill_id": "skill-1", "sync_status": "imported"}
+
+    class FakeConn:
+        def commit(self) -> None:
+            commits.append("commit")
+
+    service = RuntimeSkillImportService(
+        conn=FakeConn(),
+        source_resolver=FakeResolver(),
+        preparer=FakePreparer(),
+        skill_records=FakeSkillRecords(),
+        normalize_skill_folder_id=lambda folder_id: folder_id or "",
+        skill_deletion_key=lambda source_type, origin_path: f"{source_type}:{origin_path}",
+        clear_studio_deletion=lambda item_type, item_key: clear_calls.append((item_type, item_key)),
+        get_skill=lambda skill_id: {"skill_id": skill_id, "name": "Source Skill"},
+        error_type=AgentRuntimeError,
+    )
+
+    imported = service.import_skill(str(source), folder_id="folder-1")
+
+    assert imported == {"skill_id": "skill-1", "name": "Source Skill", "sync_status": "imported"}
+    assert cleanup_calls == [resolved]
+    assert clear_calls == [("skill_source", f"local_dir:{source.resolve()}")]
+    assert commits == ["commit"]
+    assert save_calls[0]["source_root"] == source_root
+    assert save_calls[0]["source_ref"] == "https://example.test/source-skill"
+    assert save_calls[0]["folder_id_was_provided"] is True
+    assert save_calls[0]["target_folder_id"] == "folder-1"
+
+
+def test_runtime_skill_import_service_keeps_missing_path_error_before_folder_validation(tmp_path: Path) -> None:
+    class Unused:
+        def __getattr__(self, name: str):
+            raise AssertionError(name)
+
+    service = RuntimeSkillImportService(
+        conn=Unused(),
+        source_resolver=Unused(),
+        preparer=Unused(),
+        skill_records=Unused(),
+        normalize_skill_folder_id=lambda _folder_id: (_ for _ in ()).throw(AssertionError("folder validated")),
+        skill_deletion_key=lambda _source_type, _origin_path: "",
+        clear_studio_deletion=lambda _item_type, _item_key: None,
+        get_skill=lambda _skill_id: {},
+        error_type=AgentRuntimeError,
+    )
+
+    with pytest.raises(AgentRuntimeError, match="Skill 路径不存在"):
+        service.import_skill(str(tmp_path / "missing"), folder_id="missing-folder")

@@ -226,6 +226,7 @@ from apps.shell.agent.runtime.serialization import (
 from apps.shell.agent.runtime.shutdown import RuntimeShutdownService
 from apps.shell.agent.runtime.skill_content import SkillContentInspector
 from apps.shell.agent.runtime.skill_import import SkillImportPreparer, SkillImportSourceResolver
+from apps.shell.agent.runtime.skill_import_service import RuntimeSkillImportService
 from apps.shell.agent.runtime.skill_install import SkillInstallCommandValidator
 from apps.shell.agent.runtime.skill_install_service import RuntimeSkillInstallService
 from apps.shell.agent.runtime.skill_sources import SkillSourceDiscovery
@@ -1070,6 +1071,17 @@ class NativeRunEngine:
             default_workspace_policy=self._default_workspace_policy,
             has_studio_deletion=self._has_studio_deletion,
         )
+        self.skill_import_service = RuntimeSkillImportService(
+            conn=self._conn,
+            source_resolver=self.skill_import_sources,
+            preparer=self.skill_import_preparer,
+            skill_records=self.skill_records,
+            normalize_skill_folder_id=self._normalize_skill_folder_id,
+            skill_deletion_key=self._skill_deletion_key,
+            clear_studio_deletion=self._clear_studio_deletion,
+            get_skill=self.get_skill,
+            error_type=AgentRuntimeError,
+        )
         self.skill_sync_service = RuntimeSkillSyncService(
             conn=self._conn,
             skill_sync=self.skill_sync,
@@ -1641,29 +1653,7 @@ class NativeRunEngine:
         return self.skill_records.get(skill_id)
 
     def import_skill(self, source_path: str, folder_id: str | None = None) -> dict[str, Any]:
-        source = Path(source_path).expanduser()
-        if not source.exists():
-            raise AgentRuntimeError("Skill 路径不存在")
-        target_folder_id = self._normalize_skill_folder_id(folder_id)
-        resolved = self.skill_import_sources.resolve(str(source))
-        try:
-            imported = self._import_skill_root(
-                resolved.source_root,
-                source_path=resolved.source_path,
-                source_type=resolved.source_type,
-                origin_path=resolved.origin_path,
-                source_ref=resolved.source_ref,
-                sync_status="imported",
-                folder_id=target_folder_id,
-            )
-            self._clear_studio_deletion(
-                "skill_source",
-                self._skill_deletion_key(resolved.source_type, resolved.origin_path),
-            )
-            self._conn.commit()
-            return imported
-        finally:
-            self.skill_import_sources.cleanup(resolved)
+        return self.skill_import_service.import_skill(source_path, folder_id)
 
     def sync_native_skills(self, roots: list[Any] | None = None) -> dict[str, Any]:
         return self._sync_skill_roots(self._native_skill_root_specs(roots), library="native")
@@ -1716,51 +1706,20 @@ class NativeRunEngine:
         copy_to_managed: bool = True,
         folder_id: str | None = None,
     ) -> dict[str, Any]:
-        prepared = self.skill_import_preparer.prepare(
-            source_root,
-            source_type=source_type,
-            source_ref=source_ref,
-            synced_at=synced_at,
-        )
-        source_ref = prepared.source_ref
-        name = prepared.name
-        description = prepared.description
-        content_hash = prepared.content_hash
-        existing = self._find_existing_skill(origin_path, content_hash, source_type)
-        summary = prepared.summary
-        now = prepared.now
-        last_synced_at = prepared.last_synced_at
-        markdown = prepared.markdown
-        target_folder_id = self._normalize_skill_folder_id(folder_id) if folder_id is not None else ""
-        saved = self.skill_records.save_import(
+        return self.skill_import_service.import_root(
             source_root=source_root,
             source_path=source_path,
             source_type=source_type,
             origin_path=origin_path,
             source_ref=source_ref,
-            name=name,
-            description=description,
-            content_hash=content_hash,
-            last_synced_at=last_synced_at,
             sync_status=sync_status,
-            summary=summary,
-            markdown=markdown,
-            now=now,
-            existing=existing,
             copy_to_managed=copy_to_managed,
-            folder_id_was_provided=folder_id is not None,
-            target_folder_id=target_folder_id,
+            synced_at=synced_at,
+            folder_id=folder_id,
         )
-        skill = self.get_skill(saved["skill_id"])
-        skill["sync_status"] = saved["sync_status"]
-        return skill
 
     def _find_existing_skill(self, origin_path: str, content_hash: str, source_type: str) -> sqlite3.Row | None:
-        return self.skill_records.find_existing_import(
-            origin_path=origin_path,
-            content_hash=content_hash,
-            source_type=source_type,
-        )
+        return self.skill_import_service.find_existing(origin_path, content_hash, source_type)
 
     def _repair_native_skill_references(self) -> None:
         self.skill_records.repair_native_references()
