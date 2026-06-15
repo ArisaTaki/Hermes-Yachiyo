@@ -3006,7 +3006,7 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
               data-testid="chat-message-open-run-detail"
               onClick={() => onOpenRunDetails(runId)}
             >
-              运行详情
+              Agent Studio
             </button>
           ) : null}
           {showWorkflowStudioAction ? (

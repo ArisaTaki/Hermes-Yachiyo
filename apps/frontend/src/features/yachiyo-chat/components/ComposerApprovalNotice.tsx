@@ -77,7 +77,7 @@ export function ComposerApprovalNotice({
             data-testid="chat-composer-approval-open-run-detail"
             onClick={onOpenDetails}
           >
-            运行详情
+            Agent Studio
           </button>
         ) : null}
         <button type="button" className="approve" data-testid="chat-composer-approval-approve" disabled={busy} onClick={onApprove}>{busy ? '处理中...' : '批准'}</button>

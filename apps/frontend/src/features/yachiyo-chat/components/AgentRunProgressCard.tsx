@@ -39,7 +39,7 @@ export function AgentRunProgressCard({
             data-testid="chat-agent-run-progress-open-run-detail"
             onClick={onOpenDetails}
           >
-            运行详情
+            Agent Studio
           </button>
         ) : null}
       </div>

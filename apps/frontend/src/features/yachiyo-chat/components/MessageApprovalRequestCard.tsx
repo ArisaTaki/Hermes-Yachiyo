@@ -53,7 +53,7 @@ export function MessageApprovalRequestCard({
               data-testid="chat-message-approval-open-run-detail"
               onClick={onOpenDetails}
             >
-              运行详情
+              Agent Studio
             </button>
           ) : null}
         </span>

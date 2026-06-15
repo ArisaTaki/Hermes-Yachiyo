@@ -2082,6 +2082,7 @@ def test_chat_ui_exposes_stable_e2e_selectors_for_image_cancel_approval_flow() -
             "data-testid=\"chat-message-approval-reject\"",
             "data-testid=\"chat-message-retry\"",
             "data-testid=\"chat-message-open-run-detail\"",
+            'data-testid="chat-message-open-run-detail"\n              onClick={() => onOpenRunDetails(runId)}\n            >\n              Agent Studio',
             "ComposerApprovalNotice",
         ],
     )
@@ -2314,6 +2315,7 @@ def test_chat_cancel_ui_smoke_uses_stop_buttons_and_cancel_route() -> None:
             "data-run-id={runId}",
             "data-run-status={runStatus}",
             "data-testid=\"chat-message-approval-open-run-detail\"",
+            "Agent Studio",
         ],
     )
     _assert_contains(
@@ -2332,6 +2334,7 @@ def test_chat_cancel_ui_smoke_uses_stop_buttons_and_cancel_route() -> None:
             "data-testid=\"chat-composer-approval-approve\"",
             "data-testid=\"chat-composer-approval-reject\"",
             "data-testid=\"chat-composer-approval-open-run-detail\"",
+            "Agent Studio",
             "data-testid=\"chat-composer-approval-reveal\"",
             "data-testid=\"chat-composer-approval-previous\"",
             "data-testid=\"chat-composer-approval-next\"",
@@ -2802,6 +2805,7 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
             "data-runnable-kind={runnableKind}",
             "data-runnable-id={runnableId}",
             'data-testid="chat-agent-run-progress-open-run-detail"',
+            "Agent Studio",
         ],
     )
     _assert_contains(
@@ -2827,6 +2831,19 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
             "展开调用记录",
         ],
     )
+    _assert_not_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/AgentRunProgressCard.tsx",
+        ["运行详情"],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/MessageApprovalRequestCard.tsx",
+        ["运行详情"],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/ComposerApprovalNotice.tsx",
+        ["运行详情"],
+    )
+    _assert_not_contains("apps/frontend/src/views/ChatView.tsx", ["运行详情"])
 
 
 def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None:
