@@ -72,7 +72,10 @@ from apps.shell.agent.runtime.approval_lifecycle import (
     ApprovalPauseProjectionCoordinator,
 )
 from apps.shell.agent.runtime.approval_resume import ApprovalResumeCoordinator
-from apps.shell.agent.runtime.approval_execution import RuntimeApprovalExecutionService
+from apps.shell.agent.runtime.approval_execution import (
+    RuntimeApprovalExecutionService,
+    RuntimeApprovalRunDispatcher,
+)
 from apps.shell.agent.runtime.approval_services import (
     RuntimeApprovalServiceBundle,
     build_runtime_approval_services as _build_runtime_approval_services,
@@ -869,11 +872,17 @@ class NativeRunEngine:
                 error_type=AgentRuntimeError,
             )
         )
+        self.approval_resume_dispatcher = RuntimeApprovalRunDispatcher(
+            approve_workflow_run=lambda run: self._approve_workflow_run_approval(run),
+            approve_main_chat_run=lambda run: self._approve_main_chat_run_approval(run),
+            approve_agent_run=lambda run: self.tool_approval_resume.approve_agent_run(run),
+            error_type=AgentRuntimeError,
+        )
         self.approval_execution = RuntimeApprovalExecutionService(
             execution_lock=self._approval_execution_lock,
             execution_in_progress=self._approval_execution_in_progress,
             get_run=lambda run_id: self.get_run(run_id),
-            approve_once=lambda run: self._approve_run_approval_once(run),
+            approve_once=self.approval_resume_dispatcher.approve_once,
         )
         self._install_runtime_main_chat_model_loop(
             MainChatModelLoopRunner(
@@ -2659,15 +2668,7 @@ class NativeRunEngine:
         return self.approval_execution.approve_run_approval(run_id)
 
     def _approve_run_approval_once(self, run: dict[str, Any]) -> dict[str, Any]:
-        if run["status"] != "approval_required":
-            return run
-        if run["kind"] == "workflow_run":
-            return self._approve_workflow_run_approval(run)
-        if run["kind"] == "main_chat_run":
-            return self._approve_main_chat_run_approval(run)
-        if run["kind"] != "agent_run":
-            raise AgentRuntimeError("当前只支持恢复 Agent Run 的工具审批")
-        return self.tool_approval_resume.approve_agent_run(run)
+        return self.approval_resume_dispatcher.approve_once(run)
 
     def _resume_approved_tool_run(
         self,

@@ -6,6 +6,34 @@ from collections.abc import Callable
 from typing import Any
 
 
+class RuntimeApprovalRunDispatcher:
+    """Dispatches approved Run resumes by runtime kind without bypassing gates."""
+
+    def __init__(
+        self,
+        *,
+        approve_workflow_run: Callable[[dict[str, Any]], dict[str, Any]],
+        approve_main_chat_run: Callable[[dict[str, Any]], dict[str, Any]],
+        approve_agent_run: Callable[[dict[str, Any]], dict[str, Any]],
+        error_type: type[Exception],
+    ) -> None:
+        self._approve_workflow_run = approve_workflow_run
+        self._approve_main_chat_run = approve_main_chat_run
+        self._approve_agent_run = approve_agent_run
+        self._error_type = error_type
+
+    def approve_once(self, run: dict[str, Any]) -> dict[str, Any]:
+        if run["status"] != "approval_required":
+            return run
+        if run["kind"] == "workflow_run":
+            return self._approve_workflow_run(run)
+        if run["kind"] == "main_chat_run":
+            return self._approve_main_chat_run(run)
+        if run["kind"] != "agent_run":
+            raise self._error_type("当前只支持恢复 Agent Run 的工具审批")
+        return self._approve_agent_run(run)
+
+
 class RuntimeApprovalExecutionService:
     """Serializes approval execution for a run while preserving legacy callbacks."""
 
