@@ -571,6 +571,7 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     request = _request(runtime)
 
     agents = await yachiyo.list_studio_agents(request)
+    agent = await yachiyo.get_studio_agent("agent-1", request)
     groups = await yachiyo.list_studio_groups(request)
     group = await yachiyo.get_studio_group("group-run-1", request)
     started_group_run = await yachiyo.start_studio_group_run(
@@ -681,6 +682,7 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     artifact = await yachiyo.get_studio_run_artifact("run-1", "reports/final.md", request)
 
     assert agents["agents"][0]["agent_id"] == "agent-1"
+    assert agent["agent_id"] == "agent-1"
     assert groups["groups"][0]["group_id"] == "group-run-1"
     assert groups["groups"][0]["mode"] == "pipeline"
     assert groups["groups"][0]["members"][0]["agent_id"] == "agent-1"
@@ -873,6 +875,7 @@ def test_yachiyo_studio_routes_include_run_action_facade() -> None:
     source = Path(yachiyo.__file__).read_text(encoding="utf-8")
 
     assert '@router.post("/studio/agents/{agent_id}/runs")' in source
+    assert '@router.get("/studio/agents/{agent_id}")' in source
     assert '@router.delete("/studio/agents/{agent_id}")' in source
     assert '@router.post("/studio/agents/{agent_id}/test-model")' in source
     assert '@router.post("/studio/agents/{agent_id}/skills")' in source
@@ -895,6 +898,7 @@ def test_yachiyo_studio_routes_include_run_action_facade() -> None:
     assert '@router.get("/studio/future-tasks")' in source
     assert '@router.post("/studio/future-tasks/trigger-due")' in source
     assert '@router.post("/studio/future-tasks/{future_task_id}/cancel")' in source
+    assert '@router.get("/studio/groups/{group_id}")' in source
     assert '@router.get("/studio/group-runs")' in source
     assert '@router.get("/studio/group-runs/{group_run_id}")' in source
     assert '@router.get("/studio/runs")' in source

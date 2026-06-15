@@ -813,6 +813,8 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "next_after_sequence?: number;",
             "has_more?: boolean;",
             "listYachiyoStudioAgents",
+            "getYachiyoStudioAgent",
+            "/yachiyo/studio/agents/${encodeURIComponent(agentId)}",
             "saveYachiyoStudioAgent",
             "deleteYachiyoStudioAgent",
             "listYachiyoSkills",
@@ -837,6 +839,8 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "cancelYachiyoFutureTask",
             "triggerDueYachiyoFutureTasks",
             "listYachiyoAgentGroups",
+            "getYachiyoAgentGroup",
+            "/yachiyo/studio/groups/${encodeURIComponent(groupId)}",
             "saveYachiyoAgentGroup",
             "startYachiyoGroupRun",
             "listYachiyoGroupRuns",
@@ -847,6 +851,20 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "startYachiyoWorkflowRun",
             "deleteYachiyoWorkflow",
             "function createClientRunId()",
+        ],
+    )
+    _assert_function_contains(
+        "apps/frontend/src/features/yachiyo-studio/api.ts",
+        "getYachiyoStudioAgent",
+        [
+            "/yachiyo/studio/agents/${encodeURIComponent(agentId)}",
+        ],
+    )
+    _assert_function_contains(
+        "apps/frontend/src/features/yachiyo-studio/api.ts",
+        "getYachiyoAgentGroup",
+        [
+            "/yachiyo/studio/groups/${encodeURIComponent(groupId)}",
         ],
     )
     _assert_function_contains(
@@ -929,6 +947,11 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
     _assert_contains(
         "apps/frontend/src/features/agent-studio/utils/studioData.ts",
         [
+            "getYachiyoStudioAgent",
+            "getYachiyoAgentGroup",
+            "export async function getStudioAgentForView",
+            "publicAgentToAgentSpec(await getYachiyoStudioAgent(agentId))",
+            "export async function getStudioGroupForView",
             "getYachiyoWorkflow",
             "export async function getStudioWorkflowForView",
             "publicWorkflowToWorkflowSpec(await getYachiyoWorkflow(workflowId))",

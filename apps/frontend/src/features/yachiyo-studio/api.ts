@@ -65,6 +65,10 @@ export async function listYachiyoStudioAgents(): Promise<AgentDefinitionSnapshot
   return payload.agents || [];
 }
 
+export async function getYachiyoStudioAgent(agentId: string): Promise<AgentDefinitionSnapshot> {
+  return apiGet(`/yachiyo/studio/agents/${encodeURIComponent(agentId)}`);
+}
+
 export async function saveYachiyoStudioAgent(
   request: Partial<AgentDefinitionSnapshot>,
 ): Promise<AgentDefinitionSnapshot> {

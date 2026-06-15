@@ -11,6 +11,8 @@ import type {
   WorkflowSpec,
 } from '../types';
 import {
+  getYachiyoAgentGroup,
+  getYachiyoStudioAgent,
   getYachiyoWorkflow,
   getYachiyoRunTimeline,
   listYachiyoFutureTasks,
@@ -36,6 +38,10 @@ import { publicWorkflowToWorkflowSpec } from './workflow';
 
 export async function listStudioAgentsForView(): Promise<AgentSpec[]> {
   return (await listYachiyoStudioAgents()).map(publicAgentToAgentSpec);
+}
+
+export async function getStudioAgentForView(agentId: string): Promise<AgentSpec> {
+  return publicAgentToAgentSpec(await getYachiyoStudioAgent(agentId));
 }
 
 export async function listStudioSkillsForView(): Promise<SkillSpec[]> {
@@ -99,6 +105,10 @@ export async function listStudioFutureTasksForView(): Promise<FutureTaskSpec[]> 
 
 export async function listStudioGroupsForView(): Promise<AgentGroupSnapshot[]> {
   return listYachiyoAgentGroups();
+}
+
+export async function getStudioGroupForView(groupId: string): Promise<AgentGroupSnapshot> {
+  return getYachiyoAgentGroup(groupId);
 }
 
 function studioRunnableToolPolicy(policy: AgentSpec['tool_policy']): RunnableSummary['tool_policy'] | undefined {
