@@ -210,6 +210,7 @@ from apps.shell.agent.runtime.serialization import (
     json_load as _json_load,
     slug as _slug,
 )
+from apps.shell.agent.runtime.shutdown import RuntimeShutdownService
 from apps.shell.agent.runtime.skill_content import SkillContentInspector
 from apps.shell.agent.runtime.skill_import import SkillImportPreparer, SkillImportSourceResolver
 from apps.shell.agent.runtime.skill_install import SkillInstallCommandValidator
@@ -989,6 +990,18 @@ class NativeRunEngine:
                 error_type=AgentRuntimeError,
             )
         )
+        self._install_runtime_shutdown(
+            RuntimeShutdownService(
+                conn=self._conn,
+                credential_store=self._credential_store,
+                is_closed=lambda: self._closed,
+                mark_not_accepting=lambda: setattr(self, "_accepting_runs", False),
+                mark_closed=lambda: setattr(self, "_closed", True),
+                cancel_terminal_process_groups=lambda: cancel_terminal_process_groups(),
+                ensure_row_factory=lambda: self._ensure_row_factory(),
+                cancel_run=lambda run_id: self.cancel_run(run_id),
+            )
+        )
         self._init_db()
         self._migrate_agent_workspace_policies()
         if seed_templates:
@@ -1151,35 +1164,17 @@ class NativeRunEngine:
     ) -> None:
         self.run_deletion = run_deletion
 
+    def _install_runtime_shutdown(
+        self,
+        shutdown: RuntimeShutdownService,
+    ) -> None:
+        self.runtime_shutdown = shutdown
+
     def close(self) -> None:
         self.shutdown()
 
     def shutdown(self, *, close_db: bool = True) -> None:
-        if self._closed:
-            return
-        self._accepting_runs = False
-        cancel_terminal_process_groups()
-        try:
-            self._ensure_row_factory()
-            rows = self._conn.execute(
-                """
-                SELECT run_id
-                  FROM runs
-                 WHERE status NOT IN ('completed', 'failed', 'cancelled')
-                 ORDER BY updated_at DESC
-                """
-            ).fetchall()
-            for row in rows:
-                try:
-                    self.cancel_run(str(row["run_id"]))
-                except Exception:
-                    continue
-            self._conn.commit()
-        finally:
-            if close_db:
-                self._conn.close()
-                self._credential_store.close()
-                self._closed = True
+        self.runtime_shutdown.shutdown(close_db=close_db)
 
     def _ensure_row_factory(self) -> None:
         if self._conn.row_factory is not _named_row_factory:
