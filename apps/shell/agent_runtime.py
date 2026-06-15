@@ -24,13 +24,7 @@ from apps.shell.agent.repositories.groups import RunGroupRepository
 from apps.shell.agent.repositories.memories import AgentMemoryStore
 from apps.shell.agent.repositories.runs import RunRepository
 from apps.shell.agent.repositories.row_projections import (
-    row_to_agent as _project_agent_row,
-    row_to_agent_private as _project_agent_private_row,
-    row_to_run as _project_run_row,
-    row_to_run_group as _project_run_group_row,
-    row_to_skill as _project_skill_row,
-    row_to_skill_folder as _project_skill_folder_row,
-    row_to_workflow as _project_workflow_row,
+    RuntimeRowProjector,
 )
 from apps.shell.agent.repositories.skill_folders import SkillFolderRepository
 from apps.shell.agent.repositories.skills import SkillRepository
@@ -511,6 +505,20 @@ class NativeRunEngine:
             now=_now,
             redact_secrets=redact_secrets,
             credential_store=self._credential_store,
+        )
+        self.row_projector = RuntimeRowProjector(
+            skills_dir=self.skills_dir,
+            json_load=_json_load,
+            default_tool_policy=self._default_tool_policy,
+            default_workspace_policy=self._default_workspace_policy,
+            compile_tool_policy=self._compile_tool_policy,
+            compile_workspace_policy=self._compile_workspace_policy,
+            normalize_execution_backend=_normalize_execution_backend,
+            read_credential=self._read_credential,
+            public_pending_approval=_public_pending_approval,
+            task_run_link_for_run=lambda run_id: self.task_run_links.for_run(run_id),
+            run_group_source=self._run_group_source,
+            runnable_name=self._runnable_name,
         )
         self.definition_name_guard = RuntimeDefinitionNameGuard(
             self._conn,
@@ -1599,47 +1607,28 @@ class NativeRunEngine:
         return self.future_task_service.trigger_due(now_epoch=now_epoch, limit=limit)
 
     def _row_to_agent(self, row: Any) -> dict[str, Any]:
-        return _project_agent_row(
-            row,
-            json_load=_json_load,
-            default_tool_policy=self._default_tool_policy,
-            default_workspace_policy=self._default_workspace_policy,
-            compile_tool_policy=self._compile_tool_policy,
-            compile_workspace_policy=self._compile_workspace_policy,
-            normalize_execution_backend=_normalize_execution_backend,
-        )
+        return self.row_projector.agent(row)
 
     def _row_to_agent_private(self, row: Any) -> dict[str, Any]:
-        return _project_agent_private_row(
-            row,
-            row_to_agent=self._row_to_agent,
-            read_credential=self._read_credential,
-        )
+        return self.row_projector.agent_private(row)
 
     def _main_chat_virtual_agent(self) -> dict[str, Any]:
         return self.main_chat_virtual_agent_projector.virtual_agent()
 
     def _row_to_skill(self, row: sqlite3.Row) -> dict[str, Any]:
-        return _project_skill_row(row, skills_dir=self.skills_dir, json_load=_json_load)
+        return self.row_projector.skill(row)
 
     def _row_to_skill_folder(self, row: sqlite3.Row) -> dict[str, Any]:
-        return _project_skill_folder_row(row)
+        return self.row_projector.skill_folder(row)
 
     def _row_to_workflow(self, row: sqlite3.Row) -> dict[str, Any]:
-        return _project_workflow_row(row, json_load=_json_load)
+        return self.row_projector.workflow(row)
 
     def _row_to_run(self, row: sqlite3.Row) -> dict[str, Any]:
-        return _project_run_row(
-            row,
-            json_load=_json_load,
-            public_pending_approval=_public_pending_approval,
-            task_run_link_for_run=self.task_run_links.for_run,
-            run_group_source=self._run_group_source,
-            runnable_name=self._runnable_name,
-        )
+        return self.row_projector.run(row)
 
     def _row_to_run_group(self, row: sqlite3.Row) -> dict[str, Any]:
-        return _project_run_group_row(row, json_load=_json_load)
+        return self.row_projector.run_group(row)
 
     def _runnable_name(self, kind: str, runnable_id: str) -> str:
         return self.runnable_name_resolver.resolve(kind, runnable_id)

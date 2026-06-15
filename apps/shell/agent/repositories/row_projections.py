@@ -194,3 +194,76 @@ def row_to_run(
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
+
+
+class RuntimeRowProjector:
+    """Projects repository rows into legacy runtime dictionaries."""
+
+    def __init__(
+        self,
+        *,
+        skills_dir: Path,
+        json_load: Callable[[str | None, Any], Any],
+        default_tool_policy: Callable[[str], dict[str, Any]],
+        default_workspace_policy: Callable[[], dict[str, Any]],
+        compile_tool_policy: Callable[[str, Any], dict[str, Any]],
+        compile_workspace_policy: Callable[[Any], dict[str, Any]],
+        normalize_execution_backend: Callable[..., str],
+        read_credential: Callable[[str], str],
+        public_pending_approval: Callable[[Any], dict[str, Any]],
+        task_run_link_for_run: Callable[[str], dict[str, Any] | None],
+        run_group_source: Callable[[str], str],
+        runnable_name: Callable[[str, str], str],
+    ) -> None:
+        self._skills_dir = skills_dir
+        self._json_load = json_load
+        self._default_tool_policy = default_tool_policy
+        self._default_workspace_policy = default_workspace_policy
+        self._compile_tool_policy = compile_tool_policy
+        self._compile_workspace_policy = compile_workspace_policy
+        self._normalize_execution_backend = normalize_execution_backend
+        self._read_credential = read_credential
+        self._public_pending_approval = public_pending_approval
+        self._task_run_link_for_run = task_run_link_for_run
+        self._run_group_source = run_group_source
+        self._runnable_name = runnable_name
+
+    def agent(self, row: Any) -> dict[str, Any]:
+        return row_to_agent(
+            row,
+            json_load=self._json_load,
+            default_tool_policy=self._default_tool_policy,
+            default_workspace_policy=self._default_workspace_policy,
+            compile_tool_policy=self._compile_tool_policy,
+            compile_workspace_policy=self._compile_workspace_policy,
+            normalize_execution_backend=self._normalize_execution_backend,
+        )
+
+    def agent_private(self, row: Any) -> dict[str, Any]:
+        return row_to_agent_private(
+            row,
+            row_to_agent=self.agent,
+            read_credential=self._read_credential,
+        )
+
+    def skill(self, row: Any) -> dict[str, Any]:
+        return row_to_skill(row, skills_dir=self._skills_dir, json_load=self._json_load)
+
+    def skill_folder(self, row: Any) -> dict[str, Any]:
+        return row_to_skill_folder(row)
+
+    def workflow(self, row: Any) -> dict[str, Any]:
+        return row_to_workflow(row, json_load=self._json_load)
+
+    def run(self, row: Any) -> dict[str, Any]:
+        return row_to_run(
+            row,
+            json_load=self._json_load,
+            public_pending_approval=self._public_pending_approval,
+            task_run_link_for_run=self._task_run_link_for_run,
+            run_group_source=self._run_group_source,
+            runnable_name=self._runnable_name,
+        )
+
+    def run_group(self, row: Any) -> dict[str, Any]:
+        return row_to_run_group(row, json_load=self._json_load)

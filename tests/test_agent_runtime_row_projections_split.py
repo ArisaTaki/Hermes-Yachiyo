@@ -1,7 +1,9 @@
 import sqlite3
 from pathlib import Path
 
+from apps.shell import agent_runtime
 from apps.shell.agent.repositories.row_projections import (
+    RuntimeRowProjector,
     row_to_agent,
     row_to_agent_private,
     row_to_run,
@@ -10,8 +12,10 @@ from apps.shell.agent.repositories.row_projections import (
     row_to_skill_folder,
     row_to_workflow,
 )
+from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.agent.tools.policy import RuntimePolicyCompiler
 from apps.shell.agent.runtime.serialization import json_load
+from apps.shell.credential_store import MemoryCredentialStore
 
 
 def _row(sql: str, values: tuple[object, ...]) -> sqlite3.Row:
@@ -20,6 +24,10 @@ def _row(sql: str, values: tuple[object, ...]) -> sqlite3.Row:
     row = conn.execute(sql, values).fetchone()
     assert row is not None
     return row
+
+
+def test_runtime_row_projector_remains_exported_from_legacy_module() -> None:
+    assert agent_runtime.RuntimeRowProjector is RuntimeRowProjector
 
 
 def test_repository_row_projection_helpers_project_agent_rows() -> None:
@@ -86,6 +94,62 @@ def test_repository_row_projection_helpers_project_agent_rows() -> None:
         row_to_agent=project_agent,
         read_credential=lambda ref: "stored-secret" if ref == "cred-agent-1" else "",
     )
+    assert private_agent["model_config"]["credential_ref"] == "cred-agent-1"
+    assert private_agent["model_config"]["api_key"] == "stored-secret"
+
+
+def test_runtime_row_projector_projects_agent_and_private_rows() -> None:
+    compiler = RuntimePolicyCompiler()
+    agent_row = _row(
+        """
+        SELECT
+          'agent-1' AS agent_id,
+          'Coder' AS name,
+          '' AS nickname,
+          'Codes' AS description,
+          '' AS avatar_url,
+          'coding' AS category,
+          'Do the work' AS instructions,
+          'Persona' AS persona_prompt,
+          'custom' AS model_mode,
+          'external_cli' AS execution_backend,
+          'profile-1' AS model_profile_id,
+          'vision-1' AS vision_model_profile_id,
+          'openai' AS model_provider,
+          'https://example.test/v1' AS model_base_url,
+          'gpt-test' AS model_name,
+          '' AS model_api_key,
+          'cred-agent-1' AS model_credential_ref,
+          '{"allowed_tools":["workspace.read"]}' AS tool_policy_json,
+          '{"default_workdir":" /tmp/agent "}' AS workspace_policy_json,
+          '["skill-1"]' AS skill_ids_json,
+          'markdown' AS output_contract,
+          1 AS enabled,
+          'created' AS created_at,
+          'updated' AS updated_at
+        """,
+        (),
+    )
+    projector = RuntimeRowProjector(
+        skills_dir=Path("/skills"),
+        json_load=json_load,
+        default_tool_policy=compiler.default_tool_policy,
+        default_workspace_policy=compiler.default_workspace_policy,
+        compile_tool_policy=compiler.compile_tool_policy,
+        compile_workspace_policy=compiler.compile_workspace_policy,
+        normalize_execution_backend=lambda value, **_: str(value or ""),
+        read_credential=lambda ref: "stored-secret" if ref == "cred-agent-1" else "",
+        public_pending_approval=lambda pending: pending if isinstance(pending, dict) else {},
+        task_run_link_for_run=lambda _run_id: None,
+        run_group_source=lambda _group_id: "",
+        runnable_name=lambda kind, runnable_id: f"{kind}:{runnable_id}",
+    )
+
+    agent = projector.agent(agent_row)
+    private_agent = projector.agent_private(agent_row)
+
+    assert agent["nickname"] == "Coder"
+    assert agent["skill_ids"] == ["skill-1"]
     assert private_agent["model_config"]["credential_ref"] == "cred-agent-1"
     assert private_agent["model_config"]["api_key"] == "stored-secret"
 
@@ -236,3 +300,16 @@ def test_repository_row_projection_helpers_project_run_rows() -> None:
     assert run["timeline"] == [{"type": "agent.run.started"}]
     assert run["artifacts"] == [{"artifact_id": "artifact-1"}]
     assert run["pending_approval"] == {"tool": "terminal.run"}
+
+
+def test_agent_runtime_service_uses_runtime_row_projector(tmp_path: Path) -> None:
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime.db",
+        workspace_dir=tmp_path / "runtime",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    try:
+        assert isinstance(service.row_projector, RuntimeRowProjector)
+    finally:
+        service.close()
