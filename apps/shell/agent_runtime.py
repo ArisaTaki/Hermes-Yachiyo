@@ -553,6 +553,11 @@ class NativeRunEngine:
             workspace_dir=self.workspace_dir,
             skill_import_id_factory=lambda: uuid4().hex,
             skill_source_types=_SKILL_SOURCE_TYPES,
+            row_to_workflow=self._row_to_workflow,
+            workflow_id_factory=lambda name: f"workflow_{_slug(name, 'workflow')}_{uuid4().hex[:8]}",
+            validate_workflow=self.validate_workflow,
+            validate_workflow_agent_nodes=self._validate_workflow_agent_nodes,
+            validate_workflow_subworkflow_nodes=self._validate_workflow_subworkflow_nodes,
         )
         self._install_runtime_definition_services(definition_services)
         run_services = _build_runtime_run_services(
@@ -636,20 +641,6 @@ class NativeRunEngine:
             redact_secrets=redact_secrets,
         )
         self._install_runtime_agent_services(agent_services)
-        self.workflows = WorkflowRepository(
-            self._conn,
-            ensure_row_factory=self._ensure_row_factory,
-            row_to_workflow=self._row_to_workflow,
-            now=_now,
-            json_dump=_json_dump,
-            workflow_id_factory=lambda name: f"workflow_{_slug(name, 'workflow')}_{uuid4().hex[:8]}",
-            ensure_global_name_available=self._ensure_global_name_available,
-            validate_workflow=self.validate_workflow,
-            validate_workflow_agent_nodes=self._validate_workflow_agent_nodes,
-            validate_workflow_subworkflow_nodes=self._validate_workflow_subworkflow_nodes,
-            record_studio_deletion=self._record_studio_deletion,
-            clear_studio_deletion=self._clear_studio_deletion,
-        )
         approval_services = _build_runtime_approval_services(
             timeline_factory=self._timeline,
             append_run_event=self.append_run_event,
@@ -769,6 +760,7 @@ class NativeRunEngine:
         self.skill_import_sources = services.skill_import_sources
         self.skill_import_preparer = services.skill_import_preparer
         self.skill_sync = services.skill_sync
+        self.workflows = services.workflows
 
     def _install_runtime_run_services(self, services: RuntimeRunServiceBundle) -> None:
         self.approval_snapshots = services.approval_snapshots

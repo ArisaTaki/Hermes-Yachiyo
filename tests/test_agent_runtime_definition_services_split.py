@@ -10,6 +10,7 @@ from apps.shell.agent.repositories.skill_folders import SkillFolderRepository
 from apps.shell.agent.repositories.skills import SkillRepository
 from apps.shell.agent.repositories.studio_deletions import StudioDeletionRepository
 from apps.shell.agent.repositories.task_run_links import TaskRunLinkRepository
+from apps.shell.agent.repositories.workflows import WorkflowRepository
 from apps.shell.agent.repositories.workspaces import TrustedWorkspaceRepository
 from apps.shell.agent.runtime.definition_services import (
     RuntimeDefinitionServiceBundle,
@@ -83,6 +84,11 @@ def test_build_runtime_definition_services_wires_repositories_and_skill_helpers(
         workspace_dir=tmp_path / "workspace",
         skill_import_id_factory=lambda: "import-id",
         skill_source_types={"local_dir", "native_global"},
+        row_to_workflow=row_projection,
+        workflow_id_factory=lambda name: f"workflow_{name}",
+        validate_workflow=lambda _nodes, _edges: None,
+        validate_workflow_agent_nodes=lambda _nodes: None,
+        validate_workflow_subworkflow_nodes=lambda _nodes, **_kwargs: None,
     )
 
     assert isinstance(bundle, RuntimeDefinitionServiceBundle)
@@ -98,9 +104,11 @@ def test_build_runtime_definition_services_wires_repositories_and_skill_helpers(
     assert isinstance(bundle.skill_import_sources, SkillImportSourceResolver)
     assert isinstance(bundle.skill_import_preparer, SkillImportPreparer)
     assert isinstance(bundle.skill_sync, SkillSyncPlanner)
+    assert isinstance(bundle.workflows, WorkflowRepository)
     assert bundle.task_run_links._conn is conn
     assert bundle.skill_records._conn is conn
     assert bundle.agent_definitions._conn is conn
+    assert bundle.workflows._conn is conn
     assert bundle.skill_import_preparer._content is bundle.skill_content
 
 
@@ -124,9 +132,11 @@ def test_native_runtime_installs_definition_services_under_legacy_attribute_name
         assert isinstance(service.skill_import_sources, SkillImportSourceResolver)
         assert isinstance(service.skill_import_preparer, SkillImportPreparer)
         assert isinstance(service.skill_sync, SkillSyncPlanner)
+        assert isinstance(service.workflows, WorkflowRepository)
         assert service.task_run_links._conn is service._conn
         assert service.skill_records._conn is service._conn
         assert service.agent_definitions._conn is service._conn
+        assert service.workflows._conn is service._conn
         assert service.skill_import_preparer._content is service.skill_content
     finally:
         service.close()

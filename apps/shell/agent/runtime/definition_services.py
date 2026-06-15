@@ -11,6 +11,7 @@ from apps.shell.agent.repositories.skill_folders import SkillFolderRepository
 from apps.shell.agent.repositories.skills import SkillRepository
 from apps.shell.agent.repositories.studio_deletions import StudioDeletionRepository
 from apps.shell.agent.repositories.task_run_links import TaskRunLinkRepository
+from apps.shell.agent.repositories.workflows import WorkflowRepository
 from apps.shell.agent.repositories.workspaces import TrustedWorkspaceRepository
 from apps.shell.agent.runtime.skill_content import SkillContentInspector
 from apps.shell.agent.runtime.skill_import import SkillImportPreparer, SkillImportSourceResolver
@@ -33,6 +34,7 @@ class RuntimeDefinitionServiceBundle:
     skill_import_sources: SkillImportSourceResolver
     skill_import_preparer: SkillImportPreparer
     skill_sync: SkillSyncPlanner
+    workflows: WorkflowRepository
 
 
 def build_runtime_definition_services(
@@ -82,6 +84,11 @@ def build_runtime_definition_services(
     workspace_dir: Path,
     skill_import_id_factory: Callable[[], str],
     skill_source_types: set[str],
+    row_to_workflow: Callable[[Any], dict[str, Any]],
+    workflow_id_factory: Callable[[str], str],
+    validate_workflow: Callable[[list[dict[str, Any]], list[dict[str, Any]]], Any],
+    validate_workflow_agent_nodes: Callable[[list[dict[str, Any]]], Any],
+    validate_workflow_subworkflow_nodes: Callable[..., Any],
 ) -> RuntimeDefinitionServiceBundle:
     skill_content = SkillContentInspector()
     return RuntimeDefinitionServiceBundle(
@@ -180,5 +187,19 @@ def build_runtime_definition_services(
         skill_sync=SkillSyncPlanner(
             skill_source_types=skill_source_types,
             count_skill_files=SkillSourceDiscovery.count_skill_files,
+        ),
+        workflows=WorkflowRepository(
+            conn,
+            ensure_row_factory=ensure_row_factory,
+            row_to_workflow=row_to_workflow,
+            now=now,
+            json_dump=json_dump,
+            workflow_id_factory=workflow_id_factory,
+            ensure_global_name_available=ensure_global_name_available,
+            validate_workflow=validate_workflow,
+            validate_workflow_agent_nodes=validate_workflow_agent_nodes,
+            validate_workflow_subworkflow_nodes=validate_workflow_subworkflow_nodes,
+            record_studio_deletion=record_studio_deletion,
+            clear_studio_deletion=clear_studio_deletion,
         ),
     )
