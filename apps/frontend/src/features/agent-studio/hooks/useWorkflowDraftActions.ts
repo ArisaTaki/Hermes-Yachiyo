@@ -8,9 +8,11 @@ import {
   linearEdgesForNodes,
   starterNodes,
 } from '../utils/workflow';
+import { getStudioWorkflowForView } from '../utils/studioData';
 
 type UseWorkflowDraftActionsOptions = {
   agents: AgentSpec[];
+  mergeWorkflow: (workflow: WorkflowSpec) => void;
   setEdges: Dispatch<SetStateAction<Edge[]>>;
   setError: (message: string) => void;
   setNodes: Dispatch<SetStateAction<Node[]>>;
@@ -25,6 +27,7 @@ type UseWorkflowDraftActionsOptions = {
 
 export function useWorkflowDraftActions({
   agents,
+  mergeWorkflow,
   setEdges,
   setError,
   setNodes,
@@ -68,19 +71,38 @@ export function useWorkflowDraftActions({
     setSelectedWorkflowId(workflowId);
     setStatus('');
     setError('');
+    void getStudioWorkflowForView(workflowId)
+      .then((workflow) => {
+        mergeWorkflow(workflow);
+      })
+      .catch(() => {
+        setStatus('读取 Workflow 详情失败，已使用列表快照。');
+      });
   }
 
   function openWorkflowDesign(workflowId: string) {
     const workflow = workflows.find((item) => item.workflow_id === workflowId);
-    if (!workflow) {
-      setError('找不到对应的 Workflow 定义，可能已被删除。');
-      return;
-    }
-    setSelectedWorkflowId(workflow.workflow_id);
+    setSelectedWorkflowId(workflow?.workflow_id || workflowId);
     setTab('workflows');
-    setStatus(`已打开 Workflow Studio：${workflow.name || workflow.workflow_id}`);
+    setStatus(
+      workflow
+        ? `已打开 Workflow Studio：${workflow.name || workflow.workflow_id}`
+        : '正在打开 Workflow Studio...',
+    );
     setError('');
     navigateTo('agents', { tab: 'workflows' }, ['run', 'target', 'goal']);
+    void getStudioWorkflowForView(workflowId)
+      .then((detail) => {
+        mergeWorkflow(detail);
+        setStatus(`已打开 Workflow Studio：${detail.name || detail.workflow_id}`);
+      })
+      .catch(() => {
+        if (!workflow) {
+          setError('找不到对应的 Workflow 定义，可能已被删除。');
+          return;
+        }
+        setStatus('读取 Workflow 详情失败，已使用列表快照。');
+      });
   }
 
   return {

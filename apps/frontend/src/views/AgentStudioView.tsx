@@ -246,6 +246,7 @@ export function AgentStudioView() {
     allWorkflowsSelected,
     applyWorkflows,
     finishWorkflowManagement,
+    mergeWorkflow,
     selectedWorkflow,
     selectedWorkflowId,
     selectedWorkflowIdSet,
@@ -317,6 +318,7 @@ export function AgentStudioView() {
     startNewWorkflow,
   } = useWorkflowDraftActions({
     agents,
+    mergeWorkflow,
     setEdges,
     setError,
     setNodes,

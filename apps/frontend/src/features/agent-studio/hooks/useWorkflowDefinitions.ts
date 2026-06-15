@@ -17,6 +17,15 @@ function toggleSelectedId(current: string[], id: string): string[] {
   return [...current, id];
 }
 
+function mergeWorkflowById(current: WorkflowSpec[], nextWorkflow: WorkflowSpec): WorkflowSpec[] {
+  if (!nextWorkflow.workflow_id) return current;
+  const index = current.findIndex((workflow) => workflow.workflow_id === nextWorkflow.workflow_id);
+  if (index < 0) return [...current, nextWorkflow];
+  const next = [...current];
+  next[index] = nextWorkflow;
+  return next;
+}
+
 export function useWorkflowDefinitions() {
   const [workflows, setWorkflows] = useState<WorkflowSpec[]>([]);
   const [selectedWorkflowId, setSelectedWorkflowId] = useState('');
@@ -51,6 +60,10 @@ export function useWorkflowDefinitions() {
     });
   }, []);
 
+  const mergeWorkflow = useCallback((nextWorkflow: WorkflowSpec) => {
+    setWorkflows((current) => mergeWorkflowById(current, nextWorkflow));
+  }, []);
+
   const toggleWorkflowSelected = useCallback((workflowId: string) => {
     setSelectedWorkflowIds((current) => toggleSelectedId(current, workflowId));
   }, []);
@@ -64,6 +77,7 @@ export function useWorkflowDefinitions() {
     allWorkflowsSelected,
     applyWorkflows,
     finishWorkflowManagement,
+    mergeWorkflow,
     selectedWorkflow,
     selectedWorkflowId,
     selectedWorkflowIds,
