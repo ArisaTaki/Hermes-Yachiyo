@@ -320,8 +320,7 @@ async def start_studio_agent_run(
 
 @router.get("/studio/groups")
 async def list_studio_groups(http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
-    groups = await asyncio.to_thread(_studio_service(http_request).list_groups)
-    return {"groups": [_snapshot(group) for group in groups]}
+    return await yachiyo_studio_handlers.list_groups(http_request)
 
 
 @router.post("/studio/groups")
@@ -329,13 +328,7 @@ async def save_studio_group(
     request: SaveAgentGroupRequest,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    try:
-        snapshot = await asyncio.to_thread(_studio_service(http_request).save_group, request)
-        return _snapshot(snapshot)
-    except NotImplementedError as exc:
-        raise HTTPException(status_code=501, detail=str(exc)) from exc
-    except (AgentRuntimeError, KeyError, ValueError) as exc:
-        raise _bad_request(exc) from exc
+    return await yachiyo_studio_handlers.save_group(request, http_request)
 
 
 @router.get("/studio/groups/{group_id}")
@@ -343,11 +336,7 @@ async def get_studio_group(
     group_id: str,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    try:
-        snapshot = await asyncio.to_thread(_studio_service(http_request).get_group, group_id)
-        return _snapshot(snapshot)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="AgentGroup 不存在") from exc
+    return await yachiyo_studio_handlers.get_group(group_id, http_request)
 
 
 @router.post("/studio/groups/{group_id}/runs")
@@ -356,22 +345,7 @@ async def start_studio_group_run(
     request: StartGroupRunBody,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    try:
-        run_request = StartGroupRunRequest(
-            group_id=group_id,
-            objective=request.objective,
-            title=request.title,
-            client_run_id=request.client_run_id,
-        )
-        snapshot = await asyncio.to_thread(
-            _studio_service(http_request).start_group_run,
-            run_request,
-        )
-        return _snapshot(snapshot)
-    except NotImplementedError as exc:
-        raise HTTPException(status_code=501, detail=str(exc)) from exc
-    except (AgentRuntimeError, KeyError, ValueError) as exc:
-        raise _bad_request(exc) from exc
+    return await yachiyo_studio_handlers.start_group_run(group_id, request, http_request)
 
 
 @router.get("/studio/group-runs")
@@ -379,11 +353,7 @@ async def list_studio_group_runs(
     http_request: Request = None,  # type: ignore[assignment]
     limit: int = 50,
 ) -> dict[str, Any]:
-    group_runs = await asyncio.to_thread(
-        _studio_service(http_request).list_group_runs,
-        max(1, min(200, int(limit or 50))),
-    )
-    return {"group_runs": [_snapshot(group_run) for group_run in group_runs]}
+    return await yachiyo_studio_handlers.list_group_runs(limit, http_request)
 
 
 @router.get("/studio/group-runs/{group_run_id}")
@@ -391,14 +361,7 @@ async def get_studio_group_run(
     group_run_id: str,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    try:
-        snapshot = await asyncio.to_thread(
-            _studio_service(http_request).get_group_run,
-            group_run_id,
-        )
-        return _snapshot(snapshot)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="GroupRun 不存在") from exc
+    return await yachiyo_studio_handlers.get_group_run(group_run_id, http_request)
 
 
 @router.get("/studio/workflows")
