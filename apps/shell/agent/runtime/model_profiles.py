@@ -54,6 +54,35 @@ class RuntimeModelProfileResolver:
     def chat_profile_model_config_private(self, profile_id: str) -> dict[str, Any]:
         return self.model_profile_config_private(profile_id, capability="chat")
 
+    def validate_available_profile(self, profile_id: str, capability: str) -> dict[str, Any]:
+        profile_service = self._profile_service_factory()
+        get_profile = getattr(profile_service, "get_profile", None)
+        try:
+            profile = (
+                get_profile(profile_id)
+                if callable(get_profile)
+                else profile_service.get_profile_private(profile_id)
+            )
+        except KeyError as exc:
+            raise self._error_type("Agent 引用的模型 Profile 不存在") from exc
+        if str(profile.get("capability") or "") != capability:
+            raise self._error_type(f"Agent 引用的 {capability} 模型 Profile 类型不匹配")
+        if str(profile.get("status") or "") != "available":
+            raise self._error_type("Agent 只能引用已通过连接测试的模型 Profile")
+        if not profile.get("enabled", True):
+            raise self._error_type("Agent 引用的模型 Profile 已停用")
+        return profile
+
+    def validate_agent_profile_refs(self, payload: dict[str, Any]) -> None:
+        model_mode = str(payload.get("model_mode") or "profile")
+        if model_mode == "profile":
+            profile_id = str(payload.get("model_profile_id") or "").strip()
+            if profile_id:
+                self.validate_available_profile(profile_id, "chat")
+        vision_profile_id = str(payload.get("vision_model_profile_id") or "").strip()
+        if vision_profile_id:
+            self.validate_available_profile(vision_profile_id, "vision")
+
     def agent_model_config_private(self, agent: dict[str, Any]) -> dict[str, Any]:
         profile_id = str(agent.get("model_profile_id") or "").strip()
         if profile_id:

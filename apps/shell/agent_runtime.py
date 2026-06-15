@@ -1543,27 +1543,15 @@ class NativeRunEngine:
 
     @staticmethod
     def _validate_available_profile(profile_id: str, capability: str) -> dict[str, Any]:
-        try:
-            profile = get_model_profile_service().get_profile(profile_id)
-        except KeyError as exc:
-            raise AgentRuntimeError("Agent 引用的模型 Profile 不存在") from exc
-        if str(profile.get("capability") or "") != capability:
-            raise AgentRuntimeError(f"Agent 引用的 {capability} 模型 Profile 类型不匹配")
-        if str(profile.get("status") or "") != "available":
-            raise AgentRuntimeError("Agent 只能引用已通过连接测试的模型 Profile")
-        if not profile.get("enabled", True):
-            raise AgentRuntimeError("Agent 引用的模型 Profile 已停用")
-        return profile
+        return RuntimeModelProfileResolver(
+            profile_service_factory=lambda: get_model_profile_service(),
+            supports_openai_compatible_api=supports_openai_compatible_api,
+            default_agent_ids=_DEFAULT_AGENT_IDS,
+            error_type=AgentRuntimeError,
+        ).validate_available_profile(profile_id, capability)
 
     def _validate_agent_profile_refs(self, payload: dict[str, Any]) -> None:
-        model_mode = str(payload.get("model_mode") or "profile")
-        if model_mode == "profile":
-            profile_id = str(payload.get("model_profile_id") or "").strip()
-            if profile_id:
-                self._validate_available_profile(profile_id, "chat")
-        vision_profile_id = str(payload.get("vision_model_profile_id") or "").strip()
-        if vision_profile_id:
-            self._validate_available_profile(vision_profile_id, "vision")
+        self.model_profile_resolver.validate_agent_profile_refs(payload)
 
     def list_agents(self) -> dict[str, Any]:
         return self.agent_definitions.list()

@@ -24,6 +24,9 @@ class FakeProfileService:
         except KeyError as exc:
             raise KeyError(profile_id) from exc
 
+    def get_profile(self, profile_id: str) -> dict[str, Any]:
+        return self.get_profile_private(profile_id)
+
     def get_defaults(self) -> dict[str, str]:
         return dict(self.defaults)
 
@@ -116,6 +119,38 @@ def test_runtime_model_profile_resolver_supports_agent_modes() -> None:
 
     with pytest.raises(AgentRuntimeError, match="缺少可运行的 Chat Profile"):
         resolver.agent_model_config_private({"agent_id": "agent-3", "model_mode": "profile"})
+
+
+def test_runtime_model_profile_resolver_validates_agent_profile_refs() -> None:
+    profile_service = FakeProfileService()
+    profile_service.profiles["chat-1"] = {
+        "provider": "openai_compatible",
+        "base_url": "https://api.example.test/v1",
+        "model": "demo-model",
+        "api_key": "sk-secret",
+        "enabled": True,
+        "status": "available",
+        "capability": "chat",
+    }
+    profile_service.profiles["vision-1"] = {
+        **profile_service.profiles["chat-1"],
+        "capability": "vision",
+    }
+    resolver = _resolver(profile_service)
+
+    assert resolver.validate_available_profile("chat-1", "chat")["model"] == "demo-model"
+    resolver.validate_agent_profile_refs(
+        {
+            "model_mode": "profile",
+            "model_profile_id": "chat-1",
+            "vision_model_profile_id": "vision-1",
+        }
+    )
+
+    with pytest.raises(AgentRuntimeError, match="类型不匹配"):
+        resolver.validate_available_profile("chat-1", "vision")
+    with pytest.raises(AgentRuntimeError, match="不存在"):
+        resolver.validate_agent_profile_refs({"model_mode": "profile", "model_profile_id": "missing"})
 
 
 def test_native_runtime_uses_split_model_profile_resolver(tmp_path, monkeypatch) -> None:
