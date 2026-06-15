@@ -267,7 +267,7 @@ function BubbleLauncher({
   const payloadAgentTask = data?.chat?.agent_task || null;
   const agentTask = publicAgentTask || payloadAgentTask;
   const latestReply = latestAssistantText(data?.chat, launcher);
-  const taskSummary = launcherAgentTaskSummary(payloadAgentTask);
+  const taskSummary = launcherAgentTaskSummary(agentTask);
   const summaryText = taskSummary || latestReply || latestLauncherSessionSummary(data?.chat) || statusLabel;
   const showSummary = displayMode !== 'icon' && Boolean(summaryText);
   const [quickText, setQuickText] = useState('');

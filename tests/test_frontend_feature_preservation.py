@@ -159,7 +159,7 @@ def test_launcher_views_expose_session_summary_e2e_selectors() -> None:
             "agentTask={launcher.agentTask}",
             "const payloadAgentTask = data?.chat?.agent_task || null;",
             "const agentTask = publicAgentTask || payloadAgentTask;",
-            "const taskSummary = launcherAgentTaskSummary(payloadAgentTask);",
+            "const taskSummary = launcherAgentTaskSummary(agentTask);",
             'data-testid="bubble-launcher-shell"',
             'data-testid="bubble-launcher-button"',
             'data-testid="bubble-launcher-status-dot"',
