@@ -226,8 +226,6 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "clipboardImageFiles(event.clipboardData)",
             "await addImageFiles(files)",
             "Promise.all(accepted.map(readPendingAttachment))",
-            "loadImageDimensions(dataUrl)",
-            "dimensions.width < 16 || dimensions.height < 16",
             "setStatus(next.length > 1 ? `已添加 ${next.length} 张图片附件` : '已添加图片附件')",
             "aria-label=\"添加附件，当前仅支持图片\"",
             "type=\"file\"",
@@ -354,6 +352,24 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "type SessionItem =",
             "type ChatSessionContext =",
             "type DelegatedRunSummaryResult =",
+            "function withResolvedAttachmentUrls",
+            "function resolveAttachmentUrl",
+            "function clipboardImageFiles",
+            "function readPendingAttachment",
+            "function loadImageDimensions",
+            "async function fileFromE2EImageDetail",
+            "async function fileFromDesktopImageSelection",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/attachments.ts",
+        [
+            "export function withResolvedAttachmentUrls",
+            "export function resolveAttachmentUrl",
+            "export function clipboardImageFiles",
+            "export function readPendingAttachment",
+            "export function loadImageDimensions",
+            "dimensions.width < 16 || dimensions.height < 16",
         ],
     )
 
@@ -1718,7 +1734,6 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
         [
             "const [attachments, setAttachments] = useState<PendingAttachment[]>(() => [...retainedComposerDraft.attachments]);",
             "const CHAT_E2E_ADD_IMAGE_EVENT = 'oha-chat-e2e-add-image';",
-            "async function fileFromE2EImageDetail(detail: ChatE2EImageDetail | undefined): Promise<File | null>",
             "if (!import.meta.env.DEV) return undefined;",
             "window.addEventListener(CHAT_E2E_ADD_IMAGE_EVENT, handleE2EAddImage as EventListener);",
             "window.removeEventListener(CHAT_E2E_ADD_IMAGE_EVENT, handleE2EAddImage as EventListener);",
@@ -1778,6 +1793,15 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
             "export type PendingAttachment = {",
             "export type ChatE2EImageDetail = {",
             "export type ChatAttachment = {",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/attachments.ts",
+        [
+            "export const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;",
+            "export async function fileFromE2EImageDetail(detail: ChatE2EImageDetail | undefined): Promise<File | null>",
+            "export async function fileFromDesktopImageSelection(selection: DesktopImageSelection | undefined): Promise<File | null>",
+            "if (Number(selection.size || 0) > MAX_ATTACHMENT_BYTES)",
         ],
     )
 
