@@ -1,5 +1,5 @@
 import { openAppView } from '../../../lib/bridge';
-import { yachiyoTaskStudioRunId, yachiyoTaskStudioUrl } from '../taskSnapshots';
+import { yachiyoTaskStudioGroupRunId, yachiyoTaskStudioRunId, yachiyoTaskStudioUrl } from '../taskSnapshots';
 import type { AgentTaskSnapshot } from '../types';
 
 type LauncherTaskMode = 'bubble' | 'live2d';
@@ -49,6 +49,7 @@ export function LauncherAgentTaskLight({
 }) {
   if (!task) return null;
   const runId = yachiyoTaskStudioRunId(task);
+  const groupRunId = yachiyoTaskStudioGroupRunId(task);
   const studioUrl = yachiyoTaskStudioUrl(task);
   const status = String(task.status || '');
   const needsAction = Boolean(task.needs_user_action || task.pending_approvals?.length);
@@ -88,7 +89,10 @@ export function LauncherAgentTaskLight({
           onClick={(event) => {
             event.preventDefault();
             event.stopPropagation();
-            void openAppView('agents', { run: runId });
+            void openAppView('agents', {
+              run: runId,
+              ...(groupRunId ? { group_run: groupRunId } : {}),
+            });
           }}
           title="在 Agent Studio 中查看"
         >

@@ -156,6 +156,10 @@ export function yachiyoTaskStudioRunId(task: AgentTaskSnapshot): string {
   return runIdFromStudioUrl(yachiyoTaskStudioUrl(task)) || yachiyoTaskRunId(task);
 }
 
+export function yachiyoTaskStudioGroupRunId(task: AgentTaskSnapshot): string {
+  return groupRunIdFromStudioUrl(yachiyoTaskStudioUrl(task));
+}
+
 export function yachiyoTaskStatusMessage(
   task: AgentTaskSnapshot,
   action: 'approve' | 'reject' | 'cancel',
