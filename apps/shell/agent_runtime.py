@@ -13,7 +13,6 @@ import sqlite3
 import subprocess
 import threading
 import time
-import zipfile
 from collections.abc import Iterable as IterableABC
 from copy import deepcopy
 from dataclasses import dataclass
@@ -66,6 +65,7 @@ from apps.shell.agent.runtime.run_projections import (
     RunProjectionCoordinator,
 )
 from apps.shell.agent.runtime.skill_content import SkillContentInspector
+from apps.shell.agent.runtime.skill_import import SkillImportSourceResolver
 from apps.shell.agent.runtime.skill_install import SkillInstallCommandValidator
 from apps.shell.agent.runtime.skill_sources import SkillSourceDiscovery
 from apps.shell.agent.runtime.skill_sync import SkillSyncPlanner
@@ -1714,6 +1714,11 @@ class NativeRunEngine:
             native_library_source_types=_NATIVE_LIBRARY_SOURCE_TYPES,
         )
         self.skill_content = SkillContentInspector()
+        self.skill_import_sources = SkillImportSourceResolver(
+            workspace_dir=self.workspace_dir,
+            id_factory=lambda: uuid4().hex,
+            error_type=AgentRuntimeError,
+        )
         self.skill_sync = SkillSyncPlanner(
             skill_source_types=_SKILL_SOURCE_TYPES,
             count_skill_files=SkillSourceDiscovery.count_skill_files,
@@ -3249,47 +3254,25 @@ class NativeRunEngine:
         if not source.exists():
             raise AgentRuntimeError("Skill 路径不存在")
         target_folder_id = self._normalize_skill_folder_id(folder_id)
-        temp_dir: Path | None = None
-        source_type = "local_dir"
-        source_ref = source.name
-        origin_path = str(source.resolve())
-        if source.is_file():
-            if source.suffix.lower() != ".zip":
-                raise AgentRuntimeError("Skill 文件只支持 ZIP")
-            source_type = "local_zip"
-            temp_dir = self.workspace_dir / "skill-import-tmp" / uuid4().hex
-            temp_dir.mkdir(parents=True, exist_ok=True)
-            with zipfile.ZipFile(source) as archive:
-                for member in archive.infolist():
-                    member_path = Path(member.filename)
-                    if member_path.is_absolute() or ".." in member_path.parts:
-                        raise AgentRuntimeError("ZIP 包含路径穿越项，已拒绝导入")
-                archive.extractall(temp_dir)
-            roots = [child for child in temp_dir.iterdir() if child.is_dir()]
-            source_root = temp_dir
-            if not (source_root / "SKILL.md").exists() and len(roots) == 1:
-                source_root = roots[0]
-        else:
-            source_root = source
+        resolved = self.skill_import_sources.resolve(str(source))
         try:
             imported = self._import_skill_root(
-                source_root,
-                source_path=f"local:{source.name}",
-                source_type=source_type,
-                origin_path=origin_path,
-                source_ref=source_ref,
+                resolved.source_root,
+                source_path=resolved.source_path,
+                source_type=resolved.source_type,
+                origin_path=resolved.origin_path,
+                source_ref=resolved.source_ref,
                 sync_status="imported",
                 folder_id=target_folder_id,
             )
             self._clear_studio_deletion(
                 "skill_source",
-                self._skill_deletion_key(source_type, origin_path),
+                self._skill_deletion_key(resolved.source_type, resolved.origin_path),
             )
             self._conn.commit()
             return imported
         finally:
-            if temp_dir is not None:
-                shutil.rmtree(temp_dir, ignore_errors=True)
+            self.skill_import_sources.cleanup(resolved)
 
     def sync_native_skills(self, roots: list[Any] | None = None) -> dict[str, Any]:
         return self._sync_skill_roots(self._native_skill_root_specs(roots), library="native")
