@@ -82,16 +82,18 @@ export function agentTaskSnapshotFromMessage(
     displayContent || message.content || message.text || metadata.run_progress_detail || '',
     140,
   );
+  const pendingApprovals = messageTaskApprovals(message, runId, groupRunId) || [];
+  const status = taskStatusFromRunStatus(messageRunStatus(message) || message.status || '');
   return {
     task_id: String(message.task_id || metadata.delegated_run_source_task_id || runId),
     conversation_id: null,
     title,
-    status: taskStatusFromRunStatus(messageRunStatus(message) || message.status || ''),
+    status: pendingApprovals.length ? 'waiting_approval' : status,
     summary: summary || null,
     current_step: String(metadata.run_progress_detail || message.progress_label || '').trim() || null,
     progress_text: message.progress_label || null,
-    needs_user_action: messageRunStatus(message) === 'approval_required',
-    pending_approvals: messageTaskApprovals(message, runId, groupRunId),
+    needs_user_action: pendingApprovals.length > 0 || messageRunStatus(message) === 'approval_required',
+    pending_approvals: pendingApprovals,
     recent_events: messageTaskEvents(message, runId),
     artifacts: messageTaskArtifacts(message, runId),
     open_in_studio_url: studioRunUrl(runId, { groupRunId }),
