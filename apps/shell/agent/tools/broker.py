@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from apps.shell.agent.runtime.errors import AgentRuntimeError
+from apps.shell.agent.tools.registry import dispatch_tool_call
 from apps.shell.agent.tools.terminal import (
     _TERMINAL_PROCESS_LOCK,
     _TERMINAL_PROCESSES,
@@ -351,75 +352,4 @@ class ToolBroker:
         return {"ok": True, "path": rel, "bytes": len(safe_content.encode("utf-8"))}
 
     def call(self, name: str, payload: dict[str, Any], *, approved: bool = False) -> dict[str, Any]:
-        if name == "skill.read":
-            return self.skill_read(
-                str(payload.get("skill_id") or ""),
-                str(payload.get("name") or ""),
-            )
-        if name == "memory.add":
-            return self.memory_add(
-                str(payload.get("content") or ""),
-                kind=str(payload.get("kind") or ""),
-                scope=str(payload.get("scope") or ""),
-            )
-        if name == "memory.replace":
-            return self.memory_replace(
-                str(payload.get("content") or ""),
-                memory_id=str(payload.get("memory_id") or ""),
-                old_content=str(payload.get("old_content") or ""),
-                kind=str(payload.get("kind") or ""),
-                scope=str(payload.get("scope") or ""),
-            )
-        if name == "memory.remove":
-            return self.memory_remove(
-                memory_id=str(payload.get("memory_id") or ""),
-                content=str(payload.get("content") or ""),
-                reason=str(payload.get("reason") or ""),
-            )
-        if name == "future_task.schedule":
-            return self.future_task_schedule(
-                title=str(payload.get("title") or ""),
-                prompt=str(payload.get("prompt") or ""),
-                delay_seconds=payload.get("delay_seconds"),
-                scheduled_at_epoch=payload.get("scheduled_at_epoch"),
-                cron=str(payload.get("cron") or ""),
-                runnable_id=str(payload.get("runnable_id") or ""),
-                runnable_name=str(payload.get("runnable_name") or ""),
-            )
-        if name == "future_task.list":
-            return self.future_task_list(
-                include_finished=bool(payload.get("include_finished", True)),
-                limit=int(payload.get("limit") or 100),
-            )
-        if name == "future_task.cancel":
-            return self.future_task_cancel(
-                str(payload.get("future_task_id") or ""),
-                reason=str(payload.get("reason") or ""),
-            )
-        if name == "workspace.list":
-            return self.workspace_list(str(payload.get("path") or "."))
-        if name == "workspace.read":
-            return self.workspace_read(str(payload.get("path") or ""))
-        if name == "workspace.write_patch":
-            return self.workspace_write_patch(
-                str(payload.get("path") or ""),
-                str(payload.get("content") or ""),
-                patch=str(payload.get("patch") or ""),
-                expected_sha256=str(
-                    payload.get("expected_sha256") or payload.get("base_sha256") or ""
-                ),
-                approved=approved,
-            )
-        if name == "terminal.run":
-            return self.terminal_run(
-                str(payload.get("command") or ""),
-                approved=approved,
-                timeout_seconds=int(payload.get("timeout_seconds") or 30),
-                shell=bool(payload.get("shell", False)),
-            )
-        if name == "artifact.write":
-            return self.artifact_write(
-                str(payload.get("path") or ""),
-                str(payload.get("content") or ""),
-            )
-        raise AgentRuntimeError(f"未知工具：{name}")
+        return dispatch_tool_call(self, name, payload, approved=approved)
