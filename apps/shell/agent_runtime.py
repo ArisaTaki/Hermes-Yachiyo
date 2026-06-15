@@ -33,6 +33,12 @@ from apps.shell.agent.repositories.memories import AgentMemoryStore
 from apps.shell.agent.repositories.runs import RunRepository
 from apps.shell.agent.repositories.skill_folders import SkillFolderRepository
 from apps.shell.agent.repositories.skills import SkillRepository
+from apps.shell.agent.repositories.sqlite import (
+    LockedConnection as _LockedConnection,
+    LockedCursor as _LockedCursor,
+    coerce_named_row as _coerce_named_row_value,
+    named_row_factory as _named_row_factory,
+)
 from apps.shell.agent.repositories.studio_deletions import StudioDeletionRepository
 from apps.shell.agent.repositories.task_run_links import TaskRunLinkRepository
 from apps.shell.agent.repositories.workspaces import TrustedWorkspaceRepository
@@ -303,70 +309,6 @@ def _user_goal_from_agent_messages(messages: list[dict[str, Any]]) -> str:
 
 def _agent_goal_disallows_tool(user_goal: str, tool_name: str) -> str:
     return _runtime_agent_goal_disallows_tool(user_goal, tool_name)
-
-
-def _named_row_factory(cursor: sqlite3.Cursor, row: tuple[Any, ...]) -> dict[str, Any]:
-    return {
-        column[0]: row[index]
-        for index, column in enumerate(cursor.description or ())
-        if index < len(row)
-    }
-
-
-class _LockedCursor:
-    def __init__(self, cursor: sqlite3.Cursor, lock: threading.RLock) -> None:
-        self._cursor = cursor
-        self._lock = lock
-
-    @property
-    def description(self) -> Any:
-        return self._cursor.description
-
-    def fetchone(self) -> Any:
-        with self._lock:
-            return self._cursor.fetchone()
-
-    def fetchall(self) -> list[Any]:
-        with self._lock:
-            return self._cursor.fetchall()
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._cursor, name)
-
-
-class _LockedConnection:
-    def __init__(self, conn: sqlite3.Connection, lock: threading.RLock) -> None:
-        self._conn = conn
-        self._lock = lock
-
-    @property
-    def row_factory(self) -> Any:
-        with self._lock:
-            return self._conn.row_factory
-
-    @row_factory.setter
-    def row_factory(self, value: Any) -> None:
-        with self._lock:
-            self._conn.row_factory = value
-
-    def execute(self, *args: Any, **kwargs: Any) -> _LockedCursor:
-        with self._lock:
-            return _LockedCursor(self._conn.execute(*args, **kwargs), self._lock)
-
-    def executescript(self, *args: Any, **kwargs: Any) -> _LockedCursor:
-        with self._lock:
-            return _LockedCursor(self._conn.executescript(*args, **kwargs), self._lock)
-
-    def commit(self) -> None:
-        with self._lock:
-            self._conn.commit()
-
-    def close(self) -> None:
-        with self._lock:
-            self._conn.close()
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._conn, name)
 
 
 def _now() -> str:
@@ -1016,23 +958,7 @@ class NativeRunEngine:
             self._conn.row_factory = _named_row_factory
 
     def _coerce_named_row(self, row: Any, description: Any = None) -> Any:
-        if row is None or isinstance(row, dict):
-            return row
-        if isinstance(row, sqlite3.Row):
-            if description:
-                return {
-                    column[0]: row[index]
-                    for index, column in enumerate(description)
-                    if index < len(row)
-                }
-            return {key: row[key] for key in row.keys()}
-        if description:
-            return {
-                column[0]: row[index]
-                for index, column in enumerate(description)
-                if index < len(row)
-            }
-        return row
+        return _coerce_named_row_value(row, description)
 
     def _init_db(self) -> None:
         self._conn.executescript(
