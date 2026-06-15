@@ -135,6 +135,7 @@ from apps.shell.agent.runtime.run_projections import (
     RunProjectionCoordinator,
 )
 from apps.shell.agent.runtime.run_readiness import RuntimeRunReadinessValidator
+from apps.shell.agent.runtime.runnables import RuntimeRunnableCatalog
 from apps.shell.agent.runtime.skill_content import SkillContentInspector
 from apps.shell.agent.runtime.skill_import import SkillImportPreparer, SkillImportSourceResolver
 from apps.shell.agent.runtime.skill_install import SkillInstallCommandValidator
@@ -928,6 +929,10 @@ class NativeRunEngine:
         )
         self.chat_runnable_parser = ChatRunnableMentionParser(
             list_runnables=lambda: list(self.list_runnables().get("runnables") or []),
+        )
+        self.runnable_catalog = RuntimeRunnableCatalog(
+            node_kind=self._node_kind,
+            get_agent=self.get_agent,
         )
         self.workflow_parent_resume = WorkflowParentResumeCoordinator(
             parent_runs_waiting_for_child=lambda child_run: self._workflow_parent_runs_waiting_for_child(child_run),
@@ -4337,103 +4342,25 @@ class NativeRunEngine:
             self._update_run_group(run_group_id, status=str(run.get("status") or ""), summary=str(run.get("result") or ""))
 
     def list_runnables(self) -> dict[str, Any]:
-        agents = self.list_agents()["agents"]
-        workflows = self.list_workflows()["workflows"]
-        return {
-            "ok": True,
-            "runnables": [
-                self._agent_runnable_summary(agent)
-                for agent in agents
-            ]
-            + [
-                self._workflow_runnable_summary(workflow)
-                for workflow in workflows
-            ],
-        }
-
-    @staticmethod
-    def _agent_runnable_summary(agent: dict[str, Any]) -> dict[str, Any]:
-        tool_policy = agent.get("tool_policy") if isinstance(agent.get("tool_policy"), dict) else {}
-        allowed_tools = tool_policy.get("allowed_tools") if isinstance(tool_policy.get("allowed_tools"), list) else []
-        approval_required = (
-            tool_policy.get("approval_required")
-            if isinstance(tool_policy.get("approval_required"), dict)
-            else {}
+        return self.runnable_catalog.list_runnables(
+            self.list_agents()["agents"],
+            self.list_workflows()["workflows"],
         )
-        return {
-            "id": agent["agent_id"],
-            "name": agent["name"],
-            "nickname": agent.get("nickname") or agent["name"],
-            "description": agent.get("description") or "",
-            "avatar_url": agent.get("avatar_url") or "",
-            "category": agent.get("category") or "custom",
-            "output_contract": agent.get("output_contract") or "chat",
-            "kind": "agent",
-            "enabled": agent["enabled"],
-            "tool_policy": {
-                "allowed_tools": [str(item) for item in allowed_tools if str(item)],
-                "approval_required": {
-                    str(tool): bool(required)
-                    for tool, required in approval_required.items()
-                    if str(tool)
-                },
-            },
-        }
+
+    def _agent_runnable_summary(self, agent: dict[str, Any]) -> dict[str, Any]:
+        return self.runnable_catalog.agent_summary(agent)
 
     def _workflow_participants(self, workflow: dict[str, Any]) -> list[dict[str, Any]]:
-        participants: list[dict[str, Any]] = []
-        seen_ids: set[str] = set()
-        for node in workflow.get("nodes") or []:
-            if self._node_kind(node) != "agent":
-                continue
-            data = node.get("data") or {}
-            agent_id = str(data.get("agent_id") or data.get("agentId") or "").strip()
-            if not agent_id or agent_id in seen_ids:
-                continue
-            try:
-                agent = self.get_agent(agent_id)
-            except KeyError:
-                continue
-            seen_ids.add(agent_id)
-            participants.append(self._agent_runnable_summary(agent))
-        return participants
+        return self.runnable_catalog.workflow_participants(workflow)
 
     def _workflow_runnable_summary(self, workflow: dict[str, Any]) -> dict[str, Any]:
-        return {
-            "id": workflow["workflow_id"],
-            "name": workflow["name"],
-            "description": workflow.get("description") or "",
-            "kind": "workflow",
-            "enabled": workflow["enabled"],
-            "participants": self._workflow_participants(workflow),
-        }
+        return self.runnable_catalog.workflow_summary(workflow)
 
     def list_delegation_targets(self) -> dict[str, Any]:
-        agents = [
-            {
-                "kind": "agent",
-                "id": agent["agent_id"],
-                "name": agent["name"],
-                "description": agent.get("description") or "",
-                "category": agent.get("category") or "custom",
-                "output_contract": agent.get("output_contract") or "chat",
-            }
-            for agent in self.list_agents()["agents"]
-            if agent.get("enabled", True) and not agent.get("system")
-        ]
-        workflows = [
-            {
-                "kind": "workflow",
-                "id": workflow["workflow_id"],
-                "name": workflow["name"],
-                "description": workflow.get("description") or "",
-                "nodes": len(workflow.get("nodes") or []),
-                "output_contract": "workflow",
-            }
-            for workflow in self.list_workflows()["workflows"]
-            if workflow.get("enabled", True)
-        ]
-        return {"ok": True, "agents": agents, "workflows": workflows}
+        return self.runnable_catalog.list_delegation_targets(
+            self.list_agents()["agents"],
+            self.list_workflows()["workflows"],
+        )
 
     def resolve_runnable(self, *, runnable_id: str = "", name: str = "") -> dict[str, Any] | None:
         self._ensure_row_factory()
