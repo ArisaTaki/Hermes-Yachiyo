@@ -1,5 +1,3 @@
-import { useState } from 'react';
-
 import { UiIcon } from '../../../components/UiIcon';
 import { navigateTo } from '../../../lib/view';
 
@@ -30,22 +28,12 @@ export function MessageActivityList({
   onOpenRunDetails: (runId: string) => void;
   progressLabel?: string;
 }) {
-  const [expandedEventIds, setExpandedEventIds] = useState<Set<string>>(() => new Set());
   const rows = events.slice(0, 4);
   const fallback = progressLabel && !rows.length
     ? [{ title: progressLabel, status: messageStatus || 'running' } as MessageActivityEvent]
     : [];
   const visibleRows = rows.length ? rows : fallback;
   if (!visibleRows.length) return null;
-
-  function toggleExpanded(eventKey: string) {
-    setExpandedEventIds((current) => {
-      const next = new Set(current);
-      if (next.has(eventKey)) next.delete(eventKey);
-      else next.add(eventKey);
-      return next;
-    });
-  }
 
   function openActivity(event: MessageActivityEvent) {
     if (event.event_id) {
@@ -61,12 +49,9 @@ export function MessageActivityList({
         const displayStatus = activityDisplayStatus(event.status, messageStatus);
         const runId = activityRunId(event);
         const eventKey = activityEventKey(event, index);
-        const metadataText = formatActivityMetadata(event.metadata);
-        const canExpand = Boolean(event.detail || metadataText);
-        const expanded = expandedEventIds.has(eventKey);
         return (
           <div
-            className={`message-activity-row ${activityStatusClass(displayStatus)}${runId ? ' has-detail' : ''}${expanded ? ' expanded' : ''}`}
+            className={`message-activity-row ${activityStatusClass(displayStatus)}${runId ? ' has-detail' : ''}`}
             data-activity-status={displayStatus || ''}
             data-activity-tool={event.tool_name || ''}
             data-run-id={runId || ''}
@@ -91,27 +76,8 @@ export function MessageActivityList({
                     <span>详情</span>
                   </button>
                 ) : null}
-                {canExpand ? (
-                  <button
-                    type="button"
-                    className="message-activity-link"
-                    data-testid="chat-message-activity-toggle"
-                    title={expanded ? '收起调用记录' : '展开调用记录'}
-                    aria-label={expanded ? '收起调用记录' : '展开调用记录'}
-                    onClick={() => toggleExpanded(eventKey)}
-                  >
-                    <UiIcon name={expanded ? 'close' : 'plus'} />
-                    <span>{expanded ? '收起' : '展开'}</span>
-                  </button>
-                ) : null}
               </div>
               {event.detail ? <small>{event.detail}</small> : null}
-              {expanded ? (
-                <div className="message-activity-expanded">
-                  {event.detail ? <span>{event.detail}</span> : null}
-                  {metadataText ? <pre>{metadataText}</pre> : null}
-                </div>
-              ) : null}
             </div>
             <time>{formatTime(event.created_at)}</time>
             {runId ? (
@@ -135,15 +101,6 @@ export function MessageActivityList({
 
 function activityEventKey(event: MessageActivityEvent, index: number) {
   return event.event_id || `${event.created_at || 'activity'}-${event.task_id || event.title || index}-${index}`;
-}
-
-function formatActivityMetadata(metadata?: Record<string, unknown>) {
-  if (!metadata || !Object.keys(metadata).length) return '';
-  try {
-    return JSON.stringify(metadata, null, 2);
-  } catch {
-    return '';
-  }
 }
 
 function activityRunId(event?: MessageActivityEvent | null) {

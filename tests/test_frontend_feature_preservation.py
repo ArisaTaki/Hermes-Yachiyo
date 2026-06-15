@@ -2815,8 +2815,16 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
             "data-run-id={runId || ''}",
             "data-run-status={displayStatus || ''}",
             'data-testid="chat-message-activity-open"',
-            'data-testid="chat-message-activity-toggle"',
             'data-testid="chat-message-activity-open-run-detail"',
+        ],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/MessageActivityList.tsx",
+        [
+            "JSON.stringify(metadata",
+            "message-activity-expanded",
+            'data-testid="chat-message-activity-toggle"',
+            "展开调用记录",
         ],
     )
 

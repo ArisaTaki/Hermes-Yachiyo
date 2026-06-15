@@ -9582,10 +9582,6 @@ body.electron-window .hy-traffic {
   grid-template-columns: 18px minmax(0, 1fr) auto auto;
 }
 
-.hy-content .open-chat-shell .message-activity-row.expanded {
-  background: oklch(255 0 0 / 0.035);
-}
-
 .hy-content .open-chat-shell .message-activity-row.running {
   border-color: oklch(82% 0.135 76 / 0.18);
 }
@@ -9709,37 +9705,6 @@ body.electron-window .hy-traffic {
   border-color: oklch(66% 0.12 188 / 0.44);
   background: oklch(66% 0.12 188 / 0.13);
   color: var(--hy-fg);
-}
-
-.hy-content .open-chat-shell .message-activity-expanded {
-  display: grid;
-  gap: 6px;
-  min-width: 0;
-  margin-top: 2px;
-  color: var(--hy-muted);
-  line-height: 1.45;
-  user-select: text;
-  -webkit-user-select: text;
-}
-
-.hy-content .open-chat-shell .message-activity-expanded span {
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
-}
-
-.hy-content .open-chat-shell .message-activity-expanded pre {
-  max-height: 180px;
-  margin: 0;
-  overflow: auto;
-  border: 1px solid var(--hy-border-soft);
-  border-radius: 6px;
-  background: oklch(8% 0.018 250 / 0.68);
-  color: var(--hy-fg);
-  padding: 8px;
-  font-size: 11px;
-  line-height: 1.45;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
 }
 
 .hy-content .open-chat-shell .loading-dots {
