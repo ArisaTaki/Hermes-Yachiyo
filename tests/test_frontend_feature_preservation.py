@@ -650,6 +650,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "onBack={() => void openAppView('main')}",
             "AgentGroupPanel",
             "useAgentDefinitions",
+            "useAgentGroupActions({",
             "useAgentGroups",
             "useAgentStudioRefresh({",
             "useApprovedRunGuard",
@@ -691,6 +692,8 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "runMatchesSearch(",
             "workflowSpecStepRefs({",
             "agentRunReadinessIssue(agent, chatModelProfiles",
+            "async function saveAgentGroup()",
+            "async function runCurrentAgentGroup()",
             "listStudioAgentsForView()",
             "listStudioSkillsForView()",
             "listModelProfiles()",
@@ -731,6 +734,17 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "startYachiyoGroupRun",
             "runAgentGroup",
             "saveAgentGroupDraft",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useAgentGroupActions.ts",
+        [
+            "export function useAgentGroupActions",
+            "saveAgentGroupDraft()",
+            "runAgentGroup()",
+            "setRunTarget(selectedAgentGroupId.trim())",
+            "openRunDetail(runId, { revealInHistory: true })",
+            "selectedRunId: runId || undefined",
         ],
     )
     _assert_contains(
@@ -2309,6 +2323,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "updateYachiyoSkill",
             "useAgentAvatarActions",
             "useAgentDeletionActions",
+            "useAgentGroupActions",
             "useAgentStudioRefresh",
             "useAgentRunReadiness",
             "useAgentSaveActions",

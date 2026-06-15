@@ -19,6 +19,7 @@ import { WorkflowEditorPanel, WorkflowRunPreview } from '../features/agent-studi
 import { useAgentAvatarActions } from '../features/agent-studio/hooks/useAgentAvatarActions';
 import { useAgentDeletionActions } from '../features/agent-studio/hooks/useAgentDeletionActions';
 import { useAgentDefinitions } from '../features/agent-studio/hooks/useAgentDefinitions';
+import { useAgentGroupActions } from '../features/agent-studio/hooks/useAgentGroupActions';
 import { useAgentGroups } from '../features/agent-studio/hooks/useAgentGroups';
 import { useAgentRunReadiness } from '../features/agent-studio/hooks/useAgentRunReadiness';
 import { useAgentSaveActions } from '../features/agent-studio/hooks/useAgentSaveActions';
@@ -459,6 +460,16 @@ export function AgentStudioView() {
     setRunStatusFilter,
     setSelectedRunId,
     setTab,
+  });
+  const {
+    runCurrentAgentGroup,
+    saveAgentGroup,
+  } = useAgentGroupActions({
+    openRunDetail,
+    runAgentGroup,
+    saveAgentGroupDraft,
+    selectedAgentGroupId,
+    setRunTarget,
   });
   const {
     requestCancelFutureTask,
@@ -965,23 +976,6 @@ export function AgentStudioView() {
     const action = confirmDialog?.onConfirm;
     setConfirmDialog(null);
     if (action) action();
-  }
-
-  async function saveAgentGroup(): Promise<StudioRefreshOptions> {
-    const { statusMessage } = await saveAgentGroupDraft();
-    return { statusMessage };
-  }
-
-  async function runCurrentAgentGroup(): Promise<StudioRefreshOptions> {
-    const { runId, statusMessage } = await runAgentGroup();
-    if (runId) {
-      setRunTarget(selectedAgentGroupId.trim());
-      openRunDetail(runId, { revealInHistory: true });
-    }
-    return {
-      selectedRunId: runId || undefined,
-      statusMessage,
-    };
   }
 
   return (
