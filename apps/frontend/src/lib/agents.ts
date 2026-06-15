@@ -361,11 +361,15 @@ export async function installSkillCommand(command: string, folderId?: string): P
 }
 
 export async function updateSkill(skillId: string, request: Partial<SkillSpec>): Promise<SkillSpec> {
-  return apiPatch(`/ui/skills/${encodeURIComponent(skillId)}`, request);
+  return apiPatch<SkillSpec>(`/yachiyo/studio/skills/${encodeURIComponent(skillId)}`, request).catch(() => (
+    apiPatch<SkillSpec>(`/ui/skills/${encodeURIComponent(skillId)}`, request)
+  ));
 }
 
 export async function deleteSkill(skillId: string): Promise<{ ok?: boolean }> {
-  return apiDelete(`/ui/skills/${encodeURIComponent(skillId)}`);
+  return apiDelete(`/yachiyo/studio/skills/${encodeURIComponent(skillId)}`).catch(() => (
+    apiDelete(`/ui/skills/${encodeURIComponent(skillId)}`)
+  ));
 }
 
 export async function listWorkflows(): Promise<WorkflowSpec[]> {

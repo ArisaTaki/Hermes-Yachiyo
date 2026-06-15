@@ -143,6 +143,17 @@ class _FakeAgentRuntime:
         self.calls.append(("list_skills", None))
         return {"ok": True, "skills": [_skill_payload()]}
 
+    def update_skill(self, skill_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append(("update_skill", {"skill_id": skill_id, "payload": payload}))
+        return _skill_payload(skill_id=skill_id) | {
+            "enabled": bool(payload.get("enabled", True)),
+            "folder_id": str(payload.get("folder_id") or ""),
+        }
+
+    def delete_skill(self, skill_id: str) -> dict[str, Any]:
+        self.calls.append(("delete_skill", skill_id))
+        return {"ok": True, "skill_id": skill_id}
+
     def create_agent_run(self, payload: dict[str, Any]) -> dict[str, Any]:
         self.calls.append(("create_agent_run", payload))
         return _run_payload(
@@ -369,6 +380,12 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     )
     agent_without_skill = await yachiyo.detach_studio_agent_skill("agent-1", "skill-1", request)
     skills = await yachiyo.list_studio_skills(request)
+    updated_skill = await yachiyo.update_studio_skill(
+        "skill-1",
+        yachiyo.SkillUpdateBody(enabled=False, folder_id="folder-2"),
+        request,
+    )
+    deleted_skill = await yachiyo.delete_studio_skill("skill-1", request)
     agent_run = await yachiyo.start_studio_agent_run(
         "agent-1",
         yachiyo.StartAgentRunBody(objective="Draft summary", client_run_id="client-agent-1"),
@@ -415,6 +432,9 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     assert agent_without_skill["skill_ids"] == []
     assert skills["skills"][0]["skill_id"] == "skill-1"
     assert skills["skills"][0]["asset_paths"] == ["assets/icon.png"]
+    assert updated_skill["enabled"] is False
+    assert updated_skill["folder_id"] == "folder-2"
+    assert deleted_skill == {"ok": True, "skill_id": "skill-1"}
     assert workflows["workflows"][0]["workflow_id"] == "workflow-1"
     assert deleted_workflow == {"ok": True, "workflow_id": "workflow-1"}
     assert workflow_run["workflow_run_id"] == "workflow-run-1"
@@ -445,6 +465,11 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     assert ("attach_skill", {"agent_id": "agent-1", "skill_id": "skill-1"}) in runtime.calls
     assert ("detach_skill", {"agent_id": "agent-1", "skill_id": "skill-1"}) in runtime.calls
     assert ("list_skills", None) in runtime.calls
+    assert (
+        "update_skill",
+        {"skill_id": "skill-1", "payload": {"enabled": False, "folder_id": "folder-2"}},
+    ) in runtime.calls
+    assert ("delete_skill", "skill-1") in runtime.calls
     assert ("delete_workflow", "workflow-1") in runtime.calls
     assert ("list_runs", 5) in runtime.calls
     assert ("list_run_groups", 5) in runtime.calls
@@ -524,6 +549,8 @@ def test_yachiyo_studio_routes_include_run_action_facade() -> None:
     assert '@router.post("/studio/agents/{agent_id}/skills")' in source
     assert '@router.delete("/studio/agents/{agent_id}/skills/{skill_id}")' in source
     assert '@router.get("/studio/skills")' in source
+    assert '@router.patch("/studio/skills/{skill_id}")' in source
+    assert '@router.delete("/studio/skills/{skill_id}")' in source
     assert '@router.get("/studio/group-runs")' in source
     assert '@router.get("/studio/group-runs/{group_run_id}")' in source
     assert '@router.get("/studio/runs")' in source

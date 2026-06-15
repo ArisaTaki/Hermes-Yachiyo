@@ -1,4 +1,4 @@
-import { apiDelete, apiGet, apiPost } from '../../lib/bridge';
+import { apiDelete, apiGet, apiPatch, apiPost } from '../../lib/bridge';
 import type {
   AgentDefinitionSnapshot,
   AgentGroupSnapshot,
@@ -26,6 +26,17 @@ export async function deleteYachiyoStudioAgent(agentId: string): Promise<{ ok?: 
 export async function listYachiyoSkills(): Promise<SkillSnapshot[]> {
   const payload = await apiGet<{ skills?: SkillSnapshot[] }>('/yachiyo/studio/skills');
   return payload.skills || [];
+}
+
+export async function updateYachiyoSkill(
+  skillId: string,
+  request: Partial<SkillSnapshot>,
+): Promise<SkillSnapshot> {
+  return apiPatch(`/yachiyo/studio/skills/${encodeURIComponent(skillId)}`, request);
+}
+
+export async function deleteYachiyoSkill(skillId: string): Promise<{ ok?: boolean }> {
+  return apiDelete(`/yachiyo/studio/skills/${encodeURIComponent(skillId)}`);
 }
 
 export async function listYachiyoAgentGroups(): Promise<AgentGroupSnapshot[]> {

@@ -74,6 +74,12 @@ class AgentStudioService:
             for item in _payload_items(self._studio_port.list_skills(), "skills")
         ]
 
+    def update_skill(self, skill_id: str, request: Mapping[str, Any]) -> SkillSnapshot:
+        return skill_snapshot_from_payload(self._studio_port.update_skill(skill_id, dict(request)))
+
+    def delete_skill(self, skill_id: str) -> dict[str, Any]:
+        return dict(self._studio_port.delete_skill(skill_id))
+
     def start_agent_run(
         self,
         request: StartAgentRunRequest | Mapping[str, Any],

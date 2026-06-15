@@ -451,6 +451,8 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "saveYachiyoStudioAgent",
             "deleteYachiyoStudioAgent",
             "listYachiyoSkills",
+            "updateYachiyoSkill",
+            "deleteYachiyoSkill",
             "listYachiyoAgentGroups",
             "saveYachiyoAgentGroup",
             "startYachiyoGroupRun",
@@ -1802,8 +1804,10 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "export async function installSkillCommand(",
             "apiPost('/ui/skills/install'",
             "export async function updateSkill(",
-            "apiPatch(`/ui/skills/${encodeURIComponent(skillId)}`, request)",
+            "/yachiyo/studio/skills/${encodeURIComponent(skillId)}",
+            "apiPatch<SkillSpec>(`/ui/skills/${encodeURIComponent(skillId)}`, request)",
             "export async function deleteSkill(",
+            "apiDelete(`/yachiyo/studio/skills/${encodeURIComponent(skillId)}`)",
             "apiDelete(`/ui/skills/${encodeURIComponent(skillId)}`)",
             "export async function listSkillFolders()",
             "'/ui/skill-folders'",
@@ -1862,6 +1866,22 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
         [
             "apiGet<{ skills?: SkillSpec[] }>('/yachiyo/studio/skills')",
             "apiGet<{ skills?: SkillSpec[] }>('/ui/skills')",
+        ],
+    )
+    _assert_function_contains(
+        "apps/frontend/src/lib/agents.ts",
+        "updateSkill",
+        [
+            "apiPatch<SkillSpec>(`/yachiyo/studio/skills/${encodeURIComponent(skillId)}`",
+            "apiPatch<SkillSpec>(`/ui/skills/${encodeURIComponent(skillId)}`",
+        ],
+    )
+    _assert_function_contains(
+        "apps/frontend/src/lib/agents.ts",
+        "deleteSkill",
+        [
+            "apiDelete(`/yachiyo/studio/skills/${encodeURIComponent(skillId)}`)",
+            "apiDelete(`/ui/skills/${encodeURIComponent(skillId)}`)",
         ],
     )
     _assert_contains(

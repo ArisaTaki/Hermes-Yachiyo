@@ -52,6 +52,17 @@ class _FakeStudioPort:
         self.calls.append(("list_skills", None))
         return {"ok": True, "skills": [_skill_payload()]}
 
+    def update_skill(self, skill_id: str, request: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append(("update_skill", {"skill_id": skill_id, "request": request}))
+        return _skill_payload(skill_id=skill_id) | {
+            "enabled": bool(request.get("enabled", True)),
+            "folder_id": str(request.get("folder_id") or ""),
+        }
+
+    def delete_skill(self, skill_id: str) -> dict[str, Any]:
+        self.calls.append(("delete_skill", skill_id))
+        return {"ok": True, "skill_id": skill_id}
+
     def start_agent_run(self, request: dict[str, Any]) -> dict[str, Any]:
         self.calls.append(("start_agent_run", request))
         return _run_payload(
@@ -191,6 +202,8 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
     agent_with_skill = service.attach_skill("agent-2", "skill-2")
     agent_without_skill = service.detach_skill("agent-2", "skill-2")
     skills = service.list_skills()
+    updated_skill = service.update_skill("skill-1", {"enabled": False, "folder_id": "folder-2"})
+    deleted_skill = service.delete_skill("skill-1")
     groups = service.list_groups()
     group = service.get_group("group-1")
     saved_group = service.save_group(
@@ -230,6 +243,9 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
     assert agent_without_skill.skill_ids == []
     assert skills[0].skill_id == "skill-1"
     assert skills[0].asset_paths == ["assets/icon.png"]
+    assert updated_skill.enabled is False
+    assert updated_skill.folder_id == "folder-2"
+    assert deleted_skill == {"ok": True, "skill_id": "skill-1"}
     assert groups[0].members[0].agent_id == "agent-1"
     assert group.mode == "debate"
     assert saved_group.name == "Team"
@@ -252,6 +268,11 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
     assert ("attach_skill", {"agent_id": "agent-2", "skill_id": "skill-2"}) in port.calls
     assert ("detach_skill", {"agent_id": "agent-2", "skill_id": "skill-2"}) in port.calls
     assert ("list_skills", None) in port.calls
+    assert (
+        "update_skill",
+        {"skill_id": "skill-1", "request": {"enabled": False, "folder_id": "folder-2"}},
+    ) in port.calls
+    assert ("delete_skill", "skill-1") in port.calls
     assert (
         "save_group",
         {

@@ -147,6 +147,12 @@ class LegacyStudioPort:
     def list_skills(self) -> dict[str, Any]:
         return self._runtime.list_skills()
 
+    def update_skill(self, skill_id: str, request: dict[str, Any]) -> dict[str, Any]:
+        return self._runtime.update_skill(skill_id, request)
+
+    def delete_skill(self, skill_id: str) -> dict[str, Any]:
+        return self._runtime.delete_skill(skill_id)
+
     def start_agent_run(self, request: dict[str, Any]) -> dict[str, Any]:
         return self._runtime.create_agent_run(
             {

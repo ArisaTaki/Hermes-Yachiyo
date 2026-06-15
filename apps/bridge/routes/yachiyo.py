@@ -57,6 +57,11 @@ class AgentSkillBody(BaseModel):
     skill_id: str = Field(..., min_length=1, max_length=160)
 
 
+class SkillUpdateBody(BaseModel):
+    enabled: bool | None = None
+    folder_id: str | None = Field(default=None, max_length=160)
+
+
 class StartWorkflowRunBody(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -356,6 +361,37 @@ async def detach_studio_agent_skill(
 async def list_studio_skills(http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
     skills = await asyncio.to_thread(_studio_service(http_request).list_skills)
     return {"skills": [_snapshot(skill) for skill in skills]}
+
+
+@router.patch("/studio/skills/{skill_id}")
+async def update_studio_skill(
+    skill_id: str,
+    request: SkillUpdateBody,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    try:
+        payload = request.model_dump(exclude_none=True)
+        snapshot = await asyncio.to_thread(
+            _studio_service(http_request).update_skill,
+            skill_id,
+            payload,
+        )
+        return _snapshot(snapshot)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Skill 不存在") from exc
+    except AgentRuntimeError as exc:
+        raise _bad_request(exc) from exc
+
+
+@router.delete("/studio/skills/{skill_id}")
+async def delete_studio_skill(
+    skill_id: str,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(_studio_service(http_request).delete_skill, skill_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Skill 不存在") from exc
 
 
 @router.post("/studio/agents/{agent_id}/runs")
