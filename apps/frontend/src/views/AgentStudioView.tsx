@@ -24,6 +24,7 @@ import { useRunEventReplay } from '../features/agent-studio/hooks/useRunEventRep
 import { useRunHistoryManagement } from '../features/agent-studio/hooks/useRunHistoryManagement';
 import { useRunLaunchActions } from '../features/agent-studio/hooks/useRunLaunchActions';
 import { useRunTimeline } from '../features/agent-studio/hooks/useRunTimeline';
+import { useRuntimeMemoryManagement } from '../features/agent-studio/hooks/useRuntimeMemoryManagement';
 import { useWorkflowDefinitions } from '../features/agent-studio/hooks/useWorkflowDefinitions';
 import {
   agentCapabilityLine,
@@ -108,12 +109,10 @@ import {
 import type { GroupRunSnapshot } from '../features/yachiyo-studio/types';
 import {
   attachSkill,
-  cancelFutureTask,
   createSkillFolder,
   createAgent,
   createWorkflow,
   deleteAgent,
-  deleteMemory,
   deleteSkillFolder,
   deleteSkill,
   deleteWorkflow,
@@ -135,7 +134,6 @@ import {
   listWorkflows,
   syncNativeSkills,
   testAgentModel,
-  triggerDueFutureTasks,
   updateAgent,
   updateSkill,
   updateSkillFolder,
@@ -611,6 +609,15 @@ export function AgentStudioView() {
     setRunGroups,
     setRuns,
     setSelectedRunId,
+    showConfirmDialog,
+  });
+  const {
+    requestCancelFutureTask,
+    requestDeleteMemory,
+    triggerDueFutureTaskRuns,
+  } = useRuntimeMemoryManagement({
+    openRunDetail,
+    runAction,
     showConfirmDialog,
   });
   const selectedRunWorkflow = useMemo(
@@ -1554,49 +1561,6 @@ export function AgentStudioView() {
         return undefined;
       }, '批量删除 Workflow'),
     });
-  }
-
-  function requestDeleteMemory(memory: MemorySpec) {
-    const memoryLabel = memory.content.trim() || memory.memory_id;
-    showConfirmDialog({
-      title: `删除 Memory「${memoryLabel.slice(0, 32)}」？`,
-      description: '这条长期记忆会从 Agent Runtime 的主动回忆范围中移除；历史 Run 不会被删除。',
-      confirmLabel: '删除 Memory',
-      variant: 'danger',
-      onConfirm: () => void runAction(async () => {
-        await deleteMemory(memory.memory_id, 'studio_user_delete');
-        return { statusMessage: 'Memory 已删除。' };
-      }, '删除 Memory'),
-    });
-  }
-
-  function requestCancelFutureTask(futureTask: FutureTaskSpec) {
-    const taskLabel = futureTask.title.trim() || futureTask.future_task_id;
-    showConfirmDialog({
-      title: `取消 FutureTask「${taskLabel.slice(0, 40)}」？`,
-      description: '这个 FutureTask 不会再自动触发；已经生成的 Run 不会被删除。',
-      confirmLabel: '取消 FutureTask',
-      variant: 'danger',
-      onConfirm: () => void runAction(async () => {
-        await cancelFutureTask(futureTask.future_task_id, 'studio_user_cancel');
-        return { statusMessage: 'FutureTask 已取消。' };
-      }, '取消 FutureTask'),
-    });
-  }
-
-  async function triggerDueFutureTaskRuns(): Promise<StudioRefreshOptions> {
-    const result = await triggerDueFutureTasks();
-    const triggered = result.triggered || [];
-    const firstRunId = triggered.map((item) => item.run?.run_id || '').find(Boolean) || '';
-    const failedCount = triggered.filter((item) => item.error || item.ok === false).length;
-    const statusMessage = triggered.length
-      ? `已触发 ${triggered.length} 个 FutureTask${failedCount ? `，${failedCount} 个失败` : ''}。`
-      : '没有到期 FutureTask。';
-    if (firstRunId) {
-      openRunDetail(firstRunId, { revealInHistory: true });
-      return { selectedRunId: firstRunId, statusMessage };
-    }
-    return { statusMessage };
   }
 
   function requestDeleteSkillFolder(folder: SkillFolderSpec, deleteSkills: boolean) {

@@ -2278,14 +2278,25 @@ def test_agent_studio_exposes_runtime_memory_and_future_task_management() -> Non
             "listFutureTasks()",
             "setMemories(nextMemories);",
             "setFutureTasks(nextFutureTasks);",
+            "useRuntimeMemoryManagement",
+            "requestDeleteMemory",
+            "requestCancelFutureTask",
+            "triggerDueFutureTaskRuns",
+            "RuntimeMemoryPanel",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useRuntimeMemoryManagement.ts",
+        [
+            "export function useRuntimeMemoryManagement",
             "function requestDeleteMemory(memory: MemorySpec)",
             "await deleteMemory(memory.memory_id, 'studio_user_delete');",
             "function requestCancelFutureTask(futureTask: FutureTaskSpec)",
             "await cancelFutureTask(futureTask.future_task_id, 'studio_user_cancel');",
-            "async function triggerDueFutureTaskRuns(): Promise<StudioRefreshOptions>",
+            "async function triggerDueFutureTaskRuns(): Promise<RuntimeMemoryRefreshOptions>",
             "const result = await triggerDueFutureTasks();",
             "openRunDetail(firstRunId, { revealInHistory: true });",
-            "RuntimeMemoryPanel",
+            "return { selectedRunId: firstRunId, statusMessage };",
         ],
     )
     _assert_contains(
