@@ -652,6 +652,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "useAgentDraftActions({",
             "useAgentGroupActions({",
             "useAgentGroups",
+            "useAgentStudioActionRunner({",
             "useAgentStudioConfirmDialog()",
             "useAgentStudioLoadLifecycle({",
             "useAgentStudioRefresh({",
@@ -711,12 +712,25 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "navigateTo('agents', nextTab === 'agents'",
             "type ConfirmDialogState",
             "function confirmCurrentDialog()",
+            "async function runAction(",
             "async function saveAgentGroup()",
             "async function runCurrentAgentGroup()",
             "listStudioAgentsForView()",
             "listStudioSkillsForView()",
             "listModelProfiles()",
             "studioRunnablesForView(",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useAgentStudioActionRunner.ts",
+        [
+            "export type AgentStudioRunnableAction = () => Promise<unknown> | unknown;",
+            "function isStudioRefreshOptions(value: unknown): value is StudioRefreshOptions {",
+            "return keys.some((key) => key in value);",
+            "export function useAgentStudioActionRunner",
+            "const runAction = useCallback(async (action: AgentStudioRunnableAction, label: string) => {",
+            "const refreshOptions = isStudioRefreshOptions(result) ? result : {};",
+            "if (!refreshOptions.skipRefresh) {",
         ],
     )
     _assert_contains(
@@ -2415,6 +2429,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "useAgentDeletionActions",
             "useAgentDraftActions",
             "useAgentGroupActions",
+            "useAgentStudioActionRunner",
             "useAgentStudioConfirmDialog",
             "useAgentStudioLoadLifecycle",
             "useAgentStudioRefresh",

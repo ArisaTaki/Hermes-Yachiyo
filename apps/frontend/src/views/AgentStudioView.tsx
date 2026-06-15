@@ -24,9 +24,10 @@ import { useAgentGroups } from '../features/agent-studio/hooks/useAgentGroups';
 import { useAgentRunReadiness } from '../features/agent-studio/hooks/useAgentRunReadiness';
 import { useAgentSaveActions } from '../features/agent-studio/hooks/useAgentSaveActions';
 import { useAgentSkillMountActions } from '../features/agent-studio/hooks/useAgentSkillMountActions';
+import { useAgentStudioActionRunner } from '../features/agent-studio/hooks/useAgentStudioActionRunner';
 import { useAgentStudioConfirmDialog } from '../features/agent-studio/hooks/useAgentStudioConfirmDialog';
 import { useAgentStudioLoadLifecycle } from '../features/agent-studio/hooks/useAgentStudioLoadLifecycle';
-import { useAgentStudioRefresh, type StudioRefreshOptions } from '../features/agent-studio/hooks/useAgentStudioRefresh';
+import { useAgentStudioRefresh } from '../features/agent-studio/hooks/useAgentStudioRefresh';
 import { useAgentStudioRouteState } from '../features/agent-studio/hooks/useAgentStudioRouteState';
 import { useAgentStudioSelectionSynchronization } from '../features/agent-studio/hooks/useAgentStudioSelectionSynchronization';
 import { useAgentStudioTabActions } from '../features/agent-studio/hooks/useAgentStudioTabActions';
@@ -242,6 +243,30 @@ export function AgentStudioView() {
     workflowManagementMode,
     workflows,
   } = useWorkflowDefinitions();
+
+  const refresh = useAgentStudioRefresh({
+    applyAgents,
+    applyWorkflows,
+    loadAgentGroups,
+    setFutureTasks,
+    setMemories,
+    setModelDefaults,
+    setModelProfiles,
+    setRunnables,
+    setRunGroups,
+    setRuns,
+    setRunTarget,
+    setSelectedRunId,
+    setSkillFolders,
+    setSkillSources,
+    setSkills,
+  });
+  const { runAction } = useAgentStudioActionRunner({
+    refresh,
+    setBusyAction,
+    setError,
+    setStatus,
+  });
 
   const chatModelProfiles = useMemo(
     () => modelProfiles.filter((profile) => profile.capability === 'chat' && profile.status === 'available' && profile.enabled !== false),
@@ -662,24 +687,6 @@ export function AgentStudioView() {
     setRuns,
   });
 
-  const refresh = useAgentStudioRefresh({
-    applyAgents,
-    applyWorkflows,
-    loadAgentGroups,
-    setFutureTasks,
-    setMemories,
-    setModelDefaults,
-    setModelProfiles,
-    setRunnables,
-    setRunGroups,
-    setRuns,
-    setRunTarget,
-    setSelectedRunId,
-    setSkillFolders,
-    setSkillSources,
-    setSkills,
-  });
-
   const {
     approvalFollowupRefreshOptions,
     isApprovalFollowupCurrent,
@@ -801,23 +808,6 @@ export function AgentStudioView() {
     setStatus,
     setTab,
   });
-
-  async function runAction(action: () => Promise<StudioRefreshOptions | void>, label: string) {
-    setBusyAction(label);
-    setStatus(`${label}...`);
-    setError('');
-    try {
-      const refreshOptions = await action();
-      if (!refreshOptions?.skipRefresh) {
-        await refresh(refreshOptions || {});
-      }
-      setStatus(refreshOptions?.statusMessage || `${label} 完成`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : `${label} 失败`);
-    } finally {
-      setBusyAction('');
-    }
-  }
 
   return (
     <section className="agent-studio-page hy-route-page">
@@ -1076,7 +1066,7 @@ export function AgentStudioView() {
           onRequestCancelSelectedRun={requestCancelSelectedRun}
           onRequestDeleteSelectedRuns={requestDeleteSelectedRuns}
           onRerunSelectedRun={rerunSelectedRun}
-          onRunAction={(action, label) => void runAction(action as () => Promise<StudioRefreshOptions | void>, label)}
+          onRunAction={(action, label) => void runAction(action, label)}
           onRunGoalChange={setRunGoal}
           onRunSearchQueryChange={setRunSearchQuery}
           onRunTargetChange={setRunTarget}
