@@ -24,6 +24,7 @@ import { useAgentGroups } from '../features/agent-studio/hooks/useAgentGroups';
 import { useAgentRunReadiness } from '../features/agent-studio/hooks/useAgentRunReadiness';
 import { useAgentSaveActions } from '../features/agent-studio/hooks/useAgentSaveActions';
 import { useAgentSkillMountActions } from '../features/agent-studio/hooks/useAgentSkillMountActions';
+import { useAgentStudioConfirmDialog } from '../features/agent-studio/hooks/useAgentStudioConfirmDialog';
 import { useAgentStudioLoadLifecycle } from '../features/agent-studio/hooks/useAgentStudioLoadLifecycle';
 import { useAgentStudioRefresh, type StudioRefreshOptions } from '../features/agent-studio/hooks/useAgentStudioRefresh';
 import { useAgentStudioRouteState } from '../features/agent-studio/hooks/useAgentStudioRouteState';
@@ -102,14 +103,6 @@ import type {
 import { openAppView } from '../lib/bridge';
 import type { ModelProfile, ModelProfileDefaults } from '../lib/modelProfiles';
 
-type ConfirmDialogState = {
-  title: string;
-  description: string;
-  confirmLabel: string;
-  variant?: 'default' | 'danger';
-  onConfirm: () => void;
-};
-
 const emptyAgentDraft: AgentDraft = {
   name: '',
   nickname: '',
@@ -185,13 +178,18 @@ export function AgentStudioView() {
   const [artifactPreview, setArtifactPreview] = useState<{ path: string; content: string; truncated?: boolean } | null>(null);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
-  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyAction, setBusyAction] = useState('');
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(starterNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const busy = loading || Boolean(busyAction);
   const installingSkill = busyAction === '安装 Skill';
+  const {
+    closeConfirmDialog,
+    confirmCurrentDialog,
+    confirmDialog,
+    showConfirmDialog,
+  } = useAgentStudioConfirmDialog();
   const {
     agentGroups,
     agentGroupMemberIds,
@@ -819,20 +817,6 @@ export function AgentStudioView() {
     } finally {
       setBusyAction('');
     }
-  }
-
-  function showConfirmDialog(nextConfirm: ConfirmDialogState) {
-    setConfirmDialog(nextConfirm);
-  }
-
-  function closeConfirmDialog() {
-    setConfirmDialog(null);
-  }
-
-  function confirmCurrentDialog() {
-    const action = confirmDialog?.onConfirm;
-    setConfirmDialog(null);
-    if (action) action();
   }
 
   return (

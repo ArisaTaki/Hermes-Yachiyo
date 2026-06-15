@@ -652,6 +652,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "useAgentDraftActions({",
             "useAgentGroupActions({",
             "useAgentGroups",
+            "useAgentStudioConfirmDialog()",
             "useAgentStudioLoadLifecycle({",
             "useAgentStudioRefresh({",
             "useAgentStudioRouteState()",
@@ -708,12 +709,25 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "function selectAgent(agentId: string)",
             "function activateTab(nextTab",
             "navigateTo('agents', nextTab === 'agents'",
+            "type ConfirmDialogState",
+            "function confirmCurrentDialog()",
             "async function saveAgentGroup()",
             "async function runCurrentAgentGroup()",
             "listStudioAgentsForView()",
             "listStudioSkillsForView()",
             "listModelProfiles()",
             "studioRunnablesForView(",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useAgentStudioConfirmDialog.ts",
+        [
+            "export function useAgentStudioConfirmDialog",
+            "const [confirmDialog, setConfirmDialog] = useState<AgentStudioConfirmDialogState | null>(null);",
+            "const showConfirmDialog = useCallback((nextConfirm: AgentStudioConfirmDialogState) => {",
+            "const closeConfirmDialog = useCallback(() => {",
+            "const confirmCurrentDialog = useCallback(() => {",
+            "const action = confirmDialog?.onConfirm;",
         ],
     )
     _assert_contains(
@@ -2401,6 +2415,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "useAgentDeletionActions",
             "useAgentDraftActions",
             "useAgentGroupActions",
+            "useAgentStudioConfirmDialog",
             "useAgentStudioLoadLifecycle",
             "useAgentStudioRefresh",
             "useAgentStudioRouteState",
