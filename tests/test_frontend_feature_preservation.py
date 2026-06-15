@@ -201,6 +201,13 @@ def test_launcher_views_expose_session_summary_e2e_selectors() -> None:
     _assert_contains(
         "apps/frontend/src/views/OpenDesignView.tsx",
         [
+            "const LAUNCHER_PAGE_ACTIVE_POLL_INTERVAL_MS = 1200;",
+            "const LAUNCHER_PAGE_IDLE_POLL_INTERVAL_MS = 5000;",
+            "function useLauncherModePayload(mode: 'bubble' | 'live2d', active = true)",
+            "const payload = await apiGet<LauncherPayload>(`/ui/launcher?mode=${mode}`);",
+            "launcherPayloadHasActiveTask(data)",
+            "window.setInterval(",
+            "processing ? LAUNCHER_PAGE_ACTIVE_POLL_INTERVAL_MS : LAUNCHER_PAGE_IDLE_POLL_INTERVAL_MS",
             "LauncherAgentTaskLight",
             'testIdPrefix="bubble-mode"',
             'testIdPrefix="live2d-mode"',

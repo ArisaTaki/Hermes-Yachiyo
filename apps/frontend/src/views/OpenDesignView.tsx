@@ -209,6 +209,8 @@ type ResourceFile = {
 };
 
 const launcherPayloadCache: Partial<Record<'bubble' | 'live2d', LauncherPayload>> = {};
+const LAUNCHER_PAGE_ACTIVE_POLL_INTERVAL_MS = 1200;
+const LAUNCHER_PAGE_IDLE_POLL_INTERVAL_MS = 5000;
 
 const NAV_GROUPS: Array<{
   label: string;
@@ -1235,28 +1237,59 @@ export function ProviderPage() {
   );
 }
 
-export function BubbleModePage() {
-  const [data, setData] = useState<LauncherPayload | null>(() => launcherPayloadCache.bubble || null);
-  const [loading, setLoading] = useState(() => !launcherPayloadCache.bubble);
-  usePageLoading(loading && !data);
+function useLauncherModePayload(mode: 'bubble' | 'live2d', active = true) {
+  const [data, setData] = useState<LauncherPayload | null>(() => launcherPayloadCache[mode] || null);
+  const [loading, setLoading] = useState(() => !launcherPayloadCache[mode]);
+  const canUpdateRef = useRef(active);
 
   useEffect(() => {
-    let disposed = false;
-    apiGet<LauncherPayload>('/ui/launcher?mode=bubble')
-      .then((payload) => {
-        launcherPayloadCache.bubble = payload;
-        if (!disposed) setData(payload);
-      })
-      .catch(() => {
-        if (!disposed && !launcherPayloadCache.bubble) setData(null);
-      })
-      .finally(() => {
-        if (!disposed) setLoading(false);
-      });
+    canUpdateRef.current = active;
     return () => {
-      disposed = true;
+      canUpdateRef.current = false;
     };
-  }, []);
+  }, [active]);
+
+  const refresh = useCallback(async () => {
+    try {
+      const payload = await apiGet<LauncherPayload>(`/ui/launcher?mode=${mode}`);
+      launcherPayloadCache[mode] = payload;
+      if (!canUpdateRef.current) return;
+      setData(payload);
+    } catch {
+      if (!canUpdateRef.current) return;
+      if (!launcherPayloadCache[mode]) setData(null);
+    } finally {
+      if (!canUpdateRef.current) return;
+      setLoading(false);
+    }
+  }, [mode]);
+
+  useEffect(() => {
+    if (!active) return undefined;
+    void refresh();
+    return undefined;
+  }, [active, refresh]);
+
+  useEffect(() => {
+    if (!active) return undefined;
+    const processing = Boolean(data?.chat?.is_processing || launcherPayloadHasActiveTask(data));
+    const timer = window.setInterval(
+      () => void refresh(),
+      processing ? LAUNCHER_PAGE_ACTIVE_POLL_INTERVAL_MS : LAUNCHER_PAGE_IDLE_POLL_INTERVAL_MS,
+    );
+    return () => window.clearInterval(timer);
+  }, [active, data?.chat?.agent_task?.status, data?.chat?.is_processing, refresh]);
+
+  return { data, loading };
+}
+
+function launcherPayloadHasActiveTask(data: LauncherPayload | null) {
+  return ['queued', 'running', 'waiting_approval'].includes(String(data?.chat?.agent_task?.status || ''));
+}
+
+export function BubbleModePage() {
+  const { data, loading } = useLauncherModePayload('bubble');
+  usePageLoading(loading && !data);
 
   return (
     <section className="hy-route-page hy-stage-page">
@@ -1315,27 +1348,8 @@ export function BubbleModePage() {
 }
 
 export function Live2DModePage({ active = true }: { active?: boolean } = {}) {
-  const [data, setData] = useState<LauncherPayload | null>(() => launcherPayloadCache.live2d || null);
-  const [loading, setLoading] = useState(() => !launcherPayloadCache.live2d);
+  const { data, loading } = useLauncherModePayload('live2d', active);
   usePageLoading(active && loading && !data);
-
-  useEffect(() => {
-    let disposed = false;
-    apiGet<LauncherPayload>('/ui/launcher?mode=live2d')
-      .then((payload) => {
-        launcherPayloadCache.live2d = payload;
-        if (!disposed) setData(payload);
-      })
-      .catch(() => {
-        if (!disposed && !launcherPayloadCache.live2d) setData(null);
-      })
-      .finally(() => {
-        if (!disposed) setLoading(false);
-      });
-    return () => {
-      disposed = true;
-    };
-  }, []);
 
   const resource = data?.launcher?.resource;
   const renderer = data?.launcher?.renderer;
