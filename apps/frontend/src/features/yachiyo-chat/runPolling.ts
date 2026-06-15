@@ -53,3 +53,18 @@ export function chatRunCompletionStatusText({
   if (status === 'cancelled') return `${runLabel} 已取消。`;
   return `${runLabel} 执行失败。`;
 }
+
+export function chatApprovalRejectionCompletionStatusText({
+  chatStillProcessing,
+  delegatedSummary,
+  runStatus,
+}: {
+  chatStillProcessing: boolean;
+  delegatedSummary: DelegatedRunSummaryResult;
+  runStatus: string;
+}) {
+  if (delegatedSummary.created) return 'Agent 已结束，等待主模型整理委派结果...';
+  if (delegatedSummary.error) return `审批后执行结束，但整理任务未创建：${delegatedSummary.error}`;
+  if (chatStillProcessing) return '已拒绝，等待主模型整理结果...';
+  return runStatus === 'completed' ? '审批后执行完成。' : '审批后执行结束。';
+}

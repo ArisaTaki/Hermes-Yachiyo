@@ -62,6 +62,7 @@ import {
   runnableResultStatus,
 } from '../features/yachiyo-chat/messageState';
 import {
+  chatApprovalRejectionCompletionStatusText,
   chatRunCompletionProcessingState,
   chatRunCompletionStatusText,
   chatRunLabel,
@@ -1483,16 +1484,9 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       const chatStillProcessing = Boolean(refreshed?.is_processing);
       const chatProcessingCount = Math.max(0, Number(refreshed?.processing_count || 0));
       const runStatus = normalizeRunStatus(run.status);
-      let delegatedSummaryCreated = false;
-      let delegatedSummaryError = '';
-      let delegatedSummaryIsProcessing = false;
-      let delegatedSummaryProcessingCount = 0;
+      let delegatedSummary = { created: false, error: '', taskId: '', isProcessing: false, processingCount: 0 };
       if (summarizeDelegatedRun && ['completed', 'failed', 'cancelled'].includes(runStatus)) {
-        const summary = await createDelegatedRunSummary(runId, delegatedRunSummaryOptions());
-        delegatedSummaryCreated = summary.created;
-        delegatedSummaryError = summary.error;
-        delegatedSummaryIsProcessing = summary.isProcessing;
-        delegatedSummaryProcessingCount = summary.processingCount;
+        delegatedSummary = await createDelegatedRunSummary(runId, delegatedRunSummaryOptions());
       }
       if (composerItemId && runStatus !== 'approval_required') {
         setResolvedComposerApprovalIds((current) => (
@@ -1513,20 +1507,19 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         }
       } else {
         forgetRunApprovalDetails(runId);
-        const nextProcessing = delegatedSummaryCreated ? delegatedSummaryIsProcessing : chatStillProcessing;
-        const nextProcessingCount = delegatedSummaryCreated ? delegatedSummaryProcessingCount : chatProcessingCount;
+        const { nextProcessing, nextProcessingCount } = chatRunCompletionProcessingState(
+          delegatedSummary,
+          chatStillProcessing,
+          chatProcessingCount,
+        );
         setIsProcessing(nextProcessing);
         isProcessingRef.current = nextProcessing;
         setProcessingCount(nextProcessingCount);
-        if (delegatedSummaryCreated) {
-          setStatus('Agent 已结束，等待主模型整理委派结果...');
-        } else if (delegatedSummaryError) {
-          setStatus(`审批后执行结束，但整理任务未创建：${delegatedSummaryError}`);
-        } else if (chatStillProcessing) {
-          setStatus('已拒绝，等待主模型整理结果...');
-        } else {
-          setStatus(runStatus === 'completed' ? '审批后执行完成。' : '审批后执行结束。');
-        }
+        setStatus(chatApprovalRejectionCompletionStatusText({
+          chatStillProcessing,
+          delegatedSummary,
+          runStatus,
+        }));
       }
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '处理审批失败');
