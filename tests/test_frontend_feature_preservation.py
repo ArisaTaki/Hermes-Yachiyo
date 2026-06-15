@@ -471,8 +471,24 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "onCancelTask?.(task)",
             "RuntimeArtifactList",
             "RuntimeTimelineSummary",
+            "ToolCallSummary",
+            "<ToolCallSummary events={recentEvents} />",
             'previewTestId="yachiyo-task-artifact-preview"',
             "在 Agent Studio 中查看",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/ToolCallSummary.tsx",
+        [
+            "export function ToolCallSummary",
+            'data-testid="yachiyo-agent-task-tool-summary"',
+            'data-testid="yachiyo-agent-task-tool-summary-item"',
+            "'agent.tool.approval_required'",
+            "'agent.tool.approval_approved'",
+            "'agent.tool.failed'",
+            "'tool.completed'",
+            "function summarizeToolCalls",
+            "function toolStatusFromEvent",
         ],
     )
     _assert_contains(

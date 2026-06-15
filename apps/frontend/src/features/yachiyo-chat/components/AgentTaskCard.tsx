@@ -4,6 +4,7 @@ import { RuntimeTimelineSummary } from '../../runtime-shared/components/RuntimeT
 import { yachiyoTaskRunId } from '../taskSnapshots';
 import type { AgentTaskSnapshot, ApprovalCardSnapshot } from '../types';
 import { ApprovalCard } from './ApprovalCard';
+import { ToolCallSummary } from './ToolCallSummary';
 
 export function AgentTaskCard({
   busy = false,
@@ -72,6 +73,7 @@ export function AgentTaskCard({
         ) : null}
       </header>
       {task.summary ? <p className="yachiyo-agent-task-summary">{task.summary}</p> : null}
+      {recentEvents.length ? <ToolCallSummary events={recentEvents} /> : null}
       {recentEvents.length ? (
         <RuntimeTimelineSummary
           className="yachiyo-agent-task-timeline"

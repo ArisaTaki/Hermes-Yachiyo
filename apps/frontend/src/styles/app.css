@@ -9119,9 +9119,88 @@ body.electron-window .hy-traffic {
 }
 
 .hy-content .open-chat-shell .yachiyo-agent-task-approvals,
-.hy-content .open-chat-shell .yachiyo-agent-task-artifacts {
+.hy-content .open-chat-shell .yachiyo-agent-task-artifacts,
+.hy-content .open-chat-shell .yachiyo-agent-task-tools {
   display: grid;
   gap: 6px;
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-tools {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  padding: 6px 8px;
+  border: 1px solid oklch(66% 0.12 188 / 0.14);
+  border-radius: 6px;
+  background: var(--hy-panel-soft);
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-tools > span {
+  color: var(--hy-faint);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-tools > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  min-width: 0;
+  gap: 5px;
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-tool {
+  display: inline-grid;
+  grid-template-columns: minmax(0, auto) auto auto;
+  align-items: center;
+  max-width: min(180px, 100%);
+  min-width: 0;
+  gap: 4px;
+  padding: 3px 6px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 999px;
+  color: var(--hy-muted);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-tool strong,
+.hy-content .open-chat-shell .yachiyo-agent-task-tool em,
+.hy-content .open-chat-shell .yachiyo-agent-task-tool small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-tool strong {
+  color: var(--hy-fg);
+  font-size: 11px;
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-tool em,
+.hy-content .open-chat-shell .yachiyo-agent-task-tool small {
+  color: var(--hy-faint);
+  font-style: normal;
+  font-size: 10px;
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-tool.status-waiting_approval,
+.hy-content .open-chat-shell .yachiyo-agent-task-tool.status-denied,
+.hy-content .open-chat-shell .yachiyo-agent-task-tool.status-skipped {
+  border-color: oklch(82% 0.135 76 / 0.28);
+  color: var(--hy-warning);
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-tool.status-failed {
+  border-color: oklch(62% 0.18 24 / 0.28);
+  color: var(--hy-danger);
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-tool.status-approved,
+.hy-content .open-chat-shell .yachiyo-agent-task-tool.status-completed {
+  border-color: oklch(73% 0.13 150 / 0.24);
+  color: var(--hy-success);
 }
 
 .hy-content .open-chat-shell .yachiyo-agent-task-timeline {
