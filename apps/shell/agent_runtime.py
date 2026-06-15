@@ -229,6 +229,7 @@ from apps.shell.agent.runtime.run_services import (
     RuntimeRunServiceBundle,
     build_runtime_run_services as _build_runtime_run_services,
 )
+from apps.shell.agent.runtime.run_status import RuntimeTerminalRunResolver
 from apps.shell.agent.runtime.run_timeline import RuntimeRunTimelineService
 from apps.shell.agent.runtime.runnable_names import RuntimeRunnableNameResolver
 from apps.shell.agent.runtime.runnable_services import (
@@ -484,6 +485,10 @@ class NativeRunEngine:
             contains_sensitive_text=contains_sensitive_text,
             error_type=AgentRuntimeError,
         )
+        self.terminal_run_resolver = RuntimeTerminalRunResolver(
+            get_run=lambda run_id: self.get_run(run_id),
+            final_statuses=_FINAL_RUN_STATUSES,
+        )
         recorders = _build_runtime_recorders(
             append_run_event=self.append_run_event,
             now=_now,
@@ -692,7 +697,7 @@ class NativeRunEngine:
                 coalesce_model_message=_coalesce_model_message,
                 message_visible_content_text=_message_visible_content_text,
                 model_message_metadata=_model_message_metadata,
-                terminal_run_or_none=self._terminal_run_or_none,
+                terminal_run_or_none=self.terminal_run_resolver.terminal_run_or_none,
                 redact_secrets=redact_secrets,
                 error_type=AgentRuntimeError,
             )
@@ -864,7 +869,7 @@ class NativeRunEngine:
                 continue_custom_api_agent=self._run_custom_api_agent,
                 main_chat_pending_approval=self._main_chat_pending_approval,
                 approval_pause=self.approval_pause,
-                terminal_run_or_none=self._terminal_run_or_none,
+                terminal_run_or_none=self.terminal_run_resolver.terminal_run_or_none,
                 redact_secrets=redact_secrets,
                 model_output_metadata=_model_output_metadata,
                 error_type=AgentRuntimeError,
@@ -1938,12 +1943,7 @@ class NativeRunEngine:
         return run
 
     def _terminal_run_or_none(self, run_id: str) -> dict[str, Any] | None:
-        try:
-            run = self.get_run(run_id)
-        except KeyError:
-            return None
-        status = str(run.get("status") or "").strip()
-        return run if status in _FINAL_RUN_STATUSES else None
+        return self.terminal_run_resolver.terminal_run_or_none(run_id)
 
     @staticmethod
     def _timeline(event: str, detail: str = "", **extra: Any) -> dict[str, Any]:
