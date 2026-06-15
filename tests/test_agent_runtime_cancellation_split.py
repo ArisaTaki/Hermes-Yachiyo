@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 import pytest
@@ -12,7 +13,10 @@ from apps.shell.agent.runtime.cancellation import (
     WorkflowCancellationProjectionCoordinator,
     WorkflowCancellationTarget,
 )
-from apps.shell.agent.runtime.run_cancellation import RuntimeRunCancellationService
+from apps.shell.agent.runtime.run_cancellation import (
+    RuntimeRunCancellationCoordinator,
+    RuntimeRunCancellationService,
+)
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
 
@@ -21,6 +25,7 @@ def test_runtime_cancellation_projections_remain_exported_from_legacy_module() -
     assert agent_runtime.WorkflowCancellationTarget is WorkflowCancellationTarget
     assert agent_runtime.RunCancellationProjection is RunCancellationProjection
     assert agent_runtime.RuntimeRunCancellationService is RuntimeRunCancellationService
+    assert agent_runtime.RuntimeRunCancellationCoordinator is RuntimeRunCancellationCoordinator
     assert (
         agent_runtime.WorkflowCancellationProjectionCoordinator
         is WorkflowCancellationProjectionCoordinator
@@ -221,6 +226,22 @@ def test_runtime_run_cancellation_service_cancels_workflow_root_and_resumes_pare
     assert resumed_parents == [result]
 
 
+def test_run_cancellation_coordinator_serializes_and_cleans_locks() -> None:
+    calls: list[str] = []
+    locks: dict[str, threading.RLock] = {}
+    coordinator = RuntimeRunCancellationCoordinator(
+        cancel_once=lambda run_id: calls.append(run_id) or {"run_id": run_id, "status": "cancelled"},
+        run_cancel_locks=locks,
+        run_cancel_locks_guard=threading.RLock(),
+    )
+
+    result = coordinator.cancel(" run-1 ")
+
+    assert result == {"run_id": "run-1", "status": "cancelled"}
+    assert calls == ["run-1"]
+    assert locks == {}
+
+
 def test_native_runtime_installs_run_cancellation_service(tmp_path) -> None:
     service = AgentRuntimeService(
         db_path=tmp_path / "agent-runtime.db",
@@ -230,5 +251,7 @@ def test_native_runtime_installs_run_cancellation_service(tmp_path) -> None:
     )
     try:
         assert isinstance(service.run_cancellation, RuntimeRunCancellationService)
+        assert isinstance(service.run_cancellation_coordinator, RuntimeRunCancellationCoordinator)
+        assert service.run_cancellation_coordinator._cancel_once.__self__ is service.run_cancellation
     finally:
         service.close()

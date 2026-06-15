@@ -224,7 +224,10 @@ from apps.shell.agent.runtime.run_readiness import (
     RuntimeRunReadinessValidator,
     native_agent_readiness as _runtime_native_agent_readiness,
 )
-from apps.shell.agent.runtime.run_cancellation import RuntimeRunCancellationService
+from apps.shell.agent.runtime.run_cancellation import (
+    RuntimeRunCancellationCoordinator,
+    RuntimeRunCancellationService,
+)
 from apps.shell.agent.runtime.run_deletion import RuntimeRunDeletionService
 from apps.shell.agent.runtime.run_rerun import RuntimeRunRerunService
 from apps.shell.agent.runtime.run_requests import RuntimeRunRequestParser
@@ -1347,6 +1350,11 @@ class NativeRunEngine:
         run_cancellation: RuntimeRunCancellationService,
     ) -> None:
         self.run_cancellation = run_cancellation
+        self.run_cancellation_coordinator = RuntimeRunCancellationCoordinator(
+            cancel_once=self.run_cancellation.cancel_once,
+            run_cancel_locks=self._run_cancel_locks,
+            run_cancel_locks_guard=self._run_cancel_locks_guard,
+        )
 
     def _install_runtime_run_rerun(
         self,
@@ -2619,16 +2627,7 @@ class NativeRunEngine:
         return self.workflow_resume_planner.workflow_for_run_resume(workflow_run)
 
     def cancel_run(self, run_id: str) -> dict[str, Any]:
-        clean_run_id = str(run_id or "").strip()
-        with self._run_cancel_locks_guard:
-            lock = self._run_cancel_locks.setdefault(clean_run_id, threading.RLock())
-        try:
-            with lock:
-                return self._cancel_run_once(clean_run_id)
-        finally:
-            with self._run_cancel_locks_guard:
-                if self._run_cancel_locks.get(clean_run_id) is lock:
-                    self._run_cancel_locks.pop(clean_run_id, None)
+        return self.run_cancellation_coordinator.cancel(run_id)
 
     def _cancel_workflow_run_projection(
         self,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from typing import Any, Callable
 
 from apps.shell.agent.runtime.cancellation import RunCancellationProjection
@@ -87,3 +88,30 @@ class RuntimeRunCancellationService:
             self._resume_parent_workflows_after_child_update(projected)
             return projected
         return self._project_child_run_transition(result)
+
+
+class RuntimeRunCancellationCoordinator:
+    """Serializes cancellation requests per Run id before projecting cancellation."""
+
+    def __init__(
+        self,
+        *,
+        cancel_once: Callable[[str], dict[str, Any]],
+        run_cancel_locks: dict[str, threading.RLock],
+        run_cancel_locks_guard: threading.RLock,
+    ) -> None:
+        self._cancel_once = cancel_once
+        self._run_cancel_locks = run_cancel_locks
+        self._run_cancel_locks_guard = run_cancel_locks_guard
+
+    def cancel(self, run_id: str) -> dict[str, Any]:
+        clean_run_id = str(run_id or "").strip()
+        with self._run_cancel_locks_guard:
+            lock = self._run_cancel_locks.setdefault(clean_run_id, threading.RLock())
+        try:
+            with lock:
+                return self._cancel_once(clean_run_id)
+        finally:
+            with self._run_cancel_locks_guard:
+                if self._run_cancel_locks.get(clean_run_id) is lock:
+                    self._run_cancel_locks.pop(clean_run_id, None)
