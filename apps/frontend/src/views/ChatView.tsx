@@ -15,6 +15,7 @@ import {
   composerApprovalStatusText,
   type ComposerApprovalSource,
 } from '../features/yachiyo-chat/components/ComposerApprovalNotice';
+import { AgentRunProgressCard } from '../features/yachiyo-chat/components/AgentRunProgressCard';
 import { MessageAgentTaskCard } from '../features/yachiyo-chat/components/MessageAgentTaskCard';
 import {
   MessageApprovalRequestCard,
@@ -3141,6 +3142,13 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
   const approvalId = approvalDetails ? approvalIdFromPending(message.metadata?.pending_approval) : '';
   const approvalSignature = approvalDetails ? messageApprovalSignature(message) : '';
   const showAgentProgress = isProcessingEmpty && Boolean(runId || message.metadata?.runnable_kind === 'agent' || message.metadata?.runnable_kind === 'workflow');
+  const progressSender = message.metadata?.sender;
+  const progressName = participantDisplayName(progressSender) || messageRoleLabel(message);
+  const progressTitle = String(message.metadata?.run_progress_title || 'Agent 正在执行');
+  const progressDetail = String(message.metadata?.run_progress_detail || `${progressName} 正在继续处理当前任务。`);
+  const progressRunnableKind = String(message.metadata?.runnable_kind || progressSender?.kind || '').trim();
+  const progressRunnableId = String(message.metadata?.runnable_id || progressSender?.id || '').trim();
+  const progressRunGroupId = String(message.metadata?.run_group_id || '').trim();
   const showInlineRunDetails = role === 'assistant' && Boolean(runId) && !approvalDetails && !showAgentProgress;
   const artifactCount = Number(message.metadata?.run_artifact_count || 0);
   const duplicateError = Boolean(message.error && displayContent.trim() && message.error.trim() === displayContent.trim());
@@ -3174,7 +3182,16 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
               runStatus={runStatus}
             />
           ) : showAgentProgress ? (
-            <AgentRunProgressCard message={message} onOpenDetails={() => onOpenRunDetails(runId)} runId={runId} />
+            <AgentRunProgressCard
+              detail={progressDetail}
+              onOpenDetails={() => onOpenRunDetails(runId)}
+              runGroupId={progressRunGroupId}
+              runId={runId}
+              runStatus={runStatus}
+              runnableId={progressRunnableId}
+              runnableKind={progressRunnableKind}
+              title={progressTitle}
+            />
           ) : isProcessingEmpty ? (
             <TypingIndicator />
           ) : (
@@ -3442,49 +3459,6 @@ type ComposerApprovalItem = {
   details: ApprovalRequestDetails;
   source: ComposerApprovalSource;
 };
-
-function AgentRunProgressCard({ message, onOpenDetails, runId }: {
-  message: ChatMessage;
-  onOpenDetails: () => void;
-  runId: string;
-}) {
-  const sender = message.metadata?.sender;
-  const name = participantDisplayName(sender) || messageRoleLabel(message);
-  const title = String(message.metadata?.run_progress_title || 'Agent 正在执行');
-  const detail = String(message.metadata?.run_progress_detail || `${name} 正在继续处理当前任务。`);
-  const runnableKind = String(message.metadata?.runnable_kind || sender?.kind || '').trim();
-  const runnableId = String(message.metadata?.runnable_id || sender?.id || '').trim();
-  const runGroupId = String(message.metadata?.run_group_id || '').trim();
-  const runStatus = messageRunStatus(message);
-  return (
-    <div
-      className="message-content message-agent-progress-card"
-      data-run-group-id={runGroupId}
-      data-run-id={runId}
-      data-run-status={runStatus}
-      data-runnable-id={runnableId}
-      data-runnable-kind={runnableKind}
-      data-testid="chat-agent-run-progress-card"
-    >
-      <span className="message-agent-progress-icon loading-ring" aria-hidden="true" />
-      <div>
-        <strong>{title}</strong>
-        <span>{detail}</span>
-        {runId ? (
-          <button
-            type="button"
-            data-run-id={runId}
-            data-run-status={runStatus}
-            data-testid="chat-agent-run-progress-open-run-detail"
-            onClick={onOpenDetails}
-          >
-            运行详情
-          </button>
-        ) : null}
-      </div>
-    </div>
-  );
-}
 
 function approvalRequestDetails(message: ChatMessage): ApprovalRequestDetails {
   const pending = message.metadata?.pending_approval || {};

@@ -2325,13 +2325,7 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
             'data-testid="chat-message-activity-open"',
             'data-testid="chat-message-activity-toggle"',
             'data-testid="chat-message-activity-open-run-detail"',
-            'data-testid="chat-agent-run-progress-card"',
-            "data-run-id={runId}",
-            "data-run-status={runStatus}",
-            "data-run-group-id={runGroupId}",
-            "data-runnable-kind={runnableKind}",
-            "data-runnable-id={runnableId}",
-            'data-testid="chat-agent-run-progress-open-run-detail"',
+            "AgentRunProgressCard",
             'data-testid="chat-message-summary-status"',
             "data-summary-task-id={summaryTaskId}",
             "data-summary-status={summaryStatus}",
@@ -2340,6 +2334,19 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
             'data-testid="chat-message-followup-status"',
             "data-followup-task-ids={followupTaskIds}",
             "data-followup-agent-message-ids={followupAgentMessageIds}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/AgentRunProgressCard.tsx",
+        [
+            "export function AgentRunProgressCard",
+            'data-testid="chat-agent-run-progress-card"',
+            "data-run-id={runId}",
+            "data-run-status={runStatus}",
+            "data-run-group-id={runGroupId}",
+            "data-runnable-kind={runnableKind}",
+            "data-runnable-id={runnableId}",
+            'data-testid="chat-agent-run-progress-open-run-detail"',
         ],
     )
 
