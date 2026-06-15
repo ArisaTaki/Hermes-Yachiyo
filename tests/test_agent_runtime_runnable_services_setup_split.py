@@ -11,7 +11,11 @@ from apps.shell.agent.runtime.runnable_services import (
     RuntimeRunnableServiceBundle,
     build_runtime_runnable_services,
 )
-from apps.shell.agent.runtime.runnables import RuntimeRunnableCatalog, RuntimeRunnableRunCoordinator
+from apps.shell.agent.runtime.runnables import (
+    RuntimeRunnableCatalog,
+    RuntimeRunnableResolver,
+    RuntimeRunnableRunCoordinator,
+)
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
 
@@ -74,10 +78,12 @@ def test_native_runtime_installs_runnable_services_under_legacy_attribute_names(
         assert isinstance(service.future_task_scheduler, FutureTaskTriggerScheduler)
         assert isinstance(service.chat_runnable_parser, ChatRunnableMentionParser)
         assert isinstance(service.runnable_catalog, RuntimeRunnableCatalog)
+        assert isinstance(service.runnable_resolver, RuntimeRunnableResolver)
         assert isinstance(service.runnable_run_coordinator, RuntimeRunnableRunCoordinator)
         assert service.future_task_scheduler._conn is service._conn
         assert service.future_task_scheduler._db_lock is service._db_lock
         assert service.runnable_catalog._get_agent.__self__ is service
+        assert service.runnable_run_coordinator._resolve_runnable.__self__ is service.runnable_resolver
         assert service.runnable_run_coordinator._create_agent_run.__self__ is service
         assert service.runnable_run_coordinator._create_workflow_run.__self__ is service
     finally:

@@ -6,11 +6,16 @@ import pytest
 
 from apps.shell import agent_runtime
 from apps.shell.agent.runtime.errors import AgentRuntimeError
-from apps.shell.agent.runtime.runnables import RuntimeRunnableCatalog, RuntimeRunnableRunCoordinator
+from apps.shell.agent.runtime.runnables import (
+    RuntimeRunnableCatalog,
+    RuntimeRunnableResolver,
+    RuntimeRunnableRunCoordinator,
+)
 
 
 def test_runnable_catalog_remains_exported_from_legacy_module() -> None:
     assert agent_runtime.RuntimeRunnableCatalog is RuntimeRunnableCatalog
+    assert agent_runtime.RuntimeRunnableResolver is RuntimeRunnableResolver
     assert agent_runtime.RuntimeRunnableRunCoordinator is RuntimeRunnableRunCoordinator
 
 
@@ -122,6 +127,93 @@ def test_runnable_catalog_lists_delegation_targets_without_system_agents() -> No
     assert targets["agents"][0]["output_contract"] == "report"
     assert [workflow["id"] for workflow in targets["workflows"]] == ["workflow-1"]
     assert targets["workflows"][0]["nodes"] == 2
+
+
+def test_runnable_resolver_resolves_agents_workflows_and_system_agent() -> None:
+    agents = {
+        "agent-1": {
+            "agent_id": "agent-1",
+            "name": "Coding",
+            "nickname": "Coder",
+            "enabled": True,
+            "tool_policy": {},
+        }
+    }
+    workflows = {
+        "workflow-1": {
+            "workflow_id": "workflow-1",
+            "name": "Flow",
+            "enabled": True,
+            "nodes": [],
+        }
+    }
+    resolver = RuntimeRunnableResolver(
+        main_chat_agent_id="builtin:yachiyo-main",
+        main_chat_virtual_agent=lambda: {
+            "agent_id": "builtin:yachiyo-main",
+            "name": "Yachiyo",
+            "enabled": True,
+            "tool_policy": {},
+        },
+        ensure_row_factory=lambda: None,
+        fetch_agent_by_id=lambda agent_id: agents.get(agent_id),
+        fetch_workflow_by_id=lambda workflow_id: workflows.get(workflow_id),
+        fetch_agents_by_name=lambda name: [
+            agent
+            for agent in agents.values()
+            if str(agent["name"]).lower() == name.lower()
+            or str(agent.get("nickname") or "").lower() == name.lower()
+        ],
+        fetch_workflow_by_name=lambda name: next(
+            (workflow for workflow in workflows.values() if str(workflow["name"]).lower() == name.lower()),
+            None,
+        ),
+        row_to_agent=lambda row: row,
+        row_to_workflow=lambda row: row,
+        agent_summary=RuntimeRunnableCatalog.agent_summary,
+        workflow_summary=lambda workflow: {
+            "id": workflow["workflow_id"],
+            "name": workflow["name"],
+            "kind": "workflow",
+            "enabled": workflow["enabled"],
+            "participants": [],
+        },
+        error_type=AgentRuntimeError,
+    )
+
+    assert resolver.resolve(runnable_id="builtin:yachiyo-main")["name"] == "Yachiyo"
+    assert resolver.resolve(name="yachiyo")["id"] == "builtin:yachiyo-main"
+    assert resolver.resolve(runnable_id="agent-1")["kind"] == "agent"
+    assert resolver.resolve(name="Coder")["id"] == "agent-1"
+    assert resolver.resolve(runnable_id="workflow-1")["kind"] == "workflow"
+    assert resolver.resolve(name="Flow")["id"] == "workflow-1"
+    assert resolver.resolve(name="Missing") is None
+
+
+def test_runnable_resolver_rejects_ambiguous_agent_workflow_names() -> None:
+    resolver = RuntimeRunnableResolver(
+        main_chat_agent_id="builtin:yachiyo-main",
+        main_chat_virtual_agent=lambda: {"agent_id": "builtin:yachiyo-main", "name": "Yachiyo", "enabled": True},
+        ensure_row_factory=lambda: None,
+        fetch_agent_by_id=lambda _agent_id: None,
+        fetch_workflow_by_id=lambda _workflow_id: None,
+        fetch_agents_by_name=lambda _name: [{"agent_id": "agent-1", "name": "Shared", "enabled": True}],
+        fetch_workflow_by_name=lambda _name: {"workflow_id": "workflow-1", "name": "Shared", "enabled": True},
+        row_to_agent=lambda row: row,
+        row_to_workflow=lambda row: row,
+        agent_summary=RuntimeRunnableCatalog.agent_summary,
+        workflow_summary=lambda workflow: {
+            "id": workflow["workflow_id"],
+            "name": workflow["name"],
+            "kind": "workflow",
+            "enabled": workflow["enabled"],
+            "participants": [],
+        },
+        error_type=AgentRuntimeError,
+    )
+
+    with pytest.raises(AgentRuntimeError, match="名称不唯一"):
+        resolver.resolve(name="Shared")
 
 
 def test_runnable_run_coordinator_dispatches_agent_run_with_client_request_id() -> None:

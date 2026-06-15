@@ -202,7 +202,11 @@ from apps.shell.agent.runtime.runnable_services import (
     RuntimeRunnableServiceBundle,
     build_runtime_runnable_services as _build_runtime_runnable_services,
 )
-from apps.shell.agent.runtime.runnables import RuntimeRunnableCatalog, RuntimeRunnableRunCoordinator
+from apps.shell.agent.runtime.runnables import (
+    RuntimeRunnableCatalog,
+    RuntimeRunnableResolver,
+    RuntimeRunnableRunCoordinator,
+)
 from apps.shell.agent.runtime.schema import (
     RuntimeSchemaMigrator,
     agent_model_credential_ref as _agent_model_credential_ref,
@@ -887,6 +891,32 @@ class NativeRunEngine:
             workflow_path=self._workflow_path,
         )
         self._install_runtime_workflow_planning_services(workflow_planning_services)
+        self.runnable_resolver = RuntimeRunnableResolver(
+            main_chat_agent_id=_MAIN_CHAT_AGENT_ID,
+            main_chat_virtual_agent=self._main_chat_virtual_agent,
+            ensure_row_factory=self._ensure_row_factory,
+            fetch_agent_by_id=lambda agent_id: self._conn.execute(
+                "SELECT * FROM agents WHERE agent_id=?",
+                (agent_id,),
+            ).fetchone(),
+            fetch_workflow_by_id=lambda workflow_id: self._conn.execute(
+                "SELECT * FROM workflows WHERE workflow_id=?",
+                (workflow_id,),
+            ).fetchone(),
+            fetch_agents_by_name=lambda name: self._conn.execute(
+                "SELECT * FROM agents WHERE LOWER(name)=LOWER(?) OR LOWER(nickname)=LOWER(?)",
+                (name, name),
+            ).fetchall(),
+            fetch_workflow_by_name=lambda name: self._conn.execute(
+                "SELECT * FROM workflows WHERE LOWER(name)=LOWER(?)",
+                (name,),
+            ).fetchone(),
+            row_to_agent=self._row_to_agent,
+            row_to_workflow=self._row_to_workflow,
+            agent_summary=self._agent_runnable_summary,
+            workflow_summary=self._workflow_runnable_summary,
+            error_type=AgentRuntimeError,
+        )
         runnable_services = _build_runtime_runnable_services(
             conn=self._conn,
             db_lock=self._db_lock,
@@ -898,7 +928,7 @@ class NativeRunEngine:
             list_runnables=lambda: list(self.list_runnables().get("runnables") or []),
             node_kind=self._node_kind,
             get_agent=self.get_agent,
-            resolve_runnable=lambda **kwargs: self.resolve_runnable(**kwargs),
+            resolve_runnable=self.runnable_resolver.resolve,
             create_agent_run=self.create_agent_run,
             create_workflow_run=self.create_workflow_run,
             create_agent_run_async=self.create_agent_run_async,
@@ -3361,34 +3391,7 @@ class NativeRunEngine:
         )
 
     def resolve_runnable(self, *, runnable_id: str = "", name: str = "") -> dict[str, Any] | None:
-        self._ensure_row_factory()
-        clean_id = str(runnable_id or "").strip()
-        if clean_id == _MAIN_CHAT_AGENT_ID:
-            return self._agent_runnable_summary(self._main_chat_virtual_agent())
-        if runnable_id:
-            agent = self._conn.execute("SELECT * FROM agents WHERE agent_id=?", (runnable_id,)).fetchone()
-            if agent:
-                return self._agent_runnable_summary(self._row_to_agent(agent))
-            workflow = self._conn.execute("SELECT * FROM workflows WHERE workflow_id=?", (runnable_id,)).fetchone()
-            if workflow:
-                return self._workflow_runnable_summary(self._row_to_workflow(workflow))
-        clean_name = (name or "").strip()
-        if clean_name:
-            if clean_name.lower() == "yachiyo":
-                return self._agent_runnable_summary(self._main_chat_virtual_agent())
-            agents = self._conn.execute(
-                "SELECT * FROM agents WHERE LOWER(name)=LOWER(?) OR LOWER(nickname)=LOWER(?)",
-                (clean_name, clean_name),
-            ).fetchall()
-            workflow = self._conn.execute("SELECT * FROM workflows WHERE LOWER(name)=LOWER(?)", (clean_name,)).fetchone()
-            matches = [*agents, *([workflow] if workflow is not None else [])]
-            if len(matches) > 1:
-                raise AgentRuntimeError("Agent/Workflow 名称不唯一")
-            if agents:
-                return self._agent_runnable_summary(self._row_to_agent(agents[0]))
-            if workflow:
-                return self._workflow_runnable_summary(self._row_to_workflow(workflow))
-        return None
+        return self.runnable_resolver.resolve(runnable_id=runnable_id, name=name)
 
     def create_run_for_runnable(
         self,

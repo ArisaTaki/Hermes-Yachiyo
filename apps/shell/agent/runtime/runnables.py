@@ -126,6 +126,69 @@ class RuntimeRunnableCatalog:
         }
 
 
+class RuntimeRunnableResolver:
+    """Resolves Agent/Workflow launch targets while leaving storage to callbacks."""
+
+    def __init__(
+        self,
+        *,
+        main_chat_agent_id: str,
+        main_chat_virtual_agent: Callable[[], dict[str, Any]],
+        ensure_row_factory: Callable[[], None],
+        fetch_agent_by_id: Callable[[str], Any],
+        fetch_workflow_by_id: Callable[[str], Any],
+        fetch_agents_by_name: Callable[[str], list[Any]],
+        fetch_workflow_by_name: Callable[[str], Any],
+        row_to_agent: Callable[[Any], dict[str, Any]],
+        row_to_workflow: Callable[[Any], dict[str, Any]],
+        agent_summary: Callable[[dict[str, Any]], dict[str, Any]],
+        workflow_summary: Callable[[dict[str, Any]], dict[str, Any]],
+        error_type: type[Exception] = RuntimeError,
+    ) -> None:
+        self._main_chat_agent_id = main_chat_agent_id
+        self._main_chat_virtual_agent = main_chat_virtual_agent
+        self._ensure_row_factory = ensure_row_factory
+        self._fetch_agent_by_id = fetch_agent_by_id
+        self._fetch_workflow_by_id = fetch_workflow_by_id
+        self._fetch_agents_by_name = fetch_agents_by_name
+        self._fetch_workflow_by_name = fetch_workflow_by_name
+        self._row_to_agent = row_to_agent
+        self._row_to_workflow = row_to_workflow
+        self._agent_summary = agent_summary
+        self._workflow_summary = workflow_summary
+        self._error_type = error_type
+
+    def resolve(self, *, runnable_id: str = "", name: str = "") -> dict[str, Any] | None:
+        self._ensure_row_factory()
+        clean_id = str(runnable_id or "").strip()
+        if clean_id == self._main_chat_agent_id:
+            return self._agent_summary(self._main_chat_virtual_agent())
+        if runnable_id:
+            agent = self._fetch_agent_by_id(runnable_id)
+            if agent:
+                return self._agent_summary(self._row_to_agent(agent))
+            workflow = self._fetch_workflow_by_id(runnable_id)
+            if workflow:
+                return self._workflow_summary(self._row_to_workflow(workflow))
+
+        clean_name = str(name or "").strip()
+        if not clean_name:
+            return None
+        if clean_name.lower() == "yachiyo":
+            return self._agent_summary(self._main_chat_virtual_agent())
+
+        agents = self._fetch_agents_by_name(clean_name)
+        workflow = self._fetch_workflow_by_name(clean_name)
+        matches = [*agents, *([workflow] if workflow is not None else [])]
+        if len(matches) > 1:
+            raise self._error_type("Agent/Workflow 名称不唯一")
+        if agents:
+            return self._agent_summary(self._row_to_agent(agents[0]))
+        if workflow:
+            return self._workflow_summary(self._row_to_workflow(workflow))
+        return None
+
+
 class RuntimeRunnableRunCoordinator:
     """Dispatches runnable launch requests to Agent or Workflow run creators."""
 
