@@ -366,8 +366,7 @@ async def get_studio_group_run(
 
 @router.get("/studio/workflows")
 async def list_studio_workflows(http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
-    workflows = await asyncio.to_thread(_studio_service(http_request).list_workflows)
-    return {"workflows": [_snapshot(workflow) for workflow in workflows]}
+    return await yachiyo_studio_handlers.list_workflows(http_request)
 
 
 @router.post("/studio/workflows")
@@ -375,11 +374,7 @@ async def save_studio_workflow(
     request: SaveWorkflowRequest,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    try:
-        snapshot = await asyncio.to_thread(_studio_service(http_request).save_workflow, request)
-        return _snapshot(snapshot)
-    except (AgentRuntimeError, KeyError) as exc:
-        raise _bad_request(exc) from exc
+    return await yachiyo_studio_handlers.save_workflow(request, http_request)
 
 
 @router.get("/studio/workflows/{workflow_id}")
@@ -387,11 +382,7 @@ async def get_studio_workflow(
     workflow_id: str,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    try:
-        snapshot = await asyncio.to_thread(_studio_service(http_request).get_workflow, workflow_id)
-        return _snapshot(snapshot)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Workflow 不存在") from exc
+    return await yachiyo_studio_handlers.get_workflow(workflow_id, http_request)
 
 
 @router.delete("/studio/workflows/{workflow_id}")
@@ -399,12 +390,7 @@ async def delete_studio_workflow(
     workflow_id: str,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    try:
-        return await asyncio.to_thread(_studio_service(http_request).delete_workflow, workflow_id)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Workflow 不存在") from exc
-    except AgentRuntimeError as exc:
-        raise _bad_request(exc) from exc
+    return await yachiyo_studio_handlers.delete_workflow(workflow_id, http_request)
 
 
 @router.post("/studio/workflows/{workflow_id}/runs")
@@ -413,20 +399,7 @@ async def start_studio_workflow_run(
     request: StartWorkflowRunBody,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    try:
-        run_request = StartWorkflowRunRequest(
-            workflow_id=workflow_id,
-            objective=request.objective,
-            title=request.title,
-            client_run_id=request.client_run_id,
-        )
-        snapshot = await asyncio.to_thread(
-            _studio_service(http_request).start_workflow_run,
-            run_request,
-        )
-        return _snapshot(snapshot)
-    except (AgentRuntimeError, KeyError) as exc:
-        raise _bad_request(exc) from exc
+    return await yachiyo_studio_handlers.start_workflow_run(workflow_id, request, http_request)
 
 
 @router.get("/studio/runs/{run_id}/timeline")
