@@ -258,6 +258,7 @@ from apps.shell.agent.runtime.tooling import (
     RuntimeToolingBundle,
     build_runtime_tooling as _build_runtime_tooling,
 )
+from apps.shell.agent.runtime.tool_operations import RuntimeToolOperations
 from apps.shell.agent.runtime.tool_loop import (
     RuntimeToolLoopProjectionBuilder,
     append_tool_result_message as _runtime_append_tool_result_message,
@@ -724,6 +725,10 @@ class NativeRunEngine:
             call_agent_tool=self._call_agent_tool,
         )
         self._install_runtime_tooling(tooling)
+        self.tool_operations = RuntimeToolOperations(
+            tool_request_runner=self.tool_request_runner,
+            tool_call_executor=self.tool_call_executor,
+        )
         self._install_runtime_custom_api_agent_loop(
             RuntimeCustomApiAgentLoop(
                 agent_model_config_private=self._agent_model_config_private,
@@ -2320,7 +2325,7 @@ class NativeRunEngine:
         run_id: str = "",
         budget: _RunBudget | None = None,
     ) -> None:
-        self.tool_request_runner.run(
+        self.tool_operations.run_tool_requests(
             tool_requests,
             allowed_tools,
             broker,
@@ -2344,7 +2349,7 @@ class NativeRunEngine:
         run_id: str = "",
         budget: _RunBudget | None = None,
     ) -> dict[str, Any]:
-        return self.tool_call_executor.execute(
+        return self.tool_operations.call_agent_tool(
             tool_request,
             allowed_tools,
             broker,
@@ -2357,7 +2362,7 @@ class NativeRunEngine:
 
     @staticmethod
     def _validate_tool_payload(tool_name: str, payload: dict[str, Any]) -> None:
-        ToolDescriptorRegistry.validate_payload(tool_name, payload)
+        RuntimeToolOperations.validate_tool_payload(tool_name, payload)
 
     @staticmethod
     def _make_pending_approval(
@@ -2367,7 +2372,7 @@ class NativeRunEngine:
         next_iteration: int,
         remaining_tool_requests: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        return _build_tool_pending_approval(
+        return RuntimeToolOperations.build_pending_approval(
             tool_request,
             messages=messages,
             next_iteration=next_iteration,
@@ -2376,11 +2381,11 @@ class NativeRunEngine:
         )
 
     def _tool_requests_from_message(self, message: dict[str, Any], content: str) -> list[dict[str, Any]]:
-        return self.tool_request_parser.requests_from_message(message, content)
+        return self.tool_operations.tool_requests_from_message(message, content)
 
     @staticmethod
     def _parse_tool_calls(tool_calls: Any) -> list[dict[str, Any]]:
-        return ToolRequestParser().parse_tool_calls(tool_calls)
+        return RuntimeToolOperations.parse_tool_calls(tool_calls)
 
     @staticmethod
     def _model_profile_config_private(profile_id: str, *, capability: str) -> dict[str, Any]:
@@ -2400,7 +2405,7 @@ class NativeRunEngine:
 
     @staticmethod
     def _parse_tool_request(content: str) -> dict[str, Any] | None:
-        return ToolRequestParser().parse_json_fallback(content)
+        return RuntimeToolOperations.parse_tool_request(content)
 
     @staticmethod
     def _openai_compatible_chat(base_url: str, model: str, api_key: str, messages: list[dict[str, str]]) -> str:
