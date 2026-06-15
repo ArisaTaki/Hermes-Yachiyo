@@ -21,6 +21,7 @@ import {
   MessageApprovalRequestCard,
   type ApprovalRequestDetails,
 } from '../features/yachiyo-chat/components/MessageApprovalRequestCard';
+import { MessageActivityList } from '../features/yachiyo-chat/components/MessageActivityList';
 import { useYachiyoTaskActions } from '../features/yachiyo-chat/hooks/useYachiyoTaskActions';
 import { useYachiyoTaskSnapshots } from '../features/yachiyo-chat/hooks/useYachiyoTaskSnapshots';
 import { useYachiyoTaskSubmit } from '../features/yachiyo-chat/hooks/useYachiyoTaskSubmit';
@@ -3224,6 +3225,7 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
         </div>
         <MessageActivityList
           events={message.activity_events || []}
+          formatTime={formatShortTime}
           messageStatus={message.status}
           onOpenRunDetails={onOpenRunDetails}
           progressLabel={message.progress_label}
@@ -3331,115 +3333,6 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
         </div>
       </div>
     </article>
-  );
-}
-
-function MessageActivityList({ events, messageStatus, onOpenRunDetails, progressLabel }: {
-  events: ChatActivityEvent[];
-  messageStatus?: string;
-  onOpenRunDetails: (runId: string) => void;
-  progressLabel?: string;
-}) {
-  const [expandedEventIds, setExpandedEventIds] = useState<Set<string>>(() => new Set());
-  const rows = events.slice(0, 4);
-  const fallback = progressLabel && !rows.length
-    ? [{ title: progressLabel, status: messageStatus || 'running' } as ChatActivityEvent]
-    : [];
-  const visibleRows = rows.length ? rows : fallback;
-  if (!visibleRows.length) return null;
-
-  function toggleExpanded(eventKey: string) {
-    setExpandedEventIds((current) => {
-      const next = new Set(current);
-      if (next.has(eventKey)) next.delete(eventKey);
-      else next.add(eventKey);
-      return next;
-    });
-  }
-
-  function openActivity(event: ChatActivityEvent) {
-    if (event.event_id) {
-      navigateTo('activity-detail', { event_id: event.event_id });
-      return;
-    }
-    navigateTo('activity-all');
-  }
-
-  return (
-    <div className="message-activity-list" data-testid="chat-message-activity-list" aria-label="执行活动">
-      {visibleRows.map((event, index) => {
-        const displayStatus = activityDisplayStatus(event.status, messageStatus);
-        const runId = activityRunId(event);
-        const eventKey = activityEventKey(event, index);
-        const metadataText = formatActivityMetadata(event.metadata);
-        const canExpand = Boolean(event.detail || metadataText);
-        const expanded = expandedEventIds.has(eventKey);
-        return (
-          <div
-            className={`message-activity-row ${activityStatusClass(displayStatus)}${runId ? ' has-detail' : ''}${expanded ? ' expanded' : ''}`}
-            data-activity-status={displayStatus || ''}
-            data-activity-tool={event.tool_name || ''}
-            data-run-id={runId || ''}
-            data-run-status={displayStatus || ''}
-            data-testid="chat-message-activity-row"
-            key={eventKey}
-          >
-            <span className="message-activity-icon" aria-hidden="true">{activityStatusIcon(displayStatus)}</span>
-            <div className="message-activity-text">
-              <div className="message-activity-heading">
-                <strong>{event.title || event.tool_name || 'Native 活动'}</strong>
-                {event.event_id ? (
-                  <button
-                    type="button"
-                    className="message-activity-link"
-                    data-testid="chat-message-activity-open"
-                    title="打开活动详情"
-                    aria-label="打开活动详情"
-                    onClick={() => openActivity(event)}
-                  >
-                    <UiIcon name="activity" />
-                    <span>详情</span>
-                  </button>
-                ) : null}
-                {canExpand ? (
-                  <button
-                    type="button"
-                    className="message-activity-link"
-                    data-testid="chat-message-activity-toggle"
-                    title={expanded ? '收起调用记录' : '展开调用记录'}
-                    aria-label={expanded ? '收起调用记录' : '展开调用记录'}
-                    onClick={() => toggleExpanded(eventKey)}
-                  >
-                    <UiIcon name={expanded ? 'close' : 'plus'} />
-                    <span>{expanded ? '收起' : '展开'}</span>
-                  </button>
-                ) : null}
-              </div>
-              {event.detail ? <small>{event.detail}</small> : null}
-              {expanded ? (
-                <div className="message-activity-expanded">
-                  {event.detail ? <span>{event.detail}</span> : null}
-                  {metadataText ? <pre>{metadataText}</pre> : null}
-                </div>
-              ) : null}
-            </div>
-            <time>{formatShortTime(event.created_at)}</time>
-            {runId ? (
-              <button
-                type="button"
-                className="message-activity-detail-button"
-                data-run-id={runId}
-                data-run-status={displayStatus || ''}
-                data-testid="chat-message-activity-open-run-detail"
-                onClick={() => onOpenRunDetails(runId)}
-              >
-                详情
-              </button>
-            ) : null}
-          </div>
-        );
-      })}
-    </div>
   );
 }
 
@@ -3680,19 +3573,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function fencedCode(code: string, language: string) {
   const safeCode = String(code || '').replace(/```/g, '`\\`\\`');
   return `\`\`\`${language || 'text'}\n${safeCode}\n\`\`\``;
-}
-
-function activityEventKey(event: ChatActivityEvent, index: number) {
-  return event.event_id || `${event.created_at || 'activity'}-${event.task_id || event.title || index}-${index}`;
-}
-
-function formatActivityMetadata(metadata?: Record<string, unknown>) {
-  if (!metadata || !Object.keys(metadata).length) return '';
-  try {
-    return JSON.stringify(metadata, null, 2);
-  } catch {
-    return '';
-  }
 }
 
 function TypingIndicator() {
@@ -4671,31 +4551,6 @@ function activityLabel(event?: ChatActivityEvent | null) {
 
 function activityRunId(event?: ChatActivityEvent | null) {
   return String(event?.metadata?.run_id || event?.metadata?.workflow_run_id || '').trim();
-}
-
-function activityStatusClass(status?: string) {
-  if (status === 'completed' || status === 'success') return 'completed';
-  if (status === 'failed' || status === 'error') return 'failed';
-  if (status === 'approval_required') return 'approval';
-  if (status === 'progress' || status === 'running') return 'running';
-  return 'status';
-}
-
-function activityStatusIcon(status?: string) {
-  if (status === 'completed' || status === 'success') return '✓';
-  if (status === 'failed' || status === 'error') return '!';
-  if (status === 'approval_required') return '!';
-  return '';
-}
-
-function activityDisplayStatus(eventStatus?: string, messageStatus?: string) {
-  if (
-    (messageStatus === 'completed' || messageStatus === 'failed')
-    && (!eventStatus || eventStatus === 'running' || eventStatus === 'progress' || eventStatus === 'status')
-  ) {
-    return messageStatus;
-  }
-  return eventStatus;
 }
 
 function normalizedTokenCount(value?: number) {

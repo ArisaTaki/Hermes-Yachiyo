@@ -2316,15 +2316,7 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
             "delegatedSummaryProcessingCount = summary.processingCount;",
             "const nextProcessing = delegatedSummaryCreated ? delegatedSummaryIsProcessing : chatStillProcessing;",
             "const nextProcessingCount = delegatedSummaryCreated ? delegatedSummaryProcessingCount : chatProcessingCount;",
-            'data-testid="chat-message-activity-list"',
-            'data-testid="chat-message-activity-row"',
-            "data-activity-status={displayStatus || ''}",
-            "data-activity-tool={event.tool_name || ''}",
-            "data-run-id={runId || ''}",
-            "data-run-status={displayStatus || ''}",
-            'data-testid="chat-message-activity-open"',
-            'data-testid="chat-message-activity-toggle"',
-            'data-testid="chat-message-activity-open-run-detail"',
+            "MessageActivityList",
             "AgentRunProgressCard",
             'data-testid="chat-message-summary-status"',
             "data-summary-task-id={summaryTaskId}",
@@ -2347,6 +2339,21 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
             "data-runnable-kind={runnableKind}",
             "data-runnable-id={runnableId}",
             'data-testid="chat-agent-run-progress-open-run-detail"',
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/MessageActivityList.tsx",
+        [
+            "export function MessageActivityList",
+            'data-testid="chat-message-activity-list"',
+            'data-testid="chat-message-activity-row"',
+            "data-activity-status={displayStatus || ''}",
+            "data-activity-tool={event.tool_name || ''}",
+            "data-run-id={runId || ''}",
+            "data-run-status={displayStatus || ''}",
+            'data-testid="chat-message-activity-open"',
+            'data-testid="chat-message-activity-toggle"',
+            'data-testid="chat-message-activity-open-run-detail"',
         ],
     )
 
