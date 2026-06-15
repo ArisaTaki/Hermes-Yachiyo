@@ -135,6 +135,7 @@ from apps.shell.agent.runtime.events import (
 )
 from apps.shell.agent.runtime.future_task_scheduler import FutureTaskTriggerScheduler
 from apps.shell.agent.runtime.main_chat_config import MainChatRuntimeConfigBuilder
+from apps.shell.agent.runtime.main_chat_runs import MainChatRunLifecycle
 from apps.shell.agent.runtime.memory_services import RuntimeMemoryService
 from apps.shell.agent.runtime.model_profiles import RuntimeModelProfileResolver
 from apps.shell.agent.runtime.model_messages import (
@@ -629,6 +630,20 @@ class NativeRunEngine:
                 main_chat_agent_id=_MAIN_CHAT_AGENT_ID,
             )
         )
+        self._install_runtime_main_chat_runs(
+            MainChatRunLifecycle(
+                main_chat_agent_id=_MAIN_CHAT_AGENT_ID,
+                insert_run=self._insert_run,
+                link_task_run=self.link_task_run,
+                get_run=self.get_run,
+                update_run=self._update_run,
+                task_run_links=self.task_run_links,
+                task_events=self.runtime_task_events,
+                timeline_factory=self._timeline,
+                redact_secrets=redact_secrets,
+                final_statuses=_FINAL_RUN_STATUSES,
+            )
+        )
         tooling = _build_runtime_tooling(
             normalize_tool_name=_normalize_tool_name,
             input_preview=_tool_input_preview,
@@ -835,6 +850,9 @@ class NativeRunEngine:
 
     def _install_runtime_tool_brokers(self, tool_brokers: RuntimeToolBrokerFactory) -> None:
         self.tool_brokers = tool_brokers
+
+    def _install_runtime_main_chat_runs(self, main_chat_runs: MainChatRunLifecycle) -> None:
+        self.main_chat_runs = main_chat_runs
 
     def _install_runtime_tooling(self, tooling: RuntimeToolingBundle) -> None:
         self.tool_loop_projection = tooling.tool_loop_projection
@@ -2628,30 +2646,7 @@ class NativeRunEngine:
         session_id: str,
         user_goal: str,
     ) -> dict[str, Any]:
-        run = self._insert_run(
-            kind="main_chat_run",
-            runnable_id=_MAIN_CHAT_AGENT_ID,
-            user_goal=redact_secrets(user_goal),
-        )
-        self.link_task_run(task_id=task_id, run_id=run["run_id"], session_id=session_id)
-        timeline = [
-            self._timeline(
-                "run.started",
-                "Native main chat run started",
-                task_id=str(task_id or ""),
-                session_id=str(session_id or ""),
-            ),
-            self._timeline("task.created", str(task_id or ""), task_id=str(task_id or "")),
-            self._timeline("task.started", str(task_id or ""), task_id=str(task_id or "")),
-            self._timeline("task.linked", str(task_id or ""), task_id=str(task_id or "")),
-        ]
-        run = self._update_run(run["run_id"], timeline=timeline)
-        self.runtime_task_events.started(
-            run["run_id"],
-            task_id=str(task_id or ""),
-            session_id=str(session_id or ""),
-        )
-        return run
+        return self.main_chat_runs.start(task_id=task_id, session_id=session_id, user_goal=user_goal)
 
     def call_main_chat_model(
         self,
@@ -2904,56 +2899,10 @@ class NativeRunEngine:
         )
 
     def complete_main_chat_run(self, run_id: str, result: str) -> dict[str, Any]:
-        run = self.get_run(run_id)
-        terminal = run if str(run.get("status") or "").strip() in _FINAL_RUN_STATUSES else None
-        if terminal is not None:
-            return terminal
-        safe_result = redact_secrets(result)
-        timeline = [
-            *[event for event in run.get("timeline") or [] if isinstance(event, dict)],
-            self._timeline("run.completed", "Native main chat run completed"),
-        ]
-        completed = self._update_run(
-            run_id,
-            status="completed",
-            result=safe_result,
-            timeline=timeline,
-            pending_approval=None,
-        )
-        link = self.task_run_links.for_run(run_id)
-        self.runtime_task_events.completed(
-            run_id,
-            task_id=str((link or {}).get("task_id") or ""),
-            session_id=str((link or {}).get("session_id") or ""),
-            result=safe_result,
-        )
-        return completed
+        return self.main_chat_runs.complete(run_id, result)
 
     def fail_main_chat_run(self, run_id: str, error: Any) -> dict[str, Any]:
-        run = self.get_run(run_id)
-        terminal = run if str(run.get("status") or "").strip() in _FINAL_RUN_STATUSES else None
-        if terminal is not None:
-            return terminal
-        safe_error = redact_secrets(error)
-        timeline = [
-            *[event for event in run.get("timeline") or [] if isinstance(event, dict)],
-            self._timeline("run.failed", safe_error),
-        ]
-        failed = self._update_run(
-            run_id,
-            status="failed",
-            result=safe_error,
-            timeline=timeline,
-            pending_approval=None,
-        )
-        link = self.task_run_links.for_run(run_id)
-        self.runtime_task_events.failed(
-            run_id,
-            task_id=str((link or {}).get("task_id") or ""),
-            session_id=str((link or {}).get("session_id") or ""),
-            error=safe_error,
-        )
-        return failed
+        return self.main_chat_runs.fail(run_id, error)
 
     def _load_agent_skills(self, skill_ids: list[str]) -> list[dict[str, Any]]:
         return self.agent_skill_loader.load(skill_ids)
