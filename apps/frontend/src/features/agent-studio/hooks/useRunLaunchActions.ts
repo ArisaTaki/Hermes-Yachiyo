@@ -1,13 +1,16 @@
 import { useCallback } from 'react';
 
 import {
-  createAgentRun,
-  createWorkflowRun,
-  rerunRun,
   type RunnableSummary,
   type RunSpec,
   type WorkflowSpec,
 } from '../../../lib/agents';
+import {
+  rerunYachiyoRun,
+  startYachiyoAgentRun,
+  startYachiyoWorkflowRun,
+} from '../../yachiyo-studio/api';
+import { publicRunTimelineToRunSpec } from '../utils/runs';
 
 export type RunLaunchActionRefreshOptions = {
   selectedAgentId?: string;
@@ -68,7 +71,10 @@ export function useRunLaunchActions({
     if (agentQuickRunDisabledReason) throw new Error(agentQuickRunDisabledReason);
     const agentId = draftAgentId || '';
     const goal = agentRunGoal.trim();
-    const run = await createAgentRun(agentId, goal);
+    const run = publicRunTimelineToRunSpec(
+      await startYachiyoAgentRun(agentId, goal),
+      { kind: 'agent_run', runnableId: agentId, userGoal: goal },
+    );
     setAgentRunGoal('');
     setRunTarget(agentId);
     openRunDetail(run.run_id, { revealInHistory: true });
@@ -79,7 +85,10 @@ export function useRunLaunchActions({
     if (workflowRunDisabledReason) throw new Error(workflowRunDisabledReason);
     const goal = workflowRunGoal.trim();
     const saved = await saveWorkflowDraft();
-    const run = await createWorkflowRun(saved.workflow_id, goal);
+    const run = publicRunTimelineToRunSpec(
+      await startYachiyoWorkflowRun(saved.workflow_id, goal),
+      { kind: 'workflow_run', runnableId: saved.workflow_id, userGoal: goal },
+    );
     setWorkflowRunGoal('');
     setRunTarget(saved.workflow_id);
     openRunDetail(run.run_id, { revealInHistory: true });
@@ -91,8 +100,14 @@ export function useRunLaunchActions({
     if (!target) return;
     const goal = runGoal.trim();
     const run = target.kind === 'agent'
-      ? await createAgentRun(target.id, goal)
-      : await createWorkflowRun(target.id, goal);
+      ? publicRunTimelineToRunSpec(
+        await startYachiyoAgentRun(target.id, goal),
+        { kind: 'agent_run', runnableId: target.id, runnableName: target.name, userGoal: goal },
+      )
+      : publicRunTimelineToRunSpec(
+        await startYachiyoWorkflowRun(target.id, goal),
+        { kind: 'workflow_run', runnableId: target.id, runnableName: target.name, userGoal: goal },
+      );
     openRunDetail(run.run_id, { revealInHistory: true });
     setRunGoal('');
     return { selectedRunId: run.run_id, runTarget: target.id };
@@ -114,7 +129,15 @@ export function useRunLaunchActions({
     if (!selectedRun) throw new Error('请选择要重跑的 Run');
     if (selectedRunRerunDisabledReason) throw new Error(selectedRunRerunDisabledReason);
     if (!selectedRunRerunTarget) throw new Error('找不到原 Run 对应的 Agent 或 Workflow，无法重跑。');
-    const run = await rerunRun(selectedRun.run_id);
+    const run = publicRunTimelineToRunSpec(
+      await rerunYachiyoRun(selectedRun.run_id),
+      {
+        kind: selectedRun.kind,
+        runnableId: selectedRun.runnable_id,
+        runnableName: selectedRun.runnable_name,
+        userGoal: selectedRun.user_goal,
+      },
+    );
     upsertRunDetailCache([run]);
     await refreshRunGroupsForRuns([run]);
     openRunDetail(run.run_id, { revealInHistory: true });

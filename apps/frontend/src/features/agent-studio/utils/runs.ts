@@ -1,12 +1,14 @@
 import type {
   AgentSpec,
   RunnableSummary,
+  RunGroupSpec,
   RunSpec,
   WorkflowSpec,
 } from '../../../lib/agents';
 import type {
   ApprovalCardSnapshot,
   ArtifactSnapshot,
+  GroupRunSnapshot,
   PublicRunEvent,
   RunTimelineSnapshot,
 } from '../../yachiyo-studio/types';
@@ -77,18 +79,26 @@ export function approvedRunStatusMessage(run: RunSpec): string {
   return '已批准，Run 状态已更新。';
 }
 
-export function publicRunTimelineToRunSpec(snapshot: RunTimelineSnapshot): RunSpec {
-  const kind = snapshot.workflow_run_id ? 'workflow_run' : 'agent_run';
+export function publicRunTimelineToRunSpec(
+  snapshot: RunTimelineSnapshot,
+  fallback: {
+    kind?: RunSpec['kind'];
+    runnableId?: string;
+    runnableName?: string;
+    userGoal?: string;
+  } = {},
+): RunSpec {
+  const kind = fallback.kind || (snapshot.workflow_run_id ? 'workflow_run' : 'agent_run');
   const pendingApproval = snapshot.pending_approval || snapshot.approvals?.find((approval) => approval.approval_id);
   return {
     run_id: snapshot.run_id,
     run_group_id: snapshot.run_group_id || snapshot.group_run_id || undefined,
     run_group_source: kind === 'workflow_run' ? 'workflow' : undefined,
     kind,
-    runnable_id: snapshot.workflow_run_id || snapshot.agent_id || snapshot.run_id,
-    runnable_name: snapshot.title || undefined,
+    runnable_id: fallback.runnableId || snapshot.workflow_run_id || snapshot.agent_id || snapshot.run_id,
+    runnable_name: snapshot.title || fallback.runnableName || undefined,
     status: snapshot.status || 'processing',
-    user_goal: snapshot.title || '',
+    user_goal: fallback.userGoal ?? snapshot.title ?? '',
     timeline: (snapshot.events || []).map(publicRunEventToTimelineEvent),
     artifacts: publicArtifactsOrLegacy(snapshot.artifacts, undefined),
     pending_approval: pendingApproval
@@ -98,6 +108,22 @@ export function publicRunTimelineToRunSpec(snapshot: RunTimelineSnapshot): RunSp
     updated_at: snapshot.updated_at,
     agent_run_id: kind === 'agent_run' ? snapshot.run_id : undefined,
     workflow_run_id: kind === 'workflow_run' ? snapshot.workflow_run_id || snapshot.run_id : undefined,
+  };
+}
+
+export function publicGroupRunToRunGroupSpec(snapshot: GroupRunSnapshot): RunGroupSpec {
+  const childRunIds = snapshot.child_run_ids?.length
+    ? snapshot.child_run_ids
+    : (snapshot.runs || []).map((run) => run.run_id).filter(Boolean);
+  return {
+    run_group_id: snapshot.run_group_id || snapshot.group_run_id,
+    title: snapshot.title || snapshot.objective || 'Group run',
+    source: 'yachiyo_studio',
+    status: snapshot.status || 'unknown',
+    summary: snapshot.final_answer || snapshot.objective || '',
+    child_run_ids: childRunIds,
+    created_at: snapshot.created_at,
+    updated_at: snapshot.updated_at,
   };
 }
 

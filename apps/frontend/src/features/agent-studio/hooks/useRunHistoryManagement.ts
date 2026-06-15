@@ -1,11 +1,8 @@
 import { useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 
-import {
-  deleteRun,
-  type RunGroupSpec,
-  type RunSpec,
-} from '../../../lib/agents';
+import type { RunGroupSpec, RunSpec } from '../../../lib/agents';
 import { navigateTo } from '../../../lib/view';
+import { deleteYachiyoRun } from '../../yachiyo-studio/api';
 import { isActiveRunStatus } from '../utils/runs';
 
 type RunHistoryRefreshOptions = {
@@ -99,7 +96,7 @@ export function useRunHistoryManagement({
       onConfirm: () => void runAction(async () => {
         const deletedRunIds = new Set<string>();
         for (const run of targets) {
-          const result = await deleteRun(run.run_id);
+          const result = await deleteYachiyoRun(run.run_id);
           const resultIds = Array.isArray(result.deleted_run_ids) ? result.deleted_run_ids : [run.run_id];
           resultIds.forEach((id) => {
             if (id) deletedRunIds.add(id);

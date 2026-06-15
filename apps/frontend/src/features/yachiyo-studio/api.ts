@@ -187,6 +187,19 @@ export async function getYachiyoRunTimeline(runId: string): Promise<RunTimelineS
   return apiGet(`/yachiyo/studio/runs/${encodeURIComponent(runId)}/timeline`);
 }
 
+export async function startYachiyoAgentRun(
+  agentId: string,
+  objective: string,
+  title?: string,
+): Promise<RunTimelineSnapshot> {
+  const clientRunId = createClientRunId();
+  return apiPost(`/yachiyo/studio/agents/${encodeURIComponent(agentId)}/runs`, {
+    objective,
+    title: title || undefined,
+    client_run_id: clientRunId,
+  });
+}
+
 export async function listYachiyoRunEvents(
   runId: string,
   afterSequence = 0,

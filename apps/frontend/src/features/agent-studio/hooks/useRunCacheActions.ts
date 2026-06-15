@@ -1,10 +1,11 @@
 import { useCallback, type Dispatch, type SetStateAction } from 'react';
 
 import {
-  getRunGroup,
   type RunGroupSpec,
   type RunSpec,
 } from '../../../lib/agents';
+import { getYachiyoGroupRun } from '../../yachiyo-studio/api';
+import { publicGroupRunToRunGroupSpec } from '../utils/runs';
 
 type UseRunCacheActionsOptions = {
   acceptedRunUpdates: (runs: RunSpec[]) => RunSpec[];
@@ -55,7 +56,9 @@ export function useRunCacheActions({
   ) => {
     const groupIds = Array.from(new Set(nextRuns.map((run) => String(run.run_group_id || '')).filter(Boolean)));
     if (!groupIds.length) return;
-    const loadedGroups = (await Promise.all(groupIds.map((groupId) => getRunGroup(groupId).catch(() => null))))
+    const loadedGroups = (await Promise.all(groupIds.map((groupId) => (
+      getYachiyoGroupRun(groupId).then(publicGroupRunToRunGroupSpec).catch(() => null)
+    ))))
       .filter((group): group is RunGroupSpec => Boolean(group));
     if (!shouldApply()) return;
     upsertRunGroups(loadedGroups);
@@ -66,7 +69,7 @@ export function useRunCacheActions({
     shouldApply: () => boolean = () => true,
   ) => {
     if (!runGroupId) return null;
-    const group = await getRunGroup(runGroupId);
+    const group = publicGroupRunToRunGroupSpec(await getYachiyoGroupRun(runGroupId));
     if (shouldApply()) upsertRunGroups([group]);
     return group;
   }, [upsertRunGroups]);

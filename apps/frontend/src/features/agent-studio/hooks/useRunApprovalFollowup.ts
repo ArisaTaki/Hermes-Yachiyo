@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useRef } from 'react';
 
-import {
-  getRun,
-  type RunSpec,
-} from '../../../lib/agents';
+import type { RunSpec } from '../../../lib/agents';
+import { getYachiyoRunTimeline } from '../../yachiyo-studio/api';
 import {
   approvedRunStatusMessage,
   isActiveRunStatus,
   normalizeRunStatus,
+  publicRunTimelineToRunSpec,
 } from '../utils/runs';
 
 type ApprovalFollowupRefreshOptions = {
@@ -60,7 +59,9 @@ export function useRunApprovalFollowup({
       await new Promise<void>((resolve) => {
         window.setTimeout(resolve, attempt === 0 ? 300 : runApprovalPollIntervalMs);
       });
-      const loadedRuns = (await Promise.all(pollRunIds.map((id) => getRun(id).catch(() => null))))
+      const loadedRuns = (await Promise.all(pollRunIds.map((id) => (
+        getYachiyoRunTimeline(id).then(publicRunTimelineToRunSpec).catch(() => null)
+      ))))
         .filter((run): run is RunSpec => Boolean(run));
       const visibleRuns = acceptedRunUpdates(loadedRuns);
       if (!visibleRuns.length) continue;
