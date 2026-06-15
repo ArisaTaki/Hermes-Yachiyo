@@ -62,6 +62,7 @@ from apps.shell.agent.runtime.agent_context import (
     agent_output_contract_rules as _runtime_agent_output_contract_rules,
     user_goal_from_agent_messages as _runtime_user_goal_from_agent_messages,
 )
+from apps.shell.agent.runtime.agent_outcomes import RuntimeAgentRunOutcomeProjector
 from apps.shell.agent.runtime.agent_preparation import RuntimeAgentRunPreparer
 from apps.shell.agent.runtime.agent_runs import RuntimeAgentRunStarter
 from apps.shell.agent.runtime.agent_skills import RuntimeAgentSkillLoader
@@ -1686,6 +1687,15 @@ class NativeRunEngine:
             append_run_event=self.append_run_event,
             timeline_factory=self._timeline,
             memory_context_limit=_MEMORY_CONTEXT_LIMIT,
+        )
+        self.agent_run_outcomes = RuntimeAgentRunOutcomeProjector(
+            append_run_event=self.append_run_event,
+            runtime_task_model_events=self.runtime_task_model_events,
+            runtime_agent_timeline=self.runtime_agent_timeline,
+            runtime_agent_run_events=self.runtime_agent_run_events,
+            update_run=self._update_run,
+            model_output_metadata=_model_output_metadata,
+            redact_secrets=redact_secrets,
         )
         self.workflows = WorkflowRepository(
             self._conn,
@@ -4390,25 +4400,11 @@ class NativeRunEngine:
                 artifacts,
                 run_id=run_id,
             )
-            result_text = str(result)
-            self.append_run_event(
+            return self.agent_run_outcomes.completed(
                 run_id,
-                "model.output.completed",
-                self.runtime_task_model_events.model_output_completed_payload(
-                    result_text,
-                    truncated=bool(getattr(result, "output_truncated", False)),
-                    metadata=_model_output_metadata(result),
-                ),
-            )
-            timeline.append(self.runtime_agent_timeline.completed())
-            self.runtime_agent_run_events.completed(run_id, result_text)
-            return self._update_run(
-                run_id,
-                status="completed",
-                result=result_text,
+                result,
                 timeline=timeline,
                 artifacts=artifacts,
-                pending_approval=None,
             )
         except AgentApprovalRequired as exc:
             return self.approval_pause.project_tool_required(
@@ -4418,16 +4414,11 @@ class NativeRunEngine:
                 artifacts=artifacts,
             )
         except Exception as exc:
-            safe_error = redact_secrets(exc)
-            timeline.append(self.runtime_agent_timeline.failed(safe_error))
-            self.runtime_agent_run_events.failed(run_id, safe_error)
-            return self._update_run(
+            return self.agent_run_outcomes.failed(
                 run_id,
-                status="failed",
-                result=safe_error,
+                exc,
                 timeline=timeline,
                 artifacts=artifacts,
-                pending_approval=None,
             )
 
     def _run_custom_api_agent(
