@@ -241,12 +241,7 @@ async def list_studio_memories(
     limit: int = 100,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    memories = await asyncio.to_thread(
-        _studio_service(http_request).list_memories,
-        include_deleted,
-        max(1, min(500, int(limit or 100))),
-    )
-    return {"memories": [_snapshot(memory) for memory in memories]}
+    return await yachiyo_studio_handlers.list_memories(include_deleted, limit, http_request)
 
 
 @router.post("/studio/memories")
@@ -254,15 +249,7 @@ async def create_studio_memory(
     request: MemoryBody,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    try:
-        payload = request.model_dump(exclude_none=True)
-        snapshot = await asyncio.to_thread(
-            _studio_service(http_request).create_memory,
-            payload,
-        )
-        return _snapshot(snapshot)
-    except AgentRuntimeError as exc:
-        raise _bad_request(exc) from exc
+    return await yachiyo_studio_handlers.create_memory(request, http_request)
 
 
 @router.patch("/studio/memories/{memory_id}")
@@ -271,16 +258,7 @@ async def update_studio_memory(
     request: MemoryBody,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    try:
-        payload = request.model_dump(exclude_none=True)
-        snapshot = await asyncio.to_thread(
-            _studio_service(http_request).update_memory,
-            memory_id,
-            payload,
-        )
-        return _snapshot(snapshot)
-    except AgentRuntimeError as exc:
-        raise _bad_request(exc) from exc
+    return await yachiyo_studio_handlers.update_memory(memory_id, request, http_request)
 
 
 @router.delete("/studio/memories/{memory_id}")
@@ -289,14 +267,7 @@ async def delete_studio_memory(
     reason: str = "",
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    try:
-        return await asyncio.to_thread(
-            _studio_service(http_request).delete_memory,
-            memory_id,
-            reason,
-        )
-    except AgentRuntimeError as exc:
-        raise _bad_request(exc) from exc
+    return await yachiyo_studio_handlers.delete_memory(memory_id, reason, http_request)
 
 
 @router.get("/studio/future-tasks")
@@ -305,12 +276,7 @@ async def list_studio_future_tasks(
     limit: int = 100,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    future_tasks = await asyncio.to_thread(
-        _studio_service(http_request).list_future_tasks,
-        include_finished,
-        max(1, min(500, int(limit or 100))),
-    )
-    return {"future_tasks": [_snapshot(future_task) for future_task in future_tasks]}
+    return await yachiyo_studio_handlers.list_future_tasks(include_finished, limit, http_request)
 
 
 @router.post("/studio/future-tasks/trigger-due")
@@ -318,16 +284,7 @@ async def trigger_due_studio_future_tasks(
     request: FutureTaskTriggerBody | None = None,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    body = request or FutureTaskTriggerBody()
-    try:
-        triggered = await asyncio.to_thread(
-            _studio_service(http_request).trigger_due_future_tasks,
-            body.now_epoch,
-            max(1, min(200, int(body.limit or 20))),
-        )
-        return {"ok": True, "triggered": [_snapshot(item) for item in triggered]}
-    except AgentRuntimeError as exc:
-        raise _bad_request(exc) from exc
+    return await yachiyo_studio_handlers.trigger_due_future_tasks(request, http_request)
 
 
 @router.post("/studio/future-tasks/{future_task_id}/cancel")
@@ -336,17 +293,7 @@ async def cancel_studio_future_task(
     request: FutureTaskCancelBody | None = None,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    try:
-        snapshot = await asyncio.to_thread(
-            _studio_service(http_request).cancel_future_task,
-            future_task_id,
-            request.reason if request is not None else "",
-        )
-        return {"ok": True, "future_task": _snapshot(snapshot)}
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="FutureTask 不存在") from exc
-    except AgentRuntimeError as exc:
-        raise _bad_request(exc) from exc
+    return await yachiyo_studio_handlers.cancel_future_task(future_task_id, request, http_request)
 
 
 @router.post("/studio/agents/{agent_id}/runs")
