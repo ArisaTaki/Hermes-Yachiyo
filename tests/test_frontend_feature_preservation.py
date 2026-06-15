@@ -2063,9 +2063,6 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "attachSkill",
             "detachSkill",
             "listSkills",
-            "importSkill",
-            "syncNativeSkills",
-            "installSkillCommand",
             "updateSkill",
             "deleteSkill",
             "listSkillFolders",
@@ -2081,6 +2078,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "useRunHistoryManagement",
             "useRunLaunchActions",
             "useSkillFolderManagement",
+            "useSkillImportActions",
             "saveAgent",
             "const saved = draft.agent_id ? await updateAgent(draft.agent_id, request) : await createAgent(request);",
             "await deleteAgent(agentId);",
@@ -2118,6 +2116,20 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "selectedAgentDeletable",
             "系统 Agent 只能查看，不能删除。",
             "AgentEditorPanel",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useSkillImportActions.ts",
+        [
+            "export function useSkillImportActions",
+            "async function importSkillSourceList(rawSources: string[]): Promise<SkillImportRefreshOptions | void>",
+            "const sources = normalizeSkillSources(rawSources);",
+            "const imported = await importSkill(source, skillTargetFolderId);",
+            "const result = await syncNativeSkills();",
+            "setSkillImportResults(syncResultsToImportResults(result.results || []));",
+            "const result = await installSkillCommand(command, skillTargetFolderId);",
+            "setSkillImportResults(syncResultsToImportResults(result.sync.results));",
+            "throw new Error(result.stderr || result.stdout || `安装命令退出：${result.returncode ?? 'unknown'}`);",
         ],
     )
     _assert_contains(

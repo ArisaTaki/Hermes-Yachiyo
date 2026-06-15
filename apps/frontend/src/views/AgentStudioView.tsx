@@ -26,6 +26,7 @@ import { useRunLaunchActions } from '../features/agent-studio/hooks/useRunLaunch
 import { useRunTimeline } from '../features/agent-studio/hooks/useRunTimeline';
 import { useRuntimeMemoryManagement } from '../features/agent-studio/hooks/useRuntimeMemoryManagement';
 import { useSkillFolderManagement } from '../features/agent-studio/hooks/useSkillFolderManagement';
+import { useSkillImportActions } from '../features/agent-studio/hooks/useSkillImportActions';
 import { useWorkflowDefinitions } from '../features/agent-studio/hooks/useWorkflowDefinitions';
 import {
   agentCapabilityLine,
@@ -65,8 +66,6 @@ import {
 import {
   isInstalledSkill,
   isNativeSkill,
-  localSourceAlias,
-  normalizeSkillSources,
   skillFolderNameError,
   skillFolderNameMaxLength,
   skillMatchesFolderFilter,
@@ -76,7 +75,6 @@ import {
   skillResultStatusLabel,
   skillSourceLabel,
   skillSourceTypeLabel,
-  syncResultsToImportResults,
   type SkillFolderFilter,
   type SkillImportResult,
   type SkillSourceFilter,
@@ -119,8 +117,6 @@ import {
   getRun,
   getRunArtifact,
   getRunGroup,
-  importSkill,
-  installSkillCommand,
   listAgents,
   listFutureTasks,
   listMemories,
@@ -131,7 +127,6 @@ import {
   listSkillSources,
   listSkills,
   listWorkflows,
-  syncNativeSkills,
   testAgentModel,
   updateAgent,
   updateSkill,
@@ -647,6 +642,17 @@ export function AgentStudioView() {
     skillMountFolderFilter,
     skills,
     skillTargetFolderId,
+  });
+  const {
+    importSkillSourceList,
+    installSkillFromCommand,
+    syncNativeSkillLibrary,
+  } = useSkillImportActions({
+    setSkillImportResults,
+    setSkillSources,
+    skillInstallCommand,
+    skillTargetFolderId,
+    skills,
   });
   const selectedRunWorkflow = useMemo(
     () => (
@@ -1355,44 +1361,6 @@ export function AgentStudioView() {
       .filter(Boolean);
     if (filePaths.length) {
       void runAction(() => importSkillSourceList(filePaths), '导入 Skills');
-    }
-  }
-
-  async function importSkillSourceList(rawSources: string[]): Promise<StudioRefreshOptions | void> {
-    const sources = normalizeSkillSources(rawSources);
-    if (!sources.length) throw new Error('请先选择或拖入 Skill 目录/ZIP');
-    const existingPaths = new Set(skills.flatMap((skill) => [skill.local_path, skill.source_path]).filter(Boolean).map(String));
-    const results: SkillImportResult[] = [];
-    for (const source of sources) {
-      if (existingPaths.has(source) || existingPaths.has(localSourceAlias(source))) {
-        results.push({ source, status: 'skipped', message: '已存在，跳过' });
-        continue;
-      }
-      try {
-        const imported = await importSkill(source, skillTargetFolderId);
-        results.push({ source, status: 'success', message: `已导入 ${imported.name}` });
-      } catch (err) {
-        results.push({ source, status: 'failed', message: err instanceof Error ? err.message : '导入失败' });
-      }
-    }
-    setSkillImportResults(results);
-  }
-
-  async function syncNativeSkillLibrary(): Promise<StudioRefreshOptions | void> {
-    const result = await syncNativeSkills();
-    setSkillImportResults(syncResultsToImportResults(result.results || []));
-    if (result.roots) setSkillSources(result.roots);
-  }
-
-  async function installSkillFromCommand(): Promise<StudioRefreshOptions | void> {
-    const command = skillInstallCommand.trim();
-    if (!command) throw new Error('请输入 Skill 来源或安装命令');
-    const result = await installSkillCommand(command, skillTargetFolderId);
-    if (result.sync?.results) {
-      setSkillImportResults(syncResultsToImportResults(result.sync.results));
-    }
-    if (!result.ok) {
-      throw new Error(result.stderr || result.stdout || `安装命令退出：${result.returncode ?? 'unknown'}`);
     }
   }
 
