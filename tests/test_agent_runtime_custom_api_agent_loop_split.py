@@ -6,6 +6,7 @@ from typing import Any
 
 from apps.shell import agent_runtime
 from apps.shell.agent.runtime.custom_api_agent import RuntimeCustomApiAgentLoop
+from apps.shell.agent.runtime.tool_operations import RuntimeToolOperations
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
 
@@ -180,5 +181,6 @@ def test_native_runtime_installs_custom_api_agent_loop(tmp_path) -> None:
     try:
         assert agent_runtime.RuntimeCustomApiAgentLoop is RuntimeCustomApiAgentLoop
         assert isinstance(service.custom_api_agent_loop, RuntimeCustomApiAgentLoop)
+        assert service.custom_api_agent_loop._tool_schemas is RuntimeToolOperations.model_tool_schemas
     finally:
         service.close()
