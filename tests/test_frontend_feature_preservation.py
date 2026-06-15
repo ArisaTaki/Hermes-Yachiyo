@@ -304,6 +304,29 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "return mentions[0].kind === 'agent' ? mentions[0] : null;",
         ],
     )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/sessionState.ts",
+        [
+            "export function normalizeSessionContext",
+            "export function groupMemberCount",
+            "export function isUnassignedSession",
+            "export function contextFromSession",
+            "export function primaryParticipant",
+            "export function participantDisplayName",
+            "export function participantInitial",
+            "export function conversationDisplayName",
+            "export function sessionDisplayName",
+            "export function sessionKindLabel",
+            "export function groupDefaultName",
+            "export function deleteTargetLabel",
+            "export function sessionTitle",
+            "export function sessionPreview",
+            "export function firstUserMessageTitle",
+            "export function stripLeadingMentions",
+            "looksLikeSessionIdTitle",
+            "looksLikeTitlePromptEcho",
+        ],
+    )
     _assert_not_contains(
         "apps/frontend/src/views/ChatView.tsx",
         [
@@ -319,6 +342,13 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "function activeMentions",
             "function yachiyoPublicTaskTarget",
             "function yachiyoPublicTaskPrompt",
+            "function normalizeSessionContext",
+            "function contextFromSession",
+            "function sessionDisplayName",
+            "function sessionPreview",
+            "function conversationDisplayName",
+            "function groupDefaultName",
+            "function deleteTargetLabel",
         ],
     )
 
