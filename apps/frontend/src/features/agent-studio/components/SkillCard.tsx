@@ -10,10 +10,10 @@ type SkillCardProps = {
   folders: SkillFolderSpec[];
   managing: boolean;
   onDelete: () => Promise<void> | void;
-  onMoveFolder: (folderId: string) => Promise<void>;
-  onOpenLocation: () => Promise<void>;
+  onMoveFolder: (folderId: string) => Promise<void> | void;
+  onOpenLocation: () => Promise<void> | void;
   onSelectionChange: () => void;
-  onToggleEnabled: () => Promise<void>;
+  onToggleEnabled: () => Promise<void> | void;
   selected: boolean;
   skill: SkillSpec;
 };

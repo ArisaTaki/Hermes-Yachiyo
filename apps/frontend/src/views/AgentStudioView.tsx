@@ -14,9 +14,9 @@ import { AgentListPanel } from '../features/agent-studio/components/AgentListPan
 import { RuntimeMemoryPanel } from '../features/agent-studio/components/RuntimeMemoryPanel';
 import { RunDetailPanel } from '../features/agent-studio/components/RunDetailPanel';
 import { RunLauncherPanel } from '../features/agent-studio/components/RunLauncherPanel';
-import { SkillCard } from '../features/agent-studio/components/SkillCard';
 import { SkillFolderPanel } from '../features/agent-studio/components/SkillFolderPanel';
 import { SkillImportPanel } from '../features/agent-studio/components/SkillImportPanel';
+import { SkillLibraryPanel } from '../features/agent-studio/components/SkillLibraryPanel';
 import { WorkflowEditorPanel, WorkflowRunPreview } from '../features/agent-studio/components/WorkflowEditorPanel';
 import { useAgentAvatarActions } from '../features/agent-studio/hooks/useAgentAvatarActions';
 import { useAgentDeletionActions } from '../features/agent-studio/hooks/useAgentDeletionActions';
@@ -1517,71 +1517,39 @@ export function AgentStudioView() {
             onSetSkillTargetFolderId={setSkillTargetFolderId}
             onSyncNativeSkillLibrary={() => void runAction(syncNativeSkillLibrary, '同步 Native Skills')}
           />
-          <div className="agent-studio-panel" data-testid="skill-library-panel">
-            <div className="section-heading-row">
-              <h2>{skillLibraryFilter === 'native' ? 'Native Skill Library' : 'Installed Skill Library'}</h2>
-              <div className="studio-heading-actions">
-                <span className="agent-section-count">{installedSkillCount} Installed / {nativeSkillCount} Native</span>
-                {filteredLibrarySkills.length && !skillManagementMode ? (
-                  <button type="button" disabled={busy} onClick={() => setSkillManagementMode(true)}>管理</button>
-                ) : null}
-              </div>
-            </div>
-            <div className="skill-filter-bar">
-              <div className="skill-filter-tabs">
-                <button type="button" data-testid="skill-filter-installed" className={skillLibraryFilter === 'installed' ? 'active' : ''} onClick={() => setSkillLibraryFilter('installed')}>Installed</button>
-                <button type="button" data-testid="skill-filter-native" className={skillLibraryFilter === 'native' ? 'active' : ''} onClick={() => setSkillLibraryFilter('native')}>Native</button>
-              </div>
-              <select
-                className="hy-select"
-                data-testid="skill-library-folder-filter"
-                value={skillLibraryFolderFilter}
-                onChange={(event) => setSkillLibraryFolderFilter(event.target.value)}
-              >
-                <option value="all">全部文件夹</option>
-                <option value="uncategorized">无需分组</option>
-                {skillFolders.map((folder) => (
-                  <option value={folder.folder_id} key={folder.folder_id}>{folder.name}</option>
-                ))}
-              </select>
-              <input
-                className="hy-input"
-                data-testid="skill-library-search"
-                value={skillLibrarySearch}
-                onChange={(event) => setSkillLibrarySearch(event.target.value)}
-                placeholder="搜索 Skill 名称、路径或摘要"
-              />
-            </div>
-            {filteredLibrarySkills.length && skillManagementMode ? (
-              <div className="studio-bulk-actions" aria-label="Skill 批量操作">
-                <span>{selectedLibrarySkills.length ? `已选择 ${selectedLibrarySkills.length} / ${filteredLibrarySkills.length}` : `${filteredLibrarySkills.length} skills`}</span>
-                <button type="button" disabled={busy} onClick={() => setSelectedSkillIds(allLibrarySkillsSelected ? [] : filteredLibrarySkillIds)}>
-                  {allLibrarySkillsSelected ? '取消全选' : '全选当前列表'}
-                </button>
-                <button type="button" disabled={busy || !selectedLibrarySkills.length} onClick={() => setSelectedSkillIds([])}>清空</button>
-                <button type="button" className="danger-action" disabled={busy || !selectedLibrarySkills.length} onClick={requestDeleteSelectedSkills}>删除所选</button>
-                <button type="button" disabled={busy} onClick={finishSkillManagement}>完成</button>
-              </div>
-            ) : null}
-            <div className="skill-list" data-testid="skill-list">
-              {filteredLibrarySkills.map((skill) => (
-                <SkillCard
-                  busy={busy}
-                  folders={skillFolders}
-                  key={skill.skill_id}
-                  onDelete={() => requestDeleteSkill(skill)}
-                  onMoveFolder={(folderId) => runAction(async () => { await updateSkill(skill.skill_id, { folder_id: folderId }); }, '移动 Skill')}
-                  onOpenLocation={() => runAction(async () => { await openPath(skill.local_path || ''); }, '打开 Skill 路径')}
-                  onSelectionChange={() => toggleSkillSelected(skill.skill_id)}
-                  onToggleEnabled={() => runAction(async () => { await updateSkill(skill.skill_id, { enabled: skill.enabled === false }); }, skill.enabled === false ? '启用 Skill' : '停用 Skill')}
-                  managing={skillManagementMode}
-                  selected={selectedSkillIdSet.has(skill.skill_id)}
-                  skill={skill}
-                />
-              ))}
-              {!filteredLibrarySkills.length ? <div className="empty-state inline-empty">当前分类或搜索下没有 Skill。</div> : null}
-            </div>
-          </div>
+          <SkillLibraryPanel
+            allLibrarySkillsSelected={allLibrarySkillsSelected}
+            busy={busy}
+            filteredLibrarySkillIds={filteredLibrarySkillIds}
+            filteredLibrarySkills={filteredLibrarySkills}
+            installedSkillCount={installedSkillCount}
+            nativeSkillCount={nativeSkillCount}
+            selectedLibrarySkills={selectedLibrarySkills}
+            selectedSkillIdSet={selectedSkillIdSet}
+            skillFolders={skillFolders}
+            skillLibraryFilter={skillLibraryFilter}
+            skillLibraryFolderFilter={skillLibraryFolderFilter}
+            skillLibrarySearch={skillLibrarySearch}
+            skillManagementMode={skillManagementMode}
+            onDeleteSkill={requestDeleteSkill}
+            onDeleteSelectedSkills={requestDeleteSelectedSkills}
+            onFinishSkillManagement={finishSkillManagement}
+            onMoveSkillFolder={(skill, folderId) => void runAction(async () => {
+              await updateSkill(skill.skill_id, { folder_id: folderId });
+            }, '移动 Skill')}
+            onOpenSkillLocation={(skill) => void runAction(async () => {
+              await openPath(skill.local_path || '');
+            }, '打开 Skill 路径')}
+            onSetSelectedSkillIds={setSelectedSkillIds}
+            onSetSkillLibraryFilter={setSkillLibraryFilter}
+            onSetSkillLibraryFolderFilter={setSkillLibraryFolderFilter}
+            onSetSkillLibrarySearch={setSkillLibrarySearch}
+            onSetSkillManagementMode={setSkillManagementMode}
+            onToggleSkillEnabled={(skill) => void runAction(async () => {
+              await updateSkill(skill.skill_id, { enabled: skill.enabled === false });
+            }, skill.enabled === false ? '启用 Skill' : '停用 Skill')}
+            onToggleSkillSelected={toggleSkillSelected}
+          />
         </section>
       ) : null}
 

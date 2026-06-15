@@ -3114,20 +3114,20 @@ def test_agent_studio_skills_ui_smoke_uses_skill_library_paths() -> None:
         [
             'data-testid="skill-library"',
             "SkillImportPanel",
+            "SkillLibraryPanel",
             "onInstallSkill={() => void runAction(installSkillFromCommand, '安装 Skill')}",
             "onSyncNativeSkillLibrary={() => void runAction(syncNativeSkillLibrary, '同步 Native Skills')}",
-            'data-testid="skill-library-panel"',
-            'data-testid="skill-filter-installed"',
-            'data-testid="skill-filter-native"',
-            'data-testid="skill-library-folder-filter"',
-            'data-testid="skill-library-search"',
-            'data-testid="skill-list"',
-            "SkillCard",
+            "onMoveSkillFolder={(skill, folderId) => void runAction(async () => {",
+            "onToggleSkillEnabled={(skill) => void runAction(async () => {",
         ],
     )
     _assert_not_contains(
         "apps/frontend/src/views/AgentStudioView.tsx",
-        ["function SkillCard"],
+        [
+            "function SkillCard",
+            'data-testid="skill-library-panel"',
+            'data-testid="skill-list"',
+        ],
     )
     _assert_not_contains(
         "apps/frontend/src/views/AgentStudioView.tsx",
@@ -3148,6 +3148,22 @@ def test_agent_studio_skills_ui_smoke_uses_skill_library_paths() -> None:
             'data-testid="skill-source-picker"',
             "skillResultStatusLabel(result.status)",
             "skillSourceTypeLabel(source.source_type)",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/SkillLibraryPanel.tsx",
+        [
+            "export function SkillLibraryPanel",
+            'data-testid="skill-library-panel"',
+            'data-testid="skill-filter-installed"',
+            'data-testid="skill-filter-native"',
+            'data-testid="skill-library-folder-filter"',
+            'data-testid="skill-library-search"',
+            'data-testid="skill-list"',
+            "SkillCard",
+            "onSetSelectedSkillIds(",
+            "onMoveSkillFolder(skill, folderId)",
+            "onToggleSkillEnabled(skill)",
         ],
     )
     _assert_contains(
