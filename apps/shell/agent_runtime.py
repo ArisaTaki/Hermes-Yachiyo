@@ -114,6 +114,7 @@ from apps.shell.agent.runtime.tool_approvals import (
     ToolApprovalResumeContext,
     ToolApprovalTransitionContext,
 )
+from apps.shell.agent.runtime.tool_execution import RuntimeToolCallExecutor
 from apps.shell.agent.runtime.tool_loop import (
     RuntimeToolLoopProjectionBuilder,
     append_tool_result_message as _runtime_append_tool_result_message,
@@ -1626,6 +1627,17 @@ class NativeRunEngine:
             error_type=AgentRuntimeError,
         )
         self.tool_loop_projection = RuntimeToolLoopProjectionBuilder()
+        self.tool_call_executor = RuntimeToolCallExecutor(
+            normalize_tool_name=_normalize_tool_name,
+            input_preview=_tool_input_preview,
+            run_budget=self._run_budget,
+            validate_tool_payload=self._validate_tool_payload,
+            limit_tool_result=self._limit_tool_result,
+            timeline_factory=self._timeline,
+            tool_call_events=self.runtime_tool_call_events,
+            trace_events=self.runtime_trace_events,
+            append_run_event=self.append_run_event,
+        )
         self.agent_context_builder = AgentContextBuilder(
             compile_agent_runtime=self._compile_agent_runtime,
             load_agent_skills=self._load_agent_skills,
@@ -4682,106 +4694,16 @@ class NativeRunEngine:
         run_id: str = "",
         budget: _RunBudget | None = None,
     ) -> dict[str, Any]:
-        tool_name = _normalize_tool_name(tool_request.get("tool"))
-        payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
-        input_preview = _tool_input_preview(payload)
-        budget = budget or self._run_budget(run_id, timeline)
-        if not PolicyGate.allows_tool(tool_name, allowed_tools):
-            budget.claim_tool_call(tool_name)
-            timeline.append(self._timeline("agent.tool.denied", tool_name, input_preview=input_preview))
-            self.runtime_tool_call_events.denied(run_id, tool_name, input_preview)
-            raise AgentRuntimeError(f"Agent 试图调用未授权工具：{tool_name}")
-        self.runtime_tool_call_events.requested(
-            run_id,
-            tool_name,
-            input_preview,
+        return self.tool_call_executor.execute(
+            tool_request,
+            allowed_tools,
+            broker,
+            timeline,
+            artifacts=artifacts,
             approved=approved,
+            run_id=run_id,
+            budget=budget,
         )
-        try:
-            self._validate_tool_payload(tool_name, payload)
-        except AgentRuntimeError as exc:
-            self.runtime_tool_call_events.failed(
-                run_id,
-                tool_name,
-                input_preview,
-                approved=approved,
-                pre_validation=True,
-                error=exc,
-            )
-            raise
-        budget.claim_tool_call(tool_name, terminal_execution=tool_name == "terminal.run" and approved)
-        self.runtime_tool_call_events.started(
-            run_id,
-            tool_name,
-            input_preview,
-            approved=approved,
-        )
-        try:
-            tool_result = broker.call(tool_name, payload, approved=approved)
-        except AgentRuntimeError as exc:
-            if not tool_name.startswith("workspace."):
-                self.runtime_tool_call_events.failed(
-                    run_id,
-                    tool_name,
-                    input_preview,
-                    approved=approved,
-                    error=exc,
-                )
-                raise
-            terminal_hint = (
-                " If the required target is outside the configured workspace, use terminal.run and wait for approval."
-                if "terminal.run" in allowed_tools
-                else ""
-            )
-            tool_result = {
-                "ok": False,
-                "tool": tool_name,
-                "error": redact_api_error_text(exc),
-                "hint": (
-                    "Workspace tools only accept relative paths within the configured Default Workdir. "
-                    "Use a valid relative path and do not retry the same invalid path."
-                    f"{terminal_hint}"
-                ),
-                **({"suggested_tool": "terminal.run"} if "terminal.run" in allowed_tools else {}),
-            }
-        tool_result = self._limit_tool_result(tool_result)
-        self.runtime_tool_call_events.result(
-            run_id,
-            tool_name,
-            input_preview,
-            tool_result,
-            approved=approved,
-        )
-        timeline.append(self._timeline("agent.tool.call", tool_name, input_preview=input_preview, result=tool_result))
-        if run_id:
-            self.runtime_tool_call_events.agent_tool_call(
-                run_id,
-                tool_name,
-                input_preview,
-                tool_result,
-                approved=approved,
-            )
-            trace_event = self.runtime_trace_events.memory_skill_trace_event(
-                tool_name,
-                input_preview,
-                tool_result,
-            )
-            if trace_event is not None:
-                self.append_run_event(run_id, trace_event["event_type"], trace_event["payload"])
-        if artifacts is not None and tool_name == "artifact.write" and tool_result.get("ok"):
-            artifact = {"kind": "tool_artifact", **tool_result}
-            if artifact not in artifacts:
-                artifacts.append(artifact)
-            if run_id:
-                self.append_run_event(
-                    run_id,
-                    "artifact.created",
-                    self.runtime_trace_events.artifact_created_payload(
-                        tool_result,
-                        run_id=run_id,
-                    ),
-                )
-        return tool_result
 
     @staticmethod
     def _validate_tool_payload(tool_name: str, payload: dict[str, Any]) -> None:
