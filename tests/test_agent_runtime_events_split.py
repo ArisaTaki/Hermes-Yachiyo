@@ -13,17 +13,24 @@ from apps.shell.agent.runtime.events import (
     RuntimeTraceEventBuilder,
     artifact_created_payload,
     canonical_run_event_aliases,
+    canonical_tool_event_payload,
+    canonical_tool_input_preview,
     agent_run_completed_payload,
     agent_run_failed_payload,
     agent_run_started_payload,
     memory_retrieved_payload,
     memory_skill_trace_event,
+    memory_trace_result,
     model_request_failed_payload,
     model_request_started_payload,
     model_output_completed_payload,
     redact_json_value,
     redact_run_event_payload,
+    runtime_trace_input_preview,
+    skill_trace_result,
     task_run_event_payload,
+    tool_input_preview,
+    tool_trace_status,
 )
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
@@ -198,6 +205,21 @@ def test_legacy_trace_event_helpers_delegate_to_runtime_builder() -> None:
         memory_result,
     )
     assert agent_runtime._memory_retrieved_payload(memories) == memory_retrieved_payload(memories)
+
+
+def test_legacy_trace_event_helpers_are_runtime_reexports() -> None:
+    assert agent_runtime._tool_input_preview is tool_input_preview
+    assert agent_runtime._canonical_tool_event_payload is canonical_tool_event_payload
+    assert agent_runtime._canonical_tool_input_preview is canonical_tool_input_preview
+    assert agent_runtime._artifact_created_payload is artifact_created_payload
+    assert agent_runtime._canonical_run_event_aliases is canonical_run_event_aliases
+    assert agent_runtime._memory_skill_trace_event is memory_skill_trace_event
+    assert agent_runtime._runtime_trace_input_preview is runtime_trace_input_preview
+    assert agent_runtime._tool_trace_status is tool_trace_status
+    assert agent_runtime._skill_trace_result is skill_trace_result
+    assert agent_runtime._memory_trace_result is memory_trace_result
+    assert agent_runtime._memory_retrieved_payload is memory_retrieved_payload
+    assert agent_runtime._task_run_event_payload is task_run_event_payload
 
 
 def test_runtime_task_model_event_builder_projects_task_and_model_payloads() -> None:

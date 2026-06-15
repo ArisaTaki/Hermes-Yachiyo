@@ -79,18 +79,19 @@ from apps.shell.agent.runtime.events import (
     RuntimeToolCallEventRecorder,
     RuntimeTraceEventBuilder,
     ToolEventPayloadBuilder,
-    artifact_created_payload as _runtime_artifact_created_payload,
-    canonical_run_event_aliases as _runtime_canonical_run_event_aliases,
-    canonical_tool_event_payload as _runtime_canonical_tool_event_payload,
-    canonical_tool_input_preview as _runtime_canonical_tool_input_preview,
-    memory_retrieved_payload as _runtime_memory_retrieved_payload,
-    memory_skill_trace_event as _runtime_memory_skill_trace_event,
-    memory_trace_result as _runtime_memory_trace_result,
+    artifact_created_payload as _artifact_created_payload,
+    canonical_run_event_aliases as _canonical_run_event_aliases,
+    canonical_tool_event_payload as _canonical_tool_event_payload,
+    canonical_tool_input_preview as _canonical_tool_input_preview,
+    memory_retrieved_payload as _memory_retrieved_payload,
+    memory_skill_trace_event as _memory_skill_trace_event,
+    memory_trace_result as _memory_trace_result,
     redact_json_value as _redact_json_value,
-    runtime_trace_input_preview as _runtime_event_trace_input_preview,
-    skill_trace_result as _runtime_skill_trace_result,
-    task_run_event_payload as _runtime_task_run_event_payload,
-    tool_trace_status as _runtime_tool_trace_status,
+    runtime_trace_input_preview as _runtime_trace_input_preview,
+    skill_trace_result as _skill_trace_result,
+    task_run_event_payload as _task_run_event_payload,
+    tool_input_preview as _tool_input_preview,
+    tool_trace_status as _tool_trace_status,
 )
 from apps.shell.agent.runtime.future_task_scheduler import FutureTaskTriggerScheduler
 from apps.shell.agent.runtime.model_profiles import RuntimeModelProfileResolver
@@ -511,112 +512,6 @@ def _callable_accepts_keyword(func: Any, name: str) -> bool:
     except (TypeError, ValueError):
         return False
     return name in parameters or any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values())
-
-
-def _tool_input_preview(value: Any, *, limit: int = 1200) -> Any:
-    if isinstance(value, dict):
-        return {str(key): _tool_input_preview(item, limit=limit) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_tool_input_preview(item, limit=limit) for item in value[:20]]
-    if value is None or isinstance(value, (bool, int, float)):
-        return value
-    text = redact_secrets(value)
-    if len(text) > limit:
-        return f"{text[:limit]}... [truncated]"
-    return text
-
-
-def _canonical_tool_event_payload(
-    tool_name: str,
-    input_preview: Any,
-    *,
-    approved: bool = False,
-    pre_validation: bool = False,
-    result: dict[str, Any] | None = None,
-    error: Any = None,
-    status: str = "",
-) -> dict[str, Any]:
-    return _runtime_canonical_tool_event_payload(
-        tool_name,
-        input_preview,
-        approved=approved,
-        pre_validation=pre_validation,
-        result=result,
-        error=error,
-        status=status,
-    )
-
-
-def _canonical_tool_input_preview(
-    tool_name: str,
-    input_preview: Any,
-    *,
-    pre_validation: bool = False,
-) -> Any:
-    return _runtime_canonical_tool_input_preview(
-        tool_name,
-        input_preview,
-        pre_validation=pre_validation,
-    )
-
-
-def _artifact_created_payload(
-    tool_result: dict[str, Any],
-    *,
-    run_id: str,
-) -> dict[str, Any]:
-    return _runtime_artifact_created_payload(tool_result, run_id=run_id)
-
-
-def _task_run_event_payload(
-    *,
-    task_id: str = "",
-    run_id: str = "",
-    session_id: str = "",
-    status: str = "",
-    result: Any = None,
-    error: Any = None,
-) -> dict[str, Any]:
-    return _runtime_task_run_event_payload(
-        task_id=task_id,
-        run_id=run_id,
-        session_id=session_id,
-        status=status,
-        result=result,
-        error=error,
-    )
-
-
-def _canonical_run_event_aliases(event_type: str, payload: dict[str, Any] | None = None) -> list[str]:
-    return _runtime_canonical_run_event_aliases(event_type, payload)
-
-
-def _memory_skill_trace_event(
-    tool_name: str,
-    input_preview: Any,
-    tool_result: dict[str, Any],
-) -> dict[str, Any] | None:
-    return _runtime_memory_skill_trace_event(tool_name, input_preview, tool_result)
-
-
-def _runtime_trace_input_preview(tool_name: str, input_preview: Any) -> Any:
-    return _runtime_event_trace_input_preview(tool_name, input_preview)
-
-
-def _tool_trace_status(tool_result: dict[str, Any]) -> str:
-    return _runtime_tool_trace_status(tool_result)
-
-
-def _skill_trace_result(tool_result: dict[str, Any]) -> dict[str, Any]:
-    return _runtime_skill_trace_result(tool_result)
-
-
-def _memory_trace_result(tool_result: dict[str, Any]) -> dict[str, Any]:
-    return _runtime_memory_trace_result(tool_result)
-
-
-def _memory_retrieved_payload(memories: list[dict[str, Any]]) -> dict[str, Any]:
-    return _runtime_memory_retrieved_payload(memories)
 
 
 def _normalize_tool_iteration(value: Any) -> int:
