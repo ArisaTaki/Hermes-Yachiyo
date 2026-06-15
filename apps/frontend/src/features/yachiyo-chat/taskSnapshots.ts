@@ -1,5 +1,5 @@
 import type { AgentTaskSnapshot, TaskStatus } from './types';
-import { runIdFromStudioUrl, studioRunUrl } from '../runtime-shared/studioLinks';
+import { groupRunIdFromStudioUrl, runIdFromStudioUrl, studioRunUrl } from '../runtime-shared/studioLinks';
 
 type YachiyoTaskChatParticipant = {
   id?: string;
@@ -25,6 +25,7 @@ type YachiyoTaskChatMetadata = {
   sender?: YachiyoTaskChatParticipant;
   run_id?: string;
   run_group_id?: string;
+  group_dispatch_run_group_id?: string;
   run_status?: string;
   group_goal?: string;
   delegated_goal?: string;
@@ -68,6 +69,7 @@ export function agentTaskSnapshotFromMessage(
   const runId = messageRunId(message);
   if ((message.role || '') !== 'assistant' || !runId) return null;
   const metadata = message.metadata || {};
+  const groupRunId = messageGroupRunId(message);
   const senderName = participantDisplayName(metadata.sender);
   const title = String(
     metadata.run_progress_title
@@ -89,10 +91,10 @@ export function agentTaskSnapshotFromMessage(
     current_step: String(metadata.run_progress_detail || message.progress_label || '').trim() || null,
     progress_text: message.progress_label || null,
     needs_user_action: messageRunStatus(message) === 'approval_required',
-    pending_approvals: messageTaskApprovals(message, runId),
+    pending_approvals: messageTaskApprovals(message, runId, groupRunId),
     recent_events: messageTaskEvents(message, runId),
     artifacts: messageTaskArtifacts(message, runId),
-    open_in_studio_url: studioRunUrl(runId),
+    open_in_studio_url: studioRunUrl(runId, { groupRunId }),
     created_at: message.created_at || '',
     updated_at: message.created_at || '',
   };
@@ -122,6 +124,7 @@ export function yachiyoTaskCacheKeys(task: AgentTaskSnapshot): string[] {
   ]);
   return uniqueStrings([
     runIdFromStudioUrl(task.open_in_studio_url),
+    groupRunIdFromStudioUrl(task.open_in_studio_url),
     task.task_id,
     ...((task.recent_events || []).map((event) => event.run_id)),
     ...((task.pending_approvals || []).map((approval) => approval.run_id || '')),
@@ -185,6 +188,7 @@ function taskStatusFromRunStatus(status: string): TaskStatus {
 function messageTaskApprovals(
   message: YachiyoTaskChatMessage,
   runId: string,
+  groupRunId = '',
 ): AgentTaskSnapshot['pending_approvals'] {
   const approvals: AgentTaskSnapshot['pending_approvals'] = [];
   const pending = message.metadata?.pending_approval;
@@ -198,7 +202,7 @@ function messageTaskApprovals(
       tool_name: tool,
       input_preview: recordPreview(pending.input_preview),
       requested_at: pending.requested_at || '',
-      open_in_studio_url: studioRunUrl(runId),
+      open_in_studio_url: studioRunUrl(runId, { groupRunId }),
     });
   }
   const workflowPending = message.metadata?.workflow_waiting_pending_approval;
@@ -213,7 +217,7 @@ function messageTaskApprovals(
       tool_name: tool,
       input_preview: recordPreview(workflowPending.input_preview),
       requested_at: workflowPending.requested_at || '',
-      open_in_studio_url: studioRunUrl(childRunId),
+      open_in_studio_url: studioRunUrl(childRunId, { groupRunId }),
     });
   }
   return approvals;
@@ -262,6 +266,10 @@ function messageRunStatus(message?: YachiyoTaskChatMessage | null) {
 
 function messageRunId(message?: YachiyoTaskChatMessage | null) {
   return String(message?.metadata?.run_id || message?.metadata?.workflow_run_id || '').trim();
+}
+
+function messageGroupRunId(message?: YachiyoTaskChatMessage | null) {
+  return String(message?.metadata?.run_group_id || message?.metadata?.group_dispatch_run_group_id || '').trim();
 }
 
 function activityRunId(event?: YachiyoTaskChatActivityEvent | null) {

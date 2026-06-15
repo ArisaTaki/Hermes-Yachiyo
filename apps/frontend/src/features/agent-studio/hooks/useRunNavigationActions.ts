@@ -37,7 +37,7 @@ export function useRunNavigationActions({
   setSelectedRunId,
   setTab,
 }: UseRunNavigationActionsOptions) {
-  function openRunDetail(runId: string, options: { revealInHistory?: boolean } = {}) {
+  function openRunDetail(runId: string, options: { revealInHistory?: boolean; groupRunId?: string } = {}) {
     if (options.revealInHistory) {
       setRunKindFilter('all');
       setRunStatusFilter('all');
@@ -55,7 +55,10 @@ export function useRunNavigationActions({
         return next;
       });
     }
-    navigateTo('agents', { run: runId }, ['tab', 'target', 'goal']);
+    navigateTo('agents', {
+      run: runId,
+      ...(options.groupRunId ? { group_run: options.groupRunId } : {}),
+    }, ['tab', 'target', 'goal']);
   }
 
   function openAgentGroupRunTimeline(groupRun: GroupRunSnapshot | null) {
@@ -64,7 +67,7 @@ export function useRunNavigationActions({
       setError('这个 GroupRun 暂时没有可打开的子 Run。');
       return;
     }
-    openRunDetail(runId, { revealInHistory: true });
+    openRunDetail(runId, { groupRunId: groupRun?.group_run_id || '', revealInHistory: true });
   }
 
   function toggleRunHistoryGroup(groupKey: string) {

@@ -68,6 +68,7 @@ import {
   chatApprovalRejectionCompletionStatusText,
   chatRunCompletionProcessingState,
 } from '../features/yachiyo-chat/runPolling';
+import { groupRunIdFromStudioUrl } from '../features/runtime-shared/studioLinks';
 import {
   activeMentions,
   mentionKindLabel,
@@ -1537,10 +1538,14 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     setHighlightedMessageId(messageId);
   }
 
-  function openRunDetails(runId: string | undefined) {
+  function openRunDetails(runId: string | undefined, studioUrl = '') {
     const clean = String(runId || '').trim();
     if (!clean) return;
-    navigateTo('agents', { run: clean }, ['tab', 'target', 'goal']);
+    const groupRunId = groupRunIdFromStudioUrl(studioUrl);
+    navigateTo('agents', {
+      run: clean,
+      ...(groupRunId ? { group_run: groupRunId } : {}),
+    }, ['tab', 'target', 'goal']);
   }
 
   function openWorkflowStudio(runnableId = '', suggestedGoal = '') {
@@ -2548,7 +2553,7 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
   onApproveTaskApproval: (task: AgentTaskSnapshot, approval: ApprovalCardSnapshot) => void;
   onCancelTask: (task: AgentTaskSnapshot) => void;
   onCopy: () => void;
-  onOpenRunDetails: (runId: string) => void;
+  onOpenRunDetails: (runId: string, studioUrl?: string) => void;
   onOpenWorkflowStudio: (runnableId?: string, suggestedGoal?: string) => void;
   onReject: () => void;
   onRejectTaskApproval: (task: AgentTaskSnapshot, approval: ApprovalCardSnapshot) => void;

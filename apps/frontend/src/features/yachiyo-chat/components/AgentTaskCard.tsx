@@ -17,7 +17,7 @@ export function AgentTaskCard({
   busy?: boolean;
   onApproveApproval?: (task: AgentTaskSnapshot, approval: ApprovalCardSnapshot) => void | Promise<void>;
   onCancelTask?: (task: AgentTaskSnapshot) => void | Promise<void>;
-  onOpenStudio?: (runId: string) => void;
+  onOpenStudio?: (runId: string, studioUrl?: string) => void;
   onRejectApproval?: (task: AgentTaskSnapshot, approval: ApprovalCardSnapshot) => void | Promise<void>;
   task: AgentTaskSnapshot;
 }) {
@@ -56,7 +56,7 @@ export function AgentTaskCard({
                 data-testid="yachiyo-agent-task-open-studio"
                 onClick={(event) => {
                   event.preventDefault();
-                  onOpenStudio(studioRunId);
+                  onOpenStudio(studioRunId, studioUrl);
                 }}
               >
                 <UiIcon name="activity" />

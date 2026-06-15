@@ -22,7 +22,7 @@ export function MessageAgentTaskCard({
   message: YachiyoTaskChatMessage;
   onApproveApproval: (task: AgentTaskSnapshot, approval: ApprovalCardSnapshot) => void;
   onCancelTask: (task: AgentTaskSnapshot) => void;
-  onOpenStudio: (runId: string) => void;
+  onOpenStudio: (runId: string, studioUrl?: string) => void;
   onRejectApproval: (task: AgentTaskSnapshot, approval: ApprovalCardSnapshot) => void;
   publicTaskSnapshot?: AgentTaskSnapshot | null;
 }) {

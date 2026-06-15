@@ -1,5 +1,6 @@
 import { UiIcon } from '../../../components/UiIcon';
 import { navigateTo } from '../../../lib/view';
+import { studioRunUrl } from '../../runtime-shared/studioLinks';
 
 export type MessageActivityEvent = {
   event_id?: string;
@@ -12,6 +13,8 @@ export type MessageActivityEvent = {
   metadata?: {
     run_id?: string;
     workflow_run_id?: string;
+    run_group_id?: string;
+    group_dispatch_run_group_id?: string;
   } & Record<string, unknown>;
 };
 
@@ -25,7 +28,7 @@ export function MessageActivityList({
   events: MessageActivityEvent[];
   formatTime: (value?: string) => string;
   messageStatus?: string;
-  onOpenRunDetails: (runId: string) => void;
+  onOpenRunDetails: (runId: string, studioUrl?: string) => void;
   progressLabel?: string;
 }) {
   const rows = events.slice(0, 4);
@@ -48,6 +51,8 @@ export function MessageActivityList({
       {visibleRows.map((event, index) => {
         const displayStatus = activityDisplayStatus(event.status, messageStatus);
         const runId = activityRunId(event);
+        const groupRunId = activityGroupRunId(event);
+        const studioUrl = runId ? studioRunUrl(runId, { groupRunId }) || '' : '';
         const eventKey = activityEventKey(event, index);
         return (
           <div
@@ -86,8 +91,9 @@ export function MessageActivityList({
                 className="message-activity-detail-button"
                 data-run-id={runId}
                 data-run-status={displayStatus || ''}
+                data-studio-url={studioUrl}
                 data-testid="chat-message-activity-open-run-detail"
-                onClick={() => onOpenRunDetails(runId)}
+                onClick={() => onOpenRunDetails(runId, studioUrl)}
               >
                 详情
               </button>
@@ -105,6 +111,10 @@ function activityEventKey(event: MessageActivityEvent, index: number) {
 
 function activityRunId(event?: MessageActivityEvent | null) {
   return String(event?.metadata?.run_id || event?.metadata?.workflow_run_id || '').trim();
+}
+
+function activityGroupRunId(event?: MessageActivityEvent | null) {
+  return String(event?.metadata?.run_group_id || event?.metadata?.group_dispatch_run_group_id || '').trim();
 }
 
 function activityStatusClass(status?: string) {
