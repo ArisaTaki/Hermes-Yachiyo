@@ -18,6 +18,7 @@ from apps.bridge.routes.yachiyo_models import (
     SkillUpdateBody,
     StartGroupRunBody,
     StartWorkflowRunBody,
+    TaskApprovalRequest,
 )
 from apps.bridge.routes.yachiyo_services import (
     bad_request,
@@ -497,3 +498,140 @@ async def start_workflow_run(
         return snapshot(run_snapshot)
     except (AgentRuntimeError, KeyError) as exc:
         raise bad_request(exc) from exc
+
+
+async def get_run_timeline(
+    run_id: str,
+    http_request: Request | None = None,
+) -> dict[str, Any]:
+    try:
+        run_snapshot = await asyncio.to_thread(studio_service(http_request).get_run_timeline, run_id)
+        return snapshot(run_snapshot)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Run 不存在") from exc
+
+
+async def list_runs(
+    limit: int = 50,
+    http_request: Request | None = None,
+) -> dict[str, Any]:
+    runs = await asyncio.to_thread(
+        studio_service(http_request).list_run_timelines,
+        max(1, min(200, int(limit or 50))),
+    )
+    return {"runs": [snapshot(run) for run in runs]}
+
+
+async def rerun_run(
+    run_id: str,
+    http_request: Request | None = None,
+) -> dict[str, Any]:
+    try:
+        run_snapshot = await asyncio.to_thread(studio_service(http_request).rerun_run, run_id)
+        return snapshot(run_snapshot)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Run 不存在") from exc
+    except AgentRuntimeError as exc:
+        raise bad_request(exc) from exc
+
+
+async def cancel_run(
+    run_id: str,
+    http_request: Request | None = None,
+) -> dict[str, Any]:
+    try:
+        run_snapshot = await asyncio.to_thread(studio_service(http_request).cancel_run, run_id)
+        return snapshot(run_snapshot)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Run 不存在") from exc
+
+
+async def delete_run(
+    run_id: str,
+    http_request: Request | None = None,
+) -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(studio_service(http_request).delete_run, run_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Run 不存在") from exc
+    except AgentRuntimeError as exc:
+        raise bad_request(exc) from exc
+
+
+async def approve_run_approval(
+    run_id: str,
+    http_request: Request | None = None,
+) -> dict[str, Any]:
+    try:
+        run_snapshot = await asyncio.to_thread(studio_service(http_request).approve_run_approval, run_id)
+        return snapshot(run_snapshot)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Run 不存在") from exc
+    except AgentRuntimeError as exc:
+        raise bad_request(exc) from exc
+
+
+async def reject_run_approval(
+    run_id: str,
+    request: TaskApprovalRequest | None = None,
+    http_request: Request | None = None,
+) -> dict[str, Any]:
+    try:
+        run_snapshot = await asyncio.to_thread(
+            studio_service(http_request).reject_run_approval,
+            run_id,
+            request.reason if request is not None else "",
+        )
+        return snapshot(run_snapshot)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Run 不存在") from exc
+    except AgentRuntimeError as exc:
+        raise bad_request(exc) from exc
+
+
+async def read_run_artifact(
+    run_id: str,
+    artifact_path: str,
+    http_request: Request | None = None,
+) -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(
+            studio_service(http_request).read_run_artifact,
+            run_id,
+            artifact_path,
+        )
+    except (AgentRuntimeError, KeyError) as exc:
+        raise HTTPException(status_code=404, detail="Artifact 不存在") from exc
+
+
+async def get_run_events(
+    run_id: str,
+    after_sequence: int = 0,
+    limit: int = 200,
+    http_request: Request | None = None,
+) -> dict[str, Any]:
+    try:
+        events = await asyncio.to_thread(
+            lambda: list(studio_service(http_request).get_run_event_stream(run_id))
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Run 不存在") from exc
+    clean_after_sequence = max(0, int(after_sequence or 0))
+    clean_limit = max(1, min(500, int(limit or 200)))
+    filtered_events = [
+        event
+        for event in events
+        if int(getattr(event, "sequence", 0) or 0) > clean_after_sequence
+    ]
+    page = filtered_events[:clean_limit]
+    next_after_sequence = max(
+        [int(getattr(event, "sequence", 0) or 0) for event in page] or [clean_after_sequence]
+    )
+    return {
+        "run_id": run_id,
+        "after_sequence": clean_after_sequence,
+        "limit": clean_limit,
+        "next_after_sequence": next_after_sequence,
+        "has_more": len(filtered_events) > clean_limit,
+        "events": [snapshot(event) for event in page],
+    }

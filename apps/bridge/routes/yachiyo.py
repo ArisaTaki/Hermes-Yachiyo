@@ -407,11 +407,7 @@ async def get_studio_run_timeline(
     run_id: str,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    try:
-        snapshot = await asyncio.to_thread(_studio_service(http_request).get_run_timeline, run_id)
-        return _snapshot(snapshot)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Run 不存在") from exc
+    return await yachiyo_studio_handlers.get_run_timeline(run_id, http_request)
 
 
 @router.get("/studio/runs")
@@ -419,11 +415,7 @@ async def list_studio_runs(
     http_request: Request = None,  # type: ignore[assignment]
     limit: int = 50,
 ) -> dict[str, Any]:
-    runs = await asyncio.to_thread(
-        _studio_service(http_request).list_run_timelines,
-        max(1, min(200, int(limit or 50))),
-    )
-    return {"runs": [_snapshot(run) for run in runs]}
+    return await yachiyo_studio_handlers.list_runs(limit, http_request)
 
 
 @router.get("/studio/runs/{run_id}")
@@ -431,11 +423,7 @@ async def get_studio_run(
     run_id: str,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    try:
-        snapshot = await asyncio.to_thread(_studio_service(http_request).get_run_timeline, run_id)
-        return _snapshot(snapshot)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Run 不存在") from exc
+    return await yachiyo_studio_handlers.get_run_timeline(run_id, http_request)
 
 
 @router.post("/studio/runs/{run_id}/rerun")
@@ -443,13 +431,7 @@ async def rerun_studio_run(
     run_id: str,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    try:
-        snapshot = await asyncio.to_thread(_studio_service(http_request).rerun_run, run_id)
-        return _snapshot(snapshot)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Run 不存在") from exc
-    except AgentRuntimeError as exc:
-        raise _bad_request(exc) from exc
+    return await yachiyo_studio_handlers.rerun_run(run_id, http_request)
 
 
 @router.post("/studio/runs/{run_id}/cancel")
@@ -457,11 +439,7 @@ async def cancel_studio_run(
     run_id: str,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    try:
-        snapshot = await asyncio.to_thread(_studio_service(http_request).cancel_run, run_id)
-        return _snapshot(snapshot)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Run 不存在") from exc
+    return await yachiyo_studio_handlers.cancel_run(run_id, http_request)
 
 
 @router.delete("/studio/runs/{run_id}")
@@ -469,12 +447,7 @@ async def delete_studio_run(
     run_id: str,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    try:
-        return await asyncio.to_thread(_studio_service(http_request).delete_run, run_id)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Run 不存在") from exc
-    except AgentRuntimeError as exc:
-        raise _bad_request(exc) from exc
+    return await yachiyo_studio_handlers.delete_run(run_id, http_request)
 
 
 @router.post("/studio/runs/{run_id}/approval/approve")
@@ -482,13 +455,7 @@ async def approve_studio_run_approval(
     run_id: str,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    try:
-        snapshot = await asyncio.to_thread(_studio_service(http_request).approve_run_approval, run_id)
-        return _snapshot(snapshot)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Run 不存在") from exc
-    except AgentRuntimeError as exc:
-        raise _bad_request(exc) from exc
+    return await yachiyo_studio_handlers.approve_run_approval(run_id, http_request)
 
 
 @router.post("/studio/runs/{run_id}/approval/reject")
@@ -497,17 +464,7 @@ async def reject_studio_run_approval(
     request: TaskApprovalRequest | None = None,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    try:
-        snapshot = await asyncio.to_thread(
-            _studio_service(http_request).reject_run_approval,
-            run_id,
-            request.reason if request is not None else "",
-        )
-        return _snapshot(snapshot)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Run 不存在") from exc
-    except AgentRuntimeError as exc:
-        raise _bad_request(exc) from exc
+    return await yachiyo_studio_handlers.reject_run_approval(run_id, request, http_request)
 
 
 @router.get("/studio/runs/{run_id}/artifacts/{artifact_path:path}")
@@ -516,14 +473,7 @@ async def get_studio_run_artifact(
     artifact_path: str,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    try:
-        return await asyncio.to_thread(
-            _studio_service(http_request).read_run_artifact,
-            run_id,
-            artifact_path,
-        )
-    except (AgentRuntimeError, KeyError) as exc:
-        raise HTTPException(status_code=404, detail="Artifact 不存在") from exc
+    return await yachiyo_studio_handlers.read_run_artifact(run_id, artifact_path, http_request)
 
 
 @router.get("/studio/runs/{run_id}/events")
@@ -533,28 +483,9 @@ async def get_studio_run_events(
     after_sequence: int = 0,
     limit: int = 200,
 ) -> dict[str, Any]:
-    try:
-        events = await asyncio.to_thread(
-            lambda: list(_studio_service(http_request).get_run_event_stream(run_id))
-        )
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Run 不存在") from exc
-    clean_after_sequence = max(0, int(after_sequence or 0))
-    clean_limit = max(1, min(500, int(limit or 200)))
-    filtered_events = [
-        event
-        for event in events
-        if int(getattr(event, "sequence", 0) or 0) > clean_after_sequence
-    ]
-    page = filtered_events[:clean_limit]
-    next_after_sequence = max(
-        [int(getattr(event, "sequence", 0) or 0) for event in page] or [clean_after_sequence]
+    return await yachiyo_studio_handlers.get_run_events(
+        run_id,
+        after_sequence,
+        limit,
+        http_request,
     )
-    return {
-        "run_id": run_id,
-        "after_sequence": clean_after_sequence,
-        "limit": clean_limit,
-        "next_after_sequence": next_after_sequence,
-        "has_more": len(filtered_events) > clean_limit,
-        "events": [_snapshot(event) for event in page],
-    }
