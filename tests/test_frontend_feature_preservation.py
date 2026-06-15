@@ -654,6 +654,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "useAgentGroups",
             "useAgentStudioRefresh({",
             "useAgentStudioRouteState()",
+            "useAgentStudioSelectionSynchronization({",
             "useApprovedRunGuard",
             "useRunApprovalActions",
             "useRunDetailSynchronization({",
@@ -694,14 +695,27 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "runMatchesSearch(",
             "workflowSpecStepRefs({",
             "agentRunReadinessIssue(agent, chatModelProfiles",
+            "agentToDraft(selectedAgent)",
             "const routeRunId = currentParam('run').trim();",
             "getStudioRunForView(",
+            "workflowNodes(selectedWorkflow)",
             "async function saveAgentGroup()",
             "async function runCurrentAgentGroup()",
             "listStudioAgentsForView()",
             "listStudioSkillsForView()",
             "listModelProfiles()",
             "studioRunnablesForView(",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useAgentStudioSelectionSynchronization.ts",
+        [
+            "export function useAgentStudioSelectionSynchronization",
+            "setSelectedSkillIds((current) => pruneSelectedIds(current, filteredLibrarySkillIds));",
+            "setSelectedRunIds((current) => pruneSelectedIds(current, filteredRunIds));",
+            "if (selectedAgent) setDraft(agentToDraft(selectedAgent));",
+            "setNodes(workflowNodes(selectedWorkflow));",
+            "setWorkflowName(selectedWorkflow?.name || 'New Workflow');",
         ],
     )
     _assert_contains(
@@ -2348,6 +2362,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "useAgentGroupActions",
             "useAgentStudioRefresh",
             "useAgentStudioRouteState",
+            "useAgentStudioSelectionSynchronization",
             "useAgentRunReadiness",
             "useAgentSaveActions",
             "useAgentSkillMountActions",

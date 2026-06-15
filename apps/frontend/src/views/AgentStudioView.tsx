@@ -26,6 +26,7 @@ import { useAgentSaveActions } from '../features/agent-studio/hooks/useAgentSave
 import { useAgentSkillMountActions } from '../features/agent-studio/hooks/useAgentSkillMountActions';
 import { useAgentStudioRefresh, type StudioRefreshOptions } from '../features/agent-studio/hooks/useAgentStudioRefresh';
 import { useAgentStudioRouteState } from '../features/agent-studio/hooks/useAgentStudioRouteState';
+import { useAgentStudioSelectionSynchronization } from '../features/agent-studio/hooks/useAgentStudioSelectionSynchronization';
 import { useApprovedRunGuard } from '../features/agent-studio/hooks/useApprovedRunGuard';
 import { useRunApprovalActions } from '../features/agent-studio/hooks/useRunApprovalActions';
 import { useRunApprovalFollowup } from '../features/agent-studio/hooks/useRunApprovalFollowup';
@@ -59,7 +60,6 @@ import {
 } from '../features/agent-studio/studioTabs';
 import {
   agentCapabilityLine,
-  agentToDraft,
   runnableCapabilityLine,
   runnableOptionLabel,
 } from '../features/agent-studio/utils/agents';
@@ -84,8 +84,6 @@ import {
   skippedWorkflowArtifactLabel,
   starterNodes,
   validateWorkflowDraft,
-  workflowEdges,
-  workflowNodes,
   workflowRunArtifactForStep,
   workflowStepArtifacts,
   workflowStepKindLabel,
@@ -138,13 +136,6 @@ const emptyAgentDraft: AgentDraft = {
   writable_scopes: '',
   enabled: true,
 };
-
-function pruneSelectedIds(current: string[], availableIds: string[]): string[] {
-  const available = new Set(availableIds);
-  const next = current.filter((id) => available.has(id));
-  if (next.length === current.length) return current;
-  return next;
-}
 
 export function AgentStudioView() {
   const {
@@ -771,6 +762,20 @@ export function AgentStudioView() {
     setArtifactPreview,
     upsertRunDetailCache,
   });
+  useAgentStudioSelectionSynchronization({
+    filteredLibrarySkillIds,
+    filteredRunIds,
+    selectedAgent,
+    selectedWorkflow,
+    setDraft,
+    setEdges,
+    setNodes,
+    setSelectedRunIds,
+    setSelectedSkillIds,
+    setWorkflowDescription,
+    setWorkflowEnabled,
+    setWorkflowName,
+  });
 
   useEffect(() => {
     setLoading(true);
@@ -779,18 +784,6 @@ export function AgentStudioView() {
       .catch((err: unknown) => setError(err instanceof Error ? err.message : '读取 Agent Studio 失败'))
       .finally(() => setLoading(false));
   }, [refresh]);
-
-  useEffect(() => {
-    setSelectedSkillIds((current) => pruneSelectedIds(current, filteredLibrarySkillIds));
-  }, [filteredLibrarySkillIds]);
-
-  useEffect(() => {
-    setSelectedRunIds((current) => pruneSelectedIds(current, filteredRunIds));
-  }, [filteredRunIds]);
-
-  useEffect(() => {
-    if (selectedAgent) setDraft(agentToDraft(selectedAgent));
-  }, [selectedAgent]);
 
   useEffect(() => {
     if (tab !== 'agents' || loading || busyAction || agents.length) return;
@@ -807,14 +800,6 @@ export function AgentStudioView() {
       disposed = true;
     };
   }, [agents.length, busyAction, draft.agent_id, loading, refresh, selectedAgentId, tab]);
-
-  useEffect(() => {
-    setNodes(workflowNodes(selectedWorkflow));
-    setEdges(workflowEdges(selectedWorkflow));
-    setWorkflowName(selectedWorkflow?.name || 'New Workflow');
-    setWorkflowDescription(selectedWorkflow?.description || '');
-    setWorkflowEnabled(selectedWorkflow?.enabled !== false);
-  }, [selectedWorkflow, setEdges, setNodes]);
 
   const onConnect = useCallback(
     (connection: Connection) => {
