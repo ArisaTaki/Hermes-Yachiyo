@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 from apps.bridge.routes import yachiyo
+from apps.shell.yachiyo_agent import legacy_ports
 
 
 class _FakeAgentRuntime:
@@ -456,7 +457,7 @@ async def test_yachiyo_task_route_uses_chat_backed_agent_entry(monkeypatch: pyte
                 "status": "processing",
             }
 
-    monkeypatch.setattr(yachiyo, "ChatAPI", FakeChatAPI)
+    monkeypatch.setattr(legacy_ports, "ChatAPI", FakeChatAPI)
 
     started = await yachiyo.start_task(
         yachiyo.StartChatTaskRequest(

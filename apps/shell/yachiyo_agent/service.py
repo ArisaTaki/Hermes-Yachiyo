@@ -12,15 +12,20 @@ from .contracts import (
     ReadinessSnapshot,
     StartChatTaskRequest,
 )
-from .ports import RuntimePort
+from .ports import ChatTaskStarter, RuntimePort
 from .task_cards import agent_task_snapshot_from_payload, agent_task_snapshots_from_payloads
 
 
 class YachiyoAgentService:
     """Facade for everyday Yachiyo Agent tasks."""
 
-    def __init__(self, runtime_port: RuntimePort) -> None:
+    def __init__(
+        self,
+        runtime_port: RuntimePort,
+        chat_task_starter: ChatTaskStarter | None = None,
+    ) -> None:
         self._runtime_port = runtime_port
+        self._chat_task_starter = chat_task_starter
 
     def readiness(self) -> ReadinessSnapshot:
         return readiness_snapshot_from_payload(self._runtime_port.readiness())
@@ -30,6 +35,10 @@ class YachiyoAgentService:
         request: StartChatTaskRequest | Mapping[str, Any],
     ) -> AgentTaskSnapshot:
         payload = _request_payload(request)
+        if self._chat_task_starter is not None:
+            chat_payload = self._chat_task_starter.start_chat_task(payload)
+            if chat_payload is not None:
+                return agent_task_snapshot_from_payload(chat_payload)
         return agent_task_snapshot_from_payload(self._runtime_port.start_chat_task(payload))
 
     def get_task_snapshot(self, task_id: str) -> AgentTaskSnapshot:

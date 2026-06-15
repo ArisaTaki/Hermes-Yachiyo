@@ -10,7 +10,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from apps.bridge.deps import get_runtime
 from apps.shell.agent_runtime import AgentRuntimeError
-from apps.shell.chat_api import ChatAPI
 from apps.shell.yachiyo_agent import (
     AgentStudioService,
     ApprovalDecision,
@@ -23,7 +22,11 @@ from apps.shell.yachiyo_agent import (
     StartWorkflowRunRequest,
     YachiyoAgentService,
 )
-from apps.shell.yachiyo_agent.legacy_ports import LegacyRuntimePort, LegacyStudioPort
+from apps.shell.yachiyo_agent.legacy_ports import (
+    LegacyChatTaskStarter,
+    LegacyRuntimePort,
+    LegacyStudioPort,
+)
 from packages.security import redact_api_error_detail
 
 router = APIRouter(prefix="/yachiyo", tags=["Yachiyo Agent"])
@@ -130,7 +133,12 @@ def _runtime_from_request(request: Request | None = None) -> Any:
 
 
 def _agent_service(request: Request | None = None) -> YachiyoAgentService:
-    return YachiyoAgentService(LegacyRuntimePort(_runtime_from_request(request)))
+    app_runtime = _app_runtime_from_request(request)
+    runtime = _runtime_from_request(request)
+    return YachiyoAgentService(
+        LegacyRuntimePort(runtime),
+        chat_task_starter=LegacyChatTaskStarter(app_runtime, runtime),
+    )
 
 
 def _studio_service(request: Request | None = None) -> AgentStudioService:
@@ -143,60 +151,6 @@ def _snapshot(model: Any) -> dict[str, Any]:
 
 def _bad_request(exc: Exception) -> HTTPException:
     return HTTPException(status_code=400, detail=redact_api_error_detail(exc))
-
-
-def _start_chat_backed_task(
-    request: StartChatTaskRequest,
-    http_request: Request | None = None,
-) -> dict[str, Any] | None:
-    agent_id = str(request.agent_id or "").strip()
-    if not agent_id:
-        return None
-    app_runtime = _app_runtime_from_request(http_request)
-    if getattr(app_runtime, "chat_session", None) is None:
-        return None
-
-    metadata = request.metadata if isinstance(request.metadata, dict) else {}
-    client_message_id = str(
-        metadata.get("client_message_id")
-        or metadata.get("idempotency_key")
-        or metadata.get("client_task_id")
-        or ""
-    ).strip()
-    chat_api = ChatAPI(app_runtime)
-    result = chat_api.send_runnable_message_in_session(
-        request.conversation_id or "",
-        request.prompt,
-        runnable_id=agent_id,
-        client_message_id=client_message_id,
-    )
-    if result.get("ok") is False:
-        raise AgentRuntimeError(str(result.get("error") or "发送 Agent 任务失败"))
-
-    run_id = str(
-        result.get("run_id")
-        or result.get("agent_run_id")
-        or result.get("workflow_run_id")
-        or ""
-    ).strip()
-    if not run_id:
-        return None
-
-    conversation_id = str(
-        result.get("session_id")
-        or request.conversation_id
-        or getattr(getattr(app_runtime, "chat_session", None), "session_id", "")
-        or ""
-    ).strip()
-    task_id = str(
-        metadata.get("task_id")
-        or metadata.get("client_task_id")
-        or run_id
-    ).strip()
-    link_task_run = getattr(_runtime_from_request(http_request), "link_task_run", None)
-    if callable(link_task_run):
-        link_task_run(task_id=task_id, run_id=run_id, session_id=conversation_id)
-    return _snapshot(_agent_service(http_request).get_task_snapshot(task_id or run_id))
 
 
 @router.get("/readiness")
@@ -225,9 +179,6 @@ async def start_task(
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
     try:
-        chat_snapshot = await asyncio.to_thread(_start_chat_backed_task, request, http_request)
-        if chat_snapshot is not None:
-            return chat_snapshot
         snapshot = await asyncio.to_thread(_agent_service(http_request).start_chat_task, request)
         return _snapshot(snapshot)
     except (AgentRuntimeError, KeyError, ValueError) as exc:

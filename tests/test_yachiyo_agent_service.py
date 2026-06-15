@@ -53,6 +53,22 @@ class _FakeRuntimePort:
         return _task_payload(task_id=task_id, status="cancelled")
 
 
+class _FakeChatTaskStarter:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    def start_chat_task(self, request: dict[str, Any]) -> dict[str, Any] | None:
+        self.calls.append(request)
+        if not request.get("agent_id"):
+            return None
+        return _task_payload(
+            task_id="chat-backed-task",
+            run_id="chat-backed-run",
+            status="processing",
+            session_id=str(request.get("conversation_id") or ""),
+        )
+
+
 def test_yachiyo_agent_service_maps_fake_runtime_to_task_snapshots() -> None:
     port = _FakeRuntimePort()
     service = YachiyoAgentService(port)
@@ -76,6 +92,39 @@ def test_yachiyo_agent_service_maps_fake_runtime_to_task_snapshots() -> None:
     assert fetched.status == "completed"
     assert recent[0].task_id == "task-recent"
     assert port.calls[1][1]["prompt"] == "Patch README"
+
+
+def test_yachiyo_agent_service_prefers_chat_backed_starter_when_available() -> None:
+    port = _FakeRuntimePort()
+    starter = _FakeChatTaskStarter()
+    service = YachiyoAgentService(port, chat_task_starter=starter)
+
+    task = service.start_chat_task(
+        StartChatTaskRequest(
+            prompt="Patch README",
+            conversation_id="chat-1",
+            agent_id="agent-1",
+        )
+    )
+
+    assert task.task_id == "chat-backed-task"
+    assert task.status == "running"
+    assert task.conversation_id == "chat-1"
+    assert starter.calls[0]["agent_id"] == "agent-1"
+    assert port.calls == []
+
+
+def test_yachiyo_agent_service_falls_back_to_runtime_port_without_chat_backed_task() -> None:
+    port = _FakeRuntimePort()
+    starter = _FakeChatTaskStarter()
+    service = YachiyoAgentService(port, chat_task_starter=starter)
+
+    task = service.start_chat_task(StartChatTaskRequest(prompt="Patch README"))
+
+    assert task.task_id == "task-1"
+    assert task.status == "waiting_approval"
+    assert starter.calls[0]["prompt"] == "Patch README"
+    assert port.calls[0][0] == "start_chat_task"
 
 
 def test_yachiyo_agent_service_delegates_approval_and_cancel_to_runtime_port() -> None:

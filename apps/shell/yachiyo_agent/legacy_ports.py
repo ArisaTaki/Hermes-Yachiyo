@@ -6,6 +6,8 @@ import json
 from typing import Any
 from uuid import uuid4
 
+from apps.shell.chat_api import ChatAPI
+
 MAIN_CHAT_AGENT_ID = "builtin:yachiyo-main"
 _GROUP_CONFIG_KIND = "group_config"
 _GROUP_MODES = {"moderated", "round_robin", "debate", "pipeline", "parallel", "custom"}
@@ -198,6 +200,76 @@ class LegacyRuntimePort:
             except KeyError:
                 pass
         return task_id
+
+
+class LegacyChatTaskStarter:
+    """Starts agent tasks through the existing Chat session path when available."""
+
+    def __init__(self, app_runtime: Any, runtime: Any) -> None:
+        self._app_runtime = app_runtime
+        self._runtime = runtime
+        self._projector = LegacyRunPayloadProjector()
+
+    def start_chat_task(self, request: dict[str, Any]) -> dict[str, Any] | None:
+        agent_id = str(request.get("agent_id") or "").strip()
+        if not agent_id:
+            return None
+        if getattr(self._app_runtime, "chat_session", None) is None:
+            return None
+
+        metadata = request.get("metadata") if isinstance(request.get("metadata"), dict) else {}
+        client_message_id = str(
+            metadata.get("client_message_id")
+            or metadata.get("idempotency_key")
+            or metadata.get("client_task_id")
+            or ""
+        ).strip()
+        result = ChatAPI(self._app_runtime).send_runnable_message_in_session(
+            str(request.get("conversation_id") or ""),
+            str(request.get("prompt") or ""),
+            runnable_id=agent_id,
+            client_message_id=client_message_id,
+        )
+        if result.get("ok") is False:
+            raise ValueError(str(result.get("error") or "发送 Agent 任务失败"))
+
+        run_id = str(
+            result.get("run_id")
+            or result.get("agent_run_id")
+            or result.get("workflow_run_id")
+            or ""
+        ).strip()
+        if not run_id:
+            return None
+
+        conversation_id = str(
+            result.get("session_id")
+            or request.get("conversation_id")
+            or getattr(getattr(self._app_runtime, "chat_session", None), "session_id", "")
+            or ""
+        ).strip()
+        task_id = str(
+            metadata.get("task_id")
+            or metadata.get("client_task_id")
+            or run_id
+        ).strip()
+        link_task_run = getattr(self._runtime, "link_task_run", None)
+        if callable(link_task_run):
+            link_task_run(task_id=task_id, run_id=run_id, session_id=conversation_id)
+
+        try:
+            run = self._runtime.get_run(run_id)
+        except KeyError:
+            run = {
+                **result,
+                "run_id": run_id,
+                "task_id": task_id,
+                "session_id": conversation_id,
+            }
+        return self._projector.chat_task_payload(
+            {**run, "task_id": task_id, "session_id": conversation_id},
+            conversation_id=conversation_id,
+        )
 
 
 class LegacyStudioPort:

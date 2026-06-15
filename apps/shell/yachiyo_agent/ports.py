@@ -31,6 +31,10 @@ class RuntimePort(Protocol):
     def cancel(self, task_id: str) -> dict[str, Any]: ...
 
 
+class ChatTaskStarter(Protocol):
+    def start_chat_task(self, request: dict[str, Any]) -> dict[str, Any] | None: ...
+
+
 class StudioPort(Protocol):
     def list_agents(self) -> list[dict[str, Any]] | Mapping[str, Any]: ...
 
