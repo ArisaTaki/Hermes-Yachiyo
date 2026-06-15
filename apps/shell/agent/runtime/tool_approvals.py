@@ -8,6 +8,7 @@ from typing import Any
 
 from apps.shell.agent.runtime.budget import RunBudget
 from apps.shell.agent.runtime.errors import AgentRuntimeError
+from apps.shell.agent.runtime.tool_requests import normalize_tool_name
 from apps.shell.agent.tools.broker import ToolBroker
 from packages.security import redact_api_error_text, redact_sensitive_text
 
@@ -43,6 +44,35 @@ def _normalize_tool_iteration(value: Any) -> int:
     except (TypeError, ValueError):
         iteration = 0
     return max(0, min(iteration, MAX_AGENT_TOOL_ITERATIONS))
+
+
+class ToolPendingApprovalBuilder:
+    """Builds private pending-approval payloads for tool approvals."""
+
+    def __init__(self, *, approval_id_factory: Any, now: Any) -> None:
+        self._approval_id_factory = approval_id_factory
+        self._now = now
+
+    def build(
+        self,
+        tool_request: dict[str, Any],
+        *,
+        messages: list[dict[str, Any]],
+        next_iteration: int,
+        remaining_tool_requests: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        raw_input = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+        return {
+            "approval_id": str(self._approval_id_factory()),
+            "tool": normalize_tool_name(tool_request.get("tool")),
+            "input": deepcopy(raw_input),
+            "input_preview": _tool_input_preview(raw_input),
+            "requested_at": str(self._now()),
+            "messages": deepcopy(messages),
+            "tool_request": deepcopy(tool_request),
+            "remaining_tool_requests": deepcopy(remaining_tool_requests),
+            "next_iteration": _normalize_tool_iteration(next_iteration),
+        }
 
 
 @dataclass

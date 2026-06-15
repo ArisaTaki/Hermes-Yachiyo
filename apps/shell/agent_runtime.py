@@ -77,6 +77,7 @@ from apps.shell.agent.runtime.tool_approvals import (
     ToolApprovalExecutionFailureProjection,
     ToolApprovalExecutionFollowup,
     ToolApprovalExecutionRequest,
+    ToolPendingApprovalBuilder,
     ToolApprovalResumeContext,
     ToolApprovalTransitionContext,
 )
@@ -1629,6 +1630,10 @@ class NativeRunEngine:
         self._run_cancel_locks: dict[str, threading.RLock] = {}
         self._run_cancel_locks_guard = threading.RLock()
         self.tool_request_parser = ToolRequestParser()
+        self.tool_pending_approvals = ToolPendingApprovalBuilder(
+            approval_id_factory=lambda: f"approval_{uuid4().hex[:12]}",
+            now=_now,
+        )
         raw_conn = sqlite3.connect(self.db_path, check_same_thread=False)
         raw_conn.execute("PRAGMA foreign_keys=ON")
         raw_conn.execute("PRAGMA journal_mode=WAL")
@@ -5036,7 +5041,7 @@ class NativeRunEngine:
             )
             if tool_result.get("approval_required"):
                 raise AgentApprovalRequired(
-                    self._make_pending_approval(
+                    self.tool_pending_approvals.build(
                         tool_request,
                         messages=messages,
                         next_iteration=next_iteration,
@@ -5222,18 +5227,15 @@ class NativeRunEngine:
         next_iteration: int,
         remaining_tool_requests: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        raw_input = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
-        return {
-            "approval_id": f"approval_{uuid4().hex[:12]}",
-            "tool": _normalize_tool_name(tool_request.get("tool")),
-            "input": deepcopy(raw_input),
-            "input_preview": _tool_input_preview(raw_input),
-            "requested_at": _now(),
-            "messages": deepcopy(messages),
-            "tool_request": deepcopy(tool_request),
-            "remaining_tool_requests": deepcopy(remaining_tool_requests),
-            "next_iteration": _normalize_tool_iteration(next_iteration),
-        }
+        return ToolPendingApprovalBuilder(
+            approval_id_factory=lambda: f"approval_{uuid4().hex[:12]}",
+            now=_now,
+        ).build(
+            tool_request,
+            messages=messages,
+            next_iteration=next_iteration,
+            remaining_tool_requests=remaining_tool_requests,
+        )
 
     def _tool_requests_from_message(self, message: dict[str, Any], content: str) -> list[dict[str, Any]]:
         return self.tool_request_parser.requests_from_message(message, content)
