@@ -10,14 +10,11 @@ import type {
 import { ImageAttachmentViewer } from '../components/ImageAttachmentViewer';
 import { useConfirmDialog } from '../components/ConfirmDialog';
 import { UiIcon } from '../components/UiIcon';
-import { AgentTaskCard } from '../features/yachiyo-chat/components/AgentTaskCard';
+import { MessageAgentTaskCard } from '../features/yachiyo-chat/components/MessageAgentTaskCard';
 import { useYachiyoTaskActions } from '../features/yachiyo-chat/hooks/useYachiyoTaskActions';
 import { useYachiyoTaskSnapshots } from '../features/yachiyo-chat/hooks/useYachiyoTaskSnapshots';
 import { useYachiyoTaskSubmit } from '../features/yachiyo-chat/hooks/useYachiyoTaskSubmit';
-import {
-  agentTaskSnapshotFromMessage,
-  publicTaskSnapshotForMessage,
-} from '../features/yachiyo-chat/taskSnapshots';
+import { publicTaskSnapshotForMessage } from '../features/yachiyo-chat/taskSnapshots';
 import type { AgentTaskSnapshot, ApprovalCardSnapshot } from '../features/yachiyo-chat/types';
 import logoUrl from '../../../../docs/open-design/logo.png';
 import { type AssistantProfileSeed, useAssistantProfileSeed } from '../lib/assistantProfileSeed';
@@ -3135,9 +3132,6 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
   const approvalId = approvalDetails ? approvalIdFromPending(message.metadata?.pending_approval) : '';
   const approvalSignature = approvalDetails ? messageApprovalSignature(message) : '';
   const showAgentProgress = isProcessingEmpty && Boolean(runId || message.metadata?.runnable_kind === 'agent' || message.metadata?.runnable_kind === 'workflow');
-  const taskSnapshot = !approvalDetails && !showAgentProgress
-    ? publicTaskSnapshot || agentTaskSnapshotFromMessage(message, displayContent)
-    : null;
   const showInlineRunDetails = role === 'assistant' && Boolean(runId) && !approvalDetails && !showAgentProgress;
   const artifactCount = Number(message.metadata?.run_artifact_count || 0);
   const duplicateError = Boolean(message.error && displayContent.trim() && message.error.trim() === displayContent.trim());
@@ -3207,16 +3201,17 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
           onOpenRunDetails={onOpenRunDetails}
           progressLabel={message.progress_label}
         />
-        {taskSnapshot ? (
-          <AgentTaskCard
-            busy={approvalBusy}
-            onApproveApproval={onApproveTaskApproval}
-            onCancelTask={onCancelTask}
-            onOpenStudio={onOpenRunDetails}
-            onRejectApproval={onRejectTaskApproval}
-            task={taskSnapshot}
-          />
-        ) : null}
+        <MessageAgentTaskCard
+          busy={approvalBusy}
+          displayContent={displayContent}
+          hidden={Boolean(approvalDetails || showAgentProgress)}
+          message={message}
+          onApproveApproval={onApproveTaskApproval}
+          onCancelTask={onCancelTask}
+          onOpenStudio={onOpenRunDetails}
+          onRejectApproval={onRejectTaskApproval}
+          publicTaskSnapshot={publicTaskSnapshot}
+        />
         {followupNotice ? (
           <div
             className="message-followup-status"

@@ -387,7 +387,7 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
     _assert_contains(
         "apps/frontend/src/views/ChatView.tsx",
         [
-            "AgentTaskCard",
+            "MessageAgentTaskCard",
             "useYachiyoTaskActions",
             "useYachiyoTaskSnapshots",
             "from '../features/yachiyo-chat/taskSnapshots';",
@@ -397,7 +397,6 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "publicTaskSnapshotForMessage(message, agentTaskSnapshotsById)",
             "refreshYachiyoTasksForSession(payload.current_session_id)",
             "refreshYachiyoTaskById(resultRunId)",
-            "agentTaskSnapshotFromMessage(message, displayContent)",
             "onOpenStudio={onOpenRunDetails}",
             "onApproveApproval={onApproveTaskApproval}",
             "onRejectApproval={onRejectTaskApproval}",
@@ -439,12 +438,26 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "function yachiyoTaskCacheKeys",
             "function yachiyoTaskRunId",
             "function yachiyoTaskStatusMessage",
+            "agentTaskSnapshotFromMessage(message, displayContent)",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/MessageAgentTaskCard.tsx",
+        [
+            "export function MessageAgentTaskCard",
+            "agentTaskSnapshotFromMessage(message, displayContent)",
+            "publicTaskSnapshot || agentTaskSnapshotFromMessage(message, displayContent)",
+            "onOpenStudio={onOpenStudio}",
+            "onApproveApproval={onApproveApproval}",
+            "onRejectApproval={onRejectApproval}",
+            "onCancelTask={onCancelTask}",
         ],
     )
     _assert_contains(
         "apps/frontend/src/features/yachiyo-chat/taskSnapshots.ts",
         [
             "export function agentTaskSnapshotFromMessage",
+            "export type YachiyoTaskChatMessage",
             "export function publicTaskSnapshotForMessage",
             "export function yachiyoTaskCacheKeys",
             "export function yachiyoTaskRunId",

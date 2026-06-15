@@ -48,7 +48,7 @@ type YachiyoTaskChatMetadata = {
   };
 };
 
-type YachiyoTaskChatMessage = {
+export type YachiyoTaskChatMessage = {
   role?: string;
   content?: string;
   text?: string;
