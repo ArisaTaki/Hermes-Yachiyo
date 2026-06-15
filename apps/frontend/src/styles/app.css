@@ -17478,6 +17478,38 @@ button.activity-item {
   overflow-wrap: anywhere;
 }
 
+.runtime-artifact-preview-text {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--hy-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.runtime-artifact-meta {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
+.run-artifacts .studio-runtime-artifact .runtime-artifact-meta span,
+.runtime-artifact-meta span {
+  max-width: 100%;
+  overflow: hidden;
+  padding: 2px 6px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 6px;
+  color: var(--hy-faint);
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
+  font-size: 9px;
+  font-weight: 500;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .run-artifacts.compact button {
   min-height: 26px;
   padding: 4px 8px;

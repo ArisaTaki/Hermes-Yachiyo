@@ -86,21 +86,39 @@ export function runtimeArtifactListItem(
   const runId = artifactStringValue(artifact, 'run_id');
   const sourceRunId = artifactStringValue(artifact, 'source_run_id') || runId || fallbackRunId;
   const sourceLabel = artifactStringValue(artifact, 'source_runnable_name') || artifactStringValue(artifact, 'workflow_step_label');
+  const mimeType = artifactStringValue(artifact, 'mime_type');
+  const previewText = artifactStringValue(artifact, 'preview_text');
+  const url = artifactStringValue(artifact, 'url');
+  const createdAt = artifactStringValue(artifact, 'created_at');
+  const sizeBytes = artifactNumberValue(artifact, 'size_bytes');
   const artifactId = artifactStringValue(artifact, 'artifact_id') || `${sourceRunId}:${path || kind}:${index}`;
   const title = artifactStringValue(artifact, 'title')
     || (sourceLabel ? `${sourceLabel} / ${path || 'artifact'}` : path || kind || 'Artifact');
   return {
     artifact_id: artifactId,
+    created_at: createdAt,
     kind,
+    mime_type: mimeType,
     path,
+    preview_text: previewText,
     run_id: runId,
+    size_bytes: sizeBytes,
     source_label: sourceLabel,
     source_run_id: sourceRunId,
     title,
+    url,
   };
 }
 
 function artifactStringValue(artifact: RuntimeArtifactSource, key: string) {
   const value = (artifact as Record<string, unknown>)[key];
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function artifactNumberValue(artifact: RuntimeArtifactSource, key: string) {
+  const value = (artifact as Record<string, unknown>)[key];
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }

@@ -720,8 +720,16 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "export function RuntimeArtifactPreview",
             "variant = 'compact'",
             "data-artifact-id={artifact.artifact_id}",
+            "data-artifact-mime-type={artifact.mime_type || ''}",
             "data-artifact-path={artifact.path || ''}",
+            "data-artifact-run-id={artifact.run_id || ''}",
+            "data-artifact-size-bytes={artifact.size_bytes ?? ''}",
+            "data-artifact-source-run-id={artifact.source_run_id || ''}",
             "data-artifact-variant={variant}",
+            "artifactMetadataItems",
+            "runtime-artifact-preview-text",
+            "runtime-artifact-meta",
+            "data-testid={`${testId}-metadata`}",
         ],
     )
     _assert_contains(
@@ -738,6 +746,11 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "data-artifact-source-label={item.source_label || ''}",
             "data-artifact-source-run-id={item.source_run_id || ''}",
             "data-testid={itemTestId}",
+            "mime_type: mimeType",
+            "preview_text: previewText",
+            "size_bytes: sizeBytes",
+            "url,",
+            "artifactNumberValue",
         ],
     )
     _assert_contains(
@@ -3712,6 +3725,9 @@ def test_agent_studio_exposes_stable_e2e_selectors_for_run_detail_and_approval_f
             ".run-step-meta span",
             ".runtime-approval-meta",
             ".runtime-approval-meta span",
+            ".runtime-artifact-preview-text",
+            ".runtime-artifact-meta",
+            ".runtime-artifact-meta span",
             ".runtime-tool-call-previews",
             "font-family: \"SF Mono\", \"JetBrains Mono\", ui-monospace, monospace;",
         ],
