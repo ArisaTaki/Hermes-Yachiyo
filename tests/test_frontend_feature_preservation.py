@@ -861,6 +861,20 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
     _assert_contains(
         "apps/frontend/src/features/yachiyo-studio/types.ts",
         [
+            "RunTimelineSnapshot as RuntimeRunTimelineSnapshot",
+            "GroupRunSnapshot as RuntimeGroupRunSnapshot",
+            "export type YachiyoRunTimelineSnapshot = RuntimeRunTimelineSnapshot &",
+            "task_id?: string | null;",
+            "session_id?: string | null;",
+            "task_run_link_created_at?: string | null;",
+            "task_run_link_last_event_sequence?: number | null;",
+            "export type YachiyoGroupRunSnapshot = Omit<RuntimeGroupRunSnapshot, 'runs'>",
+            "runs?: YachiyoRunTimelineSnapshot[];",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-studio/types.ts",
+        [
             "from '../runtime-shared/types';",
             "AgentDefinitionSnapshot",
             "AgentGroupSnapshot",
@@ -4184,7 +4198,7 @@ def test_agent_frontend_run_helpers_preserve_native_run_bridge_contract() -> Non
         agents_lib,
         "listRuns",
         [
-            "apiGet<{ runs?: RunTimelinePublicSnapshot[] }>('/yachiyo/studio/runs')",
+            "apiGet<{ runs?: YachiyoRunTimelineSnapshot[] }>('/yachiyo/studio/runs')",
             ".then((payload) => (payload.runs || []).map(runSpecFromPublicTimelineSnapshot))",
             "apiGet<{ runs?: RunSpec[] }>('/ui/runs')",
         ],
@@ -4193,7 +4207,7 @@ def test_agent_frontend_run_helpers_preserve_native_run_bridge_contract() -> Non
         agents_lib,
         "getRun",
         [
-            "apiGet<RunTimelinePublicSnapshot>(`/yachiyo/studio/runs/${encodeURIComponent(runId)}`)",
+            "apiGet<YachiyoRunTimelineSnapshot>(`/yachiyo/studio/runs/${encodeURIComponent(runId)}`)",
             ".then(runSpecFromPublicTimelineSnapshot)",
             "apiGet(`/ui/runs/${encodeURIComponent(runId)}`)",
         ],
@@ -4202,7 +4216,7 @@ def test_agent_frontend_run_helpers_preserve_native_run_bridge_contract() -> Non
         agents_lib,
         "listRunGroups",
         [
-            "apiGet<{ group_runs?: GroupRunPublicSnapshot[] }>('/yachiyo/studio/group-runs')",
+            "apiGet<{ group_runs?: YachiyoGroupRunSnapshot[] }>('/yachiyo/studio/group-runs')",
             ".then((payload) => (payload.group_runs || []).map(runGroupSpecFromPublicGroupRun))",
             "apiGet<{ run_groups?: RunGroupSpec[] }>('/ui/run-groups')",
         ],
@@ -4211,7 +4225,7 @@ def test_agent_frontend_run_helpers_preserve_native_run_bridge_contract() -> Non
         agents_lib,
         "getRunGroup",
         [
-            "apiGet<GroupRunPublicSnapshot>(`/yachiyo/studio/group-runs/${encodeURIComponent(runGroupId)}`)",
+            "apiGet<YachiyoGroupRunSnapshot>(`/yachiyo/studio/group-runs/${encodeURIComponent(runGroupId)}`)",
             ".then(runGroupSpecFromPublicGroupRun)",
             "apiGet(`/ui/run-groups/${encodeURIComponent(runGroupId)}`)",
         ],

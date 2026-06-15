@@ -1,4 +1,8 @@
-import type { AgentGroupSnapshot as RuntimeAgentGroupSnapshot } from '../runtime-shared/types';
+import type {
+  AgentGroupSnapshot as RuntimeAgentGroupSnapshot,
+  GroupRunSnapshot as RuntimeGroupRunSnapshot,
+  RunTimelineSnapshot as RuntimeRunTimelineSnapshot,
+} from '../runtime-shared/types';
 
 export type {
   AgentDefinitionSnapshot,
@@ -33,4 +37,17 @@ export type SaveAgentGroupRequest = {
   memory_scope?: RuntimeAgentGroupSnapshot['memory_scope'];
   tool_policy_id?: string | null;
   enabled?: boolean;
+};
+
+export type YachiyoRunTimelineSnapshot = RuntimeRunTimelineSnapshot & {
+  task_id?: string | null;
+  session_id?: string | null;
+  task_run_link_created_at?: string | null;
+  task_run_link_updated_at?: string | null;
+  task_run_link_run_status?: string | null;
+  task_run_link_last_event_sequence?: number | null;
+};
+
+export type YachiyoGroupRunSnapshot = Omit<RuntimeGroupRunSnapshot, 'runs'> & {
+  runs?: YachiyoRunTimelineSnapshot[];
 };

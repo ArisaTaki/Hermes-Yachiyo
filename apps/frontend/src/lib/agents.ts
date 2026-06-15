@@ -1,4 +1,8 @@
 import { apiDelete, apiGet, apiPatch, apiPost } from './bridge';
+import type {
+  YachiyoGroupRunSnapshot,
+  YachiyoRunTimelineSnapshot,
+} from '../features/yachiyo-studio/types';
 
 export type AgentModelMode = 'follow_main' | 'profile' | 'custom_api';
 export type AgentExecutionBackend = 'native_profile';
@@ -446,7 +450,7 @@ export async function triggerDueFutureTasks(): Promise<{ ok?: boolean; triggered
 }
 
 export async function listRuns(): Promise<RunSpec[]> {
-  return apiGet<{ runs?: RunTimelinePublicSnapshot[] }>('/yachiyo/studio/runs')
+  return apiGet<{ runs?: YachiyoRunTimelineSnapshot[] }>('/yachiyo/studio/runs')
     .then((payload) => (payload.runs || []).map(runSpecFromPublicTimelineSnapshot))
     .catch(async () => {
       const payload = await apiGet<{ runs?: RunSpec[] }>('/ui/runs');
@@ -455,7 +459,7 @@ export async function listRuns(): Promise<RunSpec[]> {
 }
 
 export async function listRunGroups(): Promise<RunGroupSpec[]> {
-  return apiGet<{ group_runs?: GroupRunPublicSnapshot[] }>('/yachiyo/studio/group-runs')
+  return apiGet<{ group_runs?: YachiyoGroupRunSnapshot[] }>('/yachiyo/studio/group-runs')
     .then((payload) => (payload.group_runs || []).map(runGroupSpecFromPublicGroupRun))
     .catch(async () => {
       const payload = await apiGet<{ run_groups?: RunGroupSpec[] }>('/ui/run-groups');
@@ -464,13 +468,13 @@ export async function listRunGroups(): Promise<RunGroupSpec[]> {
 }
 
 export async function getRunGroup(runGroupId: string): Promise<RunGroupSpec> {
-  return apiGet<GroupRunPublicSnapshot>(`/yachiyo/studio/group-runs/${encodeURIComponent(runGroupId)}`)
+  return apiGet<YachiyoGroupRunSnapshot>(`/yachiyo/studio/group-runs/${encodeURIComponent(runGroupId)}`)
     .then(runGroupSpecFromPublicGroupRun)
     .catch(() => apiGet(`/ui/run-groups/${encodeURIComponent(runGroupId)}`));
 }
 
 export async function getRun(runId: string): Promise<RunSpec> {
-  return apiGet<RunTimelinePublicSnapshot>(`/yachiyo/studio/runs/${encodeURIComponent(runId)}`)
+  return apiGet<YachiyoRunTimelineSnapshot>(`/yachiyo/studio/runs/${encodeURIComponent(runId)}`)
     .then(runSpecFromPublicTimelineSnapshot)
     .catch(() => apiGet(`/ui/runs/${encodeURIComponent(runId)}`));
 }
@@ -498,7 +502,7 @@ export async function getRunArtifact(runId: string, path: string): Promise<{ ok?
 
 export async function createAgentRun(agentId: string, userGoal: string): Promise<RunSpec> {
   const clientRunId = createClientRunId();
-  return apiPost<RunTimelinePublicSnapshot>(`/yachiyo/studio/agents/${encodeURIComponent(agentId)}/runs`, {
+  return apiPost<YachiyoRunTimelineSnapshot>(`/yachiyo/studio/agents/${encodeURIComponent(agentId)}/runs`, {
     objective: userGoal,
     client_run_id: clientRunId,
   })
@@ -510,7 +514,7 @@ export async function createAgentRun(agentId: string, userGoal: string): Promise
 
 export async function createWorkflowRun(workflowId: string, userGoal: string): Promise<RunSpec> {
   const clientRunId = createClientRunId();
-  return apiPost<RunTimelinePublicSnapshot>(`/yachiyo/studio/workflows/${encodeURIComponent(workflowId)}/runs`, {
+  return apiPost<YachiyoRunTimelineSnapshot>(`/yachiyo/studio/workflows/${encodeURIComponent(workflowId)}/runs`, {
     objective: userGoal,
     client_run_id: clientRunId,
   })
@@ -525,50 +529,7 @@ function createClientRunId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
 }
 
-type RunTimelinePublicSnapshot = {
-  run_id: string;
-  parent_run_id?: string | null;
-  run_group_id?: string | null;
-  group_run_id?: string | null;
-  workflow_run_id?: string | null;
-  agent_id?: string | null;
-  task_id?: string | null;
-  session_id?: string | null;
-  status?: string;
-  title?: string | null;
-  events?: RunEventSpec[];
-  approvals?: Array<{
-    approval_id?: string;
-    tool_name?: string | null;
-    input_preview?: Record<string, unknown>;
-    requested_at?: string;
-  }>;
-  pending_approval?: {
-    approval_id?: string;
-    tool_name?: string | null;
-    input_preview?: Record<string, unknown>;
-    requested_at?: string;
-  } | null;
-  artifacts?: Array<Record<string, unknown>>;
-  created_at?: string;
-  updated_at?: string;
-};
-
-type GroupRunPublicSnapshot = {
-  group_run_id: string;
-  run_group_id?: string | null;
-  group_id?: string;
-  title?: string | null;
-  status?: string;
-  objective?: string;
-  runs?: RunTimelinePublicSnapshot[];
-  child_run_ids?: string[];
-  final_answer?: string | null;
-  created_at?: string;
-  updated_at?: string;
-};
-
-function runGroupSpecFromPublicGroupRun(snapshot: GroupRunPublicSnapshot): RunGroupSpec {
+function runGroupSpecFromPublicGroupRun(snapshot: YachiyoGroupRunSnapshot): RunGroupSpec {
   const childRunIds = snapshot.child_run_ids?.length
     ? snapshot.child_run_ids
     : (snapshot.runs || []).map((run) => run.run_id).filter(Boolean);
@@ -584,7 +545,7 @@ function runGroupSpecFromPublicGroupRun(snapshot: GroupRunPublicSnapshot): RunGr
   };
 }
 
-function runSpecFromPublicTimelineSnapshot(snapshot: RunTimelinePublicSnapshot): RunSpec {
+function runSpecFromPublicTimelineSnapshot(snapshot: YachiyoRunTimelineSnapshot): RunSpec {
   return runSpecFromPublicTimeline(
     snapshot,
     snapshot.workflow_run_id || snapshot.agent_id || '',
@@ -594,7 +555,7 @@ function runSpecFromPublicTimelineSnapshot(snapshot: RunTimelinePublicSnapshot):
 }
 
 function runSpecFromPublicTimeline(
-  snapshot: RunTimelinePublicSnapshot,
+  snapshot: YachiyoRunTimelineSnapshot,
   runnableId: string,
   userGoal: string,
   kind: RunSpec['kind'] = 'workflow_run',
@@ -617,7 +578,7 @@ function runSpecFromPublicTimeline(
       detail: event.detail || event.title || '',
       ...event.payload,
     })),
-    artifacts: snapshot.artifacts || [],
+    artifacts: (snapshot.artifacts || []) as Array<Record<string, unknown>>,
     pending_approval: pendingApproval ? {
       approval_id: pendingApproval.approval_id,
       tool: pendingApproval.tool_name || undefined,
@@ -631,25 +592,25 @@ function runSpecFromPublicTimeline(
 }
 
 export async function rerunRun(runId: string): Promise<RunSpec> {
-  return apiPost<RunTimelinePublicSnapshot>(`/yachiyo/studio/runs/${encodeURIComponent(runId)}/rerun`, {})
+  return apiPost<YachiyoRunTimelineSnapshot>(`/yachiyo/studio/runs/${encodeURIComponent(runId)}/rerun`, {})
     .then((snapshot) => runSpecFromPublicTimeline(snapshot, snapshot.workflow_run_id || snapshot.agent_id || '', snapshot.title || '', publicRunKind(snapshot)))
     .catch(() => apiPost(`/ui/runs/${encodeURIComponent(runId)}/rerun`, {}));
 }
 
 export async function cancelRun(runId: string): Promise<RunSpec> {
-  return apiPost<RunTimelinePublicSnapshot>(`/yachiyo/studio/runs/${encodeURIComponent(runId)}/cancel`, {})
+  return apiPost<YachiyoRunTimelineSnapshot>(`/yachiyo/studio/runs/${encodeURIComponent(runId)}/cancel`, {})
     .then((snapshot) => runSpecFromPublicTimeline(snapshot, snapshot.workflow_run_id || snapshot.agent_id || '', snapshot.title || '', publicRunKind(snapshot)))
     .catch(() => apiPost(`/ui/runs/${encodeURIComponent(runId)}/cancel`, {}));
 }
 
 export async function approveRunApproval(runId: string): Promise<RunSpec> {
-  return apiPost<RunTimelinePublicSnapshot>(`/yachiyo/studio/runs/${encodeURIComponent(runId)}/approval/approve`, {})
+  return apiPost<YachiyoRunTimelineSnapshot>(`/yachiyo/studio/runs/${encodeURIComponent(runId)}/approval/approve`, {})
     .then((snapshot) => runSpecFromPublicTimeline(snapshot, snapshot.workflow_run_id || snapshot.agent_id || '', snapshot.title || '', publicRunKind(snapshot)))
     .catch(() => apiPost(`/ui/runs/${encodeURIComponent(runId)}/approval/approve`, {}));
 }
 
 export async function rejectRunApproval(runId: string, reason = ''): Promise<RunSpec> {
-  return apiPost<RunTimelinePublicSnapshot>(
+  return apiPost<YachiyoRunTimelineSnapshot>(
     `/yachiyo/studio/runs/${encodeURIComponent(runId)}/approval/reject`,
     reason ? { reason } : {},
   )
@@ -657,6 +618,6 @@ export async function rejectRunApproval(runId: string, reason = ''): Promise<Run
     .catch(() => apiPost(`/ui/runs/${encodeURIComponent(runId)}/approval/reject`, reason ? { reason } : {}));
 }
 
-function publicRunKind(snapshot: RunTimelinePublicSnapshot): RunSpec['kind'] {
+function publicRunKind(snapshot: YachiyoRunTimelineSnapshot): RunSpec['kind'] {
   return snapshot.workflow_run_id ? 'workflow_run' : 'agent_run';
 }
