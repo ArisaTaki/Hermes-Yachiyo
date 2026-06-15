@@ -656,6 +656,7 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
         request,
     )
     workflows = await yachiyo.list_studio_workflows(request)
+    workflow = await yachiyo.get_studio_workflow("workflow-1", request)
     deleted_workflow = await yachiyo.delete_studio_workflow("workflow-1", request)
     workflow_run = await yachiyo.start_studio_workflow_run(
         "workflow-1",
@@ -719,6 +720,7 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     assert triggered_future_tasks["triggered"][0]["future_task"]["last_run_id"] == "run-1"
     assert triggered_future_tasks["triggered"][0]["run"]["run_id"] == "run-1"
     assert workflows["workflows"][0]["workflow_id"] == "workflow-1"
+    assert workflow["workflow_id"] == "workflow-1"
     assert deleted_workflow == {"ok": True, "workflow_id": "workflow-1"}
     assert workflow_run["workflow_run_id"] == "workflow-run-1"
     assert runs["runs"][0]["run_id"] == "studio-run"
@@ -903,7 +905,9 @@ def test_yachiyo_studio_routes_include_run_action_facade() -> None:
     assert '@router.post("/studio/runs/{run_id}/approval/approve")' in source
     assert '@router.post("/studio/runs/{run_id}/approval/reject")' in source
     assert '@router.get("/studio/runs/{run_id}/artifacts/{artifact_path:path}")' in source
+    assert '@router.get("/studio/workflows/{workflow_id}")' in source
     assert '@router.delete("/studio/workflows/{workflow_id}")' in source
+    assert '@router.post("/studio/workflows/{workflow_id}/runs")' in source
 
 
 def _request(runtime: _FakeAgentRuntime) -> SimpleNamespace:

@@ -11,6 +11,7 @@ import type {
   WorkflowSpec,
 } from '../types';
 import {
+  getYachiyoWorkflow,
   getYachiyoRunTimeline,
   listYachiyoFutureTasks,
   listYachiyoAgentGroups,
@@ -51,6 +52,10 @@ export async function listStudioSkillSourcesForView(): Promise<SkillSourceRoot[]
 
 export async function listStudioWorkflowsForView(): Promise<WorkflowSpec[]> {
   return (await listYachiyoWorkflows()).map(publicWorkflowToWorkflowSpec);
+}
+
+export async function getStudioWorkflowForView(workflowId: string): Promise<WorkflowSpec> {
+  return publicWorkflowToWorkflowSpec(await getYachiyoWorkflow(workflowId));
 }
 
 export async function listStudioMemoriesForView(): Promise<MemorySpec[]> {

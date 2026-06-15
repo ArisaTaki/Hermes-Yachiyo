@@ -842,9 +842,18 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "listYachiyoGroupRuns",
             "getYachiyoGroupRun",
             "getYachiyoRunTimeline",
+            "getYachiyoWorkflow",
+            "/yachiyo/studio/workflows/${encodeURIComponent(workflowId)}",
             "startYachiyoWorkflowRun",
             "deleteYachiyoWorkflow",
             "function createClientRunId()",
+        ],
+    )
+    _assert_function_contains(
+        "apps/frontend/src/features/yachiyo-studio/api.ts",
+        "getYachiyoWorkflow",
+        [
+            "/yachiyo/studio/workflows/${encodeURIComponent(workflowId)}",
         ],
     )
     _assert_function_contains(
@@ -915,6 +924,14 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "ApprovalCardSnapshot",
             "ArtifactSnapshot",
             "export type SaveAgentGroupRequest",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/utils/studioData.ts",
+        [
+            "getYachiyoWorkflow",
+            "export async function getStudioWorkflowForView",
+            "publicWorkflowToWorkflowSpec(await getYachiyoWorkflow(workflowId))",
         ],
     )
     _assert_contains(

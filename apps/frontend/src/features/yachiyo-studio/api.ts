@@ -276,6 +276,10 @@ export async function listYachiyoWorkflows(): Promise<WorkflowSnapshot[]> {
   return payload.workflows || [];
 }
 
+export async function getYachiyoWorkflow(workflowId: string): Promise<WorkflowSnapshot> {
+  return apiGet(`/yachiyo/studio/workflows/${encodeURIComponent(workflowId)}`);
+}
+
 export async function saveYachiyoWorkflow(
   request: Partial<WorkflowSnapshot>,
 ): Promise<WorkflowSnapshot> {
