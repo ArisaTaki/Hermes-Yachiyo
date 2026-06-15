@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+from pathlib import Path
 from typing import Any
 
 
@@ -67,6 +68,17 @@ class LockedConnection:
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._conn, name)
+
+
+def open_locked_runtime_connection(
+    db_path: Path | str,
+    lock: threading.RLock,
+) -> LockedConnection:
+    raw_conn = sqlite3.connect(db_path, check_same_thread=False)
+    raw_conn.execute("PRAGMA foreign_keys=ON")
+    raw_conn.execute("PRAGMA journal_mode=WAL")
+    raw_conn.execute("PRAGMA busy_timeout=5000")
+    return LockedConnection(raw_conn, lock)
 
 
 def coerce_named_row(row: Any, description: Any = None) -> Any:

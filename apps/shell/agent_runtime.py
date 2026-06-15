@@ -43,6 +43,7 @@ from apps.shell.agent.repositories.sqlite import (
     LockedCursor as _LockedCursor,
     coerce_named_row as _coerce_named_row_value,
     named_row_factory as _named_row_factory,
+    open_locked_runtime_connection as _open_runtime_sqlite_connection,
 )
 from apps.shell.agent.repositories.studio_deletions import StudioDeletionRepository
 from apps.shell.agent.repositories.task_run_links import TaskRunLinkRepository
@@ -477,11 +478,7 @@ class NativeRunEngine:
             approval_id_factory=lambda: f"approval_{uuid4().hex[:12]}",
             now=_now,
         )
-        raw_conn = sqlite3.connect(self.db_path, check_same_thread=False)
-        raw_conn.execute("PRAGMA foreign_keys=ON")
-        raw_conn.execute("PRAGMA journal_mode=WAL")
-        raw_conn.execute("PRAGMA busy_timeout=5000")
-        self._conn = _LockedConnection(raw_conn, self._db_lock)
+        self._conn = _open_runtime_sqlite_connection(self.db_path, self._db_lock)
         self._conn.row_factory = _named_row_factory
         self.task_run_links = TaskRunLinkRepository(
             self._conn,
