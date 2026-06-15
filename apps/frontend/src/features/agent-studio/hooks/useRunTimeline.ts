@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { getYachiyoRunTimeline } from '../../yachiyo-studio/api';
-import type { RunTimelineSnapshot } from '../../yachiyo-studio/types';
+import type { YachiyoRunTimelineSnapshot } from '../../yachiyo-studio/types';
 
 export function useRunTimeline(runId: string, refreshKey: string) {
-  const [publicRunTimelineById, setPublicRunTimelineById] = useState<Record<string, RunTimelineSnapshot>>({});
+  const [publicRunTimelineById, setPublicRunTimelineById] = useState<Record<string, YachiyoRunTimelineSnapshot>>({});
   const selectedPublicRunTimeline = useMemo(
     () => runId ? publicRunTimelineById[runId] || null : null,
     [publicRunTimelineById, runId],

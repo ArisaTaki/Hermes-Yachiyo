@@ -2,6 +2,7 @@ import type {
   AgentGroupSnapshot as RuntimeAgentGroupSnapshot,
   GroupRunSnapshot as RuntimeGroupRunSnapshot,
   RunTimelineSnapshot as RuntimeRunTimelineSnapshot,
+  WorkflowRunSnapshot as RuntimeWorkflowRunSnapshot,
 } from '../runtime-shared/types';
 
 export type {
@@ -48,6 +49,11 @@ export type YachiyoRunTimelineSnapshot = RuntimeRunTimelineSnapshot & {
   task_run_link_updated_at?: string | null;
   task_run_link_run_status?: string | null;
   task_run_link_last_event_sequence?: number | null;
+  workflow_id?: RuntimeWorkflowRunSnapshot['workflow_id'];
+  objective?: RuntimeWorkflowRunSnapshot['objective'];
+  current_node_id?: RuntimeWorkflowRunSnapshot['current_node_id'];
+  current_node_label?: RuntimeWorkflowRunSnapshot['current_node_label'];
+  final_answer?: RuntimeWorkflowRunSnapshot['final_answer'];
 };
 
 export type YachiyoGroupRunSnapshot = Omit<RuntimeGroupRunSnapshot, 'runs'> & {

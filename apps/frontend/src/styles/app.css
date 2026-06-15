@@ -14812,13 +14812,15 @@ button.activity-item {
   gap: 6px;
 }
 
-.run-public-contract-grid span {
+.run-public-contract-grid span,
+.run-public-contract-grid code {
   padding: 4px 7px;
   border: 1px solid var(--hy-border-soft);
   border-radius: 8px;
   background: oklch(255 0 0 / 0.025);
   color: var(--hy-muted);
   font-size: 11px;
+  overflow-wrap: anywhere;
 }
 
 .runtime-management-row.muted {

@@ -46,6 +46,20 @@ def workflow_run_snapshot_from_payload(
     )
 
 
+def is_workflow_run_payload(payload: Any) -> bool:
+    if isinstance(payload, WorkflowRunSnapshot):
+        return True
+    if not isinstance(payload, Mapping):
+        return False
+    run_id = _text(payload.get("run_id"))
+    workflow_run_id = _text(payload.get("workflow_run_id"))
+    return (
+        _text(payload.get("kind")) == "workflow_run"
+        or bool(_text(payload.get("workflow_id")))
+        or bool(workflow_run_id and workflow_run_id == run_id)
+    )
+
+
 def _mapping(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
 

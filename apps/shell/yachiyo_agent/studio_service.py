@@ -42,7 +42,11 @@ from .skills import (
     skill_source_root_snapshot_from_payload,
 )
 from .timelines import run_timeline_snapshot_from_payload
-from .workflows import workflow_run_snapshot_from_payload, workflow_snapshot_from_payload
+from .workflows import (
+    is_workflow_run_payload,
+    workflow_run_snapshot_from_payload,
+    workflow_snapshot_from_payload,
+)
 
 
 class AgentStudioService:
@@ -284,8 +288,11 @@ class AgentStudioService:
             for item in _payload_items(self._studio_port.list_run_timelines(limit), "runs")
         ]
 
-    def get_run_timeline(self, run_id: str) -> RunTimelineSnapshot:
-        return run_timeline_snapshot_from_payload(self._studio_port.get_run_timeline(run_id))
+    def get_run_timeline(self, run_id: str) -> RunTimelineSnapshot | WorkflowRunSnapshot:
+        payload = self._studio_port.get_run_timeline(run_id)
+        if is_workflow_run_payload(payload):
+            return workflow_run_snapshot_from_payload(payload)
+        return run_timeline_snapshot_from_payload(payload)
 
     def rerun_run(self, run_id: str) -> RunTimelineSnapshot:
         return run_timeline_snapshot_from_payload(self._studio_port.rerun_run(run_id))

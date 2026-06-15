@@ -326,12 +326,17 @@ class _FakeAgentRuntime:
 
     def create_workflow_run(self, payload: dict[str, Any]) -> dict[str, Any]:
         self.calls.append(("create_workflow_run", payload))
-        return _run_payload(
+        run = _run_payload(
             run_id="workflow-run-1",
             kind="workflow_run",
             runnable_id=payload["workflow_id"],
             user_goal=payload["user_goal"],
+            result="Workflow final answer",
         )
+        run["workflow_node_id"] = "node-start"
+        run["workflow_node_label"] = "Start"
+        self.runs[run["run_id"]] = run
+        return run
 
     def get_run_group(self, run_group_id: str) -> dict[str, Any]:
         self.calls.append(("get_run_group", run_group_id))
@@ -667,6 +672,7 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     runs = await yachiyo.list_studio_runs(request, limit=5)
     run_detail = await yachiyo.get_studio_run("run-1", request)
     timeline = await yachiyo.get_studio_run_timeline("run-1", request)
+    workflow_timeline = await yachiyo.get_studio_run_timeline("workflow-run-1", request)
     group_runs = await yachiyo.list_studio_group_runs(request, limit=5)
     group_run = await yachiyo.get_studio_group_run("group-run-1", request)
     events = await yachiyo.get_studio_run_events("run-1", request, after_sequence=0, limit=1)
@@ -732,6 +738,11 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     assert run_detail["run_id"] == "run-1"
     assert timeline["run_group_id"] == "group-run-1"
     assert timeline["pending_approval"]["tool_name"] == "terminal.run"
+    assert workflow_timeline["workflow_id"] == "workflow-1"
+    assert workflow_timeline["objective"] == "Build report"
+    assert workflow_timeline["current_node_id"] == "node-start"
+    assert workflow_timeline["current_node_label"] == "Start"
+    assert workflow_timeline["final_answer"] == "Workflow final answer"
     assert group_runs["group_runs"][0]["group_run_id"] == "group-run-1"
     assert group_runs["group_runs"][0]["runs"][0]["run_id"] == "run-1"
     assert group_run["run_group_id"] == "group-run-1"

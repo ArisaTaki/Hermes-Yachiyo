@@ -7,7 +7,7 @@ import type {
   RunSpec,
   WorkflowSpec,
 } from '../types';
-import type { PublicRunEvent, RunTimelineSnapshot } from '../../yachiyo-studio/types';
+import type { PublicRunEvent, YachiyoRunTimelineSnapshot } from '../../yachiyo-studio/types';
 import {
   isActiveRunStatus,
   isPotentialWorkflowChildAgentRun,
@@ -36,7 +36,7 @@ type UseSelectedRunDetailStateOptions = {
   runById: Map<string, RunSpec>;
   runGroups: RunGroupSpec[];
   runnables: RunnableSummary[];
-  selectedPublicRunTimeline: RunTimelineSnapshot | null;
+  selectedPublicRunTimeline: YachiyoRunTimelineSnapshot | null;
   selectedRun: RunSpec | null;
   selectedRunId: string;
   selectedRunReplayEvents: PublicRunEvent[];

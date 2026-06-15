@@ -908,6 +908,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "/yachiyo/studio/runs/${encodeURIComponent(runId)}/timeline",
             "RunEventPageSnapshot",
             "export type YachiyoRunEventsPage = RunEventPageSnapshot;",
+            "YachiyoRunTimelineSnapshot",
             "listYachiyoStudioAgents",
             "getYachiyoStudioAgent",
             "/yachiyo/studio/agents/${encodeURIComponent(agentId)}",
@@ -973,6 +974,22 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
     )
     _assert_function_contains(
         "apps/frontend/src/features/yachiyo-studio/api.ts",
+        "getYachiyoRunTimeline",
+        [
+            "Promise<YachiyoRunTimelineSnapshot>",
+            "/yachiyo/studio/runs/${encodeURIComponent(runId)}/timeline",
+        ],
+    )
+    _assert_function_contains(
+        "apps/frontend/src/features/yachiyo-studio/api.ts",
+        "listYachiyoRunTimelines",
+        [
+            "Promise<YachiyoRunTimelineSnapshot[]>",
+            "apiGet<{ runs?: YachiyoRunTimelineSnapshot[] }>",
+        ],
+    )
+    _assert_function_contains(
+        "apps/frontend/src/features/yachiyo-studio/api.ts",
         "startYachiyoGroupRun",
         [
             "const clientRunId = createClientRunId();",
@@ -1023,6 +1040,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
         "apps/frontend/src/features/yachiyo-studio/types.ts",
         [
             "RunTimelineSnapshot as RuntimeRunTimelineSnapshot",
+            "WorkflowRunSnapshot as RuntimeWorkflowRunSnapshot",
             "GroupRunSnapshot as RuntimeGroupRunSnapshot",
             "RunEventPageSnapshot",
             "export type YachiyoRunTimelineSnapshot = RuntimeRunTimelineSnapshot &",
@@ -1030,6 +1048,11 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "session_id?: string | null;",
             "task_run_link_created_at?: string | null;",
             "task_run_link_last_event_sequence?: number | null;",
+            "workflow_id?: RuntimeWorkflowRunSnapshot['workflow_id'];",
+            "objective?: RuntimeWorkflowRunSnapshot['objective'];",
+            "current_node_id?: RuntimeWorkflowRunSnapshot['current_node_id'];",
+            "current_node_label?: RuntimeWorkflowRunSnapshot['current_node_label'];",
+            "final_answer?: RuntimeWorkflowRunSnapshot['final_answer'];",
             "export type YachiyoGroupRunSnapshot = Omit<RuntimeGroupRunSnapshot, 'runs'>",
             "runs?: YachiyoRunTimelineSnapshot[];",
         ],
@@ -1302,6 +1325,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
         "apps/frontend/src/features/agent-studio/hooks/useRunTimeline.ts",
         [
             "export function useRunTimeline",
+            "YachiyoRunTimelineSnapshot",
             "getYachiyoRunTimeline(runId)",
             "selectedPublicRunTimeline",
         ],
@@ -1527,8 +1551,15 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
         "apps/frontend/src/features/agent-studio/components/RunDetailPanel.tsx",
         [
             'data-testid="agent-run-detail-public-timeline"',
+            "data-public-snapshot-kind={publicSnapshotName}",
+            "data-workflow-id={selectedPublicRunTimeline.workflow_id || ''}",
             "Public Runtime Snapshot",
-            "RunTimelineSnapshot · Approval · Artifact · Events",
+            "const publicSnapshotName = workflowRunSnapshotActive ? 'WorkflowRunSnapshot' : 'RunTimelineSnapshot';",
+            "{publicSnapshotName} · Approval · Artifact · Events",
+            "Workflow {selectedPublicRunTimeline.workflow_id}",
+            "objective {selectedPublicRunTimeline.objective}",
+            "node {selectedPublicRunTimeline.current_node_label || selectedPublicRunTimeline.current_node_id}",
+            "final answer recorded",
         ],
     )
     _assert_contains(

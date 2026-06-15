@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 
 import type { RunSpec, WorkflowSpec } from '../types';
-import type { PublicRunEvent, RunTimelineSnapshot } from '../../yachiyo-studio/types';
+import type { PublicRunEvent, YachiyoRunTimelineSnapshot } from '../../yachiyo-studio/types';
 import { ExpandableRuntimeContent as RunExpandableContent } from '../../runtime-shared/components/ExpandableRuntimeContent';
 import { RuntimeApprovalGate } from '../../runtime-shared/components/RuntimeApprovalGate';
 import { ApprovalInspector, type RunPendingApproval } from './ApprovalInspector';
@@ -110,7 +110,7 @@ export function RunDetailPanel({
   runKindLabel: (kind: string) => string;
   runStatusLabel: (status: string) => string;
   runStatusTone: (status: string) => string;
-  selectedPublicRunTimeline: RunTimelineSnapshot | null;
+  selectedPublicRunTimeline: YachiyoRunTimelineSnapshot | null;
   selectedRun: RunSpec | null;
   selectedRunApproval: RunPendingApproval | null;
   selectedRunArtifacts: Array<Record<string, unknown>>;
@@ -170,6 +170,17 @@ export function RunDetailPanel({
   const approvalHistorySource = replayApprovals.length
     ? 'RunTimelineSnapshot + RunEvent replay approval facts'
     : 'RunTimelineSnapshot approval facts';
+  const workflowRunSnapshotActive = Boolean(
+    selectedRun?.kind === 'workflow_run'
+    && (
+      selectedPublicRunTimeline?.workflow_id
+      || selectedPublicRunTimeline?.objective
+      || selectedPublicRunTimeline?.current_node_id
+      || selectedPublicRunTimeline?.current_node_label
+      || selectedPublicRunTimeline?.final_answer
+    ),
+  );
+  const publicSnapshotName = workflowRunSnapshotActive ? 'WorkflowRunSnapshot' : 'RunTimelineSnapshot';
 
   return (
     <div className="agent-studio-panel">
@@ -386,15 +397,26 @@ export function RunDetailPanel({
             selectedRunApproval={selectedRunApproval}
           />
           {selectedPublicRunTimeline ? (
-            <section className="run-detail-block run-public-contract-block" data-testid="agent-run-detail-public-timeline">
+            <section
+              className="run-detail-block run-public-contract-block"
+              data-public-snapshot-kind={publicSnapshotName}
+              data-workflow-id={selectedPublicRunTimeline.workflow_id || ''}
+              data-testid="agent-run-detail-public-timeline"
+            >
               <div className="run-detail-section-head">
                 <div>
                   <h4>Public Runtime Snapshot</h4>
-                  <span>RunTimelineSnapshot · Approval · Artifact · Events</span>
+                  <span>{publicSnapshotName} · Approval · Artifact · Events</span>
                 </div>
                 <span className={`run-status-pill ${runStatusTone(selectedPublicRunTimeline.status)}`}>{runStatusLabel(selectedPublicRunTimeline.status)}</span>
               </div>
               <div className="run-public-contract-grid">
+                {selectedPublicRunTimeline.workflow_id ? <code>Workflow {selectedPublicRunTimeline.workflow_id}</code> : null}
+                {selectedPublicRunTimeline.objective ? <span>objective {selectedPublicRunTimeline.objective}</span> : null}
+                {selectedPublicRunTimeline.current_node_label || selectedPublicRunTimeline.current_node_id ? (
+                  <span>node {selectedPublicRunTimeline.current_node_label || selectedPublicRunTimeline.current_node_id}</span>
+                ) : null}
+                {selectedPublicRunTimeline.final_answer ? <span>final answer recorded</span> : null}
                 <span>events {selectedPublicRunTimeline.events?.length || 0}</span>
                 <span>approvals {selectedPublicRunTimeline.approvals?.length || 0}</span>
                 <span>artifacts {selectedPublicRunTimeline.artifacts?.length || 0}</span>
