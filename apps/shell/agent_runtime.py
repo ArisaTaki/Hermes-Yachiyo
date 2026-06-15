@@ -143,7 +143,7 @@ from apps.shell.agent.runtime.main_chat_model import MainChatModelCaller
 from apps.shell.agent.runtime.main_chat_model_loop import MainChatModelLoopRunner
 from apps.shell.agent.runtime.main_chat_runs import MainChatRunLifecycle
 from apps.shell.agent.runtime.memory_services import RuntimeMemoryService
-from apps.shell.agent.runtime.model_profiles import RuntimeModelProfileResolver
+from apps.shell.agent.runtime.model_profiles import RuntimeAgentModelTester, RuntimeModelProfileResolver
 from apps.shell.agent.runtime.model_messages import (
     RESPONSES_STREAM_REASONING_EVENTS as _RESPONSES_STREAM_REASONING_EVENTS,
     ModelOutputText as _ModelOutputText,
@@ -623,6 +623,14 @@ class NativeRunEngine:
             error_type=AgentRuntimeError,
         )
         self._install_runtime_core_services(core_services)
+        self.agent_model_tester = RuntimeAgentModelTester(
+            profile_service_factory=lambda: get_model_profile_service(),
+            default_agent_ids=_DEFAULT_AGENT_IDS,
+            call_custom_api=self._openai_compatible_chat,
+            now_seconds=time.time,
+            redact_error=redact_api_error_text,
+            error_type=AgentRuntimeError,
+        )
         self._install_runtime_run_timeline(
             RuntimeRunTimelineService(
                 runs=self.runs,
@@ -2517,67 +2525,7 @@ class NativeRunEngine:
 
     def test_agent_model(self, agent_id: str) -> dict[str, Any]:
         agent = self._get_agent_private(agent_id)
-        vision_profile_id = str(agent.get("vision_model_profile_id") or "").strip()
-        vision_result: dict[str, Any] | None = None
-        if vision_profile_id:
-            try:
-                vision_result = get_model_profile_service().test_profile(vision_profile_id)
-            except KeyError as exc:
-                raise AgentRuntimeError("Agent 引用的图片识别 Profile 不存在") from exc
-            if not vision_result.get("ok"):
-                vision_result["mode"] = "vision_profile"
-                return vision_result
-        profile_id = str(agent.get("model_profile_id") or "").strip()
-        if profile_id:
-            try:
-                result = get_model_profile_service().test_profile(profile_id)
-            except KeyError as exc:
-                raise AgentRuntimeError("Agent 引用的模型 Profile 不存在") from exc
-            result["mode"] = "profile"
-            if result.get("ok") and vision_result:
-                result["message"] = f"{result.get('message') or '文本模型测试通过'}；图片识别 Profile 测试通过。"
-            return result
-        if agent.get("model_mode") == "follow_main" or str(agent.get("agent_id") or "") in _DEFAULT_AGENT_IDS:
-            default_profile_id = str(get_model_profile_service().get_defaults().get("chat") or "").strip()
-            if default_profile_id:
-                try:
-                    result = get_model_profile_service().test_profile(default_profile_id)
-                except KeyError as exc:
-                    raise AgentRuntimeError("默认 Chat Profile 不存在") from exc
-                result["mode"] = "follow_main"
-                if result.get("ok") and vision_result:
-                    result["message"] = f"{result.get('message') or '文本模型测试通过'}；图片识别 Profile 测试通过。"
-                return result
-        if agent.get("model_mode") != "custom_api":
-            return {
-                "ok": False,
-                "mode": "profile",
-                "missing": ["model_profile_id"],
-                "message": "请选择已通过测试的 Agent 文本模型 Profile。",
-            }
-        model_config = agent.get("model_config") or {}
-        missing = [
-            key
-            for key in ("base_url", "model", "api_key")
-            if not str(model_config.get(key) or "").strip()
-        ]
-        if missing:
-            return {"ok": False, "missing": missing, "message": "custom_api 配置不完整。"}
-        started = time.time()
-        try:
-            result = self._openai_compatible_chat(
-                str(model_config["base_url"]).rstrip("/"),
-                str(model_config["model"]),
-                str(model_config["api_key"]),
-                [{"role": "user", "content": "Reply with OK."}],
-            )
-        except AgentRuntimeError as exc:
-            return {"ok": False, "message": redact_api_error_text(exc)}
-        return {
-            "ok": True,
-            "latency_ms": int((time.time() - started) * 1000),
-            "message": result[:500] or "OK",
-        }
+        return self.agent_model_tester.test_agent_model(agent)
 
     def create_workflow_run(self, payload: dict[str, Any]) -> dict[str, Any]:
         workflow_id = str(payload.get("workflow_id") or payload.get("runnable_id") or "")

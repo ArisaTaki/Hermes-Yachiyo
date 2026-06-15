@@ -104,3 +104,99 @@ class RuntimeModelProfileResolver:
         raise self._error_type(
             "Agent 缺少可运行的 Chat Profile；请在 Agent Studio 为该岗位选择已测试的文本模型。"
         )
+
+
+class RuntimeAgentModelTester:
+    """Tests Agent model settings without owning Agent persistence."""
+
+    def __init__(
+        self,
+        *,
+        profile_service_factory: Callable[[], Any],
+        default_agent_ids: set[str] | frozenset[str],
+        call_custom_api: Callable[[str, str, str, list[dict[str, str]]], str],
+        now_seconds: Callable[[], float],
+        redact_error: Callable[[Any], str],
+        error_type: type[Exception] = AgentRuntimeError,
+    ) -> None:
+        self._profile_service_factory = profile_service_factory
+        self._default_agent_ids = set(default_agent_ids)
+        self._call_custom_api = call_custom_api
+        self._now_seconds = now_seconds
+        self._redact_error = redact_error
+        self._error_type = error_type
+
+    def test_agent_model(self, agent: dict[str, Any]) -> dict[str, Any]:
+        profile_service = self._profile_service_factory()
+        vision_profile_id = str(agent.get("vision_model_profile_id") or "").strip()
+        vision_result: dict[str, Any] | None = None
+        if vision_profile_id:
+            try:
+                vision_result = profile_service.test_profile(vision_profile_id)
+            except KeyError as exc:
+                raise self._error_type("Agent 引用的图片识别 Profile 不存在") from exc
+            if not vision_result.get("ok"):
+                vision_result["mode"] = "vision_profile"
+                return vision_result
+
+        profile_id = str(agent.get("model_profile_id") or "").strip()
+        if profile_id:
+            try:
+                result = profile_service.test_profile(profile_id)
+            except KeyError as exc:
+                raise self._error_type("Agent 引用的模型 Profile 不存在") from exc
+            result["mode"] = "profile"
+            self._append_vision_success(result, vision_result)
+            return result
+
+        if agent.get("model_mode") == "follow_main" or str(agent.get("agent_id") or "") in self._default_agent_ids:
+            default_profile_id = str(profile_service.get_defaults().get("chat") or "").strip()
+            if default_profile_id:
+                try:
+                    result = profile_service.test_profile(default_profile_id)
+                except KeyError as exc:
+                    raise self._error_type("默认 Chat Profile 不存在") from exc
+                result["mode"] = "follow_main"
+                self._append_vision_success(result, vision_result)
+                return result
+
+        if agent.get("model_mode") != "custom_api":
+            return {
+                "ok": False,
+                "mode": "profile",
+                "missing": ["model_profile_id"],
+                "message": "请选择已通过测试的 Agent 文本模型 Profile。",
+            }
+
+        model_config = agent.get("model_config") or {}
+        missing = [
+            key
+            for key in ("base_url", "model", "api_key")
+            if not str(model_config.get(key) or "").strip()
+        ]
+        if missing:
+            return {"ok": False, "missing": missing, "message": "custom_api 配置不完整。"}
+
+        started = self._now_seconds()
+        try:
+            result = self._call_custom_api(
+                str(model_config["base_url"]).rstrip("/"),
+                str(model_config["model"]),
+                str(model_config["api_key"]),
+                [{"role": "user", "content": "Reply with OK."}],
+            )
+        except self._error_type as exc:
+            return {"ok": False, "message": self._redact_error(exc)}
+        return {
+            "ok": True,
+            "latency_ms": int((self._now_seconds() - started) * 1000),
+            "message": result[:500] or "OK",
+        }
+
+    @staticmethod
+    def _append_vision_success(
+        result: dict[str, Any],
+        vision_result: dict[str, Any] | None,
+    ) -> None:
+        if result.get("ok") and vision_result:
+            result["message"] = f"{result.get('message') or '文本模型测试通过'}；图片识别 Profile 测试通过。"
