@@ -4315,7 +4315,8 @@ button:hover {
 
 .launcher-agent-task-main span,
 .launcher-agent-task-main strong,
-.launcher-agent-task-main em {
+.launcher-agent-task-main em,
+.launcher-agent-task-main small {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4332,6 +4333,16 @@ button:hover {
   color: #fff7df;
   font-size: 10px;
   font-weight: 650;
+}
+
+.launcher-agent-task-main small {
+  grid-column: 1 / -1;
+  color: rgba(255, 247, 223, 0.62);
+  font-size: 9px;
+}
+
+.bubble-shell .launcher-agent-task-main small {
+  display: none;
 }
 
 .launcher-agent-task-main em {

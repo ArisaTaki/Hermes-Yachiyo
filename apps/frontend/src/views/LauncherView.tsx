@@ -2,6 +2,7 @@ import { CSSProperties, FormEvent, KeyboardEvent, MouseEvent, PointerEvent, useC
 
 import logoUrl from '../../../../docs/open-design/logo.png';
 import { apiGet, apiPost, getLauncherPointerState, moveLauncherWindow, openAppView, openLauncherMenu, setLauncherHitRegions, setLauncherPointerInteractive, type LauncherHitRegionRect } from '../lib/bridge';
+import { yachiyoTaskRunId } from '../features/yachiyo-chat/taskSnapshots';
 import type { AppView } from '../lib/view';
 import {
   LIVE2D_DEFAULT_RENDER_FPS,
@@ -930,6 +931,19 @@ function launcherAgentTaskSummary(task: LauncherAgentTask) {
   return title ? `${label} · ${title}` : label;
 }
 
+function launcherAgentTaskDetail(task: LauncherAgentTask) {
+  if (!task) return '';
+  const approval = task.pending_approvals?.find((item) => item.tool_name || item.title);
+  if (approval) return `审批 · ${approval.tool_name || approval.title}`;
+  const step = String(task.current_step || task.progress_text || '').trim();
+  if (step) return step;
+  const event = task.recent_events?.find((item) => item.title || item.detail || item.event_type);
+  if (event) return String(event.title || event.detail || event.event_type || '').trim();
+  const artifact = task.artifacts?.find((item) => item.title || item.path || item.kind);
+  if (artifact) return `产物 · ${artifact.title || artifact.path || artifact.kind}`;
+  return String(task.summary || '').trim();
+}
+
 function launcherAgentTaskStatusLabel(status: string) {
   if (status === 'waiting_approval') return '等待审批';
   if (status === 'running' || status === 'queued') return 'Agent 运行中';
@@ -946,20 +960,6 @@ function launcherAgentTaskTone(status: string) {
   if (status === 'failed') return 'failed';
   if (status === 'cancelled') return 'cancelled';
   return 'neutral';
-}
-
-function launcherAgentTaskRunId(task: LauncherAgentTask) {
-  if (!task) return '';
-  const artifactRun = task.artifacts?.find((artifact) => artifact.run_id || artifact.source_run_id);
-  const fromUrl = String(task.open_in_studio_url || '').match(/[?&](?:run|run_id)=([^&#]+)/)?.[1];
-  return (
-    task.recent_events?.find((event) => event.run_id)?.run_id
-    || task.pending_approvals?.find((approval) => approval.run_id)?.run_id
-    || artifactRun?.run_id
-    || artifactRun?.source_run_id
-    || (fromUrl ? decodeURIComponent(fromUrl) : '')
-    || task.task_id
-  );
 }
 
 function launcherAgentTaskChatParams(task: LauncherAgentTask): Record<string, string> | undefined {
@@ -980,9 +980,10 @@ function LauncherAgentTaskLight({
   task: LauncherAgentTask;
 }) {
   if (!task) return null;
-  const runId = launcherAgentTaskRunId(task);
+  const runId = yachiyoTaskRunId(task);
   const status = String(task.status || '');
   const needsAction = Boolean(task.needs_user_action || task.pending_approvals?.length);
+  const detail = launcherAgentTaskDetail(task);
   return (
     <div
       className={`launcher-agent-task-light ${launcherAgentTaskTone(status)}`}
@@ -1003,6 +1004,9 @@ function LauncherAgentTaskLight({
       >
         <span>{launcherAgentTaskStatusLabel(status)}</span>
         <strong>{task.title || task.task_id}</strong>
+        {detail ? (
+          <small data-testid={`${mode}-launcher-agent-task-detail`}>{detail}</small>
+        ) : null}
         {needsAction ? <em>待处理</em> : null}
       </button>
       {runId ? (
