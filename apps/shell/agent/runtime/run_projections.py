@@ -48,6 +48,39 @@ class RunProjectionCoordinator:
         )
 
 
+class AgentRunGroupProjectionCoordinator:
+    """Synchronizes root Agent Run state back to its Run Group summary."""
+
+    def __init__(
+        self,
+        *,
+        get_run_group: Any,
+        update_run_group: Any,
+    ) -> None:
+        self._get_run_group = get_run_group
+        self._update_run_group = update_run_group
+
+    def update_if_root(self, run: dict[str, Any]) -> None:
+        run_group_id = str(run.get("run_group_id") or "")
+        if not run_group_id:
+            return
+        try:
+            group = self._get_run_group(run_group_id)
+        except KeyError:
+            return
+        child_run_ids = [
+            str(item)
+            for item in group.get("child_run_ids") or []
+            if str(item)
+        ]
+        if group.get("source") in {"agent", "delegation"} or child_run_ids == [run.get("run_id")]:
+            self._update_run_group(
+                run_group_id,
+                status=str(run.get("status") or ""),
+                summary=str(run.get("result") or ""),
+            )
+
+
 class ApprovalResumeProjectionCoordinator:
     """Projects Run state changes produced by approved-tool resume."""
 

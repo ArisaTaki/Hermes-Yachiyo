@@ -186,6 +186,7 @@ from apps.shell.agent.runtime.recorders import (
     build_tool_pending_approval as _build_tool_pending_approval,
 )
 from apps.shell.agent.runtime.run_projections import (
+    AgentRunGroupProjectionCoordinator,
     ApprovalResumeProjectionCoordinator,
     RunProjectionCoordinator,
 )
@@ -973,6 +974,13 @@ class NativeRunEngine:
             trigger_scheduler=self.future_task_scheduler,
             default_runnable_id=_MAIN_CHAT_AGENT_ID,
             error_type=AgentRuntimeError,
+        )
+        self.agent_run_group_projection = AgentRunGroupProjectionCoordinator(
+            get_run_group=lambda run_group_id: self.get_run_group(run_group_id),
+            update_run_group=lambda run_group_id, **kwargs: self._update_run_group(
+                run_group_id,
+                **kwargs,
+            ),
         )
         workflow_transition_services = _build_runtime_workflow_transition_services(
             parent_runs_waiting_for_child=lambda child_run: self._workflow_parent_runs_waiting_for_child(child_run),
@@ -2873,16 +2881,7 @@ class NativeRunEngine:
         return self.approval_transitions.timeout(run_id, reason)
 
     def _update_agent_run_group_if_root(self, run: dict[str, Any]) -> None:
-        run_group_id = str(run.get("run_group_id") or "")
-        if not run_group_id:
-            return
-        try:
-            group = self.get_run_group(run_group_id)
-        except KeyError:
-            return
-        child_run_ids = [str(item) for item in group.get("child_run_ids") or [] if str(item)]
-        if group.get("source") in {"agent", "delegation"} or child_run_ids == [run.get("run_id")]:
-            self._update_run_group(run_group_id, status=str(run.get("status") or ""), summary=str(run.get("result") or ""))
+        self.agent_run_group_projection.update_if_root(run)
 
     def list_runnables(self) -> dict[str, Any]:
         return self.runnable_catalog.list_runnables(
