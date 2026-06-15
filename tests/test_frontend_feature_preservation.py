@@ -450,11 +450,15 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "recent_events: messageTaskEvents(message, runId)",
             "artifacts: messageTaskArtifacts(message, runId)",
             "open_in_studio_url: `#/agents?run_id=${encodeURIComponent(runId)}`",
+            "runIdFromStudioUrl(task.open_in_studio_url)",
+            "function runIdFromStudioUrl",
         ],
     )
     _assert_contains(
         "apps/frontend/src/features/yachiyo-chat/components/AgentTaskCard.tsx",
         [
+            "import { yachiyoTaskRunId } from '../taskSnapshots';",
+            "const runId = yachiyoTaskRunId(task);",
             'data-testid="yachiyo-agent-task-card"',
             'data-testid="yachiyo-agent-task-open-studio"',
             'data-testid="yachiyo-agent-task-cancel"',

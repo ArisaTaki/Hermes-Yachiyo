@@ -1,6 +1,7 @@
 import { UiIcon } from '../../../components/UiIcon';
 import { RuntimeArtifactList } from '../../runtime-shared/components/RuntimeArtifactList';
 import { RuntimeTimelineSummary } from '../../runtime-shared/components/RuntimeTimelineSummary';
+import { yachiyoTaskRunId } from '../taskSnapshots';
 import type { AgentTaskSnapshot, ApprovalCardSnapshot } from '../types';
 import { ApprovalCard } from './ApprovalCard';
 
@@ -20,7 +21,7 @@ export function AgentTaskCard({
   task: AgentTaskSnapshot;
 }) {
   const status = task.status || 'running';
-  const runId = taskRunId(task);
+  const runId = yachiyoTaskRunId(task);
   const approvals = task.pending_approvals || [];
   const artifacts = task.artifacts || [];
   const recentEvents = task.recent_events || [];
@@ -127,17 +128,6 @@ export function AgentTaskCard({
         />
       ) : null}
     </section>
-  );
-}
-
-function taskRunId(task: AgentTaskSnapshot) {
-  const artifactRun = task.artifacts?.find((artifact) => artifact.run_id || artifact.source_run_id);
-  return (
-    task.recent_events?.find((event) => event.run_id)?.run_id
-    || task.pending_approvals?.find((approval) => approval.run_id)?.run_id
-    || artifactRun?.run_id
-    || artifactRun?.source_run_id
-    || task.task_id
   );
 }
 

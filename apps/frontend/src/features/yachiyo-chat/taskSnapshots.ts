@@ -120,6 +120,7 @@ export function yachiyoTaskCacheKeys(task: AgentTaskSnapshot): string[] {
     artifact.source_run_id,
   ]);
   return uniqueStrings([
+    runIdFromStudioUrl(task.open_in_studio_url),
     task.task_id,
     ...((task.recent_events || []).map((event) => event.run_id)),
     ...((task.pending_approvals || []).map((approval) => approval.run_id || '')),
@@ -130,6 +131,7 @@ export function yachiyoTaskCacheKeys(task: AgentTaskSnapshot): string[] {
 export function yachiyoTaskRunId(task: AgentTaskSnapshot): string {
   const artifactRun = (task.artifacts || []).find((artifact) => artifact.run_id || artifact.source_run_id);
   return uniqueStrings([
+    runIdFromStudioUrl(task.open_in_studio_url),
     ...(task.recent_events || []).map((event) => event.run_id),
     ...(task.pending_approvals || []).map((approval) => approval.run_id || ''),
     artifactRun?.run_id,
@@ -253,6 +255,11 @@ function messageRunId(message?: YachiyoTaskChatMessage | null) {
 
 function activityRunId(event?: YachiyoTaskChatActivityEvent | null) {
   return String(event?.metadata?.run_id || event?.metadata?.workflow_run_id || '').trim();
+}
+
+function runIdFromStudioUrl(value?: string | null) {
+  const match = String(value || '').match(/[?&](?:run|run_id)=([^&#]+)/);
+  return match ? decodeURIComponent(match[1]) : '';
 }
 
 function participantDisplayName(participant?: YachiyoTaskChatParticipant | null) {
