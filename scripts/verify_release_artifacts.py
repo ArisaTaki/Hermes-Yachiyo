@@ -3733,11 +3733,18 @@ def _verify_streaming_provider_smoke_contract_guards(root: Path) -> list[Finding
             UI_BRIDGE_RESOURCE_CHAIN_TEST_REQUIRED_TEXT,
         ),
         (
-            Path("apps/shell/agent_runtime.py"),
+            (
+                Path("apps/shell/agent_runtime.py"),
+                Path("apps/shell/agent/runtime/budget.py"),
+            ),
             WORKFLOW_CONDITION_ORCHESTRATION_REQUIRED_TEXT,
         ),
         (
-            Path("apps/frontend/src/views/AgentStudioView.tsx"),
+            (
+                Path("apps/frontend/src/views/AgentStudioView.tsx"),
+                Path("apps/frontend/src/features/agent-studio/utils/workflow.ts"),
+                Path("apps/frontend/src/features/agent-studio/utils/runTimeline.ts"),
+            ),
             WORKFLOW_CONDITION_FRONTEND_REQUIRED_TEXT,
         ),
         (
@@ -3770,12 +3777,20 @@ def _verify_streaming_provider_smoke_contract_guards(root: Path) -> list[Finding
         ),
     )
     for relative_path, required_texts in targets:
-        path = _resolve(root, relative_path)
-        try:
-            text = path.read_text(encoding="utf-8")
-        except OSError as exc:
-            findings.append(Finding(path, f"could not read provider smoke contract source: {exc}"))
+        relative_paths = relative_path if isinstance(relative_path, tuple) else (relative_path,)
+        path = _resolve(root, relative_paths[0])
+        text_parts: list[str] = []
+        read_errors: list[str] = []
+        for candidate in relative_paths:
+            candidate_path = _resolve(root, candidate)
+            try:
+                text_parts.append(candidate_path.read_text(encoding="utf-8"))
+            except OSError as exc:
+                read_errors.append(f"{candidate}: {exc}")
+        if not text_parts:
+            findings.append(Finding(path, f"could not read provider smoke contract source: {'; '.join(read_errors)}"))
             continue
+        text = "\n".join(text_parts)
         for required_text, message in required_texts:
             if required_text not in text:
                 findings.append(Finding(path, message))

@@ -16,20 +16,20 @@ from pydantic import BaseModel, Field
 
 from apps.bridge.deps import get_runtime
 from apps.core.chat_session import MessageStatus
-from apps.shell.assets import DEFAULT_BUBBLE_AVATAR_PATH, data_uri, find_live2d_preview_path
 from apps.shell.activity_api import (
     delete_activity_event,
     delete_activity_events,
     get_activity_event_detail,
     list_activity_events,
 )
+from apps.shell.assets import DEFAULT_BUBBLE_AVATAR_PATH, data_uri, find_live2d_preview_path
 from apps.shell.chat_api import (
     ChatAPI,
     allocate_chat_attachment_path,
     audio_mime_type_for_suffix,
     chat_attachment_record,
 )
-from apps.shell.chat_bridge import ChatBridge
+from apps.shell.chat_bridge import ChatBridge, agent_task_snapshot_for_task
 from apps.shell.gpt_sovits_service import (
     adopt_gpt_sovits_launch_agent,
     get_gpt_sovits_service_status,
@@ -1081,7 +1081,13 @@ async def send_launcher_quick_message(request: LauncherQuickMessageRequest) -> d
         service = _launcher_proactive_services.get((mode_id, id(runtime)))
         if service is not None and session_id == service.session_id:
             service.acknowledge()
-    return ChatBridge(runtime).send_quick_message(request.text)
+    result = ChatBridge(runtime).send_quick_message(request.text)
+    if not result.get("ok"):
+        return result
+    snapshot = agent_task_snapshot_for_task(runtime, str(result.get("task_id") or ""))
+    if snapshot is None:
+        return result
+    return {**result, "agent_task": snapshot}
 
 
 @router.post("/launcher/position")

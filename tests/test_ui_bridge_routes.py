@@ -14,12 +14,12 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 
 import apps.locald.screenshot as screenshot_mod
+import apps.shell.chat_api as chat_api_mod
 import apps.shell.config as config_mod
 import apps.shell.live2d_resources as live2d_resources
 import apps.shell.mode_settings as mode_settings
 import apps.shell.tts as tts_mod
 import apps.shell.tts_resources as tts_resources
-import apps.shell.chat_api as chat_api_mod
 from apps.bridge.routes import ui
 from apps.core.chat_session import ChatSession
 from apps.core.chat_store import ChatStore
@@ -710,6 +710,52 @@ async def test_launcher_routes_reuse_chat_bridge_and_notification_tracker(monkey
         "ok": True,
         "text": "hi",
     }
+
+
+@pytest.mark.asyncio
+async def test_launcher_quick_message_returns_agent_task_snapshot_when_available(monkeypatch):
+    class FakeLauncherAgentRuntimeService:
+        def get_run(self, run_id: str):
+            return {
+                "run_id": run_id,
+                "user_goal": "Launcher quick task",
+                "status": "approval_required",
+                "pending_approval": {
+                    "approval_id": "approval-1",
+                    "tool": "terminal.run",
+                    "input_preview": {"command": "pytest"},
+                },
+                "timeline": [
+                    {
+                        "event": "agent.tool.approval_required",
+                        "detail": "terminal.run",
+                    }
+                ],
+            }
+
+    runtime = SimpleNamespace(agent_runtime_service=FakeLauncherAgentRuntimeService())
+    monkeypatch.setattr(ui, "get_runtime", lambda: runtime)
+
+    class FakeChatBridge:
+        def __init__(self, received_runtime):
+            assert received_runtime is runtime
+
+        def send_quick_message(self, text):
+            return {"ok": True, "text": text, "task_id": "launcher-task-1"}
+
+    monkeypatch.setattr(ui, "ChatBridge", FakeChatBridge)
+
+    result = await ui.send_launcher_quick_message(
+        ui.LauncherQuickMessageRequest(text="hi", mode="live2d"),
+    )
+
+    assert result["ok"] is True
+    assert result["text"] == "hi"
+    assert result["task_id"] == "launcher-task-1"
+    assert result["agent_task"]["task_id"] == "launcher-task-1"
+    assert result["agent_task"]["status"] == "waiting_approval"
+    assert result["agent_task"]["needs_user_action"] is True
+    assert result["agent_task"]["open_in_studio_url"] == "#/agents?run_id=launcher-task-1"
 
 
 def test_launcher_tts_only_triggers_for_proactive_attention(monkeypatch):

@@ -391,7 +391,7 @@ async function startMockBridge() {
         });
         return;
       }
-      if (request.method === 'GET' && url.pathname === '/ui/workflows') {
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/workflows') {
         sendJson(response, 200, { workflows: [] });
         return;
       }
@@ -419,11 +419,11 @@ async function startMockBridge() {
         sendJson(response, 200, failedRunGroup);
         return;
       }
-      if (request.method === 'GET' && url.pathname === `/runs/${RUN_ID}/events`) {
+      if (request.method === 'GET' && url.pathname === `/yachiyo/studio/runs/${RUN_ID}/events`) {
         sendJson(response, 200, runEventsPage(url, RUN_ID));
         return;
       }
-      if (request.method === 'GET' && url.pathname === `/runs/${FAILED_RUN_ID}/events`) {
+      if (request.method === 'GET' && url.pathname === `/yachiyo/studio/runs/${FAILED_RUN_ID}/events`) {
         sendJson(response, 200, runEventsPage(url, FAILED_RUN_ID));
         return;
       }

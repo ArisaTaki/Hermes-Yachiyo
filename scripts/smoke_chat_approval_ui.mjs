@@ -321,7 +321,7 @@ async function startMockBridge() {
         sendJson(response, 200, { ok: true, profiles: [], defaults: {} });
         return;
       }
-      if (request.method === 'GET' && url.pathname === '/ui/workflows') {
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/workflows') {
         sendJson(response, 200, { workflows: [] });
         return;
       }
@@ -345,7 +345,7 @@ async function startMockBridge() {
         sendJson(response, 200, runPayload());
         return;
       }
-      if (request.method === 'GET' && url.pathname === `/runs/${RUN_ID}/events`) {
+      if (request.method === 'GET' && url.pathname === `/yachiyo/studio/runs/${RUN_ID}/events`) {
         const afterSequence = Number(url.searchParams.get('after_sequence') || '0');
         const limit = Math.max(1, Number(url.searchParams.get('limit') || '200'));
         sendJson(response, 200, {

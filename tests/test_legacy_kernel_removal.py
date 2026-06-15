@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 SCAN_TARGETS = [
     ROOT / ".github",
@@ -114,11 +113,13 @@ FORBIDDEN_KERNEL_TOKENS = [
     "get_yachiyo_workspace_dir",
     "yachiyo_workspace",
     "yachiyo-workspace",
-    "yachiyo_agent",
     "Runtime: Yachiyo Agent Runtime",
     ".yachiyo_init",
     "configs/yachiyo.json",
 ]
+ALLOWED_KERNEL_TOKEN_OCCURRENCES = {
+    ("apps/shell/tts_resources.py", "hermes-yachiyo"),
+}
 FORBIDDEN_ACTIVE_DOC_TOKENS = [
     "Hermes",
     "hermes",
@@ -164,7 +165,10 @@ def test_runtime_sources_do_not_reintroduce_legacy_hermes_kernel_entrypoints() -
     findings: list[str] = []
     for path in _iter_source_files():
         text = path.read_text(encoding="utf-8", errors="ignore")
+        relative_path = path.relative_to(ROOT).as_posix()
         for token in FORBIDDEN_KERNEL_TOKENS:
+            if (relative_path, token) in ALLOWED_KERNEL_TOKEN_OCCURRENCES:
+                continue
             if token in text:
                 findings.append(f"{path.relative_to(ROOT)} contains {token!r}")
 

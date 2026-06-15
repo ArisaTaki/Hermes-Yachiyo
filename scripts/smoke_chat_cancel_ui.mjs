@@ -251,7 +251,7 @@ async function startMockBridge() {
         sendJson(response, 200, runGroup);
         return;
       }
-      if (request.method === 'GET' && url.pathname === `/runs/${RUN_ID}/events`) {
+      if (request.method === 'GET' && url.pathname === `/yachiyo/studio/runs/${RUN_ID}/events`) {
         sendJson(response, 200, runEventsPage(url));
         return;
       }

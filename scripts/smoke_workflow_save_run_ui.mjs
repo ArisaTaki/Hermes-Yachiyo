@@ -393,11 +393,11 @@ async function startMockBridge() {
         });
         return;
       }
-      if (request.method === 'GET' && url.pathname === '/ui/workflows') {
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/workflows') {
         sendJson(response, 200, { workflows: savedWorkflow ? [savedWorkflow] : [] });
         return;
       }
-      if (request.method === 'POST' && url.pathname === '/ui/workflows') {
+      if (request.method === 'POST' && url.pathname === '/yachiyo/studio/workflows') {
         const body = await readJson(request);
         const hasApprovalNode = Array.isArray(body.nodes)
           && body.nodes.some((node) => node?.data?.kind === 'approval');
@@ -493,7 +493,7 @@ async function startMockBridge() {
         sendJson(response, 200, approvalRunGroup());
         return;
       }
-      if (request.method === 'GET' && url.pathname === `/runs/${RUN_ID}/events`) {
+      if (request.method === 'GET' && url.pathname === `/yachiyo/studio/runs/${RUN_ID}/events`) {
         const afterSequence = Number(url.searchParams.get('after_sequence') || '0');
         const limit = Math.max(1, Number(url.searchParams.get('limit') || '200'));
         sendJson(response, 200, {
@@ -504,7 +504,7 @@ async function startMockBridge() {
         });
         return;
       }
-      if (request.method === 'GET' && url.pathname === `/runs/${APPROVAL_RUN_ID}/events`) {
+      if (request.method === 'GET' && url.pathname === `/yachiyo/studio/runs/${APPROVAL_RUN_ID}/events`) {
         const afterSequence = Number(url.searchParams.get('after_sequence') || '0');
         const limit = Math.max(1, Number(url.searchParams.get('limit') || '200'));
         sendJson(response, 200, {

@@ -247,7 +247,7 @@ async function startMockBridge() {
         });
         return;
       }
-      if (request.method === 'GET' && url.pathname === '/ui/workflows') {
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/workflows') {
         sendJson(response, 200, { workflows: [] });
         return;
       }
