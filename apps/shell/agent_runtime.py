@@ -65,7 +65,7 @@ from apps.shell.agent.runtime.run_projections import (
     RunProjectionCoordinator,
 )
 from apps.shell.agent.runtime.skill_content import SkillContentInspector
-from apps.shell.agent.runtime.skill_import import SkillImportSourceResolver
+from apps.shell.agent.runtime.skill_import import SkillImportPreparer, SkillImportSourceResolver
 from apps.shell.agent.runtime.skill_install import SkillInstallCommandValidator
 from apps.shell.agent.runtime.skill_sources import SkillSourceDiscovery
 from apps.shell.agent.runtime.skill_sync import SkillSyncPlanner
@@ -1717,6 +1717,12 @@ class NativeRunEngine:
         self.skill_import_sources = SkillImportSourceResolver(
             workspace_dir=self.workspace_dir,
             id_factory=lambda: uuid4().hex,
+            error_type=AgentRuntimeError,
+        )
+        self.skill_import_preparer = SkillImportPreparer(
+            content=self.skill_content,
+            skill_source_types=_SKILL_SOURCE_TYPES,
+            now=_now,
             error_type=AgentRuntimeError,
         )
         self.skill_sync = SkillSyncPlanner(
@@ -3423,23 +3429,21 @@ class NativeRunEngine:
         copy_to_managed: bool = True,
         folder_id: str | None = None,
     ) -> dict[str, Any]:
-        if source_type not in _SKILL_SOURCE_TYPES:
-            raise AgentRuntimeError("未知 Skill 来源类型")
-        skill_md = source_root / "SKILL.md"
-        if not skill_md.is_file():
-            raise AgentRuntimeError("Skill 根目录必须包含 SKILL.md")
-        markdown = self.skill_content.read_text(skill_md)
-        metadata = self.skill_content.parse_frontmatter(markdown)
-        source_ref = self.skill_content.metadata_source_ref(metadata, source_ref)
-        name = self.skill_content.name(markdown, source_root.name)
-        name = str(metadata.get("name") or name)[:120] or source_root.name
-        description = self.skill_content.description(markdown)
-        description = str(metadata.get("description") or description)[:240]
-        content_hash = self.skill_content.content_hash(source_root)
+        prepared = self.skill_import_preparer.prepare(
+            source_root,
+            source_type=source_type,
+            source_ref=source_ref,
+            synced_at=synced_at,
+        )
+        source_ref = prepared.source_ref
+        name = prepared.name
+        description = prepared.description
+        content_hash = prepared.content_hash
         existing = self._find_existing_skill(origin_path, content_hash, source_type)
-        summary = self.skill_content.summary(markdown)
-        now = _now()
-        last_synced_at = synced_at or (now if source_type not in {"local_dir", "local_zip"} else "")
+        summary = prepared.summary
+        now = prepared.now
+        last_synced_at = prepared.last_synced_at
+        markdown = prepared.markdown
         target_folder_id = self._normalize_skill_folder_id(folder_id) if folder_id is not None else ""
         if existing is None:
             skill_id = f"skill_{_slug(name, 'skill')}_{uuid4().hex[:8]}"
