@@ -5,6 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from apps.shell.agent.runtime.approval_snapshots import ApprovalSnapshotBuilder
 from packages.security import redact_sensitive_text
 
 
@@ -15,6 +16,59 @@ def _redact_secrets(value: Any) -> str:
         collapse_whitespace=False,
         trim=False,
     )
+
+
+class ApprovalPauseProjectionCoordinator:
+    """Projects a run into the public pending-approval state."""
+
+    def __init__(
+        self,
+        *,
+        timeline_factory: Any,
+        append_run_event: Any,
+        update_run: Any,
+        snapshots: ApprovalSnapshotBuilder | None = None,
+    ) -> None:
+        self._timeline = timeline_factory
+        self._append_run_event = append_run_event
+        self._update_run = update_run
+        self._snapshots = snapshots or ApprovalSnapshotBuilder()
+
+    def project_tool_required(
+        self,
+        run_id: str,
+        *,
+        pending_approval: dict[str, Any],
+        timeline: list[dict[str, Any]],
+        artifacts: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        private_pending = (
+            deepcopy(pending_approval)
+            if isinstance(pending_approval, dict)
+            else {}
+        )
+        public_pending = self._snapshots.public_pending_approval(private_pending)
+        tool_name = str(private_pending.get("tool") or "")
+        timeline.append(
+            self._timeline(
+                "agent.tool.approval_required",
+                tool_name,
+                pending_approval=public_pending,
+            )
+        )
+        self._append_run_event(
+            run_id,
+            "agent.tool.approval_required",
+            public_pending,
+        )
+        return self._update_run(
+            run_id,
+            status="approval_required",
+            result=f"等待审批：{tool_name or 'tool'}",
+            timeline=timeline,
+            artifacts=artifacts,
+            pending_approval=private_pending,
+        )
 
 
 class ApprovalCoordinator:

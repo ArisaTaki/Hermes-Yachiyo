@@ -47,7 +47,10 @@ from apps.shell.agent.runtime.budget import (
 from apps.shell.agent.runtime.budget import (
     WorkflowRunBudget as _WorkflowRunBudget,
 )
-from apps.shell.agent.runtime.approval_lifecycle import ApprovalCoordinator
+from apps.shell.agent.runtime.approval_lifecycle import (
+    ApprovalCoordinator,
+    ApprovalPauseProjectionCoordinator,
+)
 from apps.shell.agent.runtime.approval_resume import ApprovalResumeCoordinator
 from apps.shell.agent.runtime.approval_snapshots import (
     ApprovalSnapshotBuilder,
@@ -1695,6 +1698,12 @@ class NativeRunEngine:
             validate_workflow_subworkflow_nodes=self._validate_workflow_subworkflow_nodes,
             record_studio_deletion=self._record_studio_deletion,
             clear_studio_deletion=self._clear_studio_deletion,
+        )
+        self.approval_pause = ApprovalPauseProjectionCoordinator(
+            timeline_factory=self._timeline,
+            append_run_event=self.append_run_event,
+            update_run=self._update_run,
+            snapshots=self.approval_snapshots,
         )
         self.approvals = ApprovalCoordinator(
             timeline_factory=self._timeline,
@@ -4195,25 +4204,11 @@ class NativeRunEngine:
                 tool_policy=runtime["tool_policy"],
                 workspace_policy=runtime["workspace_policy"],
             )
-            timeline.append(
-                self._timeline(
-                    "agent.tool.approval_required",
-                    str(pending.get("tool") or ""),
-                    pending_approval=_public_pending_approval(pending),
-                )
-            )
-            self.append_run_event(
+            return self.approval_pause.project_tool_required(
                 run_id,
-                "agent.tool.approval_required",
-                _public_pending_approval(pending),
-            )
-            return self._update_run(
-                run_id,
-                status="approval_required",
-                result=f"等待审批：{pending.get('tool') or 'tool'}",
+                pending_approval=pending,
                 timeline=timeline,
                 artifacts=artifacts,
-                pending_approval=pending,
             )
         except Exception as exc:
             terminal = self._terminal_run_or_none(run_id)
@@ -4615,25 +4610,11 @@ class NativeRunEngine:
                 pending_approval=None,
             )
         except AgentApprovalRequired as exc:
-            timeline.append(
-                self._timeline(
-                    "agent.tool.approval_required",
-                    str(exc.pending_approval.get("tool") or ""),
-                    pending_approval=_public_pending_approval(exc.pending_approval),
-                )
-            )
-            self.append_run_event(
+            return self.approval_pause.project_tool_required(
                 run_id,
-                "agent.tool.approval_required",
-                _public_pending_approval(exc.pending_approval),
-            )
-            return self._update_run(
-                run_id,
-                status="approval_required",
-                result=f"等待审批：{exc.pending_approval.get('tool') or 'tool'}",
+                pending_approval=exc.pending_approval,
                 timeline=timeline,
                 artifacts=artifacts,
-                pending_approval=exc.pending_approval,
             )
         except Exception as exc:
             safe_error = redact_secrets(exc)
