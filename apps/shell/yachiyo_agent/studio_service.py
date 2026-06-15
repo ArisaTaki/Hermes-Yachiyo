@@ -138,6 +138,9 @@ class AgentStudioService:
     def cancel_run(self, run_id: str) -> RunTimelineSnapshot:
         return run_timeline_snapshot_from_payload(self._studio_port.cancel_run(run_id))
 
+    def delete_run(self, run_id: str) -> dict[str, Any]:
+        return dict(self._studio_port.delete_run(run_id))
+
     def approve_run_approval(self, run_id: str) -> RunTimelineSnapshot:
         return run_timeline_snapshot_from_payload(self._studio_port.approve_run_approval(run_id))
 

@@ -119,6 +119,10 @@ class _FakeStudioPort:
         self.calls.append(("cancel_run", run_id))
         return _run_payload(run_id=run_id, user_goal="Cancelled task") | {"status": "cancelled"}
 
+    def delete_run(self, run_id: str) -> dict[str, Any]:
+        self.calls.append(("delete_run", run_id))
+        return {"ok": True, "deleted_run_ids": [run_id], "deleted_run_count": 1}
+
     def approve_run_approval(self, run_id: str) -> dict[str, Any]:
         self.calls.append(("approve_run_approval", run_id))
         return _run_payload(run_id=run_id, user_goal="Approved task") | {"status": "completed"}
@@ -313,15 +317,18 @@ def test_agent_studio_service_run_actions_return_public_timeline_snapshots() -> 
 
     rerun = service.rerun_run("run-1")
     cancelled = service.cancel_run("run-1")
+    deleted = service.delete_run("run-1")
     approved = service.approve_run_approval("run-1")
     rejected = service.reject_run_approval("run-1", "No")
 
     assert rerun.run_id == "run-1-rerun"
     assert cancelled.status == "cancelled"
+    assert deleted == {"ok": True, "deleted_run_ids": ["run-1"], "deleted_run_count": 1}
     assert approved.status == "completed"
     assert rejected.status == "failed"
     assert ("rerun_run", "run-1") in port.calls
     assert ("cancel_run", "run-1") in port.calls
+    assert ("delete_run", "run-1") in port.calls
     assert ("approve_run_approval", "run-1") in port.calls
     assert ("reject_run_approval", {"run_id": "run-1", "reason": "No"}) in port.calls
 

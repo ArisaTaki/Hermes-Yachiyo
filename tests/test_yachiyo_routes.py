@@ -97,6 +97,10 @@ class _FakeAgentRuntime:
         self.calls.append(("rerun_run", run_id))
         return _run_payload(run_id=f"{run_id}-rerun", status="processing")
 
+    def delete_run(self, run_id: str) -> dict[str, Any]:
+        self.calls.append(("delete_run", run_id))
+        return {"ok": True, "deleted_run_ids": [run_id], "deleted_run_count": 1}
+
     def read_run_artifact(self, run_id: str, artifact_path: str) -> dict[str, Any]:
         self.calls.append(
             ("read_run_artifact", {"run_id": run_id, "artifact_path": artifact_path})
@@ -361,6 +365,7 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     events = await yachiyo.get_studio_run_events("run-1", request, after_sequence=0, limit=1)
     rerun = await yachiyo.rerun_studio_run("run-1", request)
     cancelled = await yachiyo.cancel_studio_run("run-1", request)
+    deleted_run = await yachiyo.delete_studio_run("run-1", request)
     approved = await yachiyo.approve_studio_run_approval("run-1", request)
     rejected = await yachiyo.reject_studio_run_approval(
         "run-1",
@@ -397,11 +402,13 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     assert events["events"][0]["event_type"] == "agent.started"
     assert rerun["run_id"] == "run-1-rerun"
     assert cancelled["status"] == "cancelled"
+    assert deleted_run == {"ok": True, "deleted_run_ids": ["run-1"], "deleted_run_count": 1}
     assert approved["status"] == "completed"
     assert rejected["status"] == "failed"
     assert artifact["content"] == "# Report"
     assert ("rerun_run", "run-1") in runtime.calls
     assert ("cancel_run", "run-1") in runtime.calls
+    assert ("delete_run", "run-1") in runtime.calls
     assert ("approve_run_approval", "run-1") in runtime.calls
     assert ("reject_run_approval", {"run_id": "run-1", "reason": "No"}) in runtime.calls
     assert ("delete_agent", "agent-1") in runtime.calls
@@ -486,6 +493,7 @@ def test_yachiyo_studio_routes_include_run_action_facade() -> None:
     assert '@router.get("/studio/runs/{run_id}")' in source
     assert '@router.post("/studio/runs/{run_id}/rerun")' in source
     assert '@router.post("/studio/runs/{run_id}/cancel")' in source
+    assert '@router.delete("/studio/runs/{run_id}")' in source
     assert '@router.post("/studio/runs/{run_id}/approval/approve")' in source
     assert '@router.post("/studio/runs/{run_id}/approval/reject")' in source
     assert '@router.get("/studio/runs/{run_id}/artifacts/{artifact_path:path}")' in source

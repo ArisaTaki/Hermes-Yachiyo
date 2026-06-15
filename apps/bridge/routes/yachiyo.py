@@ -531,6 +531,19 @@ async def cancel_studio_run(
         raise HTTPException(status_code=404, detail="Run 不存在") from exc
 
 
+@router.delete("/studio/runs/{run_id}")
+async def delete_studio_run(
+    run_id: str,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(_studio_service(http_request).delete_run, run_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Run 不存在") from exc
+    except AgentRuntimeError as exc:
+        raise _bad_request(exc) from exc
+
+
 @router.post("/studio/runs/{run_id}/approval/approve")
 async def approve_studio_run_approval(
     run_id: str,

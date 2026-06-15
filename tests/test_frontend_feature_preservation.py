@@ -1831,6 +1831,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "export async function getRunEvents(",
             "/yachiyo/studio/runs/${encodeURIComponent(runId)}/events?",
             "export async function deleteRun(",
+            "apiDelete(`/yachiyo/studio/runs/${encodeURIComponent(runId)}`)",
             "apiDelete(`/ui/runs/${encodeURIComponent(runId)}`)",
             "export async function getRunArtifact(",
             "/yachiyo/studio/runs/${encodeURIComponent(runId)}/artifacts/${encodedPath}",
@@ -2749,6 +2750,14 @@ def test_agent_frontend_run_helpers_preserve_native_run_bridge_contract() -> Non
             "after_sequence: String(Math.max(0, afterSequence))",
             "limit: String(Math.max(1, limit))",
             "apiGet(`/yachiyo/studio/runs/${encodeURIComponent(runId)}/events?${query.toString()}`)",
+        ],
+    )
+    _assert_function_contains(
+        agents_lib,
+        "deleteRun",
+        [
+            "apiDelete(`/yachiyo/studio/runs/${encodeURIComponent(runId)}`)",
+            "apiDelete(`/ui/runs/${encodeURIComponent(runId)}`)",
         ],
     )
     _assert_function_contains(

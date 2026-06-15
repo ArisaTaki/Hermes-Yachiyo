@@ -452,7 +452,9 @@ export async function getRunEvents(runId: string, afterSequence = 0, limit = 200
 }
 
 export async function deleteRun(runId: string): Promise<{ ok?: boolean; deleted_run_ids?: string[]; deleted_run_count?: number }> {
-  return apiDelete(`/ui/runs/${encodeURIComponent(runId)}`);
+  return apiDelete(`/yachiyo/studio/runs/${encodeURIComponent(runId)}`).catch(() => (
+    apiDelete(`/ui/runs/${encodeURIComponent(runId)}`)
+  ));
 }
 
 export async function getRunArtifact(runId: string, path: string): Promise<{ ok?: boolean; path?: string; content?: string; truncated?: boolean }> {

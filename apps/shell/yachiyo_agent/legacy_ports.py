@@ -377,6 +377,9 @@ class LegacyStudioPort:
     def cancel_run(self, run_id: str) -> dict[str, Any]:
         return self._runtime.cancel_run(run_id)
 
+    def delete_run(self, run_id: str) -> dict[str, Any]:
+        return self._runtime.delete_run(run_id)
+
     def approve_run_approval(self, run_id: str) -> dict[str, Any]:
         return self._runtime.approve_run_approval(run_id)
 
