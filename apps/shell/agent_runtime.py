@@ -229,6 +229,7 @@ from apps.shell.agent.runtime.run_services import (
     build_runtime_run_services as _build_runtime_run_services,
 )
 from apps.shell.agent.runtime.run_timeline import RuntimeRunTimelineService
+from apps.shell.agent.runtime.runnable_names import RuntimeRunnableNameResolver
 from apps.shell.agent.runtime.runnable_services import (
     RuntimeRunnableServiceBundle,
     build_runtime_runnable_services as _build_runtime_runnable_services,
@@ -467,6 +468,11 @@ class NativeRunEngine:
             self._conn,
             ensure_row_factory=self._ensure_row_factory,
             error_type=AgentRuntimeError,
+        )
+        self.runnable_name_resolver = RuntimeRunnableNameResolver(
+            self._conn,
+            ensure_row_factory=self._ensure_row_factory,
+            main_chat_agent_id=_MAIN_CHAT_AGENT_ID,
         )
         recorders = _build_runtime_recorders(
             append_run_event=self.append_run_event,
@@ -1515,16 +1521,7 @@ class NativeRunEngine:
         return _project_run_group_row(row, json_load=_json_load)
 
     def _runnable_name(self, kind: str, runnable_id: str) -> str:
-        self._ensure_row_factory()
-        if kind == "main_chat_run" and runnable_id == _MAIN_CHAT_AGENT_ID:
-            return "Yachiyo"
-        if kind == "agent_run":
-            row = self._conn.execute("SELECT name FROM agents WHERE agent_id=?", (runnable_id,)).fetchone()
-            return str(row["name"]) if row is not None else ""
-        if kind == "workflow_run":
-            row = self._conn.execute("SELECT name FROM workflows WHERE workflow_id=?", (runnable_id,)).fetchone()
-            return str(row["name"]) if row is not None else ""
-        return ""
+        return self.runnable_name_resolver.resolve(kind, runnable_id)
 
     def _ensure_global_name_available(self, name: str, *, ignore_agent_id: str = "", ignore_workflow_id: str = "") -> None:
         self.definition_name_guard.ensure_available(
