@@ -39,6 +39,7 @@ import { useRunCacheActions } from '../features/agent-studio/hooks/useRunCacheAc
 import { useRunDebugActions } from '../features/agent-studio/hooks/useRunDebugActions';
 import { useRunDetailSynchronization } from '../features/agent-studio/hooks/useRunDetailSynchronization';
 import { useRunEventReplay } from '../features/agent-studio/hooks/useRunEventReplay';
+import { useGroupRunSnapshot } from '../features/agent-studio/hooks/useGroupRunSnapshot';
 import { useRunHistoryManagement } from '../features/agent-studio/hooks/useRunHistoryManagement';
 import { useRunLaunchActions } from '../features/agent-studio/hooks/useRunLaunchActions';
 import { useRunListDerivedState } from '../features/agent-studio/hooks/useRunListDerivedState';
@@ -387,6 +388,11 @@ export function AgentStudioView() {
     selectedRunId,
     workflows,
   });
+  const selectedGroupRunSnapshotId = selectedRouteGroupRunId || selectedRun?.run_group_id || '';
+  const { selectedGroupRunSnapshot } = useGroupRunSnapshot(
+    selectedGroupRunSnapshotId,
+    selectedRunReplayRefreshKey,
+  );
   const { selectedPublicRunTimeline } = useRunTimeline(selectedRunId, selectedRunReplayRefreshKey);
   const {
     clearRunEventReplay,
@@ -1136,6 +1142,7 @@ export function AgentStudioView() {
           runnableCapabilityLine={runnableCapabilityLine}
           runnableOptionLabel={runnableOptionLabel}
           selectedHistoryRunCount={selectedHistoryRuns.length}
+          selectedGroupRunSnapshot={selectedGroupRunSnapshot}
           selectedPublicRunTimeline={selectedPublicRunTimeline}
           selectedRouteGroupRunId={selectedRouteGroupRunId}
           selectedRun={selectedRun}

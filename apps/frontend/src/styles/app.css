@@ -16879,6 +16879,24 @@ button.activity-item {
   gap: 8px;
 }
 
+.run-group-overview-participants {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.run-group-overview-participants span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 8px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 8px;
+  background: oklch(255 0 0 / 0.025);
+  color: var(--hy-subtle);
+  font-size: 11px;
+}
+
 .run-group-overview-children button {
   display: grid;
   gap: 3px;
