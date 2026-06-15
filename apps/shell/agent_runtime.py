@@ -71,6 +71,7 @@ from apps.shell.agent.runtime.approval_lifecycle import (
     ApprovalPauseProjectionCoordinator,
 )
 from apps.shell.agent.runtime.approval_resume import ApprovalResumeCoordinator
+from apps.shell.agent.runtime.approval_execution import RuntimeApprovalExecutionService
 from apps.shell.agent.runtime.approval_services import (
     RuntimeApprovalServiceBundle,
     build_runtime_approval_services as _build_runtime_approval_services,
@@ -843,6 +844,12 @@ class NativeRunEngine:
                 error_type=AgentRuntimeError,
             )
         )
+        self.approval_execution = RuntimeApprovalExecutionService(
+            execution_lock=self._approval_execution_lock,
+            execution_in_progress=self._approval_execution_in_progress,
+            get_run=lambda run_id: self.get_run(run_id),
+            approve_once=lambda run: self._approve_run_approval_once(run),
+        )
         self._install_runtime_main_chat_model_loop(
             MainChatModelLoopRunner(
                 get_run=self.get_run,
@@ -1422,7 +1429,7 @@ class NativeRunEngine:
 
     @staticmethod
     def _tool_schemas(allowed_tools: list[str]) -> list[dict[str, Any]]:
-        return ToolDescriptorRegistry.model_tool_schemas(allowed_tools)
+        return RuntimeToolOperations.model_tool_schemas(allowed_tools)
 
     def _compile_tool_policy(self, category: str, policy: Any = None) -> dict[str, Any]:
         return self.runtime_policy.compile_tool_policy(category, policy)
@@ -2755,19 +2762,7 @@ class NativeRunEngine:
         )
 
     def approve_run_approval(self, run_id: str) -> dict[str, Any]:
-        clean_run_id = str(run_id or "").strip()
-        with self._approval_execution_lock:
-            run = self.get_run(clean_run_id)
-            if run["status"] != "approval_required":
-                return run
-            if clean_run_id in self._approval_execution_in_progress:
-                return run
-            self._approval_execution_in_progress.add(clean_run_id)
-        try:
-            return self._approve_run_approval_once(run)
-        finally:
-            with self._approval_execution_lock:
-                self._approval_execution_in_progress.discard(clean_run_id)
+        return self.approval_execution.approve_run_approval(run_id)
 
     def _approve_run_approval_once(self, run: dict[str, Any]) -> dict[str, Any]:
         if run["status"] != "approval_required":

@@ -115,6 +115,7 @@ def test_runtime_tool_operations_static_helpers_match_legacy_contracts() -> None
 
     assert RuntimeToolOperations.parse_tool_calls(tool_calls)[0]["tool"] == "workspace.read"
     assert RuntimeToolOperations.parse_tool_request('{"action":"tool","tool":"artifact_write"}')["tool"] == "artifact.write"
+    assert RuntimeToolOperations.model_tool_schemas(["workspace.read"])[0]["function"]["name"] == "workspace_read"
     assert pending["tool"] == "terminal.run"
     assert pending["next_iteration"] == 3
     RuntimeToolOperations.validate_tool_payload("workspace.write_patch", {"path": "src/out.txt", "patch": "*** patch"})

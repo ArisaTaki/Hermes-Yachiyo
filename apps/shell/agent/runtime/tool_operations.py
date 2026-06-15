@@ -82,6 +82,10 @@ class RuntimeToolOperations:
         return ToolRequestParser().parse_json_fallback(content)
 
     @staticmethod
+    def model_tool_schemas(allowed_tools: list[str]) -> list[dict[str, Any]]:
+        return ToolDescriptorRegistry.model_tool_schemas(allowed_tools)
+
+    @staticmethod
     def validate_tool_payload(tool_name: str, payload: dict[str, Any]) -> None:
         ToolDescriptorRegistry.validate_payload(tool_name, payload)
 
