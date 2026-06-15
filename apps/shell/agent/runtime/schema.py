@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from apps.shell.agent.runtime.credentials import agent_model_credential_ref
 from apps.shell.credential_store import CredentialStoreError
 
 
@@ -257,10 +258,6 @@ CREATE INDEX IF NOT EXISTS idx_future_tasks_status_due ON future_tasks (status, 
 CREATE INDEX IF NOT EXISTS idx_future_tasks_runnable_updated ON future_tasks (runnable_id, updated_at);
 CREATE INDEX IF NOT EXISTS idx_future_task_events_task_created ON future_task_events (future_task_id, created_at);
 """
-
-
-def agent_model_credential_ref(agent_id: str) -> str:
-    return f"agent:{agent_id}:model_api_key"
 
 
 class RuntimeSchemaMigrator:

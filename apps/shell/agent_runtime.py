@@ -102,6 +102,7 @@ from apps.shell.agent.runtime.core_services import (
     RuntimeCoreServiceBundle,
     build_runtime_core_services as _build_runtime_core_services,
 )
+from apps.shell.agent.runtime.credentials import RuntimeCredentialService
 from apps.shell.agent.runtime.custom_api_agent import RuntimeCustomApiAgentLoop
 from apps.shell.agent.runtime.delegation import ChatRunnableMentionParser
 from apps.shell.agent.runtime.definition_services import (
@@ -334,7 +335,6 @@ from apps.shell.agent.tools.policy import (
 )
 from apps.shell.credential_store import (
     CredentialStore,
-    CredentialStoreError,
     create_credential_store,
 )
 from apps.shell.model_profiles import (
@@ -1031,6 +1031,7 @@ class NativeRunEngine:
         self._run_cancel_locks = state.run_cancel_locks
         self._run_cancel_locks_guard = state.run_cancel_locks_guard
         self._conn = state.conn
+        self.runtime_credentials = RuntimeCredentialService(state.credential_store)
 
     def _install_runtime_recorders(self, recorders: RuntimeRecorderBundle) -> None:
         self.tool_request_parser = recorders.tool_request_parser
@@ -1231,31 +1232,13 @@ class NativeRunEngine:
         return _agent_model_credential_ref(agent_id)
 
     def _store_credential(self, ref: str, secret: str) -> None:
-        secret = str(secret or "").strip()
-        if not secret:
-            return
-        try:
-            self._credential_store.set(ref, secret)
-        except CredentialStoreError as exc:
-            raise AgentRuntimeError(redact_api_error_text(exc)) from exc
+        self.runtime_credentials.store(ref, secret)
 
     def _read_credential(self, ref: str) -> str:
-        ref = str(ref or "").strip()
-        if not ref:
-            return ""
-        try:
-            return self._credential_store.get(ref)
-        except CredentialStoreError as exc:
-            raise AgentRuntimeError(redact_api_error_text(exc)) from exc
+        return self.runtime_credentials.read(ref)
 
     def _delete_credential(self, ref: str) -> None:
-        ref = str(ref or "").strip()
-        if not ref:
-            return
-        try:
-            self._credential_store.delete(ref)
-        except CredentialStoreError:
-            pass
+        self.runtime_credentials.delete(ref)
 
     def _migrate_agent_model_credentials(self) -> bool:
         return self._schema_migrator().migrate_agent_model_credentials()
