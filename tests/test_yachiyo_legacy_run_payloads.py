@@ -106,6 +106,40 @@ def test_legacy_run_projector_preserves_group_run_payload_shape() -> None:
     ]
 
 
+def test_legacy_group_run_merges_child_run_task_links() -> None:
+    runtime = _FakeRuntime(
+        {
+            "run-1": {
+                "run_id": "run-1",
+                "status": "approval_required",
+            },
+        },
+        task_links={
+            "run-1": {
+                "task_id": "task-1",
+                "run_id": "run-1",
+                "session_id": "chat-1",
+                "run_status": "approval_required",
+                "last_event_sequence": 7,
+                "created_at": "2026-06-14T00:00:00Z",
+                "updated_at": "2026-06-14T00:00:02Z",
+            },
+        },
+    )
+    payload = LegacyRunPayloadProjector().group_run_from_legacy_run_group(
+        {"run_group_id": "group-run-1", "child_run_ids": ["run-1"]},
+        runtime,
+    )
+
+    child_run = payload["runs"][0]
+    assert child_run["task_id"] == "task-1"
+    assert child_run["session_id"] == "chat-1"
+    assert child_run["task_run_link_created_at"] == "2026-06-14T00:00:00Z"
+    assert child_run["task_run_link_updated_at"] == "2026-06-14T00:00:02Z"
+    assert child_run["task_run_link_run_status"] == "approval_required"
+    assert child_run["task_run_link_last_event_sequence"] == 7
+
+
 def test_legacy_group_artifacts_ignores_non_dict_artifacts() -> None:
     runs = [
         {
@@ -124,11 +158,25 @@ def test_legacy_group_artifacts_ignores_non_dict_artifacts() -> None:
 
 
 class _FakeRuntime:
-    def __init__(self, runs: dict[str, dict[str, Any]]) -> None:
+    def __init__(
+        self,
+        runs: dict[str, dict[str, Any]],
+        *,
+        task_links: dict[str, dict[str, Any]] | None = None,
+    ) -> None:
         self._runs = runs
+        self.task_run_links = _FakeTaskRunLinks(task_links or {})
 
     def get_run(self, run_id: str) -> dict[str, Any]:
         try:
             return self._runs[run_id]
         except KeyError:
             raise KeyError(run_id) from None
+
+
+class _FakeTaskRunLinks:
+    def __init__(self, links_by_run_id: dict[str, dict[str, Any]]) -> None:
+        self._links_by_run_id = links_by_run_id
+
+    def for_run(self, run_id: str) -> dict[str, Any] | None:
+        return self._links_by_run_id.get(run_id)
