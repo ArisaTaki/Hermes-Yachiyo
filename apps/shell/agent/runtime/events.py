@@ -245,6 +245,86 @@ class RuntimeTaskModelEventBuilder:
         )
 
 
+class RuntimeTaskEventRecorder:
+    """Records Chat task lifecycle RunEvents without owning run state."""
+
+    def __init__(
+        self,
+        *,
+        append_run_event: Any,
+        payload_builder: RuntimeTaskModelEventBuilder | None = None,
+    ) -> None:
+        self._append_run_event = append_run_event
+        self._payload_builder = payload_builder or RuntimeTaskModelEventBuilder()
+
+    def started(
+        self,
+        run_id: str,
+        *,
+        task_id: str = "",
+        session_id: str = "",
+    ) -> None:
+        clean_task_id = str(task_id or "")
+        clean_run_id = str(run_id or "")
+        clean_session_id = str(session_id or "")
+        self._append_run_event(
+            clean_run_id,
+            "run.started",
+            {"task_id": clean_task_id, "session_id": clean_session_id},
+        )
+        task_payload = self._payload_builder.task_run_event_payload(
+            task_id=clean_task_id,
+            run_id=clean_run_id,
+            session_id=clean_session_id,
+            status="running",
+        )
+        self._append_run_event(clean_run_id, "task.created", task_payload)
+        self._append_run_event(clean_run_id, "task.started", task_payload)
+        self._append_run_event(
+            clean_run_id,
+            "task.linked",
+            {"task_id": clean_task_id, "session_id": clean_session_id},
+        )
+
+    def completed(
+        self,
+        run_id: str,
+        *,
+        task_id: str = "",
+        session_id: str = "",
+        result: Any = None,
+    ) -> None:
+        clean_run_id = str(run_id or "")
+        safe_payload = self._payload_builder.task_run_event_payload(
+            task_id=task_id,
+            run_id=clean_run_id,
+            session_id=session_id,
+            status="completed",
+            result=result,
+        )
+        self._append_run_event(clean_run_id, "task.completed", safe_payload)
+        self._append_run_event(clean_run_id, "run.completed", {"result": redact_secrets(result)})
+
+    def failed(
+        self,
+        run_id: str,
+        *,
+        task_id: str = "",
+        session_id: str = "",
+        error: Any = None,
+    ) -> None:
+        clean_run_id = str(run_id or "")
+        safe_payload = self._payload_builder.task_run_event_payload(
+            task_id=task_id,
+            run_id=clean_run_id,
+            session_id=session_id,
+            status="failed",
+            error=error,
+        )
+        self._append_run_event(clean_run_id, "task.failed", safe_payload)
+        self._append_run_event(clean_run_id, "run.failed", {"error": redact_secrets(error)})
+
+
 class ToolEventPayloadBuilder:
     """Builds canonical ToolCall RunEvent payloads."""
 

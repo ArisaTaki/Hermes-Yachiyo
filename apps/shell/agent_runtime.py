@@ -64,6 +64,7 @@ from apps.shell.agent.runtime.cancellation import (
 from apps.shell.agent.runtime.errors import AgentApprovalRequired, AgentRuntimeError
 from apps.shell.agent.runtime.events import (
     RuntimeRunEventRecorder,
+    RuntimeTaskEventRecorder,
     RuntimeTaskModelEventBuilder,
     RuntimeToolCallEventRecorder,
     RuntimeTraceEventBuilder,
@@ -1516,6 +1517,10 @@ class NativeRunEngine:
             payload_builder=self.tool_event_payloads,
         )
         self.runtime_task_model_events = RuntimeTaskModelEventBuilder()
+        self.runtime_task_events = RuntimeTaskEventRecorder(
+            append_run_event=self.append_run_event,
+            payload_builder=self.runtime_task_model_events,
+        )
         self.runtime_trace_events = RuntimeTraceEventBuilder()
         self.tool_pending_approvals = ToolPendingApprovalBuilder(
             approval_id_factory=lambda: f"approval_{uuid4().hex[:12]}",
@@ -3937,23 +3942,10 @@ class NativeRunEngine:
             self._timeline("task.linked", str(task_id or ""), task_id=str(task_id or "")),
         ]
         run = self._update_run(run["run_id"], timeline=timeline)
-        self.append_run_event(
+        self.runtime_task_events.started(
             run["run_id"],
-            "run.started",
-            {"task_id": str(task_id or ""), "session_id": str(session_id or "")},
-        )
-        task_payload = self.runtime_task_model_events.task_run_event_payload(
             task_id=str(task_id or ""),
-            run_id=str(run["run_id"]),
             session_id=str(session_id or ""),
-            status="running",
-        )
-        self.append_run_event(run["run_id"], "task.created", task_payload)
-        self.append_run_event(run["run_id"], "task.started", task_payload)
-        self.append_run_event(
-            run["run_id"],
-            "task.linked",
-            {"task_id": str(task_id or ""), "session_id": str(session_id or "")},
         )
         return run
 
@@ -4275,18 +4267,12 @@ class NativeRunEngine:
             pending_approval=None,
         )
         link = self.task_run_links.for_run(run_id)
-        self.append_run_event(
+        self.runtime_task_events.completed(
             run_id,
-            "task.completed",
-            self.runtime_task_model_events.task_run_event_payload(
-                task_id=str((link or {}).get("task_id") or ""),
-                run_id=run_id,
-                session_id=str((link or {}).get("session_id") or ""),
-                status="completed",
-                result=safe_result,
-            ),
+            task_id=str((link or {}).get("task_id") or ""),
+            session_id=str((link or {}).get("session_id") or ""),
+            result=safe_result,
         )
-        self.append_run_event(run_id, "run.completed", {"result": safe_result})
         return completed
 
     def fail_main_chat_run(self, run_id: str, error: Any) -> dict[str, Any]:
@@ -4307,18 +4293,12 @@ class NativeRunEngine:
             pending_approval=None,
         )
         link = self.task_run_links.for_run(run_id)
-        self.append_run_event(
+        self.runtime_task_events.failed(
             run_id,
-            "task.failed",
-            self.runtime_task_model_events.task_run_event_payload(
-                task_id=str((link or {}).get("task_id") or ""),
-                run_id=run_id,
-                session_id=str((link or {}).get("session_id") or ""),
-                status="failed",
-                error=safe_error,
-            ),
+            task_id=str((link or {}).get("task_id") or ""),
+            session_id=str((link or {}).get("session_id") or ""),
+            error=safe_error,
         )
-        self.append_run_event(run_id, "run.failed", {"error": safe_error})
         return failed
 
     def _load_agent_skills(self, skill_ids: list[str]) -> list[dict[str, Any]]:

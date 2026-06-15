@@ -7,6 +7,7 @@ import json
 from apps.shell import agent_runtime
 from apps.shell.agent.runtime.events import (
     RuntimeRunEventRecorder,
+    RuntimeTaskEventRecorder,
     RuntimeTaskModelEventBuilder,
     RuntimeTraceEventBuilder,
     artifact_created_payload,
@@ -303,6 +304,51 @@ def test_legacy_task_model_helpers_delegate_to_runtime_builder() -> None:
     )
 
 
+def test_runtime_task_event_recorder_records_task_lifecycle_events() -> None:
+    events: list[tuple[str, str, dict[str, object]]] = []
+
+    def append_run_event(run_id: str, event_type: str, payload: dict[str, object]) -> None:
+        events.append((run_id, event_type, payload))
+
+    recorder = RuntimeTaskEventRecorder(append_run_event=append_run_event)
+
+    recorder.started("run-1", task_id="task-1", session_id="session-1")
+    recorder.completed(
+        "run-1",
+        task_id="task-1",
+        session_id="session-1",
+        result="done sk-task-lifecycle-secret123456",
+    )
+    recorder.failed(
+        "run-2",
+        task_id="task-2",
+        session_id="session-2",
+        error="api_key=sk-task-lifecycle-error123456",
+    )
+    serialized = json.dumps(events, ensure_ascii=False)
+
+    assert [event_type for _run_id, event_type, _payload in events] == [
+        "run.started",
+        "task.created",
+        "task.started",
+        "task.linked",
+        "task.completed",
+        "run.completed",
+        "task.failed",
+        "run.failed",
+    ]
+    assert events[1][2] == {
+        "task_id": "task-1",
+        "run_id": "run-1",
+        "session_id": "session-1",
+        "status": "running",
+    }
+    assert events[4][2]["status"] == "completed"
+    assert events[6][2]["status"] == "failed"
+    assert "sk-task-lifecycle-secret123456" not in serialized
+    assert "sk-task-lifecycle-error123456" not in serialized
+
+
 def test_agent_runtime_service_uses_runtime_event_recorder_from_legacy_entrypoint(tmp_path) -> None:
     service = AgentRuntimeService(
         db_path=tmp_path / "agent-runtime.db",
@@ -339,5 +385,6 @@ def test_agent_runtime_service_uses_task_model_event_builder(tmp_path) -> None:
     )
     try:
         assert isinstance(service.runtime_task_model_events, RuntimeTaskModelEventBuilder)
+        assert isinstance(service.runtime_task_events, RuntimeTaskEventRecorder)
     finally:
         service.close()
