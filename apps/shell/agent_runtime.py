@@ -34,6 +34,7 @@ from apps.shell.agent.repositories.future_tasks import AgentFutureTaskStore
 from apps.shell.agent.repositories.groups import RunGroupRepository
 from apps.shell.agent.repositories.memories import AgentMemoryStore
 from apps.shell.agent.repositories.runs import RunRepository
+from apps.shell.agent.repositories.studio_deletions import StudioDeletionRepository
 from apps.shell.agent.repositories.task_run_links import TaskRunLinkRepository
 from apps.shell.agent.repositories.workspaces import TrustedWorkspaceRepository
 from apps.shell.agent.repositories.workflows import WorkflowRepository
@@ -1665,6 +1666,10 @@ class NativeRunEngine:
             now=_now,
             error_type=AgentRuntimeError,
         )
+        self.studio_deletions = StudioDeletionRepository(
+            self._conn,
+            now=_now,
+        )
         self.run_groups = RunGroupRepository(
             self._conn,
             ensure_row_factory=self._ensure_row_factory,
@@ -2356,30 +2361,13 @@ class NativeRunEngine:
         return scrubbed
 
     def _record_studio_deletion(self, item_type: str, item_key: str) -> None:
-        clean_key = str(item_key or "").strip()
-        if not clean_key:
-            return
-        self._conn.execute(
-            """
-            INSERT INTO studio_deletions (item_type, item_key, deleted_at)
-            VALUES (?, ?, ?)
-            ON CONFLICT(item_type, item_key) DO UPDATE SET deleted_at=excluded.deleted_at
-            """,
-            (item_type, clean_key, _now()),
-        )
+        self.studio_deletions.record(item_type, item_key)
 
     def _clear_studio_deletion(self, item_type: str, item_key: str) -> None:
-        self._conn.execute(
-            "DELETE FROM studio_deletions WHERE item_type=? AND item_key=?",
-            (item_type, str(item_key or "").strip()),
-        )
+        self.studio_deletions.clear(item_type, item_key)
 
     def _has_studio_deletion(self, item_type: str, item_key: str) -> bool:
-        row = self._conn.execute(
-            "SELECT 1 FROM studio_deletions WHERE item_type=? AND item_key=?",
-            (item_type, str(item_key or "").strip()),
-        ).fetchone()
-        return row is not None
+        return self.studio_deletions.has(item_type, item_key)
 
     @staticmethod
     def _skill_deletion_key(source_type: str, origin_path: str) -> str:
