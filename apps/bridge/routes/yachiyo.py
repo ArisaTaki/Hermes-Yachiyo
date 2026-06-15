@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 
 from apps.bridge.routes import yachiyo_chat_handlers
+from apps.bridge.routes import yachiyo_studio_handlers
 from apps.bridge.routes.yachiyo_models import (
     AgentSkillBody,
     FutureTaskCancelBody,
@@ -102,8 +103,7 @@ async def cancel_task(
 
 @router.get("/studio/agents")
 async def list_studio_agents(http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
-    agents = await asyncio.to_thread(_studio_service(http_request).list_agents)
-    return {"agents": [_snapshot(agent) for agent in agents]}
+    return await yachiyo_studio_handlers.list_agents(http_request)
 
 
 @router.post("/studio/agents")
@@ -111,11 +111,7 @@ async def save_studio_agent(
     request: SaveAgentRequest,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    try:
-        snapshot = await asyncio.to_thread(_studio_service(http_request).save_agent, request)
-        return _snapshot(snapshot)
-    except (AgentRuntimeError, KeyError) as exc:
-        raise _bad_request(exc) from exc
+    return await yachiyo_studio_handlers.save_agent(request, http_request)
 
 
 @router.get("/studio/agents/{agent_id}")
@@ -123,11 +119,7 @@ async def get_studio_agent(
     agent_id: str,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    try:
-        snapshot = await asyncio.to_thread(_studio_service(http_request).get_agent, agent_id)
-        return _snapshot(snapshot)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Agent 不存在") from exc
+    return await yachiyo_studio_handlers.get_agent(agent_id, http_request)
 
 
 @router.delete("/studio/agents/{agent_id}")
@@ -135,12 +127,7 @@ async def delete_studio_agent(
     agent_id: str,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    try:
-        return await asyncio.to_thread(_studio_service(http_request).delete_agent, agent_id)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Agent 不存在") from exc
-    except AgentRuntimeError as exc:
-        raise _bad_request(exc) from exc
+    return await yachiyo_studio_handlers.delete_agent(agent_id, http_request)
 
 
 @router.post("/studio/agents/{agent_id}/test-model")
@@ -148,12 +135,7 @@ async def test_studio_agent_model(
     agent_id: str,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    try:
-        return await asyncio.to_thread(_studio_service(http_request).test_agent_model, agent_id)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Agent 不存在") from exc
-    except AgentRuntimeError as exc:
-        raise _bad_request(exc) from exc
+    return await yachiyo_studio_handlers.test_agent_model(agent_id, http_request)
 
 
 @router.post("/studio/agents/{agent_id}/skills")
@@ -162,17 +144,7 @@ async def attach_studio_agent_skill(
     request: AgentSkillBody,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    try:
-        snapshot = await asyncio.to_thread(
-            _studio_service(http_request).attach_skill,
-            agent_id,
-            request.skill_id,
-        )
-        return _snapshot(snapshot)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Agent 或 Skill 不存在") from exc
-    except AgentRuntimeError as exc:
-        raise _bad_request(exc) from exc
+    return await yachiyo_studio_handlers.attach_agent_skill(agent_id, request, http_request)
 
 
 @router.delete("/studio/agents/{agent_id}/skills/{skill_id}")
@@ -181,15 +153,7 @@ async def detach_studio_agent_skill(
     skill_id: str,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    try:
-        snapshot = await asyncio.to_thread(
-            _studio_service(http_request).detach_skill,
-            agent_id,
-            skill_id,
-        )
-        return _snapshot(snapshot)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Agent 不存在") from exc
+    return await yachiyo_studio_handlers.detach_agent_skill(agent_id, skill_id, http_request)
 
 
 @router.get("/studio/skills")
