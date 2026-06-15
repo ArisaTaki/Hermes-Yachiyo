@@ -65,6 +65,7 @@ from apps.shell.agent.runtime.run_projections import (
     ApprovalResumeProjectionCoordinator,
     RunProjectionCoordinator,
 )
+from apps.shell.agent.runtime.skill_content import SkillContentInspector
 from apps.shell.agent.runtime.skill_install import SkillInstallCommandValidator
 from apps.shell.agent.runtime.skill_sources import SkillSourceDiscovery
 from apps.shell.agent.runtime.tool_approvals import (
@@ -497,8 +498,7 @@ def _is_within(path: Path, root: Path) -> bool:
 
 
 def _read_text(path: Path, limit: int = 200_000) -> str:
-    data = path.read_bytes()[:limit]
-    return data.decode("utf-8", errors="replace")
+    return SkillContentInspector.read_text(path, limit)
 
 
 def _sha256_bytes(data: bytes) -> str:
@@ -613,35 +613,11 @@ def _apply_single_file_unified_diff(original: str, patch: str, *, expected_path:
 
 
 def _skill_content_hash(root: Path) -> str:
-    digest = hashlib.sha256()
-    for path in sorted(item for item in root.rglob("*") if item.is_file()):
-        try:
-            rel = path.relative_to(root).as_posix()
-            digest.update(rel.encode("utf-8", errors="replace"))
-            digest.update(b"\0")
-            digest.update(path.read_bytes())
-            digest.update(b"\0")
-        except OSError:
-            continue
-    return digest.hexdigest()
+    return SkillContentInspector.content_hash(root)
 
 
 def _parse_skill_frontmatter(markdown: str) -> dict[str, Any]:
-    lines = markdown.splitlines()
-    if not lines or lines[0].strip() != "---":
-        return {}
-    data: dict[str, Any] = {}
-    for line in lines[1:]:
-        if line.strip() == "---":
-            break
-        if not line.strip() or line.lstrip().startswith("#") or ":" not in line:
-            continue
-        key, raw_value = line.split(":", 1)
-        key = key.strip()
-        value = raw_value.strip().strip("\"'")
-        if key and value:
-            data[key] = value
-    return data
+    return SkillContentInspector.parse_frontmatter(markdown)
 
 
 def _normalize_tool_name(value: Any) -> str:
@@ -1736,6 +1712,7 @@ class NativeRunEngine:
             normalize_source_type=_normalize_skill_source_type,
             native_library_source_types=_NATIVE_LIBRARY_SOURCE_TYPES,
         )
+        self.skill_content = SkillContentInspector()
         self.run_groups = RunGroupRepository(
             self._conn,
             ensure_row_factory=self._ensure_row_factory,
@@ -3513,16 +3490,16 @@ class NativeRunEngine:
         skill_md = source_root / "SKILL.md"
         if not skill_md.is_file():
             raise AgentRuntimeError("Skill 根目录必须包含 SKILL.md")
-        markdown = _read_text(skill_md)
-        metadata = _parse_skill_frontmatter(markdown)
-        source_ref = self._metadata_skill_source_ref(metadata, source_ref)
-        name = self._skill_name(markdown, source_root.name)
+        markdown = self.skill_content.read_text(skill_md)
+        metadata = self.skill_content.parse_frontmatter(markdown)
+        source_ref = self.skill_content.metadata_source_ref(metadata, source_ref)
+        name = self.skill_content.name(markdown, source_root.name)
         name = str(metadata.get("name") or name)[:120] or source_root.name
-        description = self._skill_description(markdown)
+        description = self.skill_content.description(markdown)
         description = str(metadata.get("description") or description)[:240]
-        content_hash = _skill_content_hash(source_root)
+        content_hash = self.skill_content.content_hash(source_root)
         existing = self._find_existing_skill(origin_path, content_hash, source_type)
-        summary = self._skill_summary(markdown)
+        summary = self.skill_content.summary(markdown)
         now = _now()
         last_synced_at = synced_at or (now if source_type not in {"local_dir", "local_zip"} else "")
         target_folder_id = self._normalize_skill_folder_id(folder_id) if folder_id is not None else ""
@@ -3531,7 +3508,7 @@ class NativeRunEngine:
             target = self.skills_dir / skill_id if copy_to_managed else source_root
             if copy_to_managed:
                 shutil.copytree(source_root, target)
-            asset_paths = self._skill_asset_paths(target)
+            asset_paths = self.skill_content.asset_paths(target)
             self._conn.execute(
                 """
                 INSERT INTO skills (
@@ -3599,7 +3576,7 @@ class NativeRunEngine:
                 target = source_root
             if copy_to_managed:
                 shutil.copytree(source_root, target)
-            asset_paths = self._skill_asset_paths(target)
+            asset_paths = self.skill_content.asset_paths(target)
             next_folder_id = target_folder_id if folder_id is not None else existing["folder_id"]
             self._conn.execute(
                 """
@@ -3707,11 +3684,7 @@ class NativeRunEngine:
 
     @staticmethod
     def _metadata_skill_source_ref(metadata: dict[str, Any], fallback: str) -> str:
-        for key in ("source", "repository", "repo", "homepage", "url", "origin"):
-            value = metadata.get(key)
-            if isinstance(value, str) and value.strip():
-                return value.strip()
-        return fallback
+        return SkillContentInspector.metadata_source_ref(metadata, fallback)
 
     def _validated_npx_skills_argv(self, argv: list[str]) -> list[str]:
         return self.skill_install_validator.validate_npx_skills_argv(argv)
@@ -3734,35 +3707,19 @@ class NativeRunEngine:
 
     @staticmethod
     def _skill_name(markdown: str, fallback: str) -> str:
-        for line in markdown.splitlines():
-            if line.startswith("# "):
-                return line[2:].strip()[:120] or fallback
-        return fallback or "Imported Skill"
+        return SkillContentInspector.name(markdown, fallback)
 
     @staticmethod
     def _skill_description(markdown: str) -> str:
-        for line in markdown.splitlines():
-            clean = line.strip()
-            if clean and not clean.startswith("#"):
-                return clean[:240]
-        return ""
+        return SkillContentInspector.description(markdown)
 
     @staticmethod
     def _skill_summary(markdown: str) -> str:
-        lines = [line.strip() for line in markdown.splitlines() if line.strip() and not line.startswith("#")]
-        return " ".join(lines)[:500]
+        return SkillContentInspector.summary(markdown)
 
     @staticmethod
     def _skill_asset_paths(root: Path) -> list[str]:
-        paths: list[str] = []
-        for folder in ("assets", "templates", "examples"):
-            base = root / folder
-            if not base.exists():
-                continue
-            for child in base.rglob("*"):
-                if child.is_file():
-                    paths.append(child.relative_to(root).as_posix())
-        return sorted(paths)
+        return SkillContentInspector.asset_paths(root)
 
     def delete_skill(self, skill_id: str) -> dict[str, Any]:
         return self.skill_records.delete(skill_id)
