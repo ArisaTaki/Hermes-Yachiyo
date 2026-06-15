@@ -360,6 +360,8 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "async function fileFromDesktopImageSelection",
             "'/ui/chat/delegated-run-summary'",
             "async function createDelegatedRunSummary",
+            "async function pollAgentRunCompletion",
+            "function pollAgentRunInBackground",
         ],
     )
     _assert_contains(
@@ -2463,12 +2465,12 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
     _assert_contains(
         "apps/frontend/src/views/ChatView.tsx",
         [
+            "useChatRunPolling({",
+            "activePollIntervalMs: ACTIVE_POLL_INTERVAL_MS",
+            "createDelegatedRunSummaryOptions: delegatedRunSummaryOptions",
             "createDelegatedRunSummary(runId, delegatedRunSummaryOptions())",
             "function delegatedRunSummaryOptions()",
             "chatRunCompletionProcessingState(",
-            "chatRunCompletionStatusText({",
-            "chatRunProgressStatusText(runLabel, attempt, interval)",
-            "chatRunPollingTimeoutStatusText(chatStillProcessing)",
             "chatApprovalRejectionCompletionStatusText({",
             "let delegatedSummary = { created: false, error: '', taskId: '', isProcessing: false, processingCount: 0 };",
             "delegatedSummary = await createDelegatedRunSummary(runId, delegatedRunSummaryOptions());",
@@ -2523,6 +2525,25 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
             "if (delegatedSummary.created) return 'Agent 已结束，等待主模型整理委派结果...';",
             "if (chatStillProcessing) return '已拒绝，等待主模型整理结果...';",
             "return runStatus === 'completed' ? '审批后执行完成。' : '审批后执行结束。';",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/hooks/useChatRunPolling.ts",
+        [
+            "export function useChatRunPolling",
+            "const maxAttempts = 600;",
+            "const run = await getRun(runId);",
+            "if (status === 'approval_required' && options.ignoreInitialApprovalRequired && attempt < 3)",
+            "if (isChatRunTerminalStatus(status))",
+            "rememberRunApprovalDetails(run)",
+            "setStatus(nextApprovalStatusText(run))",
+            "createDelegatedRunSummary(runId, createDelegatedRunSummaryOptions())",
+            "chatRunCompletionProcessingState(",
+            "chatRunCompletionStatusText({",
+            "chatRunProgressStatusText(runLabel, attempt, interval)",
+            "chatRunPollingTimeoutStatusText(chatStillProcessing)",
+            "void pollAgentRunCompletion(runId, options).catch((error) =>",
+            "setStatus(error instanceof Error ? error.message : 'Agent Run 状态刷新失败')",
         ],
     )
     _assert_contains(

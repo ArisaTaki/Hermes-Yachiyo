@@ -64,11 +64,6 @@ import {
 import {
   chatApprovalRejectionCompletionStatusText,
   chatRunCompletionProcessingState,
-  chatRunCompletionStatusText,
-  chatRunLabel,
-  chatRunPollingTimeoutStatusText,
-  chatRunProgressStatusText,
-  isChatRunTerminalStatus,
 } from '../features/yachiyo-chat/runPolling';
 import {
   activeMentions,
@@ -97,6 +92,7 @@ import {
   sessionPreview,
 } from '../features/yachiyo-chat/sessionState';
 import { useYachiyoTaskActions } from '../features/yachiyo-chat/hooks/useYachiyoTaskActions';
+import { useChatRunPolling } from '../features/yachiyo-chat/hooks/useChatRunPolling';
 import { useYachiyoTaskSnapshots } from '../features/yachiyo-chat/hooks/useYachiyoTaskSnapshots';
 import { useYachiyoTaskSubmit } from '../features/yachiyo-chat/hooks/useYachiyoTaskSubmit';
 import { publicTaskSnapshotForMessage } from '../features/yachiyo-chat/taskSnapshots';
@@ -119,7 +115,7 @@ import type {
 } from '../features/yachiyo-chat/types';
 import logoUrl from '../../../../docs/open-design/logo.png';
 import { type AssistantProfileSeed, useAssistantProfileSeed } from '../lib/assistantProfileSeed';
-import { approveRunApproval, listRunnables, type RunnableSummary, type RunSpec, getRun, rejectRunApproval } from '../lib/agents';
+import { approveRunApproval, listRunnables, type RunnableSummary, type RunSpec, rejectRunApproval } from '../lib/agents';
 import { apiGet, apiPatch, apiPost, bridgeUrl, canChooseChatImages, chooseAvatarImage, chooseChatImages, copyText, openAppView, openExternalUrl, restartDesktopBridge, type ChatImageSelection } from '../lib/bridge';
 import { ROUTE_CHANGE_EVENT, currentParam, navigateTo } from '../lib/view';
 
@@ -392,6 +388,21 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   function refreshYachiyoTaskSnapshotsFromMessages(nextMessages: ChatMessage[]) {
     refreshYachiyoTaskSnapshotsForRunIds(nextMessages.map(messageRunId));
   }
+
+  const {
+    pollAgentRunInBackground,
+  } = useChatRunPolling({
+    activePollIntervalMs: ACTIVE_POLL_INTERVAL_MS,
+    createDelegatedRunSummaryOptions: delegatedRunSummaryOptions,
+    forgetRunApprovalDetails,
+    isProcessingRef,
+    loadSessions,
+    refreshMessages,
+    rememberRunApprovalDetails,
+    setIsProcessing,
+    setProcessingCount,
+    setStatus,
+  });
 
   const {
     cancelYachiyoTaskFromCard,
@@ -1176,79 +1187,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '取消失败');
     }
-  }
-
-  async function pollAgentRunCompletion(runId: string, options: { summarizeDelegatedRun?: boolean; ignoreInitialApprovalRequired?: boolean } = {}) {
-    const maxAttempts = 600; // 最多轮询 600 次（约 5 分钟）
-    const interval = ACTIVE_POLL_INTERVAL_MS;
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      try {
-        const run = await getRun(runId);
-        const status = normalizeRunStatus(run.status);
-        const runLabel = chatRunLabel(run);
-        if (status === 'approval_required' && options.ignoreInitialApprovalRequired && attempt < 3) {
-          await new Promise((resolve) => setTimeout(resolve, interval));
-          continue;
-        }
-        if (isChatRunTerminalStatus(status)) {
-          // 执行完成，刷新消息
-          const refreshed = await refreshMessages();
-          await loadSessions();
-          const chatStillProcessing = Boolean(refreshed?.is_processing);
-          const chatProcessingCount = Math.max(0, Number(refreshed?.processing_count || 0));
-          if (status === 'approval_required') {
-            rememberRunApprovalDetails(run);
-            isProcessingRef.current = true;
-            setIsProcessing(true);
-            setProcessingCount(Math.max(1, chatProcessingCount));
-            setStatus(nextApprovalStatusText(run));
-          } else {
-            forgetRunApprovalDetails(runId);
-            const delegatedSummary = options.summarizeDelegatedRun
-              ? await createDelegatedRunSummary(runId, delegatedRunSummaryOptions())
-              : { created: false, error: '', taskId: '', isProcessing: false, processingCount: 0 };
-            const { nextProcessing, nextProcessingCount } = chatRunCompletionProcessingState(
-              delegatedSummary,
-              chatStillProcessing,
-              chatProcessingCount,
-            );
-            isProcessingRef.current = nextProcessing;
-            setIsProcessing(nextProcessing);
-            setProcessingCount(nextProcessingCount);
-            setStatus(chatRunCompletionStatusText({
-              chatStillProcessing,
-              delegatedSummary,
-              runLabel,
-              status,
-            }));
-          }
-          return;
-        }
-        // 更新状态文本
-        if (attempt % 10 === 0) {
-          setStatus(chatRunProgressStatusText(runLabel, attempt, interval));
-        }
-      } catch (error) {
-        console.error('轮询 Agent Run 状态失败:', error);
-      }
-      await new Promise((resolve) => setTimeout(resolve, interval));
-    }
-    // 超时
-    const refreshed = await refreshMessages();
-    await loadSessions();
-    const chatStillProcessing = Boolean(refreshed?.is_processing);
-    const chatProcessingCount = Math.max(0, Number(refreshed?.processing_count || 0));
-    isProcessingRef.current = chatStillProcessing;
-    setIsProcessing(chatStillProcessing);
-    setProcessingCount(chatProcessingCount);
-    setStatus(chatRunPollingTimeoutStatusText(chatStillProcessing));
-  }
-
-  function pollAgentRunInBackground(runId: string, options: { summarizeDelegatedRun?: boolean; ignoreInitialApprovalRequired?: boolean } = {}) {
-    void pollAgentRunCompletion(runId, options).catch((error) => {
-      console.error('后台轮询 Agent Run 状态失败:', error);
-      setStatus(error instanceof Error ? error.message : 'Agent Run 状态刷新失败');
-    });
   }
 
   async function deleteSession(targetLabel = '对话') {
