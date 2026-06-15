@@ -24,6 +24,8 @@ from apps.shell.agent.runtime.budget import (
     truncate_text,
 )
 from apps.shell.agent.runtime.errors import AgentApprovalRequired, AgentRuntimeError
+from apps.shell.agent_runtime import AgentRuntimeService
+from apps.shell.credential_store import MemoryCredentialStore
 
 
 def test_runtime_error_types_remain_exported_from_legacy_module() -> None:
@@ -163,3 +165,21 @@ def test_run_budget_factory_reconstructs_usage_from_current_limits_and_run_time(
     assert budget.limits is limits
     assert budget.started_at_epoch == 123.0
     assert budget.model_calls_used == 1
+
+
+def test_native_runtime_installs_shared_run_budget_callable(tmp_path) -> None:
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime.db",
+        workspace_dir=tmp_path / "runtime",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    try:
+        assert callable(service.runtime_run_budget)
+        assert service.main_chat_model._run_budget is service.runtime_run_budget
+        assert service.main_chat_model_loop._run_budget is service.runtime_run_budget
+        assert service.custom_api_agent_loop._run_budget is service.runtime_run_budget
+        assert service.tool_approval_resume._run_budget is service.runtime_run_budget
+        assert service._run_budget("", []).model_calls_used == service.runtime_run_budget("", []).model_calls_used
+    finally:
+        service.close()
