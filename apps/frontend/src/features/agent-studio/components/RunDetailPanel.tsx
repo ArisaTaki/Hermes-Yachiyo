@@ -11,6 +11,7 @@ import { MemorySkillTraceInspector } from './MemorySkillTraceInspector';
 import { RunApprovalRequest } from './RunApprovalRequest';
 import { RunTimeline } from './RunTimeline';
 import { ToolCallInspector } from './ToolCallInspector';
+import { WorkflowRunDetailPanel } from './WorkflowRunDetailPanel';
 import {
   approvalsFromRunEventReplay,
   artifactsFromRunEventReplay,
@@ -177,18 +178,6 @@ export function RunDetailPanel({
   const approvalHistorySource = replayApprovals.length
     ? 'RunTimelineSnapshot + RunEvent replay approval facts'
     : 'RunTimelineSnapshot approval facts';
-  const workflowRunSnapshotActive = Boolean(
-    selectedRun?.kind === 'workflow_run'
-    && (
-      selectedPublicRunTimeline?.workflow_id
-      || selectedPublicRunTimeline?.objective
-      || selectedPublicRunTimeline?.current_node_id
-      || selectedPublicRunTimeline?.current_node_label
-      || selectedPublicRunTimeline?.final_answer
-    ),
-  );
-  const publicSnapshotName = workflowRunSnapshotActive ? 'WorkflowRunSnapshot' : 'RunTimelineSnapshot';
-
   return (
     <div className="agent-studio-panel">
       <div className="section-heading-row"><h2>Run Detail</h2></div>
@@ -415,34 +404,12 @@ export function RunDetailPanel({
             selectedRun={selectedRun}
             selectedRunApproval={selectedRunApproval}
           />
-          {selectedPublicRunTimeline ? (
-            <section
-              className="run-detail-block run-public-contract-block"
-              data-public-snapshot-kind={publicSnapshotName}
-              data-workflow-id={selectedPublicRunTimeline.workflow_id || ''}
-              data-testid="agent-run-detail-public-timeline"
-            >
-              <div className="run-detail-section-head">
-                <div>
-                  <h4>Public Runtime Snapshot</h4>
-                  <span>{publicSnapshotName} · Approval · Artifact · Events</span>
-                </div>
-                <span className={`run-status-pill ${runStatusTone(selectedPublicRunTimeline.status)}`}>{runStatusLabel(selectedPublicRunTimeline.status)}</span>
-              </div>
-              <div className="run-public-contract-grid">
-                {selectedPublicRunTimeline.workflow_id ? <code>Workflow {selectedPublicRunTimeline.workflow_id}</code> : null}
-                {selectedPublicRunTimeline.objective ? <span>objective {selectedPublicRunTimeline.objective}</span> : null}
-                {selectedPublicRunTimeline.current_node_label || selectedPublicRunTimeline.current_node_id ? (
-                  <span>node {selectedPublicRunTimeline.current_node_label || selectedPublicRunTimeline.current_node_id}</span>
-                ) : null}
-                {selectedPublicRunTimeline.final_answer ? <span>final answer recorded</span> : null}
-                <span>events {selectedPublicRunTimeline.events?.length || 0}</span>
-                <span>approvals {selectedPublicRunTimeline.approvals?.length || 0}</span>
-                <span>artifacts {selectedPublicRunTimeline.artifacts?.length || 0}</span>
-                <span>children {selectedPublicRunTimeline.children?.length || 0}</span>
-              </div>
-            </section>
-          ) : null}
+          <WorkflowRunDetailPanel
+            runStatusLabel={runStatusLabel}
+            runStatusTone={runStatusTone}
+            selectedPublicRunTimeline={selectedPublicRunTimeline}
+            selectedRun={selectedRun}
+          />
           {selectedPublicRunTimeline || selectedRunToolCalls.length ? (
             <ToolCallInspector
               sourceLabel={toolCallSource}

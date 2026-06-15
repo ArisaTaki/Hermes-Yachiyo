@@ -1571,6 +1571,15 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
     _assert_contains(
         "apps/frontend/src/features/agent-studio/components/RunDetailPanel.tsx",
         [
+            "WorkflowRunDetailPanel",
+            "selectedPublicRunTimeline={selectedPublicRunTimeline}",
+            "selectedRun={selectedRun}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/WorkflowRunDetailPanel.tsx",
+        [
+            "export function WorkflowRunDetailPanel",
             'data-testid="agent-run-detail-public-timeline"',
             "data-public-snapshot-kind={publicSnapshotName}",
             "data-workflow-id={selectedPublicRunTimeline.workflow_id || ''}",
@@ -1673,6 +1682,8 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
             "RunTimeline",
             "ExpandableRuntimeContent as RunExpandableContent",
             "ArtifactInspector",
+            "GroupRunDetailPanel",
+            "WorkflowRunDetailPanel",
             "artifactsFromRunEventReplay(selectedRunReplayEvents)",
             "mergeArtifactSnapshots(selectedRunArtifacts, replayArtifacts)",
             "RunTimelineSnapshot + RunEvent replay artifact facts",
@@ -1682,7 +1693,6 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
             "RunTimelineSnapshot + RunEvent replay tool facts",
             "toolCalls={selectedRunToolCalls}",
             "MemorySkillTraceInspector",
-            "GroupRunDetailPanel",
             "const memorySkillTraceEvents = selectedRunReplayEvents.length",
             "RunEvent replay trace facts · Memory / Skill",
             "RunTimelineSnapshot trace facts · Memory / Skill",
