@@ -18,6 +18,7 @@ import { WorkflowEditorPanel, WorkflowRunPreview } from '../features/agent-studi
 import { useAgentDefinitions } from '../features/agent-studio/hooks/useAgentDefinitions';
 import { useAgentGroups } from '../features/agent-studio/hooks/useAgentGroups';
 import { useApprovedRunGuard } from '../features/agent-studio/hooks/useApprovedRunGuard';
+import { useRunApprovalActions } from '../features/agent-studio/hooks/useRunApprovalActions';
 import { useRunApprovalFollowup } from '../features/agent-studio/hooks/useRunApprovalFollowup';
 import { useRunEventReplay } from '../features/agent-studio/hooks/useRunEventReplay';
 import { useRunTimeline } from '../features/agent-studio/hooks/useRunTimeline';
@@ -32,12 +33,10 @@ import {
   textToScopes,
 } from '../features/agent-studio/utils/agents';
 import {
-  approvedRunStatusMessage,
   formatRunDate,
   isActiveRunStatus,
   isPotentialWorkflowChildAgentRun,
   isWorkflowChildAgentRun,
-  makeRunContinuingAfterApproval,
   normalizeRunStatus,
   publicApprovalToRunPendingApproval,
   publicArtifactsOrLegacy,
@@ -107,8 +106,6 @@ import {
 import type { GroupRunSnapshot } from '../features/yachiyo-studio/types';
 import {
   attachSkill,
-  approveRunApproval,
-  cancelRun,
   cancelFutureTask,
   createSkillFolder,
   createAgent,
@@ -137,7 +134,6 @@ import {
   listSkillSources,
   listSkills,
   listWorkflows,
-  rejectRunApproval,
   rerunRun,
   syncNativeSkills,
   testAgentModel,
@@ -959,6 +955,28 @@ export function AgentStudioView() {
     refresh,
     refreshRunGroupsForRuns,
     selectedRunId,
+    setStatus,
+    upsertRunDetailCache,
+  });
+
+  const {
+    approveRunById,
+    approveSelectedRun,
+    cancelRunById,
+    cancelSelectedRun,
+    rejectRunById,
+    rejectSelectedRun,
+  } = useRunApprovalActions({
+    approvalFollowupRefreshOptions,
+    isApprovalFollowupCurrent,
+    pollApprovedRunProgress,
+    refresh,
+    refreshRunGroupsForRuns,
+    rememberApprovedRun,
+    runById,
+    selectedRun,
+    setError,
+    setSelectedRunId,
     setStatus,
     upsertRunDetailCache,
   });
@@ -1937,110 +1955,6 @@ export function AgentStudioView() {
   async function loadMoreSelectedRunEvents() {
     const loadedCount = await loadMoreRunReplayEvents();
     setStatus(loadedCount ? `已加载 ${loadedCount} 条 RunEvent replay` : '没有更多 RunEvent replay');
-  }
-
-  async function approveRunById(runId: string, nextSelectedRunId?: string): Promise<StudioRefreshOptions> {
-    if (!runId) throw new Error('请选择待审批 Run');
-    const selectedAfterAction = nextSelectedRunId || runId;
-    const currentRun = runById.get(runId) || null;
-    const selectedAfterRun = selectedAfterAction !== runId ? runById.get(selectedAfterAction) || null : null;
-    const optimisticRuns = [
-      currentRun ? makeRunContinuingAfterApproval(currentRun, '已批准，Run 正在继续执行。') : null,
-      selectedAfterRun && isActiveRunStatus(selectedAfterRun.status)
-        ? makeRunContinuingAfterApproval(selectedAfterRun, '已批准子 Agent，Workflow 正在继续执行。')
-        : null,
-    ].filter((run): run is RunSpec => Boolean(run));
-    upsertRunDetailCache(optimisticRuns);
-    rememberApprovedRun(currentRun);
-    rememberApprovedRun(selectedAfterRun);
-    setSelectedRunId(selectedAfterAction);
-    const approvalRequest = approveRunApproval(runId);
-    void pollApprovedRunProgress(runId, selectedAfterAction).catch((err: unknown) => {
-      setError(err instanceof Error ? err.message : '刷新审批后的 Run 进度失败');
-    });
-    void approvalRequest
-      .then(async (run) => {
-        const updatedRuns = [run];
-        if (nextSelectedRunId && nextSelectedRunId !== run.run_id) {
-          try {
-            updatedRuns.push(await getRun(nextSelectedRunId));
-          } catch {
-            // The background polling path will retry; approval already succeeded.
-          }
-        }
-        upsertRunDetailCache(updatedRuns);
-        await refreshRunGroupsForRuns(updatedRuns);
-        if (isApprovalFollowupCurrent(selectedAfterAction)) {
-          setSelectedRunId(selectedAfterAction);
-          setStatus(approvedRunStatusMessage(run));
-        }
-      })
-      .catch((err: unknown) => {
-        if (isApprovalFollowupCurrent(selectedAfterAction)) {
-          setError(err instanceof Error ? err.message : '批准 Run 审批失败');
-        }
-        void refresh(approvalFollowupRefreshOptions(selectedAfterAction)).catch(() => undefined);
-      });
-    return {
-      selectedRunId: selectedAfterAction,
-      statusMessage: '已批准，Run 正在继续执行。',
-      skipRefresh: true,
-    };
-  }
-
-  async function rejectRunById(runId: string, nextSelectedRunId?: string): Promise<StudioRefreshOptions> {
-    if (!runId) throw new Error('请选择待审批 Run');
-    const run = await rejectRunApproval(runId);
-    const selectedAfterAction = nextSelectedRunId || run.run_id;
-    const updatedRuns = [run];
-    if (nextSelectedRunId && nextSelectedRunId !== run.run_id) {
-      try {
-        updatedRuns.push(await getRun(nextSelectedRunId));
-      } catch {
-        // The normal refresh/polling path will retry; rejection already succeeded.
-      }
-    }
-    upsertRunDetailCache(updatedRuns);
-    setSelectedRunId(selectedAfterAction);
-    return { selectedRunId: selectedAfterAction, statusMessage: '已拒绝，Run 已终止。' };
-  }
-
-  async function approveSelectedRun(): Promise<StudioRefreshOptions> {
-    if (!selectedRun) throw new Error('请选择待审批 Run');
-    return approveRunById(selectedRun.run_id);
-  }
-
-  async function rejectSelectedRun(): Promise<StudioRefreshOptions> {
-    if (!selectedRun) throw new Error('请选择待审批 Run');
-    return rejectRunById(selectedRun.run_id);
-  }
-
-  async function cancelRunById(runId: string, nextSelectedRunId?: string): Promise<StudioRefreshOptions> {
-    if (!runId) throw new Error('请选择要取消的 Run');
-    const currentRun = runById.get(runId) || null;
-    if (currentRun && !isActiveRunStatus(currentRun.status)) throw new Error('只能取消进行中或待审批的 Run');
-    const run = await cancelRun(runId);
-    const selectedAfterAction = nextSelectedRunId || run.run_id;
-    const updatedRuns = [run];
-    if (nextSelectedRunId && nextSelectedRunId !== run.run_id) {
-      try {
-        updatedRuns.push(await getRun(nextSelectedRunId));
-      } catch {
-        // The normal refresh/polling path will retry; cancellation already succeeded.
-      }
-    }
-    upsertRunDetailCache(updatedRuns);
-    await refreshRunGroupsForRuns(updatedRuns);
-    setSelectedRunId(selectedAfterAction);
-    return {
-      selectedRunId: selectedAfterAction,
-      statusMessage: nextSelectedRunId ? '已取消子 Run，Workflow 已终止。' : 'Run 已取消。',
-    };
-  }
-
-  async function cancelSelectedRun(): Promise<StudioRefreshOptions> {
-    if (!selectedRun) throw new Error('请选择要取消的 Run');
-    return cancelRunById(selectedRun.run_id);
   }
 
   function requestCancelSelectedRun() {

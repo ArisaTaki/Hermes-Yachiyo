@@ -529,6 +529,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "useAgentDefinitions",
             "useAgentGroups",
             "useApprovedRunGuard",
+            "useRunApprovalActions",
             "useRunApprovalFollowup",
             "useRunEventReplay(selectedRunId, selectedRunReplayRefreshKey)",
             "useRunTimeline(selectedRunId, selectedRunReplayRefreshKey)",
@@ -604,6 +605,22 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "setStatus('Run 需要处理下一次审批。');",
             "setStatus(approvedRunStatusMessage(watchedRun));",
             "await refresh(approvalFollowupRefreshOptions(selectedAfterAction));",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useRunApprovalActions.ts",
+        [
+            "export function useRunApprovalActions",
+            "const approveRunById = useCallback(async (",
+            "const approvalRequest = approveRunApproval(runId);",
+            "void pollApprovedRunProgress(runId, selectedAfterAction)",
+            "updatedRuns.push(await getRun(nextSelectedRunId));",
+            "await refreshRunGroupsForRuns(updatedRuns);",
+            "const rejectRunById = useCallback(async (",
+            "const run = await rejectRunApproval(runId);",
+            "const cancelRunById = useCallback(async (",
+            "const run = await cancelRun(runId);",
+            "statusMessage: nextSelectedRunId ? '已取消子 Run，Workflow 已终止。' : 'Run 已取消。'",
         ],
     )
     _assert_contains(
@@ -1754,7 +1771,6 @@ def test_chat_approval_run_detail_handoff_preserves_route_and_replay_wiring() ->
             "useRunEventReplay(selectedRunId, selectedRunReplayRefreshKey)",
             "useRunApprovalFollowup({",
             "selectedRunExecutionEvents",
-            "refresh(approvalFollowupRefreshOptions(selectedAfterAction))",
         ],
     )
     _assert_contains(
@@ -1763,6 +1779,12 @@ def test_chat_approval_run_detail_handoff_preserves_route_and_replay_wiring() ->
             "const selectedRunIdRef = useRef(selectedRunId);",
             "selectedRunIdRef.current = selectedRunId;",
             "isApprovalFollowupCurrent(selectedAfterAction) ? { selectedRunId: selectedAfterAction } : {}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useRunApprovalActions.ts",
+        [
+            "void refresh(approvalFollowupRefreshOptions(selectedAfterAction)).catch(() => undefined);",
         ],
     )
     _assert_contains(
@@ -2060,10 +2082,8 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "listRunGroups",
             "getRunGroup",
             "deleteRun",
-            "cancelRun",
             "rerunRun",
-            "approveRunApproval",
-            "rejectRunApproval",
+            "useRunApprovalActions",
             "useRunEventReplay",
             "saveAgent",
             "const saved = draft.agent_id ? await updateAgent(draft.agent_id, request) : await createAgent(request);",
@@ -3024,17 +3044,26 @@ def test_agent_studio_preserves_workflow_child_approval_refresh_wiring() -> None
     _assert_contains(
         "apps/frontend/src/views/AgentStudioView.tsx",
         [
-            "async function approveRunById(runId: string, nextSelectedRunId?: string): Promise<StudioRefreshOptions>",
+            "useRunApprovalActions({",
+            "onApproveRunById={approveRunById}",
+            "onRejectRunById={rejectRunById}",
+            "onCancelRunById={cancelRunById}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useRunApprovalActions.ts",
+        [
+            "const approveRunById = useCallback(async (",
             "const selectedAfterAction = nextSelectedRunId || runId;",
             "const approvalRequest = approveRunApproval(runId);",
             "void pollApprovedRunProgress(runId, selectedAfterAction)",
             "updatedRuns.push(await getRun(nextSelectedRunId));",
             "await refreshRunGroupsForRuns(updatedRuns);",
-            "async function rejectRunById(runId: string, nextSelectedRunId?: string): Promise<StudioRefreshOptions>",
+            "const rejectRunById = useCallback(async (",
             "const run = await rejectRunApproval(runId);",
             "upsertRunDetailCache(updatedRuns);",
             "setSelectedRunId(selectedAfterAction);",
-            "async function cancelRunById(runId: string, nextSelectedRunId?: string): Promise<StudioRefreshOptions>",
+            "const cancelRunById = useCallback(async (",
             "const run = await cancelRun(runId);",
             "statusMessage: nextSelectedRunId ? '已取消子 Run，Workflow 已终止。' : 'Run 已取消。'",
         ],
@@ -3080,6 +3109,15 @@ def test_agent_studio_preserves_workflow_child_approval_run_detail_wiring() -> N
             "...selectedWorkflowChildRefs.map((ref) => ref.childRunId),",
             "selectedWorkflowApprovalChildRunId,",
             "Promise.all(uniqueChildRunIds.map((runId) => getRun(runId).catch(() => null)))",
+            "useRunApprovalActions({",
+            "onApproveRunById={approveRunById}",
+            "onRejectRunById={rejectRunById}",
+            "onCancelRunById={cancelRunById}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useRunApprovalActions.ts",
+        [
             "const selectedAfterAction = nextSelectedRunId || runId;",
             "const selectedAfterRun = selectedAfterAction !== runId ? runById.get(selectedAfterAction) || null : null;",
             "makeRunContinuingAfterApproval(selectedAfterRun, '已批准子 Agent，Workflow 正在继续执行。')",
