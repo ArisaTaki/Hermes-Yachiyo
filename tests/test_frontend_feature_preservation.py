@@ -2088,6 +2088,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "useSkillDeletionActions",
             "useSkillFolderManagement",
             "useSkillImportActions",
+            "useSkillSourceInputActions",
             "useWorkflowCanvasActions",
             "useWorkflowDeletionActions",
             "useWorkflowSaveActions",
@@ -2296,6 +2297,20 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "const result = await installSkillCommand(command, skillTargetFolderId);",
             "setSkillImportResults(syncResultsToImportResults(result.sync.results));",
             "throw new Error(result.stderr || result.stdout || `安装命令退出：${result.returncode ?? 'unknown'}`);",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useSkillSourceInputActions.ts",
+        [
+            "export function useSkillSourceInputActions",
+            "async function pickSkillSources()",
+            "const selected = await chooseSkillSources();",
+            "if (selected.length) await runAction(() => importSkillSourceList(selected), '导入 Skills');",
+            "setError(err instanceof Error ? err.message : '选择 Skill 文件失败');",
+            "function dropSkillSources(event: DragEvent<HTMLElement>)",
+            "event.preventDefault();",
+            ".map((file) => (file as File & { path?: string }).path || file.name)",
+            "void runAction(() => importSkillSourceList(filePaths), '导入 Skills');",
         ],
     )
     _assert_contains(

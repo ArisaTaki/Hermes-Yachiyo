@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type DragEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Connection, Edge, Node } from '@xyflow/react';
 import {
   addEdge,
@@ -35,6 +35,7 @@ import { useRuntimeMemoryManagement } from '../features/agent-studio/hooks/useRu
 import { useSkillDeletionActions } from '../features/agent-studio/hooks/useSkillDeletionActions';
 import { useSkillFolderManagement } from '../features/agent-studio/hooks/useSkillFolderManagement';
 import { useSkillImportActions } from '../features/agent-studio/hooks/useSkillImportActions';
+import { useSkillSourceInputActions } from '../features/agent-studio/hooks/useSkillSourceInputActions';
 import { useWorkflowDeletionActions } from '../features/agent-studio/hooks/useWorkflowDeletionActions';
 import { useWorkflowDefinitions } from '../features/agent-studio/hooks/useWorkflowDefinitions';
 import { useWorkflowSaveActions } from '../features/agent-studio/hooks/useWorkflowSaveActions';
@@ -135,7 +136,7 @@ import {
   type SkillSourceRoot,
   type SkillSpec,
 } from '../lib/agents';
-import { chooseSkillSources, openAppView, openPath } from '../lib/bridge';
+import { openAppView, openPath } from '../lib/bridge';
 import { listModelProfiles, type ModelProfile, type ModelProfileDefaults } from '../lib/modelProfiles';
 import { currentParam, navigateTo } from '../lib/view';
 
@@ -694,6 +695,14 @@ export function AgentStudioView() {
     skillInstallCommand,
     skillTargetFolderId,
     skills,
+  });
+  const {
+    dropSkillSources,
+    pickSkillSources,
+  } = useSkillSourceInputActions({
+    importSkillSourceList,
+    runAction,
+    setError,
   });
   const selectedRunWorkflow = useMemo(
     () => (
@@ -1444,26 +1453,6 @@ export function AgentStudioView() {
       setError(err instanceof Error ? err.message : `${label} 失败`);
     } finally {
       setBusyAction('');
-    }
-  }
-
-  async function pickSkillSources() {
-    setError('');
-    try {
-      const selected = await chooseSkillSources();
-      if (selected.length) await runAction(() => importSkillSourceList(selected), '导入 Skills');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '选择 Skill 文件失败');
-    }
-  }
-
-  function dropSkillSources(event: DragEvent<HTMLElement>) {
-    event.preventDefault();
-    const filePaths = Array.from(event.dataTransfer.files)
-      .map((file) => (file as File & { path?: string }).path || file.name)
-      .filter(Boolean);
-    if (filePaths.length) {
-      void runAction(() => importSkillSourceList(filePaths), '导入 Skills');
     }
   }
 
