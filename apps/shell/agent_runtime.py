@@ -13,8 +13,6 @@ from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
-from urllib import error as urlerror
-from urllib import request as urlrequest
 from uuid import uuid4
 
 from apps.core.tls import urlopen_with_bundled_ca
@@ -170,6 +168,7 @@ from apps.shell.agent.runtime.memory_services import RuntimeMemoryService
 from apps.shell.agent.runtime.model_calling import (
     call_model_profile_chat_message as _runtime_call_model_profile_chat_message,
     callable_accepts_keyword as _callable_accepts_keyword,
+    openai_compatible_chat as _runtime_openai_compatible_chat,
 )
 from apps.shell.agent.runtime.model_profiles import RuntimeAgentModelTester, RuntimeModelProfileResolver
 from apps.shell.agent.runtime.model_messages import (
@@ -2388,26 +2387,15 @@ class NativeRunEngine:
 
     @staticmethod
     def _openai_compatible_chat(base_url: str, model: str, api_key: str, messages: list[dict[str, str]]) -> str:
-        url = f"{base_url.rstrip('/')}/chat/completions"
-        timeout = read_openai_compatible_chat_timeout()
-        body = json.dumps({"model": model, "messages": messages, "temperature": 0.2}).encode("utf-8")
-        request = urlrequest.Request(
-            url,
-            data=body,
-            method="POST",
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}",
-            },
+        return _runtime_openai_compatible_chat(
+            base_url,
+            model,
+            api_key,
+            messages,
+            timeout=read_openai_compatible_chat_timeout(),
+            urlopen=urlopen_with_bundled_ca,
+            redact_error=redact_secrets,
         )
-        try:
-            with urlopen_with_bundled_ca(request, timeout=timeout) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-        except TimeoutError as exc:
-            raise AgentRuntimeError(f"custom_api 调用超时：等待响应超过 {timeout:g} 秒") from exc
-        except (urlerror.URLError, json.JSONDecodeError) as exc:
-            raise AgentRuntimeError(f"custom_api 调用失败：{redact_secrets(exc)}") from exc
-        return str(payload.get("choices", [{}])[0].get("message", {}).get("content") or "")
 
     def test_agent_model(self, agent_id: str) -> dict[str, Any]:
         agent = self._get_agent_private(agent_id)

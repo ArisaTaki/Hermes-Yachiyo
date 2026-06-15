@@ -3,9 +3,17 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib import error as urlerror
+
+import pytest
 
 from apps.shell import agent_runtime
-from apps.shell.agent.runtime.model_calling import call_model_profile_chat_message, callable_accepts_keyword
+from apps.shell.agent.runtime.errors import AgentRuntimeError
+from apps.shell.agent.runtime.model_calling import (
+    call_model_profile_chat_message,
+    callable_accepts_keyword,
+    openai_compatible_chat,
+)
 
 
 def test_model_calling_helpers_remain_exported_from_legacy_module() -> None:
@@ -121,3 +129,72 @@ def test_legacy_model_call_wrapper_uses_current_openai_compatible_function(monke
             "stream": True,
         }
     ]
+
+
+def test_openai_compatible_chat_posts_chat_completion_request() -> None:
+    calls: list[dict[str, Any]] = []
+
+    def fake_urlopen(request: Any, *, timeout: float) -> FakeResponse:
+        calls.append({
+            "url": request.full_url,
+            "headers": dict(request.header_items()),
+            "body": request.data.decode("utf-8"),
+            "timeout": timeout,
+        })
+        return FakeResponse(b'{"choices":[{"message":{"content":"custom ok"}}]}')
+
+    result = openai_compatible_chat(
+        "https://api.example.test/v1/",
+        "demo-model",
+        "sk-test",
+        [{"role": "user", "content": "hello"}],
+        timeout=12.5,
+        urlopen=fake_urlopen,
+        redact_error=str,
+    )
+
+    assert result == "custom ok"
+    assert calls == [
+        {
+            "url": "https://api.example.test/v1/chat/completions",
+            "headers": {
+                "Content-type": "application/json",
+                "Authorization": "Bearer sk-test",
+            },
+            "body": '{"model": "demo-model", "messages": [{"role": "user", "content": "hello"}], "temperature": 0.2}',
+            "timeout": 12.5,
+        }
+    ]
+
+
+def test_openai_compatible_chat_redacts_transport_errors() -> None:
+    def failing_urlopen(_request: Any, *, timeout: float) -> FakeResponse:
+        raise urlerror.URLError("token=sk-secret-value")
+
+    with pytest.raises(AgentRuntimeError) as excinfo:
+        openai_compatible_chat(
+            "https://api.example.test/v1",
+            "demo-model",
+            "sk-test",
+            [{"role": "user", "content": "hello"}],
+            timeout=3,
+            urlopen=failing_urlopen,
+            redact_error=lambda value: str(value).replace("sk-secret-value", "[redacted]"),
+        )
+
+    assert "custom_api 调用失败" in str(excinfo.value)
+    assert "sk-secret-value" not in str(excinfo.value)
+
+
+class FakeResponse:
+    def __init__(self, body: bytes) -> None:
+        self._body = body
+
+    def __enter__(self) -> "FakeResponse":
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return self._body

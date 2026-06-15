@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 import inspect
+import json
 from typing import Any, Callable
+from urllib import error as urlerror
+from urllib import request as urlrequest
+
+from apps.shell.agent.runtime.errors import AgentRuntimeError
 
 
 def callable_accepts_keyword(func: Any, name: str) -> bool:
@@ -30,3 +35,34 @@ def call_model_profile_chat_message(
     if stream and callable_accepts_keyword(chat_message, "stream"):
         kwargs["stream"] = True
     return chat_message(base_url, model, api_key, messages, **kwargs)
+
+
+def openai_compatible_chat(
+    base_url: str,
+    model: str,
+    api_key: str,
+    messages: list[dict[str, str]],
+    *,
+    timeout: float,
+    urlopen: Callable[..., Any],
+    redact_error: Callable[[Any], str],
+) -> str:
+    url = f"{base_url.rstrip('/')}/chat/completions"
+    body = json.dumps({"model": model, "messages": messages, "temperature": 0.2}).encode("utf-8")
+    request = urlrequest.Request(
+        url,
+        data=body,
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
+    )
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except TimeoutError as exc:
+        raise AgentRuntimeError(f"custom_api 调用超时：等待响应超过 {timeout:g} 秒") from exc
+    except (urlerror.URLError, json.JSONDecodeError) as exc:
+        raise AgentRuntimeError(f"custom_api 调用失败：{redact_error(exc)}") from exc
+    return str(payload.get("choices", [{}])[0].get("message", {}).get("content") or "")
