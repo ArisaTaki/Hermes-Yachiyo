@@ -187,6 +187,7 @@ from apps.shell.agent.runtime.run_projections import (
 )
 from apps.shell.agent.runtime.run_readiness import RuntimeRunReadinessValidator
 from apps.shell.agent.runtime.run_cancellation import RuntimeRunCancellationService
+from apps.shell.agent.runtime.run_rerun import RuntimeRunRerunService
 from apps.shell.agent.runtime.run_services import (
     RuntimeRunServiceBundle,
     build_runtime_run_services as _build_runtime_run_services,
@@ -945,6 +946,27 @@ class NativeRunEngine:
                 final_statuses=_FINAL_RUN_STATUSES,
             )
         )
+        self._install_runtime_run_rerun(
+            RuntimeRunRerunService(
+                get_run=lambda run_id: self.get_run(run_id),
+                create_agent_run=lambda payload: self.create_agent_run(payload),
+                create_workflow_run=lambda payload: self.create_workflow_run(payload),
+                timeline_factory=lambda event, detail="", **extra: self._timeline(
+                    event,
+                    detail,
+                    **extra,
+                ),
+                append_run_event=lambda run_id, event_type, payload: self.append_run_event(
+                    run_id,
+                    event_type,
+                    payload,
+                ),
+                update_run=lambda run_id, **kwargs: self._update_run(run_id, **kwargs),
+                resolve_runnable=lambda **kwargs: self.resolve_runnable(**kwargs),
+                final_statuses=_FINAL_RUN_STATUSES,
+                error_type=AgentRuntimeError,
+            )
+        )
         self._init_db()
         self._migrate_agent_workspace_policies()
         if seed_templates:
@@ -1094,6 +1116,12 @@ class NativeRunEngine:
         run_cancellation: RuntimeRunCancellationService,
     ) -> None:
         self.run_cancellation = run_cancellation
+
+    def _install_runtime_run_rerun(
+        self,
+        run_rerun: RuntimeRunRerunService,
+    ) -> None:
+        self.run_rerun = run_rerun
 
     def close(self) -> None:
         self.shutdown()
@@ -3856,79 +3884,7 @@ class NativeRunEngine:
         )
 
     def rerun_run(self, run_id: str) -> dict[str, Any]:
-        original = self.get_run(run_id)
-        original_status = str(original.get("status") or "")
-        if original_status not in _FINAL_RUN_STATUSES:
-            raise AgentRuntimeError("当前 Run 还在进行中，不能重跑")
-        user_goal = str(original.get("user_goal") or "").strip()
-        if not user_goal:
-            raise AgentRuntimeError("原 Run 没有记录任务目标，无法重跑")
-        kind = str(original.get("kind") or "")
-        runnable_id = str(original.get("runnable_id") or "")
-        if kind == "agent_run":
-            rerun = self.create_agent_run(
-                {
-                    "agent_id": runnable_id,
-                    "user_goal": user_goal,
-                    "source": "rerun",
-                }
-            )
-            rerun_key = "agent_run_id"
-        elif kind == "workflow_run":
-            rerun = self.create_workflow_run(
-                {
-                    "workflow_id": runnable_id,
-                    "user_goal": user_goal,
-                    "source": "rerun",
-                }
-            )
-            rerun_key = "workflow_run_id"
-        else:
-            raise AgentRuntimeError("不支持重跑这个 Run 类型")
-
-        rerun_event = self._timeline(
-            "run.rerun.started",
-            f"Rerun of {original.get('runnable_name') or runnable_id}",
-            rerun_of_run_id=str(original.get("run_id") or ""),
-            rerun_of_kind=kind,
-            rerun_of_status=original_status,
-            rerun_of_runnable_id=runnable_id,
-            rerun_of_runnable_name=str(original.get("runnable_name") or ""),
-            original_created_at=str(original.get("created_at") or ""),
-            original_updated_at=str(original.get("updated_at") or ""),
-            input_preview={
-                "original_run_id": str(original.get("run_id") or ""),
-                "original_status": original_status,
-                "original_target": str(original.get("runnable_name") or runnable_id),
-                "original_goal": user_goal,
-            },
-        )
-        self.append_run_event(
-            str(rerun["run_id"]),
-            "run.rerun.started",
-            {
-                "rerun_of_run_id": str(original.get("run_id") or ""),
-                "rerun_of_kind": kind,
-                "rerun_of_status": original_status,
-                "rerun_of_runnable_id": runnable_id,
-                "rerun_of_runnable_name": str(original.get("runnable_name") or ""),
-                "original_created_at": str(original.get("created_at") or ""),
-                "original_updated_at": str(original.get("updated_at") or ""),
-                "input_preview": {
-                    "original_run_id": str(original.get("run_id") or ""),
-                    "original_status": original_status,
-                    "original_target": str(original.get("runnable_name") or runnable_id),
-                    "original_goal": user_goal,
-                },
-            },
-        )
-        updated = self._update_run(
-            str(rerun["run_id"]),
-            timeline=[rerun_event, *[event for event in rerun.get("timeline") or [] if isinstance(event, dict)]],
-        )
-        updated[rerun_key] = updated["run_id"]
-        updated["runnable"] = self.resolve_runnable(runnable_id=runnable_id)
-        return updated
+        return self.run_rerun.rerun(run_id)
 
     def delegate_runnable(
         self,
