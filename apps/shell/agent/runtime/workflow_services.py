@@ -5,7 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from apps.shell.agent.runtime.cancellation import WorkflowCancellationProjectionCoordinator
 from apps.shell.agent.runtime.run_readiness import RuntimeRunReadinessValidator
+from apps.shell.agent.runtime.workflow_approvals import WorkflowApprovalResumeCoordinator
+from apps.shell.agent.runtime.workflow_continuation import WorkflowContinuationCoordinator
+from apps.shell.agent.runtime.workflow_outcomes import WorkflowChildOutcomeCoordinator
 from apps.shell.agent.runtime.workflow_path import WorkflowDefinitionValidator, WorkflowPathPlanner
 from apps.shell.agent.runtime.workflow_resume import WorkflowParentRunLocator, WorkflowResumePlanner
 from apps.shell.agent.runtime.workflow_runs import RuntimeWorkflowRunStarter
@@ -21,6 +25,14 @@ class RuntimeWorkflowPlanningServiceBundle:
     workflow_run_start_projector: WorkflowRunStartProjector
     workflow_run_starter: RuntimeWorkflowRunStarter
     workflow_resume_planner: WorkflowResumePlanner
+
+
+@dataclass(frozen=True)
+class RuntimeWorkflowExecutionServiceBundle:
+    workflow_continuation: WorkflowContinuationCoordinator
+    workflow_approval_resume: WorkflowApprovalResumeCoordinator
+    workflow_cancellation: WorkflowCancellationProjectionCoordinator
+    workflow_child_outcomes: WorkflowChildOutcomeCoordinator
 
 
 def build_runtime_workflow_planning_services(
@@ -78,4 +90,40 @@ def build_runtime_workflow_planning_services(
             workflow_path=workflow_path,
             node_kind=node_kind,
         ),
+    )
+
+
+def build_runtime_workflow_execution_services(
+    *,
+    engine: Any,
+    iso_epoch: Callable[[Any], float],
+    claim_pending_approval: Callable[..., bool],
+    get_current_run: Callable[[str], dict[str, Any]],
+    pending_approval_private: Callable[[str], dict[str, Any] | None],
+    get_run: Callable[[str], dict[str, Any]],
+    merge_workflow_child_run_outcome: Callable[..., None],
+    timeline_factory: Callable[..., dict[str, Any]],
+    append_run_event: Callable[[str, str, dict[str, Any]], Any],
+    update_run: Callable[..., dict[str, Any]],
+) -> RuntimeWorkflowExecutionServiceBundle:
+    workflow_continuation = WorkflowContinuationCoordinator(
+        engine,
+        iso_epoch=iso_epoch,
+    )
+    return RuntimeWorkflowExecutionServiceBundle(
+        workflow_continuation=workflow_continuation,
+        workflow_approval_resume=WorkflowApprovalResumeCoordinator(
+            claim_pending_approval=claim_pending_approval,
+            get_current_run=get_current_run,
+            resume_after_approval_node=workflow_continuation.resume_after_approval_node,
+        ),
+        workflow_cancellation=WorkflowCancellationProjectionCoordinator(
+            pending_approval_private=pending_approval_private,
+            get_run=get_run,
+            merge_workflow_child_run_outcome=merge_workflow_child_run_outcome,
+            timeline_factory=timeline_factory,
+            append_run_event=append_run_event,
+            update_run=update_run,
+        ),
+        workflow_child_outcomes=WorkflowChildOutcomeCoordinator(),
     )

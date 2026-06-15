@@ -254,7 +254,9 @@ from apps.shell.agent.runtime.workflow_resume import (
 from apps.shell.agent.runtime.workflow_runs import RuntimeWorkflowRunStarter
 from apps.shell.agent.runtime.workflow_run_outcomes import WorkflowRunOutcomeProjector
 from apps.shell.agent.runtime.workflow_services import (
+    RuntimeWorkflowExecutionServiceBundle,
     RuntimeWorkflowPlanningServiceBundle,
+    build_runtime_workflow_execution_services as _build_runtime_workflow_execution_services,
     build_runtime_workflow_planning_services as _build_runtime_workflow_planning_services,
 )
 from apps.shell.agent.runtime.workflow_start import WorkflowRunStartProjector
@@ -733,16 +735,11 @@ class NativeRunEngine:
             continue_custom_api_agent=self._run_custom_api_agent,
         )
         self._install_runtime_approval_services(approval_services)
-        self.workflow_continuation = WorkflowContinuationCoordinator(
-            self,
+        workflow_execution_services = _build_runtime_workflow_execution_services(
+            engine=self,
             iso_epoch=lambda value: _iso_epoch(value),
-        )
-        self.workflow_approval_resume = WorkflowApprovalResumeCoordinator(
             claim_pending_approval=self.run_approvals.claim_pending_approval,
-            get_current_run=self.get_run,
-            resume_after_approval_node=self.workflow_continuation.resume_after_approval_node,
-        )
-        self.workflow_cancellation = WorkflowCancellationProjectionCoordinator(
+            get_current_run=lambda run_id: self.get_run(run_id),
             pending_approval_private=lambda run_id: self.runs.pending_approval_private(run_id),
             get_run=lambda run_id: self.get_run(run_id),
             merge_workflow_child_run_outcome=lambda timeline, artifacts, child_run, label: (
@@ -752,7 +749,7 @@ class NativeRunEngine:
             append_run_event=lambda run_id, event_type, payload: self.append_run_event(run_id, event_type, payload),
             update_run=lambda run_id, **kwargs: self._update_run(run_id, **kwargs),
         )
-        self.workflow_child_outcomes = WorkflowChildOutcomeCoordinator()
+        self._install_runtime_workflow_execution_services(workflow_execution_services)
         workflow_planning_services = _build_runtime_workflow_planning_services(
             get_run_group=self.get_run_group,
             get_run=self.get_run,
@@ -867,6 +864,15 @@ class NativeRunEngine:
         self.approval_pause = approval_services.approval_pause
         self.approvals = approval_services.approvals
         self.approval_resume = approval_services.approval_resume
+
+    def _install_runtime_workflow_execution_services(
+        self,
+        workflow_services: RuntimeWorkflowExecutionServiceBundle,
+    ) -> None:
+        self.workflow_continuation = workflow_services.workflow_continuation
+        self.workflow_approval_resume = workflow_services.workflow_approval_resume
+        self.workflow_cancellation = workflow_services.workflow_cancellation
+        self.workflow_child_outcomes = workflow_services.workflow_child_outcomes
 
     def _install_runtime_workflow_planning_services(
         self,
