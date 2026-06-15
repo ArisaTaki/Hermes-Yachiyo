@@ -60,6 +60,9 @@ def test_build_runtime_workflow_execution_services_wires_continuation_approval_a
     assert callable(bundle.workflow_continuation._default_workspace_policy_callback)
     assert callable(bundle.workflow_continuation._workflow_artifacts_dir_source)
     assert callable(bundle.workflow_continuation._workflow_artifact_path_callback)
+    assert callable(bundle.workflow_continuation._workflow_agent_for_node_callback)
+    assert callable(bundle.workflow_continuation._workflow_node_task_callback)
+    assert callable(bundle.workflow_continuation._workflow_child_goal_callback)
     assert callable(bundle.workflow_continuation._node_kind_callback)
     assert bundle.workflow_approval_resume._resume_after_approval_node.__self__ is bundle.workflow_continuation
     assert bundle.workflow_cancellation._timeline is timeline_factory
@@ -88,6 +91,9 @@ def test_native_runtime_installs_workflow_execution_services_under_legacy_attrib
         assert callable(service.workflow_continuation._default_workspace_policy_callback)
         assert callable(service.workflow_continuation._workflow_artifacts_dir_source)
         assert callable(service.workflow_continuation._workflow_artifact_path_callback)
+        assert callable(service.workflow_continuation._workflow_agent_for_node_callback)
+        assert callable(service.workflow_continuation._workflow_node_task_callback)
+        assert callable(service.workflow_continuation._workflow_child_goal_callback)
         assert callable(service.workflow_continuation._node_kind_callback)
         assert service.workflow_approval_resume._resume_after_approval_node.__self__ is service.workflow_continuation
         assert service.workflow_approval_resume._claim_pending_approval.__self__ is service.run_approvals

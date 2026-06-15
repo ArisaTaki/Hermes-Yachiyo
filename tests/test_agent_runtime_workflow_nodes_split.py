@@ -18,6 +18,50 @@ def test_workflow_node_handoffs_remain_exported_from_legacy_module() -> None:
     assert agent_runtime.WorkflowArtifactNodeWrite is WorkflowArtifactNodeWrite
 
 
+def test_workflow_agent_node_handoff_accepts_prepared_agent_goal_and_task() -> None:
+    agent = {"agent_id": "agent_research", "name": "Research Agent"}
+    handoff = WorkflowAgentNodeHandoff.from_agent(
+        {
+            "id": "research",
+            "type": "agent",
+            "data": {"agentId": "fallback_agent"},
+        },
+        agent=agent,
+        label="Research",
+        kind="agent",
+        step_task="Summarize launch risk.",
+        child_goal="Ship release candidate\n\nStep: Summarize launch risk.",
+        context="Previous result",
+        has_agent_upstream=True,
+        node_info_extra={"workflow_parent_node_id": "fanout"},
+    )
+
+    assert handoff.agent is agent
+    assert handoff.agent_id == "agent_research"
+    assert handoff.step_task == "Summarize launch risk."
+    assert handoff.child_goal == "Ship release candidate\n\nStep: Summarize launch risk."
+    assert handoff.upstream == "Previous result"
+    assert handoff.node_info() == {
+        "workflow_node_id": "research",
+        "workflow_node_kind": "agent",
+        "workflow_node_label": "Research",
+        "workflow_parent_node_id": "fanout",
+    }
+    assert (
+        WorkflowAgentNodeHandoff.from_agent(
+            {"id": "fallback", "data": {"agentId": "fallback_agent"}},
+            agent={},
+            label="Fallback",
+            kind="agent",
+            step_task="Task",
+            child_goal="Goal",
+            context="Previous result",
+            has_agent_upstream=False,
+        ).agent_id
+        == "fallback_agent"
+    )
+
+
 def test_workflow_artifact_node_write_accepts_prepared_artifact() -> None:
     write = WorkflowArtifactNodeWrite.from_artifact(
         {

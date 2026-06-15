@@ -151,6 +151,11 @@ def build_runtime_workflow_execution_services(
         workflow_artifact_path=lambda label, artifacts, requested: (
             engine._workflow_artifact_path(label, artifacts, requested)
         ),
+        workflow_agent_for_node=lambda node: engine._workflow_agent_for_node(node),
+        workflow_node_task=lambda node: engine._workflow_node_task(node),
+        workflow_child_goal=lambda workflow_goal, step_task: (
+            engine._workflow_child_goal(workflow_goal, step_task)
+        ),
         node_kind=lambda node: engine._node_kind(node),
     )
     return RuntimeWorkflowExecutionServiceBundle(

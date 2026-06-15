@@ -46,6 +46,34 @@ class WorkflowAgentNodeHandoff:
     node_info_extra: dict[str, str] | None = None
 
     @classmethod
+    def from_agent(
+        cls,
+        node: dict[str, Any],
+        *,
+        agent: dict[str, Any],
+        label: str,
+        kind: str,
+        step_task: str,
+        child_goal: str,
+        context: str,
+        has_agent_upstream: bool,
+        node_info_extra: dict[str, str] | None = None,
+    ) -> "WorkflowAgentNodeHandoff":
+        data = node.get("data") if isinstance(node.get("data"), dict) else {}
+        agent_id = str(agent.get("agent_id") or data.get("agent_id") or data.get("agentId") or "")
+        return cls(
+            agent=agent,
+            agent_id=agent_id,
+            node_id=str(node.get("id") or ""),
+            node_kind=kind,
+            node_label=label,
+            step_task=step_task,
+            child_goal=child_goal,
+            upstream=context if has_agent_upstream else "",
+            node_info_extra=dict(node_info_extra or {}),
+        )
+
+    @classmethod
     def from_node(
         cls,
         engine: Any,
@@ -58,20 +86,18 @@ class WorkflowAgentNodeHandoff:
         has_agent_upstream: bool,
         node_info_extra: dict[str, str] | None = None,
     ) -> "WorkflowAgentNodeHandoff":
-        data = node.get("data") if isinstance(node.get("data"), dict) else {}
         agent = engine._workflow_agent_for_node(node)
-        agent_id = str(agent.get("agent_id") or data.get("agent_id") or data.get("agentId") or "")
         step_task = engine._workflow_node_task(node)
-        return cls(
+        return cls.from_agent(
+            node,
             agent=agent,
-            agent_id=agent_id,
-            node_id=str(node.get("id") or ""),
-            node_kind=kind,
-            node_label=label,
+            label=label,
+            kind=kind,
             step_task=step_task,
             child_goal=engine._workflow_child_goal(workflow_goal, step_task),
-            upstream=context if has_agent_upstream else "",
-            node_info_extra=dict(node_info_extra or {}),
+            context=context,
+            has_agent_upstream=has_agent_upstream,
+            node_info_extra=node_info_extra,
         )
 
     def node_info(self) -> dict[str, str]:

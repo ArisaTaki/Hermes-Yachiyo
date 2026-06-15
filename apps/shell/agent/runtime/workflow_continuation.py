@@ -79,6 +79,9 @@ class WorkflowContinuationCoordinator:
         default_workspace_policy: Any | None = None,
         workflow_artifacts_dir: Any | None = None,
         workflow_artifact_path: Any | None = None,
+        workflow_agent_for_node: Any | None = None,
+        workflow_node_task: Any | None = None,
+        workflow_child_goal: Any | None = None,
         node_kind: Any | None = None,
     ) -> None:
         self._engine = engine
@@ -93,6 +96,9 @@ class WorkflowContinuationCoordinator:
         self._default_workspace_policy_callback = default_workspace_policy
         self._workflow_artifacts_dir_source = workflow_artifacts_dir
         self._workflow_artifact_path_callback = workflow_artifact_path
+        self._workflow_agent_for_node_callback = workflow_agent_for_node
+        self._workflow_node_task_callback = workflow_node_task
+        self._workflow_child_goal_callback = workflow_child_goal
         self._node_kind_callback = node_kind
         self._outcomes = WorkflowRunOutcomeProjector(engine)
 
@@ -223,6 +229,21 @@ class WorkflowContinuationCoordinator:
                 or ""
             )
         return self._engine._workflow_artifact_path(label, artifacts, configured_path)
+
+    def _workflow_agent_for_node(self, node: dict[str, Any]) -> dict[str, Any]:
+        if self._workflow_agent_for_node_callback is not None:
+            return self._workflow_agent_for_node_callback(node)
+        return self._engine._workflow_agent_for_node(node)
+
+    def _workflow_node_task(self, node: dict[str, Any]) -> str:
+        if self._workflow_node_task_callback is not None:
+            return str(self._workflow_node_task_callback(node) or "")
+        return self._engine._workflow_node_task(node)
+
+    def _workflow_child_goal(self, workflow_goal: str, step_task: str) -> str:
+        if self._workflow_child_goal_callback is not None:
+            return str(self._workflow_child_goal_callback(workflow_goal, step_task) or "")
+        return self._engine._workflow_child_goal(workflow_goal, step_task)
 
     def _node_kind(self, node: dict[str, Any]) -> str:
         if self._node_kind_callback is not None:
@@ -649,12 +670,15 @@ class WorkflowContinuationCoordinator:
         node_info_extra: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         engine = self._engine
-        handoff = WorkflowAgentNodeHandoff.from_node(
-            engine,
+        agent = self._workflow_agent_for_node(node)
+        step_task = self._workflow_node_task(node)
+        handoff = WorkflowAgentNodeHandoff.from_agent(
             node,
+            agent=agent,
             label=label,
             kind=kind,
-            workflow_goal=workflow_goal,
+            step_task=step_task,
+            child_goal=self._workflow_child_goal(workflow_goal, step_task),
             context=context,
             has_agent_upstream=has_agent_upstream,
             node_info_extra=node_info_extra,
