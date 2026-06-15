@@ -89,6 +89,10 @@ from apps.shell.agent.runtime.cancellation import (
     WorkflowCancellationProjectionCoordinator,
     WorkflowCancellationTarget,
 )
+from apps.shell.agent.runtime.core_services import (
+    RuntimeCoreServiceBundle,
+    build_runtime_core_services as _build_runtime_core_services,
+)
 from apps.shell.agent.runtime.delegation import ChatRunnableMentionParser
 from apps.shell.agent.runtime.errors import AgentApprovalRequired, AgentRuntimeError
 from apps.shell.agent.runtime.events import (
@@ -640,17 +644,15 @@ class NativeRunEngine:
             client_request_id_from_payload=self._client_request_id_from_payload,
             agent_workspace_dir=self._agent_workspace_dir,
         )
-        self.runtime_events = RuntimeRunEventRecorder(self.run_events)
-        self.runtime_agent_timeline = RuntimeAgentTimelineBuilder(
+        core_services = _build_runtime_core_services(
+            run_events=self.run_events,
             timeline_factory=self._timeline,
-        )
-        self.runtime_policy = RuntimePolicyCompiler()
-        self.model_profile_resolver = RuntimeModelProfileResolver(
             profile_service_factory=lambda: get_model_profile_service(),
             supports_openai_compatible_api=supports_openai_compatible_api,
             default_agent_ids=_DEFAULT_AGENT_IDS,
             error_type=AgentRuntimeError,
         )
+        self._install_runtime_core_services(core_services)
         tooling = _build_runtime_tooling(
             normalize_tool_name=_normalize_tool_name,
             input_preview=_tool_input_preview,
@@ -863,6 +865,12 @@ class NativeRunEngine:
         self.runtime_task_events = recorders.runtime_task_events
         self.runtime_trace_events = recorders.runtime_trace_events
         self.tool_pending_approvals = recorders.tool_pending_approvals
+
+    def _install_runtime_core_services(self, core_services: RuntimeCoreServiceBundle) -> None:
+        self.runtime_events = core_services.runtime_events
+        self.runtime_agent_timeline = core_services.runtime_agent_timeline
+        self.runtime_policy = core_services.runtime_policy
+        self.model_profile_resolver = core_services.model_profile_resolver
 
     def _install_runtime_tooling(self, tooling: RuntimeToolingBundle) -> None:
         self.tool_loop_projection = tooling.tool_loop_projection
