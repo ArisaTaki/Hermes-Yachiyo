@@ -1,0 +1,122 @@
+"""Fake-port tests for the Chat-facing Yachiyo Agent service."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from apps.shell.yachiyo_agent import ApprovalDecision, StartChatTaskRequest, YachiyoAgentService
+
+
+class _FakeRuntimePort:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, Any]] = []
+
+    def readiness(self) -> dict[str, Any]:
+        self.calls.append(("readiness", None))
+        return {"ok": True, "status": "ready", "capabilities": {"tasks": True}}
+
+    def start_chat_task(self, request: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append(("start_chat_task", request))
+        return _task_payload(
+            status="approval_required",
+            pending_approval={
+                "approval_id": "approval-1",
+                "tool": "workspace.write_patch",
+                "input_preview": {"path": "README.md"},
+            },
+            timeline=[
+                {
+                    "event": "agent.tool.approval_required",
+                    "detail": "workspace.write_patch",
+                }
+            ],
+        )
+
+    def get_task_snapshot(self, task_id: str) -> dict[str, Any]:
+        self.calls.append(("get_task_snapshot", task_id))
+        return _task_payload(task_id=task_id, status="completed", result="Done")
+
+    def list_recent_tasks(self, conversation_id: str | None = None) -> list[dict[str, Any]]:
+        self.calls.append(("list_recent_tasks", conversation_id))
+        return [_task_payload(task_id="task-recent", status="running")]
+
+    def approve(self, approval_id: str, decision: dict[str, Any] | None = None) -> dict[str, Any]:
+        self.calls.append(("approve", {"approval_id": approval_id, "decision": decision}))
+        return _task_payload(status="completed", result="Approved")
+
+    def reject(self, approval_id: str, reason: str | None = None) -> dict[str, Any]:
+        self.calls.append(("reject", {"approval_id": approval_id, "reason": reason}))
+        return _task_payload(status="failed", result="Rejected")
+
+    def cancel(self, task_id: str) -> dict[str, Any]:
+        self.calls.append(("cancel", task_id))
+        return _task_payload(task_id=task_id, status="cancelled")
+
+
+def test_yachiyo_agent_service_maps_fake_runtime_to_task_snapshots() -> None:
+    port = _FakeRuntimePort()
+    service = YachiyoAgentService(port)
+
+    readiness = service.readiness()
+    task = service.start_chat_task(
+        StartChatTaskRequest(prompt="Patch README", conversation_id="chat-1", title="Patch")
+    )
+    fetched = service.get_task_snapshot("task-1")
+    recent = service.list_recent_tasks("chat-1")
+
+    assert readiness.ready is True
+    assert readiness.capabilities == {"tasks": True}
+    assert task.task_id == "task-1"
+    assert task.conversation_id == "chat-1"
+    assert task.status == "waiting_approval"
+    assert task.needs_user_action is True
+    assert task.pending_approvals[0].tool_name == "workspace.write_patch"
+    assert task.recent_events[0].event_type == "agent.tool.approval_required"
+    assert task.open_in_studio_url == "#/agents?run_id=run-1"
+    assert fetched.status == "completed"
+    assert recent[0].task_id == "task-recent"
+    assert port.calls[1][1]["prompt"] == "Patch README"
+
+
+def test_yachiyo_agent_service_delegates_approval_and_cancel_to_runtime_port() -> None:
+    port = _FakeRuntimePort()
+    service = YachiyoAgentService(port)
+
+    approved = service.approve(
+        "approval-1",
+        ApprovalDecision(approved=True, reason="Looks safe"),
+    )
+    rejected = service.reject("approval-2", "No")
+    cancelled = service.cancel("task-1")
+
+    assert approved.status == "completed"
+    assert rejected.status == "failed"
+    assert cancelled.status == "cancelled"
+    assert port.calls == [
+        (
+            "approve",
+            {
+                "approval_id": "approval-1",
+                "decision": {"approved": True, "reason": "Looks safe", "metadata": {}},
+            },
+        ),
+        ("reject", {"approval_id": "approval-2", "reason": "No"}),
+        ("cancel", "task-1"),
+    ]
+
+
+def _task_payload(**overrides: Any) -> dict[str, Any]:
+    payload = {
+        "task_id": "task-1",
+        "run_id": "run-1",
+        "session_id": "chat-1",
+        "title": "Patch README",
+        "status": "running",
+        "summary": "",
+        "current_step": "Reading workspace",
+        "artifacts": [{"artifact_id": "artifact-1", "kind": "markdown", "path": "report.md"}],
+        "created_at": "2026-06-14T00:00:00Z",
+        "updated_at": "2026-06-14T00:00:01Z",
+    }
+    payload.update(overrides)
+    return payload

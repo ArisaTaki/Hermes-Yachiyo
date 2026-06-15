@@ -27,13 +27,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List
 from uuid import uuid4
 
+from apps.core.activity_store import get_activity_store
 from apps.core.chat_session import (
     ChatMessage,
     ChatSession,
     MessageRole,
     MessageStatus,
 )
-from apps.core.activity_store import get_activity_store
 from apps.core.executor import (
     execution_capabilities,
     user_task_unavailable_payload,
@@ -43,8 +43,8 @@ from apps.core.special_sessions import is_proactive_chat_session
 from apps.locald.screenshot import ScreenCapturePermissionError, capture_screenshot_to_file
 from apps.shell.agent_runtime import AgentRuntimeError, get_agent_runtime_service
 from apps.shell.native_capabilities import get_native_image_input_capability
-from packages.security import contains_sensitive_text, redact_api_error_text
 from packages.protocol.enums import ErrorCode, TaskStatus, TaskType
+from packages.security import contains_sensitive_text, redact_api_error_text
 
 if TYPE_CHECKING:
     from apps.core.runtime import AppRuntime
@@ -798,6 +798,29 @@ class ChatAPI:
         except Exception as exc:
             logger.error("发送消息失败: %s", exc)
             return {"ok": False, "error": redact_api_error_text(exc)}
+
+    def send_runnable_message_in_session(
+        self,
+        session_id: str,
+        text: str,
+        *,
+        runnable_id: str = "",
+        client_message_id: str = "",
+    ) -> Dict[str, Any]:
+        """Send an Agent/Workflow message through the existing Chat runtime path."""
+
+        def _send() -> Dict[str, Any]:
+            result = self.send_message(
+                text,
+                [],
+                runnable_id=runnable_id,
+                client_message_id=client_message_id,
+            )
+            if result.get("ok") is not False:
+                return {**result, "session_id": self._session.session_id}
+            return result
+
+        return self._with_session(session_id, _send)
 
     def summarize_delegated_run(self, run_id: str) -> Dict[str, Any]:
         """Create a main-model follow-up task for an auto-delegated Agent/Workflow run."""

@@ -22,8 +22,8 @@ from typing import TYPE_CHECKING, Any, Dict
 
 from apps.core.activity_store import get_activity_store
 from apps.shell.chat_api import ChatAPI
-from packages.security import redact_api_error_text
 from packages.protocol.enums import TaskStatus
+from packages.security import redact_api_error_text
 
 if TYPE_CHECKING:
     from apps.core.runtime import AppRuntime
@@ -178,6 +178,49 @@ def _session_updated_at(session_id: str, messages: list[Any], fallback: str = ""
     activity_time = str(activity.get("created_at") or "")
     latest_message_time = str(_message_field(_latest_message(messages), "created_at") or "")
     return max([value for value in (latest_message_time, activity_time, fallback) if value] or [""])
+
+
+def _latest_agent_task_snapshot(
+    runtime: "AppRuntime",
+    sessions: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    for session in sessions:
+        task_id = str(session.get("latest_task_id") or "").strip()
+        if not task_id:
+            continue
+        snapshot = agent_task_snapshot_for_task(runtime, task_id)
+        if snapshot is not None:
+            return snapshot
+    return None
+
+
+def agent_task_snapshot_for_task(
+    runtime: "AppRuntime",
+    task_id: str,
+) -> dict[str, Any] | None:
+    task_id = str(task_id or "").strip()
+    if not task_id:
+        return None
+    service = getattr(runtime, "agent_runtime_service", None)
+    if service is None:
+        getter = getattr(runtime, "get_agent_runtime_service", None)
+        if callable(getter):
+            try:
+                service = getter()
+            except Exception:
+                service = None
+    if service is None:
+        return None
+
+    try:
+        from apps.shell.yachiyo_agent import YachiyoAgentService
+        from apps.shell.yachiyo_agent.legacy_ports import LegacyRuntimePort
+
+        facade = YachiyoAgentService(LegacyRuntimePort(service))
+        return facade.get_task_snapshot(task_id).model_dump(mode="json")
+    except Exception:
+        logger.debug("Launcher agent task snapshot unavailable: %s", task_id, exc_info=True)
+    return None
 
 
 def _latest_notifiable_assistant_message(messages: list[dict[str, Any]]) -> dict[str, Any]:
@@ -425,5 +468,6 @@ class ChatBridge:
             "latest_notifiable_message": summary.get("latest_notifiable_message", {}),
             "latest_reply": latest_reply,
             "latest_reply_full": latest_reply_full,
+            "agent_task": _latest_agent_task_snapshot(self._runtime, sessions.get("sessions", [])),
             "recent_sessions": sessions.get("sessions", []),
         }

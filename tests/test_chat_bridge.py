@@ -23,6 +23,7 @@ def _runtime_with_chat_store(store: ChatStore) -> SimpleNamespace:
         state=AppState(),
         chat_session=session,
         task_runner=None,
+        agent_runtime_service=_FakeAgentRuntimeService(),
     )
 
 
@@ -32,7 +33,10 @@ def test_chat_bridge_conversation_overview_preserves_session_summary(tmp_path, m
     monkeypatch.setattr(chat_bridge_mod, "get_activity_store", lambda: _EmptyActivityStore())
     try:
         runtime.chat_session.add_user_message("请分析 NativeRunEngine 迁移\n保留会话总结")
-        runtime.chat_session.add_assistant_message("已经保留 ChatBridge 会话概览。", task_id="session-task-1")
+        runtime.chat_session.add_assistant_message(
+            "已经保留 ChatBridge 会话概览。",
+            task_id="session-task-1",
+        )
 
         bridge = ChatBridge(runtime)
         sessions = bridge.get_recent_sessions(limit=3)
@@ -50,6 +54,10 @@ def test_chat_bridge_conversation_overview_preserves_session_summary(tmp_path, m
         assert overview["ok"] is True
         assert overview["latest_reply"] == "已经保留 ChatBridge 会话概览。"
         assert overview["latest_reply_full"] == "已经保留 ChatBridge 会话概览。"
+        assert overview["agent_task"]["task_id"] == "session-task-1"
+        assert overview["agent_task"]["status"] == "waiting_approval"
+        assert overview["agent_task"]["needs_user_action"] is True
+        assert overview["agent_task"]["open_in_studio_url"] == "#/agents?run_id=session-task-1"
         assert overview["recent_sessions"][0]["summary"] == current["summary"]
         assert overview["recent_sessions"][0]["latest_task_id"] == "session-task-1"
     finally:
@@ -79,3 +87,23 @@ def test_session_summary_uses_processing_and_failed_statuses():
             "created_at": "2026-06-10T00:01:00+00:00",
         },
     ]) == "失败：provider error: token redacted"
+
+
+class _FakeAgentRuntimeService:
+    def get_run(self, run_id: str):
+        return {
+            "run_id": run_id,
+            "user_goal": "Launcher Agent Task",
+            "status": "approval_required",
+            "pending_approval": {
+                "approval_id": "approval-1",
+                "tool": "terminal.run",
+                "input_preview": {"command": "pytest"},
+            },
+            "timeline": [
+                {
+                    "event": "agent.tool.approval_required",
+                    "detail": "terminal.run",
+                }
+            ],
+        }
