@@ -34,6 +34,7 @@ from apps.shell.agent.repositories.future_tasks import AgentFutureTaskStore
 from apps.shell.agent.repositories.groups import RunGroupRepository
 from apps.shell.agent.repositories.memories import AgentMemoryStore
 from apps.shell.agent.repositories.runs import RunRepository
+from apps.shell.agent.repositories.skill_folders import SkillFolderRepository
 from apps.shell.agent.repositories.studio_deletions import StudioDeletionRepository
 from apps.shell.agent.repositories.task_run_links import TaskRunLinkRepository
 from apps.shell.agent.repositories.workspaces import TrustedWorkspaceRepository
@@ -1669,6 +1670,16 @@ class NativeRunEngine:
         self.studio_deletions = StudioDeletionRepository(
             self._conn,
             now=_now,
+        )
+        self.skill_folders = SkillFolderRepository(
+            self._conn,
+            ensure_row_factory=self._ensure_row_factory,
+            row_to_skill_folder=self._row_to_skill_folder,
+            now=_now,
+            slug=_slug,
+            id_suffix_factory=lambda: uuid4().hex[:6],
+            delete_skill=lambda skill_id: self.delete_skill(skill_id),
+            error_type=AgentRuntimeError,
         )
         self.run_groups = RunGroupRepository(
             self._conn,
@@ -3327,130 +3338,19 @@ class NativeRunEngine:
         return self.update_agent(agent_id, {"skill_ids": skill_ids})
 
     def list_skill_folders(self) -> dict[str, Any]:
-        self._ensure_row_factory()
-        rows = self._conn.execute(
-            """
-            SELECT f.*,
-                   COUNT(s.skill_id) AS skill_count,
-                   SUM(CASE WHEN s.source_type IN ('native_global', 'native_project') THEN 0 ELSE 1 END) AS installed_count,
-                   SUM(CASE WHEN s.source_type IN ('native_global', 'native_project') THEN 1 ELSE 0 END) AS native_count
-              FROM skill_folders f
-              LEFT JOIN skills s ON s.folder_id = f.folder_id
-             GROUP BY f.folder_id
-             ORDER BY f.sort_order ASC, LOWER(f.name) ASC
-            """
-        ).fetchall()
-        uncategorized = self._conn.execute(
-            """
-            SELECT COUNT(*) AS skill_count,
-                   SUM(CASE WHEN source_type IN ('native_global', 'native_project') THEN 0 ELSE 1 END) AS installed_count,
-                   SUM(CASE WHEN source_type IN ('native_global', 'native_project') THEN 1 ELSE 0 END) AS native_count
-              FROM skills
-             WHERE folder_id = ''
-            """
-        ).fetchone()
-        return {
-            "ok": True,
-            "folders": [self._row_to_skill_folder(row) for row in rows],
-            "uncategorized": {
-                "folder_id": "",
-                "name": "Uncategorized",
-                "description": "",
-                "source_scope": "all",
-                "sort_order": -1,
-                "skill_count": int(uncategorized["skill_count"] or 0),
-                "installed_count": int(uncategorized["installed_count"] or 0),
-                "native_count": int(uncategorized["native_count"] or 0),
-            },
-        }
+        return self.skill_folders.list()
 
     def create_skill_folder(self, payload: dict[str, Any]) -> dict[str, Any]:
-        name = str(payload.get("name") or "").strip()
-        if not name:
-            raise AgentRuntimeError("文件夹名称不能为空")
-        self._validate_skill_folder_name(name)
-        folder_id = str(payload.get("folder_id") or f"folder_{_slug(name, 'folder')}_{uuid4().hex[:6]}").strip()
-        folder_id = _slug(folder_id, "folder")
-        if not folder_id.startswith("folder_"):
-            folder_id = f"folder_{folder_id}"
-        description = str(payload.get("description") or "").strip()[:1000]
-        source_scope = str(payload.get("source_scope") or "all")
-        if source_scope not in {"all", "installed", "native"}:
-            source_scope = "all"
-        sort_order = int(payload.get("sort_order") or 0)
-        now = _now()
-        try:
-            self._conn.execute(
-                """
-                INSERT INTO skill_folders (
-                    folder_id, name, description, source_scope, sort_order, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (folder_id, name, description, source_scope, sort_order, now, now),
-            )
-        except sqlite3.IntegrityError as exc:
-            raise AgentRuntimeError("Skill 文件夹已存在") from exc
-        self._conn.commit()
-        return self.get_skill_folder(folder_id)
+        return self.skill_folders.create(payload)
 
     def get_skill_folder(self, folder_id: str) -> dict[str, Any]:
-        self._ensure_row_factory()
-        row = self._conn.execute(
-            """
-            SELECT f.*,
-                   COUNT(s.skill_id) AS skill_count,
-                   SUM(CASE WHEN s.source_type IN ('native_global', 'native_project') THEN 0 ELSE 1 END) AS installed_count,
-                   SUM(CASE WHEN s.source_type IN ('native_global', 'native_project') THEN 1 ELSE 0 END) AS native_count
-              FROM skill_folders f
-              LEFT JOIN skills s ON s.folder_id = f.folder_id
-             WHERE f.folder_id=?
-             GROUP BY f.folder_id
-            """,
-            (folder_id,),
-        ).fetchone()
-        if row is None:
-            raise KeyError(folder_id)
-        return self._row_to_skill_folder(row)
+        return self.skill_folders.get(folder_id)
 
     def update_skill_folder(self, folder_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        current = self.get_skill_folder(folder_id)
-        name = str(payload.get("name") if "name" in payload else current["name"]).strip()
-        if not name:
-            raise AgentRuntimeError("文件夹名称不能为空")
-        self._validate_skill_folder_name(name, current_folder_id=folder_id)
-        description = str(payload.get("description") if "description" in payload else current["description"]).strip()[:1000]
-        source_scope = str(payload.get("source_scope") if "source_scope" in payload else current["source_scope"])
-        if source_scope not in {"all", "installed", "native"}:
-            source_scope = "all"
-        sort_order = int(payload.get("sort_order") if "sort_order" in payload else current["sort_order"])
-        self._conn.execute(
-            """
-            UPDATE skill_folders
-               SET name=?, description=?, source_scope=?, sort_order=?, updated_at=?
-             WHERE folder_id=?
-            """,
-            (name, description, source_scope, sort_order, _now(), folder_id),
-        )
-        self._conn.commit()
-        return self.get_skill_folder(folder_id)
+        return self.skill_folders.update(folder_id, payload)
 
     def delete_skill_folder(self, folder_id: str, *, delete_skills: bool = False) -> dict[str, Any]:
-        self.get_skill_folder(folder_id)
-        deleted_skill_count = 0
-        if delete_skills:
-            self._ensure_row_factory()
-            rows = self._conn.execute("SELECT skill_id FROM skills WHERE folder_id=?", (folder_id,)).fetchall()
-            for row in rows:
-                self.delete_skill(str(row["skill_id"]))
-                deleted_skill_count += 1
-            self._conn.execute("DELETE FROM skill_folders WHERE folder_id=?", (folder_id,))
-            self._conn.commit()
-            return {"ok": True, "deleted_skill_count": deleted_skill_count}
-        now = _now()
-        self._conn.execute("UPDATE skills SET folder_id='', updated_at=? WHERE folder_id=?", (now, folder_id))
-        self._conn.execute("DELETE FROM skill_folders WHERE folder_id=?", (folder_id,))
-        self._conn.commit()
-        return {"ok": True, "deleted_skill_count": 0}
+        return self.skill_folders.delete(folder_id, delete_skills=delete_skills)
 
     def list_skills(self) -> dict[str, Any]:
         self._ensure_row_factory()
@@ -4150,29 +4050,10 @@ class NativeRunEngine:
                 raise AgentRuntimeError("Yachiyo 安装入口固定使用 oha-yachiyo 目标")
 
     def _normalize_skill_folder_id(self, folder_id: str | None) -> str:
-        clean = str(folder_id or "").strip()
-        if not clean:
-            return ""
-        row = self._conn.execute("SELECT folder_id FROM skill_folders WHERE folder_id=?", (clean,)).fetchone()
-        if row is None:
-            raise AgentRuntimeError("Skill 文件夹不存在")
-        return clean
+        return self.skill_folders.normalize_id(folder_id)
 
     def _validate_skill_folder_name(self, name: str, *, current_folder_id: str = "") -> None:
-        if len(name) > 120:
-            raise AgentRuntimeError("Skill 文件夹名称不能超过 120 个字符")
-        row = self._conn.execute(
-            """
-            SELECT folder_id
-              FROM skill_folders
-             WHERE LOWER(name)=LOWER(?)
-               AND folder_id != ?
-             LIMIT 1
-            """,
-            (name, current_folder_id),
-        ).fetchone()
-        if row is not None:
-            raise AgentRuntimeError("Skill 文件夹已存在")
+        self.skill_folders.validate_name(name, current_folder_id=current_folder_id)
 
     def update_skill(self, skill_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         current = self.get_skill(skill_id)
