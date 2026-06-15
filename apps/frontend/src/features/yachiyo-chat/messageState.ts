@@ -1,0 +1,203 @@
+import {
+  approvalRequiredMessages,
+  nextApprovalStatusText,
+  type ChatApprovalActivityEvent,
+  type ChatApprovalMessage,
+  type ChatApprovalMetadata,
+} from './approvalItems';
+
+export type YachiyoChatActivityEvent = Omit<ChatApprovalActivityEvent, 'metadata'> & {
+  session_id?: string;
+  task_id?: string;
+  phase?: string;
+  duration_seconds?: number | null;
+  metadata?: {
+    run_id?: string;
+    workflow_run_id?: string;
+    run_status?: string;
+    pending_approval?: Record<string, unknown>;
+  } & Record<string, unknown>;
+};
+
+export type YachiyoChatMessageMetadata = ChatApprovalMetadata & {
+  runnable_kind?: string;
+  group_dispatch_count?: number;
+  group_dispatch_run_group_id?: string;
+  group_dispatch_skipped?: string[];
+  group_agent_summary_pending?: boolean;
+  group_agent_summary_status?: string;
+  group_agent_summary_error?: string;
+  group_followup_for_task_ids?: string[];
+  group_followup_for_agent_message_ids?: string[];
+};
+
+export type YachiyoChatMessage = Omit<ChatApprovalMessage, 'activity_events' | 'metadata'> & {
+  status?: string;
+  error?: string;
+  task_id?: string;
+  token_count?: number;
+  progress_label?: string;
+  activity_events?: YachiyoChatActivityEvent[];
+  metadata?: YachiyoChatMessageMetadata;
+};
+
+export type GroupAgentSummaryNotice = {
+  tone: 'pending' | 'failed' | 'completed';
+  text: string;
+};
+
+export function messageText(message: YachiyoChatMessage) {
+  return String(message.content || message.text || '');
+}
+
+export function messageErrorText(message: YachiyoChatMessage) {
+  return String(
+    message.error || message.content || message.text || '任务执行失败',
+  ).trim();
+}
+
+export function groupAgentSummaryNotice(message: YachiyoChatMessage): GroupAgentSummaryNotice | null {
+  const metadata = message.metadata || {};
+  const status = String(metadata.group_agent_summary_status || '').trim();
+  const subject = groupAgentSummarySubject(metadata);
+  if (status === 'cancelled') {
+    return { tone: 'failed', text: `主模型整理${subject}已取消。` };
+  }
+  if (status === 'failed') {
+    const error = String(metadata.group_agent_summary_error || '').trim();
+    return {
+      tone: 'failed',
+      text: error ? `主模型整理${subject}失败：${error}` : `主模型整理${subject}失败，请查看后续消息或重试。`,
+    };
+  }
+  if (status === 'completed') {
+    return { tone: 'completed', text: `主模型已整理${subject}。` };
+  }
+  if (metadata.group_agent_summary_pending) {
+    return { tone: 'pending', text: `等待主模型整理${subject}...` };
+  }
+  return null;
+}
+
+export function groupFollowupNotice(message: YachiyoChatMessage): string {
+  if (message.role !== 'user') return '';
+  const metadata = message.metadata || {};
+  const taskCount = Array.isArray(metadata.group_followup_for_task_ids)
+    ? metadata.group_followup_for_task_ids.filter(Boolean).length
+    : 0;
+  const agentMessageCount = Array.isArray(metadata.group_followup_for_agent_message_ids)
+    ? metadata.group_followup_for_agent_message_ids.filter(Boolean).length
+    : 0;
+  if (!taskCount && !agentMessageCount) return '';
+  if (agentMessageCount && !taskCount) return '已作为当前 Agent 汇总补充';
+  return '已作为当前群组任务补充';
+}
+
+export function latestGroupAgentSummaryNotice(messages: YachiyoChatMessage[]) {
+  let pendingNotice: { tone: 'pending' | 'failed'; text: string } | null = null;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const notice = groupAgentSummaryNotice(messages[index]);
+    if (!notice) continue;
+    if (notice.tone === 'completed') continue;
+    if (notice.tone === 'failed') return notice;
+    if (notice.tone === 'pending') pendingNotice ||= { tone: 'pending', text: notice.text };
+  }
+  return pendingNotice;
+}
+
+export function normalizeRunStatus(status?: unknown) {
+  const value = String(status || '').trim();
+  return value === 'running' ? 'processing' : value;
+}
+
+export function runnableResultRunId(result: { run_id?: string; agent_run_id?: string; workflow_run_id?: string }) {
+  return String(result.run_id || result.agent_run_id || result.workflow_run_id || '').trim();
+}
+
+export function runnableResultStatus(result: { run_status?: string; status?: string }) {
+  return normalizeRunStatus(result.run_status || result.status || '');
+}
+
+export function messageRunStatus(message?: YachiyoChatMessage | null) {
+  return normalizeRunStatus(message?.metadata?.run_status || message?.metadata?.workflow_status || '');
+}
+
+export function messageRunId(message?: YachiyoChatMessage | null) {
+  return String(message?.metadata?.run_id || message?.metadata?.workflow_run_id || '').trim();
+}
+
+export function latestFailedMessage(messages: YachiyoChatMessage[]) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const status = messages[index]?.status;
+    if (!status) continue;
+    if (status === 'failed') return messages[index];
+    if (status === 'pending' || status === 'processing' || status === 'completed') {
+      return null;
+    }
+  }
+  return null;
+}
+
+export function latestVisibleActivity(messages: YachiyoChatMessage[]) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const events = messages[index]?.activity_events || [];
+    if (events.length) return events[0];
+    if (messages[index]?.progress_label) {
+      return {
+        title: messages[index]?.progress_label,
+        status: messages[index]?.status,
+        created_at: messages[index]?.created_at,
+      } as YachiyoChatActivityEvent;
+    }
+  }
+  return null;
+}
+
+export function activityLabel(event?: YachiyoChatActivityEvent | null) {
+  if (!event) return '';
+  return String(event.title || event.detail || event.tool_name || '').trim();
+}
+
+export function activityRunId(event?: YachiyoChatActivityEvent | null) {
+  return String(event?.metadata?.run_id || event?.metadata?.workflow_run_id || '').trim();
+}
+
+export function compactStatusText(text: string, maxLength = 96) {
+  const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return '任务执行失败';
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 3)}...` : normalized;
+}
+
+export function chatStatusLabel(
+  processing: boolean,
+  failed: YachiyoChatMessage | null,
+  messages: YachiyoChatMessage[],
+  processingCount = 0,
+) {
+  const summaryNotice = latestGroupAgentSummaryNotice(messages);
+  if (processing) {
+    const approval = latestApprovalRequiredMessage(messages);
+    if (approval) return nextApprovalStatusText({ pending_approval: approval.metadata?.pending_approval });
+    if (summaryNotice?.tone === 'pending') return summaryNotice.text;
+    const latest = latestVisibleActivity(messages);
+    const countLabel = processingCount > 1 ? `${processingCount} 项 · ` : '';
+    return `${countLabel}${compactStatusText(activityLabel(latest) || '处理中...')}`;
+  }
+  if (summaryNotice?.tone === 'failed') return summaryNotice.text;
+  if (failed) return `处理失败：${compactStatusText(messageErrorText(failed))}`;
+  return '就绪';
+}
+
+function latestApprovalRequiredMessage(messages: YachiyoChatMessage[]) {
+  const approvals = approvalRequiredMessages(messages);
+  return approvals[approvals.length - 1] || null;
+}
+
+function groupAgentSummarySubject(metadata: YachiyoChatMessageMetadata) {
+  const hasGroupDispatch = (
+    metadata.group_dispatch_count !== undefined
+    || metadata.group_dispatch_run_group_id
+    || Array.isArray(metadata.group_dispatch_skipped)
+  );
+  return hasGroupDispatch ? '这一轮群组任务' : '这条 Agent 结果';
+}

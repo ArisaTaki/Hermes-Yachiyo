@@ -265,6 +265,40 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "Fall through to the legacy Chat API with the same idempotency key.",
         ],
     )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/messageState.ts",
+        [
+            "export function messageText",
+            "export function messageErrorText",
+            "export function groupAgentSummaryNotice",
+            "export function groupFollowupNotice",
+            "export function normalizeRunStatus",
+            "export function runnableResultRunId",
+            "export function runnableResultStatus",
+            "export function messageRunStatus",
+            "export function messageRunId",
+            "export function latestFailedMessage",
+            "export function latestVisibleActivity",
+            "export function activityLabel",
+            "export function activityRunId",
+            "export function compactStatusText",
+            "export function chatStatusLabel",
+            "approvalRequiredMessages(messages)",
+            "nextApprovalStatusText({ pending_approval: approval.metadata?.pending_approval })",
+        ],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/views/ChatView.tsx",
+        [
+            "function messageText(message",
+            "function groupAgentSummaryNotice",
+            "function groupFollowupNotice",
+            "function runnableResultRunId",
+            "function messageRunStatus",
+            "function latestVisibleActivity",
+            "function chatStatusLabel",
+        ],
+    )
 
 
 def test_chat_group_ui_exposes_stable_e2e_selectors() -> None:

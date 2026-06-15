@@ -35,6 +35,23 @@ import {
   type ComposerApprovalItem,
   type RunApprovalDetailOverride,
 } from '../features/yachiyo-chat/approvalItems';
+import {
+  activityLabel,
+  activityRunId,
+  chatStatusLabel,
+  compactStatusText,
+  groupAgentSummaryNotice,
+  groupFollowupNotice,
+  latestFailedMessage,
+  latestVisibleActivity,
+  messageErrorText,
+  messageRunId,
+  messageRunStatus,
+  messageText,
+  normalizeRunStatus,
+  runnableResultRunId,
+  runnableResultStatus,
+} from '../features/yachiyo-chat/messageState';
 import { useYachiyoTaskActions } from '../features/yachiyo-chat/hooks/useYachiyoTaskActions';
 import { useYachiyoTaskSnapshots } from '../features/yachiyo-chat/hooks/useYachiyoTaskSnapshots';
 import { useYachiyoTaskSubmit } from '../features/yachiyo-chat/hooks/useYachiyoTaskSubmit';
@@ -3390,112 +3407,6 @@ function HighlightedText({ text, query }: { text: string; query: string }) {
   );
 }
 
-function messageText(message: ChatMessage) {
-  return String(message.content || message.text || '');
-}
-
-function messageErrorText(message: ChatMessage) {
-  return String(
-    message.error || message.content || message.text || '任务执行失败',
-  ).trim();
-}
-
-function groupAgentSummaryNotice(message: ChatMessage): { tone: 'pending' | 'failed' | 'completed'; text: string } | null {
-  const metadata = message.metadata || {};
-  const status = String(metadata.group_agent_summary_status || '').trim();
-  const subject = groupAgentSummarySubject(metadata);
-  if (status === 'cancelled') {
-    return { tone: 'failed', text: `主模型整理${subject}已取消。` };
-  }
-  if (status === 'failed') {
-    const error = String(metadata.group_agent_summary_error || '').trim();
-    return {
-      tone: 'failed',
-      text: error ? `主模型整理${subject}失败：${error}` : `主模型整理${subject}失败，请查看后续消息或重试。`,
-    };
-  }
-  if (status === 'completed') {
-    return { tone: 'completed', text: `主模型已整理${subject}。` };
-  }
-  if (metadata.group_agent_summary_pending) {
-    return { tone: 'pending', text: `等待主模型整理${subject}...` };
-  }
-  return null;
-}
-
-function groupAgentSummarySubject(metadata: ChatMessageMetadata) {
-  const hasGroupDispatch = (
-    metadata.group_dispatch_count !== undefined
-    || metadata.group_dispatch_run_group_id
-    || Array.isArray(metadata.group_dispatch_skipped)
-  );
-  return hasGroupDispatch ? '这一轮群组任务' : '这条 Agent 结果';
-}
-
-function groupFollowupNotice(message: ChatMessage): string {
-  if (message.role !== 'user') return '';
-  const metadata = message.metadata || {};
-  const taskCount = Array.isArray(metadata.group_followup_for_task_ids)
-    ? metadata.group_followup_for_task_ids.filter(Boolean).length
-    : 0;
-  const agentMessageCount = Array.isArray(metadata.group_followup_for_agent_message_ids)
-    ? metadata.group_followup_for_agent_message_ids.filter(Boolean).length
-    : 0;
-  if (!taskCount && !agentMessageCount) return '';
-  if (agentMessageCount && !taskCount) return '已作为当前 Agent 汇总补充';
-  return '已作为当前群组任务补充';
-}
-
-function latestGroupAgentSummaryNotice(messages: ChatMessage[]) {
-  let pendingNotice: { tone: 'pending' | 'failed'; text: string } | null = null;
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const notice = groupAgentSummaryNotice(messages[index]);
-    if (!notice) continue;
-    if (notice.tone === 'completed') continue;
-    if (notice.tone === 'failed') return notice;
-    if (notice.tone === 'pending') pendingNotice ||= { tone: 'pending', text: notice.text };
-  }
-  return pendingNotice;
-}
-
-function normalizeRunStatus(status?: string) {
-  const value = String(status || '').trim();
-  return value === 'running' ? 'processing' : value;
-}
-
-function runnableResultRunId(result: { run_id?: string; agent_run_id?: string; workflow_run_id?: string }) {
-  return String(result.run_id || result.agent_run_id || result.workflow_run_id || '').trim();
-}
-
-function runnableResultStatus(result: { run_status?: string; status?: string }) {
-  return normalizeRunStatus(result.run_status || result.status || '');
-}
-
-function messageRunStatus(message?: ChatMessage | null) {
-  return normalizeRunStatus(message?.metadata?.run_status || message?.metadata?.workflow_status || '');
-}
-
-function messageRunId(message?: ChatMessage | null) {
-  return String(message?.metadata?.run_id || message?.metadata?.workflow_run_id || '').trim();
-}
-
-function latestFailedMessage(messages: ChatMessage[]) {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const status = messages[index]?.status;
-    if (!status) continue;
-    if (status === 'failed') return messages[index];
-    if (status === 'pending' || status === 'processing' || status === 'completed') {
-      return null;
-    }
-  }
-  return null;
-}
-
-function latestApprovalRequiredMessage(messages: ChatMessage[]) {
-  const approvals = approvalRequiredMessages(messages);
-  return approvals[approvals.length - 1] || null;
-}
-
 function isRetryableMessage(message: ChatMessage, messages: ChatMessage[]) {
   if (message.status !== 'failed' || !message.id) return false;
   if (message.role === 'assistant') return true;
@@ -3526,27 +3437,6 @@ function messageMatchesTaskHandoff(message: ChatMessage, taskId: string) {
   if (stringValue(metadata.delegated_run_source_task_id) === taskId) return true;
   if (metadataListAttribute(metadata.group_followup_for_task_ids).split(',').includes(taskId)) return true;
   return false;
-}
-
-function compactStatusText(text: string, maxLength = 96) {
-  const normalized = String(text || '').replace(/\s+/g, ' ').trim();
-  if (!normalized) return '任务执行失败';
-  return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 3)}...` : normalized;
-}
-
-function chatStatusLabel(processing: boolean, failed: ChatMessage | null, messages: ChatMessage[], processingCount = 0) {
-  const summaryNotice = latestGroupAgentSummaryNotice(messages);
-  if (processing) {
-    const approval = latestApprovalRequiredMessage(messages);
-    if (approval) return nextApprovalStatusText({ pending_approval: approval.metadata?.pending_approval });
-    if (summaryNotice?.tone === 'pending') return summaryNotice.text;
-    const latest = latestVisibleActivity(messages);
-    const countLabel = processingCount > 1 ? `${processingCount} 项 · ` : '';
-    return `${countLabel}${compactStatusText(activityLabel(latest) || '处理中...')}`;
-  }
-  if (summaryNotice?.tone === 'failed') return summaryNotice.text;
-  if (failed) return `处理失败：${compactStatusText(messageErrorText(failed))}`;
-  return '就绪';
 }
 
 function isImeComposing(event: ReactKeyboardEvent<HTMLElement>, fallback = false) {
@@ -4188,30 +4078,6 @@ function looksLikeTitlePromptEcho(title: string) {
     '要求包括',
   ];
   return markers.some((marker) => normalized.includes(marker)) || /^(首先用户要求|首先，用户要求|用户要求)/.test(normalized);
-}
-
-function latestVisibleActivity(messages: ChatMessage[]) {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const events = messages[index]?.activity_events || [];
-    if (events.length) return events[0];
-    if (messages[index]?.progress_label) {
-      return {
-        title: messages[index]?.progress_label,
-        status: messages[index]?.status,
-        created_at: messages[index]?.created_at,
-      } as ChatActivityEvent;
-    }
-  }
-  return null;
-}
-
-function activityLabel(event?: ChatActivityEvent | null) {
-  if (!event) return '';
-  return String(event.title || event.detail || event.tool_name || '').trim();
-}
-
-function activityRunId(event?: ChatActivityEvent | null) {
-  return String(event?.metadata?.run_id || event?.metadata?.workflow_run_id || '').trim();
 }
 
 function normalizedTokenCount(value?: number) {
