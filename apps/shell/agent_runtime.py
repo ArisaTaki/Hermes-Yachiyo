@@ -56,6 +56,7 @@ from apps.shell.agent.runtime.errors import AgentApprovalRequired, AgentRuntimeE
 from apps.shell.agent.runtime.events import (
     redact_json_value as _redact_json_value,
 )
+from apps.shell.agent.runtime.future_task_scheduler import FutureTaskTriggerScheduler
 from apps.shell.agent.runtime.run_projections import (
     ApprovalResumeProjectionCoordinator,
     RunProjectionCoordinator,
@@ -175,7 +176,6 @@ _MEMORY_TOOL_NAMES = ("memory.add", "memory.replace", "memory.remove")
 _MEMORY_CONTEXT_LIMIT = 12
 _MEMORY_CONTENT_MAX_CHARS = 4000
 _FUTURE_TASK_TOOL_NAMES = ("future_task.schedule", "future_task.list", "future_task.cancel")
-_FUTURE_TASK_STATUSES = {"scheduled", "triggered", "cancelled", "failed"}
 _MAX_AGENT_TOOL_ITERATIONS = 50
 _FINAL_RUN_STATUSES = {"completed", "failed", "cancelled"}
 _WORKFLOW_NODE_TYPES = {"start", "agent", "approval", "artifact", "condition", "parallel", "workflow", "loop"}
@@ -1783,6 +1783,15 @@ class NativeRunEngine:
             workflow_path=self._workflow_path,
             node_kind=self._node_kind,
         )
+        self.future_task_scheduler = FutureTaskTriggerScheduler(
+            self._conn,
+            self._db_lock,
+            create_run_for_runnable=lambda **kwargs: self.create_run_for_runnable(**kwargs),
+            future_task_store=lambda **kwargs: self._future_task_store(**kwargs),
+            now=_now,
+            redact_secrets=redact_secrets,
+            error_type=AgentRuntimeError,
+        )
         self.workflow_parent_resume = WorkflowParentResumeCoordinator(
             parent_runs_waiting_for_child=lambda child_run: self._workflow_parent_runs_waiting_for_child(child_run),
             workflow_run_is_group_root=lambda workflow_run: self._workflow_run_is_group_root(workflow_run),
@@ -2910,114 +2919,10 @@ class NativeRunEngine:
         return self._future_task_store(source_run_id="manual").cancel(future_task_id, reason=reason)
 
     def trigger_due_future_tasks(self, *, now_epoch: float | None = None, limit: int = 20) -> dict[str, Any]:
-        current = time.time() if now_epoch is None else float(now_epoch)
-        rows = self._conn.execute(
-            """
-            SELECT *
-              FROM future_tasks
-             WHERE status='scheduled' AND scheduled_at_epoch<=?
-             ORDER BY scheduled_at_epoch ASC
-             LIMIT ?
-            """,
-            (current, max(1, min(int(limit or 20), 100))),
-        ).fetchall()
-        triggered: list[dict[str, Any]] = []
-        for row in rows:
-            future_task = AgentFutureTaskStore._row_to_future_task(row)
-            future_task_id = future_task["future_task_id"]
-            next_run_number = int(future_task.get("run_count") or 0) + 1
-            try:
-                run = self.create_run_for_runnable(
-                    runnable_id=str(future_task.get("runnable_id") or ""),
-                    name=str(future_task.get("runnable_name") or ""),
-                    user_goal=str(future_task.get("prompt") or ""),
-                    client_run_id=f"future-task-{future_task_id}-{next_run_number}",
-                )
-                run_id = str(run.get("run_id") or "")
-                cron = str(future_task.get("cron") or "").strip()
-                if cron:
-                    next_epoch = AgentFutureTaskStore._next_cron_epoch(cron, current)
-                    status = "scheduled"
-                    error_text = ""
-                    cancelled_at = ""
-                else:
-                    next_epoch = float(future_task.get("scheduled_at_epoch") or current)
-                    status = "triggered"
-                    error_text = ""
-                    cancelled_at = ""
-                updated = self._persist_future_task_trigger(
-                    future_task_id,
-                    status=status,
-                    scheduled_at_epoch=next_epoch,
-                    last_run_id=run_id,
-                    run_count=next_run_number,
-                    error=error_text,
-                    cancelled_at=cancelled_at,
-                    event_action="future_task.trigger",
-                    event_payload={"run_id": run_id, "cron": cron, "scheduled_at_epoch": next_epoch},
-                )
-                triggered.append({"ok": True, "future_task": updated, "run": run})
-            except Exception as exc:
-                safe_error = redact_secrets(exc)
-                updated = self._persist_future_task_trigger(
-                    future_task_id,
-                    status="failed",
-                    scheduled_at_epoch=float(future_task.get("scheduled_at_epoch") or current),
-                    last_run_id=str(future_task.get("last_run_id") or ""),
-                    run_count=int(future_task.get("run_count") or 0),
-                    error=safe_error,
-                    cancelled_at="",
-                    event_action="future_task.failed",
-                    event_payload={"error": safe_error},
-                )
-                triggered.append({"ok": False, "future_task": updated, "error": safe_error})
-        return {"ok": True, "triggered": triggered}
-
-    def _persist_future_task_trigger(
-        self,
-        future_task_id: str,
-        *,
-        status: str,
-        scheduled_at_epoch: float,
-        last_run_id: str,
-        run_count: int,
-        error: str,
-        cancelled_at: str,
-        event_action: str,
-        event_payload: dict[str, Any],
-    ) -> dict[str, Any]:
-        if status not in _FUTURE_TASK_STATUSES:
-            raise AgentRuntimeError("FutureTask 状态无效")
-        store = self._future_task_store(source_run_id=last_run_id or "future_task_scheduler")
-        now = _now()
-        with self._db_lock:
-            try:
-                self._conn.execute("BEGIN IMMEDIATE")
-                self._conn.execute(
-                    """
-                    UPDATE future_tasks
-                       SET status=?, scheduled_at_epoch=?, last_run_id=?, run_count=?,
-                           error=?, updated_at=?, cancelled_at=?
-                     WHERE future_task_id=?
-                    """,
-                    (
-                        status,
-                        scheduled_at_epoch,
-                        last_run_id,
-                        run_count,
-                        error,
-                        now,
-                        cancelled_at,
-                        future_task_id,
-                    ),
-                )
-                store._record_event(future_task_id, event_action, event_payload)
-                row = self._conn.execute("SELECT * FROM future_tasks WHERE future_task_id=?", (future_task_id,)).fetchone()
-                self._conn.commit()
-            except Exception:
-                self._conn.rollback()
-                raise
-        return AgentFutureTaskStore._row_to_future_task(row)
+        return self.future_task_scheduler.trigger_due_future_tasks(
+            now_epoch=now_epoch,
+            limit=limit,
+        )
 
     def _row_to_agent(self, row: Any) -> dict[str, Any]:
         return {
