@@ -21,6 +21,7 @@ import { useApprovedRunGuard } from '../features/agent-studio/hooks/useApprovedR
 import { useRunApprovalActions } from '../features/agent-studio/hooks/useRunApprovalActions';
 import { useRunApprovalFollowup } from '../features/agent-studio/hooks/useRunApprovalFollowup';
 import { useRunEventReplay } from '../features/agent-studio/hooks/useRunEventReplay';
+import { useRunHistoryManagement } from '../features/agent-studio/hooks/useRunHistoryManagement';
 import { useRunLaunchActions } from '../features/agent-studio/hooks/useRunLaunchActions';
 import { useRunTimeline } from '../features/agent-studio/hooks/useRunTimeline';
 import { useWorkflowDefinitions } from '../features/agent-studio/hooks/useWorkflowDefinitions';
@@ -113,7 +114,6 @@ import {
   createWorkflow,
   deleteAgent,
   deleteMemory,
-  deleteRun,
   deleteSkillFolder,
   deleteSkill,
   deleteWorkflow,
@@ -274,9 +274,7 @@ export function AgentStudioView() {
   const [futureTasks, setFutureTasks] = useState<FutureTaskSpec[]>([]);
   const [runDetailCache, setRunDetailCache] = useState<RunSpec[]>([]);
   const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
-  const [selectedRunIds, setSelectedRunIds] = useState<string[]>([]);
   const [skillManagementMode, setSkillManagementMode] = useState(false);
-  const [runHistoryManagementMode, setRunHistoryManagementMode] = useState(false);
   const [draft, setDraft] = useState<AgentDraft>(emptyAgentDraft);
   const [skillSources, setSkillSources] = useState<SkillSourceRoot[]>([]);
   const [skillFolders, setSkillFolders] = useState<SkillFolderSpec[]>([]);
@@ -587,23 +585,34 @@ export function AgentStudioView() {
     () => filteredRuns.map((run) => run.run_id).filter(Boolean),
     [filteredRuns],
   );
-  const selectedRunIdSet = useMemo(() => new Set(selectedRunIds), [selectedRunIds]);
-  const selectedHistoryRuns = useMemo(
-    () => filteredRuns.filter((run) => selectedRunIdSet.has(run.run_id)),
-    [filteredRuns, selectedRunIdSet],
-  );
-  const selectedHistoryActiveRunCount = useMemo(
-    () => selectedHistoryRuns.filter((run) => isActiveRunStatus(run.status)).length,
-    [selectedHistoryRuns],
-  );
-  const runBulkDeleteDisabledReason = selectedHistoryActiveRunCount
-    ? `有 ${selectedHistoryActiveRunCount} 个 Run 仍在进行中或待审批，请先取消或等待结束后再删除。`
-    : '';
-  const allHistoryRunsSelected = filteredRunIds.length > 0 && selectedHistoryRuns.length === filteredRunIds.length;
   const runHistoryGroups = useMemo(
     () => runHistoryGroupsFor(filteredRuns, runnables, agents),
     [agents, filteredRuns, runnables],
   );
+  const {
+    allHistoryRunsSelected,
+    finishRunHistoryManagement,
+    requestDeleteSelectedRuns,
+    runBulkDeleteDisabledReason,
+    runHistoryManagementMode,
+    selectedHistoryRuns,
+    selectedRunIdSet,
+    setRunHistoryManagementMode,
+    setSelectedRunIds,
+    toggleRunSelected,
+  } = useRunHistoryManagement({
+    clearRunEventReplay,
+    filteredRunIds,
+    filteredRuns,
+    runAction,
+    selectedRunId,
+    setArtifactPreview,
+    setRunDetailCache,
+    setRunGroups,
+    setRuns,
+    setSelectedRunId,
+    showConfirmDialog,
+  });
   const selectedRunWorkflow = useMemo(
     () => (
       selectedRun?.kind === 'workflow_run'
@@ -879,17 +888,6 @@ export function AgentStudioView() {
       loadedGroups.forEach((group) => nextById.set(group.run_group_id, group));
       return Array.from(nextById.values());
     });
-  }
-
-  function pruneDeletedRunState(deletedRunIds: Set<string>) {
-    if (!deletedRunIds.size) return;
-    setRuns((current) => current.filter((run) => !deletedRunIds.has(run.run_id)));
-    setRunDetailCache((current) => current.filter((run) => !deletedRunIds.has(run.run_id)));
-    clearRunEventReplay(deletedRunIds);
-    setRunGroups((current) => current.filter((group) => {
-      const childRunIds = group.child_run_ids || [];
-      return !childRunIds.length || childRunIds.some((runId) => !deletedRunIds.has(runId));
-    }));
   }
 
   const refresh = useCallback(async (options: StudioRefreshOptions = {}) => {
@@ -1189,18 +1187,9 @@ export function AgentStudioView() {
     setSelectedSkillIds((current) => toggleSelectedId(current, skillId));
   }
 
-  function toggleRunSelected(runId: string) {
-    setSelectedRunIds((current) => toggleSelectedId(current, runId));
-  }
-
   function finishSkillManagement() {
     setSkillManagementMode(false);
     setSelectedSkillIds([]);
-  }
-
-  function finishRunHistoryManagement() {
-    setRunHistoryManagementMode(false);
-    setSelectedRunIds([]);
   }
 
   function startNewAgent() {
@@ -1564,36 +1553,6 @@ export function AgentStudioView() {
         }
         return undefined;
       }, '批量删除 Workflow'),
-    });
-  }
-
-  function requestDeleteSelectedRuns() {
-    const targets = selectedHistoryRuns.slice();
-    if (!targets.length || selectedHistoryActiveRunCount) return;
-    showConfirmDialog({
-      title: `删除 ${targets.length} 条 Run History？`,
-      description: '这些 Run 记录会从 Runs History 移除，对应 artifacts 也会删除；Workflow Run 会连带删除同一次 Workflow 的子 Agent Run。',
-      confirmLabel: `删除 ${targets.length} 条记录`,
-      variant: 'danger',
-      onConfirm: () => void runAction(async () => {
-        const deletedRunIds = new Set<string>();
-        for (const run of targets) {
-          const result = await deleteRun(run.run_id);
-          const resultIds = Array.isArray(result.deleted_run_ids) ? result.deleted_run_ids : [run.run_id];
-          resultIds.forEach((id) => {
-            if (id) deletedRunIds.add(id);
-          });
-        }
-        pruneDeletedRunState(deletedRunIds);
-        setSelectedRunIds((current) => current.filter((id) => !deletedRunIds.has(id)));
-        if (selectedRunId && deletedRunIds.has(selectedRunId)) {
-          setSelectedRunId('');
-          setArtifactPreview(null);
-          navigateTo('agents', { tab: 'runs' }, ['run', 'target', 'goal']);
-          return { selectedRunId: '' };
-        }
-        return undefined;
-      }, '批量删除 Run History'),
     });
   }
 

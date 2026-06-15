@@ -2079,9 +2079,9 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "listRuns",
             "listRunGroups",
             "getRunGroup",
-            "deleteRun",
             "useRunApprovalActions",
             "useRunEventReplay",
+            "useRunHistoryManagement",
             "useRunLaunchActions",
             "saveAgent",
             "const saved = draft.agent_id ? await updateAgent(draft.agent_id, request) : await createAgent(request);",
@@ -2104,11 +2104,6 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "await deleteWorkflow(workflow.workflow_id);",
             "refreshRunGroupsForRuns",
             "Promise.all(groupIds.map((groupId) => getRunGroup(groupId).catch(() => null)))",
-            "function pruneDeletedRunState(deletedRunIds: Set<string>)",
-            "setRunDetailCache((current) => current.filter((run) => !deletedRunIds.has(run.run_id)))",
-            "clearRunEventReplay(deletedRunIds);",
-            "childRunIds.some((runId) => !deletedRunIds.has(runId))",
-            "const result = await deleteRun(run.run_id);",
             "runEventReplayToTimelineEvent",
             "selectedRunExecutionEvents",
             "selectedRunReplayHasMore",
@@ -2125,6 +2120,19 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "selectedAgentDeletable",
             "系统 Agent 只能查看，不能删除。",
             "AgentEditorPanel",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useRunHistoryManagement.ts",
+        [
+            "deleteRun",
+            "function pruneDeletedRunState(deletedRunIds: Set<string>)",
+            "setRunDetailCache((current) => current.filter((run) => !deletedRunIds.has(run.run_id)))",
+            "clearRunEventReplay(deletedRunIds);",
+            "childRunIds.some((runId) => !deletedRunIds.has(runId))",
+            "const result = await deleteRun(run.run_id);",
+            "setSelectedRunIds((current) => current.filter((id) => !deletedRunIds.has(id)))",
+            "navigateTo('agents', { tab: 'runs' }, ['run', 'target', 'goal']);",
         ],
     )
     _assert_contains(
