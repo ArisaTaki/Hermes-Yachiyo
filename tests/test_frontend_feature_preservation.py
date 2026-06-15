@@ -2229,7 +2229,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "selectedWorkflowApprovalChildRunId",
             "selectedAgentReadOnly",
             "selectedAgentDeletable",
-            "AgentEditorPanel",
+            "AgentDefinitionsTab",
         ],
     )
     _assert_contains(
@@ -3024,12 +3024,24 @@ def test_agent_studio_agents_ui_smoke_uses_definition_crud_paths() -> None:
     _assert_contains(
         "apps/frontend/src/views/AgentStudioView.tsx",
         [
-            'data-testid="agent-studio-agents"',
-            "AgentListPanel",
-            "AgentEditorPanel",
+            "AgentDefinitionsTab",
             "selectedAgentReadOnly",
             "onSetSelectedAgentIds={setSelectedAgentIds}",
             "系统 Agent 只能查看，不能从 Agent Studio 直接运行。",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/AgentDefinitionsTab.tsx",
+        [
+            "export function AgentDefinitionsTab",
+            'data-testid="agent-studio-agents"',
+            "AgentListPanel",
+            "AgentEditorPanel",
+            "onSetSelectedAgentIds={onSetSelectedAgentIds}",
+            "onRunAgent={onRunAgent}",
+            "onSaveAgent={onSaveAgent}",
+            "onTestAgentModel={onTestAgentModel}",
+            "onToggleSkillMount={onToggleSkillMount}",
         ],
     )
     _assert_contains(
@@ -3263,7 +3275,7 @@ def test_agent_studio_skill_mount_ui_smoke_uses_attach_detach_and_bulk_paths() -
     _assert_contains(
         "apps/frontend/src/views/AgentStudioView.tsx",
         [
-            "AgentEditorPanel",
+            "AgentDefinitionsTab",
             "useAgentSkillMountActions",
             "mountVisibleSkills",
             "toggleAgentSkillMount",

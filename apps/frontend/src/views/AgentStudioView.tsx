@@ -8,9 +8,8 @@ import {
 import '@xyflow/react/dist/style.css';
 
 import { ConfirmDialog } from '../components/ConfirmDialog';
-import { AgentEditorPanel } from '../features/agent-studio/components/AgentEditorPanel';
+import { AgentDefinitionsTab } from '../features/agent-studio/components/AgentDefinitionsTab';
 import { AgentGroupPanel } from '../features/agent-studio/components/AgentGroupPanel';
-import { AgentListPanel } from '../features/agent-studio/components/AgentListPanel';
 import { AgentStudioChrome } from '../features/agent-studio/components/AgentStudioChrome';
 import { RuntimeMemoryPanel } from '../features/agent-studio/components/RuntimeMemoryPanel';
 import { RunDetailPanel } from '../features/agent-studio/components/RunDetailPanel';
@@ -1409,66 +1408,61 @@ export function AgentStudioView() {
       ) : null}
 
       {!loading && tab === 'agents' ? (
-        <section className="agent-studio-grid" data-testid="agent-studio-agents">
-          <AgentListPanel
-            agents={agents}
-            agentManagementMode={agentManagementMode}
-            allAgentsSelected={allAgentsSelected}
-            busy={busy}
-            deletableAgentIds={deletableAgentIds}
-            selectedAgentCount={selectedAgents.length}
-            selectedAgentId={selectedAgentId}
-            selectedAgentIdSet={selectedAgentIdSet}
-            selectedDeletableAgentCount={selectedDeletableAgents.length}
-            onClearSelection={() => setSelectedAgentIds([])}
-            onFinishManagement={finishAgentManagement}
-            onRequestDeleteSelectedAgents={requestDeleteSelectedAgents}
-            onSelectAgent={selectAgent}
-            onSetAgentManagementMode={setAgentManagementMode}
-            onSetSelectedAgentIds={setSelectedAgentIds}
-            onStartNewAgent={startNewAgent}
-            onToggleAgentSelected={toggleAgentSelected}
-          />
-          <AgentEditorPanel
-            agentQuickRunDisabled={agentQuickRunDisabled}
-            agentQuickRunDisabledReason={agentQuickRunDisabledReason}
-            agentReadinessNotices={agentReadinessNotices}
-            agentRunGoal={agentRunGoal}
-            busy={busy}
-            chatModelProfiles={chatModelProfiles}
-            customApiKeyConfigured={Boolean(selectedAgent?.model_config.api_key_configured)}
-            disabledMountedSkills={disabledMountedSkills}
-            draft={draft}
-            filteredMountSkills={filteredMountSkills}
-            mountedSkillCount={mountedSkillCount}
-            selectedAgentDeletable={selectedAgentDeletable}
-            selectedAgentReadOnly={selectedAgentReadOnly}
-            selectedSkillIds={selectedAgent?.skill_ids || []}
-            skillFolders={skillFolders}
-            skillMountFilter={skillMountFilter}
-            skillMountFolderFilter={skillMountFolderFilter}
-            skillMountSearch={skillMountSearch}
-            visibleMountedCount={visibleMountedCount}
-            visionModelProfiles={visionModelProfiles}
-            onAgentRunGoalChange={setAgentRunGoal}
-            onDraftChange={setDraft}
-            onMountVisibleSkills={() => void runAction(mountVisibleSkills, '挂载当前筛选 Skills')}
-            onOpenModelProfiles={() => void openAppView('provider')}
-            onPickAgentAvatar={() => void pickAgentAvatar()}
-            onRequestDeleteAgent={requestDeleteAgent}
-            onRunAgent={() => void runAction(runCurrentAgent, '运行 Agent')}
-            onSaveAgent={() => void runAction(saveAgent, '保存 Agent')}
-            onSetSkillMountFilter={setSkillMountFilter}
-            onSetSkillMountFolderFilter={setSkillMountFolderFilter}
-            onSetSkillMountSearch={setSkillMountSearch}
-            onTestAgentModel={() => void runAction(async () => {
-              const result = await testAgentModel(draft.agent_id || '');
-              setStatus(result.message || (result.ok ? '模型测试通过' : '模型测试失败'));
-            }, '测试模型')}
-            onToggleSkillMount={toggleAgentSkillMount}
-            onUnmountVisibleSkills={() => void runAction(unmountVisibleSkills, '移除当前筛选 Skills')}
-          />
-        </section>
+        <AgentDefinitionsTab
+          agentManagementMode={agentManagementMode}
+          agentQuickRunDisabled={agentQuickRunDisabled}
+          agentQuickRunDisabledReason={agentQuickRunDisabledReason}
+          agentReadinessNotices={agentReadinessNotices}
+          agentRunGoal={agentRunGoal}
+          agents={agents}
+          allAgentsSelected={allAgentsSelected}
+          busy={busy}
+          chatModelProfiles={chatModelProfiles}
+          customApiKeyConfigured={Boolean(selectedAgent?.model_config.api_key_configured)}
+          deletableAgentIds={deletableAgentIds}
+          disabledMountedSkills={disabledMountedSkills}
+          draft={draft}
+          filteredMountSkills={filteredMountSkills}
+          mountedSkillCount={mountedSkillCount}
+          selectedAgentCount={selectedAgents.length}
+          selectedAgentDeletable={selectedAgentDeletable}
+          selectedAgentId={selectedAgentId}
+          selectedAgentIdSet={selectedAgentIdSet}
+          selectedAgentReadOnly={selectedAgentReadOnly}
+          selectedDeletableAgentCount={selectedDeletableAgents.length}
+          selectedSkillIds={selectedAgent?.skill_ids || []}
+          skillFolders={skillFolders}
+          skillMountFilter={skillMountFilter}
+          skillMountFolderFilter={skillMountFolderFilter}
+          skillMountSearch={skillMountSearch}
+          visibleMountedCount={visibleMountedCount}
+          visionModelProfiles={visionModelProfiles}
+          onAgentRunGoalChange={setAgentRunGoal}
+          onClearAgentSelection={() => setSelectedAgentIds([])}
+          onDraftChange={setDraft}
+          onFinishAgentManagement={finishAgentManagement}
+          onMountVisibleSkills={() => void runAction(mountVisibleSkills, '挂载当前筛选 Skills')}
+          onOpenModelProfiles={() => void openAppView('provider')}
+          onPickAgentAvatar={() => void pickAgentAvatar()}
+          onRequestDeleteAgent={requestDeleteAgent}
+          onRequestDeleteSelectedAgents={requestDeleteSelectedAgents}
+          onRunAgent={() => void runAction(runCurrentAgent, '运行 Agent')}
+          onSaveAgent={() => void runAction(saveAgent, '保存 Agent')}
+          onSelectAgent={selectAgent}
+          onSetAgentManagementMode={setAgentManagementMode}
+          onSetSelectedAgentIds={setSelectedAgentIds}
+          onSetSkillMountFilter={setSkillMountFilter}
+          onSetSkillMountFolderFilter={setSkillMountFolderFilter}
+          onSetSkillMountSearch={setSkillMountSearch}
+          onStartNewAgent={startNewAgent}
+          onTestAgentModel={() => void runAction(async () => {
+            const result = await testAgentModel(draft.agent_id || '');
+            setStatus(result.message || (result.ok ? '模型测试通过' : '模型测试失败'));
+          }, '测试模型')}
+          onToggleAgentSelected={toggleAgentSelected}
+          onToggleSkillMount={toggleAgentSkillMount}
+          onUnmountVisibleSkills={() => void runAction(unmountVisibleSkills, '移除当前筛选 Skills')}
+        />
       ) : null}
 
       {!loading && tab === 'skills' ? (
