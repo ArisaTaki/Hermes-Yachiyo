@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from apps.shell.yachiyo_agent.legacy_runs import LegacyRunPayloadProjector
 from apps.shell.yachiyo_agent.legacy_ports import (
-    LegacyRunPayloadProjector,
     _chat_task_payload,
     _group_artifacts,
     _group_run_from_legacy_run_group,
