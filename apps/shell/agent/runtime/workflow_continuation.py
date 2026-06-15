@@ -6,12 +6,12 @@ import json
 import time
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 from apps.shell.agent.runtime.budget import RunBudgetLimits, WorkflowRunBudget
 from apps.shell.agent.runtime.errors import AgentRuntimeError
 from apps.shell.agent.runtime.events import redact_json_value, redact_secrets
+from apps.shell.agent.runtime.tool_brokers import write_artifact_with_tool_broker
 from apps.shell.agent.runtime.workflow_approvals import WorkflowApprovalPauseProjection
 from apps.shell.agent.runtime.workflow_nodes import (
     WorkflowAgentNodeExecution,
@@ -29,7 +29,6 @@ from apps.shell.agent.runtime.workflow_projections import (
     WorkflowStartNodeProjection,
 )
 from apps.shell.agent.runtime.workflow_run_outcomes import WorkflowRunOutcomeProjector
-from apps.shell.agent.tools.broker import ToolBroker
 
 
 def _iso_epoch(value: Any) -> float:
@@ -383,11 +382,14 @@ class WorkflowContinuationCoordinator:
     ) -> dict[str, Any]:
         if self._workflow_artifact_write_callback is not None:
             return self._workflow_artifact_write_callback(run, artifact_path, context)
-        broker = ToolBroker(
-            self._default_workspace_policy(),
-            Path(self._workflow_artifacts_dir()) / str(run["run_id"]),
+        return write_artifact_with_tool_broker(
+            tool_brokers=getattr(self._engine, "tool_brokers", None),
+            run_id=str(run.get("run_id") or ""),
+            workspace_policy=self._default_workspace_policy(),
+            artifacts_dir=self._workflow_artifacts_dir(),
+            artifact_path=artifact_path,
+            content=context,
         )
-        return broker.artifact_write(artifact_path, context)
 
     def _workflow_agent_for_node(self, node: dict[str, Any]) -> dict[str, Any]:
         if self._workflow_agent_for_node_callback is not None:

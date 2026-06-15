@@ -53,6 +53,20 @@ class FakeWorkflowOutcomeEngine:
         }
 
 
+class FakeWorkflowToolBrokers:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+        self.writes: list[tuple[str, str]] = []
+
+    def for_run(self, **kwargs):
+        self.calls.append(kwargs)
+        return self
+
+    def artifact_write(self, artifact_path: str, context: str) -> dict[str, object]:
+        self.writes.append((artifact_path, context))
+        return {"ok": True, "path": artifact_path, "bytes": len(context.encode("utf-8"))}
+
+
 def test_workflow_run_outcome_projector_projects_completed_root_group() -> None:
     engine = FakeWorkflowOutcomeEngine()
     projector = WorkflowRunOutcomeProjector(engine)
@@ -681,6 +695,55 @@ def test_workflow_continuation_uses_injected_artifact_io(tmp_path) -> None:
         }
     ]
     assert timeline[0]["event"] == "workflow.node.artifact"
+
+
+def test_workflow_continuation_fallback_uses_engine_tool_brokers(tmp_path) -> None:
+    engine = FakeWorkflowTraversalEngine()
+    engine.tool_brokers = FakeWorkflowToolBrokers()
+    workflow = {
+        "nodes": [
+            {
+                "id": "report",
+                "type": "artifact",
+                "data": {"label": "Final Report", "artifact_path": "reports/final.md"},
+            },
+        ]
+    }
+    artifacts_dir = tmp_path / "workflow-artifacts"
+    coordinator = WorkflowContinuationCoordinator(
+        engine,
+        workflow_path=lambda current_workflow: list(current_workflow["nodes"]),
+        workflow_nodes_by_id=lambda current_workflow: {
+            str(node["id"]): node for node in current_workflow["nodes"]
+        },
+        workflow_next_node_id=lambda _workflow, _node, _context: "",
+        default_workspace_policy=lambda: {"default_workdir": str(tmp_path)},
+        workflow_artifacts_dir=lambda: artifacts_dir,
+        workflow_artifact_path=lambda _label, _artifacts, requested: requested,
+        node_kind=lambda node: str(node["type"]),
+    )
+    artifacts: list[dict[str, Any]] = []
+
+    result = coordinator.continue_run(
+        {"run_id": "workflow_run", "user_goal": "Write report"},
+        workflow,
+        context="Final workflow summary",
+        timeline=[],
+        artifacts=artifacts,
+        start_index=0,
+        root_group=False,
+    )
+
+    assert result["status"] == "completed"
+    assert engine.tool_brokers.calls == [
+        {
+            "run_id": "workflow_run",
+            "workspace_policy": {"default_workdir": str(tmp_path)},
+            "artifacts_dir": artifacts_dir,
+        }
+    ]
+    assert engine.tool_brokers.writes == [("reports/final.md", "Final workflow summary")]
+    assert artifacts[0]["path"] == "reports/final.md"
 
 
 def test_workflow_continuation_uses_injected_artifact_writer() -> None:

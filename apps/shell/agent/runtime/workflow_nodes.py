@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from apps.shell.agent.tools.broker import ToolBroker
+from apps.shell.agent.runtime.tool_brokers import write_artifact_with_tool_broker
 from packages.security import redact_sensitive_text
 
 
@@ -49,6 +49,7 @@ class WorkflowNodePortBundle:
     workflow_artifacts_dir: Any | None = None
     workflow_artifact_path: Any | None = None
     workflow_artifact_write: Any | None = None
+    tool_brokers: Any | None = None
 
 
 def _port_callback(
@@ -494,11 +495,18 @@ class WorkflowArtifactNodeWrite:
                 else engine.workflow_artifacts_dir
             )
             artifacts_dir = artifacts_dir() if callable(artifacts_dir) else artifacts_dir
-            broker = ToolBroker(
-                default_workspace_policy(),
-                artifacts_dir / str(run["run_id"]),
+            artifact = write_artifact_with_tool_broker(
+                tool_brokers=_port_source(
+                    ports,
+                    "tool_brokers",
+                    getattr(engine, "tool_brokers", None),
+                ),
+                run_id=str(run.get("run_id") or ""),
+                workspace_policy=default_workspace_policy(),
+                artifacts_dir=artifacts_dir,
+                artifact_path=artifact_path,
+                content=context,
             )
-            artifact = broker.artifact_write(artifact_path, context)
         else:
             artifact = workflow_artifact_write(run, artifact_path, context)
         return cls.from_artifact(

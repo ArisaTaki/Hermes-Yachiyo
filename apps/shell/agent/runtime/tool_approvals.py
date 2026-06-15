@@ -13,7 +13,6 @@ from apps.shell.agent.runtime.tool_requests import (
     normalize_tool_iteration,
     normalize_tool_name,
 )
-from apps.shell.agent.tools.broker import ToolBroker
 from packages.security import redact_api_error_text, redact_sensitive_text
 
 
@@ -75,7 +74,7 @@ class ToolApprovalResumeContext:
     run_id: str
     timeline: list[dict[str, Any]]
     artifacts: list[dict[str, Any]]
-    broker: ToolBroker
+    broker: Any
     allowed_tools: list[str]
     budget: RunBudget
     messages: list[dict[str, Any]]
@@ -91,7 +90,7 @@ class ToolApprovalResumeContext:
         run: dict[str, Any],
         pending: dict[str, Any],
         *,
-        broker: ToolBroker,
+        broker: Any,
         allowed_tools: list[str],
         budget: RunBudget | None = None,
         budget_factory: Any | None = None,
@@ -206,7 +205,7 @@ class ToolApprovalExecutionRequest:
 
     tool_request: dict[str, Any]
     allowed_tools: list[str]
-    broker: ToolBroker
+    broker: Any
     timeline: list[dict[str, Any]]
     artifacts: list[dict[str, Any]]
     run_id: str
@@ -246,7 +245,7 @@ class ToolApprovalContinuationHandoff:
 
     agent: dict[str, Any]
     user_goal: str
-    broker: ToolBroker
+    broker: Any
     timeline: list[dict[str, Any]]
     artifacts: list[dict[str, Any]]
     messages: list[dict[str, Any]]
@@ -393,7 +392,7 @@ class ToolApprovalExecutionFollowup:
     tool_result: Any
     remaining_requests: list[dict[str, Any]]
     allowed_tools: list[str]
-    broker: ToolBroker
+    broker: Any
     timeline: list[dict[str, Any]]
     artifacts: list[dict[str, Any]]
     next_iteration: int

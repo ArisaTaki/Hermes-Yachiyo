@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
+from apps.shell.agent.tools.broker import ToolBroker
+
 
 class RuntimeToolBrokerFactory:
     """Builds ToolBroker instances with run-scoped memory and FutureTask stores."""
@@ -52,3 +54,50 @@ class RuntimeToolBrokerFactory:
             workspace_policy=workspace_policy,
             default_runnable_id=self._main_chat_agent_id,
         )
+
+    def write_artifact_for_run(
+        self,
+        *,
+        run_id: str,
+        workspace_policy: dict[str, Any],
+        artifacts_dir: Path | None = None,
+        artifact_path: str,
+        content: str,
+    ) -> dict[str, Any]:
+        broker = self.for_run(
+            run_id=run_id,
+            workspace_policy=workspace_policy,
+            artifacts_dir=artifacts_dir,
+        )
+        return broker.artifact_write(artifact_path, content)
+
+
+def write_artifact_with_tool_broker(
+    *,
+    tool_brokers: Any | None,
+    run_id: str,
+    workspace_policy: dict[str, Any],
+    artifacts_dir: Any,
+    artifact_path: str,
+    content: str,
+) -> dict[str, Any]:
+    clean_run_id = str(run_id or "").strip()
+    root = Path(artifacts_dir)
+    if tool_brokers is not None:
+        writer = getattr(tool_brokers, "write_artifact_for_run", None)
+        if callable(writer):
+            return writer(
+                run_id=clean_run_id,
+                workspace_policy=workspace_policy,
+                artifacts_dir=root,
+                artifact_path=artifact_path,
+                content=content,
+            )
+        broker = tool_brokers.for_run(
+            run_id=clean_run_id,
+            workspace_policy=workspace_policy,
+            artifacts_dir=root,
+        )
+    else:
+        broker = ToolBroker(workspace_policy, root / clean_run_id)
+    return broker.artifact_write(artifact_path, content)

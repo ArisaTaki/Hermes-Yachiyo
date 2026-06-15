@@ -6,7 +6,10 @@ from pathlib import Path
 from typing import Any
 
 from apps.shell import agent_runtime
-from apps.shell.agent.runtime.tool_brokers import RuntimeToolBrokerFactory
+from apps.shell.agent.runtime.tool_brokers import (
+    RuntimeToolBrokerFactory,
+    write_artifact_with_tool_broker,
+)
 from apps.shell.agent.tools.broker import ToolBroker
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
@@ -17,6 +20,35 @@ class FakeBroker:
         self.workspace_policy = workspace_policy
         self.artifact_root = artifact_root
         self.kwargs = kwargs
+        self.writes: list[tuple[str, str]] = []
+
+    def artifact_write(self, artifact_path: str, content: str) -> dict[str, Any]:
+        self.writes.append((artifact_path, content))
+        return {"ok": True, "path": artifact_path, "bytes": len(content.encode("utf-8"))}
+
+
+class FakeSharedToolBrokers:
+    def __init__(self) -> None:
+        self.broker = FakeBroker({}, Path("/tmp/artifacts"))
+        self.calls: list[dict[str, Any]] = []
+
+    def for_run(
+        self,
+        *,
+        run_id: str,
+        workspace_policy: dict[str, Any],
+        artifacts_dir: Path | None = None,
+        **kwargs: Any,
+    ) -> FakeBroker:
+        self.calls.append(
+            {
+                "run_id": run_id,
+                "workspace_policy": workspace_policy,
+                "artifacts_dir": artifacts_dir,
+                **kwargs,
+            }
+        )
+        return self.broker
 
 
 def test_runtime_tool_broker_factory_builds_run_scoped_broker(tmp_path) -> None:
@@ -86,6 +118,53 @@ def test_runtime_tool_broker_factory_can_use_custom_artifacts_dir(tmp_path) -> N
     )
 
     assert broker.artifact_root == tmp_path / "workflow-artifacts" / "workflow-run-1"
+
+
+def test_runtime_tool_broker_factory_writes_artifact_for_custom_artifacts_dir(tmp_path) -> None:
+    factory = RuntimeToolBrokerFactory(
+        agent_artifacts_dir=tmp_path / "agent-artifacts",
+        tool_broker_factory=FakeBroker,
+        memory_store=lambda **kwargs: {"memory": kwargs},
+        future_task_store=lambda **kwargs: {"future": kwargs},
+        main_chat_agent_id="builtin:yachiyo-main",
+    )
+
+    artifact = factory.write_artifact_for_run(
+        run_id="workflow-run-1",
+        workspace_policy={},
+        artifacts_dir=tmp_path / "workflow-artifacts",
+        artifact_path="reports/final.md",
+        content="Final workflow summary",
+    )
+
+    assert artifact == {
+        "ok": True,
+        "path": "reports/final.md",
+        "bytes": len("Final workflow summary".encode("utf-8")),
+    }
+
+
+def test_write_artifact_with_tool_broker_uses_shared_factory(tmp_path) -> None:
+    tool_brokers = FakeSharedToolBrokers()
+
+    artifact = write_artifact_with_tool_broker(
+        tool_brokers=tool_brokers,
+        run_id=" workflow-run-1 ",
+        workspace_policy={"default_workdir": str(tmp_path)},
+        artifacts_dir=tmp_path / "workflow-artifacts",
+        artifact_path="reports/final.md",
+        content="Final workflow summary",
+    )
+
+    assert artifact["ok"] is True
+    assert tool_brokers.calls == [
+        {
+            "run_id": "workflow-run-1",
+            "workspace_policy": {"default_workdir": str(tmp_path)},
+            "artifacts_dir": tmp_path / "workflow-artifacts",
+        }
+    ]
+    assert tool_brokers.broker.writes == [("reports/final.md", "Final workflow summary")]
 
 
 def test_native_runtime_installs_tool_broker_factory(tmp_path) -> None:

@@ -12,6 +12,20 @@ from apps.shell.agent.runtime.workflow_nodes import (
 )
 
 
+class FakeWorkflowToolBrokers:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+        self.writes: list[tuple[str, str]] = []
+
+    def for_run(self, **kwargs):
+        self.calls.append(kwargs)
+        return self
+
+    def artifact_write(self, artifact_path: str, context: str) -> dict[str, object]:
+        self.writes.append((artifact_path, context))
+        return {"ok": True, "path": artifact_path, "bytes": len(context.encode("utf-8"))}
+
+
 def test_workflow_node_handoffs_remain_exported_from_legacy_module() -> None:
     assert agent_runtime.WorkflowAgentNodeHandoff is WorkflowAgentNodeHandoff
     assert agent_runtime.WorkflowAgentNodeExecution is WorkflowAgentNodeExecution
@@ -330,3 +344,42 @@ def test_workflow_artifact_node_legacy_helper_accepts_write_port() -> None:
         ("path", "Final Report:reports/final.md"),
         ("write", "workflow_run:reports/final.md:Final workflow summary"),
     ]
+
+
+def test_workflow_artifact_node_legacy_helper_uses_engine_tool_brokers(tmp_path) -> None:
+    tool_brokers = FakeWorkflowToolBrokers()
+
+    class FakeEngine:
+        workflow_artifacts_dir = tmp_path / "workflow-artifacts"
+
+        def _default_workspace_policy(self):
+            return {"default_workdir": str(tmp_path)}
+
+        def _workflow_artifact_path(self, _label, _artifacts, requested):
+            return requested
+
+    FakeEngine.tool_brokers = tool_brokers
+
+    write = WorkflowArtifactNodeWrite.from_node(
+        FakeEngine(),
+        {"run_id": "workflow_run"},
+        {
+            "id": "report",
+            "type": "artifact",
+            "data": {"artifact_path": "reports/final.md"},
+        },
+        label="Final Report",
+        kind="artifact",
+        context="Final workflow summary",
+        artifacts=[],
+    )
+
+    assert write.artifact_record()["path"] == "reports/final.md"
+    assert tool_brokers.calls == [
+        {
+            "run_id": "workflow_run",
+            "workspace_policy": {"default_workdir": str(tmp_path)},
+            "artifacts_dir": tmp_path / "workflow-artifacts",
+        }
+    ]
+    assert tool_brokers.writes == [("reports/final.md", "Final workflow summary")]
