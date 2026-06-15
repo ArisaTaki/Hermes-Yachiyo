@@ -372,17 +372,12 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
         "apps/frontend/src/views/ChatView.tsx",
         [
             "AgentTaskCard",
-            "approveYachiyoTask",
-            "rejectYachiyoTask",
-            "cancelYachiyoTask",
+            "useYachiyoTaskActions",
             "useYachiyoTaskSnapshots",
             "from '../features/yachiyo-chat/taskSnapshots';",
             "resolveYachiyoTaskApproval(task, approval, 'approve')",
             "resolveYachiyoTaskApproval(task, approval, 'reject')",
             "cancelYachiyoTaskFromCard",
-            "approveYachiyoTask(task.task_id, approval.approval_id)",
-            "rejectYachiyoTask(task.task_id, approval.approval_id, 'Rejected from chat task card')",
-            "cancelYachiyoTask(task.task_id)",
             "publicTaskSnapshotForMessage(message, agentTaskSnapshotsById)",
             "refreshYachiyoTasksForSession(payload.current_session_id)",
             "refreshYachiyoTaskById(resultRunId)",
@@ -391,6 +386,19 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "onApproveApproval={onApproveTaskApproval}",
             "onRejectApproval={onRejectTaskApproval}",
             "onCancelTask={onCancelTask}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/hooks/useYachiyoTaskActions.ts",
+        [
+            "export function useYachiyoTaskActions",
+            "approveYachiyoTask(task.task_id, approval.approval_id)",
+            "rejectYachiyoTask(task.task_id, approval.approval_id, 'Rejected from chat task card')",
+            "cancelYachiyoTask(task.task_id)",
+            "yachiyoTaskRunId(nextTask) || approval.run_id || task.task_id",
+            "yachiyoTaskStatusMessage(nextTask, action)",
+            "pollAgentRunInBackground(nextRunId, { ignoreInitialApprovalRequired: action === 'approve' });",
+            "focusComposerSoon();",
         ],
     )
     _assert_contains(
