@@ -134,6 +134,17 @@ def build_runtime_workflow_execution_services(
             workflow,
             node,
         ),
+        workflow_condition_selection=lambda workflow, node, context: (
+            engine._workflow_condition_selection(workflow, node, context)
+        ),
+        workflow_loop_selection=lambda workflow, node, context, *, previous_iterations: (
+            engine._workflow_loop_selection(
+                workflow,
+                node,
+                context,
+                previous_iterations=previous_iterations,
+            )
+        ),
         node_kind=lambda node: engine._node_kind(node),
     )
     return RuntimeWorkflowExecutionServiceBundle(

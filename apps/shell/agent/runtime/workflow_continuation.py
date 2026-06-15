@@ -71,6 +71,8 @@ class WorkflowContinuationCoordinator:
         workflow_nodes_by_id: Any | None = None,
         workflow_next_node_id: Any | None = None,
         workflow_parallel_plan: Any | None = None,
+        workflow_condition_selection: Any | None = None,
+        workflow_loop_selection: Any | None = None,
         node_kind: Any | None = None,
     ) -> None:
         self._engine = engine
@@ -79,6 +81,8 @@ class WorkflowContinuationCoordinator:
         self._workflow_nodes_by_id_callback = workflow_nodes_by_id
         self._workflow_next_node_id_callback = workflow_next_node_id
         self._workflow_parallel_plan_callback = workflow_parallel_plan
+        self._workflow_condition_selection_callback = workflow_condition_selection
+        self._workflow_loop_selection_callback = workflow_loop_selection
         self._node_kind_callback = node_kind
         self._outcomes = WorkflowRunOutcomeProjector(engine)
 
@@ -144,6 +148,38 @@ class WorkflowContinuationCoordinator:
         if self._workflow_parallel_plan_callback is not None:
             return self._workflow_parallel_plan_callback(workflow, node)
         return self._engine._workflow_parallel_plan(workflow, node)
+
+    def _workflow_condition_selection(
+        self,
+        workflow: dict[str, Any],
+        node: dict[str, Any],
+        context: str,
+    ) -> dict[str, Any]:
+        if self._workflow_condition_selection_callback is not None:
+            return self._workflow_condition_selection_callback(workflow, node, context)
+        return self._engine._workflow_condition_selection(workflow, node, context)
+
+    def _workflow_loop_selection(
+        self,
+        workflow: dict[str, Any],
+        node: dict[str, Any],
+        context: str,
+        *,
+        previous_iterations: int,
+    ) -> dict[str, Any]:
+        if self._workflow_loop_selection_callback is not None:
+            return self._workflow_loop_selection_callback(
+                workflow,
+                node,
+                context,
+                previous_iterations=previous_iterations,
+            )
+        return self._engine._workflow_loop_selection(
+            workflow,
+            node,
+            context,
+            previous_iterations=previous_iterations,
+        )
 
     def _node_kind(self, node: dict[str, Any]) -> str:
         if self._node_kind_callback is not None:
@@ -917,7 +953,7 @@ class WorkflowContinuationCoordinator:
         timeline: list[dict[str, Any]],
     ) -> dict[str, Any]:
         engine = self._engine
-        selection = engine._workflow_condition_selection(workflow, node, context)
+        selection = self._workflow_condition_selection(workflow, node, context)
         projection = WorkflowConditionNodeProjection.from_selection(
             node,
             selection,
@@ -944,7 +980,7 @@ class WorkflowContinuationCoordinator:
         timeline: list[dict[str, Any]],
     ) -> dict[str, Any]:
         engine = self._engine
-        selection = engine._workflow_loop_selection(
+        selection = self._workflow_loop_selection(
             workflow,
             node,
             context,

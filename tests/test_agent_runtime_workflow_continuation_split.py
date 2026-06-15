@@ -214,6 +214,116 @@ def test_workflow_continuation_uses_injected_traversal_callbacks() -> None:
     ]
 
 
+def test_workflow_continuation_uses_injected_condition_selection() -> None:
+    engine = FakeWorkflowTraversalEngine()
+    workflow = {
+        "nodes": [
+            {"id": "start", "type": "start"},
+            {"id": "route", "type": "condition", "data": {"label": "Route"}},
+        ]
+    }
+    nodes_by_id = {str(node["id"]): node for node in workflow["nodes"]}
+    selection_calls: list[dict[str, str]] = []
+    coordinator = WorkflowContinuationCoordinator(
+        engine,
+        workflow_path=lambda current_workflow: list(current_workflow["nodes"]),
+        workflow_nodes_by_id=lambda _workflow: nodes_by_id,
+        workflow_next_node_id=lambda _workflow, node, _context: (
+            "route" if node["id"] == "start" else ""
+        ),
+        workflow_parallel_plan=lambda _workflow, _node: {},
+        workflow_condition_selection=lambda _workflow, node, context: selection_calls.append(
+            {"node_id": str(node["id"]), "context": context}
+        )
+        or {
+            "condition": "ship",
+            "operator": "contains",
+            "matched": False,
+            "branch": "false",
+            "target_node_id": "",
+        },
+        workflow_loop_selection=lambda *_args, **_kwargs: {},
+        node_kind=lambda node: str(node["type"]),
+    )
+
+    result = coordinator.continue_run(
+        {"run_id": "workflow_run", "user_goal": "Choose branch"},
+        workflow,
+        context="skip it",
+        timeline=[],
+        artifacts=[],
+        start_index=0,
+        root_group=False,
+    )
+
+    condition_event = next(event for event in engine.events if event[1] == "workflow.node.condition")
+    assert result["status"] == "completed"
+    assert selection_calls == [{"node_id": "route", "context": "skip it"}]
+    assert condition_event[2]["workflow_node_selected_branch"] == "false"
+    assert condition_event[2]["workflow_node_condition_matched"] is False
+
+
+def test_workflow_continuation_uses_injected_loop_selection() -> None:
+    engine = FakeWorkflowTraversalEngine()
+    workflow = {
+        "nodes": [
+            {"id": "start", "type": "start"},
+            {"id": "repeat", "type": "loop", "data": {"label": "Repeat"}},
+        ]
+    }
+    nodes_by_id = {str(node["id"]): node for node in workflow["nodes"]}
+    selection_calls: list[dict[str, object]] = []
+    coordinator = WorkflowContinuationCoordinator(
+        engine,
+        workflow_path=lambda current_workflow: list(current_workflow["nodes"]),
+        workflow_nodes_by_id=lambda _workflow: nodes_by_id,
+        workflow_next_node_id=lambda _workflow, node, _context: (
+            "repeat" if node["id"] == "start" else ""
+        ),
+        workflow_parallel_plan=lambda _workflow, _node: {},
+        workflow_condition_selection=lambda *_args, **_kwargs: {},
+        workflow_loop_selection=lambda _workflow, node, context, *, previous_iterations: (
+            selection_calls.append(
+                {
+                    "node_id": str(node["id"]),
+                    "context": context,
+                    "previous_iterations": previous_iterations,
+                }
+            )
+            or {
+                "condition": "again",
+                "operator": "contains",
+                "matched": False,
+                "branch": "exit",
+                "target_node_id": "",
+                "previous_iterations": previous_iterations,
+                "iteration": previous_iterations,
+                "max_iterations": 1,
+                "limit_reached": True,
+            }
+        ),
+        node_kind=lambda node: str(node["type"]),
+    )
+
+    result = coordinator.continue_run(
+        {"run_id": "workflow_run", "user_goal": "Loop once"},
+        workflow,
+        context="done",
+        timeline=[],
+        artifacts=[],
+        start_index=0,
+        root_group=False,
+    )
+
+    loop_event = next(event for event in engine.events if event[1] == "workflow.node.loop")
+    assert result["status"] == "completed"
+    assert selection_calls == [
+        {"node_id": "repeat", "context": "done", "previous_iterations": 0}
+    ]
+    assert loop_event[2]["workflow_node_selected_branch"] == "exit"
+    assert loop_event[2]["workflow_node_loop_limit_reached"] is True
+
+
 class FakeWorkflowTraversalEngine:
     def __init__(self) -> None:
         self.events: list[tuple[str, str, dict[str, Any]]] = []
