@@ -135,6 +135,7 @@ from apps.shell.agent.runtime.events import (
 )
 from apps.shell.agent.runtime.future_task_scheduler import FutureTaskTriggerScheduler
 from apps.shell.agent.runtime.main_chat_config import MainChatRuntimeConfigBuilder
+from apps.shell.agent.runtime.main_chat_model import MainChatModelCaller
 from apps.shell.agent.runtime.main_chat_runs import MainChatRunLifecycle
 from apps.shell.agent.runtime.memory_services import RuntimeMemoryService
 from apps.shell.agent.runtime.model_profiles import RuntimeModelProfileResolver
@@ -644,6 +645,38 @@ class NativeRunEngine:
                 final_statuses=_FINAL_RUN_STATUSES,
             )
         )
+        self._install_runtime_main_chat_model(
+            MainChatModelCaller(
+                get_run=self.get_run,
+                default_profile_id=lambda capability: str(
+                    get_model_profile_service().get_defaults().get(capability) or ""
+                ).strip(),
+                model_profile_config_private=lambda profile_id, capability="chat": self._model_profile_config_private(
+                    profile_id,
+                    capability=capability,
+                ),
+                run_budget=self._run_budget,
+                check_context_budget=self._check_context_budget,
+                limit_model_output=self._limit_model_output,
+                timeline_factory=self._timeline,
+                update_run=self._update_run,
+                append_run_event=self.append_run_event,
+                task_model_events=self.runtime_task_model_events,
+                call_model=lambda base_url, model, api_key, messages, **kwargs: _call_model_profile_chat_message(
+                    base_url,
+                    model,
+                    api_key,
+                    messages,
+                    **kwargs,
+                ),
+                coalesce_model_message=_coalesce_model_message,
+                message_visible_content_text=_message_visible_content_text,
+                model_message_metadata=_model_message_metadata,
+                terminal_run_or_none=self._terminal_run_or_none,
+                redact_secrets=redact_secrets,
+                error_type=AgentRuntimeError,
+            )
+        )
         tooling = _build_runtime_tooling(
             normalize_tool_name=_normalize_tool_name,
             input_preview=_tool_input_preview,
@@ -853,6 +886,9 @@ class NativeRunEngine:
 
     def _install_runtime_main_chat_runs(self, main_chat_runs: MainChatRunLifecycle) -> None:
         self.main_chat_runs = main_chat_runs
+
+    def _install_runtime_main_chat_model(self, main_chat_model: MainChatModelCaller) -> None:
+        self.main_chat_model = main_chat_model
 
     def _install_runtime_tooling(self, tooling: RuntimeToolingBundle) -> None:
         self.tool_loop_projection = tooling.tool_loop_projection
@@ -2656,88 +2692,12 @@ class NativeRunEngine:
         profile_id: str = "",
         capability: str = "chat",
     ) -> str:
-        run = self.get_run(run_id)
-        if str(run.get("kind") or "") != "main_chat_run":
-            raise AgentRuntimeError("Run 不是主聊天 Native Run")
-        default_profile_id = str(
-            profile_id or get_model_profile_service().get_defaults().get(capability) or ""
-        ).strip()
-        if not default_profile_id:
-            raise AgentRuntimeError(f"native_agent_not_ready:{capability}_model_profile_required")
-        model_config = self._model_profile_config_private(default_profile_id, capability=capability)
-        timeline = list(run.get("timeline") or [])
-        budget = self._run_budget(run_id, timeline)
-        self._check_context_budget(budget, messages)
-        budget.claim_model_call()
-        timeline.append(
-            self._timeline(
-                "model.request.started",
-                str(model_config.get("model") or ""),
-                profile_id=default_profile_id,
-                capability=capability,
-            )
-        )
-        self._update_run(run_id, timeline=timeline)
-        self.append_run_event(
+        return self.main_chat_model.call(
             run_id,
-            "model.request.started",
-            self.runtime_task_model_events.model_request_started_payload(
-                profile_id=default_profile_id,
-                model=str(model_config.get("model") or ""),
-                capability=capability,
-                message_count=len(messages),
-            ),
+            messages,
+            profile_id=profile_id,
+            capability=capability,
         )
-        try:
-            message = _coalesce_model_message(
-                _call_model_profile_chat_message(
-                    str(model_config.get("base_url") or ""),
-                    str(model_config.get("model") or ""),
-                    str(model_config.get("api_key") or ""),
-                    messages,
-                    stream=True,
-                )
-            )
-            content, output_truncated = self._limit_model_output(_message_visible_content_text(message))
-            content = content.strip()
-            if not content:
-                raise AgentRuntimeError("Native Agent 模型返回了空回复")
-            output_metadata = _model_message_metadata(message)
-        except Exception as exc:
-            terminal = self._terminal_run_or_none(run_id)
-            if terminal is not None:
-                return str(terminal.get("result") or "")
-            safe_error = redact_secrets(exc)
-            timeline.append(self._timeline("model.request.failed", safe_error))
-            self._update_run(run_id, timeline=timeline)
-            self.append_run_event(
-                run_id,
-                "model.request.failed",
-                self.runtime_task_model_events.model_request_failed_payload(safe_error),
-            )
-            raise
-        terminal = self._terminal_run_or_none(run_id)
-        if terminal is not None:
-            return str(terminal.get("result") or "")
-        timeline.append(
-            self._timeline(
-                "model.output.completed",
-                content[:500],
-                output_chars=len(content),
-                truncated=output_truncated,
-            )
-        )
-        self._update_run(run_id, timeline=timeline)
-        self.append_run_event(
-            run_id,
-            "model.output.completed",
-            self.runtime_task_model_events.model_output_completed_payload(
-                content,
-                truncated=output_truncated,
-                metadata=output_metadata,
-            ),
-        )
-        return content
 
     def _main_chat_workspace_policy(self, policy: dict[str, Any] | None = None) -> dict[str, Any]:
         return self.main_chat_config.workspace_policy(policy)
