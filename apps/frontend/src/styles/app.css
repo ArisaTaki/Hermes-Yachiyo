@@ -14482,6 +14482,71 @@ button.activity-item {
   width: 100%;
 }
 
+.group-run-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.group-run-latest {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--hy-line);
+}
+
+.group-run-latest-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.group-run-latest-head strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--hy-fg);
+  font-size: 13px;
+  font-weight: 620;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-run-event-summary {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.group-run-event-summary li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  color: var(--hy-muted);
+  font-size: 12px;
+}
+
+.group-run-event-summary li span,
+.group-run-event-summary li p {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-run-event-summary li em {
+  color: var(--hy-muted);
+  font-style: normal;
+  white-space: nowrap;
+}
+
 .agent-list,
 .skill-list,
 .run-list {
