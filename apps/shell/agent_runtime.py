@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 import json
 import logging
 import os
@@ -167,6 +166,10 @@ from apps.shell.agent.runtime.main_chat_model import MainChatModelCaller
 from apps.shell.agent.runtime.main_chat_model_loop import MainChatModelLoopRunner
 from apps.shell.agent.runtime.main_chat_runs import MainChatRunLifecycle
 from apps.shell.agent.runtime.memory_services import RuntimeMemoryService
+from apps.shell.agent.runtime.model_calling import (
+    call_model_profile_chat_message as _runtime_call_model_profile_chat_message,
+    callable_accepts_keyword as _callable_accepts_keyword,
+)
 from apps.shell.agent.runtime.model_profiles import RuntimeAgentModelTester, RuntimeModelProfileResolver
 from apps.shell.agent.runtime.model_messages import (
     RESPONSES_STREAM_REASONING_EVENTS as _RESPONSES_STREAM_REASONING_EVENTS,
@@ -442,20 +445,15 @@ def _call_model_profile_chat_message(
     tools: list[dict[str, Any]] | None = None,
     stream: bool = False,
 ) -> Any:
-    kwargs: dict[str, Any] = {}
-    if tools is not None:
-        kwargs["tools"] = tools
-    if stream and _callable_accepts_keyword(openai_compatible_chat_message, "stream"):
-        kwargs["stream"] = True
-    return openai_compatible_chat_message(base_url, model, api_key, messages, **kwargs)
-
-
-def _callable_accepts_keyword(func: Any, name: str) -> bool:
-    try:
-        parameters = inspect.signature(func).parameters
-    except (TypeError, ValueError):
-        return False
-    return name in parameters or any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values())
+    return _runtime_call_model_profile_chat_message(
+        openai_compatible_chat_message,
+        base_url,
+        model,
+        api_key,
+        messages,
+        tools=tools,
+        stream=stream,
+    )
 
 
 def _public_pending_approval(value: Any) -> dict[str, Any]:
