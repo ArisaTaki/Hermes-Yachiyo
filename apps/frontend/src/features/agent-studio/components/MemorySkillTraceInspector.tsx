@@ -17,9 +17,13 @@ type MemorySkillTrace = {
 
 type MemorySkillTraceInspectorProps = {
   events?: PublicRunEvent[];
+  sourceLabel?: string;
 };
 
-export function MemorySkillTraceInspector({ events = [] }: MemorySkillTraceInspectorProps) {
+export function MemorySkillTraceInspector({
+  events = [],
+  sourceLabel = 'Memory 检索、写入和 Skill 调度的 Runtime 事实',
+}: MemorySkillTraceInspectorProps) {
   const traces = events.map(memorySkillTraceFromEvent).filter((trace): trace is MemorySkillTrace => Boolean(trace));
   return (
     <details
@@ -30,7 +34,7 @@ export function MemorySkillTraceInspector({ events = [] }: MemorySkillTraceInspe
       <summary className="run-detail-section-head">
         <div>
           <h4>Memory / Skill Trace · {traces.length}</h4>
-          <span>Memory 检索、写入和 Skill 调度的 Runtime 事实</span>
+          <span>{sourceLabel}</span>
         </div>
       </summary>
       <div className="run-detail-fold-body run-memory-skill-trace-list" data-testid="agent-run-detail-memory-skill-trace-list">

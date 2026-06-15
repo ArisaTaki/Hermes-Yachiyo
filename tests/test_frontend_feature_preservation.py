@@ -1582,7 +1582,11 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
             "ArtifactInspector",
             "ToolCallInspector",
             "MemorySkillTraceInspector",
-            "events={selectedPublicRunTimeline.events || []}",
+            "const memorySkillTraceEvents = selectedRunReplayEvents.length",
+            "RunEvent replay trace facts · Memory / Skill",
+            "RunTimelineSnapshot trace facts · Memory / Skill",
+            "events={memorySkillTraceEvents}",
+            "sourceLabel={memorySkillTraceSource}",
         ],
     )
     _assert_contains(
@@ -1624,6 +1628,8 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
         "apps/frontend/src/features/agent-studio/components/MemorySkillTraceInspector.tsx",
         [
             "export function MemorySkillTraceInspector",
+            "sourceLabel = 'Memory 检索、写入和 Skill 调度的 Runtime 事实'",
+            "<span>{sourceLabel}</span>",
             "PublicRunEvent",
             "agent-run-detail-memory-skill-traces",
             "agent-run-detail-memory-skill-trace-list",

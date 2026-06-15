@@ -129,6 +129,13 @@ export function RunDetailPanel({
   workflowStepKindLabel: (kind: RunDetailWorkflowStepRef['kind']) => string;
   workflowStepSummary: (step: RunDetailWorkflowStepRef, childRun: RunSpec | null) => string;
 }) {
+  const memorySkillTraceEvents = selectedRunReplayEvents.length
+    ? selectedRunReplayEvents
+    : selectedPublicRunTimeline?.events || [];
+  const memorySkillTraceSource = selectedRunReplayEvents.length
+    ? 'RunEvent replay trace facts · Memory / Skill'
+    : 'RunTimelineSnapshot trace facts · Memory / Skill';
+
   return (
     <div className="agent-studio-panel">
       <div className="section-heading-row"><h2>Run Detail</h2></div>
@@ -359,7 +366,12 @@ export function RunDetailPanel({
             </section>
           ) : null}
           {selectedPublicRunTimeline ? <ToolCallInspector toolCalls={selectedPublicRunTimeline.tool_calls || []} /> : null}
-          {selectedPublicRunTimeline ? <MemorySkillTraceInspector events={selectedPublicRunTimeline.events || []} /> : null}
+          {selectedPublicRunTimeline || selectedRunReplayEvents.length ? (
+            <MemorySkillTraceInspector
+              events={memorySkillTraceEvents}
+              sourceLabel={memorySkillTraceSource}
+            />
+          ) : null}
           <section className="run-detail-block run-task-block" data-testid="agent-run-detail-task">
             <div className="run-detail-section-head">
               <div>
