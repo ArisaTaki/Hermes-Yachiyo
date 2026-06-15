@@ -652,6 +652,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "useAgentDefinitions",
             "useAgentGroupActions({",
             "useAgentGroups",
+            "useAgentStudioLoadLifecycle({",
             "useAgentStudioRefresh({",
             "useAgentStudioRouteState()",
             "useAgentStudioSelectionSynchronization({",
@@ -699,12 +700,25 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "const routeRunId = currentParam('run').trim();",
             "getStudioRunForView(",
             "workflowNodes(selectedWorkflow)",
+            "setLoading(true);",
+            "读取 Agent Studio 失败",
             "async function saveAgentGroup()",
             "async function runCurrentAgentGroup()",
             "listStudioAgentsForView()",
             "listStudioSkillsForView()",
             "listModelProfiles()",
             "studioRunnablesForView(",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useAgentStudioLoadLifecycle.ts",
+        [
+            "export function useAgentStudioLoadLifecycle",
+            "setLoading(true);",
+            "读取 Agent Studio 失败",
+            "if (tab !== 'agents' || loading || busyAction || agentCount) return;",
+            "if (!selectedAgentId && !draftAgentId) return;",
+            "刷新 Agent 列表失败",
         ],
     )
     _assert_contains(
@@ -2360,6 +2374,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "useAgentAvatarActions",
             "useAgentDeletionActions",
             "useAgentGroupActions",
+            "useAgentStudioLoadLifecycle",
             "useAgentStudioRefresh",
             "useAgentStudioRouteState",
             "useAgentStudioSelectionSynchronization",

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { Connection, Edge, Node } from '@xyflow/react';
 import {
   addEdge,
@@ -24,6 +24,7 @@ import { useAgentGroups } from '../features/agent-studio/hooks/useAgentGroups';
 import { useAgentRunReadiness } from '../features/agent-studio/hooks/useAgentRunReadiness';
 import { useAgentSaveActions } from '../features/agent-studio/hooks/useAgentSaveActions';
 import { useAgentSkillMountActions } from '../features/agent-studio/hooks/useAgentSkillMountActions';
+import { useAgentStudioLoadLifecycle } from '../features/agent-studio/hooks/useAgentStudioLoadLifecycle';
 import { useAgentStudioRefresh, type StudioRefreshOptions } from '../features/agent-studio/hooks/useAgentStudioRefresh';
 import { useAgentStudioRouteState } from '../features/agent-studio/hooks/useAgentStudioRouteState';
 import { useAgentStudioSelectionSynchronization } from '../features/agent-studio/hooks/useAgentStudioSelectionSynchronization';
@@ -776,30 +777,17 @@ export function AgentStudioView() {
     setWorkflowEnabled,
     setWorkflowName,
   });
-
-  useEffect(() => {
-    setLoading(true);
-    refresh()
-      .then(() => setError(''))
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : '读取 Agent Studio 失败'))
-      .finally(() => setLoading(false));
-  }, [refresh]);
-
-  useEffect(() => {
-    if (tab !== 'agents' || loading || busyAction || agents.length) return;
-    if (!selectedAgentId && !draft.agent_id) return;
-    let disposed = false;
-    refresh()
-      .then(() => {
-        if (!disposed) setError('');
-      })
-      .catch((err: unknown) => {
-        if (!disposed) setError(err instanceof Error ? err.message : '刷新 Agent 列表失败');
-      });
-    return () => {
-      disposed = true;
-    };
-  }, [agents.length, busyAction, draft.agent_id, loading, refresh, selectedAgentId, tab]);
+  useAgentStudioLoadLifecycle({
+    agentCount: agents.length,
+    busyAction,
+    draftAgentId: draft.agent_id || '',
+    loading,
+    refresh,
+    selectedAgentId,
+    setError,
+    setLoading,
+    tab,
+  });
 
   const onConnect = useCallback(
     (connection: Connection) => {
