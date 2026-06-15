@@ -163,6 +163,7 @@ from apps.shell.agent.runtime.workflow_resume import (
     WorkflowParentRunLocator,
     WorkflowResumePlanner,
 )
+from apps.shell.agent.runtime.workflow_runs import RuntimeWorkflowRunStarter
 from apps.shell.agent.runtime.workflow_run_outcomes import WorkflowRunOutcomeProjector
 from apps.shell.agent.runtime.workflow_start import WorkflowRunStartProjector
 from apps.shell.agent.tools.broker import (
@@ -1762,6 +1763,13 @@ class NativeRunEngine:
             timeline_factory=self._timeline,
             path_snapshot=self._workflow_path_snapshot,
             runtime_snapshot=self._workflow_runtime_snapshot,
+        )
+        self.workflow_run_starter = RuntimeWorkflowRunStarter(
+            get_run_group=self.get_run_group,
+            insert_run_group=self._insert_run_group,
+            insert_run=self._insert_run,
+            run_by_client_request_id=self._run_by_client_request_id,
+            client_request_id_from_payload=self._client_request_id_from_payload,
         )
         self.workflow_resume_planner = WorkflowResumePlanner(
             get_workflow=self.get_workflow,
@@ -4763,33 +4771,15 @@ class NativeRunEngine:
         self._validate_workflow_subworkflow_nodes(workflow["nodes"], parent_workflow_id=workflow_id)
         self._validate_workflow_runnable_steps(workflow["nodes"])
         self._validate_workflow_agent_run_readiness(workflow["nodes"])
-        run_group_id = str(payload.get("run_group_id") or "").strip()
-        client_request_id = self._client_request_id_from_payload(payload)
-        existing = self._run_by_client_request_id(client_request_id)
-        if existing is not None:
-            return existing
-        root_group = False
-        with self._db_lock:
-            existing = self._run_by_client_request_id(client_request_id)
-            if existing is not None:
-                return existing
-            if run_group_id:
-                self.get_run_group(run_group_id)
-            else:
-                group = self._insert_run_group(
-                    title=f"{workflow['name']}: {user_goal[:80]}",
-                    source=str(payload.get("source") or "workflow"),
-                    workspace_dir="",
-                )
-                run_group_id = group["run_group_id"]
-                root_group = True
-            run = self._insert_run(
-                kind="workflow_run",
-                runnable_id=workflow_id,
-                user_goal=user_goal,
-                run_group_id=run_group_id,
-                client_request_id=client_request_id,
-            )
+        start = self.workflow_run_starter.start_sync(
+            payload,
+            workflow=workflow,
+            workflow_id=workflow_id,
+            lock=self._db_lock,
+        )
+        if start.existing:
+            return start.run
+        run = start.run
         timeline, started_payload = self.workflow_run_start_projector.started_projection(workflow_id, workflow)
         self.append_run_event(
             run["run_id"],
@@ -4805,7 +4795,7 @@ class NativeRunEngine:
             timeline=timeline,
             artifacts=artifacts,
             start_index=0,
-            root_group=root_group,
+            root_group=start.root_group,
         )
 
     def create_workflow_run_async(
@@ -4828,20 +4818,12 @@ class NativeRunEngine:
         self._validate_workflow_runnable_steps(workflow["nodes"])
         self._validate_workflow_agent_run_readiness(workflow["nodes"])
 
-        run_group_id = str(payload.get("run_group_id") or "").strip()
-        root_group = False
-        if run_group_id:
-            self.get_run_group(run_group_id)
-        else:
-            group = self._insert_run_group(
-                title=f"{workflow['name']}: {user_goal[:80]}",
-                source=str(payload.get("source") or "workflow"),
-                workspace_dir="",
-            )
-            run_group_id = group["run_group_id"]
-            root_group = True
-
-        run = self._insert_run(kind="workflow_run", runnable_id=workflow_id, user_goal=user_goal, run_group_id=run_group_id)
+        start = self.workflow_run_starter.start_async(
+            payload,
+            workflow=workflow,
+            workflow_id=workflow_id,
+        )
+        run = start.run
         timeline, started_payload = self.workflow_run_start_projector.started_projection(workflow_id, workflow)
         self.append_run_event(
             run["run_id"],
@@ -4871,7 +4853,7 @@ class NativeRunEngine:
                     timeline=list(timeline),
                     artifacts=[],
                     start_index=0,
-                    root_group=root_group,
+                    root_group=start.root_group,
                 )
                 if on_complete:
                     on_complete(exec_result)
@@ -4884,7 +4866,7 @@ class NativeRunEngine:
                     run,
                     timeline=timeline,
                     error=exc,
-                    root_group=root_group,
+                    root_group=start.root_group,
                 )
                 if on_complete:
                     on_complete(failed)
