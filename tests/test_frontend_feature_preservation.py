@@ -1067,7 +1067,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "agentRunReadinessIssue(agent, chatModelProfiles",
             "agentToDraft(selectedAgent)",
             "addEdge({",
-            "const routeRunId = currentParam('run').trim();",
+            "const routeRunId = (currentParam('run') || currentParam('run_id')).trim();",
             "getStudioRunForView(",
             "workflowNodes(selectedWorkflow)",
             "setLoading(true);",
@@ -2616,7 +2616,7 @@ def test_chat_approval_run_detail_handoff_preserves_route_and_replay_wiring() ->
         "apps/frontend/src/features/agent-studio/hooks/useAgentStudioRouteState.ts",
         [
             "export function useAgentStudioRouteState",
-            "const routeRunId = currentParam('run').trim();",
+            "const routeRunId = (currentParam('run') || currentParam('run_id')).trim();",
             "const [tab, setTab] = useState<StudioTab>(() => routeRunId || routeRunTarget ? 'runs' : routeTab);",
             "const [selectedRunId, setSelectedRunId] = useState(() => routeRunId);",
             "const nextTab = routeRunId || routeRunTarget ? 'runs' : routeTab;",

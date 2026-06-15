@@ -4,7 +4,7 @@ import { currentParam } from '../../../lib/view';
 import { normalizeStudioTab, type StudioTab } from '../studioTabs';
 
 export function useAgentStudioRouteState() {
-  const routeRunId = currentParam('run').trim();
+  const routeRunId = (currentParam('run') || currentParam('run_id')).trim();
   const routeRunTarget = currentParam('target').trim();
   const routeRunGoal = currentParam('goal').trim();
   const routeTab = normalizeStudioTab(currentParam('tab'));
