@@ -17072,6 +17072,13 @@ button.activity-item {
   font-family: var(--hy-font-mono);
 }
 
+.runtime-tool-call-previews {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 7px;
+  min-width: 0;
+}
+
 .workflow-approval-bridge {
   gap: 12px;
   border-color: oklch(78% 0.14 78 / 0.42);

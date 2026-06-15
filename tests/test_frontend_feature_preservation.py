@@ -1536,6 +1536,11 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
             "data-tool-call-id={toolCall.tool_call_id}",
             "data-tool-status={toolCall.status}",
             "approvalPreviewRecord",
+            "ExpandableRuntimeContent",
+            "runtime-tool-call-previews",
+            "label=\"展开输入预览\"",
+            "label=\"展开输出预览\"",
+            "formatToolPreview",
         ],
     )
     _assert_contains(
@@ -3679,6 +3684,7 @@ def test_agent_studio_exposes_stable_e2e_selectors_for_run_detail_and_approval_f
         [
             ".run-step-meta",
             ".run-step-meta span",
+            ".runtime-tool-call-previews",
             "font-family: \"SF Mono\", \"JetBrains Mono\", ui-monospace, monospace;",
         ],
     )
