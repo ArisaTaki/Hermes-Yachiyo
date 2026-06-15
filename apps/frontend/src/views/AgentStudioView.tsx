@@ -15,6 +15,7 @@ import { RuntimeMemoryPanel } from '../features/agent-studio/components/RuntimeM
 import { RunDetailPanel } from '../features/agent-studio/components/RunDetailPanel';
 import { RunLauncherPanel } from '../features/agent-studio/components/RunLauncherPanel';
 import { WorkflowEditorPanel, WorkflowRunPreview } from '../features/agent-studio/components/WorkflowEditorPanel';
+import { useAgentDeletionActions } from '../features/agent-studio/hooks/useAgentDeletionActions';
 import { useAgentDefinitions } from '../features/agent-studio/hooks/useAgentDefinitions';
 import { useAgentGroups } from '../features/agent-studio/hooks/useAgentGroups';
 import { useApprovedRunGuard } from '../features/agent-studio/hooks/useApprovedRunGuard';
@@ -111,7 +112,6 @@ import {
   attachSkill,
   createAgent,
   createWorkflow,
-  deleteAgent,
   deleteWorkflow,
   detachSkill,
   getRun,
@@ -785,6 +785,23 @@ export function AgentStudioView() {
     setSelectedSkillIds,
     showConfirmDialog,
   });
+  const {
+    requestDeleteAgent,
+    requestDeleteSelectedAgents,
+  } = useAgentDeletionActions({
+    draftAgentId: draft.agent_id || '',
+    draftAgentName: draft.name,
+    resetAgentDraft: () => setDraft({ ...emptyAgentDraft }),
+    runAction,
+    selectedAgentDeletable,
+    selectedAgentId,
+    selectedAgentName: selectedAgent?.name || '',
+    selectedDeletableAgents,
+    setSelectedAgentId,
+    setSelectedAgentIds,
+    setStatus,
+    showConfirmDialog,
+  });
   const allLibrarySkillsSelected = filteredLibrarySkillIds.length > 0 && selectedLibrarySkills.length === filteredLibrarySkillIds.length;
   const filteredMountSkills = useMemo(
     () => enabledSkills.filter((skill) => (
@@ -1385,54 +1402,6 @@ export function AgentStudioView() {
     const action = confirmDialog?.onConfirm;
     setConfirmDialog(null);
     if (action) action();
-  }
-
-  function requestDeleteAgent() {
-    if (!draft.agent_id) return;
-    if (!selectedAgentDeletable) {
-      setStatus('系统 Agent 只能查看，不能删除。');
-      return;
-    }
-    const agentId = draft.agent_id;
-    const agentName = draft.name || selectedAgent?.name || 'Agent';
-    showConfirmDialog({
-      title: `删除「${agentName}」？`,
-      description: '这个 Agent 的定义会从 Agent Studio 移除；已生成的历史 Run 不会被删除。',
-      confirmLabel: '删除 Agent',
-      variant: 'danger',
-      onConfirm: () => void runAction(async () => {
-        await deleteAgent(agentId);
-        setSelectedAgentIds((current) => current.filter((id) => id !== agentId));
-        setSelectedAgentId('');
-        setDraft({ ...emptyAgentDraft });
-        return { selectedAgentId: '' };
-      }, '删除 Agent'),
-    });
-  }
-
-  function requestDeleteSelectedAgents() {
-    const targets = selectedDeletableAgents.slice();
-    if (!targets.length) return;
-    const targetIds = new Set(targets.map((agent) => agent.agent_id));
-    const deletingCurrent = Boolean(selectedAgentId && targetIds.has(selectedAgentId));
-    showConfirmDialog({
-      title: `删除 ${targets.length} 个 Agent？`,
-      description: '这些 Agent 的定义会从 Agent Studio 移除；已生成的历史 Run 不会被删除。',
-      confirmLabel: `删除 ${targets.length} 个 Agent`,
-      variant: 'danger',
-      onConfirm: () => void runAction(async () => {
-        for (const agent of targets) {
-          await deleteAgent(agent.agent_id);
-        }
-        setSelectedAgentIds((current) => current.filter((id) => !targetIds.has(id)));
-        if (deletingCurrent) {
-          setSelectedAgentId('');
-          setDraft({ ...emptyAgentDraft });
-          return { selectedAgentId: '' };
-        }
-        return undefined;
-      }, '批量删除 Agent'),
-    });
   }
 
   function requestDeleteWorkflow() {
