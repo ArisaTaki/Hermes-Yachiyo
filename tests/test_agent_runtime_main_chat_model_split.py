@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from apps.shell import agent_runtime
+from apps.shell.agent.runtime.budget import RunBudgetLimits
 from apps.shell.agent.runtime.main_chat_model import MainChatModelCaller
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
@@ -155,6 +156,14 @@ def test_native_runtime_installs_main_chat_model_caller_and_preserves_monkeypatc
     try:
         assert agent_runtime.MainChatModelCaller is MainChatModelCaller
         assert isinstance(service.main_chat_model, MainChatModelCaller)
+        assert getattr(service.main_chat_model._check_context_budget, "__self__", None) is not service
+        assert getattr(service.main_chat_model._limit_model_output, "__self__", None) is not service
+
+        service.runtime_limits = RunBudgetLimits(max_model_output_chars=5)
+        limited, truncated = service.main_chat_model._limit_model_output("abcdefghi")
+        assert truncated is True
+        assert limited == "abcde"
+        service.runtime_limits = RunBudgetLimits()
 
         run = service.start_main_chat_run(
             task_id="task-main-model",

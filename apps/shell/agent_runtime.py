@@ -60,10 +60,12 @@ from apps.shell.agent.runtime.budget import (
 from apps.shell.agent.runtime.budget import (
     WorkflowRunBudget as _WorkflowRunBudget,
     check_context_budget as _runtime_check_context_budget,
+    context_budget_checker as _runtime_context_budget_checker,
     json_chars as _json_chars,
     limit_json_strings as _limit_json_strings,
     limit_model_output as _runtime_limit_model_output,
     limit_tool_result as _runtime_limit_tool_result,
+    model_output_limiter as _runtime_model_output_limiter,
     run_budget_from_timeline as _runtime_run_budget_from_timeline,
     tool_result_limiter as _runtime_tool_result_limiter,
     truncate_text as _truncate_text,
@@ -690,6 +692,13 @@ class NativeRunEngine:
                 final_statuses=_FINAL_RUN_STATUSES,
             )
         )
+        runtime_context_budget_checker = _runtime_context_budget_checker(
+            redact_json_value=_redact_json_value,
+        )
+        runtime_model_output_limiter = _runtime_model_output_limiter(
+            limits=lambda: self.runtime_limits,
+            redact_text=redact_secrets,
+        )
         self._install_runtime_main_chat_model(
             MainChatModelCaller(
                 get_run=self.get_run,
@@ -701,8 +710,8 @@ class NativeRunEngine:
                     capability=capability,
                 ),
                 run_budget=self._run_budget,
-                check_context_budget=self._check_context_budget,
-                limit_model_output=self._limit_model_output,
+                check_context_budget=runtime_context_budget_checker,
+                limit_model_output=runtime_model_output_limiter,
                 timeline_factory=self._timeline,
                 update_run=self._update_run,
                 append_run_event=self.append_run_event,
@@ -751,7 +760,7 @@ class NativeRunEngine:
                 agent_model_config_private=self._agent_model_config_private,
                 compile_agent_runtime=self._compile_agent_runtime,
                 run_budget=self._run_budget,
-                check_context_budget=self._check_context_budget,
+                check_context_budget=runtime_context_budget_checker,
                 tool_schemas=RuntimeToolOperations.model_tool_schemas,
                 normalize_tool_iteration=_normalize_tool_iteration,
                 max_tool_iterations=_MAX_AGENT_TOOL_ITERATIONS,
@@ -770,7 +779,7 @@ class NativeRunEngine:
                 model_message_metadata=_model_message_metadata,
                 tool_requests_from_message=self._tool_requests_from_message,
                 timeline_factory=self._timeline,
-                limit_model_output=self._limit_model_output,
+                limit_model_output=runtime_model_output_limiter,
                 model_output_text_factory=_ModelOutputText,
                 tool_loop_projection=self.tool_loop_projection,
                 run_tool_requests=self._run_tool_requests,
@@ -879,7 +888,7 @@ class NativeRunEngine:
                 main_chat_agent_config=self._main_chat_agent_config,
                 compile_agent_runtime=self._compile_agent_runtime,
                 run_budget=self._run_budget,
-                check_context_budget=self._check_context_budget,
+                check_context_budget=runtime_context_budget_checker,
                 runtime_agent_timeline=self.runtime_agent_timeline,
                 timeline_factory=self._timeline,
                 update_run=self._update_run,

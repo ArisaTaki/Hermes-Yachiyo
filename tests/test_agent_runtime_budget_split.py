@@ -12,10 +12,12 @@ from apps.shell.agent.runtime.budget import (
     RunBudgetLimits,
     WorkflowRunBudget,
     check_context_budget,
+    context_budget_checker,
     json_chars,
     limit_json_strings,
     limit_model_output,
     limit_tool_result,
+    model_output_limiter,
     run_budget_from_timeline,
     tool_result_limiter,
     truncate_text,
@@ -110,6 +112,20 @@ def test_tool_result_limiter_closes_over_current_runtime_limits() -> None:
 
     assert limited["truncated"] is True
     assert limited["content"] == "abcd"
+
+
+def test_context_and_model_output_limiter_helpers_match_legacy_budget_behaviour() -> None:
+    limits = RunBudgetLimits(max_context_chars=10, max_model_output_chars=5)
+    budget = RunBudget(limits=limits, started_at_epoch=time.time())
+    check_context = context_budget_checker(redact_json_value=lambda value: value)
+    limit_output = model_output_limiter(limits=lambda: limits, redact_text=str)
+
+    with pytest.raises(AgentRuntimeError, match="max_context_chars=10"):
+        check_context(budget, [{"role": "user", "content": "too long"}])
+
+    text, truncated = limit_output("abcdefghi")
+    assert truncated is True
+    assert text == "abcde"
 
 
 def test_run_budget_reconstructs_usage_from_timeline() -> None:

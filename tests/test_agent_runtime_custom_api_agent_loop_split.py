@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from apps.shell import agent_runtime
+from apps.shell.agent.runtime.budget import RunBudgetLimits
 from apps.shell.agent.runtime.custom_api_agent import RuntimeCustomApiAgentLoop
 from apps.shell.agent.runtime.tool_operations import RuntimeToolOperations
 from apps.shell.agent_runtime import AgentRuntimeService
@@ -182,5 +183,12 @@ def test_native_runtime_installs_custom_api_agent_loop(tmp_path) -> None:
         assert agent_runtime.RuntimeCustomApiAgentLoop is RuntimeCustomApiAgentLoop
         assert isinstance(service.custom_api_agent_loop, RuntimeCustomApiAgentLoop)
         assert service.custom_api_agent_loop._tool_schemas is RuntimeToolOperations.model_tool_schemas
+        assert getattr(service.custom_api_agent_loop._check_context_budget, "__self__", None) is not service
+        assert getattr(service.custom_api_agent_loop._limit_model_output, "__self__", None) is not service
+
+        service.runtime_limits = RunBudgetLimits(max_model_output_chars=5)
+        limited, truncated = service.custom_api_agent_loop._limit_model_output("abcdefghi")
+        assert truncated is True
+        assert limited == "abcde"
     finally:
         service.close()

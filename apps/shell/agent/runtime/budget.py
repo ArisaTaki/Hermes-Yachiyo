@@ -152,6 +152,19 @@ def check_context_budget(
     budget.check_context(json_chars(redact_json_value(messages)))
 
 
+def context_budget_checker(
+    *,
+    redact_json_value: Callable[[Any], Any],
+) -> Callable[[RunBudget, list[dict[str, Any]]], None]:
+    def check_runtime_context_budget(
+        budget: RunBudget,
+        messages: list[dict[str, Any]],
+    ) -> None:
+        check_context_budget(budget, messages, redact_json_value=redact_json_value)
+
+    return check_runtime_context_budget
+
+
 def limit_model_output(
     value: Any,
     *,
@@ -159,6 +172,18 @@ def limit_model_output(
     redact_text: Callable[[Any], str],
 ) -> tuple[str, bool]:
     return truncate_text(redact_text(value), limits.max_model_output_chars)
+
+
+def model_output_limiter(
+    *,
+    limits: RunBudgetLimits | Callable[[], RunBudgetLimits],
+    redact_text: Callable[[Any], str],
+) -> Callable[[Any], tuple[str, bool]]:
+    def limit_runtime_model_output(value: Any) -> tuple[str, bool]:
+        current_limits = limits() if callable(limits) else limits
+        return limit_model_output(value, limits=current_limits, redact_text=redact_text)
+
+    return limit_runtime_model_output
 
 
 def limit_tool_result(
