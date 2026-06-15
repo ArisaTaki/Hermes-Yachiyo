@@ -227,6 +227,7 @@ from apps.shell.agent.runtime.shutdown import RuntimeShutdownService
 from apps.shell.agent.runtime.skill_content import SkillContentInspector
 from apps.shell.agent.runtime.skill_import import SkillImportPreparer, SkillImportSourceResolver
 from apps.shell.agent.runtime.skill_install import SkillInstallCommandValidator
+from apps.shell.agent.runtime.skill_install_service import RuntimeSkillInstallService
 from apps.shell.agent.runtime.skill_sources import SkillSourceDiscovery
 from apps.shell.agent.runtime.skill_sync import SkillSyncPlanner
 from apps.shell.agent.runtime.skill_sync_service import RuntimeSkillSyncService
@@ -355,7 +356,6 @@ from packages.security import (
     contains_sensitive_text,
     redact_api_error_text,
     redact_sensitive_text,
-    scrubbed_subprocess_env,
 )
 
 logger = logging.getLogger(__name__)
@@ -1082,6 +1082,17 @@ class NativeRunEngine:
             redact_error=redact_api_error_text,
             error_type=AgentRuntimeError,
         )
+        self.skill_install_service = RuntimeSkillInstallService(
+            validator=self.skill_install_validator,
+            skill_installs_dir=self.skill_installs_dir,
+            skill_installs_native_home=self.skill_installs_native_home,
+            normalize_skill_folder_id=self._normalize_skill_folder_id,
+            sync_installed_skills=self.sync_installed_skills,
+            run_command=lambda *args, **kwargs: subprocess.run(*args, **kwargs),
+            now=_now,
+            redact_secrets=redact_secrets,
+            error_type=AgentRuntimeError,
+        )
         if seed_templates:
             self._seed_templates()
 
@@ -1690,48 +1701,7 @@ class NativeRunEngine:
         )
 
     def install_skill_command(self, command: str, folder_id: str | None = None) -> dict[str, Any]:
-        argv, installer = self._validated_skill_install_argv(command)
-        target_folder_id = self._normalize_skill_folder_id(folder_id)
-        source_ref = self._skill_install_source_ref(argv, installer)
-        started_at = _now()
-        env = scrubbed_subprocess_env({"OHA_YACHIYO_HOME": str(self.skill_installs_native_home)})
-        try:
-            completed = subprocess.run(
-                argv,
-                cwd=self.skill_installs_dir,
-                env=env,
-                text=True,
-                capture_output=True,
-                timeout=600,
-                check=False,
-            )
-        except FileNotFoundError as exc:
-            raise AgentRuntimeError(f"找不到安装命令：{argv[0]}") from exc
-        except subprocess.TimeoutExpired as exc:
-            raise AgentRuntimeError("Skill 安装命令超时") from exc
-        stdout = redact_secrets(completed.stdout)[-12000:]
-        stderr = redact_secrets(completed.stderr)[-12000:]
-        sync_result = (
-            self.sync_installed_skills(
-                record_source_type=installer,
-                folder_id=target_folder_id,
-                source_ref_override=source_ref,
-                restore_deleted=True,
-            )
-            if completed.returncode == 0
-            else None
-        )
-        return {
-            "ok": completed.returncode == 0,
-            "installer": installer,
-            "command": argv,
-            "started_at": started_at,
-            "finished_at": _now(),
-            "returncode": completed.returncode,
-            "stdout": stdout,
-            "stderr": stderr,
-            "sync": sync_result,
-        }
+        return self.skill_install_service.install(command, folder_id)
 
     def _import_skill_root(
         self,
