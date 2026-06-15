@@ -94,6 +94,10 @@ export function useSelectedRunDetailState({
     ),
     [selectedRun, workflows],
   );
+  const selectedRunGroup = useMemo(() => {
+    if (!selectedRun?.run_group_id) return null;
+    return runGroups.find((group) => group.run_group_id === selectedRun.run_group_id) || null;
+  }, [runGroups, selectedRun]);
   const selectedWorkflowSteps = useMemo(
     () => workflowStepRefs(selectedRun, selectedRunWorkflow),
     [selectedRun, selectedRunWorkflow],
@@ -191,6 +195,7 @@ export function useSelectedRunDetailState({
     selectedRunArtifacts,
     selectedRunAvatarUrl,
     selectedRunExecutionEvents,
+    selectedRunGroup,
     selectedRunIsLive,
     selectedRunRerunDisabledReason,
     selectedRunRerunTarget,

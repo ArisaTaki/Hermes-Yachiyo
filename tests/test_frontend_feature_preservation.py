@@ -1677,6 +1677,10 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
             "RunTimelineSnapshot trace facts · Memory / Skill",
             "events={memorySkillTraceEvents}",
             "sourceLabel={memorySkillTraceSource}",
+            'data-testid="agent-run-detail-group-run-overview"',
+            "GroupRun Overview",
+            'data-testid="agent-run-detail-group-run-children"',
+            "onClick={() => onOpenRunDetail(childRunId)}",
         ],
     )
     _assert_contains(
@@ -3297,6 +3301,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "refreshRunGroupsForRuns",
             "useSelectedRunDetailState",
             "selectedRunExecutionEvents",
+            "selectedRunGroup",
             "selectedRunReplayHasMore",
             "selectedRunReplayRefreshKey",
             "loadMoreSelectedRunEvents",
@@ -3321,6 +3326,8 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "publicApprovalToRunPendingApproval(selectedPublicRunApproval)",
             "publicArtifactsOrLegacy(",
             "workflowPendingApprovalChildRunId(selectedRun)",
+            "runGroups.find((group) => group.run_group_id === selectedRun.run_group_id)",
+            "selectedRunGroup,",
             "workflowRunHasChildRun(run, selectedRun.run_id)",
             "selectedRunRerunDisabledReason",
         ],

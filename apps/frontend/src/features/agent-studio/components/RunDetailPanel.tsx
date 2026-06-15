@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-import type { RunSpec, WorkflowSpec } from '../types';
+import type { RunGroupSpec, RunSpec, WorkflowSpec } from '../types';
 import type { PublicRunEvent, YachiyoRunTimelineSnapshot } from '../../yachiyo-studio/types';
 import { ExpandableRuntimeContent as RunExpandableContent } from '../../runtime-shared/components/ExpandableRuntimeContent';
 import { RuntimeApprovalGate } from '../../runtime-shared/components/RuntimeApprovalGate';
@@ -67,6 +67,7 @@ export function RunDetailPanel({
   selectedRunArtifacts,
   selectedRunAvatarUrl,
   selectedRunExecutionEvents,
+  selectedRunGroup,
   selectedRunIsLive,
   selectedRunReplayError,
   selectedRunReplayEvents,
@@ -116,6 +117,7 @@ export function RunDetailPanel({
   selectedRunArtifacts: Array<Record<string, unknown>>;
   selectedRunAvatarUrl: string;
   selectedRunExecutionEvents: Array<Record<string, unknown>>;
+  selectedRunGroup: RunGroupSpec | null;
   selectedRunIsLive: boolean;
   selectedRunReplayError: string;
   selectedRunReplayEvents: PublicRunEvent[];
@@ -269,6 +271,58 @@ export function RunDetailPanel({
               </button>
             ) : null}
           </div>
+          {selectedRunGroup ? (
+            <section
+              className="run-detail-block run-group-overview"
+              data-run-group-id={selectedRunGroup.run_group_id}
+              data-testid="agent-run-detail-group-run-overview"
+            >
+              <div className="run-detail-section-head">
+                <div>
+                  <h4>GroupRun Overview</h4>
+                  <span>
+                    {selectedRunGroup.source || 'group'} · {(selectedRunGroup.child_run_ids || []).length} child runs
+                  </span>
+                </div>
+                <span className={`run-status-pill ${runStatusTone(selectedRunGroup.status)}`}>
+                  {runStatusLabel(selectedRunGroup.status)}
+                </span>
+              </div>
+              <p>{selectedRunGroup.summary || selectedRunGroup.title || 'No GroupRun summary recorded.'}</p>
+              <div className="run-group-overview-meta" data-testid="agent-run-detail-group-run-meta">
+                <code>{selectedRunGroup.run_group_id}</code>
+                {selectedRunGroup.updated_at || selectedRunGroup.created_at ? (
+                  <span>Updated {formatRunDate(selectedRunGroup.updated_at || selectedRunGroup.created_at)}</span>
+                ) : null}
+                {selectedRunGroup.workspace_dir ? <span>{selectedRunGroup.workspace_dir}</span> : null}
+              </div>
+              {(selectedRunGroup.child_run_ids || []).length ? (
+                <div className="run-group-overview-children" data-testid="agent-run-detail-group-run-children">
+                  {(selectedRunGroup.child_run_ids || []).map((childRunId) => {
+                    const childRun = runById.get(childRunId) || null;
+                    const selected = childRunId === selectedRun.run_id;
+                    return (
+                      <button
+                        key={childRunId}
+                        type="button"
+                        className={selected ? 'selected' : ''}
+                        data-run-id={childRunId}
+                        data-run-status={childRun?.status || ''}
+                        data-testid="agent-run-detail-group-run-child"
+                        onClick={() => onOpenRunDetail(childRunId)}
+                      >
+                        <span>{childRun?.runnable_name || childRun?.runnable_id || childRunId}</span>
+                        <small>
+                          {selected ? '当前 Run · ' : ''}
+                          {childRun ? `${runKindLabel(childRun.kind)} · ${runStatusLabel(childRun.status)}` : '未加载'}
+                        </small>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </section>
+          ) : null}
           {selectedWorkflowApprovalChildRunId ? (
             <section className="run-approval-box workflow-approval-bridge" data-testid="agent-run-detail-workflow-child-approval">
               <div className="workflow-approval-bridge-head" data-testid="agent-run-detail-workflow-child-approval-head">

@@ -406,6 +406,7 @@ export function AgentStudioView() {
     selectedRunArtifacts,
     selectedRunAvatarUrl,
     selectedRunExecutionEvents,
+    selectedRunGroup,
     selectedRunIsLive,
     selectedRunRerunDisabledReason,
     selectedRunRerunTarget,
@@ -1138,6 +1139,7 @@ export function AgentStudioView() {
           selectedRunArtifacts={selectedRunArtifacts}
           selectedRunAvatarUrl={selectedRunAvatarUrl}
           selectedRunExecutionEvents={selectedRunExecutionEvents}
+          selectedRunGroup={selectedRunGroup}
           selectedRunId={selectedRunId}
           selectedRunIdSet={selectedRunIdSet}
           selectedRunIsLive={selectedRunIsLive}
