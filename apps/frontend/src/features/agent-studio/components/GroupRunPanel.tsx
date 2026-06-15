@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
+import { RuntimeApprovalCard } from '../../runtime-shared/components/RuntimeApprovalCard';
+import { RuntimeArtifactList } from '../../runtime-shared/components/RuntimeArtifactList';
 import { RuntimeTimelineSummary } from '../../runtime-shared/components/RuntimeTimelineSummary';
 import { listYachiyoGroupRunEvents } from '../../yachiyo-studio/api';
 import type { GroupRunSnapshot, RunEventPageSnapshot } from '../../yachiyo-studio/types';
@@ -80,6 +82,8 @@ export function GroupRunPanel({
     ? Math.max(4, groupRunEventPage.events.length)
     : 4;
   const latestStatus = latestAgentGroupRun?.status || 'unknown';
+  const pendingApprovals = latestAgentGroupRun?.pending_approvals || [];
+  const sharedArtifacts = latestAgentGroupRun?.shared_artifacts || [];
   return (
     <section className="group-run-panel" data-testid="agent-group-run-panel">
       <label>
@@ -139,6 +143,49 @@ export function GroupRunPanel({
                 {groupRunEventLoading ? '加载中...' : '加载更多事件'}
               </button>
             </div>
+          ) : null}
+          {pendingApprovals.length ? (
+            <section
+              className="group-run-runtime-section"
+              data-testid="agent-group-run-approvals"
+            >
+              <div className="group-run-runtime-section-head">
+                <strong>Pending Approvals</strong>
+                <span>{pendingApprovals.length}</span>
+              </div>
+              <div className="group-run-approval-list">
+                {pendingApprovals.map((approval) => (
+                  <RuntimeApprovalCard
+                    approval={approval}
+                    className="studio-runtime-approval group-run-approval-card"
+                    key={approval.approval_id}
+                    testId="agent-group-run-approval-card"
+                    variant="inspector"
+                  />
+                ))}
+              </div>
+            </section>
+          ) : null}
+          {sharedArtifacts.length ? (
+            <section
+              className="group-run-runtime-section"
+              data-testid="agent-group-run-artifacts"
+            >
+              <div className="group-run-runtime-section-head">
+                <strong>Shared Artifacts</strong>
+                <span>{sharedArtifacts.length}</span>
+              </div>
+              <RuntimeArtifactList
+                artifacts={sharedArtifacts}
+                className="group-run-artifact-list"
+                fallbackRunId={latestGroupRunId}
+                itemTestId="agent-group-run-artifact-item"
+                previewClassName="studio-runtime-artifact group-run-artifact-card"
+                previewTestId="agent-group-run-artifact-preview"
+                previewVariant="full"
+                testId="agent-group-run-artifact-list"
+              />
+            </section>
           ) : null}
         </div>
       ) : null}

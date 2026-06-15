@@ -14641,6 +14641,73 @@ button.activity-item {
   line-height: 1.35;
 }
 
+.group-run-runtime-section {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--hy-line);
+}
+
+.group-run-runtime-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.group-run-runtime-section-head strong {
+  color: var(--hy-fg);
+  font-size: 12px;
+}
+
+.group-run-runtime-section-head span {
+  color: var(--hy-faint);
+  font-size: 11px;
+}
+
+.group-run-approval-list,
+.group-run-artifact-list {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.group-run-approval-card {
+  margin-bottom: 0;
+}
+
+.group-run-artifact-list>div {
+  min-width: 0;
+}
+
+.group-run-artifact-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 7px;
+  align-items: center;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 8px;
+  background: oklch(255 0 0 / 0.025);
+}
+
+.group-run-artifact-card span {
+  color: var(--hy-faint);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.group-run-artifact-card strong {
+  min-width: 0;
+  color: var(--hy-fg);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
 .agent-list,
 .skill-list,
 .run-list {
