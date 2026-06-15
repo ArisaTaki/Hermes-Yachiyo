@@ -8,6 +8,14 @@ from pathlib import Path
 from typing import Any
 
 
+def _is_within(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except (OSError, ValueError):
+        return False
+
+
 class SkillRepository:
     """Stores Skill records while import/sync orchestration remains in the runtime."""
 
@@ -22,12 +30,11 @@ class SkillRepository:
         json_load: Callable[[str | None, Any], Any],
         normalize_skill_folder_id: Callable[[str | None], str],
         installed_skill_source_map: Callable[[], dict[str, str]],
-        remove_managed_copy_if_safe: Callable[[Path, str], None],
-        skill_path_owned_by_runtime: Callable[[Path], bool],
         record_studio_deletion: Callable[[str, str], Any],
         skill_deletion_key: Callable[[str, str], str],
         is_native_library_source_type: Callable[[Any], bool],
         skills_dir: Path,
+        skill_installs_dir: Path | None = None,
         skill_id_factory: Callable[[str], str] | None = None,
         asset_paths_for: Callable[[Path], list[str]] | None = None,
         copy_tree: Callable[..., Any] = shutil.copytree,
@@ -41,12 +48,11 @@ class SkillRepository:
         self._json_load = json_load
         self._normalize_skill_folder_id = normalize_skill_folder_id
         self._installed_skill_source_map = installed_skill_source_map
-        self._remove_managed_copy_if_safe = remove_managed_copy_if_safe
-        self._skill_path_owned_by_runtime = skill_path_owned_by_runtime
         self._record_studio_deletion = record_studio_deletion
         self._skill_deletion_key = skill_deletion_key
         self._is_native_library_source_type = is_native_library_source_type
         self._skills_dir = skills_dir
+        self._skill_installs_dir = skill_installs_dir
         self._skill_id_factory = skill_id_factory or (lambda name: f"skill_{str(name or 'skill').strip() or 'skill'}")
         self._asset_paths_for = asset_paths_for or (lambda _root: [])
         self._copy_tree = copy_tree
@@ -282,6 +288,22 @@ class SkillRepository:
             if self._skill_path_owned_by_runtime(local_path):
                 self._delete_tree(local_path, ignore_errors=True)
         return {"ok": True}
+
+    def _remove_managed_copy_if_safe(self, path: Path, origin_path: str) -> None:
+        try:
+            resolved = path.resolve()
+            origin = Path(origin_path).resolve()
+        except OSError:
+            return
+        if resolved == origin:
+            return
+        if _is_within(resolved, self._skills_dir) and resolved.exists():
+            self._delete_tree(resolved, ignore_errors=True)
+
+    def _skill_path_owned_by_runtime(self, path: Path) -> bool:
+        if _is_within(path, self._skills_dir):
+            return True
+        return self._skill_installs_dir is not None and _is_within(path, self._skill_installs_dir)
 
     def repair_native_references(self) -> None:
         rows = self._conn.execute(

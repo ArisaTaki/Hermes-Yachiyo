@@ -142,7 +142,6 @@ def test_skill_repository_lifecycle_repairs_updates_and_deletes(tmp_path: Path) 
         ]
     )
     deletion_events: list[tuple[str, str]] = []
-    removed_managed_copies: list[tuple[str, str]] = []
     deleted_trees: list[str] = []
     folder_id = "folder-research"
     conn.execute(
@@ -204,12 +203,11 @@ def test_skill_repository_lifecycle_repairs_updates_and_deletes(tmp_path: Path) 
         json_load=_json_load,
         normalize_skill_folder_id=normalize_folder_id,
         installed_skill_source_map=lambda: {"installed-skill": "https://github.com/owner/repo/blob/main/SKILL.md"},
-        remove_managed_copy_if_safe=lambda path, origin: removed_managed_copies.append((str(path), origin)),
-        skill_path_owned_by_runtime=lambda path: str(path).startswith(str(tmp_path / "managed")),
         record_studio_deletion=lambda kind, key: deletion_events.append((kind, key)),
         skill_deletion_key=lambda source_type, origin_path: f"{source_type}:{origin_path}",
         is_native_library_source_type=lambda value: str(value) in {"native_global", "native_project"},
         skills_dir=tmp_path / "managed",
+        skill_installs_dir=tmp_path / "skill-installs",
         delete_tree=lambda path, ignore_errors=False: deleted_trees.append(str(path)),
     )
 
@@ -218,7 +216,7 @@ def test_skill_repository_lifecycle_repairs_updates_and_deletes(tmp_path: Path) 
     installed = next(skill for skill in listed if skill["skill_id"] == "skill-installed")
     assert native["local_path"] == str(native_root)
     assert installed["source_ref"] == "https://github.com/owner/repo/blob/main/SKILL.md"
-    assert removed_managed_copies == [(str(managed_copy), str(native_root))]
+    assert deleted_trees == [str(managed_copy.resolve())]
 
     updated = repo.update("skill-local", {"enabled": False, "folder_id": ""})
     assert updated["enabled"] is False
@@ -227,7 +225,7 @@ def test_skill_repository_lifecycle_repairs_updates_and_deletes(tmp_path: Path) 
 
     assert repo.delete("skill-local") == {"ok": True}
     assert deletion_events == [("skill_source", "local_dir:")]
-    assert deleted_trees == [str(local_skill)]
+    assert deleted_trees == [str(managed_copy.resolve()), str(local_skill)]
     agent_row = conn.execute("SELECT skill_ids_json FROM agents WHERE agent_id='agent-1'").fetchone()
     assert _json_load(agent_row["skill_ids_json"], []) == ["skill-other"]
 
@@ -270,8 +268,6 @@ def test_skill_repository_finds_existing_import_by_origin_or_hash_with_library_s
         json_load=_json_load,
         normalize_skill_folder_id=lambda value: str(value or ""),
         installed_skill_source_map=lambda: {},
-        remove_managed_copy_if_safe=lambda _path, _origin: None,
-        skill_path_owned_by_runtime=lambda _path: False,
         record_studio_deletion=lambda _kind, _key: None,
         skill_deletion_key=lambda source_type, origin_path: f"{source_type}:{origin_path}",
         is_native_library_source_type=lambda value: str(value) in {"native_global", "native_project"},
@@ -294,6 +290,42 @@ def test_skill_repository_finds_existing_import_by_origin_or_hash_with_library_s
         source_type="local_zip",
     )["skill_id"] == "skill-local"
     assert repo.find_existing_import(origin_path="", content_hash="", source_type="local_dir") is None
+
+
+def test_skill_repository_deletes_runtime_owned_installed_paths(tmp_path: Path) -> None:
+    conn = _connect_skills_db()
+    installs_dir = tmp_path / "skill-installs"
+    installed_root = installs_dir / ".skills" / "skills" / "demo"
+    installed_root.mkdir(parents=True)
+    _insert_skill(
+        conn,
+        skill_id="skill-installed-owned",
+        name="Installed Owned",
+        source_type="npx_skills",
+        local_path=str(installed_root),
+        origin_path=str(installed_root),
+    )
+    conn.commit()
+    deleted_trees: list[str] = []
+    repo = SkillRepository(
+        conn,
+        ensure_row_factory=lambda: None,
+        row_to_skill=_row_to_skill,
+        now=lambda: "2026-06-15T10:00:00Z",
+        json_dump=_json_dump,
+        json_load=_json_load,
+        normalize_skill_folder_id=lambda value: str(value or ""),
+        installed_skill_source_map=lambda: {},
+        record_studio_deletion=lambda _kind, _key: None,
+        skill_deletion_key=lambda source_type, origin_path: f"{source_type}:{origin_path}",
+        is_native_library_source_type=lambda value: str(value) in {"native_global", "native_project"},
+        skills_dir=tmp_path / "managed",
+        skill_installs_dir=installs_dir,
+        delete_tree=lambda path, ignore_errors=False: deleted_trees.append(str(path)),
+    )
+
+    assert repo.delete("skill-installed-owned") == {"ok": True}
+    assert deleted_trees == [str(installed_root)]
 
 
 def test_skill_repository_save_import_inserts_skips_and_updates_managed_copy(tmp_path: Path) -> None:
@@ -319,8 +351,6 @@ def test_skill_repository_save_import_inserts_skips_and_updates_managed_copy(tmp
         json_load=_json_load,
         normalize_skill_folder_id=lambda value: str(value or ""),
         installed_skill_source_map=lambda: {},
-        remove_managed_copy_if_safe=lambda _path, _origin: None,
-        skill_path_owned_by_runtime=lambda _path: False,
         record_studio_deletion=lambda _kind, _key: None,
         skill_deletion_key=lambda source_type, origin_path: f"{source_type}:{origin_path}",
         is_native_library_source_type=lambda value: str(value) in {"native_global", "native_project"},

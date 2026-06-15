@@ -8,7 +8,6 @@ import json
 import logging
 import os
 import re
-import shutil
 import sqlite3
 import subprocess
 import threading
@@ -1669,12 +1668,11 @@ class NativeRunEngine:
             json_load=_json_load,
             normalize_skill_folder_id=self._normalize_skill_folder_id,
             installed_skill_source_map=self._installed_skill_source_map,
-            remove_managed_copy_if_safe=self._remove_managed_copy_if_safe,
-            skill_path_owned_by_runtime=self._skill_path_owned_by_runtime,
             record_studio_deletion=self._record_studio_deletion,
             skill_deletion_key=self._skill_deletion_key,
             is_native_library_source_type=_is_native_library_source_type,
             skills_dir=self.skills_dir,
+            skill_installs_dir=self.skill_installs_dir,
             skill_id_factory=lambda name: f"skill_{_slug(name, 'skill')}_{uuid4().hex[:8]}",
             asset_paths_for=SkillContentInspector.asset_paths,
         )
@@ -3476,20 +3474,6 @@ class NativeRunEngine:
             content_hash=content_hash,
             source_type=source_type,
         )
-
-    def _remove_managed_copy_if_safe(self, path: Path, origin_path: str) -> None:
-        try:
-            resolved = path.resolve()
-            origin = Path(origin_path).resolve()
-        except OSError:
-            return
-        if resolved == origin:
-            return
-        if _is_within(resolved, self.skills_dir) and resolved.exists():
-            shutil.rmtree(resolved, ignore_errors=True)
-
-    def _skill_path_owned_by_runtime(self, path: Path) -> bool:
-        return _is_within(path, self.skills_dir) or _is_within(path, self.skill_installs_dir)
 
     def _repair_native_skill_references(self) -> None:
         self.skill_records.repair_native_references()
