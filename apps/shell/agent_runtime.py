@@ -149,6 +149,11 @@ from apps.shell.agent.runtime.model_messages import (
     stream_index_value as _stream_index_value,
     tool_arguments_text as _tool_arguments_text,
 )
+from apps.shell.agent.runtime.recorders import (
+    RuntimeRecorderBundle,
+    build_runtime_recorders as _build_runtime_recorders,
+    build_tool_pending_approval as _build_tool_pending_approval,
+)
 from apps.shell.agent.runtime.run_projections import (
     ApprovalResumeProjectionCoordinator,
     RunProjectionCoordinator,
@@ -459,25 +464,11 @@ class NativeRunEngine:
         self._approval_execution_in_progress: set[str] = set()
         self._run_cancel_locks: dict[str, threading.RLock] = {}
         self._run_cancel_locks_guard = threading.RLock()
-        self.tool_request_parser = ToolRequestParser()
-        self.runtime_agent_run_events = RuntimeAgentRunEventRecorder(
+        recorders = _build_runtime_recorders(
             append_run_event=self.append_run_event,
-        )
-        self.tool_event_payloads = ToolEventPayloadBuilder()
-        self.runtime_tool_call_events = RuntimeToolCallEventRecorder(
-            append_run_event=self.append_run_event,
-            payload_builder=self.tool_event_payloads,
-        )
-        self.runtime_task_model_events = RuntimeTaskModelEventBuilder()
-        self.runtime_task_events = RuntimeTaskEventRecorder(
-            append_run_event=self.append_run_event,
-            payload_builder=self.runtime_task_model_events,
-        )
-        self.runtime_trace_events = RuntimeTraceEventBuilder()
-        self.tool_pending_approvals = ToolPendingApprovalBuilder(
-            approval_id_factory=lambda: f"approval_{uuid4().hex[:12]}",
             now=_now,
         )
+        self._install_runtime_recorders(recorders)
         self._conn = _open_runtime_sqlite_connection(self.db_path, self._db_lock)
         self._conn.row_factory = _named_row_factory
         self.task_run_links = TaskRunLinkRepository(
@@ -866,6 +857,16 @@ class NativeRunEngine:
         self._migrate_agent_workspace_policies()
         if seed_templates:
             self._seed_templates()
+
+    def _install_runtime_recorders(self, recorders: RuntimeRecorderBundle) -> None:
+        self.tool_request_parser = recorders.tool_request_parser
+        self.runtime_agent_run_events = recorders.runtime_agent_run_events
+        self.tool_event_payloads = recorders.tool_event_payloads
+        self.runtime_tool_call_events = recorders.runtime_tool_call_events
+        self.runtime_task_model_events = recorders.runtime_task_model_events
+        self.runtime_task_events = recorders.runtime_task_events
+        self.runtime_trace_events = recorders.runtime_trace_events
+        self.tool_pending_approvals = recorders.tool_pending_approvals
 
     def close(self) -> None:
         self.shutdown()
@@ -3410,14 +3411,12 @@ class NativeRunEngine:
         next_iteration: int,
         remaining_tool_requests: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        return ToolPendingApprovalBuilder(
-            approval_id_factory=lambda: f"approval_{uuid4().hex[:12]}",
-            now=_now,
-        ).build(
+        return _build_tool_pending_approval(
             tool_request,
             messages=messages,
             next_iteration=next_iteration,
             remaining_tool_requests=remaining_tool_requests,
+            now=_now,
         )
 
     def _tool_requests_from_message(self, message: dict[str, Any], content: str) -> list[dict[str, Any]]:
