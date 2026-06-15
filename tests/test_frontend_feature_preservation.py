@@ -1076,6 +1076,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "export function runHistoryGroupsFor",
             "export function runMatchesSearch",
             "export function publicRunEventToTimelineEvent",
+            "publicRunEventPayloadDetail(event)",
             "export function publicArtifactsOrLegacy",
         ],
     )
@@ -2915,8 +2916,15 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
     _assert_contains(
         "apps/frontend/src/features/agent-studio/utils/runTimeline.ts",
         [
+            "export function publicRunEventPayloadDetail(event: PublicRunEvent)",
             "export function runEventReplayToTimelineEvent(event: PublicRunEvent)",
             "export function mergeRunEventReplayPages(",
+            "publicRunEventPayloadString(payload, 'workflow_node_label')",
+            "publicRunEventPayloadString(payload, 'skill_id')",
+            "publicRunEventPayloadString(payload, 'memory_id')",
+            "publicRunEventPayloadString(payload, 'member_agent_id')",
+            "publicRunEventPayloadString(payload, 'artifact_path')",
+            "const detail = publicRunEventPayloadDetail(event);",
             "const bySequence = new Map<number, PublicRunEvent>();",
             "incoming.forEach((event) => bySequence.set(Number(event.sequence) || 0, event));",
             "if (name === 'run.started') return 'Run 已启动';",
@@ -2934,7 +2942,6 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "if (name === 'group.member.completed') return detail ? `群组成员完成 · ${detail}` : '群组成员完成';",
             "if (name === 'workflow.node.artifact') return detail ? `产物节点 · ${detail}` : '产物节点';",
             "if (name === 'workflow.edge.followed') return detail ? `Workflow 路由 · ${detail}` : 'Workflow 路由';",
-            "typeof payload.workflow_node_label === 'string'",
         ],
     )
 

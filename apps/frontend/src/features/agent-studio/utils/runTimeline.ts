@@ -132,19 +132,35 @@ export function timelineEventPayload(event: Record<string, unknown>): string {
   return '';
 }
 
+export function publicRunEventPayloadDetail(event: PublicRunEvent): string {
+  const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
+  return (
+    event.detail
+    || event.title
+    || publicRunEventPayloadString(payload, 'tool_name')
+    || publicRunEventPayloadString(payload, 'tool')
+    || publicRunEventPayloadString(payload, 'model')
+    || publicRunEventPayloadString(payload, 'workflow_node_label')
+    || publicRunEventPayloadString(payload, 'workflow_node_id')
+    || publicRunEventPayloadString(payload, 'skill_name')
+    || publicRunEventPayloadString(payload, 'skill_id')
+    || publicRunEventPayloadString(payload, 'memory_id')
+    || publicRunEventPayloadString(payload, 'memory_kind')
+    || publicRunEventPayloadString(payload, 'agent_name')
+    || publicRunEventPayloadString(payload, 'agent_id')
+    || publicRunEventPayloadString(payload, 'member_agent_id')
+    || publicRunEventPayloadString(payload, 'group_id')
+    || publicRunEventPayloadString(payload, 'artifact_path')
+    || publicRunEventPayloadString(payload, 'path')
+    || publicRunEventPayloadString(payload, 'child_run_id')
+    || publicRunEventPayloadString(payload, 'result')
+    || publicRunEventPayloadString(payload, 'error')
+  );
+}
+
 export function runEventReplayToTimelineEvent(event: PublicRunEvent): Record<string, unknown> {
   const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
-  const detail = typeof payload.tool === 'string'
-    ? payload.tool
-    : typeof payload.model === 'string'
-      ? payload.model
-      : typeof payload.result === 'string'
-        ? payload.result
-        : typeof payload.error === 'string'
-          ? payload.error
-          : typeof payload.workflow_node_label === 'string'
-            ? payload.workflow_node_label
-            : '';
+  const detail = publicRunEventPayloadDetail(event);
   return {
     event_id: event.event_id || '',
     run_id: event.run_id,
@@ -178,4 +194,9 @@ export function mergeRunEventReplayPages(
   return Array.from(bySequence.values()).sort(
     (left, right) => (Number(left.sequence) || 0) - (Number(right.sequence) || 0),
   );
+}
+
+function publicRunEventPayloadString(payload: Record<string, unknown>, key: string): string {
+  const value = payload[key];
+  return typeof value === 'string' ? value.trim() : '';
 }

@@ -17,6 +17,7 @@ import {
   agentCapabilityLine,
   runnableCapabilityLine,
 } from './agents';
+import { publicRunEventPayloadDetail } from './runTimeline';
 
 export type RunKindFilter = 'all' | 'workflow' | 'agent';
 export type RunStatusFilter = 'all' | 'completed' | 'failed' | 'active';
@@ -341,15 +342,7 @@ export function formatRunDate(value?: string): string {
 
 export function publicRunEventToTimelineEvent(event: PublicRunEvent): Record<string, unknown> {
   const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
-  const detail = event.detail || event.title || (
-    typeof payload.tool === 'string'
-      ? payload.tool
-      : typeof payload.model === 'string'
-        ? payload.model
-        : typeof payload.workflow_node_label === 'string'
-          ? payload.workflow_node_label
-          : ''
-  );
+  const detail = publicRunEventPayloadDetail(event);
   return {
     event_id: event.event_id || '',
     run_id: event.run_id,
