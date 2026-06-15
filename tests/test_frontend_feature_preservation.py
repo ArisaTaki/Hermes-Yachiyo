@@ -1293,6 +1293,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
         [
             "export function useRunEventReplay",
             "listYachiyoRunEvents(runId, 0, pageSize)",
+            "nextAfterSequence",
             "mergeRunEventReplayPages(previous?.events || currentEvents, incomingEvents)",
             "clearRunEventReplay",
             "selectedReplayEvents",
@@ -3523,15 +3524,19 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "const defaultRunEventReplayPageSize = 200;",
             "listYachiyoRunEvents(runId, 0, pageSize)",
             "events: current[runId]?.events || [],",
+            "const nextAfterSequence = runEventPageCursor(page, events, 0);",
             "hasMore: page.has_more ?? events.length >= limit,",
             "error: err instanceof Error ? err.message : '读取 RunEvent replay 失败',",
-            "const afterSequence = currentEvents.reduce(",
+            "const afterSequence = currentState?.nextAfterSequence ?? runEventSequenceCursor(currentEvents, 0);",
             "listYachiyoRunEvents(runId, afterSequence, pageSize)",
             "const events = mergeRunEventReplayPages(previous?.events || currentEvents, incomingEvents);",
+            "const nextAfterSequence = runEventPageCursor(page, events, afterSequence);",
             "hasMore: page.has_more ?? incomingEvents.length >= limit,",
             "error: err instanceof Error ? err.message : '读取更多 RunEvent replay 失败',",
             "for (const runIdToDelete of runIds)",
             "delete next[runIdToDelete];",
+            "function runEventPageCursor(",
+            "page.next_after_sequence",
         ],
     )
     _assert_contains(

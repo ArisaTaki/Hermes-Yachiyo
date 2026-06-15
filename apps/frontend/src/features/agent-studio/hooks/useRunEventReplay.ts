@@ -7,6 +7,7 @@ import { mergeRunEventReplayPages } from '../utils/runTimeline';
 export type RunEventReplayState = {
   events: PublicRunEvent[];
   limit: number;
+  nextAfterSequence: number;
   hasMore: boolean;
   loading: boolean;
   error?: string;
@@ -40,6 +41,7 @@ export function useRunEventReplay(
       [runId]: {
         events: current[runId]?.events || [],
         limit: pageSize,
+        nextAfterSequence: current[runId]?.nextAfterSequence ?? 0,
         hasMore: current[runId]?.hasMore || false,
         loading: true,
         error: '',
@@ -50,11 +52,13 @@ export function useRunEventReplay(
         if (disposed) return;
         const events = page.events || [];
         const limit = page.limit || pageSize;
+        const nextAfterSequence = runEventPageCursor(page, events, 0);
         setReplayByRunId((current) => ({
           ...current,
           [runId]: {
             events,
             limit,
+            nextAfterSequence,
             hasMore: page.has_more ?? events.length >= limit,
             loading: false,
             error: '',
@@ -68,6 +72,7 @@ export function useRunEventReplay(
           [runId]: {
             events: current[runId]?.events || [],
             limit: current[runId]?.limit || pageSize,
+            nextAfterSequence: current[runId]?.nextAfterSequence ?? 0,
             hasMore: current[runId]?.hasMore || false,
             loading: false,
             error: err instanceof Error ? err.message : '读取 RunEvent replay 失败',
@@ -83,15 +88,13 @@ export function useRunEventReplay(
     if (!runId) return 0;
     const currentState = replayByRunId[runId];
     const currentEvents = currentState?.events || [];
-    const afterSequence = currentEvents.reduce(
-      (max, event) => Math.max(max, Number(event.sequence) || 0),
-      0,
-    );
+    const afterSequence = currentState?.nextAfterSequence ?? runEventSequenceCursor(currentEvents, 0);
     setReplayByRunId((current) => ({
       ...current,
       [runId]: {
         events: current[runId]?.events || currentEvents,
         limit: current[runId]?.limit || pageSize,
+        nextAfterSequence: current[runId]?.nextAfterSequence ?? afterSequence,
         hasMore: current[runId]?.hasMore ?? true,
         loading: true,
         error: '',
@@ -104,11 +107,13 @@ export function useRunEventReplay(
       setReplayByRunId((current) => {
         const previous = current[runId];
         const events = mergeRunEventReplayPages(previous?.events || currentEvents, incomingEvents);
+        const nextAfterSequence = runEventPageCursor(page, events, afterSequence);
         return {
           ...current,
           [runId]: {
             events,
             limit,
+            nextAfterSequence,
             hasMore: page.has_more ?? incomingEvents.length >= limit,
             loading: false,
             error: '',
@@ -122,6 +127,7 @@ export function useRunEventReplay(
         [runId]: {
           events: current[runId]?.events || currentEvents,
           limit: current[runId]?.limit || pageSize,
+          nextAfterSequence: current[runId]?.nextAfterSequence ?? afterSequence,
           hasMore: current[runId]?.hasMore ?? true,
           loading: false,
           error: err instanceof Error ? err.message : '读取更多 RunEvent replay 失败',
@@ -155,4 +161,21 @@ export function useRunEventReplay(
     selectedReplayLoading,
     selectedReplayState,
   };
+}
+
+function runEventPageCursor(
+  page: { next_after_sequence?: number },
+  events: PublicRunEvent[],
+  fallback: number,
+): number {
+  return Number.isFinite(page.next_after_sequence)
+    ? Number(page.next_after_sequence)
+    : runEventSequenceCursor(events, fallback);
+}
+
+function runEventSequenceCursor(events: PublicRunEvent[], fallback: number): number {
+  return events.reduce(
+    (max, event) => Math.max(max, Number(event.sequence) || 0),
+    fallback,
+  );
 }
