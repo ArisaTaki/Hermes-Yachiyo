@@ -10,12 +10,10 @@ import type {
 import { ImageAttachmentViewer } from '../components/ImageAttachmentViewer';
 import { useConfirmDialog } from '../components/ConfirmDialog';
 import { UiIcon } from '../components/UiIcon';
-import {
-  startYachiyoTask,
-} from '../features/yachiyo-chat/api';
 import { AgentTaskCard } from '../features/yachiyo-chat/components/AgentTaskCard';
 import { useYachiyoTaskActions } from '../features/yachiyo-chat/hooks/useYachiyoTaskActions';
 import { useYachiyoTaskSnapshots } from '../features/yachiyo-chat/hooks/useYachiyoTaskSnapshots';
+import { useYachiyoTaskSubmit } from '../features/yachiyo-chat/hooks/useYachiyoTaskSubmit';
 import {
   agentTaskSnapshotFromMessage,
   publicTaskSnapshotForMessage,
@@ -549,6 +547,23 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     setApprovalActionMessageId,
     setStatus,
   });
+  const { startPublicYachiyoTask } = useYachiyoTaskSubmit({
+    loadSessions,
+    onAccepted: () => {
+      transientEmptySessionIdRef.current = '';
+      pendingReplyTaskIdRef.current = '';
+    },
+    onRunning: () => {
+      stickToBottomRef.current = true;
+    },
+    onSettled: () => {
+      pendingReplyScrollRef.current = false;
+    },
+    pollAgentRunInBackground,
+    refreshMessages,
+    rememberYachiyoTasks,
+    setStatus,
+  });
 
   useEffect(() => {
     const currentSessionId = sessions?.current_session_id || latestChatSnapshotRef.current.currentSessionId;
@@ -899,39 +914,14 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         ? yachiyoPublicTaskTarget(text, runnables, assistantProfile)
         : null;
       if (publicTaskTarget) {
-        try {
-          const task = await startYachiyoTask({
-            prompt: yachiyoPublicTaskPrompt(text, publicTaskTarget),
-            conversation_id: sessions?.current_session_id || latestChatSnapshotRef.current.currentSessionId || null,
-            agent_id: publicTaskTarget.id,
-            metadata: {
-              client_message_id: clientMessageId,
-              source: 'chat',
-            },
-          });
-          rememberYachiyoTasks([task]);
-          transientEmptySessionIdRef.current = '';
-          pendingReplyTaskIdRef.current = '';
-          if (task.status === 'running' && task.task_id) {
-            setStatus('Agent 执行中...');
-            stickToBottomRef.current = true;
-            await refreshMessages();
-            pollAgentRunInBackground(task.task_id);
-            return;
-          }
-          pendingReplyScrollRef.current = false;
-          setStatus(task.status === 'waiting_approval'
-            ? 'Agent 等待审批...'
-            : task.status === 'completed'
-              ? 'Agent Run 已处理。'
-              : task.status === 'failed'
-                ? 'Agent Run 失败。'
-                : 'Agent/Workflow 指令已处理。');
-          await refreshMessages();
-          await loadSessions();
+        const handled = await startPublicYachiyoTask({
+          agentId: publicTaskTarget.id,
+          clientMessageId,
+          conversationId: sessions?.current_session_id || latestChatSnapshotRef.current.currentSessionId || null,
+          prompt: yachiyoPublicTaskPrompt(text, publicTaskTarget),
+        });
+        if (handled) {
           return;
-        } catch {
-          // Fall through to the legacy Chat API with the same idempotency key.
         }
       }
       const result = await apiPost<{

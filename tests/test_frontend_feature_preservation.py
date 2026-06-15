@@ -213,10 +213,10 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "stringValue(metadata.delegated_run_source_task_id) === taskId",
             "metadataListAttribute(metadata.group_followup_for_task_ids).split(',').includes(taskId)",
             "client_message_id",
-            "startYachiyoTask({",
+            "useYachiyoTaskSubmit",
+            "startPublicYachiyoTask({",
             "yachiyoPublicTaskTarget(text, runnables, assistantProfile)",
-            "agent_id: publicTaskTarget.id",
-            "source: 'chat'",
+            "agentId: publicTaskTarget.id",
             "attachments: outgoingAttachments",
             "canAttachImages(executor)",
             "onPaste={(event) => void handlePaste(event)}",
@@ -250,6 +250,19 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "openWorkflowStudio(runnableId",
             "group_dispatch_count",
             "group_agent_summary_pending",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/hooks/useYachiyoTaskSubmit.ts",
+        [
+            "export function useYachiyoTaskSubmit",
+            "startYachiyoTask({",
+            "agent_id: agentId",
+            "client_message_id: clientMessageId",
+            "source: 'chat'",
+            "rememberYachiyoTasks([task])",
+            "pollAgentRunInBackground(task.task_id)",
+            "Fall through to the legacy Chat API with the same idempotency key.",
         ],
     )
 
