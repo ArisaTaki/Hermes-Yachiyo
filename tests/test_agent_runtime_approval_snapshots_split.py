@@ -33,6 +33,7 @@ def test_approval_snapshot_builder_projects_public_pending_approval() -> None:
 
     assert snapshot == public_pending_approval(pending)
     assert snapshot == agent_runtime._public_pending_approval(pending)
+    assert agent_runtime._public_pending_approval is public_pending_approval
     assert set(snapshot) == {"approval_id", "tool", "input_preview", "requested_at"}
     assert snapshot["approval_id"] == "approval-1"
     assert snapshot["tool"] == "terminal.run"

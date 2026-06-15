@@ -81,7 +81,7 @@ from apps.shell.agent.runtime.approval_services import (
 )
 from apps.shell.agent.runtime.approval_snapshots import (
     ApprovalSnapshotBuilder,
-    public_pending_approval as _runtime_public_pending_approval,
+    public_pending_approval as _public_pending_approval,
 )
 from apps.shell.agent.runtime.approval_transitions import RuntimeApprovalTransitionService
 from apps.shell.agent.runtime.agent_context import (
@@ -432,10 +432,6 @@ def _call_model_profile_chat_message(
         tools=tools,
         stream=stream,
     )
-
-
-def _public_pending_approval(value: Any) -> dict[str, Any]:
-    return _runtime_public_pending_approval(value)
 
 
 class NativeRunEngine:
