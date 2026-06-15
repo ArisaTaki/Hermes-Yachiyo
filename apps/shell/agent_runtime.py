@@ -135,7 +135,7 @@ from apps.shell.agent.runtime.run_projections import (
     RunProjectionCoordinator,
 )
 from apps.shell.agent.runtime.run_readiness import RuntimeRunReadinessValidator
-from apps.shell.agent.runtime.runnables import RuntimeRunnableCatalog
+from apps.shell.agent.runtime.runnables import RuntimeRunnableCatalog, RuntimeRunnableRunCoordinator
 from apps.shell.agent.runtime.skill_content import SkillContentInspector
 from apps.shell.agent.runtime.skill_import import SkillImportPreparer, SkillImportSourceResolver
 from apps.shell.agent.runtime.skill_install import SkillInstallCommandValidator
@@ -933,6 +933,14 @@ class NativeRunEngine:
         self.runnable_catalog = RuntimeRunnableCatalog(
             node_kind=self._node_kind,
             get_agent=self.get_agent,
+        )
+        self.runnable_run_coordinator = RuntimeRunnableRunCoordinator(
+            resolve_runnable=lambda **kwargs: self.resolve_runnable(**kwargs),
+            create_agent_run=self.create_agent_run,
+            create_workflow_run=self.create_workflow_run,
+            create_agent_run_async=self.create_agent_run_async,
+            create_workflow_run_async=self.create_workflow_run_async,
+            error_type=AgentRuntimeError,
         )
         self.workflow_parent_resume = WorkflowParentResumeCoordinator(
             parent_runs_waiting_for_child=lambda child_run: self._workflow_parent_runs_waiting_for_child(child_run),
@@ -4403,34 +4411,15 @@ class NativeRunEngine:
         client_run_id: str = "",
         client_request_id: str = "",
     ) -> dict[str, Any]:
-        runnable = self.resolve_runnable(runnable_id=runnable_id, name=name)
-        if runnable is None:
-            raise AgentRuntimeError("未找到指定 Agent 或 Workflow")
-        if not runnable.get("enabled", True):
-            raise AgentRuntimeError("指定 Agent 或 Workflow 已停用")
-        request_id = client_run_id or client_request_id
-        if runnable["kind"] == "agent":
-            run = self.create_agent_run({
-                "agent_id": runnable["id"],
-                "user_goal": user_goal,
-                "source": "agent",
-                "run_group_id": run_group_id,
-                "upstream": upstream,
-                "client_run_id": request_id,
-            })
-            run["agent_run_id"] = run["run_id"]
-            run["runnable"] = runnable
-            return run
-        run = self.create_workflow_run({
-            "workflow_id": runnable["id"],
-            "user_goal": user_goal,
-            "source": "workflow",
-            "run_group_id": run_group_id,
-            "client_run_id": request_id,
-        })
-        run["workflow_run_id"] = run["run_id"]
-        run["runnable"] = runnable
-        return run
+        return self.runnable_run_coordinator.create_run(
+            runnable_id=runnable_id,
+            name=name,
+            user_goal=user_goal,
+            run_group_id=run_group_id,
+            upstream=upstream,
+            client_run_id=client_run_id,
+            client_request_id=client_request_id,
+        )
 
     def create_run_for_runnable_async(
         self,
@@ -4443,39 +4432,14 @@ class NativeRunEngine:
         on_complete: "Callable[[dict[str, Any]], None] | None" = None,
     ) -> dict[str, Any]:
         """创建 Run 并立即返回，异步执行实际任务。"""
-        runnable = self.resolve_runnable(runnable_id=runnable_id, name=name)
-        if runnable is None:
-            raise AgentRuntimeError("未找到指定 Agent 或 Workflow")
-        if not runnable.get("enabled", True):
-            raise AgentRuntimeError("指定 Agent 或 Workflow 已停用")
-
-        if runnable["kind"] == "agent":
-            run = self.create_agent_run_async(
-                {
-                    "agent_id": runnable["id"],
-                    "user_goal": user_goal,
-                    "source": "agent",
-                    "run_group_id": run_group_id,
-                    "upstream": upstream,
-                },
-                on_complete=on_complete,
-            )
-            run["agent_run_id"] = run["run_id"]
-            run["runnable"] = runnable
-            return run
-
-        run = self.create_workflow_run_async(
-            {
-                "workflow_id": runnable["id"],
-                "user_goal": user_goal,
-                "source": "workflow",
-                "run_group_id": run_group_id,
-            },
+        return self.runnable_run_coordinator.create_run_async(
+            runnable_id=runnable_id,
+            name=name,
+            user_goal=user_goal,
+            run_group_id=run_group_id,
+            upstream=upstream,
             on_complete=on_complete,
         )
-        run["workflow_run_id"] = run["run_id"]
-        run["runnable"] = runnable
-        return run
 
     def rerun_run(self, run_id: str) -> dict[str, Any]:
         original = self.get_run(run_id)
@@ -4560,30 +4524,12 @@ class NativeRunEngine:
         name: str = "",
         user_goal: str = "",
     ) -> dict[str, Any]:
-        goal = str(user_goal or "").strip()
-        if not goal:
-            raise AgentRuntimeError("委派目标不能为空")
-        runnable = self.resolve_runnable(runnable_id=runnable_id, name=name)
-        if runnable is None:
-            raise AgentRuntimeError("未找到可委派的 Agent 或 Workflow")
-        requested_kind = str(kind or "").strip()
-        if requested_kind and requested_kind not in {runnable["kind"], f"{runnable['kind']}_run"}:
-            raise AgentRuntimeError("委派类型与目标不匹配")
-        if not runnable.get("enabled", True):
-            raise AgentRuntimeError("指定 Agent 或 Workflow 已停用")
-        if runnable["kind"] == "agent":
-            run = self.create_agent_run({"agent_id": runnable["id"], "user_goal": goal, "source": "delegation"})
-        else:
-            run = self.create_workflow_run({"workflow_id": runnable["id"], "user_goal": goal, "source": "delegation"})
-        return {
-            "ok": run["status"] == "completed",
-            "runnable": runnable,
-            "run_id": run["run_id"],
-            "run_group_id": run.get("run_group_id", ""),
-            "status": run["status"],
-            "result": run.get("result") or "",
-            "pending_approval": run.get("pending_approval") if isinstance(run.get("pending_approval"), dict) else {},
-        }
+        return self.runnable_run_coordinator.delegate(
+            kind=kind,
+            runnable_id=runnable_id,
+            name=name,
+            user_goal=user_goal,
+        )
 
     def parse_known_chat_runnable(self, text: str) -> tuple[str, str] | None:
         return self.chat_runnable_parser.parse_known(text)

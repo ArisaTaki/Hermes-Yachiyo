@@ -124,3 +124,142 @@ class RuntimeRunnableCatalog:
                 if workflow.get("enabled", True)
             ],
         }
+
+
+class RuntimeRunnableRunCoordinator:
+    """Dispatches runnable launch requests to Agent or Workflow run creators."""
+
+    def __init__(
+        self,
+        *,
+        resolve_runnable: Callable[..., dict[str, Any] | None],
+        create_agent_run: Callable[[dict[str, Any]], dict[str, Any]],
+        create_workflow_run: Callable[[dict[str, Any]], dict[str, Any]],
+        create_agent_run_async: Callable[..., dict[str, Any]],
+        create_workflow_run_async: Callable[..., dict[str, Any]],
+        error_type: type[Exception] = RuntimeError,
+    ) -> None:
+        self._resolve_runnable = resolve_runnable
+        self._create_agent_run = create_agent_run
+        self._create_workflow_run = create_workflow_run
+        self._create_agent_run_async = create_agent_run_async
+        self._create_workflow_run_async = create_workflow_run_async
+        self._error_type = error_type
+
+    def create_run(
+        self,
+        *,
+        runnable_id: str = "",
+        name: str = "",
+        user_goal: str = "",
+        run_group_id: str = "",
+        upstream: str = "",
+        client_run_id: str = "",
+        client_request_id: str = "",
+    ) -> dict[str, Any]:
+        runnable = self._required_runnable(runnable_id=runnable_id, name=name, message="未找到指定 Agent 或 Workflow")
+        request_id = client_run_id or client_request_id
+        if runnable["kind"] == "agent":
+            run = self._create_agent_run({
+                "agent_id": runnable["id"],
+                "user_goal": user_goal,
+                "source": "agent",
+                "run_group_id": run_group_id,
+                "upstream": upstream,
+                "client_run_id": request_id,
+            })
+            run["agent_run_id"] = run["run_id"]
+            run["runnable"] = runnable
+            return run
+        run = self._create_workflow_run({
+            "workflow_id": runnable["id"],
+            "user_goal": user_goal,
+            "source": "workflow",
+            "run_group_id": run_group_id,
+            "client_run_id": request_id,
+        })
+        run["workflow_run_id"] = run["run_id"]
+        run["runnable"] = runnable
+        return run
+
+    def create_run_async(
+        self,
+        *,
+        runnable_id: str = "",
+        name: str = "",
+        user_goal: str = "",
+        run_group_id: str = "",
+        upstream: str = "",
+        on_complete: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        runnable = self._required_runnable(runnable_id=runnable_id, name=name, message="未找到指定 Agent 或 Workflow")
+        if runnable["kind"] == "agent":
+            run = self._create_agent_run_async(
+                {
+                    "agent_id": runnable["id"],
+                    "user_goal": user_goal,
+                    "source": "agent",
+                    "run_group_id": run_group_id,
+                    "upstream": upstream,
+                },
+                on_complete=on_complete,
+            )
+            run["agent_run_id"] = run["run_id"]
+            run["runnable"] = runnable
+            return run
+
+        run = self._create_workflow_run_async(
+            {
+                "workflow_id": runnable["id"],
+                "user_goal": user_goal,
+                "source": "workflow",
+                "run_group_id": run_group_id,
+            },
+            on_complete=on_complete,
+        )
+        run["workflow_run_id"] = run["run_id"]
+        run["runnable"] = runnable
+        return run
+
+    def delegate(
+        self,
+        *,
+        kind: str = "",
+        runnable_id: str = "",
+        name: str = "",
+        user_goal: str = "",
+    ) -> dict[str, Any]:
+        goal = str(user_goal or "").strip()
+        if not goal:
+            raise self._error_type("委派目标不能为空")
+        runnable = self._required_runnable(runnable_id=runnable_id, name=name, message="未找到可委派的 Agent 或 Workflow")
+        requested_kind = str(kind or "").strip()
+        if requested_kind and requested_kind not in {runnable["kind"], f"{runnable['kind']}_run"}:
+            raise self._error_type("委派类型与目标不匹配")
+        if runnable["kind"] == "agent":
+            run = self._create_agent_run({"agent_id": runnable["id"], "user_goal": goal, "source": "delegation"})
+        else:
+            run = self._create_workflow_run({"workflow_id": runnable["id"], "user_goal": goal, "source": "delegation"})
+        return {
+            "ok": run["status"] == "completed",
+            "runnable": runnable,
+            "run_id": run["run_id"],
+            "run_group_id": run.get("run_group_id", ""),
+            "status": run["status"],
+            "result": run.get("result") or "",
+            "pending_approval": run.get("pending_approval") if isinstance(run.get("pending_approval"), dict) else {},
+        }
+
+    def _required_runnable(
+        self,
+        *,
+        runnable_id: str,
+        name: str,
+        message: str,
+    ) -> dict[str, Any]:
+        runnable = self._resolve_runnable(runnable_id=runnable_id, name=name)
+        if runnable is None:
+            raise self._error_type(message)
+        if not runnable.get("enabled", True):
+            raise self._error_type("指定 Agent 或 Workflow 已停用")
+        return runnable
