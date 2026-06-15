@@ -29,6 +29,7 @@ import { useRuntimeMemoryManagement } from '../features/agent-studio/hooks/useRu
 import { useSkillDeletionActions } from '../features/agent-studio/hooks/useSkillDeletionActions';
 import { useSkillFolderManagement } from '../features/agent-studio/hooks/useSkillFolderManagement';
 import { useSkillImportActions } from '../features/agent-studio/hooks/useSkillImportActions';
+import { useWorkflowDeletionActions } from '../features/agent-studio/hooks/useWorkflowDeletionActions';
 import { useWorkflowDefinitions } from '../features/agent-studio/hooks/useWorkflowDefinitions';
 import {
   agentCapabilityLine,
@@ -112,7 +113,6 @@ import {
   attachSkill,
   createAgent,
   createWorkflow,
-  deleteWorkflow,
   detachSkill,
   getRun,
   getRunArtifact,
@@ -802,6 +802,18 @@ export function AgentStudioView() {
     setStatus,
     showConfirmDialog,
   });
+  const {
+    requestDeleteSelectedWorkflows,
+    requestDeleteWorkflow,
+  } = useWorkflowDeletionActions({
+    resetWorkflowDraft: startNewWorkflow,
+    runAction,
+    selectedWorkflow,
+    selectedWorkflowId,
+    selectedWorkflows,
+    setSelectedWorkflowIds,
+    showConfirmDialog,
+  });
   const allLibrarySkillsSelected = filteredLibrarySkillIds.length > 0 && selectedLibrarySkills.length === filteredLibrarySkillIds.length;
   const filteredMountSkills = useMemo(
     () => enabledSkills.filter((skill) => (
@@ -1402,48 +1414,6 @@ export function AgentStudioView() {
     const action = confirmDialog?.onConfirm;
     setConfirmDialog(null);
     if (action) action();
-  }
-
-  function requestDeleteWorkflow() {
-    if (!selectedWorkflow) return;
-    const workflowId = selectedWorkflow.workflow_id;
-    const workflowName = selectedWorkflow.name || 'Workflow';
-    showConfirmDialog({
-      title: `删除「${workflowName}」？`,
-      description: '这个 Workflow 定义会从 Workflow Studio 移除；已生成的历史 Run 不会被删除。',
-      confirmLabel: '删除 Workflow',
-      variant: 'danger',
-      onConfirm: () => void runAction(async () => {
-        await deleteWorkflow(workflowId);
-        setSelectedWorkflowIds((current) => current.filter((id) => id !== workflowId));
-        startNewWorkflow();
-        return { selectedWorkflowId: '' };
-      }, '删除 Workflow'),
-    });
-  }
-
-  function requestDeleteSelectedWorkflows() {
-    const targets = selectedWorkflows.slice();
-    if (!targets.length) return;
-    const targetIds = new Set(targets.map((workflow) => workflow.workflow_id));
-    const deletingCurrent = Boolean(selectedWorkflowId && targetIds.has(selectedWorkflowId));
-    showConfirmDialog({
-      title: `删除 ${targets.length} 个 Workflow？`,
-      description: '这些 Workflow 定义会从 Workflow Studio 移除；已生成的历史 Run 不会被删除。',
-      confirmLabel: `删除 ${targets.length} 个 Workflow`,
-      variant: 'danger',
-      onConfirm: () => void runAction(async () => {
-        for (const workflow of targets) {
-          await deleteWorkflow(workflow.workflow_id);
-        }
-        setSelectedWorkflowIds((current) => current.filter((id) => !targetIds.has(id)));
-        if (deletingCurrent) {
-          startNewWorkflow();
-          return { selectedWorkflowId: '' };
-        }
-        return undefined;
-      }, '批量删除 Workflow'),
-    });
   }
 
   async function mountVisibleSkills(): Promise<StudioRefreshOptions | void> {

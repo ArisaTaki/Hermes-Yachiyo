@@ -2066,7 +2066,6 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "listSkillFolders",
             "createWorkflow",
             "updateWorkflow",
-            "deleteWorkflow",
             "listWorkflows",
             "listRuns",
             "listRunGroups",
@@ -2079,6 +2078,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "useSkillDeletionActions",
             "useSkillFolderManagement",
             "useSkillImportActions",
+            "useWorkflowDeletionActions",
             "saveAgent",
             "const saved = draft.agent_id ? await updateAgent(draft.agent_id, request) : await createAgent(request);",
             "requestDeleteAgent",
@@ -2096,8 +2096,8 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "else await attachSkill(draft.agent_id, skill.skill_id);",
             "saveWorkflowDraft",
             "const saved = selectedWorkflow ? await updateWorkflow(selectedWorkflow.workflow_id, request) : await createWorkflow(request);",
-            "await deleteWorkflow(workflowId);",
-            "await deleteWorkflow(workflow.workflow_id);",
+            "requestDeleteWorkflow",
+            "requestDeleteSelectedWorkflows",
             "refreshRunGroupsForRuns",
             "Promise.all(groupIds.map((groupId) => getRunGroup(groupId).catch(() => null)))",
             "runEventReplayToTimelineEvent",
@@ -2115,6 +2115,20 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "selectedAgentReadOnly",
             "selectedAgentDeletable",
             "AgentEditorPanel",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useWorkflowDeletionActions.ts",
+        [
+            "export function useWorkflowDeletionActions",
+            "function requestDeleteWorkflow()",
+            "await deleteWorkflow(workflowId);",
+            "setSelectedWorkflowIds((current) => current.filter((id) => id !== workflowId));",
+            "resetWorkflowDraft();",
+            "function requestDeleteSelectedWorkflows()",
+            "const deletingCurrent = Boolean(selectedWorkflowId && targetIds.has(selectedWorkflowId));",
+            "await deleteWorkflow(workflow.workflow_id);",
+            "setSelectedWorkflowIds((current) => current.filter((id) => !targetIds.has(id)));",
         ],
     )
     _assert_contains(
