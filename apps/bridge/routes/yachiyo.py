@@ -158,14 +158,12 @@ async def detach_studio_agent_skill(
 
 @router.get("/studio/skills")
 async def list_studio_skills(http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
-    skills = await asyncio.to_thread(_studio_service(http_request).list_skills)
-    return {"skills": [_snapshot(skill) for skill in skills]}
+    return await yachiyo_studio_handlers.list_skills(http_request)
 
 
 @router.get("/studio/skills/sources")
 async def list_studio_skill_sources(http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
-    roots = await asyncio.to_thread(_studio_service(http_request).list_skill_sources)
-    return {"roots": [_snapshot(root) for root in roots]}
+    return await yachiyo_studio_handlers.list_skill_sources(http_request)
 
 
 @router.post("/studio/skills/import")
@@ -173,23 +171,12 @@ async def import_studio_skill(
     request: SkillImportBody,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    try:
-        snapshot = await asyncio.to_thread(
-            _studio_service(http_request).import_skill,
-            request.source_path,
-            request.folder_id,
-        )
-        return _snapshot(snapshot)
-    except AgentRuntimeError as exc:
-        raise _bad_request(exc) from exc
+    return await yachiyo_studio_handlers.import_skill(request, http_request)
 
 
 @router.post("/studio/skills/sync")
 async def sync_studio_native_skills(http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
-    try:
-        return await asyncio.to_thread(_studio_service(http_request).sync_native_skills)
-    except AgentRuntimeError as exc:
-        raise _bad_request(exc) from exc
+    return await yachiyo_studio_handlers.sync_native_skills(http_request)
 
 
 @router.post("/studio/skills/install")
@@ -197,14 +184,7 @@ async def install_studio_skill(
     request: SkillInstallBody,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    try:
-        return await asyncio.to_thread(
-            _studio_service(http_request).install_skill_command,
-            request.command,
-            request.folder_id,
-        )
-    except AgentRuntimeError as exc:
-        raise _bad_request(exc) from exc
+    return await yachiyo_studio_handlers.install_skill(request, http_request)
 
 
 @router.patch("/studio/skills/{skill_id}")
@@ -213,18 +193,7 @@ async def update_studio_skill(
     request: SkillUpdateBody,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    try:
-        payload = request.model_dump(exclude_none=True)
-        snapshot = await asyncio.to_thread(
-            _studio_service(http_request).update_skill,
-            skill_id,
-            payload,
-        )
-        return _snapshot(snapshot)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Skill 不存在") from exc
-    except AgentRuntimeError as exc:
-        raise _bad_request(exc) from exc
+    return await yachiyo_studio_handlers.update_skill(skill_id, request, http_request)
 
 
 @router.delete("/studio/skills/{skill_id}")
@@ -232,20 +201,12 @@ async def delete_studio_skill(
     skill_id: str,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    try:
-        return await asyncio.to_thread(_studio_service(http_request).delete_skill, skill_id)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Skill 不存在") from exc
+    return await yachiyo_studio_handlers.delete_skill(skill_id, http_request)
 
 
 @router.get("/studio/skill-folders")
 async def list_studio_skill_folders(http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
-    payload = await asyncio.to_thread(_studio_service(http_request).list_skill_folders)
-    uncategorized = payload.get("uncategorized")
-    return {
-        "folders": [_snapshot(folder) for folder in payload.get("folders") or []],
-        "uncategorized": _snapshot(uncategorized) if uncategorized is not None else None,
-    }
+    return await yachiyo_studio_handlers.list_skill_folders(http_request)
 
 
 @router.post("/studio/skill-folders")
@@ -253,15 +214,7 @@ async def create_studio_skill_folder(
     request: SkillFolderBody,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    try:
-        payload = request.model_dump(exclude_none=True)
-        snapshot = await asyncio.to_thread(
-            _studio_service(http_request).create_skill_folder,
-            payload,
-        )
-        return _snapshot(snapshot)
-    except AgentRuntimeError as exc:
-        raise _bad_request(exc) from exc
+    return await yachiyo_studio_handlers.create_skill_folder(request, http_request)
 
 
 @router.patch("/studio/skill-folders/{folder_id}")
@@ -270,18 +223,7 @@ async def update_studio_skill_folder(
     request: SkillFolderBody,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    try:
-        payload = request.model_dump(exclude_none=True)
-        snapshot = await asyncio.to_thread(
-            _studio_service(http_request).update_skill_folder,
-            folder_id,
-            payload,
-        )
-        return _snapshot(snapshot)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Skill 文件夹不存在") from exc
-    except AgentRuntimeError as exc:
-        raise _bad_request(exc) from exc
+    return await yachiyo_studio_handlers.update_skill_folder(folder_id, request, http_request)
 
 
 @router.delete("/studio/skill-folders/{folder_id}")
@@ -290,14 +232,7 @@ async def delete_studio_skill_folder(
     delete_skills: bool = False,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    try:
-        return await asyncio.to_thread(
-            _studio_service(http_request).delete_skill_folder,
-            folder_id,
-            delete_skills,
-        )
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Skill 文件夹不存在") from exc
+    return await yachiyo_studio_handlers.delete_skill_folder(folder_id, delete_skills, http_request)
 
 
 @router.get("/studio/memories")
