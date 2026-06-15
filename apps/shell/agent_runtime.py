@@ -6,7 +6,6 @@ import hashlib
 import inspect
 import json
 import logging
-import os
 import re
 import sqlite3
 import subprocess
@@ -155,6 +154,11 @@ from apps.shell.agent.runtime.run_projections import (
 )
 from apps.shell.agent.runtime.run_readiness import RuntimeRunReadinessValidator
 from apps.shell.agent.runtime.runnables import RuntimeRunnableCatalog, RuntimeRunnableRunCoordinator
+from apps.shell.agent.runtime.paths import (
+    agent_workspace_dir as _runtime_agent_workspace_dir,
+    native_skill_home as _native_skill_home,
+    oha_yachiyo_home as _oha_yachiyo_home,
+)
 from apps.shell.agent.runtime.serialization import (
     json_dump_sorted as _json_dump,
     json_load as _json_load,
@@ -331,16 +335,6 @@ def _agent_goal_disallows_tool(user_goal: str, tool_name: str) -> str:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def _oha_yachiyo_home() -> Path:
-    root = Path(os.getenv("OHA_YACHIYO_HOME", os.path.expanduser("~/.oha-yachiyo"))).expanduser()
-    root.mkdir(parents=True, exist_ok=True)
-    return root
-
-
-def _native_skill_home() -> Path:
-    return _oha_yachiyo_home() / "skill-library"
 
 
 def _normalize_execution_backend(value: Any, *, model_mode: str = "") -> str:
@@ -3078,8 +3072,7 @@ class NativeRunEngine:
 
     @staticmethod
     def _agent_workspace_dir(agent: dict[str, Any]) -> str:
-        workspace = agent.get("workspace_policy") or {}
-        return str(workspace.get("default_workdir") or "").strip()
+        return _runtime_agent_workspace_dir(agent)
 
     def create_agent_run(self, payload: dict[str, Any]) -> dict[str, Any]:
         agent_id = str(payload.get("agent_id") or payload.get("runnable_id") or "")
