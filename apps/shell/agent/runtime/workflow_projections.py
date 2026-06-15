@@ -57,6 +57,48 @@ class WorkflowStartNodeProjection:
 
 
 @dataclass(frozen=True)
+class WorkflowEdgeFollowedProjection:
+    """Replay payload for a Workflow edge routing decision."""
+
+    source_node_id: str
+    source_node_kind: str
+    source_node_label: str
+    target_node_id: str
+    branch: str = ""
+
+    @classmethod
+    def from_node(
+        cls,
+        node: dict[str, Any],
+        *,
+        label: str,
+        kind: str,
+        target_node_id: str,
+        branch: str = "",
+    ) -> "WorkflowEdgeFollowedProjection":
+        return cls(
+            source_node_id=str(node.get("id") or ""),
+            source_node_kind=kind,
+            source_node_label=label,
+            target_node_id=str(target_node_id or ""),
+            branch=str(branch or ""),
+        )
+
+    def event_payload(self) -> dict[str, Any]:
+        return {
+            "workflow_node_id": self.source_node_id,
+            "workflow_node_kind": self.source_node_kind,
+            "workflow_node_label": self.source_node_label,
+            "workflow_edge_source_node_id": self.source_node_id,
+            "workflow_edge_source_node_kind": self.source_node_kind,
+            "workflow_edge_source_node_label": self.source_node_label,
+            "workflow_edge_target_node_id": self.target_node_id,
+            "workflow_edge_branch": self.branch,
+            "status": "completed",
+        }
+
+
+@dataclass(frozen=True)
 class WorkflowConditionNodeProjection:
     """Replay payload for a completed Workflow condition node."""
 

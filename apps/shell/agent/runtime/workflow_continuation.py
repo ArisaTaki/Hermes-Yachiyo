@@ -20,6 +20,7 @@ from apps.shell.agent.runtime.workflow_nodes import (
 from apps.shell.agent.runtime.workflow_projections import (
     WorkflowConditionNodeProjection,
     WorkflowContinuationFailureProjection,
+    WorkflowEdgeFollowedProjection,
     WorkflowLoopNodeProjection,
     WorkflowParallelNodeProjection,
     WorkflowRunCompletionProjection,
@@ -138,20 +139,17 @@ class WorkflowContinuationCoordinator:
                     return
                 source_kind = engine._node_kind(current_node)
                 source_label = str((current_node.get("data") or {}).get("label") or source_node_id)
+                projection = WorkflowEdgeFollowedProjection.from_node(
+                    current_node,
+                    label=source_label,
+                    kind=source_kind,
+                    target_node_id=next_node_id,
+                    branch=branch,
+                )
                 engine.append_run_event(
                     str(run["run_id"]),
                     "workflow.edge.followed",
-                    {
-                        "workflow_node_id": source_node_id,
-                        "workflow_node_kind": source_kind,
-                        "workflow_node_label": source_label,
-                        "workflow_edge_source_node_id": source_node_id,
-                        "workflow_edge_source_node_kind": source_kind,
-                        "workflow_edge_source_node_label": source_label,
-                        "workflow_edge_target_node_id": next_node_id,
-                        "workflow_edge_branch": branch,
-                        "status": "completed",
-                    },
+                    projection.event_payload(),
                 )
 
             if start_node_id:

@@ -298,6 +298,7 @@ from apps.shell.agent.runtime.workflow_parent_resume import WorkflowParentResume
 from apps.shell.agent.runtime.workflow_projections import (
     WorkflowConditionNodeProjection,
     WorkflowContinuationFailureProjection,
+    WorkflowEdgeFollowedProjection,
     WorkflowLoopNodeProjection,
     WorkflowParallelNodeProjection,
     WorkflowRunCompletionProjection,
