@@ -2320,7 +2320,6 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
         [
             "from '../features/agent-studio/studioTabs';",
             "AgentStudioChrome",
-            "updateYachiyoSkill",
             "useAgentAvatarActions",
             "useAgentDeletionActions",
             "useAgentGroupActions",
@@ -2341,6 +2340,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "useSkillDeletionActions",
             "useSkillFolderManagement",
             "useSkillImportActions",
+            "useSkillLibraryActions",
             "useSkillLibraryDerivedState",
             "useSkillSourceInputActions",
             "useWorkflowCanvasActions",
@@ -2354,8 +2354,8 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "importSkillSourceList",
             "syncNativeSkillLibrary",
             "installSkillFromCommand",
-            "await updateYachiyoSkill(skill.skill_id, { folder_id: folderId });",
-            "await updateYachiyoSkill(skill.skill_id, { enabled: skill.enabled === false });",
+            "moveSkillFolder",
+            "toggleSkillEnabled",
             "requestDeleteSkill",
             "createSkillFolderFromDraft",
             "updateSkillFolderFromDraft",
@@ -3310,8 +3310,9 @@ def test_agent_studio_skills_ui_smoke_uses_skill_library_paths() -> None:
             "SkillLibraryTab",
             "onInstallSkill={() => void runAction(installSkillFromCommand, '安装 Skill')}",
             "onSyncNativeSkillLibrary={() => void runAction(syncNativeSkillLibrary, '同步 Native Skills')}",
-            "onMoveSkillFolder={(skill, folderId) => void runAction(async () => {",
-            "onToggleSkillEnabled={(skill) => void runAction(async () => {",
+            "onMoveSkillFolder={moveSkillFolder}",
+            "onToggleSkillEnabled={toggleSkillEnabled}",
+            "useSkillLibraryActions({",
         ],
     )
     _assert_not_contains(
@@ -3328,6 +3329,17 @@ def test_agent_studio_skills_ui_smoke_uses_skill_library_paths() -> None:
     _assert_not_contains(
         "apps/frontend/src/views/AgentStudioView.tsx",
         ['data-testid="skill-import-panel"'],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useSkillLibraryActions.ts",
+        [
+            "export function useSkillLibraryActions",
+            "setSelectedSkillIds((current) => toggleSkillSelection(current, skillId))",
+            "setSkillManagementMode(false)",
+            "await updateYachiyoSkill(skill.skill_id, { folder_id: folderId });",
+            "await openPath(skill.local_path || '');",
+            "await updateYachiyoSkill(skill.skill_id, { enabled: skill.enabled === false });",
+        ],
     )
     _assert_contains(
         "apps/frontend/src/features/agent-studio/components/SkillLibraryTab.tsx",

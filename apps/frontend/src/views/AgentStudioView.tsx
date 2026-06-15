@@ -43,6 +43,7 @@ import { useSelectedRunDetailState } from '../features/agent-studio/hooks/useSel
 import { useSkillDeletionActions } from '../features/agent-studio/hooks/useSkillDeletionActions';
 import { useSkillFolderManagement } from '../features/agent-studio/hooks/useSkillFolderManagement';
 import { useSkillImportActions } from '../features/agent-studio/hooks/useSkillImportActions';
+import { useSkillLibraryActions } from '../features/agent-studio/hooks/useSkillLibraryActions';
 import { useSkillLibraryDerivedState } from '../features/agent-studio/hooks/useSkillLibraryDerivedState';
 import { useSkillSourceInputActions } from '../features/agent-studio/hooks/useSkillSourceInputActions';
 import { useWorkflowDeletionActions } from '../features/agent-studio/hooks/useWorkflowDeletionActions';
@@ -90,10 +91,7 @@ import {
   workflowStepKindLabel,
   workflowStepSummary,
 } from '../features/agent-studio/utils/workflow';
-import {
-  testYachiyoStudioAgentModel,
-  updateYachiyoSkill,
-} from '../features/yachiyo-studio/api';
+import { testYachiyoStudioAgentModel } from '../features/yachiyo-studio/api';
 import { getStudioRunForView } from '../features/agent-studio/utils/studioData';
 import type {
   FutureTaskSpec,
@@ -105,7 +103,7 @@ import type {
   SkillSourceRoot,
   SkillSpec,
 } from '../features/agent-studio/types';
-import { openAppView, openPath } from '../lib/bridge';
+import { openAppView } from '../lib/bridge';
 import type { ModelProfile, ModelProfileDefaults } from '../lib/modelProfiles';
 import { currentParam, navigateTo } from '../lib/view';
 
@@ -141,12 +139,6 @@ const emptyAgentDraft: AgentDraft = {
   writable_scopes: '',
   enabled: true,
 };
-
-function toggleSelectedId(current: string[], id: string): string[] {
-  if (!id) return current;
-  if (current.includes(id)) return current.filter((item) => item !== id);
-  return [...current, id];
-}
 
 function pruneSelectedIds(current: string[], availableIds: string[]): string[] {
   const available = new Set(availableIds);
@@ -577,6 +569,17 @@ export function AgentStudioView() {
     showConfirmDialog,
   });
   const {
+    finishSkillManagement,
+    moveSkillFolder,
+    openSkillLocation,
+    toggleSkillEnabled,
+    toggleSkillSelected,
+  } = useSkillLibraryActions({
+    runAction,
+    setSelectedSkillIds,
+    setSkillManagementMode,
+  });
+  const {
     requestDeleteAgent,
     requestDeleteSelectedAgents,
   } = useAgentDeletionActions({
@@ -913,15 +916,6 @@ export function AgentStudioView() {
     [setEdges],
   );
 
-  function toggleSkillSelected(skillId: string) {
-    setSelectedSkillIds((current) => toggleSelectedId(current, skillId));
-  }
-
-  function finishSkillManagement() {
-    setSkillManagementMode(false);
-    setSelectedSkillIds([]);
-  }
-
   function startNewAgent() {
     setSelectedAgentId('');
     setDraft({ ...emptyAgentDraft });
@@ -1102,12 +1096,8 @@ export function AgentStudioView() {
           onDropSkillSources={dropSkillSources}
           onFinishSkillManagement={finishSkillManagement}
           onInstallSkill={() => void runAction(installSkillFromCommand, '安装 Skill')}
-          onMoveSkillFolder={(skill, folderId) => void runAction(async () => {
-            await updateYachiyoSkill(skill.skill_id, { folder_id: folderId });
-          }, '移动 Skill')}
-          onOpenSkillLocation={(skill) => void runAction(async () => {
-            await openPath(skill.local_path || '');
-          }, '打开 Skill 路径')}
+          onMoveSkillFolder={moveSkillFolder}
+          onOpenSkillLocation={openSkillLocation}
           onPickSkillSources={() => void pickSkillSources()}
           onSetSelectedSkillIds={setSelectedSkillIds}
           onSetSkillInstallCommand={setSkillInstallCommand}
@@ -1117,9 +1107,7 @@ export function AgentStudioView() {
           onSetSkillManagementMode={setSkillManagementMode}
           onSetSkillTargetFolderId={setSkillTargetFolderId}
           onSyncNativeSkillLibrary={() => void runAction(syncNativeSkillLibrary, '同步 Native Skills')}
-          onToggleSkillEnabled={(skill) => void runAction(async () => {
-            await updateYachiyoSkill(skill.skill_id, { enabled: skill.enabled === false });
-          }, skill.enabled === false ? '启用 Skill' : '停用 Skill')}
+          onToggleSkillEnabled={toggleSkillEnabled}
           onToggleSkillSelected={toggleSkillSelected}
         />
       ) : null}
