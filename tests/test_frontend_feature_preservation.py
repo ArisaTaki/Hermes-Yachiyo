@@ -653,6 +653,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "useAgentGroupActions({",
             "useAgentGroups",
             "useAgentStudioRefresh({",
+            "useAgentStudioRouteState()",
             "useApprovedRunGuard",
             "useRunApprovalActions",
             "useRunApprovalFollowup",
@@ -692,6 +693,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "runMatchesSearch(",
             "workflowSpecStepRefs({",
             "agentRunReadinessIssue(agent, chatModelProfiles",
+            "const routeRunId = currentParam('run').trim();",
             "async function saveAgentGroup()",
             "async function runCurrentAgentGroup()",
             "listStudioAgentsForView()",
@@ -2026,16 +2028,24 @@ def test_chat_approval_run_detail_handoff_preserves_route_and_replay_wiring() ->
     _assert_contains(
         "apps/frontend/src/views/AgentStudioView.tsx",
         [
-            "const routeRunId = currentParam('run').trim();",
-            "const [tab, setTab] = useState<StudioTab>(() => routeRunId || routeRunTarget ? 'runs' : routeTab);",
-            "const [selectedRunId, setSelectedRunId] = useState(() => routeRunId);",
-            "const nextTab = routeRunId || routeRunTarget ? 'runs' : routeTab;",
-            "setSelectedRunId((current) => current === routeRunId ? current : routeRunId);",
+            "useAgentStudioRouteState()",
             "if (!selectedRunId || selectedRun) return;",
             "getStudioRunForView(selectedRunId)",
             "useRunEventReplay(selectedRunId, selectedRunReplayRefreshKey)",
             "useRunApprovalFollowup({",
             "selectedRunExecutionEvents",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useAgentStudioRouteState.ts",
+        [
+            "export function useAgentStudioRouteState",
+            "const routeRunId = currentParam('run').trim();",
+            "const [tab, setTab] = useState<StudioTab>(() => routeRunId || routeRunTarget ? 'runs' : routeTab);",
+            "const [selectedRunId, setSelectedRunId] = useState(() => routeRunId);",
+            "const nextTab = routeRunId || routeRunTarget ? 'runs' : routeTab;",
+            "setSelectedRunId((current) => current === routeRunId ? current : routeRunId);",
+            "setRunTarget((current) => current === routeRunTarget ? current : routeRunTarget);",
         ],
     )
     _assert_contains(
@@ -2324,6 +2334,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "useAgentDeletionActions",
             "useAgentGroupActions",
             "useAgentStudioRefresh",
+            "useAgentStudioRouteState",
             "useAgentRunReadiness",
             "useAgentSaveActions",
             "useAgentSkillMountActions",

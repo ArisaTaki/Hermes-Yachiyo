@@ -25,6 +25,7 @@ import { useAgentRunReadiness } from '../features/agent-studio/hooks/useAgentRun
 import { useAgentSaveActions } from '../features/agent-studio/hooks/useAgentSaveActions';
 import { useAgentSkillMountActions } from '../features/agent-studio/hooks/useAgentSkillMountActions';
 import { useAgentStudioRefresh, type StudioRefreshOptions } from '../features/agent-studio/hooks/useAgentStudioRefresh';
+import { useAgentStudioRouteState } from '../features/agent-studio/hooks/useAgentStudioRouteState';
 import { useApprovedRunGuard } from '../features/agent-studio/hooks/useApprovedRunGuard';
 import { useRunApprovalActions } from '../features/agent-studio/hooks/useRunApprovalActions';
 import { useRunApprovalFollowup } from '../features/agent-studio/hooks/useRunApprovalFollowup';
@@ -53,7 +54,6 @@ import { useWorkflowRunReadiness } from '../features/agent-studio/hooks/useWorkf
 import { useWorkflowSaveActions } from '../features/agent-studio/hooks/useWorkflowSaveActions';
 import { useWorkflowCanvasActions } from '../features/agent-studio/hooks/useWorkflowCanvasActions';
 import {
-  normalizeStudioTab,
   type StudioTab,
 } from '../features/agent-studio/studioTabs';
 import {
@@ -105,7 +105,7 @@ import type {
 } from '../features/agent-studio/types';
 import { openAppView } from '../lib/bridge';
 import type { ModelProfile, ModelProfileDefaults } from '../lib/modelProfiles';
-import { currentParam, navigateTo } from '../lib/view';
+import { navigateTo } from '../lib/view';
 
 type ConfirmDialogState = {
   title: string;
@@ -148,11 +148,16 @@ function pruneSelectedIds(current: string[], availableIds: string[]): string[] {
 }
 
 export function AgentStudioView() {
-  const routeRunId = currentParam('run').trim();
-  const routeRunTarget = currentParam('target').trim();
-  const routeRunGoal = currentParam('goal').trim();
-  const routeTab = normalizeStudioTab(currentParam('tab'));
-  const [tab, setTab] = useState<StudioTab>(() => routeRunId || routeRunTarget ? 'runs' : routeTab);
+  const {
+    runGoal,
+    runTarget,
+    selectedRunId,
+    setRunGoal,
+    setRunTarget,
+    setSelectedRunId,
+    setTab,
+    tab,
+  } = useAgentStudioRouteState();
   const [skills, setSkills] = useState<SkillSpec[]>([]);
   const [modelProfiles, setModelProfiles] = useState<ModelProfile[]>([]);
   const [modelDefaults, setModelDefaults] = useState<ModelProfileDefaults>({});
@@ -185,13 +190,10 @@ export function AgentStudioView() {
   const [workflowEnabled, setWorkflowEnabled] = useState(true);
   const [agentRunGoal, setAgentRunGoal] = useState('');
   const [workflowRunGoal, setWorkflowRunGoal] = useState('');
-  const [runTarget, setRunTarget] = useState(() => routeRunTarget);
-  const [runGoal, setRunGoal] = useState(() => routeRunGoal);
   const [runKindFilter, setRunKindFilter] = useState<RunKindFilter>('all');
   const [runStatusFilter, setRunStatusFilter] = useState<RunStatusFilter>('all');
   const [runSearchQuery, setRunSearchQuery] = useState('');
   const [collapsedRunHistoryGroups, setCollapsedRunHistoryGroups] = useState<Set<string>>(new Set());
-  const [selectedRunId, setSelectedRunId] = useState(() => routeRunId);
   const [artifactPreview, setArtifactPreview] = useState<{ path: string; content: string; truncated?: boolean } | null>(null);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
@@ -763,24 +765,6 @@ export function AgentStudioView() {
       .catch((err: unknown) => setError(err instanceof Error ? err.message : '读取 Agent Studio 失败'))
       .finally(() => setLoading(false));
   }, [refresh]);
-
-  useEffect(() => {
-    const nextTab = routeRunId || routeRunTarget ? 'runs' : routeTab;
-    setTab((current) => current === nextTab ? current : nextTab);
-    if (routeRunId) {
-      setSelectedRunId((current) => current === routeRunId ? current : routeRunId);
-    } else if (routeRunTarget) {
-      setSelectedRunId('');
-    } else if (routeTab === 'runs') {
-      setSelectedRunId('');
-    }
-    if (routeRunTarget) {
-      setRunTarget((current) => current === routeRunTarget ? current : routeRunTarget);
-      setRunGoal((current) => current === routeRunGoal ? current : routeRunGoal);
-    } else if (routeRunGoal) {
-      setRunGoal((current) => current === routeRunGoal ? current : routeRunGoal);
-    }
-  }, [routeRunGoal, routeRunId, routeRunTarget, routeTab]);
 
   useEffect(() => {
     setSelectedSkillIds((current) => pruneSelectedIds(current, filteredLibrarySkillIds));
