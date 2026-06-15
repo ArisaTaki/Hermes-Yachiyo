@@ -18,6 +18,26 @@ def _redact_secrets(value: Any) -> str:
 
 
 @dataclass(frozen=True)
+class WorkflowProjectionPortBundle:
+    """Ports used by legacy Workflow timeline projection helpers."""
+
+    workflow_condition_selection: Any | None = None
+    workflow_loop_selection: Any | None = None
+
+
+def _port_callback(
+    ports: WorkflowProjectionPortBundle | None,
+    name: str,
+    engine: Any,
+    legacy_name: str,
+) -> Any:
+    callback = getattr(ports, name) if ports is not None else None
+    if callback is not None:
+        return callback
+    return getattr(engine, legacy_name)
+
+
+@dataclass(frozen=True)
 class WorkflowStartNodeProjection:
     """Replay payload for a completed Workflow start node."""
 
@@ -121,8 +141,15 @@ class WorkflowConditionNodeProjection:
         label: str,
         kind: str,
         context: str,
+        ports: WorkflowProjectionPortBundle | None = None,
     ) -> "WorkflowConditionNodeProjection":
-        selection = engine._workflow_condition_selection(workflow, node, context)
+        workflow_condition_selection = _port_callback(
+            ports,
+            "workflow_condition_selection",
+            engine,
+            "_workflow_condition_selection",
+        )
+        selection = workflow_condition_selection(workflow, node, context)
         return cls.from_selection(node, selection, label=label, kind=kind)
 
     @classmethod
@@ -246,8 +273,15 @@ class WorkflowLoopNodeProjection:
         kind: str,
         context: str,
         previous_iterations: int,
+        ports: WorkflowProjectionPortBundle | None = None,
     ) -> "WorkflowLoopNodeProjection":
-        selection = engine._workflow_loop_selection(
+        workflow_loop_selection = _port_callback(
+            ports,
+            "workflow_loop_selection",
+            engine,
+            "_workflow_loop_selection",
+        )
+        selection = workflow_loop_selection(
             workflow,
             node,
             context,

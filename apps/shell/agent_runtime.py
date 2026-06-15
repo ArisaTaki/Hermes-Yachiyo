@@ -305,6 +305,7 @@ from apps.shell.agent.runtime.workflow_projections import (
     WorkflowEdgeFollowedProjection,
     WorkflowLoopNodeProjection,
     WorkflowParallelNodeProjection,
+    WorkflowProjectionPortBundle,
     WorkflowRunCompletionProjection,
     WorkflowStartNodeProjection,
 )

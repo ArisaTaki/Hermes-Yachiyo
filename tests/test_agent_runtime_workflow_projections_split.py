@@ -9,6 +9,7 @@ from apps.shell.agent.runtime.workflow_projections import (
     WorkflowEdgeFollowedProjection,
     WorkflowLoopNodeProjection,
     WorkflowParallelNodeProjection,
+    WorkflowProjectionPortBundle,
     WorkflowRunCompletionProjection,
     WorkflowStartNodeProjection,
 )
@@ -21,6 +22,7 @@ def test_workflow_timeline_projections_remain_exported_from_legacy_module() -> N
     assert agent_runtime.WorkflowParallelNodeProjection is WorkflowParallelNodeProjection
     assert agent_runtime.WorkflowLoopNodeProjection is WorkflowLoopNodeProjection
     assert agent_runtime.WorkflowRunCompletionProjection is WorkflowRunCompletionProjection
+    assert agent_runtime.WorkflowProjectionPortBundle is WorkflowProjectionPortBundle
     assert (
         agent_runtime.WorkflowContinuationFailureProjection
         is WorkflowContinuationFailureProjection
@@ -76,6 +78,36 @@ def test_workflow_condition_projection_accepts_selection_payload() -> None:
     }
 
 
+def test_workflow_condition_projection_legacy_helper_accepts_port_bundle() -> None:
+    calls: list[tuple[str, str]] = []
+    ports = WorkflowProjectionPortBundle(
+        workflow_condition_selection=lambda _workflow, node, context: calls.append(
+            (str(node["id"]), context)
+        )
+        or {
+            "condition": "ship",
+            "operator": "contains",
+            "matched": False,
+            "branch": "false",
+            "target_node_id": "skip",
+        }
+    )
+
+    projection = WorkflowConditionNodeProjection.from_node(
+        object(),
+        {"nodes": []},
+        {"id": "route", "type": "condition"},
+        label="Route",
+        kind="condition",
+        context="skip",
+        ports=ports,
+    )
+
+    assert calls == [("route", "skip")]
+    assert projection.branch == "false"
+    assert projection.target_node_id == "skip"
+
+
 def test_workflow_loop_projection_accepts_selection_payload() -> None:
     projection = WorkflowLoopNodeProjection.from_selection(
         {"id": "repeat", "type": "loop"},
@@ -109,6 +141,41 @@ def test_workflow_loop_projection_accepts_selection_payload() -> None:
         "workflow_node_loop_limit_reached": False,
         "status": "completed",
     }
+
+
+def test_workflow_loop_projection_legacy_helper_accepts_port_bundle() -> None:
+    calls: list[tuple[str, str, int]] = []
+    ports = WorkflowProjectionPortBundle(
+        workflow_loop_selection=lambda _workflow, node, context, *, previous_iterations: calls.append(
+            (str(node["id"]), context, previous_iterations)
+        )
+        or {
+            "condition": "again",
+            "operator": "contains",
+            "matched": True,
+            "branch": "continue",
+            "target_node_id": "worker",
+            "previous_iterations": previous_iterations,
+            "iteration": previous_iterations + 1,
+            "max_iterations": 3,
+            "limit_reached": False,
+        }
+    )
+
+    projection = WorkflowLoopNodeProjection.from_node(
+        object(),
+        {"nodes": []},
+        {"id": "repeat", "type": "loop"},
+        label="Repeat",
+        kind="loop",
+        context="again",
+        previous_iterations=1,
+        ports=ports,
+    )
+
+    assert calls == [("repeat", "again", 1)]
+    assert projection.branch == "continue"
+    assert projection.iteration == 2
 
 
 def test_workflow_parallel_projection_accepts_plan_payload() -> None:
