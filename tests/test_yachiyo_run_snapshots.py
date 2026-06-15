@@ -261,6 +261,115 @@ def test_run_timeline_preserves_memory_and_skill_trace_events() -> None:
     assert timeline.tool_calls == []
 
 
+def test_run_timeline_derives_approvals_and_artifacts_from_events() -> None:
+    timeline = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "run-events-only",
+            "status": "approval_required",
+            "events": [
+                {
+                    "event_type": "tool.approval_required",
+                    "payload": {
+                        "tool": "terminal.run",
+                        "input_preview": {"command": "npm test"},
+                        "status": "waiting_approval",
+                    },
+                    "created_at": "2026-06-15T00:00:00Z",
+                },
+                {
+                    "event_type": "workflow.node.approval_required",
+                    "payload": {
+                        "workflow_node_id": "review",
+                        "workflow_node_label": "Review Gate",
+                        "pending_approval": {
+                            "approval_id": "approval-workflow",
+                            "tool": "workflow.approval",
+                            "input_preview": {"checkpoint": "Review Gate"},
+                            "requested_at": "2026-06-15T00:00:01Z",
+                        },
+                    },
+                },
+                {
+                    "event_type": "artifact.created",
+                    "payload": {
+                        "artifact_id": "artifact-tool",
+                        "path": "notes.md",
+                        "size_bytes": 9,
+                        "source_tool": "artifact.write",
+                    },
+                    "created_at": "2026-06-15T00:00:02Z",
+                },
+                {
+                    "event_type": "workflow.node.artifact",
+                    "payload": {
+                        "workflow_node_id": "report",
+                        "workflow_node_label": "Report",
+                        "artifact": {
+                            "path": "workflow-report.md",
+                            "bytes": 42,
+                        },
+                    },
+                    "created_at": "2026-06-15T00:00:03Z",
+                },
+            ],
+        }
+    )
+
+    assert timeline.pending_approval is not None
+    assert timeline.pending_approval.tool_name == "terminal.run"
+    assert [approval.tool_name for approval in timeline.approvals] == [
+        "terminal.run",
+        "workflow.approval",
+    ]
+    assert timeline.approvals[0].approval_id == "run-events-only:tool.approval_required:1"
+    assert timeline.approvals[0].input_preview == {"command": "npm test"}
+    assert timeline.approvals[1].approval_id == "approval-workflow"
+    assert [artifact.path for artifact in timeline.artifacts] == [
+        "notes.md",
+        "workflow-report.md",
+    ]
+    assert timeline.artifacts[0].kind == "artifact"
+    assert timeline.artifacts[0].size_bytes == 9
+    assert timeline.artifacts[1].kind == "workflow_artifact"
+    assert timeline.artifacts[1].title == "Report"
+    assert timeline.artifacts[1].size_bytes == 42
+
+
+def test_chat_task_snapshot_derives_approval_and_artifact_cards_from_events() -> None:
+    task = agent_task_snapshot_from_payload(
+        {
+            "task_id": "task-events-only",
+            "run_id": "run-task-events",
+            "title": "Write notes",
+            "status": "approval_required",
+            "recent_events": [
+                {
+                    "event_type": "agent.tool.approval_required",
+                    "payload": {
+                        "approval_id": "approval-write",
+                        "tool": "workspace.write",
+                        "input_preview": {"path": "notes.md"},
+                    },
+                },
+                {
+                    "event_type": "artifact.created",
+                    "payload": {
+                        "path": "notes.md",
+                        "size_bytes": 12,
+                    },
+                },
+            ],
+        }
+    )
+
+    assert task.status == "waiting_approval"
+    assert task.needs_user_action is True
+    assert task.pending_approvals[0].approval_id == "approval-write"
+    assert task.pending_approvals[0].tool_name == "workspace.write"
+    assert task.artifacts[0].path == "notes.md"
+    assert task.artifacts[0].source_run_id == "run-task-events"
+
+
 def test_group_run_snapshot_reuses_shared_run_projection_for_children_artifacts_and_approvals() -> None:
     group_run = group_run_snapshot_from_payload(
         {

@@ -5,8 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from .approvals import approval_cards_from_payloads
-from .artifacts import artifact_snapshots_from_payloads
+from .approvals import approval_card_from_payload, approval_cards_from_payloads
+from .artifacts import artifact_snapshot_from_payload, artifact_snapshots_from_payloads
 from .contracts import (
     AgentTaskSnapshot,
     PublicRunEvent,
@@ -38,6 +38,7 @@ class RunSnapshotProjector:
             payload,
             run_id=run_id,
             keys=("pending_approvals", "pending_approval"),
+            events=recent_events,
         )
 
         return AgentTaskSnapshot(
@@ -51,7 +52,7 @@ class RunSnapshotProjector:
             needs_user_action=bool(payload.get("needs_user_action") or approvals),
             pending_approvals=approvals,
             recent_events=recent_events,
-            artifacts=self.artifacts_from_payload(payload, run_id=run_id),
+            artifacts=self.artifacts_from_payload(payload, run_id=run_id, events=recent_events),
             open_in_studio_url=_optional_text(payload.get("open_in_studio_url")) or _studio_url(run_id),
             created_at=_text(payload.get("created_at")),
             updated_at=_text(payload.get("updated_at")),
@@ -81,10 +82,16 @@ class RunSnapshotProjector:
             payload,
             run_id=run_id,
             keys=("approvals", "pending_approval"),
+            events=events,
         )
         pending_approval = None
         if isinstance(payload.get("pending_approval"), Mapping) and approvals:
             pending_approval = approvals[0]
+        elif _task_status(payload.get("status")) == "waiting_approval" and approvals:
+            pending_approval = next(
+                (approval for approval in approvals if approval.status == "pending"),
+                approvals[0],
+            )
 
         return RunTimelineSnapshot(
             run_id=run_id,
@@ -103,7 +110,7 @@ class RunSnapshotProjector:
             ),
             approvals=approvals,
             pending_approval=pending_approval,
-            artifacts=self.artifacts_from_payload(payload, run_id=run_id),
+            artifacts=self.artifacts_from_payload(payload, run_id=run_id, events=events),
             children=self.timeline_children_from_payloads(
                 payload.get("children") or payload.get("child_run_ids")
             ),
@@ -135,21 +142,49 @@ class RunSnapshotProjector:
         *,
         run_id: str,
         keys: tuple[str, ...],
+        events: list[PublicRunEvent] | None = None,
     ):
         for key in keys:
             approvals = approval_cards_from_payloads(payload.get(key), run_id=run_id)
             if approvals:
-                return approvals
-        return []
+                return _merge_approvals(approvals, self.approvals_from_events(events or []))
+        return self.approvals_from_events(events or [])
 
-    def artifacts_from_payload(self, payload: Mapping[str, Any], *, run_id: str):
-        return self.artifacts_from_payloads(payload.get("artifacts"), run_id=run_id)
+    def artifacts_from_payload(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        run_id: str,
+        events: list[PublicRunEvent] | None = None,
+    ):
+        return _merge_artifacts(
+            self.artifacts_from_payloads(payload.get("artifacts"), run_id=run_id),
+            self.artifacts_from_events(events or []),
+        )
 
     def approvals_from_payloads(self, payloads: Any, *, run_id: str = ""):
         return approval_cards_from_payloads(payloads, run_id=run_id)
 
     def artifacts_from_payloads(self, payloads: Any, *, run_id: str = ""):
         return artifact_snapshots_from_payloads(payloads, run_id=run_id)
+
+    def approvals_from_events(self, events: list[PublicRunEvent]):
+        approvals = []
+        for event in events:
+            approval_payload = _approval_payload_from_event(event)
+            if approval_payload:
+                approvals.append(approval_card_from_payload(approval_payload, run_id=event.run_id))
+        return approvals
+
+    def artifacts_from_events(self, events: list[PublicRunEvent]):
+        artifacts = []
+        for event in events:
+            artifact_payload = _artifact_payload_from_event(event)
+            if artifact_payload:
+                artifacts.append(
+                    artifact_snapshot_from_payload(artifact_payload, run_id=event.run_id)
+                )
+        return artifacts
 
     def tool_calls_from_payload(
         self,
@@ -259,6 +294,70 @@ def tool_call_snapshot_from_payload(
 
 def timeline_children_from_payloads(payloads: Any) -> list[RunTimelineChildSnapshot]:
     return _PROJECTOR.timeline_children_from_payloads(payloads)
+
+
+def _approval_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
+    if event.event_type not in {
+        "agent.tool.approval_required",
+        "tool.approval_required",
+        "workflow.node.approval_required",
+        "workflow.run.approval_required",
+    }:
+        return {}
+    payload = dict(event.payload)
+    pending = payload.get("pending_approval")
+    source = dict(pending) if isinstance(pending, Mapping) else payload
+    if not source:
+        return {}
+    if event.event_type.startswith("workflow.") and not source.get("tool"):
+        source["tool"] = "workflow.approval"
+    if not source.get("title") and payload.get("workflow_node_label"):
+        source["title"] = f"Approve {payload['workflow_node_label']}"
+    source.setdefault("approval_id", f"{event.run_id}:{event.event_type}:{event.sequence}")
+    source.setdefault("status", "pending")
+    source.setdefault("created_at", event.created_at)
+    source.setdefault("run_id", event.run_id)
+    return source
+
+
+def _artifact_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
+    payload = dict(event.payload)
+    if event.event_type == "artifact.created":
+        artifact_payload = payload
+    elif event.event_type == "workflow.node.artifact" and isinstance(payload.get("artifact"), Mapping):
+        artifact_payload = {
+            "kind": "workflow_artifact",
+            "title": payload.get("workflow_node_label") or "Workflow Artifact",
+            "workflow_node_id": payload.get("workflow_node_id"),
+            "workflow_node_label": payload.get("workflow_node_label"),
+            **dict(payload["artifact"]),
+        }
+    else:
+        return {}
+    artifact_payload.setdefault("source_run_id", event.run_id)
+    artifact_payload.setdefault("run_id", event.run_id)
+    artifact_payload.setdefault("created_at", event.created_at)
+    return artifact_payload
+
+
+def _merge_approvals(*approval_lists):
+    by_key = {}
+    for approvals in approval_lists:
+        for approval in approvals or []:
+            key = approval.approval_id or approval.run_id or approval.title
+            if key and key not in by_key:
+                by_key[key] = approval
+    return list(by_key.values())
+
+
+def _merge_artifacts(*artifact_lists):
+    by_key = {}
+    for artifacts in artifact_lists:
+        for artifact in artifacts or []:
+            key = artifact.artifact_id or artifact.path or artifact.title
+            if key and key not in by_key:
+                by_key[key] = artifact
+    return list(by_key.values())
 
 
 def _task_status(value: Any) -> str:
