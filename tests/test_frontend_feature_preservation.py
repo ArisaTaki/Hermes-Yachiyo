@@ -678,7 +678,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
         ],
     )
     _assert_contains(
-        "apps/frontend/src/features/yachiyo-studio/types.ts",
+        "apps/frontend/src/features/runtime-shared/types.ts",
         [
             "export type AgentDefinitionSnapshot",
             "export type SkillSnapshot",
@@ -695,6 +695,31 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "export type ApprovalCardSnapshot",
             "export type ArtifactSnapshot",
             "tool_calls?: ToolCallSnapshot[];",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-studio/types.ts",
+        [
+            "from '../runtime-shared/types';",
+            "AgentDefinitionSnapshot",
+            "AgentGroupSnapshot",
+            "GroupRunSnapshot",
+            "RunTimelineSnapshot",
+            "WorkflowSnapshot",
+            "ApprovalCardSnapshot",
+            "ArtifactSnapshot",
+            "export type SaveAgentGroupRequest",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/types.ts",
+        [
+            "from '../runtime-shared/types';",
+            "AgentTaskSnapshot",
+            "PublicRunEvent",
+            "ApprovalCardSnapshot",
+            "ArtifactSnapshot",
+            "export type YachiyoReadinessSnapshot = ReadinessSnapshot;",
         ],
     )
     _assert_contains(
