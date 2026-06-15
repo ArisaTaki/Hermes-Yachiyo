@@ -169,6 +169,42 @@ def test_run_timeline_projects_tool_lifecycle_events_as_tool_call_snapshots() ->
     assert all(call.run_id == "run-tools" for call in timeline.tool_calls)
 
 
+def test_run_timeline_projects_legacy_agent_tool_lifecycle_events() -> None:
+    timeline = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "run-legacy-tools",
+            "status": "running",
+            "timeline": [
+                {"event": "agent.tool.completed", "detail": "workspace.read"},
+                {"event": "agent.tool.failed", "detail": "terminal.run", "error": "exit 1"},
+                {"event": "agent.tool.skipped", "detail": "workspace.write"},
+                {"event": "agent.tool.approval_approved", "detail": "terminal.run"},
+                {"event": "agent.tool.approval_rejected", "detail": "workspace.write"},
+                {"event": "agent.tool.denied", "detail": "workspace.delete"},
+            ],
+        }
+    )
+
+    assert [call.tool_name for call in timeline.tool_calls] == [
+        "workspace.read",
+        "terminal.run",
+        "workspace.write",
+        "terminal.run",
+        "workspace.write",
+        "workspace.delete",
+    ]
+    assert [call.status for call in timeline.tool_calls] == [
+        "completed",
+        "failed",
+        "skipped",
+        "approved",
+        "denied",
+        "denied",
+    ]
+    assert timeline.tool_calls[1].output_preview == {"error": "exit 1"}
+    assert all(call.run_id == "run-legacy-tools" for call in timeline.tool_calls)
+
+
 def test_group_run_snapshot_reuses_shared_run_projection_for_children_artifacts_and_approvals() -> None:
     group_run = group_run_snapshot_from_payload(
         {

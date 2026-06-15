@@ -310,7 +310,12 @@ def _is_tool_event(event_type: str) -> bool:
     return event_type in {
         "agent.tool.call",
         "agent.tool.denied",
+        "agent.tool.failed",
+        "agent.tool.skipped",
         "agent.tool.approval_required",
+        "agent.tool.approval_approved",
+        "agent.tool.approval_rejected",
+        "agent.tool.completed",
         "tool.requested",
         "tool.started",
         "tool.approval_required",
@@ -335,12 +340,16 @@ def _tool_status_from_event_type(event_type: str) -> str:
         return "running"
     if event_type in {"tool.approval_required", "agent.tool.approval_required"}:
         return "waiting_approval"
-    if event_type in {"tool.completed", "agent.tool.call"}:
-        return "completed"
-    if event_type in {"tool.failed"}:
-        return "failed"
-    if event_type in {"agent.tool.denied"}:
+    if event_type in {"agent.tool.approval_approved"}:
+        return "approved"
+    if event_type in {"agent.tool.approval_rejected", "agent.tool.denied"}:
         return "denied"
+    if event_type in {"tool.completed", "agent.tool.call", "agent.tool.completed"}:
+        return "completed"
+    if event_type in {"tool.failed", "agent.tool.failed"}:
+        return "failed"
+    if event_type in {"agent.tool.skipped"}:
+        return "skipped"
     return "completed"
 
 
