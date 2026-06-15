@@ -419,10 +419,22 @@ def test_chat_group_ui_exposes_stable_e2e_selectors() -> None:
     _assert_contains(
         "apps/frontend/src/views/ChatView.tsx",
         [
+            "import { ChatGroupDialog } from '../features/yachiyo-chat/components/ChatGroupDialog';",
             'data-testid="chat-session-tab-agents"',
             'data-testid="chat-session-tab-groups"',
             'data-testid="chat-session-tab-create"',
             'data-testid="chat-group-settings"',
+            "<ChatGroupDialog",
+            "agentRunnables={agentRunnables}",
+            "onToggleAgent={toggleGroupAgent}",
+            'data-testid="chat-composer-input"',
+            'data-testid="chat-composer-send"',
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/ChatGroupDialog.tsx",
+        [
+            "export function ChatGroupDialog",
             'data-testid="chat-group-dialog"',
             'data-testid="chat-group-dialog-close"',
             'data-testid="chat-group-avatar-preview"',
@@ -438,8 +450,6 @@ def test_chat_group_ui_exposes_stable_e2e_selectors() -> None:
             'data-testid="chat-group-agent-member-checkbox"',
             'data-testid="chat-group-dialog-cancel"',
             'data-testid="chat-group-dialog-submit"',
-            'data-testid="chat-composer-input"',
-            'data-testid="chat-composer-send"',
         ],
     )
 
