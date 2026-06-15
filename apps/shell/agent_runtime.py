@@ -68,6 +68,7 @@ from apps.shell.agent.runtime.run_projections import (
 from apps.shell.agent.runtime.skill_content import SkillContentInspector
 from apps.shell.agent.runtime.skill_install import SkillInstallCommandValidator
 from apps.shell.agent.runtime.skill_sources import SkillSourceDiscovery
+from apps.shell.agent.runtime.skill_sync import SkillSyncPlanner
 from apps.shell.agent.runtime.tool_approvals import (
     ToolApprovalClaimProjection,
     ToolApprovalContinuationHandoff,
@@ -1713,6 +1714,10 @@ class NativeRunEngine:
             native_library_source_types=_NATIVE_LIBRARY_SOURCE_TYPES,
         )
         self.skill_content = SkillContentInspector()
+        self.skill_sync = SkillSyncPlanner(
+            skill_source_types=_SKILL_SOURCE_TYPES,
+            count_skill_files=SkillSourceDiscovery.count_skill_files,
+        )
         self.run_groups = RunGroupRepository(
             self._conn,
             ensure_row_factory=self._ensure_row_factory,
@@ -3317,115 +3322,65 @@ class NativeRunEngine:
         results: list[dict[str, Any]] = []
         now = _now()
         target_folder_id = self._normalize_skill_folder_id(folder_id) if folder_id is not None else None
-        for root_spec in root_specs:
-            root = root_spec["path"]
-            source_type = str(root_spec["source_type"])
-            if source_type not in _SKILL_SOURCE_TYPES:
-                source_type = "local_dir"
-            if not root.exists():
+        for entry in self.skill_sync.plan_entries(root_specs, library=library):
+            if entry.skipped_result is not None:
+                results.append(entry.skipped_result)
+                continue
+            if entry.candidate is None:
+                continue
+            candidate = entry.candidate
+            source_root = candidate.source_root
+            source_type = candidate.source_type
+            source_ref = candidate.source_ref
+            library_name = candidate.library
+            deletion_key = self._skill_deletion_key(source_type, str(source_root.resolve()))
+            has_deletion = self._has_studio_deletion("skill_source", deletion_key)
+            restore_deletion = restore_deleted and has_deletion
+            if has_deletion and not restore_deletion:
                 results.append({
-                    "source": str(root),
+                    "source": str(source_root),
                     "source_type": source_type,
-                    "library": library,
+                    "library": library_name,
+                    "source_ref": source_ref,
                     "status": "skipped",
-                    "message": "Skills root 不存在",
+                    "message": "用户已删除，跳过同步；可通过显式导入或重新安装恢复",
                 })
                 continue
-            skill_files = sorted(root.rglob("SKILL.md"))
-            if not skill_files:
-                results.append({
-                    "source": str(root),
-                    "source_type": source_type,
-                    "library": library,
-                    "status": "skipped",
-                    "message": "未发现 SKILL.md",
-                })
-                continue
-            skill_ancestors = {path.parent for path in skill_files}
-            for child in sorted(item for item in root.iterdir() if item.is_dir()):
-                if not any(child == parent or child in parent.parents for parent in skill_ancestors):
-                    results.append({
-                        "source": str(child),
-                        "source_type": source_type,
-                        "library": library,
-                        "status": "skipped",
-                        "message": "目录中未发现 SKILL.md",
-                    })
-            for skill_md in skill_files:
-                source_root = skill_md.parent
-                try:
-                    source_ref = source_root.relative_to(root).as_posix()
-                except ValueError:
-                    source_ref = source_root.name
-                source_map = root_spec.get("source_map") if isinstance(root_spec.get("source_map"), dict) else {}
-                source_ref = str(
-                    source_map.get(source_root.name)
-                    or source_map.get(source_ref)
-                    or root_spec.get("source_ref_override")
-                    or source_ref
+            try:
+                result = self._import_skill_root(
+                    source_root,
+                    source_path=f"{source_type}:{source_ref}",
+                    source_type=source_type,
+                    origin_path=str(source_root.resolve()),
+                    source_ref=source_ref,
+                    sync_status="synced",
+                    synced_at=now,
+                    copy_to_managed=False,
+                    folder_id=target_folder_id,
                 )
-                deletion_key = self._skill_deletion_key(source_type, str(source_root.resolve()))
-                has_deletion = self._has_studio_deletion("skill_source", deletion_key)
-                restore_deletion = restore_deleted and has_deletion
-                if has_deletion and not restore_deletion:
-                    results.append({
-                        "source": str(source_root),
-                        "source_type": source_type,
-                        "library": library,
-                        "source_ref": source_ref,
-                        "status": "skipped",
-                        "message": "用户已删除，跳过同步；可通过显式导入或重新安装恢复",
-                    })
-                    continue
-                try:
-                    result = self._import_skill_root(
-                        source_root,
-                        source_path=f"{source_type}:{source_ref}",
-                        source_type=source_type,
-                        origin_path=str(source_root.resolve()),
-                        source_ref=source_ref,
-                        sync_status="synced",
-                        synced_at=now,
-                        copy_to_managed=False,
-                        folder_id=target_folder_id,
-                    )
-                    if restore_deletion:
-                        self._clear_studio_deletion("skill_source", deletion_key)
-                        self._conn.commit()
-                    results.append({
-                        "source": str(source_root),
-                        "source_type": source_type,
-                        "library": library,
-                        "source_ref": source_ref,
-                        "status": result["sync_status"],
-                        "skill_id": result["skill_id"],
-                        "name": result["name"],
-                    })
-                except AgentRuntimeError as exc:
-                    results.append({
-                        "source": str(source_root),
-                        "source_type": source_type,
-                        "library": library,
-                        "source_ref": source_ref,
-                        "status": "failed",
-                        "message": redact_api_error_text(exc),
-                    })
-        summary = {
-            "imported": sum(1 for item in results if item.get("status") == "imported"),
-            "updated": sum(1 for item in results if item.get("status") == "updated"),
-            "skipped": sum(1 for item in results if item.get("status") == "skipped"),
-            "failed": sum(1 for item in results if item.get("status") == "failed"),
-        }
-        roots_info = [
-            {
-                "path": str(root["path"]),
-                "source_type": root["source_type"],
-                "library": library,
-                "exists": root["path"].exists(),
-                "skill_count": self._count_skill_files(root["path"]),
-            }
-            for root in root_specs
-        ]
+                if restore_deletion:
+                    self._clear_studio_deletion("skill_source", deletion_key)
+                    self._conn.commit()
+                results.append({
+                    "source": str(source_root),
+                    "source_type": source_type,
+                    "library": library_name,
+                    "source_ref": source_ref,
+                    "status": result["sync_status"],
+                    "skill_id": result["skill_id"],
+                    "name": result["name"],
+                })
+            except AgentRuntimeError as exc:
+                results.append({
+                    "source": str(source_root),
+                    "source_type": source_type,
+                    "library": library_name,
+                    "source_ref": source_ref,
+                    "status": "failed",
+                    "message": redact_api_error_text(exc),
+                })
+        summary = self.skill_sync.summarize_results(results)
+        roots_info = self.skill_sync.roots_info(root_specs, library=library)
         return {"ok": summary["failed"] == 0, "roots": roots_info, "summary": summary, "results": results}
 
     def install_skill_command(self, command: str, folder_id: str | None = None) -> dict[str, Any]:
