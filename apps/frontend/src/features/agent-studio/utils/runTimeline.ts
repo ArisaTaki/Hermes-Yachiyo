@@ -217,6 +217,27 @@ export function mergeToolCallSnapshots(
   return Array.from(byId.values());
 }
 
+export function artifactsFromRunEventReplay(events: PublicRunEvent[]): Array<Record<string, unknown>> {
+  return events
+    .map(artifactFromRunEvent)
+    .filter((artifact): artifact is Record<string, unknown> => Boolean(artifact));
+}
+
+export function mergeArtifactSnapshots(
+  timelineArtifacts: Array<Record<string, unknown>>,
+  replayArtifacts: Array<Record<string, unknown>>,
+): Array<Record<string, unknown>> {
+  const byKey = new Map<string, Record<string, unknown>>();
+  timelineArtifacts.forEach((artifact, index) => {
+    byKey.set(artifactRecordKey(artifact, index), artifact);
+  });
+  replayArtifacts.forEach((artifact, index) => {
+    const key = artifactRecordKey(artifact, index);
+    if (!byKey.has(key)) byKey.set(key, artifact);
+  });
+  return Array.from(byKey.values());
+}
+
 export function mergeRunEventReplayPages(
   current: PublicRunEvent[],
   incoming: PublicRunEvent[],
@@ -256,6 +277,66 @@ function toolCallFromRunEvent(event: PublicRunEvent): ToolCallSnapshot | null {
     started_at: event.created_at || '',
     completed_at: publicRunEventPayloadString(payload, 'completed_at') || null,
   };
+}
+
+function artifactFromRunEvent(event: PublicRunEvent): Record<string, unknown> | null {
+  if (!isArtifactRunEvent(event.event_type)) return null;
+  const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
+  let artifactPayload: Record<string, unknown> | null = null;
+  if (event.event_type === 'artifact.created' || event.event_type === 'agent.artifact.write') {
+    artifactPayload = { ...payload };
+  } else if (event.event_type === 'group.artifact.created' || event.event_type === 'group.shared_artifact.created') {
+    artifactPayload = { ...(objectPreview(payload.artifact) || payload) };
+    artifactPayload.kind = artifactPayload.kind || 'group_artifact';
+    artifactPayload.source_runnable_name = artifactPayload.source_runnable_name || payload.member_agent_name;
+    artifactPayload.source_runnable_id = artifactPayload.source_runnable_id || payload.member_agent_id;
+  } else if (event.event_type === 'workflow.node.artifact') {
+    artifactPayload = {
+      kind: 'workflow_artifact',
+      title: payload.workflow_node_label || 'Workflow Artifact',
+      workflow_node_id: payload.workflow_node_id,
+      workflow_node_label: payload.workflow_node_label,
+      workflow_step_label: payload.workflow_node_label,
+      ...(objectPreview(payload.artifact) || payload),
+    };
+  }
+  if (!artifactPayload) return null;
+  const path = publicRunEventPayloadString(artifactPayload, 'path')
+    || publicRunEventPayloadString(artifactPayload, 'artifact_path');
+  const artifactId = publicRunEventPayloadString(artifactPayload, 'artifact_id')
+    || publicRunEventPayloadString(artifactPayload, 'id');
+  if (!artifactId && !path) return null;
+  return {
+    ...artifactPayload,
+    artifact_id: artifactId || `${event.run_id}:${path || event.event_type}:${event.sequence}`,
+    created_at: publicRunEventPayloadString(artifactPayload, 'created_at') || event.created_at || '',
+    kind: publicRunEventPayloadString(artifactPayload, 'kind') || 'artifact',
+    path,
+    run_id: publicRunEventPayloadString(artifactPayload, 'run_id') || event.run_id,
+    source_run_id: publicRunEventPayloadString(artifactPayload, 'source_run_id') || event.run_id,
+    title: publicRunEventPayloadString(artifactPayload, 'title') || path || 'Artifact',
+  };
+}
+
+function isArtifactRunEvent(eventType: string): boolean {
+  return [
+    'artifact.created',
+    'agent.artifact.write',
+    'group.artifact.created',
+    'group.shared_artifact.created',
+    'workflow.node.artifact',
+  ].includes(eventType);
+}
+
+function artifactRecordKey(artifact: Record<string, unknown>, index: number): string {
+  return publicRunEventPayloadString(artifact, 'artifact_id')
+    || [
+      publicRunEventPayloadString(artifact, 'source_run_id') || publicRunEventPayloadString(artifact, 'run_id'),
+      publicRunEventPayloadString(artifact, 'path') || publicRunEventPayloadString(artifact, 'artifact_path'),
+      publicRunEventPayloadString(artifact, 'title'),
+      publicRunEventPayloadString(artifact, 'kind'),
+    ].filter(Boolean).join(':')
+    || `artifact:${index}`;
 }
 
 function isToolRunEvent(eventType: string): boolean {

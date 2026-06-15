@@ -10,7 +10,12 @@ import { MemorySkillTraceInspector } from './MemorySkillTraceInspector';
 import { RunApprovalRequest } from './RunApprovalRequest';
 import { RunTimeline } from './RunTimeline';
 import { ToolCallInspector } from './ToolCallInspector';
-import { mergeToolCallSnapshots, toolCallsFromRunEventReplay } from '../utils/runTimeline';
+import {
+  artifactsFromRunEventReplay,
+  mergeArtifactSnapshots,
+  mergeToolCallSnapshots,
+  toolCallsFromRunEventReplay,
+} from '../utils/runTimeline';
 
 export type RunDetailWorkflowStepRef = {
   key: string;
@@ -146,6 +151,13 @@ export function RunDetailPanel({
   const toolCallSource = replayToolCalls.length
     ? 'RunTimelineSnapshot + RunEvent replay tool facts'
     : 'RunTimelineSnapshot tool calls';
+  const replayArtifacts = selectedRunReplayEvents.length
+    ? artifactsFromRunEventReplay(selectedRunReplayEvents)
+    : [];
+  const selectedRunArtifactFacts = mergeArtifactSnapshots(selectedRunArtifacts, replayArtifacts);
+  const artifactSource = replayArtifacts.length
+    ? 'RunTimelineSnapshot + RunEvent replay artifact facts'
+    : 'RunTimelineSnapshot artifacts';
 
   return (
     <div className="agent-studio-panel">
@@ -527,7 +539,8 @@ export function RunDetailPanel({
             artifactPreview={artifactPreview}
             onOpenArtifact={onOpenArtifact}
             selectedRun={selectedRun}
-            selectedRunArtifacts={selectedRunArtifacts}
+            selectedRunArtifacts={selectedRunArtifactFacts}
+            sourceLabel={artifactSource}
           />
         </article>
       ) : (

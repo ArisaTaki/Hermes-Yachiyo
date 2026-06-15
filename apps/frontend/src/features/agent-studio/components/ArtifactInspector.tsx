@@ -12,6 +12,7 @@ type ArtifactInspectorProps = {
   onOpenArtifact: (run: RunSpec | string, path: string) => Promise<void> | void;
   selectedRun: RunSpec;
   selectedRunArtifacts: Array<Record<string, unknown>>;
+  sourceLabel?: string;
 };
 
 export function ArtifactInspector({
@@ -19,13 +20,14 @@ export function ArtifactInspector({
   onOpenArtifact,
   selectedRun,
   selectedRunArtifacts,
+  sourceLabel = '上下文、工具产物和可预览文件',
 }: ArtifactInspectorProps) {
   return (
     <details className="run-detail-block run-detail-fold" data-testid="agent-run-detail-artifacts" open>
       <summary className="run-detail-section-head">
         <div>
           <h4>Artifacts · {selectedRunArtifacts.length}</h4>
-          <span>上下文、工具产物和可预览文件</span>
+          <span>{sourceLabel}</span>
         </div>
       </summary>
       <RuntimeArtifactList
