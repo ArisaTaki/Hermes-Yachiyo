@@ -186,6 +186,7 @@ from apps.shell.agent.runtime.run_projections import (
     RunProjectionCoordinator,
 )
 from apps.shell.agent.runtime.run_readiness import RuntimeRunReadinessValidator
+from apps.shell.agent.runtime.run_cancellation import RuntimeRunCancellationService
 from apps.shell.agent.runtime.run_services import (
     RuntimeRunServiceBundle,
     build_runtime_run_services as _build_runtime_run_services,
@@ -918,6 +919,32 @@ class NativeRunEngine:
             get_run=lambda run_id: self.get_run(run_id),
         )
         self._install_runtime_workflow_transition_services(workflow_transition_services)
+        self._install_runtime_run_cancellation(
+            RuntimeRunCancellationService(
+                get_run=lambda run_id: self.get_run(run_id),
+                update_run=lambda run_id, **kwargs: self._update_run(run_id, **kwargs),
+                append_run_event=lambda run_id, event_type, payload: self.append_run_event(
+                    run_id,
+                    event_type,
+                    payload,
+                ),
+                timeline_factory=lambda event, detail="", **extra: self._timeline(
+                    event,
+                    detail,
+                    **extra,
+                ),
+                workflow_cancellation=self.workflow_cancellation,
+                workflow_run_is_group_root=lambda result: self._workflow_run_is_group_root(result),
+                project_cancelled_workflow_group_if_root=lambda run, result: (
+                    self._project_cancelled_workflow_group_if_root(run, result)
+                ),
+                resume_parent_workflows_after_child_update=lambda projected: (
+                    self._resume_parent_workflows_after_child_update(projected)
+                ),
+                project_child_run_transition=lambda result: self._project_child_run_transition(result),
+                final_statuses=_FINAL_RUN_STATUSES,
+            )
+        )
         self._init_db()
         self._migrate_agent_workspace_policies()
         if seed_templates:
@@ -1061,6 +1088,12 @@ class NativeRunEngine:
         self.workflow_parent_resume = workflow_services.workflow_parent_resume
         self.approval_resume_projection = workflow_services.approval_resume_projection
         self.run_transition_projection = workflow_services.run_transition_projection
+
+    def _install_runtime_run_cancellation(
+        self,
+        run_cancellation: RuntimeRunCancellationService,
+    ) -> None:
+        self.run_cancellation = run_cancellation
 
     def close(self) -> None:
         self.shutdown()
@@ -3575,34 +3608,7 @@ class NativeRunEngine:
         return self.workflow_cancellation.project_cancelled_workflow_run(run_id, run, timeline)
 
     def _cancel_run_once(self, run_id: str) -> dict[str, Any]:
-        run = self.get_run(run_id)
-        if run["status"] in _FINAL_RUN_STATUSES:
-            return run
-        timeline = [*run["timeline"]]
-        if run.get("kind") == "workflow_run":
-            workflow_timeline, artifacts, result_text = self._cancel_workflow_run_projection(run_id, run, timeline)
-            projection = RunCancellationProjection.workflow(workflow_timeline, artifacts, result_text)
-        else:
-            projection = RunCancellationProjection.plain(timeline, self._timeline)
-        result = self._update_run(
-            run_id,
-            **projection.update_fields(),
-        )
-        cancel_event_type = "workflow.run.cancelled" if result.get("kind") == "workflow_run" else "run.cancelled"
-        self.append_run_event(
-            run_id,
-            cancel_event_type,
-            {
-                "kind": result.get("kind"),
-                "result": result.get("result") or "",
-                "status": "cancelled",
-            },
-        )
-        if result.get("kind") == "workflow_run" and self._workflow_run_is_group_root(result):
-            projected = self._project_cancelled_workflow_group_if_root(run, result)
-            self._resume_parent_workflows_after_child_update(projected)
-            return projected
-        return self._project_child_run_transition(result)
+        return self.run_cancellation.cancel_once(run_id)
 
     def _tool_approval_resume_context(
         self,
