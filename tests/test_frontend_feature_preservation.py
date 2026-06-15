@@ -3128,12 +3128,25 @@ def test_agent_studio_skills_ui_smoke_uses_skill_library_paths() -> None:
             'data-testid="skill-library-folder-filter"',
             'data-testid="skill-library-search"',
             'data-testid="skill-list"',
+            "SkillCard",
+        ],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/views/AgentStudioView.tsx",
+        ["function SkillCard"],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/SkillCard.tsx",
+        [
+            "export function SkillCard",
             'data-testid="skill-card"',
             'data-testid="skill-card-select"',
             'data-testid="skill-card-enabled-toggle"',
             'data-testid="skill-card-folder-select"',
             'data-testid="skill-card-open-location"',
             'data-testid="skill-card-delete"',
+            "skillPathLabel(skill)",
+            "skillSourceLabel(skill)",
         ],
     )
     _assert_contains(
