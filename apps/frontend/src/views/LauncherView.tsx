@@ -962,6 +962,16 @@ function launcherAgentTaskRunId(task: LauncherAgentTask) {
   );
 }
 
+function launcherAgentTaskChatParams(task: LauncherAgentTask): Record<string, string> | undefined {
+  if (!task) return undefined;
+  const params: Record<string, string> = {};
+  const sessionId = String(task.conversation_id || '').trim();
+  const taskId = String(task.task_id || '').trim();
+  if (sessionId) params.session_id = sessionId;
+  if (taskId) params.task_id = taskId;
+  return Object.keys(params).length ? params : undefined;
+}
+
 function LauncherAgentTaskLight({
   mode,
   task,
@@ -974,23 +984,44 @@ function LauncherAgentTaskLight({
   const status = String(task.status || '');
   const needsAction = Boolean(task.needs_user_action || task.pending_approvals?.length);
   return (
-    <button
-      type="button"
+    <div
       className={`launcher-agent-task-light ${launcherAgentTaskTone(status)}`}
       data-run-id={runId}
       data-task-id={task.task_id}
       data-testid={`${mode}-launcher-agent-task-light`}
-      onClick={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        if (runId) void openAppView('agents', { run: runId });
-      }}
-      title={runId ? '在 Agent Studio 中查看' : undefined}
     >
-      <span>{launcherAgentTaskStatusLabel(status)}</span>
-      <strong>{task.title || task.task_id}</strong>
-      {needsAction ? <em>待处理</em> : null}
-    </button>
+      <button
+        type="button"
+        className="launcher-agent-task-main"
+        data-testid={`${mode}-launcher-agent-task-open-chat`}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          void openAppView('chat', launcherAgentTaskChatParams(task));
+        }}
+        title="在 Chat 中查看任务"
+      >
+        <span>{launcherAgentTaskStatusLabel(status)}</span>
+        <strong>{task.title || task.task_id}</strong>
+        {needsAction ? <em>待处理</em> : null}
+      </button>
+      {runId ? (
+        <button
+          type="button"
+          className="launcher-agent-task-studio"
+          data-run-id={runId}
+          data-testid={`${mode}-launcher-agent-task-open-studio`}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            void openAppView('agents', { run: runId });
+          }}
+          title="在 Agent Studio 中查看"
+        >
+          Studio
+        </button>
+      ) : null}
+    </div>
   );
 }
 

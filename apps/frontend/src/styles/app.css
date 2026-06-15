@@ -4253,11 +4253,11 @@ button:hover {
   top: 8px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 2px 6px;
+  gap: 4px;
   align-items: center;
   width: min(182px, calc(100vw - 18px));
   min-height: 32px;
-  padding: 5px 8px;
+  padding: 4px;
   border: 1px solid rgba(255, 244, 203, 0.28);
   border-radius: 8px;
   background: rgba(18, 22, 30, 0.78);
@@ -4274,7 +4274,7 @@ button:hover {
   top: 0;
   width: min(136px, calc(100vw - 10px));
   min-height: 24px;
-  padding: 3px 6px;
+  padding: 3px;
   border-radius: 999px;
 }
 
@@ -4282,28 +4282,59 @@ button:hover {
   border-color: rgba(255, 219, 112, 0.64);
 }
 
-.launcher-agent-task-light span,
-.launcher-agent-task-light strong,
-.launcher-agent-task-light em {
+.launcher-agent-task-main,
+.launcher-agent-task-studio {
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+.launcher-agent-task-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 6px;
+  padding: 2px 4px;
+  text-align: left;
+}
+
+.launcher-agent-task-studio {
+  align-self: stretch;
+  padding: 0 5px;
+  border-left: 1px solid rgba(255, 244, 203, 0.18);
+  color: rgba(255, 247, 223, 0.7);
+  font-size: 9px;
+}
+
+.launcher-agent-task-main:hover,
+.launcher-agent-task-studio:hover {
+  color: #fff7df;
+}
+
+.launcher-agent-task-main span,
+.launcher-agent-task-main strong,
+.launcher-agent-task-main em {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.launcher-agent-task-light span {
+.launcher-agent-task-main span {
   color: rgba(255, 247, 223, 0.72);
   font-size: 9px;
 }
 
-.launcher-agent-task-light strong {
+.launcher-agent-task-main strong {
   grid-column: 1 / -1;
   color: #fff7df;
   font-size: 10px;
   font-weight: 650;
 }
 
-.launcher-agent-task-light em {
+.launcher-agent-task-main em {
   color: #ffd166;
   font-size: 9px;
   font-style: normal;
