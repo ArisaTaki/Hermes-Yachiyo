@@ -1,10 +1,9 @@
+import type { AgentSpec, SkillSpec } from '../../../lib/agents';
 import {
-  attachSkill,
-  detachSkill,
-  updateAgent,
-  type AgentSpec,
-  type SkillSpec,
-} from '../../../lib/agents';
+  attachYachiyoAgentSkill,
+  detachYachiyoAgentSkill,
+  saveYachiyoStudioAgent,
+} from '../../yachiyo-studio/api';
 
 type AgentSkillMountRefreshOptions = {
   selectedAgentId?: string;
@@ -35,7 +34,7 @@ export function useAgentSkillMountActions({
       return;
     }
     const nextSkillIds = Array.from(new Set([...(selectedAgent.skill_ids || []), ...visibleMountSkillIds]));
-    await updateAgent(draftAgentId, { skill_ids: nextSkillIds });
+    await saveYachiyoStudioAgent({ agent_id: draftAgentId, skill_ids: nextSkillIds });
   }
 
   async function unmountVisibleSkills(): Promise<AgentSkillMountRefreshOptions | void> {
@@ -46,7 +45,7 @@ export function useAgentSkillMountActions({
     }
     const visible = new Set(visibleMountSkillIds);
     const nextSkillIds = (selectedAgent.skill_ids || []).filter((skillId) => !visible.has(skillId));
-    await updateAgent(draftAgentId, { skill_ids: nextSkillIds });
+    await saveYachiyoStudioAgent({ agent_id: draftAgentId, skill_ids: nextSkillIds });
   }
 
   function toggleAgentSkillMount(skill: SkillSpec, mounted: boolean) {
@@ -56,8 +55,8 @@ export function useAgentSkillMountActions({
         setStatus('系统 Agent 只能查看，不能修改 Skill 挂载。');
         return;
       }
-      if (mounted) await detachSkill(draftAgentId, skill.skill_id);
-      else await attachSkill(draftAgentId, skill.skill_id);
+      if (mounted) await detachYachiyoAgentSkill(draftAgentId, skill.skill_id);
+      else await attachYachiyoAgentSkill(draftAgentId, skill.skill_id);
     }, mounted ? '移除 Skill' : '挂载 Skill');
   }
 

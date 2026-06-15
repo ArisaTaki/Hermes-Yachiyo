@@ -1,5 +1,6 @@
 import type { AgentSpec, RunnableSummary, SkillSpec } from '../../../lib/agents';
 import type { ModelProfile, ModelProfileDefaults } from '../../../lib/modelProfiles';
+import type { AgentDefinitionSnapshot } from '../../yachiyo-studio/types';
 import type { AgentDraft } from '../types';
 
 const defaultAgentIds = new Set([
@@ -18,6 +19,40 @@ export function scopesToText(value: unknown): string {
 
 export function textToScopes(value: string): string[] {
   return value.split(',').map((item) => item.trim()).filter(Boolean);
+}
+
+export function publicAgentToAgentSpec(snapshot: AgentDefinitionSnapshot): AgentSpec {
+  return {
+    agent_id: snapshot.agent_id,
+    name: snapshot.name,
+    nickname: snapshot.nickname || undefined,
+    description: snapshot.description || undefined,
+    avatar_url: snapshot.avatar_url || undefined,
+    category: snapshot.category || undefined,
+    instructions: snapshot.instructions || undefined,
+    persona_prompt: snapshot.persona_prompt || undefined,
+    model_mode: snapshot.model_mode === 'custom_api' || snapshot.model_mode === 'follow_main'
+      ? snapshot.model_mode
+      : 'profile',
+    execution_backend: snapshot.execution_backend === 'native_profile'
+      ? 'native_profile'
+      : undefined,
+    model_profile_id: snapshot.model_profile_id || undefined,
+    vision_model_profile_id: snapshot.vision_model_profile_id || undefined,
+    model_config: (snapshot.model_config || {}) as AgentSpec['model_config'],
+    tool_policy: snapshot.tool_policy,
+    workspace_policy: snapshot.workspace_policy,
+    skill_ids: snapshot.skill_ids || [],
+    output_contract: snapshot.output_contract || undefined,
+    enabled: snapshot.enabled,
+    virtual: snapshot.virtual,
+    system: snapshot.system,
+    builtin: snapshot.builtin,
+    editable: snapshot.editable,
+    deletable: snapshot.deletable,
+    created_at: snapshot.created_at,
+    updated_at: snapshot.updated_at,
+  };
 }
 
 function policyTools(agent: AgentSpec): Set<string> {

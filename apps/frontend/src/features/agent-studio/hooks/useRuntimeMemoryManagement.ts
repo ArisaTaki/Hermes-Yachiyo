@@ -1,10 +1,10 @@
 import {
   cancelFutureTask,
-  deleteMemory,
   triggerDueFutureTasks,
   type FutureTaskSpec,
   type MemorySpec,
 } from '../../../lib/agents';
+import { deleteYachiyoMemory } from '../../yachiyo-studio/api';
 
 type RuntimeMemoryRefreshOptions = {
   selectedRunId?: string;
@@ -38,7 +38,7 @@ export function useRuntimeMemoryManagement({
       confirmLabel: '删除 Memory',
       variant: 'danger',
       onConfirm: () => void runAction(async () => {
-        await deleteMemory(memory.memory_id, 'studio_user_delete');
+        await deleteYachiyoMemory(memory.memory_id, 'studio_user_delete');
         return { statusMessage: 'Memory 已删除。' };
       }, '删除 Memory'),
     });

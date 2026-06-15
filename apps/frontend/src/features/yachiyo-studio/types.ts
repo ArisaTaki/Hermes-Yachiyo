@@ -120,6 +120,18 @@ export type SaveAgentGroupRequest = {
   enabled?: boolean;
 };
 
+export type WorkflowSnapshot = {
+  workflow_id: string;
+  name: string;
+  description?: string | null;
+  nodes?: Array<Record<string, unknown>>;
+  edges?: Array<Record<string, unknown>>;
+  default_input_schema?: Record<string, unknown>;
+  enabled?: boolean;
+  created_at?: string;
+  updated_at?: string;
+};
+
 export type ArtifactSnapshot = {
   artifact_id: string;
   run_id?: string | null;

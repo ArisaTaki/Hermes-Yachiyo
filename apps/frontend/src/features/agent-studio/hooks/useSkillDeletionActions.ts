@@ -1,9 +1,7 @@
 import type { Dispatch, SetStateAction } from 'react';
 
-import {
-  deleteSkill,
-  type SkillSpec,
-} from '../../../lib/agents';
+import type { SkillSpec } from '../../../lib/agents';
+import { deleteYachiyoSkill } from '../../yachiyo-studio/api';
 import { isInstalledSkill, isNativeSkill } from '../utils/skills';
 
 type SkillDeletionRefreshOptions = {
@@ -40,7 +38,7 @@ export function useSkillDeletionActions({
       confirmLabel: '删除 Skill',
       variant: 'danger',
       onConfirm: () => void runAction(async () => {
-        await deleteSkill(skill.skill_id);
+        await deleteYachiyoSkill(skill.skill_id);
         setSelectedSkillIds((current) => current.filter((id) => id !== skill.skill_id));
       }, '删除 Skill'),
     });
@@ -64,7 +62,7 @@ export function useSkillDeletionActions({
       variant: 'danger',
       onConfirm: () => void runAction(async () => {
         for (const skill of targets) {
-          await deleteSkill(skill.skill_id);
+          await deleteYachiyoSkill(skill.skill_id);
         }
         setSelectedSkillIds((current) => current.filter((id) => !targetIds.has(id)));
       }, '批量删除 Skill'),

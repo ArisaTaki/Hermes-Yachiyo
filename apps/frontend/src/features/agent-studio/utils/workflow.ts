@@ -1,6 +1,7 @@
 import type { Edge, Node } from '@xyflow/react';
 
 import type { AgentSpec, RunSpec, WorkflowSpec } from '../../../lib/agents';
+import type { WorkflowSnapshot } from '../../yachiyo-studio/types';
 import {
   timelineChildRunId,
   timelineEventPayload,
@@ -35,6 +36,20 @@ const workflowNodeTypes = new Set(['start', 'agent', 'approval', 'artifact', 'co
 const workflowRunnableNodeTypes = new Set(['agent', 'approval', 'artifact', 'condition', 'parallel', 'workflow', 'loop']);
 
 export const workflowRunnableStepRequiredMessage = 'Workflow 至少需要一个可执行节点（Agent、Approval、Artifact、Condition、Parallel、Workflow 或 Loop）';
+
+export function publicWorkflowToWorkflowSpec(snapshot: WorkflowSnapshot): WorkflowSpec {
+  return {
+    workflow_id: snapshot.workflow_id,
+    name: snapshot.name,
+    description: snapshot.description || undefined,
+    nodes: (snapshot.nodes || []) as WorkflowSpec['nodes'],
+    edges: (snapshot.edges || []) as WorkflowSpec['edges'],
+    default_input_schema: snapshot.default_input_schema,
+    enabled: snapshot.enabled,
+    created_at: snapshot.created_at,
+    updated_at: snapshot.updated_at,
+  };
+}
 
 function workflowStepKind(value: unknown): WorkflowStepRef['kind'] {
   const kind = String(value || '').trim();

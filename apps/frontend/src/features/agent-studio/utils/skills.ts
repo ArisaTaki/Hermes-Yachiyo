@@ -1,8 +1,14 @@
 import type {
   SkillFolderSpec,
+  SkillSourceRoot,
   SkillSpec,
   SkillSyncResult,
 } from '../../../lib/agents';
+import type {
+  SkillFolderSnapshot,
+  SkillSnapshot,
+  SkillSourceRootSnapshot,
+} from '../../yachiyo-studio/types';
 
 export type SkillFolderFilter = 'all' | 'uncategorized' | string;
 export type SkillImportResult = {
@@ -13,6 +19,55 @@ export type SkillImportResult = {
 export type SkillSourceFilter = 'installed' | 'native';
 
 export const skillFolderNameMaxLength = 120;
+
+export function publicSkillToSkillSpec(snapshot: SkillSnapshot): SkillSpec {
+  return {
+    skill_id: snapshot.skill_id,
+    name: snapshot.name,
+    description: snapshot.description || undefined,
+    source_path: snapshot.source_path || undefined,
+    local_path: snapshot.local_path || undefined,
+    folder_id: snapshot.folder_id || undefined,
+    folder_name: snapshot.folder_name || undefined,
+    source_type: snapshot.source_type || undefined,
+    origin_path: snapshot.origin_path || undefined,
+    source_ref: snapshot.source_ref || undefined,
+    content_hash: snapshot.content_hash || undefined,
+    last_synced_at: snapshot.last_synced_at || undefined,
+    sync_status: snapshot.sync_status || undefined,
+    content_summary: snapshot.content_summary || undefined,
+    skill_markdown: snapshot.skill_markdown || undefined,
+    asset_paths: snapshot.asset_paths || [],
+    enabled: snapshot.enabled,
+    created_at: snapshot.created_at,
+    updated_at: snapshot.updated_at,
+  };
+}
+
+export function publicSkillFolderToSkillFolderSpec(snapshot: SkillFolderSnapshot): SkillFolderSpec {
+  return {
+    folder_id: snapshot.folder_id,
+    name: snapshot.name,
+    description: snapshot.description || undefined,
+    source_scope: snapshot.source_scope,
+    sort_order: snapshot.sort_order,
+    skill_count: snapshot.skill_count,
+    installed_count: snapshot.installed_count,
+    native_count: snapshot.native_count,
+    created_at: snapshot.created_at,
+    updated_at: snapshot.updated_at,
+  };
+}
+
+export function publicSkillSourceRootToSkillSourceRoot(snapshot: SkillSourceRootSnapshot): SkillSourceRoot {
+  return {
+    path: snapshot.path,
+    source_type: snapshot.source_type,
+    library: snapshot.library || undefined,
+    exists: snapshot.exists,
+    skill_count: snapshot.skill_count,
+  };
+}
 
 export function normalizeSkillSources(sources: string[]): string[] {
   const cleanSources = sources

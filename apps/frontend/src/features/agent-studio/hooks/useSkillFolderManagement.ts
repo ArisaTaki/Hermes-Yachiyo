@@ -1,14 +1,17 @@
 import type { Dispatch, SetStateAction } from 'react';
 
-import {
-  createSkillFolder,
-  deleteSkillFolder,
-  updateSkillFolder,
-  type SkillFolderSpec,
-  type SkillSpec,
-} from '../../../lib/agents';
+import type { SkillFolderSpec, SkillSpec } from '../../../lib/agents';
 import { navigateTo } from '../../../lib/view';
-import { skillFolderNameError, type SkillFolderFilter } from '../utils/skills';
+import {
+  createYachiyoSkillFolder,
+  deleteYachiyoSkillFolder,
+  updateYachiyoSkillFolder,
+} from '../../yachiyo-studio/api';
+import {
+  publicSkillFolderToSkillFolderSpec,
+  skillFolderNameError,
+  type SkillFolderFilter,
+} from '../utils/skills';
 
 type SkillFolderRefreshOptions = {
   statusMessage?: string;
@@ -74,7 +77,7 @@ export function useSkillFolderManagement({
     if (!name) throw new Error('请输入 Skill 文件夹名称');
     const validation = skillFolderNameError(name, skillFolders);
     if (validation) throw new Error(validation);
-    const folder = await createSkillFolder({ name });
+    const folder = publicSkillFolderToSkillFolderSpec(await createYachiyoSkillFolder({ name }));
     setNewSkillFolderName('');
     setSkillTargetFolderId(folder.folder_id);
     setSkillLibraryFolderFilter(folder.folder_id);
@@ -98,12 +101,12 @@ export function useSkillFolderManagement({
     if (!name) throw new Error('请输入 Skill 文件夹名称');
     const validation = skillFolderNameError(name, skillFolders, folderId);
     if (validation) throw new Error(validation);
-    await updateSkillFolder(folderId, { name });
+    await updateYachiyoSkillFolder(folderId, { name });
     cancelEditingSkillFolder();
   }
 
   async function deleteSkillFolderById(folderId: string, deleteSkills = false): Promise<SkillFolderRefreshOptions | void> {
-    await deleteSkillFolder(folderId, { deleteSkills });
+    await deleteYachiyoSkillFolder(folderId, { deleteSkills });
     if (skillTargetFolderId === folderId) setSkillTargetFolderId('');
     if (skillLibraryFolderFilter === folderId) setSkillLibraryFolderFilter('all');
     if (skillMountFolderFilter === folderId) setSkillMountFolderFilter('all');

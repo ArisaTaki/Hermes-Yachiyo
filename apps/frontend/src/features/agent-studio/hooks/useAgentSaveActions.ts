@@ -1,12 +1,10 @@
-import {
-  createAgent,
-  updateAgent,
-  type AgentSpec,
-} from '../../../lib/agents';
+import type { AgentSpec } from '../../../lib/agents';
+import { saveYachiyoStudioAgent } from '../../yachiyo-studio/api';
 import type { AgentDraft } from '../types';
 import {
   agentToDraft,
   draftToolPolicy,
+  publicAgentToAgentSpec,
   textToScopes,
 } from '../utils/agents';
 
@@ -64,7 +62,9 @@ export function useAgentSaveActions({
         ...(draft.api_key.trim() ? { api_key: draft.api_key.trim() } : {}),
       };
     }
-    const saved = draft.agent_id ? await updateAgent(draft.agent_id, request) : await createAgent(request);
+    const saved = publicAgentToAgentSpec(await saveYachiyoStudioAgent(
+      draft.agent_id ? { ...request, agent_id: draft.agent_id } : request,
+    ));
     setSelectedAgentId(saved.agent_id);
     setDraft(agentToDraft(saved));
     return { selectedAgentId: saved.agent_id };

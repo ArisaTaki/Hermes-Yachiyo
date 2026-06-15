@@ -54,6 +54,7 @@ import {
   agentCapabilityLine,
   agentRunReadinessIssue,
   agentToDraft,
+  publicAgentToAgentSpec,
   runnableCapabilityLine,
   runnableOptionLabel,
 } from '../features/agent-studio/utils/agents';
@@ -78,6 +79,9 @@ import {
   type RunStatusFilter,
 } from '../features/agent-studio/utils/runs';
 import {
+  publicSkillFolderToSkillFolderSpec,
+  publicSkillSourceRootToSkillSourceRoot,
+  publicSkillToSkillSpec,
   type SkillFolderFilter,
   type SkillImportResult,
   type SkillSourceFilter,
@@ -99,23 +103,25 @@ import {
   workflowStepArtifacts,
   workflowStepKindLabel,
   workflowStepSummary,
+  publicWorkflowToWorkflowSpec,
 } from '../features/agent-studio/utils/workflow';
 import {
   getYachiyoRunTimeline,
+  listYachiyoSkillFolders,
+  listYachiyoSkills,
+  listYachiyoSkillSources,
+  listYachiyoStudioAgents,
   listYachiyoGroupRuns,
+  listYachiyoMemories,
   listYachiyoRunTimelines,
+  listYachiyoWorkflows,
+  testYachiyoStudioAgentModel,
+  updateYachiyoSkill,
 } from '../features/yachiyo-studio/api';
 import {
-  listAgents,
   listFutureTasks,
-  listMemories,
   listRunnables,
-  listSkillFolders,
-  listSkillSources,
-  listSkills,
-  listWorkflows,
-  testAgentModel,
-  updateSkill,
+  type AgentSpec,
   type FutureTaskSpec,
   type MemorySpec,
   type RunnableSummary,
@@ -124,6 +130,7 @@ import {
   type SkillFolderSpec,
   type SkillSourceRoot,
   type SkillSpec,
+  type WorkflowSpec,
 } from '../lib/agents';
 import { openAppView, openPath } from '../lib/bridge';
 import { listModelProfiles, type ModelProfile, type ModelProfileDefaults } from '../lib/modelProfiles';
@@ -175,6 +182,45 @@ const emptyAgentDraft: AgentDraft = {
 
 async function listStudioRunsForView(): Promise<RunSpec[]> {
   return (await listYachiyoRunTimelines()).map((snapshot) => publicRunTimelineToRunSpec(snapshot));
+}
+
+async function listStudioAgentsForView(): Promise<AgentSpec[]> {
+  return (await listYachiyoStudioAgents()).map(publicAgentToAgentSpec);
+}
+
+async function listStudioSkillsForView(): Promise<SkillSpec[]> {
+  return (await listYachiyoSkills()).map(publicSkillToSkillSpec);
+}
+
+async function listStudioSkillFoldersForView(): Promise<SkillFolderSpec[]> {
+  return (await listYachiyoSkillFolders()).map(publicSkillFolderToSkillFolderSpec);
+}
+
+async function listStudioSkillSourcesForView(): Promise<SkillSourceRoot[]> {
+  return (await listYachiyoSkillSources()).map(publicSkillSourceRootToSkillSourceRoot);
+}
+
+async function listStudioWorkflowsForView(): Promise<WorkflowSpec[]> {
+  return (await listYachiyoWorkflows()).map(publicWorkflowToWorkflowSpec);
+}
+
+async function listStudioMemoriesForView(): Promise<MemorySpec[]> {
+  return (await listYachiyoMemories()).map((memory) => ({
+    memory_id: memory.memory_id,
+    scope: memory.scope,
+    kind: memory.kind,
+    content: memory.content,
+    source_session_id: memory.source_session_id || undefined,
+    source_message_id: memory.source_message_id || undefined,
+    source_task_id: memory.source_task_id || undefined,
+    source_run_id: memory.source_run_id || undefined,
+    confidence: memory.confidence,
+    pinned: memory.pinned,
+    user_confirmed: memory.user_confirmed,
+    created_at: memory.created_at,
+    updated_at: memory.updated_at,
+    deleted_at: memory.deleted_at || undefined,
+  }));
 }
 
 async function listStudioRunGroupsForView(): Promise<RunGroupSpec[]> {
@@ -812,17 +858,17 @@ export function AgentStudioView() {
       nextMemories,
       nextFutureTasks,
     ] = await Promise.all([
-      listAgents(),
-      listSkills(),
+      listStudioAgentsForView(),
+      listStudioSkillsForView(),
       listModelProfiles(),
-      listWorkflows(),
+      listStudioWorkflowsForView(),
       loadAgentGroups(),
       listRunnables(),
       listStudioRunsForView(),
       listStudioRunGroupsForView(),
-      listSkillSources(),
-      listSkillFolders(),
-      listMemories(),
+      listStudioSkillSourcesForView(),
+      listStudioSkillFoldersForView(),
+      listStudioMemoriesForView(),
       listFutureTasks(),
     ]);
     applyAgents(nextAgents, options);
@@ -1257,7 +1303,7 @@ export function AgentStudioView() {
           onSetSkillMountSearch={setSkillMountSearch}
           onStartNewAgent={startNewAgent}
           onTestAgentModel={() => void runAction(async () => {
-            const result = await testAgentModel(draft.agent_id || '');
+            const result = await testYachiyoStudioAgentModel(draft.agent_id || '');
             setStatus(result.message || (result.ok ? '模型测试通过' : '模型测试失败'));
           }, '测试模型')}
           onToggleAgentSelected={toggleAgentSelected}
@@ -1292,7 +1338,7 @@ export function AgentStudioView() {
           onFinishSkillManagement={finishSkillManagement}
           onInstallSkill={() => void runAction(installSkillFromCommand, '安装 Skill')}
           onMoveSkillFolder={(skill, folderId) => void runAction(async () => {
-            await updateSkill(skill.skill_id, { folder_id: folderId });
+            await updateYachiyoSkill(skill.skill_id, { folder_id: folderId });
           }, '移动 Skill')}
           onOpenSkillLocation={(skill) => void runAction(async () => {
             await openPath(skill.local_path || '');
@@ -1307,7 +1353,7 @@ export function AgentStudioView() {
           onSetSkillTargetFolderId={setSkillTargetFolderId}
           onSyncNativeSkillLibrary={() => void runAction(syncNativeSkillLibrary, '同步 Native Skills')}
           onToggleSkillEnabled={(skill) => void runAction(async () => {
-            await updateSkill(skill.skill_id, { enabled: skill.enabled === false });
+            await updateYachiyoSkill(skill.skill_id, { enabled: skill.enabled === false });
           }, skill.enabled === false ? '启用 Skill' : '停用 Skill')}
           onToggleSkillSelected={toggleSkillSelected}
         />

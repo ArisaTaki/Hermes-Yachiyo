@@ -1,11 +1,9 @@
 import type { Edge, Node } from '@xyflow/react';
 
+import type { WorkflowSpec } from '../../../lib/agents';
+import { saveYachiyoWorkflow } from '../../yachiyo-studio/api';
 import {
-  createWorkflow,
-  updateWorkflow,
-  type WorkflowSpec,
-} from '../../../lib/agents';
-import {
+  publicWorkflowToWorkflowSpec,
   workflowRequestEdges,
   workflowRequestNodes,
 } from '../utils/workflow';
@@ -50,7 +48,9 @@ export function useWorkflowSaveActions({
       throw new Error(workflowErrors[0]);
     }
     const request = workflowDraftRequest();
-    const saved = selectedWorkflow ? await updateWorkflow(selectedWorkflow.workflow_id, request) : await createWorkflow(request);
+    const saved = publicWorkflowToWorkflowSpec(await saveYachiyoWorkflow(
+      selectedWorkflow ? { ...request, workflow_id: selectedWorkflow.workflow_id } : request,
+    ));
     setSelectedWorkflowId(saved.workflow_id);
     return saved;
   }

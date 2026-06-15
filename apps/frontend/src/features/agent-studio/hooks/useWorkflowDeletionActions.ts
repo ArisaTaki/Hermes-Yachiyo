@@ -1,9 +1,7 @@
 import type { Dispatch, SetStateAction } from 'react';
 
-import {
-  deleteWorkflow,
-  type WorkflowSpec,
-} from '../../../lib/agents';
+import type { WorkflowSpec } from '../../../lib/agents';
+import { deleteYachiyoWorkflow } from '../../yachiyo-studio/api';
 
 type WorkflowDeletionRefreshOptions = {
   selectedWorkflowId?: string;
@@ -46,7 +44,7 @@ export function useWorkflowDeletionActions({
       confirmLabel: '删除 Workflow',
       variant: 'danger',
       onConfirm: () => void runAction(async () => {
-        await deleteWorkflow(workflowId);
+        await deleteYachiyoWorkflow(workflowId);
         setSelectedWorkflowIds((current) => current.filter((id) => id !== workflowId));
         resetWorkflowDraft();
         return { selectedWorkflowId: '' };
@@ -66,7 +64,7 @@ export function useWorkflowDeletionActions({
       variant: 'danger',
       onConfirm: () => void runAction(async () => {
         for (const workflow of targets) {
-          await deleteWorkflow(workflow.workflow_id);
+          await deleteYachiyoWorkflow(workflow.workflow_id);
         }
         setSelectedWorkflowIds((current) => current.filter((id) => !targetIds.has(id)));
         if (deletingCurrent) {

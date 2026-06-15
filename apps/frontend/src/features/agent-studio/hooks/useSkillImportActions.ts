@@ -1,13 +1,14 @@
+import type { SkillSourceRoot, SkillSpec } from '../../../lib/agents';
 import {
-  importSkill,
-  installSkillCommand,
-  syncNativeSkills,
-  type SkillSourceRoot,
-  type SkillSpec,
-} from '../../../lib/agents';
+  importYachiyoSkill,
+  installYachiyoSkillCommand,
+  syncYachiyoNativeSkills,
+} from '../../yachiyo-studio/api';
 import {
   localSourceAlias,
   normalizeSkillSources,
+  publicSkillSourceRootToSkillSourceRoot,
+  publicSkillToSkillSpec,
   syncResultsToImportResults,
   type SkillImportResult,
 } from '../utils/skills';
@@ -42,7 +43,7 @@ export function useSkillImportActions({
         continue;
       }
       try {
-        const imported = await importSkill(source, skillTargetFolderId);
+        const imported = publicSkillToSkillSpec(await importYachiyoSkill(source, skillTargetFolderId));
         results.push({ source, status: 'success', message: `已导入 ${imported.name}` });
       } catch (err) {
         results.push({ source, status: 'failed', message: err instanceof Error ? err.message : '导入失败' });
@@ -52,15 +53,15 @@ export function useSkillImportActions({
   }
 
   async function syncNativeSkillLibrary(): Promise<SkillImportRefreshOptions | void> {
-    const result = await syncNativeSkills();
+    const result = await syncYachiyoNativeSkills();
     setSkillImportResults(syncResultsToImportResults(result.results || []));
-    if (result.roots) setSkillSources(result.roots);
+    if (result.roots) setSkillSources(result.roots.map(publicSkillSourceRootToSkillSourceRoot));
   }
 
   async function installSkillFromCommand(): Promise<SkillImportRefreshOptions | void> {
     const command = skillInstallCommand.trim();
     if (!command) throw new Error('请输入 Skill 来源或安装命令');
-    const result = await installSkillCommand(command, skillTargetFolderId);
+    const result = await installYachiyoSkillCommand(command, skillTargetFolderId);
     if (result.sync?.results) {
       setSkillImportResults(syncResultsToImportResults(result.sync.results));
     }

@@ -10,6 +10,7 @@ import type {
   SkillFolderSnapshot,
   SkillSnapshot,
   SkillSourceRootSnapshot,
+  WorkflowSnapshot,
 } from './types';
 
 export type YachiyoRunEventsPage = {
@@ -26,6 +27,35 @@ export type YachiyoRunArtifactPayload = {
   truncated?: boolean;
 };
 
+export type YachiyoSkillSyncResult = {
+  source?: string;
+  source_type?: string;
+  source_ref?: string;
+  status: 'imported' | 'updated' | 'skipped' | 'failed' | string;
+  skill_id?: string;
+  name?: string;
+  message?: string;
+};
+
+export type YachiyoSkillSyncResponse = {
+  ok?: boolean;
+  roots?: SkillSourceRootSnapshot[];
+  summary?: Record<string, number>;
+  results?: YachiyoSkillSyncResult[];
+};
+
+export type YachiyoSkillInstallResponse = {
+  ok?: boolean;
+  installer?: string;
+  command?: string[];
+  started_at?: string;
+  finished_at?: string;
+  returncode?: number;
+  stdout?: string;
+  stderr?: string;
+  sync?: YachiyoSkillSyncResponse | null;
+};
+
 export async function listYachiyoStudioAgents(): Promise<AgentDefinitionSnapshot[]> {
   const payload = await apiGet<{ agents?: AgentDefinitionSnapshot[] }>('/yachiyo/studio/agents');
   return payload.agents || [];
@@ -39,6 +69,28 @@ export async function saveYachiyoStudioAgent(
 
 export async function deleteYachiyoStudioAgent(agentId: string): Promise<{ ok?: boolean }> {
   return apiDelete(`/yachiyo/studio/agents/${encodeURIComponent(agentId)}`);
+}
+
+export async function testYachiyoStudioAgentModel(
+  agentId: string,
+): Promise<{ ok?: boolean; message?: string; missing?: string[] }> {
+  return apiPost(`/yachiyo/studio/agents/${encodeURIComponent(agentId)}/test-model`, {});
+}
+
+export async function attachYachiyoAgentSkill(
+  agentId: string,
+  skillId: string,
+): Promise<AgentDefinitionSnapshot> {
+  return apiPost(`/yachiyo/studio/agents/${encodeURIComponent(agentId)}/skills`, {
+    skill_id: skillId,
+  });
+}
+
+export async function detachYachiyoAgentSkill(
+  agentId: string,
+  skillId: string,
+): Promise<AgentDefinitionSnapshot> {
+  return apiDelete(`/yachiyo/studio/agents/${encodeURIComponent(agentId)}/skills/${encodeURIComponent(skillId)}`);
 }
 
 export async function listYachiyoSkills(): Promise<SkillSnapshot[]> {
@@ -98,14 +150,14 @@ export async function importYachiyoSkill(
   });
 }
 
-export async function syncYachiyoNativeSkills(): Promise<{ ok?: boolean }> {
+export async function syncYachiyoNativeSkills(): Promise<YachiyoSkillSyncResponse> {
   return apiPost('/yachiyo/studio/skills/sync', {});
 }
 
 export async function installYachiyoSkillCommand(
   command: string,
   folderId?: string,
-): Promise<{ ok?: boolean }> {
+): Promise<YachiyoSkillInstallResponse> {
   return apiPost('/yachiyo/studio/skills/install', {
     command,
     folder_id: folderId || undefined,
@@ -185,6 +237,17 @@ export async function getYachiyoGroupRun(groupRunId: string): Promise<GroupRunSn
 
 export async function getYachiyoRunTimeline(runId: string): Promise<RunTimelineSnapshot> {
   return apiGet(`/yachiyo/studio/runs/${encodeURIComponent(runId)}/timeline`);
+}
+
+export async function listYachiyoWorkflows(): Promise<WorkflowSnapshot[]> {
+  const payload = await apiGet<{ workflows?: WorkflowSnapshot[] }>('/yachiyo/studio/workflows');
+  return payload.workflows || [];
+}
+
+export async function saveYachiyoWorkflow(
+  request: Partial<WorkflowSnapshot>,
+): Promise<WorkflowSnapshot> {
+  return apiPost('/yachiyo/studio/workflows', request);
 }
 
 export async function listYachiyoRunTimelines(limit = 50): Promise<RunTimelineSnapshot[]> {

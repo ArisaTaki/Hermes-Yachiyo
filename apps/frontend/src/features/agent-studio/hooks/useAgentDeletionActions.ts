@@ -1,9 +1,7 @@
 import type { Dispatch, SetStateAction } from 'react';
 
-import {
-  deleteAgent,
-  type AgentSpec,
-} from '../../../lib/agents';
+import type { AgentSpec } from '../../../lib/agents';
+import { deleteYachiyoStudioAgent } from '../../yachiyo-studio/api';
 
 type AgentDeletionRefreshOptions = {
   selectedAgentId?: string;
@@ -60,7 +58,7 @@ export function useAgentDeletionActions({
       confirmLabel: '删除 Agent',
       variant: 'danger',
       onConfirm: () => void runAction(async () => {
-        await deleteAgent(agentId);
+        await deleteYachiyoStudioAgent(agentId);
         setSelectedAgentIds((current) => current.filter((id) => id !== agentId));
         setSelectedAgentId('');
         resetAgentDraft();
@@ -81,7 +79,7 @@ export function useAgentDeletionActions({
       variant: 'danger',
       onConfirm: () => void runAction(async () => {
         for (const agent of targets) {
-          await deleteAgent(agent.agent_id);
+          await deleteYachiyoStudioAgent(agent.agent_id);
         }
         setSelectedAgentIds((current) => current.filter((id) => !targetIds.has(id)));
         if (deletingCurrent) {
