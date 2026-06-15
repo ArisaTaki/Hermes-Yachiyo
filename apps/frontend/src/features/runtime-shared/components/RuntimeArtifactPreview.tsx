@@ -1,9 +1,9 @@
-export type RuntimeArtifactSnapshot = {
-  artifact_id: string;
-  title?: string | null;
-  kind: string;
-  path?: string | null;
-};
+import type { ArtifactSnapshot } from '../types';
+
+export type RuntimeArtifactSnapshot = Pick<
+  ArtifactSnapshot,
+  'artifact_id' | 'kind' | 'path' | 'title'
+>;
 
 export function RuntimeArtifactPreview({
   artifact,

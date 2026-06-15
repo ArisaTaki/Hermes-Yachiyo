@@ -1,15 +1,12 @@
 import type { ReactNode } from 'react';
 
+import type { ApprovalCardSnapshot } from '../types';
 import { approvalPreviewRecord, approvalPreviewValue } from '../approval';
 
-export type RuntimeApprovalCardSnapshot = {
-  approval_id: string;
-  title?: string | null;
-  description?: string | null;
-  status?: string;
-  tool_name?: string | null;
-  input_preview?: Record<string, unknown>;
-};
+export type RuntimeApprovalCardSnapshot = Pick<
+  ApprovalCardSnapshot,
+  'approval_id' | 'description' | 'input_preview' | 'status' | 'title' | 'tool_name'
+>;
 
 export function RuntimeApprovalCard({
   actions,
