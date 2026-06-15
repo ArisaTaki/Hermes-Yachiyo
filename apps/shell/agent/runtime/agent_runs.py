@@ -83,3 +83,49 @@ class RuntimeAgentRunStarter:
             client_request_id=client_request_id,
         )
         return AgentRunStart(run, root_group=root_group)
+
+
+class RuntimeAgentRunCoordinator:
+    """Coordinates synchronous Agent Run validation, creation, and execution."""
+
+    def __init__(
+        self,
+        *,
+        get_agent_private: Callable[[str], dict[str, Any]],
+        validate_agent_run_readiness: Callable[[dict[str, Any]], None],
+        starter: RuntimeAgentRunStarter,
+        execute_agent_run: Callable[..., dict[str, Any]],
+        project_agent_run_group_if_root: Callable[[dict[str, Any]], dict[str, Any]],
+        lock: AbstractContextManager[Any],
+        error_type: type[Exception],
+    ) -> None:
+        self._get_agent_private = get_agent_private
+        self._validate_agent_run_readiness = validate_agent_run_readiness
+        self._starter = starter
+        self._execute_agent_run = execute_agent_run
+        self._project_agent_run_group_if_root = project_agent_run_group_if_root
+        self._lock = lock
+        self._error_type = error_type
+
+    def create_sync(self, payload: dict[str, Any]) -> dict[str, Any]:
+        agent_id = str(payload.get("agent_id") or payload.get("runnable_id") or "")
+        user_goal = str(payload.get("user_goal") or payload.get("goal") or "").strip()
+        if not agent_id:
+            raise self._error_type("缺少 agent_id")
+        if not user_goal:
+            raise self._error_type("运行目标不能为空")
+        agent = self._get_agent_private(agent_id)
+        self._validate_agent_run_readiness(agent)
+        start = self._starter.start_sync(payload, agent=agent, lock=self._lock)
+        if start.existing:
+            return start.run
+        run = start.run
+        result = self._execute_agent_run(
+            run["run_id"],
+            agent,
+            user_goal,
+            upstream=str(payload.get("upstream") or ""),
+        )
+        if start.root_group:
+            result = self._project_agent_run_group_if_root(result)
+        return result

@@ -90,7 +90,7 @@ from apps.shell.agent.runtime.agent_context import (
 )
 from apps.shell.agent.runtime.agent_outcomes import RuntimeAgentRunOutcomeProjector
 from apps.shell.agent.runtime.agent_preparation import RuntimeAgentRunPreparer
-from apps.shell.agent.runtime.agent_runs import RuntimeAgentRunStarter
+from apps.shell.agent.runtime.agent_runs import RuntimeAgentRunCoordinator, RuntimeAgentRunStarter
 from apps.shell.agent.runtime.agent_services import (
     RuntimeAgentServiceBundle,
     build_runtime_agent_services as _build_runtime_agent_services,
@@ -584,6 +584,20 @@ class NativeRunEngine:
             agent_workspace_dir=self._agent_workspace_dir,
         )
         self._install_runtime_run_services(run_services)
+        self.agent_run_coordinator = RuntimeAgentRunCoordinator(
+            get_agent_private=lambda agent_id: self._get_agent_private(agent_id),
+            validate_agent_run_readiness=lambda agent: self._validate_agent_run_readiness(agent),
+            starter=self.agent_run_starter,
+            execute_agent_run=lambda run_id, agent, user_goal, **kwargs: self._execute_agent_run(
+                run_id,
+                agent,
+                user_goal,
+                **kwargs,
+            ),
+            project_agent_run_group_if_root=lambda result: self._project_agent_run_group_if_root(result),
+            lock=self._db_lock,
+            error_type=AgentRuntimeError,
+        )
         self._install_runtime_memory_services(
             RuntimeMemoryService(
                 self._conn,
@@ -2080,27 +2094,7 @@ class NativeRunEngine:
         return _runtime_agent_workspace_dir(agent)
 
     def create_agent_run(self, payload: dict[str, Any]) -> dict[str, Any]:
-        agent_id = str(payload.get("agent_id") or payload.get("runnable_id") or "")
-        user_goal = str(payload.get("user_goal") or payload.get("goal") or "").strip()
-        if not agent_id:
-            raise AgentRuntimeError("缺少 agent_id")
-        if not user_goal:
-            raise AgentRuntimeError("运行目标不能为空")
-        agent = self._get_agent_private(agent_id)
-        self._validate_agent_run_readiness(agent)
-        start = self.agent_run_starter.start_sync(payload, agent=agent, lock=self._db_lock)
-        if start.existing:
-            return start.run
-        run = start.run
-        result = self._execute_agent_run(
-            run["run_id"],
-            agent,
-            user_goal,
-            upstream=str(payload.get("upstream") or ""),
-        )
-        if start.root_group:
-            result = self._project_agent_run_group_if_root(result)
-        return result
+        return self.agent_run_coordinator.create_sync(payload)
 
     def create_agent_run_async(
         self,

@@ -6,7 +6,7 @@ import threading
 from typing import Any
 
 from apps.shell import agent_runtime
-from apps.shell.agent.runtime.agent_runs import RuntimeAgentRunStarter
+from apps.shell.agent.runtime.agent_runs import AgentRunStart, RuntimeAgentRunCoordinator, RuntimeAgentRunStarter
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
 
@@ -114,6 +114,61 @@ def test_agent_run_starter_async_preserves_legacy_non_idempotent_behavior() -> N
     assert len(state["runs"]) == 1
 
 
+def test_agent_run_coordinator_validates_starts_executes_and_projects_root_group() -> None:
+    calls: list[tuple[str, Any]] = []
+
+    class _Starter:
+        def start_sync(self, payload: dict[str, Any], *, agent: dict[str, Any], lock: Any) -> AgentRunStart:
+            calls.append(("start", payload, agent, lock))
+            return AgentRunStart({"run_id": "run-1"}, root_group=True)
+
+    coordinator = RuntimeAgentRunCoordinator(
+        get_agent_private=lambda agent_id: calls.append(("agent", agent_id)) or {
+            "agent_id": agent_id,
+            "name": "Runner",
+        },
+        validate_agent_run_readiness=lambda agent: calls.append(("readiness", agent["agent_id"])),
+        starter=_Starter(),  # type: ignore[arg-type]
+        execute_agent_run=lambda run_id, agent, user_goal, **kwargs: calls.append(
+            ("execute", run_id, agent["agent_id"], user_goal, kwargs)
+        )
+        or {"run_id": run_id, "status": "completed"},
+        project_agent_run_group_if_root=lambda result: calls.append(("project", result["run_id"]))
+        or {**result, "group_projected": True},
+        lock=object(),
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = coordinator.create_sync({"agent_id": "agent-1", "user_goal": "Ship", "upstream": "Context"})
+
+    assert result == {"run_id": "run-1", "status": "completed", "group_projected": True}
+    assert calls[0] == ("agent", "agent-1")
+    assert calls[1] == ("readiness", "agent-1")
+    assert calls[3] == ("execute", "run-1", "agent-1", "Ship", {"upstream": "Context"})
+    assert calls[4] == ("project", "run-1")
+
+
+def test_agent_run_coordinator_returns_existing_idempotent_run_without_execution() -> None:
+    class _Starter:
+        def start_sync(self, payload: dict[str, Any], *, agent: dict[str, Any], lock: Any) -> AgentRunStart:
+            return AgentRunStart({"run_id": "existing", "idempotent": True}, root_group=False, existing=True)
+
+    coordinator = RuntimeAgentRunCoordinator(
+        get_agent_private=lambda agent_id: {"agent_id": agent_id, "name": "Runner"},
+        validate_agent_run_readiness=lambda _agent: None,
+        starter=_Starter(),  # type: ignore[arg-type]
+        execute_agent_run=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not execute")),
+        project_agent_run_group_if_root=lambda result: result,
+        lock=object(),
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    assert coordinator.create_sync({"agent_id": "agent-1", "user_goal": "Ship"}) == {
+        "run_id": "existing",
+        "idempotent": True,
+    }
+
+
 def test_native_runtime_uses_split_agent_run_starter(tmp_path, monkeypatch) -> None:
     service = AgentRuntimeService(
         db_path=tmp_path / "agent-runtime.db",
@@ -136,7 +191,9 @@ def test_native_runtime_uses_split_agent_run_starter(tmp_path, monkeypatch) -> N
     monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
     try:
         assert agent_runtime.RuntimeAgentRunStarter is RuntimeAgentRunStarter
+        assert agent_runtime.RuntimeAgentRunCoordinator is RuntimeAgentRunCoordinator
         assert isinstance(service.agent_run_starter, RuntimeAgentRunStarter)
+        assert isinstance(service.agent_run_coordinator, RuntimeAgentRunCoordinator)
         agent = service.create_agent(
             {
                 "name": "Starter Agent",
