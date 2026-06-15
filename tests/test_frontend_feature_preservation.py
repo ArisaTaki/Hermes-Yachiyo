@@ -377,6 +377,7 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "cancelYachiyoTask",
             "getYachiyoTask",
             "listYachiyoTasks",
+            "from '../features/yachiyo-chat/taskSnapshots';",
             "resolveYachiyoTaskApproval(task, approval, 'approve')",
             "resolveYachiyoTaskApproval(task, approval, 'reject')",
             "cancelYachiyoTaskFromCard",
@@ -391,6 +392,30 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "onApproveApproval={onApproveTaskApproval}",
             "onRejectApproval={onRejectTaskApproval}",
             "onCancelTask={onCancelTask}",
+        ],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/views/ChatView.tsx",
+        [
+            "function agentTaskSnapshotFromMessage",
+            "function publicTaskSnapshotForMessage",
+            "function yachiyoTaskCacheKeys",
+            "function yachiyoTaskRunId",
+            "function yachiyoTaskStatusMessage",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/taskSnapshots.ts",
+        [
+            "export function agentTaskSnapshotFromMessage",
+            "export function publicTaskSnapshotForMessage",
+            "export function yachiyoTaskCacheKeys",
+            "export function yachiyoTaskRunId",
+            "export function yachiyoTaskStatusMessage",
+            "pending_approvals: messageTaskApprovals(message, runId)",
+            "recent_events: messageTaskEvents(message, runId)",
+            "artifacts: messageTaskArtifacts(message, runId)",
+            "open_in_studio_url: `#/agents?run_id=${encodeURIComponent(runId)}`",
         ],
     )
     _assert_contains(

@@ -19,7 +19,14 @@ import {
   startYachiyoTask,
 } from '../features/yachiyo-chat/api';
 import { AgentTaskCard } from '../features/yachiyo-chat/components/AgentTaskCard';
-import type { AgentTaskSnapshot, ApprovalCardSnapshot, TaskStatus } from '../features/yachiyo-chat/types';
+import {
+  agentTaskSnapshotFromMessage,
+  publicTaskSnapshotForMessage,
+  yachiyoTaskCacheKeys,
+  yachiyoTaskRunId,
+  yachiyoTaskStatusMessage,
+} from '../features/yachiyo-chat/taskSnapshots';
+import type { AgentTaskSnapshot, ApprovalCardSnapshot } from '../features/yachiyo-chat/types';
 import logoUrl from '../../../../docs/open-design/logo.png';
 import { type AssistantProfileSeed, useAssistantProfileSeed } from '../lib/assistantProfileSeed';
 import { approveRunApproval, listRunnables, type RunnableSummary, type RunSpec, getRun, rejectRunApproval } from '../lib/agents';
@@ -3734,180 +3741,6 @@ function AgentRunProgressCard({ message, onOpenDetails, runId }: {
       </div>
     </div>
   );
-}
-
-function agentTaskSnapshotFromMessage(message: ChatMessage, displayContent: string): AgentTaskSnapshot | null {
-  const runId = messageRunId(message);
-  if ((message.role || '') !== 'assistant' || !runId) return null;
-  const metadata = message.metadata || {};
-  const senderName = participantDisplayName(metadata.sender);
-  const title = String(
-    metadata.run_progress_title
-    || metadata.delegated_goal
-    || metadata.group_goal
-    || senderName
-    || 'Yachiyo task',
-  );
-  const summary = compactStatusText(
-    displayContent || message.content || message.text || metadata.run_progress_detail || '',
-    140,
-  );
-  return {
-    task_id: String(message.task_id || metadata.delegated_run_source_task_id || runId),
-    conversation_id: null,
-    title,
-    status: taskStatusFromRunStatus(messageRunStatus(message) || message.status || ''),
-    summary: summary || null,
-    current_step: String(metadata.run_progress_detail || message.progress_label || '').trim() || null,
-    progress_text: message.progress_label || null,
-    needs_user_action: messageRunStatus(message) === 'approval_required',
-    pending_approvals: messageTaskApprovals(message, runId),
-    recent_events: messageTaskEvents(message, runId),
-    artifacts: messageTaskArtifacts(message, runId),
-    open_in_studio_url: `#/agents?run_id=${encodeURIComponent(runId)}`,
-    created_at: message.created_at || '',
-    updated_at: message.created_at || '',
-  };
-}
-
-function publicTaskSnapshotForMessage(
-  message: ChatMessage,
-  snapshotsById: Record<string, AgentTaskSnapshot>,
-): AgentTaskSnapshot | null {
-  const keys = uniqueStrings([
-    message.task_id,
-    message.metadata?.delegated_run_source_task_id,
-    message.metadata?.workflow_waiting_child_run_id,
-    messageRunId(message),
-  ]);
-  for (const key of keys) {
-    const snapshot = snapshotsById[key];
-    if (snapshot) return snapshot;
-  }
-  return null;
-}
-
-function yachiyoTaskCacheKeys(task: AgentTaskSnapshot): string[] {
-  const artifactKeys = (task.artifacts || []).flatMap((artifact) => [
-    artifact.run_id,
-    artifact.source_run_id,
-  ]);
-  return uniqueStrings([
-    task.task_id,
-    ...((task.recent_events || []).map((event) => event.run_id)),
-    ...((task.pending_approvals || []).map((approval) => approval.run_id || '')),
-    ...artifactKeys,
-  ]);
-}
-
-function yachiyoTaskRunId(task: AgentTaskSnapshot): string {
-  const artifactRun = (task.artifacts || []).find((artifact) => artifact.run_id || artifact.source_run_id);
-  return uniqueStrings([
-    ...(task.recent_events || []).map((event) => event.run_id),
-    ...(task.pending_approvals || []).map((approval) => approval.run_id || ''),
-    artifactRun?.run_id,
-    artifactRun?.source_run_id,
-    task.task_id,
-  ])[0] || '';
-}
-
-function yachiyoTaskStatusMessage(
-  task: AgentTaskSnapshot,
-  action: 'approve' | 'reject' | 'cancel',
-): string {
-  if (action === 'cancel') {
-    if (task.status === 'cancelled') return 'Agent 任务已取消。';
-    if (task.status === 'failed') return 'Agent 任务取消失败。';
-    return '已请求取消 Agent 任务。';
-  }
-  if (task.status === 'waiting_approval') return 'Agent 任务需要处理下一次审批。';
-  if (task.status === 'running' || task.status === 'queued') {
-    return action === 'approve' ? '已批准，Agent 任务正在继续执行...' : '已拒绝，Agent 任务正在整理结果...';
-  }
-  if (task.status === 'completed') return 'Agent 任务已完成。';
-  if (task.status === 'failed') return 'Agent 任务失败。';
-  if (task.status === 'cancelled') return 'Agent 任务已取消。';
-  return task.progress_text || task.current_step || 'Agent 任务状态已更新。';
-}
-
-function taskStatusFromRunStatus(status: string): TaskStatus {
-  const normalized = normalizeRunStatus(status);
-  if (normalized === 'approval_required') return 'waiting_approval';
-  if (normalized === 'processing' || normalized === 'running' || normalized === 'pending') return 'running';
-  if (normalized === 'completed') return 'completed';
-  if (normalized === 'failed' || normalized === 'error') return 'failed';
-  if (normalized === 'cancelled' || normalized === 'canceled') return 'cancelled';
-  return 'running';
-}
-
-function messageTaskApprovals(message: ChatMessage, runId: string): AgentTaskSnapshot['pending_approvals'] {
-  const approvals: AgentTaskSnapshot['pending_approvals'] = [];
-  const pending = message.metadata?.pending_approval;
-  if (pending) {
-    const tool = String(pending.tool || 'tool');
-    approvals.push({
-      approval_id: String(pending.approval_id || runId),
-      run_id: runId,
-      title: `审批 ${tool}`,
-      status: 'pending',
-      tool_name: tool,
-      input_preview: recordPreview(pending.input_preview),
-      requested_at: pending.requested_at || '',
-      open_in_studio_url: `#/agents?run_id=${encodeURIComponent(runId)}`,
-    });
-  }
-  const workflowPending = message.metadata?.workflow_waiting_pending_approval;
-  if (workflowPending) {
-    const childRunId = String(message.metadata?.workflow_waiting_child_run_id || runId);
-    const tool = String(workflowPending.tool || 'workflow.approval');
-    approvals.push({
-      approval_id: String(workflowPending.approval_id || childRunId),
-      run_id: childRunId,
-      title: `审批 ${tool}`,
-      status: 'pending',
-      tool_name: tool,
-      input_preview: recordPreview(workflowPending.input_preview),
-      requested_at: workflowPending.requested_at || '',
-      open_in_studio_url: `#/agents?run_id=${encodeURIComponent(childRunId)}`,
-    });
-  }
-  return approvals;
-}
-
-function messageTaskArtifacts(message: ChatMessage, runId: string): AgentTaskSnapshot['artifacts'] {
-  return (message.metadata?.run_artifacts || []).map((artifact, index) => {
-    const path = String(artifact.path || '').trim();
-    const kind = String(artifact.kind || 'artifact').trim();
-    return {
-      artifact_id: `${runId}:${path || kind}:${index}`,
-      run_id: runId,
-      source_run_id: runId,
-      title: path || kind,
-      kind,
-      path: path || null,
-    };
-  });
-}
-
-function messageTaskEvents(message: ChatMessage, runId: string): AgentTaskSnapshot['recent_events'] {
-  return (message.activity_events || []).slice(0, 3).map((event, index) => ({
-    event_id: event.event_id || null,
-    run_id: activityRunId(event) || runId,
-    sequence: index + 1,
-    schema_version: 1,
-    event_type: event.phase || event.status || 'chat.activity',
-    title: event.title || event.tool_name || null,
-    detail: event.detail || null,
-    visibility: 'user',
-    sensitivity: 'public',
-    payload: event.metadata || {},
-    created_at: event.created_at || '',
-  }));
-}
-
-function recordPreview(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
-  return value as Record<string, unknown>;
 }
 
 function approvalRequestDetails(message: ChatMessage): ApprovalRequestDetails {
