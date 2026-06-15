@@ -12,6 +12,7 @@ import type {
   SkillFolderSnapshot,
   SkillSnapshot,
   SkillSourceRootSnapshot,
+  WorkflowRunSnapshot,
   WorkflowSnapshot,
 } from './types';
 
@@ -354,7 +355,7 @@ export async function startYachiyoWorkflowRun(
   workflowId: string,
   objective: string,
   title?: string,
-): Promise<RunTimelineSnapshot> {
+): Promise<WorkflowRunSnapshot> {
   const clientRunId = createClientRunId();
   return apiPost(`/yachiyo/studio/workflows/${encodeURIComponent(workflowId)}/runs`, {
     objective,

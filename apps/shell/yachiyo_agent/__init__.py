@@ -29,6 +29,7 @@ from .contracts import (
     StartGroupRunRequest,
     StartWorkflowRunRequest,
     ToolCallSnapshot,
+    WorkflowRunSnapshot,
     WorkflowSnapshot,
 )
 from .links import studio_run_url
@@ -65,6 +66,7 @@ __all__ = [
     "StartGroupRunRequest",
     "StartWorkflowRunRequest",
     "ToolCallSnapshot",
+    "WorkflowRunSnapshot",
     "WorkflowSnapshot",
     "YachiyoAgentService",
     "studio_run_url",

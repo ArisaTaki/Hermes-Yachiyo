@@ -93,6 +93,7 @@ export function publicRunTimelineToRunSpec(
 ): RunSpec {
   const kind = fallback.kind || (snapshot.workflow_run_id ? 'workflow_run' : 'agent_run');
   const pendingApproval = snapshot.pending_approval || snapshot.approvals?.find((approval) => approval.approval_id);
+  const workflowId = 'workflow_id' in snapshot ? String(snapshot.workflow_id || '').trim() : '';
   return {
     run_id: snapshot.run_id,
     run_group_id: snapshot.run_group_id || snapshot.group_run_id || undefined,
@@ -112,7 +113,7 @@ export function publicRunTimelineToRunSpec(
       ? snapshot.task_run_link_last_event_sequence ?? undefined
       : undefined,
     kind,
-    runnable_id: fallback.runnableId || snapshot.workflow_run_id || snapshot.agent_id || snapshot.run_id,
+    runnable_id: fallback.runnableId || workflowId || snapshot.workflow_run_id || snapshot.agent_id || snapshot.run_id,
     runnable_name: snapshot.title || fallback.runnableName || undefined,
     status: snapshot.status || 'processing',
     user_goal: fallback.userGoal ?? snapshot.title ?? '',

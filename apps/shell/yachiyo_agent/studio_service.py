@@ -25,6 +25,7 @@ from .contracts import (
     StartAgentRunRequest,
     StartGroupRunRequest,
     StartWorkflowRunRequest,
+    WorkflowRunSnapshot,
     WorkflowSnapshot,
 )
 from .events import public_run_event_from_payload
@@ -41,7 +42,7 @@ from .skills import (
     skill_source_root_snapshot_from_payload,
 )
 from .timelines import run_timeline_snapshot_from_payload
-from .workflows import workflow_snapshot_from_payload
+from .workflows import workflow_run_snapshot_from_payload, workflow_snapshot_from_payload
 
 
 class AgentStudioService:
@@ -272,8 +273,8 @@ class AgentStudioService:
     def start_workflow_run(
         self,
         request: StartWorkflowRunRequest | Mapping[str, Any],
-    ) -> RunTimelineSnapshot:
-        return run_timeline_snapshot_from_payload(
+    ) -> WorkflowRunSnapshot:
+        return workflow_run_snapshot_from_payload(
             self._studio_port.start_workflow_run(_request_payload(request))
         )
 

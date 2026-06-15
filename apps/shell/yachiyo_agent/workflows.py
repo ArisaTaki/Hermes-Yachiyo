@@ -5,7 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from .contracts import WorkflowSnapshot
+from .contracts import WorkflowRunSnapshot, WorkflowSnapshot
+from .run_snapshots import run_timeline_snapshot_from_payload
 
 
 def workflow_snapshot_from_payload(
@@ -23,6 +24,25 @@ def workflow_snapshot_from_payload(
         enabled=bool(payload.get("enabled", True)),
         created_at=_text(payload.get("created_at")),
         updated_at=_text(payload.get("updated_at")),
+    )
+
+
+def workflow_run_snapshot_from_payload(
+    payload: Mapping[str, Any] | WorkflowRunSnapshot,
+) -> WorkflowRunSnapshot:
+    if isinstance(payload, WorkflowRunSnapshot):
+        return payload
+
+    timeline = run_timeline_snapshot_from_payload(payload)
+    return WorkflowRunSnapshot(
+        **timeline.model_dump(mode="python"),
+        workflow_id=_optional_text(payload.get("workflow_id") or payload.get("runnable_id")),
+        objective=_text(payload.get("objective") or payload.get("user_goal") or timeline.title),
+        current_node_id=_optional_text(payload.get("current_node_id") or payload.get("workflow_node_id")),
+        current_node_label=_optional_text(
+            payload.get("current_node_label") or payload.get("workflow_node_label")
+        ),
+        final_answer=_optional_text(payload.get("final_answer") or payload.get("result")),
     )
 
 

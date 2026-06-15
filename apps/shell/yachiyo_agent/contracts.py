@@ -322,6 +322,14 @@ class WorkflowSnapshot(_PublicSnapshot):
     updated_at: str = ""
 
 
+class WorkflowRunSnapshot(RunTimelineSnapshot):
+    workflow_id: str | None = None
+    objective: str = ""
+    current_node_id: str | None = None
+    current_node_label: str | None = None
+    final_answer: str | None = None
+
+
 class StartChatTaskRequest(BaseModel):
     model_config = ConfigDict(extra="allow")
 

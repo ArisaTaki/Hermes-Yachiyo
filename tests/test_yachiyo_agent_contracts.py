@@ -27,6 +27,7 @@ from apps.shell.yachiyo_agent import (
     SkillSnapshot,
     SkillSourceRootSnapshot,
     ToolCallSnapshot,
+    WorkflowRunSnapshot,
     WorkflowSnapshot,
 )
 from apps.shell.yachiyo_agent.events import public_run_event_from_payload
@@ -312,12 +313,32 @@ def test_group_run_and_workflow_snapshots_keep_group_and_workflow_fields() -> No
         edges=[],
         default_input_schema={"type": "object"},
     )
+    workflow_run = WorkflowRunSnapshot(
+        run_id="workflow-run-1",
+        workflow_run_id="workflow-run-1",
+        workflow_id="workflow-1",
+        status="running",
+        title="Review docs",
+        objective="Review docs",
+        events=[
+            PublicRunEvent(
+                run_id="workflow-run-1",
+                event_type="workflow.node.started",
+                detail="Start",
+            )
+        ],
+        children=[RunTimelineChildSnapshot(run_id="agent-run-1", status="running")],
+    )
 
     assert _json(group)["mode"] == "debate"
     assert _json(group)["members"][0]["role"] == "planner"
     assert _json(group_run)["participants"][0]["agent_id"] == "agent-1"
     assert _json(group_run)["events"][0]["event_type"] == "group.member.started"
     assert _json(workflow)["default_input_schema"] == {"type": "object"}
+    assert _json(workflow_run)["run_id"] == "workflow-run-1"
+    assert _json(workflow_run)["workflow_id"] == "workflow-1"
+    assert _json(workflow_run)["events"][0]["event_type"] == "workflow.node.started"
+    assert _json(workflow_run)["children"][0]["run_id"] == "agent-run-1"
 
 
 def test_agent_definition_snapshot_serializes_model_config_alias() -> None:

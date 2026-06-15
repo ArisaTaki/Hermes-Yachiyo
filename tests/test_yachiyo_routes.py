@@ -725,6 +725,9 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     assert workflow["workflow_id"] == "workflow-1"
     assert deleted_workflow == {"ok": True, "workflow_id": "workflow-1"}
     assert workflow_run["workflow_run_id"] == "workflow-run-1"
+    assert workflow_run["workflow_id"] == "workflow-1"
+    assert workflow_run["objective"] == "Build report"
+    assert workflow_run["run_id"] == "workflow-run-1"
     assert runs["runs"][0]["run_id"] == "studio-run"
     assert run_detail["run_id"] == "run-1"
     assert timeline["run_group_id"] == "group-run-1"

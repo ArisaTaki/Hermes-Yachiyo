@@ -287,6 +287,14 @@ export type WorkflowSnapshot = {
   updated_at?: string;
 };
 
+export type WorkflowRunSnapshot = RunTimelineSnapshot & {
+  workflow_id?: string | null;
+  objective?: string;
+  current_node_id?: string | null;
+  current_node_label?: string | null;
+  final_answer?: string | null;
+};
+
 export type FutureTaskTriggerResultSnapshot = {
   ok?: boolean;
   future_task?: FutureTaskSnapshot | null;

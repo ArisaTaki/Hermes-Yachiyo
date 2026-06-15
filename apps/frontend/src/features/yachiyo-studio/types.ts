@@ -23,6 +23,7 @@ export type {
   SkillSnapshot,
   SkillSourceRootSnapshot,
   ToolCallSnapshot,
+  WorkflowRunSnapshot,
   WorkflowSnapshot,
 } from '../runtime-shared/types';
 
