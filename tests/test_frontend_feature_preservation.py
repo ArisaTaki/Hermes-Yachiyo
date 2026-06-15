@@ -697,6 +697,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "workflowSpecStepRefs({",
             "agentRunReadinessIssue(agent, chatModelProfiles",
             "agentToDraft(selectedAgent)",
+            "addEdge({",
             "const routeRunId = currentParam('run').trim();",
             "getStudioRunForView(",
             "workflowNodes(selectedWorkflow)",
@@ -2503,6 +2504,8 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
         "apps/frontend/src/features/agent-studio/hooks/useWorkflowCanvasActions.ts",
         [
             "export function useWorkflowCanvasActions",
+            "function connectFlowNodes(connection: Connection)",
+            "setEdges((current) => addEdge({ ...connection, id: `edge-${connection.source}-${connection.target}` }, current));",
             "function addFlowNode(kind: WorkflowCanvasNodeKind, agentId = '')",
             "const id = uniqueWorkflowNodeId(nodeSeed, nodes);",
             "const sourceId = terminalNodeId(nodes, edges);",

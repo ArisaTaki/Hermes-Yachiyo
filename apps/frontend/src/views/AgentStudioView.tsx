@@ -1,7 +1,6 @@
-import { useCallback, useMemo, useState } from 'react';
-import type { Connection, Edge, Node } from '@xyflow/react';
+import { useMemo, useState } from 'react';
+import type { Edge, Node } from '@xyflow/react';
 import {
-  addEdge,
   useEdgesState,
   useNodesState,
 } from '@xyflow/react';
@@ -295,6 +294,7 @@ export function AgentStudioView() {
   });
   const {
     addFlowNode,
+    connectFlowNodes,
     removeFlowNode,
   } = useWorkflowCanvasActions({
     agents,
@@ -789,13 +789,6 @@ export function AgentStudioView() {
     tab,
   });
 
-  const onConnect = useCallback(
-    (connection: Connection) => {
-      setEdges((current) => addEdge({ ...connection, id: `edge-${connection.source}-${connection.target}` }, current));
-    },
-    [setEdges],
-  );
-
   function startNewAgent() {
     setSelectedAgentId('');
     setDraft({ ...emptyAgentDraft });
@@ -1030,7 +1023,7 @@ export function AgentStudioView() {
           edges={edges}
           nodes={nodes}
           onAddFlowNode={addFlowNode}
-          onConnect={onConnect}
+          onConnect={connectFlowNodes}
           onDeleteSelectedWorkflows={requestDeleteSelectedWorkflows}
           onDeleteWorkflow={requestDeleteWorkflow}
           onEdgesChange={onEdgesChange}

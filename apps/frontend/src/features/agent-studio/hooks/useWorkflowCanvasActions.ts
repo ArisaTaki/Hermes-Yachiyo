@@ -1,5 +1,6 @@
 import type { Dispatch, SetStateAction } from 'react';
-import type { Edge, Node } from '@xyflow/react';
+import type { Connection, Edge, Node } from '@xyflow/react';
+import { addEdge } from '@xyflow/react';
 
 import type { AgentSpec } from '../types';
 import {
@@ -24,6 +25,10 @@ export function useWorkflowCanvasActions({
   setEdges,
   setNodes,
 }: UseWorkflowCanvasActionsOptions) {
+  function connectFlowNodes(connection: Connection) {
+    setEdges((current) => addEdge({ ...connection, id: `edge-${connection.source}-${connection.target}` }, current));
+  }
+
   function addFlowNode(kind: WorkflowCanvasNodeKind, agentId = '') {
     const agent = agentId
       ? agents.find((candidate) => candidate.agent_id === agentId)
@@ -84,6 +89,7 @@ export function useWorkflowCanvasActions({
 
   return {
     addFlowNode,
+    connectFlowNodes,
     removeFlowNode,
   };
 }
