@@ -205,6 +205,62 @@ def test_run_timeline_projects_legacy_agent_tool_lifecycle_events() -> None:
     assert all(call.run_id == "run-legacy-tools" for call in timeline.tool_calls)
 
 
+def test_run_timeline_preserves_memory_and_skill_trace_events() -> None:
+    timeline = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "run-memory-skill",
+            "status": "completed",
+            "events": [
+                {
+                    "event_type": "memory.retrieved",
+                    "payload": {
+                        "count": 1,
+                        "memories": [
+                            {
+                                "memory_id": "memory-1",
+                                "kind": "preference",
+                                "scope": "global",
+                            }
+                        ],
+                    },
+                },
+                {
+                    "event_type": "skill.selected",
+                    "payload": {
+                        "result": {
+                            "skill_id": "skill-1",
+                            "name": "Demo Skill",
+                        }
+                    },
+                },
+                {
+                    "event_type": "skill.dispatch.read",
+                    "payload": {
+                        "tool": "skill.read",
+                        "status": "completed",
+                        "result": {
+                            "skill_id": "skill-1",
+                            "name": "Demo Skill",
+                        },
+                    },
+                },
+            ],
+        }
+    )
+
+    assert [event.event_type for event in timeline.events] == [
+        "memory.retrieved",
+        "skill.selected",
+        "skill.dispatch.read",
+    ]
+    assert timeline.events[0].payload["memories"][0]["memory_id"] == "memory-1"
+    assert timeline.events[0].payload["memories"][0]["kind"] == "preference"
+    assert timeline.events[1].payload["result"]["skill_id"] == "skill-1"
+    assert timeline.events[2].payload["tool"] == "skill.read"
+    assert timeline.events[2].payload["status"] == "completed"
+    assert timeline.tool_calls == []
+
+
 def test_group_run_snapshot_reuses_shared_run_projection_for_children_artifacts_and_approvals() -> None:
     group_run = group_run_snapshot_from_payload(
         {
