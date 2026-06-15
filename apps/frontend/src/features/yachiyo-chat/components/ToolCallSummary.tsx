@@ -21,6 +21,12 @@ const TOOL_EVENT_TYPES = new Set([
   'tool.completed',
   'agent.tool.completed',
   'tool.failed',
+  'skill.selected',
+  'skill.dispatch.read',
+  'memory.retrieved',
+  'memory.write.add',
+  'memory.write.replace',
+  'memory.write.remove',
 ]);
 
 export function ToolCallSummary({
@@ -35,7 +41,7 @@ export function ToolCallSummary({
 
   return (
     <div className="yachiyo-agent-task-tools" data-testid="yachiyo-agent-task-tool-summary">
-      <span>工具</span>
+      <span>能力</span>
       <div>
         {tools.map((tool) => (
           <span
@@ -83,6 +89,25 @@ function summarizeToolCalls(events: PublicRunEvent[], limit: number): ToolCallSu
 }
 
 function toolNameFromEvent(event: PublicRunEvent): string {
+  const eventType = String(event.event_type || '').trim();
+  if (eventType === 'memory.retrieved') return 'Memory 检索';
+  if (eventType.startsWith('memory.write.')) {
+    return (
+      stringPayload(objectPayload(event.payload, 'result'), 'action') ||
+      stringPayload(event.payload, 'tool') ||
+      'Memory 写入'
+    );
+  }
+  if (eventType === 'skill.selected' || eventType.startsWith('skill.dispatch.')) {
+    return (
+      stringPayload(objectPayload(event.payload, 'result'), 'name') ||
+      stringPayload(event.payload, 'skill_name') ||
+      stringPayload(objectPayload(event.payload, 'result'), 'skill_id') ||
+      stringPayload(event.payload, 'skill_id') ||
+      stringPayload(event.payload, 'tool') ||
+      'Skill'
+    );
+  }
   const fallbackName = String(event.detail || event.title || 'tool').trim();
   return (
     stringPayload(event.payload, 'tool_name') ||
@@ -109,8 +134,13 @@ function toolStatusFromEvent(event: PublicRunEvent): string {
   if (
     eventType === 'agent.tool.call' ||
     eventType === 'agent.tool.completed' ||
-    eventType === 'tool.completed'
+    eventType === 'tool.completed' ||
+    eventType === 'skill.selected' ||
+    eventType === 'memory.retrieved'
   ) {
+    return 'completed';
+  }
+  if (eventType.startsWith('skill.dispatch.') || eventType.startsWith('memory.write.')) {
     return 'completed';
   }
   if (eventType === 'tool.started') return 'running';
@@ -141,6 +171,13 @@ function normalizeToolStatus(status: string): string {
 function stringPayload(payload: Record<string, unknown> | undefined, key: string): string {
   const value = payload?.[key];
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function objectPayload(payload: Record<string, unknown> | undefined, key: string): Record<string, unknown> | undefined {
+  const value = payload?.[key];
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
 }
 
 function toolStatusLabel(status: string): string {

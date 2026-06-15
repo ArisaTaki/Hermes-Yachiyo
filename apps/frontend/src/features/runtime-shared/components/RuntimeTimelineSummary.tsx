@@ -46,6 +46,12 @@ function runtimeTimelineEventLabel(event: RuntimeTimelineEventSnapshot): string 
   const type = String(event.event_type || '').trim();
   if (type === 'tool.approval_required' || type === 'agent.tool.approval_required') return '等待审批';
   if (type === 'tool.completed' || type === 'agent.tool.completed') return '工具完成';
+  if (type === 'skill.selected') return 'Skill 已选择';
+  if (type === 'skill.dispatch.read') return 'Skill 调度';
+  if (type === 'memory.retrieved') return 'Memory 检索';
+  if (type === 'memory.write.add') return 'Memory 新增';
+  if (type === 'memory.write.replace') return 'Memory 更新';
+  if (type === 'memory.write.remove') return 'Memory 删除';
   if (type === 'artifact.created') return '产物已生成';
   if (type === 'run.completed' || type === 'task.completed') return '任务完成';
   if (type === 'run.failed' || type === 'task.failed') return '任务失败';
