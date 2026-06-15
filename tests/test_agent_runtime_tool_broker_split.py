@@ -17,6 +17,14 @@ def test_tool_broker_remains_exported_from_legacy_runtime_module() -> None:
     assert agent_runtime._TERMINAL_PROCESSES is terminal_module._TERMINAL_PROCESSES
     assert agent_runtime._TERMINAL_PROCESS_LOCK is terminal_module._TERMINAL_PROCESS_LOCK
     assert broker_module._TERMINAL_PROCESSES is terminal_module._TERMINAL_PROCESSES
+    assert agent_runtime._safe_rel_path is workspace_module._safe_rel_path
+    assert agent_runtime._is_within is workspace_module._is_within
+    assert agent_runtime._read_text is workspace_module._read_text
+    assert agent_runtime._sha256_file is workspace_module._sha256_file
+    assert agent_runtime._atomic_write_text is workspace_module._atomic_write_text
+    assert agent_runtime._apply_single_file_unified_diff is (
+        workspace_module._apply_single_file_unified_diff
+    )
     assert broker_module._safe_rel_path is workspace_module._safe_rel_path
     assert broker_module._apply_single_file_unified_diff is (
         workspace_module._apply_single_file_unified_diff
