@@ -24,6 +24,7 @@ import { useAgentSkillMountActions } from '../features/agent-studio/hooks/useAge
 import { useApprovedRunGuard } from '../features/agent-studio/hooks/useApprovedRunGuard';
 import { useRunApprovalActions } from '../features/agent-studio/hooks/useRunApprovalActions';
 import { useRunApprovalFollowup } from '../features/agent-studio/hooks/useRunApprovalFollowup';
+import { useRunArtifactActions } from '../features/agent-studio/hooks/useRunArtifactActions';
 import { useRunEventReplay } from '../features/agent-studio/hooks/useRunEventReplay';
 import { useRunHistoryManagement } from '../features/agent-studio/hooks/useRunHistoryManagement';
 import { useRunLaunchActions } from '../features/agent-studio/hooks/useRunLaunchActions';
@@ -112,7 +113,6 @@ import {
 } from '../features/agent-studio/utils/workflow';
 import {
   getRun,
-  getRunArtifact,
   getRunGroup,
   listAgents,
   listFutureTasks,
@@ -636,6 +636,13 @@ export function AgentStudioView() {
     openRunDetail,
     runAction,
     showConfirmDialog,
+  });
+  const {
+    openArtifact,
+  } = useRunArtifactActions({
+    setArtifactPreview,
+    setError,
+    setStatus,
   });
   const {
     cancelEditingSkillFolder,
@@ -1526,23 +1533,6 @@ export function AgentStudioView() {
       }
       return nextEdges;
     });
-  }
-
-  async function openArtifact(run: RunSpec | string, path: string) {
-    const runId = typeof run === 'string' ? run : run.run_id;
-    setStatus('读取 artifact...');
-    setError('');
-    try {
-      const payload = await getRunArtifact(runId, path);
-      setArtifactPreview({
-        path: payload.path || path,
-        content: payload.content || '',
-        truncated: payload.truncated,
-      });
-      setStatus('Artifact 已读取');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '读取 artifact 失败');
-    }
   }
 
   async function loadMoreSelectedRunEvents() {

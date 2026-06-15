@@ -2080,6 +2080,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "useAgentSkillMountActions",
             "useRunApprovalActions",
             "useRunEventReplay",
+            "useRunArtifactActions",
             "useRunHistoryManagement",
             "useRunLaunchActions",
             "useRunNavigationActions",
@@ -2121,6 +2122,22 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "selectedAgentReadOnly",
             "selectedAgentDeletable",
             "AgentEditorPanel",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useRunArtifactActions.ts",
+        [
+            "export function useRunArtifactActions",
+            "async function openArtifact(run: RunSpec | string, path: string)",
+            "const runId = typeof run === 'string' ? run : run.run_id;",
+            "setStatus('读取 artifact...');",
+            "const payload = await getRunArtifact(runId, path);",
+            "setArtifactPreview({",
+            "path: payload.path || path,",
+            "content: payload.content || '',",
+            "truncated: payload.truncated,",
+            "setStatus('Artifact 已读取');",
+            "setError(err instanceof Error ? err.message : '读取 artifact 失败');",
         ],
     )
     _assert_contains(
