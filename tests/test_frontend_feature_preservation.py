@@ -375,8 +375,7 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "approveYachiyoTask",
             "rejectYachiyoTask",
             "cancelYachiyoTask",
-            "getYachiyoTask",
-            "listYachiyoTasks",
+            "useYachiyoTaskSnapshots",
             "from '../features/yachiyo-chat/taskSnapshots';",
             "resolveYachiyoTaskApproval(task, approval, 'approve')",
             "resolveYachiyoTaskApproval(task, approval, 'reject')",
@@ -392,6 +391,20 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "onApproveApproval={onApproveTaskApproval}",
             "onRejectApproval={onRejectTaskApproval}",
             "onCancelTask={onCancelTask}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/hooks/useYachiyoTaskSnapshots.ts",
+        [
+            "export function useYachiyoTaskSnapshots",
+            "getYachiyoTask",
+            "listYachiyoTasks",
+            "yachiyoTaskCacheKeys(task)",
+            "refreshYachiyoTasksForSession",
+            "refreshYachiyoTaskById",
+            "refreshYachiyoTaskSnapshotsForRunIds",
+            "The Chat surface keeps using legacy messages if the new facade is unavailable.",
+            "Message metadata still provides a fallback task card for legacy runs.",
         ],
     )
     _assert_not_contains(

@@ -13,16 +13,14 @@ import { UiIcon } from '../components/UiIcon';
 import {
   approveYachiyoTask,
   cancelYachiyoTask,
-  getYachiyoTask,
-  listYachiyoTasks,
   rejectYachiyoTask,
   startYachiyoTask,
 } from '../features/yachiyo-chat/api';
 import { AgentTaskCard } from '../features/yachiyo-chat/components/AgentTaskCard';
+import { useYachiyoTaskSnapshots } from '../features/yachiyo-chat/hooks/useYachiyoTaskSnapshots';
 import {
   agentTaskSnapshotFromMessage,
   publicTaskSnapshotForMessage,
-  yachiyoTaskCacheKeys,
   yachiyoTaskRunId,
   yachiyoTaskStatusMessage,
 } from '../features/yachiyo-chat/taskSnapshots';
@@ -349,7 +347,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const [sessionContext, setSessionContext] = useState<ChatSessionContext | null>(null);
   const [input, setInput] = useState(() => retainedComposerDraft.input);
   const [attachments, setAttachments] = useState<PendingAttachment[]>(() => [...retainedComposerDraft.attachments]);
-  const [agentTaskSnapshotsById, setAgentTaskSnapshotsById] = useState<Record<string, AgentTaskSnapshot>>({});
   const [status, setStatus] = useState('就绪');
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingCount, setProcessingCount] = useState(0);
@@ -424,14 +421,19 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const approvalSessionIdRef = useRef('');
   const loadSessionsRef = useRef<() => Promise<void>>(async () => undefined);
   const transientEmptySessionIdRef = useRef('');
-  const agentTaskSnapshotsRef = useRef<Record<string, AgentTaskSnapshot>>({});
-  const agentTaskFetchInFlightRef = useRef<Set<string>>(new Set());
   const latestChatSnapshotRef = useRef({
     currentSessionId: '',
     messageCount: 0,
     isProcessing: false,
     isSending: false,
   });
+  const {
+    agentTaskSnapshotsById,
+    rememberYachiyoTasks,
+    refreshYachiyoTaskById,
+    refreshYachiyoTasksForSession,
+    refreshYachiyoTaskSnapshotsForRunIds,
+  } = useYachiyoTaskSnapshots();
 
   const refreshMessages = useCallback(async (options: { allowDuringTransition?: boolean; anchorMessageId?: string } = {}) => {
     if (conversationTransitionRef.current && !options.allowDuringTransition) return;
@@ -534,55 +536,8 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     loadSessionsRef.current = loadSessions;
   }, [loadSessions]);
 
-  function rememberYachiyoTasks(tasks: Array<AgentTaskSnapshot | null | undefined>) {
-    const snapshots = tasks.filter((task): task is AgentTaskSnapshot => Boolean(task?.task_id));
-    if (!snapshots.length) return;
-    const next = { ...agentTaskSnapshotsRef.current };
-    let changed = false;
-    snapshots.forEach((task) => {
-      yachiyoTaskCacheKeys(task).forEach((key) => {
-        if (!key) return;
-        if (next[key] === task) return;
-        next[key] = task;
-        changed = true;
-      });
-    });
-    if (!changed) return;
-    agentTaskSnapshotsRef.current = next;
-    setAgentTaskSnapshotsById(next);
-  }
-
-  async function refreshYachiyoTasksForSession(sessionId: string) {
-    const cleanSessionId = sessionId.trim();
-    if (!cleanSessionId) return;
-    try {
-      rememberYachiyoTasks(await listYachiyoTasks(cleanSessionId));
-    } catch {
-      // The Chat surface keeps using legacy messages if the new facade is unavailable.
-    }
-  }
-
-  async function refreshYachiyoTaskById(taskId: string) {
-    const cleanTaskId = taskId.trim();
-    if (!cleanTaskId || agentTaskSnapshotsRef.current[cleanTaskId]) return;
-    if (agentTaskFetchInFlightRef.current.has(cleanTaskId)) return;
-    agentTaskFetchInFlightRef.current.add(cleanTaskId);
-    try {
-      rememberYachiyoTasks([await getYachiyoTask(cleanTaskId)]);
-    } catch {
-      // Message metadata still provides a fallback task card for legacy runs.
-    } finally {
-      agentTaskFetchInFlightRef.current.delete(cleanTaskId);
-    }
-  }
-
   function refreshYachiyoTaskSnapshotsFromMessages(nextMessages: ChatMessage[]) {
-    const ids = uniqueStrings(nextMessages.map(messageRunId))
-      .filter((runId) => !agentTaskSnapshotsRef.current[runId])
-      .slice(-8);
-    ids.forEach((runId) => {
-      void refreshYachiyoTaskById(runId);
-    });
+    refreshYachiyoTaskSnapshotsForRunIds(nextMessages.map(messageRunId));
   }
 
   async function resolveYachiyoTaskApproval(
