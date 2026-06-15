@@ -472,11 +472,11 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "onApproveApproval(task, approval)",
             "onRejectApproval(task, approval)",
             "onCancelTask?.(task)",
-            "RuntimeArtifactList",
             "RuntimeTimelineSummary",
             "ToolCallSummary",
+            "ArtifactPreview",
+            "<ArtifactPreview artifact={artifact}",
             "<ToolCallSummary events={recentEvents} />",
-            'previewTestId="yachiyo-task-artifact-preview"',
             "在 Agent Studio 中查看",
         ],
     )
