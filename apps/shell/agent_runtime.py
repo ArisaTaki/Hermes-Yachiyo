@@ -35,6 +35,7 @@ from apps.shell.agent.repositories.groups import RunGroupRepository
 from apps.shell.agent.repositories.memories import AgentMemoryStore
 from apps.shell.agent.repositories.runs import RunRepository
 from apps.shell.agent.repositories.skill_folders import SkillFolderRepository
+from apps.shell.agent.repositories.skills import SkillRepository
 from apps.shell.agent.repositories.studio_deletions import StudioDeletionRepository
 from apps.shell.agent.repositories.task_run_links import TaskRunLinkRepository
 from apps.shell.agent.repositories.workspaces import TrustedWorkspaceRepository
@@ -1680,6 +1681,22 @@ class NativeRunEngine:
             id_suffix_factory=lambda: uuid4().hex[:6],
             delete_skill=lambda skill_id: self.delete_skill(skill_id),
             error_type=AgentRuntimeError,
+        )
+        self.skill_records = SkillRepository(
+            self._conn,
+            ensure_row_factory=self._ensure_row_factory,
+            row_to_skill=self._row_to_skill,
+            now=_now,
+            json_dump=_json_dump,
+            json_load=_json_load,
+            normalize_skill_folder_id=self._normalize_skill_folder_id,
+            installed_skill_source_map=self._installed_skill_source_map,
+            remove_managed_copy_if_safe=self._remove_managed_copy_if_safe,
+            skill_path_owned_by_runtime=self._skill_path_owned_by_runtime,
+            record_studio_deletion=self._record_studio_deletion,
+            skill_deletion_key=self._skill_deletion_key,
+            is_native_library_source_type=_is_native_library_source_type,
+            skills_dir=self.skills_dir,
         )
         self.run_groups = RunGroupRepository(
             self._conn,
@@ -3353,18 +3370,7 @@ class NativeRunEngine:
         return self.skill_folders.delete(folder_id, delete_skills=delete_skills)
 
     def list_skills(self) -> dict[str, Any]:
-        self._ensure_row_factory()
-        self._repair_native_skill_references()
-        self._repair_installed_skill_provenance()
-        rows = self._conn.execute(
-            """
-            SELECT s.*, f.name AS folder_name
-              FROM skills s
-              LEFT JOIN skill_folders f ON f.folder_id = s.folder_id
-             ORDER BY s.updated_at DESC
-            """
-        ).fetchall()
-        return {"ok": True, "skills": [self._row_to_skill(row) for row in rows]}
+        return self.skill_records.list()
 
     def list_native_skill_sources(self) -> dict[str, Any]:
         roots = self._native_skill_root_specs()
@@ -3383,21 +3389,7 @@ class NativeRunEngine:
         }
 
     def get_skill(self, skill_id: str) -> dict[str, Any]:
-        self._ensure_row_factory()
-        self._repair_native_skill_references()
-        self._repair_installed_skill_provenance()
-        row = self._conn.execute(
-            """
-            SELECT s.*, f.name AS folder_name
-              FROM skills s
-              LEFT JOIN skill_folders f ON f.folder_id = s.folder_id
-             WHERE s.skill_id=?
-            """,
-            (skill_id,),
-        ).fetchone()
-        if row is None:
-            raise KeyError(skill_id)
-        return self._row_to_skill(row)
+        return self.skill_records.get(skill_id)
 
     def import_skill(self, source_path: str, folder_id: str | None = None) -> dict[str, Any]:
         source = Path(source_path).expanduser()
@@ -3807,64 +3799,10 @@ class NativeRunEngine:
         return _is_within(path, self.skills_dir) or _is_within(path, self.skill_installs_dir)
 
     def _repair_native_skill_references(self) -> None:
-        rows = self._conn.execute(
-            """
-            SELECT skill_id, local_path, origin_path
-              FROM skills
-             WHERE source_type IN ('native_global', 'native_project')
-               AND origin_path != ''
-               AND local_path != origin_path
-            """
-        ).fetchall()
-        if not rows:
-            return
-        for row in rows:
-            old_local_path = Path(str(row["local_path"] or ""))
-            origin_path = str(row["origin_path"])
-            self._remove_managed_copy_if_safe(old_local_path, origin_path)
-            self._conn.execute(
-                """
-                UPDATE skills
-                   SET local_path=?, updated_at=?
-                 WHERE skill_id=?
-                """,
-                (origin_path, _now(), row["skill_id"]),
-            )
-        self._conn.commit()
+        self.skill_records.repair_native_references()
 
     def _repair_installed_skill_provenance(self) -> None:
-        source_map = self._installed_skill_source_map()
-        if not source_map:
-            return
-        self._ensure_row_factory()
-        rows = self._conn.execute(
-            """
-            SELECT skill_id, local_path, origin_path, source_ref, source_type
-             FROM skills
-             WHERE source_type='npx_skills'
-            """
-        ).fetchall()
-        changed = False
-        for row in rows:
-            keys = []
-            for raw_path in (row["local_path"], row["origin_path"]):
-                if raw_path:
-                    keys.append(Path(str(raw_path)).name)
-            if row["source_ref"]:
-                keys.append(str(row["source_ref"]))
-            next_ref = next((source_map[key] for key in keys if key in source_map), "")
-            if next_ref and next_ref != row["source_ref"]:
-                self._conn.execute(
-                    """
-                    UPDATE skills
-                       SET source_ref=?, source_path=?, updated_at=?
-                     WHERE skill_id=?
-                    """,
-                    (next_ref, f"{row['source_type']}:{next_ref}", _now(), row["skill_id"]),
-                )
-                changed = True
-        if changed:
-            self._conn.commit()
+        self.skill_records.repair_installed_provenance()
 
     def _native_skill_root_specs(self, roots: list[Any] | None = None) -> list[dict[str, Any]]:
         if roots is None:
@@ -4056,21 +3994,7 @@ class NativeRunEngine:
         self.skill_folders.validate_name(name, current_folder_id=current_folder_id)
 
     def update_skill(self, skill_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        current = self.get_skill(skill_id)
-        if "enabled" not in payload and "folder_id" not in payload:
-            return current
-        enabled = payload.get("enabled") if "enabled" in payload else current.get("enabled", True)
-        folder_id = self._normalize_skill_folder_id(payload.get("folder_id")) if "folder_id" in payload else current.get("folder_id", "")
-        self._conn.execute(
-            """
-            UPDATE skills
-               SET enabled=?, folder_id=?, updated_at=?
-             WHERE skill_id=?
-            """,
-            (1 if enabled is not False else 0, folder_id, _now(), skill_id),
-        )
-        self._conn.commit()
-        return self.get_skill(skill_id)
+        return self.skill_records.update(skill_id, payload)
 
     @staticmethod
     def _skill_name(markdown: str, fallback: str) -> str:
@@ -4105,31 +4029,7 @@ class NativeRunEngine:
         return sorted(paths)
 
     def delete_skill(self, skill_id: str) -> dict[str, Any]:
-        self._ensure_row_factory()
-        skill_row = self._conn.execute(
-            "SELECT local_path, source_type, origin_path FROM skills WHERE skill_id=?",
-            (skill_id,),
-        ).fetchone()
-        if skill_row is not None:
-            self._record_studio_deletion(
-                "skill_source",
-                self._skill_deletion_key(str(skill_row["source_type"]), str(skill_row["origin_path"])),
-            )
-        self._conn.execute("DELETE FROM skills WHERE skill_id=?", (skill_id,))
-        rows = self._conn.execute("SELECT agent_id, skill_ids_json FROM agents").fetchall()
-        for row in rows:
-            skill_ids = [item for item in _json_load(row["skill_ids_json"], []) if item != skill_id]
-            self._conn.execute(
-                "UPDATE agents SET skill_ids_json=?, updated_at=? WHERE agent_id=?",
-                (_json_dump(skill_ids), _now(), row["agent_id"]),
-            )
-        self._conn.commit()
-        source_type = str(skill_row["source_type"] if skill_row is not None else "")
-        if not _is_native_library_source_type(source_type):
-            local_path = Path(str(skill_row["local_path"])) if skill_row is not None and skill_row["local_path"] else self.skills_dir / skill_id
-            if self._skill_path_owned_by_runtime(local_path):
-                shutil.rmtree(local_path, ignore_errors=True)
-        return {"ok": True}
+        return self.skill_records.delete(skill_id)
 
     def list_workflows(self) -> dict[str, Any]:
         return self.workflows.list()
