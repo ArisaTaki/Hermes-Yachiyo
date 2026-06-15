@@ -70,6 +70,10 @@ from apps.shell.agent.runtime.approval_lifecycle import (
     ApprovalPauseProjectionCoordinator,
 )
 from apps.shell.agent.runtime.approval_resume import ApprovalResumeCoordinator
+from apps.shell.agent.runtime.approval_services import (
+    RuntimeApprovalServiceBundle,
+    build_runtime_approval_services as _build_runtime_approval_services,
+)
 from apps.shell.agent.runtime.approval_snapshots import (
     ApprovalSnapshotBuilder,
     public_pending_approval as _runtime_public_pending_approval,
@@ -712,27 +716,19 @@ class NativeRunEngine:
             record_studio_deletion=self._record_studio_deletion,
             clear_studio_deletion=self._clear_studio_deletion,
         )
-        self.approval_pause = ApprovalPauseProjectionCoordinator(
+        approval_services = _build_runtime_approval_services(
             timeline_factory=self._timeline,
             append_run_event=self.append_run_event,
             update_run=self._update_run,
             snapshots=self.approval_snapshots,
-        )
-        self.approvals = ApprovalCoordinator(
-            timeline_factory=self._timeline,
-            append_run_event=self.append_run_event,
-            update_run=self._update_run,
-        )
-        self.approval_resume = ApprovalResumeCoordinator(
             call_agent_tool=self._call_agent_tool,
             fatal_tool_failure_detail=self._fatal_tool_failure_detail,
             append_tool_result_message=self._append_tool_result_message,
             run_tool_requests=self._run_tool_requests,
-            timeline_factory=self._timeline,
             claim_pending_approval=self.run_approvals.claim_pending_approval,
-            approve_tool_run=self.approvals.approve_tool_run,
             continue_custom_api_agent=self._run_custom_api_agent,
         )
+        self._install_runtime_approval_services(approval_services)
         self.workflow_continuation = WorkflowContinuationCoordinator(
             self,
             iso_epoch=lambda value: _iso_epoch(value),
@@ -876,6 +872,11 @@ class NativeRunEngine:
         self.agent_context_builder = agent_services.agent_context_builder
         self.agent_run_preparer = agent_services.agent_run_preparer
         self.agent_run_outcomes = agent_services.agent_run_outcomes
+
+    def _install_runtime_approval_services(self, approval_services: RuntimeApprovalServiceBundle) -> None:
+        self.approval_pause = approval_services.approval_pause
+        self.approvals = approval_services.approvals
+        self.approval_resume = approval_services.approval_resume
 
     def close(self) -> None:
         self.shutdown()
