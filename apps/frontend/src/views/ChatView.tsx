@@ -11,6 +11,10 @@ import { ImageAttachmentViewer } from '../components/ImageAttachmentViewer';
 import { useConfirmDialog } from '../components/ConfirmDialog';
 import { UiIcon } from '../components/UiIcon';
 import { MessageAgentTaskCard } from '../features/yachiyo-chat/components/MessageAgentTaskCard';
+import {
+  MessageApprovalRequestCard,
+  type ApprovalRequestDetails,
+} from '../features/yachiyo-chat/components/MessageApprovalRequestCard';
 import { useYachiyoTaskActions } from '../features/yachiyo-chat/hooks/useYachiyoTaskActions';
 import { useYachiyoTaskSnapshots } from '../features/yachiyo-chat/hooks/useYachiyoTaskSnapshots';
 import { useYachiyoTaskSubmit } from '../features/yachiyo-chat/hooks/useYachiyoTaskSubmit';
@@ -3153,13 +3157,14 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
       <div className="message-stack">
         <div className="message-bubble">
           {approvalDetails ? (
-            <ApprovalRequestCard
+            <MessageApprovalRequestCard
               approvalId={approvalId}
               approvalSignature={approvalSignature}
-              copiedCodeBlockKey={copiedCodeBlockKey}
               details={approvalDetails}
-              messageId={message.id || ''}
               onOpenDetails={() => onOpenRunDetails(runId)}
+              renderCodePreview={(codeText, codeLanguage) => (
+                renderMarkdown(fencedCode(codeText, codeLanguage), message.id || '', copiedCodeBlockKey)
+              )}
               runId={runId}
               runStatus={runStatus}
             />
@@ -3416,15 +3421,6 @@ function MessageActivityList({ events, messageStatus, onOpenRunDetails, progress
   );
 }
 
-type ApprovalRequestDetails = {
-  requester: string;
-  tool: string;
-  goal: string;
-  codeLanguage: string;
-  codeText: string;
-  summary: Array<{ label: string; value: string }>;
-};
-
 type RunApprovalDetailOverride = {
   signature: string;
   details: ApprovalRequestDetails;
@@ -3441,81 +3437,6 @@ type ComposerApprovalItem = {
   details: ApprovalRequestDetails;
   source: 'message' | 'activity' | 'workflow-child';
 };
-
-function ApprovalRequestCard({ approvalId, approvalSignature, copiedCodeBlockKey, details, messageId, onOpenDetails, runId, runStatus }: {
-  approvalId?: string;
-  approvalSignature?: string;
-  copiedCodeBlockKey: string;
-  details: ApprovalRequestDetails;
-  messageId: string;
-  onOpenDetails: () => void;
-  runId: string;
-  runStatus: string;
-}) {
-  const workflowApproval = isWorkflowApprovalDetails(details);
-  return (
-    <div
-      className="message-content message-approval-card"
-      data-approval-id={approvalId || ''}
-      data-approval-kind={workflowApproval ? 'workflow' : 'tool'}
-      data-approval-requester={details.requester}
-      data-approval-signature={approvalSignature || ''}
-      data-approval-source="message"
-      data-approval-tool={details.tool}
-      data-run-id={runId}
-      data-testid="chat-message-approval-card"
-    >
-      <div className="message-approval-card-header">
-        <span className="message-approval-eyebrow">需要审批</span>
-        <div>
-          <strong>{workflowApproval ? `${details.requester} 等待人工确认` : `${details.requester} 请求执行工具调用`}</strong>
-          <span>{workflowApproval ? '批准后会继续当前 Workflow' : '批准后会继续当前任务'}</span>
-        </div>
-        <span className="message-approval-header-side">
-          <code>{details.tool}</code>
-          {runId ? (
-            <button
-              type="button"
-              data-run-id={runId}
-              data-run-status={runStatus}
-              data-testid="chat-message-approval-open-run-detail"
-              onClick={onOpenDetails}
-            >
-              运行详情
-            </button>
-          ) : null}
-        </span>
-      </div>
-      {details.goal ? (
-        <section className="message-approval-section">
-          <span>关联任务</span>
-          <p>{details.goal}</p>
-        </section>
-      ) : null}
-      <section className="message-approval-section">
-        <span>{workflowApproval ? '审批内容' : '请求内容'}</span>
-        {details.summary.length ? (
-          <dl className="message-approval-summary">
-            {details.summary.map((item) => (
-              <div key={`${item.label}:${item.value}`}>
-                <dt>{item.label}</dt>
-                <dd>{item.value}</dd>
-              </div>
-            ))}
-          </dl>
-        ) : null}
-        {details.codeText ? (
-          <div
-            className="message-approval-code markdown"
-            dangerouslySetInnerHTML={{
-              __html: renderMarkdown(fencedCode(details.codeText, details.codeLanguage), messageId, copiedCodeBlockKey),
-            }}
-          />
-        ) : details.summary.length ? null : <p>没有可展示的参数预览。</p>}
-      </section>
-    </div>
-  );
-}
 
 function ComposerApprovalNotice({ approvalId, busy, currentIndex, details, itemId, onApprove, onNext, onOpenDetails, onPrevious, onReject, onReveal, runId, runStatus, source, total }: {
   approvalId?: string;
