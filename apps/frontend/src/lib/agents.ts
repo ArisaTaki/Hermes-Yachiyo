@@ -361,16 +361,22 @@ export async function deleteSkill(skillId: string): Promise<{ ok?: boolean }> {
 }
 
 export async function listWorkflows(): Promise<WorkflowSpec[]> {
-  const payload = await apiGet<{ workflows?: WorkflowSpec[] }>('/yachiyo/studio/workflows');
+  const payload = await apiGet<{ workflows?: WorkflowSpec[] }>('/yachiyo/studio/workflows').catch(() => (
+    apiGet<{ workflows?: WorkflowSpec[] }>('/ui/workflows')
+  ));
   return payload.workflows || [];
 }
 
 export async function createWorkflow(request: Partial<WorkflowSpec>): Promise<WorkflowSpec> {
-  return apiPost('/yachiyo/studio/workflows', request);
+  return apiPost<WorkflowSpec>('/yachiyo/studio/workflows', request).catch(() => (
+    apiPost<WorkflowSpec>('/ui/workflows', request)
+  ));
 }
 
 export async function updateWorkflow(workflowId: string, request: Partial<WorkflowSpec>): Promise<WorkflowSpec> {
-  return apiPost('/yachiyo/studio/workflows', { ...request, workflow_id: workflowId });
+  return apiPost<WorkflowSpec>('/yachiyo/studio/workflows', { ...request, workflow_id: workflowId }).catch(() => (
+    apiPatch<WorkflowSpec>(`/ui/workflows/${encodeURIComponent(workflowId)}`, request)
+  ));
 }
 
 export async function deleteWorkflow(workflowId: string): Promise<{ ok?: boolean }> {
