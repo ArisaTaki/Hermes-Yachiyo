@@ -52,6 +52,17 @@ import {
   runnableResultRunId,
   runnableResultStatus,
 } from '../features/yachiyo-chat/messageState';
+import {
+  activeMentions,
+  mentionKindLabel,
+  mentionOptionsForQuery,
+  mentionQueryAtEnd,
+  mentionTextForOption,
+  replaceTrailingMentionQuery,
+  yachiyoPublicTaskPrompt,
+  yachiyoPublicTaskTarget,
+  type MentionOption,
+} from '../features/yachiyo-chat/mentions';
 import { useYachiyoTaskActions } from '../features/yachiyo-chat/hooks/useYachiyoTaskActions';
 import { useYachiyoTaskSnapshots } from '../features/yachiyo-chat/hooks/useYachiyoTaskSnapshots';
 import { useYachiyoTaskSubmit } from '../features/yachiyo-chat/hooks/useYachiyoTaskSubmit';
@@ -170,15 +181,6 @@ type ChatMessageMetadata = {
   suggested_goal?: string;
 };
 
-type MentionOption = {
-  id: string;
-  name: string;
-  nickname?: string;
-  avatar_url?: string;
-  kind: 'main' | 'agent' | 'workflow';
-  participants?: ChatParticipant[];
-};
-
 type ChatMessage = {
   id?: string;
   role?: string;
@@ -198,10 +200,6 @@ type ChatMessage = {
 function metadataListAttribute(value: unknown): string {
   if (!Array.isArray(value)) return '';
   return value.map((item) => String(item || '').trim()).filter(Boolean).join(',');
-}
-
-function uniqueStrings(values: unknown[]): string[] {
-  return Array.from(new Set(values.map((value) => String(value || '').trim()).filter(Boolean)));
 }
 
 type MessagesPayload = {
@@ -3453,171 +3451,6 @@ function messageVisualRole(role: string) {
 function avatarNode(url: string | undefined, label: string, fallback: string, loading = false): ReactNode {
   if (loading) return <span className="chat-avatar-loading" aria-hidden="true" />;
   return url ? <img src={url} alt={label} /> : fallback;
-}
-
-function mentionQueryAtEnd(value: string): string | null {
-  const match = String(value || '').match(/(^|[\s，。！？、；;,.!?])@([^\s@，。！？、；;,.!?]*)$/);
-  return match ? match[2] : null;
-}
-
-function mentionOptionsForQuery(
-  runnables: RunnableSummary[],
-  query: string | null,
-  assistantProfile: AssistantProfilePayload | null,
-  context?: ChatSessionContext | null,
-): MentionOption[] {
-  if (query === null) return [];
-  const needle = query.trim().toLowerCase();
-  const normalized = normalizeSessionContext(context);
-  let scopedRunnables = runnables;
-  if (normalized.conversation_kind === 'group') {
-    const groupAgentIds = new Set(
-      (normalized.participants || [])
-        .filter((participant) => participant.kind === 'agent')
-        .map((participant) => participant.id)
-        .filter(Boolean),
-    );
-    scopedRunnables = runnables.filter((item) => (
-      item.kind === 'workflow' || (item.kind === 'agent' && groupAgentIds.has(item.id))
-    ));
-  }
-  return allMentionOptions(scopedRunnables, assistantProfile)
-    .filter((option) => {
-      if (!needle) return true;
-      return [
-        option.name,
-        option.nickname,
-        option.kind === 'main' ? 'main model' : '',
-        option.kind,
-      ].some((value) => String(value || '').toLowerCase().includes(needle));
-    })
-    .slice(0, 7);
-}
-
-function allMentionOptions(
-  runnables: RunnableSummary[],
-  assistantProfile: AssistantProfilePayload | null,
-): MentionOption[] {
-  const main: MentionOption = {
-    id: 'main',
-    name: '主模型',
-    nickname: assistantProfile?.agent_nickname || '八千代',
-    avatar_url: assistantProfile?.agent_avatar_url,
-    kind: 'main',
-  };
-  const options: MentionOption[] = [
-    main,
-    ...runnables
-      .filter((item) => item.kind === 'agent')
-      .map((item) => ({
-        id: item.id,
-        name: item.name,
-        nickname: item.nickname,
-        avatar_url: item.avatar_url,
-        kind: item.kind,
-        participants: (item.participants || []).map((participant) => ({
-          id: participant.id,
-          name: participant.name,
-          nickname: participant.nickname,
-          avatar_url: participant.avatar_url,
-          kind: participant.kind,
-        })),
-      })),
-    ...runnables
-      .filter((item) => item.kind === 'workflow')
-      .map((item) => ({
-        id: item.id,
-        name: item.name,
-        nickname: item.nickname,
-        avatar_url: item.avatar_url,
-        kind: item.kind,
-        participants: (item.participants || []).map((participant) => ({
-          id: participant.id,
-          name: participant.name,
-          nickname: participant.nickname,
-          avatar_url: participant.avatar_url,
-          kind: participant.kind,
-        })),
-      })),
-  ];
-  return options;
-}
-
-function mentionKindLabel(option: MentionOption) {
-  if (option.kind === 'main') return '主模型';
-  if (option.kind === 'workflow') {
-    const count = option.participants?.length || 0;
-    return count ? `Workflow · ${count} Agents` : 'Workflow';
-  }
-  return 'Agent';
-}
-
-function mentionTextForOption(option: MentionOption) {
-  if (option.kind === 'main') return '@主模型 ';
-  const name = option.nickname || option.name;
-  if (/\s/.test(name)) return `@"${name.replace(/"/g, '\\"')}" `;
-  return `@${name} `;
-}
-
-function replaceTrailingMentionQuery(value: string, mentionText: string) {
-  const match = String(value || '').match(/(^|[\s\S]*[\s，。！？、；;,.!?])@([^\s@，。！？、；;,.!?]*)$/);
-  if (match) return `${match[1]}${mentionText}`;
-  const spacer = value && !/[\s，。！？、；;,.!?]$/.test(value) ? ' ' : '';
-  return `${value}${spacer}${mentionText}`;
-}
-
-function activeMentions(
-  input: string,
-  runnables: RunnableSummary[],
-  assistantProfile: AssistantProfilePayload | null,
-): MentionOption[] {
-  const options = allMentionOptions(runnables, assistantProfile);
-  const seen = new Set<string>();
-  const result: MentionOption[] = [];
-  const mentionRe = /@(?:"([^"]+)"|'([^']+)'|([^\s@，。！？、；;,.!?]+))/g;
-  let match: RegExpExecArray | null;
-  while ((match = mentionRe.exec(input)) !== null) {
-    const label = String(match[1] || match[2] || match[3] || '').toLowerCase();
-    const option = options.find((candidate) => [
-      candidate.name,
-      candidate.nickname,
-      candidate.kind === 'main' ? '主模型' : '',
-      candidate.kind === 'main' ? 'main' : '',
-    ].some((value) => String(value || '').toLowerCase() === label));
-    if (!option) continue;
-    const key = `${option.kind}-${option.id}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    result.push(option);
-  }
-  return result;
-}
-
-function yachiyoPublicTaskTarget(
-  input: string,
-  runnables: RunnableSummary[],
-  assistantProfile: AssistantProfilePayload | null,
-): MentionOption | null {
-  const mentions = activeMentions(input, runnables, assistantProfile);
-  if (mentions.length !== 1) return null;
-  return mentions[0].kind === 'agent' ? mentions[0] : null;
-}
-
-function yachiyoPublicTaskPrompt(input: string, target: MentionOption): string {
-  let prompt = String(input || '').trim();
-  uniqueStrings([target.nickname, target.name]).forEach((label) => {
-    const escaped = escapeRegExp(label);
-    prompt = prompt.replace(
-      new RegExp(`(^|[\\s，。！？、；;,.!?])@(?:"${escaped}"|'${escaped}'|${escaped})(?=$|[\\s，。！？、；;,.!?])`, 'gi'),
-      '$1',
-    );
-  });
-  prompt = prompt.replace(/\s{2,}/g, ' ').trim();
-  return prompt || String(input || '').trim();
-}
-
-function escapeRegExp(value: string): string {
-  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function normalizeSessionContext(context?: ChatSessionContext | null): ChatSessionContext {

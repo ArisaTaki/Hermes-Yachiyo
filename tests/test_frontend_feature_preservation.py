@@ -287,6 +287,23 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "nextApprovalStatusText({ pending_approval: approval.metadata?.pending_approval })",
         ],
     )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/mentions.ts",
+        [
+            "export type MentionOption",
+            "export function mentionQueryAtEnd",
+            "export function mentionOptionsForQuery",
+            "export function allMentionOptions",
+            "export function mentionKindLabel",
+            "export function mentionTextForOption",
+            "export function replaceTrailingMentionQuery",
+            "export function activeMentions",
+            "export function yachiyoPublicTaskTarget",
+            "export function yachiyoPublicTaskPrompt",
+            "conversation_kind === 'group'",
+            "return mentions[0].kind === 'agent' ? mentions[0] : null;",
+        ],
+    )
     _assert_not_contains(
         "apps/frontend/src/views/ChatView.tsx",
         [
@@ -297,6 +314,11 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "function messageRunStatus",
             "function latestVisibleActivity",
             "function chatStatusLabel",
+            "function mentionQueryAtEnd",
+            "function mentionOptionsForQuery",
+            "function activeMentions",
+            "function yachiyoPublicTaskTarget",
+            "function yachiyoPublicTaskPrompt",
         ],
     )
 
