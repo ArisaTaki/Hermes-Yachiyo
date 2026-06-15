@@ -136,6 +136,7 @@ from apps.shell.agent.runtime.events import (
 from apps.shell.agent.runtime.future_task_scheduler import FutureTaskTriggerScheduler
 from apps.shell.agent.runtime.main_chat_config import MainChatRuntimeConfigBuilder
 from apps.shell.agent.runtime.main_chat_model import MainChatModelCaller
+from apps.shell.agent.runtime.main_chat_model_loop import MainChatModelLoopRunner
 from apps.shell.agent.runtime.main_chat_runs import MainChatRunLifecycle
 from apps.shell.agent.runtime.memory_services import RuntimeMemoryService
 from apps.shell.agent.runtime.model_profiles import RuntimeModelProfileResolver
@@ -731,6 +732,35 @@ class NativeRunEngine:
             continue_custom_api_agent=self._run_custom_api_agent,
         )
         self._install_runtime_approval_services(approval_services)
+        self._install_runtime_main_chat_model_loop(
+            MainChatModelLoopRunner(
+                get_run=self.get_run,
+                default_profile_id=lambda: str(
+                    get_model_profile_service().get_defaults().get("chat") or ""
+                ).strip(),
+                model_profile_config_private=lambda profile_id: self._model_profile_config_private(
+                    profile_id,
+                    capability="chat",
+                ),
+                main_chat_agent_config=self._main_chat_agent_config,
+                compile_agent_runtime=self._compile_agent_runtime,
+                run_budget=self._run_budget,
+                check_context_budget=self._check_context_budget,
+                runtime_agent_timeline=self.runtime_agent_timeline,
+                timeline_factory=self._timeline,
+                update_run=self._update_run,
+                append_run_event=self.append_run_event,
+                task_model_events=self.runtime_task_model_events,
+                tool_brokers=self.tool_brokers,
+                continue_custom_api_agent=self._run_custom_api_agent,
+                main_chat_pending_approval=self._main_chat_pending_approval,
+                approval_pause=self.approval_pause,
+                terminal_run_or_none=self._terminal_run_or_none,
+                redact_secrets=redact_secrets,
+                model_output_metadata=_model_output_metadata,
+                error_type=AgentRuntimeError,
+            )
+        )
         workflow_execution_services = _build_runtime_workflow_execution_services(
             engine=self,
             iso_epoch=lambda value: _iso_epoch(value),
@@ -889,6 +919,9 @@ class NativeRunEngine:
 
     def _install_runtime_main_chat_model(self, main_chat_model: MainChatModelCaller) -> None:
         self.main_chat_model = main_chat_model
+
+    def _install_runtime_main_chat_model_loop(self, main_chat_model_loop: MainChatModelLoopRunner) -> None:
+        self.main_chat_model_loop = main_chat_model_loop
 
     def _install_runtime_tooling(self, tooling: RuntimeToolingBundle) -> None:
         self.tool_loop_projection = tooling.tool_loop_projection
@@ -2743,119 +2776,12 @@ class NativeRunEngine:
         tool_policy: dict[str, Any] | None = None,
         workspace_policy: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        run = self.get_run(run_id)
-        if str(run.get("kind") or "") != "main_chat_run":
-            raise AgentRuntimeError("Run 不是主聊天 Native Run")
-        default_profile_id = str(
-            profile_id or get_model_profile_service().get_defaults().get("chat") or ""
-        ).strip()
-        if not default_profile_id:
-            raise AgentRuntimeError("native_agent_not_ready:chat_model_profile_required")
-        model_config = self._model_profile_config_private(default_profile_id, capability="chat")
-        agent = self._main_chat_agent_config(
-            model_profile_id=default_profile_id,
+        return self.main_chat_model_loop.execute(
+            run_id,
+            messages,
+            profile_id=profile_id,
             tool_policy=tool_policy,
             workspace_policy=workspace_policy,
-        )
-        runtime = self._compile_agent_runtime(agent)
-        timeline = [event for event in run.get("timeline") or [] if isinstance(event, dict)]
-        budget = self._run_budget(run_id, timeline)
-        self._check_context_budget(budget, messages)
-        timeline.append(
-            self.runtime_agent_timeline.compiled(
-                detail="Main chat NativeRunEngine compiled tools and workspace policy",
-                allowed_tools=runtime["tool_policy"].get("allowed_tools") or [],
-            )
-        )
-        timeline.append(
-            self._timeline(
-                "model.request.started",
-                str(model_config.get("model") or ""),
-                profile_id=default_profile_id,
-                capability="chat",
-            )
-        )
-        self._update_run(run_id, status="running", timeline=timeline)
-        self.append_run_event(
-            run_id,
-            "model.request.started",
-            self.runtime_task_model_events.model_request_started_payload(
-                profile_id=default_profile_id,
-                model=str(model_config.get("model") or ""),
-                capability="chat",
-                message_count=len(messages),
-            ),
-        )
-        broker = self.tool_brokers.for_main_chat(
-            run_id=run_id,
-            workspace_policy=runtime["workspace_policy"],
-        )
-        artifacts = [item for item in run.get("artifacts") or [] if isinstance(item, dict)]
-        try:
-            result_text = self._run_custom_api_agent(
-                agent,
-                "",
-                broker,
-                timeline,
-                artifacts,
-                messages=messages,
-                run_id=run_id,
-                budget=budget,
-            )
-        except AgentApprovalRequired as exc:
-            pending = self._main_chat_pending_approval(
-                exc.pending_approval,
-                model_profile_id=default_profile_id,
-                tool_policy=runtime["tool_policy"],
-                workspace_policy=runtime["workspace_policy"],
-            )
-            return self.approval_pause.project_tool_required(
-                run_id,
-                pending_approval=pending,
-                timeline=timeline,
-                artifacts=artifacts,
-            )
-        except Exception as exc:
-            terminal = self._terminal_run_or_none(run_id)
-            if terminal is not None:
-                return terminal
-            safe_error = redact_secrets(exc)
-            timeline.append(self._timeline("model.request.failed", safe_error))
-            self._update_run(run_id, status="failed", result=safe_error, timeline=timeline, artifacts=artifacts, pending_approval=None)
-            self.append_run_event(
-                run_id,
-                "model.request.failed",
-                self.runtime_task_model_events.model_request_failed_payload(safe_error),
-            )
-            raise
-        terminal = self._terminal_run_or_none(run_id)
-        if terminal is not None:
-            return terminal
-
-        timeline.append(
-            self._timeline(
-                "model.output.ready",
-                result_text[:500],
-                output_chars=len(result_text),
-                truncated=bool(getattr(result_text, "output_truncated", False)),
-            )
-        )
-        self.append_run_event(
-            run_id,
-            "model.output.completed",
-            self.runtime_task_model_events.model_output_completed_payload(
-                str(result_text),
-                truncated=bool(getattr(result_text, "output_truncated", False)),
-                metadata=_model_output_metadata(result_text),
-            ),
-        )
-        return self._update_run(
-            run_id,
-            status="running",
-            result=result_text,
-            timeline=timeline,
-            artifacts=artifacts,
-            pending_approval=None,
         )
 
     def complete_main_chat_run(self, run_id: str, result: str) -> dict[str, Any]:
