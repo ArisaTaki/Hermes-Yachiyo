@@ -397,6 +397,7 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             'data-testid="yachiyo-task-approval-approve"',
             'data-testid="yachiyo-task-approval-reject"',
             'testId="yachiyo-agent-task-timeline"',
+            "<ApprovalCard actions={actions}",
             "onApproveApproval(task, approval)",
             "onRejectApproval(task, approval)",
             "onCancelTask?.(task)",
@@ -408,6 +409,8 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
         "apps/frontend/src/features/yachiyo-chat/components/ApprovalCard.tsx",
         [
             "RuntimeApprovalCard",
+            "actions={actions}",
+            'actionsTestId="yachiyo-task-approval-actions"',
             'testId="yachiyo-task-approval-card"',
         ],
     )
@@ -422,8 +425,12 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
         "apps/frontend/src/features/runtime-shared/components/RuntimeApprovalCard.tsx",
         [
             "export function RuntimeApprovalCard",
+            "actions?: ReactNode;",
+            "actionsClassName = 'runtime-approval-actions'",
+            "actionsTestId = 'runtime-approval-actions'",
             "approvalPreviewRecord",
             "data-approval-id={approval.approval_id}",
+            "data-testid={actionsTestId}",
         ],
     )
     _assert_contains(
@@ -790,6 +797,8 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
             "RuntimeApprovalCard",
             "RunApprovalRequest",
             "agent-run-detail-approval",
+            'actionsClassName="run-approval-actions"',
+            'actionsTestId="agent-run-detail-approval-actions"',
             'testId="agent-run-detail-approval-card"',
         ],
     )
@@ -2659,11 +2668,13 @@ def test_agent_studio_exposes_stable_e2e_selectors_for_run_detail_and_approval_f
         "apps/frontend/src/features/agent-studio/components/ApprovalInspector.tsx",
         [
             "data-testid=\"agent-run-detail-approval\"",
-            "data-testid=\"agent-run-detail-approval-actions\"",
             "data-testid=\"agent-run-detail-approval-approve\"",
             "data-testid=\"agent-run-detail-approval-reject\"",
             "RuntimeApprovalCard",
             "RunApprovalRequest",
+            "actions={(",
+            "actionsClassName=\"run-approval-actions\"",
+            "actionsTestId=\"agent-run-detail-approval-actions\"",
             'testId="agent-run-detail-approval-card"',
         ],
     )

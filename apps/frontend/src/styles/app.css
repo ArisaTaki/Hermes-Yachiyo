@@ -9192,14 +9192,10 @@ body.electron-window .hy-traffic {
   white-space: nowrap;
 }
 
-.hy-content .open-chat-shell .yachiyo-agent-task-approval-item {
-  display: grid;
-  gap: 6px;
-}
-
 .hy-content .open-chat-shell .yachiyo-agent-task-approval-actions {
   display: flex;
   flex-wrap: wrap;
+  grid-column: 1 / -1;
   gap: 6px;
 }
 

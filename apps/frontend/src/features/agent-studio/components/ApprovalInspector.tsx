@@ -52,6 +52,14 @@ export function ApprovalInspector({
           title: `Approval Required · ${selectedRunApproval.tool}`,
           tool_name: selectedRunApproval.tool,
         }}
+        actions={(
+          <>
+            <button type="button" className="primary-action" data-testid="agent-run-detail-approval-approve" disabled={busy} onClick={() => onRunAction(onApproveSelectedRun, '批准工具调用')}>批准</button>
+            <button type="button" className="danger-action" data-testid="agent-run-detail-approval-reject" disabled={busy} onClick={() => onRunAction(onRejectSelectedRun, '拒绝工具调用')}>拒绝</button>
+          </>
+        )}
+        actionsClassName="run-approval-actions"
+        actionsTestId="agent-run-detail-approval-actions"
         className="studio-runtime-approval"
         testId="agent-run-detail-approval-card"
       />
@@ -62,10 +70,6 @@ export function ApprovalInspector({
         runLabel={selectedRun.runnable_name || runKindLabel(selectedRun.kind)}
         tool={selectedRunApproval.tool}
       />
-      <div className="run-approval-actions" data-testid="agent-run-detail-approval-actions">
-        <button type="button" className="primary-action" data-testid="agent-run-detail-approval-approve" disabled={busy} onClick={() => onRunAction(onApproveSelectedRun, '批准工具调用')}>批准</button>
-        <button type="button" className="danger-action" data-testid="agent-run-detail-approval-reject" disabled={busy} onClick={() => onRunAction(onRejectSelectedRun, '拒绝工具调用')}>拒绝</button>
-      </div>
     </section>
   );
 }

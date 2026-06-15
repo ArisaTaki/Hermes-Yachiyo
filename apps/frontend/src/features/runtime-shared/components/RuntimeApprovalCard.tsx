@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react';
+
 import { approvalPreviewRecord, approvalPreviewValue } from '../approval';
 
 export type RuntimeApprovalCardSnapshot = {
@@ -10,10 +12,16 @@ export type RuntimeApprovalCardSnapshot = {
 };
 
 export function RuntimeApprovalCard({
+  actions,
+  actionsClassName = 'runtime-approval-actions',
+  actionsTestId = 'runtime-approval-actions',
   approval,
   className = 'yachiyo-task-approval',
   testId = 'runtime-approval-card',
 }: {
+  actions?: ReactNode;
+  actionsClassName?: string;
+  actionsTestId?: string;
   approval: RuntimeApprovalCardSnapshot;
   className?: string;
   testId?: string;
@@ -34,6 +42,11 @@ export function RuntimeApprovalCard({
       <strong>{approval.title || toolName}</strong>
       {approval.description ? <p>{approval.description}</p> : null}
       {target || toolName ? <code>{target || toolName}</code> : null}
+      {actions ? (
+        <div className={actionsClassName} data-testid={actionsTestId}>
+          {actions}
+        </div>
+      ) : null}
     </div>
   );
 }
