@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from typing import Any
 
@@ -17,24 +18,48 @@ def test_legacy_studio_port_persists_groups_in_existing_chat_store(monkeypatch) 
     saved = port.save_group(
         {
             "name": "Studio Dispatch",
+            "description": "Multi-agent review group",
+            "mode": "pipeline",
+            "moderator_agent_id": "agent-reviewer",
+            "default_model": "gpt-review",
+            "memory_scope": "hybrid",
+            "tool_policy_id": "policy-review",
             "members": [
-                {"agent_id": "agent-writer"},
-                {"agent_id": "agent-reviewer"},
+                {"agent_id": "agent-writer", "role": "writer"},
+                {"agent_id": "agent-reviewer", "role": "moderator"},
             ],
         }
     )
     listed = port.list_groups()
     fetched = port.get_group(saved["group_id"])
+    stored_participants = json.loads(store.sessions[saved["group_id"]].participants_json)
+    stored_config = [
+        item for item in stored_participants if item.get("kind") == "group_config"
+    ]
 
     assert saved["group_id"].startswith("agent_group_")
     assert saved["name"] == "Studio Dispatch"
+    assert saved["description"] == "Multi-agent review group"
+    assert saved["mode"] == "pipeline"
+    assert saved["moderator_agent_id"] == "agent-reviewer"
+    assert saved["default_model"] == "gpt-review"
+    assert saved["memory_scope"] == "hybrid"
+    assert saved["tool_policy_id"] == "policy-review"
     assert [item["agent_id"] for item in saved["members"]] == [
         "agent-writer",
         "agent-reviewer",
     ]
+    assert [item["role"] for item in saved["members"]] == ["writer", "moderator"]
     assert listed["groups"][0]["group_id"] == saved["group_id"]
+    assert listed["groups"][0]["mode"] == "pipeline"
+    assert listed["groups"][0]["memory_scope"] == "hybrid"
     assert fetched["members"][1]["name"] == "Reviewer"
+    assert fetched["members"][1]["role"] == "moderator"
+    assert fetched["tool_policy_id"] == "policy-review"
     assert store.sessions[saved["group_id"]].conversation_kind == "group"
+    assert len(stored_config) == 1
+    assert stored_config[0]["mode"] == "pipeline"
+    assert stored_config[0]["memory_scope"] == "hybrid"
 
 
 def test_legacy_studio_port_updates_existing_chat_group_and_starts_member_runs(
@@ -48,6 +73,10 @@ def test_legacy_studio_port_updates_existing_chat_group_and_starts_member_runs(
     created = port.save_group(
         {
             "name": "Original",
+            "mode": "debate",
+            "moderator_agent_id": "agent-writer",
+            "memory_scope": "per_agent",
+            "tool_policy_id": "policy-original",
             "participant_ids": ["agent-writer"],
         }
     )
@@ -66,6 +95,10 @@ def test_legacy_studio_port_updates_existing_chat_group_and_starts_member_runs(
     )
 
     assert updated["name"] == "Updated Studio Group"
+    assert updated["mode"] == "debate"
+    assert updated["moderator_agent_id"] == "agent-reviewer"
+    assert updated["memory_scope"] == "per_agent"
+    assert updated["tool_policy_id"] == "policy-original"
     assert [item["agent_id"] for item in updated["members"]] == ["agent-reviewer"]
     assert started["group_id"] == created["group_id"]
     assert started["run_group_id"] == "run-group-1"

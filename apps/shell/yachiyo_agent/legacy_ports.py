@@ -7,6 +7,9 @@ from typing import Any
 from uuid import uuid4
 
 MAIN_CHAT_AGENT_ID = "builtin:yachiyo-main"
+_GROUP_CONFIG_KIND = "group_config"
+_GROUP_MODES = {"moderated", "round_robin", "debate", "pipeline", "parallel", "custom"}
+_MEMORY_SCOPES = {"shared", "per_agent", "hybrid"}
 
 
 class LegacyRunPayloadProjector:
@@ -618,11 +621,24 @@ def _save_chat_group_snapshot(request: dict[str, Any], runtime: Any) -> dict[str
     if existing is not None and getattr(existing, "conversation_kind", "") != "group":
         raise ValueError("只能修改手动 Agent 群组")
 
+    existing_participants = (
+        _parse_participants_json(getattr(existing, "participants_json", "[]"))
+        if existing is not None
+        else []
+    )
     participants = _group_participants_from_request(request, runtime)
     if not participants and existing is not None:
-        participants = _parse_participants_json(getattr(existing, "participants_json", "[]"))
+        participants = existing_participants
     if not _agent_participants(participants):
         raise ValueError("群组至少需要一个已启用 Agent")
+    participants = _with_group_config(
+        participants,
+        _group_config_from_request(
+            request,
+            participants,
+            _group_config_from_participants(existing_participants),
+        ),
+    )
 
     group_id = requested_group_id or f"agent_group_{uuid4().hex[:12]}"
     if existing is None:
@@ -660,12 +676,13 @@ def _chat_store() -> Any:
 def _group_definition_from_chat_session(session: Any, runtime: Any) -> dict[str, Any]:
     del runtime
     participants = _parse_participants_json(getattr(session, "participants_json", "[]"))
+    config = _group_config_from_participants(participants)
     members = [
         {
             "agent_id": str(item.get("id") or item.get("agent_id") or ""),
             "name": str(item.get("nickname") or item.get("name") or item.get("id") or ""),
             "role": str(item.get("role") or "member"),
-            "sort_order": index,
+            "sort_order": _int_or_default(item.get("sort_order"), index),
             "enabled": bool(item.get("enabled", True)),
         }
         for index, item in enumerate(_agent_participants(participants))
@@ -681,12 +698,14 @@ def _group_definition_from_chat_session(session: Any, runtime: Any) -> dict[str,
     return {
         "group_id": group_id,
         "name": name,
-        "description": None,
+        "description": _optional_text(config.get("description")),
         "members": members,
-        "mode": "moderated",
-        "moderator_agent_id": members[0]["agent_id"] if members else None,
-        "memory_scope": "shared",
-        "enabled": True,
+        "mode": _normalized_group_mode(config.get("mode")),
+        "moderator_agent_id": _group_moderator_from_config(config, members),
+        "default_model": _optional_text(config.get("default_model")),
+        "memory_scope": _normalized_memory_scope(config.get("memory_scope")),
+        "tool_policy_id": _optional_text(config.get("tool_policy_id")),
+        "enabled": _bool(config.get("enabled"), default=True),
         "created_at": getattr(session, "created_at", "") or "",
         "updated_at": "",
     }
@@ -700,9 +719,17 @@ def _group_participants_from_request(
     if not agent_ids:
         return []
 
+    member_settings = _member_settings_from_group_request(request)
     participants = [_main_participant(runtime)]
-    for agent_id in agent_ids:
-        participants.append(_participant_for_agent_id(runtime, agent_id))
+    for index, agent_id in enumerate(agent_ids):
+        participant = _participant_for_agent_id(runtime, agent_id)
+        settings = member_settings.get(agent_id, {})
+        if settings.get("role"):
+            participant["role"] = settings["role"]
+        participant["sort_order"] = settings.get("sort_order", index)
+        if "enabled" in settings:
+            participant["enabled"] = settings["enabled"]
+        participants.append(participant)
     return participants
 
 
@@ -732,6 +759,144 @@ def _agent_ids_from_group_request(request: dict[str, Any]) -> list[str]:
         seen.add(agent_id)
         agent_ids.append(agent_id)
     return agent_ids
+
+
+def _member_settings_from_group_request(
+    request: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    settings: dict[str, dict[str, Any]] = {}
+    for key in ("members", "participants"):
+        value = request.get(key)
+        if not isinstance(value, list):
+            continue
+        for index, item in enumerate(value):
+            if not isinstance(item, dict):
+                continue
+            agent_id = str(item.get("agent_id") or item.get("id") or "").strip()
+            if not agent_id or agent_id == "main":
+                continue
+            member: dict[str, Any] = {}
+            role = _optional_text(item.get("role"))
+            if role:
+                member["role"] = role
+            member["sort_order"] = _int_or_default(item.get("sort_order"), index)
+            if "enabled" in item:
+                member["enabled"] = _bool(item.get("enabled"), default=True)
+            settings[agent_id] = member
+    return settings
+
+
+def _group_config_from_participants(participants: list[dict[str, Any]]) -> dict[str, Any]:
+    for item in participants:
+        if str(item.get("kind") or "") == _GROUP_CONFIG_KIND:
+            return dict(item)
+    return {}
+
+
+def _with_group_config(
+    participants: list[dict[str, Any]],
+    config: dict[str, Any],
+) -> list[dict[str, Any]]:
+    return [
+        item
+        for item in participants
+        if str(item.get("kind") or "") != _GROUP_CONFIG_KIND
+    ] + [config]
+
+
+def _group_config_from_request(
+    request: dict[str, Any],
+    participants: list[dict[str, Any]],
+    existing_config: dict[str, Any],
+) -> dict[str, Any]:
+    member_ids = [
+        str(item.get("id") or item.get("agent_id") or "").strip()
+        for item in _agent_participants(participants)
+        if str(item.get("id") or item.get("agent_id") or "").strip()
+    ]
+    moderator = _optional_text(
+        request["moderator_agent_id"]
+        if "moderator_agent_id" in request
+        else existing_config.get("moderator_agent_id")
+    )
+    if moderator not in member_ids:
+        moderator = member_ids[0] if member_ids else None
+
+    enabled_value = (
+        request["enabled"] if "enabled" in request else existing_config.get("enabled", True)
+    )
+    config: dict[str, Any] = {
+        "kind": _GROUP_CONFIG_KIND,
+        "schema_version": 1,
+        "mode": _normalized_group_mode(
+            request["mode"] if "mode" in request else existing_config.get("mode")
+        ),
+        "moderator_agent_id": moderator,
+        "memory_scope": _normalized_memory_scope(
+            request["memory_scope"]
+            if "memory_scope" in request
+            else existing_config.get("memory_scope")
+        ),
+        "enabled": _bool(enabled_value, default=True),
+    }
+    for key in ("description", "default_model", "tool_policy_id"):
+        value = request[key] if key in request else existing_config.get(key)
+        text = _optional_text(value)
+        if text:
+            config[key] = text
+    return config
+
+
+def _group_moderator_from_config(
+    config: dict[str, Any],
+    members: list[dict[str, Any]],
+) -> str | None:
+    member_ids = {str(member.get("agent_id") or "") for member in members}
+    moderator = _optional_text(config.get("moderator_agent_id"))
+    if moderator and moderator in member_ids:
+        return moderator
+    return members[0]["agent_id"] if members else None
+
+
+def _normalized_group_mode(value: Any) -> str:
+    mode = str(value or "").strip()
+    if not mode:
+        return "moderated"
+    return mode if mode in _GROUP_MODES else "custom"
+
+
+def _normalized_memory_scope(value: Any) -> str:
+    scope = str(value or "").strip()
+    return scope if scope in _MEMORY_SCOPES else "shared"
+
+
+def _optional_text(value: Any) -> str | None:
+    text = str(value or "").strip()
+    return text or None
+
+
+def _bool(value: Any, *, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if not text:
+        return default
+    if text in {"0", "false", "no", "off", "disabled"}:
+        return False
+    if text in {"1", "true", "yes", "on", "enabled"}:
+        return True
+    return default
+
+
+def _int_or_default(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _participant_for_agent_id(runtime: Any, agent_id: str) -> dict[str, Any]:
