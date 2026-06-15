@@ -62,10 +62,93 @@ def _tool_input_preview(value: Any, *, limit: int = 1200) -> Any:
 class WorkflowContinuationCoordinator:
     """Executes Workflow nodes for a Workflow Run."""
 
-    def __init__(self, engine: Any, *, iso_epoch: Any | None = None) -> None:
+    def __init__(
+        self,
+        engine: Any,
+        *,
+        iso_epoch: Any | None = None,
+        workflow_path: Any | None = None,
+        workflow_nodes_by_id: Any | None = None,
+        workflow_next_node_id: Any | None = None,
+        workflow_parallel_plan: Any | None = None,
+        node_kind: Any | None = None,
+    ) -> None:
         self._engine = engine
         self._iso_epoch = iso_epoch or _iso_epoch
+        self._workflow_path_callback = workflow_path
+        self._workflow_nodes_by_id_callback = workflow_nodes_by_id
+        self._workflow_next_node_id_callback = workflow_next_node_id
+        self._workflow_parallel_plan_callback = workflow_parallel_plan
+        self._node_kind_callback = node_kind
         self._outcomes = WorkflowRunOutcomeProjector(engine)
+
+    def _workflow_path(self, workflow: dict[str, Any]) -> list[dict[str, Any]]:
+        if self._workflow_path_callback is not None:
+            return self._workflow_path_callback(workflow)
+        return self._engine._workflow_path(workflow)
+
+    def _workflow_nodes_by_id(
+        self,
+        workflow: dict[str, Any],
+        path: list[dict[str, Any]],
+    ) -> dict[str, dict[str, Any]]:
+        if self._workflow_nodes_by_id_callback is not None:
+            return self._workflow_nodes_by_id_callback(workflow)
+        try:
+            return self._engine._workflow_nodes_by_id(workflow)
+        except AttributeError:
+            return {
+                str(node.get("id") or index): node
+                for index, node in enumerate(path)
+            }
+
+    def _workflow_next_node_id(
+        self,
+        workflow: dict[str, Any],
+        current_node: dict[str, Any],
+        current_context: str,
+        path: list[dict[str, Any]],
+    ) -> str:
+        if self._workflow_next_node_id_callback is not None:
+            return str(
+                self._workflow_next_node_id_callback(
+                    workflow,
+                    current_node,
+                    current_context,
+                )
+                or ""
+            )
+        try:
+            return str(
+                self._engine._workflow_next_node_id(
+                    workflow,
+                    current_node,
+                    current_context,
+                )
+                or ""
+            )
+        except AttributeError:
+            try:
+                current_index = path.index(current_node)
+            except ValueError:
+                return ""
+            if current_index + 1 >= len(path):
+                return ""
+            return str(path[current_index + 1].get("id") or "")
+
+    def _workflow_parallel_plan(
+        self,
+        workflow: dict[str, Any],
+        node: dict[str, Any],
+    ) -> dict[str, Any]:
+        if self._workflow_parallel_plan_callback is not None:
+            return self._workflow_parallel_plan_callback(workflow, node)
+        return self._engine._workflow_parallel_plan(workflow, node)
+
+    def _node_kind(self, node: dict[str, Any]) -> str:
+        if self._node_kind_callback is not None:
+            return self._node_kind_callback(node)
+        return self._engine._node_kind(node)
 
     @staticmethod
     def _workflow_steps_used(timeline: list[dict[str, Any]]) -> int:
@@ -113,31 +196,24 @@ class WorkflowContinuationCoordinator:
         current_node_info: dict[str, str] = {}
         try:
             workflow_goal = str(run.get("user_goal") or context)
-            path = engine._workflow_path(workflow)
+            path = self._workflow_path(workflow)
             if start_index < 0 or start_index > len(path):
                 raise AgentRuntimeError("Workflow Run 待审批恢复位置无效")
-            try:
-                nodes_by_id = engine._workflow_nodes_by_id(workflow)
-            except AttributeError:
-                nodes_by_id = {str(node.get("id") or index): node for index, node in enumerate(path)}
+            nodes_by_id = self._workflow_nodes_by_id(workflow, path)
 
             def next_node_id_for(current_node: dict[str, Any], current_context: str) -> str:
-                try:
-                    return str(engine._workflow_next_node_id(workflow, current_node, current_context) or "")
-                except AttributeError:
-                    try:
-                        current_index = path.index(current_node)
-                    except ValueError:
-                        return ""
-                    if current_index + 1 >= len(path):
-                        return ""
-                    return str(path[current_index + 1].get("id") or "")
+                return self._workflow_next_node_id(
+                    workflow,
+                    current_node,
+                    current_context,
+                    path,
+                )
 
             def append_edge_followed(current_node: dict[str, Any], next_node_id: str, branch: str = "") -> None:
                 source_node_id = str(current_node.get("id") or "")
                 if not source_node_id or not next_node_id:
                     return
-                source_kind = engine._node_kind(current_node)
+                source_kind = self._node_kind(current_node)
                 source_label = str((current_node.get("data") or {}).get("label") or source_node_id)
                 projection = WorkflowEdgeFollowedProjection.from_node(
                     current_node,
@@ -180,7 +256,7 @@ class WorkflowContinuationCoordinator:
                 step_count += 1
                 if step_count > max_step_count:
                     raise AgentRuntimeError("Workflow 执行步骤超过 Loop 上限")
-                kind = engine._node_kind(node)
+                kind = self._node_kind(node)
                 label = str((node.get("data") or {}).get("label") or node.get("id"))
                 current_node_info = {
                     "workflow_node_id": str(node.get("id") or ""),
@@ -723,8 +799,8 @@ class WorkflowContinuationCoordinator:
         root_group: bool,
     ) -> dict[str, Any]:
         engine = self._engine
-        plan = engine._workflow_parallel_plan(workflow, node)
-        nodes_by_id = engine._workflow_nodes_by_id(workflow)
+        plan = self._workflow_parallel_plan(workflow, node)
+        nodes_by_id = self._workflow_nodes_by_id(workflow, self._workflow_path(workflow))
         parallel_node_id = str(node.get("id") or "")
         parallel_context = self._parallel_node_resume_context(
             timeline,
@@ -741,7 +817,7 @@ class WorkflowContinuationCoordinator:
                 branch_node = nodes_by_id.get(branch_node_id_text)
                 if branch_node is None:
                     raise AgentRuntimeError(f"Parallel 分支引用了不存在的节点：{branch_node_id}")
-                branch_kind = engine._node_kind(branch_node)
+                branch_kind = self._node_kind(branch_node)
                 branch_node_label = str((branch_node.get("data") or {}).get("label") or branch_node.get("id"))
                 node_info_extra = {
                     "workflow_parent_node_id": parallel_node_id,

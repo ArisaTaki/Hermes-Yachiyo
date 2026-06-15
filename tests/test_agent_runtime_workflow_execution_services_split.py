@@ -50,6 +50,11 @@ def test_build_runtime_workflow_execution_services_wires_continuation_approval_a
     assert isinstance(bundle.workflow_child_outcomes, WorkflowChildOutcomeCoordinator)
     assert bundle.workflow_continuation._engine is engine
     assert bundle.workflow_continuation._iso_epoch is iso_epoch
+    assert callable(bundle.workflow_continuation._workflow_path_callback)
+    assert callable(bundle.workflow_continuation._workflow_nodes_by_id_callback)
+    assert callable(bundle.workflow_continuation._workflow_next_node_id_callback)
+    assert callable(bundle.workflow_continuation._workflow_parallel_plan_callback)
+    assert callable(bundle.workflow_continuation._node_kind_callback)
     assert bundle.workflow_approval_resume._resume_after_approval_node.__self__ is bundle.workflow_continuation
     assert bundle.workflow_cancellation._timeline is timeline_factory
 
@@ -67,6 +72,11 @@ def test_native_runtime_installs_workflow_execution_services_under_legacy_attrib
         assert isinstance(service.workflow_cancellation, WorkflowCancellationProjectionCoordinator)
         assert isinstance(service.workflow_child_outcomes, WorkflowChildOutcomeCoordinator)
         assert service.workflow_continuation._engine is service
+        assert callable(service.workflow_continuation._workflow_path_callback)
+        assert callable(service.workflow_continuation._workflow_nodes_by_id_callback)
+        assert callable(service.workflow_continuation._workflow_next_node_id_callback)
+        assert callable(service.workflow_continuation._workflow_parallel_plan_callback)
+        assert callable(service.workflow_continuation._node_kind_callback)
         assert service.workflow_approval_resume._resume_after_approval_node.__self__ is service.workflow_continuation
         assert service.workflow_approval_resume._claim_pending_approval.__self__ is service.run_approvals
         assert callable(service.workflow_cancellation._pending_approval_private)

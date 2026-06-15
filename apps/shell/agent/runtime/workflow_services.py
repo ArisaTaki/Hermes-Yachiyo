@@ -125,6 +125,16 @@ def build_runtime_workflow_execution_services(
     workflow_continuation = WorkflowContinuationCoordinator(
         engine,
         iso_epoch=iso_epoch,
+        workflow_path=lambda workflow: engine._workflow_path(workflow),
+        workflow_nodes_by_id=lambda workflow: engine._workflow_nodes_by_id(workflow),
+        workflow_next_node_id=lambda workflow, node, context: (
+            engine._workflow_next_node_id(workflow, node, context)
+        ),
+        workflow_parallel_plan=lambda workflow, node: engine._workflow_parallel_plan(
+            workflow,
+            node,
+        ),
+        node_kind=lambda node: engine._node_kind(node),
     )
     return RuntimeWorkflowExecutionServiceBundle(
         workflow_continuation=workflow_continuation,

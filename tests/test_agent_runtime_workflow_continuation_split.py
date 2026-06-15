@@ -166,3 +166,68 @@ def test_workflow_run_outcome_projector_projects_background_failure_without_muta
     ]
     assert engine.group_updates == []
     assert result["status"] == "failed"
+
+
+def test_workflow_continuation_uses_injected_traversal_callbacks() -> None:
+    engine = FakeWorkflowTraversalEngine()
+    workflow = {
+        "nodes": [
+            {"id": "start", "type": "start", "data": {"label": "Injected Start"}},
+        ]
+    }
+    path = list(workflow["nodes"])
+    calls: list[str] = []
+    coordinator = WorkflowContinuationCoordinator(
+        engine,
+        workflow_path=lambda current_workflow: calls.append("path") or list(current_workflow["nodes"]),
+        workflow_nodes_by_id=lambda _workflow: calls.append("nodes") or {"start": path[0]},
+        workflow_next_node_id=lambda _workflow, _node, _context: calls.append("next") or "",
+        workflow_parallel_plan=lambda _workflow, _node: calls.append("parallel") or {},
+        node_kind=lambda node: calls.append(f"kind:{node['id']}") or str(node["type"]),
+    )
+
+    result = coordinator.continue_run(
+        {"run_id": "workflow_run", "user_goal": "Run injected traversal"},
+        workflow,
+        context="Initial context",
+        timeline=[],
+        artifacts=[],
+        start_index=0,
+        root_group=False,
+    )
+
+    assert result["status"] == "completed"
+    assert result["result"] == "Initial context"
+    assert calls == ["path", "nodes", "kind:start", "next"]
+    assert engine.events == [
+        (
+            "workflow_run",
+            "workflow.node.start",
+            {
+                "workflow_node_id": "start",
+                "workflow_node_kind": "start",
+                "workflow_node_label": "Injected Start",
+                "status": "completed",
+            },
+        ),
+        ("workflow_run", "workflow.run.completed", {"result": "Initial context"}),
+    ]
+
+
+class FakeWorkflowTraversalEngine:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, str, dict[str, Any]]] = []
+
+    def _timeline(self, event: str, detail: str, **payload: Any) -> dict[str, Any]:
+        return {"event": event, "detail": detail, **payload}
+
+    def append_run_event(
+        self,
+        run_id: str,
+        event_type: str,
+        payload: dict[str, Any],
+    ) -> None:
+        self.events.append((run_id, event_type, payload))
+
+    def _update_run(self, run_id: str, **fields: Any) -> dict[str, Any]:
+        return {"run_id": run_id, **fields}
