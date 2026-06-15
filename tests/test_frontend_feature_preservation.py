@@ -615,7 +615,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "useRunEventReplay(selectedRunId, selectedRunReplayRefreshKey)",
             "useRunTimeline(selectedRunId, selectedRunReplayRefreshKey)",
             "useWorkflowDefinitions",
-            "RunDetailPanel",
+            "RunManagementTab",
             "selectedPublicRunTimeline={selectedPublicRunTimeline}",
             "selectedRunArtifacts",
         ],
@@ -832,8 +832,20 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
     _assert_contains(
         "apps/frontend/src/views/AgentStudioView.tsx",
         [
-            "RunDetailPanel",
+            "RunManagementTab",
+            "onCreateRun={() => void runAction(createRunFromTarget, '创建 Run')}",
+            "onRerunSelectedRun={rerunSelectedRun}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/RunManagementTab.tsx",
+        [
+            "export function RunManagementTab",
+            'data-testid="agent-studio-runs"',
             "RunLauncherPanel",
+            "RunDetailPanel",
+            "<RunLauncherPanel {...props} />",
+            "<RunDetailPanel {...props} />",
         ],
     )
     _assert_contains(
@@ -2225,7 +2237,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "onRunWorkflow={() => void runAction(runCurrentWorkflow, '保存并运行 Workflow')}",
             "onPrepareSelectedRunRerun={prepareSelectedRunRerun}",
             "onRerunSelectedRun={rerunSelectedRun}",
-            "RunDetailPanel",
+            "RunManagementTab",
             "selectedWorkflowApprovalChildRunId",
             "selectedAgentReadOnly",
             "selectedAgentDeletable",

@@ -12,8 +12,7 @@ import { AgentDefinitionsTab } from '../features/agent-studio/components/AgentDe
 import { AgentGroupPanel } from '../features/agent-studio/components/AgentGroupPanel';
 import { AgentStudioChrome } from '../features/agent-studio/components/AgentStudioChrome';
 import { RuntimeMemoryPanel } from '../features/agent-studio/components/RuntimeMemoryPanel';
-import { RunDetailPanel } from '../features/agent-studio/components/RunDetailPanel';
-import { RunLauncherPanel } from '../features/agent-studio/components/RunLauncherPanel';
+import { RunManagementTab } from '../features/agent-studio/components/RunManagementTab';
 import { SkillFolderPanel } from '../features/agent-studio/components/SkillFolderPanel';
 import { SkillLibraryTab } from '../features/agent-studio/components/SkillLibraryTab';
 import { WorkflowEditorPanel, WorkflowRunPreview } from '../features/agent-studio/components/WorkflowEditorPanel';
@@ -1604,112 +1603,102 @@ export function AgentStudioView() {
       ) : null}
 
       {!loading && tab === 'runs' ? (
-        <section className="agent-studio-grid">
-          <RunLauncherPanel
-            allHistoryRunsSelected={allHistoryRunsSelected}
-            busy={busy}
-            collapsedRunHistoryGroups={collapsedRunHistoryGroups}
-            filteredRunIds={filteredRunIds}
-            filteredRuns={filteredRuns}
-            formatRunDate={formatRunDate}
-            runBulkDeleteDisabledReason={runBulkDeleteDisabledReason}
-            runFilterCounts={runFilterCounts}
-            runGoal={runGoal}
-            runHistoryGroupSummary={runHistoryGroupSummary}
-            runHistoryGroups={runHistoryGroups}
-            runHistoryManagementMode={runHistoryManagementMode}
-            runKindFilter={runKindFilter}
-            runKindLabel={runKindLabel}
-            runSearchActive={runSearchActive}
-            runSearchQuery={runSearchQuery}
-            runStatusFilter={runStatusFilter}
-            runStatusFilterCounts={runStatusFilterCounts}
-            runStatusFilteredRuns={runStatusFilteredRuns}
-            runStatusLabel={runStatusLabel}
-            runStatusTone={runStatusTone}
-            runTarget={runTarget}
-            runTargetDisabledReason={runTargetDisabledReason}
-            runTargetWorkflowErrors={selectedRunTargetWorkflowValidation.errors}
-            runnables={runnables}
-            selectedHistoryRunCount={selectedHistoryRuns.length}
-            selectedRunId={selectedRunId}
-            selectedRunIdSet={selectedRunIdSet}
-            selectedRunTarget={selectedRunTarget}
-            workflowPreview={selectedRunTarget?.kind === 'workflow' ? (
-              <WorkflowRunPreview
-                agents={agents}
-                agentCapabilityLine={agentCapabilityLine}
-                agentIssueById={agentRunIssueById}
-                sourceNodes={selectedRunTargetWorkflowNodes}
-                steps={selectedRunTargetWorkflowPreviewSteps}
-              />
-            ) : null}
-            onCreateRun={() => void runAction(createRunFromTarget, '创建 Run')}
-            onFinishRunHistoryManagement={finishRunHistoryManagement}
-            onOpenRunDetail={openRunDetail}
-            onRequestDeleteSelectedRuns={requestDeleteSelectedRuns}
-            onRunGoalChange={setRunGoal}
-            onRunSearchQueryChange={setRunSearchQuery}
-            onRunTargetChange={setRunTarget}
-            onSelectRunKindFilter={selectRunKindFilter}
-            onSelectRunStatusFilter={selectRunStatusFilter}
-            onSetRunHistoryManagementMode={setRunHistoryManagementMode}
-            onSetSelectedRunIds={setSelectedRunIds}
-            onToggleRunHistoryGroup={toggleRunHistoryGroup}
-            onToggleRunSelected={toggleRunSelected}
-            runnableCapabilityLine={runnableCapabilityLine}
-            runnableOptionLabel={runnableOptionLabel}
-          />
-          <RunDetailPanel
-            artifactPreview={artifactPreview}
-            busy={busy}
-            formatRunDate={formatRunDate}
-            isActiveRunStatus={isActiveRunStatus}
-            normalizeRunStatus={normalizeRunStatus}
-            onApproveRunById={approveRunById}
-            onApproveSelectedRun={approveSelectedRun}
-            onCancelRunById={cancelRunById}
-            onLoadMoreSelectedRunEvents={loadMoreSelectedRunEvents}
-            onOpenArtifact={openArtifact}
-            onOpenRunDetail={openRunDetail}
-            onOpenWorkflowDesign={openWorkflowDesign}
-            onPrepareSelectedRunRerun={prepareSelectedRunRerun}
-            onRejectRunById={rejectRunById}
-            onRejectSelectedRun={rejectSelectedRun}
-            onRequestCancelSelectedRun={requestCancelSelectedRun}
-            onRerunSelectedRun={rerunSelectedRun}
-            onRunAction={(action, label) => void runAction(action as () => Promise<StudioRefreshOptions | void>, label)}
-            runById={runById}
-            runKindLabel={runKindLabel}
-            runStatusLabel={runStatusLabel}
-            runStatusTone={runStatusTone}
-            selectedPublicRunTimeline={selectedPublicRunTimeline}
-            selectedRun={selectedRun}
-            selectedRunApproval={selectedRunApproval}
-            selectedRunArtifacts={selectedRunArtifacts}
-            selectedRunAvatarUrl={selectedRunAvatarUrl}
-            selectedRunExecutionEvents={selectedRunExecutionEvents}
-            selectedRunIsLive={selectedRunIsLive}
-            selectedRunReplayError={selectedRunReplayError}
-            selectedRunReplayEvents={selectedRunReplayEvents}
-            selectedRunReplayHasMore={selectedRunReplayHasMore}
-            selectedRunReplayLoading={selectedRunReplayLoading}
-            selectedRunRerunDisabledReason={selectedRunRerunDisabledReason}
-            selectedRunRerunTarget={selectedRunRerunTarget}
-            selectedRunWorkflow={selectedRunWorkflow}
-            selectedWorkflowApprovalChildRun={selectedWorkflowApprovalChildRun}
-            selectedWorkflowApprovalChildRunId={selectedWorkflowApprovalChildRunId}
-            selectedWorkflowApprovalStep={selectedWorkflowApprovalStep}
-            selectedWorkflowParentRun={selectedWorkflowParentRun}
-            selectedWorkflowParentRunId={selectedWorkflowParentRunId}
-            selectedWorkflowSteps={selectedWorkflowSteps}
-            skippedWorkflowArtifactLabel={skippedWorkflowArtifactLabel}
-            workflowRunArtifactForStep={workflowRunArtifactForStep}
-            workflowStepArtifacts={workflowStepArtifacts}
-            workflowStepKindLabel={workflowStepKindLabel}
-            workflowStepSummary={workflowStepSummary}
-          />
-        </section>
+        <RunManagementTab
+          allHistoryRunsSelected={allHistoryRunsSelected}
+          artifactPreview={artifactPreview}
+          busy={busy}
+          collapsedRunHistoryGroups={collapsedRunHistoryGroups}
+          filteredRunIds={filteredRunIds}
+          filteredRuns={filteredRuns}
+          formatRunDate={formatRunDate}
+          isActiveRunStatus={isActiveRunStatus}
+          normalizeRunStatus={normalizeRunStatus}
+          onApproveRunById={approveRunById}
+          onApproveSelectedRun={approveSelectedRun}
+          onCancelRunById={cancelRunById}
+          onCreateRun={() => void runAction(createRunFromTarget, '创建 Run')}
+          onFinishRunHistoryManagement={finishRunHistoryManagement}
+          onLoadMoreSelectedRunEvents={loadMoreSelectedRunEvents}
+          onOpenArtifact={openArtifact}
+          onOpenRunDetail={openRunDetail}
+          onOpenWorkflowDesign={openWorkflowDesign}
+          onPrepareSelectedRunRerun={prepareSelectedRunRerun}
+          onRejectRunById={rejectRunById}
+          onRejectSelectedRun={rejectSelectedRun}
+          onRequestCancelSelectedRun={requestCancelSelectedRun}
+          onRequestDeleteSelectedRuns={requestDeleteSelectedRuns}
+          onRerunSelectedRun={rerunSelectedRun}
+          onRunAction={(action, label) => void runAction(action as () => Promise<StudioRefreshOptions | void>, label)}
+          onRunGoalChange={setRunGoal}
+          onRunSearchQueryChange={setRunSearchQuery}
+          onRunTargetChange={setRunTarget}
+          onSelectRunKindFilter={selectRunKindFilter}
+          onSelectRunStatusFilter={selectRunStatusFilter}
+          onSetRunHistoryManagementMode={setRunHistoryManagementMode}
+          onSetSelectedRunIds={setSelectedRunIds}
+          onToggleRunHistoryGroup={toggleRunHistoryGroup}
+          onToggleRunSelected={toggleRunSelected}
+          runBulkDeleteDisabledReason={runBulkDeleteDisabledReason}
+          runById={runById}
+          runFilterCounts={runFilterCounts}
+          runGoal={runGoal}
+          runHistoryGroupSummary={runHistoryGroupSummary}
+          runHistoryGroups={runHistoryGroups}
+          runHistoryManagementMode={runHistoryManagementMode}
+          runKindFilter={runKindFilter}
+          runKindLabel={runKindLabel}
+          runSearchActive={runSearchActive}
+          runSearchQuery={runSearchQuery}
+          runStatusFilter={runStatusFilter}
+          runStatusFilterCounts={runStatusFilterCounts}
+          runStatusFilteredRuns={runStatusFilteredRuns}
+          runStatusLabel={runStatusLabel}
+          runStatusTone={runStatusTone}
+          runTarget={runTarget}
+          runTargetDisabledReason={runTargetDisabledReason}
+          runTargetWorkflowErrors={selectedRunTargetWorkflowValidation.errors}
+          runnables={runnables}
+          runnableCapabilityLine={runnableCapabilityLine}
+          runnableOptionLabel={runnableOptionLabel}
+          selectedHistoryRunCount={selectedHistoryRuns.length}
+          selectedPublicRunTimeline={selectedPublicRunTimeline}
+          selectedRun={selectedRun}
+          selectedRunApproval={selectedRunApproval}
+          selectedRunArtifacts={selectedRunArtifacts}
+          selectedRunAvatarUrl={selectedRunAvatarUrl}
+          selectedRunExecutionEvents={selectedRunExecutionEvents}
+          selectedRunId={selectedRunId}
+          selectedRunIdSet={selectedRunIdSet}
+          selectedRunIsLive={selectedRunIsLive}
+          selectedRunReplayError={selectedRunReplayError}
+          selectedRunReplayEvents={selectedRunReplayEvents}
+          selectedRunReplayHasMore={selectedRunReplayHasMore}
+          selectedRunReplayLoading={selectedRunReplayLoading}
+          selectedRunRerunDisabledReason={selectedRunRerunDisabledReason}
+          selectedRunRerunTarget={selectedRunRerunTarget}
+          selectedRunTarget={selectedRunTarget}
+          selectedRunWorkflow={selectedRunWorkflow}
+          selectedWorkflowApprovalChildRun={selectedWorkflowApprovalChildRun}
+          selectedWorkflowApprovalChildRunId={selectedWorkflowApprovalChildRunId}
+          selectedWorkflowApprovalStep={selectedWorkflowApprovalStep}
+          selectedWorkflowParentRun={selectedWorkflowParentRun}
+          selectedWorkflowParentRunId={selectedWorkflowParentRunId}
+          selectedWorkflowSteps={selectedWorkflowSteps}
+          skippedWorkflowArtifactLabel={skippedWorkflowArtifactLabel}
+          workflowPreview={selectedRunTarget?.kind === 'workflow' ? (
+            <WorkflowRunPreview
+              agents={agents}
+              agentCapabilityLine={agentCapabilityLine}
+              agentIssueById={agentRunIssueById}
+              sourceNodes={selectedRunTargetWorkflowNodes}
+              steps={selectedRunTargetWorkflowPreviewSteps}
+            />
+          ) : null}
+          workflowRunArtifactForStep={workflowRunArtifactForStep}
+          workflowStepArtifacts={workflowStepArtifacts}
+          workflowStepKindLabel={workflowStepKindLabel}
+          workflowStepSummary={workflowStepSummary}
+        />
       ) : null}
 
       <ConfirmDialog
