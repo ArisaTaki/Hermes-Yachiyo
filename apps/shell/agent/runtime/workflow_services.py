@@ -164,6 +164,13 @@ def build_runtime_workflow_execution_services(
             engine._workflow_child_artifact_refs(child_run, label)
         ),
         merge_workflow_child_run_outcome=merge_workflow_child_run_outcome,
+        workflow_for_node=lambda node: engine._workflow_for_node(node),
+        workflow_run_started_projection=lambda workflow_id, workflow: (
+            engine.workflow_run_start_projector.started_projection(workflow_id, workflow)
+        ),
+        continue_workflow_run=lambda run, workflow, **kwargs: (
+            engine._continue_workflow_run(run, workflow, **kwargs)
+        ),
         node_kind=lambda node: engine._node_kind(node),
     )
     return RuntimeWorkflowExecutionServiceBundle(

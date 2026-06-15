@@ -537,6 +537,123 @@ def test_workflow_continuation_uses_injected_agent_handoff_inputs() -> None:
     assert agent_event["artifact_count"] == 1
 
 
+def test_workflow_continuation_uses_injected_subworkflow_execution_ports() -> None:
+    engine = FakeWorkflowAgentExecutionEngine()
+    child_workflow = {"workflow_id": "workflow_child", "name": "Child Flow"}
+    child_run = {
+        "run_id": "child_workflow_run",
+        "kind": "workflow_run",
+        "status": "completed",
+        "result": "Child flow result",
+        "artifacts": [{"kind": "workflow_artifact", "path": "reports/child.md"}],
+    }
+    workflow = {
+        "nodes": [
+            {
+                "id": "child-flow",
+                "type": "workflow",
+                "data": {"label": "Run Child Flow", "workflow_id": "workflow_child"},
+            },
+        ]
+    }
+    inserted: list[dict[str, Any]] = []
+    started_projection_calls: list[tuple[str, str]] = []
+    continued: list[dict[str, Any]] = []
+    artifact_ref_calls: list[tuple[str, str]] = []
+    merged: list[tuple[str, str]] = []
+    coordinator = WorkflowContinuationCoordinator(
+        engine,
+        workflow_path=lambda current_workflow: list(current_workflow["nodes"]),
+        workflow_nodes_by_id=lambda current_workflow: {
+            str(node["id"]): node for node in current_workflow["nodes"]
+        },
+        workflow_next_node_id=lambda _workflow, _node, _context: "",
+        workflow_node_task=lambda _node: "Run child flow first",
+        workflow_child_goal=lambda workflow_goal, step_task: (
+            f"{workflow_goal}\n\nStep: {step_task}"
+        ),
+        insert_run=lambda **kwargs: inserted.append(kwargs)
+        or {"run_id": "child_workflow_run"},
+        workflow_for_node=lambda node: child_workflow
+        if str(node.get("id") or "") == "child-flow"
+        else {},
+        workflow_run_started_projection=lambda workflow_id, received_workflow: started_projection_calls.append(
+            (workflow_id, str(received_workflow.get("name") or ""))
+        )
+        or (
+            [{"event": "workflow.run.started", "detail": "Child started"}],
+            {"workflow_id": workflow_id, "status": "running"},
+        ),
+        continue_workflow_run=lambda run, received_workflow, **kwargs: continued.append(
+            {
+                "run_id": str(run.get("run_id") or ""),
+                "workflow_id": str(received_workflow.get("workflow_id") or ""),
+                "context": str(kwargs.get("context") or ""),
+                "start_index": kwargs.get("start_index"),
+                "root_group": kwargs.get("root_group"),
+            }
+        )
+        or child_run,
+        workflow_child_artifact_refs=lambda received_child_run, label: artifact_ref_calls.append(
+            (str(received_child_run.get("run_id") or ""), label)
+        )
+        or [
+            artifact
+            for artifact in received_child_run.get("artifacts") or []
+            if artifact.get("kind")
+        ],
+        merge_workflow_child_run_outcome=lambda _timeline, _artifacts, received_child_run, label: merged.append(
+            (str(received_child_run.get("run_id") or ""), label)
+        ),
+        node_kind=lambda node: str(node["type"]),
+    )
+    timeline: list[dict[str, Any]] = []
+
+    result = coordinator.continue_run(
+        {
+            "run_id": "workflow_run",
+            "run_group_id": "workflow_group",
+            "user_goal": "Run parent flow",
+        },
+        workflow,
+        context="Run parent flow",
+        timeline=timeline,
+        artifacts=[],
+        start_index=0,
+        root_group=False,
+    )
+
+    child_goal = "Run parent flow\n\nStep: Run child flow first"
+    assert result["status"] == "completed"
+    assert result["result"] == "Child flow result"
+    assert inserted == [
+        {
+            "kind": "workflow_run",
+            "runnable_id": "workflow_child",
+            "user_goal": child_goal,
+            "run_group_id": "workflow_group",
+        }
+    ]
+    assert started_projection_calls == [("workflow_child", "Child Flow")]
+    assert continued == [
+        {
+            "run_id": "child_workflow_run",
+            "workflow_id": "workflow_child",
+            "context": child_goal,
+            "start_index": 0,
+            "root_group": False,
+        }
+    ]
+    assert artifact_ref_calls == [("child_workflow_run", "Run Child Flow")]
+    assert merged == [("child_workflow_run", "Run Child Flow")]
+    workflow_event = next(
+        event for event in timeline if event["event"] == "workflow.node.workflow"
+    )
+    assert workflow_event["child_workflow_id"] == "workflow_child"
+    assert workflow_event["child_run_id"] == "child_workflow_run"
+    assert workflow_event["artifact_count"] == 1
+
+
 class FakeWorkflowTraversalEngine:
     def __init__(self) -> None:
         self.events: list[tuple[str, str, dict[str, Any]]] = []

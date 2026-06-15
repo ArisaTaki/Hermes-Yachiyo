@@ -102,6 +102,44 @@ def test_workflow_agent_node_execution_accepts_prepared_child_run() -> None:
     }
 
 
+def test_workflow_subworkflow_node_execution_accepts_prepared_child_run() -> None:
+    child_workflow = {"workflow_id": "workflow_child", "name": "Child Flow"}
+    child_run = {
+        "run_id": "child_workflow_run",
+        "status": "completed",
+        "result": "Child flow result",
+    }
+
+    execution = WorkflowSubworkflowNodeExecution.from_child_run(
+        {"id": "child-flow", "type": "workflow"},
+        child_workflow=child_workflow,
+        child_run=child_run,
+        label="Run Child Flow",
+        kind="workflow",
+        step_task="Run child flow first",
+        child_goal="Run parent flow\n\nStep: Run child flow first",
+        artifact_count=1,
+    )
+
+    assert execution.child_workflow is child_workflow
+    assert execution.workflow_id == "workflow_child"
+    assert execution.child_run is child_run
+    assert execution.next_context == "Child flow result"
+    assert execution.status == "completed"
+    assert execution.event_payload() == {
+        "workflow_node_id": "child-flow",
+        "workflow_node_kind": "workflow",
+        "workflow_node_label": "Run Child Flow",
+        "workflow_node_task": "Run child flow first",
+        "child_workflow_id": "workflow_child",
+        "child_workflow_name": "Child Flow",
+        "child_run_id": "child_workflow_run",
+        "status": "completed",
+        "result": "Child flow result",
+        "artifact_count": 1,
+    }
+
+
 def test_workflow_artifact_node_write_accepts_prepared_artifact() -> None:
     write = WorkflowArtifactNodeWrite.from_artifact(
         {

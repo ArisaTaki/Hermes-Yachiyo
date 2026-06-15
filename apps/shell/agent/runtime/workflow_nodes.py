@@ -203,6 +203,31 @@ class WorkflowSubworkflowNodeExecution:
     artifact_count: int
 
     @classmethod
+    def from_child_run(
+        cls,
+        node: dict[str, Any],
+        *,
+        child_workflow: dict[str, Any],
+        child_run: dict[str, Any],
+        label: str,
+        kind: str,
+        step_task: str,
+        child_goal: str,
+        artifact_count: int,
+    ) -> "WorkflowSubworkflowNodeExecution":
+        return cls(
+            child_workflow=child_workflow,
+            workflow_id=str(child_workflow.get("workflow_id") or ""),
+            node_id=str(node.get("id") or ""),
+            node_kind=kind,
+            node_label=label,
+            step_task=step_task,
+            child_goal=child_goal,
+            child_run=child_run,
+            artifact_count=artifact_count,
+        )
+
+    @classmethod
     def from_node(
         cls,
         engine: Any,
@@ -238,15 +263,14 @@ class WorkflowSubworkflowNodeExecution:
             start_index=0,
             root_group=False,
         )
-        return cls(
+        return cls.from_child_run(
+            node,
             child_workflow=child_workflow,
-            workflow_id=workflow_id,
-            node_id=str(node.get("id") or ""),
-            node_kind=kind,
-            node_label=label,
+            child_run=child,
+            label=label,
+            kind=kind,
             step_task=step_task,
             child_goal=child_goal,
-            child_run=child,
             artifact_count=len(engine._workflow_child_artifact_refs(child, label)),
         )
 

@@ -86,6 +86,9 @@ class WorkflowContinuationCoordinator:
         execute_agent_run: Any | None = None,
         workflow_child_artifact_refs: Any | None = None,
         merge_workflow_child_run_outcome: Any | None = None,
+        workflow_for_node: Any | None = None,
+        workflow_run_started_projection: Any | None = None,
+        continue_workflow_run: Any | None = None,
         node_kind: Any | None = None,
     ) -> None:
         self._engine = engine
@@ -107,6 +110,9 @@ class WorkflowContinuationCoordinator:
         self._execute_agent_run_callback = execute_agent_run
         self._workflow_child_artifact_refs_callback = workflow_child_artifact_refs
         self._merge_workflow_child_run_outcome_callback = merge_workflow_child_run_outcome
+        self._workflow_for_node_callback = workflow_for_node
+        self._workflow_run_started_projection_callback = workflow_run_started_projection
+        self._continue_workflow_run_callback = continue_workflow_run
         self._node_kind_callback = node_kind
         self._outcomes = WorkflowRunOutcomeProjector(engine)
 
@@ -305,6 +311,33 @@ class WorkflowContinuationCoordinator:
             )
             return
         self._engine._merge_workflow_child_run_outcome(timeline, artifacts, child_run, label)
+
+    def _workflow_for_node(self, node: dict[str, Any]) -> dict[str, Any]:
+        if self._workflow_for_node_callback is not None:
+            return self._workflow_for_node_callback(node)
+        return self._engine._workflow_for_node(node)
+
+    def _workflow_run_started_projection(
+        self,
+        workflow_id: str,
+        workflow: dict[str, Any],
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        if self._workflow_run_started_projection_callback is not None:
+            return self._workflow_run_started_projection_callback(workflow_id, workflow)
+        return self._engine.workflow_run_start_projector.started_projection(
+            workflow_id,
+            workflow,
+        )
+
+    def _continue_workflow_run(
+        self,
+        run: dict[str, Any],
+        workflow: dict[str, Any],
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        if self._continue_workflow_run_callback is not None:
+            return self._continue_workflow_run_callback(run, workflow, **kwargs)
+        return self._engine._continue_workflow_run(run, workflow, **kwargs)
 
     def _node_kind(self, node: dict[str, Any]) -> str:
         if self._node_kind_callback is not None:
@@ -848,14 +881,39 @@ class WorkflowContinuationCoordinator:
         root_group: bool,
     ) -> dict[str, Any]:
         engine = self._engine
-        execution = WorkflowSubworkflowNodeExecution.from_node(
-            engine,
-            run,
+        child_workflow = self._workflow_for_node(node)
+        workflow_id = str(child_workflow.get("workflow_id") or "")
+        step_task = self._workflow_node_task(node)
+        child_goal = self._workflow_child_goal(workflow_goal, step_task)
+        child = self._insert_run(
+            kind="workflow_run",
+            runnable_id=workflow_id,
+            user_goal=child_goal,
+            run_group_id=run_group_id,
+        )
+        child_timeline, started_payload = self._workflow_run_started_projection(
+            workflow_id,
+            child_workflow,
+        )
+        engine.append_run_event(child["run_id"], "workflow.run.started", started_payload)
+        child = self._continue_workflow_run(
+            child,
+            child_workflow,
+            context=child_goal,
+            timeline=child_timeline,
+            artifacts=[],
+            start_index=0,
+            root_group=False,
+        )
+        execution = WorkflowSubworkflowNodeExecution.from_child_run(
             node,
+            child_workflow=child_workflow,
+            child_run=child,
             label=label,
             kind=kind,
-            workflow_goal=workflow_goal,
-            run_group_id=run_group_id,
+            step_task=step_task,
+            child_goal=child_goal,
+            artifact_count=len(self._workflow_child_artifact_refs(child, label)),
         )
         next_context = execution.next_context
         payload = execution.event_payload()
