@@ -843,13 +843,12 @@ class WorkflowContinuationCoordinator:
         timeline: list[dict[str, Any]],
     ) -> dict[str, Any]:
         engine = self._engine
-        projection = WorkflowConditionNodeProjection.from_node(
-            engine,
-            workflow,
+        selection = engine._workflow_condition_selection(workflow, node, context)
+        projection = WorkflowConditionNodeProjection.from_selection(
             node,
+            selection,
             label=label,
             kind=kind,
-            context=context,
         )
         timeline.append(projection.timeline_event(engine._timeline))
         engine.append_run_event(str(run["run_id"]), "workflow.node.condition", projection.event_payload())
@@ -871,14 +870,17 @@ class WorkflowContinuationCoordinator:
         timeline: list[dict[str, Any]],
     ) -> dict[str, Any]:
         engine = self._engine
-        projection = WorkflowLoopNodeProjection.from_node(
-            engine,
+        selection = engine._workflow_loop_selection(
             workflow,
             node,
+            context,
+            previous_iterations=previous_iterations,
+        )
+        projection = WorkflowLoopNodeProjection.from_selection(
+            node,
+            selection,
             label=label,
             kind=kind,
-            context=context,
-            previous_iterations=previous_iterations,
         )
         timeline.append(projection.timeline_event(engine._timeline))
         engine.append_run_event(str(run["run_id"]), "workflow.node.loop", projection.event_payload())

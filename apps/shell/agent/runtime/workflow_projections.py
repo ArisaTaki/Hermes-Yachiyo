@@ -123,6 +123,17 @@ class WorkflowConditionNodeProjection:
         context: str,
     ) -> "WorkflowConditionNodeProjection":
         selection = engine._workflow_condition_selection(workflow, node, context)
+        return cls.from_selection(node, selection, label=label, kind=kind)
+
+    @classmethod
+    def from_selection(
+        cls,
+        node: dict[str, Any],
+        selection: dict[str, Any],
+        *,
+        label: str,
+        kind: str,
+    ) -> "WorkflowConditionNodeProjection":
         return cls(
             node_id=str(node.get("id") or ""),
             node_kind=kind,
@@ -222,6 +233,17 @@ class WorkflowLoopNodeProjection:
             context,
             previous_iterations=previous_iterations,
         )
+        return cls.from_selection(node, selection, label=label, kind=kind)
+
+    @classmethod
+    def from_selection(
+        cls,
+        node: dict[str, Any],
+        selection: dict[str, Any],
+        *,
+        label: str,
+        kind: str,
+    ) -> "WorkflowLoopNodeProjection":
         return cls(
             node_id=str(node.get("id") or ""),
             node_kind=kind,
