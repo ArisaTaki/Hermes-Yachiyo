@@ -2069,9 +2069,6 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "updateSkill",
             "deleteSkill",
             "listSkillFolders",
-            "createSkillFolder",
-            "updateSkillFolder",
-            "deleteSkillFolder",
             "createWorkflow",
             "updateWorkflow",
             "deleteWorkflow",
@@ -2083,6 +2080,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "useRunEventReplay",
             "useRunHistoryManagement",
             "useRunLaunchActions",
+            "useSkillFolderManagement",
             "saveAgent",
             "const saved = draft.agent_id ? await updateAgent(draft.agent_id, request) : await createAgent(request);",
             "await deleteAgent(agentId);",
@@ -2095,7 +2093,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "await deleteSkill(skill.skill_id);",
             "createSkillFolderFromDraft",
             "updateSkillFolderFromDraft",
-            "deleteSkillFolderById",
+            "requestDeleteSkillFolder",
             "if (mounted) await detachSkill(draft.agent_id, skill.skill_id);",
             "else await attachSkill(draft.agent_id, skill.skill_id);",
             "saveWorkflowDraft",
@@ -2120,6 +2118,21 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "selectedAgentDeletable",
             "系统 Agent 只能查看，不能删除。",
             "AgentEditorPanel",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useSkillFolderManagement.ts",
+        [
+            "export function useSkillFolderManagement",
+            "const folder = await createSkillFolder({ name });",
+            "await updateSkillFolder(folderId, { name });",
+            "await deleteSkillFolder(folderId, { deleteSkills });",
+            "function setSkillFolderDeleteMode(folderId: string, mode: SkillFolderDeleteMode | null)",
+            "function requestDeleteSkillFolder(folder: SkillFolderSpec, deleteSkills: boolean)",
+            "async () => deleteSkillFolderById(folder.folder_id, false)",
+            "setSkillTargetFolderId(folder.folder_id);",
+            "setSkillLibraryFolderFilter(folder.folder_id);",
+            "navigateTo('agents', { tab: 'skills' }, ['run', 'tab']);",
         ],
     )
     _assert_contains(
@@ -2929,6 +2942,15 @@ def test_agent_studio_skill_folders_ui_smoke_uses_folder_management_paths() -> N
             'data-testid="skill-folder-open"',
             'data-testid="skill-folder-delete-with-skills"',
             'data-testid="skill-folder-delete"',
+            "useSkillFolderManagement",
+            "createSkillFolderFromDraft",
+            "updateSkillFolderFromDraft",
+            "requestDeleteSkillFolder",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useSkillFolderManagement.ts",
+        [
             "const folder = await createSkillFolder({ name });",
             "await updateSkillFolder(folderId, { name });",
             "async () => deleteSkillFolderById(folder.folder_id, false)",
