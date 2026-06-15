@@ -1110,6 +1110,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "RunManagementTab",
             "useWorkflowRunReadiness({",
             "selectedPublicRunTimeline={selectedPublicRunTimeline}",
+            "selectedRunReplayNextAfterSequence={selectedRunReplayState?.nextAfterSequence ?? 0}",
             "selectedRunArtifacts",
         ],
     )
@@ -3573,6 +3574,9 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
         [
             "RunEvent replay facts",
             "replayLoading={replayLoading}",
+            "replayNextAfterSequence",
+            "`cursor ${replayNextAfterSequence}`",
+            "replayHasMore ? 'more available' : 'complete'",
             "replayHasMore={Boolean(replayEventCount && replayHasMore)}",
             "loadMoreTestId=\"agent-run-detail-load-more-events\"",
             "Execution ·",

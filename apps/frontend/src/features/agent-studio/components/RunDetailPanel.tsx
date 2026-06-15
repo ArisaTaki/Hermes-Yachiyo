@@ -64,6 +64,7 @@ export function RunDetailPanel({
   selectedRunReplayEvents,
   selectedRunReplayHasMore,
   selectedRunReplayLoading,
+  selectedRunReplayNextAfterSequence,
   selectedRunRerunDisabledReason,
   selectedRunRerunTarget,
   selectedRunWorkflow,
@@ -112,6 +113,7 @@ export function RunDetailPanel({
   selectedRunReplayEvents: PublicRunEvent[];
   selectedRunReplayHasMore: boolean;
   selectedRunReplayLoading: boolean;
+  selectedRunReplayNextAfterSequence: number;
   selectedRunRerunDisabledReason: string;
   selectedRunRerunTarget: { id: string } | null;
   selectedRunWorkflow: WorkflowSpec | null;
@@ -482,6 +484,7 @@ export function RunDetailPanel({
             replayEventCount={selectedRunReplayEvents.length}
             replayHasMore={selectedRunReplayHasMore}
             replayLoading={selectedRunReplayLoading}
+            replayNextAfterSequence={selectedRunReplayNextAfterSequence}
             formatRunDate={formatRunDate}
             getChildRunStatus={(childRunId, eventStatus) => {
               const childRun = runById.get(childRunId);

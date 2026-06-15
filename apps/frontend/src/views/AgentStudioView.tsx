@@ -394,6 +394,7 @@ export function AgentStudioView() {
     selectedReplayEvents: selectedRunReplayEvents,
     selectedReplayHasMore: selectedRunReplayHasMore,
     selectedReplayLoading: selectedRunReplayLoading,
+    selectedReplayState: selectedRunReplayState,
   } = useRunEventReplay(selectedRunId, selectedRunReplayRefreshKey);
   const {
     acceptedRunUpdates,
@@ -1144,6 +1145,7 @@ export function AgentStudioView() {
           selectedRunReplayEvents={selectedRunReplayEvents}
           selectedRunReplayHasMore={selectedRunReplayHasMore}
           selectedRunReplayLoading={selectedRunReplayLoading}
+          selectedRunReplayNextAfterSequence={selectedRunReplayState?.nextAfterSequence ?? 0}
           selectedRunRerunDisabledReason={selectedRunRerunDisabledReason}
           selectedRunRerunTarget={selectedRunRerunTarget}
           selectedRunTarget={selectedRunTarget}

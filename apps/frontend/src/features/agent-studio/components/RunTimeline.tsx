@@ -16,6 +16,7 @@ type RunTimelineProps = {
   replayEventCount: number;
   replayHasMore: boolean;
   replayLoading: boolean;
+  replayNextAfterSequence: number;
   formatRunDate: (value?: string) => string;
   getChildRunStatus: (childRunId: string, eventStatus: string) => string;
   onLoadMoreEvents: () => Promise<void> | void;
@@ -30,6 +31,7 @@ export function RunTimeline({
   replayEventCount,
   replayHasMore,
   replayLoading,
+  replayNextAfterSequence,
   formatRunDate,
   getChildRunStatus,
   onLoadMoreEvents,
@@ -37,6 +39,14 @@ export function RunTimeline({
   runStatusLabel,
   runStatusTone,
 }: RunTimelineProps) {
+  const replaySubtitle = replayEventCount
+    ? [
+        `RunEvent replay facts · loaded ${replayEventCount}`,
+        `cursor ${replayNextAfterSequence}`,
+        replayHasMore ? 'more available' : 'complete',
+      ].join(' · ')
+    : '模型响应、工具调用、审批与完成节点';
+
   return (
     <RuntimeTimelinePanel
       bodyClassName="run-detail-fold-body run-execution-steps"
@@ -66,7 +76,7 @@ export function RunTimeline({
       replayLoading={replayLoading}
       runStatusLabel={runStatusLabel}
       runStatusTone={runStatusTone}
-      subtitle={replayEventCount ? 'RunEvent replay facts' : '模型响应、工具调用、审批与完成节点'}
+      subtitle={replaySubtitle}
       summaryClassName="run-detail-section-head"
       title={`Execution · ${events.length}`}
       variant="full"
