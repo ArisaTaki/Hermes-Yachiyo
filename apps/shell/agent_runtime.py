@@ -107,6 +107,7 @@ from apps.shell.agent.runtime.tool_approvals import (
     ToolApprovalResumeContext,
     ToolApprovalTransitionContext,
 )
+from apps.shell.agent.runtime.timeline import RuntimeAgentTimelineBuilder
 
 from apps.shell.agent.runtime.workflow_continuation import WorkflowContinuationCoordinator
 from apps.shell.agent.runtime.workflow_approvals import (
@@ -1694,6 +1695,9 @@ class NativeRunEngine:
             sync_event_cursor=self.run_projections.sync_event_cursor,
         )
         self.runtime_events = RuntimeRunEventRecorder(self.run_events)
+        self.runtime_agent_timeline = RuntimeAgentTimelineBuilder(
+            timeline_factory=self._timeline,
+        )
         self.workflows = WorkflowRepository(
             self._conn,
             ensure_row_factory=self._ensure_row_factory,
@@ -4151,9 +4155,8 @@ class NativeRunEngine:
         budget = self._run_budget(run_id, timeline)
         self._check_context_budget(budget, messages)
         timeline.append(
-            self._timeline(
-                "agent.runtime.compiled",
-                "Main chat NativeRunEngine compiled tools and workspace policy",
+            self.runtime_agent_timeline.compiled(
+                detail="Main chat NativeRunEngine compiled tools and workspace policy",
                 allowed_tools=runtime["tool_policy"].get("allowed_tools") or [],
             )
         )
@@ -4512,7 +4515,7 @@ class NativeRunEngine:
                     run["run_id"],
                     status="failed",
                     result=safe_error,
-                    timeline=[self._timeline("agent.run.failed", safe_error)],
+                    timeline=[self.runtime_agent_timeline.failed(safe_error)],
                     artifacts=[],
                     pending_approval=None,
                 )
@@ -4535,7 +4538,13 @@ class NativeRunEngine:
     def _execute_agent_run(self, run_id: str, agent: dict[str, Any], user_goal: str, upstream: str = "") -> dict[str, Any]:
         backend = _normalize_execution_backend(agent.get("execution_backend"), model_mode=str(agent.get("model_mode") or "profile"))
         runtime = self._compile_agent_runtime(agent)
-        timeline = [self._timeline("agent.run.started", f"{agent['name']} started", backend=backend, runtime=runtime["runtime"])]
+        timeline = [
+            self.runtime_agent_timeline.started(
+                str(agent["name"]),
+                backend=backend,
+                runtime=runtime["runtime"],
+            )
+        ]
         self.runtime_agent_run_events.started(
             run_id,
             agent_id=str(agent.get("agent_id") or ""),
@@ -4544,9 +4553,7 @@ class NativeRunEngine:
             runtime=runtime["runtime"],
         )
         timeline.append(
-            self._timeline(
-                "agent.runtime.compiled",
-                "Oha Agent Runtime compiled tools and workspace policy",
+            self.runtime_agent_timeline.compiled(
                 allowed_tools=runtime["tool_policy"].get("allowed_tools") or [],
             )
         )
@@ -4588,7 +4595,7 @@ class NativeRunEngine:
                     metadata=_model_output_metadata(result),
                 ),
             )
-            timeline.append(self._timeline("agent.run.completed", "Agent run completed"))
+            timeline.append(self.runtime_agent_timeline.completed())
             self.runtime_agent_run_events.completed(run_id, result_text)
             return self._update_run(
                 run_id,
@@ -4607,7 +4614,7 @@ class NativeRunEngine:
             )
         except Exception as exc:
             safe_error = redact_secrets(exc)
-            timeline.append(self._timeline("agent.run.failed", safe_error))
+            timeline.append(self.runtime_agent_timeline.failed(safe_error))
             self.runtime_agent_run_events.failed(run_id, safe_error)
             return self._update_run(
                 run_id,
