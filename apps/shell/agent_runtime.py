@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import hashlib
 import inspect
 import json
 import logging
-import re
 import sqlite3
 import subprocess
 import threading
@@ -311,6 +309,7 @@ from apps.shell.agent.runtime.workflow_services import (
     build_runtime_workflow_transition_services as _build_runtime_workflow_transition_services,
 )
 from apps.shell.agent.runtime.workflow_start import WorkflowRunStartProjector
+from apps.shell.agent.runtime.workspace_policy import RuntimeWorkspacePolicyService
 from apps.shell.agent.tools.broker import (
     _TERMINAL_PROCESS_LOCK,
     _TERMINAL_PROCESSES,
@@ -635,7 +634,7 @@ class NativeRunEngine:
             MainChatRuntimeConfigBuilder(
                 main_chat_agent_id=_MAIN_CHAT_AGENT_ID,
                 agent_workspaces_dir=self.agent_workspaces_dir,
-                workspace_status=get_workspace_status,
+                workspace_status=lambda: get_workspace_status(),
                 compile_tool_policy=self._compile_tool_policy,
                 compile_workspace_policy=self._compile_workspace_policy,
                 trust_workspace_from_policy=self._trust_workspace_from_policy,
@@ -1042,6 +1041,17 @@ class NativeRunEngine:
             )
         )
         self._init_db()
+        self.workspace_policy_service = RuntimeWorkspacePolicyService(
+            conn=self._conn,
+            agent_workspaces_dir=self.agent_workspaces_dir,
+            trusted_workspaces=self.trusted_workspaces,
+            compile_tool_policy=self._compile_tool_policy,
+            compile_workspace_policy=self._compile_workspace_policy,
+            default_workspace_policy=self._default_workspace_policy,
+            json_load=_json_load,
+            json_dump=_json_dump,
+            now=_now,
+        )
         self._migrate_agent_workspace_policies()
         self.seed_template_service = RuntimeSeedTemplateService(
             conn=self._conn,
@@ -1321,15 +1331,7 @@ class NativeRunEngine:
         return RuntimePolicyCompiler.default_workspace_policy()
 
     def _default_agent_workdir(self, agent_id: str) -> Path:
-        raw_id = str(agent_id or "")
-        clean_id = re.sub(r"[^A-Za-z0-9._-]+", "-", raw_id).strip(".-")[:80]
-        if not clean_id:
-            clean_id = "agent"
-        if clean_id != raw_id:
-            clean_id = f"{clean_id}-{hashlib.sha256(raw_id.encode('utf-8')).hexdigest()[:8]}"
-        workdir = self.agent_workspaces_dir / clean_id
-        workdir.mkdir(parents=True, exist_ok=True)
-        return workdir
+        return self.workspace_policy_service.default_agent_workdir(agent_id)
 
     def _assign_default_agent_workdir(
         self,
@@ -1337,15 +1339,10 @@ class NativeRunEngine:
         workspace_policy: dict[str, Any],
         tool_policy: dict[str, Any],
     ) -> dict[str, Any]:
-        if str(workspace_policy.get("default_workdir") or "").strip():
-            return workspace_policy
-        assigned = {**workspace_policy, "default_workdir": str(self._default_agent_workdir(agent_id))}
-        if "workspace.write_patch" in (tool_policy.get("allowed_tools") or []) and not assigned.get("writable_scopes"):
-            assigned["writable_scopes"] = ["."]
-        return assigned
+        return self.workspace_policy_service.assign_default_agent_workdir(agent_id, workspace_policy, tool_policy)
 
     def trust_workspace(self, path: str | Path, *, source: str = "runtime", commit: bool = True) -> dict[str, Any]:
-        return self.trusted_workspaces.trust(path, source=source, commit=commit)
+        return self.workspace_policy_service.trust_workspace(path, source=source, commit=commit)
 
     def _trust_workspace_from_policy(
         self,
@@ -1354,41 +1351,17 @@ class NativeRunEngine:
         source: str,
         commit: bool = True,
     ) -> None:
-        workdir = str(workspace_policy.get("default_workdir") or "").strip()
-        if not workdir:
-            return
-        self.trusted_workspaces.trust_from_policy(
+        self.workspace_policy_service.trust_workspace_from_policy(
             workspace_policy,
             source=source,
             commit=commit,
         )
 
     def list_trusted_workspaces(self) -> dict[str, Any]:
-        return self.trusted_workspaces.list()
+        return self.workspace_policy_service.list_trusted_workspaces()
 
     def _migrate_agent_workspace_policies(self) -> None:
-        rows = self._conn.execute(
-            "SELECT agent_id, category, tool_policy_json, workspace_policy_json FROM agents"
-        ).fetchall()
-        changed = False
-        for row in rows:
-            tool_policy = self._compile_tool_policy(
-                str(row["category"] or "custom"),
-                _json_load(row["tool_policy_json"], {}),
-            )
-            workspace_policy = self._compile_workspace_policy(
-                _json_load(row["workspace_policy_json"], self._default_workspace_policy())
-            )
-            if str(workspace_policy.get("default_workdir") or "").strip():
-                continue
-            workspace_policy = self._assign_default_agent_workdir(str(row["agent_id"]), workspace_policy, tool_policy)
-            self._conn.execute(
-                "UPDATE agents SET workspace_policy_json=?, updated_at=? WHERE agent_id=?",
-                (_json_dump(workspace_policy), _now(), row["agent_id"]),
-            )
-            changed = True
-        if changed:
-            self._conn.commit()
+        self.workspace_policy_service.migrate_agent_workspace_policies()
 
     @staticmethod
     def _tool_schemas(allowed_tools: list[str]) -> list[dict[str, Any]]:

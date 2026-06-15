@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from apps.shell.agent.runtime.workspace_policy import RuntimeWorkspacePolicyService
 from apps.shell.agent.repositories.workspaces import TrustedWorkspaceRepository
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
@@ -17,6 +18,7 @@ def test_native_runtime_uses_split_trusted_workspace_repository(tmp_path) -> Non
         trusted = service.trust_workspace(tmp_path, source="test")
 
         assert isinstance(service.trusted_workspaces, TrustedWorkspaceRepository)
+        assert isinstance(service.workspace_policy_service, RuntimeWorkspacePolicyService)
         assert trusted["path"] == str(tmp_path.resolve())
         assert service.list_trusted_workspaces()["workspaces"][0]["source"] == "test"
     finally:
