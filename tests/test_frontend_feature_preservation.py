@@ -2082,6 +2082,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "useRunEventReplay",
             "useRunHistoryManagement",
             "useRunLaunchActions",
+            "useRunNavigationActions",
             "useSkillDeletionActions",
             "useSkillFolderManagement",
             "useSkillImportActions",
@@ -2120,6 +2121,25 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "selectedAgentReadOnly",
             "selectedAgentDeletable",
             "AgentEditorPanel",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useRunNavigationActions.ts",
+        [
+            "export function useRunNavigationActions",
+            "function openRunDetail(runId: string, options: { revealInHistory?: boolean } = {})",
+            "setRunKindFilter('all');",
+            "setRunStatusFilter('all');",
+            "setRunSearchQuery('');",
+            "const groupKey = runHistoryGroupKey(run);",
+            "navigateTo('agents', { run: runId }, ['tab', 'target', 'goal']);",
+            "function openAgentGroupRunTimeline(groupRun: GroupRunSnapshot | null)",
+            "const runId = groupRunTimelineRunId(groupRun);",
+            "setError('这个 GroupRun 暂时没有可打开的子 Run。');",
+            "function toggleRunHistoryGroup(groupKey: string)",
+            "function selectRunKindFilter(nextFilter: RunKindFilter)",
+            "function selectRunStatusFilter(nextFilter: RunStatusFilter)",
+            "navigateTo('agents', { tab: 'runs' }, ['run', 'target', 'goal']);",
         ],
     )
     _assert_contains(

@@ -27,6 +27,7 @@ import { useRunApprovalFollowup } from '../features/agent-studio/hooks/useRunApp
 import { useRunEventReplay } from '../features/agent-studio/hooks/useRunEventReplay';
 import { useRunHistoryManagement } from '../features/agent-studio/hooks/useRunHistoryManagement';
 import { useRunLaunchActions } from '../features/agent-studio/hooks/useRunLaunchActions';
+import { useRunNavigationActions } from '../features/agent-studio/hooks/useRunNavigationActions';
 import { useRunTimeline } from '../features/agent-studio/hooks/useRunTimeline';
 import { useRuntimeMemoryManagement } from '../features/agent-studio/hooks/useRuntimeMemoryManagement';
 import { useSkillDeletionActions } from '../features/agent-studio/hooks/useSkillDeletionActions';
@@ -51,7 +52,6 @@ import {
   publicApprovalToRunPendingApproval,
   publicArtifactsOrLegacy,
   publicRunEventToTimelineEvent,
-  runHistoryGroupKey,
   runHistoryGroupsFor,
   runHistoryGroupSummary,
   runKindLabel,
@@ -84,7 +84,6 @@ import {
   type SkillImportResult,
   type SkillSourceFilter,
 } from '../features/agent-studio/utils/skills';
-import { groupRunTimelineRunId } from '../features/agent-studio/utils/groups';
 import type { AgentDraft } from '../features/agent-studio/types';
 import {
   buildPhase4WorkflowNodes,
@@ -111,7 +110,6 @@ import {
   workflowStepRefs,
   workflowStepSummary,
 } from '../features/agent-studio/utils/workflow';
-import type { GroupRunSnapshot } from '../features/yachiyo-studio/types';
 import {
   getRun,
   getRunArtifact,
@@ -611,6 +609,24 @@ export function AgentStudioView() {
     setRuns,
     setSelectedRunId,
     showConfirmDialog,
+  });
+  const {
+    openAgentGroupRunTimeline,
+    openRunDetail,
+    selectRunKindFilter,
+    selectRunStatusFilter,
+    toggleRunHistoryGroup,
+  } = useRunNavigationActions({
+    runs,
+    selectedRun,
+    selectedRunId,
+    setCollapsedRunHistoryGroups,
+    setError,
+    setRunKindFilter,
+    setRunSearchQuery,
+    setRunStatusFilter,
+    setSelectedRunId,
+    setTab,
   });
   const {
     requestCancelFutureTask,
@@ -1440,65 +1456,6 @@ export function AgentStudioView() {
   async function saveAgentGroup(): Promise<StudioRefreshOptions> {
     const { statusMessage } = await saveAgentGroupDraft();
     return { statusMessage };
-  }
-
-  function openRunDetail(runId: string, options: { revealInHistory?: boolean } = {}) {
-    if (options.revealInHistory) {
-      setRunKindFilter('all');
-      setRunStatusFilter('all');
-      setRunSearchQuery('');
-    }
-    setSelectedRunId(runId);
-    setTab('runs');
-    const run = runs.find((item) => item.run_id === runId);
-    if (run) {
-      const groupKey = runHistoryGroupKey(run);
-      setCollapsedRunHistoryGroups((current) => {
-        if (!current.has(groupKey)) return current;
-        const next = new Set(current);
-        next.delete(groupKey);
-        return next;
-      });
-    }
-    navigateTo('agents', { run: runId }, ['tab', 'target', 'goal']);
-  }
-
-  function openAgentGroupRunTimeline(groupRun: GroupRunSnapshot | null) {
-    const runId = groupRunTimelineRunId(groupRun);
-    if (!runId) {
-      setError('这个 GroupRun 暂时没有可打开的子 Run。');
-      return;
-    }
-    openRunDetail(runId, { revealInHistory: true });
-  }
-
-  function toggleRunHistoryGroup(groupKey: string) {
-    setCollapsedRunHistoryGroups((current) => {
-      const next = new Set(current);
-      if (next.has(groupKey)) next.delete(groupKey);
-      else next.add(groupKey);
-      return next;
-    });
-  }
-
-  function selectRunKindFilter(nextFilter: RunKindFilter) {
-    setRunKindFilter(nextFilter);
-    if (selectedRun && runMatchesFilter(selectedRun, nextFilter)) return;
-    if (selectedRunId) {
-      setSelectedRunId('');
-      setTab('runs');
-      navigateTo('agents', { tab: 'runs' }, ['run', 'target', 'goal']);
-    }
-  }
-
-  function selectRunStatusFilter(nextFilter: RunStatusFilter) {
-    setRunStatusFilter(nextFilter);
-    if (selectedRun && runMatchesStatusFilter(selectedRun, nextFilter)) return;
-    if (selectedRunId) {
-      setSelectedRunId('');
-      setTab('runs');
-      navigateTo('agents', { tab: 'runs' }, ['run', 'target', 'goal']);
-    }
   }
 
   async function runCurrentAgentGroup(): Promise<StudioRefreshOptions> {
