@@ -660,6 +660,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "useRunTimeline(selectedRunId, selectedRunReplayRefreshKey)",
             "useWorkflowDefinitions",
             "RunManagementTab",
+            "useWorkflowRunReadiness({",
             "selectedPublicRunTimeline={selectedPublicRunTimeline}",
             "selectedRunArtifacts",
         ],
@@ -687,6 +688,8 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "runHistoryGroupsFor(",
             "runSearchTextByRunnableIdFor(",
             "runMatchesSearch(",
+            "workflowSpecStepRefs({",
+            "agentRunReadinessIssue(agent, chatModelProfiles",
         ],
     )
     _assert_contains(
@@ -747,6 +750,16 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "validateWorkflowDraft(",
             "workflowHasRunnableSteps(selectedRunTargetWorkflowNodes)",
             "runTargetDisabledReason",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useWorkflowRunReadiness.ts",
+        [
+            "export function useWorkflowRunReadiness",
+            "workflowSpecStepRefs({",
+            "agentRunReadinessIssue(agent, chatModelProfiles, modelDefaults, skills)",
+            "workflowAgentRunReadinessIssue(nodes, agentRunIssueById)",
+            "workflowRunDisabled: busy || Boolean(workflowRunDisabledReason)",
         ],
     )
     _assert_contains(
@@ -2304,6 +2317,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "useWorkflowCanvasActions",
             "useWorkflowDeletionActions",
             "useWorkflowDraftActions",
+            "useWorkflowRunReadiness",
             "useWorkflowSaveActions",
             "saveAgent",
             "requestDeleteAgent",

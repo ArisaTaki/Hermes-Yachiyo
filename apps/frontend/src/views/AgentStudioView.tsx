@@ -46,6 +46,7 @@ import { useSkillSourceInputActions } from '../features/agent-studio/hooks/useSk
 import { useWorkflowDeletionActions } from '../features/agent-studio/hooks/useWorkflowDeletionActions';
 import { useWorkflowDefinitions } from '../features/agent-studio/hooks/useWorkflowDefinitions';
 import { useWorkflowDraftActions } from '../features/agent-studio/hooks/useWorkflowDraftActions';
+import { useWorkflowRunReadiness } from '../features/agent-studio/hooks/useWorkflowRunReadiness';
 import { useWorkflowSaveActions } from '../features/agent-studio/hooks/useWorkflowSaveActions';
 import { useWorkflowCanvasActions } from '../features/agent-studio/hooks/useWorkflowCanvasActions';
 import {
@@ -54,7 +55,6 @@ import {
 } from '../features/agent-studio/studioTabs';
 import {
   agentCapabilityLine,
-  agentRunReadinessIssue,
   agentToDraft,
   runnableCapabilityLine,
   runnableOptionLabel,
@@ -81,15 +81,9 @@ import {
   skippedWorkflowArtifactLabel,
   starterNodes,
   validateWorkflowDraft,
-  workflowAgentRunReadinessIssue,
   workflowEdges,
-  workflowHasRunnableSteps,
   workflowNodes,
-  workflowRequestEdges,
-  workflowRequestNodes,
   workflowRunArtifactForStep,
-  workflowRunnableStepRequiredMessage,
-  workflowSpecStepRefs,
   workflowStepArtifacts,
   workflowStepKindLabel,
   workflowStepSummary,
@@ -345,31 +339,29 @@ export function AgentStudioView() {
     setEdges,
     setNodes,
   });
-  const workflowRunPreviewSteps = useMemo(
-    () => workflowSpecStepRefs({
-      workflow_id: selectedWorkflow?.workflow_id || 'draft',
-      name: workflowName.trim() || 'New Workflow',
-      description: workflowDescription.trim(),
-      nodes: workflowRequestNodes(nodes),
-      edges: workflowRequestEdges(edges),
-      enabled: true,
-    }),
-    [edges, nodes, selectedWorkflow?.workflow_id, workflowDescription, workflowName],
-  );
-  const workflowHasErrors = workflowErrors.length > 0;
-  const workflowPrimaryError = workflowErrors[0] || '';
-  const agentRunIssueById = useMemo(() => {
-    const next = new Map<string, string>();
-    agents.forEach((agent) => {
-      const issue = agentRunReadinessIssue(agent, chatModelProfiles, modelDefaults, skills);
-      if (issue) next.set(agent.agent_id, issue);
-    });
-    return next;
-  }, [agents, chatModelProfiles, modelDefaults, skills]);
-  const workflowRunAgentIssue = useMemo(
-    () => workflowAgentRunReadinessIssue(nodes, agentRunIssueById),
-    [agentRunIssueById, nodes],
-  );
+  const {
+    agentRunIssueById,
+    workflowHasErrors,
+    workflowPrimaryError,
+    workflowRunDisabled,
+    workflowRunDisabledReason,
+    workflowRunPreviewSteps,
+  } = useWorkflowRunReadiness({
+    agents,
+    busy,
+    chatModelProfiles,
+    edges,
+    modelDefaults,
+    nodes,
+    selectedWorkflow,
+    skills,
+    workflowDescription,
+    workflowEnabled,
+    workflowErrors,
+    workflowName,
+    workflowNameError,
+    workflowRunGoal,
+  });
   const {
     filteredRunIds,
     filteredRuns,
@@ -448,16 +440,6 @@ export function AgentStudioView() {
     runnables,
     workflows,
   });
-  const workflowRunDisabledReason = useMemo(() => {
-    if (!workflowEnabled) return '当前 Workflow 已停用，无法运行。';
-    if (workflowNameError) return workflowNameError;
-    if (workflowHasErrors) return workflowPrimaryError || '当前 Workflow 存在校验错误。';
-    if (!workflowRunGoal.trim()) return '请输入运行目标。';
-    if (!workflowHasRunnableSteps(nodes)) return workflowRunnableStepRequiredMessage;
-    if (workflowRunAgentIssue) return workflowRunAgentIssue;
-    return '';
-  }, [nodes, workflowEnabled, workflowHasErrors, workflowNameError, workflowPrimaryError, workflowRunAgentIssue, workflowRunGoal]);
-  const workflowRunDisabled = busy || Boolean(workflowRunDisabledReason);
   const {
     allHistoryRunsSelected,
     finishRunHistoryManagement,
