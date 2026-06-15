@@ -89,6 +89,12 @@ class WorkflowContinuationCoordinator:
         workflow_for_node: Any | None = None,
         workflow_run_started_projection: Any | None = None,
         continue_workflow_run: Any | None = None,
+        timeline_factory: Any | None = None,
+        append_run_event: Any | None = None,
+        update_run: Any | None = None,
+        update_run_group: Any | None = None,
+        get_run: Any | None = None,
+        approve_workflow_node: Any | None = None,
         node_kind: Any | None = None,
     ) -> None:
         self._engine = engine
@@ -113,6 +119,12 @@ class WorkflowContinuationCoordinator:
         self._workflow_for_node_callback = workflow_for_node
         self._workflow_run_started_projection_callback = workflow_run_started_projection
         self._continue_workflow_run_callback = continue_workflow_run
+        self._timeline_callback = timeline_factory
+        self._append_run_event_callback = append_run_event
+        self._update_run_callback = update_run
+        self._update_run_group_callback = update_run_group
+        self._get_run_callback = get_run
+        self._approve_workflow_node_callback = approve_workflow_node
         self._node_kind_callback = node_kind
         self._outcomes = WorkflowRunOutcomeProjector(engine)
 
@@ -339,6 +351,45 @@ class WorkflowContinuationCoordinator:
             return self._continue_workflow_run_callback(run, workflow, **kwargs)
         return self._engine._continue_workflow_run(run, workflow, **kwargs)
 
+    def _timeline(self, event: str, detail: str = "", **payload: Any) -> dict[str, Any]:
+        if self._timeline_callback is not None:
+            return self._timeline_callback(event, detail, **payload)
+        return self._engine._timeline(event, detail, **payload)
+
+    def _append_run_event(
+        self,
+        run_id: str,
+        event_type: str,
+        payload: dict[str, Any],
+    ) -> Any:
+        if self._append_run_event_callback is not None:
+            return self._append_run_event_callback(run_id, event_type, payload)
+        return self._engine.append_run_event(run_id, event_type, payload)
+
+    def _update_run(self, run_id: str, **fields: Any) -> dict[str, Any]:
+        if self._update_run_callback is not None:
+            return self._update_run_callback(run_id, **fields)
+        return self._engine._update_run(run_id, **fields)
+
+    def _update_run_group(self, run_group_id: str, **fields: Any) -> Any:
+        if self._update_run_group_callback is not None:
+            return self._update_run_group_callback(run_group_id, **fields)
+        return self._engine._update_run_group(run_group_id, **fields)
+
+    def _get_run(self, run_id: str) -> dict[str, Any]:
+        if self._get_run_callback is not None:
+            return self._get_run_callback(run_id)
+        return self._engine.get_run(run_id)
+
+    def _approve_workflow_node(
+        self,
+        run_id: str,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        if self._approve_workflow_node_callback is not None:
+            return self._approve_workflow_node_callback(run_id, **kwargs)
+        return self._engine.approvals.approve_workflow_node(run_id, **kwargs)
+
     def _node_kind(self, node: dict[str, Any]) -> str:
         if self._node_kind_callback is not None:
             return self._node_kind_callback(node)
@@ -416,7 +467,7 @@ class WorkflowContinuationCoordinator:
                     target_node_id=next_node_id,
                     branch=branch,
                 )
-                engine.append_run_event(
+                self._append_run_event(
                     str(run["run_id"]),
                     "workflow.edge.followed",
                     projection.event_payload(),
@@ -461,8 +512,8 @@ class WorkflowContinuationCoordinator:
                 budget.claim_step()
                 if kind == "start":
                     projection = WorkflowStartNodeProjection.from_node(node, label=label, kind=kind)
-                    timeline.append(projection.timeline_event(engine._timeline))
-                    engine.append_run_event(
+                    timeline.append(projection.timeline_event(self._timeline))
+                    self._append_run_event(
                         str(run["run_id"]),
                         "workflow.node.start",
                         projection.event_payload(),
@@ -642,9 +693,8 @@ class WorkflowContinuationCoordinator:
         input_preview: dict[str, Any],
         start_node_id: str = "",
     ) -> dict[str, Any]:
-        engine = self._engine
         run_id = str(run["run_id"])
-        running = engine.approvals.approve_workflow_node(
+        running = self._approve_workflow_node(
             run_id,
             timeline=timeline,
             artifacts=artifacts,
@@ -655,12 +705,12 @@ class WorkflowContinuationCoordinator:
             input_preview=input_preview,
         )
         if root_group:
-            engine._update_run_group(
+            self._update_run_group(
                 str(run.get("run_group_id") or ""),
                 status="running",
                 summary=context,
             )
-            running = engine.get_run(run_id)
+            running = self._get_run(run_id)
         return self.continue_run(
             running,
             workflow,
@@ -763,7 +813,6 @@ class WorkflowContinuationCoordinator:
         root_group: bool,
         node_info_extra: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        engine = self._engine
         agent = self._workflow_agent_for_node(node)
         step_task = self._workflow_node_task(node)
         handoff = WorkflowAgentNodeHandoff.from_agent(
@@ -799,29 +848,29 @@ class WorkflowContinuationCoordinator:
         if node_info_extra and str(node_info_extra.get("workflow_parent_node_id") or ""):
             agent_payload["workflow_node_context"] = next_context
         timeline.append(
-            engine._timeline(
+            self._timeline(
                 "workflow.node.agent",
                 label,
                 **agent_payload,
             )
         )
-        engine.append_run_event(str(run["run_id"]), "workflow.node.agent", agent_payload)
+        self._append_run_event(str(run["run_id"]), "workflow.node.agent", agent_payload)
         self._merge_workflow_child_run_outcome(timeline, artifacts, execution.child_run, label)
         if execution.status == "approval_required":
             event_payload = execution.status_event_payload()
             timeline.append(
-                engine._timeline(
+                self._timeline(
                     "workflow.run.approval_required",
                     label,
                     **event_payload,
                 )
             )
-            engine.append_run_event(
+            self._append_run_event(
                 str(run["run_id"]),
                 "workflow.run.approval_required",
                 event_payload,
             )
-            result = engine._update_run(
+            result = self._update_run(
                 str(run["run_id"]),
                 status="approval_required",
                 result=next_context,
@@ -829,24 +878,24 @@ class WorkflowContinuationCoordinator:
                 artifacts=artifacts,
             )
             if root_group:
-                engine._update_run_group(
+                self._update_run_group(
                     run_group_id,
                     status="approval_required",
                     summary=next_context,
                 )
-                result = engine.get_run(result["run_id"])
+                result = self._get_run(result["run_id"])
             return {"done": True, "run": result}
         if execution.status != "completed":
             status = "cancelled" if execution.status == "cancelled" else "failed"
             detail = f"{label}: {next_context or execution.status}"
             timeline.append(
-                engine._timeline(
+                self._timeline(
                     f"workflow.run.{status}",
                     detail,
                     **execution.status_event_payload(),
                 )
             )
-            engine.append_run_event(
+            self._append_run_event(
                 str(run["run_id"]),
                 f"workflow.run.{status}",
                 {
@@ -854,7 +903,7 @@ class WorkflowContinuationCoordinator:
                     "result": _tool_input_preview(next_context or execution.status, limit=1800),
                 },
             )
-            result = engine._update_run(
+            result = self._update_run(
                 str(run["run_id"]),
                 status=status,
                 result=next_context,
@@ -862,8 +911,8 @@ class WorkflowContinuationCoordinator:
                 artifacts=artifacts,
             )
             if root_group:
-                engine._update_run_group(run_group_id, status=status, summary=next_context)
-                result = engine.get_run(result["run_id"])
+                self._update_run_group(run_group_id, status=status, summary=next_context)
+                result = self._get_run(result["run_id"])
             return {"done": True, "run": result}
         return {"done": False, "context": next_context}
 
@@ -880,7 +929,6 @@ class WorkflowContinuationCoordinator:
         artifacts: list[dict[str, Any]],
         root_group: bool,
     ) -> dict[str, Any]:
-        engine = self._engine
         child_workflow = self._workflow_for_node(node)
         workflow_id = str(child_workflow.get("workflow_id") or "")
         step_task = self._workflow_node_task(node)
@@ -895,7 +943,7 @@ class WorkflowContinuationCoordinator:
             workflow_id,
             child_workflow,
         )
-        engine.append_run_event(child["run_id"], "workflow.run.started", started_payload)
+        self._append_run_event(child["run_id"], "workflow.run.started", started_payload)
         child = self._continue_workflow_run(
             child,
             child_workflow,
@@ -917,20 +965,20 @@ class WorkflowContinuationCoordinator:
         )
         next_context = execution.next_context
         payload = execution.event_payload()
-        timeline.append(engine._timeline("workflow.node.workflow", label, **payload))
-        engine.append_run_event(str(run["run_id"]), "workflow.node.workflow", payload)
+        timeline.append(self._timeline("workflow.node.workflow", label, **payload))
+        self._append_run_event(str(run["run_id"]), "workflow.node.workflow", payload)
         self._merge_workflow_child_run_outcome(timeline, artifacts, execution.child_run, label)
         if execution.status == "approval_required":
             event_payload = execution.status_event_payload()
             timeline.append(
-                engine._timeline(
+                self._timeline(
                     "workflow.run.approval_required",
                     label,
                     **event_payload,
                 )
             )
-            engine.append_run_event(str(run["run_id"]), "workflow.run.approval_required", event_payload)
-            result = engine._update_run(
+            self._append_run_event(str(run["run_id"]), "workflow.run.approval_required", event_payload)
+            result = self._update_run(
                 str(run["run_id"]),
                 status="approval_required",
                 result=next_context,
@@ -938,20 +986,20 @@ class WorkflowContinuationCoordinator:
                 artifacts=artifacts,
             )
             if root_group:
-                engine._update_run_group(run_group_id, status="approval_required", summary=next_context)
-                result = engine.get_run(result["run_id"])
+                self._update_run_group(run_group_id, status="approval_required", summary=next_context)
+                result = self._get_run(result["run_id"])
             return {"done": True, "run": result}
         if execution.status != "completed":
             status = "cancelled" if execution.status == "cancelled" else "failed"
             detail = f"{label}: {next_context or execution.status}"
             timeline.append(
-                engine._timeline(
+                self._timeline(
                     f"workflow.run.{status}",
                     detail,
                     **execution.status_event_payload(),
                 )
             )
-            engine.append_run_event(
+            self._append_run_event(
                 str(run["run_id"]),
                 f"workflow.run.{status}",
                 {
@@ -959,7 +1007,7 @@ class WorkflowContinuationCoordinator:
                     "result": _tool_input_preview(next_context or execution.status, limit=1800),
                 },
             )
-            result = engine._update_run(
+            result = self._update_run(
                 str(run["run_id"]),
                 status=status,
                 result=next_context,
@@ -967,8 +1015,8 @@ class WorkflowContinuationCoordinator:
                 artifacts=artifacts,
             )
             if root_group:
-                engine._update_run_group(run_group_id, status=status, summary=next_context)
-                result = engine.get_run(result["run_id"])
+                self._update_run_group(run_group_id, status=status, summary=next_context)
+                result = self._get_run(result["run_id"])
             return {"done": True, "run": result}
         return {"done": False, "context": next_context}
 
@@ -987,7 +1035,6 @@ class WorkflowContinuationCoordinator:
         node_index: int,
         next_node_id: str,
     ) -> dict[str, Any]:
-        engine = self._engine
         projection = WorkflowApprovalPauseProjection.from_criteria(
             node,
             label=label,
@@ -997,23 +1044,23 @@ class WorkflowContinuationCoordinator:
             next_index=node_index + 1,
             next_node_id=next_node_id,
         )
-        timeline.append(projection.timeline_event(engine._timeline))
-        engine.append_run_event(
+        timeline.append(projection.timeline_event(self._timeline))
+        self._append_run_event(
             str(run["run_id"]),
             "workflow.node.approval_required",
             projection.event_payload(),
         )
-        result = engine._update_run(
+        result = self._update_run(
             str(run["run_id"]),
             **projection.update_fields(timeline=timeline, artifacts=artifacts),
         )
         if root_group:
-            engine._update_run_group(
+            self._update_run_group(
                 run_group_id,
                 status="approval_required",
                 summary=projection.result_text(),
             )
-            result = engine.get_run(result["run_id"])
+            result = self._get_run(result["run_id"])
         return result
 
     def _run_parallel_node(
@@ -1032,7 +1079,6 @@ class WorkflowContinuationCoordinator:
         artifacts: list[dict[str, Any]],
         root_group: bool,
     ) -> dict[str, Any]:
-        engine = self._engine
         plan = self._workflow_parallel_plan(workflow, node)
         nodes_by_id = self._workflow_nodes_by_id(workflow, self._workflow_path(workflow))
         parallel_node_id = str(node.get("id") or "")
@@ -1131,8 +1177,8 @@ class WorkflowContinuationCoordinator:
             label=label,
             kind=kind,
         )
-        timeline.append(projection.timeline_event(engine._timeline))
-        engine.append_run_event(str(run["run_id"]), "workflow.node.parallel", projection.event_payload())
+        timeline.append(projection.timeline_event(self._timeline))
+        self._append_run_event(str(run["run_id"]), "workflow.node.parallel", projection.event_payload())
         return {
             "done": False,
             "context": aggregate_context,
@@ -1150,7 +1196,6 @@ class WorkflowContinuationCoordinator:
         context: str,
         timeline: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        engine = self._engine
         selection = self._workflow_condition_selection(workflow, node, context)
         projection = WorkflowConditionNodeProjection.from_selection(
             node,
@@ -1158,8 +1203,8 @@ class WorkflowContinuationCoordinator:
             label=label,
             kind=kind,
         )
-        timeline.append(projection.timeline_event(engine._timeline))
-        engine.append_run_event(str(run["run_id"]), "workflow.node.condition", projection.event_payload())
+        timeline.append(projection.timeline_event(self._timeline))
+        self._append_run_event(str(run["run_id"]), "workflow.node.condition", projection.event_payload())
         return {
             "branch": projection.branch,
             "next_node_id": projection.target_node_id,
@@ -1177,7 +1222,6 @@ class WorkflowContinuationCoordinator:
         previous_iterations: int,
         timeline: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        engine = self._engine
         selection = self._workflow_loop_selection(
             workflow,
             node,
@@ -1190,8 +1234,8 @@ class WorkflowContinuationCoordinator:
             label=label,
             kind=kind,
         )
-        timeline.append(projection.timeline_event(engine._timeline))
-        engine.append_run_event(str(run["run_id"]), "workflow.node.loop", projection.event_payload())
+        timeline.append(projection.timeline_event(self._timeline))
+        self._append_run_event(str(run["run_id"]), "workflow.node.loop", projection.event_payload())
         return {
             "branch": projection.branch,
             "next_node_id": projection.target_node_id,
@@ -1210,7 +1254,6 @@ class WorkflowContinuationCoordinator:
         timeline: list[dict[str, Any]],
         node_info_extra: dict[str, str] | None = None,
     ) -> None:
-        engine = self._engine
         broker = ToolBroker(
             self._default_workspace_policy(),
             Path(self._workflow_artifacts_dir()) / str(run["run_id"]),
@@ -1228,5 +1271,5 @@ class WorkflowContinuationCoordinator:
             node_info_extra=node_info_extra,
         )
         artifacts.append(write.artifact_record())
-        timeline.append(write.timeline_event(engine._timeline))
-        engine.append_run_event(str(run["run_id"]), "workflow.node.artifact", write.event_payload())
+        timeline.append(write.timeline_event(self._timeline))
+        self._append_run_event(str(run["run_id"]), "workflow.node.artifact", write.event_payload())

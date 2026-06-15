@@ -121,6 +121,8 @@ def build_runtime_workflow_execution_services(
     timeline_factory: Callable[..., dict[str, Any]],
     append_run_event: Callable[[str, str, dict[str, Any]], Any],
     update_run: Callable[..., dict[str, Any]],
+    update_run_group: Callable[..., dict[str, Any]],
+    approve_workflow_node: Callable[..., dict[str, Any]],
 ) -> RuntimeWorkflowExecutionServiceBundle:
     workflow_continuation = WorkflowContinuationCoordinator(
         engine,
@@ -171,6 +173,12 @@ def build_runtime_workflow_execution_services(
         continue_workflow_run=lambda run, workflow, **kwargs: (
             engine._continue_workflow_run(run, workflow, **kwargs)
         ),
+        timeline_factory=timeline_factory,
+        append_run_event=append_run_event,
+        update_run=update_run,
+        update_run_group=update_run_group,
+        get_run=get_run,
+        approve_workflow_node=approve_workflow_node,
         node_kind=lambda node: engine._node_kind(node),
     )
     return RuntimeWorkflowExecutionServiceBundle(

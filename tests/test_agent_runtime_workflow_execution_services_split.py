@@ -41,6 +41,8 @@ def test_build_runtime_workflow_execution_services_wires_continuation_approval_a
         timeline_factory=timeline_factory,
         append_run_event=lambda _run_id, _event_type, _payload: None,
         update_run=lambda run_id, **kwargs: {"run_id": run_id, **kwargs},
+        update_run_group=lambda run_group_id, **kwargs: {"run_group_id": run_group_id, **kwargs},
+        approve_workflow_node=lambda run_id, **kwargs: {"run_id": run_id, **kwargs},
     )
 
     assert isinstance(bundle, RuntimeWorkflowExecutionServiceBundle)
@@ -70,6 +72,12 @@ def test_build_runtime_workflow_execution_services_wires_continuation_approval_a
     assert callable(bundle.workflow_continuation._workflow_for_node_callback)
     assert callable(bundle.workflow_continuation._workflow_run_started_projection_callback)
     assert callable(bundle.workflow_continuation._continue_workflow_run_callback)
+    assert bundle.workflow_continuation._timeline_callback is timeline_factory
+    assert callable(bundle.workflow_continuation._append_run_event_callback)
+    assert callable(bundle.workflow_continuation._update_run_callback)
+    assert callable(bundle.workflow_continuation._update_run_group_callback)
+    assert callable(bundle.workflow_continuation._get_run_callback)
+    assert callable(bundle.workflow_continuation._approve_workflow_node_callback)
     assert callable(bundle.workflow_continuation._node_kind_callback)
     assert bundle.workflow_approval_resume._resume_after_approval_node.__self__ is bundle.workflow_continuation
     assert bundle.workflow_cancellation._timeline is timeline_factory
@@ -108,6 +116,12 @@ def test_native_runtime_installs_workflow_execution_services_under_legacy_attrib
         assert callable(service.workflow_continuation._workflow_for_node_callback)
         assert callable(service.workflow_continuation._workflow_run_started_projection_callback)
         assert callable(service.workflow_continuation._continue_workflow_run_callback)
+        assert callable(service.workflow_continuation._timeline_callback)
+        assert callable(service.workflow_continuation._append_run_event_callback)
+        assert callable(service.workflow_continuation._update_run_callback)
+        assert callable(service.workflow_continuation._update_run_group_callback)
+        assert callable(service.workflow_continuation._get_run_callback)
+        assert callable(service.workflow_continuation._approve_workflow_node_callback)
         assert callable(service.workflow_continuation._node_kind_callback)
         assert service.workflow_approval_resume._resume_after_approval_node.__self__ is service.workflow_continuation
         assert service.workflow_approval_resume._claim_pending_approval.__self__ is service.run_approvals

@@ -897,6 +897,8 @@ class NativeRunEngine:
             timeline_factory=lambda event, detail="", **extra: self._timeline(event, detail, **extra),
             append_run_event=lambda run_id, event_type, payload: self.append_run_event(run_id, event_type, payload),
             update_run=lambda run_id, **kwargs: self._update_run(run_id, **kwargs),
+            update_run_group=lambda run_group_id, **kwargs: self._update_run_group(run_group_id, **kwargs),
+            approve_workflow_node=lambda run_id, **kwargs: self.approvals.approve_workflow_node(run_id, **kwargs),
         )
         self._install_runtime_workflow_execution_services(workflow_execution_services)
         workflow_planning_services = _build_runtime_workflow_planning_services(

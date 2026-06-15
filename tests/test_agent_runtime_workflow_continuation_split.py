@@ -364,6 +364,87 @@ def test_workflow_continuation_uses_injected_approval_criteria() -> None:
     assert approval_event[2]["workflow_node_approval_criteria"] == "Injected criteria"
 
 
+def test_workflow_continuation_uses_injected_run_side_effect_ports() -> None:
+    workflow = {
+        "nodes": [
+            {"id": "gate", "type": "approval", "data": {"label": "Human Gate"}},
+        ]
+    }
+    timeline_events: list[dict[str, Any]] = []
+    appended_events: list[tuple[str, str, dict[str, Any]]] = []
+    run_updates: list[tuple[str, dict[str, Any]]] = []
+    group_updates: list[tuple[str, dict[str, Any]]] = []
+    get_calls: list[str] = []
+    coordinator = WorkflowContinuationCoordinator(
+        object(),
+        workflow_path=lambda current_workflow: list(current_workflow["nodes"]),
+        workflow_nodes_by_id=lambda current_workflow: {
+            str(node["id"]): node for node in current_workflow["nodes"]
+        },
+        workflow_next_node_id=lambda _workflow, _node, _context: "report",
+        workflow_approval_criteria=lambda _node: "Injected criteria",
+        timeline_factory=lambda event, detail="", **payload: timeline_events.append(
+            {"event": event, "detail": detail, **payload}
+        )
+        or timeline_events[-1],
+        append_run_event=lambda run_id, event_type, payload: appended_events.append(
+            (run_id, event_type, payload)
+        ),
+        update_run=lambda run_id, **fields: run_updates.append((run_id, fields))
+        or {"run_id": run_id, "run_group_id": "run_group", **fields},
+        update_run_group=lambda run_group_id, **fields: group_updates.append(
+            (run_group_id, fields)
+        ),
+        get_run=lambda run_id: get_calls.append(run_id)
+        or {
+            "run_id": run_id,
+            "run_group_id": "run_group",
+            **run_updates[-1][1],
+            "refetched": True,
+        },
+        node_kind=lambda node: str(node["type"]),
+    )
+    timeline: list[dict[str, Any]] = []
+
+    result = coordinator.continue_run(
+        {
+            "run_id": "workflow_run",
+            "run_group_id": "run_group",
+            "user_goal": "Review",
+        },
+        workflow,
+        context="Draft ready",
+        timeline=timeline,
+        artifacts=[],
+        start_index=0,
+        root_group=True,
+    )
+
+    assert result["refetched"] is True
+    assert result["status"] == "approval_required"
+    assert timeline == timeline_events
+    assert len(appended_events) == 1
+    event_run_id, event_type, event_payload = appended_events[0]
+    assert event_run_id == "workflow_run"
+    assert event_type == "workflow.node.approval_required"
+    assert event_payload["workflow_node_id"] == "gate"
+    assert event_payload["workflow_node_kind"] == "approval"
+    assert event_payload["workflow_node_label"] == "Human Gate"
+    assert event_payload["workflow_node_approval_criteria"] == "Injected criteria"
+    assert event_payload["status"] == "approval_required"
+    assert "workflow_context" not in event_payload["pending_approval"]
+    assert run_updates[-1][0] == "workflow_run"
+    assert run_updates[-1][1]["status"] == "approval_required"
+    assert run_updates[-1][1]["pending_approval"]["workflow_context"] == "Draft ready"
+    assert group_updates == [
+        (
+            "run_group",
+            {"status": "approval_required", "summary": "等待审批：Human Gate"},
+        )
+    ]
+    assert get_calls == ["workflow_run"]
+
+
 def test_workflow_continuation_uses_injected_artifact_io(tmp_path) -> None:
     engine = FakeWorkflowTraversalEngine()
     workflow = {
