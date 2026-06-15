@@ -28,6 +28,7 @@ from apps.shell.yachiyo_agent import (
     ToolCallSnapshot,
     WorkflowSnapshot,
 )
+from apps.shell.yachiyo_agent.events import public_run_event_from_payload
 
 
 def _json(model) -> dict:
@@ -161,6 +162,50 @@ def test_run_timeline_snapshot_json_shape_covers_runtime_debug_objects() -> None
     ]
     assert payload["tool_calls"][0]["tool_name"] == "workspace.read"
     assert payload["children"][0]["run_id"] == "child-run-1"
+
+
+def test_public_run_event_mapping_preserves_runtime_trace_payload_fields() -> None:
+    event = public_run_event_from_payload(
+        {
+            "event": "memory.write.add",
+            "run_id": "run-1",
+            "sequence": 7,
+            "memory_id": "memory-1",
+            "memory_kind": "preference",
+            "skill_id": "skill-1",
+            "skill_name": "Workspace Reviewer",
+            "workflow_node_id": "node-1",
+            "workflow_node_label": "Review",
+            "member_agent_id": "agent-2",
+            "group_id": "group-1",
+            "artifact_path": "reports/out.md",
+            "payload": {
+                "skill_id": "skill-from-payload",
+                "result": {"ok": True},
+            },
+            "visibility": "internal",
+            "sensitivity": "secret",
+            "created_at": "2026-06-14T00:00:00Z",
+        }
+    )
+
+    assert event.event_type == "memory.write.add"
+    assert event.run_id == "run-1"
+    assert event.sequence == 7
+    assert event.visibility == "internal"
+    assert event.sensitivity == "secret"
+    assert event.payload["memory_id"] == "memory-1"
+    assert event.payload["memory_kind"] == "preference"
+    assert event.payload["skill_id"] == "skill-from-payload"
+    assert event.payload["skill_name"] == "Workspace Reviewer"
+    assert event.payload["workflow_node_id"] == "node-1"
+    assert event.payload["workflow_node_label"] == "Review"
+    assert event.payload["member_agent_id"] == "agent-2"
+    assert event.payload["group_id"] == "group-1"
+    assert event.payload["artifact_path"] == "reports/out.md"
+    assert event.payload["result"] == {"ok": True}
+    assert "event" not in event.payload
+    assert "visibility" not in event.payload
 
 
 def test_agent_definition_snapshot_keeps_editing_fields() -> None:
