@@ -224,6 +224,7 @@ from apps.shell.agent.runtime.run_readiness import (
 from apps.shell.agent.runtime.run_cancellation import RuntimeRunCancellationService
 from apps.shell.agent.runtime.run_deletion import RuntimeRunDeletionService
 from apps.shell.agent.runtime.run_rerun import RuntimeRunRerunService
+from apps.shell.agent.runtime.run_requests import RuntimeRunRequestParser
 from apps.shell.agent.runtime.run_services import (
     RuntimeRunServiceBundle,
     build_runtime_run_services as _build_runtime_run_services,
@@ -479,6 +480,10 @@ class NativeRunEngine:
             ensure_row_factory=self._ensure_row_factory,
             main_chat_agent_id=_MAIN_CHAT_AGENT_ID,
         )
+        self.run_request_parser = RuntimeRunRequestParser(
+            contains_sensitive_text=contains_sensitive_text,
+            error_type=AgentRuntimeError,
+        )
         recorders = _build_runtime_recorders(
             append_run_event=self.append_run_event,
             now=_now,
@@ -564,7 +569,7 @@ class NativeRunEngine:
             insert_run_group=self._insert_run_group,
             insert_run=self._insert_run,
             run_by_client_request_id=self._run_by_client_request_id,
-            client_request_id_from_payload=self._client_request_id_from_payload,
+            client_request_id_from_payload=self.run_request_parser.client_request_id_from_payload,
             agent_workspace_dir=self._agent_workspace_dir,
         )
         self._install_runtime_run_services(run_services)
@@ -881,7 +886,7 @@ class NativeRunEngine:
             insert_run_group=self._insert_run_group,
             insert_run=self._insert_run,
             run_by_client_request_id=self._run_by_client_request_id,
-            client_request_id_from_payload=self._client_request_id_from_payload,
+            client_request_id_from_payload=self.run_request_parser.client_request_id_from_payload,
             workflow_path=self._workflow_path,
         )
         self._install_runtime_workflow_planning_services(workflow_planning_services)
@@ -1878,15 +1883,10 @@ class NativeRunEngine:
 
     @staticmethod
     def _client_request_id_from_payload(payload: dict[str, Any]) -> str:
-        client_request_id = str(
-            payload.get("client_run_id")
-            or payload.get("client_request_id")
-            or payload.get("idempotency_key")
-            or ""
-        ).strip()[:128]
-        if contains_sensitive_text(client_request_id):
-            raise AgentRuntimeError("client_run_id/idempotency_key 不能包含 API key、token 或其他敏感值")
-        return client_request_id
+        return RuntimeRunRequestParser(
+            contains_sensitive_text=contains_sensitive_text,
+            error_type=AgentRuntimeError,
+        ).client_request_id_from_payload(payload)
 
     def _run_by_client_request_id(self, client_request_id: str) -> dict[str, Any] | None:
         return self.runs.by_client_request_id(client_request_id)
