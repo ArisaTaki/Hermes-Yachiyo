@@ -102,6 +102,12 @@ export type RunTimelineSnapshot = {
   agent_id?: string | null;
   status: string;
   title?: string | null;
+  task_id?: string | null;
+  session_id?: string | null;
+  task_run_link_created_at?: string | null;
+  task_run_link_updated_at?: string | null;
+  task_run_link_run_status?: string | null;
+  task_run_link_last_event_sequence?: number | null;
   events?: PublicRunEvent[];
   tool_calls?: ToolCallSnapshot[];
   approvals?: ApprovalCardSnapshot[];

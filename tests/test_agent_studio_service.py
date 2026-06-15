@@ -543,6 +543,10 @@ def test_agent_studio_service_maps_group_run_workflow_run_timeline_and_events() 
     assert workflow_run.run_id == "workflow-run-1"
     assert workflow_run.title == "Build report"
     assert timelines[0].run_id == "run-listed"
+    assert timeline.task_id == "task-1"
+    assert timeline.session_id == "chat-1"
+    assert timeline.task_run_link_created_at == "2026-06-14T00:00:00Z"
+    assert timeline.task_run_link_last_event_sequence == 7
     assert timeline.tool_calls[0].tool_name == "workspace.read"
     assert timeline.run_group_id == "group-run-1"
     assert timeline.approvals[0].tool_name == "terminal.run"
@@ -777,6 +781,12 @@ def _run_payload(
         "runnable_id": runnable_id,
         "status": "approval_required",
         "user_goal": user_goal,
+        "task_id": "task-1",
+        "session_id": "chat-1",
+        "task_run_link_created_at": "2026-06-14T00:00:00Z",
+        "task_run_link_updated_at": "2026-06-14T00:00:02Z",
+        "task_run_link_run_status": "approval_required",
+        "task_run_link_last_event_sequence": 7,
         "timeline": [
             {
                 "event": "agent.tool.call",

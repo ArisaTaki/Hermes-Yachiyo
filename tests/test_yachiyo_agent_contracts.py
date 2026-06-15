@@ -109,6 +109,12 @@ def test_run_timeline_snapshot_json_shape_covers_runtime_debug_objects() -> None
         agent_id="agent-1",
         status="running",
         title="Ship docs",
+        task_id="task-1",
+        session_id="chat-1",
+        task_run_link_created_at="2026-06-14T00:00:00Z",
+        task_run_link_updated_at="2026-06-14T00:00:02Z",
+        task_run_link_run_status="running",
+        task_run_link_last_event_sequence=7,
         events=[
             PublicRunEvent(
                 event_id="event-1",
@@ -151,6 +157,12 @@ def test_run_timeline_snapshot_json_shape_covers_runtime_debug_objects() -> None
         "agent_id",
         "status",
         "title",
+        "task_id",
+        "session_id",
+        "task_run_link_created_at",
+        "task_run_link_updated_at",
+        "task_run_link_run_status",
+        "task_run_link_last_event_sequence",
         "events",
         "tool_calls",
         "approvals",
@@ -160,6 +172,9 @@ def test_run_timeline_snapshot_json_shape_covers_runtime_debug_objects() -> None
         "created_at",
         "updated_at",
     ]
+    assert payload["task_id"] == "task-1"
+    assert payload["session_id"] == "chat-1"
+    assert payload["task_run_link_last_event_sequence"] == 7
     assert payload["tool_calls"][0]["tool_name"] == "workspace.read"
     assert payload["children"][0]["run_id"] == "child-run-1"
 

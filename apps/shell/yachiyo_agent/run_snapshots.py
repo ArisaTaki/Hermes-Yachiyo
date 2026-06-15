@@ -102,6 +102,14 @@ class RunSnapshotProjector:
             agent_id=_optional_text(payload.get("agent_id") or _agent_id_from_run(payload)),
             status=_text(payload.get("status") or "unknown"),
             title=_optional_text(payload.get("title") or payload.get("user_goal")),
+            task_id=_optional_text(payload.get("task_id")),
+            session_id=_optional_text(payload.get("session_id")),
+            task_run_link_created_at=_optional_text(payload.get("task_run_link_created_at")),
+            task_run_link_updated_at=_optional_text(payload.get("task_run_link_updated_at")),
+            task_run_link_run_status=_optional_text(payload.get("task_run_link_run_status")),
+            task_run_link_last_event_sequence=_optional_int(
+                payload.get("task_run_link_last_event_sequence")
+            ),
             events=events,
             tool_calls=self.tool_calls_from_payload(
                 payload.get("tool_calls"),
@@ -477,3 +485,12 @@ def _text(value: Any) -> str:
 def _optional_text(value: Any) -> str | None:
     text = _text(value)
     return text or None
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None

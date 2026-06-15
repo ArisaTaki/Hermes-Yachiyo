@@ -126,6 +126,12 @@ class RunTimelineSnapshot(_PublicSnapshot):
     agent_id: str | None = None
     status: str
     title: str | None = None
+    task_id: str | None = None
+    session_id: str | None = None
+    task_run_link_created_at: str | None = None
+    task_run_link_updated_at: str | None = None
+    task_run_link_run_status: str | None = None
+    task_run_link_last_event_sequence: int | None = None
     events: list[PublicRunEvent] = Field(default_factory=list)
     tool_calls: list[ToolCallSnapshot] = Field(default_factory=list)
     approvals: list[ApprovalCardSnapshot] = Field(default_factory=list)

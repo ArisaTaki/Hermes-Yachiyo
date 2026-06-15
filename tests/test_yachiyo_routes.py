@@ -38,6 +38,10 @@ class _FakeAgentRuntime:
             **self.runs.get(run_id, _run_payload(run_id=run_id, status="completed", result="Done")),
             "task_id": link.get("task_id", ""),
             "session_id": link.get("session_id", ""),
+            "task_run_link_created_at": link.get("created_at", ""),
+            "task_run_link_updated_at": link.get("updated_at", ""),
+            "task_run_link_run_status": link.get("run_status", ""),
+            "task_run_link_last_event_sequence": link.get("last_event_sequence", 0),
         }
 
     def list_runs(self, limit: int) -> dict[str, Any]:
@@ -50,6 +54,10 @@ class _FakeAgentRuntime:
                 ),
                 "task_id": link["task_id"],
                 "session_id": link["session_id"],
+                "task_run_link_created_at": link.get("created_at", ""),
+                "task_run_link_updated_at": link.get("updated_at", ""),
+                "task_run_link_run_status": link.get("run_status", ""),
+                "task_run_link_last_event_sequence": link.get("last_event_sequence", 0),
             }
             for link in self.task_links.values()
         ]
@@ -72,6 +80,10 @@ class _FakeAgentRuntime:
             "task_id": task_id,
             "run_id": run_id,
             "session_id": session_id,
+            "run_status": self.runs.get(run_id, {}).get("status", ""),
+            "last_event_sequence": len(self.runs.get(run_id, {}).get("timeline", []) or []),
+            "created_at": "2026-06-14T00:00:00Z",
+            "updated_at": "2026-06-14T00:00:02Z",
         }
         return self.task_links[task_id]
 
@@ -416,6 +428,35 @@ async def test_yachiyo_task_routes_use_injected_runtime_and_return_public_snapsh
         "link_task_run",
         {"task_id": "run-1", "run_id": "run-1", "session_id": "chat-1"},
     )
+
+
+@pytest.mark.asyncio
+async def test_yachiyo_chat_task_link_is_visible_from_studio_timeline() -> None:
+    runtime = _FakeAgentRuntime()
+    request = _request(runtime)
+
+    started = await yachiyo.start_task(
+        yachiyo.StartChatTaskRequest(
+            prompt="Patch README",
+            conversation_id="chat-1",
+            metadata={"client_task_id": "task-chat-1"},
+        ),
+        request,
+    )
+    timeline = await yachiyo.get_studio_run_timeline("run-1", request)
+
+    assert started["task_id"] == "task-chat-1"
+    assert started["open_in_studio_url"] == "#/agents?run_id=run-1"
+    assert timeline["run_id"] == "run-1"
+    assert timeline["task_id"] == "task-chat-1"
+    assert timeline["session_id"] == "chat-1"
+    assert timeline["task_run_link_created_at"] == "2026-06-14T00:00:00Z"
+    assert timeline["task_run_link_updated_at"] == "2026-06-14T00:00:02Z"
+    assert timeline["task_run_link_run_status"] == "approval_required"
+    assert timeline["task_run_link_last_event_sequence"] == 1
+    assert timeline["pending_approval"]["approval_id"] == "run-1"
+    assert timeline["artifacts"][0]["path"] == "report.md"
+    assert timeline["events"][0]["event_type"] == "agent.tool.call"
 
 
 @pytest.mark.asyncio
