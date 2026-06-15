@@ -232,6 +232,70 @@ def test_skill_repository_lifecycle_repairs_updates_and_deletes(tmp_path: Path) 
     assert _json_load(agent_row["skill_ids_json"], []) == ["skill-other"]
 
 
+def test_skill_repository_finds_existing_import_by_origin_or_hash_with_library_scope(tmp_path: Path) -> None:
+    conn = _connect_skills_db()
+    native_root = tmp_path / "native-skill"
+    local_root = tmp_path / "local-skill"
+    _insert_skill(
+        conn,
+        skill_id="skill-native",
+        name="Native Skill",
+        source_type="native_global",
+        origin_path=str(native_root),
+        content_hash="shared-hash",
+    )
+    _insert_skill(
+        conn,
+        skill_id="skill-local",
+        name="Local Skill",
+        source_type="local_dir",
+        origin_path=str(local_root),
+        content_hash="shared-hash",
+    )
+    _insert_skill(
+        conn,
+        skill_id="skill-local-by-origin",
+        name="Local By Origin",
+        source_type="local_dir",
+        origin_path=str(tmp_path / "origin-first"),
+        content_hash="other-hash",
+    )
+    conn.commit()
+    repo = SkillRepository(
+        conn,
+        ensure_row_factory=lambda: None,
+        row_to_skill=_row_to_skill,
+        now=lambda: "2026-06-15T10:00:00Z",
+        json_dump=_json_dump,
+        json_load=_json_load,
+        normalize_skill_folder_id=lambda value: str(value or ""),
+        installed_skill_source_map=lambda: {},
+        remove_managed_copy_if_safe=lambda _path, _origin: None,
+        skill_path_owned_by_runtime=lambda _path: False,
+        record_studio_deletion=lambda _kind, _key: None,
+        skill_deletion_key=lambda source_type, origin_path: f"{source_type}:{origin_path}",
+        is_native_library_source_type=lambda value: str(value) in {"native_global", "native_project"},
+        skills_dir=tmp_path / "managed",
+    )
+
+    assert repo.find_existing_import(
+        origin_path=str(tmp_path / "origin-first"),
+        content_hash="shared-hash",
+        source_type="local_dir",
+    )["skill_id"] == "skill-local-by-origin"
+    assert repo.find_existing_import(
+        origin_path="",
+        content_hash="shared-hash",
+        source_type="native_global",
+    )["skill_id"] == "skill-native"
+    assert repo.find_existing_import(
+        origin_path="",
+        content_hash="shared-hash",
+        source_type="local_zip",
+    )["skill_id"] == "skill-local"
+    assert repo.find_existing_import(origin_path="", content_hash="", source_type="local_dir") is None
+
+
 def test_native_runtime_uses_split_skill_repository(tmp_path: Path) -> None:
     service = AgentRuntimeService(
         db_path=tmp_path / "agent-runtime.db",

@@ -77,6 +77,27 @@ class SkillRepository:
             raise KeyError(skill_id)
         return self._row_to_skill(row)
 
+    def find_existing_import(self, *, origin_path: str, content_hash: str, source_type: str) -> Any | None:
+        self._ensure_row_factory()
+        library_condition = (
+            "source_type IN ('native_global', 'native_project')"
+            if self._is_native_library_source_type(source_type)
+            else "source_type NOT IN ('native_global', 'native_project')"
+        )
+        if origin_path:
+            row = self._conn.execute(
+                f"SELECT * FROM skills WHERE origin_path=? AND {library_condition}",
+                (origin_path,),
+            ).fetchone()
+            if row is not None:
+                return row
+        if content_hash:
+            return self._conn.execute(
+                f"SELECT * FROM skills WHERE content_hash=? AND {library_condition}",
+                (content_hash,),
+            ).fetchone()
+        return None
+
     def update(self, skill_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         current = self.get(skill_id)
         if "enabled" not in payload and "folder_id" not in payload:

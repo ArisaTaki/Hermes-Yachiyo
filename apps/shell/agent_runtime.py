@@ -3554,25 +3554,11 @@ class NativeRunEngine:
         return skill
 
     def _find_existing_skill(self, origin_path: str, content_hash: str, source_type: str) -> sqlite3.Row | None:
-        self._ensure_row_factory()
-        library_condition = (
-            "source_type IN ('native_global', 'native_project')"
-            if _is_native_library_source_type(source_type)
-            else "source_type NOT IN ('native_global', 'native_project')"
+        return self.skill_records.find_existing_import(
+            origin_path=origin_path,
+            content_hash=content_hash,
+            source_type=source_type,
         )
-        if origin_path:
-            row = self._conn.execute(
-                f"SELECT * FROM skills WHERE origin_path=? AND {library_condition}",
-                (origin_path,),
-            ).fetchone()
-            if row is not None:
-                return row
-        if content_hash:
-            return self._conn.execute(
-                f"SELECT * FROM skills WHERE content_hash=? AND {library_condition}",
-                (content_hash,),
-            ).fetchone()
-        return None
 
     def _remove_managed_copy_if_safe(self, path: Path, origin_path: str) -> None:
         try:
