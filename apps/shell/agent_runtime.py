@@ -175,6 +175,10 @@ from apps.shell.agent.runtime.run_projections import (
     RunProjectionCoordinator,
 )
 from apps.shell.agent.runtime.run_readiness import RuntimeRunReadinessValidator
+from apps.shell.agent.runtime.run_services import (
+    RuntimeRunServiceBundle,
+    build_runtime_run_services as _build_runtime_run_services,
+)
 from apps.shell.agent.runtime.runnable_services import (
     RuntimeRunnableServiceBundle,
     build_runtime_runnable_services as _build_runtime_runnable_services,
@@ -551,48 +555,12 @@ class NativeRunEngine:
             skill_source_types=_SKILL_SOURCE_TYPES,
         )
         self._install_runtime_definition_services(definition_services)
-        self.approval_snapshots = ApprovalSnapshotBuilder()
-        self.run_groups = RunGroupRepository(
-            self._conn,
+        run_services = _build_runtime_run_services(
+            conn=self._conn,
+            db_lock=self._db_lock,
             ensure_row_factory=self._ensure_row_factory,
             row_to_run_group=self._row_to_run_group,
             row_to_run=self._row_to_run,
-            now=_now,
-            json_dump=_json_dump,
-            redact_secrets=redact_secrets,
-        )
-        self.run_approvals = ApprovalRepository(
-            self._conn,
-            self._db_lock,
-            now=_now,
-            json_dump=_json_dump,
-            public_pending_approval=self.approval_snapshots.public_pending_approval,
-        )
-        self.run_artifacts = RunArtifactRepository(
-            self._conn,
-            agent_artifacts_dir=self.agent_artifacts_dir,
-            workflow_artifacts_dir=self.workflow_artifacts_dir,
-            get_run=self.get_run,
-            now=_now,
-            json_dump=_json_dump,
-            redact_json_value=_redact_json_value,
-            redact_secrets=redact_secrets,
-            safe_rel_path=_safe_rel_path,
-            is_within=_is_within,
-            read_text=_read_text,
-        )
-        self.run_projections = RunProjectionCoordinator(
-            run_artifacts=self.run_artifacts,
-            run_approvals=self.run_approvals,
-            task_run_links=self.task_run_links,
-        )
-        self.runs = RunRepository(
-            self._conn,
-            ensure_row_factory=self._ensure_row_factory,
-            row_to_run=self._row_to_run,
-            accepting_runs=lambda: self._accepting_runs,
-            sync_projections=self.run_projections.sync,
-            append_run_to_group=self._append_run_to_group,
             now=_now,
             json_dump=_json_dump,
             json_load=_json_load,
@@ -601,18 +569,15 @@ class NativeRunEngine:
             contains_sensitive_text=contains_sensitive_text,
             error_type=AgentRuntimeError,
             unset_sentinel=_UNSET,
-        )
-        self.run_events = RunEventRepository(
-            self._conn,
-            self._db_lock,
-            now=_now,
-            json_dump=_json_dump,
-            json_load=_json_load,
-            error_type=AgentRuntimeError,
-            ensure_run_exists=self.get_run,
-            sync_event_cursor=self.run_projections.sync_event_cursor,
-        )
-        self.agent_run_starter = RuntimeAgentRunStarter(
+            agent_artifacts_dir=self.agent_artifacts_dir,
+            workflow_artifacts_dir=self.workflow_artifacts_dir,
+            get_run=self.get_run,
+            safe_rel_path=_safe_rel_path,
+            is_within=_is_within,
+            read_text=_read_text,
+            task_run_links=self.task_run_links,
+            accepting_runs=lambda: self._accepting_runs,
+            append_run_to_group=self._append_run_to_group,
             get_run_group=self.get_run_group,
             insert_run_group=self._insert_run_group,
             insert_run=self._insert_run,
@@ -620,6 +585,7 @@ class NativeRunEngine:
             client_request_id_from_payload=self._client_request_id_from_payload,
             agent_workspace_dir=self._agent_workspace_dir,
         )
+        self._install_runtime_run_services(run_services)
         core_services = _build_runtime_core_services(
             run_events=self.run_events,
             timeline_factory=self._timeline,
@@ -803,6 +769,16 @@ class NativeRunEngine:
         self.skill_import_sources = services.skill_import_sources
         self.skill_import_preparer = services.skill_import_preparer
         self.skill_sync = services.skill_sync
+
+    def _install_runtime_run_services(self, services: RuntimeRunServiceBundle) -> None:
+        self.approval_snapshots = services.approval_snapshots
+        self.run_groups = services.run_groups
+        self.run_approvals = services.run_approvals
+        self.run_artifacts = services.run_artifacts
+        self.run_projections = services.run_projections
+        self.runs = services.runs
+        self.run_events = services.run_events
+        self.agent_run_starter = services.agent_run_starter
 
     def _install_runtime_core_services(self, core_services: RuntimeCoreServiceBundle) -> None:
         self.runtime_events = core_services.runtime_events
