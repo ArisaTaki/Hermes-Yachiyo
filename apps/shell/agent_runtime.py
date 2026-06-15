@@ -225,6 +225,7 @@ from apps.shell.agent.runtime.tool_approvals import (
     ToolApprovalResumeContext,
     ToolApprovalTransitionContext,
 )
+from apps.shell.agent.runtime.tool_approval_resume import RuntimeToolApprovalResumeService
 from apps.shell.agent.runtime.tool_execution import RuntimeToolCallExecutor, RuntimeToolRequestRunner
 from apps.shell.agent.runtime.tooling import (
     RuntimeToolingBundle,
@@ -764,6 +765,38 @@ class NativeRunEngine:
             continue_custom_api_agent=self._run_custom_api_agent,
         )
         self._install_runtime_approval_services(approval_services)
+        self._install_runtime_tool_approval_resume(
+            RuntimeToolApprovalResumeService(
+                pending_approval_private=lambda run_id: self.runs.pending_approval_private(run_id),
+                get_agent_private=lambda agent_id: self._get_agent_private(agent_id),
+                compile_agent_runtime=lambda agent: self._compile_agent_runtime(agent),
+                load_agent_skills=lambda skill_ids: self._load_agent_skills(skill_ids),
+                tool_brokers=self.tool_brokers,
+                run_budget=lambda run_id, timeline: self._run_budget(run_id, timeline),
+                resume_approved_tool_run=lambda **kwargs: self._resume_approved_tool_run(**kwargs),
+                main_chat_agent_config=lambda **kwargs: self._main_chat_agent_config(**kwargs),
+                main_chat_pending_approval=lambda pending_approval, **kwargs: self._main_chat_pending_approval(
+                    pending_approval,
+                    **kwargs,
+                ),
+                default_chat_profile_id=lambda: str(
+                    get_model_profile_service().get_defaults().get("chat") or ""
+                ).strip(),
+                project_agent_running=lambda running: self._project_agent_approval_resume_running(running),
+                project_agent_completed=lambda context, result_text: self._project_agent_approval_resume_completed(
+                    context,
+                    result_text,
+                ),
+                project_main_chat_completed=lambda context, result_text: self._project_main_chat_approval_resume_completed(
+                    context,
+                    result_text,
+                ),
+                project_child_run_transition=lambda result: self._project_child_run_transition(result),
+                redact_agent_error=redact_secrets,
+                main_chat_agent_id=_MAIN_CHAT_AGENT_ID,
+                error_type=AgentRuntimeError,
+            )
+        )
         self._install_runtime_main_chat_model_loop(
             MainChatModelLoopRunner(
                 get_run=self.get_run,
@@ -973,6 +1006,9 @@ class NativeRunEngine:
         self.approval_pause = approval_services.approval_pause
         self.approvals = approval_services.approvals
         self.approval_resume = approval_services.approval_resume
+
+    def _install_runtime_tool_approval_resume(self, tool_approval_resume: RuntimeToolApprovalResumeService) -> None:
+        self.tool_approval_resume = tool_approval_resume
 
     def _install_runtime_workflow_execution_services(
         self,
@@ -3559,21 +3595,11 @@ class NativeRunEngine:
         runtime: dict[str, Any],
         skills: list[dict[str, Any]] | None = None,
     ) -> ToolApprovalResumeContext:
-        run_id = str(run["run_id"])
-        return ToolApprovalResumeContext.from_run(
+        return self.tool_approval_resume.context(
             run,
             pending,
-            broker=self.tool_brokers.for_run(
-                run_id=run_id,
-                workspace_policy=runtime["workspace_policy"],
-                skills=skills,
-                default_runnable_id=str((run.get("runnable_id") or _MAIN_CHAT_AGENT_ID)),
-            ),
-            allowed_tools=runtime["tool_policy"].get("allowed_tools") or [],
-            budget_factory=lambda context_run_id, context_timeline: self._run_budget(
-                context_run_id,
-                context_timeline,
-            ),
+            runtime=runtime,
+            skills=skills,
         )
 
     def approve_run_approval(self, run_id: str) -> dict[str, Any]:
@@ -3592,7 +3618,6 @@ class NativeRunEngine:
                 self._approval_execution_in_progress.discard(clean_run_id)
 
     def _approve_run_approval_once(self, run: dict[str, Any]) -> dict[str, Any]:
-        run_id = str(run["run_id"])
         if run["status"] != "approval_required":
             return run
         if run["kind"] == "workflow_run":
@@ -3601,30 +3626,7 @@ class NativeRunEngine:
             return self._approve_main_chat_run_approval(run)
         if run["kind"] != "agent_run":
             raise AgentRuntimeError("当前只支持恢复 Agent Run 的工具审批")
-        pending = self.runs.pending_approval_private(run_id)
-        if not pending:
-            raise AgentRuntimeError("Run 缺少待审批工具信息")
-        agent = self._get_agent_private(str(run["runnable_id"]))
-        runtime = self._compile_agent_runtime(agent)
-        skills = self._load_agent_skills(agent.get("skill_ids") or [])
-        resume_context = self._tool_approval_resume_context(
-            run,
-            pending,
-            runtime=runtime,
-            skills=skills,
-        )
-        return self._resume_approved_tool_run(
-            run_id=run_id,
-            pending=pending,
-            resume_context=resume_context,
-            agent=agent,
-            resumed_detail="Agent resumed after approval",
-            running_result="已批准，Agent 正在继续执行",
-            project_running=self._project_agent_approval_resume_running,
-            project_completed=self._project_agent_approval_resume_completed,
-            project_result=self._project_child_run_transition,
-            redact_error=redact_secrets,
-        )
+        return self.tool_approval_resume.approve_agent_run(run)
 
     def _resume_approved_tool_run(
         self,
@@ -3690,40 +3692,7 @@ class NativeRunEngine:
         return self.approval_resume_projection.project_failed(context, safe_error)
 
     def _approve_main_chat_run_approval(self, run: dict[str, Any]) -> dict[str, Any]:
-        run_id = str(run["run_id"])
-        pending = self.runs.pending_approval_private(run_id)
-        if not pending:
-            raise AgentRuntimeError("Run 缺少待审批工具信息")
-        model_profile_id = str(pending.get("model_profile_id") or "").strip()
-        if not model_profile_id:
-            model_profile_id = str(get_model_profile_service().get_defaults().get("chat") or "").strip()
-        if not model_profile_id:
-            raise AgentRuntimeError("native_agent_not_ready:chat_model_profile_required")
-        tool_policy = pending.get("tool_policy") if isinstance(pending.get("tool_policy"), dict) else {"allowed_tools": []}
-        workspace_policy = pending.get("workspace_policy") if isinstance(pending.get("workspace_policy"), dict) else None
-        agent = self._main_chat_agent_config(
-            model_profile_id=model_profile_id,
-            tool_policy=tool_policy,
-            workspace_policy=workspace_policy,
-        )
-        runtime = self._compile_agent_runtime(agent)
-        resume_context = self._tool_approval_resume_context(run, pending, runtime=runtime)
-        return self._resume_approved_tool_run(
-            run_id=run_id,
-            pending=pending,
-            resume_context=resume_context,
-            agent=agent,
-            resumed_detail="Main chat resumed after approval",
-            running_result="已批准，Yachiyo 正在继续执行",
-            project_completed=self._project_main_chat_approval_resume_completed,
-            project_required=lambda pending_approval: self._main_chat_pending_approval(
-                pending_approval,
-                model_profile_id=model_profile_id,
-                tool_policy=runtime["tool_policy"],
-                workspace_policy=runtime["workspace_policy"],
-            ),
-            redact_error=redact_api_error_text,
-        )
+        return self.tool_approval_resume.approve_main_chat_run(run)
 
     def _approve_workflow_run_approval(self, run: dict[str, Any]) -> dict[str, Any]:
         run_id = str(run["run_id"])
