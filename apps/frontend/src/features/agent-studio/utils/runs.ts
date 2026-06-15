@@ -389,8 +389,12 @@ export function publicApprovalToRunPendingApproval(approval: ApprovalCardSnapsho
   return {
     approval_id: approval.approval_id,
     input_preview: approval.input_preview || {},
+    open_in_studio_url: approval.open_in_studio_url || '',
+    policy_reason: approval.policy_reason || '',
     requested_at: approval.requested_at || '',
+    resolved_at: approval.resolved_at || '',
     risk_level: approval.risk_level || '',
+    run_id: approval.run_id || '',
     status: approval.status || '',
     tool: approval.tool_name || '',
   };

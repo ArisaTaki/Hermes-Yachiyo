@@ -681,7 +681,14 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "actionsTestId = 'runtime-approval-actions'",
             "approvalPreviewRecord",
             "data-approval-id={approval.approval_id}",
+            "data-approval-risk-level={approval.risk_level || ''}",
             "data-approval-variant={variant}",
+            "approvalMetadataItems",
+            "runtime-approval-meta",
+            "data-testid={`${testId}-metadata`}",
+            "policy_reason",
+            "risk_level",
+            "run_id",
             "data-testid={actionsTestId}",
         ],
     )
@@ -1312,6 +1319,10 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "model_mode: 'profile' | 'custom_api';",
             "allow_workspace_write: boolean;",
             "output_contract: string;",
+            "policy_reason?: string;",
+            "risk_level?: string;",
+            "run_id?: string;",
+            "status?: string;",
         ],
     )
     _assert_contains(
@@ -1508,6 +1519,9 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
             'actionsTestId="agent-run-detail-approval-actions"',
             'cardTestId="agent-run-detail-approval-card"',
             'cardVariant="inspector"',
+            "policy_reason: selectedRunApproval.policy_reason",
+            "risk_level: selectedRunApproval.risk_level",
+            "run_id: selectedRunApproval.run_id || selectedRun.run_id",
         ],
     )
     _assert_contains(
@@ -3055,6 +3069,18 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
         ],
     )
     _assert_contains(
+        "apps/frontend/src/features/agent-studio/utils/runs.ts",
+        [
+            "export function publicApprovalToRunPendingApproval",
+            "open_in_studio_url: approval.open_in_studio_url || ''",
+            "policy_reason: approval.policy_reason || ''",
+            "resolved_at: approval.resolved_at || ''",
+            "risk_level: approval.risk_level || ''",
+            "run_id: approval.run_id || ''",
+            "status: approval.status || ''",
+        ],
+    )
+    _assert_contains(
         "apps/frontend/src/features/agent-studio/components/AgentStudioChrome.tsx",
         [
             "studioTabs.map((item) => (",
@@ -3684,6 +3710,8 @@ def test_agent_studio_exposes_stable_e2e_selectors_for_run_detail_and_approval_f
         [
             ".run-step-meta",
             ".run-step-meta span",
+            ".runtime-approval-meta",
+            ".runtime-approval-meta span",
             ".runtime-tool-call-previews",
             "font-family: \"SF Mono\", \"JetBrains Mono\", ui-monospace, monospace;",
         ],

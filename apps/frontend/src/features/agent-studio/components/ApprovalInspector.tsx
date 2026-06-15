@@ -49,6 +49,12 @@ export function ApprovalInspector({
         input_preview: typeof selectedRunApproval.input_preview === 'string'
           ? { preview: selectedRunApproval.input_preview }
           : selectedRunApproval.input_preview,
+        open_in_studio_url: selectedRunApproval.open_in_studio_url,
+        policy_reason: selectedRunApproval.policy_reason,
+        requested_at: selectedRunApproval.requested_at,
+        resolved_at: selectedRunApproval.resolved_at,
+        risk_level: selectedRunApproval.risk_level,
+        run_id: selectedRunApproval.run_id || selectedRun.run_id,
         status: selectedRunApproval.status || 'pending',
         title: `Approval Required · ${selectedRunApproval.tool}`,
         tool_name: selectedRunApproval.tool,

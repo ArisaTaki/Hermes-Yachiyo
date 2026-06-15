@@ -176,7 +176,13 @@ export type RunSpec = {
     approval_id?: string;
     tool?: string;
     input_preview?: Record<string, unknown> | string;
+    open_in_studio_url?: string;
+    policy_reason?: string;
     requested_at?: string;
+    resolved_at?: string;
+    risk_level?: string;
+    run_id?: string;
+    status?: string;
   };
   created_at?: string;
   updated_at?: string;

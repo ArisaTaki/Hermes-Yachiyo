@@ -243,7 +243,13 @@ export function RunDetailPanel({
                     input_preview: typeof selectedWorkflowApprovalChildRun.pending_approval.input_preview === 'string'
                       ? { preview: selectedWorkflowApprovalChildRun.pending_approval.input_preview }
                       : selectedWorkflowApprovalChildRun.pending_approval.input_preview,
-                    status: 'pending',
+                    open_in_studio_url: selectedWorkflowApprovalChildRun.pending_approval.open_in_studio_url,
+                    policy_reason: selectedWorkflowApprovalChildRun.pending_approval.policy_reason,
+                    requested_at: selectedWorkflowApprovalChildRun.pending_approval.requested_at,
+                    resolved_at: selectedWorkflowApprovalChildRun.pending_approval.resolved_at,
+                    risk_level: selectedWorkflowApprovalChildRun.pending_approval.risk_level,
+                    run_id: selectedWorkflowApprovalChildRun.pending_approval.run_id || selectedWorkflowApprovalChildRun.run_id,
+                    status: selectedWorkflowApprovalChildRun.pending_approval.status || 'pending',
                     title: `Child Agent Approval · ${selectedWorkflowApprovalChildRun.pending_approval.tool}`,
                     tool_name: selectedWorkflowApprovalChildRun.pending_approval.tool,
                   }}
