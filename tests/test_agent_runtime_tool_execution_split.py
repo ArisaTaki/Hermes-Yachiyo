@@ -119,6 +119,7 @@ def _executor(
     tool_call_events: FakeToolCallEvents,
     trace_events: FakeTraceEvents | None = None,
     run_events: list[tuple[str, str, dict[str, Any]]] | None = None,
+    allows_tool=None,
 ) -> RuntimeToolCallExecutor:
     run_events = run_events if run_events is not None else []
 
@@ -135,6 +136,7 @@ def _executor(
         tool_call_events=tool_call_events,
         trace_events=trace_events or FakeTraceEvents(),
         append_run_event=append_run_event,
+        allows_tool=allows_tool,
     )
 
 
@@ -194,6 +196,31 @@ def test_runtime_tool_call_executor_denies_unallowed_tools_before_broker_call() 
         }
     ]
     assert [call[0] for call in events.calls] == ["denied"]
+
+
+def test_runtime_tool_call_executor_uses_injected_policy_gate() -> None:
+    events = FakeToolCallEvents()
+    policy_calls: list[tuple[str, list[str]]] = []
+    executor = _executor(
+        tool_call_events=events,
+        allows_tool=lambda tool_name, allowed_tools: policy_calls.append(
+            (tool_name, allowed_tools)
+        )
+        or False,
+    )
+    broker = FakeBroker({"ok": True})
+
+    with pytest.raises(AgentRuntimeError, match="未授权工具"):
+        executor.execute(
+            {"tool": "workspace.read", "input": {"path": "README.md"}},
+            ["workspace.read"],
+            broker,
+            [],
+            budget=FakeBudget(),
+        )
+
+    assert policy_calls == [("workspace.read", ["workspace.read"])]
+    assert broker.calls == []
 
 
 def test_runtime_tool_call_executor_projects_workspace_failure_as_tool_result() -> None:

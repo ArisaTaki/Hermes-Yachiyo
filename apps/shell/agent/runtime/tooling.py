@@ -31,6 +31,7 @@ def build_runtime_tooling(
     goal_disallows_tool: Callable[[str, str], str],
     pending_approval_builder: Any,
     call_agent_tool: Callable[..., dict[str, Any]],
+    allows_tool: Callable[[str, list[str]], bool] | None = None,
 ) -> RuntimeToolingBundle:
     tool_loop_projection = RuntimeToolLoopProjectionBuilder()
     return RuntimeToolingBundle(
@@ -45,6 +46,7 @@ def build_runtime_tooling(
             tool_call_events=tool_call_events,
             trace_events=trace_events,
             append_run_event=append_run_event,
+            allows_tool=allows_tool,
         ),
         tool_request_runner=RuntimeToolRequestRunner(
             normalize_tool_name=normalize_tool_name,

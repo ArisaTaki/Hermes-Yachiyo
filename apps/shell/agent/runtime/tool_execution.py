@@ -6,8 +6,11 @@ from collections.abc import Callable
 from typing import Any
 
 from apps.shell.agent.runtime.errors import AgentApprovalRequired, AgentRuntimeError
-from apps.shell.agent.tools.policy import PolicyGate
 from packages.security import redact_api_error_text
+
+
+def _default_allows_tool(tool_name: str, allowed_tools: list[str]) -> bool:
+    return tool_name in set(str(tool or "").strip() for tool in allowed_tools)
 
 
 class RuntimeToolCallExecutor:
@@ -25,6 +28,7 @@ class RuntimeToolCallExecutor:
         tool_call_events: Any,
         trace_events: Any,
         append_run_event: Callable[[str, str, dict[str, Any]], Any],
+        allows_tool: Callable[[str, list[str]], bool] | None = None,
     ) -> None:
         self._normalize_tool_name = normalize_tool_name
         self._input_preview = input_preview
@@ -35,6 +39,7 @@ class RuntimeToolCallExecutor:
         self._tool_call_events = tool_call_events
         self._trace_events = trace_events
         self._append_run_event = append_run_event
+        self._allows_tool = allows_tool or _default_allows_tool
 
     def execute(
         self,
@@ -52,7 +57,7 @@ class RuntimeToolCallExecutor:
         payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
         input_preview = self._input_preview(payload)
         budget = budget or self._run_budget(run_id, timeline)
-        if not PolicyGate.allows_tool(tool_name, allowed_tools):
+        if not self._allows_tool(tool_name, allowed_tools):
             budget.claim_tool_call(tool_name)
             timeline.append(self._timeline("agent.tool.denied", tool_name, input_preview=input_preview))
             self._tool_call_events.denied(run_id, tool_name, input_preview)

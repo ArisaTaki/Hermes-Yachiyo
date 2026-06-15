@@ -18,6 +18,7 @@ def test_build_runtime_tooling_wires_executor_runner_and_shared_loop_projection(
     pending_approval_builder = object()
     tool_call_events = object()
     trace_events = object()
+    allows_tool = lambda _tool_name, _allowed_tools: True
 
     bundle = build_runtime_tooling(
         normalize_tool_name=lambda value: str(value or "").replace("_", "."),
@@ -33,6 +34,7 @@ def test_build_runtime_tooling_wires_executor_runner_and_shared_loop_projection(
         goal_disallows_tool=lambda _user_goal, _tool_name: "",
         pending_approval_builder=pending_approval_builder,
         call_agent_tool=lambda *_args, **_kwargs: {"ok": True},
+        allows_tool=allows_tool,
     )
 
     assert isinstance(bundle, RuntimeToolingBundle)
@@ -43,6 +45,7 @@ def test_build_runtime_tooling_wires_executor_runner_and_shared_loop_projection(
     assert bundle.tool_request_runner._pending_approval_builder is pending_approval_builder
     assert bundle.tool_call_executor._tool_call_events is tool_call_events
     assert bundle.tool_call_executor._trace_events is trace_events
+    assert bundle.tool_call_executor._allows_tool is allows_tool
 
 
 def test_native_runtime_installs_tooling_bundle_under_legacy_attribute_names(tmp_path) -> None:
@@ -60,5 +63,6 @@ def test_native_runtime_installs_tooling_bundle_under_legacy_attribute_names(tmp
         assert service.tool_request_runner._pending_approval_builder is service.tool_pending_approvals
         assert service.tool_call_executor._tool_call_events is service.runtime_tool_call_events
         assert service.tool_call_executor._trace_events is service.runtime_trace_events
+        assert service.tool_call_executor._allows_tool is agent_runtime.PolicyGate.allows_tool
     finally:
         service.close()

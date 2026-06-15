@@ -731,6 +731,7 @@ class NativeRunEngine:
             tool_call_events=self.runtime_tool_call_events,
             trace_events=self.runtime_trace_events,
             append_run_event=self.append_run_event,
+            allows_tool=PolicyGate.allows_tool,
             user_goal_from_messages=_user_goal_from_agent_messages,
             goal_disallows_tool=_agent_goal_disallows_tool,
             pending_approval_builder=self.tool_pending_approvals,
