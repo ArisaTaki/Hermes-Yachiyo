@@ -10,7 +10,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -39,10 +38,11 @@ def _assert_occurs(relative_path: str, fragment: str, expected_count: int) -> No
 
 
 def _extract_async_function(text: str, name: str) -> str:
-    match = re.search(rf"(?:export\s+)?async function {re.escape(name)}\b[^\n]*\{{", text)
+    match = re.search(rf"(?:export\s+)?async function {re.escape(name)}\b", text)
     assert match, f"missing async function {name}"
+    body_start = _find_function_body_start(text, match.end())
     depth = 0
-    for index in range(match.end() - 1, len(text)):
+    for index in range(body_start, len(text)):
         char = text[index]
         if char == "{":
             depth += 1
@@ -51,6 +51,24 @@ def _extract_async_function(text: str, name: str) -> str:
             if depth == 0:
                 return text[match.start() : index + 1]
     raise AssertionError(f"unterminated exported async function {name}")
+
+
+def _find_function_body_start(text: str, start: int) -> int:
+    paren_depth = 0
+    angle_depth = 0
+    for index in range(start, len(text)):
+        char = text[index]
+        if char == "(":
+            paren_depth += 1
+        elif char == ")":
+            paren_depth = max(0, paren_depth - 1)
+        elif char == "<" and paren_depth == 0:
+            angle_depth += 1
+        elif char == ">" and angle_depth > 0:
+            angle_depth -= 1
+        elif char == "{" and paren_depth == 0 and angle_depth == 0:
+            return index
+    raise AssertionError("missing function body")
 
 
 def _assert_function_contains(relative_path: str, function_name: str, fragments: list[str]) -> None:
@@ -76,7 +94,7 @@ def test_frontend_preserves_top_level_product_routes_and_navigation() -> None:
             "| 'bubble'",
             "| 'bubble-menu'",
             "| 'live2d'",
-            "['agents', 'skills', 'skill-groups', 'workflows', 'runs', 'memory']",
+            "['agents', 'groups', 'skills', 'skill-groups', 'workflows', 'runs', 'memory']",
         ],
     )
     _assert_contains(
@@ -116,9 +134,11 @@ def test_launcher_views_expose_session_summary_e2e_selectors() -> None:
     _assert_contains(
         "apps/frontend/src/views/launcherTypes.ts",
         [
+            "import type { AgentTaskSnapshot } from '../features/yachiyo-chat/types';",
             "export type LauncherRecentSession",
             "recent_sessions?: LauncherRecentSession[];",
             "latest_task_id?: string;",
+            "agent_task?: AgentTaskSnapshot | null;",
         ],
     )
     _assert_contains(
@@ -126,10 +146,14 @@ def test_launcher_views_expose_session_summary_e2e_selectors() -> None:
         [
             "launcherRecentSessions(data?.chat)",
             "latestLauncherSessionSummary(data?.chat)",
+            "LauncherAgentTaskLight",
+            "launcherAgentTaskRunId",
+            "launcherAgentTaskSummary(agentTask)",
             'data-testid="bubble-launcher-shell"',
             'data-testid="bubble-launcher-button"',
             'data-testid="bubble-launcher-status-dot"',
             'data-testid="bubble-launcher-summary"',
+            'data-testid={`${mode}-launcher-agent-task-light`}',
             'data-testid="live2d-launcher-shell"',
             'data-testid="live2d-launcher-stage"',
             'data-testid="live2d-launcher-canvas"',
@@ -184,6 +208,10 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "stringValue(metadata.delegated_run_source_task_id) === taskId",
             "metadataListAttribute(metadata.group_followup_for_task_ids).split(',').includes(taskId)",
             "client_message_id",
+            "startYachiyoTask({",
+            "yachiyoPublicTaskTarget(text, runnables, assistantProfile)",
+            "agent_id: publicTaskTarget.id",
+            "source: 'chat'",
             "attachments: outgoingAttachments",
             "canAttachImages(executor)",
             "onPaste={(event) => void handlePaste(event)}",
@@ -291,7 +319,7 @@ def test_chat_group_summary_ui_smoke_uses_group_create_send_and_summary_status()
             "chat-group-ui-main-summary-message",
             "chat-group-ui-followup-message",
             "url.pathname === `/ui/runs/${GROUP_SUMMARY_RUN_ID}`",
-            "url.pathname === `/runs/${GROUP_SUMMARY_RUN_ID}/events`",
+            "url.pathname === `/yachiyo/studio/runs/${GROUP_SUMMARY_RUN_ID}/events`",
             "group_followup_for_task_ids",
             "group_followup_for_agent_message_ids",
             "data-summary-tone') === 'completed'",
@@ -311,7 +339,7 @@ def test_chat_group_summary_ui_smoke_uses_group_create_send_and_summary_status()
             "openRun?.getAttribute('data-run-id') === ${JSON.stringify(GROUP_AGENT_RUN_ID)}",
             "openRun?.getAttribute('data-run-status') === 'completed'",
             "url.pathname === `/ui/runs/${GROUP_AGENT_RUN_ID}`",
-            "url.pathname === `/runs/${GROUP_AGENT_RUN_ID}/events`",
+            "url.pathname === `/yachiyo/studio/runs/${GROUP_AGENT_RUN_ID}/events`",
             "run.completed",
             "agent.run.completed",
             "outputEvent?.textContent.includes(${JSON.stringify(GROUP_SUMMARY_RESULT)})",
@@ -330,6 +358,368 @@ def test_chat_group_summary_ui_smoke_uses_group_create_send_and_summary_status()
             "messagePayload.client_message_id",
             "followupPayload.client_message_id",
             "bridgeState.currentSessionId !== GROUP_SESSION_ID",
+        ],
+    )
+
+
+def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
+    _assert_contains(
+        "apps/frontend/src/views/ChatView.tsx",
+        [
+            "AgentTaskCard",
+            "getYachiyoTask",
+            "listYachiyoTasks",
+            "publicTaskSnapshotForMessage(message, agentTaskSnapshotsById)",
+            "refreshYachiyoTasksForSession(payload.current_session_id)",
+            "refreshYachiyoTaskById(resultRunId)",
+            "agentTaskSnapshotFromMessage(message, displayContent)",
+            "onOpenStudio={onOpenRunDetails}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/AgentTaskCard.tsx",
+        [
+            'data-testid="yachiyo-agent-task-card"',
+            'data-testid="yachiyo-agent-task-open-studio"',
+            'testId="yachiyo-agent-task-timeline"',
+            "RuntimeTimelineSummary",
+            "在 Agent Studio 中查看",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/ApprovalCard.tsx",
+        [
+            "RuntimeApprovalCard",
+            'testId="yachiyo-task-approval-card"',
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/ArtifactPreview.tsx",
+        [
+            "RuntimeArtifactPreview",
+            'testId="yachiyo-task-artifact-preview"',
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/runtime-shared/components/RuntimeApprovalCard.tsx",
+        [
+            "export function RuntimeApprovalCard",
+            "approvalPreviewRecord",
+            "data-approval-id={approval.approval_id}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/runtime-shared/components/RuntimeArtifactPreview.tsx",
+        [
+            "export function RuntimeArtifactPreview",
+            "data-artifact-id={artifact.artifact_id}",
+            "data-artifact-path={artifact.path || ''}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/runtime-shared/components/RuntimeTimelineSummary.tsx",
+        [
+            "export function RuntimeTimelineSummary",
+            "export type RuntimeTimelineEventSnapshot",
+            "data-run-event={eventType}",
+            "data-run-event-run-id={event.run_id || ''}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/api.ts",
+        [
+            "/yachiyo/tasks",
+            "/yachiyo/readiness",
+            "approveYachiyoTask",
+            "rejectYachiyoTask",
+            "cancelYachiyoTask",
+        ],
+    )
+
+
+def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-studio/api.ts",
+        [
+            "/yachiyo/studio/agents",
+            "/yachiyo/studio/groups",
+            "/yachiyo/studio/workflows/${encodeURIComponent(workflowId)}/runs",
+            "/yachiyo/studio/runs/${encodeURIComponent(runId)}/timeline",
+            "listYachiyoStudioAgents",
+            "saveYachiyoStudioAgent",
+            "listYachiyoAgentGroups",
+            "saveYachiyoAgentGroup",
+            "startYachiyoGroupRun",
+            "getYachiyoRunTimeline",
+            "startYachiyoWorkflowRun",
+            "function createClientRunId()",
+        ],
+    )
+    _assert_function_contains(
+        "apps/frontend/src/features/yachiyo-studio/api.ts",
+        "startYachiyoGroupRun",
+        [
+            "const clientRunId = createClientRunId();",
+            "/yachiyo/studio/groups/${encodeURIComponent(groupId)}/runs",
+            "client_run_id: clientRunId",
+        ],
+    )
+    _assert_function_contains(
+        "apps/frontend/src/features/yachiyo-studio/api.ts",
+        "startYachiyoWorkflowRun",
+        [
+            "const clientRunId = createClientRunId();",
+            "/yachiyo/studio/workflows/${encodeURIComponent(workflowId)}/runs",
+            "client_run_id: clientRunId",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-studio/types.ts",
+        [
+            "export type AgentDefinitionSnapshot",
+            "export type AgentGroupSnapshot",
+            "export type GroupRunSnapshot",
+            "export type PublicRunEvent",
+            "export type ToolCallSnapshot",
+            "export type RunTimelineSnapshot",
+            "export type ApprovalCardSnapshot",
+            "export type ArtifactSnapshot",
+            "tool_calls?: ToolCallSnapshot[];",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/views/AgentStudioView.tsx",
+        [
+            "type StudioTab = 'agents' | 'groups' | 'skills' | 'skill-groups' | "
+            "'workflows' | 'runs' | 'memory';",
+            "const studioTabs: StudioTab[] = ['agents', 'groups', 'skills', "
+            "'workflows', 'runs', 'memory'];",
+            "AgentGroupPanel",
+            "useAgentDefinitions",
+            "useAgentGroups",
+            "useRunTimeline(selectedRunId, selectedRunReplayRefreshKey)",
+            "useWorkflowDefinitions",
+            "RunDetailPanel",
+            "selectedPublicRunTimeline={selectedPublicRunTimeline}",
+            "selectedRunArtifacts",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useAgentDefinitions.ts",
+        [
+            "export function useAgentDefinitions",
+            "applyAgents",
+            "selectedAgentReadOnly",
+            "selectedAgentDeletable",
+            "toggleAgentSelected",
+            "finishAgentManagement",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useAgentGroups.ts",
+        [
+            "export function useAgentGroups",
+            "listYachiyoAgentGroups().catch(() => [])",
+            "saveYachiyoAgentGroup",
+            "startYachiyoGroupRun",
+            "runAgentGroup",
+            "saveAgentGroupDraft",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useRunTimeline.ts",
+        [
+            "export function useRunTimeline",
+            "getYachiyoRunTimeline(runId)",
+            "selectedPublicRunTimeline",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useWorkflowDefinitions.ts",
+        [
+            "export function useWorkflowDefinitions",
+            "applyWorkflows",
+            "selectedWorkflow",
+            "toggleWorkflowSelected",
+            "finishWorkflowManagement",
+            "allWorkflowsSelected",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/utils/agents.ts",
+        [
+            "export function agentToDraft",
+            "export function draftToolPolicy",
+            "export function agentRunReadinessIssue",
+            "export function runnableCapabilityLine",
+            "export function agentCapabilityLine",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/utils/skills.ts",
+        [
+            "export type SkillSourceFilter",
+            "export function skillMatchesSourceFilter",
+            "export function skillMatchesFolderFilter",
+            "export function skillFolderNameError",
+            "export const skillFolderNameMaxLength",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/utils/groups.ts",
+        [
+            "export function agentGroupListMeta",
+            "export function agentGroupMemberSummary",
+            "export function nextSelectedAgentGroupId",
+            "export function buildAgentGroupSaveRequest",
+            "export function groupRunTimelineRunId",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/utils/runs.ts",
+        [
+            "export type RunKindFilter",
+            "export type RunStatusFilter",
+            "export function runHistoryGroupsFor",
+            "export function runMatchesSearch",
+            "export function publicRunEventToTimelineEvent",
+            "export function publicArtifactsOrLegacy",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/utils/workflow.ts",
+        [
+            "export type WorkflowStepRef",
+            "export type WorkflowValidationReport",
+            "const workflowNodeTypes = new Set(['start', 'agent', 'approval', 'artifact', 'condition', 'parallel', 'workflow', 'loop']);",
+            "export const workflowRunnableStepRequiredMessage",
+            "export function validateWorkflowDraft",
+            "export function workflowSpecStepRefs",
+            "export function workflowStepRefs",
+            "export function workflowRunHasChildRun",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/RunDetailPanel.tsx",
+        [
+            'data-testid="agent-run-detail-public-timeline"',
+            "Public Runtime Snapshot",
+            "RunTimelineSnapshot · Approval · Artifact · Events",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/AgentGroupPanel.tsx",
+        [
+            'data-testid="agent-studio-groups"',
+            'data-testid="agent-group-member-picker"',
+            "GroupRunPanel",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/GroupRunPanel.tsx",
+        [
+            'data-testid="agent-group-run-panel"',
+            'data-testid="agent-group-run"',
+            'data-testid="agent-group-open-run"',
+            "打开 Run Timeline",
+        ],
+    )
+
+
+def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
+    _assert_contains(
+        "apps/frontend/src/views/AgentStudioView.tsx",
+        [
+            "RunDetailPanel",
+            "RunLauncherPanel",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/RunLauncherPanel.tsx",
+        [
+            "RunHistoryList",
+            "Run Agent / Workflow",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/RunDetailPanel.tsx",
+        [
+            "ApprovalInspector",
+            "RunApprovalRequest",
+            "RunTimeline",
+            "ExpandableRuntimeContent as RunExpandableContent",
+            "ArtifactInspector",
+            "ToolCallInspector",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/ApprovalInspector.tsx",
+        [
+            "export function ApprovalInspector",
+            "RuntimeApprovalCard",
+            "RunApprovalRequest",
+            "agent-run-detail-approval",
+            'testId="agent-run-detail-approval-card"',
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/ArtifactInspector.tsx",
+        [
+            "export function ArtifactInspector",
+            "RuntimeArtifactPreview",
+            "agent-run-detail-artifact",
+            'testId="agent-run-detail-artifact-preview-card"',
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/ToolCallInspector.tsx",
+        [
+            "export function ToolCallInspector",
+            "RuntimeToolCallCard",
+            "agent-run-detail-tool-calls",
+            'testId="agent-run-detail-tool-call-card"',
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/runtime-shared/components/RuntimeToolCallCard.tsx",
+        [
+            "export function RuntimeToolCallCard",
+            "data-tool-call-id={toolCall.tool_call_id}",
+            "data-tool-status={toolCall.status}",
+            "approvalPreviewRecord",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/RunApprovalRequest.tsx",
+        [
+            'data-testid="agent-run-approval-request"',
+            "approvalPreviewRecord",
+            "formatApprovalInput",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/RunHistoryList.tsx",
+        [
+            "export function RunHistoryList",
+            'data-testid="agent-run-history-row"',
+            'data-testid="agent-run-history-open-run"',
+            'data-testid="agent-run-history-select-run"',
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/RunTimeline.tsx",
+        [
+            "ExpandableRuntimeContent as RunExpandableContent",
+            'data-testid="agent-run-detail-execution-event"',
+            'data-testid="agent-run-detail-load-more-events"',
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/runtime-shared/approval.ts",
+        [
+            "approvalPreviewRecord",
+            "approvalPreviewValue",
+            "formatApprovalInput",
         ],
     )
 
@@ -499,7 +889,7 @@ def test_activity_ui_smoke_uses_feed_detail_trace_and_delete_paths() -> None:
             "request.method === 'GET' && url.pathname === `/ui/activity/${ACTIVITY_EVENT_ID}`",
             "request.method === 'DELETE' && url.pathname === `/ui/activity/${ACTIVITY_EVENT_ID}`",
             "request.method === 'GET' && url.pathname === `/ui/runs/${RUN_ID}`",
-            "request.method === 'GET' && url.pathname === `/runs/${RUN_ID}/events`",
+            "request.method === 'GET' && url.pathname === `/yachiyo/studio/runs/${RUN_ID}/events`",
             "data-testid=\"activity-search-input\"",
             "data-testid=\"activity-row\"",
             "data-testid=\"activity-row-open\"",
@@ -866,7 +1256,7 @@ def test_chat_image_attachment_ui_smoke_uses_file_input_path() -> None:
             "assistant-chat-image-ui-smoke-reply",
             "RUN_RESULT",
             "`/ui/runs/${RUN_ID}`",
-            "`/runs/${RUN_ID}/events`",
+            "`/yachiyo/studio/runs/${RUN_ID}/events`",
             "model.output.completed",
             "run.completed",
             r'''document.querySelector('[data-message-id=\\"assistant-chat-image-ui-smoke-reply\\"] [data-testid=\\"chat-message-open-run-detail\\"]').click()''',
@@ -938,7 +1328,7 @@ def test_chat_run_detail_handoff_ui_smoke_uses_completed_message_run_metadata() 
             "data-testid=\"agent-run-detail-result\"",
             "data-testid=\"agent-run-detail-execution-event\"",
             "`/ui/runs/${RUN_ID}`",
-            "`/runs/${RUN_ID}/events`",
+            "`/yachiyo/studio/runs/${RUN_ID}/events`",
             "agent.run.started",
             "model.output.completed",
             "agent.run.completed",
@@ -971,7 +1361,7 @@ def test_chat_agent_progress_ui_smoke_uses_run_detail_polling_and_replay() -> No
             "data-testid=\"agent-run-detail-task\"",
             "data-testid=\"agent-run-detail-execution-event\"",
             "`/ui/runs/${RUN_ID}`",
-            "`/runs/${RUN_ID}/events`",
+            "`/yachiyo/studio/runs/${RUN_ID}/events`",
             "url.pathname === '/__smoke/complete-run'",
             "agent.run.started",
             "model.output.completed",
@@ -1002,7 +1392,7 @@ def test_chat_cancel_ui_smoke_uses_stop_buttons_and_cancel_route() -> None:
             "assistant-cancel-ui-smoke-cancelled",
             "Still running cancel smoke.",
             "Cancelled by user from Chat UI smoke.",
-            "/runs/${RUN_ID}/events",
+            "/yachiyo/studio/runs/${RUN_ID}/events",
             "run.cancelled",
             "data-run-status') === 'cancelled'",
             "cancelled message Run Detail replay verified",
@@ -1021,7 +1411,7 @@ def test_chat_approval_ui_smoke_uses_message_and_composer_actions() -> None:
             "`/ui/runs/${RUN_ID}`",
             "`/ui/runs/${RUN_ID}/approval/approve`",
             "`/ui/runs/${RUN_ID}/approval/reject`",
-            "`/runs/${RUN_ID}/events`",
+            "`/yachiyo/studio/runs/${RUN_ID}/events`",
             "document.querySelector('[data-testid=\"chat-message-approval-card\"]')",
             "document.querySelector('[data-testid=\"chat-message-approval-actions\"]')",
             "document.querySelector('[data-testid=\"chat-message-approval-approve\"]')",
@@ -1098,16 +1488,16 @@ def test_agent_run_detail_ui_smoke_uses_replay_route_and_dom_attributes() -> Non
             "`/ui/runs/${RERUN_RUN_ID}`",
             "`/ui/runs/${RUN_ID}/artifacts/${ARTIFACT_PATH}`",
             "`/ui/runs/${WORKFLOW_RUN_ID}/artifacts/${WORKFLOW_ARTIFACT_PATH}`",
-            "`/runs/${RERUN_RUN_ID}/events`",
-            "`/runs/${RUN_ID}/events`",
-            "`/runs/${APPROVAL_RUN_ID}/events`",
-            "`/runs/${WORKFLOW_RUN_ID}/events`",
-            "`/runs/${WORKFLOW_CHILD_RUN_ID}/events`",
-            "`/runs/${WORKFLOW_REJECT_RUN_ID}/events`",
-            "`/runs/${WORKFLOW_REJECT_CHILD_RUN_ID}/events`",
-            "`/runs/${WORKFLOW_CANCEL_RUN_ID}/events`",
-            "`/runs/${WORKFLOW_CANCEL_CHILD_RUN_ID}/events`",
-            "`/runs/${ACTIVE_CANCEL_RUN_ID}/events`",
+            "`/yachiyo/studio/runs/${RERUN_RUN_ID}/events`",
+            "`/yachiyo/studio/runs/${RUN_ID}/events`",
+            "`/yachiyo/studio/runs/${APPROVAL_RUN_ID}/events`",
+            "`/yachiyo/studio/runs/${WORKFLOW_RUN_ID}/events`",
+            "`/yachiyo/studio/runs/${WORKFLOW_CHILD_RUN_ID}/events`",
+            "`/yachiyo/studio/runs/${WORKFLOW_REJECT_RUN_ID}/events`",
+            "`/yachiyo/studio/runs/${WORKFLOW_REJECT_CHILD_RUN_ID}/events`",
+            "`/yachiyo/studio/runs/${WORKFLOW_CANCEL_RUN_ID}/events`",
+            "`/yachiyo/studio/runs/${WORKFLOW_CANCEL_CHILD_RUN_ID}/events`",
+            "`/yachiyo/studio/runs/${ACTIVE_CANCEL_RUN_ID}/events`",
             "profile-run-detail-smoke",
             "defaults: { chat: 'profile-run-detail-smoke' }",
             "task_id: RUN_TASK_ID",
@@ -1297,10 +1687,15 @@ def test_chat_approval_run_detail_handoff_preserves_route_and_replay_wiring() ->
             "events: current[selectedRunId]?.events || [],",
             "events: current[selectedRunId]?.events || currentEvents,",
             "selectedRunExecutionEvents",
-            "RunEvent replay facts",
             "function approvalFollowupRefreshOptions(selectedAfterAction: string): StudioRefreshOptions",
             "return isApprovalFollowupCurrent(selectedAfterAction) ? { selectedRunId: selectedAfterAction } : {};",
             "refresh(approvalFollowupRefreshOptions(selectedAfterAction))",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/RunTimeline.tsx",
+        [
+            "RunEvent replay facts",
         ],
     )
 
@@ -1367,10 +1762,13 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "task_run_link_run_status?: string;",
             "task_run_link_last_event_sequence?: number;",
             "export async function listAgents()",
+            "'/yachiyo/studio/agents'",
             "'/ui/agents'",
             "export async function createAgent(",
-            "return apiPost<AgentSpec>('/ui/agents', request);",
+            "apiPost<AgentSpec>('/yachiyo/studio/agents', request)",
+            "apiPost<AgentSpec>('/ui/agents', request)",
             "export async function updateAgent(",
+            "apiPost<AgentSpec>('/yachiyo/studio/agents', { ...request, agent_id: agentId })",
             "apiPatch<AgentSpec>(`/ui/agents/${encodeURIComponent(agentId)}`, request)",
             "export async function deleteAgent(",
             "apiDelete(`/ui/agents/${encodeURIComponent(agentId)}`)",
@@ -1401,26 +1799,32 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "export async function deleteSkillFolder(",
             "apiDelete(`/ui/skill-folders/${encodeURIComponent(folderId)}${query}`)",
             "export async function listWorkflows()",
-            "'/ui/workflows'",
+            "'/yachiyo/studio/workflows'",
             "export async function createWorkflow(",
-            "return apiPost('/ui/workflows', request);",
+            "return apiPost('/yachiyo/studio/workflows', request);",
             "export async function updateWorkflow(",
-            "apiPatch(`/ui/workflows/${encodeURIComponent(workflowId)}`, request)",
+            "apiPost('/yachiyo/studio/workflows', { ...request, workflow_id: workflowId })",
             "export async function deleteWorkflow(",
             "apiDelete(`/ui/workflows/${encodeURIComponent(workflowId)}`)",
             "export async function listRuns()",
+            "'/yachiyo/studio/runs'",
             "'/ui/runs'",
+            "export async function getRun(",
+            "/yachiyo/studio/runs/${encodeURIComponent(runId)}",
             "export async function listRunGroups()",
             "'/ui/run-groups'",
             "export async function getRunGroup(",
             "/ui/run-groups/${encodeURIComponent(runGroupId)}",
             "export async function getRunEvents(",
-            "/runs/${encodeURIComponent(runId)}/events?",
+            "/yachiyo/studio/runs/${encodeURIComponent(runId)}/events?",
             "export async function deleteRun(",
             "apiDelete(`/ui/runs/${encodeURIComponent(runId)}`)",
             "export async function getRunArtifact(",
+            "/yachiyo/studio/runs/${encodeURIComponent(runId)}/artifacts/${encodedPath}",
+            "/yachiyo/studio/agents/${encodeURIComponent(agentId)}/runs",
             "'/ui/agent-runs'",
-            "client_run_id: createClientRunId()",
+            "/yachiyo/studio/workflows/${encodeURIComponent(workflowId)}/runs",
+            "client_run_id: clientRunId",
             "'/ui/workflow-runs'",
             "export async function cancelRun(",
             "export async function approveRunApproval(",
@@ -1432,9 +1836,10 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
     _assert_contains(
         "apps/frontend/src/views/AgentStudioView.tsx",
         [
-            "type StudioTab = 'agents' | 'skills' | 'skill-groups' | 'workflows' | 'runs' | 'memory';",
-            "const studioTabs: StudioTab[] = ['agents', 'skills', 'workflows', 'runs', 'memory'];",
-            "const workflowNodeTypes = new Set(['start', 'agent', 'approval', 'artifact', 'condition', 'parallel', 'workflow', 'loop']);",
+            "type StudioTab = 'agents' | 'groups' | 'skills' | 'skill-groups' | "
+            "'workflows' | 'runs' | 'memory';",
+            "const studioTabs: StudioTab[] = ['agents', 'groups', 'skills', "
+            "'workflows', 'runs', 'memory'];",
             "createAgent",
             "updateAgent",
             "deleteAgent",
@@ -1496,8 +1901,6 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "const RUN_EVENT_REPLAY_PAGE_SIZE = 200;",
             "runEventReplayToTimelineEvent",
             "mergeRunEventReplayPages",
-            "const bySequence = new Map<number, RunEventSpec>();",
-            "incoming.forEach((event) => bySequence.set(Number(event.sequence) || 0, event));",
             "selectedRunExecutionEvents",
             "selectedRunReplayHasMore",
             "selectedRunReplayRefreshKey",
@@ -1510,39 +1913,79 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "const events = mergeRunEventReplayPages(previous?.events || currentEvents, incomingEvents);",
             "hasMore: incomingEvents.length >= limit,",
             "error: err instanceof Error ? err.message : '读取更多 RunEvent replay 失败',",
-            "RunEvent replay facts",
-            "disabled={selectedRunReplayLoading}",
-            "{selectedRunReplayLoading ? '加载中...' : '加载更多 RunEvent'}",
-            "加载更多 RunEvent",
-            "if (name === 'run.started') return 'Run 已启动';",
-            "if (name === 'model.output.completed') return '模型输出完成';",
-            "if (name === 'agent.tool.approval_approved') return detail ? `审批已通过 · ${detail}` : '审批已通过';",
-            "if (name === 'agent.tool.approval_rejected') return detail ? `审批已拒绝 · ${detail}` : '审批已拒绝';",
-            "if (name === 'approval.timeout') return '审批已超时';",
-            "if (name === 'agent.run.resumed') return 'Agent 已继续执行';",
-            "if (name === 'agent.run.cancelled') return 'Agent 已取消';",
-            "if (name === 'run.rerun.started') return '从原 Run 重跑';",
             "const run = await rerunRun(selectedRun.run_id);",
             "upsertRunDetailCache([run]);",
             "await refreshRunGroupsForRuns([run]);",
             "openRunDetail(run.run_id, { revealInHistory: true });",
-            "if (name === 'workflow.node.artifact') return detail ? `产物节点 · ${detail}` : '产物节点';",
-            "typeof payload.workflow_node_label === 'string'",
-            "<h2>Run Detail</h2>",
-            "Approval Required",
-            "RunApprovalRequest",
+            "RunDetailPanel",
             "selectedWorkflowApprovalChildRunId",
-            "Artifacts ·",
-            "Execution ·",
+            "selectedAgentReadOnly",
+            "selectedAgentDeletable",
+            "系统 Agent 只能查看，不能删除。",
+            "AgentEditorPanel",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/AgentEditorPanel.tsx",
+        [
+            "系统 Agent 由 oha-yachiyo 管理",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/RunDetailPanel.tsx",
+        [
+            "<h2>Run Detail</h2>",
+            "ApprovalInspector",
+            "ArtifactInspector",
+            "ToolCallInspector",
             "selectedRun.task_id ? <code>Task {selectedRun.task_id}</code> : null",
             "selectedRun.session_id ? <code>Session {selectedRun.session_id}</code> : null",
             "selectedRun.task_run_link_run_status ? <span>Task link {runStatusLabel(selectedRun.task_run_link_run_status)}</span> : null",
             "selectedRun.task_run_link_last_event_sequence !== undefined && selectedRun.task_run_link_last_event_sequence !== null",
             "Task link updated {formatRunDate(selectedRun.task_run_link_updated_at || selectedRun.task_run_link_created_at)}",
-            "selectedAgentReadOnly",
-            "selectedAgentDeletable",
-            "系统 Agent 只能查看，不能删除。",
-            "系统 Agent 由 oha-yachiyo 管理",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/ApprovalInspector.tsx",
+        [
+            "Approval Required",
+            "RunApprovalRequest",
+            "RuntimeApprovalCard",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/RunTimeline.tsx",
+        [
+            "RunEvent replay facts",
+            "disabled={replayLoading}",
+            "{replayLoading ? '加载中...' : '加载更多 RunEvent'}",
+            "加载更多 RunEvent",
+            "Execution ·",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/utils/runTimeline.ts",
+        [
+            "export function runEventReplayToTimelineEvent(event: RunEventSpec)",
+            "export function mergeRunEventReplayPages(",
+            "const bySequence = new Map<number, RunEventSpec>();",
+            "incoming.forEach((event) => bySequence.set(Number(event.sequence) || 0, event));",
+            "if (name === 'run.started') return 'Run 已启动';",
+            "if (name === 'model.output.completed') return '模型输出完成';",
+            "if (name === 'agent.tool.approval_approved') return detail ? `审批已通过 · ${detail}` : '审批已通过';",
+            "if (name === 'agent.tool.approval_rejected') return detail ? `审批已拒绝 · ${detail}` : '审批已拒绝';",
+            "if (name === 'skill.dispatch.read') return detail ? `Skill 调度 · ${detail}` : 'Skill 调度';",
+            "if (name === 'memory.write.add') return detail ? `Memory 新增 · ${detail}` : 'Memory 新增';",
+            "if (name.startsWith('skill.') || name.startsWith('memory.')) return 'tool';",
+            "if (name === 'approval.timeout') return '审批已超时';",
+            "if (name === 'agent.run.resumed') return 'Agent 已继续执行';",
+            "if (name === 'agent.run.cancelled') return 'Agent 已取消';",
+            "if (name === 'run.rerun.started') return '从原 Run 重跑';",
+            "if (name === 'group.member.started') return detail ? `群组成员启动 · ${detail}` : '群组成员启动';",
+            "if (name === 'group.member.completed') return detail ? `群组成员完成 · ${detail}` : '群组成员完成';",
+            "if (name === 'workflow.node.artifact') return detail ? `产物节点 · ${detail}` : '产物节点';",
+            "if (name === 'workflow.edge.followed') return detail ? `Workflow 路由 · ${detail}` : 'Workflow 路由';",
+            "typeof payload.workflow_node_label === 'string'",
         ],
     )
 
@@ -1581,6 +2024,12 @@ def test_agent_studio_exposes_runtime_memory_and_future_task_management() -> Non
             "async function triggerDueFutureTaskRuns(): Promise<StudioRefreshOptions>",
             "const result = await triggerDueFutureTasks();",
             "openRunDetail(firstRunId, { revealInHistory: true });",
+            "RuntimeMemoryPanel",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/RuntimeMemoryPanel.tsx",
+        [
             "data-testid=\"agent-runtime-memory\"",
             "data-testid=\"agent-memory-list\"",
             "data-testid=\"agent-memory-delete\"",
@@ -1588,12 +2037,14 @@ def test_agent_studio_exposes_runtime_memory_and_future_task_management() -> Non
             "data-testid=\"agent-future-task-trigger-due\"",
             "data-testid=\"agent-future-task-cancel\"",
             "data-testid=\"agent-future-task-open-run\"",
+            "futureTaskStatusLabel",
+            "futureTaskStatusTone",
         ],
     )
     _assert_contains(
         "apps/frontend/src/lib/view.ts",
         [
-            "['agents', 'skills', 'skill-groups', 'workflows', 'runs', 'memory']",
+            "['agents', 'groups', 'skills', 'skill-groups', 'workflows', 'runs', 'memory']",
         ],
     )
     _assert_contains(
@@ -1609,7 +2060,7 @@ def test_agent_studio_exposes_runtime_memory_and_future_task_management() -> Non
 
 def test_agent_studio_exposes_stable_e2e_selectors_for_run_detail_and_approval_flow() -> None:
     _assert_contains(
-        "apps/frontend/src/views/AgentStudioView.tsx",
+        "apps/frontend/src/features/agent-studio/components/RunDetailPanel.tsx",
         [
             "data-testid=\"agent-run-detail\"",
             "data-run-id={selectedRun.run_id}",
@@ -1627,11 +2078,8 @@ def test_agent_studio_exposes_stable_e2e_selectors_for_run_detail_and_approval_f
             "data-run-id={selectedWorkflowParentRunId}",
             "data-run-status={selectedWorkflowParentRun?.status || ''}",
             "data-testid=\"agent-run-detail-open-workflow-studio\"",
-            "data-testid=\"agent-run-detail-approval\"",
-            "data-testid=\"agent-run-detail-approval-actions\"",
-            "data-testid=\"agent-run-detail-approval-approve\"",
-            "data-testid=\"agent-run-detail-approval-reject\"",
-            "data-testid=\"agent-run-approval-request\"",
+            "ApprovalInspector",
+            "ToolCallInspector",
             "data-testid=\"agent-run-detail-workflow-child-approval\"",
             "data-testid=\"agent-run-detail-workflow-child-approval-actions\"",
             "data-testid=\"agent-run-detail-workflow-child-approve\"",
@@ -1651,6 +2099,73 @@ def test_agent_studio_exposes_stable_e2e_selectors_for_run_detail_and_approval_f
             "data-testid=\"agent-run-detail-workflow-step-open-run\"",
             "data-run-id={step.childRunId}",
             "data-run-status={childStatus}",
+            "ArtifactInspector",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/ApprovalInspector.tsx",
+        [
+            "data-testid=\"agent-run-detail-approval\"",
+            "data-testid=\"agent-run-detail-approval-actions\"",
+            "data-testid=\"agent-run-detail-approval-approve\"",
+            "data-testid=\"agent-run-detail-approval-reject\"",
+            "RuntimeApprovalCard",
+            "RunApprovalRequest",
+            'testId="agent-run-detail-approval-card"',
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/ToolCallInspector.tsx",
+        [
+            "data-testid=\"agent-run-detail-tool-calls\"",
+            "data-testid=\"agent-run-detail-tool-call-list\"",
+            "agent-run-detail-tool-call-card",
+            "RuntimeToolCallCard",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/ArtifactInspector.tsx",
+        [
+            "Artifacts ·",
+            "data-testid=\"agent-run-detail-artifacts\"",
+            "data-testid=\"agent-run-detail-artifact-list\"",
+            "data-testid=\"agent-run-detail-artifact\"",
+            "data-artifact-kind={artifactKind}",
+            "data-artifact-path={path}",
+            "data-artifact-source-label={sourceLabel}",
+            "data-artifact-source-run-id={sourceRunId}",
+            "data-testid=\"agent-run-detail-artifact-preview\"",
+            "RuntimeArtifactPreview",
+            'testId="agent-run-detail-artifact-preview-card"',
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/RunLauncherPanel.tsx",
+        [
+            "data-testid=\"agent-run-history-manage\"",
+            "data-testid=\"agent-run-history-bulk-actions\"",
+            "data-testid=\"agent-run-history-select-all\"",
+            "data-testid=\"agent-run-history-clear-selection\"",
+            "data-testid=\"agent-run-history-delete-selected\"",
+            "data-testid=\"agent-run-history-finish-management\"",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/RunHistoryList.tsx",
+        [
+            "data-testid=\"agent-run-history-row\"",
+            "data-testid=\"agent-run-history-open-run\"",
+            "data-testid=\"agent-run-history-select-run\"",
+            "data-run-id={run.run_id}",
+            "data-run-kind={run.kind}",
+            "data-run-status={run.status}",
+            "data-run-group-id={run.run_group_id || ''}",
+            "data-task-id={run.task_id || ''}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/RunTimeline.tsx",
+        [
             "data-testid=\"agent-run-detail-execution\"",
             "data-testid=\"agent-run-detail-execution-events\"",
             "data-testid=\"agent-run-detail-execution-event\"",
@@ -1667,28 +2182,6 @@ def test_agent_studio_exposes_stable_e2e_selectors_for_run_detail_and_approval_f
             "data-child-run-id={childRunId || ''}",
             "data-testid=\"agent-run-detail-execution-open-child-run\"",
             "data-testid=\"agent-run-detail-load-more-events\"",
-            "data-testid=\"agent-run-detail-artifacts\"",
-            "data-testid=\"agent-run-detail-artifact-list\"",
-            "data-testid=\"agent-run-detail-artifact\"",
-            "data-artifact-kind={artifactKind}",
-            "data-artifact-path={path}",
-            "data-artifact-source-label={sourceLabel}",
-            "data-artifact-source-run-id={sourceRunId}",
-            "data-testid=\"agent-run-detail-artifact-preview\"",
-            "data-testid=\"agent-run-history-manage\"",
-            "data-testid=\"agent-run-history-bulk-actions\"",
-            "data-testid=\"agent-run-history-select-all\"",
-            "data-testid=\"agent-run-history-clear-selection\"",
-            "data-testid=\"agent-run-history-delete-selected\"",
-            "data-testid=\"agent-run-history-finish-management\"",
-            "data-testid=\"agent-run-history-row\"",
-            "data-testid=\"agent-run-history-open-run\"",
-            "data-testid=\"agent-run-history-select-run\"",
-            "data-run-id={run.run_id}",
-            "data-run-kind={run.kind}",
-            "data-run-status={run.status}",
-            "data-run-group-id={run.run_group_id || ''}",
-            "data-task-id={run.task_id || ''}",
         ],
     )
 
@@ -1696,6 +2189,14 @@ def test_agent_studio_exposes_stable_e2e_selectors_for_run_detail_and_approval_f
 def test_workflow_studio_exposes_stable_e2e_selectors_for_edit_and_run_flow() -> None:
     _assert_contains(
         "apps/frontend/src/views/AgentStudioView.tsx",
+        [
+            "WorkflowEditorPanel",
+            "onRunWorkflow={() => void runAction(runCurrentWorkflow, '保存并运行 Workflow')}",
+            "onSaveWorkflow={() => void runAction(saveWorkflow, '保存 Workflow')}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/WorkflowEditorPanel.tsx",
         [
             "data-testid=\"workflow-studio\"",
             "data-testid=\"workflow-list\"",
@@ -1718,11 +2219,13 @@ def test_workflow_studio_exposes_stable_e2e_selectors_for_edit_and_run_flow() ->
             "data-testid=\"workflow-add-agent-node\"",
             "data-testid=\"workflow-add-approval-node\"",
             "data-testid=\"workflow-add-artifact-node\"",
+            "data-testid=\"workflow-add-workflow-node\"",
+            "data-testid=\"workflow-add-loop-node\"",
             "data-testid=\"workflow-save\"",
             "data-testid=\"workflow-delete\"",
             "data-testid=\"workflow-agent-palette\"",
             "data-testid=\"workflow-agent-palette-item\"",
-            "data-testid=\"workflow-canvas\"",
+            "WorkflowCanvas",
             "data-testid=\"workflow-node-settings\"",
             "data-testid=\"workflow-validation\"",
             "data-testid=\"workflow-node-setting-row\"",
@@ -1731,12 +2234,26 @@ def test_workflow_studio_exposes_stable_e2e_selectors_for_edit_and_run_flow() ->
             "data-testid=\"workflow-node-task-input\"",
             "data-testid=\"workflow-node-artifact-path-input\"",
             "data-testid=\"workflow-node-approval-criteria-input\"",
+            "data-testid=\"workflow-node-loop-condition-input\"",
+            "data-testid=\"workflow-node-loop-max-iterations-input\"",
+            "data-testid=\"workflow-node-workflow-select\"",
+            "data-testid=\"workflow-node-workflow-task-input\"",
             "data-testid=\"workflow-node-remove\"",
             "data-testid=\"workflow-quick-run\"",
             "data-testid=\"workflow-run-goal-input\"",
             "data-testid=\"workflow-run-preview\"",
             "data-testid=\"workflow-run-preview-step\"",
             "data-testid=\"workflow-save-and-run\"",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/WorkflowCanvas.tsx",
+        [
+            "data-testid=\"workflow-canvas\"",
+            "<ReactFlow",
+            "<MiniMap />",
+            "<Controls />",
+            "<Background />",
         ],
     )
 
@@ -1780,7 +2297,7 @@ def test_workflow_save_run_ui_smoke_uses_studio_route_and_saved_workflow_id() ->
             "data-testid=\"workflow-node-artifact-path-input\"",
             "data-testid=\"workflow-run-goal-input\"",
             "data-testid=\"workflow-save-and-run\"",
-            "request.method === 'POST' && url.pathname === '/ui/workflows'",
+            "request.method === 'POST' && url.pathname === '/yachiyo/studio/workflows'",
             "request.method === 'POST' && url.pathname === '/ui/workflow-runs'",
             "createdWorkflowRunRequest.workflow_id !== WORKFLOW_ID",
             "createdWorkflowRunRequest.client_run_id",
@@ -1790,8 +2307,8 @@ def test_workflow_save_run_ui_smoke_uses_studio_route_and_saved_workflow_id() ->
             "assertMockBridgeContract",
             "`/ui/runs/${RUN_ID}`",
             "`/ui/runs/${APPROVAL_RUN_ID}`",
-            "`/runs/${RUN_ID}/events`",
-            "`/runs/${APPROVAL_RUN_ID}/events`",
+            "`/yachiyo/studio/runs/${RUN_ID}/events`",
+            "`/yachiyo/studio/runs/${APPROVAL_RUN_ID}/events`",
             "task_id: WORKFLOW_TASK_ID",
             "session_id: WORKFLOW_SESSION_ID",
             "task_id: APPROVAL_TASK_ID",
@@ -1864,16 +2381,25 @@ def test_agent_studio_agents_ui_smoke_uses_definition_crud_paths() -> None:
         "apps/frontend/src/views/AgentStudioView.tsx",
         [
             'data-testid="agent-studio-agents"',
-            'data-testid="agent-new"',
-            'data-testid="agent-list"',
-            'data-testid="agent-list-item"',
-            'data-testid="agent-list-open"',
-            'data-testid="agent-management-toggle"',
-            'data-testid="agent-list-select-checkbox"',
-            'data-testid="agent-select-all"',
-            'data-testid="agent-clear-selection"',
-            'data-testid="agent-delete-selected"',
-            'data-testid="agent-management-done"',
+            "AgentListPanel",
+            "AgentEditorPanel",
+            "selectedAgentReadOnly",
+            "onSetSelectedAgentIds={setSelectedAgentIds}",
+            "系统 Agent 只能查看，不能从 Agent Studio 直接运行。",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useAgentDefinitions.ts",
+        [
+            "const deletableAgentIds = useMemo(",
+            "pruneSelectedIds(current, deletableAgentIds)",
+            "if (!deletableAgentIds.includes(agentId)) return;",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/AgentEditorPanel.tsx",
+        [
+            "AgentSkillMountsPanel",
             'data-testid="agent-editor"',
             'data-testid="agent-name-input"',
             'data-testid="agent-nickname-input"',
@@ -1886,18 +2412,28 @@ def test_agent_studio_agents_ui_smoke_uses_definition_crud_paths() -> None:
             'data-testid="agent-persona-input"',
             'data-testid="agent-save"',
             'data-testid="agent-delete"',
-            "selectedAgentReadOnly",
             "readOnly={selectedAgentReadOnly}",
             "disabled={selectedAgentReadOnly || draft.model_mode === 'custom_api'}",
             "disabled={busy || selectedAgentReadOnly}",
-            "const deletableAgentIds = useMemo(",
-            "pruneSelectedIds(current, deletableAgentIds)",
-            "if (!deletableAgentIds.includes(agentId)) return;",
+            "系统 Agent 由 oha-yachiyo 管理，可查看但不能编辑、删除或直接挂载 Skill。",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/AgentListPanel.tsx",
+        [
+            'data-testid="agent-new"',
+            'data-testid="agent-list"',
+            'data-testid="agent-list-item"',
+            'data-testid="agent-list-open"',
+            'data-testid="agent-management-toggle"',
+            'data-testid="agent-list-select-checkbox"',
+            'data-testid="agent-select-all"',
+            'data-testid="agent-clear-selection"',
+            'data-testid="agent-delete-selected"',
+            'data-testid="agent-management-done"',
             "data-agent-deletable={!agent.system && agent.deletable !== false ? 'true' : 'false'}",
             "disabled={busy || !agentManagementMode || agent.system || agent.deletable === false}",
-            "setSelectedAgentIds(allAgentsSelected ? [] : deletableAgentIds)",
-            "系统 Agent 由 oha-yachiyo 管理，可查看但不能编辑、删除或直接挂载 Skill。",
-            "系统 Agent 只能查看，不能从 Agent Studio 直接运行。",
+            "onSetSelectedAgentIds(allAgentsSelected ? [] : deletableAgentIds)",
         ],
     )
     _assert_contains(
@@ -2023,6 +2559,27 @@ def test_agent_studio_skill_mount_ui_smoke_uses_attach_detach_and_bulk_paths() -
     _assert_contains(
         "apps/frontend/src/views/AgentStudioView.tsx",
         [
+            "AgentEditorPanel",
+            "function toggleAgentSkillMount(skill: SkillSpec, mounted: boolean)",
+            "if (selectedAgentReadOnly) {",
+            "setStatus('系统 Agent 只能查看，不能修改 Skill 挂载。');",
+            "if (mounted) await detachSkill(draft.agent_id, skill.skill_id);",
+            "else await attachSkill(draft.agent_id, skill.skill_id);",
+            "await updateAgent(draft.agent_id, { skill_ids: nextSkillIds });",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/AgentEditorPanel.tsx",
+        [
+            "AgentSkillMountsPanel",
+            "onMountVisibleSkills={onMountVisibleSkills}",
+            "onUnmountVisibleSkills={onUnmountVisibleSkills}",
+            "onToggleSkillMount={onToggleSkillMount}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/AgentSkillMountsPanel.tsx",
+        [
             'data-testid="agent-skill-mounts"',
             'data-testid="agent-skill-mount-summary"',
             'data-testid="agent-skill-mount-filter-installed"',
@@ -2036,13 +2593,7 @@ def test_agent_studio_skill_mount_ui_smoke_uses_attach_detach_and_bulk_paths() -
             'data-testid="agent-skill-mount-item"',
             "data-skill-mounted={mounted ? 'true' : 'false'}",
             "disabled={busy || selectedAgentReadOnly}",
-            """if (selectedAgentReadOnly) {
-                            setStatus('系统 Agent 只能查看，不能修改 Skill 挂载。');
-                            return;
-                          }""",
-            "if (mounted) await detachSkill(draft.agent_id, skill.skill_id);",
-            "else await attachSkill(draft.agent_id, skill.skill_id);",
-            "await updateAgent(draft.agent_id, { skill_ids: nextSkillIds });",
+            "onToggleSkillMount(skill, mounted)",
         ],
     )
     _assert_contains(
@@ -2141,42 +2692,82 @@ def test_agent_frontend_run_helpers_preserve_native_run_bridge_contract() -> Non
     agents_lib = "apps/frontend/src/lib/agents.ts"
     _assert_function_contains(
         agents_lib,
+        "listRuns",
+        [
+            "apiGet<{ runs?: RunTimelinePublicSnapshot[] }>('/yachiyo/studio/runs')",
+            ".then((payload) => (payload.runs || []).map(runSpecFromPublicTimelineSnapshot))",
+            "apiGet<{ runs?: RunSpec[] }>('/ui/runs')",
+        ],
+    )
+    _assert_function_contains(
+        agents_lib,
+        "getRun",
+        [
+            "apiGet<RunTimelinePublicSnapshot>(`/yachiyo/studio/runs/${encodeURIComponent(runId)}`)",
+            ".then(runSpecFromPublicTimelineSnapshot)",
+            "apiGet(`/ui/runs/${encodeURIComponent(runId)}`)",
+        ],
+    )
+    _assert_function_contains(
+        agents_lib,
         "getRunEvents",
         [
             "after_sequence: String(Math.max(0, afterSequence))",
             "limit: String(Math.max(1, limit))",
-            "apiGet(`/runs/${encodeURIComponent(runId)}/events?${query.toString()}`)",
+            "apiGet(`/yachiyo/studio/runs/${encodeURIComponent(runId)}/events?${query.toString()}`)",
         ],
     )
     _assert_function_contains(
         agents_lib,
         "createAgentRun",
         [
+            "const clientRunId = createClientRunId();",
+            "/yachiyo/studio/agents/${encodeURIComponent(agentId)}/runs",
+            "objective: userGoal",
+            "client_run_id: clientRunId",
+            "runSpecFromPublicTimeline(snapshot, agentId, userGoal, 'agent_run')",
             "apiPost('/ui/agent-runs'",
             "agent_id: agentId",
             "user_goal: userGoal",
-            "client_run_id: createClientRunId()",
+            "client_run_id: clientRunId",
+        ],
+    )
+    _assert_function_contains(
+        agents_lib,
+        "getRunArtifact",
+        [
+            "/yachiyo/studio/runs/${encodeURIComponent(runId)}/artifacts/${encodedPath}",
+            "/ui/runs/${encodeURIComponent(runId)}/artifacts/${encodedPath}",
         ],
     )
     _assert_function_contains(
         agents_lib,
         "createWorkflowRun",
         [
+            "const clientRunId = createClientRunId();",
+            "/yachiyo/studio/workflows/${encodeURIComponent(workflowId)}/runs",
+            "client_run_id: clientRunId",
             "apiPost('/ui/workflow-runs'",
             "workflow_id: workflowId",
             "user_goal: userGoal",
-            "client_run_id: createClientRunId()",
+            "client_run_id: clientRunId",
         ],
     )
     _assert_function_contains(
         agents_lib,
         "rerunRun",
-        ["apiPost(`/ui/runs/${encodeURIComponent(runId)}/rerun`, {})"],
+        [
+            "/yachiyo/studio/runs/${encodeURIComponent(runId)}/rerun",
+            "apiPost(`/ui/runs/${encodeURIComponent(runId)}/rerun`, {})",
+        ],
     )
     _assert_function_contains(
         agents_lib,
         "cancelRun",
-        ["apiPost(`/ui/runs/${encodeURIComponent(runId)}/cancel`, {})"],
+        [
+            "/yachiyo/studio/runs/${encodeURIComponent(runId)}/cancel",
+            "apiPost(`/ui/runs/${encodeURIComponent(runId)}/cancel`, {})",
+        ],
     )
 
 
@@ -2198,22 +2789,31 @@ def test_agent_studio_preserves_workflow_child_approval_refresh_wiring() -> None
             "async function cancelRunById(runId: string, nextSelectedRunId?: string): Promise<StudioRefreshOptions>",
             "const run = await cancelRun(runId);",
             "statusMessage: nextSelectedRunId ? '已取消子 Run，Workflow 已终止。' : 'Run 已取消。'",
-            "() => approveRunById(selectedWorkflowApprovalChildRunId, selectedRun.run_id)",
-            "() => rejectRunById(selectedWorkflowApprovalChildRunId, selectedRun.run_id)",
-            "() => cancelRunById(selectedWorkflowApprovalChildRunId, selectedRun.run_id)",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/RunDetailPanel.tsx",
+        [
+            "() => onApproveRunById(selectedWorkflowApprovalChildRunId, selectedRun.run_id)",
+            "() => onRejectRunById(selectedWorkflowApprovalChildRunId, selectedRun.run_id)",
+            "() => onCancelRunById(selectedWorkflowApprovalChildRunId, selectedRun.run_id)",
             "取消子 Run",
-            "openRunDetail(selectedWorkflowApprovalChildRunId)",
+            "onOpenRunDetail(selectedWorkflowApprovalChildRunId)",
         ],
     )
     _assert_function_contains(
         agents_lib,
         "approveRunApproval",
-        ["apiPost(`/ui/runs/${encodeURIComponent(runId)}/approval/approve`, {})"],
+        [
+            "/yachiyo/studio/runs/${encodeURIComponent(runId)}/approval/approve",
+            "apiPost(`/ui/runs/${encodeURIComponent(runId)}/approval/approve`, {})",
+        ],
     )
     _assert_function_contains(
         agents_lib,
         "rejectRunApproval",
         [
+            "/yachiyo/studio/runs/${encodeURIComponent(runId)}/approval/reject",
             "apiPost(`/ui/runs/${encodeURIComponent(runId)}/approval/reject`",
             "reason ? { reason } : {}",
         ],
@@ -2232,12 +2832,6 @@ def test_agent_studio_preserves_workflow_child_approval_run_detail_wiring() -> N
             "...selectedWorkflowChildRefs.map((ref) => ref.childRunId),",
             "selectedWorkflowApprovalChildRunId,",
             "Promise.all(uniqueChildRunIds.map((runId) => getRun(runId).catch(() => null)))",
-            "className=\"run-approval-box workflow-approval-bridge\"",
-            "RunApprovalRequest",
-            "runId={selectedWorkflowApprovalChildRun.run_id}",
-            "() => approveRunById(selectedWorkflowApprovalChildRunId, selectedRun.run_id),",
-            "() => rejectRunById(selectedWorkflowApprovalChildRunId, selectedRun.run_id),",
-            "onClick={() => openRunDetail(selectedWorkflowApprovalChildRunId)}",
             "const selectedAfterAction = nextSelectedRunId || runId;",
             "const selectedAfterRun = selectedAfterAction !== runId ? runById.get(selectedAfterAction) || null : null;",
             "makeRunContinuingAfterApproval(selectedAfterRun, '已批准子 Agent，Workflow 正在继续执行。')",
@@ -2248,6 +2842,17 @@ def test_agent_studio_preserves_workflow_child_approval_run_detail_wiring() -> N
             "const run = await rejectRunApproval(runId);",
             "upsertRunDetailCache(updatedRuns);",
             "setSelectedRunId(selectedAfterAction);",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/RunDetailPanel.tsx",
+        [
+            "className=\"run-approval-box workflow-approval-bridge\"",
+            "RunApprovalRequest",
+            "runId={selectedWorkflowApprovalChildRun.run_id}",
+            "() => onApproveRunById(selectedWorkflowApprovalChildRunId, selectedRun.run_id),",
+            "() => onRejectRunById(selectedWorkflowApprovalChildRunId, selectedRun.run_id),",
+            "onClick={() => onOpenRunDetail(selectedWorkflowApprovalChildRunId)}",
         ],
     )
 

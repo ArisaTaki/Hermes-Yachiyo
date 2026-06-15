@@ -1,3 +1,5 @@
+import type { AgentTaskSnapshot } from '../features/yachiyo-chat/types';
+
 export type LauncherRecentSession = {
   session_id?: string;
   title?: string;
@@ -18,6 +20,7 @@ export type LauncherPayload = {
     status_label?: string;
     latest_reply?: string;
     latest_reply_full?: string;
+    agent_task?: AgentTaskSnapshot | null;
     recent_sessions?: LauncherRecentSession[];
   };
   notification?: {

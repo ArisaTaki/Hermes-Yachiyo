@@ -4247,6 +4247,81 @@ button:hover {
   display: none;
 }
 
+.launcher-agent-task-light {
+  position: absolute;
+  left: 50%;
+  top: 8px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 6px;
+  align-items: center;
+  width: min(182px, calc(100vw - 18px));
+  min-height: 32px;
+  padding: 5px 8px;
+  border: 1px solid rgba(255, 244, 203, 0.28);
+  border-radius: 8px;
+  background: rgba(18, 22, 30, 0.78);
+  color: #fff7df;
+  font-size: 10px;
+  line-height: 1.15;
+  text-align: left;
+  transform: translateX(-50%);
+  z-index: 16;
+  backdrop-filter: blur(10px);
+}
+
+.bubble-shell .launcher-agent-task-light {
+  top: 0;
+  width: min(136px, calc(100vw - 10px));
+  min-height: 24px;
+  padding: 3px 6px;
+  border-radius: 999px;
+}
+
+.launcher-agent-task-light:hover {
+  border-color: rgba(255, 219, 112, 0.64);
+}
+
+.launcher-agent-task-light span,
+.launcher-agent-task-light strong,
+.launcher-agent-task-light em {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.launcher-agent-task-light span {
+  color: rgba(255, 247, 223, 0.72);
+  font-size: 9px;
+}
+
+.launcher-agent-task-light strong {
+  grid-column: 1 / -1;
+  color: #fff7df;
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.launcher-agent-task-light em {
+  color: #ffd166;
+  font-size: 9px;
+  font-style: normal;
+}
+
+.launcher-agent-task-light.running,
+.launcher-agent-task-light.approval {
+  border-color: rgba(255, 209, 102, 0.52);
+}
+
+.launcher-agent-task-light.completed {
+  border-color: rgba(113, 226, 140, 0.48);
+}
+
+.launcher-agent-task-light.failed {
+  border-color: rgba(255, 104, 104, 0.52);
+}
+
 .launcher-accessible-text {
   position: absolute;
   width: 1px;
@@ -8915,6 +8990,198 @@ body.electron-window .hy-traffic {
 .hy-content .open-chat-shell .message-agent-progress-card button {
   justify-self: start;
   margin-top: 4px;
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-card {
+  display: grid;
+  gap: 10px;
+  width: min(760px, 100%);
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid oklch(66% 0.12 188 / 0.18);
+  border-radius: 8px;
+  background: oklch(66% 0.12 188 / 0.055);
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-card.waiting_approval {
+  border-color: oklch(82% 0.135 76 / 0.28);
+  background: oklch(82% 0.135 76 / 0.075);
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-card.failed {
+  border-color: oklch(72% 0.14 350 / 0.24);
+  background: oklch(72% 0.14 350 / 0.075);
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-card-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-card-head div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-card-head strong {
+  color: var(--hy-fg);
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-card-head p,
+.hy-content .open-chat-shell .yachiyo-agent-task-summary {
+  margin: 0;
+  color: var(--hy-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-status {
+  padding: 4px 7px;
+  border: 1px solid oklch(66% 0.12 188 / 0.24);
+  border-radius: 7px;
+  background: oklch(66% 0.12 188 / 0.09);
+  color: var(--hy-teal);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-card-head button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid oklch(66% 0.12 188 / 0.28);
+  border-radius: 6px;
+  background: oklch(66% 0.12 188 / 0.08);
+  color: var(--hy-teal);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-card-head button:hover {
+  border-color: oklch(66% 0.12 188 / 0.44);
+  color: var(--hy-fg);
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-card-head .ui-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-approvals,
+.hy-content .open-chat-shell .yachiyo-agent-task-artifacts {
+  display: grid;
+  gap: 6px;
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-timeline {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-timeline li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid oklch(66% 0.12 188 / 0.14);
+  border-radius: 6px;
+  background: var(--hy-panel-soft);
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-timeline span,
+.hy-content .open-chat-shell .yachiyo-agent-task-timeline em {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--hy-muted);
+  font-size: 11px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-timeline p {
+  grid-column: 1 / -1;
+  margin: 0;
+  overflow: hidden;
+  color: var(--hy-muted);
+  font-size: 11px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-timeline em {
+  justify-self: end;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.hy-content .open-chat-shell .yachiyo-task-approval,
+.hy-content .open-chat-shell .yachiyo-task-artifact {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 7px;
+  background: oklch(255 0 0 / 0.03);
+}
+
+.hy-content .open-chat-shell .yachiyo-task-approval span,
+.hy-content .open-chat-shell .yachiyo-task-artifact span {
+  color: var(--hy-faint);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.hy-content .open-chat-shell .yachiyo-task-approval strong,
+.hy-content .open-chat-shell .yachiyo-task-artifact strong {
+  min-width: 0;
+  color: var(--hy-fg);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hy-content .open-chat-shell .yachiyo-task-approval p {
+  grid-column: 2 / -1;
+  margin: 0;
+  color: var(--hy-muted);
+  font-size: 12px;
+}
+
+.hy-content .open-chat-shell .yachiyo-task-approval code {
+  max-width: 180px;
+  padding: 3px 6px;
+  border: 1px solid oklch(82% 0.135 76 / 0.22);
+  border-radius: 6px;
+  color: var(--hy-warning);
+  font-family: var(--hy-font-mono);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .hy-content .open-chat-shell .message-agent-progress-icon {
@@ -14255,6 +14522,21 @@ button.activity-item {
   background: oklch(66% 0.12 188 / 0.07);
 }
 
+.run-public-contract-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.run-public-contract-grid span {
+  padding: 4px 7px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 8px;
+  background: oklch(255 0 0 / 0.025);
+  color: var(--hy-muted);
+  font-size: 11px;
+}
+
 .runtime-management-row.muted {
   opacity: 0.62;
 }
@@ -16411,6 +16693,89 @@ button.activity-item {
   background: oklch(78% 0.14 78 / 0.06);
 }
 
+.studio-runtime-approval {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.studio-runtime-approval span {
+  justify-self: start;
+  min-height: 22px;
+  padding: 2px 7px;
+  border: 1px solid oklch(78% 0.14 78 / 0.34);
+  border-radius: 999px;
+  color: oklch(86% 0.12 78);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.studio-runtime-approval strong {
+  color: var(--hy-fg);
+  font-size: 14px;
+}
+
+.studio-runtime-approval code {
+  justify-self: start;
+  max-width: 100%;
+  padding: 4px 7px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 7px;
+  color: var(--hy-muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.run-tool-call-list {
+  display: grid;
+  gap: 8px;
+}
+
+.studio-runtime-tool-call {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 6px 10px;
+  align-items: center;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 8px;
+  background: oklch(255 0 0 / 0.025);
+}
+
+.studio-runtime-tool-call span,
+.studio-runtime-tool-call em {
+  color: var(--hy-faint);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.studio-runtime-tool-call strong {
+  min-width: 0;
+  color: var(--hy-fg);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.studio-runtime-tool-call code,
+.studio-runtime-tool-call p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--hy-muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.studio-runtime-tool-call code {
+  padding: 4px 7px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 7px;
+  font-family: var(--hy-font-mono);
+}
+
 .workflow-approval-bridge {
   gap: 12px;
   border-color: oklch(78% 0.14 78 / 0.42);
@@ -16763,6 +17128,29 @@ button.activity-item {
 .run-artifacts button:hover {
   border-color: oklch(66% 0.12 188 / 0.3);
   color: var(--hy-fg);
+}
+
+.run-artifacts .studio-runtime-artifact {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.run-artifacts .studio-runtime-artifact span {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--hy-faint);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.run-artifacts .studio-runtime-artifact strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .run-artifacts.compact button {

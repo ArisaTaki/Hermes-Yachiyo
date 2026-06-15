@@ -36,6 +36,7 @@ const LIVE2D_IDLE_MOTION_MIN_MS = 8500;
 const LIVE2D_IDLE_MOTION_JITTER_MS = 6500;
 
 type LauncherMode = 'bubble' | 'live2d';
+type LauncherAgentTask = NonNullable<LauncherPayload['chat']>['agent_task'];
 
 const LAUNCHER_SUMMARY_TEST_IDS: Record<LauncherMode, {
   latestReply: string;
@@ -213,8 +214,10 @@ function BubbleLauncher({ data }: { data: LauncherPayload | null }) {
   const displayMode = launcher.default_display || 'summary';
   const statusLabel = normalizedStatusLabel(data?.chat);
   const recentSessions = launcherRecentSessions(data?.chat);
+  const agentTask = data?.chat?.agent_task || null;
   const latestReply = latestAssistantText(data?.chat, launcher);
-  const summaryText = latestReply || latestLauncherSessionSummary(data?.chat) || statusLabel;
+  const taskSummary = launcherAgentTaskSummary(agentTask);
+  const summaryText = taskSummary || latestReply || latestLauncherSessionSummary(data?.chat) || statusLabel;
   const showSummary = displayMode !== 'icon' && Boolean(summaryText);
   const title = bubbleTitle(displayMode, hasAttention, statusLabel, proactive);
   const ariaLabel = displayMode === 'icon'
@@ -344,6 +347,7 @@ function BubbleLauncher({ data }: { data: LauncherPayload | null }) {
           {summaryText}
         </span>
       </button>
+      <LauncherAgentTaskLight mode="bubble" task={agentTask} />
       <LauncherSessionSummaryProbe mode="bubble" latestReply={latestReply} statusLabel={statusLabel} sessions={recentSessions} />
     </main>
   );
@@ -430,6 +434,7 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
   const latestReply = latestAssistantText(data?.chat, launcher);
   const statusLabel = normalizedStatusLabel(data?.chat);
   const recentSessions = launcherRecentSessions(data?.chat);
+  const agentTask = data?.chat?.agent_task || null;
   const status = launcher.latest_status || (data?.chat?.is_processing ? 'processing' : 'empty');
   const hasAttention = Boolean(data?.notification?.has_unread);
   const proactiveAttention = Boolean(data?.proactive?.has_attention);
@@ -812,6 +817,8 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
         </button>
       ) : null}
 
+      <LauncherAgentTaskLight mode="live2d" task={agentTask} />
+
       {launcher.enable_quick_input !== false && quickInputVisible ? (
         <form ref={quickInputRef} className="live2d-quick-input" data-testid="live2d-launcher-quick-input" onSubmit={sendQuickMessage} onClick={(event) => event.stopPropagation()}>
           <input
@@ -914,6 +921,77 @@ function launcherChatOpenParams(data: LauncherPayload | null, sessionId: string)
 function latestLauncherSessionSummary(chat: LauncherPayload['chat']) {
   const session = launcherRecentSessions(chat).find((item) => String(item.summary || '').trim());
   return session ? String(session.summary || '').trim() : '';
+}
+
+function launcherAgentTaskSummary(task: LauncherAgentTask) {
+  if (!task) return '';
+  const label = launcherAgentTaskStatusLabel(task.status || '');
+  const title = String(task.title || '').trim();
+  return title ? `${label} · ${title}` : label;
+}
+
+function launcherAgentTaskStatusLabel(status: string) {
+  if (status === 'waiting_approval') return '等待审批';
+  if (status === 'running' || status === 'queued') return 'Agent 运行中';
+  if (status === 'completed') return 'Agent 已完成';
+  if (status === 'failed') return 'Agent 失败';
+  if (status === 'cancelled') return 'Agent 已取消';
+  return 'Agent Task';
+}
+
+function launcherAgentTaskTone(status: string) {
+  if (status === 'waiting_approval') return 'approval';
+  if (status === 'running' || status === 'queued') return 'running';
+  if (status === 'completed') return 'completed';
+  if (status === 'failed') return 'failed';
+  if (status === 'cancelled') return 'cancelled';
+  return 'neutral';
+}
+
+function launcherAgentTaskRunId(task: LauncherAgentTask) {
+  if (!task) return '';
+  const artifactRun = task.artifacts?.find((artifact) => artifact.run_id || artifact.source_run_id);
+  const fromUrl = String(task.open_in_studio_url || '').match(/[?&](?:run|run_id)=([^&#]+)/)?.[1];
+  return (
+    task.recent_events?.find((event) => event.run_id)?.run_id
+    || task.pending_approvals?.find((approval) => approval.run_id)?.run_id
+    || artifactRun?.run_id
+    || artifactRun?.source_run_id
+    || (fromUrl ? decodeURIComponent(fromUrl) : '')
+    || task.task_id
+  );
+}
+
+function LauncherAgentTaskLight({
+  mode,
+  task,
+}: {
+  mode: LauncherMode;
+  task: LauncherAgentTask;
+}) {
+  if (!task) return null;
+  const runId = launcherAgentTaskRunId(task);
+  const status = String(task.status || '');
+  const needsAction = Boolean(task.needs_user_action || task.pending_approvals?.length);
+  return (
+    <button
+      type="button"
+      className={`launcher-agent-task-light ${launcherAgentTaskTone(status)}`}
+      data-run-id={runId}
+      data-task-id={task.task_id}
+      data-testid={`${mode}-launcher-agent-task-light`}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (runId) void openAppView('agents', { run: runId });
+      }}
+      title={runId ? '在 Agent Studio 中查看' : undefined}
+    >
+      <span>{launcherAgentTaskStatusLabel(status)}</span>
+      <strong>{task.title || task.task_id}</strong>
+      {needsAction ? <em>待处理</em> : null}
+    </button>
+  );
 }
 
 function LauncherSessionSummaryProbe({

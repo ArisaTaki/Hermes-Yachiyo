@@ -10,6 +10,9 @@ import type {
 import { ImageAttachmentViewer } from '../components/ImageAttachmentViewer';
 import { useConfirmDialog } from '../components/ConfirmDialog';
 import { UiIcon } from '../components/UiIcon';
+import { getYachiyoTask, listYachiyoTasks, startYachiyoTask } from '../features/yachiyo-chat/api';
+import { AgentTaskCard } from '../features/yachiyo-chat/components/AgentTaskCard';
+import type { AgentTaskSnapshot, TaskStatus } from '../features/yachiyo-chat/types';
 import logoUrl from '../../../../docs/open-design/logo.png';
 import { type AssistantProfileSeed, useAssistantProfileSeed } from '../lib/assistantProfileSeed';
 import { approveRunApproval, listRunnables, type RunnableSummary, type RunSpec, getRun, rejectRunApproval } from '../lib/agents';
@@ -151,6 +154,10 @@ type ChatMessage = {
 function metadataListAttribute(value: unknown): string {
   if (!Array.isArray(value)) return '';
   return value.map((item) => String(item || '').trim()).filter(Boolean).join(',');
+}
+
+function uniqueStrings(values: unknown[]): string[] {
+  return Array.from(new Set(values.map((value) => String(value || '').trim()).filter(Boolean)));
 }
 
 type MessagesPayload = {
@@ -328,6 +335,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const [sessionContext, setSessionContext] = useState<ChatSessionContext | null>(null);
   const [input, setInput] = useState(() => retainedComposerDraft.input);
   const [attachments, setAttachments] = useState<PendingAttachment[]>(() => [...retainedComposerDraft.attachments]);
+  const [agentTaskSnapshotsById, setAgentTaskSnapshotsById] = useState<Record<string, AgentTaskSnapshot>>({});
   const [status, setStatus] = useState('就绪');
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingCount, setProcessingCount] = useState(0);
@@ -402,6 +410,8 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const approvalSessionIdRef = useRef('');
   const loadSessionsRef = useRef<() => Promise<void>>(async () => undefined);
   const transientEmptySessionIdRef = useRef('');
+  const agentTaskSnapshotsRef = useRef<Record<string, AgentTaskSnapshot>>({});
+  const agentTaskFetchInFlightRef = useRef<Set<string>>(new Set());
   const latestChatSnapshotRef = useRef({
     currentSessionId: '',
     messageCount: 0,
@@ -427,6 +437,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       const nextProcessingCount = Math.max(0, Number(payload.processing_count || 0));
       const processing = Boolean(payload.is_processing || nextProcessingCount > 0);
       const processingChanged = processing !== isProcessingRef.current;
+      void refreshYachiyoTaskSnapshotsFromMessages(nextMessages);
       setConversationTokenCount(normalizedTokenCount(payload.token_count));
       isProcessingRef.current = processing;
       const failed = latestFailedMessage(nextMessages);
@@ -497,6 +508,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       const payload = await apiGet<SessionsPayload>(`/ui/chat/sessions?${query.toString()}`);
       if (payload.ok === false) throw new Error('读取会话失败');
       setSessions(payload);
+      if (payload.current_session_id) void refreshYachiyoTasksForSession(payload.current_session_id);
     } catch {
       setSessions(null);
     } finally {
@@ -507,6 +519,57 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   useEffect(() => {
     loadSessionsRef.current = loadSessions;
   }, [loadSessions]);
+
+  function rememberYachiyoTasks(tasks: Array<AgentTaskSnapshot | null | undefined>) {
+    const snapshots = tasks.filter((task): task is AgentTaskSnapshot => Boolean(task?.task_id));
+    if (!snapshots.length) return;
+    const next = { ...agentTaskSnapshotsRef.current };
+    let changed = false;
+    snapshots.forEach((task) => {
+      yachiyoTaskCacheKeys(task).forEach((key) => {
+        if (!key) return;
+        if (next[key] === task) return;
+        next[key] = task;
+        changed = true;
+      });
+    });
+    if (!changed) return;
+    agentTaskSnapshotsRef.current = next;
+    setAgentTaskSnapshotsById(next);
+  }
+
+  async function refreshYachiyoTasksForSession(sessionId: string) {
+    const cleanSessionId = sessionId.trim();
+    if (!cleanSessionId) return;
+    try {
+      rememberYachiyoTasks(await listYachiyoTasks(cleanSessionId));
+    } catch {
+      // The Chat surface keeps using legacy messages if the new facade is unavailable.
+    }
+  }
+
+  async function refreshYachiyoTaskById(taskId: string) {
+    const cleanTaskId = taskId.trim();
+    if (!cleanTaskId || agentTaskSnapshotsRef.current[cleanTaskId]) return;
+    if (agentTaskFetchInFlightRef.current.has(cleanTaskId)) return;
+    agentTaskFetchInFlightRef.current.add(cleanTaskId);
+    try {
+      rememberYachiyoTasks([await getYachiyoTask(cleanTaskId)]);
+    } catch {
+      // Message metadata still provides a fallback task card for legacy runs.
+    } finally {
+      agentTaskFetchInFlightRef.current.delete(cleanTaskId);
+    }
+  }
+
+  function refreshYachiyoTaskSnapshotsFromMessages(nextMessages: ChatMessage[]) {
+    const ids = uniqueStrings(nextMessages.map(messageRunId))
+      .filter((runId) => !agentTaskSnapshotsRef.current[runId])
+      .slice(-8);
+    ids.forEach((runId) => {
+      void refreshYachiyoTaskById(runId);
+    });
+  }
 
   useEffect(() => {
     const currentSessionId = sessions?.current_session_id || latestChatSnapshotRef.current.currentSessionId;
@@ -853,6 +916,45 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     focusComposerSoon();
     const clientMessageId = createClientMessageId();
     try {
+      const publicTaskTarget = outgoingAttachments.length === 0
+        ? yachiyoPublicTaskTarget(text, runnables, assistantProfile)
+        : null;
+      if (publicTaskTarget) {
+        try {
+          const task = await startYachiyoTask({
+            prompt: yachiyoPublicTaskPrompt(text, publicTaskTarget),
+            conversation_id: sessions?.current_session_id || latestChatSnapshotRef.current.currentSessionId || null,
+            agent_id: publicTaskTarget.id,
+            metadata: {
+              client_message_id: clientMessageId,
+              source: 'chat',
+            },
+          });
+          rememberYachiyoTasks([task]);
+          transientEmptySessionIdRef.current = '';
+          pendingReplyTaskIdRef.current = '';
+          if (task.status === 'running' && task.task_id) {
+            setStatus('Agent 执行中...');
+            stickToBottomRef.current = true;
+            await refreshMessages();
+            pollAgentRunInBackground(task.task_id);
+            return;
+          }
+          pendingReplyScrollRef.current = false;
+          setStatus(task.status === 'waiting_approval'
+            ? 'Agent 等待审批...'
+            : task.status === 'completed'
+              ? 'Agent Run 已处理。'
+              : task.status === 'failed'
+                ? 'Agent Run 失败。'
+                : 'Agent/Workflow 指令已处理。');
+          await refreshMessages();
+          await loadSessions();
+          return;
+        } catch {
+          // Fall through to the legacy Chat API with the same idempotency key.
+        }
+      }
       const result = await apiPost<{
         ok?: boolean;
         error?: string;
@@ -878,10 +980,12 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         if (resultRunStatus === 'processing' && resultRunId) {
           setStatus(`${runnableLabel} 执行中...`);
           stickToBottomRef.current = true;
+          void refreshYachiyoTaskById(resultRunId);
           await refreshMessages();
           pollAgentRunInBackground(resultRunId);
           return;
         }
+        if (resultRunId) void refreshYachiyoTaskById(resultRunId);
         pendingReplyScrollRef.current = false;
         setStatus(resultRunStatus === 'approval_required'
           ? `${runnableLabel} 等待审批...`
@@ -2456,33 +2560,37 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
               <div className="empty-state">发送消息开始对话</div>
             ) : null}
             <div className={`chat-messages-content${messagesVisible ? '' : ' is-hidden'}`}>
-              {messages.map((message, index) => (
-                <MessageBubble
-                  assistantProfile={assistantProfile}
-                  assistantProfileLoading={assistantProfileLoading}
-                  copied={copiedMessageId === message.id}
-                  displayContent={displayMessageText(message, renderStateRef.current)}
-                  key={message.id || index}
-                  highlighted={message.id === highlightedMessageId}
-                  message={message}
-                  copiedCodeBlockKey={copiedCodeBlockKey}
-                  retryDisabled={isSending || isProcessing || Boolean(retryingMessageId)}
-                  retrying={retryingMessageId === message.id}
-                  showRetry={isRetryableMessage(message, messages)}
-                  approvalBusy={Boolean(
-                    message.id
-                    && (approvalActionMessageId === message.id || approvalActionMessageId.startsWith(`message:${message.id}:`)),
-                  )}
-                  onCopy={() => void copyMessage(message)}
-                  onRetry={() => void retryMessage(message)}
-                  onApprove={() => void resolveApprovalMessage(message, 'approve')}
-                  onReject={() => void resolveApprovalMessage(message, 'reject')}
-                  onOpenRunDetails={openRunDetails}
-                  onOpenWorkflowStudio={openWorkflowStudio}
-                  registerMessageNode={registerMessageNode}
-                  runnables={runnables}
-                />
-              ))}
+              {messages.map((message, index) => {
+                const publicTaskSnapshot = publicTaskSnapshotForMessage(message, agentTaskSnapshotsById);
+                return (
+                  <MessageBubble
+                    assistantProfile={assistantProfile}
+                    assistantProfileLoading={assistantProfileLoading}
+                    copied={copiedMessageId === message.id}
+                    displayContent={displayMessageText(message, renderStateRef.current)}
+                    key={message.id || index}
+                    highlighted={message.id === highlightedMessageId}
+                    message={message}
+                    copiedCodeBlockKey={copiedCodeBlockKey}
+                    publicTaskSnapshot={publicTaskSnapshot}
+                    retryDisabled={isSending || isProcessing || Boolean(retryingMessageId)}
+                    retrying={retryingMessageId === message.id}
+                    showRetry={isRetryableMessage(message, messages)}
+                    approvalBusy={Boolean(
+                      message.id
+                      && (approvalActionMessageId === message.id || approvalActionMessageId.startsWith(`message:${message.id}:`)),
+                    )}
+                    onCopy={() => void copyMessage(message)}
+                    onRetry={() => void retryMessage(message)}
+                    onApprove={() => void resolveApprovalMessage(message, 'approve')}
+                    onReject={() => void resolveApprovalMessage(message, 'reject')}
+                    onOpenRunDetails={openRunDetails}
+                    onOpenWorkflowStudio={openWorkflowStudio}
+                    registerMessageNode={registerMessageNode}
+                    runnables={runnables}
+                  />
+                );
+              })}
               <div className="chat-bottom-anchor" ref={bottomAnchorRef} aria-hidden="true" />
             </div>
           </section>
@@ -3014,7 +3122,7 @@ function SessionIdDialog({ copied, error, sessionId, onClose, onCopy }: {
   );
 }
 
-function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading, copied, copiedCodeBlockKey, displayContent, highlighted, message, retryDisabled, retrying, showRetry, onApprove, onCopy, onOpenRunDetails, onOpenWorkflowStudio, onReject, onRetry, registerMessageNode, runnables }: {
+function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading, copied, copiedCodeBlockKey, displayContent, highlighted, message, publicTaskSnapshot = null, retryDisabled, retrying, showRetry, onApprove, onCopy, onOpenRunDetails, onOpenWorkflowStudio, onReject, onRetry, registerMessageNode, runnables }: {
   approvalBusy: boolean;
   assistantProfile: AssistantProfilePayload | null;
   assistantProfileLoading: boolean;
@@ -3023,6 +3131,7 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
   displayContent: string;
   highlighted: boolean;
   message: ChatMessage;
+  publicTaskSnapshot?: AgentTaskSnapshot | null;
   retryDisabled: boolean;
   retrying: boolean;
   showRetry: boolean;
@@ -3051,6 +3160,9 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
   const approvalId = approvalDetails ? approvalIdFromPending(message.metadata?.pending_approval) : '';
   const approvalSignature = approvalDetails ? messageApprovalSignature(message) : '';
   const showAgentProgress = isProcessingEmpty && Boolean(runId || message.metadata?.runnable_kind === 'agent' || message.metadata?.runnable_kind === 'workflow');
+  const taskSnapshot = !approvalDetails && !showAgentProgress
+    ? publicTaskSnapshot || agentTaskSnapshotFromMessage(message, displayContent)
+    : null;
   const showInlineRunDetails = role === 'assistant' && Boolean(runId) && !approvalDetails && !showAgentProgress;
   const artifactCount = Number(message.metadata?.run_artifact_count || 0);
   const duplicateError = Boolean(message.error && displayContent.trim() && message.error.trim() === displayContent.trim());
@@ -3120,6 +3232,7 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
           onOpenRunDetails={onOpenRunDetails}
           progressLabel={message.progress_label}
         />
+        {taskSnapshot ? <AgentTaskCard task={taskSnapshot} onOpenStudio={onOpenRunDetails} /> : null}
         {followupNotice ? (
           <div
             className="message-followup-status"
@@ -3551,6 +3664,150 @@ function AgentRunProgressCard({ message, onOpenDetails, runId }: {
       </div>
     </div>
   );
+}
+
+function agentTaskSnapshotFromMessage(message: ChatMessage, displayContent: string): AgentTaskSnapshot | null {
+  const runId = messageRunId(message);
+  if ((message.role || '') !== 'assistant' || !runId) return null;
+  const metadata = message.metadata || {};
+  const senderName = participantDisplayName(metadata.sender);
+  const title = String(
+    metadata.run_progress_title
+    || metadata.delegated_goal
+    || metadata.group_goal
+    || senderName
+    || 'Yachiyo task',
+  );
+  const summary = compactStatusText(
+    displayContent || message.content || message.text || metadata.run_progress_detail || '',
+    140,
+  );
+  return {
+    task_id: String(message.task_id || metadata.delegated_run_source_task_id || runId),
+    conversation_id: null,
+    title,
+    status: taskStatusFromRunStatus(messageRunStatus(message) || message.status || ''),
+    summary: summary || null,
+    current_step: String(metadata.run_progress_detail || message.progress_label || '').trim() || null,
+    progress_text: message.progress_label || null,
+    needs_user_action: messageRunStatus(message) === 'approval_required',
+    pending_approvals: messageTaskApprovals(message, runId),
+    recent_events: messageTaskEvents(message, runId),
+    artifacts: messageTaskArtifacts(message, runId),
+    open_in_studio_url: `#/agents?run_id=${encodeURIComponent(runId)}`,
+    created_at: message.created_at || '',
+    updated_at: message.created_at || '',
+  };
+}
+
+function publicTaskSnapshotForMessage(
+  message: ChatMessage,
+  snapshotsById: Record<string, AgentTaskSnapshot>,
+): AgentTaskSnapshot | null {
+  const keys = uniqueStrings([
+    message.task_id,
+    message.metadata?.delegated_run_source_task_id,
+    message.metadata?.workflow_waiting_child_run_id,
+    messageRunId(message),
+  ]);
+  for (const key of keys) {
+    const snapshot = snapshotsById[key];
+    if (snapshot) return snapshot;
+  }
+  return null;
+}
+
+function yachiyoTaskCacheKeys(task: AgentTaskSnapshot): string[] {
+  const artifactKeys = (task.artifacts || []).flatMap((artifact) => [
+    artifact.run_id,
+    artifact.source_run_id,
+  ]);
+  return uniqueStrings([
+    task.task_id,
+    ...((task.recent_events || []).map((event) => event.run_id)),
+    ...((task.pending_approvals || []).map((approval) => approval.run_id || '')),
+    ...artifactKeys,
+  ]);
+}
+
+function taskStatusFromRunStatus(status: string): TaskStatus {
+  const normalized = normalizeRunStatus(status);
+  if (normalized === 'approval_required') return 'waiting_approval';
+  if (normalized === 'processing' || normalized === 'running' || normalized === 'pending') return 'running';
+  if (normalized === 'completed') return 'completed';
+  if (normalized === 'failed' || normalized === 'error') return 'failed';
+  if (normalized === 'cancelled' || normalized === 'canceled') return 'cancelled';
+  return 'running';
+}
+
+function messageTaskApprovals(message: ChatMessage, runId: string): AgentTaskSnapshot['pending_approvals'] {
+  const approvals: AgentTaskSnapshot['pending_approvals'] = [];
+  const pending = message.metadata?.pending_approval;
+  if (pending) {
+    const tool = String(pending.tool || 'tool');
+    approvals.push({
+      approval_id: String(pending.approval_id || runId),
+      run_id: runId,
+      title: `审批 ${tool}`,
+      status: 'pending',
+      tool_name: tool,
+      input_preview: recordPreview(pending.input_preview),
+      requested_at: pending.requested_at || '',
+      open_in_studio_url: `#/agents?run_id=${encodeURIComponent(runId)}`,
+    });
+  }
+  const workflowPending = message.metadata?.workflow_waiting_pending_approval;
+  if (workflowPending) {
+    const childRunId = String(message.metadata?.workflow_waiting_child_run_id || runId);
+    const tool = String(workflowPending.tool || 'workflow.approval');
+    approvals.push({
+      approval_id: String(workflowPending.approval_id || childRunId),
+      run_id: childRunId,
+      title: `审批 ${tool}`,
+      status: 'pending',
+      tool_name: tool,
+      input_preview: recordPreview(workflowPending.input_preview),
+      requested_at: workflowPending.requested_at || '',
+      open_in_studio_url: `#/agents?run_id=${encodeURIComponent(childRunId)}`,
+    });
+  }
+  return approvals;
+}
+
+function messageTaskArtifacts(message: ChatMessage, runId: string): AgentTaskSnapshot['artifacts'] {
+  return (message.metadata?.run_artifacts || []).map((artifact, index) => {
+    const path = String(artifact.path || '').trim();
+    const kind = String(artifact.kind || 'artifact').trim();
+    return {
+      artifact_id: `${runId}:${path || kind}:${index}`,
+      run_id: runId,
+      source_run_id: runId,
+      title: path || kind,
+      kind,
+      path: path || null,
+    };
+  });
+}
+
+function messageTaskEvents(message: ChatMessage, runId: string): AgentTaskSnapshot['recent_events'] {
+  return (message.activity_events || []).slice(0, 3).map((event, index) => ({
+    event_id: event.event_id || null,
+    run_id: activityRunId(event) || runId,
+    sequence: index + 1,
+    schema_version: 1,
+    event_type: event.phase || event.status || 'chat.activity',
+    title: event.title || event.tool_name || null,
+    detail: event.detail || null,
+    visibility: 'user',
+    sensitivity: 'public',
+    payload: event.metadata || {},
+    created_at: event.created_at || '',
+  }));
+}
+
+function recordPreview(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return value as Record<string, unknown>;
 }
 
 function approvalRequestDetails(message: ChatMessage): ApprovalRequestDetails {
@@ -4253,6 +4510,33 @@ function activeMentions(
     result.push(option);
   }
   return result;
+}
+
+function yachiyoPublicTaskTarget(
+  input: string,
+  runnables: RunnableSummary[],
+  assistantProfile: AssistantProfilePayload | null,
+): MentionOption | null {
+  const mentions = activeMentions(input, runnables, assistantProfile);
+  if (mentions.length !== 1) return null;
+  return mentions[0].kind === 'agent' ? mentions[0] : null;
+}
+
+function yachiyoPublicTaskPrompt(input: string, target: MentionOption): string {
+  let prompt = String(input || '').trim();
+  uniqueStrings([target.nickname, target.name]).forEach((label) => {
+    const escaped = escapeRegExp(label);
+    prompt = prompt.replace(
+      new RegExp(`(^|[\\s，。！？、；;,.!?])@(?:"${escaped}"|'${escaped}'|${escaped})(?=$|[\\s，。！？、；;,.!?])`, 'gi'),
+      '$1',
+    );
+  });
+  prompt = prompt.replace(/\s{2,}/g, ' ').trim();
+  return prompt || String(input || '').trim();
+}
+
+function escapeRegExp(value: string): string {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function normalizeSessionContext(context?: ChatSessionContext | null): ChatSessionContext {
