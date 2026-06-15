@@ -4,7 +4,7 @@ import type {
   AgentSpec,
   SkillFolderSpec,
   SkillSpec,
-} from '../../../lib/agents';
+} from '../types';
 import {
   isInstalledSkill,
   isNativeSkill,

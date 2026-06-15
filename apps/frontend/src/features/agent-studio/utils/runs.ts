@@ -4,7 +4,7 @@ import type {
   RunGroupSpec,
   RunSpec,
   WorkflowSpec,
-} from '../../../lib/agents';
+} from '../types';
 import type {
   ApprovalCardSnapshot,
   ArtifactSnapshot,

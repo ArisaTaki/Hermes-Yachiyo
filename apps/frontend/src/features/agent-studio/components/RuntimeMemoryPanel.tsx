@@ -1,4 +1,4 @@
-import type { FutureTaskSpec, MemorySpec } from '../../../lib/agents';
+import type { FutureTaskSpec, MemorySpec } from '../types';
 
 type RuntimeMemoryPanelProps = {
   busy: boolean;

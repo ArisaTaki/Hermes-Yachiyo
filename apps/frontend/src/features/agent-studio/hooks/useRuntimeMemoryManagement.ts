@@ -1,9 +1,8 @@
 import {
   cancelFutureTask,
   triggerDueFutureTasks,
-  type FutureTaskSpec,
-  type MemorySpec,
 } from '../../../lib/agents';
+import type { FutureTaskSpec, MemorySpec } from '../types';
 import { deleteYachiyoMemory } from '../../yachiyo-studio/api';
 
 type RuntimeMemoryRefreshOptions = {

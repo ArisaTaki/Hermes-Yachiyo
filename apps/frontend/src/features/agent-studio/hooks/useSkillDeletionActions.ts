@@ -1,6 +1,6 @@
 import type { Dispatch, SetStateAction } from 'react';
 
-import type { SkillSpec } from '../../../lib/agents';
+import type { SkillSpec } from '../types';
 import { deleteYachiyoSkill } from '../../yachiyo-studio/api';
 import { isInstalledSkill, isNativeSkill } from '../utils/skills';
 

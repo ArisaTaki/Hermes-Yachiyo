@@ -1,7 +1,7 @@
 import type { Dispatch, SetStateAction } from 'react';
 import type { Edge, Node, OnConnect, OnEdgesChange, OnNodesChange } from '@xyflow/react';
 
-import type { AgentSpec, WorkflowSpec } from '../../../lib/agents';
+import type { AgentSpec, WorkflowSpec } from '../types';
 import { WorkflowCanvas } from './WorkflowCanvas';
 
 type WorkflowStepKind = 'start' | 'agent' | 'approval' | 'artifact' | 'condition' | 'parallel' | 'workflow' | 'loop' | 'unknown';

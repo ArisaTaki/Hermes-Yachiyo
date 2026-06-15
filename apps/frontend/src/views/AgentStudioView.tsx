@@ -116,15 +116,17 @@ import {
 import {
   listFutureTasks,
   listRunnables,
-  type FutureTaskSpec,
-  type MemorySpec,
-  type RunnableSummary,
-  type RunGroupSpec,
-  type RunSpec,
-  type SkillFolderSpec,
-  type SkillSourceRoot,
-  type SkillSpec,
 } from '../lib/agents';
+import type {
+  FutureTaskSpec,
+  MemorySpec,
+  RunnableSummary,
+  RunGroupSpec,
+  RunSpec,
+  SkillFolderSpec,
+  SkillSourceRoot,
+  SkillSpec,
+} from '../features/agent-studio/types';
 import { openAppView, openPath } from '../lib/bridge';
 import { listModelProfiles, type ModelProfile, type ModelProfileDefaults } from '../lib/modelProfiles';
 import { currentParam, navigateTo } from '../lib/view';

@@ -1,7 +1,7 @@
 import type { Dispatch, SetStateAction } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 
-import type { AgentSpec } from '../../../lib/agents';
+import type { AgentSpec } from '../types';
 import {
   terminalNodeId,
   uniqueWorkflowNodeId,

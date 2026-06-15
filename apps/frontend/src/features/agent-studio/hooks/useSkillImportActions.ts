@@ -1,4 +1,4 @@
-import type { SkillSourceRoot, SkillSpec } from '../../../lib/agents';
+import type { SkillSourceRoot, SkillSpec } from '../types';
 import {
   importYachiyoSkill,
   installYachiyoSkillCommand,

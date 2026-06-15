@@ -1,4 +1,4 @@
-import type { SkillFolderSpec } from '../../../lib/agents';
+import type { SkillFolderSpec } from '../types';
 import { skillFolderNameMaxLength } from '../utils/skills';
 
 type SkillFolderDeleteMode = 'folder' | 'skills';

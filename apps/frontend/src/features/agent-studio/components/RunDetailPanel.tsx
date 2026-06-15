@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-import type { RunSpec, WorkflowSpec } from '../../../lib/agents';
+import type { RunSpec, WorkflowSpec } from '../types';
 import type { PublicRunEvent, RunTimelineSnapshot } from '../../yachiyo-studio/types';
 import { ExpandableRuntimeContent as RunExpandableContent } from '../../runtime-shared/components/ExpandableRuntimeContent';
 import { ApprovalInspector, type RunPendingApproval } from './ApprovalInspector';

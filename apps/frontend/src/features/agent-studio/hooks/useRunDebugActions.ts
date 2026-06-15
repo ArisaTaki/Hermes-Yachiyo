@@ -1,4 +1,4 @@
-import type { RunSpec } from '../../../lib/agents';
+import type { RunSpec } from '../types';
 import { isActiveRunStatus } from '../utils/runs';
 
 type RunDebugRefreshOptions = {

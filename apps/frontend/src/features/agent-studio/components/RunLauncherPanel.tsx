@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-import type { RunnableSummary, RunSpec } from '../../../lib/agents';
+import type { RunnableSummary, RunSpec } from '../types';
 import { RunHistoryList, type RunHistoryGroupView } from './RunHistoryList';
 
 type RunKindFilter = 'all' | 'workflow' | 'agent';

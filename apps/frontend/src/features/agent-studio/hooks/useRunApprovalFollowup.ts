@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 
-import type { RunSpec } from '../../../lib/agents';
+import type { RunSpec } from '../types';
 import { getYachiyoRunTimeline } from '../../yachiyo-studio/api';
 import {
   approvedRunStatusMessage,

@@ -1,4 +1,4 @@
-import type { AgentSpec, SkillFolderSpec, SkillSpec } from '../../../lib/agents';
+import type { AgentSpec, SkillFolderSpec, SkillSpec } from '../types';
 import type { ModelProfile } from '../../../lib/modelProfiles';
 import type { AgentDraft } from '../types';
 import type { SkillFolderFilter, SkillSourceFilter } from '../utils/skills';

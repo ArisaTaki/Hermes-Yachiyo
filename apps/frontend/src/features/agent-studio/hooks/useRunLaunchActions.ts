@@ -4,7 +4,7 @@ import {
   type RunnableSummary,
   type RunSpec,
   type WorkflowSpec,
-} from '../../../lib/agents';
+} from '../types';
 import {
   rerunYachiyoRun,
   startYachiyoAgentRun,

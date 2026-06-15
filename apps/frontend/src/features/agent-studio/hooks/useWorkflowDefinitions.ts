@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import type { WorkflowSpec } from '../../../lib/agents';
+import type { WorkflowSpec } from '../types';
 
 type ApplyWorkflowOptions = {
   selectedWorkflowId?: string;

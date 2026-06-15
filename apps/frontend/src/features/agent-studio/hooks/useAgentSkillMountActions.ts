@@ -1,4 +1,4 @@
-import type { AgentSpec, SkillSpec } from '../../../lib/agents';
+import type { AgentSpec, SkillSpec } from '../types';
 import {
   attachYachiyoAgentSkill,
   detachYachiyoAgentSkill,

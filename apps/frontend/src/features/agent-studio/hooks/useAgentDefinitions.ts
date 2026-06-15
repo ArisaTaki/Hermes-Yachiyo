@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import type { AgentSpec } from '../../../lib/agents';
+import type { AgentSpec } from '../types';
 
 type ApplyAgentOptions = {
   selectedAgentId?: string;

@@ -1,4 +1,4 @@
-import type { SkillFolderSpec, SkillSpec } from '../../../lib/agents';
+import type { SkillFolderSpec, SkillSpec } from '../types';
 
 type SkillSourceFilter = 'installed' | 'native';
 type SkillFolderFilter = 'all' | 'uncategorized' | string;

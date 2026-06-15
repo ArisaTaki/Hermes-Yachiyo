@@ -1,6 +1,6 @@
 import type { Dispatch, SetStateAction } from 'react';
 
-import type { RunSpec } from '../../../lib/agents';
+import type { RunSpec } from '../types';
 import { navigateTo } from '../../../lib/view';
 import type { GroupRunSnapshot } from '../../yachiyo-studio/types';
 import { groupRunTimelineRunId } from '../utils/groups';

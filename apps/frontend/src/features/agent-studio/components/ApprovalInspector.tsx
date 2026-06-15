@@ -1,4 +1,4 @@
-import type { RunSpec } from '../../../lib/agents';
+import type { RunSpec } from '../types';
 import { RuntimeApprovalCard } from '../../runtime-shared/components/RuntimeApprovalCard';
 import type { RunTimelineSnapshot } from '../../yachiyo-studio/types';
 import { RunApprovalRequest } from './RunApprovalRequest';

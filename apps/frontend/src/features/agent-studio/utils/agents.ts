@@ -1,4 +1,4 @@
-import type { AgentSpec, RunnableSummary, SkillSpec } from '../../../lib/agents';
+import type { AgentSpec, RunnableSummary, SkillSpec } from '../types';
 import type { ModelProfile, ModelProfileDefaults } from '../../../lib/modelProfiles';
 import type { AgentDefinitionSnapshot } from '../../yachiyo-studio/types';
 import type { AgentDraft } from '../types';

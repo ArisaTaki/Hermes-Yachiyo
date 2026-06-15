@@ -1,4 +1,4 @@
-import type { AgentSpec } from '../../../lib/agents';
+import type { AgentSpec } from '../types';
 
 type AgentListPanelProps = {
   agents: AgentSpec[];

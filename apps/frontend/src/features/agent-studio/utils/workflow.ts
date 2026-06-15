@@ -1,6 +1,6 @@
 import type { Edge, Node } from '@xyflow/react';
 
-import type { AgentSpec, RunSpec, WorkflowSpec } from '../../../lib/agents';
+import type { AgentSpec, RunSpec, WorkflowSpec } from '../types';
 import type { WorkflowSnapshot } from '../../yachiyo-studio/types';
 import {
   timelineChildRunId,

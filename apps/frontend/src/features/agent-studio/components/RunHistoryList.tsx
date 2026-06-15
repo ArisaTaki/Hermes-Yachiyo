@@ -1,4 +1,4 @@
-import type { RunSpec } from '../../../lib/agents';
+import type { RunSpec } from '../types';
 
 export type RunHistoryGroupView = {
   key: string;

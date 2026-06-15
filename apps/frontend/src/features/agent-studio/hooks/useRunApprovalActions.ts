@@ -6,7 +6,7 @@ import {
   getYachiyoRunTimeline,
   rejectYachiyoRunApproval,
 } from '../../yachiyo-studio/api';
-import type { RunSpec } from '../../../lib/agents';
+import type { RunSpec } from '../types';
 import {
   approvedRunStatusMessage,
   isActiveRunStatus,

@@ -1,6 +1,6 @@
 import type { DragEvent } from 'react';
 
-import type { SkillFolderSpec, SkillSourceRoot, SkillSpec } from '../../../lib/agents';
+import type { SkillFolderSpec, SkillSourceRoot, SkillSpec } from '../types';
 import type { SkillFolderFilter, SkillImportResult, SkillSourceFilter } from '../utils/skills';
 import { SkillImportPanel } from './SkillImportPanel';
 import { SkillLibraryPanel } from './SkillLibraryPanel';

@@ -1,6 +1,6 @@
 import type { Dispatch, SetStateAction } from 'react';
 
-import type { AgentSpec } from '../../../lib/agents';
+import type { AgentSpec } from '../types';
 import { deleteYachiyoStudioAgent } from '../../yachiyo-studio/api';
 
 type AgentDeletionRefreshOptions = {

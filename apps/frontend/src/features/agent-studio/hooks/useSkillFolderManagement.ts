@@ -1,6 +1,6 @@
 import type { Dispatch, SetStateAction } from 'react';
 
-import type { SkillFolderSpec, SkillSpec } from '../../../lib/agents';
+import type { SkillFolderSpec, SkillSpec } from '../types';
 import { navigateTo } from '../../../lib/view';
 import {
   createYachiyoSkillFolder,

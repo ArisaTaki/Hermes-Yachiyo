@@ -6,7 +6,7 @@ import type {
   RunGroupSpec,
   RunSpec,
   WorkflowSpec,
-} from '../../../lib/agents';
+} from '../types';
 import type { PublicRunEvent, RunTimelineSnapshot } from '../../yachiyo-studio/types';
 import {
   isActiveRunStatus,

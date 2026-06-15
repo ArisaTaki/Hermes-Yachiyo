@@ -1,6 +1,6 @@
 import type { Edge, Node } from '@xyflow/react';
 
-import type { WorkflowSpec } from '../../../lib/agents';
+import type { WorkflowSpec } from '../types';
 import { saveYachiyoWorkflow } from '../../yachiyo-studio/api';
 import {
   publicWorkflowToWorkflowSpec,

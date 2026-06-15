@@ -7,7 +7,7 @@ import type {
   SkillSourceRoot,
   SkillSpec,
   WorkflowSpec,
-} from '../../../lib/agents';
+} from '../types';
 import {
   getYachiyoRunTimeline,
   listYachiyoAgentGroups,

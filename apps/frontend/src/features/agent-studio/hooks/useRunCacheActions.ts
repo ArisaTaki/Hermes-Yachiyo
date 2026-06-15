@@ -3,7 +3,7 @@ import { useCallback, type Dispatch, type SetStateAction } from 'react';
 import {
   type RunGroupSpec,
   type RunSpec,
-} from '../../../lib/agents';
+} from '../types';
 import { getYachiyoGroupRun } from '../../yachiyo-studio/api';
 import { publicGroupRunToRunGroupSpec } from '../utils/runs';
 

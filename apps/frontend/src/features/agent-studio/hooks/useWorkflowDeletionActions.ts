@@ -1,6 +1,6 @@
 import type { Dispatch, SetStateAction } from 'react';
 
-import type { WorkflowSpec } from '../../../lib/agents';
+import type { WorkflowSpec } from '../types';
 import { deleteYachiyoWorkflow } from '../../yachiyo-studio/api';
 
 type WorkflowDeletionRefreshOptions = {

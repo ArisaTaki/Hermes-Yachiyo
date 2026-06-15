@@ -1,7 +1,7 @@
 import type { Dispatch, SetStateAction } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 
-import type { AgentSpec, WorkflowSpec } from '../../../lib/agents';
+import type { AgentSpec, WorkflowSpec } from '../types';
 import { navigateTo } from '../../../lib/view';
 import {
   buildPhase4WorkflowNodes,

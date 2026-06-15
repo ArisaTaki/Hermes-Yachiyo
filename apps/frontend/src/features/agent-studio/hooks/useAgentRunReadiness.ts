@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 
-import type { AgentSpec, SkillSpec } from '../../../lib/agents';
+import type { AgentSpec, SkillSpec } from '../types';
 import type { ModelProfile } from '../../../lib/modelProfiles';
 import type { AgentDraft } from '../types';
 

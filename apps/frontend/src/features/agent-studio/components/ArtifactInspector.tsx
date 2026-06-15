@@ -1,4 +1,4 @@
-import type { RunSpec } from '../../../lib/agents';
+import type { RunSpec } from '../types';
 import { RuntimeArtifactPreview } from '../../runtime-shared/components/RuntimeArtifactPreview';
 
 type ArtifactPreview = {

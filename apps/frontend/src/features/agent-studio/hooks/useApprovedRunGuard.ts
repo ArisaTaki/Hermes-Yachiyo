@@ -1,6 +1,6 @@
 import { useCallback, useRef } from 'react';
 
-import type { RunSpec } from '../../../lib/agents';
+import type { RunSpec } from '../types';
 import {
   normalizeRunStatus,
   runApprovalSignature,

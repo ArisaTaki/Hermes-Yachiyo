@@ -1,4 +1,4 @@
-import type { AgentSpec } from '../../../lib/agents';
+import type { AgentSpec } from '../types';
 import { saveYachiyoStudioAgent } from '../../yachiyo-studio/api';
 import type { AgentDraft } from '../types';
 import {

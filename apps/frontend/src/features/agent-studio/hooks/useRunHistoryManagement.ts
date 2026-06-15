@@ -1,6 +1,6 @@
 import { useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 
-import type { RunGroupSpec, RunSpec } from '../../../lib/agents';
+import type { RunGroupSpec, RunSpec } from '../types';
 import { navigateTo } from '../../../lib/view';
 import { deleteYachiyoRun } from '../../yachiyo-studio/api';
 import { isActiveRunStatus } from '../utils/runs';

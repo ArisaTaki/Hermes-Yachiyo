@@ -3,7 +3,7 @@ import type {
   SkillSourceRoot,
   SkillSpec,
   SkillSyncResult,
-} from '../../../lib/agents';
+} from '../types';
 import type {
   SkillFolderSnapshot,
   SkillSnapshot,
