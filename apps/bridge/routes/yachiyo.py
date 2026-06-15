@@ -202,16 +202,18 @@ async def approve_task(
     request: TaskApprovalRequest | None = None,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    approval_id = (request.approval_id if request is not None else None) or task_id
+    metadata = dict(request.metadata) if request is not None else {}
+    if request is not None and request.approval_id:
+        metadata.setdefault("approval_id", request.approval_id)
     decision = ApprovalDecision(
         approved=True,
         reason=request.reason if request is not None else None,
-        metadata=request.metadata if request is not None else {},
+        metadata=metadata,
     )
     try:
         snapshot = await asyncio.to_thread(
             _agent_service(http_request).approve,
-            approval_id,
+            task_id,
             decision,
         )
         return _snapshot(snapshot)
@@ -226,11 +228,10 @@ async def reject_task(
     request: TaskApprovalRequest | None = None,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    approval_id = (request.approval_id if request is not None else None) or task_id
     try:
         snapshot = await asyncio.to_thread(
             _agent_service(http_request).reject,
-            approval_id,
+            task_id,
             request.reason if request is not None else "",
         )
         return _snapshot(snapshot)

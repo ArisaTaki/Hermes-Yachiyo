@@ -175,18 +175,27 @@ class LegacyRuntimePort:
         ]
 
     def approve(self, approval_id: str, decision: dict[str, Any] | None = None) -> dict[str, Any]:
+        run_id = self._run_id_for_task(approval_id)
         return self._projector.chat_task_payload(
-            self._runtime.approve_run_approval(self._run_id_for_task(approval_id))
+            self._payload_with_task_link(
+                approval_id,
+                self._runtime.approve_run_approval(run_id),
+            )
         )
 
     def reject(self, approval_id: str, reason: str | None = None) -> dict[str, Any]:
+        run_id = self._run_id_for_task(approval_id)
         return self._projector.chat_task_payload(
-            self._runtime.reject_run_approval(self._run_id_for_task(approval_id), reason or "")
+            self._payload_with_task_link(
+                approval_id,
+                self._runtime.reject_run_approval(run_id, reason or ""),
+            )
         )
 
     def cancel(self, task_id: str) -> dict[str, Any]:
+        run_id = self._run_id_for_task(task_id)
         return self._projector.chat_task_payload(
-            self._runtime.cancel_run(self._run_id_for_task(task_id))
+            self._payload_with_task_link(task_id, self._runtime.cancel_run(run_id))
         )
 
     def _run_id_for_task(self, task_id: str) -> str:
@@ -200,6 +209,24 @@ class LegacyRuntimePort:
             except KeyError:
                 pass
         return task_id
+
+    def _payload_with_task_link(self, task_id: str, run: dict[str, Any]) -> dict[str, Any]:
+        get_task_run_link = getattr(self._runtime, "get_task_run_link", None)
+        if not callable(get_task_run_link):
+            return run
+        try:
+            link = get_task_run_link(task_id)
+        except KeyError:
+            return run
+        return {
+            **run,
+            "task_id": link.get("task_id") or task_id,
+            "session_id": link.get("session_id") or run.get("session_id") or "",
+            "task_run_link_created_at": link.get("created_at") or "",
+            "task_run_link_updated_at": link.get("updated_at") or "",
+            "task_run_link_run_status": link.get("run_status") or run.get("status") or "",
+            "task_run_link_last_event_sequence": link.get("last_event_sequence") or 0,
+        }
 
 
 class LegacyChatTaskStarter:

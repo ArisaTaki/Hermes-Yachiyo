@@ -460,6 +460,43 @@ async def test_yachiyo_chat_task_link_is_visible_from_studio_timeline() -> None:
 
 
 @pytest.mark.asyncio
+async def test_yachiyo_task_approval_body_id_does_not_replace_task_link_lookup() -> None:
+    runtime = _FakeAgentRuntime()
+    request = _request(runtime)
+
+    await yachiyo.start_task(
+        yachiyo.StartChatTaskRequest(
+            prompt="Patch README",
+            conversation_id="chat-1",
+            metadata={"client_task_id": "task-chat-1"},
+        ),
+        request,
+    )
+    approved = await yachiyo.approve_task(
+        "task-chat-1",
+        yachiyo.TaskApprovalRequest(approval_id="approval-distinct"),
+        request,
+    )
+    rejected = await yachiyo.reject_task(
+        "task-chat-1",
+        yachiyo.TaskApprovalRequest(approval_id="approval-distinct", reason="No"),
+        request,
+    )
+
+    assert approved["task_id"] == "task-chat-1"
+    assert approved["status"] == "completed"
+    assert rejected["task_id"] == "task-chat-1"
+    assert rejected["status"] == "failed"
+    assert ("approve_run_approval", "run-1") in runtime.calls
+    assert ("reject_run_approval", {"run_id": "run-1", "reason": "No"}) in runtime.calls
+    assert ("approve_run_approval", "approval-distinct") not in runtime.calls
+    assert (
+        "reject_run_approval",
+        {"run_id": "approval-distinct", "reason": "No"},
+    ) not in runtime.calls
+
+
+@pytest.mark.asyncio
 async def test_yachiyo_task_route_uses_chat_backed_agent_entry(monkeypatch: pytest.MonkeyPatch) -> None:
     runtime = _FakeAgentRuntime()
     runtime.runs["run-1"] = _run_payload(run_id="run-1", status="processing")
