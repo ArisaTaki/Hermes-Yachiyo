@@ -2074,6 +2074,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "listRuns",
             "listRunGroups",
             "getRunGroup",
+            "useAgentAvatarActions",
             "useAgentDeletionActions",
             "useAgentSaveActions",
             "useAgentSkillMountActions",
@@ -2119,6 +2120,20 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "selectedAgentReadOnly",
             "selectedAgentDeletable",
             "AgentEditorPanel",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useAgentAvatarActions.ts",
+        [
+            "export function useAgentAvatarActions",
+            "async function pickAgentAvatar()",
+            "setBusyAction('选择 Agent 头像');",
+            "const selection = await chooseAvatarImage();",
+            "const avatar = typeof selection === 'string' ? selection : selection?.data_url || selection?.path || '';",
+            "setDraft((current) => ({ ...current, avatar_url: avatar }));",
+            "setStatus('已选择 Agent 头像');",
+            "setError(err instanceof Error ? err.message : '选择 Agent 头像失败');",
+            "setBusyAction('');",
         ],
     )
     _assert_contains(

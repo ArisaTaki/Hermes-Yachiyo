@@ -15,6 +15,7 @@ import { RuntimeMemoryPanel } from '../features/agent-studio/components/RuntimeM
 import { RunDetailPanel } from '../features/agent-studio/components/RunDetailPanel';
 import { RunLauncherPanel } from '../features/agent-studio/components/RunLauncherPanel';
 import { WorkflowEditorPanel, WorkflowRunPreview } from '../features/agent-studio/components/WorkflowEditorPanel';
+import { useAgentAvatarActions } from '../features/agent-studio/hooks/useAgentAvatarActions';
 import { useAgentDeletionActions } from '../features/agent-studio/hooks/useAgentDeletionActions';
 import { useAgentDefinitions } from '../features/agent-studio/hooks/useAgentDefinitions';
 import { useAgentGroups } from '../features/agent-studio/hooks/useAgentGroups';
@@ -136,7 +137,7 @@ import {
   type SkillSourceRoot,
   type SkillSpec,
 } from '../lib/agents';
-import { chooseAvatarImage, chooseSkillSources, openAppView, openPath } from '../lib/bridge';
+import { chooseSkillSources, openAppView, openPath } from '../lib/bridge';
 import { listModelProfiles, type ModelProfile, type ModelProfileDefaults } from '../lib/modelProfiles';
 import { currentParam, navigateTo } from '../lib/view';
 
@@ -820,6 +821,14 @@ export function AgentStudioView() {
     setStatus,
   });
   const {
+    pickAgentAvatar,
+  } = useAgentAvatarActions({
+    setBusyAction,
+    setDraft,
+    setError,
+    setStatus,
+  });
+  const {
     requestDeleteSelectedWorkflows,
     requestDeleteWorkflow,
   } = useWorkflowDeletionActions({
@@ -1401,23 +1410,6 @@ export function AgentStudioView() {
       if (selected.length) await runAction(() => importSkillSourceList(selected), '导入 Skills');
     } catch (err) {
       setError(err instanceof Error ? err.message : '选择 Skill 文件失败');
-    }
-  }
-
-  async function pickAgentAvatar() {
-    setBusyAction('选择 Agent 头像');
-    setError('');
-    try {
-      const selection = await chooseAvatarImage();
-      const avatar = typeof selection === 'string' ? selection : selection?.data_url || selection?.path || '';
-      if (avatar) {
-        setDraft((current) => ({ ...current, avatar_url: avatar }));
-        setStatus('已选择 Agent 头像');
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '选择 Agent 头像失败');
-    } finally {
-      setBusyAction('');
     }
   }
 
