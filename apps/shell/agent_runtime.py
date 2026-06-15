@@ -131,6 +131,7 @@ from apps.shell.agent.runtime.definition_services import (
     RuntimeDefinitionServiceBundle,
     build_runtime_definition_services as _build_runtime_definition_services,
 )
+from apps.shell.agent.runtime.definition_names import RuntimeDefinitionNameGuard
 from apps.shell.agent.runtime.engine_state import (
     RuntimeEngineStateBundle,
     build_runtime_engine_state as _build_runtime_engine_state,
@@ -462,6 +463,11 @@ class NativeRunEngine:
             credential_store=credential_store,
         )
         self._install_runtime_engine_state(engine_state)
+        self.definition_name_guard = RuntimeDefinitionNameGuard(
+            self._conn,
+            ensure_row_factory=self._ensure_row_factory,
+            error_type=AgentRuntimeError,
+        )
         recorders = _build_runtime_recorders(
             append_run_event=self.append_run_event,
             now=_now,
@@ -494,7 +500,7 @@ class NativeRunEngine:
             main_chat_virtual_agent=self._main_chat_virtual_agent,
             agent_id_factory=lambda name: f"agent_{_slug(name, 'agent')}_{uuid4().hex[:8]}",
             normalize_execution_backend=_normalize_execution_backend,
-            ensure_global_name_available=self._ensure_global_name_available,
+            ensure_global_name_available=self.definition_name_guard.ensure_available,
             validate_agent_profile_refs=self._validate_agent_profile_refs,
             compile_tool_policy=self._compile_tool_policy,
             compile_workspace_policy=self._compile_workspace_policy,
@@ -1521,24 +1527,11 @@ class NativeRunEngine:
         return ""
 
     def _ensure_global_name_available(self, name: str, *, ignore_agent_id: str = "", ignore_workflow_id: str = "") -> None:
-        self._ensure_row_factory()
-        clean = (name or "").strip()
-        if not clean:
-            raise AgentRuntimeError("名称不能为空")
-        if clean.lower() == "yachiyo":
-            raise AgentRuntimeError("Yachiyo 是系统 Agent 名称，不能作为普通 Agent/Workflow 名称")
-        agent = self._conn.execute(
-            "SELECT agent_id FROM agents WHERE LOWER(name)=LOWER(?)",
-            (clean,),
-        ).fetchone()
-        if agent and agent["agent_id"] != ignore_agent_id:
-            raise AgentRuntimeError("Agent/Workflow 名称必须全局唯一")
-        workflow = self._conn.execute(
-            "SELECT workflow_id FROM workflows WHERE LOWER(name)=LOWER(?)",
-            (clean,),
-        ).fetchone()
-        if workflow and workflow["workflow_id"] != ignore_workflow_id:
-            raise AgentRuntimeError("Agent/Workflow 名称必须全局唯一")
+        self.definition_name_guard.ensure_available(
+            name,
+            ignore_agent_id=ignore_agent_id,
+            ignore_workflow_id=ignore_workflow_id,
+        )
 
     @staticmethod
     def _validate_available_profile(profile_id: str, capability: str) -> dict[str, Any]:
