@@ -177,6 +177,21 @@ class LegacyStudioPort:
     def install_skill_command(self, command: str, folder_id: str | None = None) -> dict[str, Any]:
         return self._runtime.install_skill_command(command, folder_id)
 
+    def list_memories(self, include_deleted: bool = False, limit: int = 100) -> dict[str, Any]:
+        return self._runtime.list_memory_items(
+            include_deleted=include_deleted,
+            limit=limit,
+        )
+
+    def create_memory(self, request: dict[str, Any]) -> dict[str, Any]:
+        return self._runtime.create_memory_item(request)
+
+    def update_memory(self, memory_id: str, request: dict[str, Any]) -> dict[str, Any]:
+        return self._runtime.update_memory_item(memory_id, request)
+
+    def delete_memory(self, memory_id: str, reason: str | None = None) -> dict[str, Any]:
+        return self._runtime.delete_memory_item(memory_id, reason=reason or "")
+
     def start_agent_run(self, request: dict[str, Any]) -> dict[str, Any]:
         return self._runtime.create_agent_run(
             {

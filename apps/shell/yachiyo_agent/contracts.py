@@ -211,6 +211,23 @@ class SkillSourceRootSnapshot(_PublicSnapshot):
     skill_count: int = 0
 
 
+class MemorySnapshot(_PublicSnapshot):
+    memory_id: str
+    scope: str
+    kind: str
+    content: str
+    source_session_id: str | None = None
+    source_message_id: str | None = None
+    source_task_id: str | None = None
+    source_run_id: str | None = None
+    confidence: float = 0.0
+    pinned: bool = False
+    user_confirmed: bool = False
+    created_at: str = ""
+    updated_at: str = ""
+    deleted_at: str | None = None
+
+
 class AgentGroupMemberSnapshot(_PublicSnapshot):
     agent_id: str
     name: str

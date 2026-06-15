@@ -116,6 +116,24 @@ class _FakeStudioPort:
         )
         return {"ok": True, "installer": "npx_skills", "command": command.split()}
 
+    def list_memories(self, include_deleted: bool = False, limit: int = 100) -> dict[str, Any]:
+        self.calls.append(
+            ("list_memories", {"include_deleted": include_deleted, "limit": limit})
+        )
+        return {"ok": True, "memories": [_memory_payload()]}
+
+    def create_memory(self, request: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append(("create_memory", request))
+        return _memory_payload(memory_id="memory-created", content=request["content"])
+
+    def update_memory(self, memory_id: str, request: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append(("update_memory", {"memory_id": memory_id, "request": request}))
+        return _memory_payload(memory_id=memory_id, content=request["content"])
+
+    def delete_memory(self, memory_id: str, reason: str = "") -> dict[str, Any]:
+        self.calls.append(("delete_memory", {"memory_id": memory_id, "reason": reason}))
+        return {"ok": True, "memory_id": memory_id}
+
     def start_agent_run(self, request: dict[str, Any]) -> dict[str, Any]:
         self.calls.append(("start_agent_run", request))
         return _run_payload(
@@ -265,6 +283,10 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
     imported_skill = service.import_skill("/skills/imported", "folder-1")
     sync_result = service.sync_native_skills()
     install_result = service.install_skill_command("npx skills add reviewer", "folder-1")
+    memories = service.list_memories(include_deleted=True, limit=10)
+    created_memory = service.create_memory({"content": "Remember concise updates"})
+    updated_memory = service.update_memory("memory-1", {"content": "Prefer detailed updates"})
+    deleted_memory = service.delete_memory("memory-1", reason="studio_user_delete")
     groups = service.list_groups()
     group = service.get_group("group-1")
     saved_group = service.save_group(
@@ -317,6 +339,11 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
     assert imported_skill.folder_id == "folder-1"
     assert sync_result == {"ok": True, "summary": {"imported": 1}}
     assert install_result["installer"] == "npx_skills"
+    assert memories[0].memory_id == "memory-1"
+    assert memories[0].source_run_id == "run-1"
+    assert created_memory.memory_id == "memory-created"
+    assert updated_memory.content == "Prefer detailed updates"
+    assert deleted_memory == {"ok": True, "memory_id": "memory-1"}
     assert groups[0].members[0].agent_id == "agent-1"
     assert group.mode == "debate"
     assert saved_group.name == "Team"
@@ -363,6 +390,16 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
     assert (
         "install_skill_command",
         {"command": "npx skills add reviewer", "folder_id": "folder-1"},
+    ) in port.calls
+    assert ("list_memories", {"include_deleted": True, "limit": 10}) in port.calls
+    assert ("create_memory", {"content": "Remember concise updates"}) in port.calls
+    assert (
+        "update_memory",
+        {"memory_id": "memory-1", "request": {"content": "Prefer detailed updates"}},
+    ) in port.calls
+    assert (
+        "delete_memory",
+        {"memory_id": "memory-1", "reason": "studio_user_delete"},
     ) in port.calls
     assert (
         "save_group",
@@ -553,6 +590,28 @@ def _skill_source_payload() -> dict[str, Any]:
         "library": "native",
         "exists": True,
         "skill_count": 4,
+    }
+
+
+def _memory_payload(
+    memory_id: str = "memory-1",
+    content: str = "Prefer concise status updates.",
+) -> dict[str, Any]:
+    return {
+        "memory_id": memory_id,
+        "scope": "global",
+        "kind": "preference",
+        "content": content,
+        "source_session_id": "chat-1",
+        "source_message_id": "message-1",
+        "source_task_id": "task-1",
+        "source_run_id": "run-1",
+        "confidence": 0.9,
+        "pinned": True,
+        "user_confirmed": True,
+        "created_at": "2026-06-14T00:00:00Z",
+        "updated_at": "2026-06-14T00:00:01Z",
+        "deleted_at": "",
     }
 
 

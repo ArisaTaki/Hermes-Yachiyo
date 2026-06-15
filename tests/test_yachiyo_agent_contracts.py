@@ -12,6 +12,7 @@ from apps.shell.yachiyo_agent import (
     ApprovalCardSnapshot,
     ArtifactSnapshot,
     GroupRunSnapshot,
+    MemorySnapshot,
     PublicRunEvent,
     RunTimelineChildSnapshot,
     RunTimelineSnapshot,
@@ -320,6 +321,46 @@ def test_skill_source_root_snapshot_keeps_skill_discovery_fields() -> None:
 
     assert list(payload) == ["path", "source_type", "library", "exists", "skill_count"]
     assert payload["library"] == "native"
+
+
+def test_memory_snapshot_keeps_runtime_memory_fields() -> None:
+    snapshot = MemorySnapshot(
+        memory_id="memory-1",
+        scope="global",
+        kind="preference",
+        content="Prefer concise status updates.",
+        source_session_id="chat-1",
+        source_message_id="message-1",
+        source_task_id="task-1",
+        source_run_id="run-1",
+        confidence=0.9,
+        pinned=True,
+        user_confirmed=True,
+        created_at="2026-06-14T00:00:00Z",
+        updated_at="2026-06-14T00:00:01Z",
+        deleted_at=None,
+    )
+
+    payload = _json(snapshot)
+
+    assert list(payload) == [
+        "memory_id",
+        "scope",
+        "kind",
+        "content",
+        "source_session_id",
+        "source_message_id",
+        "source_task_id",
+        "source_run_id",
+        "confidence",
+        "pinned",
+        "user_confirmed",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+    ]
+    assert payload["source_run_id"] == "run-1"
+    assert payload["pinned"] is True
 
 
 def test_studio_save_requests_keep_public_field_names() -> None:

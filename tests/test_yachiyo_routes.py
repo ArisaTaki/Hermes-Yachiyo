@@ -207,6 +207,24 @@ class _FakeAgentRuntime:
         )
         return {"ok": True, "installer": "npx_skills", "command": command.split()}
 
+    def list_memory_items(self, *, include_deleted: bool = False, limit: int = 100) -> dict[str, Any]:
+        self.calls.append(
+            ("list_memory_items", {"include_deleted": include_deleted, "limit": limit})
+        )
+        return {"ok": True, "memories": [_memory_payload()]}
+
+    def create_memory_item(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append(("create_memory_item", payload))
+        return _memory_payload(memory_id="memory-created", content=payload["content"])
+
+    def update_memory_item(self, memory_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append(("update_memory_item", {"memory_id": memory_id, "payload": payload}))
+        return _memory_payload(memory_id=memory_id, content=payload["content"])
+
+    def delete_memory_item(self, memory_id: str, *, reason: str = "") -> dict[str, Any]:
+        self.calls.append(("delete_memory_item", {"memory_id": memory_id, "reason": reason}))
+        return {"ok": True, "memory_id": memory_id}
+
     def create_agent_run(self, payload: dict[str, Any]) -> dict[str, Any]:
         self.calls.append(("create_agent_run", payload))
         return _run_payload(
@@ -464,6 +482,21 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
         yachiyo.SkillInstallBody(command="npx skills add reviewer", folder_id="folder-1"),
         request,
     )
+    memories = await yachiyo.list_studio_memories(True, 10, request)
+    created_memory = await yachiyo.create_studio_memory(
+        yachiyo.MemoryBody(content="Remember concise updates"),
+        request,
+    )
+    updated_memory = await yachiyo.update_studio_memory(
+        "memory-1",
+        yachiyo.MemoryBody(content="Prefer detailed updates"),
+        request,
+    )
+    deleted_memory = await yachiyo.delete_studio_memory(
+        "memory-1",
+        "studio_user_delete",
+        request,
+    )
     agent_run = await yachiyo.start_studio_agent_run(
         "agent-1",
         yachiyo.StartAgentRunBody(objective="Draft summary", client_run_id="client-agent-1"),
@@ -523,6 +556,11 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     assert imported_skill["folder_id"] == "folder-1"
     assert sync_result == {"ok": True, "summary": {"imported": 1}}
     assert install_result["installer"] == "npx_skills"
+    assert memories["memories"][0]["memory_id"] == "memory-1"
+    assert memories["memories"][0]["source_run_id"] == "run-1"
+    assert created_memory["memory_id"] == "memory-created"
+    assert updated_memory["content"] == "Prefer detailed updates"
+    assert deleted_memory == {"ok": True, "memory_id": "memory-1"}
     assert workflows["workflows"][0]["workflow_id"] == "workflow-1"
     assert deleted_workflow == {"ok": True, "workflow_id": "workflow-1"}
     assert workflow_run["workflow_run_id"] == "workflow-run-1"
@@ -577,6 +615,16 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     assert (
         "install_skill_command",
         {"command": "npx skills add reviewer", "folder_id": "folder-1"},
+    ) in runtime.calls
+    assert ("list_memory_items", {"include_deleted": True, "limit": 10}) in runtime.calls
+    assert ("create_memory_item", {"content": "Remember concise updates"}) in runtime.calls
+    assert (
+        "update_memory_item",
+        {"memory_id": "memory-1", "payload": {"content": "Prefer detailed updates"}},
+    ) in runtime.calls
+    assert (
+        "delete_memory_item",
+        {"memory_id": "memory-1", "reason": "studio_user_delete"},
     ) in runtime.calls
     assert ("delete_workflow", "workflow-1") in runtime.calls
     assert ("list_runs", 5) in runtime.calls
@@ -667,6 +715,10 @@ def test_yachiyo_studio_routes_include_run_action_facade() -> None:
     assert '@router.post("/studio/skill-folders")' in source
     assert '@router.patch("/studio/skill-folders/{folder_id}")' in source
     assert '@router.delete("/studio/skill-folders/{folder_id}")' in source
+    assert '@router.get("/studio/memories")' in source
+    assert '@router.post("/studio/memories")' in source
+    assert '@router.patch("/studio/memories/{memory_id}")' in source
+    assert '@router.delete("/studio/memories/{memory_id}")' in source
     assert '@router.get("/studio/group-runs")' in source
     assert '@router.get("/studio/group-runs/{group_run_id}")' in source
     assert '@router.get("/studio/runs")' in source
@@ -755,6 +807,28 @@ def _skill_source_payload() -> dict[str, Any]:
         "library": "native",
         "exists": True,
         "skill_count": 4,
+    }
+
+
+def _memory_payload(
+    memory_id: str = "memory-1",
+    content: str = "Prefer concise status updates.",
+) -> dict[str, Any]:
+    return {
+        "memory_id": memory_id,
+        "scope": "global",
+        "kind": "preference",
+        "content": content,
+        "source_session_id": "chat-1",
+        "source_message_id": "message-1",
+        "source_task_id": "task-1",
+        "source_run_id": "run-1",
+        "confidence": 0.9,
+        "pinned": True,
+        "user_confirmed": True,
+        "created_at": "2026-06-14T00:00:00Z",
+        "updated_at": "2026-06-14T00:00:01Z",
+        "deleted_at": "",
     }
 
 

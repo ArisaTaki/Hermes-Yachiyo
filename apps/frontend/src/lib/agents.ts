@@ -419,13 +419,17 @@ export async function listRunnables(): Promise<RunnableSummary[]> {
 }
 
 export async function listMemories(): Promise<MemorySpec[]> {
-  const payload = await apiGet<{ memories?: MemorySpec[] }>('/ui/memories');
+  const payload = await apiGet<{ memories?: MemorySpec[] }>('/yachiyo/studio/memories').catch(() => (
+    apiGet<{ memories?: MemorySpec[] }>('/ui/memories')
+  ));
   return payload.memories || [];
 }
 
 export async function deleteMemory(memoryId: string, reason = ''): Promise<{ ok?: boolean }> {
   const query = reason ? `?reason=${encodeURIComponent(reason)}` : '';
-  return apiDelete(`/ui/memories/${encodeURIComponent(memoryId)}${query}`);
+  return apiDelete(`/yachiyo/studio/memories/${encodeURIComponent(memoryId)}${query}`).catch(() => (
+    apiDelete(`/ui/memories/${encodeURIComponent(memoryId)}${query}`)
+  ));
 }
 
 export async function listFutureTasks(): Promise<FutureTaskSpec[]> {

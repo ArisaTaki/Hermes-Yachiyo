@@ -448,6 +448,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "/yachiyo/studio/skills/sync",
             "/yachiyo/studio/skills/install",
             "/yachiyo/studio/skill-folders",
+            "/yachiyo/studio/memories",
             "/yachiyo/studio/groups",
             "/yachiyo/studio/group-runs",
             "/yachiyo/studio/workflows/${encodeURIComponent(workflowId)}/runs",
@@ -466,6 +467,10 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "importYachiyoSkill",
             "syncYachiyoNativeSkills",
             "installYachiyoSkillCommand",
+            "listYachiyoMemories",
+            "createYachiyoMemory",
+            "updateYachiyoMemory",
+            "deleteYachiyoMemory",
             "listYachiyoAgentGroups",
             "saveYachiyoAgentGroup",
             "startYachiyoGroupRun",
@@ -502,6 +507,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "export type SkillSnapshot",
             "export type SkillFolderSnapshot",
             "export type SkillSourceRootSnapshot",
+            "export type MemorySnapshot",
             "export type AgentGroupSnapshot",
             "export type GroupRunSnapshot",
             "export type PublicRunEvent",
@@ -2135,8 +2141,10 @@ def test_agent_studio_exposes_runtime_memory_and_future_task_management() -> Non
             "export type MemorySpec = {",
             "export type FutureTaskSpec = {",
             "export async function listMemories()",
+            "'/yachiyo/studio/memories'",
             "'/ui/memories'",
             "export async function deleteMemory(",
+            "apiDelete(`/yachiyo/studio/memories/${encodeURIComponent(memoryId)}${query}`)",
             "apiDelete(`/ui/memories/${encodeURIComponent(memoryId)}${query}`)",
             "export async function listFutureTasks()",
             "'/ui/future-tasks'",
@@ -2144,6 +2152,22 @@ def test_agent_studio_exposes_runtime_memory_and_future_task_management() -> Non
             "/ui/future-tasks/${encodeURIComponent(futureTaskId)}/cancel",
             "export async function triggerDueFutureTasks()",
             "'/ui/future-tasks/trigger-due'",
+        ],
+    )
+    _assert_function_contains(
+        "apps/frontend/src/lib/agents.ts",
+        "listMemories",
+        [
+            "apiGet<{ memories?: MemorySpec[] }>('/yachiyo/studio/memories')",
+            "apiGet<{ memories?: MemorySpec[] }>('/ui/memories')",
+        ],
+    )
+    _assert_function_contains(
+        "apps/frontend/src/lib/agents.ts",
+        "deleteMemory",
+        [
+            "apiDelete(`/yachiyo/studio/memories/${encodeURIComponent(memoryId)}${query}`)",
+            "apiDelete(`/ui/memories/${encodeURIComponent(memoryId)}${query}`)",
         ],
     )
     _assert_contains(

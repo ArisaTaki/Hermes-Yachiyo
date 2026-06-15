@@ -80,6 +80,14 @@ class SkillInstallBody(BaseModel):
     folder_id: str | None = Field(default=None, max_length=160)
 
 
+class MemoryBody(BaseModel):
+    content: str | None = Field(default=None, max_length=60000)
+    old_content: str | None = Field(default=None, max_length=60000)
+    kind: str | None = Field(default=None, max_length=40)
+    scope: str | None = Field(default=None, max_length=40)
+    reason: str | None = Field(default=None, max_length=2000)
+
+
 class StartWorkflowRunBody(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -517,6 +525,70 @@ async def delete_studio_skill_folder(
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Skill 文件夹不存在") from exc
+
+
+@router.get("/studio/memories")
+async def list_studio_memories(
+    include_deleted: bool = False,
+    limit: int = 100,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    memories = await asyncio.to_thread(
+        _studio_service(http_request).list_memories,
+        include_deleted,
+        max(1, min(500, int(limit or 100))),
+    )
+    return {"memories": [_snapshot(memory) for memory in memories]}
+
+
+@router.post("/studio/memories")
+async def create_studio_memory(
+    request: MemoryBody,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    try:
+        payload = request.model_dump(exclude_none=True)
+        snapshot = await asyncio.to_thread(
+            _studio_service(http_request).create_memory,
+            payload,
+        )
+        return _snapshot(snapshot)
+    except AgentRuntimeError as exc:
+        raise _bad_request(exc) from exc
+
+
+@router.patch("/studio/memories/{memory_id}")
+async def update_studio_memory(
+    memory_id: str,
+    request: MemoryBody,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    try:
+        payload = request.model_dump(exclude_none=True)
+        snapshot = await asyncio.to_thread(
+            _studio_service(http_request).update_memory,
+            memory_id,
+            payload,
+        )
+        return _snapshot(snapshot)
+    except AgentRuntimeError as exc:
+        raise _bad_request(exc) from exc
+
+
+@router.delete("/studio/memories/{memory_id}")
+async def delete_studio_memory(
+    memory_id: str,
+    reason: str = "",
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(
+            _studio_service(http_request).delete_memory,
+            memory_id,
+            reason,
+        )
+    except AgentRuntimeError as exc:
+        raise _bad_request(exc) from exc
 
 
 @router.post("/studio/agents/{agent_id}/runs")

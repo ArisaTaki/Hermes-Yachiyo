@@ -10,6 +10,7 @@ from .contracts import (
     AgentDefinitionSnapshot,
     AgentGroupSnapshot,
     GroupRunSnapshot,
+    MemorySnapshot,
     PublicRunEvent,
     RunTimelineSnapshot,
     SaveAgentGroupRequest,
@@ -25,6 +26,7 @@ from .contracts import (
 )
 from .events import public_run_event_from_payload
 from .groups import agent_group_snapshot_from_payload, group_run_snapshot_from_payload
+from .memories import memory_snapshot_from_payload
 from .ports import StudioPort
 from .skills import (
     skill_folder_snapshot_from_payload,
@@ -138,6 +140,30 @@ class AgentStudioService:
 
     def install_skill_command(self, command: str, folder_id: str | None = None) -> dict[str, Any]:
         return dict(self._studio_port.install_skill_command(command, folder_id))
+
+    def list_memories(
+        self,
+        include_deleted: bool = False,
+        limit: int = 100,
+    ) -> list[MemorySnapshot]:
+        return [
+            memory_snapshot_from_payload(item)
+            for item in _payload_items(
+                self._studio_port.list_memories(include_deleted, limit),
+                "memories",
+            )
+        ]
+
+    def create_memory(self, request: Mapping[str, Any]) -> MemorySnapshot:
+        return memory_snapshot_from_payload(self._studio_port.create_memory(dict(request)))
+
+    def update_memory(self, memory_id: str, request: Mapping[str, Any]) -> MemorySnapshot:
+        return memory_snapshot_from_payload(
+            self._studio_port.update_memory(memory_id, dict(request))
+        )
+
+    def delete_memory(self, memory_id: str, reason: str | None = None) -> dict[str, Any]:
+        return dict(self._studio_port.delete_memory(memory_id, reason or ""))
 
     def start_agent_run(
         self,

@@ -77,6 +77,23 @@ export type SkillSourceRootSnapshot = {
   skill_count?: number;
 };
 
+export type MemorySnapshot = {
+  memory_id: string;
+  scope: string;
+  kind: string;
+  content: string;
+  source_session_id?: string | null;
+  source_message_id?: string | null;
+  source_task_id?: string | null;
+  source_run_id?: string | null;
+  confidence?: number;
+  pinned?: boolean;
+  user_confirmed?: boolean;
+  created_at?: string;
+  updated_at?: string;
+  deleted_at?: string | null;
+};
+
 export type AgentGroupSnapshot = {
   group_id: string;
   name: string;

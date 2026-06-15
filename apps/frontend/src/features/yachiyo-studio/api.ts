@@ -3,6 +3,7 @@ import type {
   AgentDefinitionSnapshot,
   AgentGroupSnapshot,
   GroupRunSnapshot,
+  MemorySnapshot,
   RunTimelineSnapshot,
   SaveAgentGroupRequest,
   SkillFolderSnapshot,
@@ -94,6 +95,39 @@ export async function installYachiyoSkillCommand(
     command,
     folder_id: folderId || undefined,
   });
+}
+
+export async function listYachiyoMemories(
+  includeDeleted = false,
+  limit = 100,
+): Promise<MemorySnapshot[]> {
+  const query = new URLSearchParams({
+    include_deleted: String(includeDeleted),
+    limit: String(Math.max(1, Math.min(500, limit))),
+  });
+  const payload = await apiGet<{ memories?: MemorySnapshot[] }>(`/yachiyo/studio/memories?${query.toString()}`);
+  return payload.memories || [];
+}
+
+export async function createYachiyoMemory(
+  request: Partial<MemorySnapshot>,
+): Promise<MemorySnapshot> {
+  return apiPost('/yachiyo/studio/memories', request);
+}
+
+export async function updateYachiyoMemory(
+  memoryId: string,
+  request: Partial<MemorySnapshot> & { old_content?: string },
+): Promise<MemorySnapshot> {
+  return apiPatch(`/yachiyo/studio/memories/${encodeURIComponent(memoryId)}`, request);
+}
+
+export async function deleteYachiyoMemory(
+  memoryId: string,
+  reason = '',
+): Promise<{ ok?: boolean }> {
+  const query = reason ? `?reason=${encodeURIComponent(reason)}` : '';
+  return apiDelete(`/yachiyo/studio/memories/${encodeURIComponent(memoryId)}${query}`);
 }
 
 export async function listYachiyoAgentGroups(): Promise<AgentGroupSnapshot[]> {
