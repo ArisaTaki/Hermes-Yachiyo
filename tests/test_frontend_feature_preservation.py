@@ -863,8 +863,9 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
     _assert_contains(
         "apps/frontend/src/features/yachiyo-chat/api.ts",
         [
-            "/yachiyo/chat/tasks",
-            "/yachiyo/chat/readiness",
+            "'/yachiyo/readiness'",
+            "'/yachiyo/tasks'",
+            "`/yachiyo/tasks",
             "approveYachiyoTask",
             "rejectYachiyoTask",
             "cancelYachiyoTask",
@@ -873,9 +874,8 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
     _assert_not_contains(
         "apps/frontend/src/features/yachiyo-chat/api.ts",
         [
-            "'/yachiyo/readiness'",
-            "'/yachiyo/tasks'",
-            "`/yachiyo/tasks",
+            "/yachiyo/chat/tasks",
+            "/yachiyo/chat/readiness",
         ],
     )
 
@@ -1780,7 +1780,7 @@ def test_launcher_session_summary_ui_smoke_uses_bubble_and_live2d_summary_paths(
             'data-testid="live2d-launcher-agent-task-light"',
             'data-testid="live2d-launcher-session-summary-probe"',
             'data-testid="live2d-launcher-recent-session"',
-            "url.pathname === '/yachiyo/chat/tasks'",
+            "url.pathname === '/yachiyo/tasks'",
             "request.method === 'POST' && url.pathname === '/ui/launcher/ack'",
             "request.method === 'POST' && url.pathname === '/ui/launcher/quick-message'",
             "request.method === 'GET' && url.pathname === '/__smoke/state'",
@@ -4527,7 +4527,7 @@ def test_agent_frontend_run_helpers_preserve_native_run_bridge_contract() -> Non
         agents_lib,
         "getRun",
         [
-            "apiGet<YachiyoRunTimelineSnapshot>(`/yachiyo/studio/runs/${encodeURIComponent(runId)}`)",
+            "apiGet<YachiyoRunTimelineSnapshot>(`/yachiyo/studio/runs/${encodeURIComponent(runId)}/timeline`)",
             ".then(runSpecFromPublicTimelineSnapshot)",
             "apiGet(`/ui/runs/${encodeURIComponent(runId)}`)",
         ],

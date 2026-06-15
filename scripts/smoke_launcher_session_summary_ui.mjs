@@ -224,7 +224,7 @@ async function startMockBridge() {
         sendJson(response, 200, launcherPayload(mode));
         return;
       }
-      if (request.method === 'GET' && url.pathname === '/yachiyo/chat/tasks') {
+      if (request.method === 'GET' && url.pathname === '/yachiyo/tasks') {
         bridgeState.taskRequests.push(url.search);
         sendJson(response, 200, { ok: true, tasks: publicAgentTasks() });
         return;

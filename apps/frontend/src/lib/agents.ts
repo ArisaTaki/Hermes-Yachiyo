@@ -478,7 +478,7 @@ export async function getRunGroup(runGroupId: string): Promise<RunGroupSpec> {
 }
 
 export async function getRun(runId: string): Promise<RunSpec> {
-  return apiGet<YachiyoRunTimelineSnapshot>(`/yachiyo/studio/runs/${encodeURIComponent(runId)}`)
+  return apiGet<YachiyoRunTimelineSnapshot>(`/yachiyo/studio/runs/${encodeURIComponent(runId)}/timeline`)
     .then(runSpecFromPublicTimelineSnapshot)
     .catch(() => apiGet(`/ui/runs/${encodeURIComponent(runId)}`));
 }
