@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { getRunEvents, type RunEventSpec } from '../../../lib/agents';
+import { listYachiyoRunEvents } from '../../yachiyo-studio/api';
+import type { PublicRunEvent } from '../../yachiyo-studio/types';
 import { mergeRunEventReplayPages } from '../utils/runTimeline';
 
 export type RunEventReplayState = {
-  events: RunEventSpec[];
+  events: PublicRunEvent[];
   limit: number;
   hasMore: boolean;
   loading: boolean;
@@ -44,7 +45,7 @@ export function useRunEventReplay(
         error: '',
       },
     }));
-    getRunEvents(runId, 0, pageSize)
+    listYachiyoRunEvents(runId, 0, pageSize)
       .then((page) => {
         if (disposed) return;
         const events = page.events || [];
@@ -97,7 +98,7 @@ export function useRunEventReplay(
       },
     }));
     try {
-      const page = await getRunEvents(runId, afterSequence, pageSize);
+      const page = await listYachiyoRunEvents(runId, afterSequence, pageSize);
       const incomingEvents = page.events || [];
       const limit = page.limit || pageSize;
       setReplayByRunId((current) => {

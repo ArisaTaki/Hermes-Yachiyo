@@ -1,4 +1,4 @@
-import type { RunEventSpec } from '../../../lib/agents';
+import type { PublicRunEvent } from '../../yachiyo-studio/types';
 
 export function timelineChildRunId(event: Record<string, unknown>): string {
   const value = event.child_run_id;
@@ -132,7 +132,7 @@ export function timelineEventPayload(event: Record<string, unknown>): string {
   return '';
 }
 
-export function runEventReplayToTimelineEvent(event: RunEventSpec): Record<string, unknown> {
+export function runEventReplayToTimelineEvent(event: PublicRunEvent): Record<string, unknown> {
   const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
   const detail = typeof payload.tool === 'string'
     ? payload.tool
@@ -169,10 +169,10 @@ export function runEventReplayToTimelineEvent(event: RunEventSpec): Record<strin
 }
 
 export function mergeRunEventReplayPages(
-  current: RunEventSpec[],
-  incoming: RunEventSpec[],
-): RunEventSpec[] {
-  const bySequence = new Map<number, RunEventSpec>();
+  current: PublicRunEvent[],
+  incoming: PublicRunEvent[],
+): PublicRunEvent[] {
+  const bySequence = new Map<number, PublicRunEvent>();
   current.forEach((event) => bySequence.set(Number(event.sequence) || 0, event));
   incoming.forEach((event) => bySequence.set(Number(event.sequence) || 0, event));
   return Array.from(bySequence.values()).sort(

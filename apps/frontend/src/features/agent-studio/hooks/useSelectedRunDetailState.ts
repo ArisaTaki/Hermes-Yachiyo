@@ -3,12 +3,11 @@ import { useMemo } from 'react';
 import type {
   AgentSpec,
   RunnableSummary,
-  RunEventSpec,
   RunGroupSpec,
   RunSpec,
   WorkflowSpec,
 } from '../../../lib/agents';
-import type { RunTimelineSnapshot } from '../../yachiyo-studio/types';
+import type { PublicRunEvent, RunTimelineSnapshot } from '../../yachiyo-studio/types';
 import {
   isActiveRunStatus,
   isPotentialWorkflowChildAgentRun,
@@ -40,7 +39,7 @@ type UseSelectedRunDetailStateOptions = {
   selectedPublicRunTimeline: RunTimelineSnapshot | null;
   selectedRun: RunSpec | null;
   selectedRunId: string;
-  selectedRunReplayEvents: RunEventSpec[];
+  selectedRunReplayEvents: PublicRunEvent[];
   workflows: WorkflowSpec[];
 };
 

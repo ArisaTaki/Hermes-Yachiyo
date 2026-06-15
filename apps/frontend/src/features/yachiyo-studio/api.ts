@@ -4,12 +4,27 @@ import type {
   AgentGroupSnapshot,
   GroupRunSnapshot,
   MemorySnapshot,
+  PublicRunEvent,
   RunTimelineSnapshot,
   SaveAgentGroupRequest,
   SkillFolderSnapshot,
   SkillSnapshot,
   SkillSourceRootSnapshot,
 } from './types';
+
+export type YachiyoRunEventsPage = {
+  run_id: string;
+  after_sequence: number;
+  limit: number;
+  events: PublicRunEvent[];
+};
+
+export type YachiyoRunArtifactPayload = {
+  ok?: boolean;
+  path?: string;
+  content?: string;
+  truncated?: boolean;
+};
 
 export async function listYachiyoStudioAgents(): Promise<AgentDefinitionSnapshot[]> {
   const payload = await apiGet<{ agents?: AgentDefinitionSnapshot[] }>('/yachiyo/studio/agents');
@@ -170,6 +185,54 @@ export async function getYachiyoGroupRun(groupRunId: string): Promise<GroupRunSn
 
 export async function getYachiyoRunTimeline(runId: string): Promise<RunTimelineSnapshot> {
   return apiGet(`/yachiyo/studio/runs/${encodeURIComponent(runId)}/timeline`);
+}
+
+export async function listYachiyoRunEvents(
+  runId: string,
+  afterSequence = 0,
+  limit = 200,
+): Promise<YachiyoRunEventsPage> {
+  const query = new URLSearchParams({
+    after_sequence: String(Math.max(0, afterSequence)),
+    limit: String(Math.max(1, limit)),
+  });
+  return apiGet(`/yachiyo/studio/runs/${encodeURIComponent(runId)}/events?${query.toString()}`);
+}
+
+export async function readYachiyoRunArtifact(
+  runId: string,
+  path: string,
+): Promise<YachiyoRunArtifactPayload> {
+  const encodedPath = path.split('/').map((part) => encodeURIComponent(part)).join('/');
+  return apiGet(`/yachiyo/studio/runs/${encodeURIComponent(runId)}/artifacts/${encodedPath}`);
+}
+
+export async function rerunYachiyoRun(runId: string): Promise<RunTimelineSnapshot> {
+  return apiPost(`/yachiyo/studio/runs/${encodeURIComponent(runId)}/rerun`, {});
+}
+
+export async function cancelYachiyoRun(runId: string): Promise<RunTimelineSnapshot> {
+  return apiPost(`/yachiyo/studio/runs/${encodeURIComponent(runId)}/cancel`, {});
+}
+
+export async function deleteYachiyoRun(
+  runId: string,
+): Promise<{ ok?: boolean; deleted_run_ids?: string[]; deleted_run_count?: number }> {
+  return apiDelete(`/yachiyo/studio/runs/${encodeURIComponent(runId)}`);
+}
+
+export async function approveYachiyoRunApproval(runId: string): Promise<RunTimelineSnapshot> {
+  return apiPost(`/yachiyo/studio/runs/${encodeURIComponent(runId)}/approval/approve`, {});
+}
+
+export async function rejectYachiyoRunApproval(
+  runId: string,
+  reason = '',
+): Promise<RunTimelineSnapshot> {
+  return apiPost(
+    `/yachiyo/studio/runs/${encodeURIComponent(runId)}/approval/reject`,
+    reason ? { reason } : {},
+  );
 }
 
 export async function startYachiyoWorkflowRun(

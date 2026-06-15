@@ -1,5 +1,4 @@
-import type { RunSpec } from '../../../lib/agents';
-import { getRunArtifact } from '../../../lib/agents';
+import { readYachiyoRunArtifact } from '../../yachiyo-studio/api';
 
 type ArtifactPreview = {
   path: string;
@@ -18,12 +17,16 @@ export function useRunArtifactActions({
   setError,
   setStatus,
 }: UseRunArtifactActionsOptions) {
-  async function openArtifact(run: RunSpec | string, path: string) {
+  async function openArtifact(run: { run_id?: string } | string, path: string) {
     const runId = typeof run === 'string' ? run : run.run_id;
+    if (!runId) {
+      setError('请选择要读取 Artifact 的 Run');
+      return;
+    }
     setStatus('读取 artifact...');
     setError('');
     try {
-      const payload = await getRunArtifact(runId, path);
+      const payload = await readYachiyoRunArtifact(runId, path);
       setArtifactPreview({
         path: payload.path || path,
         content: payload.content || '',

@@ -8,6 +8,7 @@ import type {
   ApprovalCardSnapshot,
   ArtifactSnapshot,
   PublicRunEvent,
+  RunTimelineSnapshot,
 } from '../../yachiyo-studio/types';
 
 import {
@@ -74,6 +75,30 @@ export function approvedRunStatusMessage(run: RunSpec): string {
   if (status === 'completed') return '已批准，Run 已完成。';
   if (status === 'failed') return '已批准，但 Run 执行失败。';
   return '已批准，Run 状态已更新。';
+}
+
+export function publicRunTimelineToRunSpec(snapshot: RunTimelineSnapshot): RunSpec {
+  const kind = snapshot.workflow_run_id ? 'workflow_run' : 'agent_run';
+  const pendingApproval = snapshot.pending_approval || snapshot.approvals?.find((approval) => approval.approval_id);
+  return {
+    run_id: snapshot.run_id,
+    run_group_id: snapshot.run_group_id || snapshot.group_run_id || undefined,
+    run_group_source: kind === 'workflow_run' ? 'workflow' : undefined,
+    kind,
+    runnable_id: snapshot.workflow_run_id || snapshot.agent_id || snapshot.run_id,
+    runnable_name: snapshot.title || undefined,
+    status: snapshot.status || 'processing',
+    user_goal: snapshot.title || '',
+    timeline: (snapshot.events || []).map(publicRunEventToTimelineEvent),
+    artifacts: publicArtifactsOrLegacy(snapshot.artifacts, undefined),
+    pending_approval: pendingApproval
+      ? publicApprovalToRunPendingApproval(pendingApproval) || undefined
+      : undefined,
+    created_at: snapshot.created_at,
+    updated_at: snapshot.updated_at,
+    agent_run_id: kind === 'agent_run' ? snapshot.run_id : undefined,
+    workflow_run_id: kind === 'workflow_run' ? snapshot.workflow_run_id || snapshot.run_id : undefined,
+  };
 }
 
 export function runStatusLabel(status: string): string {

@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 
-import type { RunEventSpec, RunSpec, WorkflowSpec } from '../../../lib/agents';
-import type { RunTimelineSnapshot } from '../../yachiyo-studio/types';
+import type { RunSpec, WorkflowSpec } from '../../../lib/agents';
+import type { PublicRunEvent, RunTimelineSnapshot } from '../../yachiyo-studio/types';
 import { ExpandableRuntimeContent as RunExpandableContent } from '../../runtime-shared/components/ExpandableRuntimeContent';
 import { ApprovalInspector, type RunPendingApproval } from './ApprovalInspector';
 import { ArtifactInspector } from './ArtifactInspector';
@@ -107,7 +107,7 @@ export function RunDetailPanel({
   selectedRunExecutionEvents: Array<Record<string, unknown>>;
   selectedRunIsLive: boolean;
   selectedRunReplayError: string;
-  selectedRunReplayEvents: RunEventSpec[];
+  selectedRunReplayEvents: PublicRunEvent[];
   selectedRunReplayHasMore: boolean;
   selectedRunReplayLoading: boolean;
   selectedRunRerunDisabledReason: string;
