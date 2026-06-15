@@ -273,7 +273,11 @@ from apps.shell.agent.runtime.tool_loop import (
     tool_loop_limit_artifact_completion as _runtime_tool_loop_limit_artifact_completion,
     tool_loop_limit_detail as _runtime_tool_loop_limit_detail,
 )
-from apps.shell.agent.runtime.timeline import RuntimeAgentTimelineBuilder
+from apps.shell.agent.runtime.timeline import (
+    RuntimeAgentTimelineBuilder,
+    runtime_timeline_event as _runtime_timeline_event,
+    runtime_timeline_factory as _runtime_timeline_factory,
+)
 
 from apps.shell.agent.runtime.workflow_continuation import (
     WorkflowContinuationCoordinator,
@@ -632,9 +636,14 @@ class NativeRunEngine:
                 error_type=AgentRuntimeError,
             )
         )
+        runtime_timeline_factory = _runtime_timeline_factory(
+            now=_now,
+            redact_detail=redact_secrets,
+            redact_payload=_redact_json_value,
+        )
         core_services = _build_runtime_core_services(
             run_events=self.run_events,
-            timeline_factory=self._timeline,
+            timeline_factory=runtime_timeline_factory,
             profile_service_factory=lambda: get_model_profile_service(),
             supports_openai_compatible_api=supports_openai_compatible_api,
             default_agent_ids=_DEFAULT_AGENT_IDS,
@@ -687,7 +696,7 @@ class NativeRunEngine:
                 update_run=self._update_run,
                 task_run_links=self.task_run_links,
                 task_events=self.runtime_task_events,
-                timeline_factory=self._timeline,
+                timeline_factory=runtime_timeline_factory,
                 redact_secrets=redact_secrets,
                 final_statuses=_FINAL_RUN_STATUSES,
             )
@@ -712,7 +721,7 @@ class NativeRunEngine:
                 run_budget=self._run_budget,
                 check_context_budget=runtime_context_budget_checker,
                 limit_model_output=runtime_model_output_limiter,
-                timeline_factory=self._timeline,
+                timeline_factory=runtime_timeline_factory,
                 update_run=self._update_run,
                 append_run_event=self.append_run_event,
                 task_model_events=self.runtime_task_model_events,
@@ -740,7 +749,7 @@ class NativeRunEngine:
                 limits=lambda: self.runtime_limits,
                 redact_json_value=_redact_json_value,
             ),
-            timeline_factory=self._timeline,
+            timeline_factory=runtime_timeline_factory,
             tool_call_events=self.runtime_tool_call_events,
             trace_events=self.runtime_trace_events,
             append_run_event=self.append_run_event,
@@ -778,7 +787,7 @@ class NativeRunEngine:
                 message_visible_content_text=_message_visible_content_text,
                 model_message_metadata=_model_message_metadata,
                 tool_requests_from_message=self._tool_requests_from_message,
-                timeline_factory=self._timeline,
+                timeline_factory=runtime_timeline_factory,
                 limit_model_output=runtime_model_output_limiter,
                 model_output_text_factory=_ModelOutputText,
                 tool_loop_projection=self.tool_loop_projection,
@@ -802,7 +811,7 @@ class NativeRunEngine:
             runtime_agent_run_events=self.runtime_agent_run_events,
             runtime_trace_events=self.runtime_trace_events,
             append_run_event=self.append_run_event,
-            timeline_factory=self._timeline,
+            timeline_factory=runtime_timeline_factory,
             memory_context_limit=_MEMORY_CONTEXT_LIMIT,
             runtime_task_model_events=self.runtime_task_model_events,
             update_run=self._update_run,
@@ -812,7 +821,7 @@ class NativeRunEngine:
         )
         self._install_runtime_agent_services(agent_services)
         approval_services = _build_runtime_approval_services(
-            timeline_factory=self._timeline,
+            timeline_factory=runtime_timeline_factory,
             append_run_event=self.append_run_event,
             update_run=self._update_run,
             snapshots=self.approval_snapshots,
@@ -890,7 +899,7 @@ class NativeRunEngine:
                 run_budget=self._run_budget,
                 check_context_budget=runtime_context_budget_checker,
                 runtime_agent_timeline=self.runtime_agent_timeline,
-                timeline_factory=self._timeline,
+                timeline_factory=runtime_timeline_factory,
                 update_run=self._update_run,
                 append_run_event=self.append_run_event,
                 task_model_events=self.runtime_task_model_events,
@@ -914,7 +923,7 @@ class NativeRunEngine:
             load_agent_skills=self._load_agent_skills,
             agent_model_config_private=self._agent_model_config_private,
             default_agent_ids=_DEFAULT_AGENT_IDS,
-            timeline_factory=self._timeline,
+            timeline_factory=runtime_timeline_factory,
             workflow_path_snapshot=self._workflow_path_snapshot,
             workflow_runtime_snapshot=self._workflow_runtime_snapshot,
             insert_run_group=self._insert_run_group,
@@ -952,7 +961,7 @@ class NativeRunEngine:
             merge_workflow_child_run_outcome=lambda timeline, artifacts, child_run, label: (
                 self._merge_workflow_child_run_outcome(timeline, artifacts, child_run, label)
             ),
-            timeline_factory=lambda event, detail="", **extra: self._timeline(event, detail, **extra),
+            timeline_factory=runtime_timeline_factory,
             append_run_event=lambda run_id, event_type, payload: self.append_run_event(run_id, event_type, payload),
             update_run=lambda run_id, **kwargs: self._update_run(run_id, **kwargs),
             update_run_group=lambda run_group_id, **kwargs: self._update_run_group(run_group_id, **kwargs),
@@ -1038,7 +1047,7 @@ class NativeRunEngine:
                 self._workflow_next_node_id(workflow, node_id, context)
             ),
             continue_workflow_run=lambda run, workflow, **kwargs: self.workflow_continuation.continue_run(run, workflow, **kwargs),
-            timeline_factory=lambda event, detail="", **extra: self._timeline(event, detail, **extra),
+            timeline_factory=runtime_timeline_factory,
             append_run_event=lambda run_id, event_type, payload: self.append_run_event(run_id, event_type, payload),
             update_run=lambda run_id, **kwargs: self._update_run(run_id, **kwargs),
             update_run_group=lambda run_group_id, **kwargs: self._update_run_group(run_group_id, **kwargs),
@@ -1057,11 +1066,7 @@ class NativeRunEngine:
                     event_type,
                     payload,
                 ),
-                timeline_factory=lambda event, detail="", **extra: self._timeline(
-                    event,
-                    detail,
-                    **extra,
-                ),
+                timeline_factory=runtime_timeline_factory,
                 workflow_cancellation=self.workflow_cancellation,
                 workflow_run_is_group_root=lambda result: self._workflow_run_is_group_root(result),
                 project_cancelled_workflow_group_if_root=lambda run, result: (
@@ -1079,11 +1084,7 @@ class NativeRunEngine:
                 get_run=lambda run_id: self.get_run(run_id),
                 create_agent_run=lambda payload: self.create_agent_run(payload),
                 create_workflow_run=lambda payload: self.create_workflow_run(payload),
-                timeline_factory=lambda event, detail="", **extra: self._timeline(
-                    event,
-                    detail,
-                    **extra,
-                ),
+                timeline_factory=runtime_timeline_factory,
                 append_run_event=lambda run_id, event_type, payload: self.append_run_event(
                     run_id,
                     event_type,
@@ -2056,12 +2057,14 @@ class NativeRunEngine:
 
     @staticmethod
     def _timeline(event: str, detail: str = "", **extra: Any) -> dict[str, Any]:
-        return {
-            "time": _now(),
-            "event": event,
-            "detail": redact_secrets(detail),
-            **_redact_json_value(extra),
-        }
+        return _runtime_timeline_event(
+            event,
+            detail,
+            now=_now,
+            redact_detail=redact_secrets,
+            redact_payload=_redact_json_value,
+            **extra,
+        )
 
     def _run_budget(self, run_id: str, timeline: list[dict[str, Any]]) -> _RunBudget:
         try:

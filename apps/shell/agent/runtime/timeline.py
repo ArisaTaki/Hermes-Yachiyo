@@ -2,7 +2,47 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
+
+
+def runtime_timeline_event(
+    event: str,
+    detail: str = "",
+    *,
+    now: Callable[[], str],
+    redact_detail: Callable[[Any], str],
+    redact_payload: Callable[[Any], Any],
+    **extra: Any,
+) -> dict[str, Any]:
+    return {
+        "time": now(),
+        "event": event,
+        "detail": redact_detail(detail),
+        **redact_payload(extra),
+    }
+
+
+def runtime_timeline_factory(
+    *,
+    now: Callable[[], str],
+    redact_detail: Callable[[Any], str],
+    redact_payload: Callable[[Any], Any],
+) -> Callable[..., dict[str, Any]]:
+    def build_runtime_timeline_event(
+        event: str,
+        detail: str = "",
+        **extra: Any,
+    ) -> dict[str, Any]:
+        return runtime_timeline_event(
+            event,
+            detail,
+            now=now,
+            redact_detail=redact_detail,
+            redact_payload=redact_payload,
+            **extra,
+        )
+
+    return build_runtime_timeline_event
 
 
 class RuntimeAgentTimelineBuilder:
