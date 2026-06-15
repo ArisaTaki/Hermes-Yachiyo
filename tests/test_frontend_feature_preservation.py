@@ -235,7 +235,6 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "apiPost<{",
             "`/ui/chat/groups/${encodeURIComponent(currentSessionId)}`",
             "'/ui/chat/groups'",
-            "'/ui/chat/delegated-run-summary'",
             "approveRunApproval(runId)",
             "rejectRunApproval(runId, 'Rejected from chat')",
             "ComposerApprovalNotice",
@@ -359,6 +358,8 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "function loadImageDimensions",
             "async function fileFromE2EImageDetail",
             "async function fileFromDesktopImageSelection",
+            "'/ui/chat/delegated-run-summary'",
+            "async function createDelegatedRunSummary",
         ],
     )
     _assert_contains(
@@ -2462,12 +2463,8 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
     _assert_contains(
         "apps/frontend/src/views/ChatView.tsx",
         [
-            "async function createDelegatedRunSummary(runId: string): Promise<DelegatedRunSummaryResult>",
-            "let refreshed: Awaited<ReturnType<typeof refreshMessages>> | undefined;",
-            "refreshed = await refreshMessages();",
-            "const refreshedProcessingCount = Math.max(0, Number(refreshed?.processing_count || 0));",
-            "isProcessing: created ? (refreshed ? Boolean(refreshed.is_processing || refreshedProcessingCount > 0) : true) : false,",
-            "processingCount: created ? (refreshed ? refreshedProcessingCount : 1) : 0,",
+            "createDelegatedRunSummary(runId, delegatedRunSummaryOptions())",
+            "function delegatedRunSummaryOptions()",
             "const nextProcessing = delegatedSummary.created ? delegatedSummary.isProcessing : chatStillProcessing;",
             "const nextProcessingCount = delegatedSummary.created ? delegatedSummary.processingCount : chatProcessingCount;",
             "let delegatedSummaryIsProcessing = false;",
@@ -2492,6 +2489,19 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
         "apps/frontend/src/features/yachiyo-chat/types.ts",
         [
             "export type DelegatedRunSummaryResult = {",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/delegatedSummary.ts",
+        [
+            "export async function createDelegatedRunSummary",
+            "'/ui/chat/delegated-run-summary'",
+            "expectPendingAssistantReply(taskId)",
+            "refreshed = await refreshMessages();",
+            "await loadSessions();",
+            "const refreshedProcessingCount = Math.max(0, Number(refreshed?.processing_count || 0));",
+            "isProcessing: created ? (refreshed ? Boolean(refreshed.is_processing || refreshedProcessingCount > 0) : true) : false,",
+            "processingCount: created ? (refreshed ? refreshedProcessingCount : 1) : 0,",
         ],
     )
     _assert_contains(

@@ -18,6 +18,7 @@ import {
   readPendingAttachment,
   withResolvedAttachmentUrls,
 } from '../features/yachiyo-chat/attachments';
+import { createDelegatedRunSummary } from '../features/yachiyo-chat/delegatedSummary';
 import {
   ComposerApprovalNotice,
   composerApprovalStatusText,
@@ -100,7 +101,6 @@ import type {
   ChatNotice,
   ChatParticipant,
   ChatSessionContext,
-  DelegatedRunSummaryResult,
   ExecutorPayload,
   MessagesPayload,
   PendingAttachment,
@@ -1169,47 +1169,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     }
   }
 
-  async function createDelegatedRunSummary(runId: string): Promise<DelegatedRunSummaryResult> {
-    try {
-      const summary = await apiPost<{
-        ok?: boolean;
-        error?: string;
-        message_id?: string;
-        summary_created?: boolean;
-        task_id?: string;
-        run_id?: string;
-        run_group_id?: string;
-        run_status?: string;
-        source_task_id?: string;
-      }>('/ui/chat/delegated-run-summary', { run_id: runId });
-      if (summary.ok === false) throw new Error(summary.error || '创建主模型整理任务失败');
-      const taskId = String(summary.task_id || '');
-      const created = Boolean(summary.summary_created && taskId);
-      let refreshed: Awaited<ReturnType<typeof refreshMessages>> | undefined;
-      if (created) {
-        expectPendingAssistantReply(taskId);
-        refreshed = await refreshMessages();
-        await loadSessions();
-      }
-      const refreshedProcessingCount = Math.max(0, Number(refreshed?.processing_count || 0));
-      return {
-        created,
-        error: '',
-        taskId,
-        isProcessing: created ? (refreshed ? Boolean(refreshed.is_processing || refreshedProcessingCount > 0) : true) : false,
-        processingCount: created ? (refreshed ? refreshedProcessingCount : 1) : 0,
-      };
-    } catch (error) {
-      return {
-        created: false,
-        error: error instanceof Error ? error.message : '创建主模型整理任务失败',
-        taskId: '',
-        isProcessing: false,
-        processingCount: 0,
-      };
-    }
-  }
-
   async function pollAgentRunCompletion(runId: string, options: { summarizeDelegatedRun?: boolean; ignoreInitialApprovalRequired?: boolean } = {}) {
     const maxAttempts = 600; // 最多轮询 600 次（约 5 分钟）
     const interval = ACTIVE_POLL_INTERVAL_MS;
@@ -1237,7 +1196,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
           } else {
             forgetRunApprovalDetails(runId);
             const delegatedSummary = options.summarizeDelegatedRun
-              ? await createDelegatedRunSummary(runId)
+              ? await createDelegatedRunSummary(runId, delegatedRunSummaryOptions())
               : { created: false, error: '', taskId: '', isProcessing: false, processingCount: 0 };
             const nextProcessing = delegatedSummary.created ? delegatedSummary.isProcessing : chatStillProcessing;
             const nextProcessingCount = delegatedSummary.created ? delegatedSummary.processingCount : chatProcessingCount;
@@ -1533,7 +1492,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       let delegatedSummaryIsProcessing = false;
       let delegatedSummaryProcessingCount = 0;
       if (summarizeDelegatedRun && ['completed', 'failed', 'cancelled'].includes(runStatus)) {
-        const summary = await createDelegatedRunSummary(runId);
+        const summary = await createDelegatedRunSummary(runId, delegatedRunSummaryOptions());
         delegatedSummaryCreated = summary.created;
         delegatedSummaryError = summary.error;
         delegatedSummaryIsProcessing = summary.isProcessing;
@@ -1786,6 +1745,14 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     pendingReplyTaskIdRef.current = normalizedTaskId;
     pendingReplyScrollRef.current = Boolean(normalizedTaskId);
     if (normalizedTaskId) stickToBottomRef.current = true;
+  }
+
+  function delegatedRunSummaryOptions() {
+    return {
+      expectPendingAssistantReply,
+      loadSessions,
+      refreshMessages,
+    };
   }
 
   function rememberRunApprovalDetails(run: RunSpec, fallbackDetails: ApprovalRequestDetails | null = null) {
