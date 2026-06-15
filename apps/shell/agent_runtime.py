@@ -35,6 +35,7 @@ from apps.shell.agent.repositories.groups import RunGroupRepository
 from apps.shell.agent.repositories.memories import AgentMemoryStore
 from apps.shell.agent.repositories.runs import RunRepository
 from apps.shell.agent.repositories.task_run_links import TaskRunLinkRepository
+from apps.shell.agent.repositories.workspaces import TrustedWorkspaceRepository
 from apps.shell.agent.repositories.workflows import WorkflowRepository
 from apps.shell.agent.runtime.budget import (
     RunBudget as _RunBudget,
@@ -1659,6 +1660,11 @@ class NativeRunEngine:
             now=_now,
             error_type=AgentRuntimeError,
         )
+        self.trusted_workspaces = TrustedWorkspaceRepository(
+            self._conn,
+            now=_now,
+            error_type=AgentRuntimeError,
+        )
         self.run_groups = RunGroupRepository(
             self._conn,
             ensure_row_factory=self._ensure_row_factory,
@@ -2702,29 +2708,7 @@ class NativeRunEngine:
         return assigned
 
     def trust_workspace(self, path: str | Path, *, source: str = "runtime", commit: bool = True) -> dict[str, Any]:
-        raw_path = str(path or "").strip()
-        if not raw_path:
-            raise AgentRuntimeError("trusted workspace 路径不能为空")
-        try:
-            resolved = Path(raw_path).expanduser().resolve()
-        except OSError as exc:
-            raise AgentRuntimeError(f"trusted workspace 路径无效：{exc}") from exc
-        if not resolved.exists() or not resolved.is_dir():
-            raise AgentRuntimeError("trusted workspace 必须是已存在目录")
-        now = _now()
-        self._conn.execute(
-            """
-            INSERT INTO trusted_workspaces (path, source, trusted_at, updated_at)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(path) DO UPDATE SET
-                source=excluded.source,
-                updated_at=excluded.updated_at
-            """,
-            (str(resolved), str(source or "runtime")[:120], now, now),
-        )
-        if commit:
-            self._conn.commit()
-        return {"path": str(resolved), "source": str(source or "runtime")[:120], "trusted_at": now}
+        return self.trusted_workspaces.trust(path, source=source, commit=commit)
 
     def _trust_workspace_from_policy(
         self,
@@ -2736,27 +2720,14 @@ class NativeRunEngine:
         workdir = str(workspace_policy.get("default_workdir") or "").strip()
         if not workdir:
             return
-        try:
-            self.trust_workspace(workdir, source=source, commit=commit)
-        except AgentRuntimeError:
-            return
+        self.trusted_workspaces.trust_from_policy(
+            workspace_policy,
+            source=source,
+            commit=commit,
+        )
 
     def list_trusted_workspaces(self) -> dict[str, Any]:
-        rows = self._conn.execute(
-            "SELECT path, source, trusted_at, updated_at FROM trusted_workspaces ORDER BY updated_at DESC"
-        ).fetchall()
-        return {
-            "ok": True,
-            "workspaces": [
-                {
-                    "path": str(row["path"]),
-                    "source": str(row["source"] or ""),
-                    "trusted_at": str(row["trusted_at"] or ""),
-                    "updated_at": str(row["updated_at"] or ""),
-                }
-                for row in rows
-            ],
-        }
+        return self.trusted_workspaces.list()
 
     def _migrate_agent_workspace_policies(self) -> None:
         rows = self._conn.execute(
