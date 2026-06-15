@@ -2,17 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-from typing import Any
-
-from fastapi import HTTPException, Request
-
-from apps.bridge.routes.yachiyo_models import TaskApprovalRequest
-from apps.bridge.routes.yachiyo_services import (
-    bad_request,
-    snapshot,
-    studio_service,
-)
 from apps.bridge.routes.yachiyo_studio_agent_handlers import (
     attach_agent_skill,
     delete_agent,
@@ -39,6 +28,17 @@ from apps.bridge.routes.yachiyo_studio_memory_handlers import (
     trigger_due_future_tasks,
     update_memory,
 )
+from apps.bridge.routes.yachiyo_studio_run_handlers import (
+    approve_run_approval,
+    cancel_run,
+    delete_run,
+    get_run_events,
+    get_run_timeline,
+    list_runs,
+    read_run_artifact,
+    reject_run_approval,
+    rerun_run,
+)
 from apps.bridge.routes.yachiyo_studio_skill_handlers import (
     create_skill_folder,
     delete_skill,
@@ -59,141 +59,51 @@ from apps.bridge.routes.yachiyo_studio_workflow_handlers import (
     save_workflow,
     start_workflow_run,
 )
-from apps.shell.agent_runtime import AgentRuntimeError
 
-
-async def get_run_timeline(
-    run_id: str,
-    http_request: Request | None = None,
-) -> dict[str, Any]:
-    try:
-        run_snapshot = await asyncio.to_thread(studio_service(http_request).get_run_timeline, run_id)
-        return snapshot(run_snapshot)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Run 不存在") from exc
-
-
-async def list_runs(
-    limit: int = 50,
-    http_request: Request | None = None,
-) -> dict[str, Any]:
-    runs = await asyncio.to_thread(
-        studio_service(http_request).list_run_timelines,
-        max(1, min(200, int(limit or 50))),
-    )
-    return {"runs": [snapshot(run) for run in runs]}
-
-
-async def rerun_run(
-    run_id: str,
-    http_request: Request | None = None,
-) -> dict[str, Any]:
-    try:
-        run_snapshot = await asyncio.to_thread(studio_service(http_request).rerun_run, run_id)
-        return snapshot(run_snapshot)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Run 不存在") from exc
-    except AgentRuntimeError as exc:
-        raise bad_request(exc) from exc
-
-
-async def cancel_run(
-    run_id: str,
-    http_request: Request | None = None,
-) -> dict[str, Any]:
-    try:
-        run_snapshot = await asyncio.to_thread(studio_service(http_request).cancel_run, run_id)
-        return snapshot(run_snapshot)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Run 不存在") from exc
-
-
-async def delete_run(
-    run_id: str,
-    http_request: Request | None = None,
-) -> dict[str, Any]:
-    try:
-        return await asyncio.to_thread(studio_service(http_request).delete_run, run_id)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Run 不存在") from exc
-    except AgentRuntimeError as exc:
-        raise bad_request(exc) from exc
-
-
-async def approve_run_approval(
-    run_id: str,
-    http_request: Request | None = None,
-) -> dict[str, Any]:
-    try:
-        run_snapshot = await asyncio.to_thread(studio_service(http_request).approve_run_approval, run_id)
-        return snapshot(run_snapshot)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Run 不存在") from exc
-    except AgentRuntimeError as exc:
-        raise bad_request(exc) from exc
-
-
-async def reject_run_approval(
-    run_id: str,
-    request: TaskApprovalRequest | None = None,
-    http_request: Request | None = None,
-) -> dict[str, Any]:
-    try:
-        run_snapshot = await asyncio.to_thread(
-            studio_service(http_request).reject_run_approval,
-            run_id,
-            request.reason if request is not None else "",
-        )
-        return snapshot(run_snapshot)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Run 不存在") from exc
-    except AgentRuntimeError as exc:
-        raise bad_request(exc) from exc
-
-
-async def read_run_artifact(
-    run_id: str,
-    artifact_path: str,
-    http_request: Request | None = None,
-) -> dict[str, Any]:
-    try:
-        return await asyncio.to_thread(
-            studio_service(http_request).read_run_artifact,
-            run_id,
-            artifact_path,
-        )
-    except (AgentRuntimeError, KeyError) as exc:
-        raise HTTPException(status_code=404, detail="Artifact 不存在") from exc
-
-
-async def get_run_events(
-    run_id: str,
-    after_sequence: int = 0,
-    limit: int = 200,
-    http_request: Request | None = None,
-) -> dict[str, Any]:
-    try:
-        events = await asyncio.to_thread(
-            lambda: list(studio_service(http_request).get_run_event_stream(run_id))
-        )
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Run 不存在") from exc
-    clean_after_sequence = max(0, int(after_sequence or 0))
-    clean_limit = max(1, min(500, int(limit or 200)))
-    filtered_events = [
-        event
-        for event in events
-        if int(getattr(event, "sequence", 0) or 0) > clean_after_sequence
-    ]
-    page = filtered_events[:clean_limit]
-    next_after_sequence = max(
-        [int(getattr(event, "sequence", 0) or 0) for event in page] or [clean_after_sequence]
-    )
-    return {
-        "run_id": run_id,
-        "after_sequence": clean_after_sequence,
-        "limit": clean_limit,
-        "next_after_sequence": next_after_sequence,
-        "has_more": len(filtered_events) > clean_limit,
-        "events": [snapshot(event) for event in page],
-    }
+__all__ = [
+    "approve_run_approval",
+    "attach_agent_skill",
+    "cancel_future_task",
+    "cancel_run",
+    "create_memory",
+    "create_skill_folder",
+    "delete_agent",
+    "delete_memory",
+    "delete_run",
+    "delete_skill",
+    "delete_skill_folder",
+    "delete_workflow",
+    "detach_agent_skill",
+    "get_agent",
+    "get_group",
+    "get_group_run",
+    "get_run_events",
+    "get_run_timeline",
+    "get_workflow",
+    "import_skill",
+    "install_skill",
+    "list_agents",
+    "list_future_tasks",
+    "list_group_runs",
+    "list_groups",
+    "list_memories",
+    "list_runs",
+    "list_skill_folders",
+    "list_skill_sources",
+    "list_skills",
+    "list_workflows",
+    "read_run_artifact",
+    "reject_run_approval",
+    "rerun_run",
+    "save_agent",
+    "save_group",
+    "save_workflow",
+    "start_group_run",
+    "start_workflow_run",
+    "sync_native_skills",
+    "test_agent_model",
+    "trigger_due_future_tasks",
+    "update_memory",
+    "update_skill",
+    "update_skill_folder",
+]
