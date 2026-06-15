@@ -4,8 +4,51 @@ from __future__ import annotations
 
 import json
 
+from apps.shell import agent_runtime
+from apps.shell.agent.runtime.events import ToolEventPayloadBuilder, runtime_trace_input_preview
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
+
+
+def test_tool_event_payload_builder_remains_exported_and_redacts_inputs() -> None:
+    builder = ToolEventPayloadBuilder()
+    artifact_preview = {"path": "report.md", "content": "do not expose"}
+    memory_preview = {"kind": "fact", "content": "private", "old_content": "old private"}
+
+    assert agent_runtime.ToolEventPayloadBuilder is ToolEventPayloadBuilder
+    assert runtime_trace_input_preview("artifact.write", artifact_preview) == {"path": "report.md"}
+    assert runtime_trace_input_preview("memory.add", memory_preview) == {"kind": "fact"}
+    assert builder.payload(
+        "terminal.run",
+        {"command": "echo ok", "API_KEY": "sk-secret-value"},
+        pre_validation=True,
+        status="requested",
+    ) == {
+        "tool": "terminal.run",
+        "input_preview": {"redacted": True, "reason": "sensitive_input"},
+        "approved": False,
+        "status": "requested",
+    }
+
+
+def test_tool_event_payload_builder_projects_result_and_error() -> None:
+    builder = ToolEventPayloadBuilder()
+
+    payload = builder.payload(
+        "workspace.read",
+        {"path": "README.md"},
+        approved=True,
+        result={"ok": True, "content": "hello"},
+        error=RuntimeError("sk-secret-value"),
+        status="failed",
+    )
+
+    assert payload["tool"] == "workspace.read"
+    assert payload["input_preview"] == {"path": "README.md"}
+    assert payload["approved"] is True
+    assert payload["status"] == "failed"
+    assert payload["output_preview"] == {"ok": True, "content": "hello"}
+    assert "sk-secret-value" not in payload["error"]
 
 
 def test_agent_tool_call_emits_canonical_tool_events(tmp_path, monkeypatch) -> None:

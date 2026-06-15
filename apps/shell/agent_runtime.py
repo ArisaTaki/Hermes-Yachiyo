@@ -56,7 +56,11 @@ from apps.shell.agent.runtime.cancellation import (
 )
 from apps.shell.agent.runtime.errors import AgentApprovalRequired, AgentRuntimeError
 from apps.shell.agent.runtime.events import (
+    ToolEventPayloadBuilder,
+    canonical_tool_event_payload as _runtime_canonical_tool_event_payload,
+    canonical_tool_input_preview as _runtime_canonical_tool_input_preview,
     redact_json_value as _redact_json_value,
+    runtime_trace_input_preview as _runtime_event_trace_input_preview,
 )
 from apps.shell.agent.runtime.future_task_scheduler import FutureTaskTriggerScheduler
 from apps.shell.agent.runtime.run_projections import (
@@ -163,9 +167,6 @@ logger = logging.getLogger(__name__)
 
 
 _EXECUTION_BACKENDS = {"native_profile", "yachiyo_profile", "external_cli"}
-_SENSITIVE_PREVALIDATION_PREVIEW_RE = re.compile(
-    r"(?i)\b(?:authorization|bearer|[A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PASSWORD|PASSWD))\b"
-)
 _KNOWN_AGENT_TOOLS = {
     "skill.read",
     "memory.add",
@@ -1357,22 +1358,15 @@ def _canonical_tool_event_payload(
     error: Any = None,
     status: str = "",
 ) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "tool": tool_name,
-        "input_preview": _canonical_tool_input_preview(
-            tool_name,
-            input_preview,
-            pre_validation=pre_validation,
-        ),
-        "approved": bool(approved),
-    }
-    if status:
-        payload["status"] = status
-    if result is not None:
-        payload["output_preview"] = _tool_input_preview(result)
-    if error is not None:
-        payload["error"] = redact_api_error_text(error)
-    return payload
+    return _runtime_canonical_tool_event_payload(
+        tool_name,
+        input_preview,
+        approved=approved,
+        pre_validation=pre_validation,
+        result=result,
+        error=error,
+        status=status,
+    )
 
 
 def _canonical_tool_input_preview(
@@ -1381,20 +1375,11 @@ def _canonical_tool_input_preview(
     *,
     pre_validation: bool = False,
 ) -> Any:
-    preview = _runtime_trace_input_preview(tool_name, input_preview)
-    if not pre_validation:
-        return preview
-    try:
-        serialized = json.dumps(preview, ensure_ascii=False, sort_keys=True)
-    except (TypeError, ValueError):
-        serialized = str(preview)
-    if (
-        contains_sensitive_text(serialized)
-        or redact_secrets(serialized) != serialized
-        or _SENSITIVE_PREVALIDATION_PREVIEW_RE.search(serialized)
-    ):
-        return {"redacted": True, "reason": "sensitive_input"}
-    return preview
+    return _runtime_canonical_tool_input_preview(
+        tool_name,
+        input_preview,
+        pre_validation=pre_validation,
+    )
 
 
 def _artifact_created_payload(
@@ -1500,21 +1485,7 @@ def _memory_skill_trace_event(
 
 
 def _runtime_trace_input_preview(tool_name: str, input_preview: Any) -> Any:
-    if not isinstance(input_preview, dict):
-        return input_preview
-    if tool_name == "artifact.write":
-        return {
-            key: value
-            for key, value in input_preview.items()
-            if str(key) != "content"
-        }
-    if tool_name not in _MEMORY_TOOL_NAMES:
-        return input_preview
-    return {
-        key: value
-        for key, value in input_preview.items()
-        if str(key) not in {"content", "old_content"}
-    }
+    return _runtime_event_trace_input_preview(tool_name, input_preview)
 
 
 def _tool_trace_status(tool_result: dict[str, Any]) -> str:
@@ -1630,6 +1601,7 @@ class NativeRunEngine:
         self._run_cancel_locks: dict[str, threading.RLock] = {}
         self._run_cancel_locks_guard = threading.RLock()
         self.tool_request_parser = ToolRequestParser()
+        self.tool_event_payloads = ToolEventPayloadBuilder()
         self.tool_pending_approvals = ToolPendingApprovalBuilder(
             approval_id_factory=lambda: f"approval_{uuid4().hex[:12]}",
             now=_now,
@@ -5092,7 +5064,7 @@ class NativeRunEngine:
             self.append_run_event(
                 run_id,
                 "tool.requested",
-                _canonical_tool_event_payload(
+                self.tool_event_payloads.payload(
                     tool_name,
                     input_preview,
                     approved=approved,
@@ -5107,7 +5079,7 @@ class NativeRunEngine:
                 self.append_run_event(
                     run_id,
                     "tool.failed",
-                    _canonical_tool_event_payload(
+                    self.tool_event_payloads.payload(
                         tool_name,
                         input_preview,
                         approved=approved,
@@ -5122,7 +5094,7 @@ class NativeRunEngine:
             self.append_run_event(
                 run_id,
                 "tool.started",
-                _canonical_tool_event_payload(
+                self.tool_event_payloads.payload(
                     tool_name,
                     input_preview,
                     approved=approved,
@@ -5137,7 +5109,7 @@ class NativeRunEngine:
                     self.append_run_event(
                         run_id,
                         "tool.failed",
-                        _canonical_tool_event_payload(
+                        self.tool_event_payloads.payload(
                             tool_name,
                             input_preview,
                             approved=approved,
@@ -5168,7 +5140,7 @@ class NativeRunEngine:
                 self.append_run_event(
                     run_id,
                     "tool.approval_required",
-                    _canonical_tool_event_payload(
+                    self.tool_event_payloads.payload(
                         tool_name,
                         input_preview,
                         approved=approved,
@@ -5180,7 +5152,7 @@ class NativeRunEngine:
                 self.append_run_event(
                     run_id,
                     "tool.completed" if tool_result.get("ok") else "tool.failed",
-                    _canonical_tool_event_payload(
+                    self.tool_event_payloads.payload(
                         tool_name,
                         input_preview,
                         approved=approved,
