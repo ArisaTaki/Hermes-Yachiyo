@@ -63,6 +63,8 @@ def test_native_runtime_installs_tooling_bundle_under_legacy_attribute_names(tmp
         assert isinstance(service.tool_request_runner, RuntimeToolRequestRunner)
         assert service.tool_request_runner._tool_loop_projection is service.tool_loop_projection
         assert service.tool_request_runner._pending_approval_builder is service.tool_pending_approvals
+        assert getattr(service.tool_request_runner._run_budget, "__self__", None) is not service
+        assert getattr(service.tool_call_executor._run_budget, "__self__", None) is not service
         assert service.tool_call_executor._tool_call_events is service.runtime_tool_call_events
         assert service.tool_call_executor._trace_events is service.runtime_trace_events
         assert service.tool_call_executor._allows_tool is agent_runtime.PolicyGate.allows_tool

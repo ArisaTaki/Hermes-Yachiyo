@@ -18,6 +18,7 @@ from apps.shell.agent.runtime.budget import (
     limit_model_output,
     limit_tool_result,
     model_output_limiter,
+    run_budget_factory,
     run_budget_from_timeline,
     tool_result_limiter,
     truncate_text,
@@ -144,3 +145,21 @@ def test_run_budget_reconstructs_usage_from_timeline() -> None:
     assert budget.model_calls_used == 2
     assert budget.tool_calls_used == 3
     assert budget.terminal_calls_used == 1
+
+
+def test_run_budget_factory_reconstructs_usage_from_current_limits_and_run_time() -> None:
+    limits = RunBudgetLimits(max_model_calls=7)
+    factory = run_budget_factory(
+        limits=lambda: limits,
+        get_run=lambda run_id: {
+            "run_id": run_id,
+            "created_at": "2026-06-16T00:00:00+00:00",
+        },
+        iso_epoch=lambda value: 123.0 if value else 999.0,
+    )
+
+    budget = factory("run-1", [{"event": "model.output.completed"}])
+
+    assert budget.limits is limits
+    assert budget.started_at_epoch == 123.0
+    assert budget.model_calls_used == 1

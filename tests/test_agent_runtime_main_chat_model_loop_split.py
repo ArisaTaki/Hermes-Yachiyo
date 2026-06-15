@@ -162,6 +162,7 @@ def test_native_runtime_installs_main_chat_model_loop_runner(tmp_path) -> None:
     try:
         assert agent_runtime.MainChatModelLoopRunner is MainChatModelLoopRunner
         assert isinstance(service.main_chat_model_loop, MainChatModelLoopRunner)
+        assert getattr(service.main_chat_model_loop._run_budget, "__self__", None) is not service
         assert getattr(service.main_chat_model_loop._check_context_budget, "__self__", None) is not service
     finally:
         service.close()

@@ -66,6 +66,7 @@ from apps.shell.agent.runtime.budget import (
     limit_model_output as _runtime_limit_model_output,
     limit_tool_result as _runtime_limit_tool_result,
     model_output_limiter as _runtime_model_output_limiter,
+    run_budget_factory as _runtime_run_budget_factory,
     run_budget_from_timeline as _runtime_run_budget_from_timeline,
     tool_result_limiter as _runtime_tool_result_limiter,
     truncate_text as _truncate_text,
@@ -708,6 +709,11 @@ class NativeRunEngine:
             limits=lambda: self.runtime_limits,
             redact_text=redact_secrets,
         )
+        runtime_run_budget = _runtime_run_budget_factory(
+            limits=lambda: self.runtime_limits,
+            get_run=lambda run_id: self.get_run(run_id),
+            iso_epoch=_iso_epoch,
+        )
         self._install_runtime_main_chat_model(
             MainChatModelCaller(
                 get_run=self.get_run,
@@ -718,7 +724,7 @@ class NativeRunEngine:
                     profile_id,
                     capability=capability,
                 ),
-                run_budget=self._run_budget,
+                run_budget=runtime_run_budget,
                 check_context_budget=runtime_context_budget_checker,
                 limit_model_output=runtime_model_output_limiter,
                 timeline_factory=runtime_timeline_factory,
@@ -743,7 +749,7 @@ class NativeRunEngine:
         tooling = _build_runtime_tooling(
             normalize_tool_name=_normalize_tool_name,
             input_preview=_tool_input_preview,
-            run_budget=self._run_budget,
+            run_budget=runtime_run_budget,
             validate_tool_payload=RuntimeToolOperations.validate_tool_payload,
             limit_tool_result=_runtime_tool_result_limiter(
                 limits=lambda: self.runtime_limits,
@@ -768,7 +774,7 @@ class NativeRunEngine:
             RuntimeCustomApiAgentLoop(
                 agent_model_config_private=self._agent_model_config_private,
                 compile_agent_runtime=self._compile_agent_runtime,
-                run_budget=self._run_budget,
+                run_budget=runtime_run_budget,
                 check_context_budget=runtime_context_budget_checker,
                 tool_schemas=RuntimeToolOperations.model_tool_schemas,
                 normalize_tool_iteration=_normalize_tool_iteration,
@@ -853,7 +859,7 @@ class NativeRunEngine:
                 compile_agent_runtime=lambda agent: self._compile_agent_runtime(agent),
                 load_agent_skills=lambda skill_ids: self._load_agent_skills(skill_ids),
                 tool_brokers=self.tool_brokers,
-                run_budget=lambda run_id, timeline: self._run_budget(run_id, timeline),
+                run_budget=runtime_run_budget,
                 resume_approved_tool_run=lambda **kwargs: self._resume_approved_tool_run(**kwargs),
                 main_chat_agent_config=lambda **kwargs: self._main_chat_agent_config(**kwargs),
                 main_chat_pending_approval=lambda pending_approval, **kwargs: self._main_chat_pending_approval(
@@ -896,7 +902,7 @@ class NativeRunEngine:
                 ),
                 main_chat_agent_config=self._main_chat_agent_config,
                 compile_agent_runtime=self._compile_agent_runtime,
-                run_budget=self._run_budget,
+                run_budget=runtime_run_budget,
                 check_context_budget=runtime_context_budget_checker,
                 runtime_agent_timeline=self.runtime_agent_timeline,
                 timeline_factory=runtime_timeline_factory,

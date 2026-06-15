@@ -177,5 +177,6 @@ def test_native_runtime_installs_tool_approval_resume_service(tmp_path) -> None:
     try:
         assert agent_runtime.RuntimeToolApprovalResumeService is RuntimeToolApprovalResumeService
         assert isinstance(service.tool_approval_resume, RuntimeToolApprovalResumeService)
+        assert getattr(service.tool_approval_resume._run_budget, "__self__", None) is not service
     finally:
         service.close()

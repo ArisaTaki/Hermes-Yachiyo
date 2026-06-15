@@ -143,6 +143,27 @@ def run_budget_from_timeline(
     )
 
 
+def run_budget_factory(
+    *,
+    limits: RunBudgetLimits | Callable[[], RunBudgetLimits],
+    get_run: Callable[[str], dict[str, Any]],
+    iso_epoch: Callable[[Any], float],
+) -> Callable[[str, list[dict[str, Any]]], RunBudget]:
+    def build_run_budget(run_id: str, timeline: list[dict[str, Any]]) -> RunBudget:
+        try:
+            run = get_run(run_id) if run_id else {}
+        except KeyError:
+            run = {}
+        current_limits = limits() if callable(limits) else limits
+        return run_budget_from_timeline(
+            current_limits,
+            started_at_epoch=iso_epoch(run.get("created_at")),
+            timeline=timeline,
+        )
+
+    return build_run_budget
+
+
 def check_context_budget(
     budget: RunBudget,
     messages: list[dict[str, Any]],

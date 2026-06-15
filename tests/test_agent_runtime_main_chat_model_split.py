@@ -156,6 +156,7 @@ def test_native_runtime_installs_main_chat_model_caller_and_preserves_monkeypatc
     try:
         assert agent_runtime.MainChatModelCaller is MainChatModelCaller
         assert isinstance(service.main_chat_model, MainChatModelCaller)
+        assert getattr(service.main_chat_model._run_budget, "__self__", None) is not service
         assert getattr(service.main_chat_model._check_context_budget, "__self__", None) is not service
         assert getattr(service.main_chat_model._limit_model_output, "__self__", None) is not service
 

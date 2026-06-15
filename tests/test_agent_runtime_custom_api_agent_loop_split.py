@@ -183,6 +183,7 @@ def test_native_runtime_installs_custom_api_agent_loop(tmp_path) -> None:
         assert agent_runtime.RuntimeCustomApiAgentLoop is RuntimeCustomApiAgentLoop
         assert isinstance(service.custom_api_agent_loop, RuntimeCustomApiAgentLoop)
         assert service.custom_api_agent_loop._tool_schemas is RuntimeToolOperations.model_tool_schemas
+        assert getattr(service.custom_api_agent_loop._run_budget, "__self__", None) is not service
         assert getattr(service.custom_api_agent_loop._check_context_budget, "__self__", None) is not service
         assert getattr(service.custom_api_agent_loop._limit_model_output, "__self__", None) is not service
 
