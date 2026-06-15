@@ -62,6 +62,7 @@ from apps.shell.agent.runtime.agent_context import (
     agent_output_contract_rules as _runtime_agent_output_contract_rules,
     user_goal_from_agent_messages as _runtime_user_goal_from_agent_messages,
 )
+from apps.shell.agent.runtime.agent_preparation import RuntimeAgentRunPreparer
 from apps.shell.agent.runtime.agent_runs import RuntimeAgentRunStarter
 from apps.shell.agent.runtime.agent_skills import RuntimeAgentSkillLoader
 from apps.shell.agent.runtime.cancellation import (
@@ -1669,6 +1670,22 @@ class NativeRunEngine:
             load_agent_skills=self._load_agent_skills,
             long_term_memory_context=self._long_term_memory_context,
             operating_doctrine=_MARKET_AGENT_OPERATING_DOCTRINE,
+        )
+        self.agent_run_preparer = RuntimeAgentRunPreparer(
+            agent_artifacts_dir=self.agent_artifacts_dir,
+            normalize_execution_backend=_normalize_execution_backend,
+            compile_agent_runtime=self._compile_agent_runtime,
+            load_agent_skills=self._load_agent_skills,
+            agent_context=self._agent_context,
+            memory_store=self._memory_store,
+            future_task_store=self._future_task_store,
+            tool_broker_factory=ToolBroker,
+            runtime_agent_timeline=self.runtime_agent_timeline,
+            runtime_agent_run_events=self.runtime_agent_run_events,
+            runtime_trace_events=self.runtime_trace_events,
+            append_run_event=self.append_run_event,
+            timeline_factory=self._timeline,
+            memory_context_limit=_MEMORY_CONTEXT_LIMIT,
         )
         self.workflows = WorkflowRepository(
             self._conn,
@@ -4355,55 +4372,24 @@ class NativeRunEngine:
         return result
 
     def _execute_agent_run(self, run_id: str, agent: dict[str, Any], user_goal: str, upstream: str = "") -> dict[str, Any]:
-        backend = _normalize_execution_backend(agent.get("execution_backend"), model_mode=str(agent.get("model_mode") or "profile"))
-        runtime = self._compile_agent_runtime(agent)
-        timeline = [
-            self.runtime_agent_timeline.started(
-                str(agent["name"]),
-                backend=backend,
-                runtime=runtime["runtime"],
-            )
-        ]
-        self.runtime_agent_run_events.started(
+        preparation = self.agent_run_preparer.prepare(
             run_id,
-            agent_id=str(agent.get("agent_id") or ""),
-            agent_name=str(agent.get("name") or ""),
-            backend=backend,
-            runtime=runtime["runtime"],
+            agent,
+            user_goal,
+            upstream,
         )
-        timeline.append(
-            self.runtime_agent_timeline.compiled(
-                allowed_tools=runtime["tool_policy"].get("allowed_tools") or [],
-            )
-        )
-        artifact_root = self.agent_artifacts_dir / run_id
-        skills = self._load_agent_skills(agent.get("skill_ids") or [])
-        context = self._agent_context(agent, user_goal, upstream, skills=skills)
-        broker = ToolBroker(
-            runtime["workspace_policy"],
-            artifact_root,
-            skills=skills,
-            memory_store=self._memory_store(source_run_id=run_id),
-            future_task_store=self._future_task_store(
-                source_run_id=run_id,
-                default_runnable_id=str(agent.get("agent_id") or ""),
-            ),
-        )
-        artifacts: list[dict[str, Any]] = []
+        timeline = preparation.timeline
+        artifacts = preparation.artifacts
         try:
-            retrieved_memories = self._memory_store().list_items(
-                include_deleted=False,
-                limit=_MEMORY_CONTEXT_LIMIT,
+            self.agent_run_preparer.write_context_artifact(run_id, preparation)
+            result = self._run_custom_api_agent(
+                agent,
+                preparation.context,
+                preparation.broker,
+                timeline,
+                artifacts,
+                run_id=run_id,
             )
-            self.append_run_event(
-                run_id,
-                "memory.retrieved",
-                self.runtime_trace_events.memory_retrieved_payload(retrieved_memories),
-            )
-            artifact = broker.artifact_write("agent-context.md", context)
-            artifacts.append({"kind": "context", **artifact})
-            timeline.append(self._timeline("agent.artifact.write", "agent-context.md", artifact=artifact))
-            result = self._run_custom_api_agent(agent, context, broker, timeline, artifacts, run_id=run_id)
             result_text = str(result)
             self.append_run_event(
                 run_id,
