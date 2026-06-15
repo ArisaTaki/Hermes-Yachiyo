@@ -47,6 +47,10 @@ export function timelineEventTitle(event: Record<string, unknown>): string {
   if (name === 'run.rerun.started') return '从原 Run 重跑';
   if (name === 'group.member.started') return detail ? `群组成员启动 · ${detail}` : '群组成员启动';
   if (name === 'group.member.completed') return detail ? `群组成员完成 · ${detail}` : '群组成员完成';
+  if (name === 'group.approval_required') return detail ? `群组审批 · ${detail}` : '群组审批';
+  if (name === 'group.member.approval_required') return detail ? `成员审批 · ${detail}` : '成员审批';
+  if (name === 'group.artifact.created') return detail ? `群组产物 · ${detail}` : '群组产物';
+  if (name === 'group.shared_artifact.created') return detail ? `群组共享产物 · ${detail}` : '群组共享产物';
   if (name === 'workflow.run.started') return 'Workflow 已启动';
   if (name === 'workflow.node.start') return 'Workflow 起点';
   if (name === 'workflow.node.agent') return detail ? `Agent 节点 · ${detail}` : 'Agent 节点';
@@ -82,6 +86,7 @@ export function timelineEventTone(event: Record<string, unknown>): string {
   if (status === 'completed' || name.includes('completed')) return 'ready';
   if (status === 'approval_required' || name.includes('approval')) return 'approval';
   if (status === 'running' || status === 'processing' || name.includes('resumed')) return 'running';
+  if (name === 'group.artifact.created' || name === 'group.shared_artifact.created') return 'ready';
   if (name.startsWith('group.member.')) return name.includes('started') ? 'running' : 'ready';
   if (name.startsWith('skill.') || name.startsWith('memory.')) return 'tool';
   if (name.includes('tool')) return 'tool';
@@ -153,10 +158,13 @@ export function publicRunEventPayloadDetail(event: PublicRunEvent): string {
     || publicRunEventMemorySummary(payload)
     || publicRunEventPayloadString(payload, 'memory_id')
     || publicRunEventPayloadString(payload, 'memory_kind')
+    || publicRunEventPayloadString(payload, 'member_agent_name')
     || publicRunEventPayloadString(payload, 'agent_name')
     || publicRunEventPayloadString(payload, 'agent_id')
+    || publicRunEventPayloadString(payload, 'group_name')
     || publicRunEventPayloadString(payload, 'member_agent_id')
     || publicRunEventPayloadString(payload, 'group_id')
+    || publicRunEventArtifactSummary(payload)
     || publicRunEventPayloadString(payload, 'artifact_path')
     || publicRunEventPayloadString(payload, 'path')
     || publicRunEventPayloadString(payload, 'child_run_id')
@@ -182,7 +190,7 @@ export function runEventReplayToTimelineEvent(event: PublicRunEvent): Record<str
     sequence: event.sequence,
     input_preview: payload.input_preview,
     result: payload.result || payload.content || payload.error || '',
-    pending_approval: payload.pending_approval || null,
+    pending_approval: payload.pending_approval || payload.approval || null,
     child_run_id: payload.child_run_id,
     workflow_node_id: payload.workflow_node_id,
     workflow_node_kind: payload.workflow_node_kind,
@@ -227,4 +235,15 @@ function publicRunEventMemorySummary(payload: Record<string, unknown>): string {
     .filter(Boolean)
     .join('、');
   return labels ? `Memory × ${count || memories.length} · ${labels}` : `Memory × ${count || memories.length}`;
+}
+
+function publicRunEventArtifactSummary(payload: Record<string, unknown>): string {
+  const artifact = payload.artifact;
+  if (!artifact || typeof artifact !== 'object' || Array.isArray(artifact)) return '';
+  const artifactPayload = artifact as Record<string, unknown>;
+  return (
+    publicRunEventPayloadString(artifactPayload, 'title')
+    || publicRunEventPayloadString(artifactPayload, 'path')
+    || publicRunEventPayloadString(artifactPayload, 'artifact_path')
+  );
 }

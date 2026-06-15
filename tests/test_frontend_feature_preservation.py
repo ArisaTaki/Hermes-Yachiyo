@@ -696,6 +696,8 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "if (type === 'skill.dispatch.read') return 'Skill 调度';",
             "if (type === 'memory.retrieved') return 'Memory 检索';",
             "if (type === 'memory.write.add') return 'Memory 新增';",
+            "if (type === 'group.approval_required' || type === 'group.member.approval_required') return '群组等待审批';",
+            "if (type === 'group.artifact.created' || type === 'group.shared_artifact.created') return '群组产物已生成';",
         ],
     )
     _assert_contains(
@@ -3258,10 +3260,13 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "publicRunEventPayloadString(payload, 'skill_id')",
             "publicRunEventMemorySummary(payload)",
             "publicRunEventPayloadString(payload, 'memory_id')",
+            "publicRunEventPayloadString(payload, 'member_agent_name')",
+            "publicRunEventPayloadString(payload, 'group_name')",
+            "publicRunEventArtifactSummary(payload)",
             "publicRunEventPayloadString(payload, 'member_agent_id')",
             "publicRunEventPayloadString(payload, 'artifact_path')",
             "return `事件内容：\\n${formatTimelinePayload(payload)}`;",
-            "pending_approval: payload.pending_approval || null",
+            "pending_approval: payload.pending_approval || payload.approval || null",
             "const detail = publicRunEventPayloadDetail(event);",
             "const bySequence = new Map<number, PublicRunEvent>();",
             "incoming.forEach((event) => bySequence.set(Number(event.sequence) || 0, event));",
@@ -3281,8 +3286,11 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "if (name === 'run.rerun.started') return '从原 Run 重跑';",
             "if (name === 'group.member.started') return detail ? `群组成员启动 · ${detail}` : '群组成员启动';",
             "if (name === 'group.member.completed') return detail ? `群组成员完成 · ${detail}` : '群组成员完成';",
+            "if (name === 'group.approval_required') return detail ? `群组审批 · ${detail}` : '群组审批';",
+            "if (name === 'group.shared_artifact.created') return detail ? `群组共享产物 · ${detail}` : '群组共享产物';",
             "if (name === 'workflow.node.artifact') return detail ? `产物节点 · ${detail}` : '产物节点';",
             "if (name === 'workflow.edge.followed') return detail ? `Workflow 路由 · ${detail}` : 'Workflow 路由';",
+            "function publicRunEventArtifactSummary(payload: Record<string, unknown>): string",
         ],
     )
 

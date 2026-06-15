@@ -53,6 +53,8 @@ function runtimeTimelineEventLabel(event: RuntimeTimelineEventSnapshot): string 
   if (type === 'memory.write.replace') return 'Memory 更新';
   if (type === 'memory.write.remove') return 'Memory 删除';
   if (type === 'artifact.created') return '产物已生成';
+  if (type === 'group.approval_required' || type === 'group.member.approval_required') return '群组等待审批';
+  if (type === 'group.artifact.created' || type === 'group.shared_artifact.created') return '群组产物已生成';
   if (type === 'run.completed' || type === 'task.completed') return '任务完成';
   if (type === 'run.failed' || type === 'task.failed') return '任务失败';
   return type || '运行事件';
