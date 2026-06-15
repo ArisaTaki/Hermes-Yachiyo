@@ -401,3 +401,51 @@ def test_group_run_snapshot_reuses_shared_run_projection_for_children_artifacts_
     assert group_run.shared_artifacts[0].path == "team.md"
     assert group_run.pending_approvals[0].run_id == "group-run-1"
     assert group_run.pending_approvals[0].open_in_studio_url == "#/agents?run_id=group-run-1"
+
+
+def test_group_run_snapshot_derives_approvals_and_artifacts_from_group_events() -> None:
+    group_run = group_run_snapshot_from_payload(
+        {
+            "group_run_id": "group-events-only",
+            "group_id": "group-1",
+            "title": "Team review",
+            "status": "approval_required",
+            "objective": "Compare options",
+            "events": [
+                {
+                    "event_type": "group.approval_required",
+                    "payload": {
+                        "member_agent_id": "agent-1",
+                        "member_agent_name": "Planner",
+                        "pending_approval": {
+                            "approval_id": "approval-group-event",
+                            "input_preview": {"decision": "continue"},
+                        },
+                    },
+                    "created_at": "2026-06-15T00:00:00Z",
+                },
+                {
+                    "event_type": "group.shared_artifact.created",
+                    "payload": {
+                        "member_agent_id": "agent-1",
+                        "member_agent_name": "Planner",
+                        "artifact": {
+                            "path": "team-summary.md",
+                            "bytes": 33,
+                        },
+                    },
+                    "created_at": "2026-06-15T00:00:01Z",
+                },
+            ],
+        }
+    )
+
+    assert group_run.events[0].event_type == "group.approval_required"
+    assert group_run.pending_approvals[0].approval_id == "approval-group-event"
+    assert group_run.pending_approvals[0].tool_name == "group.approval"
+    assert group_run.pending_approvals[0].title == "Approve Planner"
+    assert group_run.pending_approvals[0].input_preview == {"decision": "continue"}
+    assert group_run.shared_artifacts[0].kind == "group_artifact"
+    assert group_run.shared_artifacts[0].path == "team-summary.md"
+    assert group_run.shared_artifacts[0].size_bytes == 33
+    assert group_run.shared_artifacts[0].source_run_id == "group-events-only"

@@ -728,26 +728,29 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
             "run_group_id": None,
         },
     ) in runtime.calls
-    assert (
-        "append_run_event",
-        {
-            "run_id": "run-1",
-            "event_type": "group.member.started",
-            "payload": {
-                "agent_id": "agent-1",
-                "agent_name": "Planner",
-                "group_id": "group-run-1",
-                "member_index": 0,
-                "member_role": "agent_run",
-                "objective": "Compare designs",
-                "run_group_id": "group-run-1",
-                "run_id": "run-1",
-                "status": "approval_required",
-                "client_run_id": "client-group-1",
-                "child_client_run_id": "client-group-1:0:agent-1",
-            },
-        },
-    ) in runtime.calls
+    group_started_events = [
+        call[1]
+        for call in runtime.calls
+        if call[0] == "append_run_event"
+        and call[1]["event_type"] == "group.member.started"
+    ]
+    assert group_started_events
+    group_started_payload = group_started_events[0]["payload"]
+    assert group_started_events[0]["run_id"] == "run-1"
+    assert group_started_payload["agent_id"] == "agent-1"
+    assert group_started_payload["agent_name"] == "Planner"
+    assert group_started_payload["group_id"] == "group-run-1"
+    assert group_started_payload["group_name"] == "Run group"
+    assert group_started_payload["group_mode"] == "pipeline"
+    assert group_started_payload["group_memory_scope"] == "shared"
+    assert group_started_payload["member_index"] == 0
+    assert group_started_payload["member_role"] == "agent_run"
+    assert group_started_payload["objective"] == "Compare designs"
+    assert group_started_payload["run_group_id"] == "group-run-1"
+    assert group_started_payload["run_id"] == "run-1"
+    assert group_started_payload["status"] == "approval_required"
+    assert group_started_payload["client_run_id"] == "client-group-1"
+    assert group_started_payload["child_client_run_id"] == "client-group-1:0:agent-1"
     assert (
         "read_run_artifact",
         {"run_id": "run-1", "artifact_path": "reports/final.md"},

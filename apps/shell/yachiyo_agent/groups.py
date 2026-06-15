@@ -60,6 +60,11 @@ def group_run_snapshot_from_payload(
     group_run_id = _text(payload.get("group_run_id") or legacy_run_group_id)
     group_id = _text(payload.get("group_id") or payload.get("agent_group_id"))
     runs_payload = payload.get("runs") or payload.get("child_runs") or []
+    events = _RUN_PROJECTOR.events_from_payload(
+        payload,
+        run_id=group_run_id,
+        keys=("events", "run_events", "recent_events", "timeline"),
+    )
     return GroupRunSnapshot(
         group_run_id=group_run_id,
         run_group_id=legacy_run_group_id or group_run_id or None,
@@ -69,24 +74,23 @@ def group_run_snapshot_from_payload(
         objective=_text(payload.get("objective") or payload.get("user_goal")),
         participants=agent_group_members_from_payloads(payload.get("participants")),
         active_speaker_agent_id=_optional_text(payload.get("active_speaker_agent_id")),
-        events=_RUN_PROJECTOR.events_from_payload(
-            payload,
-            run_id=group_run_id,
-            keys=("events", "run_events", "recent_events", "timeline"),
-        ),
+        events=events,
         runs=[
             _RUN_PROJECTOR.timeline_snapshot_from_payload(item)
             for item in runs_payload
             if isinstance(item, Mapping)
         ],
         child_run_ids=[str(item) for item in payload.get("child_run_ids") or [] if str(item)],
-        shared_artifacts=_RUN_PROJECTOR.artifacts_from_payloads(
-            payload.get("shared_artifacts") or payload.get("artifacts"),
+        shared_artifacts=_RUN_PROJECTOR.artifacts_from_payload(
+            {"artifacts": payload.get("shared_artifacts") or payload.get("artifacts")},
             run_id=group_run_id,
+            events=events,
         ),
-        pending_approvals=_RUN_PROJECTOR.approvals_from_payloads(
-            payload.get("pending_approvals"),
+        pending_approvals=_RUN_PROJECTOR.approvals_from_payload(
+            payload,
             run_id=group_run_id,
+            keys=("pending_approvals", "pending_approval"),
+            events=events,
         ),
         final_answer=_optional_text(payload.get("final_answer") or payload.get("summary")),
         created_at=_text(payload.get("created_at")),

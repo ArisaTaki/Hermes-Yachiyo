@@ -299,20 +299,26 @@ def timeline_children_from_payloads(payloads: Any) -> list[RunTimelineChildSnaps
 def _approval_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
     if event.event_type not in {
         "agent.tool.approval_required",
+        "group.approval_required",
+        "group.member.approval_required",
         "tool.approval_required",
         "workflow.node.approval_required",
         "workflow.run.approval_required",
     }:
         return {}
     payload = dict(event.payload)
-    pending = payload.get("pending_approval")
+    pending = payload.get("pending_approval") or payload.get("approval")
     source = dict(pending) if isinstance(pending, Mapping) else payload
     if not source:
         return {}
+    if event.event_type.startswith("group.") and not source.get("tool"):
+        source["tool"] = "group.approval"
     if event.event_type.startswith("workflow.") and not source.get("tool"):
         source["tool"] = "workflow.approval"
     if not source.get("title") and payload.get("workflow_node_label"):
         source["title"] = f"Approve {payload['workflow_node_label']}"
+    if not source.get("title") and payload.get("member_agent_name"):
+        source["title"] = f"Approve {payload['member_agent_name']}"
     source.setdefault("approval_id", f"{event.run_id}:{event.event_type}:{event.sequence}")
     source.setdefault("status", "pending")
     source.setdefault("created_at", event.created_at)
@@ -324,6 +330,14 @@ def _artifact_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
     payload = dict(event.payload)
     if event.event_type == "artifact.created":
         artifact_payload = payload
+    elif event.event_type in {"group.artifact.created", "group.shared_artifact.created"}:
+        artifact = payload.get("artifact")
+        artifact_payload = dict(artifact) if isinstance(artifact, Mapping) else payload
+        artifact_payload.setdefault("kind", "group_artifact")
+        if payload.get("member_agent_name"):
+            artifact_payload.setdefault("source_runnable_name", payload.get("member_agent_name"))
+        if payload.get("member_agent_id"):
+            artifact_payload.setdefault("source_runnable_id", payload.get("member_agent_id"))
     elif event.event_type == "workflow.node.artifact" and isinstance(payload.get("artifact"), Mapping):
         artifact_payload = {
             "kind": "workflow_artifact",
