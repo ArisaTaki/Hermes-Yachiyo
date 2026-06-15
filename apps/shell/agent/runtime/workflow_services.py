@@ -1,0 +1,81 @@
+"""Workflow planning and start service setup for the legacy engine entrypoint."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Callable
+
+from apps.shell.agent.runtime.run_readiness import RuntimeRunReadinessValidator
+from apps.shell.agent.runtime.workflow_path import WorkflowDefinitionValidator, WorkflowPathPlanner
+from apps.shell.agent.runtime.workflow_resume import WorkflowParentRunLocator, WorkflowResumePlanner
+from apps.shell.agent.runtime.workflow_runs import RuntimeWorkflowRunStarter
+from apps.shell.agent.runtime.workflow_start import WorkflowRunStartProjector
+
+
+@dataclass(frozen=True)
+class RuntimeWorkflowPlanningServiceBundle:
+    workflow_parent_locator: WorkflowParentRunLocator
+    workflow_path_planner: WorkflowPathPlanner
+    workflow_definition_validator: WorkflowDefinitionValidator
+    run_readiness_validator: RuntimeRunReadinessValidator
+    workflow_run_start_projector: WorkflowRunStartProjector
+    workflow_run_starter: RuntimeWorkflowRunStarter
+    workflow_resume_planner: WorkflowResumePlanner
+
+
+def build_runtime_workflow_planning_services(
+    *,
+    get_run_group: Callable[[str], dict[str, Any]],
+    get_run: Callable[[str], dict[str, Any]],
+    node_kind: Callable[[dict[str, Any]], str],
+    node_types: set[str],
+    get_agent_private: Callable[[str], dict[str, Any]],
+    get_workflow: Callable[[str], dict[str, Any]],
+    load_agent_skills: Callable[[list[str]], list[dict[str, Any]]],
+    agent_model_config_private: Callable[[dict[str, Any]], dict[str, Any]],
+    default_agent_ids: set[str],
+    timeline_factory: Callable[..., dict[str, Any]],
+    workflow_path_snapshot: Callable[[dict[str, Any]], list[dict[str, Any]]],
+    workflow_runtime_snapshot: Callable[[dict[str, Any]], dict[str, Any]],
+    insert_run_group: Callable[..., dict[str, Any]],
+    insert_run: Callable[..., dict[str, Any]],
+    run_by_client_request_id: Callable[[str], dict[str, Any] | None],
+    client_request_id_from_payload: Callable[[dict[str, Any]], str],
+    workflow_path: Callable[[dict[str, Any]], list[dict[str, Any]]],
+) -> RuntimeWorkflowPlanningServiceBundle:
+    return RuntimeWorkflowPlanningServiceBundle(
+        workflow_parent_locator=WorkflowParentRunLocator(
+            get_run_group=get_run_group,
+            get_run=get_run,
+        ),
+        workflow_path_planner=WorkflowPathPlanner(node_kind=node_kind),
+        workflow_definition_validator=WorkflowDefinitionValidator(
+            node_kind=node_kind,
+            node_types=node_types,
+        ),
+        run_readiness_validator=RuntimeRunReadinessValidator(
+            node_kind=node_kind,
+            get_agent_private=get_agent_private,
+            get_workflow=get_workflow,
+            load_agent_skills=load_agent_skills,
+            agent_model_config_private=agent_model_config_private,
+            default_agent_ids=default_agent_ids,
+        ),
+        workflow_run_start_projector=WorkflowRunStartProjector(
+            timeline_factory=timeline_factory,
+            path_snapshot=workflow_path_snapshot,
+            runtime_snapshot=workflow_runtime_snapshot,
+        ),
+        workflow_run_starter=RuntimeWorkflowRunStarter(
+            get_run_group=get_run_group,
+            insert_run_group=insert_run_group,
+            insert_run=insert_run,
+            run_by_client_request_id=run_by_client_request_id,
+            client_request_id_from_payload=client_request_id_from_payload,
+        ),
+        workflow_resume_planner=WorkflowResumePlanner(
+            get_workflow=get_workflow,
+            workflow_path=workflow_path,
+            node_kind=node_kind,
+        ),
+    )

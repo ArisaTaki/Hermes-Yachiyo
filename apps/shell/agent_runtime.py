@@ -253,6 +253,10 @@ from apps.shell.agent.runtime.workflow_resume import (
 )
 from apps.shell.agent.runtime.workflow_runs import RuntimeWorkflowRunStarter
 from apps.shell.agent.runtime.workflow_run_outcomes import WorkflowRunOutcomeProjector
+from apps.shell.agent.runtime.workflow_services import (
+    RuntimeWorkflowPlanningServiceBundle,
+    build_runtime_workflow_planning_services as _build_runtime_workflow_planning_services,
+)
 from apps.shell.agent.runtime.workflow_start import WorkflowRunStartProjector
 from apps.shell.agent.tools.broker import (
     _TERMINAL_PROCESS_LOCK,
@@ -749,40 +753,26 @@ class NativeRunEngine:
             update_run=lambda run_id, **kwargs: self._update_run(run_id, **kwargs),
         )
         self.workflow_child_outcomes = WorkflowChildOutcomeCoordinator()
-        self.workflow_parent_locator = WorkflowParentRunLocator(
+        workflow_planning_services = _build_runtime_workflow_planning_services(
             get_run_group=self.get_run_group,
             get_run=self.get_run,
-        )
-        self.workflow_path_planner = WorkflowPathPlanner(node_kind=self._node_kind)
-        self.workflow_definition_validator = WorkflowDefinitionValidator(
             node_kind=self._node_kind,
             node_types=_WORKFLOW_NODE_TYPES,
-        )
-        self.run_readiness_validator = RuntimeRunReadinessValidator(
-            node_kind=self._node_kind,
             get_agent_private=self._get_agent_private,
             get_workflow=self.get_workflow,
             load_agent_skills=self._load_agent_skills,
             agent_model_config_private=self._agent_model_config_private,
             default_agent_ids=_DEFAULT_AGENT_IDS,
-        )
-        self.workflow_run_start_projector = WorkflowRunStartProjector(
             timeline_factory=self._timeline,
-            path_snapshot=self._workflow_path_snapshot,
-            runtime_snapshot=self._workflow_runtime_snapshot,
-        )
-        self.workflow_run_starter = RuntimeWorkflowRunStarter(
-            get_run_group=self.get_run_group,
+            workflow_path_snapshot=self._workflow_path_snapshot,
+            workflow_runtime_snapshot=self._workflow_runtime_snapshot,
             insert_run_group=self._insert_run_group,
             insert_run=self._insert_run,
             run_by_client_request_id=self._run_by_client_request_id,
             client_request_id_from_payload=self._client_request_id_from_payload,
-        )
-        self.workflow_resume_planner = WorkflowResumePlanner(
-            get_workflow=self.get_workflow,
             workflow_path=self._workflow_path,
-            node_kind=self._node_kind,
         )
+        self._install_runtime_workflow_planning_services(workflow_planning_services)
         self.future_task_scheduler = FutureTaskTriggerScheduler(
             self._conn,
             self._db_lock,
@@ -877,6 +867,18 @@ class NativeRunEngine:
         self.approval_pause = approval_services.approval_pause
         self.approvals = approval_services.approvals
         self.approval_resume = approval_services.approval_resume
+
+    def _install_runtime_workflow_planning_services(
+        self,
+        workflow_services: RuntimeWorkflowPlanningServiceBundle,
+    ) -> None:
+        self.workflow_parent_locator = workflow_services.workflow_parent_locator
+        self.workflow_path_planner = workflow_services.workflow_path_planner
+        self.workflow_definition_validator = workflow_services.workflow_definition_validator
+        self.run_readiness_validator = workflow_services.run_readiness_validator
+        self.workflow_run_start_projector = workflow_services.workflow_run_start_projector
+        self.workflow_run_starter = workflow_services.workflow_run_starter
+        self.workflow_resume_planner = workflow_services.workflow_resume_planner
 
     def close(self) -> None:
         self.shutdown()
