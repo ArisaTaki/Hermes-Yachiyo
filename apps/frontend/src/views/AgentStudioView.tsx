@@ -193,7 +193,9 @@ export function AgentStudioView() {
   } = useAgentStudioConfirmDialog();
   const {
     agentGroups,
+    agentGroupMemoryScope,
     agentGroupMemberIds,
+    agentGroupMode,
     agentGroupName,
     agentGroupRunGoal,
     latestAgentGroupRun,
@@ -203,6 +205,8 @@ export function AgentStudioView() {
     selectAgentGroup,
     selectedAgentGroup,
     selectedAgentGroupId,
+    setAgentGroupMemoryScope,
+    setAgentGroupMode,
     setAgentGroupName,
     setAgentGroupRunGoal,
     startNewAgentGroup,
@@ -824,13 +828,17 @@ export function AgentStudioView() {
         <AgentGroupPanel
           agents={agents}
           agentGroups={agentGroups}
+          agentGroupMemoryScope={agentGroupMemoryScope || 'shared'}
           agentGroupMemberIds={agentGroupMemberIds}
+          agentGroupMode={agentGroupMode || 'moderated'}
           agentGroupName={agentGroupName}
           agentGroupRunGoal={agentGroupRunGoal}
           busy={busy}
           latestAgentGroupRun={latestAgentGroupRun}
           selectedAgentGroup={selectedAgentGroup}
           selectedAgentGroupId={selectedAgentGroupId}
+          onAgentGroupMemoryScopeChange={setAgentGroupMemoryScope}
+          onAgentGroupModeChange={setAgentGroupMode}
           onAgentGroupNameChange={setAgentGroupName}
           onAgentGroupRunGoalChange={setAgentGroupRunGoal}
           onOpenAgentGroupRunTimeline={openAgentGroupRunTimeline}

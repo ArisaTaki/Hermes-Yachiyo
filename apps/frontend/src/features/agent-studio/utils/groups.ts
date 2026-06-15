@@ -40,6 +40,8 @@ export function buildAgentGroupSaveRequest(
   name: string,
   memberIds: string[],
   currentGroup: AgentGroupSnapshot | null = null,
+  mode: AgentGroupSnapshot['mode'] = currentGroup?.mode || 'moderated',
+  memoryScope: AgentGroupSnapshot['memory_scope'] = currentGroup?.memory_scope || 'shared',
 ): SaveAgentGroupRequest {
   const currentModeratorId = currentGroup?.moderator_agent_id;
   const moderatorAgentId = currentModeratorId && memberIds.includes(currentModeratorId)
@@ -55,10 +57,10 @@ export function buildAgentGroupSaveRequest(
       sort_order: index,
       enabled: true,
     })),
-    mode: currentGroup?.mode || 'moderated',
+    mode,
     moderator_agent_id: moderatorAgentId || null,
     default_model: currentGroup?.default_model || null,
-    memory_scope: currentGroup?.memory_scope || 'shared',
+    memory_scope: memoryScope,
     tool_policy_id: currentGroup?.tool_policy_id || null,
     enabled: currentGroup?.enabled ?? true,
   };

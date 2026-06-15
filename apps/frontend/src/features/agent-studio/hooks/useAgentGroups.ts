@@ -25,6 +25,8 @@ export function useAgentGroups() {
   const [selectedAgentGroupId, setSelectedAgentGroupId] = useState('');
   const [agentGroupName, setAgentGroupName] = useState('New Group');
   const [agentGroupMemberIds, setAgentGroupMemberIds] = useState<string[]>([]);
+  const [agentGroupMode, setAgentGroupMode] = useState<AgentGroupSnapshot['mode']>('moderated');
+  const [agentGroupMemoryScope, setAgentGroupMemoryScope] = useState<AgentGroupSnapshot['memory_scope']>('shared');
   const [agentGroupRunGoal, setAgentGroupRunGoal] = useState('');
   const [latestAgentGroupRun, setLatestAgentGroupRun] = useState<GroupRunSnapshot | null>(null);
 
@@ -48,12 +50,16 @@ export function useAgentGroups() {
     if (!selectedAgentGroup) return;
     setAgentGroupName(selectedAgentGroup.name || 'Agent Group');
     setAgentGroupMemberIds(memberIdsForAgentGroup(selectedAgentGroup));
+    setAgentGroupMode(selectedAgentGroup.mode || 'moderated');
+    setAgentGroupMemoryScope(selectedAgentGroup.memory_scope || 'shared');
   }, [selectedAgentGroup]);
 
   const startNewAgentGroup = useCallback(() => {
     setSelectedAgentGroupId('');
     setAgentGroupName('New Group');
     setAgentGroupMemberIds([]);
+    setAgentGroupMode('moderated');
+    setAgentGroupMemoryScope('shared');
     setAgentGroupRunGoal('');
     setLatestAgentGroupRun(null);
   }, []);
@@ -73,7 +79,14 @@ export function useAgentGroups() {
     if (!name) throw new Error('Group 名称不能为空');
     if (!memberIds.length) throw new Error('Group 至少需要一个 Agent 成员');
     const saved = await saveYachiyoAgentGroup(
-      buildAgentGroupSaveRequest(selectedAgentGroupId, name, memberIds, selectedAgentGroup),
+      buildAgentGroupSaveRequest(
+        selectedAgentGroupId,
+        name,
+        memberIds,
+        selectedAgentGroup,
+        agentGroupMode,
+        agentGroupMemoryScope,
+      ),
     );
     setSelectedAgentGroupId(saved.group_id);
     setAgentGroupName(saved.name);
@@ -87,7 +100,14 @@ export function useAgentGroups() {
       saved,
       statusMessage: `已保存 Agent Group：${saved.name}`,
     };
-  }, [agentGroupMemberIds, agentGroupName, selectedAgentGroup, selectedAgentGroupId]);
+  }, [
+    agentGroupMemberIds,
+    agentGroupMemoryScope,
+    agentGroupMode,
+    agentGroupName,
+    selectedAgentGroup,
+    selectedAgentGroupId,
+  ]);
 
   const runAgentGroup = useCallback(async (): Promise<AgentGroupRunResult> => {
     const groupId = selectedAgentGroupId.trim();
@@ -108,6 +128,8 @@ export function useAgentGroups() {
   return {
     agentGroups,
     agentGroupMemberIds,
+    agentGroupMemoryScope,
+    agentGroupMode,
     agentGroupName,
     agentGroupRunGoal,
     applyAgentGroups,
@@ -118,6 +140,8 @@ export function useAgentGroups() {
     selectAgentGroup,
     selectedAgentGroup,
     selectedAgentGroupId,
+    setAgentGroupMemoryScope,
+    setAgentGroupMode,
     setAgentGroupName,
     setAgentGroupRunGoal,
     startNewAgentGroup,

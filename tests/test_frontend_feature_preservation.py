@@ -1220,6 +1220,8 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "export function nextSelectedAgentGroupId",
             "export function buildAgentGroupSaveRequest",
             "currentGroup: AgentGroupSnapshot | null = null",
+            "mode: AgentGroupSnapshot['mode'] = currentGroup?.mode || 'moderated'",
+            "memoryScope: AgentGroupSnapshot['memory_scope'] = currentGroup?.memory_scope || 'shared'",
             "moderator_agent_id: moderatorAgentId || null",
             "default_model: currentGroup?.default_model || null",
             "tool_policy_id: currentGroup?.tool_policy_id || null",
@@ -1229,8 +1231,11 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
     _assert_contains(
         "apps/frontend/src/features/agent-studio/hooks/useAgentGroups.ts",
         [
-            "buildAgentGroupSaveRequest(selectedAgentGroupId, name, memberIds, selectedAgentGroup)",
-            "selectedAgentGroup, selectedAgentGroupId",
+            "buildAgentGroupSaveRequest(",
+            "agentGroupMode",
+            "agentGroupMemoryScope",
+            "setAgentGroupMode(selectedAgentGroup.mode || 'moderated')",
+            "setAgentGroupMemoryScope(selectedAgentGroup.memory_scope || 'shared')",
         ],
     )
     _assert_contains(
@@ -1271,6 +1276,9 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
         [
             'data-testid="agent-studio-groups"',
             'data-testid="agent-group-member-picker"',
+            "agent-group-settings-grid",
+            "groupModeOptions",
+            "memoryScopeOptions",
             "GroupRunPanel",
             "selectedAgentGroup.moderator_agent_id",
             "selectedAgentGroup.default_model",

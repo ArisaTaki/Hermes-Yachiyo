@@ -14,13 +14,17 @@ import { GroupRunPanel } from './GroupRunPanel';
 type AgentGroupPanelProps = {
   agents: AgentSpec[];
   agentGroups: AgentGroupSnapshot[];
+  agentGroupMemoryScope: string;
   agentGroupMemberIds: string[];
+  agentGroupMode: string;
   agentGroupName: string;
   agentGroupRunGoal: string;
   busy: boolean;
   latestAgentGroupRun: GroupRunSnapshot | null;
   selectedAgentGroup: AgentGroupSnapshot | null;
   selectedAgentGroupId: string;
+  onAgentGroupMemoryScopeChange: (value: string) => void;
+  onAgentGroupModeChange: (value: string) => void;
   onAgentGroupNameChange: (value: string) => void;
   onAgentGroupRunGoalChange: (value: string) => void;
   onOpenAgentGroupRunTimeline: (groupRun: GroupRunSnapshot) => void;
@@ -30,6 +34,21 @@ type AgentGroupPanelProps = {
   onStartNewAgentGroup: () => void;
   onToggleAgentGroupMember: (agentId: string) => void;
 };
+
+const groupModeOptions = [
+  ['moderated', 'Moderated'],
+  ['round_robin', 'Round robin'],
+  ['debate', 'Debate'],
+  ['pipeline', 'Pipeline'],
+  ['parallel', 'Parallel'],
+  ['custom', 'Custom'],
+];
+
+const memoryScopeOptions = [
+  ['shared', 'Shared'],
+  ['per_agent', 'Per agent'],
+  ['hybrid', 'Hybrid'],
+];
 
 function AgentGroupAvatar({ avatarUrl, name }: { avatarUrl?: string; name: string }) {
   return (
@@ -42,13 +61,17 @@ function AgentGroupAvatar({ avatarUrl, name }: { avatarUrl?: string; name: strin
 export function AgentGroupPanel({
   agents,
   agentGroups,
+  agentGroupMemoryScope,
   agentGroupMemberIds,
+  agentGroupMode,
   agentGroupName,
   agentGroupRunGoal,
   busy,
   latestAgentGroupRun,
   selectedAgentGroup,
   selectedAgentGroupId,
+  onAgentGroupMemoryScopeChange,
+  onAgentGroupModeChange,
   onAgentGroupNameChange,
   onAgentGroupRunGoalChange,
   onOpenAgentGroupRunTimeline,
@@ -103,6 +126,33 @@ export function AgentGroupPanel({
             onChange={(event) => onAgentGroupNameChange(event.target.value)}
           />
         </label>
+
+        <div className="agent-group-settings-grid">
+          <label>
+            <span>运行模式</span>
+            <select
+              className="hy-select"
+              value={agentGroupMode || 'moderated'}
+              onChange={(event) => onAgentGroupModeChange(event.target.value)}
+            >
+              {groupModeOptions.map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>记忆范围</span>
+            <select
+              className="hy-select"
+              value={agentGroupMemoryScope || 'shared'}
+              onChange={(event) => onAgentGroupMemoryScopeChange(event.target.value)}
+            >
+              {memoryScopeOptions.map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+          </label>
+        </div>
 
         <div className="section-heading-row compact">
           <h3>Members</h3>
