@@ -16,6 +16,7 @@ from apps.shell.agent.runtime.definition_services import (
     RuntimeDefinitionServiceBundle,
     build_runtime_definition_services,
 )
+from apps.shell.agent.runtime.skill_attachments import RuntimeAgentSkillAttachmentService
 from apps.shell.agent.runtime.skill_content import SkillContentInspector
 from apps.shell.agent.runtime.skill_import import SkillImportPreparer, SkillImportSourceResolver
 from apps.shell.agent.runtime.skill_install import SkillInstallCommandValidator
@@ -27,6 +28,7 @@ from apps.shell.credential_store import MemoryCredentialStore
 
 def test_runtime_definition_service_helpers_remain_exported_from_legacy_module() -> None:
     assert agent_runtime.RuntimeDefinitionServiceBundle is RuntimeDefinitionServiceBundle
+    assert agent_runtime.RuntimeAgentSkillAttachmentService is RuntimeAgentSkillAttachmentService
 
 
 def test_build_runtime_definition_services_wires_repositories_and_skill_helpers(tmp_path) -> None:
@@ -98,6 +100,7 @@ def test_build_runtime_definition_services_wires_repositories_and_skill_helpers(
     assert isinstance(bundle.skill_folders, SkillFolderRepository)
     assert isinstance(bundle.skill_records, SkillRepository)
     assert isinstance(bundle.agent_definitions, AgentDefinitionRepository)
+    assert isinstance(bundle.agent_skill_attachments, RuntimeAgentSkillAttachmentService)
     assert isinstance(bundle.skill_install_validator, SkillInstallCommandValidator)
     assert isinstance(bundle.skill_sources, SkillSourceDiscovery)
     assert isinstance(bundle.skill_content, SkillContentInspector)
@@ -108,6 +111,8 @@ def test_build_runtime_definition_services_wires_repositories_and_skill_helpers(
     assert bundle.task_run_links._conn is conn
     assert bundle.skill_records._conn is conn
     assert bundle.agent_definitions._conn is conn
+    assert bundle.agent_skill_attachments._agent_definitions is bundle.agent_definitions
+    assert bundle.agent_skill_attachments._skill_records is bundle.skill_records
     assert bundle.workflows._conn is conn
     assert bundle.skill_import_preparer._content is bundle.skill_content
 
@@ -126,6 +131,7 @@ def test_native_runtime_installs_definition_services_under_legacy_attribute_name
         assert isinstance(service.skill_folders, SkillFolderRepository)
         assert isinstance(service.skill_records, SkillRepository)
         assert isinstance(service.agent_definitions, AgentDefinitionRepository)
+        assert isinstance(service.agent_skill_attachments, RuntimeAgentSkillAttachmentService)
         assert isinstance(service.skill_install_validator, SkillInstallCommandValidator)
         assert isinstance(service.skill_sources, SkillSourceDiscovery)
         assert isinstance(service.skill_content, SkillContentInspector)
@@ -136,6 +142,8 @@ def test_native_runtime_installs_definition_services_under_legacy_attribute_name
         assert service.task_run_links._conn is service._conn
         assert service.skill_records._conn is service._conn
         assert service.agent_definitions._conn is service._conn
+        assert service.agent_skill_attachments._agent_definitions is service.agent_definitions
+        assert service.agent_skill_attachments._skill_records is service.skill_records
         assert service.workflows._conn is service._conn
         assert service.skill_import_preparer._content is service.skill_content
     finally:

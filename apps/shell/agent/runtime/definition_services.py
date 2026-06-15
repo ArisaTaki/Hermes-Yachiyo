@@ -13,6 +13,7 @@ from apps.shell.agent.repositories.studio_deletions import StudioDeletionReposit
 from apps.shell.agent.repositories.task_run_links import TaskRunLinkRepository
 from apps.shell.agent.repositories.workflows import WorkflowRepository
 from apps.shell.agent.repositories.workspaces import TrustedWorkspaceRepository
+from apps.shell.agent.runtime.skill_attachments import RuntimeAgentSkillAttachmentService
 from apps.shell.agent.runtime.skill_content import SkillContentInspector
 from apps.shell.agent.runtime.skill_import import SkillImportPreparer, SkillImportSourceResolver
 from apps.shell.agent.runtime.skill_install import SkillInstallCommandValidator
@@ -28,6 +29,7 @@ class RuntimeDefinitionServiceBundle:
     skill_folders: SkillFolderRepository
     skill_records: SkillRepository
     agent_definitions: AgentDefinitionRepository
+    agent_skill_attachments: RuntimeAgentSkillAttachmentService
     skill_install_validator: SkillInstallCommandValidator
     skill_sources: SkillSourceDiscovery
     skill_content: SkillContentInspector
@@ -91,6 +93,49 @@ def build_runtime_definition_services(
     validate_workflow_subworkflow_nodes: Callable[..., Any],
 ) -> RuntimeDefinitionServiceBundle:
     skill_content = SkillContentInspector()
+    skill_records = SkillRepository(
+        conn,
+        ensure_row_factory=ensure_row_factory,
+        row_to_skill=row_to_skill,
+        now=now,
+        json_dump=json_dump,
+        json_load=json_load,
+        normalize_skill_folder_id=normalize_skill_folder_id,
+        installed_skill_source_map=installed_skill_source_map,
+        record_studio_deletion=record_studio_deletion,
+        skill_deletion_key=skill_deletion_key,
+        is_native_library_source_type=is_native_library_source_type,
+        skills_dir=skills_dir,
+        skill_installs_dir=skill_installs_dir,
+        skill_id_factory=skill_id_factory,
+        asset_paths_for=SkillContentInspector.asset_paths,
+    )
+    agent_definitions = AgentDefinitionRepository(
+        conn,
+        ensure_row_factory=ensure_row_factory,
+        row_to_agent=row_to_agent,
+        row_to_agent_private=row_to_agent_private,
+        coerce_named_row=coerce_named_row,
+        main_chat_virtual_agent=main_chat_virtual_agent,
+        now=now,
+        json_dump=json_dump,
+        agent_id_factory=agent_id_factory,
+        normalize_execution_backend=normalize_execution_backend,
+        ensure_global_name_available=ensure_global_name_available,
+        validate_agent_profile_refs=validate_agent_profile_refs,
+        compile_tool_policy=compile_tool_policy,
+        compile_workspace_policy=compile_workspace_policy,
+        assign_default_agent_workdir=assign_default_agent_workdir,
+        trust_workspace_from_policy=trust_workspace_from_policy,
+        agent_model_credential_ref=agent_model_credential_ref,
+        store_credential=store_credential,
+        delete_credential=delete_credential,
+        record_studio_deletion=record_studio_deletion,
+        clear_studio_deletion=clear_studio_deletion,
+        system_agent_ids=system_agent_ids,
+        main_chat_agent_id=main_chat_agent_id,
+        error_type=error_type,
+    )
     return RuntimeDefinitionServiceBundle(
         task_run_links=TaskRunLinkRepository(
             conn,
@@ -118,47 +163,11 @@ def build_runtime_definition_services(
             delete_skill=delete_skill,
             error_type=error_type,
         ),
-        skill_records=SkillRepository(
-            conn,
-            ensure_row_factory=ensure_row_factory,
-            row_to_skill=row_to_skill,
-            now=now,
-            json_dump=json_dump,
-            json_load=json_load,
-            normalize_skill_folder_id=normalize_skill_folder_id,
-            installed_skill_source_map=installed_skill_source_map,
-            record_studio_deletion=record_studio_deletion,
-            skill_deletion_key=skill_deletion_key,
-            is_native_library_source_type=is_native_library_source_type,
-            skills_dir=skills_dir,
-            skill_installs_dir=skill_installs_dir,
-            skill_id_factory=skill_id_factory,
-            asset_paths_for=SkillContentInspector.asset_paths,
-        ),
-        agent_definitions=AgentDefinitionRepository(
-            conn,
-            ensure_row_factory=ensure_row_factory,
-            row_to_agent=row_to_agent,
-            row_to_agent_private=row_to_agent_private,
-            coerce_named_row=coerce_named_row,
-            main_chat_virtual_agent=main_chat_virtual_agent,
-            now=now,
-            json_dump=json_dump,
-            agent_id_factory=agent_id_factory,
-            normalize_execution_backend=normalize_execution_backend,
-            ensure_global_name_available=ensure_global_name_available,
-            validate_agent_profile_refs=validate_agent_profile_refs,
-            compile_tool_policy=compile_tool_policy,
-            compile_workspace_policy=compile_workspace_policy,
-            assign_default_agent_workdir=assign_default_agent_workdir,
-            trust_workspace_from_policy=trust_workspace_from_policy,
-            agent_model_credential_ref=agent_model_credential_ref,
-            store_credential=store_credential,
-            delete_credential=delete_credential,
-            record_studio_deletion=record_studio_deletion,
-            clear_studio_deletion=clear_studio_deletion,
-            system_agent_ids=system_agent_ids,
-            main_chat_agent_id=main_chat_agent_id,
+        skill_records=skill_records,
+        agent_definitions=agent_definitions,
+        agent_skill_attachments=RuntimeAgentSkillAttachmentService(
+            agent_definitions=agent_definitions,
+            skill_records=skill_records,
             error_type=error_type,
         ),
         skill_install_validator=SkillInstallCommandValidator(

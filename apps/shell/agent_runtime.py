@@ -96,6 +96,7 @@ from apps.shell.agent.runtime.agent_services import (
     build_runtime_agent_services as _build_runtime_agent_services,
 )
 from apps.shell.agent.runtime.agent_skills import RuntimeAgentSkillLoader
+from apps.shell.agent.runtime.skill_attachments import RuntimeAgentSkillAttachmentService
 from apps.shell.agent.runtime.cancellation import (
     RunCancellationProjection,
     WorkflowCancellationProjectionCoordinator,
@@ -1159,6 +1160,7 @@ class NativeRunEngine:
         self.skill_folders = services.skill_folders
         self.skill_records = services.skill_records
         self.agent_definitions = services.agent_definitions
+        self.agent_skill_attachments = services.agent_skill_attachments
         self.skill_install_validator = services.skill_install_validator
         self.skill_sources = services.skill_sources
         self.skill_content = services.skill_content
@@ -1569,17 +1571,10 @@ class NativeRunEngine:
         return self.agent_definitions.delete(agent_id)
 
     def attach_skill(self, agent_id: str, skill_id: str) -> dict[str, Any]:
-        agent = self.get_agent(agent_id)
-        skill = self.get_skill(skill_id)
-        if not skill.get("enabled", True):
-            raise AgentRuntimeError("Skill 已停用，不能挂载")
-        skill_ids = list(dict.fromkeys([*agent.get("skill_ids", []), skill_id]))
-        return self.update_agent(agent_id, {"skill_ids": skill_ids})
+        return self.agent_skill_attachments.attach(agent_id, skill_id)
 
     def detach_skill(self, agent_id: str, skill_id: str) -> dict[str, Any]:
-        agent = self.get_agent(agent_id)
-        skill_ids = [item for item in agent.get("skill_ids", []) if item != skill_id]
-        return self.update_agent(agent_id, {"skill_ids": skill_ids})
+        return self.agent_skill_attachments.detach(agent_id, skill_id)
 
     def list_skill_folders(self) -> dict[str, Any]:
         return self.skill_folders.list()
