@@ -70,6 +70,7 @@ from apps.shell.agent.runtime.cancellation import (
     WorkflowCancellationProjectionCoordinator,
     WorkflowCancellationTarget,
 )
+from apps.shell.agent.runtime.delegation import ChatRunnableMentionParser
 from apps.shell.agent.runtime.errors import AgentApprovalRequired, AgentRuntimeError
 from apps.shell.agent.runtime.events import (
     RuntimeAgentRunEventRecorder,
@@ -924,6 +925,9 @@ class NativeRunEngine:
             now=_now,
             redact_secrets=redact_secrets,
             error_type=AgentRuntimeError,
+        )
+        self.chat_runnable_parser = ChatRunnableMentionParser(
+            list_runnables=lambda: list(self.list_runnables().get("runnables") or []),
         )
         self.workflow_parent_resume = WorkflowParentResumeCoordinator(
             parent_runs_waiting_for_child=lambda child_run: self._workflow_parent_runs_waiting_for_child(child_run),
@@ -4655,74 +4659,19 @@ class NativeRunEngine:
         }
 
     def parse_known_chat_runnable(self, text: str) -> tuple[str, str] | None:
-        value = (text or "").strip()
-        mention = self._chat_mention_parts(value)
-        if mention is None:
-            return None
-        prefix, body, remaining_lines = mention
-        if not body.strip():
-            return None
-        if body.startswith('"') or body.startswith("'"):
-            return self.parse_chat_runnable(value)
-        runnables = sorted(
-            self.list_runnables()["runnables"],
-            key=lambda item: max(len(str(item.get("name") or "")), len(str(item.get("nickname") or ""))),
-            reverse=True,
-        )
-        body_lower = body.lower()
-        for runnable in runnables:
-            aliases = [
-                str(runnable.get("name") or "").strip(),
-                str(runnable.get("nickname") or "").strip(),
-            ]
-            for name in sorted({alias for alias in aliases if alias}, key=len, reverse=True):
-                if not body_lower.startswith(name.lower()):
-                    continue
-                remainder = body[len(name) :]
-                if remainder and not remainder[0].isspace():
-                    continue
-                return name, self._chat_mention_goal(prefix, remainder, remaining_lines)
-        parsed = self.parse_chat_runnable(value)
-        if parsed is None:
-            return None
-        raw_name = str(parsed[0] or "").strip().lower()
-        if raw_name in {"agent", "agents", "workflow", "workflows", "runnable", "runnables"}:
-            return None
-        return parsed
+        return self.chat_runnable_parser.parse_known(text)
 
     @staticmethod
     def parse_chat_runnable(text: str) -> tuple[str, str] | None:
-        value = (text or "").strip()
-        mention = NativeRunEngine._chat_mention_parts(value)
-        if mention is None:
-            return None
-        prefix, body, remaining_lines = mention
-        match = re.match(r"^(?P<name>\"[^\"]+\"|'[^']+'|[^\s，。！？、；;,.!?]+)\s*(?P<body>.*)$", body)
-        if not match:
-            return None
-        raw_name = match.group("name").strip("\"'")
-        rest = match.group("body")
-        return raw_name, NativeRunEngine._chat_mention_goal(prefix, rest, remaining_lines)
+        return ChatRunnableMentionParser.parse(text)
 
     @staticmethod
     def _chat_mention_parts(text: str) -> tuple[str, str, list[str]] | None:
-        value = (text or "").strip()
-        if not value:
-            return None
-        lines = value.splitlines()
-        first_line = lines[0]
-        match = re.search(r"(^|[\s，。！？、；;,.!?])@(?P<body>.+)$", first_line)
-        if not match:
-            return None
-        prefix = first_line[: match.start()].strip()
-        body = match.group("body")
-        return prefix, body, lines[1:]
+        return ChatRunnableMentionParser.mention_parts(text)
 
     @staticmethod
     def _chat_mention_goal(prefix: str, remainder: str, remaining_lines: list[str]) -> str:
-        first_line_parts = [part.strip() for part in (prefix, remainder) if part and part.strip()]
-        first_line = " ".join(first_line_parts)
-        return "\n".join([first_line, *remaining_lines]).strip()
+        return ChatRunnableMentionParser.mention_goal(prefix, remainder, remaining_lines)
 
 
 AgentRuntimeService = NativeRunEngine
