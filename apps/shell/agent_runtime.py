@@ -137,6 +137,7 @@ from apps.shell.agent.runtime.events import (
     tool_input_preview as _tool_input_preview,
     tool_trace_status as _tool_trace_status,
 )
+from apps.shell.agent.runtime.future_task_service import RuntimeFutureTaskService
 from apps.shell.agent.runtime.future_task_scheduler import FutureTaskTriggerScheduler
 from apps.shell.agent.runtime.main_chat_config import MainChatRuntimeConfigBuilder
 from apps.shell.agent.runtime.main_chat_model import MainChatModelCaller
@@ -945,6 +946,13 @@ class NativeRunEngine:
             create_workflow_run_async=self.create_workflow_run_async,
         )
         self._install_runtime_runnable_services(runnable_services)
+        self.future_task_service = RuntimeFutureTaskService(
+            future_task_store=lambda **kwargs: self._future_task_store(**kwargs),
+            resolve_runnable=self.runnable_resolver.resolve,
+            trigger_scheduler=self.future_task_scheduler,
+            default_runnable_id=_MAIN_CHAT_AGENT_ID,
+            error_type=AgentRuntimeError,
+        )
         workflow_transition_services = _build_runtime_workflow_transition_services(
             parent_runs_waiting_for_child=lambda child_run: self._workflow_parent_runs_waiting_for_child(child_run),
             workflow_run_is_group_root=lambda workflow_run: self._workflow_run_is_group_root(workflow_run),
@@ -1458,40 +1466,16 @@ class NativeRunEngine:
         return self.memory_services.long_term_memory_context()
 
     def schedule_future_task(self, payload: dict[str, Any], *, source_run_id: str = "") -> dict[str, Any]:
-        runnable_name = str(payload.get("runnable_name") or payload.get("name") or "").strip()
-        runnable_id = str(payload.get("runnable_id") or ("" if runnable_name else _MAIN_CHAT_AGENT_ID)).strip()
-        if self.resolve_runnable(runnable_id=runnable_id, name=runnable_name) is None:
-            raise AgentRuntimeError("FutureTask 指向的 Agent 或 Workflow 不存在")
-        return self._future_task_store(
-            source_run_id=source_run_id or "manual",
-            default_runnable_id=runnable_id,
-        ).schedule(
-            title=str(payload.get("title") or ""),
-            prompt=str(payload.get("prompt") or payload.get("user_goal") or payload.get("goal") or ""),
-            runnable_id=runnable_id,
-            runnable_name=runnable_name,
-            delay_seconds=payload.get("delay_seconds"),
-            scheduled_at_epoch=payload.get("scheduled_at_epoch"),
-            cron=str(payload.get("cron") or ""),
-        )
+        return self.future_task_service.schedule(payload, source_run_id=source_run_id)
 
     def list_future_tasks(self, *, include_finished: bool = True, limit: int = 100) -> dict[str, Any]:
-        return {
-            "ok": True,
-            "future_tasks": self._future_task_store().list_tasks(
-                include_finished=include_finished,
-                limit=limit,
-            ),
-        }
+        return self.future_task_service.list(include_finished=include_finished, limit=limit)
 
     def cancel_future_task(self, future_task_id: str, *, reason: str = "") -> dict[str, Any]:
-        return self._future_task_store(source_run_id="manual").cancel(future_task_id, reason=reason)
+        return self.future_task_service.cancel(future_task_id, reason=reason)
 
     def trigger_due_future_tasks(self, *, now_epoch: float | None = None, limit: int = 20) -> dict[str, Any]:
-        return self.future_task_scheduler.trigger_due_future_tasks(
-            now_epoch=now_epoch,
-            limit=limit,
-        )
+        return self.future_task_service.trigger_due(now_epoch=now_epoch, limit=limit)
 
     def _row_to_agent(self, row: Any) -> dict[str, Any]:
         return _project_agent_row(
