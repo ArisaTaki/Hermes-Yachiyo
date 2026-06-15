@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import time
+import json
 from dataclasses import dataclass
+from typing import Any, Callable
 
 from apps.shell.agent.runtime.errors import AgentRuntimeError
 
@@ -67,6 +69,111 @@ class RunBudget:
         self.tool_calls_used += 1
         if terminal_execution:
             self.terminal_calls_used += 1
+
+
+def json_chars(value: Any) -> int:
+    try:
+        return len(json.dumps(value, ensure_ascii=False, default=str))
+    except (TypeError, ValueError):
+        return len(str(value))
+
+
+def truncate_text(value: Any, max_chars: int) -> tuple[str, bool]:
+    text = str(value or "")
+    limit = max(1, int(max_chars or 1))
+    if len(text) <= limit:
+        return text, False
+    marker = "\n\n[truncated]"
+    if limit <= len(marker):
+        return text[:limit], True
+    return text[: limit - len(marker)] + marker, True
+
+
+def limit_json_strings(value: Any, max_chars: int) -> tuple[Any, bool]:
+    if isinstance(value, dict):
+        changed = False
+        limited: dict[str, Any] = {}
+        for key, item in value.items():
+            next_item, item_changed = limit_json_strings(item, max_chars)
+            limited[str(key)] = next_item
+            changed = changed or item_changed
+        return limited, changed
+    if isinstance(value, list):
+        changed = False
+        limited_items = []
+        for item in value:
+            next_item, item_changed = limit_json_strings(item, max_chars)
+            limited_items.append(next_item)
+            changed = changed or item_changed
+        return limited_items, changed
+    if isinstance(value, tuple):
+        return limit_json_strings(list(value), max_chars)
+    if isinstance(value, str):
+        return truncate_text(value, max_chars)
+    return value, False
+
+
+def run_budget_from_timeline(
+    limits: RunBudgetLimits,
+    *,
+    started_at_epoch: float,
+    timeline: list[dict[str, Any]],
+) -> RunBudget:
+    model_calls = 0
+    tool_calls = 0
+    terminal_calls = 0
+    for event in timeline:
+        if not isinstance(event, dict):
+            continue
+        event_name = str(event.get("event") or "")
+        if event_name in {"agent.model.response", "model.output.completed"}:
+            model_calls += 1
+        if event_name in {"agent.tool.call", "agent.tool.skipped", "agent.tool.denied"}:
+            tool_calls += 1
+        if event_name == "agent.tool.call" and str(event.get("detail") or "") == "terminal.run":
+            result = event.get("result") if isinstance(event.get("result"), dict) else {}
+            if not result.get("approval_required"):
+                terminal_calls += 1
+    return RunBudget(
+        limits=limits,
+        started_at_epoch=started_at_epoch,
+        model_calls_used=model_calls,
+        tool_calls_used=tool_calls,
+        terminal_calls_used=terminal_calls,
+    )
+
+
+def check_context_budget(
+    budget: RunBudget,
+    messages: list[dict[str, Any]],
+    *,
+    redact_json_value: Callable[[Any], Any],
+) -> None:
+    budget.check_context(json_chars(redact_json_value(messages)))
+
+
+def limit_model_output(
+    value: Any,
+    *,
+    limits: RunBudgetLimits,
+    redact_text: Callable[[Any], str],
+) -> tuple[str, bool]:
+    return truncate_text(redact_text(value), limits.max_model_output_chars)
+
+
+def limit_tool_result(
+    result: dict[str, Any],
+    *,
+    limits: RunBudgetLimits,
+    redact_json_value: Callable[[Any], Any],
+) -> dict[str, Any]:
+    limited, truncated = limit_json_strings(
+        redact_json_value(result),
+        limits.max_tool_output_chars,
+    )
+    if isinstance(limited, dict) and truncated:
+        return {**limited, "truncated": True}
+    return limited if isinstance(limited, dict) else {"ok": False, "error": str(limited)}
 
 
 @dataclass

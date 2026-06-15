@@ -51,6 +51,13 @@ from apps.shell.agent.runtime.budget import (
 )
 from apps.shell.agent.runtime.budget import (
     WorkflowRunBudget as _WorkflowRunBudget,
+    check_context_budget as _runtime_check_context_budget,
+    json_chars as _json_chars,
+    limit_json_strings as _limit_json_strings,
+    limit_model_output as _runtime_limit_model_output,
+    limit_tool_result as _runtime_limit_tool_result,
+    run_budget_from_timeline as _runtime_run_budget_from_timeline,
+    truncate_text as _truncate_text,
 )
 from apps.shell.agent.runtime.approval_lifecycle import (
     ApprovalCoordinator,
@@ -377,48 +384,6 @@ def _iso_epoch(value: Any) -> float:
         return datetime.fromisoformat(text).timestamp()
     except ValueError:
         return time.time()
-
-
-def _json_chars(value: Any) -> int:
-    try:
-        return len(json.dumps(value, ensure_ascii=False, default=str))
-    except (TypeError, ValueError):
-        return len(str(value))
-
-
-def _truncate_text(value: Any, max_chars: int) -> tuple[str, bool]:
-    text = str(value or "")
-    limit = max(1, int(max_chars or 1))
-    if len(text) <= limit:
-        return text, False
-    marker = "\n\n[truncated]"
-    if limit <= len(marker):
-        return text[:limit], True
-    return text[: limit - len(marker)] + marker, True
-
-
-def _limit_json_strings(value: Any, max_chars: int) -> tuple[Any, bool]:
-    if isinstance(value, dict):
-        changed = False
-        limited: dict[str, Any] = {}
-        for key, item in value.items():
-            next_item, item_changed = _limit_json_strings(item, max_chars)
-            limited[str(key)] = next_item
-            changed = changed or item_changed
-        return limited, changed
-    if isinstance(value, list):
-        changed = False
-        limited_items = []
-        for item in value:
-            next_item, item_changed = _limit_json_strings(item, max_chars)
-            limited_items.append(next_item)
-            changed = changed or item_changed
-        return limited_items, changed
-    if isinstance(value, tuple):
-        return _limit_json_strings(list(value), max_chars)
-    if isinstance(value, str):
-        return _truncate_text(value, max_chars)
-    return value, False
 
 
 def _skill_content_hash(root: Path) -> str:
@@ -2754,41 +2719,20 @@ class NativeRunEngine:
             run = self.get_run(run_id) if run_id else {}
         except KeyError:
             run = {}
-        model_calls = 0
-        tool_calls = 0
-        terminal_calls = 0
-        for event in timeline:
-            if not isinstance(event, dict):
-                continue
-            event_name = str(event.get("event") or "")
-            if event_name in {"agent.model.response", "model.output.completed"}:
-                model_calls += 1
-            if event_name in {"agent.tool.call", "agent.tool.skipped", "agent.tool.denied"}:
-                tool_calls += 1
-            if event_name == "agent.tool.call" and str(event.get("detail") or "") == "terminal.run":
-                result = event.get("result") if isinstance(event.get("result"), dict) else {}
-                if not result.get("approval_required"):
-                    terminal_calls += 1
-        return _RunBudget(
-            limits=self.runtime_limits,
+        return _runtime_run_budget_from_timeline(
+            self.runtime_limits,
             started_at_epoch=_iso_epoch(run.get("created_at")),
-            model_calls_used=model_calls,
-            tool_calls_used=tool_calls,
-            terminal_calls_used=terminal_calls,
+            timeline=timeline,
         )
 
     def _check_context_budget(self, budget: _RunBudget, messages: list[dict[str, Any]]) -> None:
-        budget.check_context(_json_chars(_redact_json_value(messages)))
+        _runtime_check_context_budget(budget, messages, redact_json_value=_redact_json_value)
 
     def _limit_model_output(self, value: Any) -> tuple[str, bool]:
-        safe = redact_secrets(value)
-        return _truncate_text(safe, self.runtime_limits.max_model_output_chars)
+        return _runtime_limit_model_output(value, limits=self.runtime_limits, redact_text=redact_secrets)
 
     def _limit_tool_result(self, result: dict[str, Any]) -> dict[str, Any]:
-        limited, truncated = _limit_json_strings(_redact_json_value(result), self.runtime_limits.max_tool_output_chars)
-        if isinstance(limited, dict) and truncated:
-            return {**limited, "truncated": True}
-        return limited if isinstance(limited, dict) else {"ok": False, "error": str(limited)}
+        return _runtime_limit_tool_result(result, limits=self.runtime_limits, redact_json_value=_redact_json_value)
 
     def start_main_chat_run(
         self,
