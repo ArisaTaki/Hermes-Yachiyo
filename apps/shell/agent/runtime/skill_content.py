@@ -7,6 +7,14 @@ from pathlib import Path
 from typing import Any
 
 
+def content_hash(root: Path) -> str:
+    return SkillContentInspector.content_hash(root)
+
+
+def parse_frontmatter(markdown: str) -> dict[str, Any]:
+    return SkillContentInspector.parse_frontmatter(markdown)
+
+
 class SkillContentInspector:
     """Extracts metadata, summaries, hashes, and assets from Skill roots."""
 

@@ -253,7 +253,11 @@ from apps.shell.agent.runtime.serialization import (
     slug as _slug,
 )
 from apps.shell.agent.runtime.shutdown import RuntimeShutdownService
-from apps.shell.agent.runtime.skill_content import SkillContentInspector
+from apps.shell.agent.runtime.skill_content import (
+    SkillContentInspector,
+    content_hash as _skill_content_hash,
+    parse_frontmatter as _parse_skill_frontmatter,
+)
 from apps.shell.agent.runtime.skill_import import SkillImportPreparer, SkillImportSourceResolver
 from apps.shell.agent.runtime.skill_import_service import RuntimeSkillImportService
 from apps.shell.agent.runtime.skill_install import SkillInstallCommandValidator
@@ -417,14 +421,6 @@ def _user_goal_from_agent_messages(messages: list[dict[str, Any]]) -> str:
 
 def _agent_goal_disallows_tool(user_goal: str, tool_name: str) -> str:
     return _runtime_agent_goal_disallows_tool(user_goal, tool_name)
-
-
-def _skill_content_hash(root: Path) -> str:
-    return SkillContentInspector.content_hash(root)
-
-
-def _parse_skill_frontmatter(markdown: str) -> dict[str, Any]:
-    return SkillContentInspector.parse_frontmatter(markdown)
 
 
 def _call_model_profile_chat_message(

@@ -5,13 +5,15 @@ from __future__ import annotations
 from pathlib import Path
 
 from apps.shell import agent_runtime
-from apps.shell.agent.runtime.skill_content import SkillContentInspector
+from apps.shell.agent.runtime.skill_content import SkillContentInspector, content_hash, parse_frontmatter
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
 
 
 def test_skill_content_inspector_remains_exported_from_legacy_runtime_module() -> None:
     assert agent_runtime.SkillContentInspector is SkillContentInspector
+    assert agent_runtime._skill_content_hash is content_hash
+    assert agent_runtime._parse_skill_frontmatter is parse_frontmatter
 
 
 def test_skill_content_inspector_extracts_metadata_hash_and_assets(tmp_path: Path) -> None:
@@ -44,7 +46,9 @@ def test_skill_content_inspector_extracts_metadata_hash_and_assets(tmp_path: Pat
         "examples/demo.md",
         "templates/nested/template.md",
     ]
-    assert SkillContentInspector.content_hash(root) == agent_runtime._skill_content_hash(root)
+    assert content_hash(root) == SkillContentInspector.content_hash(root)
+    assert content_hash(root) == agent_runtime._skill_content_hash(root)
+    assert parse_frontmatter(markdown) == agent_runtime._parse_skill_frontmatter(markdown)
 
 
 def test_native_runtime_uses_split_skill_content_inspector(tmp_path: Path) -> None:
