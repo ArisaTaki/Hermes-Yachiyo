@@ -9,11 +9,86 @@ from uuid import uuid4
 MAIN_CHAT_AGENT_ID = "builtin:yachiyo-main"
 
 
+class LegacyRunPayloadProjector:
+    """Normalizes legacy runtime run payloads before public snapshot projection."""
+
+    def chat_task_payload(
+        self,
+        run: dict[str, Any],
+        *,
+        conversation_id: str = "",
+    ) -> dict[str, Any]:
+        return {
+            **run,
+            "task_id": str(run.get("task_id") or run.get("run_id") or ""),
+            "conversation_id": conversation_id or str(run.get("session_id") or ""),
+            "title": str(run.get("user_goal") or run.get("runnable_name") or "Yachiyo task"),
+            "summary": run.get("summary") or run.get("result") or "",
+            "recent_events": run.get("timeline") or [],
+            "open_in_studio_url": (
+                f"#/agents?run_id={run.get('run_id')}" if run.get("run_id") else None
+            ),
+        }
+
+    def group_artifacts(self, runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        artifacts: list[dict[str, Any]] = []
+        for run in runs:
+            run_id = str(run.get("run_id") or "")
+            for artifact in run.get("artifacts") or []:
+                if isinstance(artifact, dict):
+                    artifacts.append({**artifact, "source_run_id": run_id})
+        return artifacts
+
+    def group_run_from_legacy_run_group(
+        self,
+        run_group: dict[str, Any],
+        runtime: Any,
+    ) -> dict[str, Any]:
+        child_runs = self.child_runs_for_run_group(run_group, runtime)
+        run_group_id = str(run_group.get("run_group_id") or run_group.get("group_run_id") or "")
+        return {
+            "run_group_id": run_group_id,
+            "group_run_id": run_group_id,
+            "group_id": str(run_group.get("group_id") or ""),
+            "title": run_group.get("title") or "Run group",
+            "status": run_group.get("status") or "unknown",
+            "objective": run_group.get("summary") or run_group.get("title") or "",
+            "runs": child_runs,
+            "child_run_ids": run_group.get("child_run_ids") or [],
+            "shared_artifacts": self.group_artifacts(child_runs),
+            "pending_approvals": [
+                run.get("pending_approval")
+                for run in child_runs
+                if run.get("pending_approval")
+            ],
+            "final_answer": run_group.get("summary") or "",
+            "created_at": run_group.get("created_at") or "",
+            "updated_at": run_group.get("updated_at") or "",
+        }
+
+    def child_runs_for_run_group(
+        self,
+        run_group: dict[str, Any],
+        runtime: Any,
+    ) -> list[dict[str, Any]]:
+        child_runs = []
+        for run_id in run_group.get("child_run_ids") or []:
+            try:
+                child_runs.append(runtime.get_run(str(run_id)))
+            except KeyError:
+                continue
+        return child_runs
+
+
+_LEGACY_RUN_PROJECTOR = LegacyRunPayloadProjector()
+
+
 class LegacyRuntimePort:
     """RuntimePort adapter for existing NativeRunEngine-like services."""
 
     def __init__(self, runtime: Any) -> None:
         self._runtime = runtime
+        self._projector = LegacyRunPayloadProjector()
 
     def readiness(self) -> dict[str, Any]:
         try:
@@ -66,10 +141,12 @@ class LegacyRuntimePort:
                     run = {**run, "task_id": task_id, "session_id": conversation_id}
             else:
                 run = {**run, "task_id": task_id, "session_id": conversation_id}
-        return _chat_task_payload(run, conversation_id=conversation_id)
+        return self._projector.chat_task_payload(run, conversation_id=conversation_id)
 
     def get_task_snapshot(self, task_id: str) -> dict[str, Any]:
-        return _chat_task_payload(self._runtime.get_run(self._run_id_for_task(task_id)))
+        return self._projector.chat_task_payload(
+            self._runtime.get_run(self._run_id_for_task(task_id))
+        )
 
     def list_recent_tasks(self, conversation_id: str | None = None) -> list[dict[str, Any]]:
         payload = self._runtime.list_runs(30)
@@ -84,18 +161,28 @@ class LegacyRuntimePort:
             ]
             if linked_runs:
                 runs = linked_runs
-        return [_chat_task_payload(run, conversation_id=conversation_id or "") for run in runs]
+        return [
+            self._projector.chat_task_payload(
+                run,
+                conversation_id=conversation_id or "",
+            )
+            for run in runs
+        ]
 
     def approve(self, approval_id: str, decision: dict[str, Any] | None = None) -> dict[str, Any]:
-        return _chat_task_payload(self._runtime.approve_run_approval(self._run_id_for_task(approval_id)))
+        return self._projector.chat_task_payload(
+            self._runtime.approve_run_approval(self._run_id_for_task(approval_id))
+        )
 
     def reject(self, approval_id: str, reason: str | None = None) -> dict[str, Any]:
-        return _chat_task_payload(
+        return self._projector.chat_task_payload(
             self._runtime.reject_run_approval(self._run_id_for_task(approval_id), reason or "")
         )
 
     def cancel(self, task_id: str) -> dict[str, Any]:
-        return _chat_task_payload(self._runtime.cancel_run(self._run_id_for_task(task_id)))
+        return self._projector.chat_task_payload(
+            self._runtime.cancel_run(self._run_id_for_task(task_id))
+        )
 
     def _run_id_for_task(self, task_id: str) -> str:
         get_task_run_link = getattr(self._runtime, "get_task_run_link", None)
@@ -115,6 +202,7 @@ class LegacyStudioPort:
 
     def __init__(self, runtime: Any) -> None:
         self._runtime = runtime
+        self._projector = LegacyRunPayloadProjector()
 
     def list_agents(self) -> dict[str, Any]:
         return self._runtime.list_agents()
@@ -359,7 +447,7 @@ class LegacyStudioPort:
             "runs": child_runs,
             "child_run_ids": run_group.get("child_run_ids")
             or [run.get("run_id") for run in child_runs if run.get("run_id")],
-            "shared_artifacts": _group_artifacts(child_runs),
+            "shared_artifacts": self._projector.group_artifacts(child_runs),
             "pending_approvals": [
                 run.get("pending_approval")
                 for run in child_runs
@@ -382,7 +470,7 @@ class LegacyStudioPort:
         return {
             "ok": True,
             "group_runs": [
-                _group_run_from_legacy_run_group(item, self._runtime)
+                self._projector.group_run_from_legacy_run_group(item, self._runtime)
                 for item in raw_items
                 if isinstance(item, dict)
             ],
@@ -390,7 +478,7 @@ class LegacyStudioPort:
 
     def get_group_run(self, group_run_id: str) -> dict[str, Any]:
         run_group = self._runtime.get_run_group(group_run_id)
-        return _group_run_from_legacy_run_group(run_group, self._runtime)
+        return self._projector.group_run_from_legacy_run_group(run_group, self._runtime)
 
     def list_workflows(self) -> dict[str, Any]:
         return self._runtime.list_workflows()
@@ -451,64 +539,22 @@ class LegacyStudioPort:
 
 
 def _chat_task_payload(run: dict[str, Any], *, conversation_id: str = "") -> dict[str, Any]:
-    return {
-        **run,
-        "task_id": str(run.get("task_id") or run.get("run_id") or ""),
-        "conversation_id": conversation_id or str(run.get("session_id") or ""),
-        "title": str(run.get("user_goal") or run.get("runnable_name") or "Yachiyo task"),
-        "summary": run.get("summary") or run.get("result") or "",
-        "recent_events": run.get("timeline") or [],
-        "open_in_studio_url": (
-            f"#/agents?run_id={run.get('run_id')}" if run.get("run_id") else None
-        ),
-    }
+    return _LEGACY_RUN_PROJECTOR.chat_task_payload(run, conversation_id=conversation_id)
 
 
 def _group_artifacts(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    artifacts: list[dict[str, Any]] = []
-    for run in runs:
-        run_id = str(run.get("run_id") or "")
-        for artifact in run.get("artifacts") or []:
-            if isinstance(artifact, dict):
-                artifacts.append({**artifact, "source_run_id": run_id})
-    return artifacts
+    return _LEGACY_RUN_PROJECTOR.group_artifacts(runs)
 
 
 def _group_run_from_legacy_run_group(
     run_group: dict[str, Any],
     runtime: Any,
 ) -> dict[str, Any]:
-    child_runs = _child_runs_for_run_group(run_group, runtime)
-    run_group_id = str(run_group.get("run_group_id") or run_group.get("group_run_id") or "")
-    return {
-        "run_group_id": run_group_id,
-        "group_run_id": run_group_id,
-        "group_id": str(run_group.get("group_id") or ""),
-        "title": run_group.get("title") or "Run group",
-        "status": run_group.get("status") or "unknown",
-        "objective": run_group.get("summary") or run_group.get("title") or "",
-        "runs": child_runs,
-        "child_run_ids": run_group.get("child_run_ids") or [],
-        "shared_artifacts": _group_artifacts(child_runs),
-        "pending_approvals": [
-            run.get("pending_approval")
-            for run in child_runs
-            if run.get("pending_approval")
-        ],
-        "final_answer": run_group.get("summary") or "",
-        "created_at": run_group.get("created_at") or "",
-        "updated_at": run_group.get("updated_at") or "",
-    }
+    return _LEGACY_RUN_PROJECTOR.group_run_from_legacy_run_group(run_group, runtime)
 
 
 def _child_runs_for_run_group(run_group: dict[str, Any], runtime: Any) -> list[dict[str, Any]]:
-    child_runs = []
-    for run_id in run_group.get("child_run_ids") or []:
-        try:
-            child_runs.append(runtime.get_run(str(run_id)))
-        except KeyError:
-            continue
-    return child_runs
+    return _LEGACY_RUN_PROJECTOR.child_runs_for_run_group(run_group, runtime)
 
 
 def _chat_group_snapshots(runtime: Any) -> list[dict[str, Any]]:
