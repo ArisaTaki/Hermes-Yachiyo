@@ -134,6 +134,7 @@ from apps.shell.agent.runtime.events import (
     tool_trace_status as _tool_trace_status,
 )
 from apps.shell.agent.runtime.future_task_scheduler import FutureTaskTriggerScheduler
+from apps.shell.agent.runtime.memory_services import RuntimeMemoryService
 from apps.shell.agent.runtime.model_profiles import RuntimeModelProfileResolver
 from apps.shell.agent.runtime.model_messages import (
     RESPONSES_STREAM_REASONING_EVENTS as _RESPONSES_STREAM_REASONING_EVENTS,
@@ -581,6 +582,21 @@ class NativeRunEngine:
             agent_workspace_dir=self._agent_workspace_dir,
         )
         self._install_runtime_run_services(run_services)
+        self._install_runtime_memory_services(
+            RuntimeMemoryService(
+                self._conn,
+                self._db_lock,
+                now=_now,
+                json_dump=_json_dump,
+                redact_json_value=_redact_json_value,
+                redact_secrets=redact_secrets,
+                memory_scopes=_MEMORY_SCOPES,
+                memory_kinds=_MEMORY_KINDS,
+                context_limit=_MEMORY_CONTEXT_LIMIT,
+                content_max_chars=_MEMORY_CONTENT_MAX_CHARS,
+                error_type=AgentRuntimeError,
+            )
+        )
         core_services = _build_runtime_core_services(
             run_events=self.run_events,
             timeline_factory=self._timeline,
@@ -781,6 +797,9 @@ class NativeRunEngine:
         self.runs = services.runs
         self.run_events = services.run_events
         self.agent_run_starter = services.agent_run_starter
+
+    def _install_runtime_memory_services(self, memory_services: RuntimeMemoryService) -> None:
+        self.memory_services = memory_services
 
     def _install_runtime_core_services(self, core_services: RuntimeCoreServiceBundle) -> None:
         self.runtime_events = core_services.runtime_events
@@ -1715,20 +1734,7 @@ class NativeRunEngine:
         return self.runtime_policy.compile_workspace_policy(policy)
 
     def _memory_store(self, *, source_run_id: str = "") -> AgentMemoryStore:
-        return AgentMemoryStore(
-            self._conn,
-            self._db_lock,
-            source_run_id=source_run_id,
-            now=_now,
-            json_dump=_json_dump,
-            redact_json_value=_redact_json_value,
-            redact_secrets=redact_secrets,
-            memory_scopes=_MEMORY_SCOPES,
-            memory_kinds=_MEMORY_KINDS,
-            context_limit=_MEMORY_CONTEXT_LIMIT,
-            content_max_chars=_MEMORY_CONTENT_MAX_CHARS,
-            error_type=AgentRuntimeError,
-        )
+        return self.memory_services.memory_store(source_run_id=source_run_id)
 
     def _future_task_store(
         self,
@@ -1736,16 +1742,9 @@ class NativeRunEngine:
         source_run_id: str = "",
         default_runnable_id: str = "",
     ) -> AgentFutureTaskStore:
-        return AgentFutureTaskStore(
-            self._conn,
-            self._db_lock,
+        return self.memory_services.future_task_store(
             source_run_id=source_run_id,
             default_runnable_id=default_runnable_id,
-            now=_now,
-            json_dump=_json_dump,
-            redact_json_value=_redact_json_value,
-            redact_secrets=redact_secrets,
-            error_type=AgentRuntimeError,
         )
 
     def list_memory_items(self, *, include_deleted: bool = False, limit: int = 100) -> dict[str, Any]:
@@ -1772,7 +1771,7 @@ class NativeRunEngine:
         return self._memory_store(source_run_id="manual").remove(memory_id=memory_id, reason=reason)
 
     def _long_term_memory_context(self) -> str:
-        return self._memory_store().context_block(limit=_MEMORY_CONTEXT_LIMIT)
+        return self.memory_services.long_term_memory_context()
 
     def schedule_future_task(self, payload: dict[str, Any], *, source_run_id: str = "") -> dict[str, Any]:
         runnable_name = str(payload.get("runnable_name") or payload.get("name") or "").strip()
