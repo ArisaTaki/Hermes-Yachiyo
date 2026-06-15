@@ -54,7 +54,6 @@ import {
   agentCapabilityLine,
   agentRunReadinessIssue,
   agentToDraft,
-  publicAgentToAgentSpec,
   runnableCapabilityLine,
   runnableOptionLabel,
 } from '../features/agent-studio/utils/agents';
@@ -63,8 +62,6 @@ import {
   isActiveRunStatus,
   isPotentialWorkflowChildAgentRun,
   normalizeRunStatus,
-  publicGroupRunToRunGroupSpec,
-  publicRunTimelineToRunSpec,
   runHistoryGroupsFor,
   runHistoryGroupSummary,
   runKindLabel,
@@ -79,9 +76,6 @@ import {
   type RunStatusFilter,
 } from '../features/agent-studio/utils/runs';
 import {
-  publicSkillFolderToSkillFolderSpec,
-  publicSkillSourceRootToSkillSourceRoot,
-  publicSkillToSkillSpec,
   type SkillFolderFilter,
   type SkillImportResult,
   type SkillSourceFilter,
@@ -103,25 +97,25 @@ import {
   workflowStepArtifacts,
   workflowStepKindLabel,
   workflowStepSummary,
-  publicWorkflowToWorkflowSpec,
 } from '../features/agent-studio/utils/workflow';
 import {
-  getYachiyoRunTimeline,
-  listYachiyoSkillFolders,
-  listYachiyoSkills,
-  listYachiyoSkillSources,
-  listYachiyoStudioAgents,
-  listYachiyoGroupRuns,
-  listYachiyoMemories,
-  listYachiyoRunTimelines,
-  listYachiyoWorkflows,
   testYachiyoStudioAgentModel,
   updateYachiyoSkill,
 } from '../features/yachiyo-studio/api';
 import {
+  getStudioRunForView,
+  listStudioAgentsForView,
+  listStudioMemoriesForView,
+  listStudioRunGroupsForView,
+  listStudioRunsForView,
+  listStudioSkillFoldersForView,
+  listStudioSkillsForView,
+  listStudioSkillSourcesForView,
+  listStudioWorkflowsForView,
+} from '../features/agent-studio/utils/studioData';
+import {
   listFutureTasks,
   listRunnables,
-  type AgentSpec,
   type FutureTaskSpec,
   type MemorySpec,
   type RunnableSummary,
@@ -130,7 +124,6 @@ import {
   type SkillFolderSpec,
   type SkillSourceRoot,
   type SkillSpec,
-  type WorkflowSpec,
 } from '../lib/agents';
 import { openAppView, openPath } from '../lib/bridge';
 import { listModelProfiles, type ModelProfile, type ModelProfileDefaults } from '../lib/modelProfiles';
@@ -179,57 +172,6 @@ const emptyAgentDraft: AgentDraft = {
   writable_scopes: '',
   enabled: true,
 };
-
-async function listStudioRunsForView(): Promise<RunSpec[]> {
-  return (await listYachiyoRunTimelines()).map((snapshot) => publicRunTimelineToRunSpec(snapshot));
-}
-
-async function listStudioAgentsForView(): Promise<AgentSpec[]> {
-  return (await listYachiyoStudioAgents()).map(publicAgentToAgentSpec);
-}
-
-async function listStudioSkillsForView(): Promise<SkillSpec[]> {
-  return (await listYachiyoSkills()).map(publicSkillToSkillSpec);
-}
-
-async function listStudioSkillFoldersForView(): Promise<SkillFolderSpec[]> {
-  return (await listYachiyoSkillFolders()).map(publicSkillFolderToSkillFolderSpec);
-}
-
-async function listStudioSkillSourcesForView(): Promise<SkillSourceRoot[]> {
-  return (await listYachiyoSkillSources()).map(publicSkillSourceRootToSkillSourceRoot);
-}
-
-async function listStudioWorkflowsForView(): Promise<WorkflowSpec[]> {
-  return (await listYachiyoWorkflows()).map(publicWorkflowToWorkflowSpec);
-}
-
-async function listStudioMemoriesForView(): Promise<MemorySpec[]> {
-  return (await listYachiyoMemories()).map((memory) => ({
-    memory_id: memory.memory_id,
-    scope: memory.scope,
-    kind: memory.kind,
-    content: memory.content,
-    source_session_id: memory.source_session_id || undefined,
-    source_message_id: memory.source_message_id || undefined,
-    source_task_id: memory.source_task_id || undefined,
-    source_run_id: memory.source_run_id || undefined,
-    confidence: memory.confidence,
-    pinned: memory.pinned,
-    user_confirmed: memory.user_confirmed,
-    created_at: memory.created_at,
-    updated_at: memory.updated_at,
-    deleted_at: memory.deleted_at || undefined,
-  }));
-}
-
-async function listStudioRunGroupsForView(): Promise<RunGroupSpec[]> {
-  return (await listYachiyoGroupRuns()).map(publicGroupRunToRunGroupSpec);
-}
-
-async function getStudioRunForView(runId: string): Promise<RunSpec> {
-  return publicRunTimelineToRunSpec(await getYachiyoRunTimeline(runId));
-}
 
 function toggleSelectedId(current: string[], id: string): string[] {
   if (!id) return current;
