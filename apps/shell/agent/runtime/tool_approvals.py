@@ -8,12 +8,13 @@ from typing import Any
 
 from apps.shell.agent.runtime.budget import RunBudget
 from apps.shell.agent.runtime.errors import AgentRuntimeError
-from apps.shell.agent.runtime.tool_requests import normalize_tool_name
+from apps.shell.agent.runtime.tool_requests import (
+    MAX_AGENT_TOOL_ITERATIONS,
+    normalize_tool_iteration,
+    normalize_tool_name,
+)
 from apps.shell.agent.tools.broker import ToolBroker
 from packages.security import redact_api_error_text, redact_sensitive_text
-
-
-MAX_AGENT_TOOL_ITERATIONS = 50
 
 
 def _redact_secrets(value: Any) -> str:
@@ -36,14 +37,6 @@ def _tool_input_preview(value: Any, *, limit: int = 1200) -> Any:
     if len(text) > limit:
         return f"{text[:limit]}... [truncated]"
     return text
-
-
-def _normalize_tool_iteration(value: Any) -> int:
-    try:
-        iteration = int(value or 0)
-    except (TypeError, ValueError):
-        iteration = 0
-    return max(0, min(iteration, MAX_AGENT_TOOL_ITERATIONS))
 
 
 class ToolPendingApprovalBuilder:
@@ -71,7 +64,7 @@ class ToolPendingApprovalBuilder:
             "messages": deepcopy(messages),
             "tool_request": deepcopy(tool_request),
             "remaining_tool_requests": deepcopy(remaining_tool_requests),
-            "next_iteration": _normalize_tool_iteration(next_iteration),
+            "next_iteration": normalize_tool_iteration(next_iteration),
         }
 
 
@@ -137,7 +130,7 @@ class ToolApprovalResumeContext:
             else []
         )
         allowed_tool_names = list(allowed_tools)
-        next_iteration = _normalize_tool_iteration(pending.get("next_iteration"))
+        next_iteration = normalize_tool_iteration(pending.get("next_iteration"))
         tool_name = str(tool_request.get("tool") or pending.get("tool") or "").strip()
         run_budget = budget
         if run_budget is None:

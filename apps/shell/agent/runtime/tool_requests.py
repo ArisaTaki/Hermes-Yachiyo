@@ -9,10 +9,24 @@ from typing import Any
 from apps.shell.agent.runtime.errors import AgentRuntimeError
 from apps.shell.agent.tools.policy import TOOL_NAME_ALIASES
 
+MAX_AGENT_TOOL_ITERATIONS = 50
+
 
 def normalize_tool_name(value: Any) -> str:
     name = str(value or "").strip()
     return TOOL_NAME_ALIASES.get(name, name)
+
+
+def normalize_tool_iteration(
+    value: Any,
+    *,
+    max_iterations: int = MAX_AGENT_TOOL_ITERATIONS,
+) -> int:
+    try:
+        iteration = int(value or 0)
+    except (TypeError, ValueError):
+        iteration = 0
+    return max(0, min(iteration, max_iterations))
 
 
 class ToolRequestParser:

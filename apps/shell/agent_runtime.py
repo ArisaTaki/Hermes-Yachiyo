@@ -220,7 +220,9 @@ from apps.shell.agent.runtime.skill_sources import SkillSourceDiscovery
 from apps.shell.agent.runtime.skill_sync import SkillSyncPlanner
 from apps.shell.agent.runtime.tool_brokers import RuntimeToolBrokerFactory
 from apps.shell.agent.runtime.tool_requests import (
+    MAX_AGENT_TOOL_ITERATIONS as _MAX_AGENT_TOOL_ITERATIONS,
     ToolRequestParser,
+    normalize_tool_iteration as _normalize_tool_iteration,
     normalize_tool_name as _normalize_tool_name,
 )
 from apps.shell.agent.runtime.tool_approvals import (
@@ -350,7 +352,6 @@ logger = logging.getLogger(__name__)
 _EXECUTION_BACKENDS = {"native_profile", "yachiyo_profile", "external_cli"}
 _MEMORY_CONTEXT_LIMIT = 12
 _MEMORY_CONTENT_MAX_CHARS = 4000
-_MAX_AGENT_TOOL_ITERATIONS = 50
 _FINAL_RUN_STATUSES = {"completed", "failed", "cancelled"}
 _WORKFLOW_NODE_TYPES = {"start", "agent", "approval", "artifact", "condition", "parallel", "workflow", "loop"}
 _NATIVE_LIBRARY_SOURCE_TYPES = {"native_global", "native_project"}
@@ -470,14 +471,6 @@ def _callable_accepts_keyword(func: Any, name: str) -> bool:
     except (TypeError, ValueError):
         return False
     return name in parameters or any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values())
-
-
-def _normalize_tool_iteration(value: Any) -> int:
-    try:
-        iteration = int(value or 0)
-    except (TypeError, ValueError):
-        iteration = 0
-    return max(0, min(iteration, _MAX_AGENT_TOOL_ITERATIONS))
 
 
 def _public_pending_approval(value: Any) -> dict[str, Any]:

@@ -6,7 +6,12 @@ import pytest
 
 from apps.shell import agent_runtime
 from apps.shell.agent.runtime.errors import AgentRuntimeError
-from apps.shell.agent.runtime.tool_requests import ToolRequestParser, normalize_tool_name
+from apps.shell.agent.runtime.tool_requests import (
+    MAX_AGENT_TOOL_ITERATIONS,
+    ToolRequestParser,
+    normalize_tool_iteration,
+    normalize_tool_name,
+)
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
 
@@ -14,6 +19,8 @@ from apps.shell.credential_store import MemoryCredentialStore
 def test_tool_request_parser_remains_exported_from_legacy_runtime_module() -> None:
     assert agent_runtime.ToolRequestParser is ToolRequestParser
     assert agent_runtime._normalize_tool_name is normalize_tool_name
+    assert agent_runtime._normalize_tool_iteration is normalize_tool_iteration
+    assert agent_runtime._MAX_AGENT_TOOL_ITERATIONS == MAX_AGENT_TOOL_ITERATIONS
 
 
 def test_tool_request_parser_parses_native_tool_calls_and_aliases() -> None:
@@ -50,6 +57,14 @@ def test_tool_request_parser_parses_native_tool_calls_and_aliases() -> None:
             "function_name": "memory_add",
         },
     ]
+
+
+def test_tool_request_normalizes_iteration_bounds() -> None:
+    assert normalize_tool_iteration(None) == 0
+    assert normalize_tool_iteration("bad") == 0
+    assert normalize_tool_iteration(-1) == 0
+    assert normalize_tool_iteration(7) == 7
+    assert normalize_tool_iteration(999) == MAX_AGENT_TOOL_ITERATIONS
 
 
 def test_tool_request_parser_rejects_invalid_native_arguments() -> None:
