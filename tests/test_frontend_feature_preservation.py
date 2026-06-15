@@ -4559,6 +4559,14 @@ def test_agent_frontend_run_helpers_preserve_native_run_bridge_contract() -> Non
             "apiGet(`/yachiyo/studio/runs/${encodeURIComponent(runId)}/events?${query.toString()}`)",
         ],
     )
+    _assert_contains(
+        agents_lib,
+        [
+            "export type RunEventsPage = {",
+            "next_after_sequence?: number;",
+            "has_more?: boolean;",
+        ],
+    )
     _assert_function_contains(
         agents_lib,
         "deleteRun",
