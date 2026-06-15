@@ -155,9 +155,11 @@ from apps.shell.agent.runtime.run_projections import (
 from apps.shell.agent.runtime.run_readiness import RuntimeRunReadinessValidator
 from apps.shell.agent.runtime.runnables import RuntimeRunnableCatalog, RuntimeRunnableRunCoordinator
 from apps.shell.agent.runtime.paths import (
+    RuntimeDirectoryLayout,
     agent_workspace_dir as _runtime_agent_workspace_dir,
     native_skill_home as _native_skill_home,
     oha_yachiyo_home as _oha_yachiyo_home,
+    runtime_directory_layout as _runtime_directory_layout,
 )
 from apps.shell.agent.runtime.serialization import (
     json_dump_sorted as _json_dump,
@@ -438,23 +440,16 @@ class NativeRunEngine:
         credential_store: CredentialStore | None = None,
         seed_templates: bool = True,
     ) -> None:
-        root = Path(workspace_dir) if workspace_dir is not None else _oha_yachiyo_home()
-        root.mkdir(parents=True, exist_ok=True)
-        self.workspace_dir = root
-        self.db_path = Path(db_path) if db_path is not None else root / "agent-runtime.db"
-        self._credential_store = credential_store or create_credential_store(root)
-        self.skills_dir = root / "skills"
-        self.skill_installs_dir = root / "skill-installs"
-        self.skill_installs_native_home = self.skill_installs_dir / "native-home"
-        self.agent_artifacts_dir = root / "artifacts" / "agent-runs"
-        self.workflow_artifacts_dir = root / "artifacts" / "workflow-runs"
-        self.agent_workspaces_dir = root / "workspaces" / "agents"
-        self.skills_dir.mkdir(parents=True, exist_ok=True)
-        self.skill_installs_dir.mkdir(parents=True, exist_ok=True)
-        self.skill_installs_native_home.mkdir(parents=True, exist_ok=True)
-        self.agent_artifacts_dir.mkdir(parents=True, exist_ok=True)
-        self.workflow_artifacts_dir.mkdir(parents=True, exist_ok=True)
-        self.agent_workspaces_dir.mkdir(parents=True, exist_ok=True)
+        layout = _runtime_directory_layout(workspace_dir, db_path)
+        self.workspace_dir = layout.root
+        self.db_path = layout.db_path
+        self._credential_store = credential_store or create_credential_store(layout.root)
+        self.skills_dir = layout.skills_dir
+        self.skill_installs_dir = layout.skill_installs_dir
+        self.skill_installs_native_home = layout.skill_installs_native_home
+        self.agent_artifacts_dir = layout.agent_artifacts_dir
+        self.workflow_artifacts_dir = layout.workflow_artifacts_dir
+        self.agent_workspaces_dir = layout.agent_workspaces_dir
         self._accepting_runs = True
         self._closed = False
         self.runtime_limits = _RunBudgetLimits()
