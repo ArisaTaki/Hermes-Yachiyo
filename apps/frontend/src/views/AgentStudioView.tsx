@@ -43,6 +43,14 @@ import { useWorkflowDraftActions } from '../features/agent-studio/hooks/useWorkf
 import { useWorkflowSaveActions } from '../features/agent-studio/hooks/useWorkflowSaveActions';
 import { useWorkflowCanvasActions } from '../features/agent-studio/hooks/useWorkflowCanvasActions';
 import {
+  AgentStudioLoadingState,
+  isStudioTopTabActive,
+  normalizeStudioTab,
+  studioTabLabel,
+  studioTabs,
+  type StudioTab,
+} from '../features/agent-studio/studioTabs';
+import {
   agentCapabilityLine,
   agentRunReadinessIssue,
   agentToDraft,
@@ -139,8 +147,6 @@ import { openAppView, openPath } from '../lib/bridge';
 import { listModelProfiles, type ModelProfile, type ModelProfileDefaults } from '../lib/modelProfiles';
 import { currentParam, navigateTo } from '../lib/view';
 
-type StudioTab = 'agents' | 'groups' | 'skills' | 'skill-groups' | 'workflows' | 'runs' | 'memory';
-
 type StudioRefreshOptions = {
   selectedAgentId?: string;
   selectFirstAgent?: boolean;
@@ -185,46 +191,6 @@ const emptyAgentDraft: AgentDraft = {
   enabled: true,
 };
 
-const studioRouteTabs: StudioTab[] = ['agents', 'groups', 'skills', 'skill-groups', 'workflows', 'runs', 'memory'];
-const studioTabs: StudioTab[] = ['agents', 'groups', 'skills', 'workflows', 'runs', 'memory'];
-
-function AgentStudioLoadingState() {
-  return (
-    <section className="agent-studio-grid agent-studio-loading" aria-label="正在读取 Agent Studio">
-      <aside className="agent-studio-panel">
-        <div className="section-heading-row">
-          <span className="agent-studio-skeleton-line title" />
-          <span className="agent-studio-skeleton-button" />
-        </div>
-        <div className="agent-studio-skeleton-list">
-          {Array.from({ length: 5 }).map((_, index) => (
-            <div className="agent-studio-skeleton-card" key={index}>
-              <span className="agent-studio-skeleton-avatar" />
-              <span className="agent-studio-skeleton-stack">
-                <span className="agent-studio-skeleton-line name" />
-                <span className="agent-studio-skeleton-line meta" />
-              </span>
-            </div>
-          ))}
-        </div>
-      </aside>
-      <div className="agent-studio-panel">
-        <div className="section-heading-row">
-          <span className="agent-studio-skeleton-line title wide" />
-        </div>
-        <div className="agent-studio-skeleton-form">
-          <span className="agent-studio-skeleton-avatar large" />
-          <span className="agent-studio-skeleton-line field" />
-          <span className="agent-studio-skeleton-line field" />
-          <span className="agent-studio-skeleton-line field wide" />
-          <span className="agent-studio-skeleton-block" />
-          <span className="agent-studio-skeleton-block short" />
-        </div>
-      </div>
-    </section>
-  );
-}
-
 function toggleSelectedId(current: string[], id: string): string[] {
   if (!id) return current;
   if (current.includes(id)) return current.filter((item) => item !== id);
@@ -236,10 +202,6 @@ function pruneSelectedIds(current: string[], availableIds: string[]): string[] {
   const next = current.filter((id) => available.has(id));
   if (next.length === current.length) return current;
   return next;
-}
-
-function normalizeStudioTab(value: string): StudioTab {
-  return studioRouteTabs.includes(value as StudioTab) ? value as StudioTab : 'agents';
 }
 
 export function AgentStudioView() {
@@ -1364,11 +1326,6 @@ export function AgentStudioView() {
     }
   }
 
-  function isTopTabActive(item: StudioTab): boolean {
-    if (item === 'skills') return isSkillLibraryTab;
-    return tab === item;
-  }
-
   async function runAction(action: () => Promise<StudioRefreshOptions | void>, label: string) {
     setBusyAction(label);
     setStatus(`${label}...`);
@@ -1432,11 +1389,11 @@ export function AgentStudioView() {
         {studioTabs.map((item) => (
           <button
             type="button"
-            className={isTopTabActive(item) ? 'active' : ''}
+            className={isStudioTopTabActive(tab, item) ? 'active' : ''}
             key={item}
             onClick={() => activateTab(item)}
           >
-            {item === 'agents' ? 'Agents' : item === 'groups' ? 'Groups' : item === 'skills' ? 'Skill Library' : item === 'workflows' ? 'Workflow Studio' : item === 'runs' ? 'Runs' : 'Memory'}
+            {studioTabLabel(item)}
           </button>
         ))}
       </div>

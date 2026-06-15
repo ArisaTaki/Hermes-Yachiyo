@@ -588,12 +588,23 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
         ],
     )
     _assert_contains(
+        "apps/frontend/src/features/agent-studio/studioTabs.tsx",
+        [
+            "export type StudioTab = 'agents' | 'groups' | 'skills' | 'skill-groups' | "
+            "'workflows' | 'runs' | 'memory';",
+            "export const studioTabs: StudioTab[] = [",
+            "export function normalizeStudioTab",
+            "export function isStudioTopTabActive",
+            "export function studioTabLabel",
+            "export function AgentStudioLoadingState",
+        ],
+    )
+    _assert_contains(
         "apps/frontend/src/views/AgentStudioView.tsx",
         [
-            "type StudioTab = 'agents' | 'groups' | 'skills' | 'skill-groups' | "
-            "'workflows' | 'runs' | 'memory';",
-            "const studioTabs: StudioTab[] = ['agents', 'groups', 'skills', "
-            "'workflows', 'runs', 'memory'];",
+            "from '../features/agent-studio/studioTabs';",
+            "isStudioTopTabActive(tab, item)",
+            "studioTabLabel(item)",
             "AgentGroupPanel",
             "useAgentDefinitions",
             "useAgentGroups",
@@ -606,6 +617,14 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "RunDetailPanel",
             "selectedPublicRunTimeline={selectedPublicRunTimeline}",
             "selectedRunArtifacts",
+        ],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/views/AgentStudioView.tsx",
+        [
+            "function AgentStudioLoadingState",
+            "function normalizeStudioTab",
+            "const studioTabs: StudioTab[]",
         ],
     )
     _assert_contains(
@@ -2136,10 +2155,8 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
     _assert_contains(
         "apps/frontend/src/views/AgentStudioView.tsx",
         [
-            "type StudioTab = 'agents' | 'groups' | 'skills' | 'skill-groups' | "
-            "'workflows' | 'runs' | 'memory';",
-            "const studioTabs: StudioTab[] = ['agents', 'groups', 'skills', "
-            "'workflows', 'runs', 'memory'];",
+            "from '../features/agent-studio/studioTabs';",
+            "studioTabs.map((item) => (",
             "listSkills",
             "updateSkill",
             "listSkillFolders",
