@@ -1,3 +1,10 @@
+import type {
+  AgentGroupMemberSnapshot,
+  ApprovalCardSnapshot,
+  ArtifactSnapshot,
+  PublicRunEvent,
+} from '../runtime-shared/types';
+
 export type AgentModelMode = 'follow_main' | 'profile' | 'custom_api';
 export type AgentExecutionBackend = 'native_profile';
 
@@ -197,11 +204,18 @@ export type RunSpec = {
 
 export type RunGroupSpec = {
   run_group_id: string;
+  group_id?: string;
   title: string;
   source?: string;
   workspace_dir?: string;
   status: string;
+  objective?: string;
   summary?: string;
+  participants?: AgentGroupMemberSnapshot[];
+  events?: PublicRunEvent[];
+  pending_approvals?: ApprovalCardSnapshot[];
+  shared_artifacts?: ArtifactSnapshot[];
+  final_answer?: string;
   child_run_ids?: string[];
   created_at?: string;
   updated_at?: string;

@@ -147,10 +147,17 @@ export function publicGroupRunToRunGroupSpec(
     : (snapshot.runs || []).map((run) => run.run_id).filter(Boolean);
   return {
     run_group_id: snapshot.run_group_id || snapshot.group_run_id,
+    group_id: snapshot.group_id || undefined,
     title: snapshot.title || snapshot.objective || 'Group run',
     source: 'yachiyo_studio',
     status: snapshot.status || 'unknown',
+    objective: snapshot.objective || undefined,
     summary: snapshot.final_answer || snapshot.objective || '',
+    participants: snapshot.participants || [],
+    events: snapshot.events || [],
+    pending_approvals: snapshot.pending_approvals || [],
+    shared_artifacts: snapshot.shared_artifacts || [],
+    final_answer: snapshot.final_answer || undefined,
     child_run_ids: childRunIds,
     created_at: snapshot.created_at,
     updated_at: snapshot.updated_at,

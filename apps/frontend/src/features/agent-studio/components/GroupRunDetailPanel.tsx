@@ -43,11 +43,22 @@ export function GroupRunDetailPanel({
     || selectedGroupRunSnapshot?.title
     || selectedGroupRunSnapshot?.objective
     || selectedRunGroup?.title
+    || selectedRunGroup?.objective
     || 'No GroupRun summary recorded.';
-  const groupRunParticipants = selectedGroupRunSnapshot?.participants || [];
-  const groupRunEvents = selectedGroupRunSnapshot?.events || [];
-  const groupRunApprovals = selectedGroupRunSnapshot?.pending_approvals || [];
-  const groupRunArtifacts = selectedGroupRunSnapshot?.shared_artifacts || [];
+  const groupRunObjective = selectedGroupRunSnapshot?.objective || selectedRunGroup?.objective || '';
+  const groupRunParticipants = selectedGroupRunSnapshot?.participants?.length
+    ? selectedGroupRunSnapshot.participants
+    : selectedRunGroup?.participants || [];
+  const groupRunEvents = selectedGroupRunSnapshot?.events?.length
+    ? selectedGroupRunSnapshot.events
+    : selectedRunGroup?.events || [];
+  const groupRunApprovals = selectedGroupRunSnapshot?.pending_approvals?.length
+    ? selectedGroupRunSnapshot.pending_approvals
+    : selectedRunGroup?.pending_approvals || [];
+  const groupRunArtifacts = selectedGroupRunSnapshot?.shared_artifacts?.length
+    ? selectedGroupRunSnapshot.shared_artifacts
+    : selectedRunGroup?.shared_artifacts || [];
+  const groupRunFinalAnswer = selectedGroupRunSnapshot?.final_answer || selectedRunGroup?.final_answer || '';
 
   return (
     <section
@@ -75,7 +86,7 @@ export function GroupRunDetailPanel({
           <span data-testid="agent-run-detail-group-run-route">Deep link {selectedRouteGroupRunId}</span>
         ) : null}
         {selectedGroupRunSnapshot?.group_run_id ? <code>GroupRun {selectedGroupRunSnapshot.group_run_id}</code> : null}
-        {selectedGroupRunSnapshot?.objective ? <span>Objective {selectedGroupRunSnapshot.objective}</span> : null}
+        {groupRunObjective ? <span>Objective {groupRunObjective}</span> : null}
         {selectedGroupRunSnapshot?.updated_at || selectedGroupRunSnapshot?.created_at || selectedRunGroup?.updated_at || selectedRunGroup?.created_at ? (
           <span>Updated {formatRunDate(
             selectedGroupRunSnapshot?.updated_at
@@ -144,8 +155,8 @@ export function GroupRunDetailPanel({
           />
         </section>
       ) : null}
-      {selectedGroupRunSnapshot?.final_answer ? (
-        <pre data-testid="agent-run-detail-group-run-final-answer">{selectedGroupRunSnapshot.final_answer}</pre>
+      {groupRunFinalAnswer ? (
+        <pre data-testid="agent-run-detail-group-run-final-answer">{groupRunFinalAnswer}</pre>
       ) : null}
       {groupOverviewChildRunIds.length ? (
         <div className="run-group-overview-children" data-testid="agent-run-detail-group-run-children">
