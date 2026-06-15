@@ -2064,7 +2064,6 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "detachSkill",
             "listSkills",
             "updateSkill",
-            "deleteSkill",
             "listSkillFolders",
             "createWorkflow",
             "updateWorkflow",
@@ -2077,6 +2076,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "useRunEventReplay",
             "useRunHistoryManagement",
             "useRunLaunchActions",
+            "useSkillDeletionActions",
             "useSkillFolderManagement",
             "useSkillImportActions",
             "saveAgent",
@@ -2088,7 +2088,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "installSkillFromCommand",
             "await updateSkill(skill.skill_id, { folder_id: folderId });",
             "await updateSkill(skill.skill_id, { enabled: skill.enabled === false });",
-            "await deleteSkill(skill.skill_id);",
+            "requestDeleteSkill",
             "createSkillFolderFromDraft",
             "updateSkillFolderFromDraft",
             "requestDeleteSkillFolder",
@@ -2116,6 +2116,20 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "selectedAgentDeletable",
             "系统 Agent 只能查看，不能删除。",
             "AgentEditorPanel",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useSkillDeletionActions.ts",
+        [
+            "export function useSkillDeletionActions",
+            "function requestDeleteSkill(skill: SkillSpec)",
+            "description: isNativeSkill(skill)",
+            "await deleteSkill(skill.skill_id);",
+            "setSelectedSkillIds((current) => current.filter((id) => id !== skill.skill_id));",
+            "function requestDeleteSelectedSkills()",
+            "const hasNativeSkills = targets.some(isNativeSkill);",
+            "const hasInstalledSkills = targets.some(isInstalledSkill);",
+            "setSelectedSkillIds((current) => current.filter((id) => !targetIds.has(id)));",
         ],
     )
     _assert_contains(
