@@ -9,6 +9,8 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import Any
 
+from apps.shell.agent.runtime.errors import AgentApprovalRequired
+
 
 @dataclass(frozen=True)
 class AgentRunStart:
@@ -85,6 +87,69 @@ class RuntimeAgentRunStarter:
             client_request_id=client_request_id,
         )
         return AgentRunStart(run, root_group=root_group)
+
+
+class RuntimeAgentRunExecutor:
+    """Executes a prepared Agent Run and projects terminal/approval outcomes."""
+
+    def __init__(
+        self,
+        *,
+        preparer: Any,
+        continue_custom_api_agent: Callable[..., str],
+        agent_run_outcomes: Any,
+        approval_pause: Any,
+    ) -> None:
+        self._preparer = preparer
+        self._continue_custom_api_agent = continue_custom_api_agent
+        self._agent_run_outcomes = agent_run_outcomes
+        self._approval_pause = approval_pause
+
+    def execute(
+        self,
+        run_id: str,
+        agent: dict[str, Any],
+        user_goal: str,
+        upstream: str = "",
+    ) -> dict[str, Any]:
+        preparation = self._preparer.prepare(
+            run_id,
+            agent,
+            user_goal,
+            upstream,
+        )
+        timeline = preparation.timeline
+        artifacts = preparation.artifacts
+        try:
+            self._preparer.write_context_artifact(run_id, preparation)
+            result = self._continue_custom_api_agent(
+                agent,
+                preparation.context,
+                preparation.broker,
+                timeline,
+                artifacts,
+                run_id=run_id,
+            )
+            return self._agent_run_outcomes.completed(
+                run_id,
+                result,
+                timeline=timeline,
+                artifacts=artifacts,
+            )
+        except AgentApprovalRequired as exc:
+            return self._approval_pause.project_tool_required(
+                run_id,
+                pending_approval=exc.pending_approval,
+                timeline=timeline,
+                artifacts=artifacts,
+            )
+        except Exception as exc:
+            return self._agent_run_outcomes.failed(
+                run_id,
+                exc,
+                timeline=timeline,
+                artifacts=artifacts,
+            )
 
 
 class RuntimeAgentRunCoordinator:

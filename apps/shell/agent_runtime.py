@@ -95,6 +95,7 @@ from apps.shell.agent.runtime.agent_preparation import RuntimeAgentRunPreparer
 from apps.shell.agent.runtime.agent_runs import (
     RuntimeAgentRunAsyncCoordinator,
     RuntimeAgentRunCoordinator,
+    RuntimeAgentRunExecutor,
     RuntimeAgentRunStarter,
 )
 from apps.shell.agent.runtime.agent_services import (
@@ -852,6 +853,12 @@ class NativeRunEngine:
             continue_custom_api_agent=self._run_custom_api_agent,
         )
         self._install_runtime_approval_services(approval_services)
+        self.agent_run_executor = RuntimeAgentRunExecutor(
+            preparer=self.agent_run_preparer,
+            continue_custom_api_agent=self._run_custom_api_agent,
+            agent_run_outcomes=self.agent_run_outcomes,
+            approval_pause=self.approval_pause,
+        )
         self._install_runtime_approval_transitions(
             RuntimeApprovalTransitionService(
                 get_run=lambda run_id: self.get_run(run_id),
@@ -2191,44 +2198,12 @@ class NativeRunEngine:
         return self.agent_run_async_coordinator.create_async(payload, on_complete=on_complete)
 
     def _execute_agent_run(self, run_id: str, agent: dict[str, Any], user_goal: str, upstream: str = "") -> dict[str, Any]:
-        preparation = self.agent_run_preparer.prepare(
+        return self.agent_run_executor.execute(
             run_id,
             agent,
             user_goal,
             upstream,
         )
-        timeline = preparation.timeline
-        artifacts = preparation.artifacts
-        try:
-            self.agent_run_preparer.write_context_artifact(run_id, preparation)
-            result = self._run_custom_api_agent(
-                agent,
-                preparation.context,
-                preparation.broker,
-                timeline,
-                artifacts,
-                run_id=run_id,
-            )
-            return self.agent_run_outcomes.completed(
-                run_id,
-                result,
-                timeline=timeline,
-                artifacts=artifacts,
-            )
-        except AgentApprovalRequired as exc:
-            return self.approval_pause.project_tool_required(
-                run_id,
-                pending_approval=exc.pending_approval,
-                timeline=timeline,
-                artifacts=artifacts,
-            )
-        except Exception as exc:
-            return self.agent_run_outcomes.failed(
-                run_id,
-                exc,
-                timeline=timeline,
-                artifacts=artifacts,
-            )
 
     def _run_custom_api_agent(
         self,

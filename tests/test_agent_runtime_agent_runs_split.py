@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import threading
+from dataclasses import dataclass
 from typing import Any
 
 from apps.shell import agent_runtime
+from apps.shell.agent.runtime.errors import AgentApprovalRequired
 from apps.shell.agent.runtime.agent_runs import (
     AgentRunStart,
     RuntimeAgentRunAsyncCoordinator,
     RuntimeAgentRunCoordinator,
+    RuntimeAgentRunExecutor,
     RuntimeAgentRunStarter,
 )
 from apps.shell.agent_runtime import AgentRuntimeService
@@ -24,6 +27,14 @@ class _ImmediateThread:
 
     def start(self) -> None:
         self._target()
+
+
+@dataclass
+class _PreparedAgentRun:
+    timeline: list[dict[str, Any]]
+    artifacts: list[dict[str, Any]]
+    context: str = "prepared-context"
+    broker: Any = "prepared-broker"
 
 
 def _starter(
@@ -57,6 +68,147 @@ def _starter(
         client_request_id_from_payload=client_request_id_from_payload,
         agent_workspace_dir=lambda agent: str((agent.get("workspace_policy") or {}).get("default_workdir") or ""),
     )
+
+
+def test_agent_run_executor_projects_completed_agent_run() -> None:
+    calls: list[tuple[str, Any]] = []
+    prepared = _PreparedAgentRun(
+        timeline=[{"event": "agent.run.started"}],
+        artifacts=[{"path": "context.md"}],
+    )
+
+    class _Preparer:
+        @staticmethod
+        def prepare(run_id: str, agent: dict[str, Any], user_goal: str, upstream: str) -> _PreparedAgentRun:
+            calls.append(("prepare", run_id, agent["agent_id"], user_goal, upstream))
+            return prepared
+
+        @staticmethod
+        def write_context_artifact(run_id: str, preparation: _PreparedAgentRun) -> None:
+            calls.append(("context", run_id, preparation.context))
+
+    class _Outcomes:
+        @staticmethod
+        def completed(run_id: str, result: str, *, timeline: list[dict[str, Any]], artifacts: list[dict[str, Any]]) -> dict[str, Any]:
+            calls.append(("completed", run_id, result, timeline, artifacts))
+            return {"run_id": run_id, "status": "completed", "result": result}
+
+    executor = RuntimeAgentRunExecutor(
+        preparer=_Preparer(),
+        continue_custom_api_agent=lambda agent, context, broker, timeline, artifacts, **kwargs: calls.append(
+            ("continue", agent["agent_id"], context, broker, timeline, artifacts, kwargs)
+        )
+        or "Done",
+        agent_run_outcomes=_Outcomes(),
+        approval_pause=object(),
+    )
+
+    result = executor.execute("run-1", {"agent_id": "agent-1"}, "Ship", "Upstream")
+
+    assert result == {"run_id": "run-1", "status": "completed", "result": "Done"}
+    assert calls == [
+        ("prepare", "run-1", "agent-1", "Ship", "Upstream"),
+        ("context", "run-1", "prepared-context"),
+        (
+            "continue",
+            "agent-1",
+            "prepared-context",
+            "prepared-broker",
+            prepared.timeline,
+            prepared.artifacts,
+            {"run_id": "run-1"},
+        ),
+        ("completed", "run-1", "Done", prepared.timeline, prepared.artifacts),
+    ]
+
+
+def test_agent_run_executor_projects_tool_approval_pause() -> None:
+    prepared = _PreparedAgentRun(timeline=[{"event": "agent.run.started"}], artifacts=[])
+    pending = {"approval_id": "approval-1", "tool": "terminal.run"}
+
+    class _Preparer:
+        @staticmethod
+        def prepare(*_args: Any) -> _PreparedAgentRun:
+            return prepared
+
+        @staticmethod
+        def write_context_artifact(*_args: Any) -> None:
+            return None
+
+    class _ApprovalPause:
+        @staticmethod
+        def project_tool_required(
+            run_id: str,
+            *,
+            pending_approval: dict[str, Any],
+            timeline: list[dict[str, Any]],
+            artifacts: list[dict[str, Any]],
+        ) -> dict[str, Any]:
+            return {
+                "run_id": run_id,
+                "status": "approval_required",
+                "pending_approval": pending_approval,
+                "timeline": timeline,
+                "artifacts": artifacts,
+            }
+
+    executor = RuntimeAgentRunExecutor(
+        preparer=_Preparer(),
+        continue_custom_api_agent=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AgentApprovalRequired(pending)
+        ),
+        agent_run_outcomes=object(),
+        approval_pause=_ApprovalPause(),
+    )
+
+    assert executor.execute("run-approval", {"agent_id": "agent-1"}, "Ship") == {
+        "run_id": "run-approval",
+        "status": "approval_required",
+        "pending_approval": pending,
+        "timeline": prepared.timeline,
+        "artifacts": prepared.artifacts,
+    }
+
+
+def test_agent_run_executor_projects_failed_agent_run() -> None:
+    prepared = _PreparedAgentRun(timeline=[{"event": "agent.run.started"}], artifacts=[])
+
+    class _Preparer:
+        @staticmethod
+        def prepare(*_args: Any) -> _PreparedAgentRun:
+            return prepared
+
+        @staticmethod
+        def write_context_artifact(*_args: Any) -> None:
+            return None
+
+    class _Outcomes:
+        @staticmethod
+        def failed(run_id: str, exc: Exception, *, timeline: list[dict[str, Any]], artifacts: list[dict[str, Any]]) -> dict[str, Any]:
+            return {
+                "run_id": run_id,
+                "status": "failed",
+                "error": str(exc),
+                "timeline": timeline,
+                "artifacts": artifacts,
+            }
+
+    executor = RuntimeAgentRunExecutor(
+        preparer=_Preparer(),
+        continue_custom_api_agent=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("execution failed")
+        ),
+        agent_run_outcomes=_Outcomes(),
+        approval_pause=object(),
+    )
+
+    assert executor.execute("run-failed", {"agent_id": "agent-1"}, "Ship") == {
+        "run_id": "run-failed",
+        "status": "failed",
+        "error": "execution failed",
+        "timeline": prepared.timeline,
+        "artifacts": prepared.artifacts,
+    }
 
 
 def test_agent_run_starter_creates_root_group_and_preserves_idempotency() -> None:
@@ -308,9 +460,11 @@ def test_native_runtime_uses_split_agent_run_starter(tmp_path, monkeypatch) -> N
         assert agent_runtime.RuntimeAgentRunStarter is RuntimeAgentRunStarter
         assert agent_runtime.RuntimeAgentRunCoordinator is RuntimeAgentRunCoordinator
         assert agent_runtime.RuntimeAgentRunAsyncCoordinator is RuntimeAgentRunAsyncCoordinator
+        assert agent_runtime.RuntimeAgentRunExecutor is RuntimeAgentRunExecutor
         assert isinstance(service.agent_run_starter, RuntimeAgentRunStarter)
         assert isinstance(service.agent_run_coordinator, RuntimeAgentRunCoordinator)
         assert isinstance(service.agent_run_async_coordinator, RuntimeAgentRunAsyncCoordinator)
+        assert isinstance(service.agent_run_executor, RuntimeAgentRunExecutor)
         agent = service.create_agent(
             {
                 "name": "Starter Agent",
