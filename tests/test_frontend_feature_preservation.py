@@ -741,12 +741,17 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "RuntimeTimelineEventList",
             "eventTestId={`${testId}-event`}",
             "variant=\"compact\"",
+            "if (type === 'tool.requested') return '工具请求';",
             "if (type === 'skill.selected') return 'Skill 已选择';",
             "if (type === 'skill.dispatch.read') return 'Skill 调度';",
             "if (type === 'memory.retrieved') return 'Memory 检索';",
             "if (type === 'memory.write.add') return 'Memory 新增';",
+            "if (type === 'group.member.started') return '群组成员启动';",
+            "if (type === 'group.member.completed') return '群组成员完成';",
             "if (type === 'group.approval_required' || type === 'group.member.approval_required') return '群组等待审批';",
             "if (type === 'group.artifact.created' || type === 'group.shared_artifact.created') return '群组产物已生成';",
+            "if (type === 'workflow.node.agent') return 'Agent 节点';",
+            "if (type === 'workflow.node.approval_required' || type === 'workflow.run.approval_required') return 'Workflow 等待审批';",
         ],
     )
     _assert_contains(
