@@ -141,3 +141,23 @@ class MainChatRuntimeConfigBuilder:
             "created_at": "",
             "updated_at": "",
         }
+
+
+class MainChatVirtualAgentProjector:
+    """Projects the built-in daily chat Agent with the current default profile."""
+
+    def __init__(
+        self,
+        *,
+        main_chat_config: MainChatRuntimeConfigBuilder,
+        default_profile_id: Callable[[], str],
+    ) -> None:
+        self._main_chat_config = main_chat_config
+        self._default_profile_id = default_profile_id
+
+    def virtual_agent(self) -> dict[str, Any]:
+        try:
+            default_profile_id = str(self._default_profile_id() or "").strip()
+        except Exception:
+            default_profile_id = ""
+        return self._main_chat_config.virtual_agent(default_profile_id=default_profile_id)

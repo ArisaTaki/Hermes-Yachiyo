@@ -162,7 +162,10 @@ from apps.shell.agent.runtime.events import (
 )
 from apps.shell.agent.runtime.future_task_service import RuntimeFutureTaskService
 from apps.shell.agent.runtime.future_task_scheduler import FutureTaskTriggerScheduler
-from apps.shell.agent.runtime.main_chat_config import MainChatRuntimeConfigBuilder
+from apps.shell.agent.runtime.main_chat_config import (
+    MainChatRuntimeConfigBuilder,
+    MainChatVirtualAgentProjector,
+)
 from apps.shell.agent.runtime.main_chat_model import MainChatModelCaller
 from apps.shell.agent.runtime.main_chat_model_loop import MainChatModelLoopRunner
 from apps.shell.agent.runtime.main_chat_runs import MainChatRunLifecycle
@@ -637,6 +640,12 @@ class NativeRunEngine:
                 memory_tool_names=list(_MEMORY_TOOL_NAMES),
                 future_task_tool_names=list(_FUTURE_TASK_TOOL_NAMES),
             )
+        )
+        self.main_chat_virtual_agent_projector = MainChatVirtualAgentProjector(
+            main_chat_config=self.main_chat_config,
+            default_profile_id=lambda: str(
+                get_model_profile_service().get_defaults().get("chat") or ""
+            ).strip(),
         )
         self._install_runtime_tool_brokers(
             RuntimeToolBrokerFactory(
@@ -1506,11 +1515,7 @@ class NativeRunEngine:
         )
 
     def _main_chat_virtual_agent(self) -> dict[str, Any]:
-        try:
-            default_profile_id = str(get_model_profile_service().get_defaults().get("chat") or "").strip()
-        except Exception:
-            default_profile_id = ""
-        return self.main_chat_config.virtual_agent(default_profile_id=default_profile_id)
+        return self.main_chat_virtual_agent_projector.virtual_agent()
 
     def _row_to_skill(self, row: sqlite3.Row) -> dict[str, Any]:
         return _project_skill_row(row, skills_dir=self.skills_dir, json_load=_json_load)

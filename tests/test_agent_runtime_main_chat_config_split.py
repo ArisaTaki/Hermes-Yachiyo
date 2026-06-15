@@ -5,7 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 from apps.shell import agent_runtime
-from apps.shell.agent.runtime.main_chat_config import MainChatRuntimeConfigBuilder
+from apps.shell.agent.runtime.main_chat_config import (
+    MainChatRuntimeConfigBuilder,
+    MainChatVirtualAgentProjector,
+)
 from apps.shell.agent.tools.policy import (
     FUTURE_TASK_TOOL_NAMES,
     MEMORY_TOOL_NAMES,
@@ -80,6 +83,57 @@ def test_main_chat_config_builder_projects_virtual_agent_without_trusting_worksp
     assert trusted == []
 
 
+def test_main_chat_virtual_agent_projector_reads_default_profile_id(tmp_path) -> None:
+    compiler = RuntimePolicyCompiler()
+    builder = MainChatRuntimeConfigBuilder(
+        main_chat_agent_id="builtin:yachiyo-main",
+        agent_workspaces_dir=tmp_path / "agent-workspaces",
+        workspace_status=lambda: {},
+        compile_tool_policy=compiler.compile_tool_policy,
+        compile_workspace_policy=compiler.compile_workspace_policy,
+        trust_workspace_from_policy=lambda *_args, **_kwargs: None,
+        memory_tool_names=sorted(MEMORY_TOOL_NAMES),
+        future_task_tool_names=sorted(FUTURE_TASK_TOOL_NAMES),
+    )
+    projector = MainChatVirtualAgentProjector(
+        main_chat_config=builder,
+        default_profile_id=lambda: "profile-chat",
+    )
+
+    agent = projector.virtual_agent()
+
+    assert agent["agent_id"] == "builtin:yachiyo-main"
+    assert agent["model_profile_id"] == "profile-chat"
+    assert agent["model_config"]["api_key_configured"] is True
+
+
+def test_main_chat_virtual_agent_projector_tolerates_default_profile_failure(tmp_path) -> None:
+    compiler = RuntimePolicyCompiler()
+    builder = MainChatRuntimeConfigBuilder(
+        main_chat_agent_id="builtin:yachiyo-main",
+        agent_workspaces_dir=tmp_path / "agent-workspaces",
+        workspace_status=lambda: {},
+        compile_tool_policy=compiler.compile_tool_policy,
+        compile_workspace_policy=compiler.compile_workspace_policy,
+        trust_workspace_from_policy=lambda *_args, **_kwargs: None,
+        memory_tool_names=sorted(MEMORY_TOOL_NAMES),
+        future_task_tool_names=sorted(FUTURE_TASK_TOOL_NAMES),
+    )
+
+    def fail_default_profile_id() -> str:
+        raise RuntimeError("profile service unavailable")
+
+    projector = MainChatVirtualAgentProjector(
+        main_chat_config=builder,
+        default_profile_id=fail_default_profile_id,
+    )
+
+    agent = projector.virtual_agent()
+
+    assert agent["model_profile_id"] == ""
+    assert agent["model_config"]["api_key_configured"] is False
+
+
 def test_native_runtime_installs_main_chat_config_builder(tmp_path) -> None:
     service = AgentRuntimeService(
         db_path=tmp_path / "agent-runtime.db",
@@ -89,7 +143,9 @@ def test_native_runtime_installs_main_chat_config_builder(tmp_path) -> None:
     )
     try:
         assert agent_runtime.MainChatRuntimeConfigBuilder is MainChatRuntimeConfigBuilder
+        assert agent_runtime.MainChatVirtualAgentProjector is MainChatVirtualAgentProjector
         assert isinstance(service.main_chat_config, MainChatRuntimeConfigBuilder)
+        assert isinstance(service.main_chat_virtual_agent_projector, MainChatVirtualAgentProjector)
 
         config = service._main_chat_agent_config(
             model_profile_id="profile-chat",
