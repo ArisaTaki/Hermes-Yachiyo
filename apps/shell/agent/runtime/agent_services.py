@@ -33,7 +33,6 @@ def build_runtime_agent_services(
     agent_context: Callable[..., str],
     memory_store: Callable[..., Any],
     future_task_store: Callable[..., Any],
-    tool_broker_factory: Callable[..., Any],
     runtime_agent_timeline: Any,
     runtime_agent_run_events: Any,
     runtime_trace_events: Any,
@@ -44,6 +43,7 @@ def build_runtime_agent_services(
     update_run: Callable[..., dict[str, Any]],
     model_output_metadata: Callable[[Any], dict[str, Any]],
     redact_secrets: Callable[[Any], str],
+    tool_broker_factory: Callable[..., Any] | None = None,
     tool_brokers: Any | None = None,
 ) -> RuntimeAgentServiceBundle:
     return RuntimeAgentServiceBundle(

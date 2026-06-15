@@ -33,13 +33,13 @@ class RuntimeAgentRunPreparer:
         agent_context: Callable[..., str],
         memory_store: Callable[..., Any],
         future_task_store: Callable[..., Any],
-        tool_broker_factory: Callable[..., Any],
         runtime_agent_timeline: Any,
         runtime_agent_run_events: Any,
         runtime_trace_events: Any,
         append_run_event: Callable[[str, str, dict[str, Any]], Any],
         timeline_factory: Callable[..., dict[str, Any]],
         memory_context_limit: int,
+        tool_broker_factory: Callable[..., Any] | None = None,
         tool_brokers: Any | None = None,
     ) -> None:
         self._agent_artifacts_dir = agent_artifacts_dir
@@ -101,6 +101,10 @@ class RuntimeAgentRunPreparer:
                 skills=skills,
             )
         else:
+            if self._tool_broker_factory is None:
+                raise RuntimeError(
+                    "Tool broker factory is required when shared tool brokers are not configured"
+                )
             broker = self._tool_broker_factory(
                 runtime["workspace_policy"],
                 artifact_root,
