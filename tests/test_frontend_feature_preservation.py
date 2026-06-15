@@ -758,6 +758,17 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
         ],
     )
     _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useAgentRunReadiness.ts",
+        [
+            "export function useAgentRunReadiness",
+            "agentQuickRunDisabled: busy || Boolean(agentQuickRunDisabledReason)",
+            "系统 Agent 只能查看，不能从 Agent Studio 直接运行。",
+            "Custom API 尚未保存 API Key。",
+            "`workspace.write_patch` 已启用；每次写文件都会先进入审批。",
+            "`terminal.run` 已启用；每次运行命令都会先进入审批。",
+        ],
+    )
+    _assert_contains(
         "apps/frontend/src/features/agent-studio/utils/skills.ts",
         [
             "export type SkillSourceFilter",
@@ -2204,6 +2215,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "listRunGroups",
             "useAgentAvatarActions",
             "useAgentDeletionActions",
+            "useAgentRunReadiness",
             "useAgentSaveActions",
             "useAgentSkillMountActions",
             "useRunCacheActions",
@@ -3052,7 +3064,7 @@ def test_agent_studio_agents_ui_smoke_uses_definition_crud_paths() -> None:
             "AgentDefinitionsTab",
             "selectedAgentReadOnly",
             "onSetSelectedAgentIds={setSelectedAgentIds}",
-            "系统 Agent 只能查看，不能从 Agent Studio 直接运行。",
+            "useAgentRunReadiness",
         ],
     )
     _assert_contains(
