@@ -3663,8 +3663,23 @@ def test_agent_studio_exposes_stable_e2e_selectors_for_run_detail_and_approval_f
             "data-run-event-sensitivity={defaultEventSensitivity(event)}",
             "data-run-event-status={eventStatus || ''}",
             "data-run-event-tone={eventTone}",
+            "const eventMetadata = runtimeEventMetadata(event, eventSequence, eventRunId);",
+            "className=\"run-step-meta\"",
+            "data-testid={`${eventTestId}-metadata`}",
+            "{ label: 'actor', value: defaultEventActor(event) }",
+            "{ label: 'visibility', value: defaultEventVisibility(event) }",
+            "{ label: 'sensitivity', value: defaultEventSensitivity(event) }",
+            "{ label: 'schema', value: defaultEventSchemaVersion(event) }",
             "data-child-run-id={childRunId || ''}",
             "data-testid={childRunTestId || `${eventTestId}-open-child-run`}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/styles/app.css",
+        [
+            ".run-step-meta",
+            ".run-step-meta span",
+            "font-family: \"SF Mono\", \"JetBrains Mono\", ui-monospace, monospace;",
         ],
     )
 

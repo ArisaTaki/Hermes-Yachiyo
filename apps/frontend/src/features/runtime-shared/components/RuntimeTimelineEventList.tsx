@@ -60,6 +60,7 @@ export function RuntimeTimelineEventList({
           const childRunStatus = childRunId ? getChildRunStatus(childRunId, eventStatus) : '';
           const eventTone = getEventTone(event);
           const payload = getEventPayload(event);
+          const eventMetadata = runtimeEventMetadata(event, eventSequence, eventRunId);
           return (
             <li
               className={`run-execution-step ${eventTone}`}
@@ -86,6 +87,13 @@ export function RuntimeTimelineEventList({
                   </div>
                   <code>{getEventCode(event)}</code>
                 </div>
+                {eventMetadata.length ? (
+                  <div className="run-step-meta" data-testid={`${eventTestId}-metadata`}>
+                    {eventMetadata.map(({ label, value }) => (
+                      <span key={`${label}:${value}`}>{label} {value}</span>
+                    ))}
+                  </div>
+                ) : null}
                 {detail && detail !== eventTitle ? <p>{detail}</p> : null}
                 {eventStatus ? (
                   <em className={`run-status-pill ${runStatusTone(eventStatus)}`}>
@@ -232,4 +240,19 @@ function defaultStatusTone(status: string): string {
 
 function defaultStatusLabel(status: string): string {
   return status;
+}
+
+function runtimeEventMetadata(
+  event: RuntimeTimelineEventRecord,
+  eventSequence: string,
+  eventRunId: string,
+): Array<{ label: string; value: string }> {
+  return [
+    { label: '#', value: eventSequence },
+    { label: 'run', value: eventRunId },
+    { label: 'actor', value: defaultEventActor(event) },
+    { label: 'visibility', value: defaultEventVisibility(event) },
+    { label: 'sensitivity', value: defaultEventSensitivity(event) },
+    { label: 'schema', value: defaultEventSchemaVersion(event) },
+  ].filter((item) => item.value);
 }

@@ -16900,6 +16900,27 @@ button.activity-item {
   white-space: nowrap;
 }
 
+.run-step-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
+.run-step-meta span {
+  max-width: 100%;
+  overflow: hidden;
+  padding: 2px 6px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 6px;
+  color: var(--hy-faint);
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
+  font-size: 9px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .run-step-card p {
   margin: 0;
   color: var(--hy-muted);
