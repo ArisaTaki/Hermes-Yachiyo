@@ -2252,7 +2252,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "requestDeleteWorkflow",
             "requestDeleteSelectedWorkflows",
             "refreshRunGroupsForRuns",
-            "runEventReplayToTimelineEvent",
+            "useSelectedRunDetailState",
             "selectedRunExecutionEvents",
             "selectedRunReplayHasMore",
             "selectedRunReplayRefreshKey",
@@ -2267,6 +2267,19 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "selectedAgentReadOnly",
             "selectedAgentDeletable",
             "AgentDefinitionsTab",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useSelectedRunDetailState.ts",
+        [
+            "export function useSelectedRunDetailState",
+            "selectedRunReplayEvents.map(runEventReplayToTimelineEvent)",
+            "selectedPublicRunTimeline.events.map(publicRunEventToTimelineEvent)",
+            "publicApprovalToRunPendingApproval(selectedPublicRunApproval)",
+            "publicArtifactsOrLegacy(",
+            "workflowPendingApprovalChildRunId(selectedRun)",
+            "workflowRunHasChildRun(run, selectedRun.run_id)",
+            "selectedRunRerunDisabledReason",
         ],
     )
     _assert_contains(
@@ -3643,18 +3656,26 @@ def test_agent_studio_preserves_workflow_child_approval_run_detail_wiring() -> N
     _assert_contains(
         "apps/frontend/src/views/AgentStudioView.tsx",
         [
-            "workflowPendingApprovalChildRunId(selectedRun)",
+            "useSelectedRunDetailState({",
             "selectedWorkflowApprovalChildRunId",
-            "selectedWorkflowApprovalChildRun = selectedWorkflowApprovalChildRunId",
-            "selectedWorkflowApprovalStep = selectedWorkflowApprovalChildRunId",
-            "maybeAdd(selectedWorkflowApprovalChildRunId);",
-            "...selectedWorkflowChildRefs.map((ref) => ref.childRunId),",
             "selectedWorkflowApprovalChildRunId,",
             "Promise.all(uniqueChildRunIds.map((runId) => getRun(runId).catch(() => null)))",
             "useRunApprovalActions({",
             "onApproveRunById={approveRunById}",
             "onRejectRunById={rejectRunById}",
             "onCancelRunById={cancelRunById}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useSelectedRunDetailState.ts",
+        [
+            "workflowPendingApprovalChildRunId(selectedRun)",
+            "selectedWorkflowApprovalChildRunId",
+            "selectedWorkflowApprovalChildRun = selectedWorkflowApprovalChildRunId",
+            "selectedWorkflowApprovalStep = selectedWorkflowApprovalChildRunId",
+            "maybeAdd(selectedWorkflowApprovalChildRunId);",
+            "selectedWorkflowChildRefs.forEach((ref) => maybeAdd(ref.childRunId));",
+            "selectedWorkflowApprovalChildRunId,",
         ],
     )
     _assert_contains(
