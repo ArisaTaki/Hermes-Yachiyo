@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from apps.shell.agent.runtime.budget import RunBudgetLimits, WorkflowRunBudget
@@ -27,6 +28,7 @@ from apps.shell.agent.runtime.workflow_projections import (
     WorkflowStartNodeProjection,
 )
 from apps.shell.agent.runtime.workflow_run_outcomes import WorkflowRunOutcomeProjector
+from apps.shell.agent.tools.broker import ToolBroker
 
 
 def _iso_epoch(value: Any) -> float:
@@ -73,6 +75,10 @@ class WorkflowContinuationCoordinator:
         workflow_parallel_plan: Any | None = None,
         workflow_condition_selection: Any | None = None,
         workflow_loop_selection: Any | None = None,
+        workflow_approval_criteria: Any | None = None,
+        default_workspace_policy: Any | None = None,
+        workflow_artifacts_dir: Any | None = None,
+        workflow_artifact_path: Any | None = None,
         node_kind: Any | None = None,
     ) -> None:
         self._engine = engine
@@ -83,6 +89,10 @@ class WorkflowContinuationCoordinator:
         self._workflow_parallel_plan_callback = workflow_parallel_plan
         self._workflow_condition_selection_callback = workflow_condition_selection
         self._workflow_loop_selection_callback = workflow_loop_selection
+        self._workflow_approval_criteria_callback = workflow_approval_criteria
+        self._default_workspace_policy_callback = default_workspace_policy
+        self._workflow_artifacts_dir_source = workflow_artifacts_dir
+        self._workflow_artifact_path_callback = workflow_artifact_path
         self._node_kind_callback = node_kind
         self._outcomes = WorkflowRunOutcomeProjector(engine)
 
@@ -180,6 +190,39 @@ class WorkflowContinuationCoordinator:
             context,
             previous_iterations=previous_iterations,
         )
+
+    def _workflow_approval_criteria(self, node: dict[str, Any]) -> str:
+        if self._workflow_approval_criteria_callback is not None:
+            return str(self._workflow_approval_criteria_callback(node) or "").strip()
+        return self._engine._workflow_approval_criteria(node)
+
+    def _default_workspace_policy(self) -> dict[str, Any]:
+        if self._default_workspace_policy_callback is not None:
+            return self._default_workspace_policy_callback()
+        return self._engine._default_workspace_policy()
+
+    def _workflow_artifacts_dir(self) -> Any:
+        source = self._workflow_artifacts_dir_source
+        if source is not None:
+            return source() if callable(source) else source
+        return self._engine.workflow_artifacts_dir
+
+    def _workflow_artifact_path(
+        self,
+        label: str,
+        artifacts: list[dict[str, Any]],
+        configured_path: str = "",
+    ) -> str:
+        if self._workflow_artifact_path_callback is not None:
+            return str(
+                self._workflow_artifact_path_callback(
+                    label,
+                    artifacts,
+                    configured_path,
+                )
+                or ""
+            )
+        return self._engine._workflow_artifact_path(label, artifacts, configured_path)
 
     def _node_kind(self, node: dict[str, Any]) -> str:
         if self._node_kind_callback is not None:
@@ -790,11 +833,11 @@ class WorkflowContinuationCoordinator:
         next_node_id: str,
     ) -> dict[str, Any]:
         engine = self._engine
-        projection = WorkflowApprovalPauseProjection.from_node(
-            engine,
+        projection = WorkflowApprovalPauseProjection.from_criteria(
             node,
             label=label,
             kind=kind,
+            criteria=self._workflow_approval_criteria(node),
             context=context,
             next_index=node_index + 1,
             next_node_id=next_node_id,
@@ -1013,14 +1056,20 @@ class WorkflowContinuationCoordinator:
         node_info_extra: dict[str, str] | None = None,
     ) -> None:
         engine = self._engine
-        write = WorkflowArtifactNodeWrite.from_node(
-            engine,
-            run,
+        broker = ToolBroker(
+            self._default_workspace_policy(),
+            Path(self._workflow_artifacts_dir()) / str(run["run_id"]),
+        )
+        artifact_path = self._workflow_artifact_path(
+            label,
+            artifacts,
+            WorkflowArtifactNodeWrite.configured_path(node),
+        )
+        write = WorkflowArtifactNodeWrite.from_artifact(
             node,
+            broker.artifact_write(artifact_path, context),
             label=label,
             kind=kind,
-            context=context,
-            artifacts=artifacts,
             node_info_extra=node_info_extra,
         )
         artifacts.append(write.artifact_record())

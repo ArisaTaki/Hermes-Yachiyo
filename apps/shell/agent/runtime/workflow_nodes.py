@@ -256,6 +256,29 @@ class WorkflowArtifactNodeWrite:
     artifact: dict[str, Any]
     node_info_extra: dict[str, str] | None = None
 
+    @staticmethod
+    def configured_path(node: dict[str, Any]) -> str:
+        data = node.get("data") if isinstance(node.get("data"), dict) else {}
+        return str(data.get("artifact_path") or data.get("artifactPath") or "")
+
+    @classmethod
+    def from_artifact(
+        cls,
+        node: dict[str, Any],
+        artifact: dict[str, Any],
+        *,
+        label: str,
+        kind: str,
+        node_info_extra: dict[str, str] | None = None,
+    ) -> "WorkflowArtifactNodeWrite":
+        return cls(
+            node_id=str(node.get("id") or ""),
+            node_kind=kind,
+            node_label=label,
+            artifact=artifact,
+            node_info_extra=dict(node_info_extra or {}),
+        )
+
     @classmethod
     def from_node(
         cls,
@@ -269,7 +292,6 @@ class WorkflowArtifactNodeWrite:
         artifacts: list[dict[str, Any]],
         node_info_extra: dict[str, str] | None = None,
     ) -> "WorkflowArtifactNodeWrite":
-        data = node.get("data") if isinstance(node.get("data"), dict) else {}
         broker = ToolBroker(
             engine._default_workspace_policy(),
             engine.workflow_artifacts_dir / str(run["run_id"]),
@@ -277,13 +299,13 @@ class WorkflowArtifactNodeWrite:
         artifact_path = engine._workflow_artifact_path(
             label,
             artifacts,
-            str(data.get("artifact_path") or data.get("artifactPath") or ""),
+            cls.configured_path(node),
         )
-        return cls(
-            node_id=str(node.get("id") or ""),
-            node_kind=kind,
-            node_label=label,
-            artifact=broker.artifact_write(artifact_path, context),
+        return cls.from_artifact(
+            node,
+            broker.artifact_write(artifact_path, context),
+            label=label,
+            kind=kind,
             node_info_extra=dict(node_info_extra or {}),
         )
 

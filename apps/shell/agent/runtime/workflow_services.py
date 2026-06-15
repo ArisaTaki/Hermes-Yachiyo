@@ -145,6 +145,12 @@ def build_runtime_workflow_execution_services(
                 previous_iterations=previous_iterations,
             )
         ),
+        workflow_approval_criteria=lambda node: engine._workflow_approval_criteria(node),
+        default_workspace_policy=lambda: engine._default_workspace_policy(),
+        workflow_artifacts_dir=lambda: engine.workflow_artifacts_dir,
+        workflow_artifact_path=lambda label, artifacts, requested: (
+            engine._workflow_artifact_path(label, artifacts, requested)
+        ),
         node_kind=lambda node: engine._node_kind(node),
     )
     return RuntimeWorkflowExecutionServiceBundle(

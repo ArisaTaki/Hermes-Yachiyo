@@ -153,6 +153,30 @@ class WorkflowApprovalPauseProjection:
     requested_at: str
 
     @classmethod
+    def from_criteria(
+        cls,
+        node: dict[str, Any],
+        *,
+        label: str,
+        kind: str,
+        criteria: str,
+        context: str,
+        next_index: int,
+        next_node_id: str = "",
+    ) -> "WorkflowApprovalPauseProjection":
+        return cls(
+            approval_id=f"approval_{uuid4().hex[:12]}",
+            node_id=str(node.get("id") or ""),
+            node_kind=kind,
+            label=label,
+            criteria=str(criteria or "").strip(),
+            context=context,
+            next_index=next_index,
+            next_node_id=next_node_id,
+            requested_at=_now(),
+        )
+
+    @classmethod
     def from_node(
         cls,
         engine: Any,
@@ -164,16 +188,14 @@ class WorkflowApprovalPauseProjection:
         next_index: int,
         next_node_id: str = "",
     ) -> "WorkflowApprovalPauseProjection":
-        return cls(
-            approval_id=f"approval_{uuid4().hex[:12]}",
-            node_id=str(node.get("id") or ""),
-            node_kind=kind,
+        return cls.from_criteria(
+            node,
             label=label,
+            kind=kind,
             criteria=engine._workflow_approval_criteria(node),
             context=context,
             next_index=next_index,
             next_node_id=next_node_id,
-            requested_at=_now(),
         )
 
     def pending_approval(self) -> dict[str, Any]:

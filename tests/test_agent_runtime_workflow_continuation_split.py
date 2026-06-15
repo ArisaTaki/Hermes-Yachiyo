@@ -324,6 +324,111 @@ def test_workflow_continuation_uses_injected_loop_selection() -> None:
     assert loop_event[2]["workflow_node_loop_limit_reached"] is True
 
 
+def test_workflow_continuation_uses_injected_approval_criteria() -> None:
+    engine = FakeWorkflowTraversalEngine()
+    workflow = {
+        "nodes": [
+            {"id": "gate", "type": "approval", "data": {"label": "Human Gate"}},
+        ]
+    }
+    criteria_calls: list[str] = []
+    coordinator = WorkflowContinuationCoordinator(
+        engine,
+        workflow_path=lambda current_workflow: list(current_workflow["nodes"]),
+        workflow_nodes_by_id=lambda current_workflow: {
+            str(node["id"]): node for node in current_workflow["nodes"]
+        },
+        workflow_next_node_id=lambda _workflow, _node, _context: "report",
+        workflow_approval_criteria=lambda node: criteria_calls.append(str(node["id"]))
+        or "Injected criteria",
+        node_kind=lambda node: str(node["type"]),
+    )
+
+    result = coordinator.continue_run(
+        {"run_id": "workflow_run", "user_goal": "Review"},
+        workflow,
+        context="Draft ready",
+        timeline=[],
+        artifacts=[],
+        start_index=0,
+        root_group=False,
+    )
+
+    assert result["status"] == "approval_required"
+    assert criteria_calls == ["gate"]
+    assert result["pending_approval"]["workflow_node_approval_criteria"] == "Injected criteria"
+    assert result["pending_approval"]["workflow_next_node_id"] == "report"
+    approval_event = next(
+        event for event in engine.events if event[1] == "workflow.node.approval_required"
+    )
+    assert approval_event[2]["workflow_node_approval_criteria"] == "Injected criteria"
+
+
+def test_workflow_continuation_uses_injected_artifact_io(tmp_path) -> None:
+    engine = FakeWorkflowTraversalEngine()
+    workflow = {
+        "nodes": [
+            {
+                "id": "report",
+                "type": "artifact",
+                "data": {"label": "Final Report", "artifact_path": "reports/final.md"},
+            },
+        ]
+    }
+    artifacts_dir = tmp_path / "workflow-artifacts"
+    artifact_path_calls: list[dict[str, object]] = []
+    coordinator = WorkflowContinuationCoordinator(
+        engine,
+        workflow_path=lambda current_workflow: list(current_workflow["nodes"]),
+        workflow_nodes_by_id=lambda current_workflow: {
+            str(node["id"]): node for node in current_workflow["nodes"]
+        },
+        workflow_next_node_id=lambda _workflow, _node, _context: "",
+        default_workspace_policy=lambda: {
+            "default_workdir": "",
+            "readable_scopes": ["."],
+            "writable_scopes": [],
+        },
+        workflow_artifacts_dir=lambda: artifacts_dir,
+        workflow_artifact_path=lambda label, artifacts, requested: artifact_path_calls.append(
+            {"label": label, "artifacts": list(artifacts), "requested": requested}
+        )
+        or requested,
+        node_kind=lambda node: str(node["type"]),
+    )
+    artifacts: list[dict[str, Any]] = []
+    timeline: list[dict[str, Any]] = []
+
+    result = coordinator.continue_run(
+        {"run_id": "workflow_run", "user_goal": "Write report"},
+        workflow,
+        context="Final workflow summary",
+        timeline=timeline,
+        artifacts=artifacts,
+        start_index=0,
+        root_group=False,
+    )
+
+    assert result["status"] == "completed"
+    assert (artifacts_dir / "workflow_run" / "reports" / "final.md").read_text(
+        encoding="utf-8"
+    ) == "Final workflow summary"
+    assert artifact_path_calls == [
+        {"label": "Final Report", "artifacts": [], "requested": "reports/final.md"}
+    ]
+    assert artifacts == [
+        {
+            "kind": "workflow_artifact",
+            "workflow_node_id": "report",
+            "workflow_node_label": "Final Report",
+            "ok": True,
+            "path": "reports/final.md",
+            "bytes": len("Final workflow summary".encode("utf-8")),
+        }
+    ]
+    assert timeline[0]["event"] == "workflow.node.artifact"
+
+
 class FakeWorkflowTraversalEngine:
     def __init__(self) -> None:
         self.events: list[tuple[str, str, dict[str, Any]]] = []
