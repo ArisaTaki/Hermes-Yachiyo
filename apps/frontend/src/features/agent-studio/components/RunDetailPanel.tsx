@@ -10,6 +10,7 @@ import { MemorySkillTraceInspector } from './MemorySkillTraceInspector';
 import { RunApprovalRequest } from './RunApprovalRequest';
 import { RunTimeline } from './RunTimeline';
 import { ToolCallInspector } from './ToolCallInspector';
+import { mergeToolCallSnapshots, toolCallsFromRunEventReplay } from '../utils/runTimeline';
 
 export type RunDetailWorkflowStepRef = {
   key: string;
@@ -135,6 +136,16 @@ export function RunDetailPanel({
   const memorySkillTraceSource = selectedRunReplayEvents.length
     ? 'RunEvent replay trace facts · Memory / Skill'
     : 'RunTimelineSnapshot trace facts · Memory / Skill';
+  const replayToolCalls = selectedRunReplayEvents.length
+    ? toolCallsFromRunEventReplay(selectedRunReplayEvents)
+    : [];
+  const selectedRunToolCalls = mergeToolCallSnapshots(
+    selectedPublicRunTimeline?.tool_calls || [],
+    replayToolCalls,
+  );
+  const toolCallSource = replayToolCalls.length
+    ? 'RunTimelineSnapshot + RunEvent replay tool facts'
+    : 'RunTimelineSnapshot tool calls';
 
   return (
     <div className="agent-studio-panel">
@@ -365,7 +376,12 @@ export function RunDetailPanel({
               </div>
             </section>
           ) : null}
-          {selectedPublicRunTimeline ? <ToolCallInspector toolCalls={selectedPublicRunTimeline.tool_calls || []} /> : null}
+          {selectedPublicRunTimeline || selectedRunToolCalls.length ? (
+            <ToolCallInspector
+              sourceLabel={toolCallSource}
+              toolCalls={selectedRunToolCalls}
+            />
+          ) : null}
           {selectedPublicRunTimeline || selectedRunReplayEvents.length ? (
             <MemorySkillTraceInspector
               events={memorySkillTraceEvents}

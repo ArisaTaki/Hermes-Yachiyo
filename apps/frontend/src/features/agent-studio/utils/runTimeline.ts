@@ -1,4 +1,4 @@
-import type { PublicRunEvent } from '../../yachiyo-studio/types';
+import type { PublicRunEvent, ToolCallSnapshot } from '../../yachiyo-studio/types';
 
 export function timelineChildRunId(event: Record<string, unknown>): string {
   const value = event.child_run_id;
@@ -199,6 +199,24 @@ export function runEventReplayToTimelineEvent(event: PublicRunEvent): Record<str
   };
 }
 
+export function toolCallsFromRunEventReplay(events: PublicRunEvent[]): ToolCallSnapshot[] {
+  return events
+    .map(toolCallFromRunEvent)
+    .filter((toolCall): toolCall is ToolCallSnapshot => Boolean(toolCall));
+}
+
+export function mergeToolCallSnapshots(
+  timelineToolCalls: ToolCallSnapshot[],
+  replayToolCalls: ToolCallSnapshot[],
+): ToolCallSnapshot[] {
+  const byId = new Map<string, ToolCallSnapshot>();
+  timelineToolCalls.forEach((toolCall) => byId.set(toolCall.tool_call_id, toolCall));
+  replayToolCalls.forEach((toolCall) => {
+    if (!byId.has(toolCall.tool_call_id)) byId.set(toolCall.tool_call_id, toolCall);
+  });
+  return Array.from(byId.values());
+}
+
 export function mergeRunEventReplayPages(
   current: PublicRunEvent[],
   incoming: PublicRunEvent[],
@@ -209,6 +227,70 @@ export function mergeRunEventReplayPages(
   return Array.from(bySequence.values()).sort(
     (left, right) => (Number(left.sequence) || 0) - (Number(right.sequence) || 0),
   );
+}
+
+function toolCallFromRunEvent(event: PublicRunEvent): ToolCallSnapshot | null {
+  if (!isToolRunEvent(event.event_type)) return null;
+  const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
+  const outputPreview = objectPreview(payload.output_preview)
+    || objectPreview(payload.result)
+    || (payload.error !== undefined ? { error: payload.error } : {});
+  const toolName = publicRunEventPayloadString(payload, 'tool_name')
+    || publicRunEventPayloadString(payload, 'tool')
+    || event.detail
+    || 'tool';
+  return {
+    tool_call_id: event.event_id
+      || publicRunEventPayloadString(payload, 'tool_call_id')
+      || publicRunEventPayloadString(payload, 'id')
+      || `${event.run_id}:${event.event_type}:${event.sequence}`,
+    run_id: event.run_id,
+    tool_name: toolName,
+    status: publicRunEventPayloadString(payload, 'status') || toolStatusFromRunEvent(event.event_type),
+    risk_level: publicRunEventPayloadString(payload, 'risk_level')
+      || publicRunEventPayloadString(payload, 'risk')
+      || null,
+    input_preview: objectPreview(payload.input_preview) || objectPreview(payload.input) || {},
+    output_preview: outputPreview,
+    approval_id: publicRunEventPayloadString(payload, 'approval_id') || null,
+    started_at: event.created_at || '',
+    completed_at: publicRunEventPayloadString(payload, 'completed_at') || null,
+  };
+}
+
+function isToolRunEvent(eventType: string): boolean {
+  return [
+    'agent.tool.call',
+    'agent.tool.denied',
+    'agent.tool.failed',
+    'agent.tool.skipped',
+    'agent.tool.approval_required',
+    'agent.tool.approval_approved',
+    'agent.tool.approval_rejected',
+    'agent.tool.completed',
+    'tool.requested',
+    'tool.started',
+    'tool.approval_required',
+    'tool.completed',
+    'tool.failed',
+  ].includes(eventType);
+}
+
+function toolStatusFromRunEvent(eventType: string): string {
+  if (eventType === 'tool.requested') return 'requested';
+  if (eventType === 'tool.started') return 'running';
+  if (eventType === 'tool.approval_required' || eventType === 'agent.tool.approval_required') return 'waiting_approval';
+  if (eventType === 'agent.tool.approval_approved') return 'approved';
+  if (eventType === 'agent.tool.approval_rejected' || eventType === 'agent.tool.denied') return 'denied';
+  if (eventType === 'tool.failed' || eventType === 'agent.tool.failed') return 'failed';
+  if (eventType === 'agent.tool.skipped') return 'skipped';
+  return 'completed';
+}
+
+function objectPreview(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
 }
 
 function publicRunEventPayloadString(payload: Record<string, unknown>, key: string): string {
