@@ -114,6 +114,14 @@ from apps.shell.agent.runtime.tool_approvals import (
     ToolApprovalResumeContext,
     ToolApprovalTransitionContext,
 )
+from apps.shell.agent.runtime.tool_loop import (
+    RuntimeToolLoopProjectionBuilder,
+    append_tool_result_message as _runtime_append_tool_result_message,
+    assistant_message_for_history as _runtime_assistant_message_for_history,
+    fatal_tool_failure_detail as _runtime_fatal_tool_failure_detail,
+    tool_loop_limit_artifact_completion as _runtime_tool_loop_limit_artifact_completion,
+    tool_loop_limit_detail as _runtime_tool_loop_limit_detail,
+)
 from apps.shell.agent.runtime.timeline import RuntimeAgentTimelineBuilder
 
 from apps.shell.agent.runtime.workflow_continuation import WorkflowContinuationCoordinator
@@ -1617,6 +1625,7 @@ class NativeRunEngine:
             default_agent_ids=_DEFAULT_AGENT_IDS,
             error_type=AgentRuntimeError,
         )
+        self.tool_loop_projection = RuntimeToolLoopProjectionBuilder()
         self.agent_context_builder = AgentContextBuilder(
             compile_agent_runtime=self._compile_agent_runtime,
             load_agent_skills=self._load_agent_skills,
@@ -4529,7 +4538,7 @@ class NativeRunEngine:
                 )
 
             if tool_requests[0].get("protocol") == "tool_calls":
-                messages.append(self._assistant_message_for_history(message))
+                messages.append(self.tool_loop_projection.assistant_message_for_history(message))
             else:
                 messages.append({"role": "assistant", "content": content})
             self._run_tool_requests(
@@ -4543,7 +4552,7 @@ class NativeRunEngine:
                 run_id=run_id,
                 budget=budget,
             )
-        artifact_completion = self._tool_loop_limit_artifact_completion(timeline, artifacts)
+        artifact_completion = self.tool_loop_projection.artifact_completion(timeline, artifacts)
         if artifact_completion:
             timeline.append(
                 self._timeline(
@@ -4554,112 +4563,34 @@ class NativeRunEngine:
                         for artifact in artifacts
                         if artifact.get("kind") != "context" and str(artifact.get("path") or "").strip()
                     ],
-                    loop_limit_detail=self._tool_loop_limit_detail(timeline),
+                    loop_limit_detail=self.tool_loop_projection.loop_limit_detail(timeline),
                 )
             )
             return artifact_completion
-        raise AgentRuntimeError(f"custom_api Agent 工具循环超过上限；{self._tool_loop_limit_detail(timeline)}")
-
-    @staticmethod
-    def _tool_loop_limit_detail(timeline: list[dict[str, Any]]) -> str:
-        for event in reversed(timeline):
-            if event.get("event") != "agent.tool.call":
-                continue
-            tool_name = str(event.get("detail") or "unknown tool")
-            result = event.get("result") if isinstance(event.get("result"), dict) else {}
-            parts = [f"最后一次工具调用：{tool_name}"]
-            error = str(result.get("error") or "").strip()
-            if error:
-                parts.append(f"错误：{error}")
-            returncode = result.get("returncode")
-            if returncode not in (None, 0, "0"):
-                parts.append(f"退出码：{returncode}")
-            hint = str(result.get("hint") or "").strip()
-            if hint:
-                parts.append(f"建议：{hint}")
-            suggested_tool = str(result.get("suggested_tool") or "").strip()
-            if suggested_tool:
-                parts.append(f"建议工具：{suggested_tool}")
-            stderr = str(result.get("stderr") or "").strip()
-            if stderr and not error:
-                parts.append(f"stderr：{stderr[:500]}")
-            return "；".join(parts)
-        return "没有可用的工具调用详情"
-
-    @staticmethod
-    def _tool_loop_limit_artifact_completion(timeline: list[dict[str, Any]], artifacts: list[dict[str, Any]]) -> str | None:
-        last_tool_event = next((event for event in reversed(timeline) if event.get("event") == "agent.tool.call"), None)
-        if not last_tool_event or str(last_tool_event.get("detail") or "") != "artifact.write":
-            return None
-        result = last_tool_event.get("result") if isinstance(last_tool_event.get("result"), dict) else {}
-        if not result.get("ok"):
-            return None
-        paths: list[str] = []
-        for artifact in artifacts:
-            if artifact.get("kind") == "context":
-                continue
-            path = str(artifact.get("path") or "").strip()
-            if path and path not in paths:
-                paths.append(path)
-        if not paths:
-            path = str(result.get("path") or "").strip()
-            if path:
-                paths.append(path)
-        if not paths:
-            return None
-        return (
-            "已写入产物，但模型在工具循环上限前没有返回最终总结。\n"
-            f"产物：{', '.join(paths)}\n"
-            f"{NativeRunEngine._tool_loop_limit_detail(timeline)}"
+        raise AgentRuntimeError(
+            "custom_api Agent 工具循环超过上限；"
+            f"{self.tool_loop_projection.loop_limit_detail(timeline)}"
         )
 
     @staticmethod
+    def _tool_loop_limit_detail(timeline: list[dict[str, Any]]) -> str:
+        return _runtime_tool_loop_limit_detail(timeline)
+
+    @staticmethod
+    def _tool_loop_limit_artifact_completion(timeline: list[dict[str, Any]], artifacts: list[dict[str, Any]]) -> str | None:
+        return _runtime_tool_loop_limit_artifact_completion(timeline, artifacts)
+
+    @staticmethod
     def _fatal_tool_failure_detail(tool_name: str, tool_request: dict[str, Any], tool_result: dict[str, Any]) -> str:
-        if tool_name != "terminal.run":
-            return ""
-        if tool_result.get("ok") or tool_result.get("approval_required") or tool_result.get("blocked_by_user_goal"):
-            return ""
-        payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
-        command = str(payload.get("command") or "").strip()
-        parts = ["terminal.run 执行失败"]
-        if command:
-            parts.append(f"命令：{command}")
-        returncode = tool_result.get("returncode")
-        if returncode not in (None, ""):
-            parts.append(f"退出码：{returncode}")
-        error = str(tool_result.get("error") or "").strip()
-        if error:
-            parts.append(f"错误：{error}")
-        stdout = str(tool_result.get("stdout") or "").strip()
-        if stdout:
-            parts.append(f"stdout：{stdout[:1000]}")
-        stderr = str(tool_result.get("stderr") or "").strip()
-        if stderr:
-            parts.append(f"stderr：{stderr[:1000]}")
-        return "；".join(parts)
+        return _runtime_fatal_tool_failure_detail(tool_name, tool_request, tool_result)
 
     @staticmethod
     def _assistant_message_for_history(message: dict[str, Any]) -> dict[str, Any]:
-        content = message.get("content")
-        history = {"role": "assistant", "content": content if content not in (None, "") else None}
-        tool_calls = message.get("tool_calls")
-        if isinstance(tool_calls, list):
-            history["tool_calls"] = tool_calls
-        return history
+        return _runtime_assistant_message_for_history(message)
 
     @staticmethod
     def _append_tool_result_message(messages: list[dict[str, Any]], tool_request: dict[str, Any], tool_result: dict[str, Any]) -> None:
-        content = json.dumps(tool_result, ensure_ascii=False)
-        if tool_request.get("protocol") == "tool_calls":
-            messages.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": str(tool_request.get("tool_call_id") or ""),
-                    "content": content,
-                }
-            )
-            return
-        messages.append({"role": "user", "content": f"Tool result for {tool_request['tool']}: {content}"})
+        _runtime_append_tool_result_message(messages, tool_request, tool_result)
 
     def _run_tool_requests(
         self,
@@ -4697,7 +4628,11 @@ class NativeRunEngine:
                         "agent.tool.skipped",
                         {"tool": tool_name, "input_preview": input_preview, "result": tool_result},
                     )
-                self._append_tool_result_message(messages, {**tool_request, "tool": tool_name}, tool_result)
+                self.tool_loop_projection.append_tool_result_message(
+                    messages,
+                    {**tool_request, "tool": tool_name},
+                    tool_result,
+                )
                 continue
             tool_result = self._call_agent_tool(
                 tool_request,
@@ -4717,7 +4652,11 @@ class NativeRunEngine:
                         remaining_tool_requests=tool_requests[index + 1 :],
                     )
                 )
-            fatal_failure = self._fatal_tool_failure_detail(tool_name, tool_request, tool_result)
+            fatal_failure = self.tool_loop_projection.fatal_failure_detail(
+                tool_name,
+                tool_request,
+                tool_result,
+            )
             if fatal_failure:
                 timeline.append(
                     self._timeline(
@@ -4729,7 +4668,7 @@ class NativeRunEngine:
                     )
                 )
                 raise AgentRuntimeError(fatal_failure)
-            self._append_tool_result_message(messages, tool_request, tool_result)
+            self.tool_loop_projection.append_tool_result_message(messages, tool_request, tool_result)
 
     def _call_agent_tool(
         self,
