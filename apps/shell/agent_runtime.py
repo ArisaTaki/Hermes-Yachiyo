@@ -12,7 +12,6 @@ import threading
 import time
 from copy import deepcopy
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 from urllib import error as urlerror
@@ -108,6 +107,24 @@ from apps.shell.agent.runtime.cancellation import (
 from apps.shell.agent.runtime.core_services import (
     RuntimeCoreServiceBundle,
     build_runtime_core_services as _build_runtime_core_services,
+)
+from apps.shell.agent.runtime.clock import iso_epoch as _iso_epoch, utc_now_iso as _now
+from apps.shell.agent.runtime.config import (
+    DEFAULT_AGENT_IDS as _DEFAULT_AGENT_IDS,
+    EXECUTION_BACKENDS as _EXECUTION_BACKENDS,
+    FINAL_RUN_STATUSES as _FINAL_RUN_STATUSES,
+    MAIN_CHAT_AGENT_ID as _MAIN_CHAT_AGENT_ID,
+    MARKET_AGENT_OPERATING_DOCTRINE as _MARKET_AGENT_OPERATING_DOCTRINE,
+    MEMORY_CONTENT_MAX_CHARS as _MEMORY_CONTENT_MAX_CHARS,
+    MEMORY_CONTEXT_LIMIT as _MEMORY_CONTEXT_LIMIT,
+    NATIVE_LIBRARY_SOURCE_TYPES as _NATIVE_LIBRARY_SOURCE_TYPES,
+    SKILL_SOURCE_TYPES as _SKILL_SOURCE_TYPES,
+    SYSTEM_AGENT_IDS as _SYSTEM_AGENT_IDS,
+    WORKFLOW_NODE_TYPES as _WORKFLOW_NODE_TYPES,
+    is_active_run_status as _is_active_run_status,
+    is_native_library_source_type as _is_native_library_source_type,
+    normalize_execution_backend as _normalize_execution_backend,
+    normalize_skill_source_type as _normalize_skill_source_type,
 )
 from apps.shell.agent.runtime.credentials import RuntimeCredentialService
 from apps.shell.agent.runtime.custom_api_agent import RuntimeCustomApiAgentLoop
@@ -384,43 +401,7 @@ from packages.security import (
 logger = logging.getLogger(__name__)
 
 
-_EXECUTION_BACKENDS = {"native_profile", "yachiyo_profile", "external_cli"}
-_MEMORY_CONTEXT_LIMIT = 12
-_MEMORY_CONTENT_MAX_CHARS = 4000
-_FINAL_RUN_STATUSES = {"completed", "failed", "cancelled"}
-_WORKFLOW_NODE_TYPES = {"start", "agent", "approval", "artifact", "condition", "parallel", "workflow", "loop"}
-_NATIVE_LIBRARY_SOURCE_TYPES = {"native_global", "native_project"}
-_SKILL_SOURCE_TYPES = {*_NATIVE_LIBRARY_SOURCE_TYPES, "npx_skills", "local_zip", "local_dir"}
 _UNSET = object()
-_MAIN_CHAT_AGENT_ID = "builtin:yachiyo-main"
-_SYSTEM_AGENT_IDS = {_MAIN_CHAT_AGENT_ID}
-_DEFAULT_AGENT_IDS = {
-    _MAIN_CHAT_AGENT_ID,
-    "agent_yachiyo_orchestrator",
-    "agent_coding",
-    "agent_design",
-    "agent_review",
-    "agent_research",
-    "agent_office",
-    "agent_custom",
-}
-_MARKET_AGENT_OPERATING_DOCTRINE = (
-    "Market-grade Agent operating doctrine:\n"
-    "- Act as a persistent personal agent, not a one-shot chatbot: preserve user intent, "
-    "handoff context, and reusable outputs when the task has follow-up value.\n"
-    "- Prefer the smallest reliable action loop: reason from available context, inspect before "
-    "acting, use tools only when they materially improve the answer, and do not fabricate tool results.\n"
-    "- Treat Skills as task manuals and tools as external actions; use mounted Skills when relevant, "
-    "but keep direct answers lightweight when no Skill is needed.\n"
-    "- For multi-step work, expose progress through concise summaries, artifacts, or workflow handoffs "
-    "instead of hiding important intermediate decisions.\n"
-    "- Respect safety boundaries: approval gates, workspace scopes, credential redaction, and user "
-    "instructions outrank autonomy."
-)
-
-
-def _is_active_run_status(status: str) -> bool:
-    return (status.strip() or "running") not in _FINAL_RUN_STATUSES
 
 
 def _agent_output_contract_rules(contract: Any) -> str:
@@ -435,27 +416,6 @@ def _agent_goal_disallows_tool(user_goal: str, tool_name: str) -> str:
     return _runtime_agent_goal_disallows_tool(user_goal, tool_name)
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def _normalize_execution_backend(value: Any, *, model_mode: str = "") -> str:
-    """Normalize all Studio execution backends to the native runtime."""
-    backend = str(value or "").strip()
-    if backend and backend not in _EXECUTION_BACKENDS:
-        raise AgentRuntimeError("execution_backend 不再支持 legacy 或未知执行后端；请使用 native_profile")
-    return "native_profile"
-
-
-def _normalize_skill_source_type(value: Any) -> str:
-    source_type = str(value or "").strip()
-    return source_type
-
-
-def _is_native_library_source_type(value: Any) -> bool:
-    return _normalize_skill_source_type(value) in _NATIVE_LIBRARY_SOURCE_TYPES
-
-
 def redact_secrets(value: Any) -> str:
     return redact_sensitive_text(
         value,
@@ -463,16 +423,6 @@ def redact_secrets(value: Any) -> str:
         collapse_whitespace=False,
         trim=False,
     )
-
-
-def _iso_epoch(value: Any) -> float:
-    text = str(value or "").strip()
-    if not text:
-        return time.time()
-    try:
-        return datetime.fromisoformat(text).timestamp()
-    except ValueError:
-        return time.time()
 
 
 def _skill_content_hash(root: Path) -> str:
@@ -712,7 +662,7 @@ class NativeRunEngine:
         runtime_run_budget = _runtime_run_budget_factory(
             limits=lambda: self.runtime_limits,
             get_run=lambda run_id: self.get_run(run_id),
-            iso_epoch=_iso_epoch,
+            iso_epoch=lambda value: _iso_epoch(value),
         )
         self._install_runtime_main_chat_model(
             MainChatModelCaller(

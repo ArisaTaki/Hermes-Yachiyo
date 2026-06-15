@@ -1,0 +1,21 @@
+"""Clock helpers shared by runtime services."""
+
+from __future__ import annotations
+
+import time
+from datetime import datetime, timezone
+from typing import Any
+
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def iso_epoch(value: Any) -> float:
+    text = str(value or "").strip()
+    if not text:
+        return time.time()
+    try:
+        return datetime.fromisoformat(text).timestamp()
+    except ValueError:
+        return time.time()
