@@ -656,6 +656,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "useAgentStudioRouteState()",
             "useApprovedRunGuard",
             "useRunApprovalActions",
+            "useRunDetailSynchronization({",
             "useRunApprovalFollowup",
             "useRunEventReplay(selectedRunId, selectedRunReplayRefreshKey)",
             "useRunListDerivedState({",
@@ -694,6 +695,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "workflowSpecStepRefs({",
             "agentRunReadinessIssue(agent, chatModelProfiles",
             "const routeRunId = currentParam('run').trim();",
+            "getStudioRunForView(",
             "async function saveAgentGroup()",
             "async function runCurrentAgentGroup()",
             "listStudioAgentsForView()",
@@ -2029,8 +2031,7 @@ def test_chat_approval_run_detail_handoff_preserves_route_and_replay_wiring() ->
         "apps/frontend/src/views/AgentStudioView.tsx",
         [
             "useAgentStudioRouteState()",
-            "if (!selectedRunId || selectedRun) return;",
-            "getStudioRunForView(selectedRunId)",
+            "useRunDetailSynchronization({",
             "useRunEventReplay(selectedRunId, selectedRunReplayRefreshKey)",
             "useRunApprovalFollowup({",
             "selectedRunExecutionEvents",
@@ -2046,6 +2047,18 @@ def test_chat_approval_run_detail_handoff_preserves_route_and_replay_wiring() ->
             "const nextTab = routeRunId || routeRunTarget ? 'runs' : routeTab;",
             "setSelectedRunId((current) => current === routeRunId ? current : routeRunId);",
             "setRunTarget((current) => current === routeRunTarget ? current : routeRunTarget);",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useRunDetailSynchronization.ts",
+        [
+            "export function useRunDetailSynchronization",
+            "if (!selectedRunId || selectedRun) return;",
+            "getStudioRunForView(selectedRunId)",
+            "refreshRunGroupById(runGroupId, () => !disposed)",
+            "const pollRunIds = activeRunPollKey.split('|').filter(Boolean);",
+            "await refreshRunGroupsForRuns(loadedRuns, () => !disposed);",
+            "setArtifactPreview(null);",
         ],
     )
     _assert_contains(
@@ -2340,6 +2353,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "useAgentSkillMountActions",
             "useRunCacheActions",
             "useRunApprovalActions",
+            "useRunDetailSynchronization",
             "useRunEventReplay",
             "useRunArtifactActions",
             "useRunDebugActions",
@@ -3792,11 +3806,19 @@ def test_agent_studio_preserves_workflow_child_approval_run_detail_wiring() -> N
             "useSelectedRunDetailState({",
             "selectedWorkflowApprovalChildRunId",
             "selectedWorkflowApprovalChildRunId,",
-            "Promise.all(uniqueChildRunIds.map((runId) => getStudioRunForView(runId).catch(() => null)))",
+            "useRunDetailSynchronization({",
             "useRunApprovalActions({",
             "onApproveRunById={approveRunById}",
             "onRejectRunById={rejectRunById}",
             "onCancelRunById={cancelRunById}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useRunDetailSynchronization.ts",
+        [
+            "Promise.all(uniqueChildRunIds.map((runId) => getStudioRunForView(runId).catch(() => null)))",
+            "selectedWorkflowChildRefs.map((ref) => ref.childRunId)",
+            "selectedWorkflowApprovalChildRunId",
         ],
     )
     _assert_contains(

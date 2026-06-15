@@ -32,6 +32,7 @@ import { useRunApprovalFollowup } from '../features/agent-studio/hooks/useRunApp
 import { useRunArtifactActions } from '../features/agent-studio/hooks/useRunArtifactActions';
 import { useRunCacheActions } from '../features/agent-studio/hooks/useRunCacheActions';
 import { useRunDebugActions } from '../features/agent-studio/hooks/useRunDebugActions';
+import { useRunDetailSynchronization } from '../features/agent-studio/hooks/useRunDetailSynchronization';
 import { useRunEventReplay } from '../features/agent-studio/hooks/useRunEventReplay';
 import { useRunHistoryManagement } from '../features/agent-studio/hooks/useRunHistoryManagement';
 import { useRunLaunchActions } from '../features/agent-studio/hooks/useRunLaunchActions';
@@ -65,7 +66,6 @@ import {
 import {
   formatRunDate,
   isActiveRunStatus,
-  isPotentialWorkflowChildAgentRun,
   normalizeRunStatus,
   runHistoryGroupSummary,
   runKindLabel,
@@ -92,7 +92,6 @@ import {
   workflowStepSummary,
 } from '../features/agent-studio/utils/workflow';
 import { testYachiyoStudioAgentModel } from '../features/yachiyo-studio/api';
-import { getStudioRunForView } from '../features/agent-studio/utils/studioData';
 import type {
   FutureTaskSpec,
   MemorySpec,
@@ -758,6 +757,21 @@ export function AgentStudioView() {
     workflowRunGoal,
   });
 
+  useRunDetailSynchronization({
+    activeRunPollKey,
+    refreshRunGroupById,
+    refreshRunGroupsForRuns,
+    runById,
+    runGroups,
+    selectedRun,
+    selectedRunId,
+    selectedWorkflowApprovalChildRunId,
+    selectedWorkflowChildRefs,
+    selectedWorkflowParentRunId,
+    setArtifactPreview,
+    upsertRunDetailCache,
+  });
+
   useEffect(() => {
     setLoading(true);
     refresh()
@@ -793,97 +807,6 @@ export function AgentStudioView() {
       disposed = true;
     };
   }, [agents.length, busyAction, draft.agent_id, loading, refresh, selectedAgentId, tab]);
-
-  useEffect(() => {
-    if (!selectedRunId || selectedRun) return;
-    let disposed = false;
-    getStudioRunForView(selectedRunId)
-      .then((run) => {
-        if (!disposed) upsertRunDetailCache([run]);
-      })
-      .catch(() => undefined);
-    return () => {
-      disposed = true;
-    };
-  }, [selectedRun, selectedRunId]);
-
-  useEffect(() => {
-    if (!isPotentialWorkflowChildAgentRun(selectedRun)) return;
-    const runGroupId = selectedRun.run_group_id || '';
-    if (!runGroupId) return;
-    if (runGroups.some((group) => group.run_group_id === runGroupId)) return;
-    let disposed = false;
-    refreshRunGroupById(runGroupId, () => !disposed)
-      .catch(() => undefined);
-    return () => {
-      disposed = true;
-    };
-  }, [refreshRunGroupById, runGroups, selectedRun]);
-
-  useEffect(() => {
-    if (!selectedWorkflowParentRunId || runById.has(selectedWorkflowParentRunId)) return;
-    let disposed = false;
-    getStudioRunForView(selectedWorkflowParentRunId)
-      .then((run) => {
-        if (!disposed) upsertRunDetailCache([run]);
-      })
-      .catch(() => undefined);
-    return () => {
-      disposed = true;
-    };
-  }, [runById, selectedWorkflowParentRunId, upsertRunDetailCache]);
-
-  useEffect(() => {
-    const childRunIds = [
-      ...selectedWorkflowChildRefs.map((ref) => ref.childRunId),
-      selectedWorkflowApprovalChildRunId,
-    ].filter(Boolean);
-    const uniqueChildRunIds = Array.from(new Set(childRunIds));
-    if (!uniqueChildRunIds.length) return;
-    let disposed = false;
-    Promise.all(uniqueChildRunIds.map((runId) => getStudioRunForView(runId).catch(() => null)))
-      .then((childRuns) => {
-        if (disposed) return;
-        const loaded = childRuns.filter((run): run is RunSpec => Boolean(run));
-        if (!loaded.length) return;
-        upsertRunDetailCache(loaded);
-      });
-    return () => {
-      disposed = true;
-    };
-  }, [selectedWorkflowApprovalChildRunId, selectedWorkflowChildRefs, upsertRunDetailCache]);
-
-  useEffect(() => {
-    const pollRunIds = activeRunPollKey.split('|').filter(Boolean);
-    if (!pollRunIds.length) return;
-    let disposed = false;
-    let inFlight = false;
-    const pollRuns = async () => {
-      if (inFlight) return;
-      inFlight = true;
-      try {
-        const loadedRuns = (await Promise.all(pollRunIds.map((runId) => getStudioRunForView(runId).catch(() => null))))
-          .filter((run): run is RunSpec => Boolean(run));
-        if (disposed || !loadedRuns.length) return;
-        upsertRunDetailCache(loadedRuns);
-        await refreshRunGroupsForRuns(loadedRuns, () => !disposed);
-      } finally {
-        inFlight = false;
-      }
-    };
-    void pollRuns();
-    const timer = window.setInterval(() => {
-      void pollRuns();
-    }, 2500);
-    return () => {
-      disposed = true;
-      window.clearInterval(timer);
-    };
-  }, [activeRunPollKey, refreshRunGroupsForRuns, upsertRunDetailCache]);
-
-  useEffect(() => {
-    setArtifactPreview(null);
-  }, [selectedRunId]);
 
   useEffect(() => {
     setNodes(workflowNodes(selectedWorkflow));
