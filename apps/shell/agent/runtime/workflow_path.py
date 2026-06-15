@@ -9,6 +9,17 @@ from typing import Any
 
 from apps.shell.agent.runtime.errors import AgentRuntimeError
 
+DEFAULT_WORKFLOW_NODE_TYPES = {
+    "start",
+    "agent",
+    "approval",
+    "artifact",
+    "condition",
+    "parallel",
+    "workflow",
+    "loop",
+}
+
 
 def _json_load(value: str | None, default: Any) -> Any:
     if value is None:
@@ -504,3 +515,147 @@ class WorkflowPathPlanner:
             "nodes": _json_load(_json_dump(workflow.get("nodes") or []), []),
             "edges": _json_load(_json_dump(workflow.get("edges") or []), []),
         }
+
+
+class WorkflowDefinitionValidator:
+    """Validates saved Workflow graph structure before execution."""
+
+    def __init__(
+        self,
+        *,
+        node_kind: Any,
+        node_types: set[str] | None = None,
+    ) -> None:
+        self._node_kind = node_kind
+        self._node_types = set(node_types or DEFAULT_WORKFLOW_NODE_TYPES)
+
+    def validate(self, nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> dict[str, Any]:
+        if not nodes:
+            raise AgentRuntimeError("Workflow 至少需要一个 Start 节点")
+        node_ids = [str(node.get("id") or "") for node in nodes]
+        if len(set(node_ids)) != len(node_ids) or any(not node_id for node_id in node_ids):
+            raise AgentRuntimeError("Workflow 节点 ID 必须唯一")
+        for node in nodes:
+            self._validate_node(node)
+        starts = [node for node in nodes if self._node_kind(node) == "start"]
+        if len(starts) != 1:
+            raise AgentRuntimeError("Workflow 必须且只能有一个 Start 节点")
+        start_id = str(starts[0]["id"])
+        outgoing: dict[str, list[str]] = {node_id: [] for node_id in node_ids}
+        incoming: dict[str, list[str]] = {node_id: [] for node_id in node_ids}
+        for edge in edges:
+            source = str(edge.get("source") or "")
+            target = str(edge.get("target") or "")
+            if source not in outgoing or target not in incoming:
+                raise AgentRuntimeError("Workflow edge 引用了不存在的节点")
+            outgoing[source].append(target)
+            incoming[target].append(source)
+        if incoming[start_id]:
+            raise AgentRuntimeError("Start 节点不能有入边")
+        for node_id, targets in outgoing.items():
+            node = next(item for item in nodes if str(item.get("id") or "") == node_id)
+            self._validate_outgoing_edges(node_id, node, targets, edges)
+        for node_id, sources in incoming.items():
+            if node_id != start_id and len(sources) < 1:
+                raise AgentRuntimeError("Workflow 不允许断链节点")
+        self._validate_reachability(nodes, edges, node_ids, start_id)
+        return {"ok": True}
+
+    def _validate_node(self, node: dict[str, Any]) -> None:
+        kind = self._node_kind(node)
+        if kind not in self._node_types:
+            label = str((node.get("data") or {}).get("label") or node.get("id") or "节点").strip() or "节点"
+            raise AgentRuntimeError(f"{label} 使用了未知 Workflow 节点类型：{kind or '空'}")
+        if kind == "artifact":
+            data = node.get("data") or {}
+            artifact_path = str(data.get("artifact_path") or data.get("artifactPath") or "").strip()
+            if artifact_path:
+                label = str(data.get("label") or node.get("id") or "Artifact").strip() or "Artifact"
+                try:
+                    _safe_rel_path(artifact_path)
+                except AgentRuntimeError as exc:
+                    raise AgentRuntimeError(f"Artifact 节点 {label} 的产物路径无效：{exc}") from exc
+        if kind == "condition":
+            data = node.get("data") or {}
+            condition = WorkflowPathPlanner.condition_text(node)
+            if not condition:
+                label = str(data.get("label") or node.get("id") or "Condition").strip() or "Condition"
+                raise AgentRuntimeError(f"Condition 节点 {label} 缺少条件文本")
+        if kind == "loop":
+            data = node.get("data") or {}
+            condition = WorkflowPathPlanner.condition_text(node)
+            if not condition:
+                label = str(data.get("label") or node.get("id") or "Loop").strip() or "Loop"
+                raise AgentRuntimeError(f"Loop 节点 {label} 缺少条件文本")
+
+    def _validate_outgoing_edges(
+        self,
+        node_id: str,
+        node: dict[str, Any],
+        targets: list[str],
+        edges: list[dict[str, Any]],
+    ) -> None:
+        kind = self._node_kind(node)
+        if kind == "condition":
+            if len(targets) != 2:
+                raise AgentRuntimeError("Condition 节点必须有 true/false 两个下一步")
+            branch_roles = [
+                WorkflowPathPlanner.edge_branch(edge)
+                for edge in edges
+                if str(edge.get("source") or "") == node_id
+            ]
+            labelled_roles = [role for role in branch_roles if role]
+            if labelled_roles and set(labelled_roles) != {"true", "false"}:
+                raise AgentRuntimeError("Condition 节点分支必须标注 true/false")
+            if len(labelled_roles) != len(set(labelled_roles)):
+                raise AgentRuntimeError("Condition 节点分支标注不能重复")
+        elif kind == "parallel":
+            if len(targets) < 2:
+                raise AgentRuntimeError("Parallel 节点必须至少有两个并行分支")
+        elif kind == "loop":
+            if len(targets) != 2:
+                raise AgentRuntimeError("Loop 节点必须有 continue/exit 两个下一步")
+            branch_roles = [
+                WorkflowPathPlanner.loop_edge_role(edge)
+                for edge in edges
+                if str(edge.get("source") or "") == node_id
+            ]
+            labelled_roles = [role for role in branch_roles if role]
+            if labelled_roles and set(labelled_roles) != {"continue", "exit"}:
+                raise AgentRuntimeError("Loop 节点分支必须标注 continue/exit")
+            if len(labelled_roles) != len(set(labelled_roles)):
+                raise AgentRuntimeError("Loop 节点分支标注不能重复")
+        elif len(targets) > 1:
+            raise AgentRuntimeError("只有 Condition、Parallel 或 Loop 节点允许多个下一步")
+
+    def _validate_reachability(
+        self,
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+        node_ids: list[str],
+        start_id: str,
+    ) -> None:
+        seen: set[str] = set()
+        active: set[str] = set()
+
+        def visit(node_id: str, incoming_edge: dict[str, Any] | None = None) -> None:
+            if node_id in active:
+                source = str((incoming_edge or {}).get("source") or "")
+                source_node = next((item for item in nodes if str(item.get("id") or "") == source), {})
+                source_kind = self._node_kind(source_node) if source_node else ""
+                if source_kind == "loop" and WorkflowPathPlanner.loop_edge_role(incoming_edge or {}) == "continue":
+                    return
+                raise AgentRuntimeError("Workflow 不能包含非 Loop 控制的环")
+            if node_id in seen:
+                return
+            active.add(node_id)
+            for edge in (edge for edge in edges if str(edge.get("source") or "") == node_id):
+                target = str(edge.get("target") or "")
+                if target:
+                    visit(target, edge)
+            active.remove(node_id)
+            seen.add(node_id)
+
+        visit(start_id)
+        if seen != set(node_ids):
+            raise AgentRuntimeError("Workflow 必须从 Start 触达所有节点")
