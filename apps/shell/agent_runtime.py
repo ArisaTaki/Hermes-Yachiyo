@@ -5,11 +5,11 @@ from __future__ import annotations
 import hashlib
 import inspect
 import json
+import logging
 import os
 import re
 import shlex
 import shutil
-import signal
 import sqlite3
 import subprocess
 import threading
@@ -20,14 +20,61 @@ from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib import error as urlerror
 from urllib import request as urlrequest
 from uuid import uuid4
 
 from apps.core.tls import urlopen_with_bundled_ca
 from apps.installer.workspace_init import get_workspace_status
-from apps.shell.credential_store import CredentialStore, CredentialStoreError, create_credential_store
+from apps.shell.agent.repositories.approvals import ApprovalRepository
+from apps.shell.agent.repositories.artifacts import RunArtifactRepository
+from apps.shell.agent.repositories.events import RunEventRepository
+from apps.shell.agent.repositories.groups import RunGroupRepository
+from apps.shell.agent.repositories.runs import RunRepository
+from apps.shell.agent.repositories.workflows import WorkflowRepository
+from apps.shell.agent.runtime.budget import (
+    RunBudget as _RunBudget,
+)
+from apps.shell.agent.runtime.budget import (
+    RunBudgetLimits as _RunBudgetLimits,
+)
+from apps.shell.agent.runtime.budget import (
+    WorkflowRunBudget as _WorkflowRunBudget,
+)
+from apps.shell.agent.runtime.errors import AgentApprovalRequired, AgentRuntimeError
+from apps.shell.agent.runtime.events import (
+    redact_json_value as _redact_json_value,
+)
+from apps.shell.agent.tools.broker import (
+    _TERMINAL_PROCESS_LOCK,
+    _TERMINAL_PROCESSES,
+    ToolBroker,
+    cancel_terminal_process_groups,
+)
+from apps.shell.agent.tools.policy import (
+    MEMORY_KINDS as _MEMORY_KINDS,
+)
+from apps.shell.agent.tools.policy import (
+    MEMORY_SCOPES as _MEMORY_SCOPES,
+)
+from apps.shell.agent.tools.policy import (
+    TOOL_DESCRIPTORS,
+    PolicyGate,
+    ToolDescriptor,
+    ToolDescriptorRegistry,
+)
+from apps.shell.agent.tools.policy import (
+    TOOL_FUNCTION_NAMES as _TOOL_FUNCTION_NAMES,
+)
+from apps.shell.agent.tools.policy import (
+    TOOL_NAME_ALIASES as _TOOL_NAME_ALIASES,
+)
+from apps.shell.credential_store import (
+    CredentialStore,
+    CredentialStoreError,
+    create_credential_store,
+)
 from apps.shell.model_profiles import (
     get_model_profile_service,
     openai_compatible_chat_message,
@@ -38,24 +85,16 @@ from packages.security import (
     contains_sensitive_text,
     redact_api_error_text,
     redact_sensitive_text,
-    sanitize_sensitive_value,
     scrubbed_subprocess_env,
 )
 
-
-class AgentRuntimeError(RuntimeError):
-    """Raised when an Agent Studio operation cannot be completed."""
-
-
-class AgentApprovalRequired(AgentRuntimeError):
-    """Raised internally when a run must pause for user approval."""
-
-    def __init__(self, pending_approval: dict[str, Any]) -> None:
-        self.pending_approval = pending_approval
-        super().__init__(f"等待审批：{pending_approval.get('tool') or 'tool'}")
+logger = logging.getLogger(__name__)
 
 
 _EXECUTION_BACKENDS = {"native_profile", "yachiyo_profile", "external_cli"}
+_SENSITIVE_PREVALIDATION_PREVIEW_RE = re.compile(
+    r"(?i)\b(?:authorization|bearer|[A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PASSWORD|PASSWD))\b"
+)
 _KNOWN_AGENT_TOOLS = {
     "skill.read",
     "memory.add",
@@ -72,27 +111,10 @@ _KNOWN_AGENT_TOOLS = {
 }
 _HIGH_RISK_AGENT_TOOLS = {"terminal.run", "workspace.write_patch"}
 _MEMORY_TOOL_NAMES = ("memory.add", "memory.replace", "memory.remove")
-_MEMORY_SCOPES = {"global", "project", "session"}
-_MEMORY_KINDS = {"preference", "fact", "task", "summary"}
 _MEMORY_CONTEXT_LIMIT = 12
 _MEMORY_CONTENT_MAX_CHARS = 4000
 _FUTURE_TASK_TOOL_NAMES = ("future_task.schedule", "future_task.list", "future_task.cancel")
 _FUTURE_TASK_STATUSES = {"scheduled", "triggered", "cancelled", "failed"}
-_TOOL_FUNCTION_NAMES = {
-    "skill.read": "skill_read",
-    "memory.add": "memory_add",
-    "memory.replace": "memory_replace",
-    "memory.remove": "memory_remove",
-    "future_task.schedule": "future_task_schedule",
-    "future_task.list": "future_task_list",
-    "future_task.cancel": "future_task_cancel",
-    "workspace.list": "workspace_list",
-    "workspace.read": "workspace_read",
-    "workspace.write_patch": "workspace_write_patch",
-    "terminal.run": "terminal_run",
-    "artifact.write": "artifact_write",
-}
-_TOOL_NAME_ALIASES = {value: key for key, value in _TOOL_FUNCTION_NAMES.items()}
 _MAX_AGENT_TOOL_ITERATIONS = 50
 _FINAL_RUN_STATUSES = {"completed", "failed", "cancelled"}
 _WORKFLOW_NODE_TYPES = {"start", "agent", "approval", "artifact", "condition", "parallel", "workflow", "loop"}
@@ -112,10 +134,6 @@ _DEFAULT_AGENT_IDS = {
     "agent_office",
     "agent_custom",
 }
-_TERMINAL_PROCESS_LOCK = threading.RLock()
-_TERMINAL_PROCESSES: set[subprocess.Popen[Any]] = set()
-_RUNTIME_JSON_REDACTION_MAX_ITEMS = 1000
-
 _MARKET_AGENT_OPERATING_DOCTRINE = (
     "Market-grade Agent operating doctrine:\n"
     "- Act as a persistent personal agent, not a one-shot chatbot: preserve user intent, "
@@ -129,105 +147,6 @@ _MARKET_AGENT_OPERATING_DOCTRINE = (
     "- Respect safety boundaries: approval gates, workspace scopes, credential redaction, and user "
     "instructions outrank autonomy."
 )
-
-
-@dataclass(frozen=True)
-class _RunBudgetLimits:
-    max_model_calls: int = 50
-    max_tool_calls: int = 100
-    max_terminal_calls: int = 10
-    max_run_duration_seconds: int = 600
-    max_workflow_steps: int = 200
-    max_model_output_chars: int = 200_000
-    max_tool_output_chars: int = 100_000
-    max_context_chars: int = 200_000
-
-
-@dataclass
-class _RunBudget:
-    limits: _RunBudgetLimits
-    started_at_epoch: float
-    model_calls_used: int = 0
-    tool_calls_used: int = 0
-    terminal_calls_used: int = 0
-
-    def check_duration(self) -> None:
-        elapsed = max(0.0, time.time() - self.started_at_epoch)
-        if elapsed > max(1, int(self.limits.max_run_duration_seconds)):
-            raise AgentRuntimeError(
-                f"Run 已超过 max_run_duration_seconds={self.limits.max_run_duration_seconds} 的执行预算"
-            )
-
-    def check_context(self, context_chars: int) -> None:
-        self.check_duration()
-        if context_chars > max(1, int(self.limits.max_context_chars)):
-            raise AgentRuntimeError(
-                f"Run 上下文超过 max_context_chars={self.limits.max_context_chars} 的执行预算"
-            )
-
-    def claim_model_call(self) -> None:
-        self.check_duration()
-        if self.model_calls_used >= max(1, int(self.limits.max_model_calls)):
-            raise AgentRuntimeError(f"Run 已超过 max_model_calls={self.limits.max_model_calls} 的执行预算")
-        self.model_calls_used += 1
-
-    def claim_tool_call(self, tool_name: str, *, terminal_execution: bool = False) -> None:
-        self.check_duration()
-        if self.tool_calls_used >= max(1, int(self.limits.max_tool_calls)):
-            raise AgentRuntimeError(f"Run 已超过 max_tool_calls={self.limits.max_tool_calls} 的执行预算")
-        if terminal_execution and self.terminal_calls_used >= max(0, int(self.limits.max_terminal_calls)):
-            raise AgentRuntimeError(
-                f"Run 已超过 max_terminal_calls={self.limits.max_terminal_calls} 的执行预算"
-            )
-        self.tool_calls_used += 1
-        if terminal_execution:
-            self.terminal_calls_used += 1
-
-
-@dataclass
-class _WorkflowRunBudget:
-    limits: _RunBudgetLimits
-    started_at_epoch: float
-    steps_used: int = 0
-
-    def check_duration(self) -> None:
-        elapsed = max(0.0, time.time() - self.started_at_epoch)
-        if elapsed > max(1, int(self.limits.max_run_duration_seconds)):
-            raise AgentRuntimeError(
-                f"Workflow 已超过 max_run_duration_seconds={self.limits.max_run_duration_seconds} 的执行预算"
-            )
-
-    def check_context(self, context_chars: int) -> None:
-        self.check_duration()
-        if context_chars > max(1, int(self.limits.max_context_chars)):
-            raise AgentRuntimeError(
-                f"Workflow 上下文超过 max_context_chars={self.limits.max_context_chars} 的执行预算"
-            )
-
-    def claim_step(self) -> None:
-        self.check_duration()
-        if self.steps_used >= max(1, int(self.limits.max_workflow_steps)):
-            raise AgentRuntimeError(
-                f"Workflow 已超过 max_workflow_steps={self.limits.max_workflow_steps} 的执行预算"
-            )
-        self.steps_used += 1
-
-
-def cancel_terminal_process_groups() -> None:
-    with _TERMINAL_PROCESS_LOCK:
-        processes = list(_TERMINAL_PROCESSES)
-    for process in processes:
-        if process.poll() is not None:
-            with _TERMINAL_PROCESS_LOCK:
-                _TERMINAL_PROCESSES.discard(process)
-            continue
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
-            try:
-                process.kill()
-            except ProcessLookupError:
-                pass
 
 
 def _is_active_run_status(status: str) -> bool:
@@ -438,28 +357,6 @@ def redact_secrets(value: Any) -> str:
     return redact_sensitive_text(
         value,
         limit=0,
-        collapse_whitespace=False,
-        trim=False,
-    )
-
-
-def _redact_json_value(value: Any) -> Any:
-    if isinstance(value, dict):
-        return {str(key): _redact_json_value(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_redact_json_value(item) for item in value]
-    if isinstance(value, tuple):
-        return [_redact_json_value(item) for item in value]
-    if isinstance(value, str):
-        return redact_secrets(value)
-    return value
-
-
-def _redact_run_event_payload(value: Any) -> Any:
-    return sanitize_sensitive_value(
-        value,
-        text_limit=0,
-        max_items=_RUNTIME_JSON_REDACTION_MAX_ITEMS,
         collapse_whitespace=False,
         trim=False,
     )
@@ -1398,10 +1295,229 @@ def _tool_input_preview(value: Any, *, limit: int = 1200) -> Any:
         return {str(key): _tool_input_preview(item, limit=limit) for key, item in value.items()}
     if isinstance(value, list):
         return [_tool_input_preview(item, limit=limit) for item in value[:20]]
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
     text = redact_secrets(value)
     if len(text) > limit:
         return f"{text[:limit]}... [truncated]"
     return text
+
+
+def _canonical_tool_event_payload(
+    tool_name: str,
+    input_preview: Any,
+    *,
+    approved: bool = False,
+    pre_validation: bool = False,
+    result: dict[str, Any] | None = None,
+    error: Any = None,
+    status: str = "",
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "tool": tool_name,
+        "input_preview": _canonical_tool_input_preview(
+            tool_name,
+            input_preview,
+            pre_validation=pre_validation,
+        ),
+        "approved": bool(approved),
+    }
+    if status:
+        payload["status"] = status
+    if result is not None:
+        payload["output_preview"] = _tool_input_preview(result)
+    if error is not None:
+        payload["error"] = redact_api_error_text(error)
+    return payload
+
+
+def _canonical_tool_input_preview(
+    tool_name: str,
+    input_preview: Any,
+    *,
+    pre_validation: bool = False,
+) -> Any:
+    preview = _runtime_trace_input_preview(tool_name, input_preview)
+    if not pre_validation:
+        return preview
+    try:
+        serialized = json.dumps(preview, ensure_ascii=False, sort_keys=True)
+    except (TypeError, ValueError):
+        serialized = str(preview)
+    if (
+        contains_sensitive_text(serialized)
+        or redact_secrets(serialized) != serialized
+        or _SENSITIVE_PREVALIDATION_PREVIEW_RE.search(serialized)
+    ):
+        return {"redacted": True, "reason": "sensitive_input"}
+    return preview
+
+
+def _artifact_created_payload(
+    tool_result: dict[str, Any],
+    *,
+    run_id: str,
+) -> dict[str, Any]:
+    return {
+        "artifact_id": str(tool_result.get("artifact_id") or tool_result.get("path") or ""),
+        "run_id": run_id,
+        "kind": "tool_artifact",
+        "path": str(tool_result.get("path") or ""),
+        "size_bytes": int(tool_result.get("bytes") or 0),
+        "source_tool": "artifact.write",
+    }
+
+
+def _task_run_event_payload(
+    *,
+    task_id: str = "",
+    run_id: str = "",
+    session_id: str = "",
+    status: str = "",
+    result: Any = None,
+    error: Any = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "task_id": str(task_id or ""),
+        "run_id": str(run_id or ""),
+        "session_id": str(session_id or ""),
+    }
+    if status:
+        payload["status"] = status
+    if result is not None:
+        payload["result"] = redact_secrets(result)
+    if error is not None:
+        payload["error"] = redact_secrets(error)
+    return payload
+
+
+def _canonical_run_event_aliases(event_type: str, payload: dict[str, Any] | None = None) -> list[str]:
+    clean_event_type = str(event_type or "")
+    direct_alias = {
+        "model.request.started": "model.requested",
+        "model.output.completed": "model.completed",
+        "workflow.run.approval_required": "workflow.paused_for_approval",
+        "workflow.run.resumed": "workflow.resumed",
+        "workflow.run.completed": "workflow.completed",
+        "workflow.run.failed": "workflow.failed",
+        "skill.dispatch.read": "skill.selected",
+    }.get(clean_event_type)
+    if direct_alias:
+        return [direct_alias]
+
+    if clean_event_type in {
+        "workflow.node.start",
+        "workflow.node.agent",
+        "workflow.node.workflow",
+        "workflow.node.artifact",
+        "workflow.node.condition",
+        "workflow.node.parallel",
+        "workflow.node.loop",
+    }:
+        status = str((payload or {}).get("status") or "").strip()
+        aliases = ["workflow.node.started"]
+        if status == "completed":
+            aliases.append("workflow.node.completed")
+        elif status in {"failed", "cancelled"}:
+            aliases.append("workflow.node.failed")
+        elif status == "approval_required":
+            aliases.append("workflow.paused_for_approval")
+        return aliases
+    return []
+
+
+def _memory_skill_trace_event(
+    tool_name: str,
+    input_preview: Any,
+    tool_result: dict[str, Any],
+) -> dict[str, Any] | None:
+    if tool_name == "skill.read":
+        return {
+            "event_type": "skill.dispatch.read",
+            "payload": {
+                "tool": tool_name,
+                "status": _tool_trace_status(tool_result),
+                "input_preview": _runtime_trace_input_preview(tool_name, input_preview),
+                "result": _skill_trace_result(tool_result),
+            },
+        }
+    if tool_name in _MEMORY_TOOL_NAMES:
+        action = tool_name.split(".", 1)[1]
+        return {
+            "event_type": f"memory.write.{action}",
+            "payload": {
+                "tool": tool_name,
+                "status": _tool_trace_status(tool_result),
+                "input_preview": _runtime_trace_input_preview(tool_name, input_preview),
+                "result": _memory_trace_result(tool_result),
+            },
+        }
+    return None
+
+
+def _runtime_trace_input_preview(tool_name: str, input_preview: Any) -> Any:
+    if not isinstance(input_preview, dict):
+        return input_preview
+    if tool_name == "artifact.write":
+        return {
+            key: value
+            for key, value in input_preview.items()
+            if str(key) != "content"
+        }
+    if tool_name not in _MEMORY_TOOL_NAMES:
+        return input_preview
+    return {
+        key: value
+        for key, value in input_preview.items()
+        if str(key) not in {"content", "old_content"}
+    }
+
+
+def _tool_trace_status(tool_result: dict[str, Any]) -> str:
+    return "completed" if tool_result.get("ok") else "failed"
+
+
+def _skill_trace_result(tool_result: dict[str, Any]) -> dict[str, Any]:
+    result = {
+        "ok": bool(tool_result.get("ok")),
+        "skill_id": str(tool_result.get("skill_id") or ""),
+        "name": str(tool_result.get("name") or ""),
+        "description": str(tool_result.get("description") or ""),
+        "asset_paths": list(tool_result.get("asset_paths") or []),
+    }
+    if tool_result.get("error"):
+        result["error"] = str(tool_result.get("error") or "")
+    return result
+
+
+def _memory_trace_result(tool_result: dict[str, Any]) -> dict[str, Any]:
+    memory = tool_result.get("memory") if isinstance(tool_result.get("memory"), dict) else {}
+    result = {
+        "ok": bool(tool_result.get("ok")),
+        "action": str(tool_result.get("action") or ""),
+        "memory_id": str(memory.get("memory_id") or ""),
+        "kind": str(memory.get("kind") or ""),
+        "scope": str(memory.get("scope") or ""),
+        "deleted": bool(memory.get("deleted_at")),
+    }
+    if tool_result.get("error"):
+        result["error"] = str(tool_result.get("error") or "")
+    return result
+
+
+def _memory_retrieved_payload(memories: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "count": len(memories),
+        "memories": [
+            {
+                "memory_id": str(memory.get("memory_id") or ""),
+                "kind": str(memory.get("kind") or ""),
+                "scope": str(memory.get("scope") or ""),
+                "deleted": bool(memory.get("deleted_at")),
+            }
+            for memory in memories
+        ],
+    }
 
 
 def _normalize_tool_iteration(value: Any) -> int:
@@ -1907,818 +2023,6 @@ class AgentFutureTaskStore:
         return {"ok": True, "future_task": self._row_to_future_task(updated)}
 
 
-@dataclass(frozen=True)
-class ToolDescriptor:
-    name: str
-    description: str
-    properties: dict[str, Any]
-    required: tuple[str, ...] = ()
-
-    @property
-    def function_name(self) -> str:
-        return _TOOL_FUNCTION_NAMES[self.name]
-
-    @property
-    def allowed_fields(self) -> set[str]:
-        return set(self.properties)
-
-    def to_model_tool_schema(self) -> dict[str, Any]:
-        return {
-            "type": "function",
-            "function": {
-                "name": self.function_name,
-                "description": self.description,
-                "parameters": {
-                    "type": "object",
-                    "properties": deepcopy(self.properties),
-                    "required": list(self.required),
-                    "additionalProperties": False,
-                },
-            },
-        }
-
-    def validate_payload(self, payload: dict[str, Any]) -> None:
-        extra_fields = sorted(set(payload) - self.allowed_fields)
-        if extra_fields:
-            raise AgentRuntimeError(f"{self.name} 参数包含未声明字段：{', '.join(extra_fields)}")
-        for key in self.required:
-            if not isinstance(payload.get(key), str) or not str(payload.get(key) or "").strip():
-                raise AgentRuntimeError(f"{self.name} 参数 {key} 必须是非空字符串")
-        if self.name == "workspace.write_patch":
-            patch_supplied = isinstance(payload.get("patch"), str) and str(payload.get("patch") or "").strip()
-            if not patch_supplied:
-                raise AgentRuntimeError("workspace.write_patch 参数 patch 必须是非空字符串")
-            hash_values = {
-                key: str(payload.get(key) or "").strip()
-                for key in ("expected_sha256", "base_sha256")
-                if key in payload
-            }
-            for key, value in hash_values.items():
-                if value and not re.fullmatch(r"[0-9a-fA-F]{64}", value):
-                    raise AgentRuntimeError(f"workspace.write_patch 参数 {key} 必须是 64 位 SHA-256 hex")
-            if hash_values.get("expected_sha256") and hash_values.get("base_sha256"):
-                if hash_values["expected_sha256"].lower() != hash_values["base_sha256"].lower():
-                    raise AgentRuntimeError("workspace.write_patch 参数 expected_sha256 与 base_sha256 不一致")
-        if self.name == "skill.read":
-            value = str(payload.get("skill_id") or payload.get("name") or "").strip()
-            if not value:
-                raise AgentRuntimeError("skill.read 参数 skill_id 或 name 必须是非空字符串")
-        if self.name.startswith("memory."):
-            for key in ("memory_id", "content", "old_content", "kind", "scope", "reason"):
-                if key in payload and not isinstance(payload.get(key), str):
-                    raise AgentRuntimeError(f"{self.name} 参数 {key} 必须是字符串")
-            scope = str(payload.get("scope") or "").strip().lower()
-            if scope and scope not in _MEMORY_SCOPES:
-                raise AgentRuntimeError(f"{self.name} 参数 scope 必须是 global、project 或 session")
-            kind = str(payload.get("kind") or "").strip().lower()
-            if kind and kind not in _MEMORY_KINDS:
-                raise AgentRuntimeError(f"{self.name} 参数 kind 必须是 preference、fact、task 或 summary")
-            if self.name == "memory.replace":
-                if not str(payload.get("content") or "").strip():
-                    raise AgentRuntimeError("memory.replace 参数 content 必须是非空字符串")
-                if not str(payload.get("memory_id") or payload.get("old_content") or "").strip():
-                    raise AgentRuntimeError("memory.replace 参数 memory_id 或 old_content 必须是非空字符串")
-            if self.name == "memory.remove" and not str(payload.get("memory_id") or payload.get("content") or "").strip():
-                raise AgentRuntimeError("memory.remove 参数 memory_id 或 content 必须是非空字符串")
-        if self.name.startswith("future_task."):
-            for key in ("future_task_id", "title", "prompt", "runnable_id", "runnable_name", "cron", "reason"):
-                if key in payload and not isinstance(payload.get(key), str):
-                    raise AgentRuntimeError(f"{self.name} 参数 {key} 必须是字符串")
-            for key in ("delay_seconds", "scheduled_at_epoch"):
-                if key in payload and payload.get(key) not in (None, ""):
-                    value = payload.get(key)
-                    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
-                        raise AgentRuntimeError(f"{self.name} 参数 {key} 必须是数字")
-                    try:
-                        float(value)
-                    except (TypeError, ValueError) as exc:
-                        raise AgentRuntimeError(f"{self.name} 参数 {key} 必须是数字") from exc
-            if self.name == "future_task.schedule" and not str(payload.get("prompt") or "").strip():
-                raise AgentRuntimeError("future_task.schedule 参数 prompt 必须是非空字符串")
-            if self.name == "future_task.cancel" and not str(payload.get("future_task_id") or "").strip():
-                raise AgentRuntimeError("future_task.cancel 参数 future_task_id 必须是非空字符串")
-        if "path" in payload and not isinstance(payload.get("path"), str):
-            raise AgentRuntimeError(f"{self.name} 参数 path 必须是字符串")
-        if "timeout_seconds" in payload:
-            value = payload.get("timeout_seconds")
-            if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 120:
-                raise AgentRuntimeError("terminal.run 参数 timeout_seconds 必须是 1-120 的整数")
-        if "shell" in payload and not isinstance(payload.get("shell"), bool):
-            raise AgentRuntimeError("terminal.run 参数 shell 必须是布尔值")
-        serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
-        if redact_secrets(serialized) != serialized:
-            raise AgentRuntimeError(f"{self.name} 参数包含敏感凭据，已拒绝执行和持久化")
-
-
-TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
-    "skill.read": ToolDescriptor(
-        name="skill.read",
-        description=(
-            "Read the full SKILL.md instructions for a mounted Agent Skill. "
-            "Use this only after the skill summary index looks relevant to the task."
-        ),
-        properties={
-            "skill_id": {"type": "string", "description": "Mounted skill id from the Skill summary index."},
-            "name": {"type": "string", "description": "Optional mounted skill name if skill_id is unavailable."},
-        },
-    ),
-    "memory.add": ToolDescriptor(
-        name="memory.add",
-        description=(
-            "Persist a stable user preference, durable fact, task commitment, or reusable summary "
-            "for future Agent sessions. Never store secrets or one-off transient details."
-        ),
-        properties={
-            "content": {"type": "string", "description": "Concise memory content to preserve."},
-            "kind": {
-                "type": "string",
-                "enum": ["preference", "fact", "task", "summary"],
-                "description": "Memory category. Defaults to fact.",
-            },
-            "scope": {
-                "type": "string",
-                "enum": ["global", "project", "session"],
-                "description": "Recall scope. Defaults to global.",
-            },
-        },
-        required=("content",),
-    ),
-    "memory.replace": ToolDescriptor(
-        name="memory.replace",
-        description="Replace an existing durable memory by memory_id or exact old_content when the user corrects it.",
-        properties={
-            "memory_id": {"type": "string", "description": "Existing memory id from Long-term Memory context."},
-            "old_content": {"type": "string", "description": "Exact old memory content if memory_id is unavailable."},
-            "content": {"type": "string", "description": "Replacement memory content."},
-            "kind": {
-                "type": "string",
-                "enum": ["preference", "fact", "task", "summary"],
-                "description": "Optional replacement category.",
-            },
-            "scope": {
-                "type": "string",
-                "enum": ["global", "project", "session"],
-                "description": "Optional replacement recall scope.",
-            },
-        },
-        required=("content",),
-    ),
-    "memory.remove": ToolDescriptor(
-        name="memory.remove",
-        description="Soft-delete an existing durable memory by memory_id or exact content when the user asks to forget it.",
-        properties={
-            "memory_id": {"type": "string", "description": "Existing memory id from Long-term Memory context."},
-            "content": {"type": "string", "description": "Exact memory content if memory_id is unavailable."},
-            "reason": {"type": "string", "description": "Optional short reason for the audit log."},
-        },
-    ),
-    "future_task.schedule": ToolDescriptor(
-        name="future_task.schedule",
-        description=(
-            "Schedule a durable FutureTask self-wakeup for this Agent or another runnable. "
-            "Use for reminders, standing orders, periodic summaries, and follow-up commitments."
-        ),
-        properties={
-            "title": {"type": "string", "description": "Short user-facing FutureTask title."},
-            "prompt": {"type": "string", "description": "Goal to execute when the FutureTask wakes up."},
-            "delay_seconds": {"type": "number", "description": "Optional delay from now in seconds."},
-            "scheduled_at_epoch": {"type": "number", "description": "Optional Unix epoch seconds for the wakeup."},
-            "cron": {
-                "type": "string",
-                "description": "Optional repeat schedule: @hourly, @daily, @weekly, or every N minutes/hours/days.",
-            },
-            "runnable_id": {"type": "string", "description": "Optional target Agent/Workflow id. Defaults to current Agent."},
-            "runnable_name": {"type": "string", "description": "Optional target Agent/Workflow name."},
-        },
-        required=("prompt",),
-    ),
-    "future_task.list": ToolDescriptor(
-        name="future_task.list",
-        description="List durable FutureTasks visible to the Agent, including scheduled and recently finished entries.",
-        properties={
-            "include_finished": {"type": "boolean", "description": "Include triggered/cancelled/failed tasks. Defaults true."},
-            "limit": {"type": "integer", "minimum": 1, "maximum": 100},
-        },
-    ),
-    "future_task.cancel": ToolDescriptor(
-        name="future_task.cancel",
-        description="Cancel a scheduled FutureTask by id.",
-        properties={
-            "future_task_id": {"type": "string", "description": "FutureTask id to cancel."},
-            "reason": {"type": "string", "description": "Optional short reason for the audit log."},
-        },
-        required=("future_task_id",),
-    ),
-    "workspace.list": ToolDescriptor(
-        name="workspace.list",
-        description="List entries in an allowed workspace directory. Use this before workspace.read when you only know a directory path.",
-        properties={"path": {"type": "string", "description": "Relative directory path."}},
-    ),
-    "workspace.read": ToolDescriptor(
-        name="workspace.read",
-        description="Read a UTF-8 text file from the allowed workspace. This only accepts file paths; use workspace.list for directories.",
-        properties={"path": {"type": "string", "description": "Relative file path."}},
-        required=("path",),
-    ),
-    "workspace.write_patch": ToolDescriptor(
-        name="workspace.write_patch",
-        description="Apply a single-file UTF-8 unified diff to an allowed workspace path. Requires user approval.",
-        properties={
-            "path": {"type": "string", "description": "Relative file path inside writable scopes."},
-            "patch": {"type": "string", "description": "Single-file unified diff whose file headers match path."},
-            "expected_sha256": {"type": "string", "description": "Optional current file SHA-256 precondition checked immediately before writing."},
-            "base_sha256": {"type": "string", "description": "Alias for expected_sha256."},
-        },
-        required=("path",),
-    ),
-    "terminal.run": ToolDescriptor(
-        name="terminal.run",
-        description="Run an argv command in the Agent workdir. Requires user approval. Shell mode is disabled unless explicitly requested and approved.",
-        properties={
-            "command": {"type": "string", "description": "Command parsed into argv by default."},
-            "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 120},
-            "shell": {"type": "boolean", "description": "Explicitly request shell parsing; the full command is shown for approval."},
-        },
-        required=("command",),
-    ),
-    "artifact.write": ToolDescriptor(
-        name="artifact.write",
-        description="Write a markdown/text artifact for the current run.",
-        properties={
-            "path": {"type": "string", "description": "Relative artifact path."},
-            "content": {"type": "string", "description": "Artifact content."},
-        },
-        required=("path", "content"),
-    ),
-}
-
-
-class ToolDescriptorRegistry:
-    @staticmethod
-    def model_tool_schemas(allowed_tools: list[str]) -> list[dict[str, Any]]:
-        schemas = []
-        for tool in allowed_tools:
-            descriptor = TOOL_DESCRIPTORS.get(tool)
-            if descriptor is not None:
-                schemas.append(descriptor.to_model_tool_schema())
-        return schemas
-
-    @staticmethod
-    def validate_payload(tool_name: str, payload: dict[str, Any]) -> None:
-        descriptor = TOOL_DESCRIPTORS.get(tool_name)
-        if descriptor is None:
-            raise AgentRuntimeError(f"未知工具：{tool_name}")
-        descriptor.validate_payload(payload)
-
-
-class PolicyGate:
-    @staticmethod
-    def allows_tool(tool_name: str, allowed_tools: list[str]) -> bool:
-        return tool_name in set(str(tool or "").strip() for tool in allowed_tools)
-
-
-@dataclass
-class ToolBroker:
-    """Controlled tools exposed to custom API agents.
-
-    The broker is intentionally narrow. Frontend callers never submit shell
-    commands directly; runtime code passes approved, policy-checked calls here.
-    """
-
-    workspace_policy: dict[str, Any]
-    artifact_root: Path
-    approvals: dict[str, bool] | None = None
-    skills: list[dict[str, Any]] | None = None
-    memory_store: AgentMemoryStore | None = None
-    future_task_store: AgentFutureTaskStore | None = None
-
-    def __post_init__(self) -> None:
-        self.artifact_root.mkdir(parents=True, exist_ok=True)
-        self.approvals = self.approvals or {}
-        self.skills = self.skills or []
-
-    @property
-    def workdir(self) -> Path:
-        configured = str(self.workspace_policy.get("default_workdir") or "").strip()
-        return Path(configured).expanduser() if configured else Path.cwd()
-
-    def _scope_roots(self, key: str) -> list[Path]:
-        scopes = self.workspace_policy.get(key) or []
-        if isinstance(scopes, str):
-            scopes = [scopes]
-        roots = []
-        for scope in scopes:
-            rel = str(scope or ".").strip() or "."
-            roots.append((self.workdir / rel).resolve())
-        return roots or [self.workdir.resolve()]
-
-    def _resolve_workspace_path(self, path: str, *, write: bool = False) -> Path:
-        rel = _safe_rel_path(path or ".")
-        target = (self.workdir / rel).resolve()
-        key = "writable_scopes" if write else "readable_scopes"
-        roots = self._scope_roots(key)
-        if not any(_is_within(target, root) for root in roots):
-            raise AgentRuntimeError("路径不在 Agent 允许的工作区范围内")
-        return target
-
-    def workspace_list(self, path: str = ".") -> dict[str, Any]:
-        target = self._resolve_workspace_path(path)
-        display_path = path or "."
-        if not target.exists():
-            return {
-                "ok": False,
-                "path": display_path,
-                "error": "路径不存在",
-                "hint": "请先用 workspace.list 查看父目录，确认要访问的相对路径。",
-            }
-        if not target.is_dir():
-            return {
-                "ok": False,
-                "path": display_path,
-                "error": "workspace.list 只能列目录",
-                "hint": "如果要读取文件内容，请改用 workspace.read。",
-                "suggested_tool": "workspace.read",
-            }
-        entries = []
-        for child in sorted(target.iterdir(), key=lambda item: item.name.lower())[:200]:
-            entries.append({"name": child.name, "type": "dir" if child.is_dir() else "file"})
-        return {"ok": True, "path": display_path, "entries": entries}
-
-    def skill_read(self, skill_id: str = "", name: str = "") -> dict[str, Any]:
-        wanted = str(skill_id or name or "").strip()
-        if not wanted:
-            return {
-                "ok": False,
-                "error": "skill.read 需要 skill_id 或 name",
-                "available_skills": self._available_skill_refs(),
-            }
-        wanted_key = wanted.lower()
-        for skill in self.skills or []:
-            refs = {
-                str(skill.get("skill_id") or "").strip().lower(),
-                str(skill.get("name") or "").strip().lower(),
-                str(skill.get("source_ref") or "").strip().lower(),
-            }
-            if wanted_key not in refs:
-                continue
-            markdown = redact_secrets(str(skill.get("skill_markdown") or ""))
-            return {
-                "ok": True,
-                "skill_id": str(skill.get("skill_id") or ""),
-                "name": str(skill.get("name") or ""),
-                "description": str(skill.get("description") or ""),
-                "skill_markdown": markdown,
-                "asset_paths": skill.get("asset_paths") or [],
-            }
-        return {
-            "ok": False,
-            "error": "Skill 未挂载到当前 Agent，不能读取完整手册",
-            "requested": wanted,
-            "available_skills": self._available_skill_refs(),
-        }
-
-    def memory_add(self, content: str, kind: str = "", scope: str = "") -> dict[str, Any]:
-        if self.memory_store is None:
-            return {"ok": False, "error": "当前运行未启用长期记忆存储"}
-        return self.memory_store.add(content=content, kind=kind, scope=scope)
-
-    def memory_replace(
-        self,
-        content: str,
-        *,
-        memory_id: str = "",
-        old_content: str = "",
-        kind: str = "",
-        scope: str = "",
-    ) -> dict[str, Any]:
-        if self.memory_store is None:
-            return {"ok": False, "error": "当前运行未启用长期记忆存储"}
-        return self.memory_store.replace(
-            memory_id=memory_id,
-            old_content=old_content,
-            content=content,
-            kind=kind,
-            scope=scope,
-        )
-
-    def memory_remove(self, *, memory_id: str = "", content: str = "", reason: str = "") -> dict[str, Any]:
-        if self.memory_store is None:
-            return {"ok": False, "error": "当前运行未启用长期记忆存储"}
-        return self.memory_store.remove(memory_id=memory_id, content=content, reason=reason)
-
-    def future_task_schedule(
-        self,
-        *,
-        title: str = "",
-        prompt: str,
-        delay_seconds: Any = None,
-        scheduled_at_epoch: Any = None,
-        cron: str = "",
-        runnable_id: str = "",
-        runnable_name: str = "",
-    ) -> dict[str, Any]:
-        if self.future_task_store is None:
-            return {"ok": False, "error": "当前运行未启用 FutureTask 存储"}
-        return self.future_task_store.schedule(
-            title=title,
-            prompt=prompt,
-            runnable_id=runnable_id,
-            runnable_name=runnable_name,
-            delay_seconds=delay_seconds,
-            scheduled_at_epoch=scheduled_at_epoch,
-            cron=cron,
-        )
-
-    def future_task_list(self, *, include_finished: bool = True, limit: int = 100) -> dict[str, Any]:
-        if self.future_task_store is None:
-            return {"ok": False, "error": "当前运行未启用 FutureTask 存储"}
-        return {
-            "ok": True,
-            "future_tasks": self.future_task_store.list_tasks(
-                include_finished=include_finished,
-                limit=limit,
-            ),
-        }
-
-    def future_task_cancel(self, future_task_id: str, *, reason: str = "") -> dict[str, Any]:
-        if self.future_task_store is None:
-            return {"ok": False, "error": "当前运行未启用 FutureTask 存储"}
-        try:
-            return self.future_task_store.cancel(future_task_id, reason=reason)
-        except KeyError:
-            return {"ok": False, "error": "FutureTask 不存在", "future_task_id": future_task_id}
-
-    def _available_skill_refs(self) -> list[dict[str, str]]:
-        refs: list[dict[str, str]] = []
-        for skill in self.skills or []:
-            refs.append(
-                {
-                    "skill_id": str(skill.get("skill_id") or ""),
-                    "name": str(skill.get("name") or ""),
-                    "description": str(skill.get("description") or ""),
-                }
-            )
-        return refs
-
-    def workspace_read(self, path: str) -> dict[str, Any]:
-        target = self._resolve_workspace_path(path)
-        display_path = path or "."
-        if not target.exists():
-            return {
-                "ok": False,
-                "path": display_path,
-                "error": "路径不存在",
-                "hint": "请先用 workspace.list 查看父目录，确认要读取的文件相对路径。",
-            }
-        if target.is_dir():
-            return {
-                "ok": False,
-                "path": display_path,
-                "error": "workspace.read 只能读取文件",
-                "hint": "这是一个目录；请改用 workspace.list 查看目录内容，或选择目录中的具体文件再读取。",
-                "suggested_tool": "workspace.list",
-            }
-        if not target.is_file():
-            return {
-                "ok": False,
-                "path": display_path,
-                "error": "workspace.read 只能读取文件",
-                "hint": "请选择普通文本文件路径。",
-            }
-        return {"ok": True, "path": display_path, "content": _read_text(target)}
-
-    def workspace_write_patch(
-        self,
-        path: str,
-        content: str = "",
-        *,
-        patch: str = "",
-        expected_sha256: str = "",
-        approved: bool = False,
-    ) -> dict[str, Any]:
-        if str(content or "").strip():
-            raise AgentRuntimeError("workspace.write_patch 不再支持 content 全量写入；请提供单文件 unified diff patch")
-        target = self._resolve_workspace_path(path, write=True)
-        if not approved and not self.approvals.get("workspace.write_patch"):
-            return {"ok": False, "approval_required": True, "tool": "workspace.write_patch"}
-        mode = "patch"
-        if target.exists() and not target.is_file():
-            return {"ok": False, "path": path, "error": "workspace.write_patch 只能写入普通文件"}
-        if not target.exists():
-            return {"ok": False, "path": path, "error": "workspace.write_patch patch 模式要求目标文件已存在"}
-        before_bytes = target.read_bytes() if target.exists() else b""
-        before_sha256 = _sha256_bytes(before_bytes)
-        clean_expected_sha256 = str(expected_sha256 or "").strip()
-        if clean_expected_sha256 and clean_expected_sha256 != before_sha256:
-            return {
-                "ok": False,
-                "path": path,
-                "error": "workspace.write_patch 当前文件 hash 与 expected_sha256 不匹配",
-                "sha256_before": before_sha256,
-            }
-        try:
-            before_text = before_bytes.decode("utf-8")
-        except UnicodeDecodeError:
-            return {"ok": False, "path": path, "error": "workspace.write_patch patch 模式只支持 UTF-8 文本文件"}
-        content = _apply_single_file_unified_diff(before_text, str(patch or ""), expected_path=path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        _atomic_write_text(target, content)
-        after_sha256 = _sha256_file(target)
-        return {
-            "ok": True,
-            "path": path,
-            "mode": mode,
-            "bytes": len(content.encode("utf-8")),
-            "sha256_before": before_sha256,
-            "sha256_after": after_sha256,
-        }
-
-    def terminal_run(
-        self,
-        command: str,
-        *,
-        approved: bool = False,
-        timeout_seconds: int = 30,
-        shell: bool = False,
-    ) -> dict[str, Any]:
-        if not approved and not self.approvals.get("terminal.run"):
-            return {
-                "ok": False,
-                "approval_required": True,
-                "tool": "terminal.run",
-                "input_preview": {"command": command, "shell": bool(shell)},
-            }
-        clean_command = str(command or "").strip()
-        if not clean_command:
-            return {"ok": False, "error": "terminal.run 命令不能为空"}
-        try:
-            argv: str | list[str] = clean_command if shell else shlex.split(clean_command)
-        except ValueError as exc:
-            return {"ok": False, "error": f"terminal.run 命令解析失败：{exc}"}
-        if not shell and not argv:
-            return {"ok": False, "error": "terminal.run 命令不能为空"}
-        env = scrubbed_subprocess_env()
-        try:
-            process = subprocess.Popen(
-                argv,
-                cwd=self.workdir,
-                shell=bool(shell),
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                env=env,
-                start_new_session=True,
-            )
-        except OSError as exc:
-            return {
-                "ok": False,
-                "returncode": None,
-                "timed_out": False,
-                "shell": bool(shell),
-                "stdout": "",
-                "stderr": redact_api_error_text(exc),
-            }
-        with _TERMINAL_PROCESS_LOCK:
-            _TERMINAL_PROCESSES.add(process)
-        timed_out = False
-        try:
-            stdout, stderr = process.communicate(
-                timeout=max(1, min(int(timeout_seconds or 30), 120))
-            )
-        except subprocess.TimeoutExpired:
-            timed_out = True
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
-                process.kill()
-            stdout, stderr = process.communicate()
-        finally:
-            with _TERMINAL_PROCESS_LOCK:
-                _TERMINAL_PROCESSES.discard(process)
-        return {
-            "ok": process.returncode == 0 and not timed_out,
-            "returncode": process.returncode,
-            "timed_out": timed_out,
-            "shell": bool(shell),
-            "stdout": redact_secrets(stdout)[-8000:],
-            "stderr": redact_secrets(stderr)[-8000:],
-        }
-
-    def artifact_write(self, path: str, content: str) -> dict[str, Any]:
-        rel = _safe_rel_path(path)
-        target = (self.artifact_root / rel).resolve()
-        if not _is_within(target, self.artifact_root):
-            raise AgentRuntimeError("artifact 路径越界")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        safe_content = redact_secrets(content)
-        target.write_text(safe_content, encoding="utf-8")
-        return {"ok": True, "path": rel, "bytes": len(safe_content.encode("utf-8"))}
-
-    def call(self, name: str, payload: dict[str, Any], *, approved: bool = False) -> dict[str, Any]:
-        if name == "skill.read":
-            return self.skill_read(
-                str(payload.get("skill_id") or ""),
-                str(payload.get("name") or ""),
-            )
-        if name == "memory.add":
-            return self.memory_add(
-                str(payload.get("content") or ""),
-                kind=str(payload.get("kind") or ""),
-                scope=str(payload.get("scope") or ""),
-            )
-        if name == "memory.replace":
-            return self.memory_replace(
-                str(payload.get("content") or ""),
-                memory_id=str(payload.get("memory_id") or ""),
-                old_content=str(payload.get("old_content") or ""),
-                kind=str(payload.get("kind") or ""),
-                scope=str(payload.get("scope") or ""),
-            )
-        if name == "memory.remove":
-            return self.memory_remove(
-                memory_id=str(payload.get("memory_id") or ""),
-                content=str(payload.get("content") or ""),
-                reason=str(payload.get("reason") or ""),
-            )
-        if name == "future_task.schedule":
-            return self.future_task_schedule(
-                title=str(payload.get("title") or ""),
-                prompt=str(payload.get("prompt") or ""),
-                delay_seconds=payload.get("delay_seconds"),
-                scheduled_at_epoch=payload.get("scheduled_at_epoch"),
-                cron=str(payload.get("cron") or ""),
-                runnable_id=str(payload.get("runnable_id") or ""),
-                runnable_name=str(payload.get("runnable_name") or ""),
-            )
-        if name == "future_task.list":
-            return self.future_task_list(
-                include_finished=bool(payload.get("include_finished", True)),
-                limit=int(payload.get("limit") or 100),
-            )
-        if name == "future_task.cancel":
-            return self.future_task_cancel(
-                str(payload.get("future_task_id") or ""),
-                reason=str(payload.get("reason") or ""),
-            )
-        if name == "workspace.list":
-            return self.workspace_list(str(payload.get("path") or "."))
-        if name == "workspace.read":
-            return self.workspace_read(str(payload.get("path") or ""))
-        if name == "workspace.write_patch":
-            return self.workspace_write_patch(
-                str(payload.get("path") or ""),
-                str(payload.get("content") or ""),
-                patch=str(payload.get("patch") or ""),
-                expected_sha256=str(payload.get("expected_sha256") or payload.get("base_sha256") or ""),
-                approved=approved,
-            )
-        if name == "terminal.run":
-            return self.terminal_run(
-                str(payload.get("command") or ""),
-                approved=approved,
-                timeout_seconds=int(payload.get("timeout_seconds") or 30),
-                shell=bool(payload.get("shell", False)),
-            )
-        if name == "artifact.write":
-            return self.artifact_write(str(payload.get("path") or ""), str(payload.get("content") or ""))
-        raise AgentRuntimeError(f"未知工具：{name}")
-
-
-class RunEventRepository:
-    """Durable, replayable execution fact log for native runs."""
-
-    def __init__(
-        self,
-        conn: _LockedConnection,
-        db_lock: threading.RLock,
-        *,
-        ensure_run_exists: Any | None = None,
-        sync_event_cursor: Any | None = None,
-    ) -> None:
-        self._conn = conn
-        self._db_lock = db_lock
-        self._ensure_run_exists = ensure_run_exists
-        self._sync_event_cursor = sync_event_cursor
-
-    def append(
-        self,
-        run_id: str,
-        event_type: str,
-        payload: dict[str, Any] | None = None,
-        *,
-        actor: str = "native_runtime",
-        visibility: str = "user",
-        sensitivity: str = "public",
-    ) -> dict[str, Any]:
-        clean_run_id = str(run_id or "").strip()
-        clean_event_type = str(event_type or "").strip()
-        if not clean_run_id or not clean_event_type:
-            raise AgentRuntimeError("RunEvent 缺少 run_id 或 event_type")
-
-        event_id = f"event_{uuid4().hex[:16]}"
-        created_at = _now()
-        safe_payload = _redact_run_event_payload(deepcopy(payload or {}))
-        normalized_visibility = "internal" if str(visibility or "").strip() == "internal" else "user"
-        normalized_sensitivity = "secret" if str(sensitivity or "").strip() == "secret" else "public"
-
-        with self._db_lock:
-            try:
-                self._conn.execute("BEGIN IMMEDIATE")
-                row = self._conn.execute(
-                    "SELECT COALESCE(MAX(sequence), 0) + 1 AS next_sequence FROM run_events WHERE run_id=?",
-                    (clean_run_id,),
-                ).fetchone()
-                sequence = int(row["next_sequence"] if row is not None else 1)
-                self._conn.execute(
-                    """
-                    INSERT INTO run_events (
-                        event_id, run_id, sequence, schema_version, event_type,
-                        actor, visibility, sensitivity, payload_json, created_at
-                    ) VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        event_id,
-                        clean_run_id,
-                        sequence,
-                        clean_event_type,
-                        str(actor or "native_runtime"),
-                        normalized_visibility,
-                        normalized_sensitivity,
-                        _json_dump(safe_payload),
-                        created_at,
-                    ),
-                )
-                self._conn.commit()
-            except Exception:
-                self._conn.rollback()
-                raise
-            if callable(self._sync_event_cursor):
-                self._sync_event_cursor(clean_run_id, sequence=sequence)
-
-        event = {
-            "event_id": event_id,
-            "run_id": clean_run_id,
-            "sequence": sequence,
-            "schema_version": 1,
-            "event_type": clean_event_type,
-            "actor": str(actor or "native_runtime"),
-            "visibility": normalized_visibility,
-            "sensitivity": normalized_sensitivity,
-            "payload": safe_payload,
-            "created_at": created_at,
-        }
-        return event
-
-    def list(
-        self,
-        run_id: str,
-        *,
-        after_sequence: int = 0,
-        limit: int = 200,
-        include_internal: bool = False,
-    ) -> dict[str, Any]:
-        clean_run_id = str(run_id or "").strip()
-        if callable(self._ensure_run_exists):
-            self._ensure_run_exists(clean_run_id)
-        safe_after_sequence = max(0, int(after_sequence or 0))
-        safe_limit = max(1, min(int(limit or 200), 1000))
-        params: list[Any] = [clean_run_id, safe_after_sequence]
-        visibility_clause = ""
-        if not include_internal:
-            visibility_clause = " AND visibility='user' AND sensitivity!='secret'"
-        params.append(safe_limit)
-        rows = self._conn.execute(
-            f"""
-            SELECT * FROM run_events
-             WHERE run_id=? AND sequence>?{visibility_clause}
-             ORDER BY sequence ASC
-             LIMIT ?
-            """,
-            tuple(params),
-        ).fetchall()
-        return {
-            "ok": True,
-            "run_id": clean_run_id,
-            "after_sequence": safe_after_sequence,
-            "limit": safe_limit,
-            "events": [
-                {
-                    "event_id": str(row["event_id"]),
-                    "run_id": str(row["run_id"]),
-                    "sequence": int(row["sequence"]),
-                    "schema_version": int(row["schema_version"]),
-                    "event_type": str(row["event_type"]),
-                    "actor": str(row["actor"]),
-                    "visibility": str(row["visibility"]),
-                    "sensitivity": str(row["sensitivity"]),
-                    "payload": _json_load(row["payload_json"], {}),
-                    "created_at": str(row["created_at"]),
-                }
-                for row in rows
-            ],
-        }
-
-
 class TaskRunLinkRepository:
     """Persistence boundary for product Task to native Run links."""
 
@@ -2843,189 +2147,6 @@ class TaskRunLinkRepository:
         }
 
 
-class ApprovalRepository:
-    """Projection store for user-visible and idempotent run approvals."""
-
-    def __init__(self, conn: _LockedConnection, db_lock: threading.RLock) -> None:
-        self._conn = conn
-        self._db_lock = db_lock
-
-    def sync(self, run_id: str, *, status: str, pending_approval: dict[str, Any]) -> None:
-        if pending_approval:
-            self.upsert_pending(run_id, pending_approval)
-            return
-        self.resolve_pending(run_id, status=status)
-
-    def upsert_pending(self, run_id: str, pending_approval: dict[str, Any]) -> None:
-        public = _public_pending_approval(pending_approval)
-        approval_id = str(pending_approval.get("approval_id") or f"approval_{run_id}").strip()
-        requested_at = str(pending_approval.get("requested_at") or _now())
-        self._conn.execute(
-            """
-            INSERT INTO run_approvals (
-                approval_id, run_id, status, tool, input_preview_json, payload_json,
-                requested_at, resolved_at, updated_at
-            ) VALUES (?, ?, 'pending', ?, ?, ?, ?, '', ?)
-            ON CONFLICT(approval_id) DO UPDATE SET
-                status='pending',
-                tool=excluded.tool,
-                input_preview_json=excluded.input_preview_json,
-                payload_json=excluded.payload_json,
-                requested_at=excluded.requested_at,
-                resolved_at='',
-                updated_at=excluded.updated_at
-            """,
-            (
-                approval_id,
-                run_id,
-                str(public.get("tool") or "")[:120],
-                _json_dump(public.get("input_preview") or {}),
-                _json_dump(public),
-                requested_at,
-                _now(),
-            ),
-        )
-
-    def claim_pending_approval(self, run_id: str, pending_approval: dict[str, Any]) -> bool:
-        approval_id = str(pending_approval.get("approval_id") or f"approval_{run_id}").strip()
-        if not approval_id:
-            return False
-        public = _public_pending_approval(pending_approval)
-        now = _now()
-        requested_at = str(pending_approval.get("requested_at") or now)
-        with self._db_lock:
-            try:
-                self._conn.execute("BEGIN IMMEDIATE")
-                row = self._conn.execute(
-                    "SELECT status FROM run_approvals WHERE approval_id=? AND run_id=?",
-                    (approval_id, run_id),
-                ).fetchone()
-                if row is None:
-                    self._conn.execute(
-                        """
-                        INSERT INTO run_approvals (
-                            approval_id, run_id, status, tool, input_preview_json, payload_json,
-                            requested_at, resolved_at, updated_at
-                        ) VALUES (?, ?, 'pending', ?, ?, ?, ?, '', ?)
-                        """,
-                        (
-                            approval_id,
-                            run_id,
-                            str(public.get("tool") or "")[:120],
-                            _json_dump(public.get("input_preview") or {}),
-                            _json_dump(public),
-                            requested_at,
-                            now,
-                        ),
-                    )
-                    current_status = "pending"
-                else:
-                    current_status = str(row["status"] or "")
-                if current_status != "pending":
-                    self._conn.commit()
-                    return False
-                cursor = self._conn.execute(
-                    """
-                    UPDATE run_approvals
-                       SET status='approved',
-                           resolved_at=CASE WHEN resolved_at='' THEN ? ELSE resolved_at END,
-                           updated_at=?
-                     WHERE approval_id=? AND run_id=? AND status='pending'
-                    """,
-                    (now, now, approval_id, run_id),
-                )
-                claimed = int(cursor.rowcount or 0) == 1
-                self._conn.commit()
-                return claimed
-            except Exception:
-                self._conn.rollback()
-                raise
-
-    def resolve_pending(self, run_id: str, *, status: str) -> None:
-        resolved_status = "approved" if status in {"running", "completed"} else "cancelled" if status == "cancelled" else "resolved"
-        self._conn.execute(
-            """
-            UPDATE run_approvals
-               SET status=?, resolved_at=CASE WHEN resolved_at='' THEN ? ELSE resolved_at END, updated_at=?
-             WHERE run_id=? AND status='pending'
-            """,
-            (resolved_status, _now(), _now(), run_id),
-        )
-
-
-class RunArtifactRepository:
-    """Projection store and file access boundary for run artifacts."""
-
-    def __init__(
-        self,
-        conn: _LockedConnection,
-        *,
-        agent_artifacts_dir: Path,
-        workflow_artifacts_dir: Path,
-        get_run: Any,
-    ) -> None:
-        self._conn = conn
-        self._agent_artifacts_dir = agent_artifacts_dir
-        self._workflow_artifacts_dir = workflow_artifacts_dir
-        self._get_run = get_run
-
-    def sync(self, run_id: str, artifacts: Any) -> None:
-        self._conn.execute("DELETE FROM run_artifacts WHERE run_id=?", (run_id,))
-        if not isinstance(artifacts, list):
-            return
-        now = _now()
-        for index, artifact in enumerate(item for item in artifacts if isinstance(item, dict)):
-            artifact_id = f"{run_id}:artifact:{index}"
-            self._conn.execute(
-                """
-                INSERT INTO run_artifacts (
-                    artifact_id, run_id, sequence, kind, path, source_run_id, payload_json, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    artifact_id,
-                    run_id,
-                    index,
-                    str(artifact.get("kind") or "")[:80],
-                    str(artifact.get("path") or "")[:500],
-                    str(artifact.get("source_run_id") or artifact.get("run_id") or "")[:160],
-                    _json_dump(_redact_json_value(artifact)),
-                    now,
-                ),
-            )
-
-    def read(self, run_id: str, artifact_path: str) -> dict[str, Any]:
-        run = self._get_run(run_id)
-        rel = _safe_rel_path(artifact_path)
-        root = self._run_artifact_root(run)
-        target = (root / rel).resolve()
-        if not _is_within(target, root) or not target.is_file():
-            raise KeyError(rel)
-        content = _read_text(target, limit=300_000)
-        return {
-            "ok": True,
-            "run_id": run_id,
-            "path": rel,
-            "content": redact_secrets(content),
-            "truncated": target.stat().st_size > 300_000,
-        }
-
-    def delete_files(self, run: dict[str, Any]) -> None:
-        run_id = str(run.get("run_id") or "")
-        if not run_id:
-            return
-        root = self._artifact_base_dir(run)
-        target = (root / run_id).resolve()
-        if _is_within(target, root) and target.exists():
-            shutil.rmtree(target, ignore_errors=True)
-
-    def _run_artifact_root(self, run: dict[str, Any]) -> Path:
-        return self._artifact_base_dir(run) / str(run["run_id"])
-
-    def _artifact_base_dir(self, run: dict[str, Any]) -> Path:
-        return self._agent_artifacts_dir if run.get("kind") == "agent_run" else self._workflow_artifacts_dir
-
-
 class RunProjectionCoordinator:
     """Synchronizes secondary projections after run rows or facts change."""
 
@@ -3063,338 +2184,6 @@ class RunProjectionCoordinator:
             run_id,
             last_event_sequence=int(sequence or 0),
         )
-
-
-class RunGroupRepository:
-    """Lifecycle store for run groups and their child run membership."""
-
-    def __init__(
-        self,
-        conn: _LockedConnection,
-        *,
-        ensure_row_factory: Any,
-        row_to_run_group: Any,
-        row_to_run: Any,
-    ) -> None:
-        self._conn = conn
-        self._ensure_row_factory = ensure_row_factory
-        self._row_to_run_group = row_to_run_group
-        self._row_to_run = row_to_run
-
-    def list(self, limit: int = 50) -> dict[str, Any]:
-        self._ensure_row_factory()
-        rows = self._conn.execute(
-            "SELECT * FROM run_groups ORDER BY updated_at DESC LIMIT ?",
-            (max(1, min(int(limit or 50), 200)),),
-        ).fetchall()
-        return {"ok": True, "run_groups": [self._row_to_run_group(row) for row in rows]}
-
-    def get(self, run_group_id: str) -> dict[str, Any]:
-        self._ensure_row_factory()
-        row = self._conn.execute("SELECT * FROM run_groups WHERE run_group_id=?", (run_group_id,)).fetchone()
-        if row is None:
-            raise KeyError(run_group_id)
-        return self._row_to_run_group(row)
-
-    def source(self, run_group_id: str) -> str:
-        if not run_group_id:
-            return ""
-        row = self._conn.execute(
-            "SELECT source FROM run_groups WHERE run_group_id=?",
-            (run_group_id,),
-        ).fetchone()
-        if row is None:
-            return ""
-        return str(row["source"] or "")
-
-    def insert(self, *, title: str, source: str, workspace_dir: str = "") -> dict[str, Any]:
-        run_group_id = f"run_group_{uuid4().hex[:12]}"
-        now = _now()
-        self._conn.execute(
-            """
-            INSERT INTO run_groups (
-                run_group_id, title, source, workspace_dir, status, summary,
-                child_run_ids_json, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                run_group_id,
-                redact_secrets(title)[:180],
-                redact_secrets(source)[:80],
-                redact_secrets(workspace_dir),
-                "running",
-                "",
-                "[]",
-                now,
-                now,
-            ),
-        )
-        self._conn.commit()
-        return self.get(run_group_id)
-
-    def append_run(self, run_group_id: str, run_id: str) -> None:
-        if not run_group_id:
-            return
-        group = self.get(run_group_id)
-        child_run_ids = [str(item) for item in group.get("child_run_ids") or [] if str(item)]
-        if run_id not in child_run_ids:
-            child_run_ids.append(run_id)
-        self._conn.execute(
-            """
-            UPDATE run_groups
-               SET child_run_ids_json=?, updated_at=?
-             WHERE run_group_id=?
-            """,
-            (_json_dump(child_run_ids), _now(), run_group_id),
-        )
-        self._conn.commit()
-
-    def update(
-        self,
-        run_group_id: str,
-        *,
-        status: str | None = None,
-        summary: str | None = None,
-    ) -> None:
-        if not run_group_id:
-            return
-        current = self.get(run_group_id)
-        self._conn.execute(
-            """
-            UPDATE run_groups
-               SET status=?, summary=?, updated_at=?
-             WHERE run_group_id=?
-            """,
-            (
-                status or current["status"],
-                redact_secrets(summary) if summary is not None else current["summary"],
-                _now(),
-                run_group_id,
-            ),
-        )
-        self._conn.commit()
-
-    def runs(self, run_group_id: str) -> list[dict[str, Any]]:
-        if not run_group_id:
-            return []
-        self._ensure_row_factory()
-        rows = self._conn.execute(
-            "SELECT * FROM runs WHERE run_group_id=? ORDER BY created_at ASC",
-            (run_group_id,),
-        ).fetchall()
-        return [self._row_to_run(row) for row in rows]
-
-    def remove_run_ids(self, run_group_id: str, run_ids: set[str]) -> None:
-        if not run_group_id or not run_ids:
-            return
-        try:
-            group = self.get(run_group_id)
-        except KeyError:
-            return
-        child_run_ids = [
-            str(item)
-            for item in group.get("child_run_ids") or []
-            if str(item) and str(item) not in run_ids
-        ]
-        remaining_count = self._conn.execute(
-            "SELECT COUNT(*) AS count FROM runs WHERE run_group_id=?",
-            (run_group_id,),
-        ).fetchone()
-        if not child_run_ids or int(remaining_count["count"] if remaining_count else 0) <= 0:
-            self.delete(run_group_id)
-            return
-        self._conn.execute(
-            """
-            UPDATE run_groups
-               SET child_run_ids_json=?, updated_at=?
-             WHERE run_group_id=?
-            """,
-            (_json_dump(child_run_ids), _now(), run_group_id),
-        )
-
-    def delete(self, run_group_id: str) -> None:
-        if not run_group_id:
-            return
-        self._conn.execute("DELETE FROM run_groups WHERE run_group_id=?", (run_group_id,))
-
-
-class RunRepository:
-    """Source of truth for native run lifecycle rows."""
-
-    def __init__(
-        self,
-        conn: _LockedConnection,
-        *,
-        ensure_row_factory: Any,
-        row_to_run: Any,
-        accepting_runs: Any,
-        sync_projections: Any,
-        append_run_to_group: Any,
-    ) -> None:
-        self._conn = conn
-        self._ensure_row_factory = ensure_row_factory
-        self._row_to_run = row_to_run
-        self._accepting_runs = accepting_runs
-        self._sync_projections = sync_projections
-        self._append_run_to_group = append_run_to_group
-
-    def list(self, limit: int = 50) -> dict[str, Any]:
-        self._ensure_row_factory()
-        rows = self._conn.execute(
-            """
-            SELECT runs.*, run_groups.source AS run_group_source
-             FROM runs
-              LEFT JOIN run_groups ON run_groups.run_group_id = runs.run_group_id
-             WHERE NOT (
-                runs.kind = 'agent_run'
-                AND runs.run_group_id != ''
-                AND EXISTS (
-                    SELECT 1
-                      FROM runs workflow_parent
-                     WHERE workflow_parent.run_group_id = runs.run_group_id
-                       AND workflow_parent.kind = 'workflow_run'
-                )
-             )
-             ORDER BY runs.updated_at DESC
-             LIMIT ?
-            """,
-            (max(1, min(int(limit or 50), 200)),),
-        ).fetchall()
-        return {"ok": True, "runs": [self._row_to_run(row) for row in rows]}
-
-    def get(self, run_id: str) -> dict[str, Any]:
-        self._ensure_row_factory()
-        row = self._conn.execute("SELECT * FROM runs WHERE run_id=?", (run_id,)).fetchone()
-        if row is None:
-            raise KeyError(run_id)
-        return self._row_to_run(row)
-
-    def pending_approval_json(self, run_id: str) -> str:
-        self._ensure_row_factory()
-        row = self._conn.execute("SELECT pending_approval_json FROM runs WHERE run_id=?", (run_id,)).fetchone()
-        if row is None:
-            raise KeyError(run_id)
-        return str(row["pending_approval_json"] or "{}")
-
-    def pending_approval_private(self, run_id: str) -> dict[str, Any]:
-        pending = _json_load(self.pending_approval_json(run_id), {})
-        return pending if isinstance(pending, dict) else {}
-
-    def by_client_request_id(self, client_request_id: str) -> dict[str, Any] | None:
-        clean_id = str(client_request_id or "").strip()
-        if not clean_id:
-            return None
-        self._ensure_row_factory()
-        row = self._conn.execute(
-            "SELECT * FROM runs WHERE client_request_id=? LIMIT 1",
-            (clean_id,),
-        ).fetchone()
-        if row is None:
-            return None
-        run = self._row_to_run(row)
-        run["idempotent"] = True
-        return run
-
-    def insert(
-        self,
-        *,
-        kind: str,
-        runnable_id: str,
-        user_goal: str,
-        run_group_id: str = "",
-        client_request_id: str = "",
-    ) -> dict[str, Any]:
-        if not self._accepting_runs():
-            raise AgentRuntimeError("Native Runtime 正在关闭，暂不接受新的 Run")
-        run_id = f"{kind}_{uuid4().hex[:12]}"
-        now = _now()
-        clean_client_request_id = str(client_request_id or "").strip()[:128]
-        if contains_sensitive_text(clean_client_request_id):
-            raise AgentRuntimeError("client_request_id 不能包含 API key、token 或其他敏感值")
-        self._conn.execute(
-            """
-            INSERT INTO runs (
-                run_id, run_group_id, client_request_id, kind, runnable_id, status, user_goal, result,
-                timeline_json, artifacts_json, pending_approval_json, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                run_id,
-                run_group_id,
-                clean_client_request_id,
-                kind,
-                runnable_id,
-                "running",
-                redact_secrets(user_goal),
-                "",
-                "[]",
-                "[]",
-                "{}",
-                now,
-                now,
-            ),
-        )
-        self._conn.commit()
-        self._append_run_to_group(run_group_id, run_id)
-        return self.get(run_id)
-
-    def update(
-        self,
-        run_id: str,
-        *,
-        status: str | None = None,
-        result: str | None = None,
-        timeline: list[dict[str, Any]] | None = None,
-        artifacts: list[dict[str, Any]] | None = None,
-        pending_approval: dict[str, Any] | None | object = _UNSET,
-    ) -> dict[str, Any]:
-        current = self.get(run_id)
-        if pending_approval is _UNSET:
-            pending_approval_json = self.pending_approval_json(run_id)
-            next_pending_approval = _json_load(pending_approval_json, {})
-        else:
-            next_pending_approval = _redact_json_value(pending_approval or {})
-            pending_approval_json = _json_dump(next_pending_approval)
-        safe_result = redact_secrets(result) if result is not None else current["result"]
-        safe_timeline = _redact_json_value(timeline if timeline is not None else current["timeline"])
-        safe_artifacts = _redact_json_value(artifacts if artifacts is not None else current["artifacts"])
-        next_status = status or current["status"]
-        self._conn.execute(
-            """
-            UPDATE runs
-               SET status=?, result=?, timeline_json=?, artifacts_json=?, pending_approval_json=?, updated_at=?
-             WHERE run_id=?
-            """,
-            (
-                next_status,
-                safe_result,
-                _json_dump(safe_timeline),
-                _json_dump(safe_artifacts),
-                pending_approval_json,
-                _now(),
-                run_id,
-            ),
-        )
-        self._sync_projections(
-            run_id,
-            status=next_status,
-            artifacts=safe_artifacts,
-            pending_approval=next_pending_approval if isinstance(next_pending_approval, dict) else {},
-        )
-        self._conn.commit()
-        return self.get(run_id)
-
-    def delete_rows(self, runs: list[dict[str, Any]], *, delete_artifacts: Any) -> list[str]:
-        deleted_run_ids: list[str] = []
-        for run in runs:
-            run_id = str(run.get("run_id") or "")
-            if not run_id:
-                continue
-            if callable(delete_artifacts):
-                delete_artifacts(run)
-            self._conn.execute("DELETE FROM runs WHERE run_id=?", (run_id,))
-            deleted_run_ids.append(run_id)
-        return deleted_run_ids
 
 
 class ApprovalCoordinator:
@@ -6655,6 +5444,28 @@ class WorkflowContinuationCoordinator:
                         return ""
                     return str(path[current_index + 1].get("id") or "")
 
+            def append_edge_followed(current_node: dict[str, Any], next_node_id: str, branch: str = "") -> None:
+                source_node_id = str(current_node.get("id") or "")
+                if not source_node_id or not next_node_id:
+                    return
+                source_kind = engine._node_kind(current_node)
+                source_label = str((current_node.get("data") or {}).get("label") or source_node_id)
+                engine.append_run_event(
+                    str(run["run_id"]),
+                    "workflow.edge.followed",
+                    {
+                        "workflow_node_id": source_node_id,
+                        "workflow_node_kind": source_kind,
+                        "workflow_node_label": source_label,
+                        "workflow_edge_source_node_id": source_node_id,
+                        "workflow_edge_source_node_kind": source_kind,
+                        "workflow_edge_source_node_label": source_label,
+                        "workflow_edge_target_node_id": next_node_id,
+                        "workflow_edge_branch": branch,
+                        "status": "completed",
+                    },
+                )
+
             if start_node_id:
                 node = nodes_by_id.get(start_node_id)
                 if node is None:
@@ -6701,6 +5512,7 @@ class WorkflowContinuationCoordinator:
                         projection.event_payload(),
                     )
                     next_id = next_node_id_for(node, context)
+                    append_edge_followed(node, next_id)
                     node = nodes_by_id.get(next_id) if next_id else None
                     current_node_id = next_id
                     continue
@@ -6723,11 +5535,12 @@ class WorkflowContinuationCoordinator:
                     context = str(result.get("context") or "")
                     has_agent_upstream = True
                     next_id = next_node_id_for(node, context)
+                    append_edge_followed(node, next_id)
                     node = nodes_by_id.get(next_id) if next_id else None
                     current_node_id = next_id
                     continue
                 if kind == "condition":
-                    next_id = self._run_condition_node(
+                    result = self._run_condition_node(
                         run,
                         workflow,
                         node,
@@ -6736,6 +5549,8 @@ class WorkflowContinuationCoordinator:
                         context=context,
                         timeline=timeline,
                     )
+                    next_id = str(result.get("next_node_id") or "")
+                    append_edge_followed(node, next_id, str(result.get("branch") or ""))
                     node = nodes_by_id.get(next_id) if next_id else None
                     current_node_id = next_id
                     continue
@@ -6752,6 +5567,7 @@ class WorkflowContinuationCoordinator:
                     )
                     loop_iterations[current_node_id] = int(result.get("iteration") or 0)
                     next_id = str(result.get("next_node_id") or "")
+                    append_edge_followed(node, next_id, str(result.get("branch") or ""))
                     node = nodes_by_id.get(next_id) if next_id else None
                     current_node_id = next_id
                     continue
@@ -6775,6 +5591,7 @@ class WorkflowContinuationCoordinator:
                     context = str(result.get("context") or "")
                     has_agent_upstream = True
                     next_id = str(result.get("next_node_id") or "")
+                    append_edge_followed(node, next_id, "join")
                     node = nodes_by_id.get(next_id) if next_id else None
                     current_node_id = next_id
                     continue
@@ -6795,6 +5612,7 @@ class WorkflowContinuationCoordinator:
                     context = str(result.get("context") or "")
                     has_agent_upstream = True
                     next_id = next_node_id_for(node, context)
+                    append_edge_followed(node, next_id)
                     node = nodes_by_id.get(next_id) if next_id else None
                     current_node_id = next_id
                     continue
@@ -6824,6 +5642,7 @@ class WorkflowContinuationCoordinator:
                         timeline=timeline,
                     )
                     next_id = next_node_id_for(node, context)
+                    append_edge_followed(node, next_id)
                     node = nodes_by_id.get(next_id) if next_id else None
                     current_node_id = next_id
                     continue
@@ -7365,7 +6184,7 @@ class WorkflowContinuationCoordinator:
         kind: str,
         context: str,
         timeline: list[dict[str, Any]],
-    ) -> str:
+    ) -> dict[str, Any]:
         engine = self._engine
         projection = WorkflowConditionNodeProjection.from_node(
             engine,
@@ -7377,7 +6196,10 @@ class WorkflowContinuationCoordinator:
         )
         timeline.append(projection.timeline_event(engine._timeline))
         engine.append_run_event(str(run["run_id"]), "workflow.node.condition", projection.event_payload())
-        return projection.target_node_id
+        return {
+            "branch": projection.branch,
+            "next_node_id": projection.target_node_id,
+        }
 
     def _run_loop_node(
         self,
@@ -7404,6 +6226,7 @@ class WorkflowContinuationCoordinator:
         timeline.append(projection.timeline_event(engine._timeline))
         engine.append_run_event(str(run["run_id"]), "workflow.node.loop", projection.event_payload())
         return {
+            "branch": projection.branch,
             "next_node_id": projection.target_node_id,
             "iteration": projection.iteration,
         }
@@ -7492,13 +6315,29 @@ class NativeRunEngine:
             ensure_row_factory=self._ensure_row_factory,
             row_to_run_group=self._row_to_run_group,
             row_to_run=self._row_to_run,
+            now=_now,
+            json_dump=_json_dump,
+            redact_secrets=redact_secrets,
         )
-        self.run_approvals = ApprovalRepository(self._conn, self._db_lock)
+        self.run_approvals = ApprovalRepository(
+            self._conn,
+            self._db_lock,
+            now=_now,
+            json_dump=_json_dump,
+            public_pending_approval=_public_pending_approval,
+        )
         self.run_artifacts = RunArtifactRepository(
             self._conn,
             agent_artifacts_dir=self.agent_artifacts_dir,
             workflow_artifacts_dir=self.workflow_artifacts_dir,
             get_run=self.get_run,
+            now=_now,
+            json_dump=_json_dump,
+            redact_json_value=_redact_json_value,
+            redact_secrets=redact_secrets,
+            safe_rel_path=_safe_rel_path,
+            is_within=_is_within,
+            read_text=_read_text,
         )
         self.run_projections = RunProjectionCoordinator(
             run_artifacts=self.run_artifacts,
@@ -7512,12 +6351,38 @@ class NativeRunEngine:
             accepting_runs=lambda: self._accepting_runs,
             sync_projections=self.run_projections.sync,
             append_run_to_group=self._append_run_to_group,
+            now=_now,
+            json_dump=_json_dump,
+            json_load=_json_load,
+            redact_secrets=redact_secrets,
+            redact_json_value=_redact_json_value,
+            contains_sensitive_text=contains_sensitive_text,
+            error_type=AgentRuntimeError,
+            unset_sentinel=_UNSET,
         )
         self.run_events = RunEventRepository(
             self._conn,
             self._db_lock,
+            now=_now,
+            json_dump=_json_dump,
+            json_load=_json_load,
+            error_type=AgentRuntimeError,
             ensure_run_exists=self.get_run,
             sync_event_cursor=self.run_projections.sync_event_cursor,
+        )
+        self.workflows = WorkflowRepository(
+            self._conn,
+            ensure_row_factory=self._ensure_row_factory,
+            row_to_workflow=self._row_to_workflow,
+            now=_now,
+            json_dump=_json_dump,
+            workflow_id_factory=lambda name: f"workflow_{_slug(name, 'workflow')}_{uuid4().hex[:8]}",
+            ensure_global_name_available=self._ensure_global_name_available,
+            validate_workflow=self.validate_workflow,
+            validate_workflow_agent_nodes=self._validate_workflow_agent_nodes,
+            validate_workflow_subworkflow_nodes=self._validate_workflow_subworkflow_nodes,
+            record_studio_deletion=self._record_studio_deletion,
+            clear_studio_deletion=self._clear_studio_deletion,
         )
         self.approvals = ApprovalCoordinator(
             timeline_factory=self._timeline,
@@ -10152,92 +9017,19 @@ class NativeRunEngine:
         return {"ok": True}
 
     def list_workflows(self) -> dict[str, Any]:
-        self._ensure_row_factory()
-        rows = self._conn.execute("SELECT * FROM workflows ORDER BY updated_at DESC").fetchall()
-        return {"ok": True, "workflows": [self._row_to_workflow(row) for row in rows]}
+        return self.workflows.list()
 
     def get_workflow(self, workflow_id: str) -> dict[str, Any]:
-        self._ensure_row_factory()
-        row = self._conn.execute("SELECT * FROM workflows WHERE workflow_id=?", (workflow_id,)).fetchone()
-        if row is None:
-            raise KeyError(workflow_id)
-        return self._row_to_workflow(row)
+        return self.workflows.get(workflow_id)
 
     def create_workflow(self, payload: dict[str, Any], *, seed: bool = False) -> dict[str, Any]:
-        name = str(payload.get("name") or "").strip()
-        self._ensure_global_name_available(name)
-        nodes = payload.get("nodes") or []
-        edges = payload.get("edges") or []
-        workflow_id = str(payload.get("workflow_id") or f"workflow_{_slug(name, 'workflow')}_{uuid4().hex[:8]}")
-        self.validate_workflow(nodes, edges)
-        self._validate_workflow_agent_nodes(nodes)
-        self._validate_workflow_subworkflow_nodes(nodes, parent_workflow_id=workflow_id)
-        now = _now()
-        self._conn.execute(
-            """
-            INSERT INTO workflows (
-                workflow_id, name, description, nodes_json, edges_json,
-                default_input_schema_json, enabled, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                workflow_id,
-                name,
-                str(payload.get("description") or ""),
-                _json_dump(nodes),
-                _json_dump(edges),
-                _json_dump(payload.get("default_input_schema") or {}),
-                1 if payload.get("enabled", True) else 0,
-                now,
-                now,
-            ),
-        )
-        if not seed:
-            self._clear_studio_deletion("workflow", workflow_id)
-        self._conn.commit()
-        return self.get_workflow(workflow_id)
+        return self.workflows.create(payload, seed=seed)
 
     def update_workflow(self, workflow_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        current = self.get_workflow(workflow_id)
-        next_payload = dict(payload)
-        if "name" in payload:
-            name = str(payload.get("name") or "").strip()
-            self._ensure_global_name_available(name, ignore_workflow_id=workflow_id)
-            next_payload["name"] = name
-        next_workflow = {**current, **next_payload}
-        self.validate_workflow(next_workflow.get("nodes") or [], next_workflow.get("edges") or [])
-        self._validate_workflow_agent_nodes(next_workflow.get("nodes") or [])
-        self._validate_workflow_subworkflow_nodes(
-            next_workflow.get("nodes") or [],
-            parent_workflow_id=workflow_id,
-        )
-        self._conn.execute(
-            """
-            UPDATE workflows
-               SET name=?, description=?, nodes_json=?, edges_json=?,
-                   default_input_schema_json=?, enabled=?, updated_at=?
-             WHERE workflow_id=?
-            """,
-            (
-                str(next_workflow.get("name") or ""),
-                str(next_workflow.get("description") or ""),
-                _json_dump(next_workflow.get("nodes") or []),
-                _json_dump(next_workflow.get("edges") or []),
-                _json_dump(next_workflow.get("default_input_schema") or {}),
-                1 if next_workflow.get("enabled", True) else 0,
-                _now(),
-                workflow_id,
-            ),
-        )
-        self._conn.commit()
-        return self.get_workflow(workflow_id)
+        return self.workflows.update(workflow_id, payload)
 
     def delete_workflow(self, workflow_id: str) -> dict[str, Any]:
-        if self._conn.execute("SELECT 1 FROM workflows WHERE workflow_id=?", (workflow_id,)).fetchone() is not None:
-            self._record_studio_deletion("workflow", workflow_id)
-        self._conn.execute("DELETE FROM workflows WHERE workflow_id=?", (workflow_id,))
-        self._conn.commit()
-        return {"ok": True}
+        return self.workflows.delete(workflow_id)
 
     @staticmethod
     def _node_kind(node: dict[str, Any]) -> str:
@@ -10497,7 +9289,7 @@ class NativeRunEngine:
         visibility: str = "user",
         sensitivity: str = "public",
     ) -> dict[str, Any]:
-        return self.run_events.append(
+        event = self.run_events.append(
             run_id,
             event_type,
             payload,
@@ -10505,6 +9297,16 @@ class NativeRunEngine:
             visibility=visibility,
             sensitivity=sensitivity,
         )
+        for alias in _canonical_run_event_aliases(event_type, payload):
+            self.run_events.append(
+                run_id,
+                alias,
+                payload,
+                actor=actor,
+                visibility=visibility,
+                sensitivity=sensitivity,
+            )
+        return event
 
     def list_run_events(
         self,
@@ -10701,6 +9503,8 @@ class NativeRunEngine:
                 task_id=str(task_id or ""),
                 session_id=str(session_id or ""),
             ),
+            self._timeline("task.created", str(task_id or ""), task_id=str(task_id or "")),
+            self._timeline("task.started", str(task_id or ""), task_id=str(task_id or "")),
             self._timeline("task.linked", str(task_id or ""), task_id=str(task_id or "")),
         ]
         run = self._update_run(run["run_id"], timeline=timeline)
@@ -10709,6 +9513,14 @@ class NativeRunEngine:
             "run.started",
             {"task_id": str(task_id or ""), "session_id": str(session_id or "")},
         )
+        task_payload = _task_run_event_payload(
+            task_id=str(task_id or ""),
+            run_id=str(run["run_id"]),
+            session_id=str(session_id or ""),
+            status="running",
+        )
+        self.append_run_event(run["run_id"], "task.created", task_payload)
+        self.append_run_event(run["run_id"], "task.started", task_payload)
         self.append_run_event(
             run["run_id"],
             "task.linked",
@@ -11039,6 +9851,18 @@ class NativeRunEngine:
             timeline=timeline,
             pending_approval=None,
         )
+        link = self.task_run_links.for_run(run_id)
+        self.append_run_event(
+            run_id,
+            "task.completed",
+            _task_run_event_payload(
+                task_id=str((link or {}).get("task_id") or ""),
+                run_id=run_id,
+                session_id=str((link or {}).get("session_id") or ""),
+                status="completed",
+                result=safe_result,
+            ),
+        )
         self.append_run_event(run_id, "run.completed", {"result": safe_result})
         return completed
 
@@ -11058,6 +9882,18 @@ class NativeRunEngine:
             result=safe_error,
             timeline=timeline,
             pending_approval=None,
+        )
+        link = self.task_run_links.for_run(run_id)
+        self.append_run_event(
+            run_id,
+            "task.failed",
+            _task_run_event_payload(
+                task_id=str((link or {}).get("task_id") or ""),
+                run_id=run_id,
+                session_id=str((link or {}).get("session_id") or ""),
+                status="failed",
+                error=safe_error,
+            ),
         )
         self.append_run_event(run_id, "run.failed", {"error": safe_error})
         return failed
@@ -11325,6 +10161,15 @@ class NativeRunEngine:
         )
         artifacts: list[dict[str, Any]] = []
         try:
+            retrieved_memories = self._memory_store().list_items(
+                include_deleted=False,
+                limit=_MEMORY_CONTEXT_LIMIT,
+            )
+            self.append_run_event(
+                run_id,
+                "memory.retrieved",
+                _memory_retrieved_payload(retrieved_memories),
+            )
             artifact = broker.artifact_write("agent-context.md", context)
             artifacts.append({"kind": "context", **artifact})
             timeline.append(self._timeline("agent.artifact.write", "agent-context.md", artifact=artifact))
@@ -11699,12 +10544,63 @@ class NativeRunEngine:
                     {"tool": tool_name, "input_preview": input_preview},
                 )
             raise AgentRuntimeError(f"Agent 试图调用未授权工具：{tool_name}")
-        self._validate_tool_payload(tool_name, payload)
+        if run_id:
+            self.append_run_event(
+                run_id,
+                "tool.requested",
+                _canonical_tool_event_payload(
+                    tool_name,
+                    input_preview,
+                    approved=approved,
+                    pre_validation=True,
+                    status="requested",
+                ),
+            )
+        try:
+            self._validate_tool_payload(tool_name, payload)
+        except AgentRuntimeError as exc:
+            if run_id:
+                self.append_run_event(
+                    run_id,
+                    "tool.failed",
+                    _canonical_tool_event_payload(
+                        tool_name,
+                        input_preview,
+                        approved=approved,
+                        pre_validation=True,
+                        error=exc,
+                        status="failed",
+                    ),
+                )
+            raise
         budget.claim_tool_call(tool_name, terminal_execution=tool_name == "terminal.run" and approved)
+        if run_id:
+            self.append_run_event(
+                run_id,
+                "tool.started",
+                _canonical_tool_event_payload(
+                    tool_name,
+                    input_preview,
+                    approved=approved,
+                    status="running",
+                ),
+            )
         try:
             tool_result = broker.call(tool_name, payload, approved=approved)
         except AgentRuntimeError as exc:
             if not tool_name.startswith("workspace."):
+                if run_id:
+                    self.append_run_event(
+                        run_id,
+                        "tool.failed",
+                        _canonical_tool_event_payload(
+                            tool_name,
+                            input_preview,
+                            approved=approved,
+                            error=exc,
+                            status="failed",
+                        ),
+                    )
                 raise
             terminal_hint = (
                 " If the required target is outside the configured workspace, use terminal.run and wait for approval."
@@ -11723,6 +10619,31 @@ class NativeRunEngine:
                 **({"suggested_tool": "terminal.run"} if "terminal.run" in allowed_tools else {}),
             }
         tool_result = self._limit_tool_result(tool_result)
+        if run_id:
+            if tool_result.get("approval_required"):
+                self.append_run_event(
+                    run_id,
+                    "tool.approval_required",
+                    _canonical_tool_event_payload(
+                        tool_name,
+                        input_preview,
+                        approved=approved,
+                        result=tool_result,
+                        status="waiting_approval",
+                    ),
+                )
+            else:
+                self.append_run_event(
+                    run_id,
+                    "tool.completed" if tool_result.get("ok") else "tool.failed",
+                    _canonical_tool_event_payload(
+                        tool_name,
+                        input_preview,
+                        approved=approved,
+                        result=tool_result,
+                        status="completed" if tool_result.get("ok") else "failed",
+                    ),
+                )
         timeline.append(self._timeline("agent.tool.call", tool_name, input_preview=input_preview, result=tool_result))
         if run_id:
             self.append_run_event(
@@ -11735,10 +10656,19 @@ class NativeRunEngine:
                     "approved": bool(approved),
                 },
             )
+            trace_event = _memory_skill_trace_event(tool_name, input_preview, tool_result)
+            if trace_event is not None:
+                self.append_run_event(run_id, trace_event["event_type"], trace_event["payload"])
         if artifacts is not None and tool_name == "artifact.write" and tool_result.get("ok"):
             artifact = {"kind": "tool_artifact", **tool_result}
             if artifact not in artifacts:
                 artifacts.append(artifact)
+            if run_id:
+                self.append_run_event(
+                    run_id,
+                    "artifact.created",
+                    _artifact_created_payload(tool_result, run_id=run_id),
+                )
         return tool_result
 
     @staticmethod

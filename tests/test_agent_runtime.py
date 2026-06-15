@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import shlex
 import sqlite3
 import subprocess
@@ -16,8 +16,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from apps.shell.credential_store import MemoryCredentialStore
 from apps.shell.agent_runtime import (
+    _MAX_AGENT_TOOL_ITERATIONS,
     AgentApprovalRequired,
     AgentRuntimeError,
     AgentRuntimeService,
@@ -25,10 +25,10 @@ from apps.shell.agent_runtime import (
     ApprovalResumeCoordinator,
     ApprovalResumeProjectionCoordinator,
     NativeRunEngine,
+    RunCancellationProjection,
     RunProjectionCoordinator,
     RunTransitionProjectionCoordinator,
     TaskRunLinkRepository,
-    RunCancellationProjection,
     ToolApprovalClaimProjection,
     ToolApprovalContinuationHandoff,
     ToolApprovalContinuationOutcome,
@@ -39,34 +39,34 @@ from apps.shell.agent_runtime import (
     ToolApprovalResumeContext,
     ToolApprovalTransitionContext,
     ToolBroker,
-    WorkflowApprovalResumeCoordinator,
-    WorkflowApprovalResumeContext,
-    WorkflowApprovalPauseProjection,
-    WorkflowApprovalTransitionContext,
-    WorkflowAgentNodeHandoff,
     WorkflowAgentNodeExecution,
+    WorkflowAgentNodeHandoff,
+    WorkflowApprovalPauseProjection,
+    WorkflowApprovalResumeContext,
+    WorkflowApprovalResumeCoordinator,
+    WorkflowApprovalTransitionContext,
     WorkflowArtifactNodeWrite,
+    WorkflowCancellationProjectionCoordinator,
+    WorkflowCancellationTarget,
     WorkflowChildOutcomeCoordinator,
     WorkflowChildRunProjection,
     WorkflowChildStatusProjection,
-    WorkflowCancellationProjectionCoordinator,
-    WorkflowCancellationTarget,
     WorkflowConditionNodeProjection,
     WorkflowContinuationCoordinator,
     WorkflowContinuationFailureProjection,
     WorkflowLoopNodeProjection,
     WorkflowParallelNodeProjection,
+    WorkflowParentResumeCoordinator,
     WorkflowParentResumeFailureProjection,
     WorkflowParentRunLocator,
-    WorkflowParentResumeCoordinator,
     WorkflowPathPlanner,
     WorkflowResumePlanner,
+    WorkflowRunCompletionProjection,
     WorkflowRunStartProjector,
     WorkflowStartNodeProjection,
     WorkflowSubworkflowNodeExecution,
-    WorkflowRunCompletionProjection,
-    _MAX_AGENT_TOOL_ITERATIONS,
 )
+from apps.shell.credential_store import MemoryCredentialStore
 from scripts.verify_secret_redaction import verify_secret_redaction
 
 
@@ -4172,7 +4172,7 @@ def test_runtime_sqlite_enables_required_database_guards(tmp_path):
         link = service.get_task_run_link("task-db-guard")
         assert link["run_id"] == run["run_id"]
         assert link["run_status"] == "running"
-        assert link["last_event_sequence"] == 2
+        assert link["last_event_sequence"] == 4
 
         service._conn.execute("DELETE FROM runs WHERE run_id=?", (run["run_id"],))
         service._conn.commit()
@@ -4200,7 +4200,7 @@ def test_task_run_link_repository_tracks_run_projection(tmp_path):
         assert link["run_id"] == run["run_id"]
         assert link["session_id"] == "session-link-repo"
         assert link["run_status"] == "running"
-        assert link["last_event_sequence"] == 2
+        assert link["last_event_sequence"] == 4
         assert service.task_run_links.for_run(run["run_id"])["task_id"] == "task-link-repo"
 
         event = service.append_run_event(run["run_id"], "repo.projection.checked", {"ok": True})
@@ -4256,9 +4256,14 @@ def test_main_chat_run_links_task_and_records_replayable_events(tmp_path, monkey
         assert [event["sequence"] for event in events] == list(range(1, len(events) + 1))
         assert [event["event_type"] for event in events] == [
             "run.started",
+            "task.created",
+            "task.started",
             "task.linked",
             "model.request.started",
+            "model.requested",
             "model.output.completed",
+            "model.completed",
+            "task.completed",
             "run.completed",
         ]
     finally:
@@ -4309,6 +4314,33 @@ def test_main_chat_cancelled_run_ignores_late_model_output(tmp_path, monkeypatch
         assert "run.completed" not in event_types
         assert "run.failed" not in event_types
         assert event_types[-1] == "run.cancelled"
+    finally:
+        service.close()
+
+
+def test_main_chat_failed_run_emits_task_failed_before_run_failed(tmp_path):
+    service = make_service(tmp_path)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-failed",
+            session_id="session-main-failed",
+            user_goal="fail me",
+        )
+
+        failed = service.fail_main_chat_run(
+            run["run_id"],
+            "api_key=sk-task-failed-secret123456",
+        )
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        task_failed = next(event for event in events if event["event_type"] == "task.failed")
+
+        assert failed["status"] == "failed"
+        assert event_types.index("task.failed") < event_types.index("run.failed")
+        assert task_failed["payload"]["task_id"] == "task-main-failed"
+        assert task_failed["payload"]["session_id"] == "session-main-failed"
+        assert task_failed["payload"]["status"] == "failed"
+        assert "sk-task-failed-secret123456" not in task_failed["payload"]["error"]
     finally:
         service.close()
 
@@ -19810,9 +19842,18 @@ async def test_workflow_artifact_review_route_exposes_outputs_and_reruns(tmp_pat
             ("workflow.node.artifact", "report", "completed"),
         ]
         replay = await run_routes.list_run_events(parent["run_id"], after_sequence=0, limit=200)
+        workflow_detail_events = {
+            "workflow.node.start",
+            "workflow.node.agent",
+            "workflow.node.workflow",
+            "workflow.node.artifact",
+            "workflow.node.condition",
+            "workflow.node.parallel",
+            "workflow.node.loop",
+        }
         replay_steps = [
             event for event in replay["events"]
-            if str(event.get("event_type") or "").startswith("workflow.node.")
+            if str(event.get("event_type") or "") in workflow_detail_events
         ]
         assert [
             (
