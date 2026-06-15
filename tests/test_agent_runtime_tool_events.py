@@ -5,7 +5,11 @@ from __future__ import annotations
 import json
 
 from apps.shell import agent_runtime
-from apps.shell.agent.runtime.events import ToolEventPayloadBuilder, runtime_trace_input_preview
+from apps.shell.agent.runtime.events import (
+    RuntimeToolCallEventRecorder,
+    ToolEventPayloadBuilder,
+    runtime_trace_input_preview,
+)
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
 
@@ -49,6 +53,71 @@ def test_tool_event_payload_builder_projects_result_and_error() -> None:
     assert payload["status"] == "failed"
     assert payload["output_preview"] == {"ok": True, "content": "hello"}
     assert "sk-secret-value" not in payload["error"]
+
+
+def test_runtime_tool_call_event_recorder_records_lifecycle_events() -> None:
+    events: list[tuple[str, str, dict[str, object]]] = []
+
+    def append_run_event(run_id: str, event_type: str, payload: dict[str, object]) -> dict[str, object]:
+        events.append((run_id, event_type, payload))
+        return {"run_id": run_id, "event_type": event_type, "payload": payload}
+
+    recorder = RuntimeToolCallEventRecorder(append_run_event=append_run_event)
+
+    assert recorder.requested("", "workspace.read", {"path": "README.md"}) is None
+    recorder.denied("run-1", "terminal.run", {"command": "rm -rf tmp"})
+    recorder.requested("run-1", "workspace.read", {"path": "README.md"})
+    recorder.started("run-1", "workspace.read", {"path": "README.md"}, approved=True)
+    recorder.failed(
+        "run-1",
+        "terminal.run",
+        {"command": "echo ok", "API_KEY": "sk-secret-value"},
+        pre_validation=True,
+        error=RuntimeError("sk-secret-value"),
+    )
+    recorder.result(
+        "run-1",
+        "terminal.run",
+        {"command": "echo ok"},
+        {"ok": False, "approval_required": True, "error": "needs approval"},
+    )
+    recorder.result(
+        "run-1",
+        "workspace.read",
+        {"path": "README.md"},
+        {"ok": True, "content": "hello"},
+    )
+    recorder.agent_tool_call(
+        "run-1",
+        "workspace.read",
+        {"path": "README.md"},
+        {"ok": True, "content": "hello"},
+        approved=True,
+    )
+
+    event_types = [event_type for _run_id, event_type, _payload in events]
+    failed_payload = events[3][2]
+
+    assert event_types == [
+        "agent.tool.denied",
+        "tool.requested",
+        "tool.started",
+        "tool.failed",
+        "tool.approval_required",
+        "tool.completed",
+        "agent.tool.call",
+    ]
+    assert failed_payload["input_preview"] == {"redacted": True, "reason": "sensitive_input"}
+    assert "sk-secret-value" not in json.dumps(events, ensure_ascii=False)
+    assert events[-1][2]["approved"] is True
+
+
+def test_agent_runtime_service_uses_tool_call_event_recorder(tmp_path) -> None:
+    service = _service(tmp_path)
+    try:
+        assert isinstance(service.runtime_tool_call_events, RuntimeToolCallEventRecorder)
+    finally:
+        service.close()
 
 
 def test_agent_tool_call_emits_canonical_tool_events(tmp_path, monkeypatch) -> None:

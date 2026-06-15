@@ -233,6 +233,157 @@ class ToolEventPayloadBuilder:
         )
 
 
+class RuntimeToolCallEventRecorder:
+    """Records ToolCall lifecycle RunEvents without owning tool execution."""
+
+    def __init__(
+        self,
+        *,
+        append_run_event: Any,
+        payload_builder: ToolEventPayloadBuilder | None = None,
+    ) -> None:
+        self._append_run_event = append_run_event
+        self._payload_builder = payload_builder or ToolEventPayloadBuilder()
+
+    def _append(
+        self,
+        run_id: str,
+        event_type: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        if not run_id:
+            return None
+        return self._append_run_event(run_id, event_type, payload)
+
+    def denied(
+        self,
+        run_id: str,
+        tool_name: str,
+        input_preview: Any,
+    ) -> dict[str, Any] | None:
+        return self._append(
+            run_id,
+            "agent.tool.denied",
+            {"tool": tool_name, "input_preview": input_preview},
+        )
+
+    def requested(
+        self,
+        run_id: str,
+        tool_name: str,
+        input_preview: Any,
+        *,
+        approved: bool = False,
+    ) -> dict[str, Any] | None:
+        return self._append(
+            run_id,
+            "tool.requested",
+            self._payload_builder.payload(
+                tool_name,
+                input_preview,
+                approved=approved,
+                pre_validation=True,
+                status="requested",
+            ),
+        )
+
+    def started(
+        self,
+        run_id: str,
+        tool_name: str,
+        input_preview: Any,
+        *,
+        approved: bool = False,
+    ) -> dict[str, Any] | None:
+        return self._append(
+            run_id,
+            "tool.started",
+            self._payload_builder.payload(
+                tool_name,
+                input_preview,
+                approved=approved,
+                status="running",
+            ),
+        )
+
+    def failed(
+        self,
+        run_id: str,
+        tool_name: str,
+        input_preview: Any,
+        *,
+        approved: bool = False,
+        pre_validation: bool = False,
+        error: Any = None,
+    ) -> dict[str, Any] | None:
+        return self._append(
+            run_id,
+            "tool.failed",
+            self._payload_builder.payload(
+                tool_name,
+                input_preview,
+                approved=approved,
+                pre_validation=pre_validation,
+                error=error,
+                status="failed",
+            ),
+        )
+
+    def result(
+        self,
+        run_id: str,
+        tool_name: str,
+        input_preview: Any,
+        tool_result: dict[str, Any],
+        *,
+        approved: bool = False,
+    ) -> dict[str, Any] | None:
+        if tool_result.get("approval_required"):
+            return self._append(
+                run_id,
+                "tool.approval_required",
+                self._payload_builder.payload(
+                    tool_name,
+                    input_preview,
+                    approved=approved,
+                    result=tool_result,
+                    status="waiting_approval",
+                ),
+            )
+        ok = bool(tool_result.get("ok"))
+        return self._append(
+            run_id,
+            "tool.completed" if ok else "tool.failed",
+            self._payload_builder.payload(
+                tool_name,
+                input_preview,
+                approved=approved,
+                result=tool_result,
+                status="completed" if ok else "failed",
+            ),
+        )
+
+    def agent_tool_call(
+        self,
+        run_id: str,
+        tool_name: str,
+        input_preview: Any,
+        tool_result: dict[str, Any],
+        *,
+        approved: bool = False,
+    ) -> dict[str, Any] | None:
+        return self._append(
+            run_id,
+            "agent.tool.call",
+            {
+                "tool": tool_name,
+                "input_preview": input_preview,
+                "result": tool_result,
+                "approved": bool(approved),
+            },
+        )
+
+
 def artifact_created_payload(
     tool_result: dict[str, Any],
     *,

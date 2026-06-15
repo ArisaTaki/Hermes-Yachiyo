@@ -58,6 +58,7 @@ from apps.shell.agent.runtime.errors import AgentApprovalRequired, AgentRuntimeE
 from apps.shell.agent.runtime.events import (
     RuntimeRunEventRecorder,
     RuntimeTaskModelEventBuilder,
+    RuntimeToolCallEventRecorder,
     RuntimeTraceEventBuilder,
     ToolEventPayloadBuilder,
     artifact_created_payload as _runtime_artifact_created_payload,
@@ -1516,6 +1517,10 @@ class NativeRunEngine:
         self._run_cancel_locks_guard = threading.RLock()
         self.tool_request_parser = ToolRequestParser()
         self.tool_event_payloads = ToolEventPayloadBuilder()
+        self.runtime_tool_call_events = RuntimeToolCallEventRecorder(
+            append_run_event=self.append_run_event,
+            payload_builder=self.tool_event_payloads,
+        )
         self.runtime_task_model_events = RuntimeTaskModelEventBuilder()
         self.runtime_trace_events = RuntimeTraceEventBuilder()
         self.tool_pending_approvals = ToolPendingApprovalBuilder(
@@ -4960,70 +4965,44 @@ class NativeRunEngine:
         if not PolicyGate.allows_tool(tool_name, allowed_tools):
             budget.claim_tool_call(tool_name)
             timeline.append(self._timeline("agent.tool.denied", tool_name, input_preview=input_preview))
-            if run_id:
-                self.append_run_event(
-                    run_id,
-                    "agent.tool.denied",
-                    {"tool": tool_name, "input_preview": input_preview},
-                )
+            self.runtime_tool_call_events.denied(run_id, tool_name, input_preview)
             raise AgentRuntimeError(f"Agent 试图调用未授权工具：{tool_name}")
-        if run_id:
-            self.append_run_event(
-                run_id,
-                "tool.requested",
-                self.tool_event_payloads.payload(
-                    tool_name,
-                    input_preview,
-                    approved=approved,
-                    pre_validation=True,
-                    status="requested",
-                ),
-            )
+        self.runtime_tool_call_events.requested(
+            run_id,
+            tool_name,
+            input_preview,
+            approved=approved,
+        )
         try:
             self._validate_tool_payload(tool_name, payload)
         except AgentRuntimeError as exc:
-            if run_id:
-                self.append_run_event(
-                    run_id,
-                    "tool.failed",
-                    self.tool_event_payloads.payload(
-                        tool_name,
-                        input_preview,
-                        approved=approved,
-                        pre_validation=True,
-                        error=exc,
-                        status="failed",
-                    ),
-                )
+            self.runtime_tool_call_events.failed(
+                run_id,
+                tool_name,
+                input_preview,
+                approved=approved,
+                pre_validation=True,
+                error=exc,
+            )
             raise
         budget.claim_tool_call(tool_name, terminal_execution=tool_name == "terminal.run" and approved)
-        if run_id:
-            self.append_run_event(
-                run_id,
-                "tool.started",
-                self.tool_event_payloads.payload(
-                    tool_name,
-                    input_preview,
-                    approved=approved,
-                    status="running",
-                ),
-            )
+        self.runtime_tool_call_events.started(
+            run_id,
+            tool_name,
+            input_preview,
+            approved=approved,
+        )
         try:
             tool_result = broker.call(tool_name, payload, approved=approved)
         except AgentRuntimeError as exc:
             if not tool_name.startswith("workspace."):
-                if run_id:
-                    self.append_run_event(
-                        run_id,
-                        "tool.failed",
-                        self.tool_event_payloads.payload(
-                            tool_name,
-                            input_preview,
-                            approved=approved,
-                            error=exc,
-                            status="failed",
-                        ),
-                    )
+                self.runtime_tool_call_events.failed(
+                    run_id,
+                    tool_name,
+                    input_preview,
+                    approved=approved,
+                    error=exc,
+                )
                 raise
             terminal_hint = (
                 " If the required target is outside the configured workspace, use terminal.run and wait for approval."
@@ -5042,42 +5021,21 @@ class NativeRunEngine:
                 **({"suggested_tool": "terminal.run"} if "terminal.run" in allowed_tools else {}),
             }
         tool_result = self._limit_tool_result(tool_result)
-        if run_id:
-            if tool_result.get("approval_required"):
-                self.append_run_event(
-                    run_id,
-                    "tool.approval_required",
-                    self.tool_event_payloads.payload(
-                        tool_name,
-                        input_preview,
-                        approved=approved,
-                        result=tool_result,
-                        status="waiting_approval",
-                    ),
-                )
-            else:
-                self.append_run_event(
-                    run_id,
-                    "tool.completed" if tool_result.get("ok") else "tool.failed",
-                    self.tool_event_payloads.payload(
-                        tool_name,
-                        input_preview,
-                        approved=approved,
-                        result=tool_result,
-                        status="completed" if tool_result.get("ok") else "failed",
-                    ),
-                )
+        self.runtime_tool_call_events.result(
+            run_id,
+            tool_name,
+            input_preview,
+            tool_result,
+            approved=approved,
+        )
         timeline.append(self._timeline("agent.tool.call", tool_name, input_preview=input_preview, result=tool_result))
         if run_id:
-            self.append_run_event(
+            self.runtime_tool_call_events.agent_tool_call(
                 run_id,
-                "agent.tool.call",
-                {
-                    "tool": tool_name,
-                    "input_preview": input_preview,
-                    "result": tool_result,
-                    "approved": bool(approved),
-                },
+                tool_name,
+                input_preview,
+                tool_result,
+                approved=approved,
             )
             trace_event = self.runtime_trace_events.memory_skill_trace_event(
                 tool_name,
