@@ -56,7 +56,9 @@ from apps.shell.agent.runtime.cancellation import (
 )
 from apps.shell.agent.runtime.errors import AgentApprovalRequired, AgentRuntimeError
 from apps.shell.agent.runtime.events import (
+    RuntimeRunEventRecorder,
     ToolEventPayloadBuilder,
+    canonical_run_event_aliases as _runtime_canonical_run_event_aliases,
     canonical_tool_event_payload as _runtime_canonical_tool_event_payload,
     canonical_tool_input_preview as _runtime_canonical_tool_input_preview,
     redact_json_value as _redact_json_value,
@@ -1421,38 +1423,7 @@ def _task_run_event_payload(
 
 
 def _canonical_run_event_aliases(event_type: str, payload: dict[str, Any] | None = None) -> list[str]:
-    clean_event_type = str(event_type or "")
-    direct_alias = {
-        "model.request.started": "model.requested",
-        "model.output.completed": "model.completed",
-        "workflow.run.approval_required": "workflow.paused_for_approval",
-        "workflow.run.resumed": "workflow.resumed",
-        "workflow.run.completed": "workflow.completed",
-        "workflow.run.failed": "workflow.failed",
-        "skill.dispatch.read": "skill.selected",
-    }.get(clean_event_type)
-    if direct_alias:
-        return [direct_alias]
-
-    if clean_event_type in {
-        "workflow.node.start",
-        "workflow.node.agent",
-        "workflow.node.workflow",
-        "workflow.node.artifact",
-        "workflow.node.condition",
-        "workflow.node.parallel",
-        "workflow.node.loop",
-    }:
-        status = str((payload or {}).get("status") or "").strip()
-        aliases = ["workflow.node.started"]
-        if status == "completed":
-            aliases.append("workflow.node.completed")
-        elif status in {"failed", "cancelled"}:
-            aliases.append("workflow.node.failed")
-        elif status == "approval_required":
-            aliases.append("workflow.paused_for_approval")
-        return aliases
-    return []
+    return _runtime_canonical_run_event_aliases(event_type, payload)
 
 
 def _memory_skill_trace_event(
@@ -1768,6 +1739,7 @@ class NativeRunEngine:
             ensure_run_exists=self.get_run,
             sync_event_cursor=self.run_projections.sync_event_cursor,
         )
+        self.runtime_events = RuntimeRunEventRecorder(self.run_events)
         self.workflows = WorkflowRepository(
             self._conn,
             ensure_row_factory=self._ensure_row_factory,
@@ -3805,7 +3777,7 @@ class NativeRunEngine:
         visibility: str = "user",
         sensitivity: str = "public",
     ) -> dict[str, Any]:
-        event = self.run_events.append(
+        return self.runtime_events.append(
             run_id,
             event_type,
             payload,
@@ -3813,16 +3785,6 @@ class NativeRunEngine:
             visibility=visibility,
             sensitivity=sensitivity,
         )
-        for alias in _canonical_run_event_aliases(event_type, payload):
-            self.run_events.append(
-                run_id,
-                alias,
-                payload,
-                actor=actor,
-                visibility=visibility,
-                sensitivity=sensitivity,
-            )
-        return event
 
     def list_run_events(
         self,
@@ -3832,7 +3794,7 @@ class NativeRunEngine:
         limit: int = 200,
         include_internal: bool = False,
     ) -> dict[str, Any]:
-        return self.run_events.list(
+        return self.runtime_events.list(
             run_id,
             after_sequence=after_sequence,
             limit=limit,

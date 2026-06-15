@@ -155,3 +155,92 @@ class ToolEventPayloadBuilder:
             error=error,
             status=status,
         )
+
+
+def canonical_run_event_aliases(
+    event_type: str,
+    payload: dict[str, Any] | None = None,
+) -> list[str]:
+    clean_event_type = str(event_type or "")
+    direct_alias = {
+        "model.request.started": "model.requested",
+        "model.output.completed": "model.completed",
+        "workflow.run.approval_required": "workflow.paused_for_approval",
+        "workflow.run.resumed": "workflow.resumed",
+        "workflow.run.completed": "workflow.completed",
+        "workflow.run.failed": "workflow.failed",
+        "skill.dispatch.read": "skill.selected",
+    }.get(clean_event_type)
+    if direct_alias:
+        return [direct_alias]
+
+    if clean_event_type in {
+        "workflow.node.start",
+        "workflow.node.agent",
+        "workflow.node.workflow",
+        "workflow.node.artifact",
+        "workflow.node.condition",
+        "workflow.node.parallel",
+        "workflow.node.loop",
+    }:
+        status = str((payload or {}).get("status") or "").strip()
+        aliases = ["workflow.node.started"]
+        if status == "completed":
+            aliases.append("workflow.node.completed")
+        elif status in {"failed", "cancelled"}:
+            aliases.append("workflow.node.failed")
+        elif status == "approval_required":
+            aliases.append("workflow.paused_for_approval")
+        return aliases
+    return []
+
+
+class RuntimeRunEventRecorder:
+    """Writes replayable RunEvents and their public compatibility aliases."""
+
+    def __init__(self, repository: Any) -> None:
+        self._repository = repository
+
+    def append(
+        self,
+        run_id: str,
+        event_type: str,
+        payload: dict[str, Any] | None = None,
+        *,
+        actor: str = "native_runtime",
+        visibility: str = "user",
+        sensitivity: str = "public",
+    ) -> dict[str, Any]:
+        event = self._repository.append(
+            run_id,
+            event_type,
+            payload,
+            actor=actor,
+            visibility=visibility,
+            sensitivity=sensitivity,
+        )
+        for alias in canonical_run_event_aliases(event_type, payload):
+            self._repository.append(
+                run_id,
+                alias,
+                payload,
+                actor=actor,
+                visibility=visibility,
+                sensitivity=sensitivity,
+            )
+        return event
+
+    def list(
+        self,
+        run_id: str,
+        *,
+        after_sequence: int = 0,
+        limit: int = 200,
+        include_internal: bool = False,
+    ) -> dict[str, Any]:
+        return self._repository.list(
+            run_id,
+            after_sequence=after_sequence,
+            limit=limit,
+            include_internal=include_internal,
+        )
