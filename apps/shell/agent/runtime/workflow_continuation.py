@@ -82,6 +82,10 @@ class WorkflowContinuationCoordinator:
         workflow_agent_for_node: Any | None = None,
         workflow_node_task: Any | None = None,
         workflow_child_goal: Any | None = None,
+        insert_run: Any | None = None,
+        execute_agent_run: Any | None = None,
+        workflow_child_artifact_refs: Any | None = None,
+        merge_workflow_child_run_outcome: Any | None = None,
         node_kind: Any | None = None,
     ) -> None:
         self._engine = engine
@@ -99,6 +103,10 @@ class WorkflowContinuationCoordinator:
         self._workflow_agent_for_node_callback = workflow_agent_for_node
         self._workflow_node_task_callback = workflow_node_task
         self._workflow_child_goal_callback = workflow_child_goal
+        self._insert_run_callback = insert_run
+        self._execute_agent_run_callback = execute_agent_run
+        self._workflow_child_artifact_refs_callback = workflow_child_artifact_refs
+        self._merge_workflow_child_run_outcome_callback = merge_workflow_child_run_outcome
         self._node_kind_callback = node_kind
         self._outcomes = WorkflowRunOutcomeProjector(engine)
 
@@ -244,6 +252,59 @@ class WorkflowContinuationCoordinator:
         if self._workflow_child_goal_callback is not None:
             return str(self._workflow_child_goal_callback(workflow_goal, step_task) or "")
         return self._engine._workflow_child_goal(workflow_goal, step_task)
+
+    def _insert_run(self, **fields: Any) -> dict[str, Any]:
+        if self._insert_run_callback is not None:
+            return self._insert_run_callback(**fields)
+        return self._engine._insert_run(**fields)
+
+    def _execute_agent_run(
+        self,
+        run_id: str,
+        agent: dict[str, Any],
+        user_goal: str,
+        *,
+        upstream: str,
+    ) -> dict[str, Any]:
+        if self._execute_agent_run_callback is not None:
+            return self._execute_agent_run_callback(
+                run_id,
+                agent,
+                user_goal,
+                upstream=upstream,
+            )
+        return self._engine._execute_agent_run(
+            run_id,
+            agent,
+            user_goal,
+            upstream=upstream,
+        )
+
+    def _workflow_child_artifact_refs(
+        self,
+        child_run: dict[str, Any],
+        label: str,
+    ) -> list[dict[str, Any]]:
+        if self._workflow_child_artifact_refs_callback is not None:
+            return self._workflow_child_artifact_refs_callback(child_run, label)
+        return self._engine._workflow_child_artifact_refs(child_run, label)
+
+    def _merge_workflow_child_run_outcome(
+        self,
+        timeline: list[dict[str, Any]],
+        artifacts: list[dict[str, Any]],
+        child_run: dict[str, Any],
+        label: str,
+    ) -> None:
+        if self._merge_workflow_child_run_outcome_callback is not None:
+            self._merge_workflow_child_run_outcome_callback(
+                timeline,
+                artifacts,
+                child_run,
+                label,
+            )
+            return
+        self._engine._merge_workflow_child_run_outcome(timeline, artifacts, child_run, label)
 
     def _node_kind(self, node: dict[str, Any]) -> str:
         if self._node_kind_callback is not None:
@@ -683,10 +744,22 @@ class WorkflowContinuationCoordinator:
             has_agent_upstream=has_agent_upstream,
             node_info_extra=node_info_extra,
         )
-        execution = WorkflowAgentNodeExecution.from_handoff(
-            engine,
-            handoff,
+        child = self._insert_run(
+            kind="agent_run",
+            runnable_id=handoff.agent_id,
+            user_goal=handoff.child_goal,
             run_group_id=run_group_id,
+        )
+        child = self._execute_agent_run(
+            child["run_id"],
+            handoff.agent,
+            handoff.child_goal,
+            upstream=handoff.upstream,
+        )
+        execution = WorkflowAgentNodeExecution.from_child_run(
+            handoff,
+            child,
+            artifact_count=len(self._workflow_child_artifact_refs(child, handoff.node_label)),
         )
         next_context = execution.next_context
         agent_payload = execution.agent_event_payload()
@@ -700,7 +773,7 @@ class WorkflowContinuationCoordinator:
             )
         )
         engine.append_run_event(str(run["run_id"]), "workflow.node.agent", agent_payload)
-        engine._merge_workflow_child_run_outcome(timeline, artifacts, execution.child_run, label)
+        self._merge_workflow_child_run_outcome(timeline, artifacts, execution.child_run, label)
         if execution.status == "approval_required":
             event_payload = execution.status_event_payload()
             timeline.append(
@@ -788,7 +861,7 @@ class WorkflowContinuationCoordinator:
         payload = execution.event_payload()
         timeline.append(engine._timeline("workflow.node.workflow", label, **payload))
         engine.append_run_event(str(run["run_id"]), "workflow.node.workflow", payload)
-        engine._merge_workflow_child_run_outcome(timeline, artifacts, execution.child_run, label)
+        self._merge_workflow_child_run_outcome(timeline, artifacts, execution.child_run, label)
         if execution.status == "approval_required":
             event_payload = execution.status_event_payload()
             timeline.append(

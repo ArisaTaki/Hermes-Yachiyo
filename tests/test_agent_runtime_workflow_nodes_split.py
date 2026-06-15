@@ -62,6 +62,46 @@ def test_workflow_agent_node_handoff_accepts_prepared_agent_goal_and_task() -> N
     )
 
 
+def test_workflow_agent_node_execution_accepts_prepared_child_run() -> None:
+    handoff = WorkflowAgentNodeHandoff.from_agent(
+        {"id": "research", "type": "agent"},
+        agent={"agent_id": "agent_research"},
+        label="Research",
+        kind="agent",
+        step_task="Summarize launch risk.",
+        child_goal="Ship release candidate\n\nStep: Summarize launch risk.",
+        context="Previous result",
+        has_agent_upstream=True,
+    )
+    child_run = {
+        "run_id": "child_run",
+        "status": "completed",
+        "result": "Launch risk summary",
+    }
+
+    execution = WorkflowAgentNodeExecution.from_child_run(
+        handoff,
+        child_run,
+        artifact_count=2,
+    )
+
+    assert execution.handoff is handoff
+    assert execution.child_run is child_run
+    assert execution.next_context == "Launch risk summary"
+    assert execution.status == "completed"
+    assert execution.artifact_count == 2
+    assert execution.agent_event_payload() == {
+        "workflow_node_id": "research",
+        "workflow_node_kind": "agent",
+        "workflow_node_label": "Research",
+        "workflow_node_task": "Summarize launch risk.",
+        "child_run_id": "child_run",
+        "status": "completed",
+        "result": "Launch risk summary",
+        "artifact_count": 2,
+    }
+
+
 def test_workflow_artifact_node_write_accepts_prepared_artifact() -> None:
     write = WorkflowArtifactNodeWrite.from_artifact(
         {

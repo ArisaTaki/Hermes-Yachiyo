@@ -156,6 +156,14 @@ def build_runtime_workflow_execution_services(
         workflow_child_goal=lambda workflow_goal, step_task: (
             engine._workflow_child_goal(workflow_goal, step_task)
         ),
+        insert_run=lambda **kwargs: engine._insert_run(**kwargs),
+        execute_agent_run=lambda run_id, agent, user_goal, *, upstream: (
+            engine._execute_agent_run(run_id, agent, user_goal, upstream=upstream)
+        ),
+        workflow_child_artifact_refs=lambda child_run, label: (
+            engine._workflow_child_artifact_refs(child_run, label)
+        ),
+        merge_workflow_child_run_outcome=merge_workflow_child_run_outcome,
         node_kind=lambda node: engine._node_kind(node),
     )
     return RuntimeWorkflowExecutionServiceBundle(

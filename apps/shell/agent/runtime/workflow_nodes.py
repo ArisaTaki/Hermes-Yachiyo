@@ -137,6 +137,21 @@ class WorkflowAgentNodeExecution:
     artifact_count: int
 
     @classmethod
+    def from_child_run(
+        cls,
+        handoff: WorkflowAgentNodeHandoff,
+        child_run: dict[str, Any],
+        *,
+        artifact_count: int,
+    ) -> "WorkflowAgentNodeExecution":
+        return cls(
+            handoff=handoff,
+            child_run=child_run,
+            next_context=str(child_run.get("result") or ""),
+            artifact_count=artifact_count,
+        )
+
+    @classmethod
     def from_handoff(
         cls,
         engine: Any,
@@ -156,10 +171,9 @@ class WorkflowAgentNodeExecution:
             handoff.child_goal,
             upstream=handoff.upstream,
         )
-        return cls(
-            handoff=handoff,
-            child_run=child,
-            next_context=str(child.get("result") or ""),
+        return cls.from_child_run(
+            handoff,
+            child,
             artifact_count=len(engine._workflow_child_artifact_refs(child, handoff.node_label)),
         )
 

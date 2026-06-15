@@ -432,6 +432,12 @@ def test_workflow_continuation_uses_injected_artifact_io(tmp_path) -> None:
 def test_workflow_continuation_uses_injected_agent_handoff_inputs() -> None:
     engine = FakeWorkflowAgentExecutionEngine()
     agent = {"agent_id": "agent_research", "name": "Research Agent"}
+    child_run = {
+        "run_id": "child_run",
+        "status": "completed",
+        "result": "Launch risk summary",
+        "artifacts": [{"kind": "artifact", "path": "risk.md"}],
+    }
     workflow = {
         "nodes": [
             {
@@ -442,6 +448,10 @@ def test_workflow_continuation_uses_injected_agent_handoff_inputs() -> None:
         ]
     }
     handoff_calls: list[tuple[str, str]] = []
+    inserted: list[dict[str, Any]] = []
+    executed: list[dict[str, Any]] = []
+    artifact_ref_calls: list[tuple[str, str]] = []
+    merged: list[tuple[str, str]] = []
     coordinator = WorkflowContinuationCoordinator(
         engine,
         workflow_path=lambda current_workflow: list(current_workflow["nodes"]),
@@ -457,6 +467,27 @@ def test_workflow_continuation_uses_injected_agent_handoff_inputs() -> None:
             ("goal", step_task)
         )
         or f"{workflow_goal}\n\nStep: {step_task}",
+        insert_run=lambda **kwargs: inserted.append(kwargs) or {"run_id": "child_run"},
+        execute_agent_run=lambda run_id, received_agent, user_goal, *, upstream: executed.append(
+            {
+                "run_id": run_id,
+                "agent": received_agent,
+                "user_goal": user_goal,
+                "upstream": upstream,
+            }
+        )
+        or child_run,
+        workflow_child_artifact_refs=lambda received_child_run, label: artifact_ref_calls.append(
+            (str(received_child_run.get("run_id") or ""), label)
+        )
+        or [
+            artifact
+            for artifact in received_child_run.get("artifacts") or []
+            if artifact.get("kind")
+        ],
+        merge_workflow_child_run_outcome=lambda _timeline, _artifacts, received_child_run, label: merged.append(
+            (str(received_child_run.get("run_id") or ""), label)
+        ),
         node_kind=lambda node: str(node["type"]),
     )
     timeline: list[dict[str, Any]] = []
@@ -482,7 +513,7 @@ def test_workflow_continuation_uses_injected_agent_handoff_inputs() -> None:
         ("task", "research"),
         ("goal", "Summarize launch risk."),
     ]
-    assert engine.inserted == [
+    assert inserted == [
         {
             "kind": "agent_run",
             "runnable_id": "agent_research",
@@ -490,7 +521,7 @@ def test_workflow_continuation_uses_injected_agent_handoff_inputs() -> None:
             "run_group_id": "workflow_group",
         }
     ]
-    assert engine.executed == [
+    assert executed == [
         {
             "run_id": "child_run",
             "agent": agent,
@@ -498,6 +529,8 @@ def test_workflow_continuation_uses_injected_agent_handoff_inputs() -> None:
             "upstream": "",
         }
     ]
+    assert artifact_ref_calls == [("child_run", "Research")]
+    assert merged == [("child_run", "Research")]
     agent_event = next(event for event in timeline if event["event"] == "workflow.node.agent")
     assert agent_event["workflow_node_task"] == "Summarize launch risk."
     assert agent_event["child_run_id"] == "child_run"
@@ -526,9 +559,6 @@ class FakeWorkflowTraversalEngine:
 class FakeWorkflowAgentExecutionEngine:
     def __init__(self) -> None:
         self.events: list[tuple[str, str, dict[str, Any]]] = []
-        self.inserted: list[dict[str, Any]] = []
-        self.executed: list[dict[str, Any]] = []
-        self.merged: list[tuple[str, str]] = []
 
     def _timeline(self, event: str, detail: str, **payload: Any) -> dict[str, Any]:
         return {"event": event, "detail": detail, **payload}
@@ -540,49 +570,6 @@ class FakeWorkflowAgentExecutionEngine:
         payload: dict[str, Any],
     ) -> None:
         self.events.append((run_id, event_type, payload))
-
-    def _insert_run(self, **kwargs: Any) -> dict[str, Any]:
-        self.inserted.append(kwargs)
-        return {"run_id": "child_run"}
-
-    def _execute_agent_run(
-        self,
-        run_id: str,
-        agent: dict[str, Any],
-        user_goal: str,
-        *,
-        upstream: str,
-    ) -> dict[str, Any]:
-        self.executed.append(
-            {
-                "run_id": run_id,
-                "agent": agent,
-                "user_goal": user_goal,
-                "upstream": upstream,
-            }
-        )
-        return {
-            "run_id": run_id,
-            "status": "completed",
-            "result": "Launch risk summary",
-            "artifacts": [{"kind": "artifact", "path": "risk.md"}],
-        }
-
-    def _workflow_child_artifact_refs(
-        self,
-        child_run: dict[str, Any],
-        label: str,
-    ) -> list[dict[str, Any]]:
-        return [artifact for artifact in child_run.get("artifacts") or [] if artifact.get("kind")]
-
-    def _merge_workflow_child_run_outcome(
-        self,
-        timeline: list[dict[str, Any]],
-        artifacts: list[dict[str, Any]],
-        child_run: dict[str, Any],
-        label: str,
-    ) -> None:
-        self.merged.append((str(child_run.get("run_id") or ""), label))
 
     def _update_run(self, run_id: str, **fields: Any) -> dict[str, Any]:
         return {"run_id": run_id, **fields}
