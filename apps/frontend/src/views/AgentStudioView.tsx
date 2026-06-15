@@ -32,7 +32,9 @@ import { useRunDebugActions } from '../features/agent-studio/hooks/useRunDebugAc
 import { useRunEventReplay } from '../features/agent-studio/hooks/useRunEventReplay';
 import { useRunHistoryManagement } from '../features/agent-studio/hooks/useRunHistoryManagement';
 import { useRunLaunchActions } from '../features/agent-studio/hooks/useRunLaunchActions';
+import { useRunListDerivedState } from '../features/agent-studio/hooks/useRunListDerivedState';
 import { useRunNavigationActions } from '../features/agent-studio/hooks/useRunNavigationActions';
+import { useRunTargetReadiness } from '../features/agent-studio/hooks/useRunTargetReadiness';
 import { useRunTimeline } from '../features/agent-studio/hooks/useRunTimeline';
 import { useRuntimeMemoryManagement } from '../features/agent-studio/hooks/useRuntimeMemoryManagement';
 import { useSelectedRunDetailState } from '../features/agent-studio/hooks/useSelectedRunDetailState';
@@ -62,16 +64,10 @@ import {
   isActiveRunStatus,
   isPotentialWorkflowChildAgentRun,
   normalizeRunStatus,
-  runHistoryGroupsFor,
   runHistoryGroupSummary,
   runKindLabel,
-  runMatchesFilter,
-  runMatchesSearch,
-  runMatchesStatusFilter,
-  runSearchTextByRunnableIdFor,
   runStatusLabel,
   runStatusTone,
-  type RunHistoryGroup,
   type RunKindFilter,
   type RunStatusFilter,
 } from '../features/agent-studio/utils/runs';
@@ -374,30 +370,28 @@ export function AgentStudioView() {
     () => workflowAgentRunReadinessIssue(nodes, agentRunIssueById),
     [agentRunIssueById, nodes],
   );
-  const runById = useMemo(
-    () => {
-      const next = new Map<string, RunSpec>();
-      runDetailCache.forEach((run) => next.set(run.run_id, run));
-      runs.forEach((run) => next.set(run.run_id, run));
-      return next;
-    },
-    [runDetailCache, runs],
-  );
-  const selectedRun = useMemo(
-    () => selectedRunId ? runById.get(selectedRunId) || null : null,
-    [runById, selectedRunId],
-  );
-  const selectedRunReplayRefreshKey = useMemo(
-    () => selectedRunId
-      ? [
-          selectedRunId,
-          selectedRun?.updated_at || '',
-          selectedRun?.status || '',
-          selectedRun?.timeline?.length || 0,
-        ].join('|')
-      : '',
-    [selectedRun, selectedRunId],
-  );
+  const {
+    filteredRunIds,
+    filteredRuns,
+    runById,
+    runFilterCounts,
+    runHistoryGroups,
+    runSearchActive,
+    runStatusFilterCounts,
+    runStatusFilteredRuns,
+    selectedRun,
+    selectedRunReplayRefreshKey,
+  } = useRunListDerivedState({
+    agents,
+    runDetailCache,
+    runKindFilter,
+    runSearchQuery,
+    runs,
+    runStatusFilter,
+    runnables,
+    selectedRunId,
+    workflows,
+  });
   const { selectedPublicRunTimeline } = useRunTimeline(selectedRunId, selectedRunReplayRefreshKey);
   const {
     clearRunEventReplay,
@@ -440,67 +434,20 @@ export function AgentStudioView() {
     selectedRunReplayEvents,
     workflows,
   });
-  const selectedRunTarget = useMemo(
-    () => runTarget ? runnables.find((item) => item.id === runTarget) || null : null,
-    [runTarget, runnables],
-  );
-  const selectedRunTargetWorkflow = useMemo(
-    () => selectedRunTarget?.kind === 'workflow'
-      ? workflows.find((workflow) => workflow.workflow_id === selectedRunTarget.id) || null
-      : null,
-    [selectedRunTarget, workflows],
-  );
-  const selectedRunTargetWorkflowNodes = useMemo(
-    () => selectedRunTargetWorkflow ? workflowNodes(selectedRunTargetWorkflow) : [],
-    [selectedRunTargetWorkflow],
-  );
-  const selectedRunTargetWorkflowEdges = useMemo(
-    () => selectedRunTargetWorkflow ? workflowEdges(selectedRunTargetWorkflow) : [],
-    [selectedRunTargetWorkflow],
-  );
-  const selectedRunTargetWorkflowPreviewSteps = useMemo(
-    () => selectedRunTargetWorkflow ? workflowSpecStepRefs(selectedRunTargetWorkflow) : [],
-    [selectedRunTargetWorkflow],
-  );
-  const selectedRunTargetWorkflowValidation = useMemo(
-    () => selectedRunTargetWorkflow
-      ? validateWorkflowDraft(
-        selectedRunTargetWorkflowNodes,
-        selectedRunTargetWorkflowEdges,
-        agents,
-        workflows,
-        selectedRunTargetWorkflow.workflow_id,
-      )
-      : { errors: [], warnings: [] },
-    [agents, selectedRunTargetWorkflow, selectedRunTargetWorkflowEdges, selectedRunTargetWorkflowNodes, workflows],
-  );
-  const selectedRunTargetWorkflowAgentIssue = useMemo(
-    () => selectedRunTargetWorkflow
-      ? workflowAgentRunReadinessIssue(selectedRunTargetWorkflowNodes, agentRunIssueById)
-      : '',
-    [agentRunIssueById, selectedRunTargetWorkflow, selectedRunTargetWorkflowNodes],
-  );
-  const selectedRunTargetDisabled = selectedRunTarget?.enabled === false;
-  const runTargetDisabledReason = useMemo(() => {
-    if (!selectedRunTarget) return '';
-    if (selectedRunTargetDisabled) return '目标已停用，无法运行。';
-    if (selectedRunTarget.kind === 'agent') {
-      const agent = agents.find((item) => item.agent_id === selectedRunTarget.id);
-      if (!agent) return '找不到 Agent 定义，无法运行。';
-      return agentRunIssueById.get(agent.agent_id) || '';
-    }
-    if (selectedRunTarget.kind === 'workflow') {
-      if (!selectedRunTargetWorkflow) return '找不到 Workflow 定义，无法运行。';
-      if (selectedRunTargetWorkflowValidation.errors.length) {
-        return selectedRunTargetWorkflowValidation.errors[0] || '当前 Workflow 存在校验错误。';
-      }
-      if (!workflowHasRunnableSteps(selectedRunTargetWorkflowNodes)) {
-        return workflowRunnableStepRequiredMessage;
-      }
-      if (selectedRunTargetWorkflowAgentIssue) return selectedRunTargetWorkflowAgentIssue;
-    }
-    return '';
-  }, [agentRunIssueById, agents, selectedRunTarget, selectedRunTargetDisabled, selectedRunTargetWorkflow, selectedRunTargetWorkflowAgentIssue, selectedRunTargetWorkflowNodes, selectedRunTargetWorkflowValidation.errors]);
+  const {
+    runTargetDisabledReason,
+    selectedRunTarget,
+    selectedRunTargetWorkflowEdges,
+    selectedRunTargetWorkflowNodes,
+    selectedRunTargetWorkflowPreviewSteps,
+    selectedRunTargetWorkflowValidation,
+  } = useRunTargetReadiness({
+    agentRunIssueById,
+    agents,
+    runTarget,
+    runnables,
+    workflows,
+  });
   const workflowRunDisabledReason = useMemo(() => {
     if (!workflowEnabled) return '当前 Workflow 已停用，无法运行。';
     if (workflowNameError) return workflowNameError;
@@ -511,50 +458,6 @@ export function AgentStudioView() {
     return '';
   }, [nodes, workflowEnabled, workflowHasErrors, workflowNameError, workflowPrimaryError, workflowRunAgentIssue, workflowRunGoal]);
   const workflowRunDisabled = busy || Boolean(workflowRunDisabledReason);
-  const runFilterCounts = useMemo(
-    () => ({
-      all: runs.filter((run) => runMatchesFilter(run, 'all')).length,
-      workflow: runs.filter((run) => runMatchesFilter(run, 'workflow')).length,
-      agent: runs.filter((run) => runMatchesFilter(run, 'agent')).length,
-    }),
-    [runs],
-  );
-  const runKindFilteredRuns = useMemo(
-    () => runs.filter((run) => runMatchesFilter(run, runKindFilter)),
-    [runs, runKindFilter],
-  );
-  const runStatusFilterCounts = useMemo(
-    () => ({
-      all: runKindFilteredRuns.length,
-      completed: runKindFilteredRuns.filter((run) => runMatchesStatusFilter(run, 'completed')).length,
-      failed: runKindFilteredRuns.filter((run) => runMatchesStatusFilter(run, 'failed')).length,
-      active: runKindFilteredRuns.filter((run) => runMatchesStatusFilter(run, 'active')).length,
-    }),
-    [runKindFilteredRuns],
-  );
-  const runStatusFilteredRuns = useMemo(
-    () => runKindFilteredRuns.filter((run) => runMatchesStatusFilter(run, runStatusFilter)),
-    [runKindFilteredRuns, runStatusFilter],
-  );
-  const runSearchActive = Boolean(runSearchQuery.trim());
-  const runSearchTextByRunnableId = useMemo(
-    () => runSearchTextByRunnableIdFor(runnables, agents, workflows),
-    [agents, runnables, workflows],
-  );
-  const filteredRuns = useMemo(
-    () => runStatusFilteredRuns.filter((run) => (
-      runMatchesSearch(run, runSearchQuery, runSearchTextByRunnableId.get(run.runnable_id) || '')
-    )),
-    [runSearchQuery, runSearchTextByRunnableId, runStatusFilteredRuns],
-  );
-  const filteredRunIds = useMemo(
-    () => filteredRuns.map((run) => run.run_id).filter(Boolean),
-    [filteredRuns],
-  );
-  const runHistoryGroups = useMemo(
-    () => runHistoryGroupsFor(filteredRuns, runnables, agents),
-    [agents, filteredRuns, runnables],
-  );
   const {
     allHistoryRunsSelected,
     finishRunHistoryManagement,

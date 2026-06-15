@@ -655,6 +655,8 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "useRunApprovalActions",
             "useRunApprovalFollowup",
             "useRunEventReplay(selectedRunId, selectedRunReplayRefreshKey)",
+            "useRunListDerivedState({",
+            "useRunTargetReadiness({",
             "useRunTimeline(selectedRunId, selectedRunReplayRefreshKey)",
             "useWorkflowDefinitions",
             "RunManagementTab",
@@ -682,6 +684,9 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "function AgentStudioLoadingState",
             "function normalizeStudioTab",
             "const studioTabs: StudioTab[]",
+            "runHistoryGroupsFor(",
+            "runSearchTextByRunnableIdFor(",
+            "runMatchesSearch(",
         ],
     )
     _assert_contains(
@@ -722,6 +727,26 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "mergeRunEventReplayPages(previous?.events || currentEvents, incomingEvents)",
             "clearRunEventReplay",
             "selectedReplayEvents",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useRunListDerivedState.ts",
+        [
+            "export function useRunListDerivedState",
+            "runSearchTextByRunnableIdFor(runnables, agents, workflows)",
+            "runMatchesSearch(run, runSearchQuery",
+            "runHistoryGroupsFor(filteredRuns, runnables, agents)",
+            "selectedRunReplayRefreshKey",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useRunTargetReadiness.ts",
+        [
+            "export function useRunTargetReadiness",
+            "selectedRunTargetWorkflow ? workflowNodes(selectedRunTargetWorkflow) : []",
+            "validateWorkflowDraft(",
+            "workflowHasRunnableSteps(selectedRunTargetWorkflowNodes)",
+            "runTargetDisabledReason",
         ],
     )
     _assert_contains(
@@ -2268,7 +2293,9 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "useRunDebugActions",
             "useRunHistoryManagement",
             "useRunLaunchActions",
+            "useRunListDerivedState",
             "useRunNavigationActions",
+            "useRunTargetReadiness",
             "useSkillDeletionActions",
             "useSkillFolderManagement",
             "useSkillImportActions",
