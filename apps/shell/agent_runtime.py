@@ -187,6 +187,7 @@ from apps.shell.agent.runtime.run_projections import (
 )
 from apps.shell.agent.runtime.run_readiness import RuntimeRunReadinessValidator
 from apps.shell.agent.runtime.run_cancellation import RuntimeRunCancellationService
+from apps.shell.agent.runtime.run_deletion import RuntimeRunDeletionService
 from apps.shell.agent.runtime.run_rerun import RuntimeRunRerunService
 from apps.shell.agent.runtime.run_services import (
     RuntimeRunServiceBundle,
@@ -967,6 +968,27 @@ class NativeRunEngine:
                 error_type=AgentRuntimeError,
             )
         )
+        self._install_runtime_run_deletion(
+            RuntimeRunDeletionService(
+                get_run=lambda run_id: self.get_run(run_id),
+                group_runs=lambda run_group_id: self.run_groups.runs(run_group_id),
+                delete_run_rows=lambda targets, **kwargs: self.runs.delete_rows(
+                    targets,
+                    **kwargs,
+                ),
+                delete_artifacts=lambda *args, **kwargs: self.run_artifacts.delete_files(
+                    *args,
+                    **kwargs,
+                ),
+                delete_group=lambda run_group_id: self.run_groups.delete(run_group_id),
+                remove_group_run_ids=lambda run_group_id, deleted_ids: (
+                    self.run_groups.remove_run_ids(run_group_id, deleted_ids)
+                ),
+                commit=lambda: self._conn.commit(),
+                is_active_run_status=_is_active_run_status,
+                error_type=AgentRuntimeError,
+            )
+        )
         self._init_db()
         self._migrate_agent_workspace_policies()
         if seed_templates:
@@ -1122,6 +1144,12 @@ class NativeRunEngine:
         run_rerun: RuntimeRunRerunService,
     ) -> None:
         self.run_rerun = run_rerun
+
+    def _install_runtime_run_deletion(
+        self,
+        run_deletion: RuntimeRunDeletionService,
+    ) -> None:
+        self.run_deletion = run_deletion
 
     def close(self) -> None:
         self.shutdown()
@@ -2719,30 +2747,7 @@ class NativeRunEngine:
         )
 
     def delete_run(self, run_id: str) -> dict[str, Any]:
-        run = self.get_run(run_id)
-        if _is_active_run_status(str(run.get("status") or "")):
-            raise AgentRuntimeError("Run 仍在进行中或待审批，取消或完成后才能删除")
-        run_group_id = str(run.get("run_group_id") or "")
-        targets = [run]
-        delete_group = False
-        if run.get("kind") == "workflow_run" and run_group_id:
-            group_runs = self.run_groups.runs(run_group_id)
-            if any(_is_active_run_status(str(item.get("status") or "")) for item in group_runs):
-                raise AgentRuntimeError("这个 Workflow Run 仍有进行中或待审批的子 Run，取消或完成后才能删除")
-            targets = group_runs or [run]
-            delete_group = True
-        deleted_run_ids = self.runs.delete_rows(targets, delete_artifacts=self.run_artifacts.delete_files)
-        deleted_ids = set(deleted_run_ids)
-        if delete_group and run_group_id:
-            self.run_groups.delete(run_group_id)
-        else:
-            self.run_groups.remove_run_ids(run_group_id, deleted_ids)
-        self._conn.commit()
-        return {
-            "ok": True,
-            "deleted_run_ids": deleted_run_ids,
-            "deleted_run_count": len(deleted_run_ids),
-        }
+        return self.run_deletion.delete(run_id)
 
     def read_run_artifact(self, run_id: str, artifact_path: str) -> dict[str, Any]:
         return self.run_artifacts.read(run_id, artifact_path)
