@@ -56,11 +56,40 @@ class FakeBroker:
         return {"path": path, "bytes": len(content)}
 
 
+class FakeSharedToolBrokers:
+    def __init__(self) -> None:
+        self.broker = FakeBroker()
+        self.calls: list[dict[str, Any]] = []
+
+    def for_run(
+        self,
+        *,
+        run_id: str,
+        workspace_policy: dict[str, Any],
+        default_runnable_id: str = "",
+        skills: list[dict[str, Any]] | None = None,
+    ) -> FakeBroker:
+        self.calls.append(
+            {
+                "run_id": run_id,
+                "workspace_policy": workspace_policy,
+                "default_runnable_id": default_runnable_id,
+                "skills": skills,
+            }
+        )
+        return self.broker
+
+
 def _timeline(event: str, detail: str = "", **extra: Any) -> dict[str, Any]:
     return {"event": event, "detail": detail, **extra}
 
 
-def _preparer(tmp_path: Path, state: dict[str, Any]) -> RuntimeAgentRunPreparer:
+def _preparer(
+    tmp_path: Path,
+    state: dict[str, Any],
+    *,
+    tool_brokers: Any | None = None,
+) -> RuntimeAgentRunPreparer:
     run_events = state.setdefault("run_events", [])
     memory_store_calls = state.setdefault("memory_store_calls", [])
     future_task_store_calls = state.setdefault("future_task_store_calls", [])
@@ -123,6 +152,7 @@ def _preparer(tmp_path: Path, state: dict[str, Any]) -> RuntimeAgentRunPreparer:
         append_run_event=lambda run_id, event_type, payload: run_events.append((run_id, event_type, payload)),
         timeline_factory=_timeline,
         memory_context_limit=12,
+        tool_brokers=tool_brokers,
     )
 
 
@@ -178,6 +208,36 @@ def test_agent_run_preparer_builds_started_timeline_context_and_broker(tmp_path:
     assert state["broker_args"]["artifact_root"] == tmp_path / "artifacts" / "run-1"
     assert state["broker_args"]["skills"] == [{"skill_id": "skill-1", "name": "Brief Reader"}]
     assert preparation.artifacts == []
+
+
+def test_agent_run_preparer_can_use_shared_tool_broker_factory(tmp_path: Path) -> None:
+    state: dict[str, Any] = {}
+    tool_brokers = FakeSharedToolBrokers()
+    preparer = _preparer(tmp_path, state, tool_brokers=tool_brokers)
+
+    preparation = preparer.prepare(
+        "run-1",
+        {
+            "agent_id": "agent-1",
+            "name": "Prep Agent",
+            "skill_ids": ["skill-1"],
+        },
+        "Finish",
+    )
+
+    assert preparation.broker is tool_brokers.broker
+    assert preparation.artifact_root == tmp_path / "artifacts" / "run-1"
+    assert tool_brokers.calls == [
+        {
+            "run_id": "run-1",
+            "workspace_policy": {"default_workdir": "/tmp/project"},
+            "default_runnable_id": "agent-1",
+            "skills": [{"skill_id": "skill-1", "name": "Brief Reader"}],
+        }
+    ]
+    assert state["memory_store_calls"] == []
+    assert state["future_task_store_calls"] == []
+    assert "broker_args" not in state
 
 
 def test_agent_run_preparer_writes_observable_context_artifact(tmp_path: Path) -> None:

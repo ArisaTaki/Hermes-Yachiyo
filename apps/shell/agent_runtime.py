@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 import json
 import logging
+import os
 import sqlite3
 import subprocess
 import threading
@@ -794,6 +795,7 @@ class NativeRunEngine:
             update_run=self._update_run,
             model_output_metadata=_model_output_metadata,
             redact_secrets=redact_secrets,
+            tool_brokers=self.tool_brokers,
         )
         self._install_runtime_agent_services(agent_services)
         approval_services = _build_runtime_approval_services(

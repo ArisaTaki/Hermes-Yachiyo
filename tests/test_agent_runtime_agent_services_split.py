@@ -29,6 +29,7 @@ def test_build_runtime_agent_services_wires_skill_context_preparation_and_outcom
     runtime_agent_run_events = object()
     runtime_trace_events = object()
     runtime_task_model_events = object()
+    tool_brokers = object()
 
     def compile_agent_runtime(_agent: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -60,6 +61,7 @@ def test_build_runtime_agent_services_wires_skill_context_preparation_and_outcom
         update_run=lambda run_id, **kwargs: {"run_id": run_id, **kwargs},
         model_output_metadata=lambda _value: {},
         redact_secrets=lambda value: str(value),
+        tool_brokers=tool_brokers,
     )
 
     assert isinstance(bundle, RuntimeAgentServiceBundle)
@@ -73,6 +75,7 @@ def test_build_runtime_agent_services_wires_skill_context_preparation_and_outcom
     assert bundle.agent_run_preparer._runtime_agent_run_events is runtime_agent_run_events
     assert bundle.agent_run_preparer._runtime_trace_events is runtime_trace_events
     assert bundle.agent_run_preparer._memory_context_limit == 12
+    assert bundle.agent_run_preparer._tool_brokers is tool_brokers
     assert bundle.agent_run_outcomes._runtime_task_model_events is runtime_task_model_events
     assert bundle.agent_run_outcomes._runtime_agent_timeline is runtime_agent_timeline
     assert bundle.agent_run_outcomes._runtime_agent_run_events is runtime_agent_run_events
@@ -93,6 +96,7 @@ def test_native_runtime_installs_agent_services_under_legacy_attribute_names(tmp
         assert service.agent_run_preparer._runtime_agent_timeline is service.runtime_agent_timeline
         assert service.agent_run_preparer._runtime_agent_run_events is service.runtime_agent_run_events
         assert service.agent_run_preparer._runtime_trace_events is service.runtime_trace_events
+        assert service.agent_run_preparer._tool_brokers is service.tool_brokers
         assert service.agent_run_outcomes._runtime_task_model_events is service.runtime_task_model_events
         assert service.agent_run_outcomes._runtime_agent_timeline is service.runtime_agent_timeline
         assert service.agent_run_outcomes._runtime_agent_run_events is service.runtime_agent_run_events

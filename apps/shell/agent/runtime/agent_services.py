@@ -44,6 +44,7 @@ def build_runtime_agent_services(
     update_run: Callable[..., dict[str, Any]],
     model_output_metadata: Callable[[Any], dict[str, Any]],
     redact_secrets: Callable[[Any], str],
+    tool_brokers: Any | None = None,
 ) -> RuntimeAgentServiceBundle:
     return RuntimeAgentServiceBundle(
         agent_skill_loader=RuntimeAgentSkillLoader(
@@ -71,6 +72,7 @@ def build_runtime_agent_services(
             append_run_event=append_run_event,
             timeline_factory=timeline_factory,
             memory_context_limit=memory_context_limit,
+            tool_brokers=tool_brokers,
         ),
         agent_run_outcomes=RuntimeAgentRunOutcomeProjector(
             append_run_event=append_run_event,

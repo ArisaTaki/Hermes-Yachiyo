@@ -40,6 +40,7 @@ class RuntimeAgentRunPreparer:
         append_run_event: Callable[[str, str, dict[str, Any]], Any],
         timeline_factory: Callable[..., dict[str, Any]],
         memory_context_limit: int,
+        tool_brokers: Any | None = None,
     ) -> None:
         self._agent_artifacts_dir = agent_artifacts_dir
         self._normalize_execution_backend = normalize_execution_backend
@@ -49,6 +50,7 @@ class RuntimeAgentRunPreparer:
         self._memory_store = memory_store
         self._future_task_store = future_task_store
         self._tool_broker_factory = tool_broker_factory
+        self._tool_brokers = tool_brokers
         self._runtime_agent_timeline = runtime_agent_timeline
         self._runtime_agent_run_events = runtime_agent_run_events
         self._runtime_trace_events = runtime_trace_events
@@ -90,16 +92,25 @@ class RuntimeAgentRunPreparer:
         artifact_root = self._agent_artifacts_dir / run_id
         skills = self._load_agent_skills(agent.get("skill_ids") or [])
         context = self._agent_context(agent, user_goal, upstream, skills=skills)
-        broker = self._tool_broker_factory(
-            runtime["workspace_policy"],
-            artifact_root,
-            skills=skills,
-            memory_store=self._memory_store(source_run_id=run_id),
-            future_task_store=self._future_task_store(
-                source_run_id=run_id,
-                default_runnable_id=str(agent.get("agent_id") or ""),
-            ),
-        )
+        default_runnable_id = str(agent.get("agent_id") or "")
+        if self._tool_brokers is not None:
+            broker = self._tool_brokers.for_run(
+                run_id=run_id,
+                workspace_policy=runtime["workspace_policy"],
+                default_runnable_id=default_runnable_id,
+                skills=skills,
+            )
+        else:
+            broker = self._tool_broker_factory(
+                runtime["workspace_policy"],
+                artifact_root,
+                skills=skills,
+                memory_store=self._memory_store(source_run_id=run_id),
+                future_task_store=self._future_task_store(
+                    source_run_id=run_id,
+                    default_runnable_id=default_runnable_id,
+                ),
+            )
         return AgentRunPreparation(
             backend=backend,
             runtime=runtime,
