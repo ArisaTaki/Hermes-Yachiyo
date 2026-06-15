@@ -91,6 +91,84 @@ def test_legacy_task_and_timeline_functions_delegate_to_shared_projector() -> No
     assert legacy_timeline_snapshot_from_payload(payload) == run_timeline_snapshot_from_payload(payload)
 
 
+def test_run_timeline_projects_tool_lifecycle_events_as_tool_call_snapshots() -> None:
+    timeline = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "run-tools",
+            "status": "running",
+            "events": [
+                {
+                    "event_type": "tool.requested",
+                    "payload": {
+                        "tool": "workspace.read",
+                        "input_preview": {"path": "README.md"},
+                    },
+                    "created_at": "2026-06-15T00:00:00Z",
+                },
+                {
+                    "event_type": "tool.started",
+                    "payload": {
+                        "tool": "workspace.read",
+                        "input_preview": {"path": "README.md"},
+                    },
+                },
+                {
+                    "event_type": "tool.approval_required",
+                    "payload": {
+                        "tool": "terminal.run",
+                        "input_preview": {"command": "npm test"},
+                        "output_preview": {"approval_required": True},
+                    },
+                },
+                {
+                    "event_type": "tool.completed",
+                    "payload": {
+                        "tool": "workspace.read",
+                        "input_preview": {"path": "README.md"},
+                        "output_preview": {"ok": True},
+                    },
+                },
+                {
+                    "event_type": "tool.failed",
+                    "payload": {
+                        "tool": "terminal.run",
+                        "input_preview": {"command": "npm test"},
+                        "error": "exit 1",
+                    },
+                },
+                {
+                    "event": "agent.tool.denied",
+                    "detail": "workspace.write",
+                    "input_preview": {"path": "README.md"},
+                },
+                {"event_type": "model.output.completed", "payload": {"content": "done"}},
+            ],
+        }
+    )
+
+    assert [call.tool_name for call in timeline.tool_calls] == [
+        "workspace.read",
+        "workspace.read",
+        "terminal.run",
+        "workspace.read",
+        "terminal.run",
+        "workspace.write",
+    ]
+    assert [call.status for call in timeline.tool_calls] == [
+        "requested",
+        "running",
+        "waiting_approval",
+        "completed",
+        "failed",
+        "denied",
+    ]
+    assert timeline.tool_calls[0].input_preview == {"path": "README.md"}
+    assert timeline.tool_calls[2].output_preview == {"approval_required": True}
+    assert timeline.tool_calls[4].output_preview == {"error": "exit 1"}
+    assert timeline.tool_calls[5].input_preview == {"path": "README.md"}
+    assert all(call.run_id == "run-tools" for call in timeline.tool_calls)
+
+
 def test_group_run_snapshot_reuses_shared_run_projection_for_children_artifacts_and_approvals() -> None:
     group_run = group_run_snapshot_from_payload(
         {

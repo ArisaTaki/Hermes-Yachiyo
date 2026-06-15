@@ -181,7 +181,7 @@ class RunSnapshotProjector:
             status=_text(payload.get("status") or "completed"),
             risk_level=_optional_text(payload.get("risk_level") or payload.get("risk")),
             input_preview=_mapping(payload.get("input_preview") or payload.get("input")),
-            output_preview=_mapping(payload.get("output_preview") or payload.get("result")),
+            output_preview=_tool_output_preview(payload),
             approval_id=_optional_text(payload.get("approval_id")),
             started_at=_text(payload.get("started_at") or payload.get("created_at")),
             completed_at=_optional_text(payload.get("completed_at")),
@@ -190,13 +190,16 @@ class RunSnapshotProjector:
     def tool_calls_from_events(self, events: list[PublicRunEvent]) -> list[ToolCallSnapshot]:
         calls: list[ToolCallSnapshot] = []
         for event in events:
-            if event.event_type != "agent.tool.call":
+            if not _is_tool_event(event.event_type):
                 continue
             payload = {
                 **event.payload,
                 "run_id": event.run_id,
                 "sequence": event.sequence,
-                "tool_name": event.detail or event.payload.get("tool"),
+                "tool_name": _tool_name_from_event(event),
+                "status": event.payload.get("status") or _tool_status_from_event_type(
+                    event.event_type
+                ),
                 "created_at": event.created_at,
             }
             calls.append(self.tool_call_from_payload(payload, run_id=event.run_id))
@@ -293,6 +296,52 @@ def _workflow_run_id(payload: Mapping[str, Any], run_id: str) -> str | None:
 
 def _mapping(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _tool_output_preview(payload: Mapping[str, Any]) -> dict[str, Any]:
+    explicit = _mapping(payload.get("output_preview") or payload.get("result"))
+    if explicit:
+        return explicit
+    error = payload.get("error")
+    return {"error": error} if error is not None else {}
+
+
+def _is_tool_event(event_type: str) -> bool:
+    return event_type in {
+        "agent.tool.call",
+        "agent.tool.denied",
+        "agent.tool.approval_required",
+        "tool.requested",
+        "tool.started",
+        "tool.approval_required",
+        "tool.completed",
+        "tool.failed",
+    }
+
+
+def _tool_name_from_event(event: PublicRunEvent) -> str:
+    return _text(
+        event.payload.get("tool_name")
+        or event.payload.get("tool")
+        or event.detail
+        or "tool"
+    )
+
+
+def _tool_status_from_event_type(event_type: str) -> str:
+    if event_type in {"tool.requested"}:
+        return "requested"
+    if event_type in {"tool.started"}:
+        return "running"
+    if event_type in {"tool.approval_required", "agent.tool.approval_required"}:
+        return "waiting_approval"
+    if event_type in {"tool.completed", "agent.tool.call"}:
+        return "completed"
+    if event_type in {"tool.failed"}:
+        return "failed"
+    if event_type in {"agent.tool.denied"}:
+        return "denied"
+    return "completed"
 
 
 def _studio_url(run_id: str) -> str | None:
