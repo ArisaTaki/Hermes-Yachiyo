@@ -630,8 +630,20 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
         "apps/frontend/src/features/yachiyo-chat/components/ToolCallSummary.tsx",
         [
             "export function ToolCallSummary",
-            'data-testid="yachiyo-agent-task-tool-summary"',
-            'data-testid="yachiyo-agent-task-tool-summary-item"',
+            "RuntimeToolCallSummary",
+            'testId="yachiyo-agent-task-tool-summary"',
+            'itemTestId="yachiyo-agent-task-tool-summary-item"',
+            'label="能力"',
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/runtime-shared/components/RuntimeToolCallSummary.tsx",
+        [
+            "export type RuntimeToolCallSummaryItem",
+            "export function RuntimeToolCallSummary",
+            "export function summarizeRuntimeToolCalls",
+            'testId = \'runtime-tool-call-summary\'',
+            'itemTestId = \'runtime-tool-call-summary-item\'',
             "'agent.tool.approval_required'",
             "'agent.tool.approval_approved'",
             "'agent.tool.failed'",
@@ -640,12 +652,12 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "'skill.dispatch.read'",
             "'memory.retrieved'",
             "'memory.write.add'",
-            "<span>能力</span>",
+            "label?: string;",
+            "<span>{label}</span>",
             "if (eventType === 'memory.retrieved') return 'Memory 检索';",
             "if (eventType === 'skill.selected' || eventType.startsWith('skill.dispatch.'))",
             "function objectPayload",
-            "function summarizeToolCalls",
-            "function toolStatusFromEvent",
+            "function runtimeToolStatusFromEvent",
         ],
     )
     _assert_contains(
