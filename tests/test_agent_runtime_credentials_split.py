@@ -10,6 +10,7 @@ from apps.shell.agent.runtime.credentials import (
     agent_model_credential_ref,
 )
 from apps.shell.agent.runtime.errors import AgentRuntimeError
+from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import CredentialStoreError, MemoryCredentialStore
 
 
@@ -18,6 +19,7 @@ def test_runtime_credential_service_stores_reads_and_deletes_model_secrets() -> 
     service = RuntimeCredentialService(store)
     ref = agent_model_credential_ref("agent-1")
 
+    assert service.agent_model_ref("agent-1") == ref
     service.store(ref, "  sk-agent-secret123456  ")
 
     assert ref == "agent:agent-1:model_api_key"
@@ -55,3 +57,17 @@ def test_runtime_credential_service_redacts_store_and_read_errors() -> None:
 
 def test_runtime_credentials_remain_available_from_legacy_runtime_module() -> None:
     assert agent_runtime.RuntimeCredentialService is RuntimeCredentialService
+
+
+def test_agent_runtime_service_credential_ref_delegates_to_runtime_credentials(tmp_path) -> None:
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime.db",
+        workspace_dir=tmp_path / "runtime",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    try:
+        assert service._agent_model_credential_ref("agent-1") == "agent:agent-1:model_api_key"
+        assert service._agent_model_credential_ref("agent-1") == service.runtime_credentials.agent_model_ref("agent-1")
+    finally:
+        service.close()

@@ -1489,7 +1489,7 @@ class NativeRunEngine:
         return self.runtime_schema.migrate_run_group_secret_projections()
 
     def _agent_model_credential_ref(self, agent_id: str) -> str:
-        return _agent_model_credential_ref(agent_id)
+        return self.runtime_credentials.agent_model_ref(agent_id)
 
     def _store_credential(self, ref: str, secret: str) -> None:
         self.runtime_credentials.store(ref, secret)

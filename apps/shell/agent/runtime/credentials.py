@@ -19,6 +19,9 @@ class RuntimeCredentialService:
     def __init__(self, credential_store: Any) -> None:
         self._credential_store = credential_store
 
+    def agent_model_ref(self, agent_id: str) -> str:
+        return agent_model_credential_ref(agent_id)
+
     def store(self, ref: str, secret: str) -> None:
         secret = str(secret or "").strip()
         if not secret:
