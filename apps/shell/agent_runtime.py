@@ -887,23 +887,6 @@ class NativeRunEngine:
                 error_type=AgentRuntimeError,
             )
         )
-        workflow_execution_services = _build_runtime_workflow_execution_services(
-            engine=self,
-            iso_epoch=lambda value: _iso_epoch(value),
-            claim_pending_approval=self.run_approvals.claim_pending_approval,
-            get_current_run=lambda run_id: self.get_run(run_id),
-            pending_approval_private=lambda run_id: self.runs.pending_approval_private(run_id),
-            get_run=lambda run_id: self.get_run(run_id),
-            merge_workflow_child_run_outcome=lambda timeline, artifacts, child_run, label: (
-                self._merge_workflow_child_run_outcome(timeline, artifacts, child_run, label)
-            ),
-            timeline_factory=lambda event, detail="", **extra: self._timeline(event, detail, **extra),
-            append_run_event=lambda run_id, event_type, payload: self.append_run_event(run_id, event_type, payload),
-            update_run=lambda run_id, **kwargs: self._update_run(run_id, **kwargs),
-            update_run_group=lambda run_group_id, **kwargs: self._update_run_group(run_group_id, **kwargs),
-            approve_workflow_node=lambda run_id, **kwargs: self.approvals.approve_workflow_node(run_id, **kwargs),
-        )
-        self._install_runtime_workflow_execution_services(workflow_execution_services)
         workflow_planning_services = _build_runtime_workflow_planning_services(
             get_run_group=self.get_run_group,
             get_run=self.get_run,
@@ -924,6 +907,34 @@ class NativeRunEngine:
             workflow_path=self._workflow_path,
         )
         self._install_runtime_workflow_planning_services(workflow_planning_services)
+        workflow_execution_services = _build_runtime_workflow_execution_services(
+            engine=self,
+            iso_epoch=lambda value: _iso_epoch(value),
+            workflow_path=self.workflow_path_planner.workflow_path,
+            workflow_nodes_by_id=self.workflow_path_planner.nodes_by_id,
+            workflow_next_node_id=self.workflow_path_planner.next_node_id,
+            workflow_parallel_plan=self.workflow_path_planner.parallel_plan,
+            workflow_condition_selection=self.workflow_path_planner.condition_selection,
+            workflow_loop_selection=self.workflow_path_planner.loop_selection,
+            workflow_loop_iterations_from_timeline=(
+                self.workflow_path_planner.loop_iterations_from_timeline
+            ),
+            workflow_loop_step_limit=self.workflow_path_planner.loop_step_limit,
+            workflow_run_started_projection=self.workflow_run_start_projector.started_projection,
+            claim_pending_approval=self.run_approvals.claim_pending_approval,
+            get_current_run=lambda run_id: self.get_run(run_id),
+            pending_approval_private=lambda run_id: self.runs.pending_approval_private(run_id),
+            get_run=lambda run_id: self.get_run(run_id),
+            merge_workflow_child_run_outcome=lambda timeline, artifacts, child_run, label: (
+                self._merge_workflow_child_run_outcome(timeline, artifacts, child_run, label)
+            ),
+            timeline_factory=lambda event, detail="", **extra: self._timeline(event, detail, **extra),
+            append_run_event=lambda run_id, event_type, payload: self.append_run_event(run_id, event_type, payload),
+            update_run=lambda run_id, **kwargs: self._update_run(run_id, **kwargs),
+            update_run_group=lambda run_group_id, **kwargs: self._update_run_group(run_group_id, **kwargs),
+            approve_workflow_node=lambda run_id, **kwargs: self.approvals.approve_workflow_node(run_id, **kwargs),
+        )
+        self._install_runtime_workflow_execution_services(workflow_execution_services)
         self.workflow_approval_execution = RuntimeWorkflowApprovalExecutionService(
             pending_approval_private=lambda run_id: self.runs.pending_approval_private(run_id),
             workflow_for_run_resume=lambda run: self._workflow_for_run_resume(run),

@@ -87,6 +87,100 @@ def test_build_runtime_workflow_execution_services_wires_continuation_approval_a
     assert bundle.workflow_cancellation._timeline is timeline_factory
 
 
+def test_build_runtime_workflow_execution_services_prefers_explicit_planning_ports() -> None:
+    engine = object()
+
+    def iso_epoch(_value: Any) -> float:
+        return 0.0
+
+    def workflow_path(_workflow: dict[str, Any]) -> list[dict[str, Any]]:
+        return []
+
+    def workflow_nodes_by_id(_workflow: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        return {}
+
+    def workflow_next_node_id(
+        _workflow: dict[str, Any],
+        _node: dict[str, Any],
+        _context: str,
+    ) -> str:
+        return ""
+
+    def workflow_parallel_plan(
+        _workflow: dict[str, Any],
+        _node: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {}
+
+    def workflow_condition_selection(
+        _workflow: dict[str, Any],
+        _node: dict[str, Any],
+        _context: str,
+    ) -> dict[str, Any]:
+        return {}
+
+    def workflow_loop_selection(
+        _workflow: dict[str, Any],
+        _node: dict[str, Any],
+        _context: str,
+        *,
+        previous_iterations: int,
+    ) -> dict[str, Any]:
+        return {"previous_iterations": previous_iterations}
+
+    def workflow_loop_iterations_from_timeline(
+        _timeline: list[dict[str, Any]],
+    ) -> dict[str, int]:
+        return {}
+
+    def workflow_loop_step_limit(_workflow: dict[str, Any]) -> int:
+        return 1
+
+    def workflow_run_started_projection(
+        workflow_id: str,
+        _workflow: dict[str, Any],
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        return [], {"workflow_id": workflow_id}
+
+    bundle = build_runtime_workflow_execution_services(
+        engine=engine,
+        iso_epoch=iso_epoch,
+        workflow_path=workflow_path,
+        workflow_nodes_by_id=workflow_nodes_by_id,
+        workflow_next_node_id=workflow_next_node_id,
+        workflow_parallel_plan=workflow_parallel_plan,
+        workflow_condition_selection=workflow_condition_selection,
+        workflow_loop_selection=workflow_loop_selection,
+        workflow_loop_iterations_from_timeline=workflow_loop_iterations_from_timeline,
+        workflow_loop_step_limit=workflow_loop_step_limit,
+        workflow_run_started_projection=workflow_run_started_projection,
+        claim_pending_approval=lambda *_args, **_kwargs: True,
+        get_current_run=lambda run_id: {"run_id": run_id},
+        pending_approval_private=lambda _run_id: None,
+        get_run=lambda run_id: {"run_id": run_id},
+        merge_workflow_child_run_outcome=lambda *_args, **_kwargs: None,
+        timeline_factory=lambda event, detail="", **extra: {"event": event, "detail": detail, **extra},
+        append_run_event=lambda _run_id, _event_type, _payload: None,
+        update_run=lambda run_id, **kwargs: {"run_id": run_id, **kwargs},
+        update_run_group=lambda run_group_id, **kwargs: {"run_group_id": run_group_id, **kwargs},
+        approve_workflow_node=lambda run_id, **kwargs: {"run_id": run_id, **kwargs},
+    )
+
+    continuation = bundle.workflow_continuation
+    assert continuation._workflow_path_callback is workflow_path
+    assert continuation._workflow_nodes_by_id_callback is workflow_nodes_by_id
+    assert continuation._workflow_next_node_id_callback is workflow_next_node_id
+    assert continuation._workflow_parallel_plan_callback is workflow_parallel_plan
+    assert continuation._workflow_condition_selection_callback is workflow_condition_selection
+    assert continuation._workflow_loop_selection_callback is workflow_loop_selection
+    assert (
+        continuation._workflow_loop_iterations_from_timeline_callback
+        is workflow_loop_iterations_from_timeline
+    )
+    assert continuation._workflow_loop_step_limit_callback is workflow_loop_step_limit
+    assert continuation._workflow_run_started_projection_callback is workflow_run_started_projection
+
+
 def test_native_runtime_installs_workflow_execution_services_under_legacy_attribute_names(tmp_path) -> None:
     service = AgentRuntimeService(
         db_path=tmp_path / "agent-runtime.db",
@@ -101,11 +195,35 @@ def test_native_runtime_installs_workflow_execution_services_under_legacy_attrib
         assert isinstance(service.workflow_child_outcomes, WorkflowChildOutcomeCoordinator)
         assert service.workflow_continuation._engine is service
         assert callable(service.workflow_continuation._workflow_path_callback)
+        assert (
+            service.workflow_continuation._workflow_path_callback.__self__
+            is service.workflow_path_planner
+        )
         assert callable(service.workflow_continuation._workflow_nodes_by_id_callback)
+        sample_workflow = {"nodes": [{"id": "start", "type": "start"}], "edges": []}
+        assert service.workflow_continuation._workflow_nodes_by_id_callback(sample_workflow) == {
+            "start": sample_workflow["nodes"][0]
+        }
         assert callable(service.workflow_continuation._workflow_next_node_id_callback)
+        assert (
+            service.workflow_continuation._workflow_next_node_id_callback.__self__
+            is service.workflow_path_planner
+        )
         assert callable(service.workflow_continuation._workflow_parallel_plan_callback)
+        assert (
+            service.workflow_continuation._workflow_parallel_plan_callback.__self__
+            is service.workflow_path_planner
+        )
         assert callable(service.workflow_continuation._workflow_condition_selection_callback)
+        assert (
+            service.workflow_continuation._workflow_condition_selection_callback.__self__
+            is service.workflow_path_planner
+        )
         assert callable(service.workflow_continuation._workflow_loop_selection_callback)
+        assert (
+            service.workflow_continuation._workflow_loop_selection_callback.__self__
+            is service.workflow_path_planner
+        )
         assert callable(service.workflow_continuation._workflow_approval_criteria_callback)
         assert callable(service.workflow_continuation._default_workspace_policy_callback)
         assert callable(service.workflow_continuation._workflow_artifacts_dir_source)
@@ -120,6 +238,10 @@ def test_native_runtime_installs_workflow_execution_services_under_legacy_attrib
         assert callable(service.workflow_continuation._merge_workflow_child_run_outcome_callback)
         assert callable(service.workflow_continuation._workflow_for_node_callback)
         assert callable(service.workflow_continuation._workflow_run_started_projection_callback)
+        assert (
+            service.workflow_continuation._workflow_run_started_projection_callback.__self__
+            is service.workflow_run_start_projector
+        )
         assert callable(service.workflow_continuation._continue_workflow_run_callback)
         assert callable(service.workflow_continuation._timeline_callback)
         assert callable(service.workflow_continuation._append_run_event_callback)
@@ -129,7 +251,20 @@ def test_native_runtime_installs_workflow_execution_services_under_legacy_attrib
         assert callable(service.workflow_continuation._approve_workflow_node_callback)
         assert callable(service.workflow_continuation._runtime_limits_source)
         assert callable(service.workflow_continuation._workflow_loop_iterations_from_timeline_callback)
+        assert service.workflow_continuation._workflow_loop_iterations_from_timeline_callback(
+            [
+                {
+                    "event": "workflow.node.loop",
+                    "workflow_node_id": "repeat",
+                    "workflow_node_loop_iteration": 2,
+                }
+            ]
+        ) == {"repeat": 2}
         assert callable(service.workflow_continuation._workflow_loop_step_limit_callback)
+        assert (
+            service.workflow_continuation._workflow_loop_step_limit_callback.__self__
+            is service.workflow_path_planner
+        )
         assert callable(service.workflow_continuation._node_kind_callback)
         assert service.workflow_approval_resume._resume_after_approval_node.__self__ is service.workflow_continuation
         assert service.workflow_approval_resume._claim_pending_approval.__self__ is service.run_approvals

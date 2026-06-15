@@ -127,23 +127,49 @@ def build_runtime_workflow_execution_services(
     update_run: Callable[..., dict[str, Any]],
     update_run_group: Callable[..., dict[str, Any]],
     approve_workflow_node: Callable[..., dict[str, Any]],
+    workflow_path: Callable[[dict[str, Any]], list[dict[str, Any]]] | None = None,
+    workflow_nodes_by_id: Callable[[dict[str, Any]], dict[str, dict[str, Any]]] | None = None,
+    workflow_next_node_id: Callable[[dict[str, Any], dict[str, Any], str], str] | None = None,
+    workflow_parallel_plan: Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]] | None = None,
+    workflow_condition_selection: Callable[[dict[str, Any], dict[str, Any], str], dict[str, Any]] | None = None,
+    workflow_loop_selection: Callable[..., dict[str, Any]] | None = None,
+    workflow_loop_iterations_from_timeline: Callable[[list[dict[str, Any]]], dict[str, int]] | None = None,
+    workflow_loop_step_limit: Callable[[dict[str, Any]], int] | None = None,
+    workflow_run_started_projection: (
+        Callable[[str, dict[str, Any]], tuple[list[dict[str, Any]], dict[str, Any]]] | None
+    ) = None,
 ) -> RuntimeWorkflowExecutionServiceBundle:
     continuation_ports = WorkflowContinuationPortBundle(
         iso_epoch=iso_epoch,
-        workflow_path=lambda workflow: engine._workflow_path(workflow),
-        workflow_nodes_by_id=lambda workflow: engine._workflow_nodes_by_id(workflow),
-        workflow_next_node_id=lambda workflow, node, context: (
-            engine._workflow_next_node_id(workflow, node, context)
+        workflow_path=workflow_path or (lambda workflow: engine._workflow_path(workflow)),
+        workflow_nodes_by_id=workflow_nodes_by_id
+        or (lambda workflow: engine._workflow_nodes_by_id(workflow)),
+        workflow_next_node_id=workflow_next_node_id
+        or (
+            lambda workflow, node, context: engine._workflow_next_node_id(
+                workflow,
+                node,
+                context,
+            )
         ),
-        workflow_parallel_plan=lambda workflow, node: engine._workflow_parallel_plan(
-            workflow,
-            node,
+        workflow_parallel_plan=workflow_parallel_plan
+        or (
+            lambda workflow, node: engine._workflow_parallel_plan(
+                workflow,
+                node,
+            )
         ),
-        workflow_condition_selection=lambda workflow, node, context: (
-            engine._workflow_condition_selection(workflow, node, context)
+        workflow_condition_selection=workflow_condition_selection
+        or (
+            lambda workflow, node, context: engine._workflow_condition_selection(
+                workflow,
+                node,
+                context,
+            )
         ),
-        workflow_loop_selection=lambda workflow, node, context, *, previous_iterations: (
-            engine._workflow_loop_selection(
+        workflow_loop_selection=workflow_loop_selection
+        or (
+            lambda workflow, node, context, *, previous_iterations: engine._workflow_loop_selection(
                 workflow,
                 node,
                 context,
@@ -174,8 +200,12 @@ def build_runtime_workflow_execution_services(
         ),
         merge_workflow_child_run_outcome=merge_workflow_child_run_outcome,
         workflow_for_node=lambda node: engine._workflow_for_node(node),
-        workflow_run_started_projection=lambda workflow_id, workflow: (
-            engine.workflow_run_start_projector.started_projection(workflow_id, workflow)
+        workflow_run_started_projection=workflow_run_started_projection
+        or (
+            lambda workflow_id, workflow: engine.workflow_run_start_projector.started_projection(
+                workflow_id,
+                workflow,
+            )
         ),
         continue_workflow_run=lambda run, workflow, **kwargs: (
             engine._continue_workflow_run(run, workflow, **kwargs)
@@ -187,10 +217,12 @@ def build_runtime_workflow_execution_services(
         get_run=get_run,
         approve_workflow_node=approve_workflow_node,
         runtime_limits=lambda: engine.runtime_limits,
-        workflow_loop_iterations_from_timeline=lambda timeline: (
-            engine._workflow_loop_iterations_from_timeline(timeline)
+        workflow_loop_iterations_from_timeline=workflow_loop_iterations_from_timeline
+        or (
+            lambda timeline: engine._workflow_loop_iterations_from_timeline(timeline)
         ),
-        workflow_loop_step_limit=lambda workflow: engine._workflow_loop_step_limit(workflow),
+        workflow_loop_step_limit=workflow_loop_step_limit
+        or (lambda workflow: engine._workflow_loop_step_limit(workflow)),
         node_kind=lambda node: engine._node_kind(node),
     )
     workflow_continuation = WorkflowContinuationCoordinator(
