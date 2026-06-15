@@ -158,6 +158,50 @@ export function approvalRequestDetailsFromRun(
   });
 }
 
+export function runApprovalOverrideFromRun(
+  run: ChatApprovalRun,
+  fallbackDetails: ApprovalRequestDetails | null = null,
+): { runId: string; override: RunApprovalDetailOverride | null } {
+  const runId = chatApprovalRunId(run);
+  const pending = run.pending_approval;
+  if (!runId || normalizeRunStatus(run.status) !== 'approval_required' || !pending?.tool) {
+    return { runId, override: null };
+  }
+  return {
+    runId,
+    override: {
+      details: approvalRequestDetailsFromRun(run, fallbackDetails),
+      signature: approvalSignatureFromPending(pending),
+      createdAt: String(pending.requested_at || run.updated_at || new Date().toISOString()),
+    },
+  };
+}
+
+export function rememberRunApprovalOverride(
+  current: Record<string, RunApprovalDetailOverride>,
+  run: ChatApprovalRun,
+  fallbackDetails: ApprovalRequestDetails | null = null,
+) {
+  const { runId, override } = runApprovalOverrideFromRun(run, fallbackDetails);
+  if (!runId) return current;
+  if (!override) return forgetRunApprovalOverride(current, runId);
+  return {
+    ...current,
+    [runId]: override,
+  };
+}
+
+export function forgetRunApprovalOverride(
+  current: Record<string, RunApprovalDetailOverride>,
+  runId: string,
+) {
+  const normalizedRunId = String(runId || '').trim();
+  if (!normalizedRunId || !current[normalizedRunId]) return current;
+  const next = { ...current };
+  delete next[normalizedRunId];
+  return next;
+}
+
 export function isWorkflowApprovalDetails(details: ApprovalRequestDetails) {
   return details.tool === 'workflow.approval';
 }
@@ -447,6 +491,10 @@ function messageRunStatus(message?: ChatApprovalMessage | null) {
 
 function messageRunId(message?: ChatApprovalMessage | null) {
   return String(message?.metadata?.run_id || message?.metadata?.workflow_run_id || '').trim();
+}
+
+function chatApprovalRunId(run?: ChatApprovalRun | null) {
+  return String(run?.run_id || run?.agent_run_id || run?.workflow_run_id || '').trim();
 }
 
 function activityRunId(event?: ChatApprovalActivityEvent | null) {

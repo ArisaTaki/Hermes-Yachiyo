@@ -2096,6 +2096,9 @@ def test_chat_cancel_ui_smoke_uses_stop_buttons_and_cancel_route() -> None:
             "export type ComposerApprovalItem",
             "export function approvalRequestDetails",
             "export function approvalRequestDetailsFromRun",
+            "export function runApprovalOverrideFromRun",
+            "export function rememberRunApprovalOverride",
+            "export function forgetRunApprovalOverride",
             "export function approvalRequiredItems",
             "export function approvalRequiredMessages",
             "export function hasActionableApproval",
@@ -2104,6 +2107,7 @@ def test_chat_cancel_ui_smoke_uses_stop_buttons_and_cancel_route() -> None:
             "function approvalRequestDetailsFromActivity",
             "function approvalRequestDetailsFromWorkflowWaitingChild",
             "function hasActionableActivityApproval",
+            "function chatApprovalRunId",
             "const eventStatus = String(event?.status || '').trim();",
             "if (['completed', 'success', 'failed', 'error', 'cancelled'].includes(eventStatus)) return false;",
             "(eventStatus === 'approval_required' || String(event?.metadata?.run_status || '').trim() === 'approval_required')",
@@ -2117,6 +2121,8 @@ def test_chat_cancel_ui_smoke_uses_stop_buttons_and_cancel_route() -> None:
             "function hasActionableActivityApproval",
             "function workflowWaitingChildApprovalRunId",
             "function approvalSignatureFromPending",
+            "const details = approvalRequestDetailsFromRun(run",
+            "const signature = approvalSignatureFromPending(pending)",
         ],
     )
 

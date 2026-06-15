@@ -32,12 +32,12 @@ import { MessageActivityList } from '../features/yachiyo-chat/components/Message
 import {
   approvalIdFromPending,
   approvalRequestDetails,
-  approvalRequestDetailsFromRun,
   approvalRequiredItems,
   approvalRequiredMessages,
-  approvalSignatureFromPending,
+  forgetRunApprovalOverride,
   hasActionableApproval,
   isWorkflowApprovalDetails,
+  rememberRunApprovalOverride,
   messageApprovalSignature,
   nextApprovalStatusText,
   type ComposerApprovalItem,
@@ -1789,33 +1789,11 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   }
 
   function rememberRunApprovalDetails(run: RunSpec, fallbackDetails: ApprovalRequestDetails | null = null) {
-    const runId = String(run.run_id || run.agent_run_id || run.workflow_run_id || '').trim();
-    const pending = run.pending_approval;
-    if (!runId || normalizeRunStatus(run.status) !== 'approval_required' || !pending?.tool) {
-      if (runId) forgetRunApprovalDetails(runId);
-      return;
-    }
-    const details = approvalRequestDetailsFromRun(run, fallbackDetails);
-    const signature = approvalSignatureFromPending(pending);
-    setRunApprovalDetailOverrides((current) => ({
-      ...current,
-      [runId]: {
-        details,
-        signature,
-        createdAt: String(pending.requested_at || run.updated_at || new Date().toISOString()),
-      },
-    }));
+    setRunApprovalDetailOverrides((current) => rememberRunApprovalOverride(current, run, fallbackDetails));
   }
 
   function forgetRunApprovalDetails(runId: string) {
-    const normalizedRunId = String(runId || '').trim();
-    if (!normalizedRunId) return;
-    setRunApprovalDetailOverrides((current) => {
-      if (!current[normalizedRunId]) return current;
-      const next = { ...current };
-      delete next[normalizedRunId];
-      return next;
-    });
+    setRunApprovalDetailOverrides((current) => forgetRunApprovalOverride(current, runId));
   }
 
   function shouldTriggerPendingReplyScroll(nextMessages: ChatMessage[]) {
