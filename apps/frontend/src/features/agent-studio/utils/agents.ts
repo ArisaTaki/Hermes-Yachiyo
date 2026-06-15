@@ -1,6 +1,6 @@
-import type { AgentDraft } from '../components/AgentEditorPanel';
 import type { AgentSpec, RunnableSummary, SkillSpec } from '../../../lib/agents';
 import type { ModelProfile, ModelProfileDefaults } from '../../../lib/modelProfiles';
+import type { AgentDraft } from '../types';
 
 const defaultAgentIds = new Set([
   'agent_yachiyo_orchestrator',

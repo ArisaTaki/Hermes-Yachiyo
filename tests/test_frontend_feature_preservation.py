@@ -635,8 +635,18 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
         ],
     )
     _assert_contains(
+        "apps/frontend/src/features/agent-studio/types.ts",
+        [
+            "export type AgentDraft",
+            "model_mode: 'profile' | 'custom_api';",
+            "allow_workspace_write: boolean;",
+            "output_contract: string;",
+        ],
+    )
+    _assert_contains(
         "apps/frontend/src/features/agent-studio/utils/agents.ts",
         [
+            "import type { AgentDraft } from '../types';",
             "export function agentToDraft",
             "export function draftToolPolicy",
             "export function agentRunReadinessIssue",
@@ -2057,8 +2067,6 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "'workflows' | 'runs' | 'memory';",
             "const studioTabs: StudioTab[] = ['agents', 'groups', 'skills', "
             "'workflows', 'runs', 'memory'];",
-            "createAgent",
-            "updateAgent",
             "listSkills",
             "updateSkill",
             "listSkillFolders",
@@ -2067,6 +2075,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "listRunGroups",
             "getRunGroup",
             "useAgentDeletionActions",
+            "useAgentSaveActions",
             "useAgentSkillMountActions",
             "useRunApprovalActions",
             "useRunEventReplay",
@@ -2078,7 +2087,6 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "useWorkflowDeletionActions",
             "useWorkflowSaveActions",
             "saveAgent",
-            "const saved = draft.agent_id ? await updateAgent(draft.agent_id, request) : await createAgent(request);",
             "requestDeleteAgent",
             "requestDeleteSelectedAgents",
             "importSkillSourceList",
@@ -2111,6 +2119,21 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "selectedAgentReadOnly",
             "selectedAgentDeletable",
             "AgentEditorPanel",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useAgentSaveActions.ts",
+        [
+            "export function useAgentSaveActions",
+            "async function saveAgent()",
+            "if (selectedAgentReadOnly)",
+            "setStatus('系统 Agent 只能查看，不能修改。');",
+            "tool_policy: draftToolPolicy(draft),",
+            "readable_scopes: textToScopes(draft.readable_scopes),",
+            "writable_scopes: textToScopes(draft.writable_scopes),",
+            "const saved = draft.agent_id ? await updateAgent(draft.agent_id, request) : await createAgent(request);",
+            "setSelectedAgentId(saved.agent_id);",
+            "setDraft(agentToDraft(saved));",
         ],
     )
     _assert_contains(

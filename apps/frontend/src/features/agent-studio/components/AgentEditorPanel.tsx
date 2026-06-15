@@ -1,32 +1,7 @@
 import type { ModelProfile } from '../../../lib/modelProfiles';
 import type { SkillFolderSpec, SkillSpec } from '../../../lib/agents';
+import type { AgentDraft } from '../types';
 import { AgentSkillMountsPanel } from './AgentSkillMountsPanel';
-
-export type AgentDraft = {
-  agent_id?: string;
-  name: string;
-  nickname: string;
-  description: string;
-  avatar_url: string;
-  category: string;
-  instructions: string;
-  persona_prompt: string;
-  model_mode: 'profile' | 'custom_api';
-  model_profile_id: string;
-  vision_model_profile_id: string;
-  base_url: string;
-  model: string;
-  api_key: string;
-  output_contract: string;
-  allow_workspace_read: boolean;
-  allow_workspace_write: boolean;
-  allow_terminal: boolean;
-  allow_artifacts: boolean;
-  default_workdir: string;
-  readable_scopes: string;
-  writable_scopes: string;
-  enabled: boolean;
-};
 
 type AgentReadinessNotice = {
   tone: 'danger' | 'warn' | 'info';

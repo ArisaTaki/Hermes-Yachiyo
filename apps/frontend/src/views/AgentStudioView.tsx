@@ -8,7 +8,7 @@ import {
 import '@xyflow/react/dist/style.css';
 
 import { ConfirmDialog } from '../components/ConfirmDialog';
-import { AgentEditorPanel, type AgentDraft } from '../features/agent-studio/components/AgentEditorPanel';
+import { AgentEditorPanel } from '../features/agent-studio/components/AgentEditorPanel';
 import { AgentGroupPanel } from '../features/agent-studio/components/AgentGroupPanel';
 import { AgentListPanel } from '../features/agent-studio/components/AgentListPanel';
 import { RuntimeMemoryPanel } from '../features/agent-studio/components/RuntimeMemoryPanel';
@@ -18,6 +18,7 @@ import { WorkflowEditorPanel, WorkflowRunPreview } from '../features/agent-studi
 import { useAgentDeletionActions } from '../features/agent-studio/hooks/useAgentDeletionActions';
 import { useAgentDefinitions } from '../features/agent-studio/hooks/useAgentDefinitions';
 import { useAgentGroups } from '../features/agent-studio/hooks/useAgentGroups';
+import { useAgentSaveActions } from '../features/agent-studio/hooks/useAgentSaveActions';
 import { useAgentSkillMountActions } from '../features/agent-studio/hooks/useAgentSkillMountActions';
 import { useApprovedRunGuard } from '../features/agent-studio/hooks/useApprovedRunGuard';
 import { useRunApprovalActions } from '../features/agent-studio/hooks/useRunApprovalActions';
@@ -37,10 +38,8 @@ import {
   agentCapabilityLine,
   agentRunReadinessIssue,
   agentToDraft,
-  draftToolPolicy,
   runnableCapabilityLine,
   runnableOptionLabel,
-  textToScopes,
 } from '../features/agent-studio/utils/agents';
 import {
   formatRunDate,
@@ -85,6 +84,7 @@ import {
   type SkillSourceFilter,
 } from '../features/agent-studio/utils/skills';
 import { groupRunTimelineRunId } from '../features/agent-studio/utils/groups';
+import type { AgentDraft } from '../features/agent-studio/types';
 import {
   buildPhase4WorkflowNodes,
   linearEdgesForNodes,
@@ -112,7 +112,6 @@ import {
 } from '../features/agent-studio/utils/workflow';
 import type { GroupRunSnapshot } from '../features/yachiyo-studio/types';
 import {
-  createAgent,
   getRun,
   getRunArtifact,
   getRunGroup,
@@ -127,9 +126,7 @@ import {
   listSkills,
   listWorkflows,
   testAgentModel,
-  updateAgent,
   updateSkill,
-  type AgentSpec,
   type FutureTaskSpec,
   type MemorySpec,
   type RunnableSummary,
@@ -813,6 +810,16 @@ export function AgentStudioView() {
     showConfirmDialog,
   });
   const {
+    saveAgent,
+  } = useAgentSaveActions({
+    draft,
+    selectedAgentId,
+    selectedAgentReadOnly,
+    setDraft,
+    setSelectedAgentId,
+    setStatus,
+  });
+  const {
     requestDeleteSelectedWorkflows,
     requestDeleteWorkflow,
   } = useWorkflowDeletionActions({
@@ -1436,45 +1443,6 @@ export function AgentStudioView() {
     const action = confirmDialog?.onConfirm;
     setConfirmDialog(null);
     if (action) action();
-  }
-
-  async function saveAgent(): Promise<StudioRefreshOptions> {
-    if (selectedAgentReadOnly) {
-      setStatus('系统 Agent 只能查看，不能修改。');
-      return { selectedAgentId };
-    }
-    const request: Partial<AgentSpec> = {
-      name: draft.name,
-      nickname: draft.nickname,
-      description: draft.description,
-      avatar_url: draft.avatar_url,
-      category: draft.category,
-      instructions: draft.instructions,
-      persona_prompt: draft.persona_prompt,
-      model_mode: draft.model_mode,
-      model_profile_id: draft.model_mode === 'profile' ? draft.model_profile_id : '',
-      vision_model_profile_id: draft.vision_model_profile_id,
-      tool_policy: draftToolPolicy(draft),
-      workspace_policy: {
-        default_workdir: draft.default_workdir,
-        readable_scopes: textToScopes(draft.readable_scopes),
-        writable_scopes: textToScopes(draft.writable_scopes),
-      },
-      output_contract: draft.output_contract,
-      enabled: draft.enabled,
-    };
-    if (draft.model_mode === 'custom_api') {
-      request.model_config = {
-        provider: 'openai_compatible',
-        base_url: draft.base_url,
-        model: draft.model,
-        ...(draft.api_key.trim() ? { api_key: draft.api_key.trim() } : {}),
-      };
-    }
-    const saved = draft.agent_id ? await updateAgent(draft.agent_id, request) : await createAgent(request);
-    setSelectedAgentId(saved.agent_id);
-    setDraft(agentToDraft(saved));
-    return { selectedAgentId: saved.agent_id };
   }
 
   async function saveAgentGroup(): Promise<StudioRefreshOptions> {
