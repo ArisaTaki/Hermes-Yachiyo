@@ -5,14 +5,18 @@ export type RuntimeArtifactSnapshot = Pick<
   'artifact_id' | 'kind' | 'path' | 'title'
 >;
 
+export type RuntimeArtifactVariant = 'compact' | 'full';
+
 export function RuntimeArtifactPreview({
   artifact,
   className = 'yachiyo-task-artifact',
   testId = 'runtime-artifact-preview',
+  variant = 'compact',
 }: {
   artifact: RuntimeArtifactSnapshot;
   className?: string;
   testId?: string;
+  variant?: RuntimeArtifactVariant;
 }) {
   const label = artifact.title || artifact.path || artifact.kind || 'Artifact';
   return (
@@ -21,6 +25,7 @@ export function RuntimeArtifactPreview({
       data-artifact-id={artifact.artifact_id}
       data-artifact-kind={artifact.kind}
       data-artifact-path={artifact.path || ''}
+      data-artifact-variant={variant}
       data-testid={testId}
       title={artifact.path || label}
     >

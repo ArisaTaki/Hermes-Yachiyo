@@ -7,6 +7,7 @@ export function ArtifactPreview({ artifact }: { artifact: ArtifactSnapshot }) {
       artifact={artifact}
       className="yachiyo-task-artifact"
       testId="yachiyo-task-artifact-preview"
+      variant="compact"
     />
   );
 }

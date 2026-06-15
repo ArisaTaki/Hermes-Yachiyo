@@ -8,6 +8,8 @@ export type RuntimeApprovalCardSnapshot = Pick<
   'approval_id' | 'description' | 'input_preview' | 'status' | 'title' | 'tool_name'
 >;
 
+export type RuntimeApprovalVariant = 'compact' | 'inspector';
+
 export function RuntimeApprovalCard({
   actions,
   actionsClassName = 'runtime-approval-actions',
@@ -15,6 +17,7 @@ export function RuntimeApprovalCard({
   approval,
   className = 'yachiyo-task-approval',
   testId = 'runtime-approval-card',
+  variant = 'compact',
 }: {
   actions?: ReactNode;
   actionsClassName?: string;
@@ -22,6 +25,7 @@ export function RuntimeApprovalCard({
   approval: RuntimeApprovalCardSnapshot;
   className?: string;
   testId?: string;
+  variant?: RuntimeApprovalVariant;
 }) {
   const toolName = approval.tool_name || 'tool';
   const status = approval.status || 'pending';
@@ -33,6 +37,7 @@ export function RuntimeApprovalCard({
       data-approval-id={approval.approval_id}
       data-approval-status={status}
       data-approval-tool={toolName}
+      data-approval-variant={variant}
       data-testid={testId}
     >
       <span>{status === 'pending' ? '待审批' : approvalStatusLabel(status)}</span>

@@ -37,6 +37,7 @@ export function ArtifactInspector({
         onOpenArtifact={onOpenArtifact}
         previewClassName="studio-runtime-artifact"
         previewTestId="agent-run-detail-artifact-preview-card"
+        previewVariant="full"
         testId="agent-run-detail-artifact-list"
       />
       {artifactPreview ? (

@@ -633,7 +633,9 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             'actionsTestId="yachiyo-task-approval-actions"',
             'testId="yachiyo-task-approval-gate"',
             'cardTestId="yachiyo-task-approval-card"',
+            'cardVariant="compact"',
             'testId="yachiyo-task-approval-card"',
+            'variant="compact"',
             'approveContent={<><UiIcon name="check" /><span>批准</span></>}',
             'rejectContent={<><UiIcon name="close" /><span>拒绝</span></>}',
         ],
@@ -643,17 +645,21 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
         [
             "RuntimeArtifactPreview",
             'testId="yachiyo-task-artifact-preview"',
+            'variant="compact"',
         ],
     )
     _assert_contains(
         "apps/frontend/src/features/runtime-shared/components/RuntimeApprovalCard.tsx",
         [
+            "export type RuntimeApprovalVariant",
             "export function RuntimeApprovalCard",
+            "variant = 'compact'",
             "actions?: ReactNode;",
             "actionsClassName = 'runtime-approval-actions'",
             "actionsTestId = 'runtime-approval-actions'",
             "approvalPreviewRecord",
             "data-approval-id={approval.approval_id}",
+            "data-approval-variant={variant}",
             "data-testid={actionsTestId}",
         ],
     )
@@ -662,6 +668,8 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
         [
             "export function RuntimeApprovalGate",
             "RuntimeApprovalCard",
+            "type RuntimeApprovalVariant",
+            "cardVariant?: RuntimeApprovalVariant;",
             "approveContent?: ReactNode;",
             "rejectContent?: ReactNode;",
             "data-testid={testId}",
@@ -673,14 +681,18 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "{approveContent || approveLabel}",
             "{rejectContent || rejectLabel}",
             "disabled={busy}",
+            "variant={cardVariant}",
         ],
     )
     _assert_contains(
         "apps/frontend/src/features/runtime-shared/components/RuntimeArtifactPreview.tsx",
         [
+            "export type RuntimeArtifactVariant",
             "export function RuntimeArtifactPreview",
+            "variant = 'compact'",
             "data-artifact-id={artifact.artifact_id}",
             "data-artifact-path={artifact.path || ''}",
+            "data-artifact-variant={variant}",
         ],
     )
     _assert_contains(
@@ -689,6 +701,9 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "export function RuntimeArtifactList",
             "export function runtimeArtifactListItem",
             "RuntimeArtifactPreview",
+            "type RuntimeArtifactVariant",
+            "previewVariant?: RuntimeArtifactVariant;",
+            "variant={previewVariant}",
             "data-artifact-kind={item.kind}",
             "data-artifact-path={item.path || ''}",
             "data-artifact-source-label={item.source_label || ''}",
@@ -1387,6 +1402,7 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
             'actionsClassName="run-approval-actions"',
             'actionsTestId="agent-run-detail-approval-actions"',
             'cardTestId="agent-run-detail-approval-card"',
+            'cardVariant="inspector"',
         ],
     )
     _assert_contains(
@@ -1396,6 +1412,7 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
             "RuntimeArtifactList",
             "agent-run-detail-artifact",
             'previewTestId="agent-run-detail-artifact-preview-card"',
+            'previewVariant="full"',
         ],
     )
     _assert_contains(
@@ -3427,6 +3444,7 @@ def test_agent_studio_exposes_stable_e2e_selectors_for_run_detail_and_approval_f
             "data-testid=\"agent-run-detail-workflow-child-approval\"",
             "testId=\"agent-run-detail-workflow-child-approval-gate\"",
             "cardTestId=\"agent-run-detail-workflow-child-approval-card\"",
+            "cardVariant=\"inspector\"",
             "data-testid=\"agent-run-detail-workflow-child-approval-actions\"",
             "approveTestId=\"agent-run-detail-workflow-child-approve\"",
             "rejectTestId=\"agent-run-detail-workflow-child-reject\"",
@@ -3460,6 +3478,7 @@ def test_agent_studio_exposes_stable_e2e_selectors_for_run_detail_and_approval_f
             "actionsClassName=\"run-approval-actions\"",
             "actionsTestId=\"agent-run-detail-approval-actions\"",
             'cardTestId="agent-run-detail-approval-card"',
+            'cardVariant="inspector"',
         ],
     )
     _assert_contains(
@@ -3482,6 +3501,7 @@ def test_agent_studio_exposes_stable_e2e_selectors_for_run_detail_and_approval_f
             "fallbackRunId={selectedRun.run_id}",
             "data-testid=\"agent-run-detail-artifact-preview\"",
             'previewTestId="agent-run-detail-artifact-preview-card"',
+            'previewVariant="full"',
         ],
     )
     _assert_contains(

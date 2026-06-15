@@ -1,6 +1,10 @@
 import type { ReactNode } from 'react';
 
-import { RuntimeApprovalCard, type RuntimeApprovalCardSnapshot } from './RuntimeApprovalCard';
+import {
+  RuntimeApprovalCard,
+  type RuntimeApprovalCardSnapshot,
+  type RuntimeApprovalVariant,
+} from './RuntimeApprovalCard';
 
 type RuntimeApprovalGateProps = {
   actionsClassName?: string;
@@ -13,6 +17,7 @@ type RuntimeApprovalGateProps = {
   busy?: boolean;
   cardClassName?: string;
   cardTestId?: string;
+  cardVariant?: RuntimeApprovalVariant;
   children?: ReactNode;
   className?: string;
   onApprove?: () => void;
@@ -35,6 +40,7 @@ export function RuntimeApprovalGate({
   busy = false,
   cardClassName = 'runtime-approval-card',
   cardTestId = 'runtime-approval-card',
+  cardVariant = 'compact',
   children,
   className = 'runtime-approval-gate',
   onApprove,
@@ -83,6 +89,7 @@ export function RuntimeApprovalGate({
         approval={approval}
         className={cardClassName}
         testId={cardTestId}
+        variant={cardVariant}
       />
       {children}
     </section>

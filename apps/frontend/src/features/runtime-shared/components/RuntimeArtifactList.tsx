@@ -1,4 +1,8 @@
-import { RuntimeArtifactPreview, type RuntimeArtifactSnapshot } from './RuntimeArtifactPreview';
+import {
+  RuntimeArtifactPreview,
+  type RuntimeArtifactSnapshot,
+  type RuntimeArtifactVariant,
+} from './RuntimeArtifactPreview';
 
 export type RuntimeArtifactSource = RuntimeArtifactSnapshot | Record<string, unknown>;
 
@@ -18,6 +22,7 @@ type RuntimeArtifactListProps = {
   onOpenArtifact?: (runId: string, path: string) => Promise<void> | void;
   previewClassName?: string;
   previewTestId?: string;
+  previewVariant?: RuntimeArtifactVariant;
   testId?: string;
 };
 
@@ -31,6 +36,7 @@ export function RuntimeArtifactList({
   onOpenArtifact,
   previewClassName,
   previewTestId,
+  previewVariant = 'compact',
   testId,
 }: RuntimeArtifactListProps) {
   const visibleArtifacts = artifacts.slice(0, limit ? Math.max(0, limit) : artifacts.length);
@@ -43,6 +49,7 @@ export function RuntimeArtifactList({
             artifact={item}
             className={previewClassName}
             testId={previewTestId}
+            variant={previewVariant}
           />
         );
         if (!onOpenArtifact) {

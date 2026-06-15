@@ -29,6 +29,7 @@ export function ApprovalCard({
         busy={busy}
         cardClassName="yachiyo-task-approval"
         cardTestId="yachiyo-task-approval-card"
+        cardVariant="compact"
         className="yachiyo-task-approval-gate"
         onApprove={onApprove}
         onReject={onReject}
@@ -47,6 +48,7 @@ export function ApprovalCard({
       approval={approval}
       className="yachiyo-task-approval"
       testId="yachiyo-task-approval-card"
+      variant="compact"
     />
   );
 }

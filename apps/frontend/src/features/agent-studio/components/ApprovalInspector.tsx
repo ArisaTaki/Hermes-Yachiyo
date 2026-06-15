@@ -58,6 +58,7 @@ export function ApprovalInspector({
       busy={busy}
       cardClassName="studio-runtime-approval"
       cardTestId="agent-run-detail-approval-card"
+      cardVariant="inspector"
       className="run-approval-box"
       onApprove={() => onRunAction(onApproveSelectedRun, '批准工具调用')}
       onReject={() => onRunAction(onRejectSelectedRun, '拒绝工具调用')}

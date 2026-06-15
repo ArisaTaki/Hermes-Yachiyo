@@ -253,6 +253,7 @@ export function RunDetailPanel({
                   busy={busy}
                   cardClassName="studio-runtime-approval workflow-child-runtime-approval-card"
                   cardTestId="agent-run-detail-workflow-child-approval-card"
+                  cardVariant="inspector"
                   className="workflow-child-runtime-approval"
                   onApprove={() => onRunAction(
                     () => onApproveRunById(selectedWorkflowApprovalChildRunId, selectedRun.run_id),
