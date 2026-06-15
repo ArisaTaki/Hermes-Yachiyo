@@ -6,8 +6,21 @@ import asyncio
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field
 
+from apps.bridge.routes.yachiyo_models import (
+    AgentSkillBody,
+    FutureTaskCancelBody,
+    FutureTaskTriggerBody,
+    MemoryBody,
+    SkillFolderBody,
+    SkillImportBody,
+    SkillInstallBody,
+    SkillUpdateBody,
+    StartAgentRunBody,
+    StartGroupRunBody,
+    StartWorkflowRunBody,
+    TaskApprovalRequest,
+)
 from apps.bridge.routes.yachiyo_services import (
     agent_service as _agent_service,
     bad_request as _bad_request,
@@ -27,82 +40,6 @@ from apps.shell.yachiyo_agent import (
 )
 
 router = APIRouter(prefix="/yachiyo", tags=["Yachiyo Agent"])
-
-
-class TaskApprovalRequest(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    approval_id: str | None = Field(default=None, max_length=160)
-    reason: str | None = Field(default=None, max_length=2000)
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class StartGroupRunBody(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    objective: str = Field(..., min_length=1, max_length=60000)
-    title: str | None = Field(default=None, max_length=1000)
-    client_run_id: str | None = Field(default=None, max_length=160)
-
-
-class StartAgentRunBody(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    objective: str = Field(..., min_length=1, max_length=60000)
-    title: str | None = Field(default=None, max_length=1000)
-    client_run_id: str | None = Field(default=None, max_length=160)
-
-
-class AgentSkillBody(BaseModel):
-    skill_id: str = Field(..., min_length=1, max_length=160)
-
-
-class SkillUpdateBody(BaseModel):
-    enabled: bool | None = None
-    folder_id: str | None = Field(default=None, max_length=160)
-
-
-class SkillFolderBody(BaseModel):
-    folder_id: str | None = Field(default=None, max_length=160)
-    name: str | None = Field(default=None, max_length=160)
-    description: str | None = Field(default=None, max_length=1000)
-    source_scope: str | None = Field(default=None, max_length=40)
-    sort_order: int | None = None
-
-
-class SkillImportBody(BaseModel):
-    source_path: str = Field(..., min_length=1, max_length=4000)
-    folder_id: str | None = Field(default=None, max_length=160)
-
-
-class SkillInstallBody(BaseModel):
-    command: str = Field(..., min_length=1, max_length=4000)
-    folder_id: str | None = Field(default=None, max_length=160)
-
-
-class MemoryBody(BaseModel):
-    content: str | None = Field(default=None, max_length=60000)
-    old_content: str | None = Field(default=None, max_length=60000)
-    kind: str | None = Field(default=None, max_length=40)
-    scope: str | None = Field(default=None, max_length=40)
-    reason: str | None = Field(default=None, max_length=2000)
-
-
-class FutureTaskCancelBody(BaseModel):
-    reason: str | None = Field(default=None, max_length=2000)
-
-
-class FutureTaskTriggerBody(BaseModel):
-    now_epoch: float | None = None
-    limit: int | None = Field(default=None, ge=1, le=200)
-
-
-class StartWorkflowRunBody(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    objective: str = Field(..., min_length=1, max_length=60000)
-    title: str | None = Field(default=None, max_length=1000)
-    client_run_id: str | None = Field(default=None, max_length=160)
 
 
 @router.get("/readiness")
