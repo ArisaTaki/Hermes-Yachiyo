@@ -219,7 +219,10 @@ from apps.shell.agent.runtime.skill_install import SkillInstallCommandValidator
 from apps.shell.agent.runtime.skill_sources import SkillSourceDiscovery
 from apps.shell.agent.runtime.skill_sync import SkillSyncPlanner
 from apps.shell.agent.runtime.tool_brokers import RuntimeToolBrokerFactory
-from apps.shell.agent.runtime.tool_requests import ToolRequestParser
+from apps.shell.agent.runtime.tool_requests import (
+    ToolRequestParser,
+    normalize_tool_name as _normalize_tool_name,
+)
 from apps.shell.agent.runtime.tool_approvals import (
     ToolApprovalClaimProjection,
     ToolApprovalContinuationHandoff,
@@ -442,11 +445,6 @@ def _skill_content_hash(root: Path) -> str:
 
 def _parse_skill_frontmatter(markdown: str) -> dict[str, Any]:
     return SkillContentInspector.parse_frontmatter(markdown)
-
-
-def _normalize_tool_name(value: Any) -> str:
-    name = str(value or "").strip()
-    return _TOOL_NAME_ALIASES.get(name, name)
 
 
 def _call_model_profile_chat_message(

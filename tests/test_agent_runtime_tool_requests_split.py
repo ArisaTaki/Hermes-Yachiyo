@@ -13,6 +13,7 @@ from apps.shell.credential_store import MemoryCredentialStore
 
 def test_tool_request_parser_remains_exported_from_legacy_runtime_module() -> None:
     assert agent_runtime.ToolRequestParser is ToolRequestParser
+    assert agent_runtime._normalize_tool_name is normalize_tool_name
 
 
 def test_tool_request_parser_parses_native_tool_calls_and_aliases() -> None:
