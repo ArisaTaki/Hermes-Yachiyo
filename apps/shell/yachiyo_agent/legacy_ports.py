@@ -412,6 +412,7 @@ class LegacyStudioPort:
                     completed_run,
                     "group.member.completed",
                     group_id=group_id,
+                    group=group,
                     run_group_id="",
                     objective=objective,
                     member=current_member,
@@ -435,6 +436,7 @@ class LegacyStudioPort:
                 child_run,
                 "group.member.started",
                 group_id=group_id,
+                group=group,
                 run_group_id=run_group_id,
                 objective=objective,
                 member=member,
@@ -448,6 +450,7 @@ class LegacyStudioPort:
                     child_run,
                     "group.member.completed",
                     group_id=group_id,
+                    group=group,
                     run_group_id=run_group_id,
                     objective=objective,
                     member=member,
@@ -1079,6 +1082,7 @@ def _append_group_member_event(
     event_type: str,
     *,
     group_id: str,
+    group: dict[str, Any] | None = None,
     run_group_id: str,
     objective: str,
     member: dict[str, Any],
@@ -1101,8 +1105,26 @@ def _append_group_member_event(
         "run_id": run_id,
         "status": str(run.get("status") or ""),
     }
+    if group:
+        payload.update(_group_event_context(group))
     if client_run_id:
         payload["client_run_id"] = client_run_id
     if child_client_run_id:
         payload["child_client_run_id"] = child_client_run_id
     append_run_event(run_id, event_type, payload)
+
+
+def _group_event_context(group: dict[str, Any]) -> dict[str, Any]:
+    context: dict[str, Any] = {}
+    for source_key, event_key in (
+        ("name", "group_name"),
+        ("mode", "group_mode"),
+        ("moderator_agent_id", "group_moderator_agent_id"),
+        ("memory_scope", "group_memory_scope"),
+        ("tool_policy_id", "group_tool_policy_id"),
+    ):
+        value = _optional_text(group.get(source_key))
+        if value:
+            context[event_key] = value
+    context["group_enabled"] = _bool(group.get("enabled"), default=True)
+    return context

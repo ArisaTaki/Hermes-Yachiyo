@@ -108,11 +108,16 @@ def test_legacy_studio_port_updates_existing_chat_group_and_starts_member_runs(
     assert event_calls[0][1]["event_type"] == "group.member.started"
     assert event_calls[0][1]["payload"]["group_id"] == created["group_id"]
     assert event_calls[0][1]["payload"]["agent_id"] == "agent-reviewer"
+    assert event_calls[0][1]["payload"]["group_mode"] == "debate"
+    assert event_calls[0][1]["payload"]["group_memory_scope"] == "per_agent"
+    assert event_calls[0][1]["payload"]["group_moderator_agent_id"] == "agent-reviewer"
+    assert event_calls[0][1]["payload"]["group_tool_policy_id"] == "policy-original"
 
     runtime.complete_run(started["runs"][0]["run_id"], status="completed")
     event_calls = [call for call in runtime.calls if call[0] == "append_run_event"]
     assert event_calls[-1][1]["event_type"] == "group.member.completed"
     assert event_calls[-1][1]["payload"]["agent_id"] == "agent-reviewer"
+    assert event_calls[-1][1]["payload"]["group_mode"] == "debate"
 
 
 class _FakeChatStore:
