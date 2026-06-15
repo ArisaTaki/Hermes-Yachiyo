@@ -445,6 +445,8 @@ class NativeRunEngine:
     _validate_tool_payload = staticmethod(RuntimeToolOperations.validate_tool_payload)
     _parse_tool_calls = staticmethod(RuntimeToolOperations.parse_tool_calls)
     _parse_tool_request = staticmethod(RuntimeToolOperations.parse_tool_request)
+    _default_tool_policy = staticmethod(RuntimePolicyCompiler.default_tool_policy)
+    _default_workspace_policy = staticmethod(RuntimePolicyCompiler.default_workspace_policy)
 
     def __init__(
         self,
@@ -1377,14 +1379,6 @@ class NativeRunEngine:
 
     def _seed_workflow_templates(self) -> None:
         self.seed_template_service.seed_workflows()
-
-    @staticmethod
-    def _default_tool_policy(category: str = "custom") -> dict[str, Any]:
-        return RuntimePolicyCompiler.default_tool_policy(category)
-
-    @staticmethod
-    def _default_workspace_policy() -> dict[str, Any]:
-        return RuntimePolicyCompiler.default_workspace_policy()
 
     def _default_agent_workdir(self, agent_id: str) -> Path:
         return self.workspace_policy_service.default_agent_workdir(agent_id)

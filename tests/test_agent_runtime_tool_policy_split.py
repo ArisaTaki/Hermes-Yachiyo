@@ -39,6 +39,8 @@ def test_tool_policy_classes_and_constants_remain_exported_from_legacy_module() 
     assert agent_runtime._MEMORY_SCOPES is MEMORY_SCOPES
     assert agent_runtime._MEMORY_KINDS is MEMORY_KINDS
     assert agent_runtime.RuntimePolicyCompiler is RuntimePolicyCompiler
+    assert agent_runtime.NativeRunEngine._default_tool_policy is RuntimePolicyCompiler.default_tool_policy
+    assert agent_runtime.NativeRunEngine._default_workspace_policy is RuntimePolicyCompiler.default_workspace_policy
 
 
 def test_model_tool_schema_uses_function_aliases_and_strict_parameters() -> None:
