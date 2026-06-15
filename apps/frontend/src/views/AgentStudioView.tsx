@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState, type DragEvent } from 'react';
 import type { Connection, Edge, Node } from '@xyflow/react';
 import {
   addEdge,
@@ -18,6 +18,7 @@ import { WorkflowEditorPanel, WorkflowRunPreview } from '../features/agent-studi
 import { useAgentDefinitions } from '../features/agent-studio/hooks/useAgentDefinitions';
 import { useAgentGroups } from '../features/agent-studio/hooks/useAgentGroups';
 import { useApprovedRunGuard } from '../features/agent-studio/hooks/useApprovedRunGuard';
+import { useRunApprovalFollowup } from '../features/agent-studio/hooks/useRunApprovalFollowup';
 import { useRunEventReplay } from '../features/agent-studio/hooks/useRunEventReplay';
 import { useRunTimeline } from '../features/agent-studio/hooks/useRunTimeline';
 import { useWorkflowDefinitions } from '../features/agent-studio/hooks/useWorkflowDefinitions';
@@ -173,9 +174,6 @@ type StudioRefreshOptions = {
   skipRefresh?: boolean;
 };
 
-const runApprovalPollAttempts = 100;
-const runApprovalPollIntervalMs = 1200;
-
 type ConfirmDialogState = {
   title: string;
   description: string;
@@ -313,7 +311,6 @@ export function AgentStudioView() {
   const [runSearchQuery, setRunSearchQuery] = useState('');
   const [collapsedRunHistoryGroups, setCollapsedRunHistoryGroups] = useState<Set<string>>(new Set());
   const [selectedRunId, setSelectedRunId] = useState(() => routeRunId);
-  const selectedRunIdRef = useRef(selectedRunId);
   const [artifactPreview, setArtifactPreview] = useState<{ path: string; content: string; truncated?: boolean } | null>(null);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
@@ -901,50 +898,6 @@ export function AgentStudioView() {
     }));
   }
 
-  function isApprovalFollowupCurrent(selectedAfterAction: string): boolean {
-    return selectedRunIdRef.current === selectedAfterAction;
-  }
-
-  function approvalFollowupRefreshOptions(selectedAfterAction: string): StudioRefreshOptions {
-    return isApprovalFollowupCurrent(selectedAfterAction) ? { selectedRunId: selectedAfterAction } : {};
-  }
-
-  async function pollApprovedRunProgress(runId: string, selectedAfterAction: string) {
-    const pollRunIds = Array.from(new Set([runId, selectedAfterAction].filter(Boolean)));
-    if (!pollRunIds.length) return;
-    for (let attempt = 0; attempt < runApprovalPollAttempts; attempt += 1) {
-      await new Promise<void>((resolve) => {
-        window.setTimeout(resolve, attempt === 0 ? 300 : runApprovalPollIntervalMs);
-      });
-      const loadedRuns = (await Promise.all(pollRunIds.map((id) => getRun(id).catch(() => null))))
-        .filter((run): run is RunSpec => Boolean(run));
-      const visibleRuns = acceptedRunUpdates(loadedRuns);
-      if (!visibleRuns.length) continue;
-      upsertRunDetailCache(visibleRuns);
-      await refreshRunGroupsForRuns(visibleRuns);
-      const approvedRun = visibleRuns.find((run) => run.run_id === runId) || null;
-      const selectedRunUpdate = visibleRuns.find((run) => run.run_id === selectedAfterAction) || null;
-      const watchedRun = selectedRunUpdate || approvedRun;
-      if (!watchedRun) continue;
-      const watchedStatus = normalizeRunStatus(watchedRun.status);
-      if (watchedStatus === 'approval_required') {
-        if (isApprovalFollowupCurrent(selectedAfterAction)) {
-          setStatus('Run 需要处理下一次审批。');
-        }
-        await refresh(approvalFollowupRefreshOptions(selectedAfterAction));
-        return;
-      }
-      if (!isActiveRunStatus(watchedRun.status)) {
-        if (isApprovalFollowupCurrent(selectedAfterAction)) {
-          setStatus(approvedRunStatusMessage(watchedRun));
-        }
-        await refresh(approvalFollowupRefreshOptions(selectedAfterAction));
-        return;
-      }
-    }
-    await refresh(approvalFollowupRefreshOptions(selectedAfterAction));
-  }
-
   const refresh = useCallback(async (options: StudioRefreshOptions = {}) => {
     const [
       nextAgents,
@@ -997,6 +950,19 @@ export function AgentStudioView() {
     });
   }, [applyAgents, applyWorkflows, loadAgentGroups]);
 
+  const {
+    approvalFollowupRefreshOptions,
+    isApprovalFollowupCurrent,
+    pollApprovedRunProgress,
+  } = useRunApprovalFollowup({
+    acceptedRunUpdates,
+    refresh,
+    refreshRunGroupsForRuns,
+    selectedRunId,
+    setStatus,
+    upsertRunDetailCache,
+  });
+
   useEffect(() => {
     setLoading(true);
     refresh()
@@ -1004,10 +970,6 @@ export function AgentStudioView() {
       .catch((err: unknown) => setError(err instanceof Error ? err.message : '读取 Agent Studio 失败'))
       .finally(() => setLoading(false));
   }, [refresh]);
-
-  useEffect(() => {
-    selectedRunIdRef.current = selectedRunId;
-  }, [selectedRunId]);
 
   useEffect(() => {
     const nextTab = routeRunId || routeRunTarget ? 'runs' : routeTab;

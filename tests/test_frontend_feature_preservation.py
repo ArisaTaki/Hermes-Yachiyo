@@ -529,6 +529,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "useAgentDefinitions",
             "useAgentGroups",
             "useApprovedRunGuard",
+            "useRunApprovalFollowup",
             "useRunEventReplay(selectedRunId, selectedRunReplayRefreshKey)",
             "useRunTimeline(selectedRunId, selectedRunReplayRefreshKey)",
             "useWorkflowDefinitions",
@@ -586,6 +587,23 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "normalizeRunStatus(run.status) !== 'approval_required'",
             "approvedApprovalGuardsRef.current.delete(run.run_id)",
             "nextRuns.filter((run) => shouldAcceptRunUpdate(run))",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useRunApprovalFollowup.ts",
+        [
+            "export function useRunApprovalFollowup",
+            "const selectedRunIdRef = useRef(selectedRunId);",
+            "selectedRunIdRef.current = selectedRunId;",
+            "const runApprovalPollAttempts = 100;",
+            "window.setTimeout(resolve, attempt === 0 ? 300 : runApprovalPollIntervalMs)",
+            "getRun(id).catch(() => null)",
+            "const visibleRuns = acceptedRunUpdates(loadedRuns);",
+            "await refreshRunGroupsForRuns(visibleRuns);",
+            "normalizeRunStatus(watchedRun.status)",
+            "setStatus('Run 需要处理下一次审批。');",
+            "setStatus(approvedRunStatusMessage(watchedRun));",
+            "await refresh(approvalFollowupRefreshOptions(selectedAfterAction));",
         ],
     )
     _assert_contains(
@@ -1729,17 +1747,22 @@ def test_chat_approval_run_detail_handoff_preserves_route_and_replay_wiring() ->
             "const routeRunId = currentParam('run').trim();",
             "const [tab, setTab] = useState<StudioTab>(() => routeRunId || routeRunTarget ? 'runs' : routeTab);",
             "const [selectedRunId, setSelectedRunId] = useState(() => routeRunId);",
-            "const selectedRunIdRef = useRef(selectedRunId);",
-            "selectedRunIdRef.current = selectedRunId;",
             "const nextTab = routeRunId || routeRunTarget ? 'runs' : routeTab;",
             "setSelectedRunId((current) => current === routeRunId ? current : routeRunId);",
             "if (!selectedRunId || selectedRun) return;",
             "getRun(selectedRunId)",
             "useRunEventReplay(selectedRunId, selectedRunReplayRefreshKey)",
+            "useRunApprovalFollowup({",
             "selectedRunExecutionEvents",
-            "function approvalFollowupRefreshOptions(selectedAfterAction: string): StudioRefreshOptions",
-            "return isApprovalFollowupCurrent(selectedAfterAction) ? { selectedRunId: selectedAfterAction } : {};",
             "refresh(approvalFollowupRefreshOptions(selectedAfterAction))",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useRunApprovalFollowup.ts",
+        [
+            "const selectedRunIdRef = useRef(selectedRunId);",
+            "selectedRunIdRef.current = selectedRunId;",
+            "isApprovalFollowupCurrent(selectedAfterAction) ? { selectedRunId: selectedAfterAction } : {}",
         ],
     )
     _assert_contains(
