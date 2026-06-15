@@ -4019,6 +4019,7 @@ button:hover {
 .live2d-resource-hint,
 .live2d-reply,
 .live2d-quick-input,
+.bubble-quick-input,
 .bubble-launcher,
 .portrait,
 .status-dot,
@@ -4245,6 +4246,46 @@ button:hover {
 
 .bubble-summary.hidden {
   display: none;
+}
+
+.bubble-quick-input {
+  position: absolute;
+  left: 50%;
+  bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: min(176px, calc(100vw - 14px));
+  padding: 4px;
+  border: 1px solid rgba(255, 244, 203, 0.28);
+  border-radius: 999px;
+  background: rgba(18, 22, 30, 0.82);
+  transform: translateX(-50%);
+  z-index: 18;
+  backdrop-filter: blur(10px);
+  -webkit-app-region: no-drag;
+}
+
+.bubble-quick-input input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: #fff7df;
+  font-size: 10px;
+}
+
+.bubble-quick-input button {
+  min-width: 36px;
+  padding: 3px 6px;
+  font-size: 10px;
+  line-height: 1.15;
+}
+
+.bubble-quick-input button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .launcher-agent-task-light {

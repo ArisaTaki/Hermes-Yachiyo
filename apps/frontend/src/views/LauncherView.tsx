@@ -132,7 +132,7 @@ export function LauncherView({ view }: { view: AppView }) {
   }, []);
 
   if (mode === 'live2d') return <Live2DLauncher data={launcher.data} refresh={launcher.refresh} />;
-  return <BubbleLauncher data={launcher.data} />;
+  return <BubbleLauncher data={launcher.data} refresh={launcher.refresh} />;
 }
 
 function useLauncher(mode: 'bubble' | 'live2d') {
@@ -193,10 +193,12 @@ function handleContextMenu(event: MouseEvent, mode: LauncherMode) {
   void openLauncherMenu(mode);
 }
 
-function BubbleLauncher({ data }: { data: LauncherPayload | null }) {
+function BubbleLauncher({ data, refresh }: { data: LauncherPayload | null; refresh: () => Promise<void> }) {
   const launcher = data?.launcher || {};
   const proactive = data?.proactive || {};
   const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const quickInputRef = useRef<HTMLFormElement | null>(null);
+  const quickInputComposingRef = useRef(false);
   const dragStateRef = useRef<LauncherDragState | null>(null);
   const clickSuppressedRef = useRef(false);
   const hitRegionsRef = useRef<Live2DHitRegion[]>([]);
@@ -222,6 +224,8 @@ function BubbleLauncher({ data }: { data: LauncherPayload | null }) {
   const taskSummary = launcherAgentTaskSummary(agentTask);
   const summaryText = taskSummary || latestReply || latestLauncherSessionSummary(data?.chat) || statusLabel;
   const showSummary = displayMode !== 'icon' && Boolean(summaryText);
+  const [quickText, setQuickText] = useState('');
+  const [quickInputVisible, setQuickInputVisible] = useState(launcher.default_open_behavior === 'chat_input');
   const title = bubbleTitle(displayMode, hasAttention, statusLabel, proactive);
   const ariaLabel = displayMode === 'icon'
     ? 'Yachiyo Bubble'
@@ -233,13 +237,17 @@ function BubbleLauncher({ data }: { data: LauncherPayload | null }) {
   } as CSSProperties;
 
   useEffect(() => {
+    setQuickInputVisible(launcher.default_open_behavior === 'chat_input');
+  }, [launcher.default_open_behavior]);
+
+  useEffect(() => {
     let frame = 0;
     const report = () => {
       if (frame) window.cancelAnimationFrame(frame);
       frame = window.requestAnimationFrame(() => {
         frame = 0;
-        const region = elementRegion(buttonRef.current);
-        const regions = region ? [region] : [];
+        const regions = [elementRegion(buttonRef.current), elementRegion(quickInputRef.current)]
+          .filter((region): region is Live2DHitRegion => Boolean(region));
         hitRegionsRef.current = regions;
         const rects = live2dShapeRects(null, regions, 'medium');
         if (rects.length) {
@@ -258,7 +266,7 @@ function BubbleLauncher({ data }: { data: LauncherPayload | null }) {
       window.removeEventListener('resize', report);
       void setLauncherPointerInteractive('bubble', true);
     };
-  }, [launcher.avatar_url, displayMode, idleHidden]);
+  }, [launcher.avatar_url, displayMode, idleHidden, quickInputVisible]);
 
   useEffect(() => {
     let pending = false;
@@ -327,6 +335,21 @@ function BubbleLauncher({ data }: { data: LauncherPayload | null }) {
     void openLauncherPrimaryTarget('bubble', data);
   }
 
+  async function sendQuickMessage(event: FormEvent) {
+    event.preventDefault();
+    if (quickInputComposingRef.current) return;
+    const text = quickText.trim();
+    if (!text) return;
+    setQuickText('');
+    await apiPost('/ui/launcher/quick-message', {
+      text,
+      mode: data?.mode || 'bubble',
+      session_id: '',
+    });
+    setQuickInputVisible(false);
+    await refresh();
+  }
+
   return (
     <main className="launcher-shell bubble-shell" data-testid="bubble-launcher-shell" onContextMenu={(event) => handleContextMenu(event, 'bubble')}>
       <button
@@ -346,11 +369,33 @@ function BubbleLauncher({ data }: { data: LauncherPayload | null }) {
       >
         <span className="portrait" aria-hidden="true"><span className="mouth" /></span>
         <span className={dotClass} data-testid="bubble-launcher-status-dot" aria-hidden="true" />
-        <span className={showSummary ? 'bubble-summary' : 'bubble-summary hidden'} data-testid="bubble-launcher-summary">
+        <span className={showSummary && !quickInputVisible ? 'bubble-summary' : 'bubble-summary hidden'} data-testid="bubble-launcher-summary">
           {summaryText}
         </span>
       </button>
       <LauncherAgentTaskLight mode="bubble" task={agentTask} />
+      {launcher.enable_quick_input !== false && quickInputVisible ? (
+        <form ref={quickInputRef} className="bubble-quick-input" data-testid="bubble-launcher-quick-input" onSubmit={sendQuickMessage} onClick={(event) => event.stopPropagation()}>
+          <input
+            data-testid="bubble-launcher-quick-input-field"
+            value={quickText}
+            onChange={(event) => setQuickText(event.target.value)}
+            onCompositionEnd={() => {
+              quickInputComposingRef.current = false;
+            }}
+            onCompositionStart={() => {
+              quickInputComposingRef.current = true;
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && isImeComposingKey(event, quickInputComposingRef.current)) {
+                event.preventDefault();
+              }
+            }}
+            placeholder="和八千代说点什么…"
+          />
+          <button type="submit" data-testid="bubble-launcher-quick-input-submit" disabled={!quickText.trim()}>发送</button>
+        </form>
+      ) : null}
       <LauncherSessionSummaryProbe mode="bubble" latestReply={latestReply} statusLabel={statusLabel} sessions={recentSessions} />
     </main>
   );

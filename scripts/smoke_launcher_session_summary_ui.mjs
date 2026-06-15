@@ -17,6 +17,7 @@ const GROUP_TASK_ID = 'launcher_group_summary_task';
 const DELEGATED_TASK_ID = 'launcher_delegated_summary_task';
 const BUBBLE_SUMMARY = 'Group summary: Design and Coding finished Native dispatch.';
 const DELEGATED_SUMMARY = 'Delegated summary: Coding finished Native delegated run.';
+const BUBBLE_QUICK_TEXT = 'Bubble quick input from launcher smoke';
 const LIVE2D_REPLY = 'Live2D latest reply from launcher smoke';
 const LIVE2D_QUICK_TEXT = 'Live2D quick input from launcher smoke';
 const STATUS_LABEL = '2 recent sessions';
@@ -24,9 +25,11 @@ const now = new Date().toISOString();
 
 const bridgeState = {
   ackPayloads: [],
+  bubbleDefaultOpenBehavior: 'reply_bubble',
   live2dClickAction: 'toggle_reply',
   modeRequests: [],
   quickMessagePayload: null,
+  quickMessagePayloads: [],
 };
 
 const recentSessions = [
@@ -109,6 +112,8 @@ function launcherPayload(mode) {
         }
       : {
           default_display: 'summary',
+          default_open_behavior: bridgeState.bubbleDefaultOpenBehavior,
+          enable_quick_input: true,
           latest_status: 'completed',
           show_unread_dot: true,
           has_attention: false,
@@ -186,17 +191,26 @@ async function startMockBridge() {
         return;
       }
       if (request.method === 'POST' && url.pathname === '/ui/launcher/quick-message') {
-        bridgeState.quickMessagePayload = await readRequestJson(request);
+        const body = await readRequestJson(request);
+        bridgeState.quickMessagePayload = body;
+        bridgeState.quickMessagePayloads.push(body);
         sendJson(response, 200, { ok: true, task_id: 'launcher-session-summary-quick-message' });
         return;
       }
       if (request.method === 'GET' && url.pathname === '/__smoke/state') {
         sendJson(response, 200, {
           ackPayloads: bridgeState.ackPayloads,
+          bubbleDefaultOpenBehavior: bridgeState.bubbleDefaultOpenBehavior,
           live2dClickAction: bridgeState.live2dClickAction,
           modeRequests: bridgeState.modeRequests,
           quickMessagePayload: bridgeState.quickMessagePayload,
+          quickMessagePayloads: bridgeState.quickMessagePayloads,
         });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/__smoke/bubble-chat-input') {
+        bridgeState.bubbleDefaultOpenBehavior = 'chat_input';
+        sendJson(response, 200, { ok: true, bubbleDefaultOpenBehavior: bridgeState.bubbleDefaultOpenBehavior });
         return;
       }
       if (request.method === 'GET' && url.pathname === '/__smoke/live2d-open-chat') {
@@ -263,6 +277,7 @@ const devUrl = ${JSON.stringify(devUrl)};
 const bridgeUrl = ${JSON.stringify(bridgeUrl)};
 const bubbleSummary = ${JSON.stringify(BUBBLE_SUMMARY)};
 const delegatedSummary = ${JSON.stringify(DELEGATED_SUMMARY)};
+const bubbleQuickText = ${JSON.stringify(BUBBLE_QUICK_TEXT)};
 const live2dReply = ${JSON.stringify(LIVE2D_REPLY)};
 const live2dQuickText = ${JSON.stringify(LIVE2D_QUICK_TEXT)};
 const groupSessionId = ${JSON.stringify(GROUP_SESSION_ID)};
@@ -432,6 +447,43 @@ async function main() {
   ), 'bubble launcher opened chat session');
   console.log('[electron-smoke] bubble launcher ack verified');
 
+  await requestBridgeJson('/__smoke/bubble-chat-input');
+  await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '&surface=desktop#/bubble');
+  await installOpenViewProbe(win);
+  console.log('[electron-smoke] bubble chat input loaded');
+  await waitFor(win, () => {
+    const quickInput = document.querySelector('[data-testid="bubble-launcher-quick-input"]');
+    const quickField = document.querySelector('[data-testid="bubble-launcher-quick-input-field"]');
+    const quickSubmit = document.querySelector('[data-testid="bubble-launcher-quick-input-submit"]');
+    return quickInput && quickField && quickSubmit;
+  }, 'bubble quick input visible');
+  await win.webContents.executeJavaScript(\`
+    {
+      const field = document.querySelector('[data-testid="bubble-launcher-quick-input-field"]');
+      if (!field) throw new Error('missing bubble quick input field');
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      setter.call(field, ${JSON.stringify(`  ${BUBBLE_QUICK_TEXT}  `)});
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  \`, true);
+  await waitFor(win, () => {
+    const submit = document.querySelector('[data-testid="bubble-launcher-quick-input-submit"]');
+    return submit && !submit.disabled;
+  }, 'bubble quick input submit enabled');
+  await win.webContents.executeJavaScript(\`
+    (() => {
+      const submit = document.querySelector('[data-testid="bubble-launcher-quick-input-submit"]');
+      if (!submit) throw new Error('missing bubble quick input submit');
+      submit.click();
+    })();
+  \`, true);
+  await waitForBridgeState((state) => (
+    Array.isArray(state.quickMessagePayloads)
+    && state.quickMessagePayloads.some((payload) => payload?.text === ${JSON.stringify(BUBBLE_QUICK_TEXT)} && payload?.mode === 'bubble')
+  ), 'bubble quick input payload');
+  await waitFor(win, () => !document.querySelector('[data-testid="bubble-launcher-quick-input"]'), 'bubble quick input submitted');
+  console.log('[electron-smoke] bubble quick input submitted: ' + bubbleQuickText);
+
   await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '&surface=desktop#/live2d');
   await installOpenViewProbe(win);
   console.log('[electron-smoke] live2d loaded');
@@ -480,9 +532,11 @@ async function main() {
     return submit && !submit.disabled;
   }, 'live2d quick input submit enabled');
   await win.webContents.executeJavaScript(\`
-    const submit = document.querySelector('[data-testid="live2d-launcher-quick-input-submit"]');
-    if (!submit) throw new Error('missing live2d quick input submit');
-    submit.click();
+    (() => {
+      const submit = document.querySelector('[data-testid="live2d-launcher-quick-input-submit"]');
+      if (!submit) throw new Error('missing live2d quick input submit');
+      submit.click();
+    })();
   \`, true);
   await waitFor(win, () => {
     const quickInput = document.querySelector('[data-testid="live2d-launcher-quick-input"]');
@@ -587,6 +641,17 @@ function assertMockBridgeContract() {
   }
   if (!ackModes.includes('live2d')) {
     throw new Error(`live2d launcher ack was not called: ${JSON.stringify(bridgeState.ackPayloads)}`);
+  }
+  const quickPayloads = bridgeState.quickMessagePayloads;
+  const bubbleQuickPayload = quickPayloads.find((payload) => payload?.mode === 'bubble');
+  if (!bubbleQuickPayload) {
+    throw new Error(`bubble quick input did not call /ui/launcher/quick-message: ${JSON.stringify(quickPayloads)}`);
+  }
+  if (bubbleQuickPayload.text !== BUBBLE_QUICK_TEXT) {
+    throw new Error(`bubble quick input text mismatch: ${JSON.stringify(bubbleQuickPayload.text)}`);
+  }
+  if (bubbleQuickPayload.session_id !== '') {
+    throw new Error(`bubble quick input session_id should be empty: ${JSON.stringify(bubbleQuickPayload.session_id)}`);
   }
   const quickPayload = bridgeState.quickMessagePayload;
   if (!quickPayload) {
