@@ -271,6 +271,9 @@ from apps.shell.agent.runtime.tool_loop import (
 from apps.shell.agent.runtime.timeline import RuntimeAgentTimelineBuilder
 
 from apps.shell.agent.runtime.workflow_continuation import WorkflowContinuationCoordinator
+from apps.shell.agent.runtime.workflow_approval_execution import (
+    RuntimeWorkflowApprovalExecutionService,
+)
 from apps.shell.agent.runtime.workflow_approvals import (
     WorkflowApprovalPauseProjection,
     WorkflowApprovalResumeContext,
@@ -914,6 +917,12 @@ class NativeRunEngine:
             workflow_path=self._workflow_path,
         )
         self._install_runtime_workflow_planning_services(workflow_planning_services)
+        self.workflow_approval_execution = RuntimeWorkflowApprovalExecutionService(
+            pending_approval_private=lambda run_id: self.runs.pending_approval_private(run_id),
+            workflow_for_run_resume=lambda run: self._workflow_for_run_resume(run),
+            workflow_run_is_group_root=lambda run: self._workflow_run_is_group_root(run),
+            workflow_approval_resume=self.workflow_approval_resume,
+        )
         self.runnable_resolver = RuntimeRunnableResolver(
             main_chat_agent_id=_MAIN_CHAT_AGENT_ID,
             main_chat_virtual_agent=self._main_chat_virtual_agent,
@@ -2842,19 +2851,7 @@ class NativeRunEngine:
         return self.tool_approval_resume.approve_main_chat_run(run)
 
     def _approve_workflow_run_approval(self, run: dict[str, Any]) -> dict[str, Any]:
-        run_id = str(run["run_id"])
-        pending = self.runs.pending_approval_private(run_id)
-        resume_context = WorkflowApprovalResumeContext.from_run(
-            run,
-            pending,
-            workflow=self._workflow_for_run_resume(run),
-            root_group=self._workflow_run_is_group_root(run),
-        )
-        return self.workflow_approval_resume.resume_after_approval(
-            run,
-            pending,
-            resume_context,
-        )
+        return self.workflow_approval_execution.approve_workflow_run(run)
 
     def _project_cancelled_workflow_group_if_root(
         self,
