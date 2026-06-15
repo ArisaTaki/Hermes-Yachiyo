@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from apps.shell import agent_runtime
-from apps.shell.agent.runtime.skill_sources import SkillSourceDiscovery
+from apps.shell.agent.runtime.skill_sources import SkillSourceDiscovery, skill_deletion_key
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
 
@@ -21,6 +21,7 @@ def _json_load(value: str | None, fallback: Any) -> Any:
 
 def test_skill_source_discovery_remains_exported_from_legacy_runtime_module() -> None:
     assert agent_runtime.SkillSourceDiscovery is SkillSourceDiscovery
+    assert agent_runtime._runtime_skill_deletion_key is skill_deletion_key
 
 
 def test_skill_source_discovery_roots_counts_and_installed_source_map(tmp_path: Path, monkeypatch) -> None:
@@ -118,3 +119,24 @@ def test_native_runtime_uses_split_skill_source_discovery(tmp_path: Path) -> Non
         assert roots[0]["source_ref_override"] == "override"
     finally:
         service.close()
+
+
+def test_skill_deletion_key_labels_native_and_installed_sources(tmp_path: Path) -> None:
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+
+    assert skill_deletion_key(
+        "native_global",
+        str(source_root),
+        is_native_library_source_type=lambda value: str(value).startswith("native_"),
+    ) == f"native:{source_root.resolve()}"
+    assert skill_deletion_key(
+        "npx_skills",
+        str(source_root),
+        is_native_library_source_type=lambda value: str(value).startswith("native_"),
+    ) == f"installed:{source_root.resolve()}"
+    assert skill_deletion_key(
+        "npx_skills",
+        "",
+        is_native_library_source_type=lambda _value: False,
+    ) == ""

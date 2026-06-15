@@ -269,7 +269,10 @@ from apps.shell.agent.runtime.skill_import import SkillImportPreparer, SkillImpo
 from apps.shell.agent.runtime.skill_import_service import RuntimeSkillImportService
 from apps.shell.agent.runtime.skill_install import SkillInstallCommandValidator
 from apps.shell.agent.runtime.skill_install_service import RuntimeSkillInstallService
-from apps.shell.agent.runtime.skill_sources import SkillSourceDiscovery
+from apps.shell.agent.runtime.skill_sources import (
+    SkillSourceDiscovery,
+    skill_deletion_key as _runtime_skill_deletion_key,
+)
 from apps.shell.agent.runtime.skill_sync import SkillSyncPlanner
 from apps.shell.agent.runtime.skill_sync_service import RuntimeSkillSyncService
 from apps.shell.agent.runtime.tool_brokers import RuntimeToolBrokerFactory
@@ -1392,15 +1395,11 @@ class NativeRunEngine:
 
     @staticmethod
     def _skill_deletion_key(source_type: str, origin_path: str) -> str:
-        clean_origin = str(origin_path or "").strip()
-        if not clean_origin:
-            return ""
-        library = "native" if _is_native_library_source_type(source_type) else "installed"
-        try:
-            clean_origin = str(Path(clean_origin).expanduser().resolve())
-        except OSError:
-            pass
-        return f"{library}:{clean_origin}"
+        return _runtime_skill_deletion_key(
+            source_type,
+            origin_path,
+            is_native_library_source_type=_is_native_library_source_type,
+        )
 
     def _seed_templates(self) -> None:
         self.seed_template_service.seed()

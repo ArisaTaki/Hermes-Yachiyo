@@ -134,3 +134,20 @@ class SkillSourceDiscovery:
         if not root.exists():
             return 0
         return sum(1 for _ in root.rglob("SKILL.md"))
+
+
+def skill_deletion_key(
+    source_type: str,
+    origin_path: str,
+    *,
+    is_native_library_source_type: Callable[[Any], bool],
+) -> str:
+    clean_origin = str(origin_path or "").strip()
+    if not clean_origin:
+        return ""
+    library = "native" if is_native_library_source_type(source_type) else "installed"
+    try:
+        clean_origin = str(Path(clean_origin).expanduser().resolve())
+    except OSError:
+        pass
+    return f"{library}:{clean_origin}"
