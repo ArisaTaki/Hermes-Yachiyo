@@ -5,10 +5,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from .approvals import approval_cards_from_payloads
-from .artifacts import artifact_snapshots_from_payloads
 from .contracts import AgentGroupMemberSnapshot, AgentGroupSnapshot, GroupRunSnapshot
-from .timelines import run_timeline_snapshot_from_payload
+from .run_snapshots import RunSnapshotProjector
+
+
+_RUN_PROJECTOR = RunSnapshotProjector()
 
 
 def agent_group_snapshot_from_payload(
@@ -69,16 +70,16 @@ def group_run_snapshot_from_payload(
         participants=agent_group_members_from_payloads(payload.get("participants")),
         active_speaker_agent_id=_optional_text(payload.get("active_speaker_agent_id")),
         runs=[
-            run_timeline_snapshot_from_payload(item)
+            _RUN_PROJECTOR.timeline_snapshot_from_payload(item)
             for item in runs_payload
             if isinstance(item, Mapping)
         ],
         child_run_ids=[str(item) for item in payload.get("child_run_ids") or [] if str(item)],
-        shared_artifacts=artifact_snapshots_from_payloads(
+        shared_artifacts=_RUN_PROJECTOR.artifacts_from_payloads(
             payload.get("shared_artifacts") or payload.get("artifacts"),
             run_id=group_run_id,
         ),
-        pending_approvals=approval_cards_from_payloads(
+        pending_approvals=_RUN_PROJECTOR.approvals_from_payloads(
             payload.get("pending_approvals"),
             run_id=group_run_id,
         ),

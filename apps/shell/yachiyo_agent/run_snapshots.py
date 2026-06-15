@@ -143,7 +143,13 @@ class RunSnapshotProjector:
         return []
 
     def artifacts_from_payload(self, payload: Mapping[str, Any], *, run_id: str):
-        return artifact_snapshots_from_payloads(payload.get("artifacts"), run_id=run_id)
+        return self.artifacts_from_payloads(payload.get("artifacts"), run_id=run_id)
+
+    def approvals_from_payloads(self, payloads: Any, *, run_id: str = ""):
+        return approval_cards_from_payloads(payloads, run_id=run_id)
+
+    def artifacts_from_payloads(self, payloads: Any, *, run_id: str = ""):
+        return artifact_snapshots_from_payloads(payloads, run_id=run_id)
 
     def tool_calls_from_payload(
         self,

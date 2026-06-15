@@ -7,6 +7,7 @@ from apps.shell.yachiyo_agent.run_snapshots import (
     agent_task_snapshot_from_payload,
     run_timeline_snapshot_from_payload,
 )
+from apps.shell.yachiyo_agent.groups import group_run_snapshot_from_payload
 from apps.shell.yachiyo_agent.task_cards import (
     agent_task_snapshot_from_payload as legacy_task_snapshot_from_payload,
 )
@@ -88,3 +89,27 @@ def test_legacy_task_and_timeline_functions_delegate_to_shared_projector() -> No
 
     assert legacy_task_snapshot_from_payload(payload) == agent_task_snapshot_from_payload(payload)
     assert legacy_timeline_snapshot_from_payload(payload) == run_timeline_snapshot_from_payload(payload)
+
+
+def test_group_run_snapshot_reuses_shared_run_projection_for_children_artifacts_and_approvals() -> None:
+    group_run = group_run_snapshot_from_payload(
+        {
+            "group_run_id": "group-run-1",
+            "group_id": "group-1",
+            "title": "Team review",
+            "status": "running",
+            "objective": "Compare options",
+            "runs": [_run_payload()],
+            "shared_artifacts": [{"kind": "markdown", "path": "team.md"}],
+            "pending_approvals": [{"approval_id": "approval-group", "tool": "terminal.run"}],
+        }
+    )
+
+    assert group_run.group_run_id == "group-run-1"
+    assert group_run.runs[0].run_id == "run-1"
+    assert group_run.runs[0].tool_calls[0].tool_name == "workspace.read"
+    assert group_run.runs[0].pending_approval is not None
+    assert group_run.shared_artifacts[0].source_run_id == "group-run-1"
+    assert group_run.shared_artifacts[0].path == "team.md"
+    assert group_run.pending_approvals[0].run_id == "group-run-1"
+    assert group_run.pending_approvals[0].open_in_studio_url == "#/agents?run_id=group-run-1"
