@@ -49,6 +49,10 @@ from apps.shell.agent.runtime.budget import (
 )
 from apps.shell.agent.runtime.approval_lifecycle import ApprovalCoordinator
 from apps.shell.agent.runtime.approval_resume import ApprovalResumeCoordinator
+from apps.shell.agent.runtime.approval_snapshots import (
+    ApprovalSnapshotBuilder,
+    public_pending_approval as _runtime_public_pending_approval,
+)
 from apps.shell.agent.runtime.cancellation import (
     RunCancellationProjection,
     WorkflowCancellationProjectionCoordinator,
@@ -1459,20 +1463,7 @@ def _normalize_tool_iteration(value: Any) -> int:
 
 
 def _public_pending_approval(value: Any) -> dict[str, Any]:
-    raw = value if isinstance(value, dict) else {}
-    if not raw:
-        return {}
-    input_preview = raw.get("input_preview")
-    if input_preview:
-        public_input_preview = _tool_input_preview(input_preview)
-    else:
-        public_input_preview = _tool_input_preview(raw.get("input") or {})
-    return {
-        "approval_id": str(raw.get("approval_id") or ""),
-        "tool": str(raw.get("tool") or ""),
-        "input_preview": public_input_preview,
-        "requested_at": str(raw.get("requested_at") or ""),
-    }
+    return _runtime_public_pending_approval(value)
 
 
 class NativeRunEngine:
@@ -1629,6 +1620,7 @@ class NativeRunEngine:
             skill_source_types=_SKILL_SOURCE_TYPES,
             count_skill_files=SkillSourceDiscovery.count_skill_files,
         )
+        self.approval_snapshots = ApprovalSnapshotBuilder()
         self.run_groups = RunGroupRepository(
             self._conn,
             ensure_row_factory=self._ensure_row_factory,
@@ -1643,7 +1635,7 @@ class NativeRunEngine:
             self._db_lock,
             now=_now,
             json_dump=_json_dump,
-            public_pending_approval=_public_pending_approval,
+            public_pending_approval=self.approval_snapshots.public_pending_approval,
         )
         self.run_artifacts = RunArtifactRepository(
             self._conn,

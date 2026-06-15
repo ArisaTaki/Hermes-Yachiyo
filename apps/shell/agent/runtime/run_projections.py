@@ -5,47 +5,8 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from apps.shell.agent.runtime.approval_snapshots import public_pending_approval
 from apps.shell.agent.runtime.tool_approvals import ToolApprovalResumeContext
-from packages.security import redact_sensitive_text
-
-
-def _redact_secrets(value: Any) -> str:
-    return redact_sensitive_text(
-        value,
-        limit=0,
-        collapse_whitespace=False,
-        trim=False,
-    )
-
-
-def _tool_input_preview(value: Any, *, limit: int = 1200) -> Any:
-    if isinstance(value, dict):
-        return {str(key): _tool_input_preview(item, limit=limit) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_tool_input_preview(item, limit=limit) for item in value[:20]]
-    if value is None or isinstance(value, (bool, int, float)):
-        return value
-    text = _redact_secrets(value)
-    if len(text) > limit:
-        return f"{text[:limit]}... [truncated]"
-    return text
-
-
-def _public_pending_approval(value: Any) -> dict[str, Any]:
-    raw = value if isinstance(value, dict) else {}
-    if not raw:
-        return {}
-    input_preview = raw.get("input_preview")
-    if input_preview:
-        public_input_preview = _tool_input_preview(input_preview)
-    else:
-        public_input_preview = _tool_input_preview(raw.get("input") or {})
-    return {
-        "approval_id": str(raw.get("approval_id") or ""),
-        "tool": str(raw.get("tool") or ""),
-        "input_preview": public_input_preview,
-        "requested_at": str(raw.get("requested_at") or ""),
-    }
 
 
 class RunProjectionCoordinator:
@@ -158,7 +119,7 @@ class ApprovalResumeProjectionCoordinator:
         pending_approval: dict[str, Any],
     ) -> dict[str, Any]:
         private_pending = deepcopy(pending_approval)
-        public_pending = _public_pending_approval(private_pending)
+        public_pending = public_pending_approval(private_pending)
         tool_name = str(private_pending.get("tool") or "")
         context.timeline.append(
             self._timeline(

@@ -8,51 +8,15 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
+from apps.shell.agent.runtime.approval_snapshots import (
+    approval_input_preview,
+    public_pending_approval,
+)
 from apps.shell.agent.runtime.errors import AgentRuntimeError
-from packages.security import redact_sensitive_text
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def _redact_secrets(value: Any) -> str:
-    return redact_sensitive_text(
-        value,
-        limit=0,
-        collapse_whitespace=False,
-        trim=False,
-    )
-
-
-def _tool_input_preview(value: Any, *, limit: int = 1200) -> Any:
-    if isinstance(value, dict):
-        return {str(key): _tool_input_preview(item, limit=limit) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_tool_input_preview(item, limit=limit) for item in value[:20]]
-    if value is None or isinstance(value, (bool, int, float)):
-        return value
-    text = _redact_secrets(value)
-    if len(text) > limit:
-        return f"{text[:limit]}... [truncated]"
-    return text
-
-
-def _public_pending_approval(value: Any) -> dict[str, Any]:
-    raw = value if isinstance(value, dict) else {}
-    if not raw:
-        return {}
-    input_preview = raw.get("input_preview")
-    if input_preview:
-        public_input_preview = _tool_input_preview(input_preview)
-    else:
-        public_input_preview = _tool_input_preview(raw.get("input") or {})
-    return {
-        "approval_id": str(raw.get("approval_id") or ""),
-        "tool": str(raw.get("tool") or ""),
-        "input_preview": public_input_preview,
-        "requested_at": str(raw.get("requested_at") or ""),
-    }
 
 
 @dataclass(frozen=True)
@@ -218,7 +182,7 @@ class WorkflowApprovalPauseProjection:
             "tool": "workflow.approval",
             "input_preview": {
                 "checkpoint": self.label,
-                "context": _tool_input_preview(self.context),
+                "context": approval_input_preview(self.context),
                 **({"criteria": self.criteria} if self.criteria else {}),
             },
             "requested_at": self.requested_at,
@@ -231,7 +195,7 @@ class WorkflowApprovalPauseProjection:
         }
 
     def public_pending_approval(self) -> dict[str, Any]:
-        return _public_pending_approval(self.pending_approval())
+        return public_pending_approval(self.pending_approval())
 
     def event_payload(self) -> dict[str, Any]:
         return {
