@@ -1,6 +1,7 @@
 import type { RunSpec } from '../types';
+import { RuntimeApprovalCard } from '../../runtime-shared/components/RuntimeApprovalCard';
 import { RuntimeApprovalGate } from '../../runtime-shared/components/RuntimeApprovalGate';
-import type { RunTimelineSnapshot } from '../../yachiyo-studio/types';
+import type { ApprovalCardSnapshot, RunTimelineSnapshot } from '../../yachiyo-studio/types';
 import { RunApprovalRequest } from './RunApprovalRequest';
 
 export type RunPendingApproval = NonNullable<RunSpec['pending_approval']> & {
@@ -9,6 +10,8 @@ export type RunPendingApproval = NonNullable<RunSpec['pending_approval']> & {
 };
 
 type ApprovalInspectorProps = {
+  approvalHistory?: ApprovalCardSnapshot[];
+  approvalHistorySource?: string;
   busy: boolean;
   onApproveSelectedRun: () => Promise<unknown>;
   onRejectSelectedRun: () => Promise<unknown>;
@@ -20,6 +23,8 @@ type ApprovalInspectorProps = {
 };
 
 export function ApprovalInspector({
+  approvalHistory,
+  approvalHistorySource = 'RunTimelineSnapshot approval facts',
   busy,
   onApproveSelectedRun,
   onRejectSelectedRun,
@@ -29,56 +34,86 @@ export function ApprovalInspector({
   selectedRun,
   selectedRunApproval,
 }: ApprovalInspectorProps) {
+  const approvals = approvalHistory || selectedPublicRunTimeline?.approvals || [];
   const hasPendingPublicApproval = Boolean(
     selectedPublicRunTimeline?.pending_approval
     || selectedPublicRunTimeline?.approvals?.some((approval) => approval.status === 'pending'),
   );
-  if (!(selectedRun.status === 'approval_required' || hasPendingPublicApproval) || !selectedRunApproval?.tool) {
+  const showApprovalGate = (
+    (selectedRun.status === 'approval_required' || hasPendingPublicApproval)
+    && Boolean(selectedRunApproval?.tool)
+  );
+  if (!showApprovalGate && !approvals.length) {
     return null;
   }
 
   return (
-    <RuntimeApprovalGate
-      actionsClassName="run-approval-actions"
-      actionsTestId="agent-run-detail-approval-actions"
-      approval={{
-        approval_id: selectedRunApproval.approval_id || selectedRun.run_id,
-        description: selectedRunApproval.tool === 'workflow.approval'
-          ? '这个 Workflow 审批节点需要人工确认后才会继续。'
-          : '这个工具调用需要人工确认后才会继续当前 Run。',
-        input_preview: typeof selectedRunApproval.input_preview === 'string'
-          ? { preview: selectedRunApproval.input_preview }
-          : selectedRunApproval.input_preview,
-        open_in_studio_url: selectedRunApproval.open_in_studio_url,
-        policy_reason: selectedRunApproval.policy_reason,
-        requested_at: selectedRunApproval.requested_at,
-        resolved_at: selectedRunApproval.resolved_at,
-        risk_level: selectedRunApproval.risk_level,
-        run_id: selectedRunApproval.run_id || selectedRun.run_id,
-        status: selectedRunApproval.status || 'pending',
-        title: `Approval Required · ${selectedRunApproval.tool}`,
-        tool_name: selectedRunApproval.tool,
-      }}
-      approveButtonClassName="primary-action"
-      approveTestId="agent-run-detail-approval-approve"
-      busy={busy}
-      cardClassName="studio-runtime-approval"
-      cardTestId="agent-run-detail-approval-card"
-      cardVariant="inspector"
-      className="run-approval-box"
-      onApprove={() => onRunAction(onApproveSelectedRun, '批准工具调用')}
-      onReject={() => onRunAction(onRejectSelectedRun, '拒绝工具调用')}
-      rejectButtonClassName="danger-action"
-      rejectTestId="agent-run-detail-approval-reject"
-      testId="agent-run-detail-approval"
-    >
-      <RunApprovalRequest
-        inputPreview={selectedRunApproval.input_preview}
-        runGoal={selectedRun.user_goal || ''}
-        runId={selectedRun.run_id}
-        runLabel={selectedRun.runnable_name || runKindLabel(selectedRun.kind)}
-        tool={selectedRunApproval.tool}
-      />
-    </RuntimeApprovalGate>
+    <>
+      {showApprovalGate && selectedRunApproval ? (
+        <RuntimeApprovalGate
+          actionsClassName="run-approval-actions"
+          actionsTestId="agent-run-detail-approval-actions"
+          approval={{
+            approval_id: selectedRunApproval.approval_id || selectedRun.run_id,
+            description: selectedRunApproval.tool === 'workflow.approval'
+              ? '这个 Workflow 审批节点需要人工确认后才会继续。'
+              : '这个工具调用需要人工确认后才会继续当前 Run。',
+            input_preview: typeof selectedRunApproval.input_preview === 'string'
+              ? { preview: selectedRunApproval.input_preview }
+              : selectedRunApproval.input_preview,
+            open_in_studio_url: selectedRunApproval.open_in_studio_url,
+            policy_reason: selectedRunApproval.policy_reason,
+            requested_at: selectedRunApproval.requested_at,
+            resolved_at: selectedRunApproval.resolved_at,
+            risk_level: selectedRunApproval.risk_level,
+            run_id: selectedRunApproval.run_id || selectedRun.run_id,
+            status: selectedRunApproval.status || 'pending',
+            title: `Approval Required · ${selectedRunApproval.tool}`,
+            tool_name: selectedRunApproval.tool,
+          }}
+          approveButtonClassName="primary-action"
+          approveTestId="agent-run-detail-approval-approve"
+          busy={busy}
+          cardClassName="studio-runtime-approval"
+          cardTestId="agent-run-detail-approval-card"
+          cardVariant="inspector"
+          className="run-approval-box"
+          onApprove={() => onRunAction(onApproveSelectedRun, '批准工具调用')}
+          onReject={() => onRunAction(onRejectSelectedRun, '拒绝工具调用')}
+          rejectButtonClassName="danger-action"
+          rejectTestId="agent-run-detail-approval-reject"
+          testId="agent-run-detail-approval"
+        >
+          <RunApprovalRequest
+            inputPreview={selectedRunApproval.input_preview}
+            runGoal={selectedRun.user_goal || ''}
+            runId={selectedRun.run_id}
+            runLabel={selectedRun.runnable_name || runKindLabel(selectedRun.kind)}
+            tool={selectedRunApproval.tool || 'approval'}
+          />
+        </RuntimeApprovalGate>
+      ) : null}
+      {approvals.length ? (
+        <details className="run-detail-block run-detail-fold run-approval-history" data-testid="agent-run-detail-approval-history" open>
+          <summary className="run-detail-section-head">
+            <div>
+              <h4>Approval History · {approvals.length}</h4>
+              <span>{approvalHistorySource}</span>
+            </div>
+          </summary>
+          <div className="run-detail-fold-body run-approval-history-list" data-testid="agent-run-detail-approval-history-list">
+            {approvals.map((approval, index) => (
+              <RuntimeApprovalCard
+                approval={approval}
+                className="studio-runtime-approval history"
+                key={approval.approval_id || `${approval.run_id || 'approval'}-${index}`}
+                testId="agent-run-detail-approval-history-card"
+                variant="inspector"
+              />
+            ))}
+          </div>
+        </details>
+      ) : null}
+    </>
   );
 }

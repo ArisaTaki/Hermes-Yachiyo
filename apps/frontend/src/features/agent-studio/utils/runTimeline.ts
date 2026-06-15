@@ -1,4 +1,4 @@
-import type { PublicRunEvent, ToolCallSnapshot } from '../../yachiyo-studio/types';
+import type { ApprovalCardSnapshot, PublicRunEvent, ToolCallSnapshot } from '../../yachiyo-studio/types';
 
 export function timelineChildRunId(event: Record<string, unknown>): string {
   const value = event.child_run_id;
@@ -238,6 +238,27 @@ export function mergeArtifactSnapshots(
   return Array.from(byKey.values());
 }
 
+export function approvalsFromRunEventReplay(events: PublicRunEvent[]): ApprovalCardSnapshot[] {
+  return events
+    .map(approvalFromRunEvent)
+    .filter((approval): approval is ApprovalCardSnapshot => Boolean(approval));
+}
+
+export function mergeApprovalSnapshots(
+  timelineApprovals: ApprovalCardSnapshot[],
+  replayApprovals: ApprovalCardSnapshot[],
+): ApprovalCardSnapshot[] {
+  const byKey = new Map<string, ApprovalCardSnapshot>();
+  timelineApprovals.forEach((approval, index) => {
+    byKey.set(approvalRecordKey(approval, index), approval);
+  });
+  replayApprovals.forEach((approval, index) => {
+    const key = approvalRecordKey(approval, index);
+    if (!byKey.has(key)) byKey.set(key, approval);
+  });
+  return Array.from(byKey.values());
+}
+
 export function mergeRunEventReplayPages(
   current: PublicRunEvent[],
   incoming: PublicRunEvent[],
@@ -277,6 +298,59 @@ function toolCallFromRunEvent(event: PublicRunEvent): ToolCallSnapshot | null {
     started_at: event.created_at || '',
     completed_at: publicRunEventPayloadString(payload, 'completed_at') || null,
   };
+}
+
+function approvalFromRunEvent(event: PublicRunEvent): ApprovalCardSnapshot | null {
+  if (!isApprovalRunEvent(event.event_type)) return null;
+  const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
+  const source = objectPreview(payload.pending_approval)
+    || objectPreview(payload.approval)
+    || payload;
+  const toolName = publicRunEventPayloadString(source, 'tool_name')
+    || publicRunEventPayloadString(source, 'tool')
+    || approvalToolFromRunEvent(event.event_type)
+    || event.detail
+    || 'approval';
+  const approvalId = publicRunEventPayloadString(source, 'approval_id')
+    || `${event.run_id}:${event.event_type}:${event.sequence}`;
+  const status = publicRunEventPayloadString(source, 'status') || approvalStatusFromRunEvent(event.event_type);
+  return {
+    approval_id: approvalId,
+    description: publicRunEventPayloadString(source, 'description') || null,
+    input_preview: objectPreview(source.input_preview) || objectPreview(source.input) || {},
+    policy_reason: publicRunEventPayloadString(source, 'policy_reason') || null,
+    requested_at: publicRunEventPayloadString(source, 'requested_at') || event.created_at || '',
+    resolved_at: publicRunEventPayloadString(source, 'resolved_at')
+      || (status !== 'pending' ? event.created_at || '' : null),
+    risk_level: publicRunEventPayloadString(source, 'risk_level')
+      || publicRunEventPayloadString(source, 'risk')
+      || null,
+    run_id: publicRunEventPayloadString(source, 'run_id') || event.run_id,
+    status,
+    title: publicRunEventPayloadString(source, 'title') || `Approval · ${toolName}`,
+    tool_name: toolName,
+  };
+}
+
+function isApprovalRunEvent(eventType: string): boolean {
+  return eventType.includes('approval_required')
+    || eventType.includes('approval_approved')
+    || eventType.includes('approval_rejected')
+    || eventType === 'approval.timeout';
+}
+
+function approvalStatusFromRunEvent(eventType: string): ApprovalCardSnapshot['status'] {
+  if (eventType.includes('approval_approved')) return 'approved';
+  if (eventType.includes('approval_rejected')) return 'rejected';
+  if (eventType === 'approval.timeout') return 'expired';
+  return 'pending';
+}
+
+function approvalToolFromRunEvent(eventType: string): string {
+  if (eventType.startsWith('workflow.')) return 'workflow.approval';
+  if (eventType.startsWith('group.')) return 'group.approval';
+  if (eventType.startsWith('agent.tool.') || eventType.startsWith('tool.')) return 'tool.approval';
+  return '';
 }
 
 function artifactFromRunEvent(event: PublicRunEvent): Record<string, unknown> | null {
@@ -337,6 +411,12 @@ function artifactRecordKey(artifact: Record<string, unknown>, index: number): st
       publicRunEventPayloadString(artifact, 'kind'),
     ].filter(Boolean).join(':')
     || `artifact:${index}`;
+}
+
+function approvalRecordKey(approval: ApprovalCardSnapshot, index: number): string {
+  return approval.approval_id
+    || [approval.run_id || '', approval.tool_name || '', approval.title || ''].filter(Boolean).join(':')
+    || `approval:${index}`;
 }
 
 function isToolRunEvent(eventType: string): boolean {

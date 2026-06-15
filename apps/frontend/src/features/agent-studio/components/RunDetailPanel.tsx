@@ -11,7 +11,9 @@ import { RunApprovalRequest } from './RunApprovalRequest';
 import { RunTimeline } from './RunTimeline';
 import { ToolCallInspector } from './ToolCallInspector';
 import {
+  approvalsFromRunEventReplay,
   artifactsFromRunEventReplay,
+  mergeApprovalSnapshots,
   mergeArtifactSnapshots,
   mergeToolCallSnapshots,
   toolCallsFromRunEventReplay,
@@ -158,6 +160,16 @@ export function RunDetailPanel({
   const artifactSource = replayArtifacts.length
     ? 'RunTimelineSnapshot + RunEvent replay artifact facts'
     : 'RunTimelineSnapshot artifacts';
+  const replayApprovals = selectedRunReplayEvents.length
+    ? approvalsFromRunEventReplay(selectedRunReplayEvents)
+    : [];
+  const selectedRunApprovalHistory = mergeApprovalSnapshots(
+    selectedPublicRunTimeline?.approvals || [],
+    replayApprovals,
+  );
+  const approvalHistorySource = replayApprovals.length
+    ? 'RunTimelineSnapshot + RunEvent replay approval facts'
+    : 'RunTimelineSnapshot approval facts';
 
   return (
     <div className="agent-studio-panel">
@@ -362,6 +374,8 @@ export function RunDetailPanel({
             </section>
           ) : null}
           <ApprovalInspector
+            approvalHistory={selectedRunApprovalHistory}
+            approvalHistorySource={approvalHistorySource}
             busy={busy}
             onApproveSelectedRun={onApproveSelectedRun}
             onRejectSelectedRun={onRejectSelectedRun}
