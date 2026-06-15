@@ -240,13 +240,10 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "'/ui/chat/delegated-run-summary'",
             "approveRunApproval(runId)",
             "rejectRunApproval(runId, 'Rejected from chat')",
-            "className=\"composer-approval-notice\"",
-            "className=\"composer-approval-actions\"",
+            "ComposerApprovalNotice",
             "approvalId={composerApprovalItem.approvalId}",
             "itemId={composerApprovalItem.id}",
             "source={composerApprovalItem.source}",
-            "className=\"approve\"",
-            "className=\"reject\"",
             "onClick={onApprove}",
             "onClick={onReject}",
             "openRunDetails(runId",
@@ -1962,6 +1959,33 @@ def test_chat_cancel_ui_smoke_uses_stop_buttons_and_cancel_route() -> None:
             "data-testid=\"chat-composer-approval-reveal\"",
             "data-testid=\"chat-composer-approval-previous\"",
             "data-testid=\"chat-composer-approval-next\"",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/approvalItems.ts",
+        [
+            "export type RunApprovalDetailOverride",
+            "export type ComposerApprovalItem",
+            "export function approvalRequestDetails",
+            "export function approvalRequestDetailsFromRun",
+            "export function approvalRequiredItems",
+            "export function approvalRequiredMessages",
+            "export function hasActionableApproval",
+            "export function nextApprovalStatusText",
+            "source: 'workflow-child'",
+            "function approvalRequestDetailsFromActivity",
+            "function approvalRequestDetailsFromWorkflowWaitingChild",
+            "function hasActionableActivityApproval",
+        ],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/views/ChatView.tsx",
+        [
+            "function approvalRequestDetails(message",
+            "function approvalRequiredItems(",
+            "function hasActionableActivityApproval",
+            "function workflowWaitingChildApprovalRunId",
+            "function approvalSignatureFromPending",
         ],
     )
 

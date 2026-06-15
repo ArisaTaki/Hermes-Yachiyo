@@ -13,7 +13,6 @@ import { UiIcon } from '../components/UiIcon';
 import {
   ComposerApprovalNotice,
   composerApprovalStatusText,
-  type ComposerApprovalSource,
 } from '../features/yachiyo-chat/components/ComposerApprovalNotice';
 import { AgentRunProgressCard } from '../features/yachiyo-chat/components/AgentRunProgressCard';
 import { MessageAgentTaskCard } from '../features/yachiyo-chat/components/MessageAgentTaskCard';
@@ -22,6 +21,20 @@ import {
   type ApprovalRequestDetails,
 } from '../features/yachiyo-chat/components/MessageApprovalRequestCard';
 import { MessageActivityList } from '../features/yachiyo-chat/components/MessageActivityList';
+import {
+  approvalIdFromPending,
+  approvalRequestDetails,
+  approvalRequestDetailsFromRun,
+  approvalRequiredItems,
+  approvalRequiredMessages,
+  approvalSignatureFromPending,
+  hasActionableApproval,
+  isWorkflowApprovalDetails,
+  messageApprovalSignature,
+  nextApprovalStatusText,
+  type ComposerApprovalItem,
+  type RunApprovalDetailOverride,
+} from '../features/yachiyo-chat/approvalItems';
 import { useYachiyoTaskActions } from '../features/yachiyo-chat/hooks/useYachiyoTaskActions';
 import { useYachiyoTaskSnapshots } from '../features/yachiyo-chat/hooks/useYachiyoTaskSnapshots';
 import { useYachiyoTaskSubmit } from '../features/yachiyo-chat/hooks/useYachiyoTaskSubmit';
@@ -3336,231 +3349,6 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
   );
 }
 
-type RunApprovalDetailOverride = {
-  signature: string;
-  details: ApprovalRequestDetails;
-  createdAt?: string;
-};
-
-type ComposerApprovalItem = {
-  id: string;
-  approvalId?: string;
-  messageId?: string;
-  runId: string;
-  runStatus: string;
-  createdAt?: string;
-  details: ApprovalRequestDetails;
-  source: ComposerApprovalSource;
-};
-
-function approvalRequestDetails(message: ChatMessage): ApprovalRequestDetails {
-  const pending = message.metadata?.pending_approval || {};
-  const preview = pending.input_preview;
-  const tool = String(pending.tool || approvalToolFromContent(message.content || message.text || '') || 'tool');
-  const requester = participantDisplayName(message.metadata?.sender) || messageRoleLabel(message);
-  const goal = String(message.metadata?.delegated_goal || message.metadata?.group_goal || approvalGoalFromContent(message.content || message.text || '') || '').trim();
-  const summary: Array<{ label: string; value: string }> = [];
-  let codeLanguage = tool === 'terminal.run' ? 'bash' : 'text';
-  let codeText = '';
-
-  if (isRecord(preview)) {
-    const command = stringValue(preview.command);
-    if (command) {
-      codeLanguage = 'bash';
-      codeText = command;
-    }
-    if (tool === 'workflow.approval') {
-      const checkpoint = stringValue(preview.checkpoint || preview.node || preview.label);
-      if (checkpoint) summary.push({ label: '审批节点', value: checkpoint });
-      const criteria = stringValue(preview.criteria || preview.approval_criteria || preview.instructions);
-      if (criteria) summary.push({ label: '审批说明', value: criteria });
-      const context = stringValue(preview.context || preview.summary || preview.result);
-      if (context) summary.push({ label: '当前上下文', value: context });
-    }
-    const path = stringValue(preview.path || preview.file || preview.filename);
-    if (path) summary.push({ label: '文件', value: path });
-    const timeout = stringValue(preview.timeout_seconds || preview.timeout || preview.timeout_ms);
-    if (timeout) summary.push({ label: '超时', value: timeout.endsWith('s') ? timeout : `${timeout}s` });
-    const content = stringValue(preview.content || preview.body || preview.patch);
-    if (!codeText && content) {
-      codeLanguage = tool === 'workspace.write_patch' ? detectCodeLanguage(content) || 'text' : 'text';
-      codeText = content;
-    }
-    if (!codeText && !summary.length) {
-      const compact = approvalPreviewFallback(preview);
-      if (compact) summary.push({ label: '参数', value: compact });
-    }
-  } else {
-    const compact = approvalPreviewFallback(preview);
-    if (compact) summary.push({ label: '参数', value: compact });
-  }
-
-  if (!codeText) {
-    const command = approvalCommandFromContent(message.content || message.text || '');
-    if (command) {
-      codeLanguage = 'bash';
-      codeText = command;
-    }
-  }
-
-  return { requester, tool, goal, codeLanguage, codeText, summary };
-}
-
-function approvalRequestDetailsFromActivity(event: ChatActivityEvent): ApprovalRequestDetails {
-  const pending = event.metadata?.pending_approval || {};
-  return approvalRequestDetails({
-    id: event.event_id,
-    role: 'assistant',
-    content: `${event.title || ''}\n${event.detail || ''}`,
-    metadata: {
-      pending_approval: pending as ChatMessageMetadata['pending_approval'],
-      sender: { kind: 'agent', name: activityApprovalRequester(event) },
-    },
-  });
-}
-
-function approvalRequestDetailsFromWorkflowWaitingChild(message: ChatMessage): ApprovalRequestDetails {
-  const metadata = message.metadata || {};
-  const workflowName = participantDisplayName(metadata.sender) || 'Workflow';
-  const requester = stringValue(metadata.workflow_waiting_node) || '子 Agent';
-  const tool = stringValue(metadata.workflow_waiting_tool) || 'tool';
-  const summary = [
-    { label: '父 Workflow', value: workflowName },
-    { label: 'Workflow 节点', value: requester },
-  ];
-  const runId = stringValue(metadata.workflow_waiting_child_run_id);
-  if (runId) summary.push({ label: '子 Run', value: runId });
-  const pending = isRecord(metadata.workflow_waiting_pending_approval)
-    ? metadata.workflow_waiting_pending_approval as ChatMessageMetadata['pending_approval']
-    : null;
-  if (pending?.tool) {
-    const details = approvalRequestDetails({
-      id: message.id,
-      role: 'assistant',
-      content: message.content || message.text || '',
-      metadata: {
-        delegated_goal: approvalGoalFromContent(message.content || message.text || ''),
-        pending_approval: pending,
-        sender: { kind: 'agent', name: requester },
-      },
-    });
-    return {
-      ...details,
-      requester,
-      goal: details.goal,
-      summary: [...summary, ...details.summary],
-    };
-  }
-  return {
-    requester,
-    tool,
-    goal: approvalGoalFromContent(message.content || message.text || ''),
-    codeLanguage: tool === 'terminal.run' ? 'bash' : 'text',
-    codeText: '',
-    summary,
-  };
-}
-
-function approvalRequestDetailsFromRun(run: RunSpec, fallbackDetails: ApprovalRequestDetails | null = null): ApprovalRequestDetails {
-  const pending = run.pending_approval || {};
-  return approvalRequestDetails({
-    id: run.run_id,
-    role: 'assistant',
-    content: '',
-    metadata: {
-      delegated_goal: String(run.user_goal || fallbackDetails?.goal || ''),
-      pending_approval: pending as ChatMessageMetadata['pending_approval'],
-      sender: {
-        kind: run.kind === 'workflow_run' ? 'workflow' : 'agent',
-        name: String(run.runnable_name || fallbackDetails?.requester || 'Agent'),
-      },
-    },
-  });
-}
-
-function activityApprovalRequester(event: ChatActivityEvent) {
-  const title = String(event.title || '').trim();
-  return title
-    .replace(/\s*(等待审批|请求执行工具调用|请求工具调用|委派失败|委派完成)\s*$/u, '')
-    .trim() || String(event.tool_name || 'Agent').trim();
-}
-
-function isWorkflowApprovalDetails(details: ApprovalRequestDetails) {
-  return details.tool === 'workflow.approval';
-}
-
-function approvalToolFromContent(text: string) {
-  const match = String(text || '').match(/工具[:：]\s*([A-Za-z0-9_.-]+)/);
-  return match?.[1] || '';
-}
-
-function approvalGoalFromContent(text: string) {
-  const match = String(text || '').match(/关联任务[:：]\s*([^\n]+)/);
-  return match?.[1]?.trim() || '';
-}
-
-function approvalCommandFromContent(text: string) {
-  const match = String(text || '').match(/(?:命令|command)[:：]\s*(.+)$/is);
-  return match?.[1]?.trim() || '';
-}
-
-function approvalPreviewFallback(value: unknown) {
-  if (value === undefined || value === null || value === '') return '';
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value);
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
-}
-
-function messageApprovalSignature(message: ChatMessage) {
-  return approvalSignatureFromPending(message.metadata?.pending_approval);
-}
-
-function activityApprovalSignature(event: ChatActivityEvent) {
-  return approvalSignatureFromPending(event.metadata?.pending_approval);
-}
-
-function approvalSignatureFromPending(pending: unknown) {
-  if (!isRecord(pending)) return 'none';
-  const approvalId = stringValue(pending.approval_id);
-  const requestedAt = stringValue(pending.requested_at);
-  const tool = stringValue(pending.tool);
-  const preview = approvalPreviewFallback(pending.input_preview).slice(0, 220);
-  const raw = [approvalId, requestedAt, tool, preview].filter(Boolean).join('|') || 'pending';
-  return raw.replace(/[^A-Za-z0-9_.:-]+/g, '_').slice(0, 240);
-}
-
-function approvalIdFromPending(pending: unknown) {
-  return isRecord(pending) ? stringValue(pending.approval_id) : '';
-}
-
-function workflowWaitingChildApprovalSignature(message: ChatMessage) {
-  const metadata = message.metadata || {};
-  const raw = [
-    metadata.workflow_waiting_child_run_id,
-    metadata.workflow_waiting_tool,
-    metadata.workflow_waiting_node,
-    approvalSignatureFromPending(metadata.workflow_waiting_pending_approval),
-    messageRunId(message),
-  ].map(stringValue).filter(Boolean).join('|') || 'workflow-child-approval';
-  return raw.replace(/[^A-Za-z0-9_.:-]+/g, '_').slice(0, 240);
-}
-
-function nextApprovalStatusText(run: { pending_approval?: { tool?: string; input_preview?: unknown } }) {
-  const tool = String(run.pending_approval?.tool || 'tool');
-  const preview = run.pending_approval?.input_preview;
-  let detail = '';
-  if (isRecord(preview)) {
-    detail = stringValue(preview.command || preview.path || preview.file || preview.filename);
-  } else {
-    detail = stringValue(preview);
-  }
-  const suffix = detail ? `：${compactStatusText(detail, 54)}` : '';
-  return `还有新的工具审批待确认：${tool}${suffix}`;
-}
-
 function stringValue(value: unknown) {
   if (value === undefined || value === null) return '';
   return String(value).trim();
@@ -3706,133 +3494,6 @@ function latestFailedMessage(messages: ChatMessage[]) {
 function latestApprovalRequiredMessage(messages: ChatMessage[]) {
   const approvals = approvalRequiredMessages(messages);
   return approvals[approvals.length - 1] || null;
-}
-
-function approvalRequiredMessages(messages: ChatMessage[]) {
-  return messages.filter((message) => (
-    hasActionableApproval(message)
-    && Boolean(message.id)
-  ));
-}
-
-function approvalRequiredItems(
-  messages: ChatMessage[],
-  resolvedItemIds: string[] = [],
-  runApprovalOverrides: Record<string, RunApprovalDetailOverride> = {},
-): ComposerApprovalItem[] {
-  const resolved = new Set(resolvedItemIds);
-  const messageApprovals = approvalRequiredMessages(messages).map((message) => {
-    const runId = messageRunId(message);
-    const override = runId ? runApprovalOverrides[runId] : undefined;
-    const signature = override?.signature || messageApprovalSignature(message);
-    return {
-      id: `message:${message.id || ''}:${signature}`,
-      approvalId: approvalIdFromPending(message.metadata?.pending_approval),
-      messageId: message.id,
-      runId,
-      runStatus: messageRunStatus(message),
-      createdAt: override?.createdAt || message.created_at,
-      details: override?.details || approvalRequestDetails(message),
-      source: 'message' as const,
-    };
-  }).filter((item) => item.id && item.runId && !resolved.has(item.id));
-  const messageRunIds = new Set(messageApprovals.map((item) => item.runId));
-  const seenActivityRunIds = new Set<string>();
-  const activityApprovals: ComposerApprovalItem[] = [];
-
-  for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
-    const message = messages[messageIndex];
-    for (const event of message.activity_events || []) {
-      const runId = activityRunId(event);
-      if (!runId || messageRunIds.has(runId) || seenActivityRunIds.has(runId)) continue;
-      const override = runApprovalOverrides[runId];
-      if (!hasActionableActivityApproval(event) && !override) continue;
-      seenActivityRunIds.add(runId);
-      const eventId = String(event.event_id || `${message.id || messageIndex}:${runId}`);
-      const signature = override?.signature || activityApprovalSignature(event);
-      const itemId = `activity:${eventId}:${signature}`;
-      if (resolved.has(itemId)) continue;
-      const runStatus = normalizeRunStatus(event.metadata?.run_status || event.status || 'approval_required');
-      activityApprovals.push({
-        id: itemId,
-        approvalId: approvalIdFromPending(event.metadata?.pending_approval),
-        messageId: message.id,
-        runId,
-        runStatus,
-        createdAt: override?.createdAt || event.created_at || message.created_at,
-        details: override?.details || approvalRequestDetailsFromActivity(event),
-        source: 'activity',
-      });
-    }
-  }
-
-  const knownApprovalRunIds = new Set([
-    ...messageRunIds,
-    ...activityApprovals.map((item) => item.runId),
-  ]);
-  const workflowChildApprovals: ComposerApprovalItem[] = [];
-  const seenWorkflowChildRunIds = new Set<string>();
-  for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
-    const message = messages[messageIndex];
-    const runId = workflowWaitingChildApprovalRunId(message);
-    if (!runId || knownApprovalRunIds.has(runId) || seenWorkflowChildRunIds.has(runId)) continue;
-    seenWorkflowChildRunIds.add(runId);
-    const override = runApprovalOverrides[runId];
-    const signature = override?.signature || workflowWaitingChildApprovalSignature(message);
-    const itemId = `workflow-child:${message.id || messageIndex}:${signature}`;
-    if (resolved.has(itemId)) continue;
-    workflowChildApprovals.push({
-      id: itemId,
-      approvalId: approvalIdFromPending(message.metadata?.workflow_waiting_pending_approval),
-      messageId: message.id,
-      runId,
-      runStatus: 'approval_required',
-      createdAt: override?.createdAt || message.created_at,
-      details: override?.details || approvalRequestDetailsFromWorkflowWaitingChild(message),
-      source: 'workflow-child',
-    });
-  }
-
-  return [...messageApprovals, ...activityApprovals, ...workflowChildApprovals].sort((a, b) => (
-    approvalItemTime(a) - approvalItemTime(b)
-  ));
-}
-
-function hasActionableApproval(message?: ChatMessage | null) {
-  const pending = message?.metadata?.pending_approval;
-  return (
-    messageRunStatus(message) === 'approval_required'
-    && Boolean(messageRunId(message))
-    && Boolean(pending && typeof pending === 'object' && String(pending.tool || '').trim())
-  );
-}
-
-function hasActionableActivityApproval(event?: ChatActivityEvent | null) {
-  const eventStatus = String(event?.status || '').trim();
-  if (['completed', 'success', 'failed', 'error', 'cancelled'].includes(eventStatus)) return false;
-  const pending = event?.metadata?.pending_approval;
-  return (
-    (eventStatus === 'approval_required' || String(event?.metadata?.run_status || '').trim() === 'approval_required')
-    && Boolean(activityRunId(event))
-    && Boolean(pending && typeof pending === 'object' && String(pending.tool || '').trim())
-  );
-}
-
-function workflowWaitingChildApprovalRunId(message?: ChatMessage | null) {
-  const metadata = message?.metadata || {};
-  const runId = stringValue(metadata.workflow_waiting_child_run_id);
-  if (!runId) return '';
-  const tool = stringValue(metadata.workflow_waiting_tool);
-  if (!tool) return '';
-  const status = messageRunStatus(message);
-  const workflowStatus = normalizeRunStatus(metadata.workflow_status);
-  if (status !== 'processing' && workflowStatus !== 'approval_required') return '';
-  return runId;
-}
-
-function approvalItemTime(item: ComposerApprovalItem) {
-  const value = item.createdAt ? new Date(item.createdAt).getTime() : 0;
-  return Number.isFinite(value) ? value : 0;
 }
 
 function isRetryableMessage(message: ChatMessage, messages: ChatMessage[]) {
