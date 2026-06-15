@@ -78,6 +78,7 @@ from apps.shell.agent.runtime.approval_snapshots import (
     ApprovalSnapshotBuilder,
     public_pending_approval as _runtime_public_pending_approval,
 )
+from apps.shell.agent.runtime.approval_transitions import RuntimeApprovalTransitionService
 from apps.shell.agent.runtime.agent_context import (
     AgentContextBuilder,
     agent_goal_disallows_tool as _runtime_agent_goal_disallows_tool,
@@ -765,6 +766,19 @@ class NativeRunEngine:
             continue_custom_api_agent=self._run_custom_api_agent,
         )
         self._install_runtime_approval_services(approval_services)
+        self._install_runtime_approval_transitions(
+            RuntimeApprovalTransitionService(
+                get_run=lambda run_id: self.get_run(run_id),
+                pending_approval_private=lambda run_id: self.runs.pending_approval_private(run_id),
+                approvals=self.approvals,
+                project_child_run_transition=lambda result: self._project_child_run_transition(result),
+                project_cancelled_workflow_group_if_root=lambda run, result: self._project_cancelled_workflow_group_if_root(
+                    run,
+                    result,
+                ),
+                cancel_run=lambda run_id: self.cancel_run(run_id),
+            )
+        )
         self._install_runtime_tool_approval_resume(
             RuntimeToolApprovalResumeService(
                 pending_approval_private=lambda run_id: self.runs.pending_approval_private(run_id),
@@ -1006,6 +1020,9 @@ class NativeRunEngine:
         self.approval_pause = approval_services.approval_pause
         self.approvals = approval_services.approvals
         self.approval_resume = approval_services.approval_resume
+
+    def _install_runtime_approval_transitions(self, approval_transitions: RuntimeApprovalTransitionService) -> None:
+        self.approval_transitions = approval_transitions
 
     def _install_runtime_tool_approval_resume(self, tool_approval_resume: RuntimeToolApprovalResumeService) -> None:
         self.tool_approval_resume = tool_approval_resume
@@ -3723,62 +3740,10 @@ class NativeRunEngine:
         return self.run_transition_projection.project_agent_run_group_if_root(result)
 
     def reject_run_approval(self, run_id: str, reason: str = "") -> dict[str, Any]:
-        run = self.get_run(run_id)
-        if run["status"] != "approval_required":
-            return run
-        if run["kind"] == "workflow_run":
-            pending = self.runs.pending_approval_private(run_id)
-            approval_context = WorkflowApprovalTransitionContext.from_pending(pending)
-            result = self.approvals.reject_workflow_node(
-                run_id,
-                timeline=[*run["timeline"]],
-                reason=reason,
-                workflow_node_id=approval_context.workflow_node_id,
-                label=approval_context.label,
-                criteria=approval_context.criteria,
-                input_preview=approval_context.input_preview,
-            )
-            return self._project_cancelled_workflow_group_if_root(run, result)
-        pending = self.runs.pending_approval_private(run_id)
-        approval_context = ToolApprovalTransitionContext.from_pending(pending)
-        result = self.approvals.reject_tool_run(
-            run_id,
-            timeline=[*run["timeline"]],
-            reason=reason,
-            tool_name=approval_context.tool_name,
-            input_preview=approval_context.input_preview,
-        )
-        return self._project_child_run_transition(result)
+        return self.approval_transitions.reject(run_id, reason)
 
     def timeout_run_approval(self, run_id: str, reason: str = "approval_wait_timeout") -> dict[str, Any]:
-        run = self.get_run(run_id)
-        if run["status"] != "approval_required":
-            return run
-        if run["kind"] == "workflow_run":
-            pending = self.runs.pending_approval_private(run_id)
-            if not pending or str(pending.get("tool") or "") != "workflow.approval":
-                return self.cancel_run(run_id)
-            approval_context = WorkflowApprovalTransitionContext.from_pending(pending)
-            result = self.approvals.timeout_workflow_node(
-                run_id,
-                timeline=[*run["timeline"]],
-                reason=reason,
-                workflow_node_id=approval_context.workflow_node_id,
-                label=approval_context.label,
-                criteria=approval_context.criteria,
-                input_preview=approval_context.input_preview,
-            )
-            return self._project_cancelled_workflow_group_if_root(run, result)
-        pending = self.runs.pending_approval_private(run_id)
-        approval_context = ToolApprovalTransitionContext.from_pending(pending)
-        result = self.approvals.timeout_tool_run(
-            run_id,
-            timeline=[*run["timeline"]],
-            reason=reason,
-            tool_name=approval_context.tool_name,
-            input_preview=approval_context.input_preview,
-        )
-        return self._project_child_run_transition(result)
+        return self.approval_transitions.timeout(run_id, reason)
 
     def _update_agent_run_group_if_root(self, run: dict[str, Any]) -> None:
         run_group_id = str(run.get("run_group_id") or "")
