@@ -6,12 +6,18 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from apps.shell.agent.runtime.cancellation import WorkflowCancellationProjectionCoordinator
+from apps.shell.agent.runtime.run_projections import ApprovalResumeProjectionCoordinator
 from apps.shell.agent.runtime.run_readiness import RuntimeRunReadinessValidator
 from apps.shell.agent.runtime.workflow_approvals import WorkflowApprovalResumeCoordinator
 from apps.shell.agent.runtime.workflow_continuation import WorkflowContinuationCoordinator
 from apps.shell.agent.runtime.workflow_outcomes import WorkflowChildOutcomeCoordinator
+from apps.shell.agent.runtime.workflow_parent_resume import WorkflowParentResumeCoordinator
 from apps.shell.agent.runtime.workflow_path import WorkflowDefinitionValidator, WorkflowPathPlanner
-from apps.shell.agent.runtime.workflow_resume import WorkflowParentRunLocator, WorkflowResumePlanner
+from apps.shell.agent.runtime.workflow_resume import (
+    RunTransitionProjectionCoordinator,
+    WorkflowParentRunLocator,
+    WorkflowResumePlanner,
+)
 from apps.shell.agent.runtime.workflow_runs import RuntimeWorkflowRunStarter
 from apps.shell.agent.runtime.workflow_start import WorkflowRunStartProjector
 
@@ -33,6 +39,13 @@ class RuntimeWorkflowExecutionServiceBundle:
     workflow_approval_resume: WorkflowApprovalResumeCoordinator
     workflow_cancellation: WorkflowCancellationProjectionCoordinator
     workflow_child_outcomes: WorkflowChildOutcomeCoordinator
+
+
+@dataclass(frozen=True)
+class RuntimeWorkflowTransitionServiceBundle:
+    workflow_parent_resume: WorkflowParentResumeCoordinator
+    approval_resume_projection: ApprovalResumeProjectionCoordinator
+    run_transition_projection: RunTransitionProjectionCoordinator
 
 
 def build_runtime_workflow_planning_services(
@@ -126,4 +139,56 @@ def build_runtime_workflow_execution_services(
             update_run=update_run,
         ),
         workflow_child_outcomes=WorkflowChildOutcomeCoordinator(),
+    )
+
+
+def build_runtime_workflow_transition_services(
+    *,
+    parent_runs_waiting_for_child: Callable[[dict[str, Any]], list[dict[str, Any]]],
+    workflow_run_is_group_root: Callable[[dict[str, Any]], bool],
+    workflow_child_node_context: Callable[..., tuple[str, dict[str, str]]],
+    merge_workflow_child_run_outcome: Callable[..., None],
+    workflow_for_run_resume: Callable[[dict[str, Any]], dict[str, Any]],
+    workflow_resume_start_index: Callable[..., int | None],
+    workflow_next_node_id: Callable[..., str],
+    continue_workflow_run: Callable[..., dict[str, Any]],
+    timeline_factory: Callable[..., dict[str, Any]],
+    append_run_event: Callable[[str, str, dict[str, Any]], Any],
+    update_run: Callable[..., dict[str, Any]],
+    update_run_group: Callable[..., dict[str, Any]],
+    update_agent_run_group_if_root: Callable[[dict[str, Any]], None],
+    mark_parent_workflows_child_running: Callable[[dict[str, Any]], None],
+    resume_parent_workflows_after_child_update: Callable[[dict[str, Any]], None],
+    get_run: Callable[[str], dict[str, Any]],
+) -> RuntimeWorkflowTransitionServiceBundle:
+    workflow_parent_resume = WorkflowParentResumeCoordinator(
+        parent_runs_waiting_for_child=parent_runs_waiting_for_child,
+        workflow_run_is_group_root=workflow_run_is_group_root,
+        workflow_child_node_context=workflow_child_node_context,
+        merge_workflow_child_run_outcome=merge_workflow_child_run_outcome,
+        workflow_for_run_resume=workflow_for_run_resume,
+        workflow_resume_start_index=workflow_resume_start_index,
+        workflow_next_node_id=workflow_next_node_id,
+        continue_workflow_run=continue_workflow_run,
+        timeline_factory=timeline_factory,
+        append_run_event=append_run_event,
+        update_run=update_run,
+        update_run_group=update_run_group,
+    )
+    return RuntimeWorkflowTransitionServiceBundle(
+        workflow_parent_resume=workflow_parent_resume,
+        approval_resume_projection=ApprovalResumeProjectionCoordinator(
+            timeline_factory=timeline_factory,
+            append_run_event=append_run_event,
+            update_run=update_run,
+            update_agent_run_group_if_root=update_agent_run_group_if_root,
+            mark_parent_workflows_child_running=mark_parent_workflows_child_running,
+        ),
+        run_transition_projection=RunTransitionProjectionCoordinator(
+            update_agent_run_group_if_root=update_agent_run_group_if_root,
+            resume_parent_workflows_after_child_update=resume_parent_workflows_after_child_update,
+            workflow_run_is_group_root=workflow_run_is_group_root,
+            update_run_group=update_run_group,
+            get_run=get_run,
+        ),
     )

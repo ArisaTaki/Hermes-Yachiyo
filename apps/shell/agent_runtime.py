@@ -260,8 +260,10 @@ from apps.shell.agent.runtime.workflow_run_outcomes import WorkflowRunOutcomePro
 from apps.shell.agent.runtime.workflow_services import (
     RuntimeWorkflowExecutionServiceBundle,
     RuntimeWorkflowPlanningServiceBundle,
+    RuntimeWorkflowTransitionServiceBundle,
     build_runtime_workflow_execution_services as _build_runtime_workflow_execution_services,
     build_runtime_workflow_planning_services as _build_runtime_workflow_planning_services,
+    build_runtime_workflow_transition_services as _build_runtime_workflow_transition_services,
 )
 from apps.shell.agent.runtime.workflow_start import WorkflowRunStartProjector
 from apps.shell.agent.tools.broker import (
@@ -792,7 +794,7 @@ class NativeRunEngine:
             create_workflow_run_async=self.create_workflow_run_async,
         )
         self._install_runtime_runnable_services(runnable_services)
-        self.workflow_parent_resume = WorkflowParentResumeCoordinator(
+        workflow_transition_services = _build_runtime_workflow_transition_services(
             parent_runs_waiting_for_child=lambda child_run: self._workflow_parent_runs_waiting_for_child(child_run),
             workflow_run_is_group_root=lambda workflow_run: self._workflow_run_is_group_root(workflow_run),
             workflow_child_node_context=lambda timeline, child_run: self._workflow_child_node_context(timeline, child_run),
@@ -811,21 +813,12 @@ class NativeRunEngine:
             append_run_event=lambda run_id, event_type, payload: self.append_run_event(run_id, event_type, payload),
             update_run=lambda run_id, **kwargs: self._update_run(run_id, **kwargs),
             update_run_group=lambda run_group_id, **kwargs: self._update_run_group(run_group_id, **kwargs),
-        )
-        self.approval_resume_projection = ApprovalResumeProjectionCoordinator(
-            timeline_factory=lambda event, detail="", **extra: self._timeline(event, detail, **extra),
-            append_run_event=lambda run_id, event_type, payload: self.append_run_event(run_id, event_type, payload),
-            update_run=lambda run_id, **kwargs: self._update_run(run_id, **kwargs),
             update_agent_run_group_if_root=lambda run: self._update_agent_run_group_if_root(run),
             mark_parent_workflows_child_running=lambda run: self._mark_parent_workflows_child_running(run),
-        )
-        self.run_transition_projection = RunTransitionProjectionCoordinator(
-            update_agent_run_group_if_root=lambda run: self._update_agent_run_group_if_root(run),
             resume_parent_workflows_after_child_update=lambda run: self._resume_parent_workflows_after_child_update(run),
-            workflow_run_is_group_root=lambda run: self._workflow_run_is_group_root(run),
-            update_run_group=lambda run_group_id, **kwargs: self._update_run_group(run_group_id, **kwargs),
             get_run=lambda run_id: self.get_run(run_id),
         )
+        self._install_runtime_workflow_transition_services(workflow_transition_services)
         self._init_db()
         self._migrate_agent_workspace_policies()
         if seed_templates:
@@ -889,6 +882,14 @@ class NativeRunEngine:
         self.chat_runnable_parser = runnable_services.chat_runnable_parser
         self.runnable_catalog = runnable_services.runnable_catalog
         self.runnable_run_coordinator = runnable_services.runnable_run_coordinator
+
+    def _install_runtime_workflow_transition_services(
+        self,
+        workflow_services: RuntimeWorkflowTransitionServiceBundle,
+    ) -> None:
+        self.workflow_parent_resume = workflow_services.workflow_parent_resume
+        self.approval_resume_projection = workflow_services.approval_resume_projection
+        self.run_transition_projection = workflow_services.run_transition_projection
 
     def close(self) -> None:
         self.shutdown()
