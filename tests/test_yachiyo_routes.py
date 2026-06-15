@@ -352,6 +352,13 @@ class _FakeAgentRuntime:
                     "sequence": 1,
                     "event_type": "agent.started",
                     "payload": {"status": "running"},
+                },
+                {
+                    "event_id": "event-2",
+                    "run_id": run_id,
+                    "sequence": 2,
+                    "event_type": "agent.completed",
+                    "payload": {"status": "completed"},
                 }
             ],
         }
@@ -645,6 +652,8 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     assert group_run["child_run_ids"] == ["run-1"]
     assert events["after_sequence"] == 0
     assert events["limit"] == 1
+    assert events["next_after_sequence"] == 1
+    assert events["has_more"] is True
     assert events["events"][0]["event_type"] == "agent.started"
     assert rerun["run_id"] == "run-1-rerun"
     assert cancelled["status"] == "cancelled"

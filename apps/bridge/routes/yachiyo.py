@@ -959,14 +959,20 @@ async def get_studio_run_events(
         raise HTTPException(status_code=404, detail="Run 不存在") from exc
     clean_after_sequence = max(0, int(after_sequence or 0))
     clean_limit = max(1, min(500, int(limit or 200)))
-    page = [
+    filtered_events = [
         event
         for event in events
         if int(getattr(event, "sequence", 0) or 0) > clean_after_sequence
-    ][:clean_limit]
+    ]
+    page = filtered_events[:clean_limit]
+    next_after_sequence = max(
+        [int(getattr(event, "sequence", 0) or 0) for event in page] or [clean_after_sequence]
+    )
     return {
         "run_id": run_id,
         "after_sequence": clean_after_sequence,
         "limit": clean_limit,
+        "next_after_sequence": next_after_sequence,
+        "has_more": len(filtered_events) > clean_limit,
         "events": [_snapshot(event) for event in page],
     }

@@ -55,7 +55,7 @@ export function useRunEventReplay(
           [runId]: {
             events,
             limit,
-            hasMore: events.length >= limit,
+            hasMore: page.has_more ?? events.length >= limit,
             loading: false,
             error: '',
           },
@@ -109,7 +109,7 @@ export function useRunEventReplay(
           [runId]: {
             events,
             limit,
-            hasMore: incomingEvents.length >= limit,
+            hasMore: page.has_more ?? incomingEvents.length >= limit,
             loading: false,
             error: '',
           },

@@ -19,6 +19,8 @@ export type YachiyoRunEventsPage = {
   run_id: string;
   after_sequence: number;
   limit: number;
+  next_after_sequence?: number;
+  has_more?: boolean;
   events: PublicRunEvent[];
 };
 
