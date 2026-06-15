@@ -225,6 +225,63 @@ class _FakeAgentRuntime:
         self.calls.append(("delete_memory_item", {"memory_id": memory_id, "reason": reason}))
         return {"ok": True, "memory_id": memory_id}
 
+    def list_future_tasks(
+        self,
+        *,
+        include_finished: bool = True,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        self.calls.append(
+            (
+                "list_future_tasks",
+                {"include_finished": include_finished, "limit": limit},
+            )
+        )
+        return {"ok": True, "future_tasks": [_future_task_payload()]}
+
+    def cancel_future_task(self, future_task_id: str, *, reason: str = "") -> dict[str, Any]:
+        self.calls.append(
+            (
+                "cancel_future_task",
+                {"future_task_id": future_task_id, "reason": reason},
+            )
+        )
+        return {
+            "ok": True,
+            "future_task": _future_task_payload(
+                future_task_id=future_task_id,
+                status="cancelled",
+                cancelled_at="2026-06-14T00:00:02Z",
+            ),
+        }
+
+    def trigger_due_future_tasks(
+        self,
+        *,
+        now_epoch: float | None = None,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        self.calls.append(
+            (
+                "trigger_due_future_tasks",
+                {"now_epoch": now_epoch, "limit": limit},
+            )
+        )
+        return {
+            "ok": True,
+            "triggered": [
+                {
+                    "ok": True,
+                    "future_task": _future_task_payload(
+                        status="triggered",
+                        last_run_id="run-1",
+                        run_count=1,
+                    ),
+                    "run": _run_payload(run_id="run-1", user_goal="Follow up"),
+                }
+            ],
+        }
+
     def create_agent_run(self, payload: dict[str, Any]) -> dict[str, Any]:
         self.calls.append(("create_agent_run", payload))
         return _run_payload(
@@ -497,6 +554,16 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
         "studio_user_delete",
         request,
     )
+    future_tasks = await yachiyo.list_studio_future_tasks(False, 5, request)
+    cancelled_future_task = await yachiyo.cancel_studio_future_task(
+        "future-1",
+        yachiyo.FutureTaskCancelBody(reason="studio_user_cancel"),
+        request,
+    )
+    triggered_future_tasks = await yachiyo.trigger_due_studio_future_tasks(
+        yachiyo.FutureTaskTriggerBody(limit=3),
+        request,
+    )
     agent_run = await yachiyo.start_studio_agent_run(
         "agent-1",
         yachiyo.StartAgentRunBody(objective="Draft summary", client_run_id="client-agent-1"),
@@ -561,6 +628,10 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     assert created_memory["memory_id"] == "memory-created"
     assert updated_memory["content"] == "Prefer detailed updates"
     assert deleted_memory == {"ok": True, "memory_id": "memory-1"}
+    assert future_tasks["future_tasks"][0]["future_task_id"] == "future-1"
+    assert cancelled_future_task["future_task"]["status"] == "cancelled"
+    assert triggered_future_tasks["triggered"][0]["future_task"]["last_run_id"] == "run-1"
+    assert triggered_future_tasks["triggered"][0]["run"]["run_id"] == "run-1"
     assert workflows["workflows"][0]["workflow_id"] == "workflow-1"
     assert deleted_workflow == {"ok": True, "workflow_id": "workflow-1"}
     assert workflow_run["workflow_run_id"] == "workflow-run-1"
@@ -625,6 +696,15 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     assert (
         "delete_memory_item",
         {"memory_id": "memory-1", "reason": "studio_user_delete"},
+    ) in runtime.calls
+    assert ("list_future_tasks", {"include_finished": False, "limit": 5}) in runtime.calls
+    assert (
+        "cancel_future_task",
+        {"future_task_id": "future-1", "reason": "studio_user_cancel"},
+    ) in runtime.calls
+    assert (
+        "trigger_due_future_tasks",
+        {"now_epoch": None, "limit": 3},
     ) in runtime.calls
     assert ("delete_workflow", "workflow-1") in runtime.calls
     assert ("list_runs", 5) in runtime.calls
@@ -719,6 +799,9 @@ def test_yachiyo_studio_routes_include_run_action_facade() -> None:
     assert '@router.post("/studio/memories")' in source
     assert '@router.patch("/studio/memories/{memory_id}")' in source
     assert '@router.delete("/studio/memories/{memory_id}")' in source
+    assert '@router.get("/studio/future-tasks")' in source
+    assert '@router.post("/studio/future-tasks/trigger-due")' in source
+    assert '@router.post("/studio/future-tasks/{future_task_id}/cancel")' in source
     assert '@router.get("/studio/group-runs")' in source
     assert '@router.get("/studio/group-runs/{group_run_id}")' in source
     assert '@router.get("/studio/runs")' in source
@@ -829,6 +912,32 @@ def _memory_payload(
         "created_at": "2026-06-14T00:00:00Z",
         "updated_at": "2026-06-14T00:00:01Z",
         "deleted_at": "",
+    }
+
+
+def _future_task_payload(
+    future_task_id: str = "future-1",
+    status: str = "scheduled",
+    last_run_id: str = "",
+    run_count: int = 0,
+    cancelled_at: str = "",
+) -> dict[str, Any]:
+    return {
+        "future_task_id": future_task_id,
+        "title": "Follow up later",
+        "prompt": "Follow up on the report",
+        "runnable_id": "agent-1",
+        "runnable_name": "Planner",
+        "status": status,
+        "scheduled_at_epoch": 1781433600.0,
+        "cron": "",
+        "source_run_id": "run-source-1",
+        "last_run_id": last_run_id,
+        "run_count": run_count,
+        "error": "",
+        "created_at": "2026-06-14T00:00:00Z",
+        "updated_at": "2026-06-14T00:00:01Z",
+        "cancelled_at": cancelled_at,
     }
 
 

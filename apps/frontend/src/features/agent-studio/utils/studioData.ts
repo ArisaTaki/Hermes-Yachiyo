@@ -1,5 +1,6 @@
 import type {
   AgentSpec,
+  FutureTaskSpec,
   MemorySpec,
   RunnableSummary,
   RunGroupSpec,
@@ -11,6 +12,7 @@ import type {
 } from '../types';
 import {
   getYachiyoRunTimeline,
+  listYachiyoFutureTasks,
   listYachiyoAgentGroups,
   listYachiyoGroupRuns,
   listYachiyoMemories,
@@ -67,6 +69,26 @@ export async function listStudioMemoriesForView(): Promise<MemorySpec[]> {
     created_at: memory.created_at,
     updated_at: memory.updated_at,
     deleted_at: memory.deleted_at || undefined,
+  }));
+}
+
+export async function listStudioFutureTasksForView(): Promise<FutureTaskSpec[]> {
+  return (await listYachiyoFutureTasks()).map((futureTask) => ({
+    future_task_id: futureTask.future_task_id,
+    title: futureTask.title,
+    prompt: futureTask.prompt,
+    runnable_id: futureTask.runnable_id || undefined,
+    runnable_name: futureTask.runnable_name || undefined,
+    status: futureTask.status,
+    scheduled_at_epoch: futureTask.scheduled_at_epoch,
+    cron: futureTask.cron || undefined,
+    source_run_id: futureTask.source_run_id || undefined,
+    last_run_id: futureTask.last_run_id || undefined,
+    run_count: futureTask.run_count,
+    error: futureTask.error || undefined,
+    created_at: futureTask.created_at,
+    updated_at: futureTask.updated_at,
+    cancelled_at: futureTask.cancelled_at || undefined,
   }));
 }
 

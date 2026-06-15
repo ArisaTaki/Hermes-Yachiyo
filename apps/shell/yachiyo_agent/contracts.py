@@ -228,6 +228,24 @@ class MemorySnapshot(_PublicSnapshot):
     deleted_at: str | None = None
 
 
+class FutureTaskSnapshot(_PublicSnapshot):
+    future_task_id: str
+    title: str
+    prompt: str
+    runnable_id: str | None = None
+    runnable_name: str | None = None
+    status: str = "scheduled"
+    scheduled_at_epoch: float = 0.0
+    cron: str | None = None
+    source_run_id: str | None = None
+    last_run_id: str | None = None
+    run_count: int = 0
+    error: str | None = None
+    created_at: str = ""
+    updated_at: str = ""
+    cancelled_at: str | None = None
+
+
 class AgentGroupMemberSnapshot(_PublicSnapshot):
     agent_id: str
     name: str
@@ -267,6 +285,13 @@ class GroupRunSnapshot(_PublicSnapshot):
     final_answer: str | None = None
     created_at: str = ""
     updated_at: str = ""
+
+
+class FutureTaskTriggerResultSnapshot(_PublicSnapshot):
+    ok: bool = True
+    future_task: FutureTaskSnapshot | None = None
+    run: RunTimelineSnapshot | None = None
+    error: str | None = None
 
 
 class WorkflowSnapshot(_PublicSnapshot):

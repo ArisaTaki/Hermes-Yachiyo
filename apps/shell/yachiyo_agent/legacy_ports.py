@@ -280,6 +280,33 @@ class LegacyStudioPort:
     def delete_memory(self, memory_id: str, reason: str | None = None) -> dict[str, Any]:
         return self._runtime.delete_memory_item(memory_id, reason=reason or "")
 
+    def list_future_tasks(
+        self,
+        include_finished: bool = True,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        return self._runtime.list_future_tasks(
+            include_finished=include_finished,
+            limit=limit,
+        )
+
+    def cancel_future_task(
+        self,
+        future_task_id: str,
+        reason: str | None = None,
+    ) -> dict[str, Any]:
+        return self._runtime.cancel_future_task(future_task_id, reason=reason or "")
+
+    def trigger_due_future_tasks(
+        self,
+        now_epoch: float | None = None,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        return self._runtime.trigger_due_future_tasks(
+            now_epoch=now_epoch,
+            limit=limit,
+        )
+
     def start_agent_run(self, request: dict[str, Any]) -> dict[str, Any]:
         return self._runtime.create_agent_run(
             {

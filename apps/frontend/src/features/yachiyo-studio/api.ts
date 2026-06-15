@@ -2,6 +2,8 @@ import { apiDelete, apiGet, apiPatch, apiPost } from '../../lib/bridge';
 import type {
   AgentDefinitionSnapshot,
   AgentGroupSnapshot,
+  FutureTaskSnapshot,
+  FutureTaskTriggerResultSnapshot,
   GroupRunSnapshot,
   MemorySnapshot,
   PublicRunEvent,
@@ -195,6 +197,34 @@ export async function deleteYachiyoMemory(
 ): Promise<{ ok?: boolean }> {
   const query = reason ? `?reason=${encodeURIComponent(reason)}` : '';
   return apiDelete(`/yachiyo/studio/memories/${encodeURIComponent(memoryId)}${query}`);
+}
+
+export async function listYachiyoFutureTasks(
+  includeFinished = true,
+  limit = 100,
+): Promise<FutureTaskSnapshot[]> {
+  const query = new URLSearchParams({
+    include_finished: String(includeFinished),
+    limit: String(Math.max(1, Math.min(500, limit))),
+  });
+  const payload = await apiGet<{ future_tasks?: FutureTaskSnapshot[] }>(`/yachiyo/studio/future-tasks?${query.toString()}`);
+  return payload.future_tasks || [];
+}
+
+export async function cancelYachiyoFutureTask(
+  futureTaskId: string,
+  reason = '',
+): Promise<{ ok?: boolean; future_task?: FutureTaskSnapshot }> {
+  return apiPost(
+    `/yachiyo/studio/future-tasks/${encodeURIComponent(futureTaskId)}/cancel`,
+    reason ? { reason } : {},
+  );
+}
+
+export async function triggerDueYachiyoFutureTasks(
+  limit = 20,
+): Promise<{ ok?: boolean; triggered?: FutureTaskTriggerResultSnapshot[] }> {
+  return apiPost('/yachiyo/studio/future-tasks/trigger-due', { limit });
 }
 
 export async function listYachiyoAgentGroups(): Promise<AgentGroupSnapshot[]> {

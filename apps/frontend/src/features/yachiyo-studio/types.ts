@@ -94,6 +94,24 @@ export type MemorySnapshot = {
   deleted_at?: string | null;
 };
 
+export type FutureTaskSnapshot = {
+  future_task_id: string;
+  title: string;
+  prompt: string;
+  runnable_id?: string | null;
+  runnable_name?: string | null;
+  status: 'scheduled' | 'triggered' | 'cancelled' | 'failed' | string;
+  scheduled_at_epoch: number;
+  cron?: string | null;
+  source_run_id?: string | null;
+  last_run_id?: string | null;
+  run_count?: number;
+  error?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  cancelled_at?: string | null;
+};
+
 export type AgentGroupSnapshot = {
   group_id: string;
   name: string;
@@ -231,4 +249,11 @@ export type GroupRunSnapshot = {
   final_answer?: string | null;
   created_at?: string;
   updated_at?: string;
+};
+
+export type FutureTaskTriggerResultSnapshot = {
+  ok?: boolean;
+  future_task?: FutureTaskSnapshot | null;
+  run?: RunTimelineSnapshot | null;
+  error?: string | null;
 };

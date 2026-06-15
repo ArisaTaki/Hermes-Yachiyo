@@ -134,6 +134,61 @@ class _FakeStudioPort:
         self.calls.append(("delete_memory", {"memory_id": memory_id, "reason": reason}))
         return {"ok": True, "memory_id": memory_id}
 
+    def list_future_tasks(
+        self,
+        include_finished: bool = True,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        self.calls.append(
+            (
+                "list_future_tasks",
+                {"include_finished": include_finished, "limit": limit},
+            )
+        )
+        return {"ok": True, "future_tasks": [_future_task_payload()]}
+
+    def cancel_future_task(self, future_task_id: str, reason: str = "") -> dict[str, Any]:
+        self.calls.append(
+            (
+                "cancel_future_task",
+                {"future_task_id": future_task_id, "reason": reason},
+            )
+        )
+        return {
+            "ok": True,
+            "future_task": _future_task_payload(
+                future_task_id=future_task_id,
+                status="cancelled",
+                cancelled_at="2026-06-14T00:00:02Z",
+            ),
+        }
+
+    def trigger_due_future_tasks(
+        self,
+        now_epoch: float | None = None,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        self.calls.append(
+            (
+                "trigger_due_future_tasks",
+                {"now_epoch": now_epoch, "limit": limit},
+            )
+        )
+        return {
+            "ok": True,
+            "triggered": [
+                {
+                    "ok": True,
+                    "future_task": _future_task_payload(
+                        status="triggered",
+                        last_run_id="run-1",
+                        run_count=1,
+                    ),
+                    "run": _run_payload(run_id="run-1", user_goal="Follow up"),
+                }
+            ],
+        }
+
     def start_agent_run(self, request: dict[str, Any]) -> dict[str, Any]:
         self.calls.append(("start_agent_run", request))
         return _run_payload(
@@ -287,6 +342,9 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
     created_memory = service.create_memory({"content": "Remember concise updates"})
     updated_memory = service.update_memory("memory-1", {"content": "Prefer detailed updates"})
     deleted_memory = service.delete_memory("memory-1", reason="studio_user_delete")
+    future_tasks = service.list_future_tasks(include_finished=False, limit=5)
+    cancelled_future_task = service.cancel_future_task("future-1", reason="studio_user_cancel")
+    triggered_future_tasks = service.trigger_due_future_tasks(limit=3)
     groups = service.list_groups()
     group = service.get_group("group-1")
     saved_group = service.save_group(
@@ -344,6 +402,10 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
     assert created_memory.memory_id == "memory-created"
     assert updated_memory.content == "Prefer detailed updates"
     assert deleted_memory == {"ok": True, "memory_id": "memory-1"}
+    assert future_tasks[0].future_task_id == "future-1"
+    assert cancelled_future_task.status == "cancelled"
+    assert triggered_future_tasks[0].future_task.last_run_id == "run-1"
+    assert triggered_future_tasks[0].run.run_id == "run-1"
     assert groups[0].members[0].agent_id == "agent-1"
     assert group.mode == "debate"
     assert saved_group.name == "Team"
@@ -400,6 +462,15 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
     assert (
         "delete_memory",
         {"memory_id": "memory-1", "reason": "studio_user_delete"},
+    ) in port.calls
+    assert ("list_future_tasks", {"include_finished": False, "limit": 5}) in port.calls
+    assert (
+        "cancel_future_task",
+        {"future_task_id": "future-1", "reason": "studio_user_cancel"},
+    ) in port.calls
+    assert (
+        "trigger_due_future_tasks",
+        {"now_epoch": None, "limit": 3},
     ) in port.calls
     assert (
         "save_group",
@@ -612,6 +683,32 @@ def _memory_payload(
         "created_at": "2026-06-14T00:00:00Z",
         "updated_at": "2026-06-14T00:00:01Z",
         "deleted_at": "",
+    }
+
+
+def _future_task_payload(
+    future_task_id: str = "future-1",
+    status: str = "scheduled",
+    last_run_id: str = "",
+    run_count: int = 0,
+    cancelled_at: str = "",
+) -> dict[str, Any]:
+    return {
+        "future_task_id": future_task_id,
+        "title": "Follow up later",
+        "prompt": "Follow up on the report",
+        "runnable_id": "agent-1",
+        "runnable_name": "Planner",
+        "status": status,
+        "scheduled_at_epoch": 1781433600.0,
+        "cron": "",
+        "source_run_id": "run-source-1",
+        "last_run_id": last_run_id,
+        "run_count": run_count,
+        "error": "",
+        "created_at": "2026-06-14T00:00:00Z",
+        "updated_at": "2026-06-14T00:00:01Z",
+        "cancelled_at": cancelled_at,
     }
 
 

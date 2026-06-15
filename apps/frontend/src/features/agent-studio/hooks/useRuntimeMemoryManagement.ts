@@ -1,9 +1,9 @@
-import {
-  cancelFutureTask,
-  triggerDueFutureTasks,
-} from '../../../lib/agents';
 import type { FutureTaskSpec, MemorySpec } from '../types';
-import { deleteYachiyoMemory } from '../../yachiyo-studio/api';
+import {
+  cancelYachiyoFutureTask,
+  deleteYachiyoMemory,
+  triggerDueYachiyoFutureTasks,
+} from '../../yachiyo-studio/api';
 
 type RuntimeMemoryRefreshOptions = {
   selectedRunId?: string;
@@ -51,14 +51,14 @@ export function useRuntimeMemoryManagement({
       confirmLabel: '取消 FutureTask',
       variant: 'danger',
       onConfirm: () => void runAction(async () => {
-        await cancelFutureTask(futureTask.future_task_id, 'studio_user_cancel');
+        await cancelYachiyoFutureTask(futureTask.future_task_id, 'studio_user_cancel');
         return { statusMessage: 'FutureTask 已取消。' };
       }, '取消 FutureTask'),
     });
   }
 
   async function triggerDueFutureTaskRuns(): Promise<RuntimeMemoryRefreshOptions> {
-    const result = await triggerDueFutureTasks();
+    const result = await triggerDueYachiyoFutureTasks();
     const triggered = result.triggered || [];
     const firstRunId = triggered.map((item) => item.run?.run_id || '').find(Boolean) || '';
     const failedCount = triggered.filter((item) => item.error || item.ok === false).length;

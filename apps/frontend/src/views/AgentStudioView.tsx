@@ -105,6 +105,7 @@ import {
 import {
   getStudioRunForView,
   listStudioAgentsForView,
+  listStudioFutureTasksForView,
   listStudioMemoriesForView,
   listStudioRunGroupsForView,
   listStudioRunsForView,
@@ -114,7 +115,6 @@ import {
   listStudioWorkflowsForView,
   studioRunnablesForView,
 } from '../features/agent-studio/utils/studioData';
-import { listFutureTasks } from '../lib/agents';
 import type {
   FutureTaskSpec,
   MemorySpec,
@@ -809,7 +809,7 @@ export function AgentStudioView() {
       listStudioSkillSourcesForView(),
       listStudioSkillFoldersForView(),
       listStudioMemoriesForView(),
-      listFutureTasks(),
+      listStudioFutureTasksForView(),
     ]);
     applyAgents(nextAgents, options);
     setSkills(nextSkills);

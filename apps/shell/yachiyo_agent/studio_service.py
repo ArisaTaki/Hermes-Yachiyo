@@ -9,6 +9,8 @@ from .adapters import agent_definition_snapshot_from_payload
 from .contracts import (
     AgentDefinitionSnapshot,
     AgentGroupSnapshot,
+    FutureTaskSnapshot,
+    FutureTaskTriggerResultSnapshot,
     GroupRunSnapshot,
     MemorySnapshot,
     PublicRunEvent,
@@ -25,6 +27,10 @@ from .contracts import (
     WorkflowSnapshot,
 )
 from .events import public_run_event_from_payload
+from .future_tasks import (
+    future_task_snapshot_from_payload,
+    future_task_trigger_result_snapshot_from_payload,
+)
 from .groups import agent_group_snapshot_from_payload, group_run_snapshot_from_payload
 from .memories import memory_snapshot_from_payload
 from .ports import StudioPort
@@ -164,6 +170,41 @@ class AgentStudioService:
 
     def delete_memory(self, memory_id: str, reason: str | None = None) -> dict[str, Any]:
         return dict(self._studio_port.delete_memory(memory_id, reason or ""))
+
+    def list_future_tasks(
+        self,
+        include_finished: bool = True,
+        limit: int = 100,
+    ) -> list[FutureTaskSnapshot]:
+        return [
+            future_task_snapshot_from_payload(item)
+            for item in _payload_items(
+                self._studio_port.list_future_tasks(include_finished, limit),
+                "future_tasks",
+            )
+        ]
+
+    def cancel_future_task(
+        self,
+        future_task_id: str,
+        reason: str | None = None,
+    ) -> FutureTaskSnapshot:
+        payload = self._studio_port.cancel_future_task(future_task_id, reason or "")
+        raw = payload.get("future_task") if isinstance(payload, Mapping) else None
+        return future_task_snapshot_from_payload(raw if isinstance(raw, Mapping) else payload)
+
+    def trigger_due_future_tasks(
+        self,
+        now_epoch: float | None = None,
+        limit: int = 20,
+    ) -> list[FutureTaskTriggerResultSnapshot]:
+        return [
+            future_task_trigger_result_snapshot_from_payload(item)
+            for item in _payload_items(
+                self._studio_port.trigger_due_future_tasks(now_epoch, limit),
+                "triggered",
+            )
+        ]
 
     def start_agent_run(
         self,

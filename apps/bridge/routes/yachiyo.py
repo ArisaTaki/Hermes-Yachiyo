@@ -88,6 +88,15 @@ class MemoryBody(BaseModel):
     reason: str | None = Field(default=None, max_length=2000)
 
 
+class FutureTaskCancelBody(BaseModel):
+    reason: str | None = Field(default=None, max_length=2000)
+
+
+class FutureTaskTriggerBody(BaseModel):
+    now_epoch: float | None = None
+    limit: int | None = Field(default=None, ge=1, le=200)
+
+
 class StartWorkflowRunBody(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -587,6 +596,56 @@ async def delete_studio_memory(
             memory_id,
             reason,
         )
+    except AgentRuntimeError as exc:
+        raise _bad_request(exc) from exc
+
+
+@router.get("/studio/future-tasks")
+async def list_studio_future_tasks(
+    include_finished: bool = True,
+    limit: int = 100,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    future_tasks = await asyncio.to_thread(
+        _studio_service(http_request).list_future_tasks,
+        include_finished,
+        max(1, min(500, int(limit or 100))),
+    )
+    return {"future_tasks": [_snapshot(future_task) for future_task in future_tasks]}
+
+
+@router.post("/studio/future-tasks/trigger-due")
+async def trigger_due_studio_future_tasks(
+    request: FutureTaskTriggerBody | None = None,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    body = request or FutureTaskTriggerBody()
+    try:
+        triggered = await asyncio.to_thread(
+            _studio_service(http_request).trigger_due_future_tasks,
+            body.now_epoch,
+            max(1, min(200, int(body.limit or 20))),
+        )
+        return {"ok": True, "triggered": [_snapshot(item) for item in triggered]}
+    except AgentRuntimeError as exc:
+        raise _bad_request(exc) from exc
+
+
+@router.post("/studio/future-tasks/{future_task_id}/cancel")
+async def cancel_studio_future_task(
+    future_task_id: str,
+    request: FutureTaskCancelBody | None = None,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    try:
+        snapshot = await asyncio.to_thread(
+            _studio_service(http_request).cancel_future_task,
+            future_task_id,
+            request.reason if request is not None else "",
+        )
+        return {"ok": True, "future_task": _snapshot(snapshot)}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="FutureTask 不存在") from exc
     except AgentRuntimeError as exc:
         raise _bad_request(exc) from exc
 

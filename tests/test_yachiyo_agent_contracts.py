@@ -11,6 +11,8 @@ from apps.shell.yachiyo_agent import (
     AgentTaskSnapshot,
     ApprovalCardSnapshot,
     ArtifactSnapshot,
+    FutureTaskSnapshot,
+    FutureTaskTriggerResultSnapshot,
     GroupRunSnapshot,
     MemorySnapshot,
     PublicRunEvent,
@@ -361,6 +363,48 @@ def test_memory_snapshot_keeps_runtime_memory_fields() -> None:
     ]
     assert payload["source_run_id"] == "run-1"
     assert payload["pinned"] is True
+
+
+def test_future_task_snapshots_keep_runtime_schedule_fields() -> None:
+    future_task = FutureTaskSnapshot(
+        future_task_id="future-1",
+        title="Follow up later",
+        prompt="Follow up on the report",
+        runnable_id="agent-1",
+        runnable_name="Planner",
+        scheduled_at_epoch=1781433600.0,
+        source_run_id="run-source-1",
+        last_run_id="run-1",
+        run_count=1,
+    )
+    triggered = FutureTaskTriggerResultSnapshot(
+        future_task=future_task,
+        run=RunTimelineSnapshot(run_id="run-1", status="completed"),
+    )
+
+    payload = _json(future_task)
+    triggered_payload = _json(triggered)
+
+    assert list(payload) == [
+        "future_task_id",
+        "title",
+        "prompt",
+        "runnable_id",
+        "runnable_name",
+        "status",
+        "scheduled_at_epoch",
+        "cron",
+        "source_run_id",
+        "last_run_id",
+        "run_count",
+        "error",
+        "created_at",
+        "updated_at",
+        "cancelled_at",
+    ]
+    assert payload["last_run_id"] == "run-1"
+    assert triggered_payload["future_task"]["future_task_id"] == "future-1"
+    assert triggered_payload["run"]["run_id"] == "run-1"
 
 
 def test_studio_save_requests_keep_public_field_names() -> None:

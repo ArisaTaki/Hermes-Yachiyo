@@ -84,6 +84,20 @@ class StudioPort(Protocol):
 
     def delete_memory(self, memory_id: str, reason: str | None = None) -> dict[str, Any]: ...
 
+    def list_future_tasks(
+        self,
+        include_finished: bool = True,
+        limit: int = 100,
+    ) -> list[dict[str, Any]] | Mapping[str, Any]: ...
+
+    def cancel_future_task(self, future_task_id: str, reason: str | None = None) -> dict[str, Any]: ...
+
+    def trigger_due_future_tasks(
+        self,
+        now_epoch: float | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]] | Mapping[str, Any]: ...
+
     def start_agent_run(self, request: dict[str, Any]) -> dict[str, Any]: ...
 
     def list_groups(self) -> list[dict[str, Any]] | Mapping[str, Any]: ...
