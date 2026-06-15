@@ -178,6 +178,7 @@ from apps.shell.agent.runtime.main_chat_model_loop import MainChatModelLoopRunne
 from apps.shell.agent.runtime.main_chat_runs import MainChatRunLifecycle
 from apps.shell.agent.runtime.memory_services import RuntimeMemoryService
 from apps.shell.agent.runtime.model_calling import (
+    RuntimeModelProfileChatAdapter,
     call_model_profile_chat_message as _runtime_call_model_profile_chat_message,
     callable_accepts_keyword as _callable_accepts_keyword,
     openai_compatible_chat as _runtime_openai_compatible_chat,
@@ -440,6 +441,9 @@ logger = logging.getLogger(__name__)
 
 
 _UNSET = object()
+_legacy_model_profile_chat_adapter = RuntimeModelProfileChatAdapter(
+    chat_message_provider=lambda: openai_compatible_chat_message,
+)
 
 
 def _call_model_profile_chat_message(
@@ -451,8 +455,7 @@ def _call_model_profile_chat_message(
     tools: list[dict[str, Any]] | None = None,
     stream: bool = False,
 ) -> Any:
-    return _runtime_call_model_profile_chat_message(
-        openai_compatible_chat_message,
+    return _legacy_model_profile_chat_adapter.call(
         base_url,
         model,
         api_key,
@@ -485,6 +488,9 @@ class NativeRunEngine:
         credential_store: CredentialStore | None = None,
         seed_templates: bool = True,
     ) -> None:
+        self.model_profile_chat_adapter = RuntimeModelProfileChatAdapter(
+            chat_message_provider=lambda: openai_compatible_chat_message,
+        )
         engine_state = _build_runtime_engine_state(
             db_path=db_path,
             workspace_dir=workspace_dir,
@@ -745,13 +751,7 @@ class NativeRunEngine:
                 update_run=self._update_run,
                 append_run_event=self.append_run_event,
                 task_model_events=self.runtime_task_model_events,
-                call_model=lambda base_url, model, api_key, messages, **kwargs: _call_model_profile_chat_message(
-                    base_url,
-                    model,
-                    api_key,
-                    messages,
-                    **kwargs,
-                ),
+                call_model=self.model_profile_chat_adapter.call,
                 coalesce_model_message=_coalesce_model_message,
                 message_visible_content_text=_message_visible_content_text,
                 model_message_metadata=_model_message_metadata,
@@ -796,13 +796,7 @@ class NativeRunEngine:
                 operating_doctrine=_MARKET_AGENT_OPERATING_DOCTRINE,
                 memory_tool_names=_MEMORY_TOOL_NAMES,
                 future_task_tool_names=_FUTURE_TASK_TOOL_NAMES,
-                call_model=lambda base_url, model, api_key, messages, **kwargs: _call_model_profile_chat_message(
-                    base_url,
-                    model,
-                    api_key,
-                    messages,
-                    **kwargs,
-                ),
+                call_model=self.model_profile_chat_adapter.call,
                 coalesce_model_message=_coalesce_model_message,
                 message_visible_content_text=_message_visible_content_text,
                 model_message_metadata=_model_message_metadata,

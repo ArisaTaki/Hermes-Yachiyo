@@ -10,6 +10,7 @@ import pytest
 from apps.shell import agent_runtime
 from apps.shell.agent.runtime.errors import AgentRuntimeError
 from apps.shell.agent.runtime.model_calling import (
+    RuntimeModelProfileChatAdapter,
     call_model_profile_chat_message,
     callable_accepts_keyword,
     openai_compatible_chat,
@@ -17,7 +18,54 @@ from apps.shell.agent.runtime.model_calling import (
 
 
 def test_model_calling_helpers_remain_exported_from_legacy_module() -> None:
+    assert agent_runtime.RuntimeModelProfileChatAdapter is RuntimeModelProfileChatAdapter
+    assert agent_runtime._runtime_call_model_profile_chat_message is call_model_profile_chat_message
     assert agent_runtime._callable_accepts_keyword is callable_accepts_keyword
+
+
+def test_model_profile_chat_adapter_uses_current_provider() -> None:
+    calls: list[dict[str, Any]] = []
+    current_chat: dict[str, Any] = {}
+
+    def first_chat(
+        base_url: str,
+        model: str,
+        api_key: str,
+        messages: list[dict[str, Any]],
+        **kwargs: Any,
+    ) -> dict[str, str]:
+        calls.append({"chat": "first", "kwargs": kwargs})
+        return {"content": "first"}
+
+    def second_chat(
+        base_url: str,
+        model: str,
+        api_key: str,
+        messages: list[dict[str, Any]],
+        **kwargs: Any,
+    ) -> dict[str, str]:
+        calls.append({"chat": "second", "kwargs": kwargs})
+        return {"content": "second"}
+
+    current_chat["func"] = first_chat
+    adapter = RuntimeModelProfileChatAdapter(
+        chat_message_provider=lambda: current_chat["func"],
+    )
+
+    assert adapter.call("https://api.example.test/v1", "demo", "sk-test", []) == {"content": "first"}
+    current_chat["func"] = second_chat
+    assert adapter.call(
+        "https://api.example.test/v1",
+        "demo",
+        "sk-test",
+        [],
+        tools=[{"type": "function"}],
+        stream=True,
+    ) == {"content": "second"}
+    assert calls == [
+        {"chat": "first", "kwargs": {}},
+        {"chat": "second", "kwargs": {"tools": [{"type": "function"}], "stream": True}},
+    ]
 
 
 def test_model_calling_passes_stream_only_when_supported() -> None:

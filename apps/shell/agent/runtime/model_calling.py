@@ -37,6 +37,33 @@ def call_model_profile_chat_message(
     return chat_message(base_url, model, api_key, messages, **kwargs)
 
 
+class RuntimeModelProfileChatAdapter:
+    """Binds runtime model callers to the current model-profile chat function."""
+
+    def __init__(self, *, chat_message_provider: Callable[[], Callable[..., Any]]) -> None:
+        self._chat_message_provider = chat_message_provider
+
+    def call(
+        self,
+        base_url: str,
+        model: str,
+        api_key: str,
+        messages: list[dict[str, Any]],
+        *,
+        tools: list[dict[str, Any]] | None = None,
+        stream: bool = False,
+    ) -> Any:
+        return call_model_profile_chat_message(
+            self._chat_message_provider(),
+            base_url,
+            model,
+            api_key,
+            messages,
+            tools=tools,
+            stream=stream,
+        )
+
+
 def openai_compatible_chat(
     base_url: str,
     model: str,
