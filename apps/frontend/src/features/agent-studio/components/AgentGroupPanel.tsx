@@ -154,6 +154,15 @@ export function AgentGroupPanel({
                 <strong>{selectedAgentGroup.name}</strong>
                 <span>{selectedAgentGroup.mode}</span>
                 <span>{selectedAgentGroup.memory_scope || 'shared'}</span>
+                {selectedAgentGroup.moderator_agent_id ? (
+                  <span>moderator {selectedAgentGroup.moderator_agent_id}</span>
+                ) : null}
+                {selectedAgentGroup.default_model ? (
+                  <span>model {selectedAgentGroup.default_model}</span>
+                ) : null}
+                {selectedAgentGroup.tool_policy_id ? (
+                  <span>policy {selectedAgentGroup.tool_policy_id}</span>
+                ) : null}
               </div>
               <span>{agentGroupMemberSummary(selectedAgentGroup)}</span>
             </div>

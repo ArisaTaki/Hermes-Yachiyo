@@ -1272,6 +1272,9 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             'data-testid="agent-studio-groups"',
             'data-testid="agent-group-member-picker"',
             "GroupRunPanel",
+            "selectedAgentGroup.moderator_agent_id",
+            "selectedAgentGroup.default_model",
+            "selectedAgentGroup.tool_policy_id",
         ],
     )
     _assert_contains(
