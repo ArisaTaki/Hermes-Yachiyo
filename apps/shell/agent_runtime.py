@@ -62,6 +62,7 @@ from apps.shell.agent.runtime.workflow_resume import (
     WorkflowParentRunLocator,
     WorkflowResumePlanner,
 )
+from apps.shell.agent.runtime.workflow_start import WorkflowRunStartProjector
 from apps.shell.agent.tools.broker import (
     _TERMINAL_PROCESS_LOCK,
     _TERMINAL_PROCESSES,
@@ -3830,42 +3831,6 @@ class WorkflowPathPlanner:
             "nodes": _json_load(_json_dump(workflow.get("nodes") or []), []),
             "edges": _json_load(_json_dump(workflow.get("edges") or []), []),
         }
-
-
-class WorkflowRunStartProjector:
-    """Builds the initial replay projection for a Workflow Run."""
-
-    def __init__(
-        self,
-        *,
-        timeline_factory: Any,
-        path_snapshot: Any,
-        runtime_snapshot: Any,
-    ) -> None:
-        self._timeline = timeline_factory
-        self._path_snapshot = path_snapshot
-        self._runtime_snapshot = runtime_snapshot
-
-    def started_projection(
-        self,
-        workflow_id: str,
-        workflow: dict[str, Any],
-    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-        workflow_path = self._path_snapshot(workflow)
-        timeline = [
-            self._timeline(
-                "workflow.run.started",
-                workflow["name"],
-                workflow_path=workflow_path,
-                workflow_snapshot=self._runtime_snapshot(workflow),
-            )
-        ]
-        event_payload = {
-            "workflow_id": workflow_id,
-            "workflow_name": workflow["name"],
-            "workflow_path": _json_load(_json_dump(workflow_path), []),
-        }
-        return timeline, event_payload
 
 
 class WorkflowParentResumeCoordinator:
