@@ -2,7 +2,7 @@ import { ExpandableRuntimeContent } from './ExpandableRuntimeContent';
 
 export type RuntimeTimelineEventRecord = Record<string, unknown>;
 
-type RuntimeTimelineEventListProps = {
+export type RuntimeTimelineEventListProps = {
   className: string;
   childRunTestId?: string;
   eventTestId: string;

@@ -533,6 +533,7 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
     _assert_contains(
         "apps/frontend/src/features/runtime-shared/components/RuntimeTimelineEventList.tsx",
         [
+            "export type RuntimeTimelineEventListProps",
             "export function RuntimeTimelineEventList",
             "variant = 'compact'",
             "variant === 'full'",
@@ -541,6 +542,19 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "data-run-event={eventName}",
             "data-run-event-run-id={eventRunId}",
             "data-run-event-sequence={eventSequence}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/runtime-shared/components/RuntimeTimelinePanel.tsx",
+        [
+            "export function RuntimeTimelinePanel",
+            "RuntimeTimelineEventList",
+            "data-testid={panelTestId}",
+            "testId={eventListTestId}",
+            "className={bodyClassName}",
+            "data-testid={loadMoreTestId}",
+            "disabled={replayLoading}",
+            "replayLoading ? loadMoreLoadingLabel : loadMoreLabel",
         ],
     )
     _assert_contains(
@@ -1163,11 +1177,11 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
     _assert_contains(
         "apps/frontend/src/features/agent-studio/components/RunTimeline.tsx",
         [
-            "RuntimeTimelineEventList",
+            "RuntimeTimelinePanel",
             'eventTestId="agent-run-detail-execution-event"',
             'childRunTestId="agent-run-detail-execution-open-child-run"',
-            'testId="agent-run-detail-execution-events"',
-            'data-testid="agent-run-detail-load-more-events"',
+            'eventListTestId="agent-run-detail-execution-events"',
+            'loadMoreTestId="agent-run-detail-load-more-events"',
         ],
     )
     _assert_contains(
@@ -2853,9 +2867,9 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
         "apps/frontend/src/features/agent-studio/components/RunTimeline.tsx",
         [
             "RunEvent replay facts",
-            "disabled={replayLoading}",
-            "{replayLoading ? '加载中...' : '加载更多 RunEvent'}",
-            "加载更多 RunEvent",
+            "replayLoading={replayLoading}",
+            "replayHasMore={Boolean(replayEventCount && replayHasMore)}",
+            "loadMoreTestId=\"agent-run-detail-load-more-events\"",
             "Execution ·",
         ],
     )
@@ -3087,11 +3101,11 @@ def test_agent_studio_exposes_stable_e2e_selectors_for_run_detail_and_approval_f
     _assert_contains(
         "apps/frontend/src/features/agent-studio/components/RunTimeline.tsx",
         [
-            "data-testid=\"agent-run-detail-execution\"",
-            "testId=\"agent-run-detail-execution-events\"",
+            "panelTestId=\"agent-run-detail-execution\"",
+            "eventListTestId=\"agent-run-detail-execution-events\"",
             "eventTestId=\"agent-run-detail-execution-event\"",
             "childRunTestId=\"agent-run-detail-execution-open-child-run\"",
-            "data-testid=\"agent-run-detail-load-more-events\"",
+            "loadMoreTestId=\"agent-run-detail-load-more-events\"",
         ],
     )
     _assert_contains(
