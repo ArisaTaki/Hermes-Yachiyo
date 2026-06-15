@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import logging
+import sqlite3
 from typing import Any, Callable
 
 from apps.shell.agent.runtime.credentials import agent_model_credential_ref
 from apps.shell.credential_store import CredentialStoreError
+
+
+logger = logging.getLogger(__name__)
 
 
 _RUNTIME_TABLE_SCHEMA = """
@@ -438,6 +443,59 @@ class RuntimeSchemaMigrator:
             )
             scrubbed = True
         return scrubbed
+
+
+class RuntimeSchemaService:
+    """Coordinates runtime schema initialization and compatibility migrations."""
+
+    def __init__(
+        self,
+        conn: Any,
+        *,
+        now: Callable[[], str],
+        redact_secrets: Callable[[Any], str],
+        credential_store: Any,
+    ) -> None:
+        self._conn = conn
+        self._now = now
+        self._redact_secrets = redact_secrets
+        self._credential_store = credential_store
+
+    def init_db(self) -> None:
+        initialize_runtime_schema(
+            self._conn,
+            now=self._now,
+            ensure_runtime_columns=self.ensure_runtime_columns,
+            vacuum_after_secret_scrub=self.vacuum_after_secret_scrub,
+        )
+
+    def migrator(self) -> RuntimeSchemaMigrator:
+        return RuntimeSchemaMigrator(
+            self._conn,
+            now=self._now,
+            redact_secrets=self._redact_secrets,
+            credential_store=self._credential_store,
+        )
+
+    def ensure_runtime_columns(self) -> bool:
+        return self.migrator().ensure_runtime_columns()
+
+    def vacuum_after_secret_scrub(self) -> None:
+        try:
+            self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            self._conn.execute("VACUUM")
+            self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except sqlite3.Error:
+            logger.debug("Runtime schema secret scrub vacuum failed", exc_info=True)
+
+    def migrate_native_execution_and_skill_sources(self) -> None:
+        self.migrator().migrate_native_execution_and_skill_sources()
+
+    def migrate_run_group_secret_projections(self) -> bool:
+        return self.migrator().migrate_run_group_secret_projections()
+
+    def migrate_agent_model_credentials(self) -> bool:
+        return self.migrator().migrate_agent_model_credentials()
 
 
 def initialize_runtime_schema(

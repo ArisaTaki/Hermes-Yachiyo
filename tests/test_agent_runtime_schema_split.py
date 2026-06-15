@@ -5,12 +5,21 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+from apps.shell import agent_runtime
 from apps.shell.agent.runtime.schema import (
     RuntimeSchemaMigrator,
+    RuntimeSchemaService,
     agent_model_credential_ref,
     initialize_runtime_schema,
 )
+from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
+
+
+def test_runtime_schema_helpers_remain_exported_from_legacy_module() -> None:
+    assert agent_runtime.RuntimeSchemaService is RuntimeSchemaService
+    assert agent_runtime.RuntimeSchemaMigrator is RuntimeSchemaMigrator
+    assert agent_runtime._initialize_runtime_schema is initialize_runtime_schema
 
 
 def test_runtime_schema_initializer_creates_runtime_tables_indexes_and_metadata(tmp_path: Path) -> None:
@@ -70,6 +79,31 @@ def test_runtime_schema_initializer_creates_runtime_tables_indexes_and_metadata(
     assert metadata["schema_version"] == "1"
 
 
+def test_runtime_schema_service_initializes_schema_and_exposes_migrator(tmp_path: Path) -> None:
+    conn = sqlite3.connect(tmp_path / "agent-runtime.db")
+    conn.row_factory = sqlite3.Row
+    service = RuntimeSchemaService(
+        conn,
+        now=lambda: "2026-06-15T00:00:00+00:00",
+        redact_secrets=str,
+        credential_store=MemoryCredentialStore(),
+    )
+
+    service.init_db()
+
+    tables = {
+        row["name"]
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
+    metadata = {
+        row["key"]: row["value"]
+        for row in conn.execute("SELECT key, value FROM runtime_schema_metadata").fetchall()
+    }
+    assert {"agents", "runs", "run_events", "runtime_schema_metadata"}.issubset(tables)
+    assert metadata["schema_version"] == "1"
+    assert isinstance(service.migrator(), RuntimeSchemaMigrator)
+
+
 def test_runtime_schema_initializer_skips_vacuum_without_secret_scrub(tmp_path: Path) -> None:
     conn = sqlite3.connect(tmp_path / "agent-runtime.db")
     conn.row_factory = sqlite3.Row
@@ -83,6 +117,20 @@ def test_runtime_schema_initializer_skips_vacuum_without_secret_scrub(tmp_path: 
     )
 
     assert calls == ["ensure"]
+
+
+def test_agent_runtime_service_uses_runtime_schema_service(tmp_path: Path) -> None:
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime.db",
+        workspace_dir=tmp_path / "runtime",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    try:
+        assert isinstance(service.runtime_schema, RuntimeSchemaService)
+        assert isinstance(service._schema_migrator(), RuntimeSchemaMigrator)
+    finally:
+        service.close()
 
 
 def test_runtime_schema_migrator_updates_legacy_columns_projections_and_secrets(

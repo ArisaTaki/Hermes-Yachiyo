@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import logging
 import os
 import sqlite3
 import subprocess
@@ -257,6 +256,7 @@ from apps.shell.agent.runtime.runnables import (
     RuntimeRunnableRunCoordinator,
 )
 from apps.shell.agent.runtime.schema import (
+    RuntimeSchemaService,
     RuntimeSchemaMigrator,
     agent_model_credential_ref as _agent_model_credential_ref,
     initialize_runtime_schema as _initialize_runtime_schema,
@@ -438,9 +438,6 @@ from packages.security import (
     redact_api_error_text,
 )
 
-logger = logging.getLogger(__name__)
-
-
 _UNSET = object()
 _legacy_model_profile_chat_adapter = RuntimeModelProfileChatAdapter(
     chat_message_provider=lambda: openai_compatible_chat_message,
@@ -508,6 +505,12 @@ class NativeRunEngine:
             credential_store=credential_store,
         )
         self._install_runtime_engine_state(engine_state)
+        self.runtime_schema = RuntimeSchemaService(
+            self._conn,
+            now=_now,
+            redact_secrets=redact_secrets,
+            credential_store=self._credential_store,
+        )
         self.definition_name_guard = RuntimeDefinitionNameGuard(
             self._conn,
             ensure_row_factory=self._ensure_row_factory,
@@ -1459,37 +1462,22 @@ class NativeRunEngine:
         return _coerce_named_row_value(row, description)
 
     def _init_db(self) -> None:
-        _initialize_runtime_schema(
-            self._conn,
-            now=_now,
-            ensure_runtime_columns=self._ensure_runtime_columns,
-            vacuum_after_secret_scrub=self._vacuum_after_secret_scrub,
-        )
+        self.runtime_schema.init_db()
 
     def _schema_migrator(self) -> RuntimeSchemaMigrator:
-        return RuntimeSchemaMigrator(
-            self._conn,
-            now=_now,
-            redact_secrets=redact_secrets,
-            credential_store=self._credential_store,
-        )
+        return self.runtime_schema.migrator()
 
     def _ensure_runtime_columns(self) -> bool:
-        return self._schema_migrator().ensure_runtime_columns()
+        return self.runtime_schema.ensure_runtime_columns()
 
     def _vacuum_after_secret_scrub(self) -> None:
-        try:
-            self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-            self._conn.execute("VACUUM")
-            self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        except sqlite3.Error:
-            logger.debug("NativeRunEngine secret scrub vacuum failed", exc_info=True)
+        self.runtime_schema.vacuum_after_secret_scrub()
 
     def _migrate_native_execution_and_skill_sources(self) -> None:
-        self._schema_migrator().migrate_native_execution_and_skill_sources()
+        self.runtime_schema.migrate_native_execution_and_skill_sources()
 
     def _migrate_run_group_secret_projections(self) -> bool:
-        return self._schema_migrator().migrate_run_group_secret_projections()
+        return self.runtime_schema.migrate_run_group_secret_projections()
 
     def _agent_model_credential_ref(self, agent_id: str) -> str:
         return _agent_model_credential_ref(agent_id)
@@ -1504,7 +1492,7 @@ class NativeRunEngine:
         self.runtime_credentials.delete(ref)
 
     def _migrate_agent_model_credentials(self) -> bool:
-        return self._schema_migrator().migrate_agent_model_credentials()
+        return self.runtime_schema.migrate_agent_model_credentials()
 
     def _record_studio_deletion(self, item_type: str, item_key: str) -> None:
         self.studio_deletions.record(item_type, item_key)
