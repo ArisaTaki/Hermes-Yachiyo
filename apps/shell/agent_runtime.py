@@ -63,6 +63,7 @@ from apps.shell.agent.runtime.cancellation import (
 )
 from apps.shell.agent.runtime.errors import AgentApprovalRequired, AgentRuntimeError
 from apps.shell.agent.runtime.events import (
+    RuntimeAgentRunEventRecorder,
     RuntimeRunEventRecorder,
     RuntimeTaskEventRecorder,
     RuntimeTaskModelEventBuilder,
@@ -1511,6 +1512,9 @@ class NativeRunEngine:
         self._run_cancel_locks: dict[str, threading.RLock] = {}
         self._run_cancel_locks_guard = threading.RLock()
         self.tool_request_parser = ToolRequestParser()
+        self.runtime_agent_run_events = RuntimeAgentRunEventRecorder(
+            append_run_event=self.append_run_event,
+        )
         self.tool_event_payloads = ToolEventPayloadBuilder()
         self.runtime_tool_call_events = RuntimeToolCallEventRecorder(
             append_run_event=self.append_run_event,
@@ -4503,7 +4507,7 @@ class NativeRunEngine:
                 )
                 safe_error = redact_secrets(exc)
                 # 更新 run 状态为 failed
-                self.append_run_event(run["run_id"], "agent.run.failed", {"error": safe_error})
+                self.runtime_agent_run_events.failed(run["run_id"], safe_error)
                 self._update_run(
                     run["run_id"],
                     status="failed",
@@ -4532,15 +4536,12 @@ class NativeRunEngine:
         backend = _normalize_execution_backend(agent.get("execution_backend"), model_mode=str(agent.get("model_mode") or "profile"))
         runtime = self._compile_agent_runtime(agent)
         timeline = [self._timeline("agent.run.started", f"{agent['name']} started", backend=backend, runtime=runtime["runtime"])]
-        self.append_run_event(
+        self.runtime_agent_run_events.started(
             run_id,
-            "agent.run.started",
-            {
-                "agent_id": str(agent.get("agent_id") or ""),
-                "agent_name": str(agent.get("name") or ""),
-                "backend": backend,
-                "runtime": runtime["runtime"],
-            },
+            agent_id=str(agent.get("agent_id") or ""),
+            agent_name=str(agent.get("name") or ""),
+            backend=backend,
+            runtime=runtime["runtime"],
         )
         timeline.append(
             self._timeline(
@@ -4588,7 +4589,7 @@ class NativeRunEngine:
                 ),
             )
             timeline.append(self._timeline("agent.run.completed", "Agent run completed"))
-            self.append_run_event(run_id, "agent.run.completed", {"result": result_text})
+            self.runtime_agent_run_events.completed(run_id, result_text)
             return self._update_run(
                 run_id,
                 status="completed",
@@ -4607,7 +4608,7 @@ class NativeRunEngine:
         except Exception as exc:
             safe_error = redact_secrets(exc)
             timeline.append(self._timeline("agent.run.failed", safe_error))
-            self.append_run_event(run_id, "agent.run.failed", {"error": safe_error})
+            self.runtime_agent_run_events.failed(run_id, safe_error)
             return self._update_run(
                 run_id,
                 status="failed",

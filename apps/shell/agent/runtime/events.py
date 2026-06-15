@@ -325,6 +325,70 @@ class RuntimeTaskEventRecorder:
         self._append_run_event(clean_run_id, "run.failed", {"error": redact_secrets(error)})
 
 
+def agent_run_started_payload(
+    *,
+    agent_id: str,
+    agent_name: str,
+    backend: str,
+    runtime: str,
+) -> dict[str, Any]:
+    return {
+        "agent_id": str(agent_id or ""),
+        "agent_name": str(agent_name or ""),
+        "backend": str(backend or ""),
+        "runtime": str(runtime or ""),
+    }
+
+
+def agent_run_completed_payload(result: Any) -> dict[str, Any]:
+    return {"result": result}
+
+
+def agent_run_failed_payload(error: Any) -> dict[str, Any]:
+    return {"error": error}
+
+
+class RuntimeAgentRunEventRecorder:
+    """Records Agent run lifecycle RunEvents without owning run state."""
+
+    def __init__(self, *, append_run_event: Any) -> None:
+        self._append_run_event = append_run_event
+
+    def started(
+        self,
+        run_id: str,
+        *,
+        agent_id: str,
+        agent_name: str,
+        backend: str,
+        runtime: str,
+    ) -> None:
+        self._append_run_event(
+            run_id,
+            "agent.run.started",
+            agent_run_started_payload(
+                agent_id=agent_id,
+                agent_name=agent_name,
+                backend=backend,
+                runtime=runtime,
+            ),
+        )
+
+    def completed(self, run_id: str, result: Any) -> None:
+        self._append_run_event(
+            run_id,
+            "agent.run.completed",
+            agent_run_completed_payload(result),
+        )
+
+    def failed(self, run_id: str, error: Any) -> None:
+        self._append_run_event(
+            run_id,
+            "agent.run.failed",
+            agent_run_failed_payload(error),
+        )
+
+
 class ToolEventPayloadBuilder:
     """Builds canonical ToolCall RunEvent payloads."""
 

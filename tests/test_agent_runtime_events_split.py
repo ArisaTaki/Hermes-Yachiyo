@@ -6,12 +6,16 @@ import json
 
 from apps.shell import agent_runtime
 from apps.shell.agent.runtime.events import (
+    RuntimeAgentRunEventRecorder,
     RuntimeRunEventRecorder,
     RuntimeTaskEventRecorder,
     RuntimeTaskModelEventBuilder,
     RuntimeTraceEventBuilder,
     artifact_created_payload,
     canonical_run_event_aliases,
+    agent_run_completed_payload,
+    agent_run_failed_payload,
+    agent_run_started_payload,
     memory_retrieved_payload,
     memory_skill_trace_event,
     model_request_failed_payload,
@@ -349,6 +353,39 @@ def test_runtime_task_event_recorder_records_task_lifecycle_events() -> None:
     assert "sk-task-lifecycle-error123456" not in serialized
 
 
+def test_runtime_agent_run_event_recorder_records_agent_lifecycle_events() -> None:
+    events: list[tuple[str, str, dict[str, object]]] = []
+
+    def append_run_event(run_id: str, event_type: str, payload: dict[str, object]) -> None:
+        events.append((run_id, event_type, payload))
+
+    recorder = RuntimeAgentRunEventRecorder(append_run_event=append_run_event)
+
+    recorder.started(
+        "run-agent",
+        agent_id="agent-1",
+        agent_name="Researcher",
+        backend="native_profile",
+        runtime="oha_agent",
+    )
+    recorder.completed("run-agent", "final answer")
+    recorder.failed("run-agent-2", "safe failure")
+
+    assert [event_type for _run_id, event_type, _payload in events] == [
+        "agent.run.started",
+        "agent.run.completed",
+        "agent.run.failed",
+    ]
+    assert events[0][2] == agent_run_started_payload(
+        agent_id="agent-1",
+        agent_name="Researcher",
+        backend="native_profile",
+        runtime="oha_agent",
+    )
+    assert events[1][2] == agent_run_completed_payload("final answer")
+    assert events[2][2] == agent_run_failed_payload("safe failure")
+
+
 def test_agent_runtime_service_uses_runtime_event_recorder_from_legacy_entrypoint(tmp_path) -> None:
     service = AgentRuntimeService(
         db_path=tmp_path / "agent-runtime.db",
@@ -384,6 +421,7 @@ def test_agent_runtime_service_uses_task_model_event_builder(tmp_path) -> None:
         seed_templates=False,
     )
     try:
+        assert isinstance(service.runtime_agent_run_events, RuntimeAgentRunEventRecorder)
         assert isinstance(service.runtime_task_model_events, RuntimeTaskModelEventBuilder)
         assert isinstance(service.runtime_task_events, RuntimeTaskEventRecorder)
     finally:
