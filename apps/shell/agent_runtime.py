@@ -102,6 +102,10 @@ from apps.shell.agent.runtime.core_services import (
     build_runtime_core_services as _build_runtime_core_services,
 )
 from apps.shell.agent.runtime.delegation import ChatRunnableMentionParser
+from apps.shell.agent.runtime.definition_services import (
+    RuntimeDefinitionServiceBundle,
+    build_runtime_definition_services as _build_runtime_definition_services,
+)
 from apps.shell.agent.runtime.errors import AgentApprovalRequired, AgentRuntimeError
 from apps.shell.agent.runtime.events import (
     RuntimeAgentRunEventRecorder,
@@ -499,37 +503,17 @@ class NativeRunEngine:
         self._install_runtime_recorders(recorders)
         self._conn = _open_runtime_sqlite_connection(self.db_path, self._db_lock)
         self._conn.row_factory = _named_row_factory
-        self.task_run_links = TaskRunLinkRepository(
-            self._conn,
+        definition_services = _build_runtime_definition_services(
+            conn=self._conn,
             ensure_row_factory=self._ensure_row_factory,
             get_run=lambda run_id: self.get_run(run_id),
             now=_now,
             error_type=AgentRuntimeError,
-        )
-        self.trusted_workspaces = TrustedWorkspaceRepository(
-            self._conn,
-            now=_now,
-            error_type=AgentRuntimeError,
-        )
-        self.studio_deletions = StudioDeletionRepository(
-            self._conn,
-            now=_now,
-        )
-        self.skill_folders = SkillFolderRepository(
-            self._conn,
-            ensure_row_factory=self._ensure_row_factory,
             row_to_skill_folder=self._row_to_skill_folder,
-            now=_now,
             slug=_slug,
-            id_suffix_factory=lambda: uuid4().hex[:6],
+            skill_folder_id_suffix_factory=lambda: uuid4().hex[:6],
             delete_skill=lambda skill_id: self.delete_skill(skill_id),
-            error_type=AgentRuntimeError,
-        )
-        self.skill_records = SkillRepository(
-            self._conn,
-            ensure_row_factory=self._ensure_row_factory,
             row_to_skill=self._row_to_skill,
-            now=_now,
             json_dump=_json_dump,
             json_load=_json_load,
             normalize_skill_folder_id=self._normalize_skill_folder_id,
@@ -540,17 +524,10 @@ class NativeRunEngine:
             skills_dir=self.skills_dir,
             skill_installs_dir=self.skill_installs_dir,
             skill_id_factory=lambda name: f"skill_{_slug(name, 'skill')}_{uuid4().hex[:8]}",
-            asset_paths_for=SkillContentInspector.asset_paths,
-        )
-        self.agent_definitions = AgentDefinitionRepository(
-            self._conn,
-            ensure_row_factory=self._ensure_row_factory,
             row_to_agent=self._row_to_agent,
             row_to_agent_private=self._row_to_agent_private,
             coerce_named_row=self._coerce_named_row,
             main_chat_virtual_agent=self._main_chat_virtual_agent,
-            now=_now,
-            json_dump=_json_dump,
             agent_id_factory=lambda name: f"agent_{_slug(name, 'agent')}_{uuid4().hex[:8]}",
             normalize_execution_backend=_normalize_execution_backend,
             ensure_global_name_available=self._ensure_global_name_available,
@@ -562,39 +539,18 @@ class NativeRunEngine:
             agent_model_credential_ref=self._agent_model_credential_ref,
             store_credential=self._store_credential,
             delete_credential=self._delete_credential,
-            record_studio_deletion=self._record_studio_deletion,
             clear_studio_deletion=self._clear_studio_deletion,
             system_agent_ids=_SYSTEM_AGENT_IDS,
             main_chat_agent_id=_MAIN_CHAT_AGENT_ID,
-            error_type=AgentRuntimeError,
-        )
-        self.skill_install_validator = SkillInstallCommandValidator(
-            error_type=AgentRuntimeError,
-        )
-        self.skill_sources = SkillSourceDiscovery(
             native_skill_home=_native_skill_home,
-            skill_installs_dir=self.skill_installs_dir,
             skill_installs_native_home=self.skill_installs_native_home,
-            json_load=_json_load,
-            normalize_source_type=_normalize_skill_source_type,
+            normalize_skill_source_type=_normalize_skill_source_type,
             native_library_source_types=_NATIVE_LIBRARY_SOURCE_TYPES,
-        )
-        self.skill_content = SkillContentInspector()
-        self.skill_import_sources = SkillImportSourceResolver(
             workspace_dir=self.workspace_dir,
-            id_factory=lambda: uuid4().hex,
-            error_type=AgentRuntimeError,
-        )
-        self.skill_import_preparer = SkillImportPreparer(
-            content=self.skill_content,
+            skill_import_id_factory=lambda: uuid4().hex,
             skill_source_types=_SKILL_SOURCE_TYPES,
-            now=_now,
-            error_type=AgentRuntimeError,
         )
-        self.skill_sync = SkillSyncPlanner(
-            skill_source_types=_SKILL_SOURCE_TYPES,
-            count_skill_files=SkillSourceDiscovery.count_skill_files,
-        )
+        self._install_runtime_definition_services(definition_services)
         self.approval_snapshots = ApprovalSnapshotBuilder()
         self.run_groups = RunGroupRepository(
             self._conn,
@@ -833,6 +789,20 @@ class NativeRunEngine:
         self.runtime_task_events = recorders.runtime_task_events
         self.runtime_trace_events = recorders.runtime_trace_events
         self.tool_pending_approvals = recorders.tool_pending_approvals
+
+    def _install_runtime_definition_services(self, services: RuntimeDefinitionServiceBundle) -> None:
+        self.task_run_links = services.task_run_links
+        self.trusted_workspaces = services.trusted_workspaces
+        self.studio_deletions = services.studio_deletions
+        self.skill_folders = services.skill_folders
+        self.skill_records = services.skill_records
+        self.agent_definitions = services.agent_definitions
+        self.skill_install_validator = services.skill_install_validator
+        self.skill_sources = services.skill_sources
+        self.skill_content = services.skill_content
+        self.skill_import_sources = services.skill_import_sources
+        self.skill_import_preparer = services.skill_import_preparer
+        self.skill_sync = services.skill_sync
 
     def _install_runtime_core_services(self, core_services: RuntimeCoreServiceBundle) -> None:
         self.runtime_events = core_services.runtime_events
