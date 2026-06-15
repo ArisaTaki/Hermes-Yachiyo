@@ -1,0 +1,84 @@
+import type { ReactNode } from 'react';
+
+import { RuntimeApprovalCard, type RuntimeApprovalCardSnapshot } from './RuntimeApprovalCard';
+
+type RuntimeApprovalGateProps = {
+  actionsClassName?: string;
+  actionsTestId?: string;
+  approval: RuntimeApprovalCardSnapshot;
+  approveButtonClassName?: string;
+  approveLabel?: string;
+  approveTestId?: string;
+  busy?: boolean;
+  cardClassName?: string;
+  cardTestId?: string;
+  children?: ReactNode;
+  className?: string;
+  onApprove?: () => void;
+  onReject?: () => void;
+  rejectButtonClassName?: string;
+  rejectLabel?: string;
+  rejectTestId?: string;
+  testId?: string;
+};
+
+export function RuntimeApprovalGate({
+  actionsClassName = 'runtime-approval-actions',
+  actionsTestId = 'runtime-approval-actions',
+  approval,
+  approveButtonClassName,
+  approveLabel = '批准',
+  approveTestId,
+  busy = false,
+  cardClassName = 'runtime-approval-card',
+  cardTestId = 'runtime-approval-card',
+  children,
+  className = 'runtime-approval-gate',
+  onApprove,
+  onReject,
+  rejectButtonClassName,
+  rejectLabel = '拒绝',
+  rejectTestId,
+  testId = 'runtime-approval-gate',
+}: RuntimeApprovalGateProps) {
+  const actions = onApprove || onReject ? (
+    <>
+      {onApprove ? (
+        <button
+          type="button"
+          className={approveButtonClassName}
+          data-testid={approveTestId}
+          disabled={busy}
+          onClick={onApprove}
+        >
+          {approveLabel}
+        </button>
+      ) : null}
+      {onReject ? (
+        <button
+          type="button"
+          className={rejectButtonClassName}
+          data-testid={rejectTestId}
+          disabled={busy}
+          onClick={onReject}
+        >
+          {rejectLabel}
+        </button>
+      ) : null}
+    </>
+  ) : undefined;
+
+  return (
+    <section className={className} data-testid={testId}>
+      <RuntimeApprovalCard
+        actions={actions}
+        actionsClassName={actionsClassName}
+        actionsTestId={actionsTestId}
+        approval={approval}
+        className={cardClassName}
+        testId={cardTestId}
+      />
+      {children}
+    </section>
+  );
+}

@@ -500,6 +500,19 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
         ],
     )
     _assert_contains(
+        "apps/frontend/src/features/runtime-shared/components/RuntimeApprovalGate.tsx",
+        [
+            "export function RuntimeApprovalGate",
+            "RuntimeApprovalCard",
+            "data-testid={testId}",
+            "actionsClassName={actionsClassName}",
+            "actionsTestId={actionsTestId}",
+            "data-testid={approveTestId}",
+            "data-testid={rejectTestId}",
+            "disabled={busy}",
+        ],
+    )
+    _assert_contains(
         "apps/frontend/src/features/runtime-shared/components/RuntimeArtifactPreview.tsx",
         [
             "export function RuntimeArtifactPreview",
@@ -1122,12 +1135,12 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
         "apps/frontend/src/features/agent-studio/components/ApprovalInspector.tsx",
         [
             "export function ApprovalInspector",
-            "RuntimeApprovalCard",
+            "RuntimeApprovalGate",
             "RunApprovalRequest",
             "agent-run-detail-approval",
             'actionsClassName="run-approval-actions"',
             'actionsTestId="agent-run-detail-approval-actions"',
-            'testId="agent-run-detail-approval-card"',
+            'cardTestId="agent-run-detail-approval-card"',
         ],
     )
     _assert_contains(
@@ -2860,7 +2873,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
         [
             "Approval Required",
             "RunApprovalRequest",
-            "RuntimeApprovalCard",
+            "RuntimeApprovalGate",
         ],
     )
     _assert_contains(
@@ -3041,15 +3054,14 @@ def test_agent_studio_exposes_stable_e2e_selectors_for_run_detail_and_approval_f
     _assert_contains(
         "apps/frontend/src/features/agent-studio/components/ApprovalInspector.tsx",
         [
-            "data-testid=\"agent-run-detail-approval\"",
-            "data-testid=\"agent-run-detail-approval-approve\"",
-            "data-testid=\"agent-run-detail-approval-reject\"",
-            "RuntimeApprovalCard",
+            "testId=\"agent-run-detail-approval\"",
+            "approveTestId=\"agent-run-detail-approval-approve\"",
+            "rejectTestId=\"agent-run-detail-approval-reject\"",
+            "RuntimeApprovalGate",
             "RunApprovalRequest",
-            "actions={(",
             "actionsClassName=\"run-approval-actions\"",
             "actionsTestId=\"agent-run-detail-approval-actions\"",
-            'testId="agent-run-detail-approval-card"',
+            'cardTestId="agent-run-detail-approval-card"',
         ],
     )
     _assert_contains(
