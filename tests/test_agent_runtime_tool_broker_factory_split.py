@@ -70,6 +70,24 @@ def test_runtime_tool_broker_factory_uses_main_chat_default_runnable(tmp_path) -
     }
 
 
+def test_runtime_tool_broker_factory_can_use_custom_artifacts_dir(tmp_path) -> None:
+    factory = RuntimeToolBrokerFactory(
+        agent_artifacts_dir=tmp_path / "agent-artifacts",
+        tool_broker_factory=FakeBroker,
+        memory_store=lambda **kwargs: {"memory": kwargs},
+        future_task_store=lambda **kwargs: {"future": kwargs},
+        main_chat_agent_id="builtin:yachiyo-main",
+    )
+
+    broker = factory.for_run(
+        run_id="workflow-run-1",
+        workspace_policy={},
+        artifacts_dir=tmp_path / "workflow-artifacts",
+    )
+
+    assert broker.artifact_root == tmp_path / "workflow-artifacts" / "workflow-run-1"
+
+
 def test_native_runtime_installs_tool_broker_factory(tmp_path) -> None:
     service = AgentRuntimeService(
         db_path=tmp_path / "agent-runtime.db",

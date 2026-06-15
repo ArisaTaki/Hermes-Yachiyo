@@ -925,6 +925,13 @@ class NativeRunEngine:
             ),
             workflow_loop_step_limit=self.workflow_path_planner.loop_step_limit,
             workflow_run_started_projection=self.workflow_run_start_projector.started_projection,
+            workflow_artifact_write=lambda run, artifact_path, context: (
+                self.tool_brokers.for_run(
+                    run_id=str(run.get("run_id") or ""),
+                    workspace_policy=self._default_workspace_policy(),
+                    artifacts_dir=self.workflow_artifacts_dir,
+                ).artifact_write(artifact_path, context)
+            ),
             claim_pending_approval=self.run_approvals.claim_pending_approval,
             get_current_run=lambda run_id: self.get_run(run_id),
             pending_approval_private=lambda run_id: self.runs.pending_approval_private(run_id),

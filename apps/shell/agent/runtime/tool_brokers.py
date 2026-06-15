@@ -30,12 +30,14 @@ class RuntimeToolBrokerFactory:
         run_id: str,
         workspace_policy: dict[str, Any],
         default_runnable_id: str = "",
+        artifacts_dir: Path | None = None,
         skills: list[dict[str, Any]] | None = None,
     ) -> Any:
         clean_run_id = str(run_id or "").strip()
+        root = artifacts_dir or self._agent_artifacts_dir
         return self._tool_broker_factory(
             workspace_policy,
-            self._agent_artifacts_dir / clean_run_id,
+            root / clean_run_id,
             skills=skills,
             memory_store=self._memory_store(source_run_id=clean_run_id),
             future_task_store=self._future_task_store(

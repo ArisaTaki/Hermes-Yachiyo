@@ -23,7 +23,6 @@ from apps.shell.agent.runtime.workflow_resume import (
 )
 from apps.shell.agent.runtime.workflow_runs import RuntimeWorkflowRunStarter
 from apps.shell.agent.runtime.workflow_start import WorkflowRunStartProjector
-from apps.shell.agent.tools.broker import ToolBroker
 
 
 @dataclass(frozen=True)
@@ -138,6 +137,7 @@ def build_runtime_workflow_execution_services(
     workflow_run_started_projection: (
         Callable[[str, dict[str, Any]], tuple[list[dict[str, Any]], dict[str, Any]]] | None
     ) = None,
+    workflow_artifact_write: Callable[[dict[str, Any], str, str], dict[str, Any]] | None = None,
 ) -> RuntimeWorkflowExecutionServiceBundle:
     continuation_ports = WorkflowContinuationPortBundle(
         iso_epoch=iso_epoch,
@@ -182,10 +182,14 @@ def build_runtime_workflow_execution_services(
         workflow_artifact_path=lambda label, artifacts, requested: (
             engine._workflow_artifact_path(label, artifacts, requested)
         ),
-        workflow_artifact_write=lambda run, artifact_path, context: ToolBroker(
-            engine._default_workspace_policy(),
-            engine.workflow_artifacts_dir / str(run["run_id"]),
-        ).artifact_write(artifact_path, context),
+        workflow_artifact_write=workflow_artifact_write
+        or (
+            lambda run, artifact_path, context: engine.tool_brokers.for_run(
+                run_id=str(run.get("run_id") or ""),
+                workspace_policy=engine._default_workspace_policy(),
+                artifacts_dir=engine.workflow_artifacts_dir,
+            ).artifact_write(artifact_path, context)
+        ),
         workflow_agent_for_node=lambda node: engine._workflow_agent_for_node(node),
         workflow_node_task=lambda node: engine._workflow_node_task(node),
         workflow_child_goal=lambda workflow_goal, step_task: (

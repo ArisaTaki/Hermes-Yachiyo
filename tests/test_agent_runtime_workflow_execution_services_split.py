@@ -30,6 +30,13 @@ def test_build_runtime_workflow_execution_services_wires_continuation_approval_a
     def timeline_factory(event: str, detail: str = "", **extra: Any) -> dict[str, Any]:
         return {"event": event, "detail": detail, **extra}
 
+    def workflow_artifact_write(
+        _run: dict[str, Any],
+        artifact_path: str,
+        context: str,
+    ) -> dict[str, Any]:
+        return {"path": artifact_path, "content": context}
+
     bundle = build_runtime_workflow_execution_services(
         engine=engine,
         iso_epoch=iso_epoch,
@@ -43,6 +50,7 @@ def test_build_runtime_workflow_execution_services_wires_continuation_approval_a
         update_run=lambda run_id, **kwargs: {"run_id": run_id, **kwargs},
         update_run_group=lambda run_group_id, **kwargs: {"run_group_id": run_group_id, **kwargs},
         approve_workflow_node=lambda run_id, **kwargs: {"run_id": run_id, **kwargs},
+        workflow_artifact_write=workflow_artifact_write,
     )
 
     assert isinstance(bundle, RuntimeWorkflowExecutionServiceBundle)
@@ -62,7 +70,7 @@ def test_build_runtime_workflow_execution_services_wires_continuation_approval_a
     assert callable(bundle.workflow_continuation._default_workspace_policy_callback)
     assert callable(bundle.workflow_continuation._workflow_artifacts_dir_source)
     assert callable(bundle.workflow_continuation._workflow_artifact_path_callback)
-    assert callable(bundle.workflow_continuation._workflow_artifact_write_callback)
+    assert bundle.workflow_continuation._workflow_artifact_write_callback is workflow_artifact_write
     assert callable(bundle.workflow_continuation._workflow_agent_for_node_callback)
     assert callable(bundle.workflow_continuation._workflow_node_task_callback)
     assert callable(bundle.workflow_continuation._workflow_child_goal_callback)
@@ -229,6 +237,19 @@ def test_native_runtime_installs_workflow_execution_services_under_legacy_attrib
         assert callable(service.workflow_continuation._workflow_artifacts_dir_source)
         assert callable(service.workflow_continuation._workflow_artifact_path_callback)
         assert callable(service.workflow_continuation._workflow_artifact_write_callback)
+        artifact = service.workflow_continuation._workflow_artifact_write_callback(
+            {"run_id": "workflow-run-1"},
+            "notes/result.md",
+            "workflow result",
+        )
+        assert artifact["ok"] is True
+        assert artifact["path"] == "notes/result.md"
+        assert (
+            service.workflow_artifacts_dir / "workflow-run-1" / "notes" / "result.md"
+        ).read_text(encoding="utf-8") == "workflow result"
+        assert not (
+            service.agent_artifacts_dir / "workflow-run-1" / "notes" / "result.md"
+        ).exists()
         assert callable(service.workflow_continuation._workflow_agent_for_node_callback)
         assert callable(service.workflow_continuation._workflow_node_task_callback)
         assert callable(service.workflow_continuation._workflow_child_goal_callback)
