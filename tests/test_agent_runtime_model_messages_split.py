@@ -14,6 +14,11 @@ def test_model_message_helpers_remain_exported_from_legacy_runtime_module() -> N
     assert agent_runtime._message_visible_content_text is model_messages.message_visible_content_text
     assert agent_runtime._responses_stream_text_delta is model_messages.responses_stream_text_delta
     assert agent_runtime._responses_stream_tool_call is model_messages.responses_stream_tool_call
+    assert agent_runtime._stream_chunk_tool_calls is model_messages.stream_chunk_tool_calls
+    assert agent_runtime._merge_stream_tool_call_delta is model_messages.merge_stream_tool_call_delta
+    assert agent_runtime._coalesced_stream_tool_calls is model_messages.coalesced_stream_tool_calls
+    assert agent_runtime._coerce_tool_call is model_messages.coerce_tool_call
+    assert agent_runtime._coalesce_model_message is model_messages.coalesce_model_message
 
 
 def test_model_message_helpers_parse_responses_stream_text_and_tool_calls() -> None:
@@ -72,4 +77,39 @@ def test_model_output_text_carries_metadata_for_runtime_events() -> None:
         "output_chars": 9,
         "truncated": True,
         "usage": {"total_tokens": 12},
+    }
+
+
+def test_model_message_helpers_coalesce_streaming_text_and_tool_calls() -> None:
+    message = model_messages.coalesce_model_message([
+        {"type": "response.output_text.delta", "delta": "Read "},
+        {"type": "response.output_text.delta", "delta": "the file"},
+        {
+            "type": "response.output_item.done",
+            "item": {
+                "type": "function_call",
+                "id": "item-1",
+                "call_id": "call-1",
+                "name": "workspace.read",
+                "arguments": "{\"path\":\"README.md\"}",
+            },
+        },
+        {"usage": {"total_tokens": "21"}, "finish_reason": "tool_calls"},
+    ])
+
+    assert message == {
+        "role": "assistant",
+        "content": "Read the file",
+        "tool_calls": [
+            {
+                "id": "call-1",
+                "type": "function",
+                "function": {
+                    "name": "workspace.read",
+                    "arguments": "{\"path\":\"README.md\"}",
+                },
+            }
+        ],
+        "finish_reason": "tool_calls",
+        "usage": {"total_tokens": 21},
     }
