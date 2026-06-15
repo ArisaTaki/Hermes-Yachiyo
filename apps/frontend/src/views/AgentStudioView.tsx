@@ -18,6 +18,7 @@ import { WorkflowEditorPanel, WorkflowRunPreview } from '../features/agent-studi
 import { useAgentAvatarActions } from '../features/agent-studio/hooks/useAgentAvatarActions';
 import { useAgentDeletionActions } from '../features/agent-studio/hooks/useAgentDeletionActions';
 import { useAgentDefinitions } from '../features/agent-studio/hooks/useAgentDefinitions';
+import { useAgentDraftActions } from '../features/agent-studio/hooks/useAgentDraftActions';
 import { useAgentGroupActions } from '../features/agent-studio/hooks/useAgentGroupActions';
 import { useAgentGroups } from '../features/agent-studio/hooks/useAgentGroups';
 import { useAgentRunReadiness } from '../features/agent-studio/hooks/useAgentRunReadiness';
@@ -562,6 +563,17 @@ export function AgentStudioView() {
     showConfirmDialog,
   });
   const {
+    resetAgentDraft,
+    selectAgent,
+    startNewAgent,
+  } = useAgentDraftActions({
+    emptyAgentDraft,
+    setDraft,
+    setError,
+    setSelectedAgentId,
+    setStatus,
+  });
+  const {
     finishSkillManagement,
     moveSkillFolder,
     openSkillLocation,
@@ -578,7 +590,7 @@ export function AgentStudioView() {
   } = useAgentDeletionActions({
     draftAgentId: draft.agent_id || '',
     draftAgentName: draft.name,
-    resetAgentDraft: () => setDraft({ ...emptyAgentDraft }),
+    resetAgentDraft,
     runAction,
     selectedAgentDeletable,
     selectedAgentId,
@@ -788,19 +800,6 @@ export function AgentStudioView() {
     setLoading,
     tab,
   });
-
-  function startNewAgent() {
-    setSelectedAgentId('');
-    setDraft({ ...emptyAgentDraft });
-    setStatus('正在编辑新的 Agent 草稿');
-    setError('');
-  }
-
-  function selectAgent(agentId: string) {
-    setSelectedAgentId(agentId);
-    setStatus('');
-    setError('');
-  }
 
   function activateTab(nextTab: StudioTab) {
     setTab(nextTab);

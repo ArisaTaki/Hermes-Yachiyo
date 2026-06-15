@@ -650,6 +650,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "onBack={() => void openAppView('main')}",
             "AgentGroupPanel",
             "useAgentDefinitions",
+            "useAgentDraftActions({",
             "useAgentGroupActions({",
             "useAgentGroups",
             "useAgentStudioLoadLifecycle({",
@@ -703,12 +704,25 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "workflowNodes(selectedWorkflow)",
             "setLoading(true);",
             "读取 Agent Studio 失败",
+            "function startNewAgent()",
+            "function selectAgent(agentId: string)",
             "async function saveAgentGroup()",
             "async function runCurrentAgentGroup()",
             "listStudioAgentsForView()",
             "listStudioSkillsForView()",
             "listModelProfiles()",
             "studioRunnablesForView(",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useAgentDraftActions.ts",
+        [
+            "export function useAgentDraftActions",
+            "setDraft({ ...emptyAgentDraft });",
+            "setSelectedAgentId('');",
+            "setStatus('正在编辑新的 Agent 草稿');",
+            "function useAgentDraftActions",
+            "const selectAgent = useCallback((agentId: string) => {",
         ],
     )
     _assert_contains(
@@ -2374,6 +2388,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "AgentStudioChrome",
             "useAgentAvatarActions",
             "useAgentDeletionActions",
+            "useAgentDraftActions",
             "useAgentGroupActions",
             "useAgentStudioLoadLifecycle",
             "useAgentStudioRefresh",
