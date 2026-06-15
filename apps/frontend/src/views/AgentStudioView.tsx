@@ -25,6 +25,7 @@ import { useApprovedRunGuard } from '../features/agent-studio/hooks/useApprovedR
 import { useRunApprovalActions } from '../features/agent-studio/hooks/useRunApprovalActions';
 import { useRunApprovalFollowup } from '../features/agent-studio/hooks/useRunApprovalFollowup';
 import { useRunArtifactActions } from '../features/agent-studio/hooks/useRunArtifactActions';
+import { useRunDebugActions } from '../features/agent-studio/hooks/useRunDebugActions';
 import { useRunEventReplay } from '../features/agent-studio/hooks/useRunEventReplay';
 import { useRunHistoryManagement } from '../features/agent-studio/hooks/useRunHistoryManagement';
 import { useRunLaunchActions } from '../features/agent-studio/hooks/useRunLaunchActions';
@@ -1116,6 +1117,17 @@ export function AgentStudioView() {
     setStatus,
     upsertRunDetailCache,
   });
+  const {
+    loadMoreSelectedRunEvents,
+    requestCancelSelectedRun,
+  } = useRunDebugActions({
+    cancelSelectedRun,
+    loadMoreRunReplayEvents,
+    runAction,
+    selectedRun,
+    setStatus,
+    showConfirmDialog,
+  });
 
   const {
     createRunFromTarget,
@@ -1532,23 +1544,6 @@ export function AgentStudioView() {
         });
       }
       return nextEdges;
-    });
-  }
-
-  async function loadMoreSelectedRunEvents() {
-    const loadedCount = await loadMoreRunReplayEvents();
-    setStatus(loadedCount ? `已加载 ${loadedCount} 条 RunEvent replay` : '没有更多 RunEvent replay');
-  }
-
-  function requestCancelSelectedRun() {
-    if (!selectedRun || !isActiveRunStatus(selectedRun.status)) return;
-    const runName = selectedRun.runnable_name || selectedRun.runnable_id || 'Run';
-    showConfirmDialog({
-      title: `取消「${runName}」？`,
-      description: '这会终止当前进行中或待审批的 Run；如果它正在等待审批，待审批请求也会被清空。',
-      confirmLabel: '取消 Run',
-      variant: 'danger',
-      onConfirm: () => void runAction(cancelSelectedRun, '取消 Run'),
     });
   }
 

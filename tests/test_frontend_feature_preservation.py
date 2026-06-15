@@ -2081,6 +2081,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "useRunApprovalActions",
             "useRunEventReplay",
             "useRunArtifactActions",
+            "useRunDebugActions",
             "useRunHistoryManagement",
             "useRunLaunchActions",
             "useRunNavigationActions",
@@ -2122,6 +2123,21 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "selectedAgentReadOnly",
             "selectedAgentDeletable",
             "AgentEditorPanel",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useRunDebugActions.ts",
+        [
+            "export function useRunDebugActions",
+            "async function loadMoreSelectedRunEvents()",
+            "const loadedCount = await loadMoreRunReplayEvents();",
+            "setStatus(loadedCount ? `已加载 ${loadedCount} 条 RunEvent replay` : '没有更多 RunEvent replay');",
+            "function requestCancelSelectedRun()",
+            "if (!selectedRun || !isActiveRunStatus(selectedRun.status)) return;",
+            "const runName = selectedRun.runnable_name || selectedRun.runnable_id || 'Run';",
+            "confirmLabel: '取消 Run',",
+            "variant: 'danger',",
+            "onConfirm: () => void runAction(cancelSelectedRun, '取消 Run'),",
         ],
     )
     _assert_contains(
