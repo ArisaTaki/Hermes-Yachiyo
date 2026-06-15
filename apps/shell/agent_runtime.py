@@ -207,6 +207,7 @@ from apps.shell.agent.runtime.skill_import import SkillImportPreparer, SkillImpo
 from apps.shell.agent.runtime.skill_install import SkillInstallCommandValidator
 from apps.shell.agent.runtime.skill_sources import SkillSourceDiscovery
 from apps.shell.agent.runtime.skill_sync import SkillSyncPlanner
+from apps.shell.agent.runtime.tool_brokers import RuntimeToolBrokerFactory
 from apps.shell.agent.runtime.tool_requests import ToolRequestParser
 from apps.shell.agent.runtime.tool_approvals import (
     ToolApprovalClaimProjection,
@@ -619,6 +620,15 @@ class NativeRunEngine:
                 future_task_tool_names=list(_FUTURE_TASK_TOOL_NAMES),
             )
         )
+        self._install_runtime_tool_brokers(
+            RuntimeToolBrokerFactory(
+                agent_artifacts_dir=self.agent_artifacts_dir,
+                tool_broker_factory=ToolBroker,
+                memory_store=self._memory_store,
+                future_task_store=self._future_task_store,
+                main_chat_agent_id=_MAIN_CHAT_AGENT_ID,
+            )
+        )
         tooling = _build_runtime_tooling(
             normalize_tool_name=_normalize_tool_name,
             input_preview=_tool_input_preview,
@@ -822,6 +832,9 @@ class NativeRunEngine:
 
     def _install_runtime_main_chat_config(self, main_chat_config: MainChatRuntimeConfigBuilder) -> None:
         self.main_chat_config = main_chat_config
+
+    def _install_runtime_tool_brokers(self, tool_brokers: RuntimeToolBrokerFactory) -> None:
+        self.tool_brokers = tool_brokers
 
     def _install_runtime_tooling(self, tooling: RuntimeToolingBundle) -> None:
         self.tool_loop_projection = tooling.tool_loop_projection
@@ -2818,14 +2831,9 @@ class NativeRunEngine:
                 message_count=len(messages),
             ),
         )
-        broker = ToolBroker(
-            runtime["workspace_policy"],
-            self.agent_artifacts_dir / run_id,
-            memory_store=self._memory_store(source_run_id=run_id),
-            future_task_store=self._future_task_store(
-                source_run_id=run_id,
-                default_runnable_id=_MAIN_CHAT_AGENT_ID,
-            ),
+        broker = self.tool_brokers.for_main_chat(
+            run_id=run_id,
+            workspace_policy=runtime["workspace_policy"],
         )
         artifacts = [item for item in run.get("artifacts") or [] if isinstance(item, dict)]
         try:
@@ -3782,15 +3790,11 @@ class NativeRunEngine:
         return ToolApprovalResumeContext.from_run(
             run,
             pending,
-            broker=ToolBroker(
-                runtime["workspace_policy"],
-                self.agent_artifacts_dir / run_id,
+            broker=self.tool_brokers.for_run(
+                run_id=run_id,
+                workspace_policy=runtime["workspace_policy"],
                 skills=skills,
-                memory_store=self._memory_store(source_run_id=run_id),
-                future_task_store=self._future_task_store(
-                    source_run_id=run_id,
-                    default_runnable_id=str((run.get("runnable_id") or _MAIN_CHAT_AGENT_ID)),
-                ),
+                default_runnable_id=str((run.get("runnable_id") or _MAIN_CHAT_AGENT_ID)),
             ),
             allowed_tools=runtime["tool_policy"].get("allowed_tools") or [],
             budget_factory=lambda context_run_id, context_timeline: self._run_budget(
