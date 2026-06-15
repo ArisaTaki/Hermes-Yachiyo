@@ -4270,6 +4270,35 @@ button:hover {
   backdrop-filter: blur(10px);
 }
 
+.hy-mode-info .launcher-agent-task-light.is-panel {
+  position: relative;
+  left: auto;
+  top: auto;
+  width: min(100%, 420px);
+  min-height: 44px;
+  margin: -6px 0 18px;
+  padding: 6px;
+  transform: none;
+}
+
+.hy-mode-info .launcher-agent-task-light.is-panel .launcher-agent-task-main {
+  gap: 4px 8px;
+  padding: 4px 8px;
+}
+
+.hy-mode-info .launcher-agent-task-light.is-panel .launcher-agent-task-main strong {
+  font-size: 12px;
+}
+
+.hy-mode-info .launcher-agent-task-light.is-panel .launcher-agent-task-main small {
+  font-size: 10px;
+}
+
+.hy-mode-info .launcher-agent-task-light.is-panel .launcher-agent-task-studio {
+  padding: 0 8px;
+  font-size: 10px;
+}
+
 .bubble-shell .launcher-agent-task-light {
   top: 0;
   width: min(136px, calc(100vw - 10px));

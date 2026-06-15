@@ -3,6 +3,7 @@ import { Suspense, createContext, lazy, FormEvent, ReactNode, useCallback, useCo
 import logoUrl from '../../../../docs/open-design/logo.png';
 import { useConfirmDialog } from '../components/ConfirmDialog';
 import { UiIcon, type UiIconName } from '../components/UiIcon';
+import { LauncherAgentTaskLight } from '../features/yachiyo-chat/components/LauncherAgentTaskLight';
 import { AssistantProfileSeedContext, type AssistantProfileSeed } from '../lib/assistantProfileSeed';
 import { apiDelete, apiGet, apiPost, checkAppUpdate, openDesktopMode, openExternalUrl, openPath, quitApp } from '../lib/bridge';
 import { type AppView, currentParam, navigateTo } from '../lib/view';
@@ -1291,6 +1292,12 @@ export function BubbleModePage() {
         <div className="hy-mode-info hy-stagger">
           <h3>气泡模式</h3>
           <p>桌面悬浮气泡，随时与八千代对话。支持拖拽、双击展开聊天、边缘吸附等功能。</p>
+          <LauncherAgentTaskLight
+            mode="bubble"
+            task={data?.chat?.agent_task || null}
+            testIdPrefix="bubble-mode"
+            variant="panel"
+          />
           <div className="hy-feature-pills">
             {[
               ['💬', '随时对话'],
@@ -1372,6 +1379,12 @@ export function Live2DModePage({ active = true }: { active?: boolean } = {}) {
         <div className="hy-mode-info hy-stagger">
           <h3>Live2D 模式</h3>
           <p>虚拟形象互动，让八千代在你的桌面上活起来。支持口型同步、表情动作、语音合成等功能。</p>
+          <LauncherAgentTaskLight
+            mode="live2d"
+            task={data?.chat?.agent_task || null}
+            testIdPrefix="live2d-mode"
+            variant="panel"
+          />
           <div className="hy-feature-pills">
             {[
               ['🎤', data?.tts?.enabled ? '口型同步' : '口型同步'],

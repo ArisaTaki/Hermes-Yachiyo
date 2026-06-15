@@ -146,20 +146,12 @@ def test_launcher_views_expose_session_summary_e2e_selectors() -> None:
         [
             "launcherRecentSessions(data?.chat)",
             "latestLauncherSessionSummary(data?.chat)",
-            "import { yachiyoTaskRunId } from '../features/yachiyo-chat/taskSnapshots';",
             "LauncherAgentTaskLight",
-            "launcherAgentTaskChatParams",
             "launcherAgentTaskSummary(agentTask)",
-            "launcherAgentTaskDetail(task)",
-            "yachiyoTaskRunId(task)",
             'data-testid="bubble-launcher-shell"',
             'data-testid="bubble-launcher-button"',
             'data-testid="bubble-launcher-status-dot"',
             'data-testid="bubble-launcher-summary"',
-            'data-testid={`${mode}-launcher-agent-task-light`}',
-            'data-testid={`${mode}-launcher-agent-task-open-chat`}',
-            'data-testid={`${mode}-launcher-agent-task-open-studio`}',
-            'data-testid={`${mode}-launcher-agent-task-detail`}',
             'data-testid="live2d-launcher-shell"',
             'data-testid="live2d-launcher-stage"',
             'data-testid="live2d-launcher-canvas"',
@@ -186,10 +178,33 @@ def test_launcher_views_expose_session_summary_e2e_selectors() -> None:
             "if (conversationKind) params.conversation_kind = conversationKind;",
             "if (latestTaskId) params.task_id = latestTaskId;",
             "await openAppView('chat', params);",
-            "void openAppView('chat', launcherAgentTaskChatParams(task));",
-            "void openAppView('agents', { run: runId });",
             "data-session-id={session.session_id || ''}",
             "data-task-id={session.latest_task_id || ''}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/LauncherAgentTaskLight.tsx",
+        [
+            "export function LauncherAgentTaskLight",
+            "export function launcherAgentTaskSummary",
+            "export function launcherAgentTaskChatParams",
+            "testIdPrefix = `${mode}-launcher`",
+            "launcherAgentTaskDetail(task)",
+            "yachiyoTaskRunId(task)",
+            "void openAppView('chat', launcherAgentTaskChatParams(task));",
+            "void openAppView('agents', { run: runId });",
+            "data-testid={`${testIdPrefix}-agent-task-light`}",
+            "data-testid={`${testIdPrefix}-agent-task-open-chat`}",
+            "data-testid={`${testIdPrefix}-agent-task-open-studio`}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/views/OpenDesignView.tsx",
+        [
+            "LauncherAgentTaskLight",
+            'testIdPrefix="bubble-mode"',
+            'testIdPrefix="live2d-mode"',
+            'variant="panel"',
         ],
     )
 
