@@ -178,6 +178,26 @@ class WorkflowParallelNodeProjection:
     join_node_id: str
     branch_results: list[dict[str, str]]
 
+    @classmethod
+    def from_plan(
+        cls,
+        node: dict[str, Any],
+        plan: dict[str, Any],
+        branch_results: list[dict[str, str]],
+        *,
+        label: str,
+        kind: str,
+    ) -> "WorkflowParallelNodeProjection":
+        return cls(
+            node_id=str(node.get("id") or ""),
+            node_kind=kind,
+            node_label=label,
+            branch_count=len(plan.get("branches") or []),
+            completed_count=len(branch_results),
+            join_node_id=str(plan.get("join_node_id") or ""),
+            branch_results=branch_results,
+        )
+
     def event_payload(self) -> dict[str, Any]:
         return {
             "workflow_node_id": self.node_id,

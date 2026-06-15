@@ -814,14 +814,12 @@ class WorkflowContinuationCoordinator:
             aggregate_context = f"Parallel {label} results:\n{aggregate_context}"
         else:
             aggregate_context = context
-        projection = WorkflowParallelNodeProjection(
-            node_id=str(node.get("id") or ""),
-            node_kind=kind,
-            node_label=label,
-            branch_count=len(plan.get("branches") or []),
-            completed_count=len(branch_results),
-            join_node_id=str(plan.get("join_node_id") or ""),
-            branch_results=branch_results,
+        projection = WorkflowParallelNodeProjection.from_plan(
+            node,
+            plan,
+            branch_results,
+            label=label,
+            kind=kind,
         )
         timeline.append(projection.timeline_event(engine._timeline))
         engine.append_run_event(str(run["run_id"]), "workflow.node.parallel", projection.event_payload())

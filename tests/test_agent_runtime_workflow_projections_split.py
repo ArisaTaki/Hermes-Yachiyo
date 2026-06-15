@@ -109,3 +109,34 @@ def test_workflow_loop_projection_accepts_selection_payload() -> None:
         "workflow_node_loop_limit_reached": False,
         "status": "completed",
     }
+
+
+def test_workflow_parallel_projection_accepts_plan_payload() -> None:
+    projection = WorkflowParallelNodeProjection.from_plan(
+        {"id": "fanout", "type": "parallel"},
+        {
+            "join_node_id": "report",
+            "branches": [
+                {"entry_node_id": "design", "label": "Design"},
+                {"entry_node_id": "code", "label": "Code"},
+            ],
+        },
+        [
+            {"entry_node_id": "design", "label": "Design", "result": "Design ready"},
+        ],
+        label="Parallel Work",
+        kind="parallel",
+    )
+
+    assert projection.event_payload() == {
+        "workflow_node_id": "fanout",
+        "workflow_node_kind": "parallel",
+        "workflow_node_label": "Parallel Work",
+        "workflow_node_branch_count": 2,
+        "workflow_node_completed_branch_count": 1,
+        "workflow_node_join_target": "report",
+        "workflow_node_branch_results": [
+            {"entry_node_id": "design", "label": "Design", "result": "Design ready"},
+        ],
+        "status": "completed",
+    }
