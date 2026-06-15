@@ -3113,15 +3113,9 @@ def test_agent_studio_skills_ui_smoke_uses_skill_library_paths() -> None:
         "apps/frontend/src/views/AgentStudioView.tsx",
         [
             'data-testid="skill-library"',
-            'data-testid="skill-import-panel"',
-            'data-testid="skill-import-folder-select"',
-            'data-testid="skill-install-command-input"',
-            'data-testid="skill-install-command-submit"',
-            'data-testid="skill-native-sync"',
-            'data-testid="skill-source-root"',
-            'data-testid="skill-import-results"',
-            'data-testid="skill-import-result"',
-            'data-testid="skill-source-picker"',
+            "SkillImportPanel",
+            "onInstallSkill={() => void runAction(installSkillFromCommand, '安装 Skill')}",
+            "onSyncNativeSkillLibrary={() => void runAction(syncNativeSkillLibrary, '同步 Native Skills')}",
             'data-testid="skill-library-panel"',
             'data-testid="skill-filter-installed"',
             'data-testid="skill-filter-native"',
@@ -3134,6 +3128,27 @@ def test_agent_studio_skills_ui_smoke_uses_skill_library_paths() -> None:
     _assert_not_contains(
         "apps/frontend/src/views/AgentStudioView.tsx",
         ["function SkillCard"],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/views/AgentStudioView.tsx",
+        ['data-testid="skill-import-panel"'],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/SkillImportPanel.tsx",
+        [
+            "export function SkillImportPanel",
+            'data-testid="skill-import-panel"',
+            'data-testid="skill-import-folder-select"',
+            'data-testid="skill-install-command-input"',
+            'data-testid="skill-install-command-submit"',
+            'data-testid="skill-native-sync"',
+            'data-testid="skill-source-root"',
+            'data-testid="skill-import-results"',
+            'data-testid="skill-import-result"',
+            'data-testid="skill-source-picker"',
+            "skillResultStatusLabel(result.status)",
+            "skillSourceTypeLabel(source.source_type)",
+        ],
     )
     _assert_contains(
         "apps/frontend/src/features/agent-studio/components/SkillCard.tsx",

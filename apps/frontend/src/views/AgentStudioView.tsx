@@ -16,6 +16,7 @@ import { RunDetailPanel } from '../features/agent-studio/components/RunDetailPan
 import { RunLauncherPanel } from '../features/agent-studio/components/RunLauncherPanel';
 import { SkillCard } from '../features/agent-studio/components/SkillCard';
 import { SkillFolderPanel } from '../features/agent-studio/components/SkillFolderPanel';
+import { SkillImportPanel } from '../features/agent-studio/components/SkillImportPanel';
 import { WorkflowEditorPanel, WorkflowRunPreview } from '../features/agent-studio/components/WorkflowEditorPanel';
 import { useAgentAvatarActions } from '../features/agent-studio/hooks/useAgentAvatarActions';
 import { useAgentDeletionActions } from '../features/agent-studio/hooks/useAgentDeletionActions';
@@ -91,8 +92,6 @@ import {
   skillMatchesFolderFilter,
   skillMatchesQuery,
   skillMatchesSourceFilter,
-  skillResultStatusLabel,
-  skillSourceTypeLabel,
   type SkillFolderFilter,
   type SkillImportResult,
   type SkillSourceFilter,
@@ -1503,87 +1502,21 @@ export function AgentStudioView() {
 
       {!loading && tab === 'skills' ? (
         <section className="agent-studio-grid" data-testid="skill-library">
-          <div className="agent-studio-panel skill-import-panel" data-testid="skill-import-panel">
-            <div className="section-heading-row">
-              <h2>Installed Skills</h2>
-            </div>
-            <p className="agent-section-help">从安装命令或上传入口导入的 Skills 会进入 Installed Skill 管理区；它们和 Native Skill Library 分开展示和挂载。</p>
-            <div className="skill-import-target">
-              <label>
-                <span>导入到文件夹</span>
-                <select className="hy-select" data-testid="skill-import-folder-select" value={skillTargetFolderId} onChange={(event) => setSkillTargetFolderId(event.target.value)}>
-                  <option value="">无需分组</option>
-                  {skillFolders.map((folder) => (
-                    <option value={folder.folder_id} key={folder.folder_id}>{folder.name}</option>
-                  ))}
-                </select>
-              </label>
-              <small>需要新增、重命名或删除文件夹时，进入上方“分组管理”。</small>
-            </div>
-            <div className="skill-install-box">
-              <label>
-                <span>Skill 来源或安装命令</span>
-                <input
-                  className="hy-input"
-                  data-testid="skill-install-command-input"
-                  value={skillInstallCommand}
-                  onChange={(event) => setSkillInstallCommand(event.target.value)}
-                  placeholder="owner/repo --skill skill-name 或 skills@latest add owner/repo"
-                />
-              </label>
-              {installingSkill ? (
-                <div className="skill-install-progress" role="progressbar" aria-label="Skill 安装进度">
-                  <span />
-                </div>
-              ) : null}
-              <button type="button" data-testid="skill-install-command-submit" disabled={busy || !skillInstallCommand.trim()} onClick={() => void runAction(installSkillFromCommand, '安装 Skill')}>
-                {installingSkill ? '安装中...' : '安装并同步'}
-              </button>
-              <small>可以直接输入 Skill 来源，也可以输入 <code>skills@latest add ...</code> 或 <code>npx skills add ...</code>。Oha-Yachiyo 会固定使用 <code>oha-yachiyo</code> 目标并补上 <code>--copy -y</code>，在 Installed Skill 工作区执行，不写入 Native 全局库。</small>
-            </div>
-            <div className="section-heading-row"><h2>上传 Skills</h2></div>
-            <p className="agent-section-help">支持批量上传 zip 技能包，也支持选择本地 Skill 目录；导入后会复制到 Installed Skill 管理区。</p>
-            <div className="skill-import-hints">
-              <span>一次上传多个 zip</span>
-              <span>自动校验 SKILL.md</span>
-              <span>跳过重复选择</span>
-            </div>
-            <div
-              className="skill-drop-zone"
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={dropSkillSources}
-            >
-              <strong>拖拽 Skill 目录或 zip 到这里</strong>
-              <span>也可以点击选择文件，选择后会立即校验并导入</span>
-              <button type="button" data-testid="skill-source-picker" disabled={busy} onClick={() => void pickSkillSources()}>上传 Skills</button>
-            </div>
-            <div className="section-heading-row">
-              <h2>Native Skill Library</h2>
-              <button type="button" data-testid="skill-native-sync" disabled={busy} onClick={() => void runAction(syncNativeSkillLibrary, '同步 Native Skills')}>从 Native Library 同步</button>
-            </div>
-            <p className="agent-section-help">Native Skill Library 的 `~/.oha-yachiyo/skill-library/skills` 只登记引用，不复制到 Installed Skill 管理区；项目级 Skills 暂不纳入本页管理。</p>
-            <div className="skill-source-roots">
-              {skillSources.map((source) => (
-                <div className={source.exists ? 'skill-source-root' : 'skill-source-root missing'} data-testid="skill-source-root" key={`${source.source_type}-${source.path}`}>
-                  <strong>{skillSourceTypeLabel(source.source_type)}</strong>
-                  <span>{source.skill_count || 0} skills</span>
-                  <code>{source.path}</code>
-                </div>
-              ))}
-              {!skillSources.length ? <div className="empty-state inline-empty">暂未检测到 Native skills root。</div> : null}
-            </div>
-            {skillImportResults.length ? (
-              <div className="skill-import-results" aria-label="Skill import results" data-testid="skill-import-results">
-                {skillImportResults.map((result) => (
-                  <div className={`skill-import-result ${result.status}`} data-testid="skill-import-result" key={`${result.source}-${result.status}`}>
-                    <strong>{skillResultStatusLabel(result.status)}</strong>
-                    <span>{result.source}</span>
-                    <small>{result.message}</small>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-          </div>
+          <SkillImportPanel
+            busy={busy}
+            installingSkill={installingSkill}
+            skillFolders={skillFolders}
+            skillImportResults={skillImportResults}
+            skillInstallCommand={skillInstallCommand}
+            skillSources={skillSources}
+            skillTargetFolderId={skillTargetFolderId}
+            onDropSkillSources={dropSkillSources}
+            onInstallSkill={() => void runAction(installSkillFromCommand, '安装 Skill')}
+            onPickSkillSources={() => void pickSkillSources()}
+            onSetSkillInstallCommand={setSkillInstallCommand}
+            onSetSkillTargetFolderId={setSkillTargetFolderId}
+            onSyncNativeSkillLibrary={() => void runAction(syncNativeSkillLibrary, '同步 Native Skills')}
+          />
           <div className="agent-studio-panel" data-testid="skill-library-panel">
             <div className="section-heading-row">
               <h2>{skillLibraryFilter === 'native' ? 'Native Skill Library' : 'Installed Skill Library'}</h2>
