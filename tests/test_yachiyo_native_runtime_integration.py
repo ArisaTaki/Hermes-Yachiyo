@@ -518,3 +518,97 @@ def test_agent_studio_rejects_native_workflow_approval_with_group_replay_events(
         assert "sk-workflow-reject-secret123456" not in serialized_events
     finally:
         runtime.close()
+
+
+def test_agent_studio_approves_native_workflow_approval_and_replays_resume(tmp_path) -> None:
+    credential_store = MemoryCredentialStore()
+    runtime = NativeRunEngine(
+        db_path=tmp_path / "agent-runtime-workflow-approval-resume.db",
+        workspace_dir=tmp_path / "runtime-workflow-approval-resume",
+        credential_store=credential_store,
+        seed_templates=False,
+    )
+    try:
+        workflow = runtime.create_workflow(
+            {
+                "name": "Native approval resume workflow",
+                "nodes": [
+                    {
+                        "id": "start",
+                        "type": "input",
+                        "data": {"kind": "start", "label": "Start"},
+                    },
+                    {
+                        "id": "review",
+                        "type": "default",
+                        "data": {
+                            "kind": "approval",
+                            "label": "Review Gate",
+                            "criteria": "Review release notes",
+                        },
+                    },
+                    {
+                        "id": "artifact",
+                        "type": "output",
+                        "data": {
+                            "kind": "artifact",
+                            "label": "Release Notes",
+                            "artifact_path": "release/notes.md",
+                        },
+                    },
+                ],
+                "edges": [
+                    {"id": "edge-start-review", "source": "start", "target": "review"},
+                    {"id": "edge-review-artifact", "source": "review", "target": "artifact"},
+                ],
+            }
+        )
+        waiting = runtime.create_workflow_run(
+            {
+                "workflow_id": workflow["workflow_id"],
+                "user_goal": "Prepare release notes",
+            }
+        )
+
+        studio = AgentStudioService(LegacyStudioPort(runtime))
+
+        before = studio.get_run_timeline(waiting["run_id"])
+        approved = studio.approve_run_approval(waiting["run_id"])
+        after = studio.get_run_timeline(waiting["run_id"])
+        group_run = studio.get_group_run(str(after.run_group_id or after.group_run_id or ""))
+        events = list(studio.get_run_event_stream(waiting["run_id"]))
+        page = studio.get_run_event_page(waiting["run_id"], limit=20)
+
+        event_types = [event.event_type for event in events]
+        approved_events = [
+            event for event in events if event.event_type == "workflow.node.approval_approved"
+        ]
+        artifact_events = [
+            event for event in events if event.event_type == "workflow.node.artifact"
+        ]
+
+        assert waiting["status"] == "approval_required"
+        assert before.pending_approval is not None
+        assert before.pending_approval.workflow_node_id == "review"
+        assert before.pending_approval.workflow_node_label == "Review Gate"
+        assert approved.status == "completed"
+        assert approved.pending_approval is None
+        assert after.status == "completed"
+        assert after.pending_approval is None
+        assert after.approvals[0].status == "approved"
+        assert after.artifacts[0].path == "release/notes.md"
+        assert after.artifacts[0].workflow_node_id == "artifact"
+        assert after.artifacts[0].workflow_node_label == "Release Notes"
+        assert group_run.status == "completed"
+        assert "workflow.node.approval_required" in event_types
+        assert "workflow.node.approval_approved" in event_types
+        assert "workflow.node.artifact" in event_types
+        assert "workflow.run.completed" in event_types
+        assert "approval.approved" in event_types
+        assert approved_events[0].payload["workflow_node_id"] == "review"
+        assert approved_events[0].payload["workflow_node_label"] == "Review Gate"
+        assert artifact_events[0].payload["workflow_node_id"] == "artifact"
+        assert artifact_events[0].payload["artifact"]["path"] == "release/notes.md"
+        assert "workflow.run.completed" in [event.event_type for event in page.events]
+    finally:
+        runtime.close()
