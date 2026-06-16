@@ -124,3 +124,216 @@ def test_chat_task_and_studio_timeline_share_native_runtime_snapshot(tmp_path) -
         assert event_page.events[0].event_type == "agent.tool.approval_required"
     finally:
         runtime.close()
+
+
+def test_agent_studio_group_run_uses_native_run_group_events_and_children(tmp_path) -> None:
+    credential_store = MemoryCredentialStore()
+    runtime = NativeRunEngine(
+        db_path=tmp_path / "agent-runtime-group.db",
+        workspace_dir=tmp_path / "runtime-group",
+        credential_store=credential_store,
+        seed_templates=False,
+    )
+    try:
+        run_group = runtime._insert_run_group(
+            title="Native review group",
+            source="agent_group",
+            workspace_dir=str(tmp_path / "group-workspace"),
+        )
+        planner_run = runtime._insert_run(
+            kind="agent_run",
+            runnable_id="agent-planner",
+            user_goal="Compare options",
+            run_group_id=run_group["run_group_id"],
+        )
+        reviewer_run = runtime._insert_run(
+            kind="agent_run",
+            runnable_id="agent-reviewer",
+            user_goal="Compare options",
+            run_group_id=run_group["run_group_id"],
+        )
+        approval = {
+            "approval_id": "approval-group-native",
+            "tool": "terminal.run",
+            "title": "Approve planner command",
+        }
+        runtime._update_run(
+            planner_run["run_id"],
+            status="approval_required",
+            artifacts=[
+                {
+                    "artifact_id": "artifact-group-plan",
+                    "kind": "markdown",
+                    "path": "team-plan.md",
+                }
+            ],
+            pending_approval=approval,
+        )
+        runtime._update_run(
+            reviewer_run["run_id"],
+            status="completed",
+            result="Looks good",
+        )
+        runtime._update_run_group(
+            run_group["run_group_id"],
+            status="running",
+            summary="Compare options",
+        )
+        runtime.append_run_event(
+            planner_run["run_id"],
+            "group.run.started",
+            {
+                "group_id": "group-native-1",
+                "group_run_id": run_group["run_group_id"],
+                "run_group_id": run_group["run_group_id"],
+                "objective": "Compare options",
+                "participant_count": 2,
+                "child_run_ids": [planner_run["run_id"], reviewer_run["run_id"]],
+            },
+        )
+        runtime.append_run_event(
+            planner_run["run_id"],
+            "group.member.started",
+            {
+                "agent_id": "agent-planner",
+                "agent_name": "Planner",
+                "group_id": "group-native-1",
+                "group_run_id": run_group["run_group_id"],
+                "run_group_id": run_group["run_group_id"],
+                "run_id": planner_run["run_id"],
+                "status": "approval_required",
+            },
+        )
+        runtime.append_run_event(
+            reviewer_run["run_id"],
+            "group.member.completed",
+            {
+                "agent_id": "agent-reviewer",
+                "agent_name": "Reviewer",
+                "group_id": "group-native-1",
+                "group_run_id": run_group["run_group_id"],
+                "run_group_id": run_group["run_group_id"],
+                "run_id": reviewer_run["run_id"],
+                "status": "completed",
+            },
+        )
+
+        studio = AgentStudioService(LegacyStudioPort(runtime))
+
+        group_run = studio.get_group_run(run_group["run_group_id"])
+        group_events = list(studio.get_group_run_event_stream(run_group["run_group_id"]))
+        event_page = studio.get_group_run_event_page(run_group["run_group_id"], limit=2)
+
+        assert group_run.group_run_id == run_group["run_group_id"]
+        assert group_run.status == "running"
+        assert group_run.objective == "Compare options"
+        assert group_run.child_run_ids == [planner_run["run_id"], reviewer_run["run_id"]]
+        assert [run.run_id for run in group_run.runs] == [
+            planner_run["run_id"],
+            reviewer_run["run_id"],
+        ]
+        assert group_run.runs[0].pending_approval is not None
+        assert group_run.runs[0].pending_approval.tool_name == "terminal.run"
+        assert group_run.pending_approvals[0].approval_id == "approval-group-native"
+        assert group_run.shared_artifacts[0].path == "team-plan.md"
+        assert group_run.shared_artifacts[0].source_run_id == planner_run["run_id"]
+        assert "group.run.started" in [event.event_type for event in group_events]
+        assert "group.member.completed" in [event.event_type for event in group_events]
+        assert event_page.run_id == run_group["run_group_id"]
+        assert event_page.events[0].event_type == "group.run.started"
+    finally:
+        runtime.close()
+
+
+def test_agent_studio_workflow_run_timeline_uses_native_runtime_events(tmp_path) -> None:
+    credential_store = MemoryCredentialStore()
+    runtime = NativeRunEngine(
+        db_path=tmp_path / "agent-runtime-workflow.db",
+        workspace_dir=tmp_path / "runtime-workflow",
+        credential_store=credential_store,
+        seed_templates=False,
+    )
+    try:
+        run_group = runtime._insert_run_group(
+            title="Native workflow run",
+            source="workflow",
+            workspace_dir=str(tmp_path / "workflow-workspace"),
+        )
+        workflow_run = runtime._insert_run(
+            kind="workflow_run",
+            runnable_id="workflow-native-1",
+            user_goal="Build workflow report",
+            run_group_id=run_group["run_group_id"],
+        )
+        artifact = {
+            "artifact_id": "artifact-workflow-native",
+            "kind": "workflow_artifact",
+            "path": "workflow/report.md",
+            "workflow_id": "workflow-native-1",
+            "workflow_run_id": workflow_run["run_id"],
+            "workflow_node_id": "report",
+            "workflow_node_label": "Report",
+        }
+        runtime._update_run(
+            workflow_run["run_id"],
+            status="completed",
+            result="Workflow report complete",
+            timeline=[
+                {
+                    "event_type": "workflow.node.started",
+                    "payload": {
+                        "workflow_id": "workflow-native-1",
+                        "workflow_run_id": workflow_run["run_id"],
+                        "workflow_node_id": "report",
+                        "workflow_node_label": "Report",
+                    },
+                },
+                {
+                    "event_type": "workflow.node.completed",
+                    "payload": {
+                        "workflow_id": "workflow-native-1",
+                        "workflow_run_id": workflow_run["run_id"],
+                        "workflow_node_id": "report",
+                        "workflow_node_label": "Report",
+                    },
+                },
+            ],
+            artifacts=[artifact],
+        )
+        runtime.append_run_event(
+            workflow_run["run_id"],
+            "workflow.node.completed",
+            {
+                "workflow_id": "workflow-native-1",
+                "workflow_run_id": workflow_run["run_id"],
+                "workflow_node_id": "report",
+                "workflow_node_label": "Report",
+            },
+        )
+
+        studio = AgentStudioService(LegacyStudioPort(runtime))
+
+        timeline = studio.get_run_timeline(workflow_run["run_id"])
+        events = list(studio.get_run_event_stream(workflow_run["run_id"]))
+        page = studio.get_run_event_page(workflow_run["run_id"], limit=1)
+
+        assert timeline.run_id == workflow_run["run_id"]
+        assert timeline.workflow_run_id == workflow_run["run_id"]
+        assert timeline.workflow_id == "workflow-native-1"
+        assert timeline.objective == "Build workflow report"
+        assert timeline.final_answer == "Workflow report complete"
+        assert [event.event_type for event in timeline.events] == [
+            "workflow.node.started",
+            "workflow.node.completed",
+        ]
+        assert timeline.artifacts[0].artifact_id == "artifact-workflow-native"
+        assert timeline.artifacts[0].workflow_node_label == "Report"
+        workflow_events = [
+            event for event in events if event.event_type == "workflow.node.completed"
+        ]
+        assert workflow_events
+        assert workflow_events[0].payload["workflow_node_id"] == "report"
+        assert page.run_id == workflow_run["run_id"]
+        assert page.events[0].event_type == "group.run.started"
+    finally:
+        runtime.close()
