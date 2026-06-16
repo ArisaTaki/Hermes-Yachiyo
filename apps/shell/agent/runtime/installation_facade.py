@@ -28,6 +28,7 @@ from apps.shell.agent.runtime.definition_services import build_runtime_definitio
 from apps.shell.agent.runtime.errors import AgentRuntimeError
 from apps.shell.agent.runtime.events import redact_secrets
 from apps.shell.agent.runtime.foundation import build_runtime_foundation_setup
+from apps.shell.agent.runtime.future_task_service import RuntimeFutureTaskService
 from apps.shell.agent.runtime.model_calling import (
     RuntimeModelProfileChatAdapter,
     RuntimeOpenAICompatibleChatAdapter,
@@ -44,7 +45,10 @@ from apps.shell.agent.runtime.main_chat_model_loop import (
 )
 from apps.shell.agent.runtime.paths import native_skill_home
 from apps.shell.agent.runtime.run_cancellation import RuntimeRunCancellationCoordinator
+from apps.shell.agent.runtime.run_projections import AgentRunGroupProjectionCoordinator
 from apps.shell.agent.runtime.run_services import build_runtime_run_layer_setup
+from apps.shell.agent.runtime.runnable_services import build_runtime_runnable_services
+from apps.shell.agent.runtime.runnables import RuntimeRunnableResolver
 from apps.shell.agent.runtime.serialization import json_dump_sorted, json_load, slug
 from apps.shell.agent.runtime.tooling import build_runtime_tooling_stack
 
@@ -548,9 +552,8 @@ class RuntimeInstallationFacadeMixin:
         )
 
     def _install_runtime_runnable_entrypoints(self) -> None:
-        legacy = _legacy_agent_runtime_module()
-        self.runnable_resolver = legacy.RuntimeRunnableResolver(
-            main_chat_agent_id=legacy._MAIN_CHAT_AGENT_ID,
+        self.runnable_resolver = RuntimeRunnableResolver(
+            main_chat_agent_id=MAIN_CHAT_AGENT_ID,
             main_chat_virtual_agent=self._main_chat_virtual_agent,
             ensure_row_factory=self._ensure_row_factory,
             fetch_agent_by_id=lambda agent_id: self._conn.execute(
@@ -573,16 +576,16 @@ class RuntimeInstallationFacadeMixin:
             row_to_workflow=self._row_to_workflow,
             agent_summary=self._agent_runnable_summary,
             workflow_summary=self._workflow_runnable_summary,
-            error_type=legacy.AgentRuntimeError,
+            error_type=AgentRuntimeError,
         )
-        runnable_services = legacy._build_runtime_runnable_services(
+        runnable_services = build_runtime_runnable_services(
             conn=self._conn,
             db_lock=self._db_lock,
             create_run_for_runnable=lambda **kwargs: self.create_run_for_runnable(**kwargs),
             future_task_store=lambda **kwargs: self._future_task_store(**kwargs),
-            now=legacy._now,
-            redact_secrets=legacy.redact_secrets,
-            error_type=legacy.AgentRuntimeError,
+            now=utc_now_iso,
+            redact_secrets=redact_secrets,
+            error_type=AgentRuntimeError,
             list_runnables=lambda: list(self.list_runnables().get("runnables") or []),
             node_kind=self._node_kind,
             get_agent=self.get_agent,
@@ -593,14 +596,14 @@ class RuntimeInstallationFacadeMixin:
             create_workflow_run_async=self.create_workflow_run_async,
         )
         self._install_runtime_runnable_services(runnable_services)
-        self.future_task_service = legacy.RuntimeFutureTaskService(
+        self.future_task_service = RuntimeFutureTaskService(
             future_task_store=lambda **kwargs: self._future_task_store(**kwargs),
             resolve_runnable=self.runnable_resolver.resolve,
             trigger_scheduler=self.future_task_scheduler,
-            default_runnable_id=legacy._MAIN_CHAT_AGENT_ID,
-            error_type=legacy.AgentRuntimeError,
+            default_runnable_id=MAIN_CHAT_AGENT_ID,
+            error_type=AgentRuntimeError,
         )
-        self.agent_run_group_projection = legacy.AgentRunGroupProjectionCoordinator(
+        self.agent_run_group_projection = AgentRunGroupProjectionCoordinator(
             get_run_group=lambda run_group_id: self.get_run_group(run_group_id),
             update_run_group=lambda run_group_id, **kwargs: self._update_run_group(
                 run_group_id,

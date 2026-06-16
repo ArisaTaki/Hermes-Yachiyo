@@ -734,27 +734,54 @@ def test_installation_facade_installs_runnable_entrypoints(monkeypatch) -> None:
         def __init__(self, **kwargs) -> None:
             self.kwargs = kwargs
 
+    class ForbiddenLegacyRunnableResolver:
+        def __init__(self, **_kwargs) -> None:
+            raise AssertionError("runnable resolver should use split installation class")
+
     class CapturedFutureTaskService:
         def __init__(self, **kwargs) -> None:
             self.kwargs = kwargs
+
+    class ForbiddenLegacyFutureTaskService:
+        def __init__(self, **_kwargs) -> None:
+            raise AssertionError("future task service should use split installation class")
 
     class CapturedAgentRunGroupProjection:
         def __init__(self, **kwargs) -> None:
             self.kwargs = kwargs
 
+    class ForbiddenLegacyAgentRunGroupProjection:
+        def __init__(self, **_kwargs) -> None:
+            raise AssertionError("agent run group projection should use split installation class")
+
+    def forbidden_runnable_builder(**_kwargs):
+        raise AssertionError("runnable services should use split installation builder")
+
     def fake_build_runtime_runnable_services(**kwargs):
         return SimpleNamespace(
             kwargs=kwargs,
-            future_task_scheduler="future-task-scheduler",
+            future_task_scheduler=SimpleNamespace(kwargs=kwargs),
             chat_runnable_parser="chat-runnable-parser",
             runnable_catalog="runnable-catalog",
             runnable_run_coordinator="runnable-run-coordinator",
         )
 
-    monkeypatch.setattr(agent_runtime, "RuntimeRunnableResolver", CapturedRunnableResolver)
-    monkeypatch.setattr(agent_runtime, "_build_runtime_runnable_services", fake_build_runtime_runnable_services)
-    monkeypatch.setattr(agent_runtime, "RuntimeFutureTaskService", CapturedFutureTaskService)
-    monkeypatch.setattr(agent_runtime, "AgentRunGroupProjectionCoordinator", CapturedAgentRunGroupProjection)
+    monkeypatch.setattr(agent_runtime, "RuntimeRunnableResolver", ForbiddenLegacyRunnableResolver)
+    monkeypatch.setattr(agent_runtime, "_build_runtime_runnable_services", forbidden_runnable_builder)
+    monkeypatch.setattr(agent_runtime, "RuntimeFutureTaskService", ForbiddenLegacyFutureTaskService)
+    monkeypatch.setattr(agent_runtime, "AgentRunGroupProjectionCoordinator", ForbiddenLegacyAgentRunGroupProjection)
+    monkeypatch.setattr(installation_facade_mod, "RuntimeRunnableResolver", CapturedRunnableResolver)
+    monkeypatch.setattr(
+        installation_facade_mod,
+        "build_runtime_runnable_services",
+        fake_build_runtime_runnable_services,
+    )
+    monkeypatch.setattr(installation_facade_mod, "RuntimeFutureTaskService", CapturedFutureTaskService)
+    monkeypatch.setattr(
+        installation_facade_mod,
+        "AgentRunGroupProjectionCoordinator",
+        CapturedAgentRunGroupProjection,
+    )
 
     engine = object.__new__(agent_runtime.NativeRunEngine)
     engine._main_chat_virtual_agent = "main-chat-virtual-agent"
@@ -778,14 +805,21 @@ def test_installation_facade_installs_runnable_entrypoints(monkeypatch) -> None:
     engine._install_runtime_runnable_entrypoints()
 
     assert isinstance(engine.runnable_resolver, CapturedRunnableResolver)
+    assert engine.runnable_resolver.kwargs["main_chat_agent_id"] == installation_facade_mod.MAIN_CHAT_AGENT_ID
     assert engine.runnable_resolver.kwargs["main_chat_virtual_agent"] == "main-chat-virtual-agent"
-    assert engine.future_task_scheduler == "future-task-scheduler"
+    assert engine.runnable_resolver.kwargs["error_type"] is agent_runtime.AgentRuntimeError
+    assert engine.future_task_scheduler.kwargs["conn"] == "conn"
     assert engine.chat_runnable_parser == "chat-runnable-parser"
     assert engine.runnable_catalog == "runnable-catalog"
     assert engine.runnable_run_coordinator == "runnable-run-coordinator"
+    assert engine.future_task_scheduler.kwargs["now"] is installation_facade_mod.utc_now_iso
+    assert engine.future_task_scheduler.kwargs["redact_secrets"] is installation_facade_mod.redact_secrets
+    assert engine.future_task_scheduler.kwargs["error_type"] is agent_runtime.AgentRuntimeError
     assert isinstance(engine.future_task_service, CapturedFutureTaskService)
     assert engine.future_task_service.kwargs["resolve_runnable"] == "resolve-runnable"
-    assert engine.future_task_service.kwargs["trigger_scheduler"] == "future-task-scheduler"
+    assert engine.future_task_service.kwargs["trigger_scheduler"] is engine.future_task_scheduler
+    assert engine.future_task_service.kwargs["default_runnable_id"] == installation_facade_mod.MAIN_CHAT_AGENT_ID
+    assert engine.future_task_service.kwargs["error_type"] is agent_runtime.AgentRuntimeError
     assert isinstance(engine.agent_run_group_projection, CapturedAgentRunGroupProjection)
     assert "get_run_group" in engine.agent_run_group_projection.kwargs
     assert "update_run_group" in engine.agent_run_group_projection.kwargs
