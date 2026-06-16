@@ -15,9 +15,11 @@ const TOOL_EVENT_TYPES = new Set([
   'agent.tool.approval_required',
   'agent.tool.approval_approved',
   'agent.tool.approval_rejected',
+  'tool.approved',
   'tool.requested',
   'tool.started',
   'tool.approval_required',
+  'tool.rejected',
   'tool.completed',
   'agent.tool.completed',
   'tool.failed',
@@ -142,8 +144,8 @@ function runtimeToolStatusFromEvent(event: PublicRunEvent): string {
   if (eventType === 'agent.tool.approval_required' || eventType === 'tool.approval_required') {
     return 'waiting_approval';
   }
-  if (eventType === 'agent.tool.approval_approved') return 'approved';
-  if (eventType === 'agent.tool.approval_rejected') return 'denied';
+  if (eventType === 'agent.tool.approval_approved' || eventType === 'tool.approved') return 'approved';
+  if (eventType === 'agent.tool.approval_rejected' || eventType === 'tool.rejected') return 'denied';
   if (
     eventType === 'agent.tool.call' ||
     eventType === 'agent.tool.completed' ||

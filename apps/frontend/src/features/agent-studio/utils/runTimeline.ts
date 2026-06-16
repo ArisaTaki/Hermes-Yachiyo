@@ -28,6 +28,8 @@ export function timelineEventTitle(event: Record<string, unknown>): string {
   if (name === 'agent.tool.denied') return detail ? `工具已拒绝 · ${detail}` : '工具已拒绝';
   if (name === 'agent.tool.failed') return detail ? `工具调用失败 · ${detail}` : '工具调用失败';
   if (name === 'agent.tool.approval_required') return detail ? `请求审批 · ${detail}` : '请求审批';
+  if (name === 'tool.approved') return detail ? `工具审批通过 · ${detail}` : '工具审批通过';
+  if (name === 'tool.rejected') return detail ? `工具审批拒绝 · ${detail}` : '工具审批拒绝';
   if (name === 'agent.tool.approval_approved') return detail ? `审批已通过 · ${detail}` : '审批已通过';
   if (name === 'agent.tool.approval_rejected') return detail ? `审批已拒绝 · ${detail}` : '审批已拒绝';
   if (name === 'skill.selected') return detail ? `Skill 已选择 · ${detail}` : 'Skill 已选择';
@@ -82,6 +84,7 @@ export function timelineEventTone(event: Record<string, unknown>): string {
     || name.includes('cancelled')
     || name.includes('timeout')
     || name.includes('denied')
+    || name.includes('rejected')
   ) return 'danger';
   if (status === 'completed' || name.includes('completed')) return 'ready';
   if (status === 'approval_required' || name.includes('approval')) return 'approval';

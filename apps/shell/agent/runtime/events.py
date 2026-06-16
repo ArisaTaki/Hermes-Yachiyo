@@ -692,6 +692,8 @@ def canonical_run_event_aliases(
         "workflow.run.completed": "workflow.completed",
         "workflow.run.failed": "workflow.failed",
         "skill.dispatch.read": "skill.selected",
+        "agent.tool.approval_approved": "tool.approved",
+        "agent.tool.approval_rejected": "tool.rejected",
     }.get(clean_event_type)
     if direct_alias:
         return [direct_alias]

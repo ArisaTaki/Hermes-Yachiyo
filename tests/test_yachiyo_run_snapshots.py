@@ -166,6 +166,21 @@ def test_run_timeline_projects_tool_lifecycle_events_as_tool_call_snapshots() ->
                     },
                 },
                 {
+                    "event_type": "tool.approved",
+                    "payload": {
+                        "tool": "terminal.run",
+                        "input_preview": {"command": "npm test"},
+                    },
+                },
+                {
+                    "event_type": "tool.rejected",
+                    "payload": {
+                        "tool": "terminal.run",
+                        "input_preview": {"command": "rm -rf /tmp/demo"},
+                        "reason": "Too risky",
+                    },
+                },
+                {
                     "event_type": "tool.completed",
                     "payload": {
                         "tool": "workspace.read",
@@ -195,6 +210,8 @@ def test_run_timeline_projects_tool_lifecycle_events_as_tool_call_snapshots() ->
         "workspace.read",
         "workspace.read",
         "terminal.run",
+        "terminal.run",
+        "terminal.run",
         "workspace.read",
         "terminal.run",
         "workspace.write",
@@ -203,6 +220,8 @@ def test_run_timeline_projects_tool_lifecycle_events_as_tool_call_snapshots() ->
         "requested",
         "running",
         "waiting_approval",
+        "approved",
+        "denied",
         "completed",
         "failed",
         "denied",
@@ -217,8 +236,9 @@ def test_run_timeline_projects_tool_lifecycle_events_as_tool_call_snapshots() ->
         "policy_reason": "terminal command requires approval",
     }
     assert timeline.tool_calls[2].output_preview == {"approval_required": True}
-    assert timeline.tool_calls[4].output_preview == {"error": "exit 1"}
-    assert timeline.tool_calls[5].input_preview == {"path": "README.md"}
+    assert timeline.tool_calls[4].input_preview == {"command": "rm -rf /tmp/demo"}
+    assert timeline.tool_calls[6].output_preview == {"error": "exit 1"}
+    assert timeline.tool_calls[7].input_preview == {"path": "README.md"}
     assert all(call.run_id == "run-tools" for call in timeline.tool_calls)
 
 

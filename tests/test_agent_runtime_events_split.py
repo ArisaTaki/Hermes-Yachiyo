@@ -98,7 +98,31 @@ def test_runtime_run_event_recorder_appends_compatibility_aliases() -> None:
         "workflow.node.completed",
     ]
     assert canonical_run_event_aliases("model.output.completed") == ["model.completed"]
+    assert canonical_run_event_aliases("agent.tool.approval_approved") == ["tool.approved"]
+    assert canonical_run_event_aliases("agent.tool.approval_rejected") == ["tool.rejected"]
     assert agent_runtime._canonical_run_event_aliases("model.output.completed") == ["model.completed"]
+
+    repository.calls.clear()
+    recorder.append(
+        "run-1",
+        "agent.tool.approval_approved",
+        {"tool": "terminal.run", "status": "completed"},
+    )
+    assert [call[1] for call in repository.calls] == [
+        "agent.tool.approval_approved",
+        "tool.approved",
+    ]
+
+    repository.calls.clear()
+    recorder.append(
+        "run-1",
+        "agent.tool.approval_rejected",
+        {"tool": "terminal.run", "status": "cancelled"},
+    )
+    assert [call[1] for call in repository.calls] == [
+        "agent.tool.approval_rejected",
+        "tool.rejected",
+    ]
 
 
 def test_runtime_trace_event_builder_projects_artifact_memory_and_skill_facts() -> None:

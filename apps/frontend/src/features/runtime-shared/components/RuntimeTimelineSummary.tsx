@@ -52,6 +52,8 @@ function runtimeTimelineEventLabel(event: RuntimeTimelineEventSnapshot): string 
   if (type === 'agent.tool.skipped') return '工具已跳过';
   if (type === 'agent.tool.denied') return '工具已拒绝';
   if (type === 'tool.approval_required' || type === 'agent.tool.approval_required') return '等待审批';
+  if (type === 'tool.approved') return '工具审批通过';
+  if (type === 'tool.rejected') return '工具审批拒绝';
   if (type === 'agent.tool.approval_approved') return '审批已通过';
   if (type === 'agent.tool.approval_rejected') return '审批已拒绝';
   if (type === 'agent.tool.approval_timeout') return '审批已超时';
