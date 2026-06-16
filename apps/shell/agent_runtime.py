@@ -544,59 +544,8 @@ class NativeRunEngine(
             runtime_timeline_factory=runtime_timeline_factory,
         )
         self._init_db()
-        self.workspace_policy_service = RuntimeWorkspacePolicyService(
-            conn=self._conn,
-            agent_workspaces_dir=self.agent_workspaces_dir,
-            trusted_workspaces=self.trusted_workspaces,
-            compile_tool_policy=self._compile_tool_policy,
-            compile_workspace_policy=self._compile_workspace_policy,
-            default_workspace_policy=self._default_workspace_policy,
-            json_load=_json_load,
-            json_dump=_json_dump,
-            now=_now,
-        )
-        self._migrate_agent_workspace_policies()
-        self.seed_template_service = RuntimeSeedTemplateService(
-            conn=self._conn,
-            create_agent=self.create_agent,
-            create_workflow=self.create_workflow,
-            default_tool_policy=self._default_tool_policy,
-            default_workspace_policy=self._default_workspace_policy,
-            has_studio_deletion=self._has_studio_deletion,
-        )
-        self.skill_import_service = RuntimeSkillImportService(
-            conn=self._conn,
-            source_resolver=self.skill_import_sources,
-            preparer=self.skill_import_preparer,
-            skill_records=self.skill_records,
-            normalize_skill_folder_id=self._normalize_skill_folder_id,
-            skill_deletion_key=self._skill_deletion_key,
-            clear_studio_deletion=self._clear_studio_deletion,
-            get_skill=self.get_skill,
-            error_type=AgentRuntimeError,
-        )
-        self.skill_sync_service = RuntimeSkillSyncService(
-            conn=self._conn,
-            skill_sync=self.skill_sync,
-            normalize_skill_folder_id=self._normalize_skill_folder_id,
-            skill_deletion_key=self._skill_deletion_key,
-            has_studio_deletion=self._has_studio_deletion,
-            clear_studio_deletion=self._clear_studio_deletion,
-            import_skill_root=self._import_skill_root,
-            now=_now,
-            redact_error=redact_api_error_text,
-            error_type=AgentRuntimeError,
-        )
-        self.skill_install_service = RuntimeSkillInstallService(
-            validator=self.skill_install_validator,
-            skill_installs_dir=self.skill_installs_dir,
-            skill_installs_native_home=self.skill_installs_native_home,
-            normalize_skill_folder_id=self._normalize_skill_folder_id,
-            sync_installed_skills=self.sync_installed_skills,
-            run_command=lambda *args, **kwargs: subprocess.run(*args, **kwargs),
-            now=_now,
-            redact_secrets=redact_secrets,
-            error_type=AgentRuntimeError,
+        self._install_runtime_post_db_support_services(
+            seed_templates=seed_templates,
         )
         if seed_templates:
             self._seed_templates()

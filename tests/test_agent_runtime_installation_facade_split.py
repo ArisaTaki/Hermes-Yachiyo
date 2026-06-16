@@ -37,6 +37,7 @@ def test_runtime_installation_facade_mixin_remains_exported_from_legacy_module()
         "_install_runtime_runnable_entrypoints",
         "_install_runtime_workflow_transitions",
         "_install_runtime_run_control_and_shutdown",
+        "_install_runtime_post_db_support_services",
         "_install_runtime_engine_state",
         "_install_runtime_recorders",
         "_install_runtime_definition_services",
@@ -775,3 +776,60 @@ def test_installation_facade_installs_run_control_and_shutdown(monkeypatch) -> N
     assert isinstance(engine.runtime_shutdown, CapturedCollaborator)
     assert engine.runtime_shutdown.kwargs["conn"] is engine._conn
     assert engine.runtime_shutdown.kwargs["credential_store"] == "credential-store"
+
+
+def test_installation_facade_installs_post_db_support_services(monkeypatch) -> None:
+    class CapturedCollaborator:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+
+    for name in (
+        "RuntimeWorkspacePolicyService",
+        "RuntimeSeedTemplateService",
+        "RuntimeSkillImportService",
+        "RuntimeSkillSyncService",
+        "RuntimeSkillInstallService",
+    ):
+        monkeypatch.setattr(agent_runtime, name, CapturedCollaborator)
+
+    calls: list[str] = []
+    engine = object.__new__(agent_runtime.NativeRunEngine)
+    engine._conn = "conn"
+    engine.agent_workspaces_dir = "agent-workspaces"
+    engine.trusted_workspaces = "trusted-workspaces"
+    engine._compile_tool_policy = "compile-tool-policy"
+    engine._compile_workspace_policy = "compile-workspace-policy"
+    engine._default_workspace_policy = "default-workspace-policy"
+    engine.create_agent = "create-agent"
+    engine.create_workflow = "create-workflow"
+    engine._default_tool_policy = "default-tool-policy"
+    engine._has_studio_deletion = "has-studio-deletion"
+    engine.skill_import_sources = "skill-import-sources"
+    engine.skill_import_preparer = "skill-import-preparer"
+    engine.skill_records = "skill-records"
+    engine._normalize_skill_folder_id = "normalize-skill-folder-id"
+    engine._skill_deletion_key = "skill-deletion-key"
+    engine._clear_studio_deletion = "clear-studio-deletion"
+    engine.get_skill = "get-skill"
+    engine.skill_sync = "skill-sync"
+    engine._import_skill_root = "import-skill-root"
+    engine.skill_install_validator = "skill-install-validator"
+    engine.skill_installs_dir = "skill-installs"
+    engine.skill_installs_native_home = "skill-installs-native-home"
+    engine.sync_installed_skills = "sync-installed-skills"
+    engine._migrate_agent_workspace_policies = lambda: calls.append("migrate")
+    engine._seed_templates = lambda: calls.append("seed")
+
+    engine._install_runtime_post_db_support_services(seed_templates=True)
+
+    assert isinstance(engine.workspace_policy_service, CapturedCollaborator)
+    assert engine.workspace_policy_service.kwargs["trusted_workspaces"] == "trusted-workspaces"
+    assert isinstance(engine.seed_template_service, CapturedCollaborator)
+    assert engine.seed_template_service.kwargs["create_agent"] == "create-agent"
+    assert isinstance(engine.skill_import_service, CapturedCollaborator)
+    assert engine.skill_import_service.kwargs["source_resolver"] == "skill-import-sources"
+    assert isinstance(engine.skill_sync_service, CapturedCollaborator)
+    assert engine.skill_sync_service.kwargs["skill_sync"] == "skill-sync"
+    assert isinstance(engine.skill_install_service, CapturedCollaborator)
+    assert engine.skill_install_service.kwargs["validator"] == "skill-install-validator"
+    assert calls == ["migrate", "seed"]
