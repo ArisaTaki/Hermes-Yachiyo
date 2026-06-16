@@ -11,6 +11,7 @@ export type {
   AgentGroupSnapshot,
   AgentTaskSnapshot,
   ApprovalCardSnapshot,
+  ArtifactContentSnapshot,
   ArtifactSnapshot,
   FutureTaskSnapshot,
   FutureTaskTriggerResultSnapshot,

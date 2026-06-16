@@ -111,11 +111,12 @@ async def read_run_artifact(
     http_request: Request | None = None,
 ) -> dict[str, Any]:
     try:
-        return await asyncio.to_thread(
+        artifact = await asyncio.to_thread(
             studio_service(http_request).read_run_artifact,
             run_id,
             artifact_path,
         )
+        return snapshot(artifact)
     except (AgentRuntimeError, KeyError) as exc:
         raise HTTPException(status_code=404, detail="Artifact 不存在") from exc
 

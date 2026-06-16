@@ -867,7 +867,11 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     assert deleted_run == {"ok": True, "deleted_run_ids": ["run-1"], "deleted_run_count": 1}
     assert approved["status"] == "completed"
     assert rejected["status"] == "failed"
+    assert artifact["ok"] is True
+    assert artifact["run_id"] == "run-1"
+    assert artifact["path"] == "reports/final.md"
     assert artifact["content"] == "# Report"
+    assert artifact["truncated"] is False
     assert ("rerun_run", "run-1") in runtime.calls
     assert ("cancel_run", "run-1") in runtime.calls
     assert ("delete_run", "run-1") in runtime.calls

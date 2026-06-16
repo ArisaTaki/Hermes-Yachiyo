@@ -2,6 +2,7 @@ import { apiDelete, apiGet, apiPatch, apiPost } from '../../lib/bridge';
 import type {
   AgentDefinitionSnapshot,
   AgentGroupSnapshot,
+  ArtifactContentSnapshot,
   FutureTaskSnapshot,
   FutureTaskTriggerResultSnapshot,
   GroupRunSnapshot,
@@ -18,12 +19,7 @@ import type {
 
 export type YachiyoRunEventsPage = RunEventPageSnapshot;
 
-export type YachiyoRunArtifactPayload = {
-  ok?: boolean;
-  path?: string;
-  content?: string;
-  truncated?: boolean;
-};
+export type YachiyoRunArtifactPayload = ArtifactContentSnapshot;
 
 export type YachiyoSkillSyncResult = {
   source?: string;

@@ -6,9 +6,11 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 from .adapters import agent_definition_snapshot_from_payload
+from .artifacts import artifact_content_snapshot_from_payload
 from .contracts import (
     AgentDefinitionSnapshot,
     AgentGroupSnapshot,
+    ArtifactContentSnapshot,
     FutureTaskSnapshot,
     FutureTaskTriggerResultSnapshot,
     GroupRunSnapshot,
@@ -367,8 +369,12 @@ class AgentStudioService:
             self._studio_port.reject_run_approval(run_id, reason or "")
         )
 
-    def read_run_artifact(self, run_id: str, artifact_path: str) -> dict[str, Any]:
-        return dict(self._studio_port.read_run_artifact(run_id, artifact_path))
+    def read_run_artifact(self, run_id: str, artifact_path: str) -> ArtifactContentSnapshot:
+        return artifact_content_snapshot_from_payload(
+            self._studio_port.read_run_artifact(run_id, artifact_path),
+            run_id=run_id,
+            path=artifact_path,
+        )
 
     def get_run_event_stream(self, run_id: str) -> Iterable[PublicRunEvent]:
         raw_events = self._studio_port.get_run_event_stream(run_id)

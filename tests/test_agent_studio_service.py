@@ -854,7 +854,12 @@ def test_agent_studio_service_reads_run_artifact_through_port() -> None:
 
     artifact = service.read_run_artifact("run-1", "reports/final.md")
 
-    assert artifact["content"] == "# Report"
+    assert artifact.ok is True
+    assert artifact.run_id == "run-1"
+    assert artifact.task_id is None
+    assert artifact.path == "reports/final.md"
+    assert artifact.content == "# Report"
+    assert artifact.truncated is False
     assert (
         "read_run_artifact",
         {"run_id": "run-1", "artifact_path": "reports/final.md"},

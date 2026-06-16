@@ -1143,6 +1143,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "/yachiyo/studio/workflows/${encodeURIComponent(workflowId)}",
             "startYachiyoWorkflowRun",
             "WorkflowRunSnapshot",
+            "ArtifactContentSnapshot",
             "deleteYachiyoWorkflow",
             "function createClientRunId()",
         ],
@@ -1191,6 +1192,21 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
         [
             "Promise<YachiyoRunTimelineSnapshot[]>",
             "apiGet<{ runs?: YachiyoRunTimelineSnapshot[] }>",
+        ],
+    )
+    _assert_function_contains(
+        "apps/frontend/src/features/yachiyo-studio/api.ts",
+        "readYachiyoRunArtifact",
+        [
+            "Promise<YachiyoRunArtifactPayload>",
+            "/yachiyo/studio/runs/${encodeURIComponent(runId)}/artifacts/${encodedPath}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-studio/api.ts",
+        [
+            "ArtifactContentSnapshot",
+            "export type YachiyoRunArtifactPayload = ArtifactContentSnapshot;",
         ],
     )
     _assert_function_contains(
@@ -1285,6 +1301,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "AgentGroupSnapshot",
             "GroupRunSnapshot",
             "RunEventPageSnapshot",
+            "ArtifactContentSnapshot",
             "RunTimelineSnapshot",
             "WorkflowRunSnapshot",
             "WorkflowSnapshot",
