@@ -23,11 +23,16 @@ export function timelineEventTitle(event: Record<string, unknown>): string {
   const name = String(event.event || 'event');
   const detail = String(event.detail || '').trim();
   if (name === 'run.started') return 'Run 已启动';
+  if (name === 'task.created') return '任务已创建';
+  if (name === 'task.started') return '任务已启动';
   if (name === 'task.linked') return 'Task 已关联';
-  if (name === 'model.request.started') return detail ? `模型请求 · ${detail}` : '模型请求已开始';
+  if (name === 'task.completed') return '任务已完成';
+  if (name === 'task.failed') return '任务失败';
+  if (name === 'task.cancelled') return '任务已取消';
+  if (name === 'model.request.started' || name === 'model.requested') return detail ? `模型请求 · ${detail}` : '模型请求已开始';
   if (name === 'model.request.failed') return '模型请求失败';
   if (name === 'model.output.ready') return '模型输出已就绪';
-  if (name === 'model.output.completed') return '模型输出完成';
+  if (name === 'model.output.completed' || name === 'model.completed') return '模型输出完成';
   if (name === 'agent.run.started') return 'Agent 已启动';
   if (name === 'agent.runtime.compiled') return '运行环境已准备';
   if (name === 'agent.artifact.write') return '上下文/产物已写入';

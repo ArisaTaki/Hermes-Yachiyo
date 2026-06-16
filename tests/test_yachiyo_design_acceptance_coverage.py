@@ -240,6 +240,9 @@ def test_group_and_workflow_acceptance_paths_are_guarded() -> None:
     _assert_contains(
         "apps/frontend/src/features/runtime-shared/components/RuntimeTimelineSummary.tsx",
         [
+            "task.created",
+            "model.requested",
+            "model.completed",
             "workflow.started",
             "workflow.paused_for_approval",
             "workflow.resumed",

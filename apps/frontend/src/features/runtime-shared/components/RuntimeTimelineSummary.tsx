@@ -61,8 +61,13 @@ function runtimeTimelineEventDetail(event: RuntimeTimelineEventSnapshot): string
 }
 
 function runtimeTimelineEventTypeLabel(type: string): string {
+  if (type === 'task.created') return '任务已创建';
   if (type === 'run.started' || type === 'task.started') return '任务已启动';
   if (type === 'task.linked') return 'Task 已关联';
+  if (type === 'model.request.started' || type === 'model.requested') return '模型请求';
+  if (type === 'model.request.failed') return '模型请求失败';
+  if (type === 'model.output.ready') return '模型输出就绪';
+  if (type === 'model.output.completed' || type === 'model.completed') return '模型完成';
   if (type === 'tool.requested') return '工具请求';
   if (type === 'tool.started' || type === 'agent.tool.started') return '工具执行中';
   if (type === 'agent.tool.call') return '工具调用';
