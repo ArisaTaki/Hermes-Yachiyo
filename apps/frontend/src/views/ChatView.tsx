@@ -76,11 +76,11 @@ import {
   messageRunStatus,
   messageText,
   messageWorkflowStudioAction,
-  metadataListAttribute,
   normalizeRunStatus,
   runnableResultLabel,
   runnableResultRunId,
   runnableResultStatus,
+  taskHandoffMessageId,
 } from '../features/yachiyo-chat/messageState';
 import {
   chatApprovalRejectionCompletionStatusText,
@@ -2784,15 +2784,6 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
   );
 }
 
-function stringValue(value: unknown) {
-  if (value === undefined || value === null) return '';
-  return String(value).trim();
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
-}
-
 function TypingIndicator() {
   return (
     <span className="typing-indicator loading-dots" aria-label="处理中">
@@ -2829,27 +2820,6 @@ function isRetryableMessage(message: ChatMessage, messages: ChatMessage[]) {
     candidate.role === 'assistant'
     && candidate.task_id === message.task_id
   ));
-}
-
-function taskHandoffMessageId(messages: ChatMessage[], taskId: string) {
-  const clean = String(taskId || '').trim();
-  if (!clean) return '';
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (!message?.id) continue;
-    if (messageMatchesTaskHandoff(message, clean)) return message.id;
-  }
-  return '';
-}
-
-function messageMatchesTaskHandoff(message: ChatMessage, taskId: string) {
-  const metadata = message.metadata || {};
-  if (String(message.task_id || '').trim() === taskId) return true;
-  if (stringValue(metadata.group_agent_summary_task_id) === taskId) return true;
-  if (stringValue(metadata.group_agent_summary_for_task_id) === taskId) return true;
-  if (stringValue(metadata.delegated_run_source_task_id) === taskId) return true;
-  if (metadataListAttribute(metadata.group_followup_for_task_ids).split(',').includes(taskId)) return true;
-  return false;
 }
 
 function isImeComposing(event: ReactKeyboardEvent<HTMLElement>, fallback = false) {
