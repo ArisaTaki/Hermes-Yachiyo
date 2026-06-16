@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
+import {
+  mergeRuntimeRunEventPages,
+  runEventPageNextCursor,
+  runEventSequenceCursor,
+} from '../../runtime-shared/runEvents';
 import { getYachiyoGroupRun, listYachiyoGroupRunEvents } from '../../yachiyo-studio/api';
 import type { GroupRunSnapshot, PublicRunEvent } from '../../yachiyo-studio/types';
-import { mergeRunEventReplayPages } from '../utils/runTimeline';
 
 type GroupRunEventReplayState = {
   events: PublicRunEvent[];
@@ -74,7 +78,7 @@ export function useGroupRunSnapshot(
         if (disposed) return;
         const events = page.events || [];
         const limit = page.limit || pageSize;
-        const nextAfterSequence = groupRunEventPageCursor(page, events, 0);
+        const nextAfterSequence = runEventPageNextCursor(page, events, 0);
         setEventReplayByGroupRunId((current) => ({
           ...current,
           [groupRunId]: {
@@ -110,7 +114,7 @@ export function useGroupRunSnapshot(
     if (!groupRunId) return 0;
     const currentState = eventReplayByGroupRunId[groupRunId];
     const currentEvents = currentState?.events || [];
-    const afterSequence = currentState?.nextAfterSequence ?? groupRunEventSequenceCursor(currentEvents, 0);
+    const afterSequence = currentState?.nextAfterSequence ?? runEventSequenceCursor(currentEvents, 0);
     setEventReplayByGroupRunId((current) => ({
       ...current,
       [groupRunId]: {
@@ -128,8 +132,8 @@ export function useGroupRunSnapshot(
       const limit = page.limit || pageSize;
       setEventReplayByGroupRunId((current) => {
         const previous = current[groupRunId];
-        const events = mergeRunEventReplayPages(previous?.events || currentEvents, incomingEvents);
-        const nextAfterSequence = groupRunEventPageCursor(page, events, afterSequence);
+        const events = mergeRuntimeRunEventPages(previous?.events || currentEvents, incomingEvents);
+        const nextAfterSequence = runEventPageNextCursor(page, events, afterSequence);
         return {
           ...current,
           [groupRunId]: {
@@ -170,21 +174,4 @@ export function useGroupRunSnapshot(
     selectedGroupRunReplayState,
     selectedGroupRunSnapshot,
   };
-}
-
-function groupRunEventPageCursor(
-  page: { next_after_sequence?: number },
-  events: PublicRunEvent[],
-  fallback: number,
-): number {
-  return Number.isFinite(page.next_after_sequence)
-    ? Number(page.next_after_sequence)
-    : groupRunEventSequenceCursor(events, fallback);
-}
-
-function groupRunEventSequenceCursor(events: PublicRunEvent[], fallback: number): number {
-  return events.reduce(
-    (max, event) => Math.max(max, Number(event.sequence) || 0),
-    fallback,
-  );
 }

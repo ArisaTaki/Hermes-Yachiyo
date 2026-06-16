@@ -1,5 +1,4 @@
 import type { PublicRunEvent } from '../../yachiyo-studio/types';
-import { mergeRuntimeRunEventPages } from '../../runtime-shared/runEvents';
 export {
   approvalsFromRunEventReplay,
   artifactsFromRunEventReplay,
@@ -232,13 +231,6 @@ export function runEventReplayToTimelineEvent(event: PublicRunEvent): Record<str
     ...publicRunEventWorkflowStepPayload(payload),
     payload,
   };
-}
-
-export function mergeRunEventReplayPages(
-  current: PublicRunEvent[],
-  incoming: PublicRunEvent[],
-): PublicRunEvent[] {
-  return mergeRuntimeRunEventPages(current, incoming);
 }
 
 function publicRunEventPayloadString(payload: Record<string, unknown>, key: string): string {

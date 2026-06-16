@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
+import {
+  mergeRuntimeRunEventPages,
+  runEventPageNextCursor,
+  runEventSequenceCursor,
+} from '../../runtime-shared/runEvents';
 import { listYachiyoRunEvents } from '../../yachiyo-studio/api';
 import type { PublicRunEvent } from '../../yachiyo-studio/types';
-import { mergeRunEventReplayPages } from '../utils/runTimeline';
 
 export type RunEventReplayState = {
   events: PublicRunEvent[];
@@ -52,7 +56,7 @@ export function useRunEventReplay(
         if (disposed) return;
         const events = page.events || [];
         const limit = page.limit || pageSize;
-        const nextAfterSequence = runEventPageCursor(page, events, 0);
+        const nextAfterSequence = runEventPageNextCursor(page, events, 0);
         setReplayByRunId((current) => ({
           ...current,
           [runId]: {
@@ -106,8 +110,8 @@ export function useRunEventReplay(
       const limit = page.limit || pageSize;
       setReplayByRunId((current) => {
         const previous = current[runId];
-        const events = mergeRunEventReplayPages(previous?.events || currentEvents, incomingEvents);
-        const nextAfterSequence = runEventPageCursor(page, events, afterSequence);
+        const events = mergeRuntimeRunEventPages(previous?.events || currentEvents, incomingEvents);
+        const nextAfterSequence = runEventPageNextCursor(page, events, afterSequence);
         return {
           ...current,
           [runId]: {
@@ -161,21 +165,4 @@ export function useRunEventReplay(
     selectedReplayLoading,
     selectedReplayState,
   };
-}
-
-function runEventPageCursor(
-  page: { next_after_sequence?: number },
-  events: PublicRunEvent[],
-  fallback: number,
-): number {
-  return Number.isFinite(page.next_after_sequence)
-    ? Number(page.next_after_sequence)
-    : runEventSequenceCursor(events, fallback);
-}
-
-function runEventSequenceCursor(events: PublicRunEvent[], fallback: number): number {
-  return events.reduce(
-    (max, event) => Math.max(max, Number(event.sequence) || 0),
-    fallback,
-  );
 }

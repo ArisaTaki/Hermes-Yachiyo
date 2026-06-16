@@ -20,6 +20,10 @@ export function runEventPageNextCursor(
   if (Number.isFinite(page.next_after_sequence) && page.next_after_sequence > fallback) {
     return page.next_after_sequence;
   }
+  return runEventSequenceCursor(events, fallback);
+}
+
+export function runEventSequenceCursor(events: PublicRunEvent[], fallback = 0): number {
   return events.reduce((cursor, event) => {
     const sequence = Number(event.sequence) || 0;
     return sequence > cursor ? sequence : cursor;
