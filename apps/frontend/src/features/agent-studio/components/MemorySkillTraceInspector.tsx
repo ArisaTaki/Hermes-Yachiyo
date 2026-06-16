@@ -178,19 +178,25 @@ function memorySkillTraceFromEvent(event: PublicRunEvent): MemorySkillTrace | nu
   if (!kind) return null;
 
   const payload = objectRecord(event.payload);
-  const result = objectRecord(payload.result);
-  const memories = Array.isArray(payload.memories) ? payload.memories.map(objectRecord) : [];
+  const eventIsSecret = publicRunEventIsSecret(event);
+  const visiblePayload = eventIsSecret ? {} : payload;
+  const result = objectRecord(visiblePayload.result);
+  const memories = Array.isArray(visiblePayload.memories) ? visiblePayload.memories.map(objectRecord) : [];
   const sequence = Number.isFinite(event.sequence) ? String(event.sequence) : '';
-  const status = normalizeTraceStatus(stringValue(payload.status) || stringValue((event as Record<string, unknown>).status));
-  const memoryId = stringValue(result.memory_id) || stringValue(payload.memory_id) || stringValue(memories[0]?.memory_id);
-  const skillId = stringValue(result.skill_id) || stringValue(payload.skill_id);
+  const status = normalizeTraceStatus(
+    stringValue(visiblePayload.status) || stringValue((event as Record<string, unknown>).status),
+  );
+  const memoryId = stringValue(result.memory_id) || stringValue(visiblePayload.memory_id) || stringValue(memories[0]?.memory_id);
+  const skillId = stringValue(result.skill_id) || stringValue(visiblePayload.skill_id);
   const id = kind === 'memory' ? memoryId : skillId;
-  const title = traceTitle(eventType, payload, result, memories);
-  const detail = stringValue(event.detail) || traceDetail(eventType, payload, result, memories);
-  const count = eventType === 'memory.retrieved' ? traceMemoryCount(payload, memories) : '';
-  const groupRunId = stringValue(payload.group_run_id) || stringValue(payload.run_group_id);
-  const memberAgentId = stringValue(payload.member_agent_id);
-  const workflowNodeId = stringValue(payload.workflow_node_id);
+  const title = traceTitle(eventType, visiblePayload, result, memories);
+  const detail = eventIsSecret
+    ? ''
+    : stringValue(event.detail) || traceDetail(eventType, visiblePayload, result, memories);
+  const count = eventType === 'memory.retrieved' ? traceMemoryCount(visiblePayload, memories) : '';
+  const groupRunId = stringValue(visiblePayload.group_run_id) || stringValue(visiblePayload.run_group_id);
+  const memberAgentId = stringValue(visiblePayload.member_agent_id);
+  const workflowNodeId = stringValue(visiblePayload.workflow_node_id);
   return {
     count,
     detail,
@@ -200,14 +206,14 @@ function memorySkillTraceFromEvent(event: PublicRunEvent): MemorySkillTrace | nu
     key: runtimeTraceKeyFromEvent(event, eventType, sequence, title, id),
     kind,
     memberAgentId,
-    metadata: memorySkillTraceMetadata(kind, payload, result, memories),
+    metadata: eventIsSecret ? [] : memorySkillTraceMetadata(kind, visiblePayload, result, memories),
     memoryId,
-    payload: JSON.stringify(payload, null, 2),
+    payload: eventIsSecret ? '' : JSON.stringify(payload, null, 2),
     sequence,
     skillId,
     status,
     title,
-    tool: stringValue(payload.tool),
+    tool: stringValue(visiblePayload.tool),
     workflowNodeId,
   };
 }
@@ -362,6 +368,10 @@ function objectRecord(value: unknown): Record<string, unknown> {
 function formatTracePayload(value: Record<string, unknown> | undefined): string {
   if (!value || !Object.keys(value).length) return '';
   return JSON.stringify(value, null, 2);
+}
+
+function publicRunEventIsSecret(event: PublicRunEvent): boolean {
+  return String(event.sensitivity || '').trim() === 'secret';
 }
 
 function stringValue(value: unknown): string {
