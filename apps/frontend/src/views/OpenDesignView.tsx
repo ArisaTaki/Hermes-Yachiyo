@@ -4,6 +4,12 @@ import logoUrl from '../../../../docs/open-design/logo.png';
 import { useConfirmDialog } from '../components/ConfirmDialog';
 import { UiIcon, type UiIconName } from '../components/UiIcon';
 import { LauncherAgentTaskLight } from '../features/yachiyo-chat/components/LauncherAgentTaskLight';
+import { approveYachiyoTask, listYachiyoTasks, rejectYachiyoTask } from '../features/yachiyo-chat/api';
+import {
+  launcherAgentTaskFromPublicTasks,
+  launcherAgentTaskIsActive,
+} from '../features/yachiyo-chat/launcherTasks';
+import type { AgentTaskSnapshot, ApprovalCardSnapshot } from '../features/yachiyo-chat/types';
 import { AssistantProfileSeedContext, type AssistantProfileSeed } from '../lib/assistantProfileSeed';
 import { apiDelete, apiGet, apiPost, checkAppUpdate, openDesktopMode, openExternalUrl, openPath, quitApp } from '../lib/bridge';
 import { type AppView, currentParam, navigateTo } from '../lib/view';
@@ -1239,6 +1245,7 @@ export function ProviderPage() {
 
 function useLauncherModePayload(mode: 'bubble' | 'live2d', active = true) {
   const [data, setData] = useState<LauncherPayload | null>(() => launcherPayloadCache[mode] || null);
+  const [publicAgentTask, setPublicAgentTask] = useState<AgentTaskSnapshot | null>(null);
   const [loading, setLoading] = useState(() => !launcherPayloadCache[mode]);
   const canUpdateRef = useRef(active);
 
@@ -1255,9 +1262,18 @@ function useLauncherModePayload(mode: 'bubble' | 'live2d', active = true) {
       launcherPayloadCache[mode] = payload;
       if (!canUpdateRef.current) return;
       setData(payload);
+      try {
+        const tasks = await listYachiyoTasks();
+        if (!canUpdateRef.current) return;
+        setPublicAgentTask(launcherAgentTaskFromPublicTasks(tasks, payload.chat?.agent_task || null));
+      } catch {
+        if (!canUpdateRef.current) return;
+        setPublicAgentTask((current) => payload.chat?.agent_task || current || null);
+      }
     } catch {
       if (!canUpdateRef.current) return;
       if (!launcherPayloadCache[mode]) setData(null);
+      if (!launcherPayloadCache[mode]) setPublicAgentTask(null);
     } finally {
       if (!canUpdateRef.current) return;
       setLoading(false);
@@ -1272,15 +1288,52 @@ function useLauncherModePayload(mode: 'bubble' | 'live2d', active = true) {
 
   useEffect(() => {
     if (!active) return undefined;
-    const processing = Boolean(data?.chat?.is_processing || launcherPayloadHasActiveTask(data));
+    const processing = Boolean(
+      data?.chat?.is_processing
+      || launcherAgentTaskIsActive(publicAgentTask || data?.chat?.agent_task)
+      || launcherPayloadHasActiveTask(data),
+    );
     const timer = window.setInterval(
       () => void refresh(),
       processing ? LAUNCHER_PAGE_ACTIVE_POLL_INTERVAL_MS : LAUNCHER_PAGE_IDLE_POLL_INTERVAL_MS,
     );
     return () => window.clearInterval(timer);
-  }, [active, data?.chat?.agent_task?.status, data?.chat?.is_processing, refresh]);
+  }, [active, data?.chat?.agent_task, data?.chat?.is_processing, publicAgentTask, refresh]);
 
-  return { data, loading };
+  const resolveAgentTaskApproval = useCallback(async (
+    task: AgentTaskSnapshot,
+    approval: ApprovalCardSnapshot,
+    approved: boolean,
+  ) => {
+    const taskId = String(task.task_id || '').trim();
+    if (!taskId) return null;
+    const approvalId = String(approval.approval_id || '').trim() || undefined;
+    const nextTask = approved
+      ? await approveYachiyoTask(taskId, approvalId)
+      : await rejectYachiyoTask(taskId, approvalId, 'Rejected from launcher mode page');
+    setPublicAgentTask(nextTask);
+    await refresh();
+    return nextTask;
+  }, [refresh]);
+
+  const approveAgentTaskApproval = useCallback((
+    task: AgentTaskSnapshot,
+    approval: ApprovalCardSnapshot,
+  ) => resolveAgentTaskApproval(task, approval, true), [resolveAgentTaskApproval]);
+
+  const rejectAgentTaskApproval = useCallback((
+    task: AgentTaskSnapshot,
+    approval: ApprovalCardSnapshot,
+  ) => resolveAgentTaskApproval(task, approval, false), [resolveAgentTaskApproval]);
+
+  return {
+    agentTask: publicAgentTask || data?.chat?.agent_task || null,
+    approveAgentTaskApproval,
+    data,
+    loading,
+    refresh,
+    rejectAgentTaskApproval,
+  };
 }
 
 function launcherPayloadHasActiveTask(data: LauncherPayload | null) {
@@ -1288,7 +1341,13 @@ function launcherPayloadHasActiveTask(data: LauncherPayload | null) {
 }
 
 export function BubbleModePage() {
-  const { data, loading } = useLauncherModePayload('bubble');
+  const {
+    agentTask,
+    approveAgentTaskApproval,
+    data,
+    loading,
+    rejectAgentTaskApproval,
+  } = useLauncherModePayload('bubble');
   usePageLoading(loading && !data);
 
   return (
@@ -1327,7 +1386,9 @@ export function BubbleModePage() {
           <p>桌面悬浮气泡，随时与八千代对话。支持拖拽、双击展开聊天、边缘吸附等功能。</p>
           <LauncherAgentTaskLight
             mode="bubble"
-            task={data?.chat?.agent_task || null}
+            onApproveApproval={approveAgentTaskApproval}
+            onRejectApproval={rejectAgentTaskApproval}
+            task={agentTask}
             testIdPrefix="bubble-mode"
             variant="panel"
           />
@@ -1348,7 +1409,13 @@ export function BubbleModePage() {
 }
 
 export function Live2DModePage({ active = true }: { active?: boolean } = {}) {
-  const { data, loading } = useLauncherModePayload('live2d', active);
+  const {
+    agentTask,
+    approveAgentTaskApproval,
+    data,
+    loading,
+    rejectAgentTaskApproval,
+  } = useLauncherModePayload('live2d', active);
   usePageLoading(active && loading && !data);
 
   const resource = data?.launcher?.resource;
@@ -1395,7 +1462,9 @@ export function Live2DModePage({ active = true }: { active?: boolean } = {}) {
           <p>虚拟形象互动，让八千代在你的桌面上活起来。支持口型同步、表情动作、语音合成等功能。</p>
           <LauncherAgentTaskLight
             mode="live2d"
-            task={data?.chat?.agent_task || null}
+            onApproveApproval={approveAgentTaskApproval}
+            onRejectApproval={rejectAgentTaskApproval}
+            task={agentTask}
             testIdPrefix="live2d-mode"
             variant="panel"
           />

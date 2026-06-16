@@ -7,6 +7,12 @@ import {
   launcherAgentTaskSummary,
 } from '../features/yachiyo-chat/components/LauncherAgentTaskLight';
 import { approveYachiyoTask, listYachiyoTasks, rejectYachiyoTask, startYachiyoTask } from '../features/yachiyo-chat/api';
+import {
+  launcherAgentTaskFromPublicTasks,
+  launcherAgentTaskIsActive,
+  launcherTaskConversationId,
+  launcherTaskTitle,
+} from '../features/yachiyo-chat/launcherTasks';
 import type { AgentTaskSnapshot, ApprovalCardSnapshot } from '../features/yachiyo-chat/types';
 import type { AppView } from '../lib/view';
 import {
@@ -239,45 +245,6 @@ function useLauncher(mode: 'bubble' | 'live2d') {
     rejectAgentTaskApproval,
     startAgentTask,
   };
-}
-
-function launcherAgentTaskFromPublicTasks(
-  tasks: AgentTaskSnapshot[],
-  fallback: AgentTaskSnapshot | null,
-): AgentTaskSnapshot | null {
-  const snapshots = Array.isArray(tasks) ? tasks.filter(Boolean) : [];
-  if (!snapshots.length) return fallback;
-  const fallbackTaskId = String(fallback?.task_id || '').trim();
-  const matchingFallbackTask = fallbackTaskId
-    ? snapshots.find((task) => String(task.task_id || '').trim() === fallbackTaskId)
-    : null;
-  if (matchingFallbackTask) return matchingFallbackTask;
-  const activeTask = snapshots.find(launcherAgentTaskIsActive);
-  if (activeTask) return activeTask;
-  const fallbackConversationId = String(fallback?.conversation_id || '').trim();
-  const matchingConversationTask = fallbackConversationId
-    ? snapshots.find((task) => String(task.conversation_id || '').trim() === fallbackConversationId)
-    : null;
-  return matchingConversationTask || fallback || snapshots[0] || null;
-}
-
-function launcherAgentTaskIsActive(task: AgentTaskSnapshot | null | undefined) {
-  if (!task) return false;
-  if (task.needs_user_action || task.pending_approvals?.length) return true;
-  return task.status === 'queued' || task.status === 'running' || task.status === 'waiting_approval';
-}
-
-function launcherTaskConversationId(mode: LauncherMode, data: LauncherPayload | null) {
-  const sessionId = mode === 'live2d' && data?.proactive?.has_attention
-    ? data?.proactive?.session_id
-    : data?.chat?.session_id;
-  return String(sessionId || '').trim() || null;
-}
-
-function launcherTaskTitle(prompt: string) {
-  const text = prompt.trim().replace(/\s+/g, ' ');
-  if (!text) return 'Launcher Task';
-  return text.length > 40 ? `${text.slice(0, 39)}...` : text;
 }
 
 async function acknowledgeAndOpenChat(mode: 'bubble' | 'live2d', data: LauncherPayload | null) {
