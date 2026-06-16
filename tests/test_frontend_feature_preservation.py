@@ -2893,6 +2893,21 @@ def test_chat_cancel_ui_smoke_uses_stop_buttons_and_cancel_route() -> None:
             "header stop cancelled chat",
         ],
     )
+
+
+def test_chat_smokes_use_agent_studio_handoff_copy() -> None:
+    smoke_scripts = [
+        "scripts/smoke_chat_cancel_ui.mjs",
+        "scripts/smoke_chat_image_attachment_ui.mjs",
+        "scripts/smoke_chat_run_detail_handoff_ui.mjs",
+        "scripts/smoke_packaged_chat_native_file_upload.mjs",
+    ]
+    for smoke_script in smoke_scripts:
+        _assert_contains(smoke_script, ["textContent.includes('Agent Studio')"])
+        _assert_not_contains(smoke_script, ["textContent.includes('运行详情')"])
+
+
+def test_chat_message_approval_card_uses_readable_tool_labels() -> None:
     _assert_contains(
         "apps/frontend/src/features/yachiyo-chat/components/MessageApprovalRequestCard.tsx",
         [
