@@ -40,10 +40,17 @@ export function RuntimeTimelineSummary({
   );
 }
 
-function runtimeTimelineEventLabel(event: RuntimeTimelineEventSnapshot): string {
+export function runtimeTimelineEventLabel(event: RuntimeTimelineEventSnapshot): string {
   const title = String(event.title || '').trim();
-  if (title) return title;
   const type = String(event.event_type || '').trim();
+  const typeLabel = runtimeTimelineEventTypeLabel(type || title);
+  if (typeLabel) return typeLabel;
+  if (title && !runtimeTimelineLooksInternalLabel(title)) return title;
+  if (type && !runtimeTimelineLooksInternalLabel(type)) return type;
+  return '运行事件';
+}
+
+function runtimeTimelineEventTypeLabel(type: string): string {
   if (type === 'run.started' || type === 'task.started') return '任务已启动';
   if (type === 'task.linked') return 'Task 已关联';
   if (type === 'tool.requested') return '工具请求';
@@ -91,7 +98,7 @@ function runtimeTimelineEventLabel(event: RuntimeTimelineEventSnapshot): string 
   if (type === 'workflow.node.approval_rejected') return 'Workflow 审批拒绝';
   if (type === 'workflow.node.approval_timeout') return 'Workflow 审批超时';
   if (type === 'workflow.edge.followed') return 'Workflow 路由';
-  if (type === 'workflow.run.child_resumed') return '子 Run 已继续';
+  if (type === 'workflow.run.child_resumed') return '子任务已继续';
   if (type === 'workflow.run.resumed') return 'Workflow 已继续';
   if (type === 'workflow.node.started') return 'Workflow 节点已启动';
   if (type === 'workflow.node.completed') return 'Workflow 节点完成';
@@ -102,7 +109,11 @@ function runtimeTimelineEventLabel(event: RuntimeTimelineEventSnapshot): string 
   if (type === 'run.completed' || type === 'task.completed') return '任务完成';
   if (type === 'run.failed' || type === 'task.failed') return '任务失败';
   if (type === 'run.cancelled' || type === 'task.cancelled') return '任务已取消';
-  return type || '运行事件';
+  return '';
+}
+
+function runtimeTimelineLooksInternalLabel(value: string): boolean {
+  return /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/i.test(value);
 }
 
 function runtimeTimelineStatusLabel(status: string): string {

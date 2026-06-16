@@ -2,8 +2,9 @@ import { useState } from 'react';
 
 import { openAppView } from '../../../lib/bridge';
 import { runtimeToolDisplayLabelOrName } from '../../runtime-shared/approval';
+import { runtimeTimelineEventLabel } from '../../runtime-shared/components/RuntimeTimelineSummary';
 import { yachiyoTaskStudioGroupRunId, yachiyoTaskStudioRunId, yachiyoTaskStudioUrl } from '../taskSnapshots';
-import type { AgentTaskSnapshot, ApprovalCardSnapshot } from '../types';
+import type { AgentTaskSnapshot, ApprovalCardSnapshot, PublicRunEvent } from '../types';
 
 type LauncherTaskMode = 'bubble' | 'live2d';
 type LauncherTaskApprovalAction = 'approve' | 'reject';
@@ -38,10 +39,18 @@ export function launcherAgentTaskDetail(task: LauncherAgentTask) {
   const step = String(task.current_step || task.progress_text || '').trim();
   if (step) return step;
   const event = task.recent_events?.find((item) => item.title || item.detail || item.event_type);
-  if (event) return String(event.title || event.detail || event.event_type || '').trim();
+  if (event) return launcherAgentTaskEventLabel(event);
   const artifact = task.artifacts?.find((item) => item.title || item.path || item.kind);
   if (artifact) return `产物 · ${artifact.title || artifact.path || artifact.kind}`;
   return String(task.summary || '').trim();
+}
+
+function launcherAgentTaskEventLabel(event: PublicRunEvent) {
+  const label = runtimeTimelineEventLabel(event);
+  if (label && label !== '运行事件') return label;
+  const detail = String(event.detail || '').trim();
+  if (detail) return runtimeToolDisplayLabelOrName(detail);
+  return label || '运行事件';
 }
 
 export function launcherAgentTaskChatParams(task: LauncherAgentTask): Record<string, string> | undefined {
