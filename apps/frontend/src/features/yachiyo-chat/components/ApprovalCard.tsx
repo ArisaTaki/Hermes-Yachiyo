@@ -36,7 +36,9 @@ export function ApprovalCard({
         rejectContent={<><UiIcon name="close" /><span>拒绝</span></>}
         rejectTestId="yachiyo-task-approval-reject"
         testId="yachiyo-task-approval-gate"
-      />
+      >
+        {actions}
+      </RuntimeApprovalGate>
     );
   }
 

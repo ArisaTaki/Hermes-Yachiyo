@@ -9495,7 +9495,8 @@ body.electron-window .hy-traffic {
   gap: 6px;
 }
 
-.hy-content .open-chat-shell .yachiyo-agent-task-approval-actions button {
+.hy-content .open-chat-shell .yachiyo-agent-task-approval-actions button,
+.hy-content .open-chat-shell .yachiyo-agent-task-approval-actions a {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -9508,10 +9509,12 @@ body.electron-window .hy-traffic {
   cursor: pointer;
   font-size: 11px;
   font-weight: 700;
+  text-decoration: none;
   line-height: 1;
 }
 
-.hy-content .open-chat-shell .yachiyo-agent-task-approval-actions button:hover {
+.hy-content .open-chat-shell .yachiyo-agent-task-approval-actions button:hover,
+.hy-content .open-chat-shell .yachiyo-agent-task-approval-actions a:hover {
   border-color: oklch(82% 0.135 76 / 0.42);
   color: var(--hy-fg);
 }

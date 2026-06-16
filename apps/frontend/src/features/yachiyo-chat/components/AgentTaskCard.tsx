@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 
 import { UiIcon } from '../../../components/UiIcon';
 import { RuntimeTimelineSummary } from '../../runtime-shared/components/RuntimeTimelineSummary';
+import { studioRunUrl } from '../../runtime-shared/studioLinks';
 import {
   approvalsFromRunEventReplay,
   artifactsFromRunEventReplay,
@@ -14,7 +15,12 @@ import {
   runEventSequenceCursor,
 } from '../../runtime-shared/runEvents';
 import { listYachiyoTaskEvents } from '../api';
-import { yachiyoTaskRunId, yachiyoTaskStudioRunId, yachiyoTaskStudioUrl } from '../taskSnapshots';
+import {
+  yachiyoTaskRunId,
+  yachiyoTaskStudioGroupRunId,
+  yachiyoTaskStudioRunId,
+  yachiyoTaskStudioUrl,
+} from '../taskSnapshots';
 import type { AgentTaskSnapshot, ApprovalCardSnapshot, ArtifactSnapshot, PublicRunEvent } from '../types';
 import { ApprovalCard } from './ApprovalCard';
 import { ArtifactPreview } from './ArtifactPreview';
@@ -191,8 +197,38 @@ export function AgentTaskCard({
           {approvalFacts.slice(0, 2).map((approval) => {
             const pending = (approval.status || 'pending') === 'pending';
             const actionable = pending && (onApproveApproval || onRejectApproval);
+            const approvalStudioRunId = approvalStudioRunIdFor(approval);
+            const approvalStudioUrl = approvalStudioUrlFor(approval, task);
+            const canOpenApprovalStudio = Boolean(onOpenStudio && (approvalStudioRunId || approvalStudioUrl));
             return (
               <ApprovalCard
+                actions={
+                  canOpenApprovalStudio ? (
+                    <div
+                      className="yachiyo-agent-task-approval-actions yachiyo-agent-task-approval-secondary-actions"
+                      data-testid="yachiyo-task-approval-secondary-actions"
+                    >
+                      <a
+                        href={approvalStudioUrl || '#'}
+                        data-approval-id={approval.approval_id}
+                        data-run-id={approvalStudioRunId}
+                        data-studio-url={approvalStudioUrl}
+                        data-testid="yachiyo-task-approval-open-studio"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          if (approvalStudioUrl) {
+                            onOpenStudio?.(undefined, approvalStudioUrl);
+                            return;
+                          }
+                          onOpenStudio?.(approvalStudioRunId);
+                        }}
+                      >
+                        <UiIcon name="activity" />
+                        <span>在 Studio 中查看</span>
+                      </a>
+                    </div>
+                  ) : undefined
+                }
                 approval={approval}
                 busy={busy}
                 key={approval.approval_id}
@@ -230,4 +266,23 @@ function taskStatusLabel(status: string) {
   if (status === 'failed') return '失败';
   if (status === 'cancelled') return '已取消';
   return status || '任务';
+}
+
+function approvalStudioRunIdFor(approval: ApprovalCardSnapshot) {
+  return String(
+    approval.source_run_id
+    || approval.run_id
+    || approval.workflow_run_id
+    || '',
+  ).trim();
+}
+
+function approvalStudioUrlFor(approval: ApprovalCardSnapshot, task: AgentTaskSnapshot) {
+  const publicUrl = String(approval.open_in_studio_url || '').trim();
+  if (publicUrl) return publicUrl;
+  const runId = approvalStudioRunIdFor(approval);
+  if (!runId) return '';
+  return studioRunUrl(runId, {
+    groupRunId: String(approval.group_run_id || '').trim() || yachiyoTaskStudioGroupRunId(task),
+  });
 }

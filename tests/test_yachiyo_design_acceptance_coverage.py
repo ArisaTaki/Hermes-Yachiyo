@@ -56,6 +56,8 @@ def test_chat_daily_entry_acceptance_paths_are_guarded() -> None:
             "mergeApprovalSnapshots",
             "onApproveApproval(task, approval)",
             "onRejectApproval(task, approval)",
+            'data-testid="yachiyo-task-approval-open-studio"',
+            "approval.open_in_studio_url",
             "ArtifactPreview",
             "ToolCallSummary",
             "在 Agent Studio 中查看",
