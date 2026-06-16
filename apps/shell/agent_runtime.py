@@ -103,6 +103,8 @@ from apps.shell.agent.runtime.cancellation import (
 from apps.shell.agent.runtime.core_services import (
     RuntimeCoreServiceBundle,
     build_runtime_core_services as _build_runtime_core_services,
+    RuntimeMemoryCoreSetup,
+    build_runtime_memory_core_setup as _build_runtime_memory_core_setup,
 )
 from apps.shell.agent.runtime.clock import iso_epoch as _iso_epoch, utc_now_iso as _now
 from apps.shell.agent.runtime.config import (

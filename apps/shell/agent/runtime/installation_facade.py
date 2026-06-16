@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from apps.shell.agent.runtime.credentials import RuntimeCredentialService
+from apps.shell.agent.runtime.core_services import build_runtime_memory_core_setup
 from apps.shell.agent.runtime.model_calling import (
     RuntimeModelProfileChatAdapter,
     RuntimeOpenAICompatibleChatAdapter,
@@ -197,37 +198,16 @@ class RuntimeInstallationFacadeMixin:
         )
 
     def _install_runtime_memory_and_core(self) -> Any:
-        legacy = _legacy_agent_runtime_module()
-        self._install_runtime_memory_services(
-            legacy.RuntimeMemoryService(
-                self._conn,
-                self._db_lock,
-                now=legacy._now,
-                json_dump=legacy._json_dump,
-                redact_json_value=legacy._redact_json_value,
-                redact_secrets=legacy.redact_secrets,
-                memory_scopes=legacy._MEMORY_SCOPES,
-                memory_kinds=legacy._MEMORY_KINDS,
-                context_limit=legacy._MEMORY_CONTEXT_LIMIT,
-                content_max_chars=legacy._MEMORY_CONTENT_MAX_CHARS,
-                error_type=legacy.AgentRuntimeError,
-            )
-        )
-        runtime_timeline_factory = legacy._runtime_timeline_factory(
-            now=legacy._now,
-            redact_detail=legacy.redact_secrets,
-            redact_payload=legacy._redact_json_value,
-        )
-        core_services = legacy._build_runtime_core_services(
+        setup = build_runtime_memory_core_setup(
+            conn=self._conn,
+            db_lock=self._db_lock,
             run_events=self.run_events,
-            timeline_factory=runtime_timeline_factory,
-            profile_service_factory=lambda: legacy.get_model_profile_service(),
-            supports_openai_compatible_api=legacy.supports_openai_compatible_api,
-            default_agent_ids=legacy._DEFAULT_AGENT_IDS,
-            error_type=legacy.AgentRuntimeError,
+            profile_service_factory=lambda: _legacy_agent_runtime_module().get_model_profile_service(),
+            supports_openai_compatible_api=_legacy_agent_runtime_module().supports_openai_compatible_api,
         )
-        self._install_runtime_core_services(core_services)
-        return runtime_timeline_factory
+        self._install_runtime_memory_services(setup.memory_services)
+        self._install_runtime_core_services(setup.core_services)
+        return setup.timeline_factory
 
     def _install_runtime_agent_chat_entrypoints(
         self,
