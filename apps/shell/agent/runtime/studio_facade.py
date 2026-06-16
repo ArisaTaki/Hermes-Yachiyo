@@ -286,6 +286,21 @@ class RuntimeStudioFacadeMixin:
     def get_run_group(self, run_group_id: str) -> dict[str, Any]:
         return self.run_timeline.get_run_group(run_group_id)
 
+    def list_group_run_events(
+        self,
+        run_group_id: str,
+        *,
+        after_sequence: int = 0,
+        limit: int = 200,
+        include_internal: bool = False,
+    ) -> dict[str, Any]:
+        return self.run_timeline.list_group_events(
+            run_group_id,
+            after_sequence=after_sequence,
+            limit=limit,
+            include_internal=include_internal,
+        )
+
     def _run_group_source(self, run_group_id: str) -> str:
         return self.run_timeline.run_group_source(run_group_id)
 

@@ -342,6 +342,7 @@ def test_agent_studio_group_run_uses_native_run_group_events_and_children(tmp_pa
         group_run = studio.get_group_run(run_group["run_group_id"])
         group_events = list(studio.get_group_run_event_stream(run_group["run_group_id"]))
         event_page = studio.get_group_run_event_page(run_group["run_group_id"], limit=2)
+        native_event_page = runtime.list_group_run_events(run_group["run_group_id"], limit=2)
 
         assert group_run.group_run_id == run_group["run_group_id"]
         assert group_run.status == "running"
@@ -360,6 +361,14 @@ def test_agent_studio_group_run_uses_native_run_group_events_and_children(tmp_pa
         assert "group.member.completed" in [event.event_type for event in group_events]
         assert event_page.run_id == run_group["run_group_id"]
         assert event_page.events[0].event_type == "group.run.started"
+        assert event_page.events[0].sequence == 1
+        assert event_page.events[0].payload["source_run_id"] == planner_run["run_id"]
+        assert event_page.events[0].payload["source_sequence"] == 1
+        assert event_page.events[1].event_type == "group.member.started"
+        assert event_page.events[1].payload["source_run_id"] == planner_run["run_id"]
+        assert native_event_page["run_id"] == run_group["run_group_id"]
+        assert native_event_page["events"][0]["run_id"] == run_group["run_group_id"]
+        assert native_event_page["events"][0]["payload"]["source_run_id"] == planner_run["run_id"]
     finally:
         runtime.close()
 

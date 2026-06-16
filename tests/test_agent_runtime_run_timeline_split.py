@@ -26,6 +26,10 @@ class _FakeRuns:
 class _FakeRunGroups:
     def __init__(self) -> None:
         self.calls: list[tuple[str, Any]] = []
+        self.child_runs = [
+            {"run_id": "child-run-1"},
+            {"run_id": "child-run-2"},
+        ]
 
     def list(self, limit: int) -> dict[str, Any]:
         self.calls.append(("list", limit))
@@ -33,16 +37,24 @@ class _FakeRunGroups:
 
     def get(self, run_group_id: str) -> dict[str, Any]:
         self.calls.append(("get", run_group_id))
-        return {"run_group_id": run_group_id}
+        return {
+            "run_group_id": run_group_id,
+            "child_run_ids": ["child-run-2", "child-run-1"],
+        }
 
     def source(self, run_group_id: str) -> str:
         self.calls.append(("source", run_group_id))
         return "workflow"
 
+    def runs(self, run_group_id: str) -> list[dict[str, Any]]:
+        self.calls.append(("runs", run_group_id))
+        return list(self.child_runs)
+
 
 class _FakeRuntimeEvents:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
+        self.events_by_run_id: dict[str, list[dict[str, Any]]] = {}
 
     def append(
         self,
@@ -88,7 +100,10 @@ class _FakeRuntimeEvents:
                 },
             )
         )
-        return {"events": [{"event_type": "run.completed"}], "run_id": run_id}
+        return {
+            "events": self.events_by_run_id.get(run_id, [{"event_type": "run.completed"}]),
+            "run_id": run_id,
+        }
 
 
 class _FakeArtifacts:
@@ -122,7 +137,10 @@ def test_runtime_run_timeline_service_delegates_run_group_and_artifact_access() 
         "run_groups": [{"run_group_id": "group-1"}],
         "limit": 5,
     }
-    assert service.get_run_group("group-1") == {"run_group_id": "group-1"}
+    assert service.get_run_group("group-1") == {
+        "run_group_id": "group-1",
+        "child_run_ids": ["child-run-2", "child-run-1"],
+    }
     assert service.run_group_source("group-1") == "workflow"
     assert service.read_artifact("run-1", "report.md") == {
         "ok": True,
@@ -187,6 +205,62 @@ def test_runtime_run_timeline_service_delegates_event_append_and_replay() -> Non
             },
         ),
     ]
+
+
+def test_runtime_run_timeline_service_projects_group_event_page_from_child_runs() -> None:
+    run_groups = _FakeRunGroups()
+    runtime_events = _FakeRuntimeEvents()
+    runtime_events.events_by_run_id = {
+        "child-run-1": [
+            {
+                "event_id": "event-child-1-1",
+                "run_id": "child-run-1",
+                "sequence": 1,
+                "event_type": "agent.tool.call",
+                "payload": {"tool": "workspace.read"},
+            },
+            {
+                "event_id": "event-child-1-2",
+                "run_id": "child-run-1",
+                "sequence": 2,
+                "event_type": "group.member.completed",
+                "payload": {"member_agent_id": "agent-1"},
+            },
+        ],
+        "child-run-2": [
+            {
+                "event_id": "event-child-2-4",
+                "run_id": "child-run-2",
+                "sequence": 4,
+                "event_type": "group.member.started",
+                "payload": {"member_agent_id": "agent-2"},
+            }
+        ],
+    }
+    service = RuntimeRunTimelineService(
+        runs=_FakeRuns(),
+        run_groups=run_groups,
+        runtime_events=runtime_events,
+        run_artifacts=_FakeArtifacts(),
+    )
+
+    first_page = service.list_group_events("group-1", after_sequence=0, limit=1)
+    second_page = service.list_group_events("group-1", after_sequence=1, limit=1)
+
+    assert first_page["run_id"] == "group-1"
+    assert first_page["events"][0]["sequence"] == 1
+    assert first_page["events"][0]["run_id"] == "group-1"
+    assert first_page["events"][0]["event_type"] == "group.member.started"
+    assert first_page["events"][0]["payload"]["source_run_id"] == "child-run-2"
+    assert first_page["events"][0]["payload"]["source_sequence"] == 4
+    assert first_page["events"][0]["payload"]["source_event_id"] == "event-child-2-4"
+    assert first_page["has_more"] is True
+    assert second_page["events"][0]["sequence"] == 2
+    assert second_page["events"][0]["event_type"] == "group.member.completed"
+    assert second_page["events"][0]["payload"]["source_run_id"] == "child-run-1"
+    assert second_page["has_more"] is False
+    assert ("get", "group-1") in run_groups.calls
+    assert ("runs", "group-1") in run_groups.calls
 
 
 def test_native_runtime_installs_run_timeline_service(tmp_path) -> None:

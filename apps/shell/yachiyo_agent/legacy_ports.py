@@ -469,6 +469,9 @@ class LegacyStudioPort:
         return self._projector.group_run_from_legacy_run_group(run_group, self._runtime)
 
     def get_group_run_event_stream(self, group_run_id: str) -> dict[str, Any]:
+        list_group_run_events = getattr(self._runtime, "list_group_run_events", None)
+        if callable(list_group_run_events):
+            return list_group_run_events(group_run_id, limit=500)
         group_run = group_run_snapshot_from_payload(self.get_group_run(group_run_id))
         return {
             "run_id": group_run.group_run_id,
@@ -482,6 +485,13 @@ class LegacyStudioPort:
         after_sequence: int = 0,
         limit: int = 200,
     ) -> dict[str, Any]:
+        list_group_run_events = getattr(self._runtime, "list_group_run_events", None)
+        if callable(list_group_run_events):
+            return list_group_run_events(
+                group_run_id,
+                after_sequence=after_sequence,
+                limit=limit,
+            )
         return _run_event_page_from_legacy_stream(
             self.get_group_run_event_stream(group_run_id),
             run_id=group_run_id,
