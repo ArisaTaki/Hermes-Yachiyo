@@ -61,6 +61,15 @@ class RunEventPageSnapshot(_PublicSnapshot):
 class ApprovalCardSnapshot(_PublicSnapshot):
     approval_id: str
     run_id: str | None = None
+    source_run_id: str | None = None
+    source_runnable_id: str | None = None
+    source_runnable_name: str | None = None
+    workflow_id: str | None = None
+    workflow_run_id: str | None = None
+    workflow_node_id: str | None = None
+    workflow_node_label: str | None = None
+    group_id: str | None = None
+    group_run_id: str | None = None
     title: str
     description: str | None = None
     status: ApprovalStatus = "pending"

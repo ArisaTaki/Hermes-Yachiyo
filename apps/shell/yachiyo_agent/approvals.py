@@ -34,16 +34,49 @@ def approval_card_from_payload(
     title = _text(payload.get("title"))
     if not title:
         title = f"Approve {tool_name}" if tool_name else "Approval required"
+    input_preview = _mapping(payload.get("input_preview") or payload.get("input"))
 
     return ApprovalCardSnapshot(
         approval_id=approval_id,
         run_id=approval_run_id,
+        source_run_id=_optional_text(payload.get("source_run_id") or input_preview.get("source_run_id")),
+        source_runnable_id=_optional_text(
+            payload.get("source_runnable_id")
+            or payload.get("source_agent_id")
+            or payload.get("member_agent_id")
+            or payload.get("agent_id")
+            or input_preview.get("source_runnable_id")
+            or input_preview.get("member_agent_id")
+            or input_preview.get("agent_id")
+        ),
+        source_runnable_name=_optional_text(
+            payload.get("source_runnable_name")
+            or payload.get("source_agent_name")
+            or payload.get("member_agent_name")
+            or payload.get("agent_name")
+            or input_preview.get("source_runnable_name")
+            or input_preview.get("member_agent_name")
+            or input_preview.get("agent_name")
+        ),
+        workflow_id=_optional_text(payload.get("workflow_id") or input_preview.get("workflow_id")),
+        workflow_run_id=_optional_text(
+            payload.get("workflow_run_id") or input_preview.get("workflow_run_id")
+        ),
+        workflow_node_id=_optional_text(
+            payload.get("workflow_node_id") or input_preview.get("workflow_node_id")
+        ),
+        workflow_node_label=_optional_text(
+            payload.get("workflow_node_label") or input_preview.get("workflow_node_label")
+        ),
+        group_id=_optional_text(payload.get("group_id") or input_preview.get("group_id")),
+        group_run_id=approval_group_run_id
+        or _optional_text(input_preview.get("group_run_id") or input_preview.get("run_group_id")),
         title=title,
         description=_optional_text(payload.get("description") or payload.get("reason")),
         status=_approval_status(payload.get("status")),
         tool_name=tool_name,
         risk_level=_optional_text(payload.get("risk_level") or payload.get("risk")),
-        input_preview=_mapping(payload.get("input_preview") or payload.get("input")),
+        input_preview=input_preview,
         policy_reason=_optional_text(payload.get("policy_reason")),
         requested_at=_text(payload.get("requested_at") or payload.get("created_at")),
         resolved_at=_optional_text(payload.get("resolved_at")),

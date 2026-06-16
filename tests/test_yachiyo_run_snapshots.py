@@ -467,6 +467,10 @@ def test_run_timeline_derives_approvals_and_artifacts_from_events() -> None:
                 {
                     "event_type": "workflow.node.approval_required",
                     "payload": {
+                        "group_id": "group-1",
+                        "group_run_id": "group-run-1",
+                        "member_agent_id": "agent-reviewer",
+                        "member_agent_name": "Reviewer",
                         "workflow_id": "workflow-1",
                         "workflow_run_id": "run-events-only",
                         "workflow_node_id": "review",
@@ -516,8 +520,20 @@ def test_run_timeline_derives_approvals_and_artifacts_from_events() -> None:
     assert timeline.approvals[0].approval_id == "run-events-only:tool.approval_required:1"
     assert timeline.approvals[0].input_preview == {"command": "npm test"}
     assert timeline.approvals[1].approval_id == "approval-workflow"
+    assert timeline.approvals[1].source_runnable_id == "agent-reviewer"
+    assert timeline.approvals[1].source_runnable_name == "Reviewer"
+    assert timeline.approvals[1].workflow_id == "workflow-1"
+    assert timeline.approvals[1].workflow_run_id == "run-events-only"
+    assert timeline.approvals[1].workflow_node_id == "review"
+    assert timeline.approvals[1].workflow_node_label == "Review Gate"
+    assert timeline.approvals[1].group_id == "group-1"
+    assert timeline.approvals[1].group_run_id == "group-run-1"
     assert timeline.approvals[1].input_preview == {
         "checkpoint": "Review Gate",
+        "group_id": "group-1",
+        "group_run_id": "group-run-1",
+        "member_agent_id": "agent-reviewer",
+        "member_agent_name": "Reviewer",
         "workflow_id": "workflow-1",
         "workflow_run_id": "run-events-only",
         "workflow_node_id": "review",
@@ -606,6 +622,9 @@ def test_run_timeline_merges_approval_lifecycle_events_into_stable_cards() -> No
     assert timeline.approvals[0].input_preview == {"command": "npm test"}
     assert timeline.approvals[1].description == "Needs more detail"
     assert timeline.approvals[1].resolved_at == "2026-06-15T00:00:03Z"
+    assert timeline.approvals[1].workflow_id == "workflow-1"
+    assert timeline.approvals[1].workflow_node_id == "review"
+    assert timeline.approvals[1].workflow_node_label == "Review Gate"
     assert timeline.approvals[1].input_preview == {
         "checkpoint": "Review Gate",
         "workflow_id": "workflow-1",

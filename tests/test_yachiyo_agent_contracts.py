@@ -107,6 +107,61 @@ def test_agent_task_snapshot_json_shape_is_stable() -> None:
     assert "event" not in payload["recent_events"][0]
 
 
+def test_approval_card_snapshot_keeps_runtime_trace_fields() -> None:
+    snapshot = ApprovalCardSnapshot(
+        approval_id="approval-1",
+        run_id="run-1",
+        source_run_id="child-run-1",
+        source_runnable_id="agent-1",
+        source_runnable_name="Planner",
+        workflow_id="workflow-1",
+        workflow_run_id="workflow-run-1",
+        workflow_node_id="review",
+        workflow_node_label="Review Gate",
+        group_id="group-1",
+        group_run_id="group-run-1",
+        title="Approve Review Gate",
+        description="Needs review",
+        status="pending",
+        tool_name="workflow.approval",
+        risk_level="medium",
+        input_preview={"checkpoint": "Review Gate"},
+        policy_reason="manual checkpoint",
+        requested_at="2026-06-14T00:00:00Z",
+        resolved_at=None,
+        open_in_studio_url="#/agents?run_id=run-1&group_run=group-run-1",
+    )
+
+    payload = _json(snapshot)
+
+    assert list(payload) == [
+        "approval_id",
+        "run_id",
+        "source_run_id",
+        "source_runnable_id",
+        "source_runnable_name",
+        "workflow_id",
+        "workflow_run_id",
+        "workflow_node_id",
+        "workflow_node_label",
+        "group_id",
+        "group_run_id",
+        "title",
+        "description",
+        "status",
+        "tool_name",
+        "risk_level",
+        "input_preview",
+        "policy_reason",
+        "requested_at",
+        "resolved_at",
+        "open_in_studio_url",
+    ]
+    assert payload["workflow_node_id"] == "review"
+    assert payload["source_runnable_name"] == "Planner"
+    assert payload["group_run_id"] == "group-run-1"
+
+
 def test_chat_runnable_catalog_snapshot_json_shape_is_stable() -> None:
     snapshot = ChatRunnableCatalogSnapshot(
         agents=[AgentDefinitionSnapshot(agent_id="agent-1", name="Planner")],

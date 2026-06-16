@@ -316,9 +316,29 @@ export function mergeApprovalSnapshots(
   });
   replayApprovals.forEach((approval, index) => {
     const key = approvalRecordKey(approval, index);
-    if (!byKey.has(key)) byKey.set(key, approval);
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, approval);
+      return;
+    }
+    byKey.set(key, mergeApprovalTrace(existing, approval));
   });
   return Array.from(byKey.values());
+}
+
+function mergeApprovalTrace(current: ApprovalCardSnapshot, incoming: ApprovalCardSnapshot): ApprovalCardSnapshot {
+  return {
+    ...current,
+    source_run_id: current.source_run_id || incoming.source_run_id || null,
+    source_runnable_id: current.source_runnable_id || incoming.source_runnable_id || null,
+    source_runnable_name: current.source_runnable_name || incoming.source_runnable_name || null,
+    workflow_id: current.workflow_id || incoming.workflow_id || null,
+    workflow_run_id: current.workflow_run_id || incoming.workflow_run_id || null,
+    workflow_node_id: current.workflow_node_id || incoming.workflow_node_id || null,
+    workflow_node_label: current.workflow_node_label || incoming.workflow_node_label || null,
+    group_id: current.group_id || incoming.group_id || null,
+    group_run_id: current.group_run_id || incoming.group_run_id || null,
+  };
 }
 
 export function mergeRunEventReplayPages(
@@ -407,6 +427,47 @@ function approvalFromRunEvent(event: PublicRunEvent): ApprovalCardSnapshot | nul
       || publicRunEventPayloadString(source, 'risk')
       || null,
     run_id: publicRunEventPayloadString(source, 'run_id') || event.run_id,
+    source_run_id: publicRunEventPayloadString(source, 'source_run_id')
+      || publicRunEventPayloadString(payload, 'source_run_id')
+      || null,
+    source_runnable_id: publicRunEventPayloadString(source, 'source_runnable_id')
+      || publicRunEventPayloadString(source, 'source_agent_id')
+      || publicRunEventPayloadString(source, 'member_agent_id')
+      || publicRunEventPayloadString(source, 'agent_id')
+      || publicRunEventPayloadString(payload, 'source_runnable_id')
+      || publicRunEventPayloadString(payload, 'source_agent_id')
+      || publicRunEventPayloadString(payload, 'member_agent_id')
+      || publicRunEventPayloadString(payload, 'agent_id')
+      || null,
+    source_runnable_name: publicRunEventPayloadString(source, 'source_runnable_name')
+      || publicRunEventPayloadString(source, 'source_agent_name')
+      || publicRunEventPayloadString(source, 'member_agent_name')
+      || publicRunEventPayloadString(source, 'agent_name')
+      || publicRunEventPayloadString(payload, 'source_runnable_name')
+      || publicRunEventPayloadString(payload, 'source_agent_name')
+      || publicRunEventPayloadString(payload, 'member_agent_name')
+      || publicRunEventPayloadString(payload, 'agent_name')
+      || null,
+    workflow_id: publicRunEventPayloadString(source, 'workflow_id')
+      || publicRunEventPayloadString(payload, 'workflow_id')
+      || null,
+    workflow_run_id: publicRunEventPayloadString(source, 'workflow_run_id')
+      || publicRunEventPayloadString(payload, 'workflow_run_id')
+      || null,
+    workflow_node_id: publicRunEventPayloadString(source, 'workflow_node_id')
+      || publicRunEventPayloadString(payload, 'workflow_node_id')
+      || null,
+    workflow_node_label: publicRunEventPayloadString(source, 'workflow_node_label')
+      || publicRunEventPayloadString(payload, 'workflow_node_label')
+      || null,
+    group_id: publicRunEventPayloadString(source, 'group_id')
+      || publicRunEventPayloadString(payload, 'group_id')
+      || null,
+    group_run_id: publicRunEventPayloadString(source, 'group_run_id')
+      || publicRunEventPayloadString(source, 'run_group_id')
+      || publicRunEventPayloadString(payload, 'group_run_id')
+      || publicRunEventPayloadString(payload, 'run_group_id')
+      || null,
     status,
     title: publicRunEventPayloadString(source, 'title') || `Approval · ${toolName}`,
     tool_name: toolName,
