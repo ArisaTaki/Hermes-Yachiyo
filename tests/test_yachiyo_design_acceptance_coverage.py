@@ -199,6 +199,19 @@ def test_group_and_workflow_acceptance_paths_are_guarded() -> None:
             "onOpenAgentGroupRunTimeline(latestAgentGroupRun)",
         ],
     )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/GroupRunDetailPanel.tsx",
+        [
+            "RuntimeTimelineSummary",
+            "RuntimeApprovalCard",
+            "RuntimeArtifactList",
+            "onOpenArtifact={onOpenArtifact}",
+            'data-testid="agent-run-detail-group-run-replay"',
+            'data-testid="agent-run-detail-group-run-approvals"',
+            'data-testid="agent-run-detail-group-run-artifacts"',
+            'itemTestId="agent-run-detail-group-run-artifact-item"',
+        ],
+    )
     _assert_smoke_script(
         "scripts/smoke_chat_group_summary_ui.mjs",
         [

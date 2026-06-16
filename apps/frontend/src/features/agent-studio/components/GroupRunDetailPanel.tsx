@@ -13,6 +13,7 @@ import {
 type GroupRunDetailPanelProps = {
   formatRunDate: (value?: string) => string;
   onLoadMoreGroupRunEvents: () => Promise<unknown> | unknown;
+  onOpenArtifact: (run: RunSpec | string, path: string) => Promise<void> | void;
   onOpenRunDetail: (runId: string) => void;
   replayError: string;
   replayEvents: PublicRunEvent[];
@@ -38,6 +39,7 @@ type GroupRunChildRunRef = {
 export function GroupRunDetailPanel({
   formatRunDate,
   onLoadMoreGroupRunEvents,
+  onOpenArtifact,
   onOpenRunDetail,
   replayError,
   replayEvents,
@@ -205,6 +207,7 @@ export function GroupRunDetailPanel({
             className="group-run-artifact-list run-group-overview-artifact-list"
             fallbackRunId={selectedGroupRunSnapshot?.group_run_id || groupOverviewId}
             itemTestId="agent-run-detail-group-run-artifact-item"
+            onOpenArtifact={onOpenArtifact}
             previewClassName="studio-runtime-artifact group-run-artifact-card"
             previewTestId="agent-run-detail-group-run-artifact-preview"
             previewVariant="full"

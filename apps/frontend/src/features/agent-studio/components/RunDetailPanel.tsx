@@ -296,6 +296,7 @@ export function RunDetailPanel({
           </div>
           <GroupRunDetailPanel
             formatRunDate={formatRunDate}
+            onOpenArtifact={onOpenArtifact}
             onOpenRunDetail={onOpenRunDetail}
             runById={runById}
             runKindLabel={runKindLabel}
