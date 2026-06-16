@@ -1,4 +1,5 @@
 import { RuntimeReadableArtifactPreview } from '../../runtime-shared/components/RuntimeReadableArtifactPreview';
+import { readYachiyoRunArtifact } from '../../yachiyo-studio/api';
 import { readYachiyoTaskArtifact } from '../api';
 import type { ArtifactSnapshot } from '../types';
 
@@ -10,7 +11,9 @@ export function ArtifactPreview({
   taskId?: string;
 }) {
   const path = String(artifact.path || '').trim();
-  const canReadArtifact = Boolean(taskId && path);
+  const sourceRunId = String(artifact.source_run_id || artifact.run_id || '').trim();
+  const canReadRunArtifact = Boolean(sourceRunId && path);
+  const canReadTaskArtifact = Boolean(taskId && path);
   return (
     <RuntimeReadableArtifactPreview
       artifact={artifact}
@@ -24,7 +27,13 @@ export function ArtifactPreview({
       previewClassName="yachiyo-task-artifact"
       previewTestId="yachiyo-task-artifact-preview"
       previewVariant="compact"
-      readArtifact={canReadArtifact ? (artifactPath) => readYachiyoTaskArtifact(taskId, artifactPath) : undefined}
+      readArtifact={
+        canReadRunArtifact
+          ? (artifactPath) => readYachiyoRunArtifact(sourceRunId, artifactPath)
+          : canReadTaskArtifact
+            ? (artifactPath) => readYachiyoTaskArtifact(taskId, artifactPath)
+            : undefined
+      }
       shellTestId="yachiyo-task-artifact-shell"
       statusClassName="yachiyo-task-artifact-status"
       statusTestId="yachiyo-task-artifact-loading"

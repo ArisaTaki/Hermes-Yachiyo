@@ -940,8 +940,12 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
         "apps/frontend/src/features/yachiyo-chat/components/ArtifactPreview.tsx",
         [
             "RuntimeReadableArtifactPreview",
+            "readYachiyoRunArtifact",
             "readYachiyoTaskArtifact",
-            "canReadArtifact ? (artifactPath) => readYachiyoTaskArtifact(taskId, artifactPath) : undefined",
+            "const sourceRunId = String(artifact.source_run_id || artifact.run_id || '').trim();",
+            "canReadRunArtifact",
+            "readYachiyoRunArtifact(sourceRunId, artifactPath)",
+            "readYachiyoTaskArtifact(taskId, artifactPath)",
             'shellTestId="yachiyo-task-artifact-shell"',
             'errorTestId="yachiyo-task-artifact-error"',
             'previewActionClassName="yachiyo-task-artifact-action"',
