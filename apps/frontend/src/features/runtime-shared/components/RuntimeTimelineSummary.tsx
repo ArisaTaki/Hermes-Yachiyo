@@ -30,6 +30,7 @@ export function RuntimeTimelineSummary({
       className={className}
       eventTestId={`${testId}-event`}
       events={visibleEvents as RuntimeTimelineEventRecord[]}
+      getEventDetail={(event) => runtimeTimelineEventDetail(event as RuntimeTimelineEventSnapshot)}
       getEventName={(event) => String(event.event_type || event.title || 'event').trim()}
       getEventStatus={(event) => String(event.status || '').trim()}
       getEventTitle={(event) => runtimeTimelineEventLabel(event as RuntimeTimelineEventSnapshot)}
@@ -48,6 +49,15 @@ export function runtimeTimelineEventLabel(event: RuntimeTimelineEventSnapshot): 
   if (title && !runtimeTimelineLooksInternalLabel(title)) return title;
   if (type && !runtimeTimelineLooksInternalLabel(type)) return type;
   return '运行事件';
+}
+
+function runtimeTimelineEventDetail(event: RuntimeTimelineEventSnapshot): string {
+  const detail = String(event.detail || '').trim();
+  if (!detail) return '';
+  if (detail === String(event.title || '').trim()) return '';
+  if (runtimeTimelineLooksInternalLabel(detail)) return '';
+  if (runtimeTimelineLooksRuntimeId(detail)) return '';
+  return detail;
 }
 
 function runtimeTimelineEventTypeLabel(type: string): string {
@@ -114,6 +124,10 @@ function runtimeTimelineEventTypeLabel(type: string): string {
 
 function runtimeTimelineLooksInternalLabel(value: string): boolean {
   return /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/i.test(value);
+}
+
+function runtimeTimelineLooksRuntimeId(value: string): boolean {
+  return /^(run|task|workflow|group|agent|approval|artifact)[-_][A-Za-z0-9_.:-]+$/i.test(value);
 }
 
 function runtimeTimelineStatusLabel(status: string): string {

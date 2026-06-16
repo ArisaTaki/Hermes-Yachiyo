@@ -13,6 +13,7 @@ export type RuntimeTimelineEventListProps = {
   getChildRunId?: (event: RuntimeTimelineEventRecord) => string;
   getChildRunStatus?: (childRunId: string, eventStatus: string) => string;
   getEventCode?: (event: RuntimeTimelineEventRecord) => string;
+  getEventDetail?: (event: RuntimeTimelineEventRecord) => string;
   getEventName?: (event: RuntimeTimelineEventRecord) => string;
   getEventPayload?: (event: RuntimeTimelineEventRecord) => string;
   getEventStatus?: (event: RuntimeTimelineEventRecord) => string;
@@ -35,6 +36,7 @@ export function RuntimeTimelineEventList({
   getChildRunId = defaultChildRunId,
   getChildRunStatus = defaultChildRunStatus,
   getEventCode = defaultEventCode,
+  getEventDetail = defaultEventDetail,
   getEventName = defaultEventName,
   getEventPayload = defaultEventPayload,
   getEventStatus = defaultEventStatus,
@@ -54,7 +56,7 @@ export function RuntimeTimelineEventList({
         const eventId = defaultEventId(event);
         const eventRunId = defaultEventRunId(event);
         const eventTitle = getEventTitle(event);
-        const detail = defaultEventDetail(event);
+        const detail = getEventDetail(event);
         if (variant === 'full') {
           const childRunId = getChildRunId(event);
           const childRunStatus = childRunId ? getChildRunStatus(childRunId, eventStatus) : '';
