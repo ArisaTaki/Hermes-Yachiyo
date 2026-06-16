@@ -169,6 +169,76 @@ def test_workflow_run_snapshot_derives_context_from_replay_events() -> None:
     assert workflow_run.objective == "Review docs"
 
 
+def test_workflow_run_snapshot_adds_lifecycle_events_from_status() -> None:
+    workflow_run = workflow_run_snapshot_from_payload(
+        {
+            "run_id": "workflow-run-lifecycle",
+            "kind": "workflow_run",
+            "status": "completed",
+            "workflow_id": "workflow-1",
+            "user_goal": "Review docs",
+            "current_node_id": "done",
+            "current_node_label": "Done",
+            "created_at": "2026-06-15T00:00:00Z",
+            "updated_at": "2026-06-15T00:00:03Z",
+        }
+    )
+
+    assert [event.event_type for event in workflow_run.events] == [
+        "workflow.run.started",
+        "workflow.run.completed",
+    ]
+    assert [event.sequence for event in workflow_run.events] == [1, 2]
+    assert workflow_run.events[0].payload == {
+        "workflow_id": "workflow-1",
+        "workflow_run_id": "workflow-run-lifecycle",
+        "objective": "Review docs",
+        "status": "completed",
+        "workflow_node_id": "done",
+        "workflow_node_label": "Done",
+    }
+    assert workflow_run.events[1].created_at == "2026-06-15T00:00:03Z"
+    assert workflow_run.workflow_id == "workflow-1"
+    assert workflow_run.workflow_run_id == "workflow-run-lifecycle"
+
+
+def test_workflow_run_snapshot_does_not_duplicate_existing_lifecycle_events() -> None:
+    workflow_run = workflow_run_snapshot_from_payload(
+        {
+            "run_id": "workflow-run-existing-lifecycle",
+            "kind": "workflow_run",
+            "status": "failed",
+            "workflow_id": "workflow-1",
+            "events": [
+                {
+                    "event": "workflow.started",
+                    "payload": {"workflow_id": "workflow-1"},
+                },
+                {
+                    "event_type": "workflow.node.started",
+                    "payload": {
+                        "workflow_id": "workflow-1",
+                        "workflow_node_id": "draft",
+                        "workflow_node_label": "Draft",
+                    },
+                },
+                {
+                    "event_type": "workflow.failed",
+                    "payload": {"workflow_id": "workflow-1"},
+                },
+            ],
+        }
+    )
+
+    assert [event.event_type for event in workflow_run.events] == [
+        "workflow.started",
+        "workflow.node.started",
+        "workflow.failed",
+    ]
+    assert workflow_run.current_node_id == "draft"
+    assert workflow_run.workflow_id == "workflow-1"
+
+
 def test_run_timeline_projects_tool_lifecycle_events_as_tool_call_snapshots() -> None:
     timeline = run_timeline_snapshot_from_payload(
         {
