@@ -828,21 +828,17 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
     _assert_contains(
         "apps/frontend/src/features/yachiyo-chat/components/ArtifactPreview.tsx",
         [
-            "useState",
-            "RuntimeArtifactPreview",
+            "RuntimeReadableArtifactPreview",
             "readYachiyoTaskArtifact",
-            "ArtifactContentSnapshot",
-            "async function togglePreview",
-            "setPreview(await readYachiyoTaskArtifact(taskId, path))",
-            'data-testid="yachiyo-task-artifact-shell"',
-            "actions={<UiIcon name={preview ? 'close' : 'paperclip'} />}",
-            'actionsClassName="yachiyo-task-artifact-action"',
-            'actionsElement="span"',
-            'actionsTestId="yachiyo-task-artifact-action"',
-            'as="span"',
-            'testId="yachiyo-task-artifact-preview"',
-            'data-testid="yachiyo-task-artifact-content"',
-            'variant="compact"',
+            "canReadArtifact ? (artifactPath) => readYachiyoTaskArtifact(taskId, artifactPath) : undefined",
+            'shellTestId="yachiyo-task-artifact-shell"',
+            'errorTestId="yachiyo-task-artifact-error"',
+            'previewActionClassName="yachiyo-task-artifact-action"',
+            'previewActionTestId="yachiyo-task-artifact-action"',
+            'previewClassName="yachiyo-task-artifact"',
+            'previewTestId="yachiyo-task-artifact-preview"',
+            'contentTestId="yachiyo-task-artifact-content"',
+            'previewVariant="compact"',
         ],
     )
     _assert_contains(
@@ -920,6 +916,26 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "runtime-artifact-preview-text",
             "runtime-artifact-meta",
             "data-testid={`${testId}-metadata`}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/runtime-shared/components/RuntimeReadableArtifactPreview.tsx",
+        [
+            "export type RuntimeReadableArtifactContent",
+            "export function RuntimeReadableArtifactPreview",
+            "useState",
+            "RuntimeArtifactPreview",
+            "readArtifact?: (",
+            "setPreview(await readArtifact(path, artifact));",
+            "errorTestId = 'runtime-readable-artifact-error'",
+            "actions={<UiIcon name={preview ? 'close' : 'paperclip'} />}",
+            "actionsClassName={previewActionClassName}",
+            "actionsElement=\"span\"",
+            "actionsTestId={previewActionTestId}",
+            "as=\"span\"",
+            "data-testid={shellTestId}",
+            "data-testid={contentTestId}",
+            "previewVariant = 'compact'",
         ],
     )
     _assert_contains(
