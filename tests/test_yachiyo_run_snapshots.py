@@ -348,6 +348,7 @@ def test_run_timeline_preserves_memory_and_skill_trace_events() -> None:
                     "event_type": "memory.retrieved",
                     "payload": {
                         "count": 1,
+                        "group_id": "group-1",
                         "group_run_id": "group-run-1",
                         "memories": [
                             {
@@ -358,6 +359,8 @@ def test_run_timeline_preserves_memory_and_skill_trace_events() -> None:
                         ],
                         "member_agent_id": "agent-researcher",
                         "member_agent_name": "Researcher",
+                        "workflow_id": "workflow-1",
+                        "workflow_run_id": "workflow-run-1",
                         "workflow_node_id": "retrieve-context",
                         "workflow_node_label": "Retrieve Context",
                     },
@@ -365,22 +368,30 @@ def test_run_timeline_preserves_memory_and_skill_trace_events() -> None:
                 {
                     "event_type": "skill.selected",
                     "payload": {
+                        "group_id": "group-1",
                         "group_run_id": "group-run-1",
                         "member_agent_id": "agent-researcher",
+                        "member_agent_name": "Researcher",
                         "result": {
                             "skill_id": "skill-1",
                             "name": "Demo Skill",
+                            "description": "Reads project context",
                             "source_ref": "skills/demo/SKILL.md",
+                            "source_type": "local_dir",
                         }
                     },
                 },
                 {
                     "event_type": "skill.dispatch.read",
                     "payload": {
+                        "group_id": "group-1",
                         "group_run_id": "group-run-1",
                         "member_agent_id": "agent-researcher",
+                        "member_agent_name": "Researcher",
                         "tool": "skill.read",
                         "status": "completed",
+                        "workflow_id": "workflow-1",
+                        "workflow_run_id": "workflow-run-1",
                         "workflow_node_id": "read-skill",
                         "workflow_node_label": "Read Skill",
                         "result": {
@@ -409,6 +420,32 @@ def test_run_timeline_preserves_memory_and_skill_trace_events() -> None:
     assert timeline.events[2].payload["tool"] == "skill.read"
     assert timeline.events[2].payload["status"] == "completed"
     assert timeline.events[2].payload["workflow_node_label"] == "Read Skill"
+    assert [trace.event_type for trace in timeline.memory_traces] == ["memory.retrieved"]
+    assert timeline.memory_traces[0].memory_id == "memory-1"
+    assert timeline.memory_traces[0].memory_kind == "preference"
+    assert timeline.memory_traces[0].memory_scope == "global"
+    assert timeline.memory_traces[0].count == 1
+    assert timeline.memory_traces[0].source_runnable_id == "agent-researcher"
+    assert timeline.memory_traces[0].source_runnable_name == "Researcher"
+    assert timeline.memory_traces[0].workflow_id == "workflow-1"
+    assert timeline.memory_traces[0].workflow_run_id == "workflow-run-1"
+    assert timeline.memory_traces[0].workflow_node_id == "retrieve-context"
+    assert timeline.memory_traces[0].workflow_node_label == "Retrieve Context"
+    assert timeline.memory_traces[0].group_id == "group-1"
+    assert timeline.memory_traces[0].group_run_id == "group-run-1"
+    assert [trace.event_type for trace in timeline.skill_traces] == [
+        "skill.selected",
+        "skill.dispatch.read",
+    ]
+    assert timeline.skill_traces[0].skill_id == "skill-1"
+    assert timeline.skill_traces[0].skill_name == "Demo Skill"
+    assert timeline.skill_traces[0].source_ref == "skills/demo/SKILL.md"
+    assert timeline.skill_traces[0].source_type == "local_dir"
+    assert timeline.skill_traces[0].source_runnable_name == "Researcher"
+    assert timeline.skill_traces[0].group_id == "group-1"
+    assert timeline.skill_traces[1].tool_name == "skill.read"
+    assert timeline.skill_traces[1].workflow_id == "workflow-1"
+    assert timeline.skill_traces[1].workflow_node_id == "read-skill"
     assert timeline.tool_calls == []
 
 

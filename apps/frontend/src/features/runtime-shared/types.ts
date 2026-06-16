@@ -104,6 +104,60 @@ export type ToolCallSnapshot = {
   completed_at?: string | null;
 };
 
+export type MemoryTraceSnapshot = {
+  trace_id: string;
+  run_id: string;
+  event_id?: string | null;
+  sequence?: number;
+  event_type: string;
+  status?: string;
+  action?: string | null;
+  memory_id?: string | null;
+  memory_kind?: string | null;
+  memory_scope?: string | null;
+  count?: number;
+  source_run_id?: string | null;
+  source_runnable_id?: string | null;
+  source_runnable_name?: string | null;
+  workflow_id?: string | null;
+  workflow_run_id?: string | null;
+  workflow_node_id?: string | null;
+  workflow_node_label?: string | null;
+  group_id?: string | null;
+  group_run_id?: string | null;
+  title: string;
+  detail?: string | null;
+  payload_preview?: Record<string, unknown>;
+  created_at?: string;
+};
+
+export type SkillTraceSnapshot = {
+  trace_id: string;
+  run_id: string;
+  event_id?: string | null;
+  sequence?: number;
+  event_type: string;
+  status?: string;
+  skill_id?: string | null;
+  skill_name?: string | null;
+  source_ref?: string | null;
+  source_type?: string | null;
+  tool_name?: string | null;
+  source_run_id?: string | null;
+  source_runnable_id?: string | null;
+  source_runnable_name?: string | null;
+  workflow_id?: string | null;
+  workflow_run_id?: string | null;
+  workflow_node_id?: string | null;
+  workflow_node_label?: string | null;
+  group_id?: string | null;
+  group_run_id?: string | null;
+  title: string;
+  detail?: string | null;
+  payload_preview?: Record<string, unknown>;
+  created_at?: string;
+};
+
 export type AgentTaskSnapshot = {
   task_id: string;
   conversation_id?: string | null;
@@ -147,6 +201,8 @@ export type RunTimelineSnapshot = {
   task_run_link_last_event_sequence?: number | null;
   events?: PublicRunEvent[];
   tool_calls?: ToolCallSnapshot[];
+  memory_traces?: MemoryTraceSnapshot[];
+  skill_traces?: SkillTraceSnapshot[];
   approvals?: ApprovalCardSnapshot[];
   pending_approval?: ApprovalCardSnapshot | null;
   artifacts?: ArtifactSnapshot[];

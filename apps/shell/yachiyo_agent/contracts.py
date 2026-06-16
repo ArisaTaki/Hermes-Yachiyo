@@ -128,6 +128,60 @@ class ToolCallSnapshot(_PublicSnapshot):
     completed_at: str | None = None
 
 
+class MemoryTraceSnapshot(_PublicSnapshot):
+    trace_id: str
+    run_id: str
+    event_id: str | None = None
+    sequence: int = 0
+    event_type: str
+    status: str = "completed"
+    action: str | None = None
+    memory_id: str | None = None
+    memory_kind: str | None = None
+    memory_scope: str | None = None
+    count: int = 0
+    source_run_id: str | None = None
+    source_runnable_id: str | None = None
+    source_runnable_name: str | None = None
+    workflow_id: str | None = None
+    workflow_run_id: str | None = None
+    workflow_node_id: str | None = None
+    workflow_node_label: str | None = None
+    group_id: str | None = None
+    group_run_id: str | None = None
+    title: str
+    detail: str | None = None
+    payload_preview: dict[str, Any] = Field(default_factory=dict)
+    created_at: str = ""
+
+
+class SkillTraceSnapshot(_PublicSnapshot):
+    trace_id: str
+    run_id: str
+    event_id: str | None = None
+    sequence: int = 0
+    event_type: str
+    status: str = "completed"
+    skill_id: str | None = None
+    skill_name: str | None = None
+    source_ref: str | None = None
+    source_type: str | None = None
+    tool_name: str | None = None
+    source_run_id: str | None = None
+    source_runnable_id: str | None = None
+    source_runnable_name: str | None = None
+    workflow_id: str | None = None
+    workflow_run_id: str | None = None
+    workflow_node_id: str | None = None
+    workflow_node_label: str | None = None
+    group_id: str | None = None
+    group_run_id: str | None = None
+    title: str
+    detail: str | None = None
+    payload_preview: dict[str, Any] = Field(default_factory=dict)
+    created_at: str = ""
+
+
 class AgentTaskSnapshot(_PublicSnapshot):
     task_id: str
     conversation_id: str | None = None
@@ -171,6 +225,8 @@ class RunTimelineSnapshot(_PublicSnapshot):
     task_run_link_last_event_sequence: int | None = None
     events: list[PublicRunEvent] = Field(default_factory=list)
     tool_calls: list[ToolCallSnapshot] = Field(default_factory=list)
+    memory_traces: list[MemoryTraceSnapshot] = Field(default_factory=list)
+    skill_traces: list[SkillTraceSnapshot] = Field(default_factory=list)
     approvals: list[ApprovalCardSnapshot] = Field(default_factory=list)
     pending_approval: ApprovalCardSnapshot | None = None
     artifacts: list[ArtifactSnapshot] = Field(default_factory=list)

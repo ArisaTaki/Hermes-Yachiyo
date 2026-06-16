@@ -1128,6 +1128,8 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "export type RunEventPageSnapshot",
             "export type ArtifactContentSnapshot",
             "export type ToolCallSnapshot",
+            "export type MemoryTraceSnapshot",
+            "export type SkillTraceSnapshot",
             "export type RunTimelineSnapshot",
             "export type WorkflowRunSnapshot",
             "export type StartChatTaskRequest",
@@ -1150,6 +1152,8 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "task_run_link_created_at?: string | null;",
             "task_run_link_last_event_sequence?: number | null;",
             "tool_calls?: ToolCallSnapshot[];",
+            "memory_traces?: MemoryTraceSnapshot[];",
+            "skill_traces?: SkillTraceSnapshot[];",
         ],
     )
     _assert_contains(
@@ -1186,6 +1190,8 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "WorkflowSnapshot",
             "ApprovalCardSnapshot",
             "ArtifactSnapshot",
+            "MemoryTraceSnapshot",
+            "SkillTraceSnapshot",
             "export type SaveAgentGroupRequest",
         ],
     )

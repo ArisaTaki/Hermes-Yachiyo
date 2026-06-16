@@ -17,6 +17,7 @@ from apps.shell.yachiyo_agent import (
     FutureTaskTriggerResultSnapshot,
     GroupRunSnapshot,
     MemorySnapshot,
+    MemoryTraceSnapshot,
     PublicRunEvent,
     RunEventPageSnapshot,
     RunTimelineChildSnapshot,
@@ -28,6 +29,7 @@ from apps.shell.yachiyo_agent import (
     SkillFolderSnapshot,
     SkillSnapshot,
     SkillSourceRootSnapshot,
+    SkillTraceSnapshot,
     StartChatTaskRequest,
     ToolCallSnapshot,
     WorkflowRunSnapshot,
@@ -150,6 +152,22 @@ def test_run_timeline_snapshot_json_shape_covers_runtime_debug_objects() -> None
                 input_preview={"path": "README.md"},
             )
         ],
+        memory_traces=[
+            MemoryTraceSnapshot(
+                trace_id="memory-trace-1",
+                run_id="run-1",
+                event_type="memory.retrieved",
+                title="Memory retrieved",
+            )
+        ],
+        skill_traces=[
+            SkillTraceSnapshot(
+                trace_id="skill-trace-1",
+                run_id="run-1",
+                event_type="skill.selected",
+                title="Demo Skill",
+            )
+        ],
         approvals=[
             ApprovalCardSnapshot(approval_id="approval-1", run_id="run-1", title="Approve")
         ],
@@ -183,6 +201,8 @@ def test_run_timeline_snapshot_json_shape_covers_runtime_debug_objects() -> None
         "task_run_link_last_event_sequence",
         "events",
         "tool_calls",
+        "memory_traces",
+        "skill_traces",
         "approvals",
         "pending_approval",
         "artifacts",
@@ -194,6 +214,8 @@ def test_run_timeline_snapshot_json_shape_covers_runtime_debug_objects() -> None
     assert payload["session_id"] == "chat-1"
     assert payload["task_run_link_last_event_sequence"] == 7
     assert payload["tool_calls"][0]["tool_name"] == "workspace.read"
+    assert payload["memory_traces"][0]["event_type"] == "memory.retrieved"
+    assert payload["skill_traces"][0]["event_type"] == "skill.selected"
     assert payload["children"][0]["run_id"] == "child-run-1"
 
 
@@ -246,6 +268,128 @@ def test_tool_call_snapshot_keeps_runtime_trace_fields() -> None:
     assert payload["source_runnable_name"] == "Planner"
     assert payload["workflow_node_id"] == "read"
     assert payload["group_run_id"] == "group-run-1"
+
+
+def test_memory_trace_snapshot_keeps_runtime_trace_fields() -> None:
+    snapshot = MemoryTraceSnapshot(
+        trace_id="trace-1",
+        run_id="run-1",
+        event_id="event-1",
+        sequence=3,
+        event_type="memory.retrieved",
+        status="completed",
+        action="retrieved",
+        memory_id="memory-1",
+        memory_kind="preference",
+        memory_scope="global",
+        count=1,
+        source_run_id="child-run-1",
+        source_runnable_id="agent-1",
+        source_runnable_name="Researcher",
+        workflow_id="workflow-1",
+        workflow_run_id="workflow-run-1",
+        workflow_node_id="retrieve",
+        workflow_node_label="Retrieve Context",
+        group_id="group-1",
+        group_run_id="group-run-1",
+        title="Memory retrieved",
+        detail="retrieved · preference · global",
+        payload_preview={"count": 1},
+        created_at="2026-06-14T00:00:00Z",
+    )
+
+    payload = _json(snapshot)
+
+    assert list(payload) == [
+        "trace_id",
+        "run_id",
+        "event_id",
+        "sequence",
+        "event_type",
+        "status",
+        "action",
+        "memory_id",
+        "memory_kind",
+        "memory_scope",
+        "count",
+        "source_run_id",
+        "source_runnable_id",
+        "source_runnable_name",
+        "workflow_id",
+        "workflow_run_id",
+        "workflow_node_id",
+        "workflow_node_label",
+        "group_id",
+        "group_run_id",
+        "title",
+        "detail",
+        "payload_preview",
+        "created_at",
+    ]
+    assert payload["memory_id"] == "memory-1"
+    assert payload["workflow_node_id"] == "retrieve"
+    assert payload["group_run_id"] == "group-run-1"
+
+
+def test_skill_trace_snapshot_keeps_runtime_trace_fields() -> None:
+    snapshot = SkillTraceSnapshot(
+        trace_id="trace-1",
+        run_id="run-1",
+        event_id="event-1",
+        sequence=4,
+        event_type="skill.dispatch.read",
+        status="completed",
+        skill_id="skill-1",
+        skill_name="Demo Skill",
+        source_ref="skills/demo/SKILL.md",
+        source_type="local_dir",
+        tool_name="skill.read",
+        source_run_id="child-run-1",
+        source_runnable_id="agent-1",
+        source_runnable_name="Researcher",
+        workflow_id="workflow-1",
+        workflow_run_id="workflow-run-1",
+        workflow_node_id="read-skill",
+        workflow_node_label="Read Skill",
+        group_id="group-1",
+        group_run_id="group-run-1",
+        title="Demo Skill",
+        detail="Read project docs · skills/demo/SKILL.md · local_dir",
+        payload_preview={"tool": "skill.read"},
+        created_at="2026-06-14T00:00:01Z",
+    )
+
+    payload = _json(snapshot)
+
+    assert list(payload) == [
+        "trace_id",
+        "run_id",
+        "event_id",
+        "sequence",
+        "event_type",
+        "status",
+        "skill_id",
+        "skill_name",
+        "source_ref",
+        "source_type",
+        "tool_name",
+        "source_run_id",
+        "source_runnable_id",
+        "source_runnable_name",
+        "workflow_id",
+        "workflow_run_id",
+        "workflow_node_id",
+        "workflow_node_label",
+        "group_id",
+        "group_run_id",
+        "title",
+        "detail",
+        "payload_preview",
+        "created_at",
+    ]
+    assert payload["skill_id"] == "skill-1"
+    assert payload["source_ref"] == "skills/demo/SKILL.md"
+    assert payload["workflow_node_id"] == "read-skill"
 
 
 def test_run_event_page_snapshot_json_shape_is_stable() -> None:
