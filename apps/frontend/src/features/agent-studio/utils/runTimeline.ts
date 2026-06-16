@@ -267,9 +267,37 @@ export function mergeArtifactSnapshots(
   });
   replayArtifacts.forEach((artifact, index) => {
     const key = artifactRecordKey(artifact, index);
-    if (!byKey.has(key)) byKey.set(key, artifact);
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, artifact);
+      return;
+    }
+    byKey.set(key, mergeArtifactTrace(existing, artifact));
   });
   return Array.from(byKey.values());
+}
+
+function mergeArtifactTrace(
+  current: Record<string, unknown>,
+  incoming: Record<string, unknown>,
+): Record<string, unknown> {
+  const merged = { ...current };
+  [
+    'source_tool',
+    'source_run_id',
+    'source_runnable_id',
+    'source_runnable_name',
+    'workflow_id',
+    'workflow_run_id',
+    'workflow_node_id',
+    'workflow_node_label',
+    'workflow_step_label',
+    'group_id',
+    'group_run_id',
+  ].forEach((key) => {
+    if (!merged[key] && incoming[key]) merged[key] = incoming[key];
+  });
+  return merged;
 }
 
 export function approvalsFromRunEventReplay(events: PublicRunEvent[]): ApprovalCardSnapshot[] {
@@ -417,10 +445,14 @@ function artifactFromRunEvent(event: PublicRunEvent): Record<string, unknown> | 
     artifactPayload.kind = artifactPayload.kind || 'group_artifact';
     artifactPayload.source_runnable_name = artifactPayload.source_runnable_name || payload.member_agent_name;
     artifactPayload.source_runnable_id = artifactPayload.source_runnable_id || payload.member_agent_id;
+    artifactPayload.group_id = artifactPayload.group_id || payload.group_id;
+    artifactPayload.group_run_id = artifactPayload.group_run_id || payload.group_run_id || payload.run_group_id;
   } else if (event.event_type === 'workflow.node.artifact') {
     artifactPayload = {
       kind: 'workflow_artifact',
       title: payload.workflow_node_label || 'Workflow Artifact',
+      workflow_id: payload.workflow_id,
+      workflow_run_id: payload.workflow_run_id || event.run_id,
       workflow_node_id: payload.workflow_node_id,
       workflow_node_label: payload.workflow_node_label,
       workflow_step_label: payload.workflow_node_label,
@@ -428,6 +460,7 @@ function artifactFromRunEvent(event: PublicRunEvent): Record<string, unknown> | 
     };
   }
   if (!artifactPayload) return null;
+  mergeArtifactTraceContext(artifactPayload, payload);
   const path = publicRunEventPayloadString(artifactPayload, 'path')
     || publicRunEventPayloadString(artifactPayload, 'artifact_path');
   const artifactId = publicRunEventPayloadString(artifactPayload, 'artifact_id')
@@ -441,8 +474,53 @@ function artifactFromRunEvent(event: PublicRunEvent): Record<string, unknown> | 
     path,
     run_id: publicRunEventPayloadString(artifactPayload, 'run_id') || event.run_id,
     source_run_id: publicRunEventPayloadString(artifactPayload, 'source_run_id') || event.run_id,
+    source_tool: publicRunEventPayloadString(artifactPayload, 'source_tool')
+      || publicRunEventPayloadString(artifactPayload, 'tool')
+      || null,
+    source_runnable_id: publicRunEventPayloadString(artifactPayload, 'source_runnable_id') || null,
+    source_runnable_name: publicRunEventPayloadString(artifactPayload, 'source_runnable_name') || null,
+    workflow_id: publicRunEventPayloadString(artifactPayload, 'workflow_id') || null,
+    workflow_run_id: publicRunEventPayloadString(artifactPayload, 'workflow_run_id') || null,
+    workflow_node_id: publicRunEventPayloadString(artifactPayload, 'workflow_node_id') || null,
+    workflow_node_label: publicRunEventPayloadString(artifactPayload, 'workflow_node_label') || null,
+    group_id: publicRunEventPayloadString(artifactPayload, 'group_id') || null,
+    group_run_id: publicRunEventPayloadString(artifactPayload, 'group_run_id')
+      || publicRunEventPayloadString(artifactPayload, 'run_group_id')
+      || null,
     title: publicRunEventPayloadString(artifactPayload, 'title') || path || 'Artifact',
   };
+}
+
+function mergeArtifactTraceContext(
+  artifactPayload: Record<string, unknown>,
+  payload: Record<string, unknown>,
+) {
+  if (!artifactPayload.source_tool) artifactPayload.source_tool = payload.source_tool || payload.tool;
+  if (!artifactPayload.source_runnable_id) {
+    artifactPayload.source_runnable_id = payload.source_runnable_id
+      || payload.source_agent_id
+      || payload.member_agent_id
+      || payload.agent_id;
+  }
+  if (!artifactPayload.source_runnable_name) {
+    artifactPayload.source_runnable_name = payload.source_runnable_name
+      || payload.source_agent_name
+      || payload.member_agent_name
+      || payload.agent_name;
+  }
+  [
+    'workflow_id',
+    'workflow_run_id',
+    'workflow_node_id',
+    'workflow_node_label',
+    'group_id',
+    'group_run_id',
+  ].forEach((key) => {
+    if (!artifactPayload[key] && payload[key]) artifactPayload[key] = payload[key];
+  });
+  if (!artifactPayload.group_run_id && payload.run_group_id) {
+    artifactPayload.group_run_id = payload.run_group_id;
+  }
 }
 
 function isArtifactRunEvent(eventType: string): boolean {
