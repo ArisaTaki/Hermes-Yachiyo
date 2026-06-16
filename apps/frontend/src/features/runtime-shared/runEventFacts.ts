@@ -1,4 +1,44 @@
-import type { ApprovalCardSnapshot, PublicRunEvent } from './types';
+import type { ApprovalCardSnapshot, PublicRunEvent, ToolCallSnapshot } from './types';
+
+export function toolCallsFromRunEventReplay(events: PublicRunEvent[]): ToolCallSnapshot[] {
+  const calls: ToolCallSnapshot[] = [];
+  const activeByKey = new Map<string, number>();
+  events.forEach((event) => {
+    const toolCall = toolCallFromRunEvent(event);
+    if (!toolCall) return;
+    const key = toolCallCorrelationKey(event, toolCall);
+    const activeIndex = key ? activeByKey.get(key) : undefined;
+    if (activeIndex === undefined) {
+      const nextIndex = calls.length;
+      calls.push(toolCall);
+      if (key && !toolCallStatusIsTerminal(toolCall.status)) activeByKey.set(key, nextIndex);
+      return;
+    }
+    calls[activeIndex] = mergeToolCallReplayTrace(calls[activeIndex], toolCall);
+    if (key) {
+      if (toolCallStatusIsTerminal(toolCall.status)) activeByKey.delete(key);
+      else activeByKey.set(key, activeIndex);
+    }
+  });
+  return calls;
+}
+
+export function mergeToolCallSnapshots(
+  timelineToolCalls: ToolCallSnapshot[],
+  replayToolCalls: ToolCallSnapshot[],
+): ToolCallSnapshot[] {
+  const byId = new Map<string, ToolCallSnapshot>();
+  timelineToolCalls.forEach((toolCall) => byId.set(toolCall.tool_call_id, toolCall));
+  replayToolCalls.forEach((toolCall) => {
+    const existing = byId.get(toolCall.tool_call_id);
+    if (!existing) {
+      byId.set(toolCall.tool_call_id, toolCall);
+      return;
+    }
+    byId.set(toolCall.tool_call_id, mergeToolCallTrace(existing, toolCall));
+  });
+  return Array.from(byId.values());
+}
 
 export function artifactsFromRunEventReplay(events: PublicRunEvent[]): Array<Record<string, unknown>> {
   return events
@@ -125,6 +165,54 @@ function approvalFromRunEvent(event: PublicRunEvent): ApprovalCardSnapshot | nul
   };
 }
 
+function toolCallFromRunEvent(event: PublicRunEvent): ToolCallSnapshot | null {
+  if (!isToolRunEvent(event.event_type)) return null;
+  const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
+  const outputPreview = objectPreview(payload.output_preview)
+    || objectPreview(payload.result)
+    || (payload.error !== undefined ? { error: payload.error } : {});
+  const toolName = publicRunEventPayloadString(payload, 'tool_name')
+    || publicRunEventPayloadString(payload, 'tool')
+    || event.detail
+    || 'tool';
+  return {
+    tool_call_id: event.event_id
+      || publicRunEventPayloadString(payload, 'tool_call_id')
+      || publicRunEventPayloadString(payload, 'id')
+      || `${event.run_id}:${event.event_type}:${event.sequence}`,
+    run_id: event.run_id,
+    source_run_id: publicRunEventPayloadString(payload, 'source_run_id') || null,
+    source_runnable_id: publicRunEventPayloadString(payload, 'source_runnable_id')
+      || publicRunEventPayloadString(payload, 'source_agent_id')
+      || publicRunEventPayloadString(payload, 'member_agent_id')
+      || publicRunEventPayloadString(payload, 'agent_id')
+      || null,
+    source_runnable_name: publicRunEventPayloadString(payload, 'source_runnable_name')
+      || publicRunEventPayloadString(payload, 'source_agent_name')
+      || publicRunEventPayloadString(payload, 'member_agent_name')
+      || publicRunEventPayloadString(payload, 'agent_name')
+      || null,
+    workflow_id: publicRunEventPayloadString(payload, 'workflow_id') || null,
+    workflow_run_id: publicRunEventPayloadString(payload, 'workflow_run_id') || null,
+    workflow_node_id: publicRunEventPayloadString(payload, 'workflow_node_id') || null,
+    workflow_node_label: publicRunEventPayloadString(payload, 'workflow_node_label') || null,
+    group_id: publicRunEventPayloadString(payload, 'group_id') || null,
+    group_run_id: publicRunEventPayloadString(payload, 'group_run_id')
+      || publicRunEventPayloadString(payload, 'run_group_id')
+      || null,
+    tool_name: toolName,
+    status: publicRunEventPayloadString(payload, 'status') || toolStatusFromRunEvent(event.event_type),
+    risk_level: publicRunEventPayloadString(payload, 'risk_level')
+      || publicRunEventPayloadString(payload, 'risk')
+      || null,
+    input_preview: objectPreview(payload.input_preview) || objectPreview(payload.input) || {},
+    output_preview: outputPreview,
+    approval_id: publicRunEventPayloadString(payload, 'approval_id') || null,
+    started_at: event.created_at || '',
+    completed_at: publicRunEventPayloadString(payload, 'completed_at') || null,
+  };
+}
+
 function artifactFromRunEvent(event: PublicRunEvent): Record<string, unknown> | null {
   if (!isArtifactRunEvent(event.event_type)) return null;
   const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
@@ -194,6 +282,52 @@ function mergeApprovalTrace(current: ApprovalCardSnapshot, incoming: ApprovalCar
     workflow_node_label: current.workflow_node_label || incoming.workflow_node_label || null,
     group_id: current.group_id || incoming.group_id || null,
     group_run_id: current.group_run_id || incoming.group_run_id || null,
+  };
+}
+
+function mergeToolCallTrace(current: ToolCallSnapshot, incoming: ToolCallSnapshot): ToolCallSnapshot {
+  return {
+    ...current,
+    source_run_id: current.source_run_id || incoming.source_run_id || null,
+    source_runnable_id: current.source_runnable_id || incoming.source_runnable_id || null,
+    source_runnable_name: current.source_runnable_name || incoming.source_runnable_name || null,
+    workflow_id: current.workflow_id || incoming.workflow_id || null,
+    workflow_run_id: current.workflow_run_id || incoming.workflow_run_id || null,
+    workflow_node_id: current.workflow_node_id || incoming.workflow_node_id || null,
+    workflow_node_label: current.workflow_node_label || incoming.workflow_node_label || null,
+    group_id: current.group_id || incoming.group_id || null,
+    group_run_id: current.group_run_id || incoming.group_run_id || null,
+  };
+}
+
+function mergeToolCallReplayTrace(current: ToolCallSnapshot, incoming: ToolCallSnapshot): ToolCallSnapshot {
+  const outputPreview = {
+    ...(current.output_preview || {}),
+    ...(incoming.output_preview || {}),
+  };
+  return {
+    ...current,
+    source_run_id: current.source_run_id || incoming.source_run_id || null,
+    source_runnable_id: current.source_runnable_id || incoming.source_runnable_id || null,
+    source_runnable_name: current.source_runnable_name || incoming.source_runnable_name || null,
+    workflow_id: current.workflow_id || incoming.workflow_id || null,
+    workflow_run_id: current.workflow_run_id || incoming.workflow_run_id || null,
+    workflow_node_id: current.workflow_node_id || incoming.workflow_node_id || null,
+    workflow_node_label: current.workflow_node_label || incoming.workflow_node_label || null,
+    group_id: current.group_id || incoming.group_id || null,
+    group_run_id: current.group_run_id || incoming.group_run_id || null,
+    status: incoming.status || current.status,
+    risk_level: current.risk_level || incoming.risk_level || null,
+    input_preview: {
+      ...(current.input_preview || {}),
+      ...(incoming.input_preview || {}),
+    },
+    output_preview: Object.keys(outputPreview).length ? outputPreview : {},
+    approval_id: current.approval_id || incoming.approval_id || null,
+    started_at: current.started_at || incoming.started_at || '',
+    completed_at: incoming.completed_at || (
+      toolCallStatusIsTerminal(incoming.status) ? incoming.started_at || current.completed_at || null : current.completed_at || null
+    ),
   };
 }
 
@@ -281,6 +415,92 @@ function isArtifactRunEvent(eventType: string): boolean {
     'group.shared_artifact.created',
     'workflow.node.artifact',
   ].includes(eventType);
+}
+
+function isToolRunEvent(eventType: string): boolean {
+  return [
+    'agent.tool.call',
+    'agent.tool.denied',
+    'agent.tool.failed',
+    'agent.tool.skipped',
+    'agent.tool.approval_required',
+    'agent.tool.approval_approved',
+    'agent.tool.approval_rejected',
+    'agent.tool.completed',
+    'tool.approved',
+    'tool.requested',
+    'tool.started',
+    'tool.approval_required',
+    'tool.rejected',
+    'tool.completed',
+    'tool.failed',
+  ].includes(eventType);
+}
+
+function toolStatusFromRunEvent(eventType: string): string {
+  if (eventType === 'tool.requested') return 'requested';
+  if (eventType === 'tool.started') return 'running';
+  if (eventType === 'tool.approval_required' || eventType === 'agent.tool.approval_required') return 'waiting_approval';
+  if (eventType === 'agent.tool.approval_approved' || eventType === 'tool.approved') return 'approved';
+  if (eventType === 'agent.tool.approval_rejected' || eventType === 'agent.tool.denied' || eventType === 'tool.rejected') return 'denied';
+  if (eventType === 'tool.failed' || eventType === 'agent.tool.failed') return 'failed';
+  if (eventType === 'agent.tool.skipped') return 'skipped';
+  return 'completed';
+}
+
+function toolCallStatusIsTerminal(status: string): boolean {
+  return ['completed', 'failed', 'denied', 'skipped'].includes(status);
+}
+
+function toolCallCorrelationKey(event: PublicRunEvent, toolCall: ToolCallSnapshot): string {
+  const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
+  const explicitId = publicRunEventPayloadString(payload, 'tool_call_id')
+    || publicRunEventPayloadString(payload, 'id');
+  if (explicitId) return `${event.run_id}:id:${explicitId}`;
+  return [
+    event.run_id,
+    'tool',
+    toolCall.tool_name,
+    stableJson(toolCallCorrelationPreview(toolCall.input_preview || {})),
+  ].join(':');
+}
+
+function toolCallCorrelationPreview(preview: Record<string, unknown>): Record<string, unknown> {
+  const traceKeys = new Set([
+    'approval_id',
+    'group_id',
+    'group_run_id',
+    'member_agent_id',
+    'member_agent_name',
+    'policy_reason',
+    'risk_level',
+    'run_group_id',
+    'workflow_id',
+    'workflow_node_id',
+    'workflow_node_label',
+    'workflow_run_id',
+  ]);
+  return Object.fromEntries(
+    Object.entries(preview).filter(([key]) => !traceKeys.has(key)),
+  );
+}
+
+function stableJson(value: unknown): string {
+  try {
+    return JSON.stringify(stableJsonValue(value));
+  } catch {
+    return String(value);
+  }
+}
+
+function stableJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stableJsonValue);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => [key, stableJsonValue(item)]),
+  );
 }
 
 function artifactRecordKey(artifact: Record<string, unknown>, index: number): string {
