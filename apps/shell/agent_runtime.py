@@ -2091,12 +2091,50 @@ class NativeRunEngine:
         run_group_id: str = "",
         client_request_id: str = "",
     ) -> dict[str, Any]:
-        return self.runs.insert(
+        run = self.runs.insert(
             kind=kind,
             runnable_id=runnable_id,
             user_goal=user_goal,
             run_group_id=run_group_id,
             client_request_id=client_request_id,
+        )
+        self._record_run_group_started_event(run_group_id, run_id=run["run_id"])
+        return run
+
+    def _record_run_group_started_event(self, run_group_id: str, *, run_id: str) -> None:
+        if not run_group_id or not run_id:
+            return
+        try:
+            group = self.get_run_group(run_group_id)
+        except KeyError:
+            return
+        if str(group.get("source") or "") != "workflow":
+            return
+        child_run_ids = [
+            str(item)
+            for item in group.get("child_run_ids") or []
+            if str(item)
+        ] or [run_id]
+        if self._run_group_event_recorded(
+            child_run_ids,
+            event_type="group.run.started",
+            run_group_id=run_group_id,
+        ):
+            return
+        self.append_run_event(
+            child_run_ids[0],
+            "group.run.started",
+            {
+                "child_run_ids": child_run_ids,
+                "group_run_id": run_group_id,
+                "objective": str(group.get("summary") or group.get("title") or ""),
+                "participant_count": len(child_run_ids),
+                "run_group_id": run_group_id,
+                "source": str(group.get("source") or ""),
+                "status": str(group.get("status") or "running"),
+                "summary": str(group.get("summary") or ""),
+                "title": str(group.get("title") or ""),
+            },
         )
 
     def _update_run(

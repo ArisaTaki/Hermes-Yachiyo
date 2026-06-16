@@ -9865,6 +9865,53 @@ def test_update_run_group_records_terminal_run_event(tmp_path):
         service.close()
 
 
+def test_insert_workflow_run_records_group_started_event(tmp_path):
+    service = make_service(tmp_path)
+    try:
+        workflow_group = service.run_groups.insert(title="Workflow group", source="workflow")
+        workflow_run = service._insert_run(
+            kind="workflow_run",
+            runnable_id="workflow_group_root",
+            user_goal="Ship workflow",
+            run_group_id=workflow_group["run_group_id"],
+        )
+        service._insert_run(
+            kind="agent_run",
+            runnable_id="agent_group_child",
+            user_goal="Ship workflow",
+            run_group_id=workflow_group["run_group_id"],
+        )
+        agent_group = service.run_groups.insert(title="Agent group", source="agent")
+        agent_run = service._insert_run(
+            kind="agent_run",
+            runnable_id="agent_root",
+            user_goal="Ship agent",
+            run_group_id=agent_group["run_group_id"],
+        )
+
+        workflow_events = service.list_run_events(workflow_run["run_id"])["events"]
+        agent_events = service.list_run_events(agent_run["run_id"])["events"]
+        group_events = [
+            event
+            for event in workflow_events
+            if event["event_type"] == "group.run.started"
+        ]
+
+        assert len(group_events) == 1
+        assert group_events[0]["payload"]["run_group_id"] == workflow_group["run_group_id"]
+        assert group_events[0]["payload"]["group_run_id"] == workflow_group["run_group_id"]
+        assert group_events[0]["payload"]["child_run_ids"] == [workflow_run["run_id"]]
+        assert group_events[0]["payload"]["status"] == "running"
+        assert group_events[0]["payload"]["source"] == "workflow"
+        assert [
+            event["event_type"]
+            for event in agent_events
+            if event["event_type"].startswith("group.run.")
+        ] == []
+    finally:
+        service.close()
+
+
 def test_update_run_group_records_failed_and_cancelled_run_events(tmp_path):
     service = make_service(tmp_path)
     try:
