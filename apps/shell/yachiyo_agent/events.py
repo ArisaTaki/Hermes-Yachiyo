@@ -73,8 +73,12 @@ def public_run_event_page_from_payload(
     limit: int,
 ) -> RunEventPageSnapshot:
     events = [
-        public_run_event_from_payload(event, run_id=run_id)
-        for event in _payload_items(payload, "events")
+        public_run_event_from_payload(
+            event,
+            run_id=run_id,
+            sequence=after_sequence + index + 1,
+        )
+        for index, event in enumerate(_payload_items(payload, "events"))
     ]
     next_after_sequence = _optional_int(payload.get("next_after_sequence"))
     if next_after_sequence is None:

@@ -152,6 +152,58 @@ def test_legacy_runtime_port_resolves_task_link_for_event_stream() -> None:
     assert ("list_run_events", "run-1") in runtime.calls
 
 
+def test_legacy_runtime_port_resolves_task_link_for_event_page_fallback() -> None:
+    runtime = _FakeRuntime()
+    runtime.runs["run-1"]["timeline"] = [
+        {"event": "run.started"},
+        {"event": "agent.progress"},
+    ]
+    port = LegacyRuntimePort(runtime)
+    port.start_chat_task(
+        {
+            "prompt": "Patch README",
+            "conversation_id": "chat-1",
+            "client_task_id": "task-1",
+        }
+    )
+
+    page = port.get_task_event_page("task-1", after_sequence=1, limit=1)
+
+    assert page["run_id"] == "run-1"
+    assert page["after_sequence"] == 1
+    assert page["limit"] == 1
+    assert page["next_after_sequence"] == 2
+    assert page["has_more"] is False
+    assert page["events"] == [{"event": "agent.progress"}]
+    assert ("list_run_events", "run-1") in runtime.calls
+
+
+def test_legacy_runtime_port_prefers_runtime_event_page_for_task_events() -> None:
+    runtime = _PagedFakeRuntime()
+    port = LegacyRuntimePort(runtime)
+    port.start_chat_task(
+        {
+            "prompt": "Patch README",
+            "conversation_id": "chat-1",
+            "client_task_id": "task-1",
+        }
+    )
+
+    page = port.get_task_event_page("task-1", after_sequence=-2, limit=999)
+
+    assert page["run_id"] == "run-1"
+    assert page["after_sequence"] == 0
+    assert page["limit"] == 500
+    assert page["next_after_sequence"] == 5
+    assert page["has_more"] is True
+    assert page["events"] == [{"event": "agent.progress", "sequence": 5}]
+    assert (
+        "get_run_event_page",
+        {"run_id": "run-1", "after_sequence": 0, "limit": 500},
+    ) in runtime.calls
+    assert ("list_run_events", "run-1") not in runtime.calls
+
+
 def test_legacy_runtime_port_resolves_task_link_for_artifact_read() -> None:
     runtime = _FakeRuntime()
     port = LegacyRuntimePort(runtime)
@@ -261,4 +313,32 @@ class _FakeRuntime:
             "run_id": run_id,
             "user_goal": "Patch README",
             "status": "failed",
+        }
+
+
+class _PagedFakeRuntime(_FakeRuntime):
+    def get_run_event_page(
+        self,
+        run_id: str,
+        *,
+        after_sequence: int = 0,
+        limit: int = 200,
+    ) -> dict[str, Any]:
+        self.calls.append(
+            (
+                "get_run_event_page",
+                {
+                    "run_id": run_id,
+                    "after_sequence": after_sequence,
+                    "limit": limit,
+                },
+            )
+        )
+        return {
+            "run_id": run_id,
+            "after_sequence": after_sequence,
+            "limit": limit,
+            "next_after_sequence": 5,
+            "has_more": True,
+            "events": [{"event": "agent.progress", "sequence": 5}],
         }

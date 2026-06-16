@@ -110,6 +110,58 @@ class LegacyRuntimePort:
         run = self._runtime.get_run(run_id)
         return {"run_id": run_id, "events": run.get("timeline") or []}
 
+    def get_task_event_page(
+        self,
+        task_id: str,
+        *,
+        after_sequence: int = 0,
+        limit: int = 200,
+    ) -> dict[str, Any]:
+        run_id = self._run_id_for_task(task_id)
+        clean_after_sequence = max(0, int(after_sequence or 0))
+        clean_limit = max(1, min(500, int(limit or 200)))
+        get_run_event_page = getattr(self._runtime, "get_run_event_page", None)
+        if callable(get_run_event_page):
+            payload = get_run_event_page(
+                run_id,
+                after_sequence=clean_after_sequence,
+                limit=clean_limit,
+            )
+            if isinstance(payload, dict):
+                return {
+                    **payload,
+                    "run_id": payload.get("run_id") or run_id,
+                    "after_sequence": payload.get("after_sequence", clean_after_sequence),
+                    "limit": payload.get("limit", clean_limit),
+                }
+
+        stream = self.get_task_event_stream(task_id)
+        raw_events = stream.get("events") if isinstance(stream, dict) else []
+        events = [
+            dict(event)
+            for event in raw_events or []
+            if isinstance(event, dict)
+        ]
+        filtered_events = []
+        for index, event in enumerate(events):
+            event_sequence = self._event_sequence(event, index)
+            if event_sequence > clean_after_sequence:
+                filtered_events.append((event_sequence, event))
+        page_pairs = filtered_events[:clean_limit]
+        page = [event for _, event in page_pairs]
+        next_after_sequence = max(
+            [sequence for sequence, _ in page_pairs] or [clean_after_sequence]
+        )
+        stream_run_id = stream.get("run_id") if isinstance(stream, dict) else ""
+        return {
+            "run_id": stream_run_id or run_id,
+            "after_sequence": clean_after_sequence,
+            "limit": clean_limit,
+            "next_after_sequence": next_after_sequence,
+            "has_more": len(filtered_events) > clean_limit,
+            "events": page,
+        }
+
     def read_task_artifact(self, task_id: str, artifact_path: str) -> dict[str, Any]:
         run_id = self._run_id_for_task(task_id)
         payload = self._runtime.read_run_artifact(run_id, artifact_path)
@@ -239,3 +291,9 @@ class LegacyRuntimePort:
     def _payload_items(self, payload: Any, key: str) -> list[dict[str, Any]]:
         items = payload.get(key) if isinstance(payload, dict) else payload
         return [dict(item) for item in items or [] if isinstance(item, dict)]
+
+    def _event_sequence(self, event: dict[str, Any], index: int) -> int:
+        try:
+            return int(event.get("sequence"))
+        except (TypeError, ValueError):
+            return index + 1
