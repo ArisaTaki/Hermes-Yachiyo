@@ -98,6 +98,9 @@ def test_runtime_run_event_recorder_appends_compatibility_aliases() -> None:
         "workflow.node.completed",
     ]
     assert canonical_run_event_aliases("model.output.completed") == ["model.completed"]
+    assert canonical_run_event_aliases("agent.tool.started") == ["tool.started"]
+    assert canonical_run_event_aliases("agent.tool.completed") == ["tool.completed"]
+    assert canonical_run_event_aliases("agent.tool.failed") == ["tool.failed"]
     assert canonical_run_event_aliases("agent.tool.approval_required") == [
         "tool.approval_required"
     ]
@@ -122,6 +125,39 @@ def test_runtime_run_event_recorder_appends_compatibility_aliases() -> None:
         "approval.timeout"
     ]
     assert agent_runtime._canonical_run_event_aliases("model.output.completed") == ["model.completed"]
+
+    repository.calls.clear()
+    recorder.append(
+        "run-1",
+        "agent.tool.started",
+        {"tool": "workspace.read", "status": "running"},
+    )
+    assert [call[1] for call in repository.calls] == [
+        "agent.tool.started",
+        "tool.started",
+    ]
+
+    repository.calls.clear()
+    recorder.append(
+        "run-1",
+        "agent.tool.completed",
+        {"tool": "workspace.read", "status": "completed"},
+    )
+    assert [call[1] for call in repository.calls] == [
+        "agent.tool.completed",
+        "tool.completed",
+    ]
+
+    repository.calls.clear()
+    recorder.append(
+        "run-1",
+        "agent.tool.failed",
+        {"tool": "terminal.run", "status": "failed"},
+    )
+    assert [call[1] for call in repository.calls] == [
+        "agent.tool.failed",
+        "tool.failed",
+    ]
 
     repository.calls.clear()
     recorder.append(
