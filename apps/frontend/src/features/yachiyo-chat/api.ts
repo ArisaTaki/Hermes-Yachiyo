@@ -2,7 +2,6 @@ import { apiGet, apiPost } from '../../lib/bridge';
 import type {
   AgentDefinitionSnapshot,
   AgentTaskSnapshot,
-  RunTimelineSnapshot,
   StartChatTaskRequest,
   WorkflowSnapshot,
   YachiyoReadinessSnapshot,
@@ -36,22 +35,19 @@ export async function listYachiyoChatWorkflows(): Promise<WorkflowSnapshot[]> {
   return payload.workflows || [];
 }
 
-export async function getYachiyoChatRunTimeline(runId: string): Promise<RunTimelineSnapshot> {
-  return apiGet(`/yachiyo/studio/runs/${encodeURIComponent(runId)}/timeline`);
+export async function getYachiyoChatRunTaskSnapshot(runId: string): Promise<AgentTaskSnapshot> {
+  return getYachiyoTask(runId);
 }
 
-export async function approveYachiyoChatRunApproval(runId: string): Promise<RunTimelineSnapshot> {
-  return apiPost(`/yachiyo/studio/runs/${encodeURIComponent(runId)}/approval/approve`, {});
+export async function approveYachiyoChatRunApproval(runId: string): Promise<AgentTaskSnapshot> {
+  return approveYachiyoTask(runId);
 }
 
 export async function rejectYachiyoChatRunApproval(
   runId: string,
   reason = '',
-): Promise<RunTimelineSnapshot> {
-  return apiPost(
-    `/yachiyo/studio/runs/${encodeURIComponent(runId)}/approval/reject`,
-    reason ? { reason } : {},
-  );
+): Promise<AgentTaskSnapshot> {
+  return rejectYachiyoTask(runId, undefined, reason);
 }
 
 export async function approveYachiyoTask(
