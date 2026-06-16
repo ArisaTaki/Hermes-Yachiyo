@@ -731,6 +731,65 @@ def test_run_timeline_derives_approvals_and_artifacts_from_events() -> None:
     assert timeline.artifacts[1].workflow_node_label == "Report"
 
 
+def test_run_timeline_keeps_secret_events_out_of_derived_runtime_facts() -> None:
+    timeline = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "run-secret-derived-facts",
+            "status": "running",
+            "events": [
+                {
+                    "event_type": "agent.tool.call",
+                    "sensitivity": "secret",
+                    "payload": {
+                        "tool": "terminal.run",
+                        "input_preview": {"command": "printf sk-secret-value"},
+                    },
+                },
+                {
+                    "event_type": "tool.approval_required",
+                    "sensitivity": "secret",
+                    "payload": {
+                        "tool": "terminal.run",
+                        "input_preview": {"command": "printf sk-secret-value"},
+                    },
+                },
+                {
+                    "event_type": "artifact.created",
+                    "sensitivity": "secret",
+                    "payload": {"path": "secret-report.md"},
+                },
+                {
+                    "event_type": "memory.retrieved",
+                    "sensitivity": "secret",
+                    "payload": {
+                        "count": 1,
+                        "memories": [{"memory_id": "memory-secret", "kind": "token"}],
+                    },
+                },
+                {
+                    "event_type": "skill.selected",
+                    "sensitivity": "secret",
+                    "payload": {
+                        "result": {
+                            "skill_id": "skill-secret",
+                            "name": "Secret Skill",
+                        },
+                    },
+                },
+            ],
+        }
+    )
+
+    assert [event.sensitivity for event in timeline.events] == ["secret"] * 5
+    assert timeline.events[0].payload["input_preview"]["command"] == "printf sk-secret-value"
+    assert timeline.tool_calls == []
+    assert timeline.approvals == []
+    assert timeline.pending_approval is None
+    assert timeline.artifacts == []
+    assert timeline.memory_traces == []
+    assert timeline.skill_traces == []
+
+
 def test_run_timeline_projects_legacy_agent_artifact_write_events() -> None:
     timeline = run_timeline_snapshot_from_payload(
         {

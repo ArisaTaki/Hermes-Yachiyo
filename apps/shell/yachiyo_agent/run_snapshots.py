@@ -236,6 +236,8 @@ class RunSnapshotProjector:
         active_by_weak_key: dict[str, int] = {}
         active_keys_by_index: dict[int, tuple[list[str], str]] = {}
         for event in events:
+            if _public_run_event_is_secret(event):
+                continue
             approval_payload = _approval_payload_from_event(event)
             if approval_payload:
                 if group_run_id:
@@ -285,6 +287,8 @@ class RunSnapshotProjector:
     def artifacts_from_events(self, events: list[PublicRunEvent]):
         artifacts = []
         for event in events:
+            if _public_run_event_is_secret(event):
+                continue
             artifact_payload = _artifact_payload_from_event(event)
             if artifact_payload:
                 artifacts.append(
@@ -371,6 +375,8 @@ class RunSnapshotProjector:
         calls: list[ToolCallSnapshot] = []
         active_by_key: dict[str, int] = {}
         for event in events:
+            if _public_run_event_is_secret(event):
+                continue
             if not _is_tool_event(event.event_type):
                 continue
             payload = _tool_call_payload_from_event(event)
@@ -392,6 +398,8 @@ class RunSnapshotProjector:
     def memory_traces_from_events(self, events: list[PublicRunEvent]) -> list[MemoryTraceSnapshot]:
         traces: list[MemoryTraceSnapshot] = []
         for event in events:
+            if _public_run_event_is_secret(event):
+                continue
             trace = _memory_trace_from_event(event)
             if trace is not None:
                 traces.append(trace)
@@ -400,6 +408,8 @@ class RunSnapshotProjector:
     def skill_traces_from_events(self, events: list[PublicRunEvent]) -> list[SkillTraceSnapshot]:
         traces: list[SkillTraceSnapshot] = []
         for event in events:
+            if _public_run_event_is_secret(event):
+                continue
             trace = _skill_trace_from_event(event)
             if trace is not None:
                 traces.append(trace)
@@ -1248,6 +1258,10 @@ def _workflow_run_id(payload: Mapping[str, Any], run_id: str) -> str | None:
 
 def _mapping(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _public_run_event_is_secret(event: PublicRunEvent) -> bool:
+    return event.sensitivity == "secret"
 
 
 def _nested_mapping(payload: Mapping[str, Any], key: str) -> dict[str, Any]:
