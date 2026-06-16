@@ -276,13 +276,52 @@ class RunSnapshotProjector:
         tool_call_id = _text(payload.get("tool_call_id") or payload.get("id"))
         if not tool_call_id:
             tool_call_id = f"{run_id or 'run'}:{tool_name}:{payload.get('sequence') or 0}"
+        input_preview = _mapping(payload.get("input_preview") or payload.get("input"))
         return ToolCallSnapshot(
             tool_call_id=tool_call_id,
             run_id=_optional_text(payload.get("run_id") or run_id),
+            source_run_id=_optional_text(
+                payload.get("source_run_id") or input_preview.get("source_run_id")
+            ),
+            source_runnable_id=_optional_text(
+                payload.get("source_runnable_id")
+                or payload.get("source_agent_id")
+                or payload.get("member_agent_id")
+                or payload.get("agent_id")
+                or input_preview.get("source_runnable_id")
+                or input_preview.get("member_agent_id")
+                or input_preview.get("agent_id")
+            ),
+            source_runnable_name=_optional_text(
+                payload.get("source_runnable_name")
+                or payload.get("source_agent_name")
+                or payload.get("member_agent_name")
+                or payload.get("agent_name")
+                or input_preview.get("source_runnable_name")
+                or input_preview.get("member_agent_name")
+                or input_preview.get("agent_name")
+            ),
+            workflow_id=_optional_text(payload.get("workflow_id") or input_preview.get("workflow_id")),
+            workflow_run_id=_optional_text(
+                payload.get("workflow_run_id") or input_preview.get("workflow_run_id")
+            ),
+            workflow_node_id=_optional_text(
+                payload.get("workflow_node_id") or input_preview.get("workflow_node_id")
+            ),
+            workflow_node_label=_optional_text(
+                payload.get("workflow_node_label") or input_preview.get("workflow_node_label")
+            ),
+            group_id=_optional_text(payload.get("group_id") or input_preview.get("group_id")),
+            group_run_id=_optional_text(
+                payload.get("group_run_id")
+                or payload.get("run_group_id")
+                or input_preview.get("group_run_id")
+                or input_preview.get("run_group_id")
+            ),
             tool_name=tool_name,
             status=_text(payload.get("status") or "completed"),
             risk_level=_optional_text(payload.get("risk_level") or payload.get("risk")),
-            input_preview=_mapping(payload.get("input_preview") or payload.get("input")),
+            input_preview=input_preview,
             output_preview=_tool_output_preview(payload),
             approval_id=_optional_text(payload.get("approval_id")),
             started_at=_text(payload.get("started_at") or payload.get("created_at")),
@@ -494,6 +533,7 @@ def _tool_call_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
         normalized.setdefault("approval_id", approval_id)
     if risk_level:
         normalized.setdefault("risk_level", risk_level)
+    _merge_tool_trace_context(normalized, payload)
     _merge_tool_trace_into_input_preview(
         normalized,
         {
@@ -511,6 +551,32 @@ def _tool_call_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
         },
     )
     return normalized
+
+
+def _merge_tool_trace_context(source: dict[str, Any], payload: dict[str, Any]) -> None:
+    for key in (
+        "source_run_id",
+        "source_runnable_id",
+        "source_runnable_name",
+        "workflow_id",
+        "workflow_run_id",
+        "workflow_node_id",
+        "workflow_node_label",
+        "group_id",
+        "group_run_id",
+    ):
+        if payload.get(key):
+            source.setdefault(key, payload.get(key))
+    if payload.get("run_group_id"):
+        source.setdefault("group_run_id", payload.get("run_group_id"))
+    if payload.get("member_agent_id"):
+        source.setdefault("source_runnable_id", payload.get("member_agent_id"))
+    if payload.get("member_agent_name"):
+        source.setdefault("source_runnable_name", payload.get("member_agent_name"))
+    if payload.get("agent_id"):
+        source.setdefault("source_runnable_id", payload.get("agent_id"))
+    if payload.get("agent_name"):
+        source.setdefault("source_runnable_name", payload.get("agent_name"))
 
 
 def _merge_tool_trace_into_input_preview(
@@ -727,6 +793,15 @@ def _merge_tool_call_snapshots(
     return ToolCallSnapshot(
         tool_call_id=current.tool_call_id or next_call.tool_call_id,
         run_id=current.run_id or next_call.run_id,
+        source_run_id=current.source_run_id or next_call.source_run_id,
+        source_runnable_id=current.source_runnable_id or next_call.source_runnable_id,
+        source_runnable_name=current.source_runnable_name or next_call.source_runnable_name,
+        workflow_id=current.workflow_id or next_call.workflow_id,
+        workflow_run_id=current.workflow_run_id or next_call.workflow_run_id,
+        workflow_node_id=current.workflow_node_id or next_call.workflow_node_id,
+        workflow_node_label=current.workflow_node_label or next_call.workflow_node_label,
+        group_id=current.group_id or next_call.group_id,
+        group_run_id=current.group_run_id or next_call.group_run_id,
         tool_name=current.tool_name or next_call.tool_name,
         status=next_call.status or current.status,
         risk_level=current.risk_level or next_call.risk_level,

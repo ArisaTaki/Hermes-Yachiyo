@@ -197,6 +197,57 @@ def test_run_timeline_snapshot_json_shape_covers_runtime_debug_objects() -> None
     assert payload["children"][0]["run_id"] == "child-run-1"
 
 
+def test_tool_call_snapshot_keeps_runtime_trace_fields() -> None:
+    snapshot = ToolCallSnapshot(
+        tool_call_id="tool-1",
+        run_id="run-1",
+        source_run_id="child-run-1",
+        source_runnable_id="agent-1",
+        source_runnable_name="Planner",
+        workflow_id="workflow-1",
+        workflow_run_id="workflow-run-1",
+        workflow_node_id="read",
+        workflow_node_label="Read Files",
+        group_id="group-1",
+        group_run_id="group-run-1",
+        tool_name="workspace.read",
+        status="completed",
+        risk_level="low",
+        input_preview={"path": "README.md"},
+        output_preview={"ok": True},
+        approval_id="approval-1",
+        started_at="2026-06-14T00:00:00Z",
+        completed_at="2026-06-14T00:00:01Z",
+    )
+
+    payload = _json(snapshot)
+
+    assert list(payload) == [
+        "tool_call_id",
+        "run_id",
+        "source_run_id",
+        "source_runnable_id",
+        "source_runnable_name",
+        "workflow_id",
+        "workflow_run_id",
+        "workflow_node_id",
+        "workflow_node_label",
+        "group_id",
+        "group_run_id",
+        "tool_name",
+        "status",
+        "risk_level",
+        "input_preview",
+        "output_preview",
+        "approval_id",
+        "started_at",
+        "completed_at",
+    ]
+    assert payload["source_runnable_name"] == "Planner"
+    assert payload["workflow_node_id"] == "read"
+    assert payload["group_run_id"] == "group-run-1"
+
+
 def test_run_event_page_snapshot_json_shape_is_stable() -> None:
     snapshot = RunEventPageSnapshot(
         run_id="run-1",

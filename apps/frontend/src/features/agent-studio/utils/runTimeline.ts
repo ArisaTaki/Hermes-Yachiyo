@@ -226,9 +226,29 @@ export function mergeToolCallSnapshots(
   const byId = new Map<string, ToolCallSnapshot>();
   timelineToolCalls.forEach((toolCall) => byId.set(toolCall.tool_call_id, toolCall));
   replayToolCalls.forEach((toolCall) => {
-    if (!byId.has(toolCall.tool_call_id)) byId.set(toolCall.tool_call_id, toolCall);
+    const existing = byId.get(toolCall.tool_call_id);
+    if (!existing) {
+      byId.set(toolCall.tool_call_id, toolCall);
+      return;
+    }
+    byId.set(toolCall.tool_call_id, mergeToolCallTrace(existing, toolCall));
   });
   return Array.from(byId.values());
+}
+
+function mergeToolCallTrace(current: ToolCallSnapshot, incoming: ToolCallSnapshot): ToolCallSnapshot {
+  return {
+    ...current,
+    source_run_id: current.source_run_id || incoming.source_run_id || null,
+    source_runnable_id: current.source_runnable_id || incoming.source_runnable_id || null,
+    source_runnable_name: current.source_runnable_name || incoming.source_runnable_name || null,
+    workflow_id: current.workflow_id || incoming.workflow_id || null,
+    workflow_run_id: current.workflow_run_id || incoming.workflow_run_id || null,
+    workflow_node_id: current.workflow_node_id || incoming.workflow_node_id || null,
+    workflow_node_label: current.workflow_node_label || incoming.workflow_node_label || null,
+    group_id: current.group_id || incoming.group_id || null,
+    group_run_id: current.group_run_id || incoming.group_run_id || null,
+  };
 }
 
 export function artifactsFromRunEventReplay(events: PublicRunEvent[]): Array<Record<string, unknown>> {
@@ -301,6 +321,25 @@ function toolCallFromRunEvent(event: PublicRunEvent): ToolCallSnapshot | null {
       || publicRunEventPayloadString(payload, 'id')
       || `${event.run_id}:${event.event_type}:${event.sequence}`,
     run_id: event.run_id,
+    source_run_id: publicRunEventPayloadString(payload, 'source_run_id') || null,
+    source_runnable_id: publicRunEventPayloadString(payload, 'source_runnable_id')
+      || publicRunEventPayloadString(payload, 'source_agent_id')
+      || publicRunEventPayloadString(payload, 'member_agent_id')
+      || publicRunEventPayloadString(payload, 'agent_id')
+      || null,
+    source_runnable_name: publicRunEventPayloadString(payload, 'source_runnable_name')
+      || publicRunEventPayloadString(payload, 'source_agent_name')
+      || publicRunEventPayloadString(payload, 'member_agent_name')
+      || publicRunEventPayloadString(payload, 'agent_name')
+      || null,
+    workflow_id: publicRunEventPayloadString(payload, 'workflow_id') || null,
+    workflow_run_id: publicRunEventPayloadString(payload, 'workflow_run_id') || null,
+    workflow_node_id: publicRunEventPayloadString(payload, 'workflow_node_id') || null,
+    workflow_node_label: publicRunEventPayloadString(payload, 'workflow_node_label') || null,
+    group_id: publicRunEventPayloadString(payload, 'group_id') || null,
+    group_run_id: publicRunEventPayloadString(payload, 'group_run_id')
+      || publicRunEventPayloadString(payload, 'run_group_id')
+      || null,
     tool_name: toolName,
     status: publicRunEventPayloadString(payload, 'status') || toolStatusFromRunEvent(event.event_type),
     risk_level: publicRunEventPayloadString(payload, 'risk_level')

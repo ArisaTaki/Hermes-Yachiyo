@@ -158,6 +158,14 @@ def test_run_timeline_projects_tool_lifecycle_events_as_tool_call_snapshots() ->
                     "event_type": "tool.approval_required",
                     "payload": {
                         "tool": "terminal.run",
+                        "group_id": "group-1",
+                        "group_run_id": "group-run-1",
+                        "member_agent_id": "agent-1",
+                        "member_agent_name": "Planner",
+                        "workflow_id": "workflow-1",
+                        "workflow_run_id": "workflow-run-1",
+                        "workflow_node_id": "test",
+                        "workflow_node_label": "Run Tests",
                         "input_preview": {"command": "npm test"},
                         "output_preview": {"approval_required": True},
                         "pending_approval": {
@@ -224,11 +232,27 @@ def test_run_timeline_projects_tool_lifecycle_events_as_tool_call_snapshots() ->
     assert timeline.tool_calls[0].output_preview == {"ok": True}
     assert timeline.tool_calls[1].approval_id == "approval-tool"
     assert timeline.tool_calls[1].risk_level == "high"
+    assert timeline.tool_calls[1].source_runnable_id == "agent-1"
+    assert timeline.tool_calls[1].source_runnable_name == "Planner"
+    assert timeline.tool_calls[1].workflow_id == "workflow-1"
+    assert timeline.tool_calls[1].workflow_run_id == "workflow-run-1"
+    assert timeline.tool_calls[1].workflow_node_id == "test"
+    assert timeline.tool_calls[1].workflow_node_label == "Run Tests"
+    assert timeline.tool_calls[1].group_id == "group-1"
+    assert timeline.tool_calls[1].group_run_id == "group-run-1"
     assert timeline.tool_calls[1].input_preview == {
         "command": "npm test",
         "approval_id": "approval-tool",
         "risk_level": "high",
         "policy_reason": "terminal command requires approval",
+        "group_id": "group-1",
+        "group_run_id": "group-run-1",
+        "member_agent_id": "agent-1",
+        "member_agent_name": "Planner",
+        "workflow_id": "workflow-1",
+        "workflow_run_id": "workflow-run-1",
+        "workflow_node_id": "test",
+        "workflow_node_label": "Run Tests",
     }
     assert timeline.tool_calls[1].output_preview == {
         "approval_required": True,

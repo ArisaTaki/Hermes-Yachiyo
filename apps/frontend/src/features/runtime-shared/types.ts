@@ -85,6 +85,15 @@ export type ArtifactContentSnapshot = {
 export type ToolCallSnapshot = {
   tool_call_id: string;
   run_id?: string | null;
+  source_run_id?: string | null;
+  source_runnable_id?: string | null;
+  source_runnable_name?: string | null;
+  workflow_id?: string | null;
+  workflow_run_id?: string | null;
+  workflow_node_id?: string | null;
+  workflow_node_label?: string | null;
+  group_id?: string | null;
+  group_run_id?: string | null;
   tool_name: string;
   status: string;
   risk_level?: string | null;
