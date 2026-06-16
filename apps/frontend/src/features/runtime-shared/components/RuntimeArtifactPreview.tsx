@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react';
+
 import type { ArtifactSnapshot } from '../types';
 
 export type RuntimeArtifactSnapshot = Pick<
@@ -18,12 +20,22 @@ export type RuntimeArtifactSnapshot = Pick<
 export type RuntimeArtifactVariant = 'compact' | 'full';
 
 export function RuntimeArtifactPreview({
+  actions,
+  actionsClassName = 'runtime-artifact-actions',
+  actionsElement: ActionsElement = 'div',
+  actionsTestId,
   artifact,
+  as: Component = 'div',
   className = 'yachiyo-task-artifact',
   testId = 'runtime-artifact-preview',
   variant = 'compact',
 }: {
+  actions?: ReactNode;
+  actionsClassName?: string;
+  actionsElement?: 'div' | 'span';
+  actionsTestId?: string;
   artifact: RuntimeArtifactSnapshot;
+  as?: 'div' | 'span';
   className?: string;
   testId?: string;
   variant?: RuntimeArtifactVariant;
@@ -31,7 +43,7 @@ export function RuntimeArtifactPreview({
   const label = artifact.title || artifact.path || artifact.kind || 'Artifact';
   const metadata = variant === 'full' ? artifactMetadataItems(artifact) : [];
   return (
-    <div
+    <Component
       className={className}
       data-artifact-id={artifact.artifact_id}
       data-artifact-kind={artifact.kind}
@@ -49,6 +61,11 @@ export function RuntimeArtifactPreview({
       {artifact.preview_text && variant === 'full' ? (
         <p className="runtime-artifact-preview-text">{artifact.preview_text}</p>
       ) : null}
+      {actions ? (
+        <ActionsElement className={actionsClassName} data-testid={actionsTestId}>
+          {actions}
+        </ActionsElement>
+      ) : null}
       {metadata.length ? (
         <div className="runtime-artifact-meta" data-testid={`${testId}-metadata`}>
           {metadata.map(({ label: itemLabel, value }) => (
@@ -56,7 +73,7 @@ export function RuntimeArtifactPreview({
           ))}
         </div>
       ) : null}
-    </div>
+    </Component>
   );
 }
 

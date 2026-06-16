@@ -9357,7 +9357,11 @@ body.electron-window .hy-traffic {
 }
 
 .hy-content .open-chat-shell .yachiyo-task-artifact-button {
+  display: block;
   width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: inherit;
   cursor: pointer;
   font: inherit;
@@ -9369,7 +9373,7 @@ body.electron-window .hy-traffic {
   opacity: 0.72;
 }
 
-.hy-content .open-chat-shell .yachiyo-task-artifact-button .ui-icon {
+.hy-content .open-chat-shell .yachiyo-task-artifact-action .ui-icon {
   width: 14px;
   height: 14px;
   color: var(--hy-faint);

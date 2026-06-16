@@ -57,15 +57,22 @@ export function ArtifactPreview({
       <button
         type="button"
         aria-expanded={Boolean(preview)}
-        className="yachiyo-task-artifact yachiyo-task-artifact-button"
-        data-testid="yachiyo-task-artifact-preview"
+        className="yachiyo-task-artifact-button"
         disabled={busy}
         onClick={() => void togglePreview()}
         title={path || label}
       >
-        <span>{artifact.kind || 'artifact'}</span>
-        <strong>{label}</strong>
-        <UiIcon name={preview ? 'close' : 'paperclip'} />
+        <RuntimeArtifactPreview
+          actions={<UiIcon name={preview ? 'close' : 'paperclip'} />}
+          actionsClassName="yachiyo-task-artifact-action"
+          actionsElement="span"
+          actionsTestId="yachiyo-task-artifact-action"
+          artifact={artifact}
+          as="span"
+          className="yachiyo-task-artifact"
+          testId="yachiyo-task-artifact-preview"
+          variant="compact"
+        />
       </button>
       {busy ? (
         <p className="yachiyo-task-artifact-status" data-testid="yachiyo-task-artifact-loading">
