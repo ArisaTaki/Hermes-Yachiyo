@@ -808,6 +808,29 @@ def test_group_run_snapshot_reuses_shared_run_projection_for_children_artifacts_
     assert group_run.pending_approvals[0].open_in_studio_url == "#/agents?run_id=group-run-1&group_run=group-run-1"
 
 
+def test_group_run_snapshot_accepts_members_as_participants() -> None:
+    group_run = group_run_snapshot_from_payload(
+        {
+            "group_run_id": "group-run-members",
+            "group_id": "group-1",
+            "title": "Members only",
+            "status": "running",
+            "members": [
+                {"agent_id": "agent-1", "name": "Planner", "role": "planner"},
+                {"agent_id": "agent-2", "name": "Reviewer", "role": "reviewer"},
+            ],
+            "events": [],
+        }
+    )
+
+    assert [member.agent_id for member in group_run.participants] == [
+        "agent-1",
+        "agent-2",
+    ]
+    assert group_run.events[0].event_type == "group.run.started"
+    assert group_run.events[0].payload["participant_count"] == 2
+
+
 def test_legacy_group_run_payload_collects_child_group_events_for_replay() -> None:
     runtime = _FakeLegacyGroupRuntime()
     payload = LegacyRunPayloadProjector().group_run_from_legacy_run_group(

@@ -50,6 +50,13 @@ def agent_group_members_from_payloads(payloads: Any) -> list[AgentGroupMemberSna
     return [agent_group_member_from_payload(item) for item in payloads if isinstance(item, Mapping)]
 
 
+def group_run_participants_from_payload(
+    payload: Mapping[str, Any],
+) -> list[AgentGroupMemberSnapshot]:
+    participants = agent_group_members_from_payloads(payload.get("participants"))
+    return participants or agent_group_members_from_payloads(payload.get("members"))
+
+
 def group_run_snapshot_from_payload(
     payload: Mapping[str, Any] | GroupRunSnapshot,
 ) -> GroupRunSnapshot:
@@ -61,6 +68,7 @@ def group_run_snapshot_from_payload(
     group_id = _text(payload.get("group_id") or payload.get("agent_group_id"))
     runs_payload = payload.get("runs") or payload.get("child_runs") or []
     child_run_ids = [str(item) for item in payload.get("child_run_ids") or [] if str(item)]
+    participants = group_run_participants_from_payload(payload)
     events = _RUN_PROJECTOR.events_from_payload(
         {
             "events": _group_run_events_with_lifecycle(
@@ -81,7 +89,7 @@ def group_run_snapshot_from_payload(
         title=_text(payload.get("title") or "Group run"),
         status=_text(payload.get("status") or "unknown"),
         objective=_text(payload.get("objective") or payload.get("user_goal")),
-        participants=agent_group_members_from_payloads(payload.get("participants")),
+        participants=participants,
         active_speaker_agent_id=_optional_text(payload.get("active_speaker_agent_id")),
         events=events,
         runs=[
@@ -246,7 +254,7 @@ def _group_run_lifecycle_context(
         "objective": objective,
         "status": _text(payload.get("status") or "unknown"),
         "child_run_ids": child_run_ids,
-        "participant_count": _len_list(payload.get("participants")),
+        "participant_count": len(group_run_participants_from_payload(payload)),
     }
 
 
@@ -277,10 +285,6 @@ def _group_run_terminal_event_type(value: Any) -> str:
     if status == "cancelled":
         return "group.run.cancelled"
     return ""
-
-
-def _len_list(value: Any) -> int:
-    return len(value) if isinstance(value, list) else 0
 
 
 def _text(value: Any) -> str:
