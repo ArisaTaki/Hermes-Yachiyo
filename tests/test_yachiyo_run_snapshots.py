@@ -210,38 +210,72 @@ def test_run_timeline_projects_tool_lifecycle_events_as_tool_call_snapshots() ->
 
     assert [call.tool_name for call in timeline.tool_calls] == [
         "workspace.read",
-        "workspace.read",
         "terminal.run",
-        "terminal.run",
-        "terminal.run",
-        "workspace.read",
         "terminal.run",
         "workspace.write",
     ]
     assert [call.status for call in timeline.tool_calls] == [
-        "requested",
-        "running",
-        "waiting_approval",
-        "approved",
-        "denied",
         "completed",
         "failed",
         "denied",
+        "denied",
     ]
     assert timeline.tool_calls[0].input_preview == {"path": "README.md"}
-    assert timeline.tool_calls[2].approval_id == "approval-tool"
-    assert timeline.tool_calls[2].risk_level == "high"
-    assert timeline.tool_calls[2].input_preview == {
+    assert timeline.tool_calls[0].output_preview == {"ok": True}
+    assert timeline.tool_calls[1].approval_id == "approval-tool"
+    assert timeline.tool_calls[1].risk_level == "high"
+    assert timeline.tool_calls[1].input_preview == {
         "command": "npm test",
         "approval_id": "approval-tool",
         "risk_level": "high",
         "policy_reason": "terminal command requires approval",
     }
-    assert timeline.tool_calls[2].output_preview == {"approval_required": True}
-    assert timeline.tool_calls[4].input_preview == {"command": "rm -rf /tmp/demo"}
-    assert timeline.tool_calls[6].output_preview == {"error": "exit 1"}
-    assert timeline.tool_calls[7].input_preview == {"path": "README.md"}
+    assert timeline.tool_calls[1].output_preview == {
+        "approval_required": True,
+        "error": "exit 1",
+    }
+    assert timeline.tool_calls[2].input_preview == {"command": "rm -rf /tmp/demo"}
+    assert timeline.tool_calls[3].input_preview == {"path": "README.md"}
     assert all(call.run_id == "run-tools" for call in timeline.tool_calls)
+
+
+def test_run_timeline_keeps_repeated_identical_tool_lifecycles_separate() -> None:
+    timeline = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "run-repeated-tools",
+            "status": "completed",
+            "events": [
+                {
+                    "event_type": "tool.requested",
+                    "payload": {"tool": "workspace.read", "input_preview": {"path": "README.md"}},
+                },
+                {
+                    "event_type": "tool.completed",
+                    "payload": {
+                        "tool": "workspace.read",
+                        "input_preview": {"path": "README.md"},
+                        "output_preview": {"ok": True, "first": True},
+                    },
+                },
+                {
+                    "event_type": "tool.requested",
+                    "payload": {"tool": "workspace.read", "input_preview": {"path": "README.md"}},
+                },
+                {
+                    "event_type": "tool.completed",
+                    "payload": {
+                        "tool": "workspace.read",
+                        "input_preview": {"path": "README.md"},
+                        "output_preview": {"ok": True, "second": True},
+                    },
+                },
+            ],
+        }
+    )
+
+    assert [call.status for call in timeline.tool_calls] == ["completed", "completed"]
+    assert timeline.tool_calls[0].output_preview == {"ok": True, "first": True}
+    assert timeline.tool_calls[1].output_preview == {"ok": True, "second": True}
 
 
 def test_run_timeline_projects_legacy_agent_tool_lifecycle_events() -> None:

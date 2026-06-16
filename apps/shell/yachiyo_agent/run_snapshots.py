@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from typing import Any
 
@@ -271,11 +272,24 @@ class RunSnapshotProjector:
 
     def tool_calls_from_events(self, events: list[PublicRunEvent]) -> list[ToolCallSnapshot]:
         calls: list[ToolCallSnapshot] = []
+        active_by_key: dict[str, int] = {}
         for event in events:
             if not _is_tool_event(event.event_type):
                 continue
             payload = _tool_call_payload_from_event(event)
-            calls.append(self.tool_call_from_payload(payload, run_id=event.run_id))
+            call = self.tool_call_from_payload(payload, run_id=event.run_id)
+            key = _tool_call_correlation_key(payload, call)
+            active_index = active_by_key.get(key) if key else None
+            if active_index is None:
+                active_index = len(calls)
+                calls.append(call)
+            else:
+                calls[active_index] = _merge_tool_call_snapshots(calls[active_index], call)
+            if key:
+                if _tool_call_status_is_terminal(call.status):
+                    active_by_key.pop(key, None)
+                else:
+                    active_by_key[key] = active_index
         return calls
 
     def timeline_children_from_payloads(self, payloads: Any) -> list[RunTimelineChildSnapshot]:
@@ -508,6 +522,70 @@ def _merge_artifacts(*artifact_lists):
             if key and key not in by_key:
                 by_key[key] = artifact
     return list(by_key.values())
+
+
+def _merge_tool_call_snapshots(
+    current: ToolCallSnapshot,
+    next_call: ToolCallSnapshot,
+) -> ToolCallSnapshot:
+    output_preview = dict(current.output_preview)
+    output_preview.update(next_call.output_preview)
+    completed_at = next_call.completed_at or current.completed_at
+    if _tool_call_status_is_terminal(next_call.status) and not completed_at:
+        completed_at = next_call.started_at or current.completed_at
+    return ToolCallSnapshot(
+        tool_call_id=current.tool_call_id or next_call.tool_call_id,
+        run_id=current.run_id or next_call.run_id,
+        tool_name=current.tool_name or next_call.tool_name,
+        status=next_call.status or current.status,
+        risk_level=current.risk_level or next_call.risk_level,
+        input_preview={**current.input_preview, **next_call.input_preview},
+        output_preview=output_preview,
+        approval_id=current.approval_id or next_call.approval_id,
+        started_at=current.started_at or next_call.started_at,
+        completed_at=completed_at,
+    )
+
+
+def _tool_call_correlation_key(
+    payload: Mapping[str, Any],
+    call: ToolCallSnapshot,
+) -> str:
+    explicit_id = _text(payload.get("tool_call_id") or payload.get("id"))
+    run_id = call.run_id or _text(payload.get("run_id"))
+    if explicit_id:
+        return f"{run_id}:id:{explicit_id}"
+    preview = _tool_call_correlation_preview(call.input_preview)
+    return f"{run_id}:tool:{call.tool_name}:{_stable_json(preview)}"
+
+
+def _tool_call_correlation_preview(preview: Mapping[str, Any]) -> dict[str, Any]:
+    trace_keys = {
+        "approval_id",
+        "group_id",
+        "group_run_id",
+        "member_agent_id",
+        "member_agent_name",
+        "policy_reason",
+        "risk_level",
+        "run_group_id",
+        "workflow_id",
+        "workflow_node_id",
+        "workflow_node_label",
+        "workflow_run_id",
+    }
+    return {key: value for key, value in preview.items() if key not in trace_keys}
+
+
+def _tool_call_status_is_terminal(status: str) -> bool:
+    return status in {"completed", "failed", "denied", "skipped"}
+
+
+def _stable_json(value: Any) -> str:
+    try:
+        return json.dumps(value, ensure_ascii=True, sort_keys=True, default=str)
+    except (TypeError, ValueError):
+        return str(value)
 
 
 def _task_status(value: Any) -> str:
