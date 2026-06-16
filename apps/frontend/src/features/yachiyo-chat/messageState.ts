@@ -102,6 +102,14 @@ export function messageRunId(message?: YachiyoChatMessage | null) {
   return String(message?.metadata?.run_id || message?.metadata?.workflow_run_id || '').trim();
 }
 
+export function messageArtifactCount(message?: YachiyoChatMessage | null) {
+  return Number(message?.metadata?.run_artifact_count || 0);
+}
+
+export function messageArtifactTitle(message?: YachiyoChatMessage | null) {
+  return message?.metadata?.run_artifacts?.map((artifact) => artifact.path).filter(Boolean).join('\n') || '查看运行产物';
+}
+
 export function latestFailedMessage(messages: YachiyoChatMessage[]) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const status = messages[index]?.status;

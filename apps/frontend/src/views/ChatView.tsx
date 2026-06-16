@@ -56,6 +56,8 @@ import {
   groupFollowupNotice,
   latestFailedMessage,
   latestVisibleActivity,
+  messageArtifactCount,
+  messageArtifactTitle,
   messageErrorText,
   messageRunId,
   messageRunStatus,
@@ -2587,7 +2589,7 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
   const progressRunnableId = String(message.metadata?.runnable_id || progressSender?.id || '').trim();
   const progressRunGroupId = String(message.metadata?.run_group_id || '').trim();
   const showInlineRunDetails = role === 'assistant' && Boolean(runId) && !approvalDetails && !showAgentProgress;
-  const artifactCount = Number(message.metadata?.run_artifact_count || 0);
+  const artifactCount = messageArtifactCount(message);
   const duplicateError = Boolean(message.error && displayContent.trim() && message.error.trim() === displayContent.trim());
   const summaryNotice = groupAgentSummaryNotice(message);
   const followupNotice = groupFollowupNotice(message);
@@ -2713,7 +2715,7 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
             <button
               className="message-artifact-detail-button"
               type="button"
-              title={message.metadata?.run_artifacts?.map((artifact) => artifact.path).filter(Boolean).join('\n') || '查看运行产物'}
+              title={messageArtifactTitle(message)}
               onClick={() => onOpenRunDetails(runId)}
             >
               产物 {artifactCount}
