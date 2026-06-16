@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from apps.shell.chat_api import ChatAPI
@@ -500,7 +501,7 @@ class LegacyStudioPort:
         return self._runtime.list_runs(limit)
 
     def get_run_timeline(self, run_id: str) -> dict[str, Any]:
-        return self._runtime.get_run(run_id)
+        return _run_with_replay_events(self._runtime.get_run(run_id), self._runtime)
 
     def rerun_run(self, run_id: str) -> dict[str, Any]:
         return self._runtime.rerun_run(run_id)
@@ -548,6 +549,57 @@ class LegacyStudioPort:
 
 def _chat_task_payload(run: dict[str, Any], *, conversation_id: str = "") -> dict[str, Any]:
     return _LEGACY_RUN_PROJECTOR.chat_task_payload(run, conversation_id=conversation_id)
+
+
+def _run_with_replay_events(run: dict[str, Any], runtime: Any) -> dict[str, Any]:
+    run_id = str(run.get("run_id") or "").strip()
+    list_run_events = getattr(runtime, "list_run_events", None)
+    if not run_id or not callable(list_run_events):
+        return run
+    try:
+        events_payload = list_run_events(run_id, limit=500)
+    except Exception:
+        return run
+    events = events_payload.get("events") if isinstance(events_payload, dict) else None
+    if not isinstance(events, list) or not events:
+        return run
+    replay_events = [dict(event) for event in events if isinstance(event, dict)]
+    legacy_events = _legacy_run_events(run)
+    if not legacy_events:
+        return {**run, "events": replay_events}
+
+    enriched_events = list(legacy_events)
+    existing_keys = {_event_identity(event) for event in enriched_events}
+    for event in replay_events:
+        if not _is_memory_or_skill_event(event):
+            continue
+        event_key = _event_identity(event)
+        if event_key in existing_keys:
+            continue
+        enriched_events.append(event)
+        existing_keys.add(event_key)
+    if len(enriched_events) == len(legacy_events):
+        return run
+    return {**run, "events": enriched_events}
+
+
+def _legacy_run_events(run: dict[str, Any]) -> list[dict[str, Any]]:
+    for key in ("events", "run_events", "timeline"):
+        value = run.get(key)
+        if isinstance(value, list) and value:
+            return [dict(event) for event in value if isinstance(event, dict)]
+    return []
+
+
+def _is_memory_or_skill_event(event: dict[str, Any]) -> bool:
+    event_type = str(event.get("event_type") or event.get("event") or "")
+    return event_type.startswith("memory.") or event_type.startswith("skill.")
+
+
+def _event_identity(event: dict[str, Any]) -> tuple[str, str]:
+    event_type = str(event.get("event_type") or event.get("event") or "")
+    payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+    return (event_type, json.dumps(payload, sort_keys=True, default=str))
 
 
 def _run_event_page_from_legacy_stream(

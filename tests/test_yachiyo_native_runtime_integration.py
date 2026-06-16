@@ -128,6 +128,123 @@ def test_chat_task_and_studio_timeline_share_native_runtime_snapshot(tmp_path) -
         runtime.close()
 
 
+def test_agent_studio_timeline_projects_native_memory_and_skill_trace_events(tmp_path) -> None:
+    credential_store = MemoryCredentialStore()
+    runtime = NativeRunEngine(
+        db_path=tmp_path / "agent-runtime-memory-skill.db",
+        workspace_dir=tmp_path / "runtime-memory-skill",
+        credential_store=credential_store,
+        seed_templates=False,
+    )
+    try:
+        run_group = runtime._insert_run_group(
+            title="Native memory skill trace",
+            source="agent_group",
+            workspace_dir=str(tmp_path / "memory-skill-workspace"),
+        )
+        run = runtime._insert_run(
+            kind="agent_run",
+            runnable_id="agent-researcher",
+            user_goal="Gather context",
+            run_group_id=run_group["run_group_id"],
+        )
+        runtime._update_run(
+            run["run_id"],
+            status="completed",
+            result="Context gathered",
+        )
+        runtime.append_run_event(
+            run["run_id"],
+            "memory.retrieved",
+            {
+                "count": 1,
+                "group_id": "group-memory-skill",
+                "group_run_id": run_group["run_group_id"],
+                "memories": [
+                    {
+                        "memory_id": "memory-native-1",
+                        "kind": "preference",
+                        "scope": "global",
+                    }
+                ],
+                "member_agent_id": "agent-researcher",
+                "member_agent_name": "Researcher",
+                "workflow_id": "workflow-memory-skill",
+                "workflow_run_id": "workflow-run-memory-skill",
+                "workflow_node_id": "retrieve-context",
+                "workflow_node_label": "Retrieve Context",
+            },
+        )
+        runtime.append_run_event(
+            run["run_id"],
+            "skill.dispatch.read",
+            {
+                "group_id": "group-memory-skill",
+                "group_run_id": run_group["run_group_id"],
+                "member_agent_id": "agent-researcher",
+                "member_agent_name": "Researcher",
+                "tool": "skill.read",
+                "status": "completed",
+                "workflow_id": "workflow-memory-skill",
+                "workflow_run_id": "workflow-run-memory-skill",
+                "workflow_node_id": "read-skill",
+                "workflow_node_label": "Read Skill",
+                "result": {
+                    "skill_id": "skill-native-1",
+                    "name": "Native Trace Skill",
+                    "description": "Reads project context",
+                    "source_ref": "skills/native-trace/SKILL.md",
+                    "source_type": "local_dir",
+                },
+            },
+        )
+
+        studio = AgentStudioService(LegacyStudioPort(runtime))
+
+        timeline = studio.get_run_timeline(run["run_id"])
+        events = list(studio.get_run_event_stream(run["run_id"]))
+        page = studio.get_run_event_page(run["run_id"], limit=3)
+
+        assert [event.event_type for event in events] == [
+            "memory.retrieved",
+            "skill.dispatch.read",
+            "skill.selected",
+        ]
+        assert [event.event_type for event in page.events] == [
+            "memory.retrieved",
+            "skill.dispatch.read",
+            "skill.selected",
+        ]
+        assert timeline.memory_traces[0].memory_id == "memory-native-1"
+        assert timeline.memory_traces[0].memory_kind == "preference"
+        assert timeline.memory_traces[0].memory_scope == "global"
+        assert timeline.memory_traces[0].count == 1
+        assert timeline.memory_traces[0].source_runnable_id == "agent-researcher"
+        assert timeline.memory_traces[0].source_runnable_name == "Researcher"
+        assert timeline.memory_traces[0].workflow_id == "workflow-memory-skill"
+        assert timeline.memory_traces[0].workflow_run_id == "workflow-run-memory-skill"
+        assert timeline.memory_traces[0].workflow_node_id == "retrieve-context"
+        assert timeline.memory_traces[0].workflow_node_label == "Retrieve Context"
+        assert timeline.memory_traces[0].group_id == "group-memory-skill"
+        assert timeline.memory_traces[0].group_run_id == run_group["run_group_id"]
+        assert [trace.event_type for trace in timeline.skill_traces] == [
+            "skill.dispatch.read",
+            "skill.selected",
+        ]
+        assert timeline.skill_traces[0].skill_id == "skill-native-1"
+        assert timeline.skill_traces[0].skill_name == "Native Trace Skill"
+        assert timeline.skill_traces[0].source_ref == "skills/native-trace/SKILL.md"
+        assert timeline.skill_traces[0].source_type == "local_dir"
+        assert timeline.skill_traces[0].source_runnable_id == "agent-researcher"
+        assert timeline.skill_traces[0].group_id == "group-memory-skill"
+        assert timeline.skill_traces[0].group_run_id == run_group["run_group_id"]
+        assert timeline.skill_traces[0].tool_name == "skill.read"
+        assert timeline.skill_traces[0].workflow_node_id == "read-skill"
+        assert timeline.skill_traces[1].skill_id == "skill-native-1"
+    finally:
+        runtime.close()
+
+
 def test_agent_studio_group_run_uses_native_run_group_events_and_children(tmp_path) -> None:
     credential_store = MemoryCredentialStore()
     runtime = NativeRunEngine(
