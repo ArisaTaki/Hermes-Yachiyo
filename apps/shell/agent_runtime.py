@@ -181,6 +181,7 @@ from apps.shell.agent.runtime.model_calling import (
     openai_compatible_chat as _runtime_openai_compatible_chat,
 )
 from apps.shell.agent.runtime.model_profiles import RuntimeAgentModelTester, RuntimeModelProfileResolver
+from apps.shell.agent.runtime.model_facade import RuntimeModelFacadeMixin
 from apps.shell.agent.runtime.model_messages import (
     RESPONSES_STREAM_REASONING_EVENTS as _RESPONSES_STREAM_REASONING_EVENTS,
     ModelOutputText as _ModelOutputText,
@@ -469,6 +470,7 @@ class NativeRunEngine(
     RuntimeRunFacadeMixin,
     RuntimeAgentFacadeMixin,
     RuntimeToolFacadeMixin,
+    RuntimeModelFacadeMixin,
 ):
     """Persistent native agent execution engine shared by product entry points.
 
@@ -1464,15 +1466,6 @@ class NativeRunEngine(
         self.runtime_shutdown = shutdown
 
     @staticmethod
-    def _validate_available_profile(profile_id: str, capability: str) -> dict[str, Any]:
-        return RuntimeModelProfileResolver(
-            profile_service_factory=lambda: get_model_profile_service(),
-            supports_openai_compatible_api=supports_openai_compatible_api,
-            default_agent_ids=_DEFAULT_AGENT_IDS,
-            error_type=AgentRuntimeError,
-        ).validate_available_profile(profile_id, capability)
-
-    @staticmethod
     def _timeline(event: str, detail: str = "", **extra: Any) -> dict[str, Any]:
         return _runtime_timeline_event(
             event,
@@ -1494,31 +1487,6 @@ class NativeRunEngine(
 
     def _limit_tool_result(self, result: dict[str, Any]) -> dict[str, Any]:
         return _runtime_limit_tool_result(result, limits=self.runtime_limits, redact_json_value=_redact_json_value)
-
-    @staticmethod
-    def _model_profile_config_private(profile_id: str, *, capability: str) -> dict[str, Any]:
-        return RuntimeModelProfileResolver(
-            profile_service_factory=lambda: get_model_profile_service(),
-            supports_openai_compatible_api=supports_openai_compatible_api,
-            default_agent_ids=_DEFAULT_AGENT_IDS,
-            error_type=AgentRuntimeError,
-        ).model_profile_config_private(profile_id, capability=capability)
-
-    @staticmethod
-    def _chat_profile_model_config_private(profile_id: str) -> dict[str, Any]:
-        return NativeRunEngine._model_profile_config_private(profile_id, capability="chat")
-
-    def _agent_model_config_private(self, agent: dict[str, Any]) -> dict[str, Any]:
-        return self.model_profile_resolver.agent_model_config_private(agent)
-
-    @staticmethod
-    def _openai_compatible_chat(base_url: str, model: str, api_key: str, messages: list[dict[str, str]]) -> str:
-        return _legacy_openai_compatible_chat_adapter.call(
-            base_url,
-            model,
-            api_key,
-            messages,
-        )
 
     def create_workflow_run(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self.workflow_run_coordinator.create_sync(payload)
