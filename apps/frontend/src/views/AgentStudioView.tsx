@@ -25,14 +25,13 @@ import { emptyAgentDraft, useAgentStudioLocalState } from '../features/agent-stu
 import { useAgentStudioLoadLifecycle } from '../features/agent-studio/hooks/useAgentStudioLoadLifecycle';
 import { useAgentStudioModelProfiles } from '../features/agent-studio/hooks/useAgentStudioModelProfiles';
 import { useAgentStudioRefresh } from '../features/agent-studio/hooks/useAgentStudioRefresh';
+import { useAgentStudioRunApprovalControls } from '../features/agent-studio/hooks/useAgentStudioRunApprovalControls';
 import { useAgentStudioRunDebugControls } from '../features/agent-studio/hooks/useAgentStudioRunDebugControls';
 import { useAgentStudioRunSnapshots } from '../features/agent-studio/hooks/useAgentStudioRunSnapshots';
 import { useAgentStudioRouteState } from '../features/agent-studio/hooks/useAgentStudioRouteState';
 import { useAgentStudioSelectionSynchronization } from '../features/agent-studio/hooks/useAgentStudioSelectionSynchronization';
 import { useAgentStudioTabActions } from '../features/agent-studio/hooks/useAgentStudioTabActions';
 import { useApprovedRunGuard } from '../features/agent-studio/hooks/useApprovedRunGuard';
-import { useRunApprovalActions } from '../features/agent-studio/hooks/useRunApprovalActions';
-import { useRunApprovalFollowup } from '../features/agent-studio/hooks/useRunApprovalFollowup';
 import { useRunArtifactActions } from '../features/agent-studio/hooks/useRunArtifactActions';
 import { useRunCacheActions } from '../features/agent-studio/hooks/useRunCacheActions';
 import { useRunDetailSynchronization } from '../features/agent-studio/hooks/useRunDetailSynchronization';
@@ -654,34 +653,20 @@ export function AgentStudioView() {
   });
 
   const {
-    approvalFollowupRefreshOptions,
-    isApprovalFollowupCurrent,
-    pollApprovedRunProgress,
-  } = useRunApprovalFollowup({
-    acceptedRunUpdates,
-    refresh,
-    refreshRunGroupsForRuns,
-    selectedRunId,
-    setStatus,
-    upsertRunDetailCache,
-  });
-
-  const {
     approveRunById,
     approveSelectedRun,
     cancelRunById,
     cancelSelectedRun,
     rejectRunById,
     rejectSelectedRun,
-  } = useRunApprovalActions({
-    approvalFollowupRefreshOptions,
-    isApprovalFollowupCurrent,
-    pollApprovedRunProgress,
+  } = useAgentStudioRunApprovalControls({
+    acceptedRunUpdates,
     refresh,
     refreshRunGroupsForRuns,
     rememberApprovedRun,
     runById,
     selectedRun,
+    selectedRunId,
     setError,
     setSelectedRunId,
     setStatus,

@@ -1473,14 +1473,13 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "useAgentStudioLoadLifecycle({",
             "useAgentStudioRefresh({",
             "useAgentStudioRouteState()",
+            "useAgentStudioRunApprovalControls({",
             "useAgentStudioRunDebugControls({",
             "useAgentStudioRunSnapshots({",
             "useAgentStudioSelectionSynchronization({",
             "useAgentStudioTabActions({",
             "useApprovedRunGuard",
-            "useRunApprovalActions",
             "useRunDetailSynchronization({",
-            "useRunApprovalFollowup",
             "useRunListDerivedState({",
             "useRunTargetReadiness({",
             "useWorkflowDefinitions",
@@ -1787,6 +1786,17 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "const cancelRunById = useCallback(async (",
             "const run = publicRunTimelineToRunSpec(await cancelYachiyoRun(runId));",
             "statusMessage: nextSelectedRunId ? '已取消子 Run，Workflow 已终止。' : 'Run 已取消。'",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useAgentStudioRunApprovalControls.ts",
+        [
+            "export function useAgentStudioRunApprovalControls",
+            "useRunApprovalFollowup({",
+            "useRunApprovalActions({",
+            "approvalFollowupRefreshOptions",
+            "isApprovalFollowupCurrent",
+            "pollApprovedRunProgress",
         ],
     )
     _assert_contains(
@@ -3332,9 +3342,9 @@ def test_chat_approval_run_detail_handoff_preserves_route_and_replay_wiring() ->
         "apps/frontend/src/views/AgentStudioView.tsx",
         [
             "useAgentStudioRouteState()",
+            "useAgentStudioRunApprovalControls({",
             "useAgentStudioRunSnapshots({",
             "useRunDetailSynchronization({",
-            "useRunApprovalFollowup({",
             "selectedRunExecutionEvents",
         ],
     )
@@ -3835,6 +3845,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "useAgentStudioLoadLifecycle",
             "useAgentStudioRefresh",
             "useAgentStudioRouteState",
+            "useAgentStudioRunApprovalControls",
             "useAgentStudioRunDebugControls",
             "useAgentStudioRunSnapshots",
             "useAgentStudioSelectionSynchronization",
@@ -3843,7 +3854,6 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "useAgentSaveActions",
             "useAgentSkillMountActions",
             "useRunCacheActions",
-            "useRunApprovalActions",
             "useRunDetailSynchronization",
             "useRunArtifactActions",
             "useRunHistoryManagement",
@@ -5505,7 +5515,7 @@ def test_agent_studio_preserves_workflow_child_approval_refresh_wiring() -> None
     _assert_contains(
         "apps/frontend/src/views/AgentStudioView.tsx",
         [
-            "useRunApprovalActions({",
+            "useAgentStudioRunApprovalControls({",
             "onApproveRunById={approveRunById}",
             "onRejectRunById={rejectRunById}",
             "onCancelRunById={cancelRunById}",
@@ -5566,7 +5576,7 @@ def test_agent_studio_preserves_workflow_child_approval_run_detail_wiring() -> N
             "selectedWorkflowApprovalChildRunId",
             "selectedWorkflowApprovalChildRunId,",
             "useRunDetailSynchronization({",
-            "useRunApprovalActions({",
+            "useAgentStudioRunApprovalControls({",
             "onApproveRunById={approveRunById}",
             "onRejectRunById={rejectRunById}",
             "onCancelRunById={cancelRunById}",
