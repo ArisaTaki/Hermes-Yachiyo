@@ -773,6 +773,7 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "return studioRunUrl(yachiyoTaskRunId(task)) || '';",
             "runIdFromStudioUrl(task.open_in_studio_url)",
             "groupRunIdFromStudioUrl(task.open_in_studio_url)",
+            "messageGroupRunId(message)",
             "return groupRunIdFromStudioUrl(yachiyoTaskStudioUrl(task));",
             "function messageGroupRunId",
         ],

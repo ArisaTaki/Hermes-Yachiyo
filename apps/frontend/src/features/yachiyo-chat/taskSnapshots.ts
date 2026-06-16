@@ -111,6 +111,7 @@ export function publicTaskSnapshotForMessage(
     message.metadata?.delegated_run_source_task_id,
     message.metadata?.workflow_waiting_child_run_id,
     messageRunId(message),
+    messageGroupRunId(message),
   ]);
   for (const key of keys) {
     const snapshot = snapshotsById[key];
