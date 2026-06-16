@@ -53,6 +53,28 @@ def test_legacy_runtime_port_resolves_task_link_for_approval_actions() -> None:
     assert ("get_task_run_link", "task-1") in runtime.calls
 
 
+def test_legacy_runtime_port_resolves_task_link_for_timeline() -> None:
+    runtime = _FakeRuntime()
+    port = LegacyRuntimePort(runtime)
+    port.start_chat_task(
+        {
+            "prompt": "Patch README",
+            "conversation_id": "chat-1",
+            "client_task_id": "task-1",
+        }
+    )
+
+    timeline = port.get_task_timeline("task-1")
+
+    assert timeline["run_id"] == "run-1"
+    assert timeline["task_id"] == "task-1"
+    assert timeline["session_id"] == "chat-1"
+    assert timeline["task_run_link_run_status"] == "running"
+    assert timeline["task_run_link_last_event_sequence"] == 1
+    assert timeline["timeline"][0]["event"] == "run.started"
+    assert ("get_task_run_link", "task-1") in runtime.calls
+
+
 class _FakeRuntime:
     def __init__(self) -> None:
         self.calls: list[tuple[str, Any]] = []

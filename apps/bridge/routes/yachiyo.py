@@ -78,6 +78,15 @@ async def get_task(task_id: str, http_request: Request = None) -> dict[str, Any]
     return await yachiyo_chat_handlers.get_task(task_id, http_request)
 
 
+@router.get("/tasks/{task_id}/timeline")
+@router.get("/chat/tasks/{task_id}/timeline")
+async def get_task_timeline(
+    task_id: str,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    return await yachiyo_chat_handlers.get_task_timeline(task_id, http_request)
+
+
 @router.post("/tasks/{task_id}/approve")
 @router.post("/chat/tasks/{task_id}/approve")
 async def approve_task(

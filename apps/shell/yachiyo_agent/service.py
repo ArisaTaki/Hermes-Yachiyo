@@ -11,9 +11,11 @@ from .contracts import (
     ApprovalDecision,
     ChatRunnableCatalogSnapshot,
     ReadinessSnapshot,
+    RunTimelineSnapshot,
     StartChatTaskRequest,
 )
 from .ports import ChatTaskStarter, RuntimePort
+from .run_snapshots import run_timeline_snapshot_from_payload
 from .task_cards import agent_task_snapshot_from_payload, agent_task_snapshots_from_payloads
 from .workflows import workflow_snapshot_from_payload
 
@@ -58,6 +60,9 @@ class YachiyoAgentService:
 
     def get_task_snapshot(self, task_id: str) -> AgentTaskSnapshot:
         return agent_task_snapshot_from_payload(self._runtime_port.get_task_snapshot(task_id))
+
+    def get_task_timeline(self, task_id: str) -> RunTimelineSnapshot:
+        return run_timeline_snapshot_from_payload(self._runtime_port.get_task_timeline(task_id))
 
     def list_recent_tasks(self, conversation_id: str | None = None) -> list[AgentTaskSnapshot]:
         return agent_task_snapshots_from_payloads(

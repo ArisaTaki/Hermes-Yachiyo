@@ -2,6 +2,7 @@ import { apiGet, apiPost } from '../../lib/bridge';
 import type {
   AgentTaskSnapshot,
   ChatRunnableCatalogSnapshot,
+  RunTimelineSnapshot,
   StartChatTaskRequest,
   YachiyoReadinessSnapshot,
 } from './types';
@@ -22,6 +23,10 @@ export async function startYachiyoTask(request: StartChatTaskRequest): Promise<A
 
 export async function getYachiyoTask(taskId: string): Promise<AgentTaskSnapshot> {
   return apiGet(`/yachiyo/tasks/${encodeURIComponent(taskId)}`);
+}
+
+export async function getYachiyoTaskTimeline(taskId: string): Promise<RunTimelineSnapshot> {
+  return apiGet(`/yachiyo/tasks/${encodeURIComponent(taskId)}/timeline`);
 }
 
 export async function listYachiyoChatRunnableCatalog(): Promise<ChatRunnableCatalogSnapshot> {

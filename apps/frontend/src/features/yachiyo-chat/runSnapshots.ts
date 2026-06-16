@@ -1,6 +1,7 @@
 import {
   approveYachiyoChatRunApproval,
   getYachiyoChatRunTaskSnapshot,
+  getYachiyoTaskTimeline,
   rejectYachiyoChatRunApproval,
 } from './api';
 import type { ChatApprovalPending, ChatApprovalRun } from './approvalItems';
@@ -8,7 +9,11 @@ import { yachiyoTaskRunId } from './taskSnapshots';
 import type { AgentTaskSnapshot, ApprovalCardSnapshot, RunTimelineSnapshot } from './types';
 
 export async function getChatRunSnapshot(runId: string): Promise<ChatApprovalRun> {
-  return chatRunSnapshotFromTaskSnapshot(await getYachiyoChatRunTaskSnapshot(runId));
+  try {
+    return chatRunSnapshotFromTimeline(await getYachiyoTaskTimeline(runId));
+  } catch {
+    return chatRunSnapshotFromTaskSnapshot(await getYachiyoChatRunTaskSnapshot(runId));
+  }
 }
 
 export async function approveChatRunApproval(runId: string): Promise<ChatApprovalRun> {

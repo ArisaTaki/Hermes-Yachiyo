@@ -58,6 +58,20 @@ async def get_task(
         raise HTTPException(status_code=404, detail="Task 不存在") from exc
 
 
+async def get_task_timeline(
+    task_id: str,
+    http_request: Request | None = None,
+) -> dict[str, Any]:
+    try:
+        task_timeline = await asyncio.to_thread(
+            agent_service(http_request).get_task_timeline,
+            task_id,
+        )
+        return snapshot(task_timeline)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Task 不存在") from exc
+
+
 async def approve_task(
     task_id: str,
     request: TaskApprovalRequest | None = None,

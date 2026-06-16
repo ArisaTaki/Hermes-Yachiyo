@@ -55,6 +55,24 @@ class _FakeRuntimePort:
         self.calls.append(("get_task_snapshot", task_id))
         return _task_payload(task_id=task_id, status="completed", result="Done")
 
+    def get_task_timeline(self, task_id: str) -> dict[str, Any]:
+        self.calls.append(("get_task_timeline", task_id))
+        return _task_payload(
+            task_id=task_id,
+            status="approval_required",
+            pending_approval={
+                "approval_id": "approval-1",
+                "tool": "workspace.write_patch",
+            },
+            timeline=[
+                {
+                    "event": "agent.tool.approval_required",
+                    "detail": "workspace.write_patch",
+                },
+                {"event": "tool.approval_required", "tool": "workspace.write_patch"},
+            ],
+        )
+
     def list_recent_tasks(self, conversation_id: str | None = None) -> list[dict[str, Any]]:
         self.calls.append(("list_recent_tasks", conversation_id))
         return [_task_payload(task_id="task-recent", status="running")]
@@ -124,6 +142,22 @@ def test_yachiyo_agent_service_maps_chat_runnable_catalog() -> None:
     assert catalog.workflows[0].workflow_id == "workflow-1"
     assert catalog.workflows[0].nodes == [{"id": "review", "type": "agent"}]
     assert port.calls == [("list_runnable_catalog", None)]
+
+
+def test_yachiyo_agent_service_maps_task_timeline_snapshot() -> None:
+    port = _FakeRuntimePort()
+    service = YachiyoAgentService(port)
+
+    timeline = service.get_task_timeline("task-1")
+
+    assert timeline.run_id == "run-1"
+    assert timeline.task_id == "task-1"
+    assert timeline.status == "approval_required"
+    assert timeline.events[0].event_type == "agent.tool.approval_required"
+    assert timeline.pending_approval is not None
+    assert timeline.pending_approval.tool_name == "workspace.write_patch"
+    assert timeline.tool_calls[0].tool_name == "workspace.write_patch"
+    assert port.calls == [("get_task_timeline", "task-1")]
 
 
 def test_yachiyo_agent_service_prefers_chat_backed_starter_when_available() -> None:
