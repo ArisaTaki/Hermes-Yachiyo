@@ -4417,6 +4417,8 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "function isToolRunEvent(eventType: string): boolean",
             "function toolStatusFromRunEvent(eventType: string): string",
             "function toolCallStatusIsTerminal(status: string): boolean",
+            "eventType === 'agent.tool.approval_timeout' || eventType === 'approval.timeout' || eventType === 'tool.approval_timeout'",
+            "return ['completed', 'failed', 'denied', 'skipped', 'expired'].includes(status);",
             "function stableJson(value: unknown): string",
             "function stableJsonValue(value: unknown): unknown",
             "export function artifactsFromRunEventReplay(events: PublicRunEvent[])",
@@ -4442,7 +4444,19 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "group_run_id: publicRunEventPayloadString(source, 'group_run_id')",
             "source_tool: publicRunEventPayloadString(artifactPayload, 'source_tool')",
             "group_run_id: publicRunEventPayloadString(artifactPayload, 'group_run_id')",
+            "eventType.includes('approval_timeout') || eventType === 'approval.timeout'",
             "['approval.approved', 'approval.rejected', 'approval.timeout', 'tool.approved', 'tool.rejected'].includes(eventType)",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/runtime-shared/components/RuntimeToolCallSummary.tsx",
+        [
+            "'agent.tool.approval_timeout'",
+            "'tool.approval_timeout'",
+            "'approval.timeout'",
+            "return 'expired';",
+            "'expired',",
+            "if (status === 'expired') return '已超时';",
         ],
     )
 

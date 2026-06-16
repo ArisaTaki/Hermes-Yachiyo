@@ -883,6 +883,49 @@ def test_run_timeline_projects_approval_timeout_as_expired_card() -> None:
     assert timeline.approvals[0].status == "expired"
     assert timeline.approvals[0].description == "approval_wait_timeout"
     assert timeline.approvals[0].resolved_at == "2026-06-15T00:00:01Z"
+    assert len(timeline.tool_calls) == 1
+    assert timeline.tool_calls[0].tool_name == "terminal.run"
+    assert timeline.tool_calls[0].status == "expired"
+    assert timeline.tool_calls[0].input_preview == {
+        "command": "npm test",
+        "approval_id": "approval-timeout",
+    }
+    assert timeline.tool_calls[0].completed_at == "2026-06-15T00:00:01Z"
+
+
+def test_run_timeline_projects_legacy_approval_timeout_aliases_as_expired_tool_calls() -> None:
+    timeline = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "run-approval-timeout-alias",
+            "status": "cancelled",
+            "events": [
+                {
+                    "event_type": "agent.tool.approval_required",
+                    "payload": {
+                        "approval_id": "approval-timeout-alias",
+                        "tool": "terminal.run",
+                        "input_preview": {"command": "npm test"},
+                    },
+                },
+                {
+                    "event_type": "agent.tool.approval_timeout",
+                    "payload": {
+                        "tool": "terminal.run",
+                        "input_preview": {"command": "npm test"},
+                        "reason": "approval_wait_timeout",
+                    },
+                    "created_at": "2026-06-15T00:00:01Z",
+                },
+            ],
+        }
+    )
+
+    assert len(timeline.approvals) == 1
+    assert timeline.approvals[0].approval_id == "approval-timeout-alias"
+    assert timeline.approvals[0].status == "expired"
+    assert len(timeline.tool_calls) == 1
+    assert timeline.tool_calls[0].tool_name == "terminal.run"
+    assert timeline.tool_calls[0].status == "expired"
 
 
 def test_run_timeline_merges_minimal_approval_resolution_with_pending_card() -> None:

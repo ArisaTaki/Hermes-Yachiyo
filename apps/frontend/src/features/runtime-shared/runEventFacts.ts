@@ -480,7 +480,7 @@ function isApprovalRunEvent(eventType: string): boolean {
 function approvalStatusFromRunEvent(eventType: string): ApprovalCardSnapshot['status'] {
   if (eventType.includes('approval_approved') || eventType === 'approval.approved' || eventType === 'tool.approved') return 'approved';
   if (eventType.includes('approval_rejected') || eventType === 'approval.rejected' || eventType === 'tool.rejected') return 'rejected';
-  if (eventType === 'approval.timeout') return 'expired';
+  if (eventType.includes('approval_timeout') || eventType === 'approval.timeout') return 'expired';
   return 'pending';
 }
 
@@ -511,11 +511,14 @@ function isToolRunEvent(eventType: string): boolean {
     'agent.tool.approval_required',
     'agent.tool.approval_approved',
     'agent.tool.approval_rejected',
+    'agent.tool.approval_timeout',
     'agent.tool.completed',
+    'approval.timeout',
     'tool.approved',
     'tool.requested',
     'tool.started',
     'tool.approval_required',
+    'tool.approval_timeout',
     'tool.rejected',
     'tool.completed',
     'tool.failed',
@@ -528,13 +531,14 @@ function toolStatusFromRunEvent(eventType: string): string {
   if (eventType === 'tool.approval_required' || eventType === 'agent.tool.approval_required') return 'waiting_approval';
   if (eventType === 'agent.tool.approval_approved' || eventType === 'tool.approved') return 'approved';
   if (eventType === 'agent.tool.approval_rejected' || eventType === 'agent.tool.denied' || eventType === 'tool.rejected') return 'denied';
+  if (eventType === 'agent.tool.approval_timeout' || eventType === 'approval.timeout' || eventType === 'tool.approval_timeout') return 'expired';
   if (eventType === 'tool.failed' || eventType === 'agent.tool.failed') return 'failed';
   if (eventType === 'agent.tool.skipped') return 'skipped';
   return 'completed';
 }
 
 function toolCallStatusIsTerminal(status: string): boolean {
-  return ['completed', 'failed', 'denied', 'skipped'].includes(status);
+  return ['completed', 'failed', 'denied', 'skipped', 'expired'].includes(status);
 }
 
 function toolCallCorrelationKey(event: PublicRunEvent, toolCall: ToolCallSnapshot): string {

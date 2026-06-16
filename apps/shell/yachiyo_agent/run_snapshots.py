@@ -1180,7 +1180,7 @@ def _tool_call_correlation_preview(preview: Mapping[str, Any]) -> dict[str, Any]
 
 
 def _tool_call_status_is_terminal(status: str) -> bool:
-    return status in {"completed", "failed", "denied", "skipped"}
+    return status in {"completed", "failed", "denied", "skipped", "expired"}
 
 
 def _stable_json(value: Any) -> str:
@@ -1250,11 +1250,14 @@ def _is_tool_event(event_type: str) -> bool:
         "agent.tool.approval_required",
         "agent.tool.approval_approved",
         "agent.tool.approval_rejected",
+        "agent.tool.approval_timeout",
         "agent.tool.completed",
+        "approval.timeout",
         "tool.approved",
         "tool.requested",
         "tool.started",
         "tool.approval_required",
+        "tool.approval_timeout",
         "tool.rejected",
         "tool.completed",
         "tool.failed",
@@ -1281,6 +1284,8 @@ def _tool_status_from_event_type(event_type: str) -> str:
         return "approved"
     if event_type in {"agent.tool.approval_rejected", "agent.tool.denied", "tool.rejected"}:
         return "denied"
+    if event_type in {"agent.tool.approval_timeout", "approval.timeout", "tool.approval_timeout"}:
+        return "expired"
     if event_type in {"tool.completed", "agent.tool.call", "agent.tool.completed"}:
         return "completed"
     if event_type in {"tool.failed", "agent.tool.failed"}:

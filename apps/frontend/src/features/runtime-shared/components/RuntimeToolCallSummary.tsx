@@ -17,10 +17,13 @@ const TOOL_EVENT_TYPES = new Set([
   'agent.tool.approval_required',
   'agent.tool.approval_approved',
   'agent.tool.approval_rejected',
+  'agent.tool.approval_timeout',
+  'approval.timeout',
   'tool.approved',
   'tool.requested',
   'tool.started',
   'tool.approval_required',
+  'tool.approval_timeout',
   'tool.rejected',
   'tool.completed',
   'agent.tool.completed',
@@ -150,6 +153,13 @@ function runtimeToolStatusFromEvent(event: PublicRunEvent): string {
   if (eventType === 'agent.tool.approval_approved' || eventType === 'tool.approved') return 'approved';
   if (eventType === 'agent.tool.approval_rejected' || eventType === 'tool.rejected') return 'denied';
   if (
+    eventType === 'agent.tool.approval_timeout' ||
+    eventType === 'approval.timeout' ||
+    eventType === 'tool.approval_timeout'
+  ) {
+    return 'expired';
+  }
+  if (
     eventType === 'agent.tool.call' ||
     eventType === 'agent.tool.completed' ||
     eventType === 'tool.completed' ||
@@ -179,6 +189,7 @@ function normalizeRuntimeToolStatus(status: string): string {
     'failed',
     'denied',
     'skipped',
+    'expired',
   ];
   if (knownStatuses.includes(status)) {
     return status;
@@ -207,6 +218,7 @@ function runtimeToolStatusLabel(status: string): string {
   if (status === 'failed') return '失败';
   if (status === 'denied') return '已拒绝';
   if (status === 'skipped') return '已跳过';
+  if (status === 'expired') return '已超时';
   return status || '工具';
 }
 
