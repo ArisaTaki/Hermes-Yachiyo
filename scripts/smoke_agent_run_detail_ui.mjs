@@ -542,8 +542,55 @@ const runEvents = [
     payload: { tool: 'workspace.read', path: 'README.md' },
     created_at: now,
   },
-  ...Array.from({ length: 198 }, (_, index) => {
-    const sequence = index + 3;
+  {
+    event_id: 'event-run-detail-smoke-3',
+    run_id: RUN_ID,
+    sequence: 3,
+    schema_version: 1,
+    event_type: 'memory.retrieved',
+    actor: 'runtime',
+    visibility: 'user',
+    sensitivity: 'normal',
+    payload: {
+      count: 1,
+      group_run_id: RUN_GROUP_ID,
+      member_agent_id: 'agent-run-detail-smoke',
+      memories: [{
+        memory_id: 'memory-run-detail-smoke',
+        kind: 'preference',
+        scope: 'global',
+        content: 'Run Detail smoke preference memory',
+      }],
+      status: 'completed',
+    },
+    created_at: now,
+  },
+  {
+    event_id: 'event-run-detail-smoke-4',
+    run_id: RUN_ID,
+    sequence: 4,
+    schema_version: 1,
+    event_type: 'skill.dispatch.read',
+    actor: 'runtime',
+    visibility: 'user',
+    sensitivity: 'normal',
+    payload: {
+      group_run_id: RUN_GROUP_ID,
+      member_agent_id: 'agent-run-detail-smoke',
+      status: 'completed',
+      tool: 'skill.read',
+      result: {
+        skill_id: 'skill-run-detail-smoke',
+        name: 'Run Detail Smoke Skill',
+        description: 'Loads smoke skill instructions',
+        source_ref: 'skills/run-detail-smoke/SKILL.md',
+        source_type: 'native',
+      },
+    },
+    created_at: now,
+  },
+  ...Array.from({ length: 196 }, (_, index) => {
+    const sequence = index + 5;
     return {
       event_id: `event-run-detail-smoke-${sequence}`,
       run_id: RUN_ID,
@@ -2177,6 +2224,25 @@ async function main() {
   await waitFor(win, () => document.querySelector('[data-testid="agent-run-detail-task"]')?.textContent.includes('Inspect Native RunEvent replay'), 'run task block');
   await waitFor(win, () => document.querySelector('[data-testid="agent-run-detail-result"]')?.textContent.includes('Run Detail UI smoke completed through replay facts'), 'run result block');
   await waitFor(win, () => {
+    const traces = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-memory-skill-trace"]'));
+    const memoryTrace = traces.find((node) => node.getAttribute('data-runtime-trace-kind') === 'memory');
+    const skillTrace = traces.find((node) => node.getAttribute('data-runtime-trace-kind') === 'skill');
+    return document.querySelector('[data-testid="agent-run-detail-memory-skill-traces"]')
+      && memoryTrace?.getAttribute('data-run-event') === 'memory.retrieved'
+      && memoryTrace?.getAttribute('data-run-event-sequence') === '3'
+      && memoryTrace?.getAttribute('data-memory-id') === 'memory-run-detail-smoke'
+      && memoryTrace?.getAttribute('data-group-run-id') === ${JSON.stringify(RUN_GROUP_ID)}
+      && memoryTrace?.textContent.includes('Memory 检索')
+      && memoryTrace?.textContent.includes('Run Detail smoke preference memory')
+      && skillTrace?.getAttribute('data-run-event') === 'skill.dispatch.read'
+      && skillTrace?.getAttribute('data-run-event-sequence') === '4'
+      && skillTrace?.getAttribute('data-skill-id') === 'skill-run-detail-smoke'
+      && skillTrace?.getAttribute('data-member-agent-id') === 'agent-run-detail-smoke'
+      && skillTrace?.textContent.includes('Run Detail Smoke Skill')
+      && skillTrace?.textContent.includes('skills/run-detail-smoke/SKILL.md');
+  }, 'run detail memory skill trace replay');
+  console.log('[electron-smoke] run detail memory skill trace replay verified');
+  await waitFor(win, () => {
     const manage = document.querySelector('[data-testid="agent-run-history-manage"]');
     const rows = Array.from(document.querySelectorAll('[data-testid="agent-run-history-row"]'));
     const approvalOpen = document.querySelector('[data-testid="agent-run-history-row"][data-run-id="${APPROVAL_RUN_ID}"] [data-testid="agent-run-history-open-run"]');
@@ -2256,7 +2322,7 @@ async function main() {
       && sequences[199] === '200'
       && runIds.every((id) => id === ${JSON.stringify(RUN_ID)})
       && toolEvent?.textContent.includes('"path": "README.md"')
-      && modelEvent?.textContent.includes('Replay page smoke event 3')
+      && modelEvent?.textContent.includes('Replay page smoke event 5')
       && document.querySelector('[data-testid="agent-run-detail-load-more-events"]');
   }, 'initial run event replay page');
   console.log('[electron-smoke] initial replay page rendered');

@@ -262,6 +262,16 @@ def test_runtime_memory_and_skill_trace_acceptance_paths_are_guarded() -> None:
             "eventType.startsWith('skill.')",
         ],
     )
+    _assert_smoke_script(
+        "scripts/smoke_agent_run_detail_ui.mjs",
+        [
+            "memory.retrieved",
+            "skill.dispatch.read",
+            'data-testid="agent-run-detail-memory-skill-trace"',
+            "data-runtime-trace-kind",
+            "run detail memory skill trace replay verified",
+        ],
+    )
 
 
 def test_legacy_agents_compatibility_acceptance_path_is_guarded() -> None:
