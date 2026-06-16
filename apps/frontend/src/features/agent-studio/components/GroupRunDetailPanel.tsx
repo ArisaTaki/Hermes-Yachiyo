@@ -1,5 +1,5 @@
 import type { RunGroupSpec, RunSpec } from '../types';
-import type { GroupRunSnapshot, PublicRunEvent } from '../../yachiyo-studio/types';
+import type { GroupRunSnapshot, PublicRunEvent, RunTimelineSnapshot } from '../../yachiyo-studio/types';
 import { RuntimeApprovalCard } from '../../runtime-shared/components/RuntimeApprovalCard';
 import { RuntimeArtifactList } from '../../runtime-shared/components/RuntimeArtifactList';
 import { RuntimeTimelineSummary } from '../../runtime-shared/components/RuntimeTimelineSummary';
@@ -29,6 +29,12 @@ type GroupRunDetailPanelProps = {
   selectedRunGroup: RunGroupSpec | null;
 };
 
+type GroupRunChildRunRef = {
+  loadedRun: RunSpec | null;
+  publicRun: RunTimelineSnapshot | null;
+  runId: string;
+};
+
 export function GroupRunDetailPanel({
   formatRunDate,
   onLoadMoreGroupRunEvents,
@@ -53,9 +59,14 @@ export function GroupRunDetailPanel({
     || selectedGroupRunSnapshot?.run_group_id
     || selectedGroupRunSnapshot?.group_run_id
     || '';
-  const groupOverviewChildRunIds = selectedRunGroup?.child_run_ids?.length
+  const legacyGroupChildRunIds = selectedRunGroup?.child_run_ids?.length
     ? selectedRunGroup.child_run_ids
     : selectedGroupRunSnapshot?.child_run_ids || [];
+  const groupOverviewChildRuns = groupRunChildRunRefs(
+    selectedGroupRunSnapshot?.runs || [],
+    legacyGroupChildRunIds,
+    runById,
+  );
   const groupOverviewStatus = selectedGroupRunSnapshot?.status || selectedRunGroup?.status || 'unknown';
   const groupOverviewTitle = selectedRunGroup?.summary
     || selectedGroupRunSnapshot?.title
@@ -96,7 +107,7 @@ export function GroupRunDetailPanel({
         <div>
           <h4>GroupRun Overview</h4>
           <span>
-            {selectedRunGroup?.source || selectedGroupRunSnapshot?.group_id || 'group'} · {groupOverviewChildRunIds.length} child runs
+            {selectedRunGroup?.source || selectedGroupRunSnapshot?.group_id || 'group'} · {groupOverviewChildRuns.length} child runs
           </span>
         </div>
         <span className={`run-status-pill ${runStatusTone(groupOverviewStatus)}`}>
@@ -204,25 +215,28 @@ export function GroupRunDetailPanel({
       {groupRunFinalAnswer ? (
         <pre data-testid="agent-run-detail-group-run-final-answer">{groupRunFinalAnswer}</pre>
       ) : null}
-      {groupOverviewChildRunIds.length ? (
+      {groupOverviewChildRuns.length ? (
         <div className="run-group-overview-children" data-testid="agent-run-detail-group-run-children">
-          {groupOverviewChildRunIds.map((childRunId) => {
-            const childRun = runById.get(childRunId) || null;
+          {groupOverviewChildRuns.map(({ loadedRun: childRun, publicRun, runId: childRunId }) => {
             const selected = childRunId === selectedRun.run_id;
+            const childStatus = publicRun?.status || childRun?.status || '';
+            const childKind = groupRunChildKind(publicRun, childRun);
             return (
               <button
                 key={childRunId}
                 type="button"
                 className={selected ? 'selected' : ''}
+                data-agent-id={publicRun?.agent_id || childRun?.runnable_id || ''}
                 data-run-id={childRunId}
-                data-run-status={childRun?.status || ''}
+                data-run-status={childStatus}
                 data-testid="agent-run-detail-group-run-child"
+                data-workflow-run-id={publicRun?.workflow_run_id || childRun?.workflow_run_id || ''}
                 onClick={() => onOpenRunDetail(childRunId)}
               >
-                <span>{childRun?.runnable_name || childRun?.runnable_id || childRunId}</span>
+                <span>{publicRun?.title || childRun?.runnable_name || childRun?.runnable_id || childRunId}</span>
                 <small>
                   {selected ? '当前 Run · ' : ''}
-                  {childRun ? `${runKindLabel(childRun.kind)} · ${runStatusLabel(childRun.status)}` : '未加载'}
+                  {groupRunChildMeta(publicRun, childRun, runKindLabel(childKind), runStatusLabel(childStatus))}
                 </small>
               </button>
             );
@@ -231,4 +245,51 @@ export function GroupRunDetailPanel({
       ) : null}
     </section>
   );
+}
+
+function groupRunChildRunRefs(
+  publicRuns: RunTimelineSnapshot[],
+  childRunIds: string[],
+  runById: Map<string, RunSpec>,
+): GroupRunChildRunRef[] {
+  const refs: GroupRunChildRunRef[] = [];
+  const seen = new Set<string>();
+  for (const publicRun of publicRuns) {
+    const runId = publicRun.run_id;
+    if (!runId || seen.has(runId)) continue;
+    seen.add(runId);
+    refs.push({ loadedRun: runById.get(runId) || null, publicRun, runId });
+  }
+  for (const runId of childRunIds) {
+    if (!runId || seen.has(runId)) continue;
+    seen.add(runId);
+    refs.push({ loadedRun: runById.get(runId) || null, publicRun: null, runId });
+  }
+  return refs;
+}
+
+function groupRunChildKind(publicRun: RunTimelineSnapshot | null, childRun: RunSpec | null): string {
+  if (childRun?.kind) return childRun.kind;
+  if (publicRun?.workflow_run_id) return 'workflow_run';
+  if (publicRun?.agent_id) return 'agent_run';
+  return 'run';
+}
+
+function groupRunChildMeta(
+  publicRun: RunTimelineSnapshot | null,
+  childRun: RunSpec | null,
+  kindLabel: string,
+  statusLabel: string,
+): string {
+  return [
+    publicRun || childRun ? `${kindLabel} · ${statusLabel}` : '未加载',
+    publicRun?.agent_id ? `agent ${publicRun.agent_id}` : '',
+    publicRun?.workflow_run_id ? `workflow run ${publicRun.workflow_run_id}` : '',
+    publicRun?.task_id ? `task ${publicRun.task_id}` : '',
+    publicRun?.session_id ? `session ${publicRun.session_id}` : '',
+    publicRun?.events?.length ? `events ${publicRun.events.length}` : '',
+    publicRun?.tool_calls?.length ? `tools ${publicRun.tool_calls.length}` : '',
+    publicRun?.approvals?.length ? `approvals ${publicRun.approvals.length}` : '',
+    publicRun?.artifacts?.length ? `artifacts ${publicRun.artifacts.length}` : '',
+  ].filter(Boolean).join(' · ');
 }
