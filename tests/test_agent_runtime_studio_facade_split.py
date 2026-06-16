@@ -16,6 +16,8 @@ def test_runtime_studio_facade_mixin_remains_exported_from_legacy_module() -> No
     assert "list_agents" not in agent_runtime.NativeRunEngine.__dict__
     assert "list_workflows" not in agent_runtime.NativeRunEngine.__dict__
     assert "list_runs" not in agent_runtime.NativeRunEngine.__dict__
+    assert "sync_native_skills" not in agent_runtime.NativeRunEngine.__dict__
+    assert "install_skill_command" not in agent_runtime.NativeRunEngine.__dict__
 
 
 def test_native_runtime_keeps_studio_facade_methods_available_after_split(tmp_path: Path) -> None:
@@ -46,5 +48,9 @@ def test_native_runtime_keeps_studio_facade_methods_available_after_split(tmp_pa
         assert service.list_runs()["runs"] == []
         assert service.list_run_groups()["run_groups"] == []
         assert service._skill_name("# Facade Skill\n\nDescription", "Fallback") == "Facade Skill"
+        assert service._validated_skill_install_argv("skills@latest add owner/repo")[1] == "npx_skills"
+        assert service._count_skill_files(tmp_path / "missing") == 0
+        synced = service.sync_native_skills(roots=[{"path": str(tmp_path / "missing"), "source_type": "native_global"}])
+        assert synced["summary"] == {"imported": 0, "updated": 0, "skipped": 1, "failed": 0}
     finally:
         service.close()

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 from typing import Any
 
 from apps.shell.agent.runtime.run_readiness import RuntimeRunReadinessValidator
 from apps.shell.agent.runtime.skill_content import SkillContentInspector
+from apps.shell.agent.runtime.skill_install import SkillInstallCommandValidator
+from apps.shell.agent.runtime.skill_sources import SkillSourceDiscovery
 
 
 class RuntimeStudioFacadeMixin:
@@ -65,6 +68,125 @@ class RuntimeStudioFacadeMixin:
 
     def import_skill(self, source_path: str, folder_id: str | None = None) -> dict[str, Any]:
         return self.skill_import_service.import_skill(source_path, folder_id)
+
+    def sync_native_skills(self, roots: list[Any] | None = None) -> dict[str, Any]:
+        return self._sync_skill_roots(self._native_skill_root_specs(roots), library="native")
+
+    def sync_installed_skills(
+        self,
+        *,
+        record_source_type: str = "npx_skills",
+        folder_id: str | None = None,
+        source_ref_override: str = "",
+        restore_deleted: bool = False,
+    ) -> dict[str, Any]:
+        source_type = record_source_type if record_source_type == "npx_skills" else "npx_skills"
+        roots = self._installed_skill_root_specs(
+            source_type=source_type,
+            source_ref_override=source_ref_override,
+        )
+        return self._sync_skill_roots(
+            roots,
+            library="installed",
+            folder_id=folder_id,
+            restore_deleted=restore_deleted,
+        )
+
+    def _sync_skill_roots(
+        self,
+        root_specs: list[dict[str, Any]],
+        *,
+        library: str,
+        folder_id: str | None = None,
+        restore_deleted: bool = False,
+    ) -> dict[str, Any]:
+        return self.skill_sync_service.sync_roots(
+            root_specs,
+            library=library,
+            folder_id=folder_id,
+            restore_deleted=restore_deleted,
+        )
+
+    def install_skill_command(self, command: str, folder_id: str | None = None) -> dict[str, Any]:
+        return self.skill_install_service.install(command, folder_id)
+
+    def _import_skill_root(
+        self,
+        source_root: Path,
+        *,
+        source_path: str,
+        source_type: str,
+        origin_path: str,
+        source_ref: str,
+        sync_status: str,
+        synced_at: str = "",
+        copy_to_managed: bool = True,
+        folder_id: str | None = None,
+    ) -> dict[str, Any]:
+        return self.skill_import_service.import_root(
+            source_root=source_root,
+            source_path=source_path,
+            source_type=source_type,
+            origin_path=origin_path,
+            source_ref=source_ref,
+            sync_status=sync_status,
+            copy_to_managed=copy_to_managed,
+            synced_at=synced_at,
+            folder_id=folder_id,
+        )
+
+    def _find_existing_skill(self, origin_path: str, content_hash: str, source_type: str) -> sqlite3.Row | None:
+        return self.skill_import_service.find_existing(origin_path, content_hash, source_type)
+
+    def _repair_native_skill_references(self) -> None:
+        self.skill_records.repair_native_references()
+
+    def _repair_installed_skill_provenance(self) -> None:
+        self.skill_records.repair_installed_provenance()
+
+    def _native_skill_root_specs(self, roots: list[Any] | None = None) -> list[dict[str, Any]]:
+        return self.skill_sources.native_root_specs(roots)
+
+    def _installed_skill_root_specs(self, *, source_type: str, source_ref_override: str = "") -> list[dict[str, Any]]:
+        return self.skill_sources.installed_root_specs(
+            source_type=source_type,
+            source_ref_override=source_ref_override,
+        )
+
+    def _installed_skill_source_map(self) -> dict[str, str]:
+        return self.skill_sources.installed_source_map()
+
+    @staticmethod
+    def _skill_lock_source_ref(entry: dict[str, Any]) -> str:
+        return SkillSourceDiscovery.skill_lock_source_ref(entry)
+
+    @staticmethod
+    def _infer_native_source_type(path: Path) -> str:
+        return SkillSourceDiscovery.infer_native_source_type(path)
+
+    @staticmethod
+    def _count_skill_files(root: Path) -> int:
+        return SkillSourceDiscovery.count_skill_files(root)
+
+    def _validated_skill_install_argv(self, command: str) -> tuple[list[str], str]:
+        return self.skill_install_validator.validate(command)
+
+    def _skill_install_source_ref(self, argv: list[str], installer: str) -> str:
+        return self.skill_install_validator.source_ref(argv, installer)
+
+    @staticmethod
+    def _metadata_skill_source_ref(metadata: dict[str, Any], fallback: str) -> str:
+        return SkillContentInspector.metadata_source_ref(metadata, fallback)
+
+    def _validated_npx_skills_argv(self, argv: list[str]) -> list[str]:
+        return self.skill_install_validator.validate_npx_skills_argv(argv)
+
+    @staticmethod
+    def _has_agent_target(args: list[str]) -> bool:
+        return SkillInstallCommandValidator.has_agent_target(args)
+
+    def _validate_skill_install_agent_target(self, args: list[str]) -> None:
+        self.skill_install_validator.validate_agent_target(args)
 
     def _normalize_skill_folder_id(self, folder_id: str | None) -> str:
         return self.skill_folders.normalize_id(folder_id)
