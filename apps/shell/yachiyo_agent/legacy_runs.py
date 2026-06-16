@@ -86,13 +86,15 @@ class LegacyRunPayloadProjector:
             *self.run_group_events(run_group),
             *self.group_events_from_child_runs(child_runs, runtime),
         ]
+        event_group_id = _first_event_payload_text(events, "group_id")
+        event_objective = _first_event_payload_text(events, "objective")
         return {
             "run_group_id": run_group_id,
             "group_run_id": run_group_id,
-            "group_id": str(run_group.get("group_id") or ""),
+            "group_id": str(run_group.get("group_id") or event_group_id or ""),
             "title": run_group.get("title") or "Run group",
             "status": run_group.get("status") or "unknown",
-            "objective": run_group.get("summary") or run_group.get("title") or "",
+            "objective": event_objective or run_group.get("summary") or run_group.get("title") or "",
             "events": events,
             "runs": child_runs,
             "child_run_ids": run_group.get("child_run_ids") or [],
@@ -168,3 +170,14 @@ def _event_list_from_payload(
 
 def _event_type(event: dict[str, Any]) -> str:
     return str(event.get("event_type") or event.get("event") or "").strip()
+
+
+def _first_event_payload_text(events: list[dict[str, Any]], key: str) -> str:
+    for event in events:
+        payload = event.get("payload") if isinstance(event, dict) else {}
+        if not isinstance(payload, dict):
+            continue
+        value = str(payload.get(key) or "").strip()
+        if value:
+            return value
+    return ""

@@ -5,6 +5,7 @@ from __future__ import annotations
 from apps.shell.agent.runtime.workflow_approvals import WorkflowApprovalPauseProjection
 from apps.shell.agent_runtime import NativeRunEngine
 from apps.shell.credential_store import MemoryCredentialStore
+from apps.shell.yachiyo_agent.contracts import StartGroupRunRequest
 from apps.shell.yachiyo_agent.legacy_ports import LegacyStudioPort
 from apps.shell.yachiyo_agent.legacy_tasks import LegacyRuntimePort
 from apps.shell.yachiyo_agent.service import YachiyoAgentService
@@ -242,6 +243,121 @@ def test_agent_studio_group_run_uses_native_run_group_events_and_children(tmp_pa
         assert "group.member.completed" in [event.event_type for event in group_events]
         assert event_page.run_id == run_group["run_group_id"]
         assert event_page.events[0].event_type == "group.run.started"
+    finally:
+        runtime.close()
+
+
+def test_agent_studio_start_group_run_records_native_group_replay(tmp_path, monkeypatch) -> None:
+    credential_store = MemoryCredentialStore()
+    runtime = NativeRunEngine(
+        db_path=tmp_path / "agent-runtime-group-start.db",
+        workspace_dir=tmp_path / "runtime-group-start",
+        credential_store=credential_store,
+        seed_templates=False,
+    )
+    try:
+        group = {
+            "group_id": "native-start-group",
+            "name": "Native launch team",
+            "mode": "parallel",
+            "memory_scope": "shared",
+            "members": [
+                {"agent_id": "agent-planner", "name": "Planner", "role": "planner"},
+                {"agent_id": "agent-reviewer", "name": "Reviewer", "role": "reviewer"},
+            ],
+        }
+
+        def get_agent_group(group_id: str) -> dict[str, object]:
+            if group_id != group["group_id"]:
+                raise KeyError(group_id)
+            return dict(group)
+
+        def complete_child_run(
+            *,
+            runnable_id: str,
+            user_goal: str,
+            run_group_id: str = "",
+            on_complete=None,
+        ) -> dict[str, object]:
+            del on_complete
+            target_group_id = run_group_id
+            if not target_group_id:
+                run_group = runtime._insert_run_group(
+                    title="Native launch team",
+                    source="agent_group",
+                    workspace_dir=str(tmp_path / "group-start-workspace"),
+                )
+                target_group_id = run_group["run_group_id"]
+            run = runtime._insert_run(
+                kind="agent_run",
+                runnable_id=runnable_id,
+                user_goal=user_goal,
+                run_group_id=target_group_id,
+            )
+            artifact = {
+                "artifact_id": f"artifact-{runnable_id}",
+                "kind": "markdown",
+                "path": f"{runnable_id}/summary.md",
+                "source_tool": "agent.result",
+            }
+            completed = runtime._update_run(
+                run["run_id"],
+                status="completed",
+                result=f"{runnable_id} finished",
+                artifacts=[artifact],
+                pending_approval=None,
+            )
+            return {
+                **completed,
+                "agent_run_id": completed["run_id"],
+                "runnable_name": runnable_id,
+            }
+
+        monkeypatch.setattr(runtime, "get_agent_group", get_agent_group, raising=False)
+        monkeypatch.setattr(
+            runtime,
+            "create_run_for_runnable_async",
+            complete_child_run,
+            raising=False,
+        )
+
+        studio = AgentStudioService(LegacyStudioPort(runtime))
+
+        started = studio.start_group_run(
+            StartGroupRunRequest(
+                group_id="native-start-group",
+                objective="Compare launch risks",
+                client_run_id="native-start-client",
+            )
+        )
+        replayed = studio.get_group_run(started.group_run_id)
+        events = list(studio.get_group_run_event_stream(started.group_run_id))
+        page = studio.get_group_run_event_page(started.group_run_id, limit=10)
+
+        event_types = [event.event_type for event in events]
+
+        assert started.status == "completed"
+        assert started.group_id == "native-start-group"
+        assert started.objective == "Compare launch risks"
+        assert started.child_run_ids == [run.run_id for run in started.runs]
+        assert len(started.runs) == 2
+        assert all(run.status == "completed" for run in started.runs)
+        assert [artifact.path for artifact in started.shared_artifacts] == [
+            "agent-planner/summary.md",
+            "agent-reviewer/summary.md",
+        ]
+
+        assert replayed.status == "completed"
+        assert replayed.group_id == "native-start-group"
+        assert replayed.objective == "Compare launch risks"
+        assert replayed.final_answer
+        assert replayed.child_run_ids == started.child_run_ids
+        assert "group.run.started" in event_types
+        assert event_types.count("group.member.started") == 2
+        assert event_types.count("group.member.completed") == 2
+        assert "group.run.completed" in event_types
+        assert page.run_id == started.group_run_id
+        assert any(event.event_type == "group.run.completed" for event in page.events)
     finally:
         runtime.close()
 

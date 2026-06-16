@@ -368,6 +368,16 @@ class LegacyStudioPort:
         if not child_runs:
             raise NotImplementedError("这个 legacy run group 没有可运行的成员")
 
+        projected_status = _group_run_status_from_child_runs(child_runs)
+        if projected_status and run_group_id:
+            update_run_group = getattr(self._runtime, "_update_run_group", None)
+            if callable(update_run_group):
+                update_run_group(
+                    run_group_id,
+                    status=projected_status,
+                    summary=_group_run_summary_from_child_runs(child_runs),
+                )
+
         run_group = self._runtime.get_run_group(run_group_id) if run_group_id else {}
         return {
             "run_group_id": run_group_id,
@@ -558,3 +568,35 @@ def _group_member_terminal_event_type(run: dict[str, Any]) -> str:
     if status == "cancelled":
         return "group.member.cancelled"
     return "group.member.completed"
+
+
+def _group_run_status_from_child_runs(child_runs: list[dict[str, Any]]) -> str:
+    statuses = {
+        str(run.get("status") or "").strip()
+        for run in child_runs
+        if str(run.get("status") or "").strip()
+    }
+    if not statuses:
+        return ""
+    if statuses & {"approval_required", "waiting_approval"}:
+        return "approval_required"
+    if statuses & {"queued", "running", "processing"}:
+        return ""
+    if "failed" in statuses:
+        return "failed"
+    if "cancelled" in statuses:
+        return "cancelled"
+    if statuses == {"completed"}:
+        return "completed"
+    return ""
+
+
+def _group_run_summary_from_child_runs(child_runs: list[dict[str, Any]]) -> str | None:
+    lines: list[str] = []
+    for run in child_runs:
+        result = str(run.get("result") or "").strip()
+        if not result:
+            continue
+        label = str(run.get("runnable_name") or run.get("runnable_id") or "").strip()
+        lines.append(f"{label}: {result}" if label else result)
+    return "\n".join(lines) if lines else None
