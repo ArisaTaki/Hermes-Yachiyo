@@ -55,6 +55,8 @@ export function timelineEventTitle(event: Record<string, unknown>): string {
   if (name === 'group.run.cancelled') return detail ? `群组运行已取消 · ${detail}` : '群组运行已取消';
   if (name === 'group.member.started') return detail ? `群组成员启动 · ${detail}` : '群组成员启动';
   if (name === 'group.member.completed') return detail ? `群组成员完成 · ${detail}` : '群组成员完成';
+  if (name === 'group.member.failed') return detail ? `群组成员失败 · ${detail}` : '群组成员失败';
+  if (name === 'group.member.cancelled') return detail ? `群组成员已取消 · ${detail}` : '群组成员已取消';
   if (name === 'group.approval_required') return detail ? `群组审批 · ${detail}` : '群组审批';
   if (name === 'group.member.approval_required') return detail ? `成员审批 · ${detail}` : '成员审批';
   if (name === 'group.artifact.created') return detail ? `群组产物 · ${detail}` : '群组产物';

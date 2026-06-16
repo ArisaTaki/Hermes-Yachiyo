@@ -302,7 +302,7 @@ class LegacyStudioPort:
                 append_group_member_event(
                     self._runtime,
                     completed_run,
-                    "group.member.completed",
+                    _group_member_terminal_event_type(completed_run),
                     group_id=group_id,
                     group=group,
                     run_group_id="",
@@ -353,7 +353,7 @@ class LegacyStudioPort:
                 append_group_member_event(
                     self._runtime,
                     child_run,
-                    "group.member.completed",
+                    _group_member_terminal_event_type(child_run),
                     group_id=group_id,
                     group=group,
                     run_group_id=run_group_id,
@@ -494,3 +494,12 @@ def _group_run_from_legacy_run_group(
 
 def _child_runs_for_run_group(run_group: dict[str, Any], runtime: Any) -> list[dict[str, Any]]:
     return _LEGACY_RUN_PROJECTOR.child_runs_for_run_group(run_group, runtime)
+
+
+def _group_member_terminal_event_type(run: dict[str, Any]) -> str:
+    status = str(run.get("status") or "").strip()
+    if status == "failed":
+        return "group.member.failed"
+    if status == "cancelled":
+        return "group.member.cancelled"
+    return "group.member.completed"

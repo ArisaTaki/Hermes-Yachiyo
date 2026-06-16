@@ -34,11 +34,38 @@ def test_legacy_studio_group_run_records_group_run_started_event() -> None:
     assert started["payload"]["client_run_id"] == "client-group-run-1"
 
 
+def test_legacy_studio_group_run_records_member_failed_and_cancelled_events() -> None:
+    runtime = _FakeGroupRuntime(
+        statuses={
+            "agent-1": "failed",
+            "agent-2": "cancelled",
+        }
+    )
+
+    group_run = LegacyStudioPort(runtime).start_group_run(
+        {
+            "group_id": "group-1",
+            "objective": "Compare options",
+        }
+    )
+
+    assert [event["event_type"] for event in group_run["events"]] == [
+        "group.run.started",
+        "group.member.started",
+        "group.member.failed",
+        "group.member.started",
+        "group.member.cancelled",
+    ]
+    assert group_run["events"][2]["payload"]["status"] == "failed"
+    assert group_run["events"][4]["payload"]["status"] == "cancelled"
+
+
 class _FakeGroupRuntime:
-    def __init__(self) -> None:
+    def __init__(self, statuses: dict[str, str] | None = None) -> None:
         self.child_run_ids: list[str] = []
         self.events: dict[str, list[dict[str, Any]]] = {}
         self.runs: dict[str, dict[str, Any]] = {}
+        self.statuses = statuses or {}
         self.group = {
             "group_id": "group-1",
             "name": "Review team",
@@ -66,6 +93,7 @@ class _FakeGroupRuntime:
         del on_complete
         clean_run_group_id = run_group_id or "group-run-1"
         run_id = f"run-{len(self.runs) + 1}"
+        status = self.statuses.get(runnable_id, "processing")
         run = {
             "artifacts": [],
             "pending_approval": {},
@@ -73,7 +101,7 @@ class _FakeGroupRuntime:
             "run_id": run_id,
             "runnable_id": runnable_id,
             "runnable_name": runnable_id,
-            "status": "processing",
+            "status": status,
             "user_goal": user_goal,
         }
         self.runs[run_id] = run

@@ -75,6 +75,7 @@ function runtimeTimelineEventLabel(event: RuntimeTimelineEventSnapshot): string 
   if (type === 'group.member.started') return '群组成员启动';
   if (type === 'group.member.completed') return '群组成员完成';
   if (type === 'group.member.failed') return '群组成员失败';
+  if (type === 'group.member.cancelled') return '群组成员已取消';
   if (type === 'group.approval_required' || type === 'group.member.approval_required') return '群组等待审批';
   if (type === 'group.artifact.created' || type === 'group.shared_artifact.created') return '群组产物已生成';
   if (type === 'workflow.run.started') return 'Workflow 已启动';
