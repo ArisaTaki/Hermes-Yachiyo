@@ -135,11 +135,19 @@ async def reject_task(
     request: TaskApprovalRequest | None = None,
     http_request: Request | None = None,
 ) -> dict[str, Any]:
+    metadata = dict(request.metadata) if request is not None else {}
+    if request is not None and request.approval_id:
+        metadata.setdefault("approval_id", request.approval_id)
+    decision = ApprovalDecision(
+        approved=False,
+        reason=request.reason if request is not None else None,
+        metadata=metadata,
+    )
     try:
         task_snapshot = await asyncio.to_thread(
             agent_service(http_request).reject,
             task_id,
-            request.reason if request is not None else "",
+            decision,
         )
         return snapshot(task_snapshot)
     except (AgentRuntimeError, KeyError) as exc:

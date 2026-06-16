@@ -9,6 +9,12 @@ from .legacy_runs import LegacyRunPayloadProjector
 MAIN_CHAT_AGENT_ID = "builtin:yachiyo-main"
 
 
+def _rejection_reason(decision: dict[str, Any] | str | None) -> str:
+    if isinstance(decision, dict):
+        return str(decision.get("reason") or "").strip()
+    return str(decision or "").strip()
+
+
 class LegacyRuntimePort:
     """RuntimePort adapter for existing NativeRunEngine-like services."""
 
@@ -202,14 +208,15 @@ class LegacyRuntimePort:
             )
         )
 
-    def reject(self, task_id: str, reason: str | None = None) -> dict[str, Any]:
+    def reject(self, task_id: str, decision: dict[str, Any] | str | None = None) -> dict[str, Any]:
         run_id = self._run_id_for_task(task_id)
+        reason = _rejection_reason(decision)
         return self._projector.chat_task_payload(
             self._payload_with_task_link(
                 task_id,
                 self._run_action_payload(
                     run_id,
-                    self._runtime.reject_run_approval(run_id, reason or ""),
+                    self._runtime.reject_run_approval(run_id, reason),
                 ),
             )
         )

@@ -76,7 +76,14 @@ def test_legacy_runtime_port_preserves_workflow_identity_after_task_approval() -
     )
 
     approved = port.approve("task-workflow-1")
-    rejected = port.reject("task-workflow-1", "No")
+    rejected = port.reject(
+        "task-workflow-1",
+        {
+            "approved": False,
+            "reason": "No",
+            "metadata": {"approval_id": "approval-workflow-1"},
+        },
+    )
 
     assert approved["task_id"] == "task-workflow-1"
     assert approved["status"] == "completed"

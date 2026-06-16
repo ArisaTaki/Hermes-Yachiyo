@@ -115,8 +115,8 @@ class _FakeRuntimePort:
         self.calls.append(("approve", {"task_id": task_id, "decision": decision}))
         return _task_payload(status="completed", result="Approved")
 
-    def reject(self, task_id: str, reason: str | None = None) -> dict[str, Any]:
-        self.calls.append(("reject", {"task_id": task_id, "reason": reason}))
+    def reject(self, task_id: str, decision: dict[str, Any] | None = None) -> dict[str, Any]:
+        self.calls.append(("reject", {"task_id": task_id, "decision": decision}))
         return _task_payload(status="failed", result="Rejected")
 
     def cancel(self, task_id: str) -> dict[str, Any]:
@@ -331,7 +331,14 @@ def test_yachiyo_agent_service_delegates_approval_and_cancel_to_runtime_port() -
             metadata={"approval_id": "approval-1"},
         ),
     )
-    rejected = service.reject("task-2", "No")
+    rejected = service.reject(
+        "task-2",
+        ApprovalDecision(
+            approved=False,
+            reason="No",
+            metadata={"approval_id": "approval-2"},
+        ),
+    )
     cancelled = service.cancel("task-1")
 
     assert approved.status == "completed"
@@ -349,8 +356,30 @@ def test_yachiyo_agent_service_delegates_approval_and_cancel_to_runtime_port() -
                 },
             },
         ),
-        ("reject", {"task_id": "task-2", "reason": "No"}),
+        (
+            "reject",
+            {
+                "task_id": "task-2",
+                "decision": {
+                    "approved": False,
+                    "reason": "No",
+                    "metadata": {"approval_id": "approval-2"},
+                },
+            },
+        ),
         ("cancel", "task-1"),
+    ]
+
+
+def test_yachiyo_agent_service_keeps_string_reject_reason_compatible() -> None:
+    port = _FakeRuntimePort()
+    service = YachiyoAgentService(port)
+
+    rejected = service.reject("task-2", "No")
+
+    assert rejected.status == "failed"
+    assert port.calls == [
+        ("reject", {"task_id": "task-2", "decision": {"approved": False, "reason": "No"}})
     ]
 
 

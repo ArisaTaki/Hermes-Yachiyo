@@ -132,8 +132,14 @@ class YachiyoAgentService:
             self._runtime_port.approve(task_id, _optional_request_payload(decision))
         )
 
-    def reject(self, task_id: str, reason: str | None = None) -> AgentTaskSnapshot:
-        return agent_task_snapshot_from_payload(self._runtime_port.reject(task_id, reason))
+    def reject(
+        self,
+        task_id: str,
+        decision: ApprovalDecision | Mapping[str, Any] | str | None = None,
+    ) -> AgentTaskSnapshot:
+        return agent_task_snapshot_from_payload(
+            self._runtime_port.reject(task_id, _rejection_payload(decision))
+        )
 
     def cancel(self, task_id: str) -> AgentTaskSnapshot:
         return agent_task_snapshot_from_payload(self._runtime_port.cancel(task_id))
@@ -153,6 +159,19 @@ def _optional_request_payload(
     if isinstance(request, ApprovalDecision):
         return request.model_dump(exclude_none=True)
     return dict(request)
+
+
+def _rejection_payload(
+    request: ApprovalDecision | Mapping[str, Any] | str | None,
+) -> dict[str, Any] | None:
+    if request is None:
+        return None
+    if isinstance(request, str):
+        return {"approved": False, "reason": request}
+    payload = _optional_request_payload(request)
+    if payload is not None:
+        payload.setdefault("approved", False)
+    return payload
 
 
 def _payload_items(payload: Any, key: str) -> list[dict[str, Any]]:

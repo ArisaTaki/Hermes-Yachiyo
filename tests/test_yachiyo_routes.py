@@ -8,8 +8,8 @@ from typing import Any
 
 import pytest
 
-from apps.bridge.routes import yachiyo
-from apps.shell.yachiyo_agent import legacy_ports
+from apps.bridge.routes import yachiyo, yachiyo_chat_handlers
+from apps.shell.yachiyo_agent import AgentTaskSnapshot, legacy_ports
 
 
 class _FakeAgentRuntime:
@@ -489,6 +489,46 @@ async def test_yachiyo_task_routes_use_injected_runtime_and_return_public_snapsh
         "link_task_run",
         {"task_id": "run-1", "run_id": "run-1", "session_id": "chat-1"},
     ) in runtime.calls
+
+
+@pytest.mark.asyncio
+async def test_yachiyo_task_reject_preserves_approval_decision_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _RejectRecordingService:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        def reject(self, task_id: str, decision: Any) -> AgentTaskSnapshot:
+            payload = decision.model_dump(exclude_none=True)
+            self.calls.append({"task_id": task_id, "decision": payload})
+            return AgentTaskSnapshot(task_id=task_id, title="Rejected", status="failed")
+
+    service = _RejectRecordingService()
+    monkeypatch.setattr(yachiyo_chat_handlers, "agent_service", lambda _request=None: service)
+
+    rejected = await yachiyo.reject_task(
+        "task-approval-1",
+        yachiyo.TaskApprovalRequest(
+            approval_id="approval-1",
+            reason="No",
+            metadata={"surface": "bubble"},
+        ),
+        None,
+    )
+
+    assert rejected["status"] == "failed"
+    assert service.calls == [
+        {
+            "task_id": "task-approval-1",
+            "decision": {
+                "approved": False,
+                "reason": "No",
+                "metadata": {
+                    "approval_id": "approval-1",
+                    "surface": "bubble",
+                },
+            },
+        }
+    ]
 
 
 @pytest.mark.asyncio
