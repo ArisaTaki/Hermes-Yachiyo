@@ -92,7 +92,7 @@ export function summarizeRuntimeToolCalls(
   for (const event of events || []) {
     if (publicRunEventIsSecret(event)) continue;
     const eventType = String(event.event_type || '').trim();
-    if (!TOOL_EVENT_TYPES.has(eventType)) continue;
+    if (!runtimeToolEventIsVisible(eventType)) continue;
 
     const name = runtimeToolNameFromEvent(event);
     const sequence = Number.isFinite(event.sequence) ? Number(event.sequence) : 0;
@@ -113,6 +113,14 @@ export function summarizeRuntimeToolCalls(
   return Array.from(byName.values())
     .sort((left, right) => right.sequence - left.sequence)
     .slice(0, Math.max(1, limit));
+}
+
+function runtimeToolEventIsVisible(eventType: string): boolean {
+  return (
+    TOOL_EVENT_TYPES.has(eventType)
+    || eventType.startsWith('skill.dispatch.')
+    || eventType.startsWith('memory.write.')
+  );
 }
 
 function runtimeToolNameFromEvent(event: PublicRunEvent): string {

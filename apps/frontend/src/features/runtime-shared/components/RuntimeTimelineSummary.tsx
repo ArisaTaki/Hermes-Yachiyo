@@ -85,7 +85,7 @@ function runtimeTimelineEventTypeLabel(type: string): string {
   if (type === 'tool.failed' || type === 'agent.tool.failed') return '工具失败';
   if (type === 'tool.cancelled') return '工具已取消';
   if (type === 'skill.selected') return 'Skill 已选择';
-  if (type === 'skill.dispatch.read') return 'Skill 调度';
+  if (type.startsWith('skill.dispatch.')) return 'Skill 调度';
   if (type === 'memory.retrieved') return 'Memory 检索';
   if (type === 'memory.write.add') return 'Memory 新增';
   if (type === 'memory.write.replace') return 'Memory 更新';

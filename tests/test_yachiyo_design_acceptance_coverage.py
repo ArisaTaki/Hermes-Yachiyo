@@ -296,6 +296,12 @@ def test_runtime_memory_and_skill_trace_acceptance_paths_are_guarded() -> None:
             "eventType.startsWith('skill.')",
         ],
     )
+    _assert_contains(
+        "apps/frontend/src/features/runtime-shared/components/RuntimeTimelineSummary.tsx",
+        [
+            "type.startsWith('skill.dispatch.')",
+        ],
+    )
     _assert_smoke_script(
         "scripts/smoke_agent_run_detail_ui.mjs",
         [
