@@ -1,4 +1,5 @@
 import type { ApprovalCardSnapshot, PublicRunEvent, ToolCallSnapshot } from '../../yachiyo-studio/types';
+import { mergeRuntimeRunEventPages } from '../../runtime-shared/runEvents';
 
 export function timelineChildRunId(event: Record<string, unknown>): string {
   const value = event.child_run_id;
@@ -393,12 +394,7 @@ export function mergeRunEventReplayPages(
   current: PublicRunEvent[],
   incoming: PublicRunEvent[],
 ): PublicRunEvent[] {
-  const bySequence = new Map<number, PublicRunEvent>();
-  current.forEach((event) => bySequence.set(Number(event.sequence) || 0, event));
-  incoming.forEach((event) => bySequence.set(Number(event.sequence) || 0, event));
-  return Array.from(bySequence.values()).sort(
-    (left, right) => (Number(left.sequence) || 0) - (Number(right.sequence) || 0),
-  );
+  return mergeRuntimeRunEventPages(current, incoming);
 }
 
 function toolCallFromRunEvent(event: PublicRunEvent): ToolCallSnapshot | null {

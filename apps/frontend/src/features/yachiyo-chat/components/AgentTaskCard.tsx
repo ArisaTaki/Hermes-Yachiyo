@@ -2,12 +2,15 @@ import { useEffect, useState } from 'react';
 
 import { UiIcon } from '../../../components/UiIcon';
 import { RuntimeTimelineSummary } from '../../runtime-shared/components/RuntimeTimelineSummary';
+import { mergeRuntimeRunEventPages, runEventPageNextCursor } from '../../runtime-shared/runEvents';
 import { listYachiyoTaskEvents } from '../api';
 import { yachiyoTaskRunId, yachiyoTaskStudioRunId, yachiyoTaskStudioUrl } from '../taskSnapshots';
 import type { AgentTaskSnapshot, ApprovalCardSnapshot, PublicRunEvent } from '../types';
 import { ApprovalCard } from './ApprovalCard';
 import { ArtifactPreview } from './ArtifactPreview';
 import { ToolCallSummary } from './ToolCallSummary';
+
+const TASK_EVENT_PAGE_SIZE = 200;
 
 export function AgentTaskCard({
   busy = false,
@@ -25,6 +28,10 @@ export function AgentTaskCard({
   task: AgentTaskSnapshot;
 }) {
   const [replayEvents, setReplayEvents] = useState<PublicRunEvent[]>([]);
+  const [replayError, setReplayError] = useState('');
+  const [replayHasMore, setReplayHasMore] = useState(false);
+  const [replayLoading, setReplayLoading] = useState(false);
+  const [replayNextAfterSequence, setReplayNextAfterSequence] = useState(0);
   const status = task.status || 'running';
   const runId = yachiyoTaskRunId(task);
   const studioRunId = yachiyoTaskStudioRunId(task);
@@ -33,6 +40,7 @@ export function AgentTaskCard({
   const artifacts = task.artifacts || [];
   const recentEvents = task.recent_events || [];
   const timelineEvents = replayEvents.length ? replayEvents : recentEvents;
+  const timelineSummaryEvents = timelineEvents.slice(-3);
   const timelineEventSource = replayEvents.length ? 'run_event_page' : 'task_snapshot';
   const canCancel = onCancelTask && ['queued', 'running', 'waiting_approval'].includes(status);
   const hasHeaderActions = Boolean((studioRunId && studioUrl && onOpenStudio) || canCancel);
@@ -40,19 +48,61 @@ export function AgentTaskCard({
   useEffect(() => {
     const taskId = String(task.task_id || '').trim();
     setReplayEvents([]);
+    setReplayError('');
+    setReplayHasMore(false);
+    setReplayLoading(false);
+    setReplayNextAfterSequence(0);
     if (!taskId) return undefined;
     let disposed = false;
-    void listYachiyoTaskEvents(taskId, 0, 200)
+    setReplayLoading(true);
+    void listYachiyoTaskEvents(taskId, 0, TASK_EVENT_PAGE_SIZE)
       .then((page) => {
-        if (!disposed) setReplayEvents(page.events || []);
+        if (disposed) return;
+        const events = page.events || [];
+        setReplayEvents(events);
+        setReplayHasMore(page.has_more ?? events.length >= (page.limit || TASK_EVENT_PAGE_SIZE));
+        setReplayNextAfterSequence(runEventPageNextCursor(page, events, 0));
+        setReplayError('');
       })
-      .catch(() => {
-        if (!disposed) setReplayEvents([]);
+      .catch((err: unknown) => {
+        if (disposed) return;
+        setReplayEvents([]);
+        setReplayError(err instanceof Error ? err.message : '读取任务事件失败');
+      })
+      .finally(() => {
+        if (!disposed) setReplayLoading(false);
       });
     return () => {
       disposed = true;
     };
   }, [task.task_id, task.updated_at]);
+
+  async function loadMoreTaskEvents() {
+    const taskId = String(task.task_id || '').trim();
+    if (!taskId || replayLoading) return;
+    const afterSequence = replayNextAfterSequence || taskEventSequenceCursor(replayEvents, 0);
+    setReplayLoading(true);
+    setReplayError('');
+    try {
+      const page = await listYachiyoTaskEvents(taskId, afterSequence, TASK_EVENT_PAGE_SIZE);
+      const incomingEvents = page.events || [];
+      const events = mergeRuntimeRunEventPages(replayEvents, incomingEvents);
+      setReplayEvents(events);
+      setReplayHasMore(page.has_more ?? incomingEvents.length >= (page.limit || TASK_EVENT_PAGE_SIZE));
+      setReplayNextAfterSequence(runEventPageNextCursor(page, incomingEvents, afterSequence));
+    } catch (err) {
+      setReplayError(err instanceof Error ? err.message : '读取更多任务事件失败');
+    } finally {
+      setReplayLoading(false);
+    }
+  }
+
+  function taskEventSequenceCursor(events: PublicRunEvent[], fallback: number) {
+    return events.reduce((cursor, event) => {
+      const sequence = Number(event.sequence) || 0;
+      return sequence > cursor ? sequence : cursor;
+    }, fallback);
+  }
 
   return (
     <section
@@ -108,9 +158,26 @@ export function AgentTaskCard({
       {timelineEvents.length ? (
         <RuntimeTimelineSummary
           className="yachiyo-agent-task-timeline"
-          events={timelineEvents}
+          events={timelineSummaryEvents}
           testId="yachiyo-agent-task-timeline"
         />
+      ) : null}
+      {replayError ? (
+        <p className="yachiyo-agent-task-timeline-status error" data-testid="yachiyo-agent-task-event-error">
+          {replayError}
+        </p>
+      ) : null}
+      {replayHasMore ? (
+        <button
+          type="button"
+          className="yachiyo-agent-task-load-events"
+          data-next-after-sequence={replayNextAfterSequence}
+          data-testid="yachiyo-agent-task-load-more-events"
+          disabled={replayLoading}
+          onClick={() => void loadMoreTaskEvents()}
+        >
+          {replayLoading ? '加载任务事件中...' : '加载更多任务事件'}
+        </button>
       ) : null}
       {approvals.length ? (
         <div className="yachiyo-agent-task-approvals">
