@@ -31,6 +31,7 @@ def test_runtime_installation_facade_mixin_remains_exported_from_legacy_module()
         "_install_runtime_tooling_and_custom_agent_loop",
         "_install_runtime_agent_and_approval_services",
         "_install_runtime_approval_runtime_services",
+        "_install_runtime_main_chat_model_loop_runner",
         "_install_runtime_engine_state",
         "_install_runtime_recorders",
         "_install_runtime_definition_services",
@@ -421,3 +422,41 @@ def test_installation_facade_installs_approval_runtime_services(monkeypatch) -> 
     assert isinstance(engine.approval_execution, CapturedCollaborator)
     assert engine.approval_execution.kwargs["execution_lock"] == "approval-execution-lock"
     assert engine.approval_execution.kwargs["approve_once"] == "approve-once"
+
+
+def test_installation_facade_installs_main_chat_model_loop_runner(monkeypatch) -> None:
+    class CapturedMainChatModelLoopRunner:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+
+    monkeypatch.setattr(agent_runtime, "MainChatModelLoopRunner", CapturedMainChatModelLoopRunner)
+
+    engine = object.__new__(agent_runtime.NativeRunEngine)
+    engine.get_run = "get-run"
+    engine._model_profile_config_private = "model-profile-config-private"
+    engine._main_chat_agent_config = "main-chat-agent-config"
+    engine._compile_agent_runtime = "compile-agent-runtime"
+    engine.runtime_run_budget = "runtime-run-budget"
+    engine.runtime_agent_timeline = "runtime-agent-timeline"
+    engine._update_run = "update-run"
+    engine.append_run_event = "append-run-event"
+    engine.runtime_task_model_events = "task-model-events"
+    engine.tool_brokers = "tool-brokers"
+    engine._run_custom_api_agent = "run-custom-api-agent"
+    engine._main_chat_pending_approval = "main-chat-pending-approval"
+    engine.approval_pause = "approval-pause"
+    engine.terminal_run_resolver = SimpleNamespace(terminal_run_or_none="terminal-run-or-none")
+
+    engine._install_runtime_main_chat_model_loop_runner(
+        runtime_timeline_factory="timeline-factory",
+        runtime_context_budget_checker="context-budget-checker",
+    )
+
+    assert isinstance(engine.main_chat_model_loop, CapturedMainChatModelLoopRunner)
+    assert engine.main_chat_model_loop.kwargs["get_run"] == "get-run"
+    assert engine.main_chat_model_loop.kwargs["run_budget"] == "runtime-run-budget"
+    assert engine.main_chat_model_loop.kwargs["check_context_budget"] == "context-budget-checker"
+    assert engine.main_chat_model_loop.kwargs["timeline_factory"] == "timeline-factory"
+    assert engine.main_chat_model_loop.kwargs["tool_brokers"] == "tool-brokers"
+    assert engine.main_chat_model_loop.kwargs["approval_pause"] == "approval-pause"
+    assert engine.main_chat_model_loop.kwargs["terminal_run_or_none"] == "terminal-run-or-none"

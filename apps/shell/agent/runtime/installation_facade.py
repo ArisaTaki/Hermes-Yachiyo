@@ -523,6 +523,43 @@ class RuntimeInstallationFacadeMixin:
             approve_once=self.approval_resume_dispatcher.approve_once,
         )
 
+    def _install_runtime_main_chat_model_loop_runner(
+        self,
+        *,
+        runtime_timeline_factory: Any,
+        runtime_context_budget_checker: Any,
+    ) -> None:
+        legacy = _legacy_agent_runtime_module()
+        self._install_runtime_main_chat_model_loop(
+            legacy.MainChatModelLoopRunner(
+                get_run=self.get_run,
+                default_profile_id=lambda: str(
+                    legacy.get_model_profile_service().get_defaults().get("chat") or ""
+                ).strip(),
+                model_profile_config_private=lambda profile_id: self._model_profile_config_private(
+                    profile_id,
+                    capability="chat",
+                ),
+                main_chat_agent_config=self._main_chat_agent_config,
+                compile_agent_runtime=self._compile_agent_runtime,
+                run_budget=self.runtime_run_budget,
+                check_context_budget=runtime_context_budget_checker,
+                runtime_agent_timeline=self.runtime_agent_timeline,
+                timeline_factory=runtime_timeline_factory,
+                update_run=self._update_run,
+                append_run_event=self.append_run_event,
+                task_model_events=self.runtime_task_model_events,
+                tool_brokers=self.tool_brokers,
+                continue_custom_api_agent=self._run_custom_api_agent,
+                main_chat_pending_approval=self._main_chat_pending_approval,
+                approval_pause=self.approval_pause,
+                terminal_run_or_none=self.terminal_run_resolver.terminal_run_or_none,
+                redact_secrets=legacy.redact_secrets,
+                model_output_metadata=legacy._model_output_metadata,
+                error_type=legacy.AgentRuntimeError,
+            )
+        )
+
     def _install_runtime_engine_state(self, state: Any) -> None:
         self.workspace_dir = state.workspace_dir
         self.db_path = state.db_path
