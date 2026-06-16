@@ -361,7 +361,7 @@ function approvalRequestDetailsFromWorkflowWaitingChild(message: ChatApprovalMes
     { label: 'Workflow 节点', value: requester },
   ];
   const runId = stringValue(metadata.workflow_waiting_child_run_id);
-  if (runId) summary.push({ label: '子 Run', value: runId });
+  if (runId) summary.push({ label: '子任务', value: '等待审批' });
   const pending = isRecord(metadata.workflow_waiting_pending_approval)
     ? metadata.workflow_waiting_pending_approval
     : null;

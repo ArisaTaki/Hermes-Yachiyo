@@ -2940,10 +2940,17 @@ def test_chat_cancel_ui_smoke_uses_stop_buttons_and_cancel_route() -> None:
             "function hasActionableActivityApproval",
             "runtimeToolDisplayLabelOrName",
             ".trim() || runtimeToolDisplayLabelOrName(String(event.tool_name || 'Agent').trim());",
+            "summary.push({ label: '子任务', value: '等待审批' });",
             "function chatApprovalRunId",
             "const eventStatus = String(event?.status || '').trim();",
             "if (['completed', 'success', 'failed', 'error', 'cancelled'].includes(eventStatus)) return false;",
             "(eventStatus === 'approval_required' || String(event?.metadata?.run_status || '').trim() === 'approval_required')",
+        ],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/features/yachiyo-chat/approvalItems.ts",
+        [
+            "label: '子 Run'",
         ],
     )
     _assert_not_contains(
