@@ -547,8 +547,6 @@ class NativeRunEngine(
         self._install_runtime_post_db_support_services(
             seed_templates=seed_templates,
         )
-        if seed_templates:
-            self._seed_templates()
 
 AgentRuntimeService = NativeRunEngine
 
