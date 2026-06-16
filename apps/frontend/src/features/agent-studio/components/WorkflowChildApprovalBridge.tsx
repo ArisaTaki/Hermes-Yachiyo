@@ -2,19 +2,7 @@ import { RuntimeApprovalGate } from '../../runtime-shared/components/RuntimeAppr
 import type { RuntimeApprovalCardSnapshot } from '../../runtime-shared/components/RuntimeApprovalCard';
 import type { RunSpec } from '../types';
 import { RunApprovalRequest } from './RunApprovalRequest';
-
-export type RunDetailWorkflowStepRef = {
-  key: string;
-  kind: 'start' | 'agent' | 'approval' | 'artifact' | 'condition' | 'parallel' | 'workflow' | 'loop' | 'unknown';
-  nodeId?: string;
-  label: string;
-  status: string;
-  childRunId?: string;
-  payload?: string;
-  artifactPath?: string;
-  artifactCount?: number;
-  task?: string;
-};
+import type { RunDetailWorkflowStepRef } from './runDetailTypes';
 
 type WorkflowChildApprovalBridgeProps = {
   busy: boolean;

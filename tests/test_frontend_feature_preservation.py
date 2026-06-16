@@ -2114,6 +2114,7 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
             "mergeApprovalSnapshots(",
             "RunTimelineSnapshot + RunEvent replay approval facts",
             "WorkflowChildApprovalBridge",
+            "WorkflowStepResults",
             "RunTimeline",
             "ExpandableRuntimeContent as RunExpandableContent",
             "ArtifactInspector",
@@ -4701,8 +4702,15 @@ def test_agent_studio_exposes_stable_e2e_selectors_for_run_detail_and_approval_f
             "ApprovalInspector",
             "ToolCallInspector",
             "WorkflowChildApprovalBridge",
+            "WorkflowStepResults",
             "data-testid=\"agent-run-detail-task\"",
             "data-testid=\"agent-run-detail-result\"",
+            "ArtifactInspector",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/WorkflowStepResults.tsx",
+        [
             "data-testid=\"agent-run-detail-workflow-steps\"",
             "data-testid=\"agent-run-detail-workflow-step\"",
             "data-workflow-step-key={step.key}",
@@ -4712,7 +4720,8 @@ def test_agent_studio_exposes_stable_e2e_selectors_for_run_detail_and_approval_f
             "data-testid=\"agent-run-detail-workflow-step-open-run\"",
             "data-run-id={step.childRunId}",
             "data-run-status={childStatus}",
-            "ArtifactInspector",
+            "workflowArtifact ?",
+            "skippedWorkflowArtifactLabel(selectedRun, step)",
         ],
     )
     _assert_contains(
