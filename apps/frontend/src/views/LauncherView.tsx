@@ -6,7 +6,7 @@ import {
   LauncherAgentTaskLight,
   launcherAgentTaskSummary,
 } from '../features/yachiyo-chat/components/LauncherAgentTaskLight';
-import { listYachiyoTasks } from '../features/yachiyo-chat/api';
+import { listYachiyoTasks, startYachiyoTask } from '../features/yachiyo-chat/api';
 import type { AgentTaskSnapshot } from '../features/yachiyo-chat/types';
 import type { AppView } from '../lib/view';
 import {
@@ -133,8 +133,24 @@ export function LauncherView({ view }: { view: AppView }) {
     };
   }, []);
 
-  if (mode === 'live2d') return <Live2DLauncher agentTask={launcher.agentTask} data={launcher.data} refresh={launcher.refresh} />;
-  return <BubbleLauncher agentTask={launcher.agentTask} data={launcher.data} refresh={launcher.refresh} />;
+  if (mode === 'live2d') {
+    return (
+      <Live2DLauncher
+        agentTask={launcher.agentTask}
+        data={launcher.data}
+        refresh={launcher.refresh}
+        startAgentTask={launcher.startAgentTask}
+      />
+    );
+  }
+  return (
+    <BubbleLauncher
+      agentTask={launcher.agentTask}
+      data={launcher.data}
+      refresh={launcher.refresh}
+      startAgentTask={launcher.startAgentTask}
+    />
+  );
 }
 
 function useLauncher(mode: 'bubble' | 'live2d') {
@@ -168,7 +184,24 @@ function useLauncher(mode: 'bubble' | 'live2d') {
     return () => window.clearInterval(timer);
   }, [data?.chat?.agent_task, data?.chat?.is_processing, publicAgentTask, refresh]);
 
-  return { agentTask: publicAgentTask || data?.chat?.agent_task || null, data, refresh };
+  const startAgentTask = useCallback(async (prompt: string) => {
+    const text = prompt.trim();
+    if (!text) return null;
+    const task = await startYachiyoTask({
+      prompt: text,
+      conversation_id: launcherTaskConversationId(mode, data),
+      title: launcherTaskTitle(text),
+      metadata: {
+        source: 'launcher',
+        launcher_mode: mode,
+      },
+    });
+    setPublicAgentTask(task);
+    await refresh();
+    return task;
+  }, [data, mode, refresh]);
+
+  return { agentTask: publicAgentTask || data?.chat?.agent_task || null, data, refresh, startAgentTask };
 }
 
 function launcherAgentTaskFromPublicTasks(
@@ -195,6 +228,19 @@ function launcherAgentTaskIsActive(task: AgentTaskSnapshot | null | undefined) {
   if (!task) return false;
   if (task.needs_user_action || task.pending_approvals?.length) return true;
   return task.status === 'queued' || task.status === 'running' || task.status === 'waiting_approval';
+}
+
+function launcherTaskConversationId(mode: LauncherMode, data: LauncherPayload | null) {
+  const sessionId = mode === 'live2d' && data?.proactive?.has_attention
+    ? data?.proactive?.session_id
+    : data?.chat?.session_id;
+  return String(sessionId || '').trim() || null;
+}
+
+function launcherTaskTitle(prompt: string) {
+  const text = prompt.trim().replace(/\s+/g, ' ');
+  if (!text) return 'Launcher Task';
+  return text.length > 40 ? `${text.slice(0, 39)}...` : text;
 }
 
 async function acknowledgeAndOpenChat(mode: 'bubble' | 'live2d', data: LauncherPayload | null) {
@@ -234,10 +280,12 @@ function BubbleLauncher({
   agentTask: publicAgentTask,
   data,
   refresh,
+  startAgentTask,
 }: {
   agentTask?: AgentTaskSnapshot | null;
   data: LauncherPayload | null;
   refresh: () => Promise<void>;
+  startAgentTask: (prompt: string) => Promise<AgentTaskSnapshot | null>;
 }) {
   const launcher = data?.launcher || {};
   const proactive = data?.proactive || {};
@@ -271,6 +319,7 @@ function BubbleLauncher({
   const summaryText = taskSummary || latestReply || latestLauncherSessionSummary(data?.chat) || statusLabel;
   const showSummary = displayMode !== 'icon' && Boolean(summaryText);
   const [quickText, setQuickText] = useState('');
+  const [quickBusy, setQuickBusy] = useState<'chat' | 'task' | ''>('');
   const [quickInputVisible, setQuickInputVisible] = useState(launcher.default_open_behavior === 'chat_input');
   const title = bubbleTitle(displayMode, hasAttention, statusLabel, proactive);
   const ariaLabel = displayMode === 'icon'
@@ -385,15 +434,34 @@ function BubbleLauncher({
     event.preventDefault();
     if (quickInputComposingRef.current) return;
     const text = quickText.trim();
-    if (!text) return;
+    if (!text || quickBusy) return;
+    setQuickBusy('chat');
     setQuickText('');
-    await apiPost('/ui/launcher/quick-message', {
-      text,
-      mode: data?.mode || 'bubble',
-      session_id: '',
-    });
-    setQuickInputVisible(false);
-    await refresh();
+    try {
+      await apiPost('/ui/launcher/quick-message', {
+        text,
+        mode: data?.mode || 'bubble',
+        session_id: '',
+      });
+      setQuickInputVisible(false);
+      await refresh();
+    } finally {
+      setQuickBusy('');
+    }
+  }
+
+  async function delegateQuickTask() {
+    if (quickInputComposingRef.current) return;
+    const text = quickText.trim();
+    if (!text || quickBusy) return;
+    setQuickBusy('task');
+    setQuickText('');
+    try {
+      await startAgentTask(text);
+      setQuickInputVisible(false);
+    } finally {
+      setQuickBusy('');
+    }
   }
 
   return (
@@ -439,7 +507,18 @@ function BubbleLauncher({
             }}
             placeholder="和八千代说点什么…"
           />
-          <button type="submit" data-testid="bubble-launcher-quick-input-submit" disabled={!quickText.trim()}>发送</button>
+          <button
+            type="button"
+            data-testid="bubble-launcher-quick-input-delegate"
+            disabled={!quickText.trim() || Boolean(quickBusy)}
+            onClick={() => void delegateQuickTask()}
+            title="委派给 Agent"
+          >
+            {quickBusy === 'task' ? '委派中' : '委派'}
+          </button>
+          <button type="submit" data-testid="bubble-launcher-quick-input-submit" disabled={!quickText.trim() || Boolean(quickBusy)}>
+            {quickBusy === 'chat' ? '发送中' : '发送'}
+          </button>
         </form>
       ) : null}
       <LauncherSessionSummaryProbe mode="bubble" latestReply={latestReply} statusLabel={statusLabel} sessions={recentSessions} />
@@ -489,10 +568,12 @@ function Live2DLauncher({
   agentTask: publicAgentTask,
   data,
   refresh,
+  startAgentTask,
 }: {
   agentTask?: AgentTaskSnapshot | null;
   data: LauncherPayload | null;
   refresh: () => Promise<void>;
+  startAgentTask: (prompt: string) => Promise<AgentTaskSnapshot | null>;
 }) {
   const launcher = data?.launcher || {};
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -527,6 +608,7 @@ function Live2DLauncher({
   const lastReactionKeyRef = useRef('');
   const lastStatusExpressionKeyRef = useRef('');
   const [quickText, setQuickText] = useState('');
+  const [quickBusy, setQuickBusy] = useState<'chat' | 'task' | ''>('');
   const [replyHidden, setReplyHidden] = useState(false);
   const [quickInputVisible, setQuickInputVisible] = useState(launcher.default_open_behavior === 'chat_input');
   const [dismissedHintKey, setDismissedHintKey] = useState('');
@@ -805,16 +887,36 @@ function Live2DLauncher({
     event.preventDefault();
     if (quickInputComposingRef.current) return;
     const text = quickText.trim();
-    if (!text) return;
+    if (!text || quickBusy) return;
+    setQuickBusy('chat');
     setQuickText('');
-    await apiPost('/ui/launcher/quick-message', {
-      text,
-      mode: data?.mode || 'live2d',
-      session_id: proactiveAttention ? String(data?.proactive?.session_id || '') : '',
-    });
-    setReplyHidden(false);
-    setQuickInputVisible(false);
-    await refresh();
+    try {
+      await apiPost('/ui/launcher/quick-message', {
+        text,
+        mode: data?.mode || 'live2d',
+        session_id: proactiveAttention ? String(data?.proactive?.session_id || '') : '',
+      });
+      setReplyHidden(false);
+      setQuickInputVisible(false);
+      await refresh();
+    } finally {
+      setQuickBusy('');
+    }
+  }
+
+  async function delegateQuickTask() {
+    if (quickInputComposingRef.current) return;
+    const text = quickText.trim();
+    if (!text || quickBusy) return;
+    setQuickBusy('task');
+    setQuickText('');
+    try {
+      await startAgentTask(text);
+      setReplyHidden(false);
+      setQuickInputVisible(false);
+    } finally {
+      setQuickBusy('');
+    }
   }
 
   return (
@@ -940,7 +1042,18 @@ function Live2DLauncher({
             }}
             placeholder="和八千代说点什么…"
           />
-          <button type="submit" data-testid="live2d-launcher-quick-input-submit" disabled={!quickText.trim()}>发送</button>
+          <button
+            type="button"
+            data-testid="live2d-launcher-quick-input-delegate"
+            disabled={!quickText.trim() || Boolean(quickBusy)}
+            onClick={() => void delegateQuickTask()}
+            title="委派给 Agent"
+          >
+            {quickBusy === 'task' ? '委派中' : '委派'}
+          </button>
+          <button type="submit" data-testid="live2d-launcher-quick-input-submit" disabled={!quickText.trim() || Boolean(quickBusy)}>
+            {quickBusy === 'chat' ? '发送中' : '发送'}
+          </button>
         </form>
       ) : null}
       <LauncherSessionSummaryProbe mode="live2d" latestReply={latestReply} statusLabel={statusLabel} sessions={recentSessions} />

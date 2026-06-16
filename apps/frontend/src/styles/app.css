@@ -4255,7 +4255,7 @@ button:hover {
   display: flex;
   align-items: center;
   gap: 5px;
-  width: min(176px, calc(100vw - 14px));
+  width: min(224px, calc(100vw - 14px));
   padding: 4px;
   border: 1px solid rgba(255, 244, 203, 0.28);
   border-radius: 999px;
@@ -4277,10 +4277,11 @@ button:hover {
 }
 
 .bubble-quick-input button {
-  min-width: 36px;
+  min-width: 34px;
   padding: 3px 6px;
   font-size: 10px;
   line-height: 1.15;
+  white-space: nowrap;
 }
 
 .bubble-quick-input button:disabled {
@@ -4784,6 +4785,7 @@ button:hover {
 .live2d-quick-input button {
   padding: 5px 8px;
   font-size: 12px;
+  white-space: nowrap;
 }
 
 .live2d-quick-input button:disabled {
