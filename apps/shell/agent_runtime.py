@@ -509,80 +509,8 @@ class NativeRunEngine(
         self._install_runtime_definition_layer()
         self._install_runtime_run_layer()
         runtime_timeline_factory = self._install_runtime_memory_and_core()
-        self.agent_run_async_coordinator = RuntimeAgentRunAsyncCoordinator(
-            get_agent_private=lambda agent_id: self._get_agent_private(agent_id),
-            validate_agent_run_readiness=lambda agent: self._validate_agent_run_readiness(agent),
-            starter=self.agent_run_starter,
-            execute_agent_run=lambda run_id, agent, user_goal, **kwargs: self._execute_agent_run(
-                run_id,
-                agent,
-                user_goal,
-                **kwargs,
-            ),
-            project_agent_run_group_if_root=lambda result: self._project_agent_run_group_if_root(result),
-            resolve_runnable=lambda **kwargs: self.resolve_runnable(**kwargs),
-            update_run=lambda run_id, **kwargs: self._update_run(run_id, **kwargs),
-            runtime_agent_timeline=self.runtime_agent_timeline,
-            runtime_agent_run_events=self.runtime_agent_run_events,
-            redact_error=redact_secrets,
-            error_type=AgentRuntimeError,
-        )
-        self.agent_model_tester = RuntimeAgentModelTester(
-            profile_service_factory=lambda: get_model_profile_service(),
-            default_agent_ids=_DEFAULT_AGENT_IDS,
-            call_custom_api=self.openai_compatible_chat_adapter.call,
-            now_seconds=time.time,
-            redact_error=redact_api_error_text,
-            error_type=AgentRuntimeError,
-        )
-        self._install_runtime_run_timeline(
-            RuntimeRunTimelineService(
-                runs=self.runs,
-                run_groups=self.run_groups,
-                runtime_events=self.runtime_events,
-                run_artifacts=self.run_artifacts,
-            )
-        )
-        self._install_runtime_main_chat_config(
-            MainChatRuntimeConfigBuilder(
-                main_chat_agent_id=_MAIN_CHAT_AGENT_ID,
-                agent_workspaces_dir=self.agent_workspaces_dir,
-                workspace_status=lambda: get_workspace_status(),
-                compile_tool_policy=self._compile_tool_policy,
-                compile_workspace_policy=self._compile_workspace_policy,
-                trust_workspace_from_policy=self._trust_workspace_from_policy,
-                memory_tool_names=list(_MEMORY_TOOL_NAMES),
-                future_task_tool_names=list(_FUTURE_TASK_TOOL_NAMES),
-            )
-        )
-        self.main_chat_virtual_agent_projector = MainChatVirtualAgentProjector(
-            main_chat_config=self.main_chat_config,
-            default_profile_id=lambda: str(
-                get_model_profile_service().get_defaults().get("chat") or ""
-            ).strip(),
-        )
-        self._install_runtime_tool_brokers(
-            RuntimeToolBrokerFactory(
-                agent_artifacts_dir=self.agent_artifacts_dir,
-                tool_broker_factory=ToolBroker,
-                memory_store=self._memory_store,
-                future_task_store=self._future_task_store,
-                main_chat_agent_id=_MAIN_CHAT_AGENT_ID,
-            )
-        )
-        self._install_runtime_main_chat_runs(
-            MainChatRunLifecycle(
-                main_chat_agent_id=_MAIN_CHAT_AGENT_ID,
-                insert_run=self._insert_run,
-                link_task_run=self.link_task_run,
-                get_run=self.get_run,
-                update_run=self._update_run,
-                task_run_links=self.task_run_links,
-                task_events=self.runtime_task_events,
-                timeline_factory=runtime_timeline_factory,
-                redact_secrets=redact_secrets,
-                final_statuses=_FINAL_RUN_STATUSES,
-            )
+        self._install_runtime_agent_chat_entrypoints(
+            runtime_timeline_factory=runtime_timeline_factory,
         )
         runtime_context_budget_checker = _runtime_context_budget_checker(
             redact_json_value=_redact_json_value,

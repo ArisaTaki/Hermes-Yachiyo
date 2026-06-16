@@ -26,6 +26,7 @@ def test_runtime_installation_facade_mixin_remains_exported_from_legacy_module()
         "_install_runtime_definition_layer",
         "_install_runtime_run_layer",
         "_install_runtime_memory_and_core",
+        "_install_runtime_agent_chat_entrypoints",
         "_install_runtime_engine_state",
         "_install_runtime_recorders",
         "_install_runtime_definition_services",
@@ -139,3 +140,58 @@ def test_installation_facade_installs_cancellation_and_service_bundles() -> None
     assert engine.chat_runnable_parser == "parser"
     assert engine.runnable_catalog == "catalog"
     assert engine.runnable_run_coordinator == "coordinator"
+
+
+def test_installation_facade_installs_agent_chat_entrypoints(monkeypatch) -> None:
+    class CapturedCollaborator:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+
+    for name in (
+        "RuntimeAgentRunAsyncCoordinator",
+        "RuntimeAgentModelTester",
+        "RuntimeRunTimelineService",
+        "MainChatRuntimeConfigBuilder",
+        "MainChatVirtualAgentProjector",
+        "RuntimeToolBrokerFactory",
+        "MainChatRunLifecycle",
+    ):
+        monkeypatch.setattr(agent_runtime, name, CapturedCollaborator)
+
+    engine = object.__new__(agent_runtime.NativeRunEngine)
+    engine.agent_run_starter = "starter"
+    engine.runtime_agent_timeline = "agent-timeline"
+    engine.runtime_agent_run_events = "agent-run-events"
+    engine.openai_compatible_chat_adapter = SimpleNamespace(call="custom-api-call")
+    engine.runs = "runs"
+    engine.run_groups = "run-groups"
+    engine.runtime_events = "runtime-events"
+    engine.run_artifacts = "run-artifacts"
+    engine.agent_workspaces_dir = "agent-workspaces"
+    engine.agent_artifacts_dir = "agent-artifacts"
+    engine._memory_store = "memory-store"
+    engine._future_task_store = "future-task-store"
+    engine._insert_run = "insert-run"
+    engine.link_task_run = "link-task-run"
+    engine.get_run = "get-run"
+    engine._update_run = "update-run"
+    engine.task_run_links = "task-run-links"
+    engine.runtime_task_events = "task-events"
+
+    engine._install_runtime_agent_chat_entrypoints(
+        runtime_timeline_factory="timeline-factory",
+    )
+
+    assert isinstance(engine.agent_run_async_coordinator, CapturedCollaborator)
+    assert engine.agent_run_async_coordinator.kwargs["starter"] == "starter"
+    assert isinstance(engine.agent_model_tester, CapturedCollaborator)
+    assert engine.agent_model_tester.kwargs["call_custom_api"] == "custom-api-call"
+    assert isinstance(engine.run_timeline, CapturedCollaborator)
+    assert engine.run_timeline.kwargs["runs"] == "runs"
+    assert isinstance(engine.main_chat_config, CapturedCollaborator)
+    assert engine.main_chat_config.kwargs["agent_workspaces_dir"] == "agent-workspaces"
+    assert isinstance(engine.main_chat_virtual_agent_projector, CapturedCollaborator)
+    assert isinstance(engine.tool_brokers, CapturedCollaborator)
+    assert engine.tool_brokers.kwargs["memory_store"] == "memory-store"
+    assert isinstance(engine.main_chat_runs, CapturedCollaborator)
+    assert engine.main_chat_runs.kwargs["timeline_factory"] == "timeline-factory"
