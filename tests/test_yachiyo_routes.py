@@ -895,6 +895,11 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
         yachiyo.SaveAgentRequest(agent_id="agent-1", name="Writer"),
         request,
     )
+    updated_agent = await yachiyo.update_studio_agent(
+        "agent-1",
+        yachiyo.SaveAgentRequest(name="Updated Writer"),
+        request,
+    )
     deleted_agent = await yachiyo.delete_studio_agent("agent-1", request)
     model_test = await yachiyo.test_studio_agent_model("agent-1", request)
     agent_with_skill = await yachiyo.attach_studio_agent_skill(
@@ -967,6 +972,11 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     )
     workflows = await yachiyo.list_studio_workflows(request)
     workflow = await yachiyo.get_studio_workflow("workflow-1", request)
+    updated_workflow = await yachiyo.update_studio_workflow(
+        "workflow-1",
+        yachiyo.SaveWorkflowRequest(name="Updated Workflow"),
+        request,
+    )
     deleted_workflow = await yachiyo.delete_studio_workflow("workflow-1", request)
     workflow_run = await yachiyo.start_studio_workflow_run(
         "workflow-1",
@@ -1007,6 +1017,8 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     assert started_group_run["participants"][0]["agent_id"] == "agent-1"
     assert started_group_run["runs"][0]["run_id"] == "run-1"
     assert saved_agent["model_config"] == {"provider": "model_profile"}
+    assert updated_agent["agent_id"] == "agent-1"
+    assert updated_agent["name"] == "Updated Writer"
     assert deleted_agent == {"ok": True, "agent_id": "agent-1"}
     assert agent_run["run_id"] == "agent-run-1"
     assert agent_run["agent_id"] == "agent-1"
@@ -1039,6 +1051,8 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     assert triggered_future_tasks["triggered"][0]["run"]["run_id"] == "run-1"
     assert workflows["workflows"][0]["workflow_id"] == "workflow-1"
     assert workflow["workflow_id"] == "workflow-1"
+    assert updated_workflow["workflow_id"] == "workflow-1"
+    assert updated_workflow["name"] == "Updated Workflow"
     assert deleted_workflow == {"ok": True, "workflow_id": "workflow-1"}
     assert workflow_run["workflow_run_id"] == "workflow-run-1"
     assert workflow_run["workflow_id"] == "workflow-1"
@@ -1090,6 +1104,14 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     assert ("delete_run", "run-1") in runtime.calls
     assert ("approve_run_approval", "run-1") in runtime.calls
     assert ("reject_run_approval", {"run_id": "run-1", "reason": "No"}) in runtime.calls
+    assert (
+        "update_agent",
+        {"agent_id": "agent-1", "payload": {"agent_id": "agent-1", "name": "Writer"}},
+    ) in runtime.calls
+    assert (
+        "update_agent",
+        {"agent_id": "agent-1", "payload": {"agent_id": "agent-1", "name": "Updated Writer"}},
+    ) in runtime.calls
     assert ("delete_agent", "agent-1") in runtime.calls
     assert ("test_agent_model", "agent-1") in runtime.calls
     assert ("attach_skill", {"agent_id": "agent-1", "skill_id": "skill-1"}) in runtime.calls
@@ -1138,6 +1160,10 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     assert (
         "trigger_due_future_tasks",
         {"now_epoch": None, "limit": 3},
+    ) in runtime.calls
+    assert (
+        "update_workflow",
+        {"workflow_id": "workflow-1", "payload": {"workflow_id": "workflow-1", "name": "Updated Workflow"}},
     ) in runtime.calls
     assert ("delete_workflow", "workflow-1") in runtime.calls
     assert ("list_runs", 5) in runtime.calls
@@ -1241,6 +1267,7 @@ def test_yachiyo_studio_routes_include_run_action_facade() -> None:
 
     assert '@router.post("/studio/agents/{agent_id}/runs")' in source
     assert '@router.get("/studio/agents/{agent_id}")' in source
+    assert '@router.patch("/studio/agents/{agent_id}")' in source
     assert '@router.delete("/studio/agents/{agent_id}")' in source
     assert '@router.post("/studio/agents/{agent_id}/test-model")' in source
     assert '@router.post("/studio/agents/{agent_id}/skills")' in source
@@ -1264,6 +1291,7 @@ def test_yachiyo_studio_routes_include_run_action_facade() -> None:
     assert '@router.post("/studio/future-tasks/trigger-due")' in source
     assert '@router.post("/studio/future-tasks/{future_task_id}/cancel")' in source
     assert '@router.get("/studio/groups/{group_id}")' in source
+    assert '@router.patch("/studio/groups/{group_id}")' in source
     assert '@router.get("/studio/group-runs")' in source
     assert '@router.get("/studio/group-runs/{group_run_id}")' in source
     assert '@router.get("/studio/group-runs/{group_run_id}/events")' in source
@@ -1276,6 +1304,7 @@ def test_yachiyo_studio_routes_include_run_action_facade() -> None:
     assert '@router.post("/studio/runs/{run_id}/approval/reject")' in source
     assert '@router.get("/studio/runs/{run_id}/artifacts/{artifact_path:path}")' in source
     assert '@router.get("/studio/workflows/{workflow_id}")' in source
+    assert '@router.patch("/studio/workflows/{workflow_id}")' in source
     assert '@router.delete("/studio/workflows/{workflow_id}")' in source
     assert '@router.post("/studio/workflows/{workflow_id}/runs")' in source
 

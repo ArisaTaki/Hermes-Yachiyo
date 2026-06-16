@@ -291,7 +291,7 @@ export async function createAgent(request: Partial<AgentSpec>): Promise<AgentSpe
 }
 
 export async function updateAgent(agentId: string, request: Partial<AgentSpec>): Promise<AgentSpec> {
-  return apiPost<AgentSpec>('/yachiyo/studio/agents', { ...request, agent_id: agentId }).catch(() => (
+  return apiPatch<AgentSpec>(`/yachiyo/studio/agents/${encodeURIComponent(agentId)}`, request).catch(() => (
     apiPatch<AgentSpec>(`/ui/agents/${encodeURIComponent(agentId)}`, request)
   ));
 }
@@ -404,7 +404,7 @@ export async function createWorkflow(request: Partial<WorkflowSpec>): Promise<Wo
 }
 
 export async function updateWorkflow(workflowId: string, request: Partial<WorkflowSpec>): Promise<WorkflowSpec> {
-  return apiPost<WorkflowSpec>('/yachiyo/studio/workflows', { ...request, workflow_id: workflowId }).catch(() => (
+  return apiPatch<WorkflowSpec>(`/yachiyo/studio/workflows/${encodeURIComponent(workflowId)}`, request).catch(() => (
     apiPatch<WorkflowSpec>(`/ui/workflows/${encodeURIComponent(workflowId)}`, request)
   ));
 }

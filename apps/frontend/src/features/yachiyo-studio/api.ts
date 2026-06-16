@@ -62,6 +62,8 @@ export async function getYachiyoStudioAgent(agentId: string): Promise<AgentDefin
 export async function saveYachiyoStudioAgent(
   request: Partial<AgentDefinitionSnapshot>,
 ): Promise<AgentDefinitionSnapshot> {
+  const agentId = String(request.agent_id || '').trim();
+  if (agentId) return apiPatch(`/yachiyo/studio/agents/${encodeURIComponent(agentId)}`, request);
   return apiPost('/yachiyo/studio/agents', request);
 }
 
@@ -235,6 +237,8 @@ export async function getYachiyoAgentGroup(groupId: string): Promise<AgentGroupS
 export async function saveYachiyoAgentGroup(
   request: SaveAgentGroupRequest,
 ): Promise<AgentGroupSnapshot> {
+  const groupId = String(request.group_id || '').trim();
+  if (groupId) return apiPatch(`/yachiyo/studio/groups/${encodeURIComponent(groupId)}`, request);
   return apiPost('/yachiyo/studio/groups', request);
 }
 
@@ -289,6 +293,8 @@ export async function getYachiyoWorkflow(workflowId: string): Promise<WorkflowSn
 export async function saveYachiyoWorkflow(
   request: Partial<WorkflowSnapshot>,
 ): Promise<WorkflowSnapshot> {
+  const workflowId = String(request.workflow_id || '').trim();
+  if (workflowId) return apiPatch(`/yachiyo/studio/workflows/${encodeURIComponent(workflowId)}`, request);
   return apiPost('/yachiyo/studio/workflows', request);
 }
 

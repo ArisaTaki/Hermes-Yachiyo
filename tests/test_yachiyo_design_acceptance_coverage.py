@@ -119,10 +119,13 @@ def test_agent_studio_professional_entry_acceptance_paths_are_guarded() -> None:
         [
             '@router.get("/studio/agents")',
             '@router.post("/studio/agents")',
+            '@router.patch("/studio/agents/{agent_id}")',
             '@router.get("/studio/groups")',
             '@router.post("/studio/groups")',
+            '@router.patch("/studio/groups/{group_id}")',
             '@router.post("/studio/groups/{group_id}/runs")',
             '@router.get("/studio/workflows")',
+            '@router.patch("/studio/workflows/{workflow_id}")',
             '@router.post("/studio/workflows/{workflow_id}/runs")',
             '@router.get("/studio/runs/{run_id}/timeline")',
             '@router.get("/studio/runs/{run_id}/events")',
