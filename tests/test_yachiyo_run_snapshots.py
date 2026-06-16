@@ -1117,6 +1117,63 @@ def test_group_run_snapshot_reuses_shared_run_projection_for_children_artifacts_
     assert group_run.pending_approvals[0].open_in_studio_url == "#/agents?run_id=group-run-1&group_run=group-run-1"
 
 
+def test_group_run_snapshot_injects_group_context_into_child_run_facts() -> None:
+    group_run = group_run_snapshot_from_payload(
+        {
+            "group_run_id": "group-run-child-context",
+            "group_id": "group-child-context",
+            "title": "Team review",
+            "status": "running",
+            "runs": [
+                {
+                    "run_id": "child-run-no-context",
+                    "status": "approval_required",
+                    "timeline": [
+                        {
+                            "event_type": "tool.approval_required",
+                            "payload": {
+                                "tool": "terminal.run",
+                                "input_preview": {"command": "npm test"},
+                                "pending_approval": {
+                                    "approval_id": "approval-child-context",
+                                    "tool": "terminal.run",
+                                },
+                            },
+                        },
+                        {
+                            "event_type": "artifact.created",
+                            "payload": {"path": "child-report.md"},
+                        },
+                        {
+                            "event_type": "memory.retrieved",
+                            "payload": {"count": 1},
+                        },
+                    ],
+                },
+            ],
+        }
+    )
+
+    child = group_run.runs[0]
+
+    assert child.group_run_id == "group-run-child-context"
+    assert child.run_group_id == "group-run-child-context"
+    assert child.events[0].payload["group_id"] == "group-child-context"
+    assert child.events[0].payload["group_run_id"] == "group-run-child-context"
+    assert child.tool_calls[0].group_id == "group-child-context"
+    assert child.tool_calls[0].group_run_id == "group-run-child-context"
+    assert child.tool_calls[0].input_preview["group_id"] == "group-child-context"
+    assert child.tool_calls[0].input_preview["group_run_id"] == "group-run-child-context"
+    assert child.approvals[0].group_id == "group-child-context"
+    assert child.approvals[0].group_run_id == "group-run-child-context"
+    assert child.approvals[0].input_preview["group_id"] == "group-child-context"
+    assert child.approvals[0].input_preview["group_run_id"] == "group-run-child-context"
+    assert child.artifacts[0].group_id == "group-child-context"
+    assert child.artifacts[0].group_run_id == "group-run-child-context"
+    assert child.memory_traces[0].group_id == "group-child-context"
+    assert child.memory_traces[0].group_run_id == "group-run-child-context"
+
+
 def test_group_run_snapshot_accepts_members_as_participants() -> None:
     group_run = group_run_snapshot_from_payload(
         {

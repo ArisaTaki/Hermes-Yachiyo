@@ -93,7 +93,13 @@ def group_run_snapshot_from_payload(
         active_speaker_agent_id=_optional_text(payload.get("active_speaker_agent_id")),
         events=events,
         runs=[
-            _RUN_PROJECTOR.timeline_snapshot_from_payload(item)
+            _RUN_PROJECTOR.timeline_snapshot_from_payload(
+                _group_run_child_payload(
+                    item,
+                    group_run_id=group_run_id,
+                    group_id=group_id,
+                )
+            )
             for item in runs_payload
             if isinstance(item, Mapping)
         ],
@@ -221,6 +227,65 @@ def _group_run_stream_event(
     payload.setdefault("source_run_id", event_run_id)
     payload.setdefault("source_sequence", source_sequence)
     item["payload"] = payload
+    return item
+
+
+def _group_run_child_payload(
+    payload: Mapping[str, Any],
+    *,
+    group_run_id: str,
+    group_id: str,
+) -> dict[str, Any]:
+    child = dict(payload)
+    if group_run_id:
+        child.setdefault("group_run_id", group_run_id)
+        child.setdefault("run_group_id", group_run_id)
+    if group_id:
+        child.setdefault("group_id", group_id)
+    for key in ("events", "run_events", "recent_events", "timeline"):
+        value = child.get(key)
+        if isinstance(value, list):
+            child[key] = [
+                _group_run_child_event_context(
+                    item,
+                    group_run_id=group_run_id,
+                    group_id=group_id,
+                )
+                for item in value
+                if isinstance(item, Mapping)
+            ]
+    return child
+
+
+def _group_run_child_event_context(
+    event: Mapping[str, Any],
+    *,
+    group_run_id: str,
+    group_id: str,
+) -> dict[str, Any]:
+    item = dict(event)
+    payload = dict(item.get("payload")) if isinstance(item.get("payload"), Mapping) else {}
+    timeline_payload = {
+        key: item.get(key)
+        for key in (
+            "input_preview",
+            "input",
+            "output_preview",
+            "result",
+            "pending_approval",
+            "approval",
+            "artifact",
+        )
+        if key in item
+    }
+    payload = {**timeline_payload, **payload}
+    if group_run_id:
+        payload.setdefault("group_run_id", group_run_id)
+        payload.setdefault("run_group_id", group_run_id)
+    if group_id:
+        payload.setdefault("group_id", group_id)
+    if payload:
+        item["payload"] = payload
     return item
 
 
