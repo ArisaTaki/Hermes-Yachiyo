@@ -4950,6 +4950,16 @@ def test_workflow_studio_exposes_stable_e2e_selectors_for_edit_and_run_flow() ->
             "data-testid=\"workflow-agent-palette\"",
             "data-testid=\"workflow-agent-palette-item\"",
             "WorkflowCanvas",
+            "WorkflowNodeSettings",
+            "data-testid=\"workflow-quick-run\"",
+            "data-testid=\"workflow-run-goal-input\"",
+            "WorkflowRunPreview",
+            "data-testid=\"workflow-save-and-run\"",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/WorkflowNodeSettings.tsx",
+        [
             "data-testid=\"workflow-node-settings\"",
             "data-testid=\"workflow-validation\"",
             "data-testid=\"workflow-node-setting-row\"",
@@ -4963,10 +4973,6 @@ def test_workflow_studio_exposes_stable_e2e_selectors_for_edit_and_run_flow() ->
             "data-testid=\"workflow-node-workflow-select\"",
             "data-testid=\"workflow-node-workflow-task-input\"",
             "data-testid=\"workflow-node-remove\"",
-            "data-testid=\"workflow-quick-run\"",
-            "data-testid=\"workflow-run-goal-input\"",
-            "WorkflowRunPreview",
-            "data-testid=\"workflow-save-and-run\"",
         ],
     )
     _assert_contains(
