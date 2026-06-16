@@ -14,6 +14,7 @@ from apps.bridge.routes.yachiyo_services import (
     studio_service,
 )
 from apps.shell.agent_runtime import AgentRuntimeError
+from apps.shell.yachiyo_agent import ApprovalDecision
 
 
 async def get_run_timeline(
@@ -92,11 +93,19 @@ async def reject_run_approval(
     request: TaskApprovalRequest | None = None,
     http_request: Request | None = None,
 ) -> dict[str, Any]:
+    metadata = dict(request.metadata) if request is not None else {}
+    if request is not None and request.approval_id:
+        metadata.setdefault("approval_id", request.approval_id)
+    decision = ApprovalDecision(
+        approved=False,
+        reason=request.reason if request is not None else None,
+        metadata=metadata,
+    )
     try:
         run_snapshot = await asyncio.to_thread(
             studio_service(http_request).reject_run_approval,
             run_id,
-            request.reason if request is not None else "",
+            decision,
         )
         return snapshot(run_snapshot)
     except KeyError as exc:

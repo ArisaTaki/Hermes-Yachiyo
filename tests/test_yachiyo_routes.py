@@ -8,8 +8,8 @@ from typing import Any
 
 import pytest
 
-from apps.bridge.routes import yachiyo, yachiyo_chat_handlers
-from apps.shell.yachiyo_agent import AgentTaskSnapshot, legacy_ports
+from apps.bridge.routes import yachiyo, yachiyo_chat_handlers, yachiyo_studio_run_handlers
+from apps.shell.yachiyo_agent import AgentTaskSnapshot, RunTimelineSnapshot, legacy_ports
 
 
 class _FakeAgentRuntime:
@@ -525,6 +525,46 @@ async def test_yachiyo_task_reject_preserves_approval_decision_payload(monkeypat
                 "metadata": {
                     "approval_id": "approval-1",
                     "surface": "bubble",
+                },
+            },
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_yachiyo_studio_run_reject_preserves_approval_decision_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _RejectRecordingStudioService:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        def reject_run_approval(self, run_id: str, decision: Any) -> RunTimelineSnapshot:
+            payload = decision.model_dump(exclude_none=True)
+            self.calls.append({"run_id": run_id, "decision": payload})
+            return RunTimelineSnapshot(run_id=run_id, status="failed")
+
+    service = _RejectRecordingStudioService()
+    monkeypatch.setattr(yachiyo_studio_run_handlers, "studio_service", lambda _request=None: service)
+
+    rejected = await yachiyo.reject_studio_run_approval(
+        "run-approval-1",
+        yachiyo.TaskApprovalRequest(
+            approval_id="approval-studio-1",
+            reason="No",
+            metadata={"surface": "studio"},
+        ),
+        None,
+    )
+
+    assert rejected["status"] == "failed"
+    assert service.calls == [
+        {
+            "run_id": "run-approval-1",
+            "decision": {
+                "approved": False,
+                "reason": "No",
+                "metadata": {
+                    "approval_id": "approval-studio-1",
+                    "surface": "studio",
                 },
             },
         }

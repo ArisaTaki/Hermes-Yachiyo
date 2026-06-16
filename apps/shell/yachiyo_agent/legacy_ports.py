@@ -24,6 +24,12 @@ from .groups import group_run_snapshot_from_payload
 _LEGACY_RUN_PROJECTOR = LegacyRunPayloadProjector()
 
 
+def _rejection_reason(decision: dict[str, Any] | str | None) -> str:
+    if isinstance(decision, dict):
+        return str(decision.get("reason") or "").strip()
+    return str(decision or "").strip()
+
+
 class LegacyChatTaskStarter:
     """Starts agent tasks through the existing Chat session path when available."""
 
@@ -547,8 +553,12 @@ class LegacyStudioPort:
     def approve_run_approval(self, run_id: str) -> dict[str, Any]:
         return self._runtime.approve_run_approval(run_id)
 
-    def reject_run_approval(self, run_id: str, reason: str | None = None) -> dict[str, Any]:
-        return self._runtime.reject_run_approval(run_id, reason or "")
+    def reject_run_approval(
+        self,
+        run_id: str,
+        decision: dict[str, Any] | str | None = None,
+    ) -> dict[str, Any]:
+        return self._runtime.reject_run_approval(run_id, _rejection_reason(decision))
 
     def read_run_artifact(self, run_id: str, artifact_path: str) -> dict[str, Any]:
         return self._runtime.read_run_artifact(run_id, artifact_path)

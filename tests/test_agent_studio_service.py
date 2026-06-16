@@ -6,6 +6,7 @@ from typing import Any
 
 from apps.shell.yachiyo_agent import (
     AgentStudioService,
+    ApprovalDecision,
     SaveAgentGroupMemberRequest,
     SaveAgentGroupRequest,
     SaveAgentRequest,
@@ -280,8 +281,8 @@ class _FakeStudioPort:
         self.calls.append(("approve_run_approval", run_id))
         return _run_payload(run_id=run_id, user_goal="Approved task") | {"status": "completed"}
 
-    def reject_run_approval(self, run_id: str, reason: str = "") -> dict[str, Any]:
-        self.calls.append(("reject_run_approval", {"run_id": run_id, "reason": reason}))
+    def reject_run_approval(self, run_id: str, decision: dict[str, Any] | None = None) -> dict[str, Any]:
+        self.calls.append(("reject_run_approval", {"run_id": run_id, "decision": decision}))
         return _run_payload(run_id=run_id, user_goal="Rejected task") | {"status": "failed"}
 
     def read_run_artifact(self, run_id: str, artifact_path: str) -> dict[str, Any]:
@@ -784,7 +785,14 @@ def test_agent_studio_service_run_actions_return_public_timeline_snapshots() -> 
     cancelled = service.cancel_run("run-1")
     deleted = service.delete_run("run-1")
     approved = service.approve_run_approval("run-1")
-    rejected = service.reject_run_approval("run-1", "No")
+    rejected = service.reject_run_approval(
+        "run-1",
+        ApprovalDecision(
+            approved=False,
+            reason="No",
+            metadata={"approval_id": "approval-1"},
+        ),
+    )
 
     assert rerun.run_id == "run-1-rerun"
     assert cancelled.status == "cancelled"
@@ -795,7 +803,17 @@ def test_agent_studio_service_run_actions_return_public_timeline_snapshots() -> 
     assert ("cancel_run", "run-1") in port.calls
     assert ("delete_run", "run-1") in port.calls
     assert ("approve_run_approval", "run-1") in port.calls
-    assert ("reject_run_approval", {"run_id": "run-1", "reason": "No"}) in port.calls
+    assert (
+        "reject_run_approval",
+        {
+            "run_id": "run-1",
+            "decision": {
+                "approved": False,
+                "reason": "No",
+                "metadata": {"approval_id": "approval-1"},
+            },
+        },
+    ) in port.calls
 
 
 def test_agent_studio_service_run_actions_preserve_workflow_run_snapshots() -> None:
@@ -816,8 +834,9 @@ def test_agent_studio_service_run_actions_preserve_workflow_run_snapshots() -> N
                 final_answer="Workflow approved",
             )
 
-        def reject_run_approval(self, run_id: str, reason: str = "") -> dict[str, Any]:
-            self.calls.append(("reject_run_approval", {"run_id": run_id, "reason": reason}))
+        def reject_run_approval(self, run_id: str, decision: dict[str, Any] | None = None) -> dict[str, Any]:
+            reason = str((decision or {}).get("reason") or "")
+            self.calls.append(("reject_run_approval", {"run_id": run_id, "decision": decision}))
             return _workflow_run_payload(
                 run_id=run_id,
                 status="failed",
@@ -844,7 +863,7 @@ def test_agent_studio_service_run_actions_preserve_workflow_run_snapshots() -> N
     assert ("approve_run_approval", "workflow-run-1") in port.calls
     assert (
         "reject_run_approval",
-        {"run_id": "workflow-run-1", "reason": "No"},
+        {"run_id": "workflow-run-1", "decision": {"approved": False, "reason": "No"}},
     ) in port.calls
 
 

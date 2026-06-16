@@ -76,11 +76,29 @@ def test_legacy_studio_port_forwards_run_event_page_cursor_to_runtime() -> None:
     }
 
 
+def test_legacy_studio_port_accepts_reject_decision_payload() -> None:
+    runtime = _FakeGroupRuntime()
+    port = LegacyStudioPort(runtime)
+
+    rejected = port.reject_run_approval(
+        "run-1",
+        {
+            "approved": False,
+            "reason": "No",
+            "metadata": {"approval_id": "approval-1"},
+        },
+    )
+
+    assert rejected["status"] == "failed"
+    assert runtime.last_reject_request == {"run_id": "run-1", "reason": "No"}
+
+
 class _FakeGroupRuntime:
     def __init__(self, statuses: dict[str, str] | None = None) -> None:
         self.child_run_ids: list[str] = []
         self.events: dict[str, list[dict[str, Any]]] = {}
         self.last_event_page_request: dict[str, Any] | None = None
+        self.last_reject_request: dict[str, Any] | None = None
         self.runs: dict[str, dict[str, Any]] = {}
         self.statuses = statuses or {}
         self.group = {
@@ -167,4 +185,12 @@ class _FakeGroupRuntime:
             "after_sequence": after_sequence,
             "limit": limit,
             "events": list(self.events.get(run_id, [])),
+        }
+
+    def reject_run_approval(self, run_id: str, reason: str = "") -> dict[str, Any]:
+        self.last_reject_request = {"run_id": run_id, "reason": reason}
+        return {
+            "run_id": run_id,
+            "status": "failed",
+            "user_goal": "Rejected",
         }

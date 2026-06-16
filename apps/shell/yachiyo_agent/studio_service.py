@@ -10,6 +10,7 @@ from .artifacts import artifact_content_snapshot_from_payload
 from .contracts import (
     AgentDefinitionSnapshot,
     AgentGroupSnapshot,
+    ApprovalDecision,
     ArtifactContentSnapshot,
     FutureTaskSnapshot,
     FutureTaskTriggerResultSnapshot,
@@ -363,10 +364,10 @@ class AgentStudioService:
     def reject_run_approval(
         self,
         run_id: str,
-        reason: str | None = None,
+        decision: ApprovalDecision | Mapping[str, Any] | str | None = None,
     ) -> RunTimelineSnapshot | WorkflowRunSnapshot:
         return _public_run_snapshot_from_payload(
-            self._studio_port.reject_run_approval(run_id, reason or "")
+            self._studio_port.reject_run_approval(run_id, _rejection_payload(decision))
         )
 
     def read_run_artifact(self, run_id: str, artifact_path: str) -> ArtifactContentSnapshot:
@@ -426,6 +427,18 @@ def _request_payload(request: Any) -> dict[str, Any]:
     if hasattr(request, "model_dump"):
         return request.model_dump(exclude_none=True, by_alias=True)
     return dict(request)
+
+
+def _rejection_payload(
+    request: ApprovalDecision | Mapping[str, Any] | str | None,
+) -> dict[str, Any] | None:
+    if request is None:
+        return None
+    if isinstance(request, str):
+        return {"approved": False, "reason": request}
+    payload = _request_payload(request)
+    payload.setdefault("approved", False)
+    return payload
 
 
 def _public_run_snapshot_from_payload(
