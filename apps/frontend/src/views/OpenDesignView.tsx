@@ -4,10 +4,12 @@ import logoUrl from '../../../../docs/open-design/logo.png';
 import { useConfirmDialog } from '../components/ConfirmDialog';
 import { UiIcon, type UiIconName } from '../components/UiIcon';
 import { LauncherAgentTaskLight } from '../features/yachiyo-chat/components/LauncherAgentTaskLight';
-import { approveYachiyoTask, listYachiyoTasks, rejectYachiyoTask } from '../features/yachiyo-chat/api';
+import { approveYachiyoTask, listYachiyoTasks, rejectYachiyoTask, startYachiyoTask } from '../features/yachiyo-chat/api';
 import {
   launcherAgentTaskFromPublicTasks,
   launcherAgentTaskIsActive,
+  launcherTaskConversationId,
+  launcherTaskTitle,
 } from '../features/yachiyo-chat/launcherTasks';
 import type { AgentTaskSnapshot, ApprovalCardSnapshot } from '../features/yachiyo-chat/types';
 import { AssistantProfileSeedContext, type AssistantProfileSeed } from '../lib/assistantProfileSeed';
@@ -1326,6 +1328,24 @@ function useLauncherModePayload(mode: 'bubble' | 'live2d', active = true) {
     approval: ApprovalCardSnapshot,
   ) => resolveAgentTaskApproval(task, approval, false), [resolveAgentTaskApproval]);
 
+  const startAgentTask = useCallback(async (prompt: string) => {
+    const text = prompt.trim();
+    if (!text) return null;
+    const task = await startYachiyoTask({
+      prompt: text,
+      conversation_id: launcherTaskConversationId(mode, data),
+      title: launcherTaskTitle(text),
+      metadata: {
+        source: 'launcher',
+        launcher_mode: mode,
+        launcher_surface: 'mode_page',
+      },
+    });
+    setPublicAgentTask(task);
+    await refresh();
+    return task;
+  }, [data, mode, refresh]);
+
   return {
     agentTask: publicAgentTask || data?.chat?.agent_task || null,
     approveAgentTaskApproval,
@@ -1333,6 +1353,7 @@ function useLauncherModePayload(mode: 'bubble' | 'live2d', active = true) {
     loading,
     refresh,
     rejectAgentTaskApproval,
+    startAgentTask,
   };
 }
 
@@ -1347,6 +1368,7 @@ export function BubbleModePage() {
     data,
     loading,
     rejectAgentTaskApproval,
+    startAgentTask,
   } = useLauncherModePayload('bubble');
   usePageLoading(loading && !data);
 
@@ -1392,6 +1414,7 @@ export function BubbleModePage() {
             testIdPrefix="bubble-mode"
             variant="panel"
           />
+          <LauncherModeTaskComposer mode="bubble" startAgentTask={startAgentTask} />
           <div className="hy-feature-pills">
             {[
               ['💬', '随时对话'],
@@ -1415,6 +1438,7 @@ export function Live2DModePage({ active = true }: { active?: boolean } = {}) {
     data,
     loading,
     rejectAgentTaskApproval,
+    startAgentTask,
   } = useLauncherModePayload('live2d', active);
   usePageLoading(active && loading && !data);
 
@@ -1468,6 +1492,7 @@ export function Live2DModePage({ active = true }: { active?: boolean } = {}) {
             testIdPrefix="live2d-mode"
             variant="panel"
           />
+          <LauncherModeTaskComposer mode="live2d" startAgentTask={startAgentTask} />
           <div className="hy-feature-pills">
             {[
               ['🎤', data?.tts?.enabled ? '口型同步' : '口型同步'],
@@ -1483,6 +1508,60 @@ export function Live2DModePage({ active = true }: { active?: boolean } = {}) {
         </div>
       </div>
     </section>
+  );
+}
+
+function LauncherModeTaskComposer({
+  mode,
+  startAgentTask,
+}: {
+  mode: 'bubble' | 'live2d';
+  startAgentTask: (prompt: string) => Promise<AgentTaskSnapshot | null>;
+}) {
+  const [prompt, setPrompt] = useState('');
+  const [busy, setBusy] = useState(false);
+  const composingRef = useRef(false);
+
+  async function submitTask(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (composingRef.current) return;
+    const text = prompt.trim();
+    if (!text || busy) return;
+    setBusy(true);
+    setPrompt('');
+    try {
+      await startAgentTask(text);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form className="launcher-mode-task-composer" data-testid={`${mode}-mode-task-composer`} onSubmit={submitTask}>
+      <input
+        aria-label="委派任务给八千代"
+        className="hy-input"
+        data-testid={`${mode}-mode-task-input`}
+        disabled={busy}
+        onChange={(event) => setPrompt(event.target.value)}
+        onCompositionEnd={() => {
+          composingRef.current = false;
+        }}
+        onCompositionStart={() => {
+          composingRef.current = true;
+        }}
+        placeholder="委派一个任务给八千代"
+        value={prompt}
+      />
+      <button
+        className="hy-btn hy-btn-primary"
+        data-testid={`${mode}-mode-task-submit`}
+        disabled={!prompt.trim() || busy}
+        type="submit"
+      >
+        {busy ? '委派中' : '委派任务'}
+      </button>
+    </form>
   );
 }
 
