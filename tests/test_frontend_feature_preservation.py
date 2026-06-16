@@ -3534,7 +3534,11 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
         "apps/frontend/src/features/yachiyo-chat/components/ComposerApprovalNotice.tsx",
         ["运行详情"],
     )
-    _assert_not_contains("apps/frontend/src/views/ChatView.tsx", ["运行详情"])
+    _assert_contains(
+        "apps/frontend/src/views/ChatView.tsx",
+        ["在 Agent Studio 中运行"],
+    )
+    _assert_not_contains("apps/frontend/src/views/ChatView.tsx", ["运行详情", "去 Runs 运行"])
 
 
 def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None:

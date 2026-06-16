@@ -2739,7 +2739,7 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
                 String(message.metadata?.suggested_goal || ''),
               )}
             >
-              {message.metadata?.runnable_id ? '去 Runs 运行' : '打开 Workflow Studio'}
+              {message.metadata?.runnable_id ? '在 Agent Studio 中运行' : '打开 Workflow Studio'}
             </button>
           ) : null}
           {showRetry ? (
