@@ -658,6 +658,29 @@ async def test_launcher_routes_reuse_chat_bridge_and_notification_tracker(monkey
             assert session_limit == 3
             return {
                 "empty": False,
+                "agent_task": {
+                    "task_id": "launcher-task-1",
+                    "conversation_id": "launcher-session-1",
+                    "title": "Public launcher task",
+                    "status": "waiting_approval",
+                    "needs_user_action": True,
+                    "pending_approvals": [
+                        {
+                            "approval_id": "approval-1",
+                            "tool_name": "terminal.run",
+                            "status": "pending",
+                            "open_in_studio_url": "#/agents?run_id=launcher-task-1",
+                        }
+                    ],
+                    "recent_events": [
+                        {
+                            "event_type": "agent.tool.approval_required",
+                            "title": "Approval required",
+                        }
+                    ],
+                    "artifacts": [],
+                    "open_in_studio_url": "#/agents?run_id=launcher-task-1",
+                },
                 "is_processing": False,
                 "status_label": f"最近 {summary_count} 条",
                 "latest_reply": "短回复",
@@ -696,11 +719,24 @@ async def test_launcher_routes_reuse_chat_bridge_and_notification_tracker(monkey
     assert bubble_launcher["status_label"] == "最近 2 条"
     assert bubble_launcher["latest_reply"] == "短回复"
     assert bubble_launcher["latest_reply_full"] == "完整回复"
+    assert bubble_payload["chat"]["agent_task"]["task_id"] == "launcher-task-1"
+    assert bubble_payload["chat"]["agent_task"]["status"] == "waiting_approval"
+    assert bubble_payload["chat"]["agent_task"]["needs_user_action"] is True
+    assert (
+        bubble_payload["chat"]["agent_task"]["pending_approvals"][0]["open_in_studio_url"]
+        == "#/agents?run_id=launcher-task-1"
+    )
+    assert (
+        bubble_payload["chat"]["agent_task"]["recent_events"][0]["event_type"]
+        == "agent.tool.approval_required"
+    )
 
     live2d_payload = await ui.get_launcher_view("live2d")
     assert live2d_payload["launcher"]["show_reply_bubble"] is True
     assert live2d_payload["launcher"]["enable_quick_input"] is True
     assert live2d_payload["launcher"]["latest_status"] == "completed"
+    assert live2d_payload["chat"]["agent_task"]["task_id"] == "launcher-task-1"
+    assert live2d_payload["chat"]["agent_task"]["open_in_studio_url"] == "#/agents?run_id=launcher-task-1"
     assert await ui.acknowledge_launcher(ui.LauncherAckRequest(mode="live2d")) == {
         "ok": True,
         "mode": "live2d",
