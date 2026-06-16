@@ -1370,6 +1370,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "useRunApprovalActions",
             "useRunDetailSynchronization({",
             "useRunApprovalFollowup",
+            "useGroupRunDebugActions({",
             "useGroupRunSnapshot(",
             "useRunEventReplay(selectedRunId, selectedRunReplayRefreshKey)",
             "useRunListDerivedState({",
@@ -3200,6 +3201,16 @@ def test_chat_approval_run_detail_handoff_preserves_route_and_replay_wiring() ->
             "const pollRunIds = activeRunPollKey.split('|').filter(Boolean);",
             "await refreshRunGroupsForRuns(loadedRuns, () => !disposed);",
             "setArtifactPreview(null);",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useGroupRunDebugActions.ts",
+        [
+            "export function useGroupRunDebugActions",
+            "loadMoreGroupRunReplayEvents",
+            "loadMoreSelectedGroupRunEvents",
+            "已加载 ${loadedCount} 条 GroupRun Event replay",
+            "没有更多 GroupRun Event replay",
         ],
     )
     _assert_contains(

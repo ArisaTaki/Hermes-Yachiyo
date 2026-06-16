@@ -28,6 +28,7 @@ import { useAgentStudioRouteState } from '../features/agent-studio/hooks/useAgen
 import { useAgentStudioSelectionSynchronization } from '../features/agent-studio/hooks/useAgentStudioSelectionSynchronization';
 import { useAgentStudioTabActions } from '../features/agent-studio/hooks/useAgentStudioTabActions';
 import { useApprovedRunGuard } from '../features/agent-studio/hooks/useApprovedRunGuard';
+import { useGroupRunDebugActions } from '../features/agent-studio/hooks/useGroupRunDebugActions';
 import { useRunApprovalActions } from '../features/agent-studio/hooks/useRunApprovalActions';
 import { useRunApprovalFollowup } from '../features/agent-studio/hooks/useRunApprovalFollowup';
 import { useRunArtifactActions } from '../features/agent-studio/hooks/useRunArtifactActions';
@@ -696,10 +697,10 @@ export function AgentStudioView() {
     setStatus,
     showConfirmDialog,
   });
-  async function loadMoreSelectedGroupRunEvents() {
-    const loadedCount = await loadMoreGroupRunReplayEvents();
-    setStatus(loadedCount ? `已加载 ${loadedCount} 条 GroupRun Event replay` : '没有更多 GroupRun Event replay');
-  }
+  const { loadMoreSelectedGroupRunEvents } = useGroupRunDebugActions({
+    loadMoreGroupRunReplayEvents,
+    setStatus,
+  });
 
   const {
     createRunFromTarget,
