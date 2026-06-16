@@ -755,7 +755,7 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             'data-testid="yachiyo-agent-task-open-studio"',
             "href={studioUrl}",
             "data-studio-url={studioUrl}",
-            "onOpenStudio(studioRunId, studioUrl)",
+            "onOpenStudio(undefined, studioUrl)",
             'data-testid="yachiyo-agent-task-cancel"',
             'testId="yachiyo-agent-task-timeline"',
             "<ApprovalCard",
@@ -3270,7 +3270,7 @@ def test_chat_approval_run_detail_handoff_preserves_route_and_replay_wiring() ->
         "apps/frontend/src/views/ChatView.tsx",
         [
             "function openRunDetails(runId: string | undefined, studioUrl = '')",
-            "const clean = String(runId || '').trim();",
+            "runIdFromStudioUrl(studioUrl) || String(runId || '').trim();",
             "const groupRunId = groupRunIdFromStudioUrl(studioUrl);",
             "group_run: groupRunId",
             "onOpenRunDetails={openRunDetails}",
