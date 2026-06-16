@@ -563,7 +563,7 @@ async function main() {
     const failedArticle = document.querySelector('[data-message-id="${FAILED_MESSAGE_ID}"]');
     const failedButton = failedArticle?.querySelector('[data-testid="chat-message-open-run-detail"]');
     return Boolean(button)
-      && button.textContent.includes('运行详情')
+      && button.textContent.includes('Agent Studio')
       && button.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
       && button.getAttribute('data-run-status') === 'completed'
       && document.querySelector('[data-testid="chat-message-copy"]')
@@ -619,7 +619,7 @@ async function main() {
     const completedArticle = document.querySelector('[data-message-id="${COMPLETED_MESSAGE_ID}"]');
     const button = completedArticle?.querySelector('[data-testid="chat-message-open-run-detail"]');
     return Boolean(button)
-      && button.textContent.includes('运行详情')
+      && button.textContent.includes('Agent Studio')
       && button.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
       && button.getAttribute('data-run-status') === 'completed'
       && document.querySelector('[data-testid="chat-message-copy"]')

@@ -397,7 +397,7 @@ async function waitForCancelled(win, label) {
       && header.disabled
       && !composer
       && cancelledMessage?.className.includes('error')
-      && openRun?.textContent.includes('运行详情')
+      && openRun?.textContent.includes('Agent Studio')
       && document.body.textContent.includes(${JSON.stringify(RUN_RESULT)})
       && !document.body.textContent.includes('Still running cancel smoke.')
       && status !== '取消失败';

@@ -560,7 +560,7 @@ async function runPackagedChatSmoke(client, timeoutMs) {
         && openRun
         && openRun.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
         && openRun.getAttribute('data-run-status') === 'completed'
-        && openRun.textContent.includes('运行详情');
+        && openRun.textContent.includes('Agent Studio');
     })()
   `, 'packaged native file assistant reply Run Detail action', timeoutMs);
   await evaluate(client, `

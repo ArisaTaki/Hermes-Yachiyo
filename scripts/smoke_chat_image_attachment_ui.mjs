@@ -637,7 +637,7 @@ async function main() {
       && openRun
       && openRun.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
       && openRun.getAttribute('data-run-status') === 'completed'
-      && openRun.textContent.includes('运行详情');
+      && openRun.textContent.includes('Agent Studio');
   }, 'image assistant reply Run Detail action');
   await win.webContents.executeJavaScript("document.querySelector('[data-message-id=\\"assistant-chat-image-ui-smoke-reply\\"] [data-testid=\\"chat-message-open-run-detail\\"]').click()", true);
   await waitFor(win, () => {
