@@ -8,6 +8,10 @@ from typing import Any
 
 from apps.shell.agent.runtime.config import DEFAULT_AGENT_IDS
 from apps.shell.agent.runtime.errors import AgentRuntimeError
+from apps.shell.agent.runtime.model_calling import (
+    RuntimeModelCallAdapterBundle,
+    build_runtime_model_call_adapters,
+)
 from apps.shell.agent.runtime.model_profiles import RuntimeModelProfileResolver
 
 
@@ -73,6 +77,14 @@ class RuntimeModelCompatibilityProvider:
             messages,
         )
 
+    def model_call_adapters(self) -> RuntimeModelCallAdapterBundle:
+        return build_runtime_model_call_adapters(
+            chat_message_provider=self.chat_message,
+            timeout_provider=self.chat_timeout,
+            urlopen=self.urlopen,
+            redact_error=self.redact_error,
+        )
+
     def model_profile_resolver(self) -> RuntimeModelProfileResolver:
         return RuntimeModelProfileResolver(
             profile_service_factory=self.profile_service,
@@ -84,3 +96,9 @@ class RuntimeModelCompatibilityProvider:
 
 def runtime_model_compat_provider() -> RuntimeModelCompatibilityProvider:
     return RuntimeModelCompatibilityProvider()
+
+
+def build_legacy_model_call_adapters(
+    provider: RuntimeModelCompatibilityProvider | None = None,
+) -> RuntimeModelCallAdapterBundle:
+    return (provider or runtime_model_compat_provider()).model_call_adapters()

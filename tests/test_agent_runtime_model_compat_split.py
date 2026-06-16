@@ -5,7 +5,10 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
-from apps.shell.agent.runtime.model_compat import RuntimeModelCompatibilityProvider
+from apps.shell.agent.runtime.model_compat import (
+    RuntimeModelCompatibilityProvider,
+    build_legacy_model_call_adapters,
+)
 
 
 class _FakeProfileService:
@@ -89,3 +92,11 @@ def test_runtime_model_compat_provider_preserves_legacy_monkeypatch_points() -> 
             [{"role": "user", "content": "hello"}],
         )
     ]
+
+    adapters = build_legacy_model_call_adapters(provider)
+    assert adapters.model_profile_chat_adapter.call(
+        "https://api.example.test/v1",
+        "demo-model",
+        "sk-test",
+        [{"role": "user", "content": "hello"}],
+    ) == {"content": "patched"}

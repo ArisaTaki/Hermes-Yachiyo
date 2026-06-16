@@ -200,6 +200,9 @@ from apps.shell.agent.runtime.model_calling import (
     openai_compatible_chat as _runtime_openai_compatible_chat,
 )
 from apps.shell.agent.runtime.model_profiles import RuntimeAgentModelTester, RuntimeModelProfileResolver
+from apps.shell.agent.runtime.model_compat import (
+    build_legacy_model_call_adapters as _build_legacy_model_call_adapters,
+)
 from apps.shell.agent.runtime.model_facade import RuntimeModelFacadeMixin
 from apps.shell.agent.runtime.model_messages import (
     RESPONSES_STREAM_REASONING_EVENTS as _RESPONSES_STREAM_REASONING_EVENTS,
@@ -465,12 +468,7 @@ from packages.security import (
     redact_api_error_text,
 )
 
-_legacy_model_call_adapters = _build_runtime_model_call_adapters(
-    chat_message_provider=lambda: openai_compatible_chat_message,
-    timeout_provider=lambda: read_openai_compatible_chat_timeout(),
-    urlopen=lambda *args, **kwargs: urlopen_with_bundled_ca(*args, **kwargs),
-    redact_error=lambda value: redact_secrets(value),
-)
+_legacy_model_call_adapters = _build_legacy_model_call_adapters()
 _legacy_model_profile_chat_adapter = _legacy_model_call_adapters.model_profile_chat_adapter
 _legacy_openai_compatible_chat_adapter = _legacy_model_call_adapters.openai_compatible_chat_adapter
 
