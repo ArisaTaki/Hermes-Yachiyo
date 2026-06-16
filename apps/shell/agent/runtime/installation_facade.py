@@ -10,8 +10,9 @@ from apps.shell.agent.runtime.agent_chat_entrypoints import (
 )
 from apps.shell.agent.runtime.agent_runs import RuntimeAgentRunExecutor
 from apps.shell.agent.runtime.agent_services import build_runtime_agent_services
-from apps.shell.agent.runtime.clock import utc_now_iso
+from apps.shell.agent.runtime.clock import iso_epoch, utc_now_iso
 from apps.shell.agent.runtime.config import (
+    DEFAULT_AGENT_IDS,
     FINAL_RUN_STATUSES,
     MAIN_CHAT_AGENT_ID,
     MARKET_AGENT_OPERATING_DOCTRINE,
@@ -19,6 +20,7 @@ from apps.shell.agent.runtime.config import (
     NATIVE_LIBRARY_SOURCE_TYPES,
     SKILL_SOURCE_TYPES,
     SYSTEM_AGENT_IDS,
+    WORKFLOW_NODE_TYPES,
     is_active_run_status,
     is_native_library_source_type,
     normalize_execution_backend,
@@ -59,6 +61,12 @@ from apps.shell.agent.runtime.runnables import RuntimeRunnableResolver
 from apps.shell.agent.runtime.serialization import json_dump_sorted, json_load, slug
 from apps.shell.agent.runtime.shutdown import RuntimeShutdownService
 from apps.shell.agent.runtime.tooling import build_runtime_tooling_stack
+from apps.shell.agent.runtime.workflow_approval_execution import RuntimeWorkflowApprovalExecutionService
+from apps.shell.agent.runtime.workflow_runs import RuntimeWorkflowRunAsyncCoordinator, RuntimeWorkflowRunCoordinator
+from apps.shell.agent.runtime.workflow_services import (
+    build_runtime_workflow_execution_services,
+    build_runtime_workflow_planning_services,
+)
 from apps.shell.agent.tools import cancel_terminal_process_groups
 
 
@@ -445,17 +453,16 @@ class RuntimeInstallationFacadeMixin:
         *,
         runtime_timeline_factory: Any,
     ) -> None:
-        legacy = _legacy_agent_runtime_module()
-        workflow_planning_services = legacy._build_runtime_workflow_planning_services(
+        workflow_planning_services = build_runtime_workflow_planning_services(
             get_run_group=self.get_run_group,
             get_run=self.get_run,
             node_kind=self._node_kind,
-            node_types=legacy._WORKFLOW_NODE_TYPES,
+            node_types=WORKFLOW_NODE_TYPES,
             get_agent_private=self._get_agent_private,
             get_workflow=self.get_workflow,
             load_agent_skills=self._load_agent_skills,
             agent_model_config_private=self._agent_model_config_private,
-            default_agent_ids=legacy._DEFAULT_AGENT_IDS,
+            default_agent_ids=DEFAULT_AGENT_IDS,
             timeline_factory=runtime_timeline_factory,
             workflow_path_snapshot=self._workflow_path_snapshot,
             workflow_runtime_snapshot=self._workflow_runtime_snapshot,
@@ -466,7 +473,7 @@ class RuntimeInstallationFacadeMixin:
             workflow_path=self._workflow_path,
         )
         self._install_runtime_workflow_planning_services(workflow_planning_services)
-        self.workflow_run_coordinator = legacy.RuntimeWorkflowRunCoordinator(
+        self.workflow_run_coordinator = RuntimeWorkflowRunCoordinator(
             get_workflow=lambda workflow_id: self.get_workflow(workflow_id),
             validate_workflow=lambda nodes, edges: self.validate_workflow(nodes, edges),
             validate_workflow_agent_nodes=lambda nodes: self._validate_workflow_agent_nodes(nodes),
@@ -484,7 +491,7 @@ class RuntimeInstallationFacadeMixin:
                 **kwargs,
             ),
             lock=self._db_lock,
-            error_type=legacy.AgentRuntimeError,
+            error_type=AgentRuntimeError,
         )
 
     def _install_runtime_workflow_execution_and_async(
@@ -492,10 +499,9 @@ class RuntimeInstallationFacadeMixin:
         *,
         runtime_timeline_factory: Any,
     ) -> None:
-        legacy = _legacy_agent_runtime_module()
-        workflow_execution_services = legacy._build_runtime_workflow_execution_services(
+        workflow_execution_services = build_runtime_workflow_execution_services(
             engine=self,
-            iso_epoch=lambda value: legacy._iso_epoch(value),
+            iso_epoch=iso_epoch,
             workflow_path=self.workflow_path_planner.workflow_path,
             workflow_nodes_by_id=self.workflow_path_planner.nodes_by_id,
             workflow_next_node_id=self.workflow_path_planner.next_node_id,
@@ -528,7 +534,7 @@ class RuntimeInstallationFacadeMixin:
             approve_workflow_node=lambda run_id, **kwargs: self.approvals.approve_workflow_node(run_id, **kwargs),
         )
         self._install_runtime_workflow_execution_services(workflow_execution_services)
-        self.workflow_run_async_coordinator = legacy.RuntimeWorkflowRunAsyncCoordinator(
+        self.workflow_run_async_coordinator = RuntimeWorkflowRunAsyncCoordinator(
             get_workflow=lambda workflow_id: self.get_workflow(workflow_id),
             validate_workflow=lambda nodes, edges: self.validate_workflow(nodes, edges),
             validate_workflow_agent_nodes=lambda nodes: self._validate_workflow_agent_nodes(nodes),
@@ -551,9 +557,9 @@ class RuntimeInstallationFacadeMixin:
                 **kwargs,
             ),
             resolve_runnable=lambda **kwargs: self.resolve_runnable(**kwargs),
-            error_type=legacy.AgentRuntimeError,
+            error_type=AgentRuntimeError,
         )
-        self.workflow_approval_execution = legacy.RuntimeWorkflowApprovalExecutionService(
+        self.workflow_approval_execution = RuntimeWorkflowApprovalExecutionService(
             pending_approval_private=lambda run_id: self.runs.pending_approval_private(run_id),
             workflow_for_run_resume=lambda run: self._workflow_for_run_resume(run),
             workflow_run_is_group_root=lambda run: self._workflow_run_is_group_root(run),

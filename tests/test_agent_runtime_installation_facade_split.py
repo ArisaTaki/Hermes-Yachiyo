@@ -580,10 +580,17 @@ def test_installation_facade_installs_workflow_planning_and_coordinator(monkeypa
         def __init__(self, **kwargs) -> None:
             self.kwargs = kwargs
 
+    class ForbiddenLegacyWorkflowRunCoordinator:
+        def __init__(self, **_kwargs) -> None:
+            raise AssertionError("workflow coordinator should use split installation class")
+
+    def forbidden_workflow_planning_builder(**_kwargs):
+        raise AssertionError("workflow planning should use split installation builder")
+
     def fake_build_runtime_workflow_planning_services(**kwargs):
         return SimpleNamespace(
             kwargs=kwargs,
-            workflow_parent_locator="workflow-parent-locator",
+            workflow_parent_locator=SimpleNamespace(kwargs=kwargs),
             workflow_path_planner="workflow-path-planner",
             workflow_definition_validator="workflow-definition-validator",
             run_readiness_validator="run-readiness-validator",
@@ -595,9 +602,23 @@ def test_installation_facade_installs_workflow_planning_and_coordinator(monkeypa
     monkeypatch.setattr(
         agent_runtime,
         "_build_runtime_workflow_planning_services",
+        forbidden_workflow_planning_builder,
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "RuntimeWorkflowRunCoordinator",
+        ForbiddenLegacyWorkflowRunCoordinator,
+    )
+    monkeypatch.setattr(
+        installation_facade_mod,
+        "build_runtime_workflow_planning_services",
         fake_build_runtime_workflow_planning_services,
     )
-    monkeypatch.setattr(agent_runtime, "RuntimeWorkflowRunCoordinator", CapturedWorkflowRunCoordinator)
+    monkeypatch.setattr(
+        installation_facade_mod,
+        "RuntimeWorkflowRunCoordinator",
+        CapturedWorkflowRunCoordinator,
+    )
 
     engine = object.__new__(agent_runtime.NativeRunEngine)
     engine.get_run_group = "get-run-group"
@@ -627,8 +648,10 @@ def test_installation_facade_installs_workflow_planning_and_coordinator(monkeypa
         runtime_timeline_factory="timeline-factory",
     )
 
-    assert engine.workflow_parent_locator == "workflow-parent-locator"
+    assert engine.workflow_parent_locator.kwargs["get_run"] == "get-run"
     assert engine.workflow_path_planner == "workflow-path-planner"
+    assert engine.workflow_parent_locator.kwargs["node_types"] is installation_facade_mod.WORKFLOW_NODE_TYPES
+    assert engine.workflow_parent_locator.kwargs["default_agent_ids"] is installation_facade_mod.DEFAULT_AGENT_IDS
     assert engine.workflow_definition_validator == "workflow-definition-validator"
     assert engine.run_readiness_validator == "run-readiness-validator"
     assert engine.workflow_run_start_projector == "workflow-run-start-projector"
@@ -638,6 +661,7 @@ def test_installation_facade_installs_workflow_planning_and_coordinator(monkeypa
     assert engine.workflow_run_coordinator.kwargs["starter"] == "workflow-run-starter"
     assert engine.workflow_run_coordinator.kwargs["start_projector"] == "workflow-run-start-projector"
     assert engine.workflow_run_coordinator.kwargs["lock"] == "db-lock"
+    assert engine.workflow_run_coordinator.kwargs["error_type"] is agent_runtime.AgentRuntimeError
 
 
 def test_installation_facade_installs_workflow_execution_and_async(monkeypatch) -> None:
@@ -645,14 +669,28 @@ def test_installation_facade_installs_workflow_execution_and_async(monkeypatch) 
         def __init__(self, **kwargs) -> None:
             self.kwargs = kwargs
 
+    class ForbiddenLegacyWorkflowRunAsyncCoordinator:
+        def __init__(self, **_kwargs) -> None:
+            raise AssertionError("workflow async coordinator should use split installation class")
+
     class CapturedWorkflowApprovalExecution:
         def __init__(self, **kwargs) -> None:
             self.kwargs = kwargs
 
+    class ForbiddenLegacyWorkflowApprovalExecution:
+        def __init__(self, **_kwargs) -> None:
+            raise AssertionError("workflow approval execution should use split installation class")
+
+    def forbidden_workflow_execution_builder(**_kwargs):
+        raise AssertionError("workflow execution should use split installation builder")
+
     def fake_build_runtime_workflow_execution_services(**kwargs):
         return SimpleNamespace(
             kwargs=kwargs,
-            workflow_continuation=SimpleNamespace(project_background_failure="project-background-failure"),
+            workflow_continuation=SimpleNamespace(
+                kwargs=kwargs,
+                project_background_failure="project-background-failure",
+            ),
             workflow_approval_resume="workflow-approval-resume",
             workflow_cancellation="workflow-cancellation",
             workflow_child_outcomes="workflow-child-outcomes",
@@ -661,15 +699,30 @@ def test_installation_facade_installs_workflow_execution_and_async(monkeypatch) 
     monkeypatch.setattr(
         agent_runtime,
         "_build_runtime_workflow_execution_services",
-        fake_build_runtime_workflow_execution_services,
+        forbidden_workflow_execution_builder,
     )
     monkeypatch.setattr(
         agent_runtime,
         "RuntimeWorkflowRunAsyncCoordinator",
-        CapturedWorkflowRunAsyncCoordinator,
+        ForbiddenLegacyWorkflowRunAsyncCoordinator,
     )
     monkeypatch.setattr(
         agent_runtime,
+        "RuntimeWorkflowApprovalExecutionService",
+        ForbiddenLegacyWorkflowApprovalExecution,
+    )
+    monkeypatch.setattr(
+        installation_facade_mod,
+        "build_runtime_workflow_execution_services",
+        fake_build_runtime_workflow_execution_services,
+    )
+    monkeypatch.setattr(
+        installation_facade_mod,
+        "RuntimeWorkflowRunAsyncCoordinator",
+        CapturedWorkflowRunAsyncCoordinator,
+    )
+    monkeypatch.setattr(
+        installation_facade_mod,
         "RuntimeWorkflowApprovalExecutionService",
         CapturedWorkflowApprovalExecution,
     )
@@ -713,6 +766,7 @@ def test_installation_facade_installs_workflow_execution_and_async(monkeypatch) 
     )
 
     assert engine.workflow_continuation.project_background_failure == "project-background-failure"
+    assert engine.workflow_continuation.kwargs["iso_epoch"] is installation_facade_mod.iso_epoch
     assert engine.workflow_approval_resume == "workflow-approval-resume"
     assert engine.workflow_cancellation == "workflow-cancellation"
     assert engine.workflow_child_outcomes == "workflow-child-outcomes"
@@ -720,6 +774,7 @@ def test_installation_facade_installs_workflow_execution_and_async(monkeypatch) 
     assert engine.workflow_run_async_coordinator.kwargs["starter"] == "workflow-run-starter"
     assert engine.workflow_run_async_coordinator.kwargs["start_projector"] is engine.workflow_run_start_projector
     assert "project_background_failure" in engine.workflow_run_async_coordinator.kwargs
+    assert engine.workflow_run_async_coordinator.kwargs["error_type"] is agent_runtime.AgentRuntimeError
     assert isinstance(engine.workflow_approval_execution, CapturedWorkflowApprovalExecution)
     assert (
         engine.workflow_approval_execution.kwargs["workflow_approval_resume"]
