@@ -870,10 +870,26 @@ def test_installation_facade_installs_run_control_and_shutdown(monkeypatch) -> N
         def __init__(self, **kwargs) -> None:
             self.kwargs = kwargs
 
-    monkeypatch.setattr(agent_runtime, "RuntimeRunCancellationService", CapturedRunCancellation)
-    monkeypatch.setattr(agent_runtime, "RuntimeRunRerunService", CapturedCollaborator)
-    monkeypatch.setattr(agent_runtime, "RuntimeRunDeletionService", CapturedCollaborator)
-    monkeypatch.setattr(agent_runtime, "RuntimeShutdownService", CapturedCollaborator)
+    class ForbiddenLegacyCollaborator:
+        def __init__(self, **_kwargs) -> None:
+            raise AssertionError("run control should use split installation classes")
+
+    def fake_cancel_terminal_process_groups() -> None:
+        return None
+
+    monkeypatch.setattr(agent_runtime, "RuntimeRunCancellationService", ForbiddenLegacyCollaborator)
+    monkeypatch.setattr(agent_runtime, "RuntimeRunRerunService", ForbiddenLegacyCollaborator)
+    monkeypatch.setattr(agent_runtime, "RuntimeRunDeletionService", ForbiddenLegacyCollaborator)
+    monkeypatch.setattr(agent_runtime, "RuntimeShutdownService", ForbiddenLegacyCollaborator)
+    monkeypatch.setattr(installation_facade_mod, "RuntimeRunCancellationService", CapturedRunCancellation)
+    monkeypatch.setattr(installation_facade_mod, "RuntimeRunRerunService", CapturedCollaborator)
+    monkeypatch.setattr(installation_facade_mod, "RuntimeRunDeletionService", CapturedCollaborator)
+    monkeypatch.setattr(installation_facade_mod, "RuntimeShutdownService", CapturedCollaborator)
+    monkeypatch.setattr(
+        installation_facade_mod,
+        "cancel_terminal_process_groups",
+        fake_cancel_terminal_process_groups,
+    )
 
     engine = object.__new__(agent_runtime.NativeRunEngine)
     engine._run_cancel_locks = {}
@@ -905,18 +921,24 @@ def test_installation_facade_installs_run_control_and_shutdown(monkeypatch) -> N
     assert isinstance(engine.run_cancellation, CapturedRunCancellation)
     assert engine.run_cancellation.kwargs["workflow_cancellation"] == "workflow-cancellation"
     assert engine.run_cancellation.kwargs["timeline_factory"] == "timeline-factory"
+    assert engine.run_cancellation.kwargs["final_statuses"] is installation_facade_mod.FINAL_RUN_STATUSES
     assert isinstance(engine.run_cancellation_coordinator, RuntimeRunCancellationCoordinator)
     assert engine.run_cancellation_coordinator._cancel_once == "cancel-once"
     assert isinstance(engine.run_rerun, CapturedCollaborator)
     assert callable(engine.run_rerun.kwargs["create_agent_run"])
     assert callable(engine.run_rerun.kwargs["create_workflow_run"])
     assert engine.run_rerun.kwargs["timeline_factory"] == "timeline-factory"
+    assert engine.run_rerun.kwargs["final_statuses"] is installation_facade_mod.FINAL_RUN_STATUSES
+    assert engine.run_rerun.kwargs["error_type"] is agent_runtime.AgentRuntimeError
     assert isinstance(engine.run_deletion, CapturedCollaborator)
     assert "delete_run_rows" in engine.run_deletion.kwargs
     assert "delete_artifacts" in engine.run_deletion.kwargs
+    assert engine.run_deletion.kwargs["is_active_run_status"] is installation_facade_mod.is_active_run_status
+    assert engine.run_deletion.kwargs["error_type"] is agent_runtime.AgentRuntimeError
     assert isinstance(engine.runtime_shutdown, CapturedCollaborator)
     assert engine.runtime_shutdown.kwargs["conn"] is engine._conn
     assert engine.runtime_shutdown.kwargs["credential_store"] == "credential-store"
+    assert engine.runtime_shutdown.kwargs["cancel_terminal_process_groups"] is fake_cancel_terminal_process_groups
 
 
 def test_installation_facade_installs_post_db_support_services(monkeypatch) -> None:

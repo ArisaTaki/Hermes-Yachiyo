@@ -12,12 +12,14 @@ from apps.shell.agent.runtime.agent_runs import RuntimeAgentRunExecutor
 from apps.shell.agent.runtime.agent_services import build_runtime_agent_services
 from apps.shell.agent.runtime.clock import utc_now_iso
 from apps.shell.agent.runtime.config import (
+    FINAL_RUN_STATUSES,
     MAIN_CHAT_AGENT_ID,
     MARKET_AGENT_OPERATING_DOCTRINE,
     MEMORY_CONTEXT_LIMIT,
     NATIVE_LIBRARY_SOURCE_TYPES,
     SKILL_SOURCE_TYPES,
     SYSTEM_AGENT_IDS,
+    is_active_run_status,
     is_native_library_source_type,
     normalize_execution_backend,
     normalize_skill_source_type,
@@ -44,13 +46,20 @@ from apps.shell.agent.runtime.main_chat_model_loop import (
     build_runtime_main_chat_model_loop_runner,
 )
 from apps.shell.agent.runtime.paths import native_skill_home
-from apps.shell.agent.runtime.run_cancellation import RuntimeRunCancellationCoordinator
+from apps.shell.agent.runtime.run_cancellation import (
+    RuntimeRunCancellationCoordinator,
+    RuntimeRunCancellationService,
+)
+from apps.shell.agent.runtime.run_deletion import RuntimeRunDeletionService
 from apps.shell.agent.runtime.run_projections import AgentRunGroupProjectionCoordinator
+from apps.shell.agent.runtime.run_rerun import RuntimeRunRerunService
 from apps.shell.agent.runtime.run_services import build_runtime_run_layer_setup
 from apps.shell.agent.runtime.runnable_services import build_runtime_runnable_services
 from apps.shell.agent.runtime.runnables import RuntimeRunnableResolver
 from apps.shell.agent.runtime.serialization import json_dump_sorted, json_load, slug
+from apps.shell.agent.runtime.shutdown import RuntimeShutdownService
 from apps.shell.agent.runtime.tooling import build_runtime_tooling_stack
+from apps.shell.agent.tools import cancel_terminal_process_groups
 
 
 def _legacy_agent_runtime_module() -> Any:
@@ -655,9 +664,8 @@ class RuntimeInstallationFacadeMixin:
         *,
         runtime_timeline_factory: Any,
     ) -> None:
-        legacy = _legacy_agent_runtime_module()
         self._install_runtime_run_cancellation(
-            legacy.RuntimeRunCancellationService(
+            RuntimeRunCancellationService(
                 get_run=lambda run_id: self.get_run(run_id),
                 update_run=lambda run_id, **kwargs: self._update_run(run_id, **kwargs),
                 append_run_event=lambda run_id, event_type, payload: self.append_run_event(
@@ -675,11 +683,11 @@ class RuntimeInstallationFacadeMixin:
                     self._resume_parent_workflows_after_child_update(projected)
                 ),
                 project_child_run_transition=lambda result: self._project_child_run_transition(result),
-                final_statuses=legacy._FINAL_RUN_STATUSES,
+                final_statuses=FINAL_RUN_STATUSES,
             )
         )
         self._install_runtime_run_rerun(
-            legacy.RuntimeRunRerunService(
+            RuntimeRunRerunService(
                 get_run=lambda run_id: self.get_run(run_id),
                 create_agent_run=lambda payload: self.create_agent_run(payload),
                 create_workflow_run=lambda payload: self.create_workflow_run(payload),
@@ -691,12 +699,12 @@ class RuntimeInstallationFacadeMixin:
                 ),
                 update_run=lambda run_id, **kwargs: self._update_run(run_id, **kwargs),
                 resolve_runnable=lambda **kwargs: self.resolve_runnable(**kwargs),
-                final_statuses=legacy._FINAL_RUN_STATUSES,
-                error_type=legacy.AgentRuntimeError,
+                final_statuses=FINAL_RUN_STATUSES,
+                error_type=AgentRuntimeError,
             )
         )
         self._install_runtime_run_deletion(
-            legacy.RuntimeRunDeletionService(
+            RuntimeRunDeletionService(
                 get_run=lambda run_id: self.get_run(run_id),
                 group_runs=lambda run_group_id: self.run_groups.runs(run_group_id),
                 delete_run_rows=lambda targets, **kwargs: self.runs.delete_rows(
@@ -712,18 +720,18 @@ class RuntimeInstallationFacadeMixin:
                     self.run_groups.remove_run_ids(run_group_id, deleted_ids)
                 ),
                 commit=lambda: self._conn.commit(),
-                is_active_run_status=legacy._is_active_run_status,
-                error_type=legacy.AgentRuntimeError,
+                is_active_run_status=is_active_run_status,
+                error_type=AgentRuntimeError,
             )
         )
         self._install_runtime_shutdown(
-            legacy.RuntimeShutdownService(
+            RuntimeShutdownService(
                 conn=self._conn,
                 credential_store=self._credential_store,
                 is_closed=lambda: self._closed,
                 mark_not_accepting=lambda: setattr(self, "_accepting_runs", False),
                 mark_closed=lambda: setattr(self, "_closed", True),
-                cancel_terminal_process_groups=lambda: legacy.cancel_terminal_process_groups(),
+                cancel_terminal_process_groups=cancel_terminal_process_groups,
                 ensure_row_factory=lambda: self._ensure_row_factory(),
                 cancel_run=lambda run_id: self.cancel_run(run_id),
             )
