@@ -77,10 +77,23 @@ async def delete_run(
 
 async def approve_run_approval(
     run_id: str,
+    request: TaskApprovalRequest | None = None,
     http_request: Request | None = None,
 ) -> dict[str, Any]:
+    metadata = dict(request.metadata) if request is not None else {}
+    if request is not None and request.approval_id:
+        metadata.setdefault("approval_id", request.approval_id)
+    decision = ApprovalDecision(
+        approved=True,
+        reason=request.reason if request is not None else None,
+        metadata=metadata,
+    )
     try:
-        run_snapshot = await asyncio.to_thread(studio_service(http_request).approve_run_approval, run_id)
+        run_snapshot = await asyncio.to_thread(
+            studio_service(http_request).approve_run_approval,
+            run_id,
+            decision,
+        )
         return snapshot(run_snapshot)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Run 不存在") from exc

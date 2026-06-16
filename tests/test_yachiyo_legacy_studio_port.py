@@ -93,10 +93,28 @@ def test_legacy_studio_port_accepts_reject_decision_payload() -> None:
     assert runtime.last_reject_request == {"run_id": "run-1", "reason": "No"}
 
 
+def test_legacy_studio_port_accepts_approve_decision_payload() -> None:
+    runtime = _FakeGroupRuntime()
+    port = LegacyStudioPort(runtime)
+
+    approved = port.approve_run_approval(
+        "run-1",
+        {
+            "approved": True,
+            "reason": "Looks safe",
+            "metadata": {"approval_id": "approval-1"},
+        },
+    )
+
+    assert approved["status"] == "completed"
+    assert runtime.last_approve_request == {"run_id": "run-1"}
+
+
 class _FakeGroupRuntime:
     def __init__(self, statuses: dict[str, str] | None = None) -> None:
         self.child_run_ids: list[str] = []
         self.events: dict[str, list[dict[str, Any]]] = {}
+        self.last_approve_request: dict[str, Any] | None = None
         self.last_event_page_request: dict[str, Any] | None = None
         self.last_reject_request: dict[str, Any] | None = None
         self.runs: dict[str, dict[str, Any]] = {}
@@ -193,4 +211,12 @@ class _FakeGroupRuntime:
             "run_id": run_id,
             "status": "failed",
             "user_goal": "Rejected",
+        }
+
+    def approve_run_approval(self, run_id: str) -> dict[str, Any]:
+        self.last_approve_request = {"run_id": run_id}
+        return {
+            "run_id": run_id,
+            "status": "completed",
+            "user_goal": "Approved",
         }

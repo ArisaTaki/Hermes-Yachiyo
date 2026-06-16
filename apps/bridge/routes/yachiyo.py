@@ -514,8 +514,9 @@ async def delete_studio_run(
 async def approve_studio_run_approval(
     run_id: str,
     http_request: Request = None,  # type: ignore[assignment]
+    request: TaskApprovalRequest | None = None,
 ) -> dict[str, Any]:
-    return await yachiyo_studio_handlers.approve_run_approval(run_id, http_request)
+    return await yachiyo_studio_handlers.approve_run_approval(run_id, request, http_request)
 
 
 @router.post("/studio/runs/{run_id}/approval/reject")

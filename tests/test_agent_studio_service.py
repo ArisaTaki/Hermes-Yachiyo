@@ -277,8 +277,8 @@ class _FakeStudioPort:
         self.calls.append(("delete_run", run_id))
         return {"ok": True, "deleted_run_ids": [run_id], "deleted_run_count": 1}
 
-    def approve_run_approval(self, run_id: str) -> dict[str, Any]:
-        self.calls.append(("approve_run_approval", run_id))
+    def approve_run_approval(self, run_id: str, decision: dict[str, Any] | None = None) -> dict[str, Any]:
+        self.calls.append(("approve_run_approval", {"run_id": run_id, "decision": decision}))
         return _run_payload(run_id=run_id, user_goal="Approved task") | {"status": "completed"}
 
     def reject_run_approval(self, run_id: str, decision: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -784,7 +784,14 @@ def test_agent_studio_service_run_actions_return_public_timeline_snapshots() -> 
     rerun = service.rerun_run("run-1")
     cancelled = service.cancel_run("run-1")
     deleted = service.delete_run("run-1")
-    approved = service.approve_run_approval("run-1")
+    approved = service.approve_run_approval(
+        "run-1",
+        ApprovalDecision(
+            approved=True,
+            reason="Looks safe",
+            metadata={"approval_id": "approval-1"},
+        ),
+    )
     rejected = service.reject_run_approval(
         "run-1",
         ApprovalDecision(
@@ -802,7 +809,17 @@ def test_agent_studio_service_run_actions_return_public_timeline_snapshots() -> 
     assert ("rerun_run", "run-1") in port.calls
     assert ("cancel_run", "run-1") in port.calls
     assert ("delete_run", "run-1") in port.calls
-    assert ("approve_run_approval", "run-1") in port.calls
+    assert (
+        "approve_run_approval",
+        {
+            "run_id": "run-1",
+            "decision": {
+                "approved": True,
+                "reason": "Looks safe",
+                "metadata": {"approval_id": "approval-1"},
+            },
+        },
+    ) in port.calls
     assert (
         "reject_run_approval",
         {
@@ -826,8 +843,8 @@ def test_agent_studio_service_run_actions_preserve_workflow_run_snapshots() -> N
             self.calls.append(("cancel_run", run_id))
             return _workflow_run_payload(run_id=run_id, status="cancelled")
 
-        def approve_run_approval(self, run_id: str) -> dict[str, Any]:
-            self.calls.append(("approve_run_approval", run_id))
+        def approve_run_approval(self, run_id: str, decision: dict[str, Any] | None = None) -> dict[str, Any]:
+            self.calls.append(("approve_run_approval", {"run_id": run_id, "decision": decision}))
             return _workflow_run_payload(
                 run_id=run_id,
                 status="completed",
@@ -860,7 +877,10 @@ def test_agent_studio_service_run_actions_preserve_workflow_run_snapshots() -> N
     assert rejected.final_answer == "Rejected: No"
     assert ("rerun_run", "workflow-run-1") in port.calls
     assert ("cancel_run", "workflow-run-1") in port.calls
-    assert ("approve_run_approval", "workflow-run-1") in port.calls
+    assert (
+        "approve_run_approval",
+        {"run_id": "workflow-run-1", "decision": None},
+    ) in port.calls
     assert (
         "reject_run_approval",
         {"run_id": "workflow-run-1", "decision": {"approved": False, "reason": "No"}},

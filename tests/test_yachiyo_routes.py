@@ -492,6 +492,46 @@ async def test_yachiyo_task_routes_use_injected_runtime_and_return_public_snapsh
 
 
 @pytest.mark.asyncio
+async def test_yachiyo_task_approve_preserves_approval_decision_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _ApproveRecordingService:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        def approve(self, task_id: str, decision: Any) -> AgentTaskSnapshot:
+            payload = decision.model_dump(exclude_none=True)
+            self.calls.append({"task_id": task_id, "decision": payload})
+            return AgentTaskSnapshot(task_id=task_id, title="Approved", status="completed")
+
+    service = _ApproveRecordingService()
+    monkeypatch.setattr(yachiyo_chat_handlers, "agent_service", lambda _request=None: service)
+
+    approved = await yachiyo.approve_task(
+        "task-approval-1",
+        yachiyo.TaskApprovalRequest(
+            approval_id="approval-1",
+            reason="Looks safe",
+            metadata={"surface": "bubble"},
+        ),
+        None,
+    )
+
+    assert approved["status"] == "completed"
+    assert service.calls == [
+        {
+            "task_id": "task-approval-1",
+            "decision": {
+                "approved": True,
+                "reason": "Looks safe",
+                "metadata": {
+                    "approval_id": "approval-1",
+                    "surface": "bubble",
+                },
+            },
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_yachiyo_task_reject_preserves_approval_decision_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     class _RejectRecordingService:
         def __init__(self) -> None:
@@ -525,6 +565,46 @@ async def test_yachiyo_task_reject_preserves_approval_decision_payload(monkeypat
                 "metadata": {
                     "approval_id": "approval-1",
                     "surface": "bubble",
+                },
+            },
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_yachiyo_studio_run_approve_preserves_approval_decision_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _ApproveRecordingStudioService:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        def approve_run_approval(self, run_id: str, decision: Any) -> RunTimelineSnapshot:
+            payload = decision.model_dump(exclude_none=True)
+            self.calls.append({"run_id": run_id, "decision": payload})
+            return RunTimelineSnapshot(run_id=run_id, status="completed")
+
+    service = _ApproveRecordingStudioService()
+    monkeypatch.setattr(yachiyo_studio_run_handlers, "studio_service", lambda _request=None: service)
+
+    approved = await yachiyo.approve_studio_run_approval(
+        "run-approval-1",
+        None,
+        yachiyo.TaskApprovalRequest(
+            approval_id="approval-studio-1",
+            reason="Looks safe",
+            metadata={"surface": "studio"},
+        ),
+    )
+
+    assert approved["status"] == "completed"
+    assert service.calls == [
+        {
+            "run_id": "run-approval-1",
+            "decision": {
+                "approved": True,
+                "reason": "Looks safe",
+                "metadata": {
+                    "approval_id": "approval-studio-1",
+                    "surface": "studio",
                 },
             },
         }

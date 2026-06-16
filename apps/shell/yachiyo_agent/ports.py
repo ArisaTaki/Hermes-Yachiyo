@@ -167,7 +167,11 @@ class StudioPort(Protocol):
 
     def delete_run(self, run_id: str) -> dict[str, Any]: ...
 
-    def approve_run_approval(self, run_id: str) -> dict[str, Any]: ...
+    def approve_run_approval(
+        self,
+        run_id: str,
+        decision: dict[str, Any] | None = None,
+    ) -> dict[str, Any]: ...
 
     def reject_run_approval(
         self,

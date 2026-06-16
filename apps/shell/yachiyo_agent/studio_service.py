@@ -358,8 +358,14 @@ class AgentStudioService:
     def delete_run(self, run_id: str) -> dict[str, Any]:
         return dict(self._studio_port.delete_run(run_id))
 
-    def approve_run_approval(self, run_id: str) -> RunTimelineSnapshot | WorkflowRunSnapshot:
-        return _public_run_snapshot_from_payload(self._studio_port.approve_run_approval(run_id))
+    def approve_run_approval(
+        self,
+        run_id: str,
+        decision: ApprovalDecision | Mapping[str, Any] | None = None,
+    ) -> RunTimelineSnapshot | WorkflowRunSnapshot:
+        return _public_run_snapshot_from_payload(
+            self._studio_port.approve_run_approval(run_id, _approval_payload(decision))
+        )
 
     def reject_run_approval(
         self,
@@ -438,6 +444,16 @@ def _rejection_payload(
         return {"approved": False, "reason": request}
     payload = _request_payload(request)
     payload.setdefault("approved", False)
+    return payload
+
+
+def _approval_payload(
+    request: ApprovalDecision | Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    if request is None:
+        return None
+    payload = _request_payload(request)
+    payload.setdefault("approved", True)
     return payload
 
 
