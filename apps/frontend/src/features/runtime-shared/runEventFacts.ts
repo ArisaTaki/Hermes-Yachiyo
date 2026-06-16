@@ -573,6 +573,8 @@ function toolCallCorrelationKey(event: PublicRunEvent, toolCall: ToolCallSnapsho
 
 function toolCallCorrelationPreview(preview: Record<string, unknown>): Record<string, unknown> {
   const traceKeys = new Set([
+    'agent_id',
+    'agent_name',
     'approval_id',
     'group_id',
     'group_run_id',
@@ -580,11 +582,21 @@ function toolCallCorrelationPreview(preview: Record<string, unknown>): Record<st
     'member_agent_name',
     'policy_reason',
     'risk_level',
+    'run_id',
     'run_group_id',
+    'source_agent_id',
+    'source_agent_name',
+    'source_run_id',
+    'source_runnable_id',
+    'source_runnable_name',
+    'source_tool',
+    'tool_call_id',
     'workflow_id',
     'workflow_node_id',
+    'workflow_node_kind',
     'workflow_node_label',
     'workflow_run_id',
+    'workflow_step_label',
   ]);
   return Object.fromEntries(
     Object.entries(preview).filter(([key]) => !traceKeys.has(key)),
@@ -697,6 +709,8 @@ function unregisterActiveApprovalReplay(
 
 function approvalReplayCorrelationPreview(preview: Record<string, unknown>): Record<string, unknown> {
   const traceKeys = new Set([
+    'agent_id',
+    'agent_name',
     'approval_id',
     'group_id',
     'group_run_id',
@@ -704,11 +718,21 @@ function approvalReplayCorrelationPreview(preview: Record<string, unknown>): Rec
     'member_agent_name',
     'policy_reason',
     'risk_level',
+    'run_id',
     'run_group_id',
+    'source_agent_id',
+    'source_agent_name',
+    'source_run_id',
+    'source_runnable_id',
+    'source_runnable_name',
+    'source_tool',
+    'tool_call_id',
     'workflow_id',
     'workflow_node_id',
+    'workflow_node_kind',
     'workflow_node_label',
     'workflow_run_id',
+    'workflow_step_label',
   ]);
   return Object.fromEntries(
     Object.entries(preview).filter(([key]) => !traceKeys.has(key)),

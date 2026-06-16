@@ -580,6 +580,49 @@ def test_run_timeline_keeps_repeated_identical_tool_lifecycles_separate() -> Non
     assert timeline.tool_calls[1].output_preview == {"ok": True, "second": True}
 
 
+def test_run_timeline_correlates_tool_events_with_trace_keys_in_input_preview() -> None:
+    timeline = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "run-tool-trace-preview",
+            "status": "completed",
+            "events": [
+                {
+                    "event_type": "tool.requested",
+                    "payload": {
+                        "tool": "terminal.run",
+                        "input_preview": {"command": "npm test"},
+                    },
+                    "created_at": "2026-06-15T00:00:00Z",
+                },
+                {
+                    "event_type": "tool.completed",
+                    "payload": {
+                        "tool": "terminal.run",
+                        "input_preview": {
+                            "command": "npm test",
+                            "source_runnable_id": "agent-1",
+                            "source_runnable_name": "Planner",
+                        },
+                        "output_preview": {"ok": True},
+                    },
+                    "created_at": "2026-06-15T00:00:01Z",
+                },
+            ],
+        }
+    )
+
+    assert len(timeline.tool_calls) == 1
+    assert timeline.tool_calls[0].status == "completed"
+    assert timeline.tool_calls[0].source_runnable_id == "agent-1"
+    assert timeline.tool_calls[0].source_runnable_name == "Planner"
+    assert timeline.tool_calls[0].input_preview == {
+        "command": "npm test",
+        "source_runnable_id": "agent-1",
+        "source_runnable_name": "Planner",
+    }
+    assert timeline.tool_calls[0].output_preview == {"ok": True}
+
+
 def test_run_timeline_projects_legacy_agent_tool_lifecycle_events() -> None:
     timeline = run_timeline_snapshot_from_payload(
         {

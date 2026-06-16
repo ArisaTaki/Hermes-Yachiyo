@@ -1177,6 +1177,8 @@ def _unregister_active_approval(
 
 def _approval_correlation_preview(preview: Mapping[str, Any]) -> dict[str, Any]:
     trace_keys = {
+        "agent_id",
+        "agent_name",
         "approval_id",
         "group_id",
         "group_run_id",
@@ -1184,11 +1186,21 @@ def _approval_correlation_preview(preview: Mapping[str, Any]) -> dict[str, Any]:
         "member_agent_name",
         "policy_reason",
         "risk_level",
+        "run_id",
         "run_group_id",
+        "source_agent_id",
+        "source_agent_name",
+        "source_run_id",
+        "source_runnable_id",
+        "source_runnable_name",
+        "source_tool",
+        "tool_call_id",
         "workflow_id",
         "workflow_node_id",
+        "workflow_node_kind",
         "workflow_node_label",
         "workflow_run_id",
+        "workflow_step_label",
     }
     return {key: value for key, value in preview.items() if key not in trace_keys}
 
@@ -1239,6 +1251,8 @@ def _tool_call_correlation_key(
 
 def _tool_call_correlation_preview(preview: Mapping[str, Any]) -> dict[str, Any]:
     trace_keys = {
+        "agent_id",
+        "agent_name",
         "approval_id",
         "group_id",
         "group_run_id",
@@ -1246,11 +1260,21 @@ def _tool_call_correlation_preview(preview: Mapping[str, Any]) -> dict[str, Any]
         "member_agent_name",
         "policy_reason",
         "risk_level",
+        "run_id",
         "run_group_id",
+        "source_agent_id",
+        "source_agent_name",
+        "source_run_id",
+        "source_runnable_id",
+        "source_runnable_name",
+        "source_tool",
+        "tool_call_id",
         "workflow_id",
         "workflow_node_id",
+        "workflow_node_kind",
         "workflow_node_label",
         "workflow_run_id",
+        "workflow_step_label",
     }
     return {key: value for key, value in preview.items() if key not in trace_keys}
 
