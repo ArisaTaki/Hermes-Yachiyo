@@ -92,7 +92,9 @@ export function publicRunTimelineToRunSpec(
   } = {},
 ): RunSpec {
   const kind = fallback.kind || (snapshot.workflow_run_id ? 'workflow_run' : 'agent_run');
-  const pendingApproval = snapshot.pending_approval || snapshot.approvals?.find((approval) => approval.approval_id);
+  const pendingApproval = snapshot.pending_approval || snapshot.approvals?.find(
+    (approval) => approval.status === 'pending',
+  );
   const workflowId = 'workflow_id' in snapshot ? String(snapshot.workflow_id || '').trim() : '';
   const workflowObjective = 'objective' in snapshot ? String(snapshot.objective || '').trim() : '';
   const currentNodeId = 'current_node_id' in snapshot ? String(snapshot.current_node_id || '').trim() : '';

@@ -3957,6 +3957,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "const currentNodeId = 'current_node_id' in snapshot ? String(snapshot.current_node_id || '').trim() : '';",
             "const currentNodeLabel = 'current_node_label' in snapshot ? String(snapshot.current_node_label || '').trim() : '';",
             "const finalAnswer = 'final_answer' in snapshot ? String(snapshot.final_answer || '').trim() : '';",
+            "(approval) => approval.status === 'pending',",
             "runnable_id: fallback.runnableId || workflowId || snapshot.workflow_run_id || snapshot.agent_id || snapshot.run_id",
             "user_goal: (fallback.userGoal ?? workflowObjective) || snapshot.title || '',",
             "result: finalAnswer || undefined,",
