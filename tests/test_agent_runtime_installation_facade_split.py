@@ -404,12 +404,18 @@ def test_installation_facade_installs_agent_and_approval_services(monkeypatch) -
         def __init__(self, **kwargs) -> None:
             self.kwargs = kwargs
 
+    def forbidden_agent_builder(**_kwargs):
+        raise AssertionError("agent services should use split installation builder")
+
+    def forbidden_approval_builder(**_kwargs):
+        raise AssertionError("approval services should use split installation builder")
+
     def fake_build_runtime_agent_services(**kwargs):
         return SimpleNamespace(
             kwargs=kwargs,
             agent_skill_loader="agent-skill-loader",
             agent_context_builder="agent-context-builder",
-            agent_run_preparer="agent-run-preparer",
+            agent_run_preparer=SimpleNamespace(kwargs=kwargs),
             agent_run_outcomes="agent-run-outcomes",
         )
 
@@ -421,9 +427,19 @@ def test_installation_facade_installs_agent_and_approval_services(monkeypatch) -
             approval_resume="approval-resume",
         )
 
-    monkeypatch.setattr(agent_runtime, "_build_runtime_agent_services", fake_build_runtime_agent_services)
-    monkeypatch.setattr(agent_runtime, "_build_runtime_approval_services", fake_build_runtime_approval_services)
-    monkeypatch.setattr(agent_runtime, "RuntimeAgentRunExecutor", CapturedAgentRunExecutor)
+    monkeypatch.setattr(agent_runtime, "_build_runtime_agent_services", forbidden_agent_builder)
+    monkeypatch.setattr(agent_runtime, "_build_runtime_approval_services", forbidden_approval_builder)
+    monkeypatch.setattr(
+        installation_facade_mod,
+        "build_runtime_agent_services",
+        fake_build_runtime_agent_services,
+    )
+    monkeypatch.setattr(
+        installation_facade_mod,
+        "build_runtime_approval_services",
+        fake_build_runtime_approval_services,
+    )
+    monkeypatch.setattr(installation_facade_mod, "RuntimeAgentRunExecutor", CapturedAgentRunExecutor)
 
     engine = object.__new__(agent_runtime.NativeRunEngine)
     engine.get_skill = "get-skill"
@@ -455,13 +471,28 @@ def test_installation_facade_installs_agent_and_approval_services(monkeypatch) -
 
     assert engine.agent_skill_loader == "agent-skill-loader"
     assert engine.agent_context_builder == "agent-context-builder"
-    assert engine.agent_run_preparer == "agent-run-preparer"
+    assert engine.agent_run_preparer.kwargs["get_skill"] == "get-skill"
     assert engine.agent_run_outcomes == "agent-run-outcomes"
+    assert engine.agent_run_preparer.kwargs["error_type"] is agent_runtime.AgentRuntimeError
+    assert (
+        engine.agent_run_preparer.kwargs["operating_doctrine"]
+        == installation_facade_mod.MARKET_AGENT_OPERATING_DOCTRINE
+    )
+    assert engine.agent_run_preparer.kwargs["memory_context_limit"] == installation_facade_mod.MEMORY_CONTEXT_LIMIT
+    assert (
+        engine.agent_run_preparer.kwargs["normalize_execution_backend"]
+        is installation_facade_mod.normalize_execution_backend
+    )
+    assert (
+        engine.agent_run_preparer.kwargs["model_output_metadata"]
+        is installation_facade_mod.model_output_metadata
+    )
+    assert engine.agent_run_preparer.kwargs["redact_secrets"] is installation_facade_mod.redact_secrets
     assert engine.approval_pause == "approval-pause"
     assert engine.approvals == "approvals"
     assert engine.approval_resume == "approval-resume"
     assert isinstance(engine.agent_run_executor, CapturedAgentRunExecutor)
-    assert engine.agent_run_executor.kwargs["preparer"] == "agent-run-preparer"
+    assert engine.agent_run_executor.kwargs["preparer"] is engine.agent_run_preparer
     assert engine.agent_run_executor.kwargs["continue_custom_api_agent"] == "run-custom-api-agent"
     assert engine.agent_run_executor.kwargs["approval_pause"] == "approval-pause"
 

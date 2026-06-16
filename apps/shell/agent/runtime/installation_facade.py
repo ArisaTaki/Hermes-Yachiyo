@@ -8,9 +8,13 @@ from uuid import uuid4
 from apps.shell.agent.runtime.agent_chat_entrypoints import (
     build_runtime_agent_chat_entrypoint_setup,
 )
+from apps.shell.agent.runtime.agent_runs import RuntimeAgentRunExecutor
+from apps.shell.agent.runtime.agent_services import build_runtime_agent_services
 from apps.shell.agent.runtime.clock import utc_now_iso
 from apps.shell.agent.runtime.config import (
     MAIN_CHAT_AGENT_ID,
+    MARKET_AGENT_OPERATING_DOCTRINE,
+    MEMORY_CONTEXT_LIMIT,
     NATIVE_LIBRARY_SOURCE_TYPES,
     SKILL_SOURCE_TYPES,
     SYSTEM_AGENT_IDS,
@@ -22,13 +26,16 @@ from apps.shell.agent.runtime.credentials import RuntimeCredentialService
 from apps.shell.agent.runtime.core_services import build_runtime_memory_core_setup
 from apps.shell.agent.runtime.definition_services import build_runtime_definition_services
 from apps.shell.agent.runtime.errors import AgentRuntimeError
+from apps.shell.agent.runtime.events import redact_secrets
 from apps.shell.agent.runtime.foundation import build_runtime_foundation_setup
 from apps.shell.agent.runtime.model_calling import (
     RuntimeModelProfileChatAdapter,
     RuntimeOpenAICompatibleChatAdapter,
     build_runtime_model_call_adapters,
 )
+from apps.shell.agent.runtime.model_messages import model_output_metadata
 from apps.shell.agent.runtime.approval_services import (
+    build_runtime_approval_services,
     build_runtime_approval_runtime_services,
 )
 from apps.shell.agent.runtime.main_chat_model import build_runtime_main_chat_model_setup
@@ -300,16 +307,15 @@ class RuntimeInstallationFacadeMixin:
         *,
         runtime_timeline_factory: Any,
     ) -> None:
-        legacy = _legacy_agent_runtime_module()
-        agent_services = legacy._build_runtime_agent_services(
+        agent_services = build_runtime_agent_services(
             get_skill=self.get_skill,
-            error_type=legacy.AgentRuntimeError,
+            error_type=AgentRuntimeError,
             compile_agent_runtime=self._compile_agent_runtime,
             load_agent_skills=self._load_agent_skills,
             long_term_memory_context=self._long_term_memory_context,
-            operating_doctrine=legacy._MARKET_AGENT_OPERATING_DOCTRINE,
+            operating_doctrine=MARKET_AGENT_OPERATING_DOCTRINE,
             agent_artifacts_dir=self.agent_artifacts_dir,
-            normalize_execution_backend=legacy._normalize_execution_backend,
+            normalize_execution_backend=normalize_execution_backend,
             agent_context=self._agent_context,
             memory_store=self._memory_store,
             future_task_store=self._future_task_store,
@@ -318,15 +324,15 @@ class RuntimeInstallationFacadeMixin:
             runtime_trace_events=self.runtime_trace_events,
             append_run_event=self.append_run_event,
             timeline_factory=runtime_timeline_factory,
-            memory_context_limit=legacy._MEMORY_CONTEXT_LIMIT,
+            memory_context_limit=MEMORY_CONTEXT_LIMIT,
             runtime_task_model_events=self.runtime_task_model_events,
             update_run=self._update_run,
-            model_output_metadata=legacy._model_output_metadata,
-            redact_secrets=legacy.redact_secrets,
+            model_output_metadata=model_output_metadata,
+            redact_secrets=redact_secrets,
             tool_brokers=self.tool_brokers,
         )
         self._install_runtime_agent_services(agent_services)
-        approval_services = legacy._build_runtime_approval_services(
+        approval_services = build_runtime_approval_services(
             timeline_factory=runtime_timeline_factory,
             append_run_event=self.append_run_event,
             update_run=self._update_run,
@@ -339,7 +345,7 @@ class RuntimeInstallationFacadeMixin:
             continue_custom_api_agent=self._run_custom_api_agent,
         )
         self._install_runtime_approval_services(approval_services)
-        self.agent_run_executor = legacy.RuntimeAgentRunExecutor(
+        self.agent_run_executor = RuntimeAgentRunExecutor(
             preparer=self.agent_run_preparer,
             continue_custom_api_agent=self._run_custom_api_agent,
             agent_run_outcomes=self.agent_run_outcomes,
