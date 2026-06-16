@@ -31,6 +31,64 @@ class RuntimeInstallationFacadeMixin:
             redact_error=lambda value: _legacy_agent_runtime_module().redact_secrets(value),
         )
 
+    def _install_runtime_foundation(
+        self,
+        *,
+        db_path: Any,
+        workspace_dir: Any,
+        credential_store: Any,
+    ) -> None:
+        legacy = _legacy_agent_runtime_module()
+        engine_state = legacy._build_runtime_engine_state(
+            db_path=db_path,
+            workspace_dir=workspace_dir,
+            credential_store=credential_store,
+        )
+        self._install_runtime_engine_state(engine_state)
+        self.runtime_schema = legacy.RuntimeSchemaService(
+            self._conn,
+            now=legacy._now,
+            redact_secrets=legacy.redact_secrets,
+            credential_store=self._credential_store,
+        )
+        self.row_projector = legacy.RuntimeRowProjector(
+            skills_dir=self.skills_dir,
+            json_load=legacy._json_load,
+            default_tool_policy=self._default_tool_policy,
+            default_workspace_policy=self._default_workspace_policy,
+            compile_tool_policy=self._compile_tool_policy,
+            compile_workspace_policy=self._compile_workspace_policy,
+            normalize_execution_backend=legacy._normalize_execution_backend,
+            read_credential=self._read_credential,
+            public_pending_approval=legacy._public_pending_approval,
+            task_run_link_for_run=lambda run_id: self.task_run_links.for_run(run_id),
+            run_group_source=self._run_group_source,
+            runnable_name=self._runnable_name,
+        )
+        self.definition_name_guard = legacy.RuntimeDefinitionNameGuard(
+            self._conn,
+            ensure_row_factory=self._ensure_row_factory,
+            error_type=legacy.AgentRuntimeError,
+        )
+        self.runnable_name_resolver = legacy.RuntimeRunnableNameResolver(
+            self._conn,
+            ensure_row_factory=self._ensure_row_factory,
+            main_chat_agent_id=legacy._MAIN_CHAT_AGENT_ID,
+        )
+        self.run_request_parser = legacy.RuntimeRunRequestParser(
+            contains_sensitive_text=legacy.contains_sensitive_text,
+            error_type=legacy.AgentRuntimeError,
+        )
+        self.terminal_run_resolver = legacy.RuntimeTerminalRunResolver(
+            get_run=lambda run_id: self.get_run(run_id),
+            final_statuses=legacy._FINAL_RUN_STATUSES,
+        )
+        recorders = legacy._build_runtime_recorders(
+            append_run_event=self.append_run_event,
+            now=legacy._now,
+        )
+        self._install_runtime_recorders(recorders)
+
     def _install_runtime_engine_state(self, state: Any) -> None:
         self.workspace_dir = state.workspace_dir
         self.db_path = state.db_path

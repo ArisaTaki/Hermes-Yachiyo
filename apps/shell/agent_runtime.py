@@ -501,55 +501,11 @@ class NativeRunEngine(
         seed_templates: bool = True,
     ) -> None:
         self._install_runtime_model_adapters()
-        engine_state = _build_runtime_engine_state(
+        self._install_runtime_foundation(
             db_path=db_path,
             workspace_dir=workspace_dir,
             credential_store=credential_store,
         )
-        self._install_runtime_engine_state(engine_state)
-        self.runtime_schema = RuntimeSchemaService(
-            self._conn,
-            now=_now,
-            redact_secrets=redact_secrets,
-            credential_store=self._credential_store,
-        )
-        self.row_projector = RuntimeRowProjector(
-            skills_dir=self.skills_dir,
-            json_load=_json_load,
-            default_tool_policy=self._default_tool_policy,
-            default_workspace_policy=self._default_workspace_policy,
-            compile_tool_policy=self._compile_tool_policy,
-            compile_workspace_policy=self._compile_workspace_policy,
-            normalize_execution_backend=_normalize_execution_backend,
-            read_credential=self._read_credential,
-            public_pending_approval=_public_pending_approval,
-            task_run_link_for_run=lambda run_id: self.task_run_links.for_run(run_id),
-            run_group_source=self._run_group_source,
-            runnable_name=self._runnable_name,
-        )
-        self.definition_name_guard = RuntimeDefinitionNameGuard(
-            self._conn,
-            ensure_row_factory=self._ensure_row_factory,
-            error_type=AgentRuntimeError,
-        )
-        self.runnable_name_resolver = RuntimeRunnableNameResolver(
-            self._conn,
-            ensure_row_factory=self._ensure_row_factory,
-            main_chat_agent_id=_MAIN_CHAT_AGENT_ID,
-        )
-        self.run_request_parser = RuntimeRunRequestParser(
-            contains_sensitive_text=contains_sensitive_text,
-            error_type=AgentRuntimeError,
-        )
-        self.terminal_run_resolver = RuntimeTerminalRunResolver(
-            get_run=lambda run_id: self.get_run(run_id),
-            final_statuses=_FINAL_RUN_STATUSES,
-        )
-        recorders = _build_runtime_recorders(
-            append_run_event=self.append_run_event,
-            now=_now,
-        )
-        self._install_runtime_recorders(recorders)
         definition_services = _build_runtime_definition_services(
             conn=self._conn,
             ensure_row_factory=self._ensure_row_factory,
