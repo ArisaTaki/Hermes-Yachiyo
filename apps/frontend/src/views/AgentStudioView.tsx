@@ -52,6 +52,7 @@ import { useSkillLibraryDerivedState } from '../features/agent-studio/hooks/useS
 import { useSkillSourceInputActions } from '../features/agent-studio/hooks/useSkillSourceInputActions';
 import { useWorkflowDeletionActions } from '../features/agent-studio/hooks/useWorkflowDeletionActions';
 import { useWorkflowDefinitions } from '../features/agent-studio/hooks/useWorkflowDefinitions';
+import { useWorkflowDraftValidation } from '../features/agent-studio/hooks/useWorkflowDraftValidation';
 import { useWorkflowDraftActions } from '../features/agent-studio/hooks/useWorkflowDraftActions';
 import { useWorkflowRunReadiness } from '../features/agent-studio/hooks/useWorkflowRunReadiness';
 import { useWorkflowSaveActions } from '../features/agent-studio/hooks/useWorkflowSaveActions';
@@ -72,7 +73,6 @@ import {
 } from '../features/agent-studio/utils/runs';
 import {
   skippedWorkflowArtifactLabel,
-  validateWorkflowDraft,
   workflowRunArtifactForStep,
   workflowStepArtifacts,
   workflowStepKindLabel,
@@ -223,12 +223,18 @@ export function AgentStudioView() {
     () => modelProfiles.filter((profile) => profile.capability === 'vision' && profile.status === 'available' && profile.enabled !== false),
     [modelProfiles],
   );
-  const workflowValidation = useMemo(
-    () => validateWorkflowDraft(nodes, edges, agents, workflows, selectedWorkflow?.workflow_id || ''),
-    [agents, edges, nodes, selectedWorkflow?.workflow_id, workflows],
-  );
-  const workflowNameError = workflowName.trim() ? '' : 'Workflow 名称不能为空';
-  const workflowErrors = workflowNameError ? [workflowNameError, ...workflowValidation.errors] : workflowValidation.errors;
+  const {
+    workflowErrors,
+    workflowNameError,
+    workflowValidation,
+  } = useWorkflowDraftValidation({
+    agents,
+    edges,
+    nodes,
+    selectedWorkflowId: selectedWorkflow?.workflow_id || '',
+    workflowName,
+    workflows,
+  });
   const {
     saveWorkflow,
     saveWorkflowDraft,

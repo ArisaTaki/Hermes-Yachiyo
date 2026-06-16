@@ -1594,6 +1594,16 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
         ],
     )
     _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useWorkflowDraftValidation.ts",
+        [
+            "export function useWorkflowDraftValidation",
+            "validateWorkflowDraft(nodes, edges, agents, workflows, selectedWorkflowId)",
+            "const workflowNameError = workflowName.trim() ? '' : 'Workflow 名称不能为空';",
+            "const workflowErrors = workflowNameError",
+            "workflowValidation.errors",
+        ],
+    )
+    _assert_contains(
         "apps/frontend/src/features/agent-studio/hooks/useWorkflowRunReadiness.ts",
         [
             "export function useWorkflowRunReadiness",
