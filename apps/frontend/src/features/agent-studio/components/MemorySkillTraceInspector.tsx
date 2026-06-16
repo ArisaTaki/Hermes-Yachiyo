@@ -197,7 +197,7 @@ function memorySkillTraceFromEvent(event: PublicRunEvent): MemorySkillTrace | nu
     eventType,
     groupRunId,
     id,
-    key: stringValue(event.event_id) || `${eventType}-${sequence || title}-${id}`,
+    key: runtimeTraceKeyFromEvent(event, eventType, sequence, title, id),
     kind,
     memberAgentId,
     metadata: memorySkillTraceMetadata(kind, payload, result, memories),
@@ -210,6 +210,20 @@ function memorySkillTraceFromEvent(event: PublicRunEvent): MemorySkillTrace | nu
     tool: stringValue(payload.tool),
     workflowNodeId,
   };
+}
+
+function runtimeTraceKeyFromEvent(
+  event: PublicRunEvent,
+  eventType: string,
+  sequence: string,
+  title: string,
+  id: string,
+): string {
+  const eventId = stringValue(event.event_id);
+  if (eventId) return eventId;
+  const runId = stringValue(event.run_id);
+  if (runId && eventType && sequence) return `${runId}:${eventType}:${sequence}`;
+  return `${eventType}-${sequence || title}-${id}`;
 }
 
 function memorySkillTraceMetadataFromMemorySnapshot(trace: MemoryTraceSnapshot): MemorySkillTraceMetadataItem[] {

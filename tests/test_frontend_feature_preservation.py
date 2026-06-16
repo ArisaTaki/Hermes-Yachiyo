@@ -2209,6 +2209,8 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
             "memorySkillTraceMetadataFromMemorySnapshot",
             "memorySkillTraceMetadataFromSkillSnapshot",
             "memorySkillTraceMetadata",
+            "runtimeTraceKeyFromEvent",
+            "return `${runId}:${eventType}:${sequence}`;",
             "memory.retrieved",
             "memory.write.add",
             "memory.write.replace",
