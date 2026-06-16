@@ -146,8 +146,16 @@ export function useSelectedRunDetailState({
   const selectedWorkflowApprovalStep = selectedWorkflowApprovalChildRunId
     ? selectedWorkflowSteps.find((step) => step.childRunId === selectedWorkflowApprovalChildRunId) || null
     : null;
+  const publicWorkflowParentRunId = useMemo(
+    () => publicTimelineWorkflowParentRunId(selectedPublicRunTimeline, selectedRun),
+    [selectedPublicRunTimeline, selectedRun],
+  );
   const selectedWorkflowParentRun = useMemo(() => {
     if (!isPotentialWorkflowChildAgentRun(selectedRun)) return null;
+    if (publicWorkflowParentRunId) {
+      const publicParentRun = runById.get(publicWorkflowParentRunId) || null;
+      if (publicParentRun) return publicParentRun;
+    }
     const timelineParent = Array.from(runById.values()).find((run) => (
       run.kind === 'workflow_run'
       && run.run_group_id === selectedRun.run_group_id
@@ -159,8 +167,9 @@ export function useSelectedRunDetailState({
       run.kind === 'workflow_run'
       && run.run_group_id === selectedRun.run_group_id
     )) || null;
-  }, [runById, selectedRun]);
+  }, [publicWorkflowParentRunId, runById, selectedRun]);
   const selectedWorkflowParentRunId = useMemo(() => {
+    if (publicWorkflowParentRunId) return publicWorkflowParentRunId;
     if (selectedWorkflowParentRun) return selectedWorkflowParentRun.run_id;
     if (!isPotentialWorkflowChildAgentRun(selectedRun)) return '';
     const group = runGroups.find((item) => item.run_group_id === selectedRun.run_group_id);
@@ -169,7 +178,7 @@ export function useSelectedRunDetailState({
       const run = runById.get(runId);
       return run?.kind === 'workflow_run' && workflowRunHasChildRun(run, selectedRun.run_id);
     }) || childRunIds.find((runId) => runId.startsWith('workflow_run_')) || '';
-  }, [runById, runGroups, selectedRun, selectedWorkflowParentRun]);
+  }, [publicWorkflowParentRunId, runById, runGroups, selectedRun, selectedWorkflowParentRun]);
   const activeRunPollKey = useMemo(() => {
     const nextIds = new Set<string>();
     const maybeAdd = (runId: string) => {
@@ -272,4 +281,16 @@ function publicTimelineApprovalChildRunId(
     ))?.run_id
     || ''
   );
+}
+
+function publicTimelineWorkflowParentRunId(
+  timeline: YachiyoRunTimelineSnapshot | null,
+  run: RunSpec | null,
+): string {
+  if (!isPotentialWorkflowChildAgentRun(run)) return '';
+  const candidates = [
+    timeline?.parent_run_id || '',
+    timeline?.workflow_run_id || '',
+  ];
+  return candidates.find((runId) => runId && runId !== run.run_id) || '';
 }
