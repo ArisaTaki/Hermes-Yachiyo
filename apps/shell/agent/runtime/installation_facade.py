@@ -89,6 +89,62 @@ class RuntimeInstallationFacadeMixin:
         )
         self._install_runtime_recorders(recorders)
 
+    def _install_runtime_definition_layer(self) -> None:
+        legacy = _legacy_agent_runtime_module()
+        definition_services = legacy._build_runtime_definition_services(
+            conn=self._conn,
+            ensure_row_factory=self._ensure_row_factory,
+            get_run=lambda run_id: self.get_run(run_id),
+            now=legacy._now,
+            error_type=legacy.AgentRuntimeError,
+            row_to_skill_folder=self._row_to_skill_folder,
+            slug=legacy._slug,
+            skill_folder_id_suffix_factory=lambda: legacy.uuid4().hex[:6],
+            delete_skill=lambda skill_id: self.delete_skill(skill_id),
+            row_to_skill=self._row_to_skill,
+            json_dump=legacy._json_dump,
+            json_load=legacy._json_load,
+            normalize_skill_folder_id=self._normalize_skill_folder_id,
+            installed_skill_source_map=self._installed_skill_source_map,
+            record_studio_deletion=self._record_studio_deletion,
+            skill_deletion_key=self._skill_deletion_key,
+            is_native_library_source_type=legacy._is_native_library_source_type,
+            skills_dir=self.skills_dir,
+            skill_installs_dir=self.skill_installs_dir,
+            skill_id_factory=lambda name: f"skill_{legacy._slug(name, 'skill')}_{legacy.uuid4().hex[:8]}",
+            row_to_agent=self._row_to_agent,
+            row_to_agent_private=self._row_to_agent_private,
+            coerce_named_row=self._coerce_named_row,
+            main_chat_virtual_agent=self._main_chat_virtual_agent,
+            agent_id_factory=lambda name: f"agent_{legacy._slug(name, 'agent')}_{legacy.uuid4().hex[:8]}",
+            normalize_execution_backend=legacy._normalize_execution_backend,
+            ensure_global_name_available=self.definition_name_guard.ensure_available,
+            validate_agent_profile_refs=self._validate_agent_profile_refs,
+            compile_tool_policy=self._compile_tool_policy,
+            compile_workspace_policy=self._compile_workspace_policy,
+            assign_default_agent_workdir=self._assign_default_agent_workdir,
+            trust_workspace_from_policy=self._trust_workspace_from_policy,
+            agent_model_credential_ref=self._agent_model_credential_ref,
+            store_credential=self._store_credential,
+            delete_credential=self._delete_credential,
+            clear_studio_deletion=self._clear_studio_deletion,
+            system_agent_ids=legacy._SYSTEM_AGENT_IDS,
+            main_chat_agent_id=legacy._MAIN_CHAT_AGENT_ID,
+            native_skill_home=legacy._native_skill_home,
+            skill_installs_native_home=self.skill_installs_native_home,
+            normalize_skill_source_type=legacy._normalize_skill_source_type,
+            native_library_source_types=legacy._NATIVE_LIBRARY_SOURCE_TYPES,
+            workspace_dir=self.workspace_dir,
+            skill_import_id_factory=lambda: legacy.uuid4().hex,
+            skill_source_types=legacy._SKILL_SOURCE_TYPES,
+            row_to_workflow=self._row_to_workflow,
+            workflow_id_factory=lambda name: f"workflow_{legacy._slug(name, 'workflow')}_{legacy.uuid4().hex[:8]}",
+            validate_workflow=self.validate_workflow,
+            validate_workflow_agent_nodes=self._validate_workflow_agent_nodes,
+            validate_workflow_subworkflow_nodes=self._validate_workflow_subworkflow_nodes,
+        )
+        self._install_runtime_definition_services(definition_services)
+
     def _install_runtime_engine_state(self, state: Any) -> None:
         self.workspace_dir = state.workspace_dir
         self.db_path = state.db_path
