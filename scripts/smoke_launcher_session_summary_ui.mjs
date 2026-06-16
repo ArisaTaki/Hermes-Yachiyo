@@ -517,6 +517,19 @@ async function main() {
   }, 'bubble summary and recent sessions');
   console.log('[electron-smoke] bubble summary rendered');
   await win.webContents.executeJavaScript(\`
+    const studio = document.querySelector('[data-testid="bubble-launcher-agent-task-open-studio"]');
+    if (!studio) throw new Error('missing bubble launcher task Agent Studio handoff');
+    studio.click();
+  \`, true);
+  await waitFor(win, () => (
+    Array.isArray(window.__ohaLauncherOpenViewCalls)
+    && window.__ohaLauncherOpenViewCalls.some((call) => (
+      call?.view === 'agents'
+      && call?.params?.run === ${JSON.stringify(PUBLIC_RUN_ID)}
+    ))
+  ), 'bubble launcher task opened Agent Studio');
+  console.log('[electron-smoke] bubble launcher task Agent Studio handoff verified');
+  await win.webContents.executeJavaScript(\`
     const approve = document.querySelector('[data-testid="bubble-launcher-agent-task-approve"]');
     if (!approve) throw new Error('missing bubble launcher task approve');
     approve.click();
@@ -637,6 +650,19 @@ async function main() {
       && !bodyText.includes('<oha_delegation>');
   }, 'live2d quick input and recent sessions');
   console.log('[electron-smoke] live2d summary rendered');
+  await win.webContents.executeJavaScript(\`
+    const studio = document.querySelector('[data-testid="live2d-launcher-agent-task-open-studio"]');
+    if (!studio) throw new Error('missing live2d launcher task Agent Studio handoff');
+    studio.click();
+  \`, true);
+  await waitFor(win, () => (
+    Array.isArray(window.__ohaLauncherOpenViewCalls)
+    && window.__ohaLauncherOpenViewCalls.some((call) => (
+      call?.view === 'agents'
+      && call?.params?.run === ${JSON.stringify(PUBLIC_RUN_ID)}
+    ))
+  ), 'live2d launcher task opened Agent Studio');
+  console.log('[electron-smoke] live2d launcher task Agent Studio handoff verified');
   await win.webContents.executeJavaScript(\`
     const reject = document.querySelector('[data-testid="live2d-launcher-agent-task-reject"]');
     if (!reject) throw new Error('missing live2d launcher task reject');
