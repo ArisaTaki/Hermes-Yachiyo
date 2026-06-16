@@ -33,6 +33,7 @@ def test_runtime_installation_facade_mixin_remains_exported_from_legacy_module()
         "_install_runtime_approval_runtime_services",
         "_install_runtime_main_chat_model_loop_runner",
         "_install_runtime_workflow_planning_and_coordinator",
+        "_install_runtime_workflow_execution_and_async",
         "_install_runtime_engine_state",
         "_install_runtime_recorders",
         "_install_runtime_definition_services",
@@ -526,3 +527,90 @@ def test_installation_facade_installs_workflow_planning_and_coordinator(monkeypa
     assert engine.workflow_run_coordinator.kwargs["starter"] == "workflow-run-starter"
     assert engine.workflow_run_coordinator.kwargs["start_projector"] == "workflow-run-start-projector"
     assert engine.workflow_run_coordinator.kwargs["lock"] == "db-lock"
+
+
+def test_installation_facade_installs_workflow_execution_and_async(monkeypatch) -> None:
+    class CapturedWorkflowRunAsyncCoordinator:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+
+    class CapturedWorkflowApprovalExecution:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+
+    def fake_build_runtime_workflow_execution_services(**kwargs):
+        return SimpleNamespace(
+            kwargs=kwargs,
+            workflow_continuation=SimpleNamespace(project_background_failure="project-background-failure"),
+            workflow_approval_resume="workflow-approval-resume",
+            workflow_cancellation="workflow-cancellation",
+            workflow_child_outcomes="workflow-child-outcomes",
+        )
+
+    monkeypatch.setattr(
+        agent_runtime,
+        "_build_runtime_workflow_execution_services",
+        fake_build_runtime_workflow_execution_services,
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "RuntimeWorkflowRunAsyncCoordinator",
+        CapturedWorkflowRunAsyncCoordinator,
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "RuntimeWorkflowApprovalExecutionService",
+        CapturedWorkflowApprovalExecution,
+    )
+
+    engine = object.__new__(agent_runtime.NativeRunEngine)
+    engine.workflow_path_planner = SimpleNamespace(
+        workflow_path="workflow-path",
+        nodes_by_id="nodes-by-id",
+        next_node_id="next-node-id",
+        parallel_plan="parallel-plan",
+        condition_selection="condition-selection",
+        loop_selection="loop-selection",
+        loop_iterations_from_timeline="loop-iterations-from-timeline",
+        loop_step_limit="loop-step-limit",
+    )
+    engine.workflow_run_start_projector = SimpleNamespace(started_projection="started-projection")
+    engine.tool_brokers = "tool-brokers"
+    engine.workflow_artifacts_dir = "workflow-artifacts"
+    engine.run_approvals = SimpleNamespace(claim_pending_approval="claim-pending-approval")
+    engine.get_run = "get-run"
+    engine.runs = SimpleNamespace(pending_approval_private="pending-approval-private")
+    engine._merge_workflow_child_run_outcome = "merge-workflow-child-run-outcome"
+    engine.append_run_event = "append-run-event"
+    engine._update_run = "update-run"
+    engine._update_run_group = "update-run-group"
+    engine.approvals = SimpleNamespace(approve_workflow_node="approve-workflow-node")
+    engine.get_workflow = "get-workflow"
+    engine.validate_workflow = "validate-workflow"
+    engine._validate_workflow_agent_nodes = "validate-workflow-agent-nodes"
+    engine._validate_workflow_subworkflow_nodes = "validate-workflow-subworkflow-nodes"
+    engine._validate_workflow_runnable_steps = "validate-workflow-runnable-steps"
+    engine._validate_workflow_agent_run_readiness = "validate-workflow-agent-run-readiness"
+    engine.workflow_run_starter = "workflow-run-starter"
+    engine._continue_workflow_run = "continue-workflow-run"
+    engine.resolve_runnable = "resolve-runnable"
+    engine._workflow_for_run_resume = "workflow-for-run-resume"
+    engine._workflow_run_is_group_root = "workflow-run-is-group-root"
+
+    engine._install_runtime_workflow_execution_and_async(
+        runtime_timeline_factory="timeline-factory",
+    )
+
+    assert engine.workflow_continuation.project_background_failure == "project-background-failure"
+    assert engine.workflow_approval_resume == "workflow-approval-resume"
+    assert engine.workflow_cancellation == "workflow-cancellation"
+    assert engine.workflow_child_outcomes == "workflow-child-outcomes"
+    assert isinstance(engine.workflow_run_async_coordinator, CapturedWorkflowRunAsyncCoordinator)
+    assert engine.workflow_run_async_coordinator.kwargs["starter"] == "workflow-run-starter"
+    assert engine.workflow_run_async_coordinator.kwargs["start_projector"] is engine.workflow_run_start_projector
+    assert "project_background_failure" in engine.workflow_run_async_coordinator.kwargs
+    assert isinstance(engine.workflow_approval_execution, CapturedWorkflowApprovalExecution)
+    assert (
+        engine.workflow_approval_execution.kwargs["workflow_approval_resume"]
+        == "workflow-approval-resume"
+    )

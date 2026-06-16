@@ -533,71 +533,8 @@ class NativeRunEngine(
         self._install_runtime_workflow_planning_and_coordinator(
             runtime_timeline_factory=runtime_timeline_factory,
         )
-        workflow_execution_services = _build_runtime_workflow_execution_services(
-            engine=self,
-            iso_epoch=lambda value: _iso_epoch(value),
-            workflow_path=self.workflow_path_planner.workflow_path,
-            workflow_nodes_by_id=self.workflow_path_planner.nodes_by_id,
-            workflow_next_node_id=self.workflow_path_planner.next_node_id,
-            workflow_parallel_plan=self.workflow_path_planner.parallel_plan,
-            workflow_condition_selection=self.workflow_path_planner.condition_selection,
-            workflow_loop_selection=self.workflow_path_planner.loop_selection,
-            workflow_loop_iterations_from_timeline=(
-                self.workflow_path_planner.loop_iterations_from_timeline
-            ),
-            workflow_loop_step_limit=self.workflow_path_planner.loop_step_limit,
-            workflow_run_started_projection=self.workflow_run_start_projector.started_projection,
-            workflow_artifact_write=lambda run, artifact_path, context: (
-                self.tool_brokers.for_run(
-                    run_id=str(run.get("run_id") or ""),
-                    workspace_policy=self._default_workspace_policy(),
-                    artifacts_dir=self.workflow_artifacts_dir,
-                ).artifact_write(artifact_path, context)
-            ),
-            claim_pending_approval=self.run_approvals.claim_pending_approval,
-            get_current_run=lambda run_id: self.get_run(run_id),
-            pending_approval_private=lambda run_id: self.runs.pending_approval_private(run_id),
-            get_run=lambda run_id: self.get_run(run_id),
-            merge_workflow_child_run_outcome=lambda timeline, artifacts, child_run, label: (
-                self._merge_workflow_child_run_outcome(timeline, artifacts, child_run, label)
-            ),
-            timeline_factory=runtime_timeline_factory,
-            append_run_event=lambda run_id, event_type, payload: self.append_run_event(run_id, event_type, payload),
-            update_run=lambda run_id, **kwargs: self._update_run(run_id, **kwargs),
-            update_run_group=lambda run_group_id, **kwargs: self._update_run_group(run_group_id, **kwargs),
-            approve_workflow_node=lambda run_id, **kwargs: self.approvals.approve_workflow_node(run_id, **kwargs),
-        )
-        self._install_runtime_workflow_execution_services(workflow_execution_services)
-        self.workflow_run_async_coordinator = RuntimeWorkflowRunAsyncCoordinator(
-            get_workflow=lambda workflow_id: self.get_workflow(workflow_id),
-            validate_workflow=lambda nodes, edges: self.validate_workflow(nodes, edges),
-            validate_workflow_agent_nodes=lambda nodes: self._validate_workflow_agent_nodes(nodes),
-            validate_workflow_subworkflow_nodes=lambda nodes, **kwargs: (
-                self._validate_workflow_subworkflow_nodes(nodes, **kwargs)
-            ),
-            validate_workflow_runnable_steps=lambda nodes: self._validate_workflow_runnable_steps(nodes),
-            validate_workflow_agent_run_readiness=lambda nodes: self._validate_workflow_agent_run_readiness(nodes),
-            starter=self.workflow_run_starter,
-            start_projector=self.workflow_run_start_projector,
-            append_run_event=lambda run_id, event_type, payload: self.append_run_event(run_id, event_type, payload),
-            update_run=lambda run_id, **kwargs: self._update_run(run_id, **kwargs),
-            continue_workflow_run=lambda run, workflow, **kwargs: self._continue_workflow_run(
-                run,
-                workflow,
-                **kwargs,
-            ),
-            project_background_failure=lambda run, **kwargs: self.workflow_continuation.project_background_failure(
-                run,
-                **kwargs,
-            ),
-            resolve_runnable=lambda **kwargs: self.resolve_runnable(**kwargs),
-            error_type=AgentRuntimeError,
-        )
-        self.workflow_approval_execution = RuntimeWorkflowApprovalExecutionService(
-            pending_approval_private=lambda run_id: self.runs.pending_approval_private(run_id),
-            workflow_for_run_resume=lambda run: self._workflow_for_run_resume(run),
-            workflow_run_is_group_root=lambda run: self._workflow_run_is_group_root(run),
-            workflow_approval_resume=self.workflow_approval_resume,
+        self._install_runtime_workflow_execution_and_async(
+            runtime_timeline_factory=runtime_timeline_factory,
         )
         self.runnable_resolver = RuntimeRunnableResolver(
             main_chat_agent_id=_MAIN_CHAT_AGENT_ID,
