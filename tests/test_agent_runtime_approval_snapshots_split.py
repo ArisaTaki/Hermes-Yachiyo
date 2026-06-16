@@ -80,6 +80,8 @@ def test_workflow_approval_pause_projection_uses_shared_public_snapshot() -> Non
 
     assert public == public_pending_approval(pending)
     assert public["tool"] == "workflow.approval"
+    assert public["workflow_node_id"] == "gate"
+    assert public["workflow_node_label"] == "Human Gate"
     assert public["input_preview"]["checkpoint"] == "Human Gate"
     assert public["input_preview"]["criteria"] == "Review output"
     assert "workflow_context" not in public

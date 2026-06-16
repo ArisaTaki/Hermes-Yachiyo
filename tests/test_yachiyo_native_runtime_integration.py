@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from apps.shell.agent.runtime.workflow_approvals import WorkflowApprovalPauseProjection
 from apps.shell.agent_runtime import NativeRunEngine
 from apps.shell.credential_store import MemoryCredentialStore
 from apps.shell.yachiyo_agent.legacy_ports import LegacyStudioPort
@@ -418,5 +419,102 @@ def test_agent_studio_rejects_native_tool_approval_with_replay_events(tmp_path) 
             event.event_type for event in second_page.events
         } & {"tool.rejected", "approval.rejected", "agent.run.cancelled"}
         assert "sk-native-reject-secret123456" not in serialized_events
+    finally:
+        runtime.close()
+
+
+def test_agent_studio_rejects_native_workflow_approval_with_group_replay_events(tmp_path) -> None:
+    credential_store = MemoryCredentialStore()
+    runtime = NativeRunEngine(
+        db_path=tmp_path / "agent-runtime-workflow-approval.db",
+        workspace_dir=tmp_path / "runtime-workflow-approval",
+        credential_store=credential_store,
+        seed_templates=False,
+    )
+    try:
+        run_group = runtime._insert_run_group(
+            title="Native workflow approval",
+            source="workflow",
+            workspace_dir=str(tmp_path / "workflow-approval-workspace"),
+        )
+        workflow_run = runtime._insert_run(
+            kind="workflow_run",
+            runnable_id="workflow-approval-native",
+            user_goal="Review release plan",
+            run_group_id=run_group["run_group_id"],
+        )
+        projection = WorkflowApprovalPauseProjection.from_criteria(
+            {"id": "review-gate"},
+            label="Review Gate",
+            kind="approval",
+            criteria="Review the release plan",
+            context="Release plan includes token sk-workflow-reject-secret123456",
+            next_index=1,
+        )
+        timeline = [projection.timeline_event(runtime._timeline)]
+        runtime.append_run_event(
+            workflow_run["run_id"],
+            "workflow.node.approval_required",
+            projection.event_payload(),
+        )
+        runtime._update_run(
+            workflow_run["run_id"],
+            **projection.update_fields(timeline=timeline, artifacts=[]),
+        )
+        runtime._update_run_group(
+            run_group["run_group_id"],
+            status="approval_required",
+            summary=projection.result_text(),
+        )
+
+        studio = AgentStudioService(LegacyStudioPort(runtime))
+
+        pending = studio.get_run_timeline(workflow_run["run_id"])
+        rejected = studio.reject_run_approval(workflow_run["run_id"], "Needs safer rollout")
+        timeline_after = studio.get_run_timeline(workflow_run["run_id"])
+        group_run = studio.get_group_run(run_group["run_group_id"])
+        events = list(studio.get_run_event_stream(workflow_run["run_id"]))
+        first_page = studio.get_run_event_page(workflow_run["run_id"], limit=2)
+        second_page = studio.get_run_event_page(
+            workflow_run["run_id"],
+            after_sequence=first_page.next_after_sequence,
+            limit=4,
+        )
+
+        event_types = [event.event_type for event in events]
+        rejected_events = [
+            event for event in events if event.event_type == "workflow.node.approval_rejected"
+        ]
+        cancelled_events = [
+            event for event in events if event.event_type == "workflow.run.cancelled"
+        ]
+        serialized_events = " ".join(str(event.model_dump()) for event in events)
+
+        assert pending.status == "approval_required"
+        assert pending.pending_approval is not None
+        assert pending.pending_approval.workflow_node_label == "Review Gate"
+        assert rejected.status == "cancelled"
+        assert rejected.pending_approval is None
+        assert timeline_after.pending_approval is None
+        assert timeline_after.approvals[0].approval_id == projection.approval_id
+        assert timeline_after.approvals[0].status == "rejected"
+        assert group_run.status == "cancelled"
+        assert group_run.final_answer == "Workflow 审批已拒绝：Needs safer rollout"
+        assert "workflow.node.approval_required" in event_types
+        assert "workflow.node.approval_rejected" in event_types
+        assert "workflow.run.cancelled" in event_types
+        assert rejected_events[0].payload["workflow_node_id"] == "review-gate"
+        assert rejected_events[0].payload["workflow_node_label"] == "Review Gate"
+        assert rejected_events[0].payload["reason"] == "Needs safer rollout"
+        assert cancelled_events[0].payload["status"] == "cancelled"
+        page_event_types = [
+            event.event_type for event in [*first_page.events, *second_page.events]
+        ]
+        assert "workflow.node.approval_required" in page_event_types
+        assert second_page.events[0].sequence > first_page.events[-1].sequence
+        assert {
+            event.event_type for event in second_page.events
+        } & {"workflow.node.approval_rejected", "approval.rejected", "workflow.run.cancelled"}
+        assert "sk-workflow-reject-secret123456" not in serialized_events
     finally:
         runtime.close()
