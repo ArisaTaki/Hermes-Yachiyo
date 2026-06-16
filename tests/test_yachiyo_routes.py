@@ -108,7 +108,17 @@ class _FakeAgentRuntime:
 
     def rerun_run(self, run_id: str) -> dict[str, Any]:
         self.calls.append(("rerun_run", run_id))
-        return _run_payload(run_id=f"{run_id}-rerun", status="processing")
+        payload = _run_payload(run_id=f"{run_id}-rerun", status="processing")
+        payload["timeline"] = [
+            _rerun_started_event(
+                run_id,
+                kind="agent_run",
+                status="completed",
+                runnable_id="agent-1",
+                runnable_name="Planner",
+            )
+        ]
+        return payload
 
     def delete_run(self, run_id: str) -> dict[str, Any]:
         self.calls.append(("delete_run", run_id))
@@ -1031,6 +1041,13 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     assert events["has_more"] is True
     assert events["events"][0]["event_type"] == "agent.started"
     assert rerun["run_id"] == "run-1-rerun"
+    assert rerun["rerun_of_run_id"] == "run-1"
+    assert rerun["rerun_of_kind"] == "agent_run"
+    assert rerun["rerun_of_status"] == "completed"
+    assert rerun["rerun_of_runnable_id"] == "agent-1"
+    assert rerun["rerun_of_runnable_name"] == "Planner"
+    assert rerun["rerun_original_created_at"] == "2026-06-13T00:00:00Z"
+    assert rerun["rerun_original_updated_at"] == "2026-06-13T00:00:04Z"
     assert cancelled["status"] == "cancelled"
     assert deleted_run == {"ok": True, "deleted_run_ids": ["run-1"], "deleted_run_count": 1}
     assert approved["status"] == "completed"
@@ -1397,4 +1414,26 @@ def _run_payload(
         "artifacts": [{"artifact_id": "artifact-1", "kind": "markdown", "path": "report.md"}],
         "created_at": "2026-06-14T00:00:00Z",
         "updated_at": "2026-06-14T00:00:01Z",
+    }
+
+
+def _rerun_started_event(
+    original_run_id: str,
+    *,
+    kind: str,
+    status: str,
+    runnable_id: str,
+    runnable_name: str,
+) -> dict[str, Any]:
+    return {
+        "event_type": "run.rerun.started",
+        "payload": {
+            "rerun_of_run_id": original_run_id,
+            "rerun_of_kind": kind,
+            "rerun_of_status": status,
+            "rerun_of_runnable_id": runnable_id,
+            "rerun_of_runnable_name": runnable_name,
+            "original_created_at": "2026-06-13T00:00:00Z",
+            "original_updated_at": "2026-06-13T00:00:04Z",
+        },
     }

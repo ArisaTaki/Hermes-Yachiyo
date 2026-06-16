@@ -267,7 +267,17 @@ class _FakeStudioPort:
 
     def rerun_run(self, run_id: str) -> dict[str, Any]:
         self.calls.append(("rerun_run", run_id))
-        return _run_payload(run_id=f"{run_id}-rerun", user_goal="Rerun task")
+        payload = _run_payload(run_id=f"{run_id}-rerun", user_goal="Rerun task")
+        payload["timeline"] = [
+            _rerun_started_event(
+                run_id,
+                kind="agent_run",
+                status="completed",
+                runnable_id="agent-1",
+                runnable_name="Planner",
+            )
+        ]
+        return payload
 
     def cancel_run(self, run_id: str) -> dict[str, Any]:
         self.calls.append(("cancel_run", run_id))
@@ -802,6 +812,13 @@ def test_agent_studio_service_run_actions_return_public_timeline_snapshots() -> 
     )
 
     assert rerun.run_id == "run-1-rerun"
+    assert rerun.rerun_of_run_id == "run-1"
+    assert rerun.rerun_of_kind == "agent_run"
+    assert rerun.rerun_of_status == "completed"
+    assert rerun.rerun_of_runnable_id == "agent-1"
+    assert rerun.rerun_of_runnable_name == "Planner"
+    assert rerun.rerun_original_created_at == "2026-06-13T00:00:00Z"
+    assert rerun.rerun_original_updated_at == "2026-06-13T00:00:04Z"
     assert cancelled.status == "cancelled"
     assert deleted == {"ok": True, "deleted_run_ids": ["run-1"], "deleted_run_count": 1}
     assert approved.status == "completed"
@@ -837,7 +854,17 @@ def test_agent_studio_service_run_actions_preserve_workflow_run_snapshots() -> N
     class _WorkflowActionPort(_FakeStudioPort):
         def rerun_run(self, run_id: str) -> dict[str, Any]:
             self.calls.append(("rerun_run", run_id))
-            return _workflow_run_payload(run_id=f"{run_id}-rerun", status="running")
+            payload = _workflow_run_payload(run_id=f"{run_id}-rerun", status="running")
+            payload["timeline"] = [
+                _rerun_started_event(
+                    run_id,
+                    kind="workflow_run",
+                    status="completed",
+                    runnable_id="workflow-1",
+                    runnable_name="Review workflow",
+                )
+            ]
+            return payload
 
         def cancel_run(self, run_id: str) -> dict[str, Any]:
             self.calls.append(("cancel_run", run_id))
@@ -871,6 +898,11 @@ def test_agent_studio_service_run_actions_preserve_workflow_run_snapshots() -> N
     assert rerun.workflow_run_id == "workflow-run-1-rerun"
     assert rerun.workflow_id == "workflow-1"
     assert rerun.current_node_id == "review"
+    assert rerun.rerun_of_run_id == "workflow-run-1"
+    assert rerun.rerun_of_kind == "workflow_run"
+    assert rerun.rerun_of_status == "completed"
+    assert rerun.rerun_of_runnable_id == "workflow-1"
+    assert rerun.rerun_of_runnable_name == "Review workflow"
     assert cancelled.status == "cancelled"
     assert cancelled.objective == "Review docs"
     assert approved.final_answer == "Workflow approved"
@@ -1123,4 +1155,26 @@ def _workflow_run_payload(
         "current_node_id": "review",
         "current_node_label": "Review",
         "final_answer": final_answer,
+    }
+
+
+def _rerun_started_event(
+    original_run_id: str,
+    *,
+    kind: str,
+    status: str,
+    runnable_id: str,
+    runnable_name: str,
+) -> dict[str, Any]:
+    return {
+        "event_type": "run.rerun.started",
+        "payload": {
+            "rerun_of_run_id": original_run_id,
+            "rerun_of_kind": kind,
+            "rerun_of_status": status,
+            "rerun_of_runnable_id": runnable_id,
+            "rerun_of_runnable_name": runnable_name,
+            "original_created_at": "2026-06-13T00:00:00Z",
+            "original_updated_at": "2026-06-13T00:00:04Z",
+        },
     }
