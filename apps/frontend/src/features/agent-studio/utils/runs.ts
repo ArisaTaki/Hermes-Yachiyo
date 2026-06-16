@@ -125,6 +125,13 @@ export function publicRunTimelineToRunSpec(
     task_run_link_last_event_sequence: 'task_run_link_last_event_sequence' in snapshot
       ? snapshot.task_run_link_last_event_sequence ?? undefined
       : undefined,
+    rerun_of_run_id: snapshot.rerun_of_run_id || undefined,
+    rerun_of_kind: snapshot.rerun_of_kind || undefined,
+    rerun_of_status: snapshot.rerun_of_status || undefined,
+    rerun_of_runnable_id: snapshot.rerun_of_runnable_id || undefined,
+    rerun_of_runnable_name: snapshot.rerun_of_runnable_name || undefined,
+    rerun_original_created_at: snapshot.rerun_original_created_at || undefined,
+    rerun_original_updated_at: snapshot.rerun_original_updated_at || undefined,
     kind,
     runnable_id: fallback.runnableId || (kind === 'workflow_run' ? workflowId || workflowRunId : agentId) || snapshot.run_id,
     runnable_name: snapshot.title || fallback.runnableName || undefined,

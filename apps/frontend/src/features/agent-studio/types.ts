@@ -172,6 +172,13 @@ export type RunSpec = {
   task_run_link_updated_at?: string;
   task_run_link_run_status?: string;
   task_run_link_last_event_sequence?: number;
+  rerun_of_run_id?: string;
+  rerun_of_kind?: string;
+  rerun_of_status?: string;
+  rerun_of_runnable_id?: string;
+  rerun_of_runnable_name?: string;
+  rerun_original_created_at?: string;
+  rerun_original_updated_at?: string;
   kind: 'agent_run' | 'workflow_run' | string;
   runnable_id: string;
   runnable_name?: string;
