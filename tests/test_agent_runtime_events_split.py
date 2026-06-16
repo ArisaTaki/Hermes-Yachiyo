@@ -98,6 +98,10 @@ def test_runtime_run_event_recorder_appends_compatibility_aliases() -> None:
         "workflow.node.completed",
     ]
     assert canonical_run_event_aliases("model.output.completed") == ["model.completed"]
+    assert canonical_run_event_aliases("workflow.run.started") == ["workflow.started"]
+    assert canonical_run_event_aliases("workflow.run.cancelled") == [
+        "workflow.cancelled"
+    ]
     assert canonical_run_event_aliases("agent.tool.started") == ["tool.started"]
     assert canonical_run_event_aliases("agent.tool.completed") == ["tool.completed"]
     assert canonical_run_event_aliases("agent.tool.failed") == ["tool.failed"]
@@ -125,6 +129,28 @@ def test_runtime_run_event_recorder_appends_compatibility_aliases() -> None:
         "approval.timeout"
     ]
     assert agent_runtime._canonical_run_event_aliases("model.output.completed") == ["model.completed"]
+
+    repository.calls.clear()
+    recorder.append(
+        "run-1",
+        "workflow.run.started",
+        {"workflow_id": "workflow-1", "status": "running"},
+    )
+    assert [call[1] for call in repository.calls] == [
+        "workflow.run.started",
+        "workflow.started",
+    ]
+
+    repository.calls.clear()
+    recorder.append(
+        "run-1",
+        "workflow.run.cancelled",
+        {"workflow_id": "workflow-1", "status": "cancelled"},
+    )
+    assert [call[1] for call in repository.calls] == [
+        "workflow.run.cancelled",
+        "workflow.cancelled",
+    ]
 
     repository.calls.clear()
     recorder.append(
@@ -564,6 +590,7 @@ def test_agent_runtime_service_uses_runtime_event_recorder_from_legacy_entrypoin
             user_goal="record events",
         )
         service.append_run_event(run["run_id"], "workflow.run.completed", {"status": "completed"})
+        service.append_run_event(run["run_id"], "workflow.run.cancelled", {"status": "cancelled"})
         event_types = [
             event["event_type"]
             for event in service.list_run_events(run["run_id"])["events"]
@@ -571,6 +598,8 @@ def test_agent_runtime_service_uses_runtime_event_recorder_from_legacy_entrypoin
 
         assert "workflow.run.completed" in event_types
         assert "workflow.completed" in event_types
+        assert "workflow.run.cancelled" in event_types
+        assert "workflow.cancelled" in event_types
     finally:
         service.close()
 

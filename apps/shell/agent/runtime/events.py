@@ -687,10 +687,12 @@ def canonical_run_event_aliases(
     direct_aliases = {
         "model.request.started": ["model.requested"],
         "model.output.completed": ["model.completed"],
+        "workflow.run.started": ["workflow.started"],
         "workflow.run.approval_required": ["workflow.paused_for_approval"],
         "workflow.run.resumed": ["workflow.resumed"],
         "workflow.run.completed": ["workflow.completed"],
         "workflow.run.failed": ["workflow.failed"],
+        "workflow.run.cancelled": ["workflow.cancelled"],
         "skill.dispatch.read": ["skill.selected"],
         "agent.tool.started": ["tool.started"],
         "agent.tool.completed": ["tool.completed"],
