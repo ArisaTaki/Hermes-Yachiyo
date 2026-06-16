@@ -508,35 +508,7 @@ class NativeRunEngine(
         )
         self._install_runtime_definition_layer()
         self._install_runtime_run_layer()
-        self._install_runtime_memory_services(
-            RuntimeMemoryService(
-                self._conn,
-                self._db_lock,
-                now=_now,
-                json_dump=_json_dump,
-                redact_json_value=_redact_json_value,
-                redact_secrets=redact_secrets,
-                memory_scopes=_MEMORY_SCOPES,
-                memory_kinds=_MEMORY_KINDS,
-                context_limit=_MEMORY_CONTEXT_LIMIT,
-                content_max_chars=_MEMORY_CONTENT_MAX_CHARS,
-                error_type=AgentRuntimeError,
-            )
-        )
-        runtime_timeline_factory = _runtime_timeline_factory(
-            now=_now,
-            redact_detail=redact_secrets,
-            redact_payload=_redact_json_value,
-        )
-        core_services = _build_runtime_core_services(
-            run_events=self.run_events,
-            timeline_factory=runtime_timeline_factory,
-            profile_service_factory=lambda: get_model_profile_service(),
-            supports_openai_compatible_api=supports_openai_compatible_api,
-            default_agent_ids=_DEFAULT_AGENT_IDS,
-            error_type=AgentRuntimeError,
-        )
-        self._install_runtime_core_services(core_services)
+        runtime_timeline_factory = self._install_runtime_memory_and_core()
         self.agent_run_async_coordinator = RuntimeAgentRunAsyncCoordinator(
             get_agent_private=lambda agent_id: self._get_agent_private(agent_id),
             validate_agent_run_readiness=lambda agent: self._validate_agent_run_readiness(agent),

@@ -25,6 +25,7 @@ def test_runtime_installation_facade_mixin_remains_exported_from_legacy_module()
         "_install_runtime_foundation",
         "_install_runtime_definition_layer",
         "_install_runtime_run_layer",
+        "_install_runtime_memory_and_core",
         "_install_runtime_engine_state",
         "_install_runtime_recorders",
         "_install_runtime_definition_services",

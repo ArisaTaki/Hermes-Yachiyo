@@ -193,6 +193,39 @@ class RuntimeInstallationFacadeMixin:
             error_type=legacy.AgentRuntimeError,
         )
 
+    def _install_runtime_memory_and_core(self) -> Any:
+        legacy = _legacy_agent_runtime_module()
+        self._install_runtime_memory_services(
+            legacy.RuntimeMemoryService(
+                self._conn,
+                self._db_lock,
+                now=legacy._now,
+                json_dump=legacy._json_dump,
+                redact_json_value=legacy._redact_json_value,
+                redact_secrets=legacy.redact_secrets,
+                memory_scopes=legacy._MEMORY_SCOPES,
+                memory_kinds=legacy._MEMORY_KINDS,
+                context_limit=legacy._MEMORY_CONTEXT_LIMIT,
+                content_max_chars=legacy._MEMORY_CONTENT_MAX_CHARS,
+                error_type=legacy.AgentRuntimeError,
+            )
+        )
+        runtime_timeline_factory = legacy._runtime_timeline_factory(
+            now=legacy._now,
+            redact_detail=legacy.redact_secrets,
+            redact_payload=legacy._redact_json_value,
+        )
+        core_services = legacy._build_runtime_core_services(
+            run_events=self.run_events,
+            timeline_factory=runtime_timeline_factory,
+            profile_service_factory=lambda: legacy.get_model_profile_service(),
+            supports_openai_compatible_api=legacy.supports_openai_compatible_api,
+            default_agent_ids=legacy._DEFAULT_AGENT_IDS,
+            error_type=legacy.AgentRuntimeError,
+        )
+        self._install_runtime_core_services(core_services)
+        return runtime_timeline_factory
+
     def _install_runtime_engine_state(self, state: Any) -> None:
         self.workspace_dir = state.workspace_dir
         self.db_path = state.db_path
