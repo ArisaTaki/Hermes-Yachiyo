@@ -684,19 +684,21 @@ def canonical_run_event_aliases(
     payload: dict[str, Any] | None = None,
 ) -> list[str]:
     clean_event_type = str(event_type or "")
-    direct_alias = {
-        "model.request.started": "model.requested",
-        "model.output.completed": "model.completed",
-        "workflow.run.approval_required": "workflow.paused_for_approval",
-        "workflow.run.resumed": "workflow.resumed",
-        "workflow.run.completed": "workflow.completed",
-        "workflow.run.failed": "workflow.failed",
-        "skill.dispatch.read": "skill.selected",
-        "agent.tool.approval_approved": "tool.approved",
-        "agent.tool.approval_rejected": "tool.rejected",
+    direct_aliases = {
+        "model.request.started": ["model.requested"],
+        "model.output.completed": ["model.completed"],
+        "workflow.run.approval_required": ["workflow.paused_for_approval"],
+        "workflow.run.resumed": ["workflow.resumed"],
+        "workflow.run.completed": ["workflow.completed"],
+        "workflow.run.failed": ["workflow.failed"],
+        "skill.dispatch.read": ["skill.selected"],
+        "agent.tool.approval_approved": ["tool.approved", "approval.approved"],
+        "agent.tool.approval_rejected": ["tool.rejected", "approval.rejected"],
+        "workflow.node.approval_approved": ["approval.approved"],
+        "workflow.node.approval_rejected": ["approval.rejected"],
     }.get(clean_event_type)
-    if direct_alias:
-        return [direct_alias]
+    if direct_aliases:
+        return direct_aliases
 
     if clean_event_type in {
         "workflow.node.start",

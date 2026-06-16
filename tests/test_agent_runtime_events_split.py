@@ -98,8 +98,20 @@ def test_runtime_run_event_recorder_appends_compatibility_aliases() -> None:
         "workflow.node.completed",
     ]
     assert canonical_run_event_aliases("model.output.completed") == ["model.completed"]
-    assert canonical_run_event_aliases("agent.tool.approval_approved") == ["tool.approved"]
-    assert canonical_run_event_aliases("agent.tool.approval_rejected") == ["tool.rejected"]
+    assert canonical_run_event_aliases("agent.tool.approval_approved") == [
+        "tool.approved",
+        "approval.approved",
+    ]
+    assert canonical_run_event_aliases("agent.tool.approval_rejected") == [
+        "tool.rejected",
+        "approval.rejected",
+    ]
+    assert canonical_run_event_aliases("workflow.node.approval_approved") == [
+        "approval.approved"
+    ]
+    assert canonical_run_event_aliases("workflow.node.approval_rejected") == [
+        "approval.rejected"
+    ]
     assert agent_runtime._canonical_run_event_aliases("model.output.completed") == ["model.completed"]
 
     repository.calls.clear()
@@ -111,6 +123,7 @@ def test_runtime_run_event_recorder_appends_compatibility_aliases() -> None:
     assert [call[1] for call in repository.calls] == [
         "agent.tool.approval_approved",
         "tool.approved",
+        "approval.approved",
     ]
 
     repository.calls.clear()
@@ -122,6 +135,29 @@ def test_runtime_run_event_recorder_appends_compatibility_aliases() -> None:
     assert [call[1] for call in repository.calls] == [
         "agent.tool.approval_rejected",
         "tool.rejected",
+        "approval.rejected",
+    ]
+
+    repository.calls.clear()
+    recorder.append(
+        "run-1",
+        "workflow.node.approval_approved",
+        {"workflow_node_id": "approval-1", "status": "completed"},
+    )
+    assert [call[1] for call in repository.calls] == [
+        "workflow.node.approval_approved",
+        "approval.approved",
+    ]
+
+    repository.calls.clear()
+    recorder.append(
+        "run-1",
+        "workflow.node.approval_rejected",
+        {"workflow_node_id": "approval-1", "status": "cancelled"},
+    )
+    assert [call[1] for call in repository.calls] == [
+        "workflow.node.approval_rejected",
+        "approval.rejected",
     ]
 
 
