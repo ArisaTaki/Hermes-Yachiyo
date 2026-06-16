@@ -11,6 +11,7 @@ export function toolCallsFromRunEventReplay(events: PublicRunEvent[]): ToolCallS
   const calls: ToolCallSnapshot[] = [];
   const activeByKey = new Map<string, number>();
   events.forEach((event) => {
+    if (publicRunEventIsSecret(event)) return;
     const toolCall = toolCallFromRunEvent(event);
     if (!toolCall) return;
     const key = toolCallCorrelationKey(event, toolCall);
@@ -49,6 +50,7 @@ export function mergeToolCallSnapshots(
 
 export function artifactsFromRunEventReplay(events: PublicRunEvent[]): Array<Record<string, unknown>> {
   return events
+    .filter((event) => !publicRunEventIsSecret(event))
     .map(artifactFromRunEvent)
     .filter((artifact): artifact is Record<string, unknown> => Boolean(artifact));
 }
@@ -79,6 +81,7 @@ export function approvalsFromRunEventReplay(events: PublicRunEvent[]): ApprovalC
   const activeByWeakKey = new Map<string, ApprovalReplayWeakIndex>();
   const activeKeysByIndex = new Map<number, ApprovalReplayCorrelationKeys>();
   events.forEach((event) => {
+    if (publicRunEventIsSecret(event)) return;
     const approval = approvalFromRunEvent(event);
     if (!approval) return;
     const keys = approvalReplayCorrelationKeys(approval);
@@ -214,6 +217,10 @@ function approvalFromRunEvent(event: PublicRunEvent): ApprovalCardSnapshot | nul
     title: publicRunEventPayloadString(source, 'title') || `Approval · ${toolName}`,
     tool_name: toolName,
   };
+}
+
+function publicRunEventIsSecret(event: PublicRunEvent): boolean {
+  return String(event.sensitivity || '').trim() === 'secret';
 }
 
 function toolCallFromRunEvent(event: PublicRunEvent): ToolCallSnapshot | null {

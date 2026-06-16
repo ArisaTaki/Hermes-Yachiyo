@@ -84,6 +84,7 @@ export function summarizeRuntimeToolCalls(
 ): RuntimeToolCallSummaryItem[] {
   const byName = new Map<string, RuntimeToolCallSummaryItem>();
   for (const event of events || []) {
+    if (runtimeToolEventIsSecret(event)) continue;
     const eventType = String(event.event_type || '').trim();
     if (!TOOL_EVENT_TYPES.has(eventType)) continue;
 
@@ -106,6 +107,10 @@ export function summarizeRuntimeToolCalls(
   return Array.from(byName.values())
     .sort((left, right) => right.sequence - left.sequence)
     .slice(0, Math.max(1, limit));
+}
+
+function runtimeToolEventIsSecret(event: PublicRunEvent): boolean {
+  return String(event.sensitivity || '').trim() === 'secret';
 }
 
 function runtimeToolNameFromEvent(event: PublicRunEvent): string {
