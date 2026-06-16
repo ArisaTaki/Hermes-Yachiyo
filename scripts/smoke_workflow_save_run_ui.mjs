@@ -72,8 +72,12 @@ const workflowRun = {
   kind: 'workflow_run',
   runnable_id: WORKFLOW_ID,
   runnable_name: 'Workflow Save Run UI Smoke',
+  title: 'Workflow Save Run UI Smoke',
+  workflow_id: WORKFLOW_ID,
   status: 'completed',
+  objective: RUN_GOAL,
   user_goal: RUN_GOAL,
+  final_answer: 'Workflow save-and-run UI smoke completed',
   result: 'Workflow save-and-run UI smoke completed',
   timeline: [
     { event: 'workflow.run.started', status: 'running', workflow_id: WORKFLOW_ID },
@@ -171,12 +175,26 @@ function approvalWorkflowRun() {
     kind: 'workflow_run',
     runnable_id: APPROVAL_WORKFLOW_ID,
     runnable_name: 'Workflow Approval Save Run UI Smoke',
+    title: 'Workflow Approval Save Run UI Smoke',
+    workflow_id: APPROVAL_WORKFLOW_ID,
     status: approvalRunApproved ? 'completed' : 'approval_required',
+    objective: APPROVAL_RUN_GOAL,
     user_goal: APPROVAL_RUN_GOAL,
+    final_answer: approvalRunApproved ? 'Workflow approval save-and-run UI smoke completed' : '',
     result: approvalRunApproved ? 'Workflow approval save-and-run UI smoke completed' : '',
     pending_approval: approvalRunApproved ? undefined : {
       approval_id: 'approval-workflow-save-run-ui-smoke',
+      run_id: APPROVAL_RUN_ID,
+      source_run_id: APPROVAL_RUN_ID,
+      status: 'pending',
       tool: 'workflow.approval',
+      tool_name: 'workflow.approval',
+      title: 'Approval Required · workflow.approval',
+      requested_at: now,
+      workflow_id: APPROVAL_WORKFLOW_ID,
+      workflow_run_id: APPROVAL_RUN_ID,
+      workflow_node_id: 'approval-1',
+      workflow_node_label: 'Manual Approval',
       input_preview: {
         node_id: 'approval-1',
         label: 'Manual Approval',
@@ -365,7 +383,15 @@ async function startMockBridge() {
         sendJson(response, 200, { agents: [agent] });
         return;
       }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/agents') {
+        sendJson(response, 200, { agents: [agent] });
+        return;
+      }
       if (request.method === 'GET' && url.pathname === '/ui/skills') {
+        sendJson(response, 200, { skills: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/skills') {
         sendJson(response, 200, { skills: [] });
         return;
       }
@@ -373,8 +399,28 @@ async function startMockBridge() {
         sendJson(response, 200, { roots: [] });
         return;
       }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/skills/sources') {
+        sendJson(response, 200, { roots: [] });
+        return;
+      }
       if (request.method === 'GET' && url.pathname === '/ui/skill-folders') {
         sendJson(response, 200, { folders: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/skill-folders') {
+        sendJson(response, 200, { folders: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/groups') {
+        sendJson(response, 200, { groups: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/memories') {
+        sendJson(response, 200, { memories: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/future-tasks') {
+        sendJson(response, 200, { future_tasks: [] });
         return;
       }
       if (request.method === 'GET' && url.pathname === '/ui/model-profiles') {
@@ -429,7 +475,20 @@ async function startMockBridge() {
         });
         return;
       }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/runs') {
+        sendJson(response, 200, {
+          runs: [
+            ...(createdApprovalWorkflowRunRequest ? [approvalWorkflowRun()] : []),
+            ...(createdWorkflowRunRequest ? [workflowRun] : []),
+          ],
+        });
+        return;
+      }
       if (request.method === 'GET' && url.pathname === `/ui/runs/${RUN_ID}`) {
+        sendJson(response, createdWorkflowRunRequest ? 200 : 404, createdWorkflowRunRequest ? workflowRun : { ok: false, error: 'run not created' });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/yachiyo/studio/runs/${RUN_ID}/timeline`) {
         sendJson(response, createdWorkflowRunRequest ? 200 : 404, createdWorkflowRunRequest ? workflowRun : { ok: false, error: 'run not created' });
         return;
       }
@@ -437,7 +496,20 @@ async function startMockBridge() {
         sendJson(response, createdApprovalWorkflowRunRequest ? 200 : 404, createdApprovalWorkflowRunRequest ? approvalWorkflowRun() : { ok: false, error: 'approval run not created' });
         return;
       }
+      if (request.method === 'GET' && url.pathname === `/yachiyo/studio/runs/${APPROVAL_RUN_ID}/timeline`) {
+        sendJson(response, createdApprovalWorkflowRunRequest ? 200 : 404, createdApprovalWorkflowRunRequest ? approvalWorkflowRun() : { ok: false, error: 'approval run not created' });
+        return;
+      }
       if (request.method === 'GET' && url.pathname === `/ui/runs/${RUN_ID}/artifacts/${WORKFLOW_ARTIFACT_PATH}`) {
+        sendJson(response, 200, {
+          ok: true,
+          path: WORKFLOW_ARTIFACT_PATH,
+          content: WORKFLOW_ARTIFACT_CONTENT,
+          truncated: false,
+        });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/yachiyo/studio/runs/${RUN_ID}/artifacts/${WORKFLOW_ARTIFACT_PATH}`) {
         sendJson(response, 200, {
           ok: true,
           path: WORKFLOW_ARTIFACT_PATH,
@@ -455,23 +527,54 @@ async function startMockBridge() {
         } : { ok: false, error: 'approval artifact not created' });
         return;
       }
-      if (request.method === 'POST' && url.pathname === '/ui/workflow-runs') {
+      if (request.method === 'GET' && url.pathname === `/yachiyo/studio/runs/${APPROVAL_RUN_ID}/artifacts/${APPROVAL_ARTIFACT_PATH}`) {
+        sendJson(response, approvalRunApproved ? 200 : 404, approvalRunApproved ? {
+          ok: true,
+          path: APPROVAL_ARTIFACT_PATH,
+          content: APPROVAL_ARTIFACT_CONTENT,
+          truncated: false,
+        } : { ok: false, error: 'approval artifact not created' });
+        return;
+      }
+      if (
+        request.method === 'POST'
+        && (
+          url.pathname === '/ui/workflow-runs'
+          || url.pathname === `/yachiyo/studio/workflows/${WORKFLOW_ID}/runs`
+          || url.pathname === `/yachiyo/studio/workflows/${APPROVAL_WORKFLOW_ID}/runs`
+        )
+      ) {
         const body = await readJson(request);
-        if (body.workflow_id === WORKFLOW_ID) {
-          createdWorkflowRunRequest = body;
+        const workflowId = body.workflow_id || decodeURIComponent(url.pathname.split('/').at(-2) || '');
+        if (workflowId === WORKFLOW_ID) {
+          createdWorkflowRunRequest = {
+            ...body,
+            workflow_id: workflowId,
+            user_goal: body.user_goal || body.objective || '',
+          };
           sendJson(response, 200, workflowRun);
           return;
         }
-        if (body.workflow_id === APPROVAL_WORKFLOW_ID) {
-          createdApprovalWorkflowRunRequest = body;
+        if (workflowId === APPROVAL_WORKFLOW_ID) {
+          createdApprovalWorkflowRunRequest = {
+            ...body,
+            workflow_id: workflowId,
+            user_goal: body.user_goal || body.objective || '',
+          };
           approvalRunApproved = false;
           sendJson(response, 200, approvalWorkflowRun());
           return;
         }
-        sendJson(response, 409, { ok: false, error: `wrong workflow_id: ${body.workflow_id}` });
+        sendJson(response, 409, { ok: false, error: `wrong workflow_id: ${workflowId}` });
         return;
       }
-      if (request.method === 'POST' && url.pathname === `/ui/runs/${APPROVAL_RUN_ID}/approval/approve`) {
+      if (
+        request.method === 'POST'
+        && (
+          url.pathname === `/ui/runs/${APPROVAL_RUN_ID}/approval/approve`
+          || url.pathname === `/yachiyo/studio/runs/${APPROVAL_RUN_ID}/approval/approve`
+        )
+      ) {
         approvalRunApproved = true;
         sendJson(response, 200, approvalWorkflowRun());
         return;
@@ -485,12 +588,29 @@ async function startMockBridge() {
         });
         return;
       }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/group-runs') {
+        sendJson(response, 200, {
+          group_runs: [
+            ...(createdApprovalWorkflowRunRequest ? [approvalRunGroup()] : []),
+            ...(createdWorkflowRunRequest ? [runGroup] : []),
+          ],
+        });
+        return;
+      }
       if (request.method === 'GET' && url.pathname === `/ui/run-groups/${RUN_GROUP_ID}`) {
         sendJson(response, 200, runGroup);
         return;
       }
       if (request.method === 'GET' && url.pathname === `/ui/run-groups/${APPROVAL_RUN_GROUP_ID}`) {
         sendJson(response, 200, approvalRunGroup());
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/yachiyo/studio/group-runs/${RUN_GROUP_ID}/events`) {
+        sendJson(response, 200, { group_run_id: RUN_GROUP_ID, events: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/yachiyo/studio/group-runs/${APPROVAL_RUN_GROUP_ID}/events`) {
+        sendJson(response, 200, { group_run_id: APPROVAL_RUN_GROUP_ID, events: [] });
         return;
       }
       if (request.method === 'GET' && url.pathname === `/yachiyo/studio/runs/${RUN_ID}/events`) {

@@ -93,7 +93,15 @@ async function startMockBridge() {
         sendJson(response, 200, { agents: [agent] });
         return;
       }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/agents') {
+        sendJson(response, 200, { agents: [agent] });
+        return;
+      }
       if (request.method === 'GET' && url.pathname === '/ui/skills') {
+        sendJson(response, 200, { skills: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/skills') {
         sendJson(response, 200, { skills: [] });
         return;
       }
@@ -101,8 +109,28 @@ async function startMockBridge() {
         sendJson(response, 200, { roots: [] });
         return;
       }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/skills/sources') {
+        sendJson(response, 200, { roots: [] });
+        return;
+      }
       if (request.method === 'GET' && url.pathname === '/ui/skill-folders') {
         sendJson(response, 200, { folders: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/skill-folders') {
+        sendJson(response, 200, { folders: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/groups') {
+        sendJson(response, 200, { groups: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/memories') {
+        sendJson(response, 200, { memories: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/future-tasks') {
+        sendJson(response, 200, { future_tasks: [] });
         return;
       }
       if (request.method === 'GET' && url.pathname === '/ui/model-profiles') {
@@ -164,8 +192,16 @@ async function startMockBridge() {
         sendJson(response, 200, { runs: [] });
         return;
       }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/runs') {
+        sendJson(response, 200, { runs: [] });
+        return;
+      }
       if (request.method === 'GET' && url.pathname === '/ui/run-groups') {
         sendJson(response, 200, { run_groups: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/group-runs') {
+        sendJson(response, 200, { group_runs: [] });
         return;
       }
       sendJson(response, 404, { ok: false, error: `not found: ${request.method} ${url.pathname}` });

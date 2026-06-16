@@ -8,7 +8,8 @@ import { RuntimeMemoryPanel } from '../features/agent-studio/components/RuntimeM
 import { RunManagementTab } from '../features/agent-studio/components/RunManagementTab';
 import { SkillFolderPanel } from '../features/agent-studio/components/SkillFolderPanel';
 import { SkillLibraryTab } from '../features/agent-studio/components/SkillLibraryTab';
-import { WorkflowEditorPanel, WorkflowRunPreview } from '../features/agent-studio/components/WorkflowEditorPanel';
+import { WorkflowEditorPanel } from '../features/agent-studio/components/WorkflowEditorPanel';
+import { WorkflowRunPreview } from '../features/agent-studio/components/WorkflowRunPreview';
 import { useAgentAvatarActions } from '../features/agent-studio/hooks/useAgentAvatarActions';
 import { useAgentDeletionActions } from '../features/agent-studio/hooks/useAgentDeletionActions';
 import { useAgentDefinitions } from '../features/agent-studio/hooks/useAgentDefinitions';

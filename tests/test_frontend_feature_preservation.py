@@ -4965,9 +4965,17 @@ def test_workflow_studio_exposes_stable_e2e_selectors_for_edit_and_run_flow() ->
             "data-testid=\"workflow-node-remove\"",
             "data-testid=\"workflow-quick-run\"",
             "data-testid=\"workflow-run-goal-input\"",
+            "WorkflowRunPreview",
+            "data-testid=\"workflow-save-and-run\"",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/WorkflowRunPreview.tsx",
+        [
+            "export type WorkflowPreviewStep",
             "data-testid=\"workflow-run-preview\"",
             "data-testid=\"workflow-run-preview-step\"",
-            "data-testid=\"workflow-save-and-run\"",
+            "workflowStepKindLabel(step.kind)",
         ],
     )
     _assert_contains(
@@ -5023,7 +5031,9 @@ def test_workflow_save_run_ui_smoke_uses_studio_route_and_saved_workflow_id() ->
             "data-testid=\"workflow-run-goal-input\"",
             "data-testid=\"workflow-save-and-run\"",
             "request.method === 'POST' && url.pathname === '/yachiyo/studio/workflows'",
-            "request.method === 'POST' && url.pathname === '/ui/workflow-runs'",
+            "url.pathname === '/ui/workflow-runs'",
+            "url.pathname === `/yachiyo/studio/workflows/${WORKFLOW_ID}/runs`",
+            "url.pathname === `/yachiyo/studio/workflows/${APPROVAL_WORKFLOW_ID}/runs`",
             "createdWorkflowRunRequest.workflow_id !== WORKFLOW_ID",
             "createdWorkflowRunRequest.client_run_id",
             "`/ui/runs/${RUN_ID}/artifacts/${WORKFLOW_ARTIFACT_PATH}`",
