@@ -18,6 +18,12 @@ export type GroupAgentSummaryNotice = {
   text: string;
 };
 
+export type MessageWorkflowStudioAction = {
+  label: string;
+  runnableId: string;
+  suggestedGoal: string;
+};
+
 export function metadataListAttribute(value: unknown): string {
   if (!Array.isArray(value)) return '';
   return value.map((item) => String(item || '').trim()).filter(Boolean).join(',');
@@ -160,6 +166,17 @@ export function groupFollowupTaskIdsAttribute(message?: YachiyoChatMessage | nul
 
 export function groupFollowupAgentMessageIdsAttribute(message?: YachiyoChatMessage | null) {
   return metadataListAttribute(message?.metadata?.group_followup_for_agent_message_ids);
+}
+
+export function messageWorkflowStudioAction(message?: YachiyoChatMessage | null): MessageWorkflowStudioAction | null {
+  const metadata = message?.metadata || {};
+  if (metadata.guidance_type !== 'workflow_chat_entry_disabled') return null;
+  const runnableId = String(metadata.runnable_id || '').trim();
+  return {
+    label: runnableId ? '在 Agent Studio 中运行' : '打开 Workflow Studio',
+    runnableId,
+    suggestedGoal: String(metadata.suggested_goal || '').trim(),
+  };
 }
 
 export function latestFailedMessage(messages: YachiyoChatMessage[]) {

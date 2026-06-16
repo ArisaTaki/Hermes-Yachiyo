@@ -385,6 +385,7 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "export function messageRunProgressRunGroupId",
             "export function messageArtifactCount",
             "export function messageArtifactTitle",
+            "export function messageWorkflowStudioAction",
             "export function latestFailedMessage",
             "export function latestVisibleActivity",
             "export function activityLabel",
@@ -459,6 +460,8 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "message.metadata?.group_followup_for_task_ids",
             "message.metadata?.run_artifact_count",
             "message.metadata?.run_artifacts?.map",
+            "message.metadata?.guidance_type === 'workflow_chat_entry_disabled'",
+            "message.metadata?.suggested_goal",
             "function latestVisibleActivity",
             "function chatStatusLabel",
             "function mentionQueryAtEnd",
@@ -3590,6 +3593,10 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
     )
     _assert_contains(
         "apps/frontend/src/views/ChatView.tsx",
+        ["workflowStudioAction.label"],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/messageState.ts",
         ["在 Agent Studio 中运行"],
     )
     _assert_not_contains("apps/frontend/src/views/ChatView.tsx", ["运行详情", "去 Runs 运行"])

@@ -73,6 +73,7 @@ import {
   messageRunId,
   messageRunStatus,
   messageText,
+  messageWorkflowStudioAction,
   metadataListAttribute,
   normalizeRunStatus,
   runnableResultLabel,
@@ -2605,7 +2606,7 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
   const summaryRunGroupId = groupAgentSummaryRunGroupId(message);
   const followupTaskIds = groupFollowupTaskIdsAttribute(message);
   const followupAgentMessageIds = groupFollowupAgentMessageIdsAttribute(message);
-  const showWorkflowStudioAction = message.metadata?.guidance_type === 'workflow_chat_entry_disabled';
+  const workflowStudioAction = messageWorkflowStudioAction(message);
   return (
     <article
       className={`message message--${messageVisualRole(role)} refined-message ${role} ${statusClass}${highlighted ? ' search-highlighted' : ''}`}
@@ -2740,16 +2741,16 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
               Agent Studio
             </button>
           ) : null}
-          {showWorkflowStudioAction ? (
+          {workflowStudioAction ? (
             <button
               className="message-run-detail-button"
               type="button"
               onClick={() => onOpenWorkflowStudio(
-                String(message.metadata?.runnable_id || ''),
-                String(message.metadata?.suggested_goal || ''),
+                workflowStudioAction.runnableId,
+                workflowStudioAction.suggestedGoal,
               )}
             >
-              {message.metadata?.runnable_id ? '在 Agent Studio 中运行' : '打开 Workflow Studio'}
+              {workflowStudioAction.label}
             </button>
           ) : null}
           {showRetry ? (
