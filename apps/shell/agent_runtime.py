@@ -47,12 +47,9 @@ from apps.shell.agent.runtime.budget import (
 )
 from apps.shell.agent.runtime.budget import (
     WorkflowRunBudget as _WorkflowRunBudget,
-    check_context_budget as _runtime_check_context_budget,
     context_budget_checker as _runtime_context_budget_checker,
     json_chars as _json_chars,
     limit_json_strings as _limit_json_strings,
-    limit_model_output as _runtime_limit_model_output,
-    limit_tool_result as _runtime_limit_tool_result,
     model_output_limiter as _runtime_model_output_limiter,
     run_budget_factory as _runtime_run_budget_factory,
     run_budget_from_timeline as _runtime_run_budget_from_timeline,
@@ -277,6 +274,7 @@ from apps.shell.agent.runtime.serialization import (
     slug as _slug,
 )
 from apps.shell.agent.runtime.shutdown import RuntimeShutdownService
+from apps.shell.agent.runtime.support_facade import RuntimeSupportFacadeMixin
 from apps.shell.agent.runtime.skill_content import (
     SkillContentInspector,
     content_hash as _skill_content_hash,
@@ -324,7 +322,6 @@ from apps.shell.agent.runtime.tool_loop import (
 )
 from apps.shell.agent.runtime.timeline import (
     RuntimeAgentTimelineBuilder,
-    runtime_timeline_event as _runtime_timeline_event,
     runtime_timeline_factory as _runtime_timeline_factory,
 )
 
@@ -477,6 +474,7 @@ class NativeRunEngine(
     RuntimeWorkflowFacadeMixin,
     RuntimeRunControlFacadeMixin,
     RuntimeRunnableFacadeMixin,
+    RuntimeSupportFacadeMixin,
 ):
     """Persistent native agent execution engine shared by product entry points.
 
@@ -1470,30 +1468,6 @@ class NativeRunEngine(
         shutdown: RuntimeShutdownService,
     ) -> None:
         self.runtime_shutdown = shutdown
-
-    @staticmethod
-    def _timeline(event: str, detail: str = "", **extra: Any) -> dict[str, Any]:
-        return _runtime_timeline_event(
-            event,
-            detail,
-            now=_now,
-            redact_detail=redact_secrets,
-            redact_payload=_redact_json_value,
-            **extra,
-        )
-
-    def _run_budget(self, run_id: str, timeline: list[dict[str, Any]]) -> _RunBudget:
-        return self.runtime_run_budget(run_id, timeline)
-
-    def _check_context_budget(self, budget: _RunBudget, messages: list[dict[str, Any]]) -> None:
-        _runtime_check_context_budget(budget, messages, redact_json_value=_redact_json_value)
-
-    def _limit_model_output(self, value: Any) -> tuple[str, bool]:
-        return _runtime_limit_model_output(value, limits=self.runtime_limits, redact_text=redact_secrets)
-
-    def _limit_tool_result(self, result: dict[str, Any]) -> dict[str, Any]:
-        return _runtime_limit_tool_result(result, limits=self.runtime_limits, redact_json_value=_redact_json_value)
-
 
 AgentRuntimeService = NativeRunEngine
 
