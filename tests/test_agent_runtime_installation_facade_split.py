@@ -386,20 +386,20 @@ def test_installation_facade_installs_agent_and_approval_services(monkeypatch) -
 
 
 def test_installation_facade_installs_approval_runtime_services(monkeypatch) -> None:
-    class CapturedCollaborator:
-        def __init__(self, **kwargs) -> None:
-            self.kwargs = kwargs
+    def fake_build_runtime_approval_runtime_services(**kwargs):
+        return SimpleNamespace(
+            kwargs=kwargs,
+            approval_transitions=SimpleNamespace(kwargs=kwargs),
+            tool_approval_resume=SimpleNamespace(kwargs=kwargs, approve_agent_run="approve-agent-run"),
+            approval_resume_dispatcher=SimpleNamespace(kwargs=kwargs, approve_once="approve-once"),
+            approval_execution=SimpleNamespace(kwargs=kwargs),
+        )
 
-    class CapturedToolApprovalResume(CapturedCollaborator):
-        approve_agent_run = "approve-agent-run"
-
-    class CapturedApprovalDispatcher(CapturedCollaborator):
-        approve_once = "approve-once"
-
-    monkeypatch.setattr(agent_runtime, "RuntimeApprovalTransitionService", CapturedCollaborator)
-    monkeypatch.setattr(agent_runtime, "RuntimeToolApprovalResumeService", CapturedToolApprovalResume)
-    monkeypatch.setattr(agent_runtime, "RuntimeApprovalRunDispatcher", CapturedApprovalDispatcher)
-    monkeypatch.setattr(agent_runtime, "RuntimeApprovalExecutionService", CapturedCollaborator)
+    monkeypatch.setattr(
+        installation_facade_mod,
+        "build_runtime_approval_runtime_services",
+        fake_build_runtime_approval_runtime_services,
+    )
 
     engine = object.__new__(agent_runtime.NativeRunEngine)
     engine.get_run = "get-run"
@@ -413,18 +413,14 @@ def test_installation_facade_installs_approval_runtime_services(monkeypatch) -> 
 
     engine._install_runtime_approval_runtime_services()
 
-    assert isinstance(engine.approval_transitions, CapturedCollaborator)
     assert engine.approval_transitions.kwargs["approvals"] == "approvals"
-    assert isinstance(engine.tool_approval_resume, CapturedToolApprovalResume)
     assert engine.tool_approval_resume.kwargs["tool_brokers"] == "tool-brokers"
     assert engine.tool_approval_resume.kwargs["run_budget"] == "run-budget"
-    assert isinstance(engine.approval_resume_dispatcher, CapturedApprovalDispatcher)
     assert "approve_workflow_run" in engine.approval_resume_dispatcher.kwargs
     assert "approve_main_chat_run" in engine.approval_resume_dispatcher.kwargs
-    assert "approve_agent_run" in engine.approval_resume_dispatcher.kwargs
-    assert isinstance(engine.approval_execution, CapturedCollaborator)
+    assert engine.tool_approval_resume.approve_agent_run == "approve-agent-run"
+    assert engine.approval_resume_dispatcher.approve_once == "approve-once"
     assert engine.approval_execution.kwargs["execution_lock"] == "approval-execution-lock"
-    assert engine.approval_execution.kwargs["approve_once"] == "approve-once"
 
 
 def test_installation_facade_installs_main_chat_model_loop_runner(monkeypatch) -> None:

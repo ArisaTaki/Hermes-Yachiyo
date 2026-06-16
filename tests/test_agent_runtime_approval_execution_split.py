@@ -10,6 +10,12 @@ from apps.shell.agent.runtime.approval_execution import (
     RuntimeApprovalExecutionService,
     RuntimeApprovalRunDispatcher,
 )
+from apps.shell.agent.runtime.approval_services import (
+    RuntimeApprovalRuntimeServiceBundle,
+    build_runtime_approval_runtime_services,
+)
+from apps.shell.agent.runtime.approval_transitions import RuntimeApprovalTransitionService
+from apps.shell.agent.runtime.tool_approval_resume import RuntimeToolApprovalResumeService
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
 
@@ -17,6 +23,55 @@ from apps.shell.credential_store import MemoryCredentialStore
 def test_runtime_approval_execution_service_remains_exported_from_legacy_module() -> None:
     assert agent_runtime.RuntimeApprovalExecutionService is RuntimeApprovalExecutionService
     assert agent_runtime.RuntimeApprovalRunDispatcher is RuntimeApprovalRunDispatcher
+    assert agent_runtime.RuntimeApprovalRuntimeServiceBundle is RuntimeApprovalRuntimeServiceBundle
+    assert agent_runtime._build_runtime_approval_runtime_services is build_runtime_approval_runtime_services
+
+
+def test_build_runtime_approval_runtime_services_wires_gate_preserving_services() -> None:
+    execution_lock = threading.RLock()
+    in_progress: set[str] = set()
+    setup = build_runtime_approval_runtime_services(
+        get_run=lambda run_id: {"run_id": run_id, "status": "approval_required", "kind": "agent_run"},
+        pending_approval_private=lambda _run_id: {"tool": "workspace.read"},
+        approvals=object(),
+        project_child_run_transition=lambda result: result,
+        project_cancelled_workflow_group_if_root=lambda _run, result: result,
+        cancel_run=lambda run_id: {"run_id": run_id, "status": "cancelled"},
+        get_agent_private=lambda agent_id: {"agent_id": agent_id},
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {"allowed_tools": []},
+            "workspace_policy": {},
+        },
+        load_agent_skills=lambda _skill_ids: [],
+        tool_brokers=object(),
+        run_budget=lambda _run_id, _timeline: object(),
+        resume_approved_tool_run=lambda **kwargs: {"status": "resumed", **kwargs},
+        main_chat_agent_config=lambda **kwargs: {"agent_id": "builtin:yachiyo-main", **kwargs},
+        main_chat_pending_approval=lambda pending, **kwargs: {"pending": pending, **kwargs},
+        default_chat_profile_id=lambda: "profile-chat",
+        project_agent_running=lambda running: running,
+        project_agent_completed=lambda _context, result_text: {"result": result_text},
+        project_main_chat_completed=lambda _context, result_text: {"result": result_text},
+        approve_workflow_run=lambda run: {**run, "route": "workflow"},
+        approve_main_chat_run=lambda run: {**run, "route": "main_chat"},
+        execution_lock=execution_lock,
+        execution_in_progress=in_progress,
+    )
+
+    assert isinstance(setup, RuntimeApprovalRuntimeServiceBundle)
+    assert isinstance(setup.approval_transitions, RuntimeApprovalTransitionService)
+    assert isinstance(setup.tool_approval_resume, RuntimeToolApprovalResumeService)
+    assert isinstance(setup.approval_resume_dispatcher, RuntimeApprovalRunDispatcher)
+    assert isinstance(setup.approval_execution, RuntimeApprovalExecutionService)
+    assert setup.approval_resume_dispatcher._approve_agent_run.__self__ is setup.tool_approval_resume
+    assert (
+        setup.approval_resume_dispatcher._approve_agent_run.__func__
+        is RuntimeToolApprovalResumeService.approve_agent_run
+    )
+    assert setup.approval_execution._execution_lock is execution_lock
+    assert setup.approval_execution._execution_in_progress is in_progress
+    assert setup.approval_execution._approve_once.__self__ is setup.approval_resume_dispatcher
+    assert setup.approval_execution._approve_once.__func__ is RuntimeApprovalRunDispatcher.approve_once
 
 
 def test_native_runtime_installs_split_approval_execution_service(tmp_path) -> None:

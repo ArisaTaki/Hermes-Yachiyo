@@ -66,7 +66,9 @@ from apps.shell.agent.runtime.approval_execution import (
     RuntimeApprovalRunDispatcher,
 )
 from apps.shell.agent.runtime.approval_services import (
+    RuntimeApprovalRuntimeServiceBundle,
     RuntimeApprovalServiceBundle,
+    build_runtime_approval_runtime_services as _build_runtime_approval_runtime_services,
     build_runtime_approval_services as _build_runtime_approval_services,
 )
 from apps.shell.agent.runtime.approval_snapshots import (
