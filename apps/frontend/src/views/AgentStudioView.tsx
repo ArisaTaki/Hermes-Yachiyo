@@ -802,6 +802,7 @@ export function AgentStudioView() {
           onAgentGroupNameChange={setAgentGroupName}
           onAgentGroupRunGoalChange={setAgentGroupRunGoal}
           onAgentGroupToolPolicyIdChange={setAgentGroupToolPolicyId}
+          onOpenArtifact={openArtifact}
           onOpenAgentGroupRunTimeline={openAgentGroupRunTimeline}
           onRunAgentGroup={() => void runAction(runCurrentAgentGroup, '启动 Group Run')}
           onSaveAgentGroup={() => void runAction(saveAgentGroup, '保存 Agent Group')}

@@ -13,6 +13,7 @@ type GroupRunPanelProps = {
   latestAgentGroupRun: GroupRunSnapshot | null;
   selectedAgentGroupId: string;
   onAgentGroupRunGoalChange: (value: string) => void;
+  onOpenArtifact?: (runId: string, path: string) => Promise<void> | void;
   onOpenAgentGroupRunTimeline: (groupRun: GroupRunSnapshot) => void;
   onRunAgentGroup: () => void;
 };
@@ -23,6 +24,7 @@ export function GroupRunPanel({
   latestAgentGroupRun,
   selectedAgentGroupId,
   onAgentGroupRunGoalChange,
+  onOpenArtifact,
   onOpenAgentGroupRunTimeline,
   onRunAgentGroup,
 }: GroupRunPanelProps) {
@@ -180,6 +182,7 @@ export function GroupRunPanel({
                 className="group-run-artifact-list"
                 fallbackRunId={latestGroupRunId}
                 itemTestId="agent-group-run-artifact-item"
+                onOpenArtifact={onOpenArtifact}
                 previewClassName="studio-runtime-artifact group-run-artifact-card"
                 previewTestId="agent-group-run-artifact-preview"
                 previewVariant="full"

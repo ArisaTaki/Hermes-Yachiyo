@@ -189,13 +189,16 @@ def test_group_and_workflow_acceptance_paths_are_guarded() -> None:
             "agent-group-settings-grid",
             "groupModeOptions",
             "GroupRunPanel",
+            "onOpenArtifact={onOpenArtifact}",
         ],
     )
     _assert_contains(
         "apps/frontend/src/features/agent-studio/components/GroupRunPanel.tsx",
         [
             "onRunAgentGroup",
+            "onOpenArtifact={onOpenArtifact}",
             'data-testid="agent-group-run"',
+            'itemTestId="agent-group-run-artifact-item"',
             "onOpenAgentGroupRunTimeline(latestAgentGroupRun)",
         ],
     )

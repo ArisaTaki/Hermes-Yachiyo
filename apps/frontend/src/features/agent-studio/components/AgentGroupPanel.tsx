@@ -37,6 +37,7 @@ type AgentGroupPanelProps = {
   onAgentGroupNameChange: (value: string) => void;
   onAgentGroupRunGoalChange: (value: string) => void;
   onAgentGroupToolPolicyIdChange: (value: string) => void;
+  onOpenArtifact?: (runId: string, path: string) => Promise<void> | void;
   onOpenAgentGroupRunTimeline: (groupRun: GroupRunSnapshot) => void;
   onRunAgentGroup: () => void;
   onSaveAgentGroup: () => void;
@@ -94,6 +95,7 @@ export function AgentGroupPanel({
   onAgentGroupNameChange,
   onAgentGroupRunGoalChange,
   onAgentGroupToolPolicyIdChange,
+  onOpenArtifact,
   onOpenAgentGroupRunTimeline,
   onRunAgentGroup,
   onSaveAgentGroup,
@@ -276,6 +278,7 @@ export function AgentGroupPanel({
           latestAgentGroupRun={latestAgentGroupRun}
           selectedAgentGroupId={selectedAgentGroupId}
           onAgentGroupRunGoalChange={onAgentGroupRunGoalChange}
+          onOpenArtifact={onOpenArtifact}
           onOpenAgentGroupRunTimeline={onOpenAgentGroupRunTimeline}
           onRunAgentGroup={onRunAgentGroup}
         />
