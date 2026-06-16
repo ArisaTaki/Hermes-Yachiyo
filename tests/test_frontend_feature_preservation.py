@@ -1989,6 +1989,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "export function runMatchesSearch",
             "export function publicRunEventToTimelineEvent",
             "publicRunEventPayloadDetail(event)",
+            "pending_approval: payload.pending_approval || payload.approval || null",
             "publicRunEventWorkflowStepPayload(payload)",
             "export function publicArtifactsOrLegacy",
         ],

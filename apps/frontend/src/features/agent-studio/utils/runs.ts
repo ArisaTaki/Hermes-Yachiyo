@@ -413,7 +413,7 @@ export function publicRunEventToTimelineEvent(event: PublicRunEvent): Record<str
     sequence: event.sequence,
     input_preview: payload.input_preview,
     result: payload.result || payload.content || payload.error || '',
-    pending_approval: payload.pending_approval || null,
+    pending_approval: payload.pending_approval || payload.approval || null,
     child_run_id: payload.child_run_id,
     workflow_node_id: payload.workflow_node_id,
     workflow_node_kind: payload.workflow_node_kind,
