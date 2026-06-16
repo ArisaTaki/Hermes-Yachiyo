@@ -14,6 +14,209 @@ from scripts.run_electron_ui_smokes import electron_ui_smoke_scripts
 
 ROOT = Path(__file__).resolve().parents[1]
 
+AcceptanceEvidence = tuple[str, str, tuple[str, ...]]
+AcceptanceScenario = tuple[int, str, tuple[AcceptanceEvidence, ...]]
+
+ACCEPTANCE_10_3_REQUIREMENTS = [
+    "Chat 发起普通任务。",
+    "Chat 看到任务卡片。",
+    "Chat 中出现审批卡片。",
+    "用户批准后任务继续。",
+    "用户拒绝后任务停止或走拒绝分支。",
+    "Chat 可打开 Agent Studio 查看完整 run timeline。",
+    "Agent Studio 可查看 Agent 列表。",
+    "Agent Studio 可查看/编辑群组。",
+    "Agent Studio 可发起群组 run。",
+    "Agent Studio 可查看 workflow run timeline。",
+    "旧 /agents/* API 仍工作。",
+    "旧 AgentStudioView 关键功能未丢失。",
+]
+
+ACCEPTANCE_10_3_MATRIX: tuple[AcceptanceScenario, ...] = (
+    (
+        1,
+        "Chat 发起普通任务。",
+        (
+            (
+                "source",
+                "apps/frontend/src/features/yachiyo-chat/hooks/useYachiyoTaskSubmit.ts",
+                ("startYachiyoTask({", "source: 'chat'", "pollAgentRunInBackground(task.task_id);"),
+            ),
+            (
+                "source",
+                "apps/frontend/src/features/yachiyo-chat/api.ts",
+                ("apiPost('/yachiyo/tasks'",),
+            ),
+        ),
+    ),
+    (
+        2,
+        "Chat 看到任务卡片。",
+        (
+            (
+                "source",
+                "apps/frontend/src/views/ChatView.tsx",
+                ("MessageAgentTaskCard", "publicTaskSnapshotForMessage"),
+            ),
+            (
+                "source",
+                "apps/frontend/src/features/yachiyo-chat/components/AgentTaskCard.tsx",
+                ('data-testid="yachiyo-agent-task-card"', "RuntimeTimelineSummary"),
+            ),
+        ),
+    ),
+    (
+        3,
+        "Chat 中出现审批卡片。",
+        (
+            (
+                "source",
+                "apps/frontend/src/features/yachiyo-chat/components/AgentTaskCard.tsx",
+                ("ApprovalCard", "mergeApprovalSnapshots", "approvalFacts.slice(0, 2).map((approval)"),
+            ),
+            (
+                "smoke",
+                "scripts/smoke_chat_approval_ui.mjs",
+                ('data-testid="chat-message-approval-card"', 'data-testid="chat-message-approval-approve"'),
+            ),
+        ),
+    ),
+    (
+        4,
+        "用户批准后任务继续。",
+        (
+            (
+                "source",
+                "apps/frontend/src/features/yachiyo-chat/hooks/useYachiyoTaskActions.ts",
+                ("approveYachiyoTask(task.task_id, approval.approval_id)", "pollAgentRunInBackground(nextRunId"),
+            ),
+            (
+                "smoke",
+                "scripts/smoke_chat_approval_ui.mjs",
+                ('data-testid="chat-message-approval-approve"', "waitForApprovedRunDetailHandoff"),
+            ),
+        ),
+    ),
+    (
+        5,
+        "用户拒绝后任务停止或走拒绝分支。",
+        (
+            (
+                "source",
+                "apps/frontend/src/features/yachiyo-chat/hooks/useYachiyoTaskActions.ts",
+                ("rejectYachiyoTask(task.task_id, approval.approval_id, 'Rejected from chat task card')",),
+            ),
+            (
+                "smoke",
+                "scripts/smoke_chat_approval_ui.mjs",
+                ('data-testid="chat-message-approval-reject"', "waitForRejected"),
+            ),
+        ),
+    ),
+    (
+        6,
+        "Chat 可打开 Agent Studio 查看完整 run timeline。",
+        (
+            (
+                "source",
+                "apps/frontend/src/features/yachiyo-chat/components/AgentTaskCard.tsx",
+                ('data-testid="yachiyo-agent-task-open-studio"', "onOpenStudio(undefined, studioUrl)"),
+            ),
+            (
+                "smoke",
+                "scripts/smoke_chat_run_detail_handoff_ui.mjs",
+                ('data-testid="chat-message-open-run-detail"', 'data-testid="agent-run-detail-execution-event"', "Run Detail handoff"),
+            ),
+        ),
+    ),
+    (
+        7,
+        "Agent Studio 可查看 Agent 列表。",
+        (
+            (
+                "smoke",
+                "scripts/smoke_agent_studio_agents_ui.mjs",
+                ("/yachiyo/studio/agents", 'data-testid="agent-list-item"', "Agent Definition Smoke v1"),
+            ),
+        ),
+    ),
+    (
+        8,
+        "Agent Studio 可查看/编辑群组。",
+        (
+            (
+                "source",
+                "apps/frontend/src/features/agent-studio/components/AgentGroupPanel.tsx",
+                ('data-testid="agent-group-list"', 'data-testid="agent-group-editor"', 'data-testid="agent-group-save"'),
+            ),
+            (
+                "source",
+                "apps/frontend/src/features/yachiyo-studio/api.ts",
+                ("/yachiyo/studio/groups", "apiPatch(`/yachiyo/studio/groups/${encodeURIComponent(groupId)}`"),
+            ),
+        ),
+    ),
+    (
+        9,
+        "Agent Studio 可发起群组 run。",
+        (
+            (
+                "source",
+                "apps/frontend/src/features/yachiyo-studio/api.ts",
+                ("export async function startYachiyoGroupRun", "/yachiyo/studio/groups/${encodeURIComponent(groupId)}/runs"),
+            ),
+            (
+                "source",
+                "apps/frontend/src/features/agent-studio/hooks/useAgentGroupActions.ts",
+                ("runCurrentAgentGroup", "openRunDetail(runId, { revealInHistory: true });"),
+            ),
+        ),
+    ),
+    (
+        10,
+        "Agent Studio 可查看 workflow run timeline。",
+        (
+            (
+                "smoke",
+                "scripts/smoke_workflow_save_run_ui.mjs",
+                ('data-testid="workflow-save-and-run"', "/yachiyo/studio/runs/${RUN_ID}/timeline", "workflow.run.completed"),
+            ),
+        ),
+    ),
+    (
+        11,
+        "旧 /agents/* API 仍工作。",
+        (
+            (
+                "source",
+                "apps/bridge/routes/agents.py",
+                ('APIRouter(prefix="/ui", tags=["Agent Studio"])', '@router.get("/agents")', '@router.post("/agents")'),
+            ),
+            (
+                "source",
+                "tests/test_yachiyo_routes.py",
+                ("legacy_agents_source", 'assert \'@router.get("/agents")\' in legacy_agents_source'),
+            ),
+        ),
+    ),
+    (
+        12,
+        "旧 AgentStudioView 关键功能未丢失。",
+        (
+            (
+                "source",
+                "apps/frontend/src/views/AgentStudioView.tsx",
+                ("AgentDefinitionsTab", "AgentGroupPanel", "RunManagementTab", "WorkflowCanvas"),
+            ),
+            (
+                "source",
+                "apps/frontend/src/features/agent-studio/components/RunDetailPanel.tsx",
+                ("ToolCallInspector", "ApprovalInspector", "ArtifactInspector", "RunTimeline"),
+            ),
+        ),
+    ),
+)
+
 
 def _read(relative_path: str) -> str:
     return (ROOT / relative_path).read_text(encoding="utf-8")
@@ -29,6 +232,30 @@ def _assert_smoke_script(script: str, fragments: list[str]) -> None:
     scripts = {str(path) for path in electron_ui_smoke_scripts(ROOT)}
     assert script in scripts, f"{script} must be discovered by run_electron_ui_smokes.py"
     _assert_contains(script, fragments)
+
+
+def _assert_acceptance_evidence(evidence: AcceptanceEvidence) -> None:
+    kind, relative_path, fragments = evidence
+    assert kind in {"source", "smoke"}
+    assert fragments, f"{relative_path} must include at least one evidence fragment"
+    if kind == "smoke":
+        _assert_smoke_script(relative_path, list(fragments))
+    else:
+        _assert_contains(relative_path, list(fragments))
+
+
+def test_10_3_acceptance_matrix_has_concrete_evidence() -> None:
+    ids = [scenario_id for scenario_id, _requirement, _evidence in ACCEPTANCE_10_3_MATRIX]
+    requirements = [requirement for _scenario_id, requirement, _evidence in ACCEPTANCE_10_3_MATRIX]
+
+    assert ids == list(range(1, 13))
+    assert requirements == ACCEPTANCE_10_3_REQUIREMENTS
+
+    for scenario_id, requirement, evidence_items in ACCEPTANCE_10_3_MATRIX:
+        assert requirement
+        assert evidence_items, f"Scenario {scenario_id} must have concrete evidence"
+        for evidence in evidence_items:
+            _assert_acceptance_evidence(evidence)
 
 
 def test_chat_daily_entry_acceptance_paths_are_guarded() -> None:
