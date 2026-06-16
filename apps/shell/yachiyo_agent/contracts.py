@@ -322,6 +322,11 @@ class WorkflowSnapshot(_PublicSnapshot):
     updated_at: str = ""
 
 
+class ChatRunnableCatalogSnapshot(_PublicSnapshot):
+    agents: list[AgentDefinitionSnapshot] = Field(default_factory=list)
+    workflows: list[WorkflowSnapshot] = Field(default_factory=list)
+
+
 class WorkflowRunSnapshot(RunTimelineSnapshot):
     workflow_id: str | None = None
     objective: str = ""

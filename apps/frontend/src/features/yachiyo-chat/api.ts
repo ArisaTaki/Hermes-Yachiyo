@@ -1,9 +1,8 @@
 import { apiGet, apiPost } from '../../lib/bridge';
 import type {
-  AgentDefinitionSnapshot,
   AgentTaskSnapshot,
+  ChatRunnableCatalogSnapshot,
   StartChatTaskRequest,
-  WorkflowSnapshot,
   YachiyoReadinessSnapshot,
 } from './types';
 
@@ -25,14 +24,12 @@ export async function getYachiyoTask(taskId: string): Promise<AgentTaskSnapshot>
   return apiGet(`/yachiyo/tasks/${encodeURIComponent(taskId)}`);
 }
 
-export async function listYachiyoChatAgents(): Promise<AgentDefinitionSnapshot[]> {
-  const payload = await apiGet<{ agents?: AgentDefinitionSnapshot[] }>('/yachiyo/studio/agents');
-  return payload.agents || [];
-}
-
-export async function listYachiyoChatWorkflows(): Promise<WorkflowSnapshot[]> {
-  const payload = await apiGet<{ workflows?: WorkflowSnapshot[] }>('/yachiyo/studio/workflows');
-  return payload.workflows || [];
+export async function listYachiyoChatRunnableCatalog(): Promise<ChatRunnableCatalogSnapshot> {
+  const payload = await apiGet<Partial<ChatRunnableCatalogSnapshot>>('/yachiyo/runnables');
+  return {
+    agents: payload.agents || [],
+    workflows: payload.workflows || [],
+  };
 }
 
 export async function getYachiyoChatRunTaskSnapshot(runId: string): Promise<AgentTaskSnapshot> {

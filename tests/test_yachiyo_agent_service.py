@@ -15,6 +15,25 @@ class _FakeRuntimePort:
         self.calls.append(("readiness", None))
         return {"ok": True, "status": "ready", "capabilities": {"tasks": True}}
 
+    def list_runnable_catalog(self) -> dict[str, Any]:
+        self.calls.append(("list_runnable_catalog", None))
+        return {
+            "agents": [
+                {
+                    "agent_id": "agent-1",
+                    "name": "Planner",
+                    "tool_policy": {"allowed_tools": ["workspace.read"]},
+                }
+            ],
+            "workflows": [
+                {
+                    "workflow_id": "workflow-1",
+                    "name": "Review workflow",
+                    "nodes": [{"id": "review", "type": "agent"}],
+                }
+            ],
+        }
+
     def start_chat_task(self, request: dict[str, Any]) -> dict[str, Any]:
         self.calls.append(("start_chat_task", request))
         return _task_payload(
@@ -92,6 +111,19 @@ def test_yachiyo_agent_service_maps_fake_runtime_to_task_snapshots() -> None:
     assert fetched.status == "completed"
     assert recent[0].task_id == "task-recent"
     assert port.calls[1][1]["prompt"] == "Patch README"
+
+
+def test_yachiyo_agent_service_maps_chat_runnable_catalog() -> None:
+    port = _FakeRuntimePort()
+    service = YachiyoAgentService(port)
+
+    catalog = service.list_runnable_catalog()
+
+    assert catalog.agents[0].agent_id == "agent-1"
+    assert catalog.agents[0].tool_policy == {"allowed_tools": ["workspace.read"]}
+    assert catalog.workflows[0].workflow_id == "workflow-1"
+    assert catalog.workflows[0].nodes == [{"id": "review", "type": "agent"}]
+    assert port.calls == [("list_runnable_catalog", None)]
 
 
 def test_yachiyo_agent_service_prefers_chat_backed_starter_when_available() -> None:

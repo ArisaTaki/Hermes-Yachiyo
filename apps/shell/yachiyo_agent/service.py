@@ -5,15 +5,17 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from .adapters import readiness_snapshot_from_payload
+from .adapters import agent_definition_snapshot_from_payload, readiness_snapshot_from_payload
 from .contracts import (
     AgentTaskSnapshot,
     ApprovalDecision,
+    ChatRunnableCatalogSnapshot,
     ReadinessSnapshot,
     StartChatTaskRequest,
 )
 from .ports import ChatTaskStarter, RuntimePort
 from .task_cards import agent_task_snapshot_from_payload, agent_task_snapshots_from_payloads
+from .workflows import workflow_snapshot_from_payload
 
 
 class YachiyoAgentService:
@@ -29,6 +31,19 @@ class YachiyoAgentService:
 
     def readiness(self) -> ReadinessSnapshot:
         return readiness_snapshot_from_payload(self._runtime_port.readiness())
+
+    def list_runnable_catalog(self) -> ChatRunnableCatalogSnapshot:
+        payload = self._runtime_port.list_runnable_catalog()
+        return ChatRunnableCatalogSnapshot(
+            agents=[
+                agent_definition_snapshot_from_payload(item)
+                for item in _payload_items(payload, "agents")
+            ],
+            workflows=[
+                workflow_snapshot_from_payload(item)
+                for item in _payload_items(payload, "workflows")
+            ],
+        )
 
     def start_chat_task(
         self,
@@ -79,3 +94,10 @@ def _optional_request_payload(
     if isinstance(request, ApprovalDecision):
         return request.model_dump(exclude_none=True)
     return dict(request)
+
+
+def _payload_items(payload: Any, key: str) -> list[dict[str, Any]]:
+    items = payload.get(key) if isinstance(payload, Mapping) else payload
+    if not isinstance(items, list):
+        return []
+    return [dict(item) for item in items if isinstance(item, Mapping)]

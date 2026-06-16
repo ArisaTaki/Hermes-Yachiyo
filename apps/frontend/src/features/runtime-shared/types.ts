@@ -287,6 +287,11 @@ export type WorkflowSnapshot = {
   updated_at?: string;
 };
 
+export type ChatRunnableCatalogSnapshot = {
+  agents: AgentDefinitionSnapshot[];
+  workflows: WorkflowSnapshot[];
+};
+
 export type WorkflowRunSnapshot = RunTimelineSnapshot & {
   workflow_id?: string | null;
   objective?: string;

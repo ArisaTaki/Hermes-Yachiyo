@@ -30,6 +30,12 @@ class LegacyRuntimePort:
             },
         }
 
+    def list_runnable_catalog(self) -> dict[str, Any]:
+        return {
+            "agents": self._payload_items(self._runtime.list_agents(), "agents"),
+            "workflows": self._payload_items(self._runtime.list_workflows(), "workflows"),
+        }
+
     def start_chat_task(self, request: dict[str, Any]) -> dict[str, Any]:
         prompt = str(request.get("prompt") or request.get("goal") or "").strip()
         runnable_id = str(
@@ -157,3 +163,7 @@ class LegacyRuntimePort:
             "task_run_link_run_status": link.get("run_status") or run.get("status") or "",
             "task_run_link_last_event_sequence": link.get("last_event_sequence") or 0,
         }
+
+    def _payload_items(self, payload: Any, key: str) -> list[dict[str, Any]]:
+        items = payload.get(key) if isinstance(payload, dict) else payload
+        return [dict(item) for item in items or [] if isinstance(item, dict)]

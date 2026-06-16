@@ -11,6 +11,7 @@ from apps.shell.yachiyo_agent import (
     AgentTaskSnapshot,
     ApprovalCardSnapshot,
     ArtifactSnapshot,
+    ChatRunnableCatalogSnapshot,
     FutureTaskSnapshot,
     FutureTaskTriggerResultSnapshot,
     GroupRunSnapshot,
@@ -100,6 +101,19 @@ def test_agent_task_snapshot_json_shape_is_stable() -> None:
     assert payload["pending_approvals"][0]["approval_id"] == "approval-1"
     assert payload["recent_events"][0]["event_type"] == "agent.tool.approval_required"
     assert "event" not in payload["recent_events"][0]
+
+
+def test_chat_runnable_catalog_snapshot_json_shape_is_stable() -> None:
+    snapshot = ChatRunnableCatalogSnapshot(
+        agents=[AgentDefinitionSnapshot(agent_id="agent-1", name="Planner")],
+        workflows=[WorkflowSnapshot(workflow_id="workflow-1", name="Review workflow")],
+    )
+
+    payload = _json(snapshot)
+
+    assert list(payload) == ["agents", "workflows"]
+    assert payload["agents"][0]["agent_id"] == "agent-1"
+    assert payload["workflows"][0]["workflow_id"] == "workflow-1"
 
 
 def test_run_timeline_snapshot_json_shape_covers_runtime_debug_objects() -> None:

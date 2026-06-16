@@ -417,6 +417,7 @@ async def test_yachiyo_task_routes_use_injected_runtime_and_return_public_snapsh
     request = _request(runtime)
 
     readiness = await yachiyo.readiness(request)
+    runnables = await yachiyo.list_chat_runnables(request)
     started = await yachiyo.start_task(
         yachiyo.StartChatTaskRequest(prompt="Patch README", conversation_id="chat-1"),
         request,
@@ -432,6 +433,8 @@ async def test_yachiyo_task_routes_use_injected_runtime_and_return_public_snapsh
     cancelled = await yachiyo.cancel_task("run-1", request)
 
     assert readiness["ready"] is True
+    assert runnables["agents"][0]["agent_id"] == "agent-1"
+    assert runnables["workflows"][0]["workflow_id"] == "workflow-1"
     assert started["task_id"] == "run-1"
     assert started["status"] == "waiting_approval"
     assert started["conversation_id"] == "chat-1"
@@ -445,14 +448,14 @@ async def test_yachiyo_task_routes_use_injected_runtime_and_return_public_snapsh
     assert approved["status"] == "completed"
     assert rejected["status"] == "failed"
     assert cancelled["status"] == "cancelled"
-    assert runtime.calls[1] == (
+    assert (
         "create_run_for_runnable_async",
         {"runnable_id": "builtin:yachiyo-main", "user_goal": "Patch README"},
-    )
-    assert runtime.calls[2] == (
+    ) in runtime.calls
+    assert (
         "link_task_run",
         {"task_id": "run-1", "run_id": "run-1", "session_id": "chat-1"},
-    )
+    ) in runtime.calls
 
 
 @pytest.mark.asyncio
@@ -902,6 +905,7 @@ def test_yachiyo_chat_routes_are_registered_as_light_surface_aliases() -> None:
     source = Path(yachiyo.__file__).read_text(encoding="utf-8")
 
     assert '@router.get("/readiness")' in source
+    assert '@router.get("/runnables")' in source
     assert '@router.get("/tasks")' in source
     assert '@router.post("/tasks")' in source
     assert '@router.get("/tasks/{task_id}")' in source
@@ -909,6 +913,7 @@ def test_yachiyo_chat_routes_are_registered_as_light_surface_aliases() -> None:
     assert '@router.post("/tasks/{task_id}/reject")' in source
     assert '@router.post("/tasks/{task_id}/cancel")' in source
     assert '@router.get("/chat/readiness")' in source
+    assert '@router.get("/chat/runnables")' in source
     assert '@router.get("/chat/tasks")' in source
     assert '@router.post("/chat/tasks")' in source
     assert '@router.get("/chat/tasks/{task_id}")' in source

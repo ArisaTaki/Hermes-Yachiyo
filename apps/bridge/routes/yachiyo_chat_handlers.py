@@ -21,6 +21,10 @@ async def readiness(http_request: Request | None = None) -> dict[str, Any]:
     return snapshot(await asyncio.to_thread(agent_service(http_request).readiness))
 
 
+async def list_runnables(http_request: Request | None = None) -> dict[str, Any]:
+    return snapshot(await asyncio.to_thread(agent_service(http_request).list_runnable_catalog))
+
+
 async def list_tasks(
     conversation_id: str | None = None,
     http_request: Request | None = None,

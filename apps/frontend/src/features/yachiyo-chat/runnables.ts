@@ -1,8 +1,5 @@
 import { listRunnables as listLegacyRunnables } from '../../lib/agents';
-import {
-  listYachiyoChatAgents,
-  listYachiyoChatWorkflows,
-} from './api';
+import { listYachiyoChatRunnableCatalog } from './api';
 import type { AgentDefinitionSnapshot, WorkflowSnapshot } from './types';
 
 export type ChatRunnableSummary = {
@@ -24,11 +21,8 @@ export type ChatRunnableSummary = {
 
 export async function listYachiyoChatRunnables(): Promise<ChatRunnableSummary[]> {
   try {
-    const [agents, workflows] = await Promise.all([
-      listYachiyoChatAgents(),
-      listYachiyoChatWorkflows(),
-    ]);
-    return chatRunnablesFromPublicSnapshots(agents, workflows);
+    const catalog = await listYachiyoChatRunnableCatalog();
+    return chatRunnablesFromPublicSnapshots(catalog.agents, catalog.workflows);
   } catch {
     return listLegacyRunnables();
   }

@@ -48,6 +48,12 @@ async def readiness(http_request: Request = None) -> dict[str, Any]:  # type: ig
     return await yachiyo_chat_handlers.readiness(http_request)
 
 
+@router.get("/runnables")
+@router.get("/chat/runnables")
+async def list_chat_runnables(http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
+    return await yachiyo_chat_handlers.list_runnables(http_request)
+
+
 @router.get("/tasks")
 @router.get("/chat/tasks")
 async def list_tasks(
