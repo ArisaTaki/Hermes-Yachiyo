@@ -98,7 +98,11 @@ class RunSnapshotProjector:
             events=events,
         )
         pending_approval = None
-        if isinstance(payload.get("pending_approval"), Mapping) and approvals:
+        if (
+            isinstance(payload.get("pending_approval"), Mapping)
+            and payload.get("pending_approval")
+            and approvals
+        ):
             pending_approval = approvals[0]
         elif _task_status(payload.get("status")) == "waiting_approval" and approvals:
             pending_approval = next(

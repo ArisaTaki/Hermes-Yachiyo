@@ -337,3 +337,86 @@ def test_agent_studio_workflow_run_timeline_uses_native_runtime_events(tmp_path)
         assert page.events[0].event_type == "group.run.started"
     finally:
         runtime.close()
+
+
+def test_agent_studio_rejects_native_tool_approval_with_replay_events(tmp_path) -> None:
+    credential_store = MemoryCredentialStore()
+    runtime = NativeRunEngine(
+        db_path=tmp_path / "agent-runtime-approval.db",
+        workspace_dir=tmp_path / "runtime-approval",
+        credential_store=credential_store,
+        seed_templates=False,
+    )
+    try:
+        run = runtime._insert_run(
+            kind="agent_run",
+            runnable_id="agent-approval-replay",
+            user_goal="Run a gated command",
+        )
+        pending_approval = {
+            "approval_id": "approval-native-reject",
+            "tool": "terminal.run",
+            "input_preview": {
+                "command": "printf ok",
+                "API_KEY": "sk-native-reject-secret123456",
+            },
+            "requested_at": "2026-06-15T00:00:00+00:00",
+            "tool_request": {
+                "tool": "terminal.run",
+                "input": {
+                    "command": "printf ok",
+                    "API_KEY": "sk-native-reject-secret123456",
+                },
+            },
+        }
+        runtime.approval_pause.project_tool_required(
+            run["run_id"],
+            pending_approval=pending_approval,
+            timeline=[],
+            artifacts=[],
+        )
+
+        studio = AgentStudioService(LegacyStudioPort(runtime))
+
+        rejected = studio.reject_run_approval(run["run_id"], "No secret-bearing commands")
+        timeline = studio.get_run_timeline(run["run_id"])
+        events = list(studio.get_run_event_stream(run["run_id"]))
+        first_page = studio.get_run_event_page(run["run_id"], limit=2)
+        second_page = studio.get_run_event_page(
+            run["run_id"],
+            after_sequence=first_page.next_after_sequence,
+            limit=2,
+        )
+
+        event_types = [event.event_type for event in events]
+        rejected_events = [
+            event for event in events if event.event_type == "agent.tool.approval_rejected"
+        ]
+        cancelled_events = [
+            event for event in events if event.event_type == "agent.run.cancelled"
+        ]
+        serialized_events = " ".join(str(event.model_dump()) for event in events)
+
+        assert rejected.status == "cancelled"
+        assert rejected.pending_approval is None
+        assert timeline.status == "cancelled"
+        assert timeline.pending_approval is None
+        assert "agent.tool.approval_required" in event_types
+        assert "agent.tool.approval_rejected" in event_types
+        assert "agent.run.cancelled" in event_types
+        assert rejected_events[0].payload["tool"] == "terminal.run"
+        assert rejected_events[0].payload["status"] == "cancelled"
+        assert rejected_events[0].payload["reason"] == "No secret-bearing commands"
+        assert cancelled_events[0].payload["result"] == (
+            "工具审批已拒绝：No secret-bearing commands"
+        )
+        assert timeline.approvals[0].approval_id == "approval-native-reject"
+        assert timeline.approvals[0].status == "rejected"
+        assert first_page.events[0].event_type == "agent.tool.approval_required"
+        assert second_page.events[0].sequence > first_page.events[-1].sequence
+        assert {
+            event.event_type for event in second_page.events
+        } & {"tool.rejected", "approval.rejected", "agent.run.cancelled"}
+        assert "sk-native-reject-secret123456" not in serialized_events
+    finally:
+        runtime.close()

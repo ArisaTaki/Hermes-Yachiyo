@@ -633,6 +633,37 @@ def test_run_timeline_merges_approval_lifecycle_events_into_stable_cards() -> No
     }
 
 
+def test_run_timeline_does_not_treat_empty_pending_approval_as_actionable() -> None:
+    timeline = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "run-empty-pending",
+            "status": "cancelled",
+            "pending_approval": {},
+            "events": [
+                {
+                    "event_type": "agent.tool.approval_required",
+                    "payload": {
+                        "approval_id": "approval-empty-pending",
+                        "tool": "terminal.run",
+                    },
+                },
+                {
+                    "event_type": "agent.tool.approval_rejected",
+                    "payload": {
+                        "tool": "terminal.run",
+                        "reason": "No",
+                        "status": "cancelled",
+                    },
+                },
+            ],
+        }
+    )
+
+    assert timeline.pending_approval is None
+    assert timeline.approvals[0].approval_id == "approval-empty-pending"
+    assert timeline.approvals[0].status == "rejected"
+
+
 def test_run_timeline_projects_approval_timeout_as_expired_card() -> None:
     timeline = run_timeline_snapshot_from_payload(
         {
