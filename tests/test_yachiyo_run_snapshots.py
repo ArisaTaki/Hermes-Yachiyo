@@ -70,10 +70,10 @@ def test_run_snapshot_projector_drives_chat_task_and_studio_timeline_shapes() ->
     assert task.status == "waiting_approval"
     assert task.needs_user_action is True
     assert task.pending_approvals[0].approval_id == "approval-1"
-    assert task.pending_approvals[0].open_in_studio_url == "#/agents?run_id=run-1"
+    assert task.pending_approvals[0].open_in_studio_url == "#/agents?run_id=run-1&group_run=group-1"
     assert task.recent_events[0].event_type == "agent.tool.call"
     assert task.artifacts[0].source_run_id == "run-1"
-    assert task.open_in_studio_url == "#/agents?run_id=run-1"
+    assert task.open_in_studio_url == "#/agents?run_id=run-1&group_run=group-1"
 
     assert timeline.run_id == "run-1"
     assert timeline.agent_id == "agent-1"
@@ -90,17 +90,38 @@ def test_run_snapshot_projector_drives_chat_task_and_studio_timeline_shapes() ->
 def test_studio_run_url_is_shared_by_run_task_and_approval_snapshots() -> None:
     run_id = "run with/slash"
     expected_url = "#/agents?run_id=run%20with%2Fslash"
+    expected_group_url = "#/agents?run_id=run%20with%2Fslash&group_run=group%20with%2Fslash"
 
     assert studio_run_url(run_id) == expected_url
+    assert studio_run_url(run_id, group_run_id="group with/slash") == expected_group_url
     assert studio_run_url("") is None
 
     task = agent_task_snapshot_from_payload({"run_id": run_id, "status": "completed"})
     approval = approval_card_from_payload({"tool": "workspace.read"}, run_id=run_id)
+    grouped_task = agent_task_snapshot_from_payload({
+        "run_id": run_id,
+        "run_group_id": "group with/slash",
+        "status": "approval_required",
+        "pending_approval": {"tool": "workspace.write"},
+    })
+    grouped_approval = approval_card_from_payload(
+        {"tool": "workspace.write"},
+        run_id=run_id,
+        group_run_id="group with/slash",
+    )
     legacy_payload = LegacyRunPayloadProjector().chat_task_payload({"run_id": run_id})
+    grouped_legacy_payload = LegacyRunPayloadProjector().chat_task_payload({
+        "run_id": run_id,
+        "run_group_id": "group with/slash",
+    })
 
     assert task.open_in_studio_url == expected_url
     assert approval.open_in_studio_url == expected_url
+    assert grouped_task.open_in_studio_url == expected_group_url
+    assert grouped_task.pending_approvals[0].open_in_studio_url == expected_group_url
+    assert grouped_approval.open_in_studio_url == expected_group_url
     assert legacy_payload["open_in_studio_url"] == expected_url
+    assert grouped_legacy_payload["open_in_studio_url"] == expected_group_url
 
 
 def test_legacy_task_and_timeline_functions_delegate_to_shared_projector() -> None:
@@ -419,7 +440,7 @@ def test_group_run_snapshot_reuses_shared_run_projection_for_children_artifacts_
     assert group_run.shared_artifacts[0].source_run_id == "group-run-1"
     assert group_run.shared_artifacts[0].path == "team.md"
     assert group_run.pending_approvals[0].run_id == "group-run-1"
-    assert group_run.pending_approvals[0].open_in_studio_url == "#/agents?run_id=group-run-1"
+    assert group_run.pending_approvals[0].open_in_studio_url == "#/agents?run_id=group-run-1&group_run=group-run-1"
 
 
 def test_group_run_snapshot_derives_approvals_and_artifacts_from_group_events() -> None:

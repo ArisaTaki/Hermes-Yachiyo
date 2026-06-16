@@ -434,7 +434,7 @@ async def test_yachiyo_task_routes_use_injected_runtime_and_return_public_snapsh
     assert started["task_id"] == "run-1"
     assert started["status"] == "waiting_approval"
     assert started["conversation_id"] == "chat-1"
-    assert started["open_in_studio_url"] == "#/agents?run_id=run-1"
+    assert started["open_in_studio_url"] == "#/agents?run_id=run-1&group_run=group-run-1"
     assert tasks["tasks"][0]["task_id"] == "run-1"
     assert tasks["tasks"][0]["conversation_id"] == "chat-1"
     assert all(task["task_id"] != "studio-run" for task in tasks["tasks"])
@@ -467,7 +467,7 @@ async def test_yachiyo_chat_task_link_is_visible_from_studio_timeline() -> None:
     timeline = await yachiyo.get_studio_run_timeline("run-1", request)
 
     assert started["task_id"] == "task-chat-1"
-    assert started["open_in_studio_url"] == "#/agents?run_id=run-1"
+    assert started["open_in_studio_url"] == "#/agents?run_id=run-1&group_run=group-run-1"
     assert timeline["run_id"] == "run-1"
     assert timeline["task_id"] == "task-chat-1"
     assert timeline["session_id"] == "chat-1"

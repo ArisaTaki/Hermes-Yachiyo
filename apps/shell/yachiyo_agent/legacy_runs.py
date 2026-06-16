@@ -23,7 +23,10 @@ class LegacyRunPayloadProjector:
             "title": str(run.get("user_goal") or run.get("runnable_name") or "Yachiyo task"),
             "summary": run.get("summary") or run.get("result") or "",
             "recent_events": run.get("timeline") or [],
-            "open_in_studio_url": studio_run_url(str(run.get("run_id") or "")),
+            "open_in_studio_url": studio_run_url(
+                str(run.get("run_id") or ""),
+                group_run_id=str(run.get("group_run_id") or run.get("run_group_id") or ""),
+            ),
         }
 
     def group_artifacts(self, runs: list[dict[str, Any]]) -> list[dict[str, Any]]:

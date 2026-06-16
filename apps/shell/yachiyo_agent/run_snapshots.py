@@ -30,6 +30,7 @@ class RunSnapshotProjector:
 
         task_id = _text(payload.get("task_id") or payload.get("run_id"))
         run_id = _text(payload.get("run_id") or task_id)
+        group_run_id = _group_run_id(payload)
         recent_events = self.events_from_payload(
             payload,
             run_id=run_id,
@@ -38,6 +39,7 @@ class RunSnapshotProjector:
         approvals = self.approvals_from_payload(
             payload,
             run_id=run_id,
+            group_run_id=group_run_id,
             keys=("pending_approvals", "pending_approval"),
             events=recent_events,
         )
@@ -54,7 +56,8 @@ class RunSnapshotProjector:
             pending_approvals=approvals,
             recent_events=recent_events,
             artifacts=self.artifacts_from_payload(payload, run_id=run_id, events=recent_events),
-            open_in_studio_url=_optional_text(payload.get("open_in_studio_url")) or _studio_url(run_id),
+            open_in_studio_url=_optional_text(payload.get("open_in_studio_url"))
+            or _studio_url(run_id, group_run_id),
             created_at=_text(payload.get("created_at")),
             updated_at=_text(payload.get("updated_at")),
         )
@@ -82,6 +85,7 @@ class RunSnapshotProjector:
         approvals = self.approvals_from_payload(
             payload,
             run_id=run_id,
+            group_run_id=group_run_id or "",
             keys=("approvals", "pending_approval"),
             events=events,
         )
@@ -150,14 +154,22 @@ class RunSnapshotProjector:
         payload: Mapping[str, Any],
         *,
         run_id: str,
+        group_run_id: str = "",
         keys: tuple[str, ...],
         events: list[PublicRunEvent] | None = None,
     ):
         for key in keys:
-            approvals = approval_cards_from_payloads(payload.get(key), run_id=run_id)
+            approvals = approval_cards_from_payloads(
+                payload.get(key),
+                run_id=run_id,
+                group_run_id=group_run_id,
+            )
             if approvals:
-                return _merge_approvals(approvals, self.approvals_from_events(events or []))
-        return self.approvals_from_events(events or [])
+                return _merge_approvals(
+                    approvals,
+                    self.approvals_from_events(events or [], group_run_id=group_run_id),
+                )
+        return self.approvals_from_events(events or [], group_run_id=group_run_id)
 
     def artifacts_from_payload(
         self,
@@ -171,18 +183,39 @@ class RunSnapshotProjector:
             self.artifacts_from_events(events or []),
         )
 
-    def approvals_from_payloads(self, payloads: Any, *, run_id: str = ""):
-        return approval_cards_from_payloads(payloads, run_id=run_id)
+    def approvals_from_payloads(
+        self,
+        payloads: Any,
+        *,
+        run_id: str = "",
+        group_run_id: str = "",
+    ):
+        return approval_cards_from_payloads(
+            payloads,
+            run_id=run_id,
+            group_run_id=group_run_id,
+        )
 
     def artifacts_from_payloads(self, payloads: Any, *, run_id: str = ""):
         return artifact_snapshots_from_payloads(payloads, run_id=run_id)
 
-    def approvals_from_events(self, events: list[PublicRunEvent]):
+    def approvals_from_events(
+        self,
+        events: list[PublicRunEvent],
+        *,
+        group_run_id: str = "",
+    ):
         approvals = []
         for event in events:
             approval_payload = _approval_payload_from_event(event)
             if approval_payload:
-                approvals.append(approval_card_from_payload(approval_payload, run_id=event.run_id))
+                approvals.append(
+                    approval_card_from_payload(
+                        approval_payload,
+                        run_id=event.run_id,
+                        group_run_id=group_run_id or _group_run_id(event.payload),
+                    )
+                )
         return approvals
 
     def artifacts_from_events(self, events: list[PublicRunEvent]):
@@ -475,8 +508,12 @@ def _tool_status_from_event_type(event_type: str) -> str:
     return "completed"
 
 
-def _studio_url(run_id: str) -> str | None:
-    return studio_run_url(run_id)
+def _group_run_id(payload: Mapping[str, Any]) -> str:
+    return _text(payload.get("group_run_id") or payload.get("run_group_id"))
+
+
+def _studio_url(run_id: str, group_run_id: str = "") -> str | None:
+    return studio_run_url(run_id, group_run_id=group_run_id)
 
 
 def _text(value: Any) -> str:

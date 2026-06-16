@@ -13,11 +13,17 @@ def approval_card_from_payload(
     payload: Mapping[str, Any] | ApprovalCardSnapshot,
     *,
     run_id: str = "",
+    group_run_id: str = "",
 ) -> ApprovalCardSnapshot:
     if isinstance(payload, ApprovalCardSnapshot):
         return payload
 
     approval_run_id = _optional_text(payload.get("run_id")) or _optional_text(run_id)
+    approval_group_run_id = (
+        _optional_text(payload.get("group_run_id"))
+        or _optional_text(payload.get("run_group_id"))
+        or _optional_text(group_run_id)
+    )
     approval_id = _text(
         payload.get("approval_id")
         or payload.get("id")
@@ -41,7 +47,10 @@ def approval_card_from_payload(
         policy_reason=_optional_text(payload.get("policy_reason")),
         requested_at=_text(payload.get("requested_at") or payload.get("created_at")),
         resolved_at=_optional_text(payload.get("resolved_at")),
-        open_in_studio_url=_studio_url(approval_run_id),
+        open_in_studio_url=(
+            _optional_text(payload.get("open_in_studio_url"))
+            or _studio_url(approval_run_id, approval_group_run_id)
+        ),
     )
 
 
@@ -49,12 +58,18 @@ def approval_cards_from_payloads(
     payloads: Any,
     *,
     run_id: str = "",
+    group_run_id: str = "",
 ) -> list[ApprovalCardSnapshot]:
     if isinstance(payloads, Mapping):
-        return [approval_card_from_payload(payloads, run_id=run_id)] if payloads else []
+        return [
+            approval_card_from_payload(payloads, run_id=run_id, group_run_id=group_run_id)
+        ] if payloads else []
     if not isinstance(payloads, list):
         return []
-    return [approval_card_from_payload(item, run_id=run_id) for item in payloads]
+    return [
+        approval_card_from_payload(item, run_id=run_id, group_run_id=group_run_id)
+        for item in payloads
+    ]
 
 
 def _approval_status(value: Any) -> str:
@@ -67,8 +82,8 @@ def _mapping(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
 
 
-def _studio_url(run_id: str | None) -> str | None:
-    return studio_run_url(run_id)
+def _studio_url(run_id: str | None, group_run_id: str | None = None) -> str | None:
+    return studio_run_url(run_id, group_run_id=group_run_id)
 
 
 def _text(value: Any) -> str:

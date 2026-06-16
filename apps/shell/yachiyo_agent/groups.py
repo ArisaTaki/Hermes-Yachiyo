@@ -89,6 +89,7 @@ def group_run_snapshot_from_payload(
         pending_approvals=_RUN_PROJECTOR.approvals_from_payload(
             payload,
             run_id=group_run_id,
+            group_run_id=group_run_id,
             keys=("pending_approvals", "pending_approval"),
             events=events,
         ),
