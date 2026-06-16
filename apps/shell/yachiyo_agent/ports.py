@@ -30,11 +30,11 @@ class RuntimePort(Protocol):
 
     def approve(
         self,
-        approval_id: str,
+        task_id: str,
         decision: dict[str, Any] | None = None,
     ) -> dict[str, Any]: ...
 
-    def reject(self, approval_id: str, reason: str | None = None) -> dict[str, Any]: ...
+    def reject(self, task_id: str, reason: str | None = None) -> dict[str, Any]: ...
 
     def cancel(self, task_id: str) -> dict[str, Any]: ...
 

@@ -131,15 +131,15 @@ class YachiyoAgentService:
 
     def approve(
         self,
-        approval_id: str,
+        task_id: str,
         decision: ApprovalDecision | Mapping[str, Any] | None = None,
     ) -> AgentTaskSnapshot:
         return agent_task_snapshot_from_payload(
-            self._runtime_port.approve(approval_id, _optional_request_payload(decision))
+            self._runtime_port.approve(task_id, _optional_request_payload(decision))
         )
 
-    def reject(self, approval_id: str, reason: str | None = None) -> AgentTaskSnapshot:
-        return agent_task_snapshot_from_payload(self._runtime_port.reject(approval_id, reason))
+    def reject(self, task_id: str, reason: str | None = None) -> AgentTaskSnapshot:
+        return agent_task_snapshot_from_payload(self._runtime_port.reject(task_id, reason))
 
     def cancel(self, task_id: str) -> AgentTaskSnapshot:
         return agent_task_snapshot_from_payload(self._runtime_port.cancel(task_id))

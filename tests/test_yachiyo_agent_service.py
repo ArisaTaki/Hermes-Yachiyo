@@ -100,12 +100,12 @@ class _FakeRuntimePort:
         self.calls.append(("list_recent_tasks", conversation_id))
         return [_task_payload(task_id="task-recent", status="running")]
 
-    def approve(self, approval_id: str, decision: dict[str, Any] | None = None) -> dict[str, Any]:
-        self.calls.append(("approve", {"approval_id": approval_id, "decision": decision}))
+    def approve(self, task_id: str, decision: dict[str, Any] | None = None) -> dict[str, Any]:
+        self.calls.append(("approve", {"task_id": task_id, "decision": decision}))
         return _task_payload(status="completed", result="Approved")
 
-    def reject(self, approval_id: str, reason: str | None = None) -> dict[str, Any]:
-        self.calls.append(("reject", {"approval_id": approval_id, "reason": reason}))
+    def reject(self, task_id: str, reason: str | None = None) -> dict[str, Any]:
+        self.calls.append(("reject", {"task_id": task_id, "reason": reason}))
         return _task_payload(status="failed", result="Rejected")
 
     def cancel(self, task_id: str) -> dict[str, Any]:
@@ -308,10 +308,14 @@ def test_yachiyo_agent_service_delegates_approval_and_cancel_to_runtime_port() -
     service = YachiyoAgentService(port)
 
     approved = service.approve(
-        "approval-1",
-        ApprovalDecision(approved=True, reason="Looks safe"),
+        "task-1",
+        ApprovalDecision(
+            approved=True,
+            reason="Looks safe",
+            metadata={"approval_id": "approval-1"},
+        ),
     )
-    rejected = service.reject("approval-2", "No")
+    rejected = service.reject("task-2", "No")
     cancelled = service.cancel("task-1")
 
     assert approved.status == "completed"
@@ -321,11 +325,15 @@ def test_yachiyo_agent_service_delegates_approval_and_cancel_to_runtime_port() -
         (
             "approve",
             {
-                "approval_id": "approval-1",
-                "decision": {"approved": True, "reason": "Looks safe", "metadata": {}},
+                "task_id": "task-1",
+                "decision": {
+                    "approved": True,
+                    "reason": "Looks safe",
+                    "metadata": {"approval_id": "approval-1"},
+                },
             },
         ),
-        ("reject", {"approval_id": "approval-2", "reason": "No"}),
+        ("reject", {"task_id": "task-2", "reason": "No"}),
         ("cancel", "task-1"),
     ]
 

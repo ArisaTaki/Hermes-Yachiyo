@@ -193,20 +193,20 @@ class LegacyRuntimePort:
             for run in runs
         ]
 
-    def approve(self, approval_id: str, decision: dict[str, Any] | None = None) -> dict[str, Any]:
-        run_id = self._run_id_for_task(approval_id)
+    def approve(self, task_id: str, decision: dict[str, Any] | None = None) -> dict[str, Any]:
+        run_id = self._run_id_for_task(task_id)
         return self._projector.chat_task_payload(
             self._payload_with_task_link(
-                approval_id,
+                task_id,
                 self._run_action_payload(run_id, self._runtime.approve_run_approval(run_id)),
             )
         )
 
-    def reject(self, approval_id: str, reason: str | None = None) -> dict[str, Any]:
-        run_id = self._run_id_for_task(approval_id)
+    def reject(self, task_id: str, reason: str | None = None) -> dict[str, Any]:
+        run_id = self._run_id_for_task(task_id)
         return self._projector.chat_task_payload(
             self._payload_with_task_link(
-                approval_id,
+                task_id,
                 self._run_action_payload(
                     run_id,
                     self._runtime.reject_run_approval(run_id, reason or ""),
