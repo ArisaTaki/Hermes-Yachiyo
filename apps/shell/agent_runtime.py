@@ -522,49 +522,8 @@ class NativeRunEngine(
             runtime_context_budget_checker=runtime_context_budget_checker,
             runtime_model_output_limiter=runtime_model_output_limiter,
         )
-        agent_services = _build_runtime_agent_services(
-            get_skill=self.get_skill,
-            error_type=AgentRuntimeError,
-            compile_agent_runtime=self._compile_agent_runtime,
-            load_agent_skills=self._load_agent_skills,
-            long_term_memory_context=self._long_term_memory_context,
-            operating_doctrine=_MARKET_AGENT_OPERATING_DOCTRINE,
-            agent_artifacts_dir=self.agent_artifacts_dir,
-            normalize_execution_backend=_normalize_execution_backend,
-            agent_context=self._agent_context,
-            memory_store=self._memory_store,
-            future_task_store=self._future_task_store,
-            runtime_agent_timeline=self.runtime_agent_timeline,
-            runtime_agent_run_events=self.runtime_agent_run_events,
-            runtime_trace_events=self.runtime_trace_events,
-            append_run_event=self.append_run_event,
-            timeline_factory=runtime_timeline_factory,
-            memory_context_limit=_MEMORY_CONTEXT_LIMIT,
-            runtime_task_model_events=self.runtime_task_model_events,
-            update_run=self._update_run,
-            model_output_metadata=_model_output_metadata,
-            redact_secrets=redact_secrets,
-            tool_brokers=self.tool_brokers,
-        )
-        self._install_runtime_agent_services(agent_services)
-        approval_services = _build_runtime_approval_services(
-            timeline_factory=runtime_timeline_factory,
-            append_run_event=self.append_run_event,
-            update_run=self._update_run,
-            snapshots=self.approval_snapshots,
-            call_agent_tool=self._call_agent_tool,
-            fatal_tool_failure_detail=self._fatal_tool_failure_detail,
-            append_tool_result_message=self._append_tool_result_message,
-            run_tool_requests=self._run_tool_requests,
-            claim_pending_approval=self.run_approvals.claim_pending_approval,
-            continue_custom_api_agent=self._run_custom_api_agent,
-        )
-        self._install_runtime_approval_services(approval_services)
-        self.agent_run_executor = RuntimeAgentRunExecutor(
-            preparer=self.agent_run_preparer,
-            continue_custom_api_agent=self._run_custom_api_agent,
-            agent_run_outcomes=self.agent_run_outcomes,
-            approval_pause=self.approval_pause,
+        self._install_runtime_agent_and_approval_services(
+            runtime_timeline_factory=runtime_timeline_factory,
         )
         self._install_runtime_approval_transitions(
             RuntimeApprovalTransitionService(

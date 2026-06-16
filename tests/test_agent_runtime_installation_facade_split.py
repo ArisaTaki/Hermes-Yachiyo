@@ -29,6 +29,7 @@ def test_runtime_installation_facade_mixin_remains_exported_from_legacy_module()
         "_install_runtime_agent_chat_entrypoints",
         "_install_runtime_run_budget_and_main_chat_model",
         "_install_runtime_tooling_and_custom_agent_loop",
+        "_install_runtime_agent_and_approval_services",
         "_install_runtime_engine_state",
         "_install_runtime_recorders",
         "_install_runtime_definition_services",
@@ -310,3 +311,70 @@ def test_installation_facade_installs_tooling_and_custom_agent_loop(monkeypatch)
     assert engine.custom_api_agent_loop.kwargs["tool_schemas"] == "model-tool-schemas"
     assert engine.custom_api_agent_loop.kwargs["limit_model_output"] == "model-output-limiter"
     assert engine.custom_api_agent_loop.kwargs["tool_loop_projection"] == "tool-loop-projection"
+
+
+def test_installation_facade_installs_agent_and_approval_services(monkeypatch) -> None:
+    class CapturedAgentRunExecutor:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+
+    def fake_build_runtime_agent_services(**kwargs):
+        return SimpleNamespace(
+            kwargs=kwargs,
+            agent_skill_loader="agent-skill-loader",
+            agent_context_builder="agent-context-builder",
+            agent_run_preparer="agent-run-preparer",
+            agent_run_outcomes="agent-run-outcomes",
+        )
+
+    def fake_build_runtime_approval_services(**kwargs):
+        return SimpleNamespace(
+            kwargs=kwargs,
+            approval_pause="approval-pause",
+            approvals="approvals",
+            approval_resume="approval-resume",
+        )
+
+    monkeypatch.setattr(agent_runtime, "_build_runtime_agent_services", fake_build_runtime_agent_services)
+    monkeypatch.setattr(agent_runtime, "_build_runtime_approval_services", fake_build_runtime_approval_services)
+    monkeypatch.setattr(agent_runtime, "RuntimeAgentRunExecutor", CapturedAgentRunExecutor)
+
+    engine = object.__new__(agent_runtime.NativeRunEngine)
+    engine.get_skill = "get-skill"
+    engine._compile_agent_runtime = "compile-agent-runtime"
+    engine._load_agent_skills = "load-agent-skills"
+    engine._long_term_memory_context = "long-term-memory-context"
+    engine.agent_artifacts_dir = "agent-artifacts"
+    engine._agent_context = "agent-context"
+    engine._memory_store = "memory-store"
+    engine._future_task_store = "future-task-store"
+    engine.runtime_agent_timeline = "agent-timeline"
+    engine.runtime_agent_run_events = "agent-run-events"
+    engine.runtime_trace_events = "trace-events"
+    engine.append_run_event = "append-run-event"
+    engine.runtime_task_model_events = "task-model-events"
+    engine._update_run = "update-run"
+    engine.tool_brokers = "tool-brokers"
+    engine.approval_snapshots = "approval-snapshots"
+    engine._call_agent_tool = "call-agent-tool"
+    engine._fatal_tool_failure_detail = "fatal-tool-failure-detail"
+    engine._append_tool_result_message = "append-tool-result-message"
+    engine._run_tool_requests = "run-tool-requests"
+    engine.run_approvals = SimpleNamespace(claim_pending_approval="claim-pending-approval")
+    engine._run_custom_api_agent = "run-custom-api-agent"
+
+    engine._install_runtime_agent_and_approval_services(
+        runtime_timeline_factory="timeline-factory",
+    )
+
+    assert engine.agent_skill_loader == "agent-skill-loader"
+    assert engine.agent_context_builder == "agent-context-builder"
+    assert engine.agent_run_preparer == "agent-run-preparer"
+    assert engine.agent_run_outcomes == "agent-run-outcomes"
+    assert engine.approval_pause == "approval-pause"
+    assert engine.approvals == "approvals"
+    assert engine.approval_resume == "approval-resume"
+    assert isinstance(engine.agent_run_executor, CapturedAgentRunExecutor)
+    assert engine.agent_run_executor.kwargs["preparer"] == "agent-run-preparer"
+    assert engine.agent_run_executor.kwargs["continue_custom_api_agent"] == "run-custom-api-agent"
+    assert engine.agent_run_executor.kwargs["approval_pause"] == "approval-pause"
