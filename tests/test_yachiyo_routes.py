@@ -401,6 +401,22 @@ class _FakeAgentRuntime:
                     "event_id": "event-2",
                     "run_id": run_id,
                     "sequence": 2,
+                    "event_type": "agent.tool.call",
+                    "visibility": "internal",
+                    "payload": {"status": "internal", "tool": "workspace.read"},
+                },
+                {
+                    "event_id": "event-3",
+                    "run_id": run_id,
+                    "sequence": 3,
+                    "event_type": "agent.tool.call",
+                    "sensitivity": "secret",
+                    "payload": {"status": "secret", "api_key": "sk-secret"},
+                },
+                {
+                    "event_id": "event-4",
+                    "run_id": run_id,
+                    "sequence": 4,
                     "event_type": "agent.completed",
                     "payload": {"status": "completed"},
                 }
@@ -483,6 +499,18 @@ async def test_yachiyo_task_routes_use_injected_runtime_and_return_public_snapsh
     assert task_events["next_after_sequence"] == 1
     assert task_events["has_more"] is True
     assert task_events["events"][0]["event_type"] == "agent.started"
+    full_task_events = await yachiyo.get_task_events(
+        "run-1",
+        request,
+        after_sequence=0,
+        limit=10,
+    )
+    assert [event["event_type"] for event in full_task_events["events"]] == [
+        "agent.started",
+        "agent.completed",
+    ]
+    assert all(event["visibility"] == "user" for event in full_task_events["events"])
+    assert all(event["sensitivity"] == "public" for event in full_task_events["events"])
     assert task_artifact["ok"] is True
     assert task_artifact["run_id"] == "run-1"
     assert task_artifact["task_id"] == "run-1"
