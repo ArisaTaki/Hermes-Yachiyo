@@ -90,6 +90,37 @@ def test_run_snapshot_projector_drives_chat_task_and_studio_timeline_shapes() ->
     assert timeline.children[0].run_id == "child-1"
 
 
+def test_agent_task_snapshot_filters_secret_and_internal_recent_events() -> None:
+    task = agent_task_snapshot_from_payload(
+        {
+            "task_id": "task-visible-events",
+            "run_id": "run-visible-events",
+            "status": "running",
+            "events": [
+                {"event_type": "task.started", "payload": {"step": "visible"}},
+                {
+                    "event_type": "tool.approval_required",
+                    "sensitivity": "secret",
+                    "payload": {
+                        "tool": "terminal.run",
+                        "input_preview": {"command": "printf sk-secret-value"},
+                    },
+                },
+                {
+                    "event_type": "artifact.created",
+                    "visibility": "internal",
+                    "payload": {"path": "internal-report.md"},
+                },
+            ],
+        }
+    )
+
+    assert [event.event_type for event in task.recent_events] == ["task.started"]
+    assert task.recent_events[0].payload == {"step": "visible"}
+    assert task.pending_approvals == []
+    assert task.artifacts == []
+
+
 def test_studio_run_url_is_shared_by_run_task_and_approval_snapshots() -> None:
     run_id = "run with/slash"
     expected_url = "#/agents?run_id=run%20with%2Fslash"

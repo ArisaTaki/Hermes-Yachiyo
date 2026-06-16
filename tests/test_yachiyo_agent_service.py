@@ -172,6 +172,62 @@ class _PagedRuntimePort(_FakeRuntimePort):
         }
 
 
+class _SensitiveTaskRuntimePort(_FakeRuntimePort):
+    def get_task_timeline(self, task_id: str) -> dict[str, Any]:
+        self.calls.append(("get_task_timeline", task_id))
+        return _task_payload(
+            task_id=task_id,
+            status="running",
+            timeline=[
+                {
+                    "event_type": "task.started",
+                    "sequence": 1,
+                    "payload": {"step": "visible"},
+                },
+                {
+                    "event_type": "agent.tool.call",
+                    "sequence": 2,
+                    "sensitivity": "secret",
+                    "payload": {
+                        "tool": "terminal.run",
+                        "input_preview": {"command": "printf sk-secret-value"},
+                    },
+                },
+                {
+                    "event_type": "agent.runtime.compiled",
+                    "sequence": 3,
+                    "visibility": "internal",
+                    "payload": {"step": "internal"},
+                },
+            ],
+        )
+
+    def get_task_event_stream(self, task_id: str) -> dict[str, Any]:
+        self.calls.append(("get_task_event_stream", task_id))
+        return {
+            "run_id": "run-sensitive",
+            "events": [
+                {"event_type": "task.started", "sequence": 1, "payload": {"step": "visible"}},
+                {
+                    "event_type": "agent.tool.call",
+                    "sequence": 2,
+                    "sensitivity": "secret",
+                    "payload": {
+                        "tool": "terminal.run",
+                        "input_preview": {"command": "printf sk-secret-value"},
+                    },
+                },
+                {
+                    "event_type": "agent.runtime.compiled",
+                    "sequence": 3,
+                    "visibility": "internal",
+                    "payload": {"step": "internal"},
+                },
+                {"event_type": "task.completed", "sequence": 4, "payload": {"step": "done"}},
+            ],
+        }
+
+
 def test_yachiyo_agent_service_maps_fake_runtime_to_task_snapshots() -> None:
     port = _FakeRuntimePort()
     service = YachiyoAgentService(port)
@@ -269,6 +325,20 @@ def test_yachiyo_agent_service_prefers_runtime_port_task_event_pages() -> None:
             },
         )
     ]
+
+
+def test_yachiyo_agent_service_filters_secret_and_internal_chat_events() -> None:
+    port = _SensitiveTaskRuntimePort()
+    service = YachiyoAgentService(port)
+
+    timeline = service.get_task_timeline("task-sensitive")
+    page = service.get_task_event_page("task-sensitive", after_sequence=0, limit=10)
+
+    assert [event.event_type for event in timeline.events] == ["task.started"]
+    assert timeline.tool_calls == []
+    assert [event.event_type for event in page.events] == ["task.started", "task.completed"]
+    assert all(event.sensitivity == "public" for event in page.events)
+    assert all(event.visibility == "user" for event in page.events)
 
 
 def test_yachiyo_agent_service_reads_task_artifact_content() -> None:

@@ -61,7 +61,8 @@ class YachiyoAgentService:
         return agent_task_snapshot_from_payload(self._runtime_port.get_task_snapshot(task_id))
 
     def get_task_timeline(self, task_id: str) -> RunTimelineSnapshot:
-        return run_timeline_snapshot_from_payload(self._runtime_port.get_task_timeline(task_id))
+        timeline = run_timeline_snapshot_from_payload(self._runtime_port.get_task_timeline(task_id))
+        return timeline.model_copy(update={"events": _chat_visible_events(timeline.events)})
 
     def get_task_event_stream(self, task_id: str) -> Iterable[PublicRunEvent]:
         raw_events = self._runtime_port.get_task_event_stream(task_id)
@@ -84,14 +85,15 @@ class YachiyoAgentService:
                 after_sequence=clean_after_sequence,
                 limit=clean_limit,
             )
-            return public_run_event_page_from_payload(
+            page = public_run_event_page_from_payload(
                 raw_page,
                 run_id=task_id,
                 after_sequence=clean_after_sequence,
                 limit=clean_limit,
             )
+            return page.model_copy(update={"events": _chat_visible_events(page.events)})
 
-        events = list(self.get_task_event_stream(task_id))
+        events = _chat_visible_events(list(self.get_task_event_stream(task_id)))
         filtered_events = [
             event
             for event in events
@@ -187,3 +189,11 @@ def _payload_run_id(payload: Any) -> str:
     if not isinstance(payload, Mapping):
         return ""
     return str(payload.get("run_id") or "").strip()
+
+
+def _chat_visible_events(events: list[PublicRunEvent]) -> list[PublicRunEvent]:
+    return [
+        event
+        for event in events
+        if event.visibility == "user" and event.sensitivity == "public"
+    ]

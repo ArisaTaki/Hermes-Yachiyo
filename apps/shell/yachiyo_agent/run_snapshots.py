@@ -41,6 +41,7 @@ class RunSnapshotProjector:
             run_id=run_id,
             keys=("recent_events", "events", "timeline"),
         )
+        recent_events = _chat_visible_events(recent_events)
         approvals = [
             approval
             for approval in self.approvals_from_payload(
@@ -1262,6 +1263,14 @@ def _mapping(value: Any) -> dict[str, Any]:
 
 def _public_run_event_is_secret(event: PublicRunEvent) -> bool:
     return event.sensitivity == "secret"
+
+
+def _chat_visible_events(events: list[PublicRunEvent]) -> list[PublicRunEvent]:
+    return [
+        event
+        for event in events
+        if event.visibility == "user" and event.sensitivity == "public"
+    ]
 
 
 def _nested_mapping(payload: Mapping[str, Any], key: str) -> dict[str, Any]:
