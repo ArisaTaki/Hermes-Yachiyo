@@ -237,6 +237,16 @@ def test_group_and_workflow_acceptance_paths_are_guarded() -> None:
             "workflow.node.approval_required",
         ],
     )
+    _assert_contains(
+        "apps/frontend/src/features/runtime-shared/components/RuntimeTimelineSummary.tsx",
+        [
+            "workflow.started",
+            "workflow.paused_for_approval",
+            "workflow.resumed",
+            "workflow.completed",
+            "workflow.failed",
+        ],
+    )
 
 
 def test_runtime_memory_and_skill_trace_acceptance_paths_are_guarded() -> None:

@@ -72,7 +72,7 @@ export function timelineEventTitle(event: Record<string, unknown>): string {
   if (name === 'group.member.approval_required') return detail ? `成员审批 · ${detail}` : '成员审批';
   if (name === 'group.artifact.created') return detail ? `群组产物 · ${detail}` : '群组产物';
   if (name === 'group.shared_artifact.created') return detail ? `群组共享产物 · ${detail}` : '群组共享产物';
-  if (name === 'workflow.run.started') return 'Workflow 已启动';
+  if (name === 'workflow.run.started' || name === 'workflow.started') return 'Workflow 已启动';
   if (name === 'workflow.node.start') return 'Workflow 起点';
   if (name === 'workflow.node.agent') return detail ? `Agent 节点 · ${detail}` : 'Agent 节点';
   if (name === 'workflow.node.workflow') return detail ? `子 Workflow · ${detail}` : '子 Workflow';
@@ -84,12 +84,12 @@ export function timelineEventTitle(event: Record<string, unknown>): string {
   if (name === 'workflow.node.approval_approved') return detail ? `审批已通过 · ${detail}` : '审批已通过';
   if (name === 'workflow.node.approval_rejected') return detail ? `审批已拒绝 · ${detail}` : '审批已拒绝';
   if (name === 'workflow.edge.followed') return detail ? `Workflow 路由 · ${detail}` : 'Workflow 路由';
-  if (name === 'workflow.run.approval_required') return 'Workflow 等待审批';
+  if (name === 'workflow.run.approval_required' || name === 'workflow.paused_for_approval') return 'Workflow 等待审批';
   if (name === 'workflow.run.child_resumed') return '子 Agent 已继续执行';
-  if (name === 'workflow.run.resumed') return 'Workflow 已继续执行';
-  if (name === 'workflow.run.completed') return 'Workflow 已完成';
-  if (name === 'workflow.run.failed') return 'Workflow 执行失败';
-  if (name === 'workflow.run.cancelled') return 'Workflow 已取消';
+  if (name === 'workflow.run.resumed' || name === 'workflow.resumed') return 'Workflow 已继续执行';
+  if (name === 'workflow.run.completed' || name === 'workflow.completed') return 'Workflow 已完成';
+  if (name === 'workflow.run.failed' || name === 'workflow.failed') return 'Workflow 执行失败';
+  if (name === 'workflow.run.cancelled' || name === 'workflow.cancelled') return 'Workflow 已取消';
   return name;
 }
 
