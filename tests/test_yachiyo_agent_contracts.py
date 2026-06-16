@@ -314,7 +314,21 @@ def test_run_timeline_snapshot_json_shape_covers_runtime_debug_objects() -> None
                 kind="markdown",
             )
         ],
-        children=[RunTimelineChildSnapshot(run_id="child-run-1", status="completed")],
+        children=[
+            RunTimelineChildSnapshot(
+                run_id="child-run-1",
+                status="completed",
+                kind="agent_run",
+                parent_run_id="run-1",
+                group_run_id="group-run-1",
+                run_group_id="group-run-1",
+                workflow_run_id="workflow-run-1",
+                workflow_node_id="review",
+                workflow_node_label="Review",
+                agent_id="agent-2",
+                workflow_id="workflow-1",
+            )
+        ],
     )
 
     payload = _json(snapshot)
@@ -352,6 +366,9 @@ def test_run_timeline_snapshot_json_shape_covers_runtime_debug_objects() -> None
     assert payload["memory_traces"][0]["event_type"] == "memory.retrieved"
     assert payload["skill_traces"][0]["event_type"] == "skill.selected"
     assert payload["children"][0]["run_id"] == "child-run-1"
+    assert payload["children"][0]["parent_run_id"] == "run-1"
+    assert payload["children"][0]["group_run_id"] == "group-run-1"
+    assert payload["children"][0]["workflow_node_id"] == "review"
 
 
 def test_tool_call_snapshot_keeps_runtime_trace_fields() -> None:

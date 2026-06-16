@@ -189,6 +189,12 @@ export type RunTimelineChildSnapshot = {
   title?: string | null;
   status?: string;
   kind?: string | null;
+  parent_run_id?: string | null;
+  group_run_id?: string | null;
+  run_group_id?: string | null;
+  workflow_run_id?: string | null;
+  workflow_node_id?: string | null;
+  workflow_node_label?: string | null;
   agent_id?: string | null;
   workflow_id?: string | null;
 };

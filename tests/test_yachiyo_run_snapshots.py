@@ -127,6 +127,41 @@ def test_studio_run_url_is_shared_by_run_task_and_approval_snapshots() -> None:
     assert grouped_legacy_payload["open_in_studio_url"] == expected_group_url
 
 
+def test_run_timeline_child_snapshots_preserve_orchestration_context() -> None:
+    timeline = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "parent-run",
+            "status": "running",
+            "children": [
+                {
+                    "run_id": "child-run",
+                    "title": "Reviewer",
+                    "status": "completed",
+                    "kind": "agent_run",
+                    "parent_run_id": "parent-run",
+                    "group_run_id": "group-run-1",
+                    "workflow_run_id": "workflow-run-1",
+                    "workflow_node_id": "review",
+                    "workflow_node_label": "Review",
+                    "member_agent_id": "agent-reviewer",
+                    "workflow_id": "workflow-1",
+                }
+            ],
+        }
+    )
+
+    child = timeline.children[0]
+    assert child.run_id == "child-run"
+    assert child.parent_run_id == "parent-run"
+    assert child.group_run_id == "group-run-1"
+    assert child.run_group_id == "group-run-1"
+    assert child.workflow_run_id == "workflow-run-1"
+    assert child.workflow_node_id == "review"
+    assert child.workflow_node_label == "Review"
+    assert child.agent_id == "agent-reviewer"
+    assert child.workflow_id == "workflow-1"
+
+
 def test_legacy_task_and_timeline_functions_delegate_to_shared_projector() -> None:
     payload = _run_payload()
 

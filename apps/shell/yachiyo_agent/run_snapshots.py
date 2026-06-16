@@ -403,14 +403,29 @@ class RunSnapshotProjector:
         children: list[RunTimelineChildSnapshot] = []
         for item in payloads:
             if isinstance(item, Mapping):
+                kind = _optional_text(item.get("kind"))
+                runnable_id = _optional_text(item.get("runnable_id"))
                 children.append(
                     RunTimelineChildSnapshot(
                         run_id=_text(item.get("run_id")),
                         title=_optional_text(item.get("title") or item.get("user_goal")),
                         status=_text(item.get("status")),
-                        kind=_optional_text(item.get("kind")),
-                        agent_id=_optional_text(item.get("agent_id")),
-                        workflow_id=_optional_text(item.get("workflow_id")),
+                        kind=kind,
+                        parent_run_id=_optional_text(item.get("parent_run_id")),
+                        group_run_id=_optional_text(item.get("group_run_id") or item.get("run_group_id")),
+                        run_group_id=_optional_text(item.get("run_group_id") or item.get("group_run_id")),
+                        workflow_run_id=_optional_text(item.get("workflow_run_id")),
+                        workflow_node_id=_optional_text(item.get("workflow_node_id")),
+                        workflow_node_label=_optional_text(item.get("workflow_node_label")),
+                        agent_id=_optional_text(
+                            item.get("agent_id")
+                            or item.get("member_agent_id")
+                            or (runnable_id if kind == "agent_run" else "")
+                        ),
+                        workflow_id=_optional_text(
+                            item.get("workflow_id")
+                            or (runnable_id if kind == "workflow_run" else "")
+                        ),
                     )
                 )
             else:

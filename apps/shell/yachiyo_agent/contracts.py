@@ -213,6 +213,12 @@ class RunTimelineChildSnapshot(_PublicSnapshot):
     title: str | None = None
     status: str = ""
     kind: str | None = None
+    parent_run_id: str | None = None
+    group_run_id: str | None = None
+    run_group_id: str | None = None
+    workflow_run_id: str | None = None
+    workflow_node_id: str | None = None
+    workflow_node_label: str | None = None
     agent_id: str | None = None
     workflow_id: str | None = None
 
