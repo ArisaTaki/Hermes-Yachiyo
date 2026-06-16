@@ -245,6 +245,118 @@ def test_agent_studio_timeline_projects_native_memory_and_skill_trace_events(tmp
         runtime.close()
 
 
+def test_agent_studio_timeline_enriches_legacy_rows_with_native_tool_artifact_events(tmp_path) -> None:
+    credential_store = MemoryCredentialStore()
+    runtime = NativeRunEngine(
+        db_path=tmp_path / "agent-runtime-tool-artifact-replay.db",
+        workspace_dir=tmp_path / "runtime-tool-artifact-replay",
+        credential_store=credential_store,
+        seed_templates=False,
+    )
+    try:
+        run_group = runtime._insert_run_group(
+            title="Native tool artifact replay",
+            source="agent_group",
+            workspace_dir=str(tmp_path / "tool-artifact-workspace"),
+        )
+        run = runtime._insert_run(
+            kind="agent_run",
+            runnable_id="agent-tool-artifact",
+            user_goal="Read and report",
+            run_group_id=run_group["run_group_id"],
+        )
+        runtime._update_run(
+            run["run_id"],
+            status="completed",
+            result="Tool artifact replay complete",
+            timeline=[
+                {
+                    "event_type": "agent.model.response",
+                    "detail": "Preparing tool calls",
+                }
+            ],
+            artifacts=[],
+        )
+        runtime.append_run_event(
+            run["run_id"],
+            "tool.requested",
+            {
+                "tool": "workspace.read",
+                "input_preview": {"path": "README.md"},
+            },
+        )
+        runtime.append_run_event(
+            run["run_id"],
+            "tool.completed",
+            {
+                "tool": "workspace.read",
+                "input_preview": {"path": "README.md"},
+                "output_preview": {"ok": True},
+            },
+        )
+        runtime.append_run_event(
+            run["run_id"],
+            "tool.approval_required",
+            {
+                "tool": "terminal.run",
+                "input_preview": {"command": "npm test"},
+                "pending_approval": {
+                    "approval_id": "approval-native-tool-replay",
+                    "risk_level": "high",
+                    "policy_reason": "terminal command requires approval",
+                },
+            },
+        )
+        runtime.append_run_event(
+            run["run_id"],
+            "approval.rejected",
+            {
+                "approval_id": "approval-native-tool-replay",
+                "tool": "terminal.run",
+                "reason": "No terminal runs",
+            },
+        )
+        runtime.append_run_event(
+            run["run_id"],
+            "artifact.created",
+            {
+                "artifact_id": "artifact-native-tool-replay",
+                "path": "reports/tool-replay.md",
+                "size_bytes": 24,
+                "source_tool": "artifact.write",
+            },
+        )
+
+        studio = AgentStudioService(LegacyStudioPort(runtime))
+
+        timeline = studio.get_run_timeline(run["run_id"])
+
+        assert [event.event_type for event in timeline.events] == [
+            "agent.model.response",
+            "tool.requested",
+            "tool.completed",
+            "tool.approval_required",
+            "approval.rejected",
+            "artifact.created",
+        ]
+        assert [call.tool_name for call in timeline.tool_calls] == [
+            "workspace.read",
+            "terminal.run",
+        ]
+        assert timeline.tool_calls[0].status == "completed"
+        assert timeline.tool_calls[0].output_preview == {"ok": True}
+        assert timeline.tool_calls[1].status == "waiting_approval"
+        assert timeline.tool_calls[1].approval_id == "approval-native-tool-replay"
+        assert timeline.approvals[0].approval_id == "approval-native-tool-replay"
+        assert timeline.approvals[0].status == "rejected"
+        assert timeline.approvals[0].description == "No terminal runs"
+        assert timeline.artifacts[0].artifact_id == "artifact-native-tool-replay"
+        assert timeline.artifacts[0].path == "reports/tool-replay.md"
+        assert timeline.artifacts[0].source_tool == "artifact.write"
+    finally:
+        runtime.close()
+
+
 def test_agent_studio_group_run_uses_native_run_group_events_and_children(tmp_path) -> None:
     credential_store = MemoryCredentialStore()
     runtime = NativeRunEngine(

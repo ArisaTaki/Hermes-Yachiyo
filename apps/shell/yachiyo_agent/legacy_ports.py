@@ -603,7 +603,7 @@ def _run_with_replay_events(run: dict[str, Any], runtime: Any) -> dict[str, Any]
     enriched_events = list(legacy_events)
     existing_keys = {_event_identity(event) for event in enriched_events}
     for event in replay_events:
-        if not _is_memory_or_skill_event(event):
+        if not _is_replay_enrichment_event(event):
             continue
         event_key = _event_identity(event)
         if event_key in existing_keys:
@@ -623,9 +623,25 @@ def _legacy_run_events(run: dict[str, Any]) -> list[dict[str, Any]]:
     return []
 
 
-def _is_memory_or_skill_event(event: dict[str, Any]) -> bool:
+def _is_replay_enrichment_event(event: dict[str, Any]) -> bool:
     event_type = str(event.get("event_type") or event.get("event") or "")
-    return event_type.startswith("memory.") or event_type.startswith("skill.")
+    return event_type.startswith(
+        (
+            "agent.tool.",
+            "approval.",
+            "artifact.",
+            "memory.",
+            "skill.",
+            "tool.",
+        )
+    ) or event_type in {
+        "workflow.node.artifact",
+        "workflow.node.approval_required",
+        "workflow.node.approval_approved",
+        "workflow.node.approval_rejected",
+        "workflow.node.approval_timeout",
+        "workflow.run.approval_required",
+    }
 
 
 def _event_identity(event: dict[str, Any]) -> tuple[str, str]:
