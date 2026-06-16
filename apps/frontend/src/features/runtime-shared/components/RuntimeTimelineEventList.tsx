@@ -60,7 +60,15 @@ export function RuntimeTimelineEventList({
           const childRunStatus = childRunId ? getChildRunStatus(childRunId, eventStatus) : '';
           const eventTone = getEventTone(event);
           const payload = getEventPayload(event);
-          const eventMetadata = runtimeEventMetadata(event, eventSequence, eventRunId);
+          const payloadRecord = runtimeEventPayloadRecord(event);
+          const traceContext = runtimeEventTraceContext(event, payloadRecord);
+          const eventMetadata = runtimeEventMetadata(
+            event,
+            payloadRecord,
+            traceContext,
+            eventSequence,
+            eventRunId,
+          );
           return (
             <li
               className={`run-execution-step ${eventTone}`}
@@ -72,9 +80,12 @@ export function RuntimeTimelineEventList({
               data-run-event-sequence={eventSequence}
               data-run-event-sensitivity={defaultEventSensitivity(event)}
               data-run-event-schema-version={defaultEventSchemaVersion(event)}
+              data-run-event-group-run-id={traceContext.groupRunId}
+              data-run-event-member-agent-id={traceContext.memberAgentId}
               data-run-event-status={eventStatus || ''}
               data-run-event-tone={eventTone}
               data-run-event-visibility={defaultEventVisibility(event)}
+              data-run-event-workflow-node-id={traceContext.workflowNodeId}
               data-testid={eventTestId}
               key={`${eventName || 'event'}-${index}`}
             >
@@ -244,10 +255,11 @@ function defaultStatusLabel(status: string): string {
 
 function runtimeEventMetadata(
   event: RuntimeTimelineEventRecord,
+  payload: RuntimeTimelineEventRecord,
+  traceContext: RuntimeTimelineTraceContext,
   eventSequence: string,
   eventRunId: string,
 ): Array<{ label: string; value: string }> {
-  const payload = runtimeEventPayloadRecord(event);
   return [
     { label: '#', value: eventSequence },
     { label: 'run', value: eventRunId },
@@ -258,15 +270,41 @@ function runtimeEventMetadata(
         || runtimeEventNestedString(payload, 'pending_approval', 'approval_id'),
     },
     { label: 'artifact', value: runtimeEventString(event, payload, 'artifact_id') },
-    { label: 'memory', value: runtimeEventString(event, payload, 'memory_id') },
-    { label: 'skill', value: runtimeEventString(event, payload, 'skill_id') },
-    { label: 'node', value: runtimeEventString(event, payload, 'workflow_node_id') },
+    { label: 'memory', value: runtimeEventMemoryId(event, payload) },
+    { label: 'skill', value: runtimeEventSkillId(event, payload) },
+    { label: 'workflow', value: traceContext.workflowNodeLabel || traceContext.workflowNodeId },
+    { label: 'group', value: traceContext.groupRunId || traceContext.groupId },
+    { label: 'member', value: traceContext.memberAgentName || traceContext.memberAgentId },
     { label: 'child', value: defaultChildRunId(event) || runtimeEventString(event, payload, 'child_run_id') },
     { label: 'actor', value: defaultEventActor(event) },
     { label: 'visibility', value: defaultEventVisibility(event) },
     { label: 'sensitivity', value: defaultEventSensitivity(event) },
     { label: 'schema', value: defaultEventSchemaVersion(event) },
   ].filter((item) => item.value);
+}
+
+type RuntimeTimelineTraceContext = {
+  groupId: string;
+  groupRunId: string;
+  memberAgentId: string;
+  memberAgentName: string;
+  workflowNodeId: string;
+  workflowNodeLabel: string;
+};
+
+function runtimeEventTraceContext(
+  event: RuntimeTimelineEventRecord,
+  payload: RuntimeTimelineEventRecord,
+): RuntimeTimelineTraceContext {
+  return {
+    groupId: runtimeEventString(event, payload, 'group_id'),
+    groupRunId: runtimeEventString(event, payload, 'group_run_id')
+      || runtimeEventString(event, payload, 'run_group_id'),
+    memberAgentId: runtimeEventString(event, payload, 'member_agent_id'),
+    memberAgentName: runtimeEventString(event, payload, 'member_agent_name'),
+    workflowNodeId: runtimeEventString(event, payload, 'workflow_node_id'),
+    workflowNodeLabel: runtimeEventString(event, payload, 'workflow_node_label'),
+  };
 }
 
 function runtimeEventPayloadRecord(event: RuntimeTimelineEventRecord): RuntimeTimelineEventRecord {
@@ -282,6 +320,27 @@ function runtimeEventString(
   key: string,
 ): string {
   return defaultString(event[key]) || defaultString(payload[key]);
+}
+
+function runtimeEventMemoryId(
+  event: RuntimeTimelineEventRecord,
+  payload: RuntimeTimelineEventRecord,
+): string {
+  const memories = payload.memories;
+  const firstMemory = Array.isArray(memories) ? memories[0] : null;
+  const firstMemoryId = firstMemory && typeof firstMemory === 'object' && !Array.isArray(firstMemory)
+    ? defaultString((firstMemory as RuntimeTimelineEventRecord).memory_id)
+    : '';
+  return runtimeEventString(event, payload, 'memory_id') || firstMemoryId;
+}
+
+function runtimeEventSkillId(
+  event: RuntimeTimelineEventRecord,
+  payload: RuntimeTimelineEventRecord,
+): string {
+  return runtimeEventString(event, payload, 'skill_id')
+    || runtimeEventNestedString(payload, 'result', 'skill_id')
+    || runtimeEventNestedString(payload, 'result', 'name');
 }
 
 function runtimeEventNestedString(
