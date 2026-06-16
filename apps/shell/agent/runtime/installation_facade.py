@@ -8,6 +8,7 @@ from apps.shell.agent.runtime.credentials import RuntimeCredentialService
 from apps.shell.agent.runtime.model_calling import (
     RuntimeModelProfileChatAdapter,
     RuntimeOpenAICompatibleChatAdapter,
+    build_runtime_model_call_adapters,
 )
 from apps.shell.agent.runtime.run_cancellation import RuntimeRunCancellationCoordinator
 
@@ -22,14 +23,14 @@ class RuntimeInstallationFacadeMixin:
     """Keeps legacy runtime collaborator installation methods."""
 
     def _install_runtime_model_adapters(self) -> None:
-        self.model_profile_chat_adapter = RuntimeModelProfileChatAdapter(
+        adapters = build_runtime_model_call_adapters(
             chat_message_provider=lambda: _legacy_agent_runtime_module().openai_compatible_chat_message,
-        )
-        self.openai_compatible_chat_adapter = RuntimeOpenAICompatibleChatAdapter(
             timeout_provider=lambda: _legacy_agent_runtime_module().read_openai_compatible_chat_timeout(),
             urlopen=lambda *args, **kwargs: _legacy_agent_runtime_module().urlopen_with_bundled_ca(*args, **kwargs),
             redact_error=lambda value: _legacy_agent_runtime_module().redact_secrets(value),
         )
+        self.model_profile_chat_adapter = adapters.model_profile_chat_adapter
+        self.openai_compatible_chat_adapter = adapters.openai_compatible_chat_adapter
 
     def _install_runtime_foundation(
         self,

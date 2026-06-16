@@ -172,8 +172,10 @@ from apps.shell.agent.runtime.main_chat_model_loop import MainChatModelLoopRunne
 from apps.shell.agent.runtime.main_chat_runs import MainChatRunLifecycle
 from apps.shell.agent.runtime.memory_services import RuntimeMemoryService
 from apps.shell.agent.runtime.model_calling import (
+    RuntimeModelCallAdapterBundle,
     RuntimeModelProfileChatAdapter,
     RuntimeOpenAICompatibleChatAdapter,
+    build_runtime_model_call_adapters as _build_runtime_model_call_adapters,
     call_model_profile_chat_message as _runtime_call_model_profile_chat_message,
     callable_accepts_keyword as _callable_accepts_keyword,
     openai_compatible_chat as _runtime_openai_compatible_chat,
@@ -439,14 +441,14 @@ from packages.security import (
     redact_api_error_text,
 )
 
-_legacy_model_profile_chat_adapter = RuntimeModelProfileChatAdapter(
+_legacy_model_call_adapters = _build_runtime_model_call_adapters(
     chat_message_provider=lambda: openai_compatible_chat_message,
-)
-_legacy_openai_compatible_chat_adapter = RuntimeOpenAICompatibleChatAdapter(
     timeout_provider=lambda: read_openai_compatible_chat_timeout(),
     urlopen=lambda *args, **kwargs: urlopen_with_bundled_ca(*args, **kwargs),
     redact_error=lambda value: redact_secrets(value),
 )
+_legacy_model_profile_chat_adapter = _legacy_model_call_adapters.model_profile_chat_adapter
+_legacy_openai_compatible_chat_adapter = _legacy_model_call_adapters.openai_compatible_chat_adapter
 
 
 def _call_model_profile_chat_message(

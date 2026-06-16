@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import json
+from dataclasses import dataclass
 from typing import Any, Callable
 from urllib import error as urlerror
 from urllib import request as urlrequest
@@ -94,6 +95,31 @@ class RuntimeOpenAICompatibleChatAdapter:
             urlopen=self._urlopen,
             redact_error=self._redact_error,
         )
+
+
+@dataclass(frozen=True)
+class RuntimeModelCallAdapterBundle:
+    model_profile_chat_adapter: RuntimeModelProfileChatAdapter
+    openai_compatible_chat_adapter: RuntimeOpenAICompatibleChatAdapter
+
+
+def build_runtime_model_call_adapters(
+    *,
+    chat_message_provider: Callable[[], Callable[..., Any]],
+    timeout_provider: Callable[[], float],
+    urlopen: Callable[..., Any],
+    redact_error: Callable[[Any], str],
+) -> RuntimeModelCallAdapterBundle:
+    return RuntimeModelCallAdapterBundle(
+        model_profile_chat_adapter=RuntimeModelProfileChatAdapter(
+            chat_message_provider=chat_message_provider,
+        ),
+        openai_compatible_chat_adapter=RuntimeOpenAICompatibleChatAdapter(
+            timeout_provider=timeout_provider,
+            urlopen=urlopen,
+            redact_error=redact_error,
+        ),
+    )
 
 
 def openai_compatible_chat(

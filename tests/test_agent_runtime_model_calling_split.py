@@ -10,8 +10,10 @@ import pytest
 from apps.shell import agent_runtime
 from apps.shell.agent.runtime.errors import AgentRuntimeError
 from apps.shell.agent.runtime.model_calling import (
+    RuntimeModelCallAdapterBundle,
     RuntimeModelProfileChatAdapter,
     RuntimeOpenAICompatibleChatAdapter,
+    build_runtime_model_call_adapters,
     call_model_profile_chat_message,
     callable_accepts_keyword,
     openai_compatible_chat,
@@ -21,8 +23,58 @@ from apps.shell.agent.runtime.model_calling import (
 def test_model_calling_helpers_remain_exported_from_legacy_module() -> None:
     assert agent_runtime.RuntimeModelProfileChatAdapter is RuntimeModelProfileChatAdapter
     assert agent_runtime.RuntimeOpenAICompatibleChatAdapter is RuntimeOpenAICompatibleChatAdapter
+    assert agent_runtime.RuntimeModelCallAdapterBundle is RuntimeModelCallAdapterBundle
+    assert agent_runtime._build_runtime_model_call_adapters is build_runtime_model_call_adapters
     assert agent_runtime._runtime_call_model_profile_chat_message is call_model_profile_chat_message
     assert agent_runtime._callable_accepts_keyword is callable_accepts_keyword
+
+
+def test_model_call_adapter_builder_binds_runtime_dependencies() -> None:
+    calls: list[dict[str, Any]] = []
+
+    def fake_chat(
+        base_url: str,
+        model: str,
+        api_key: str,
+        messages: list[dict[str, Any]],
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        calls.append({"kind": "model", "kwargs": kwargs})
+        return {"content": "model ok"}
+
+    def fake_urlopen(request: Any, *, timeout: float) -> FakeResponse:
+        calls.append({"kind": "custom", "timeout": timeout, "url": request.full_url})
+        return FakeResponse(b'{"choices":[{"message":{"content":"custom ok"}}]}')
+
+    adapters = build_runtime_model_call_adapters(
+        chat_message_provider=lambda: fake_chat,
+        timeout_provider=lambda: 4.0,
+        urlopen=fake_urlopen,
+        redact_error=str,
+    )
+
+    assert isinstance(adapters, RuntimeModelCallAdapterBundle)
+    assert adapters.model_profile_chat_adapter.call(
+        "https://api.example.test/v1",
+        "demo",
+        "sk-test",
+        [],
+        stream=True,
+    ) == {"content": "model ok"}
+    assert adapters.openai_compatible_chat_adapter.call(
+        "https://api.example.test/v1",
+        "demo",
+        "sk-test",
+        [{"role": "user", "content": "hi"}],
+    ) == "custom ok"
+    assert calls == [
+        {"kind": "model", "kwargs": {"stream": True}},
+        {
+            "kind": "custom",
+            "timeout": 4.0,
+            "url": "https://api.example.test/v1/chat/completions",
+        },
+    ]
 
 
 def test_model_profile_chat_adapter_uses_current_provider() -> None:
