@@ -27,6 +27,7 @@ import { useAgentStudioModelProfiles } from '../features/agent-studio/hooks/useA
 import { useAgentStudioRefresh } from '../features/agent-studio/hooks/useAgentStudioRefresh';
 import { useAgentStudioRunApprovalControls } from '../features/agent-studio/hooks/useAgentStudioRunApprovalControls';
 import { useAgentStudioRunDebugControls } from '../features/agent-studio/hooks/useAgentStudioRunDebugControls';
+import { useAgentStudioRunLaunchControls } from '../features/agent-studio/hooks/useAgentStudioRunLaunchControls';
 import { useAgentStudioRunSnapshots } from '../features/agent-studio/hooks/useAgentStudioRunSnapshots';
 import { useAgentStudioRouteState } from '../features/agent-studio/hooks/useAgentStudioRouteState';
 import { useAgentStudioSelectionSynchronization } from '../features/agent-studio/hooks/useAgentStudioSelectionSynchronization';
@@ -36,7 +37,6 @@ import { useRunArtifactActions } from '../features/agent-studio/hooks/useRunArti
 import { useRunCacheActions } from '../features/agent-studio/hooks/useRunCacheActions';
 import { useRunDetailSynchronization } from '../features/agent-studio/hooks/useRunDetailSynchronization';
 import { useRunHistoryManagement } from '../features/agent-studio/hooks/useRunHistoryManagement';
-import { useRunLaunchActions } from '../features/agent-studio/hooks/useRunLaunchActions';
 import { useRunListDerivedState } from '../features/agent-studio/hooks/useRunListDerivedState';
 import { useRunNavigationActions } from '../features/agent-studio/hooks/useRunNavigationActions';
 import { useRunTargetReadiness } from '../features/agent-studio/hooks/useRunTargetReadiness';
@@ -692,7 +692,7 @@ export function AgentStudioView() {
     rerunSelectedRun,
     runCurrentAgent,
     runCurrentWorkflow,
-  } = useRunLaunchActions({
+  } = useAgentStudioRunLaunchControls({
     agentQuickRunDisabledReason,
     agentRunGoal,
     draftAgentId: draft.agent_id || '',

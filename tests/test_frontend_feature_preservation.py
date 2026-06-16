@@ -1475,6 +1475,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "useAgentStudioRouteState()",
             "useAgentStudioRunApprovalControls({",
             "useAgentStudioRunDebugControls({",
+            "useAgentStudioRunLaunchControls({",
             "useAgentStudioRunSnapshots({",
             "useAgentStudioSelectionSynchronization({",
             "useAgentStudioTabActions({",
@@ -3847,6 +3848,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "useAgentStudioRouteState",
             "useAgentStudioRunApprovalControls",
             "useAgentStudioRunDebugControls",
+            "useAgentStudioRunLaunchControls",
             "useAgentStudioRunSnapshots",
             "useAgentStudioSelectionSynchronization",
             "useAgentStudioTabActions",
@@ -3857,7 +3859,6 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "useRunDetailSynchronization",
             "useRunArtifactActions",
             "useRunHistoryManagement",
-            "useRunLaunchActions",
             "useRunListDerivedState",
             "useRunNavigationActions",
             "useRunTargetReadiness",
@@ -4246,6 +4247,14 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "upsertRunDetailCache([run]);",
             "await refreshRunGroupsForRuns([run]);",
             "openRunDetail(run.run_id, { revealInHistory: true });",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useAgentStudioRunLaunchControls.ts",
+        [
+            "export function useAgentStudioRunLaunchControls",
+            "Parameters<typeof useRunLaunchActions>[0]",
+            "return useRunLaunchActions(options);",
         ],
     )
     _assert_contains(
