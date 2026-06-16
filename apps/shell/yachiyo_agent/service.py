@@ -18,7 +18,7 @@ from .contracts import (
     RunTimelineSnapshot,
     StartChatTaskRequest,
 )
-from .events import public_run_event_from_payload
+from .events import public_run_event_from_payload, public_run_event_page_from_payload
 from .ports import ChatTaskStarter, RuntimePort
 from .run_snapshots import run_timeline_snapshot_from_payload
 from .task_cards import agent_task_snapshot_from_payload, agent_task_snapshots_from_payloads
@@ -83,6 +83,20 @@ class YachiyoAgentService:
     ) -> RunEventPageSnapshot:
         clean_after_sequence = max(0, int(after_sequence or 0))
         clean_limit = max(1, min(500, int(limit or 200)))
+        port_event_page = getattr(self._runtime_port, "get_task_event_page", None)
+        if callable(port_event_page):
+            raw_page = port_event_page(
+                task_id,
+                after_sequence=clean_after_sequence,
+                limit=clean_limit,
+            )
+            return public_run_event_page_from_payload(
+                raw_page,
+                run_id=task_id,
+                after_sequence=clean_after_sequence,
+                limit=clean_limit,
+            )
+
         events = list(self.get_task_event_stream(task_id))
         filtered_events = [
             event

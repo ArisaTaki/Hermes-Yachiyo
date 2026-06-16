@@ -39,6 +39,16 @@ class RuntimePort(Protocol):
     def cancel(self, task_id: str) -> dict[str, Any]: ...
 
 
+class RuntimeTaskEventPagePort(Protocol):
+    def get_task_event_page(
+        self,
+        task_id: str,
+        *,
+        after_sequence: int = 0,
+        limit: int = 200,
+    ) -> Mapping[str, Any]: ...
+
+
 class ChatTaskStarter(Protocol):
     def start_chat_task(self, request: dict[str, Any]) -> dict[str, Any] | None: ...
 

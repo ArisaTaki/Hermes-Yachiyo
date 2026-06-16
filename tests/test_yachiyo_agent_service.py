@@ -129,6 +129,38 @@ class _FakeChatTaskStarter:
         )
 
 
+class _PagedRuntimePort(_FakeRuntimePort):
+    def get_task_event_page(
+        self,
+        task_id: str,
+        *,
+        after_sequence: int = 0,
+        limit: int = 200,
+    ) -> dict[str, Any]:
+        self.calls.append((
+            "get_task_event_page",
+            {
+                "task_id": task_id,
+                "after_sequence": after_sequence,
+                "limit": limit,
+            },
+        ))
+        return {
+            "run_id": "run-paged",
+            "after_sequence": after_sequence,
+            "limit": limit,
+            "next_after_sequence": 7,
+            "has_more": True,
+            "events": [
+                {
+                    "event_type": "task.progress",
+                    "sequence": 7,
+                    "payload": {"step": "read workspace"},
+                }
+            ],
+        }
+
+
 def test_yachiyo_agent_service_maps_fake_runtime_to_task_snapshots() -> None:
     port = _FakeRuntimePort()
     service = YachiyoAgentService(port)
@@ -196,6 +228,31 @@ def test_yachiyo_agent_service_pages_task_events() -> None:
     assert page.has_more is True
     assert [event.event_type for event in page.events] == ["tool.requested"]
     assert port.calls == [("get_task_event_stream", "task-1")]
+
+
+def test_yachiyo_agent_service_prefers_runtime_port_task_event_pages() -> None:
+    port = _PagedRuntimePort()
+    service = YachiyoAgentService(port)
+
+    page = service.get_task_event_page("task-1", after_sequence=-4, limit=999)
+
+    assert page.run_id == "run-paged"
+    assert page.after_sequence == 0
+    assert page.limit == 500
+    assert page.next_after_sequence == 7
+    assert page.has_more is True
+    assert [event.event_type for event in page.events] == ["task.progress"]
+    assert page.events[0].payload == {"step": "read workspace"}
+    assert port.calls == [
+        (
+            "get_task_event_page",
+            {
+                "task_id": "task-1",
+                "after_sequence": 0,
+                "limit": 500,
+            },
+        )
+    ]
 
 
 def test_yachiyo_agent_service_reads_task_artifact_content() -> None:

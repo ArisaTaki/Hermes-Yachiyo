@@ -28,7 +28,7 @@ from .contracts import (
     WorkflowRunSnapshot,
     WorkflowSnapshot,
 )
-from .events import public_run_event_from_payload
+from .events import public_run_event_from_payload, public_run_event_page_from_payload
 from .future_tasks import (
     future_task_snapshot_from_payload,
     future_task_trigger_result_snapshot_from_payload,
@@ -284,7 +284,7 @@ class AgentStudioService:
                 after_sequence=clean_after_sequence,
                 limit=clean_limit,
             )
-            return _run_event_page_from_payload(
+            return public_run_event_page_from_payload(
                 raw_page,
                 run_id=group_run_id,
                 after_sequence=clean_after_sequence,
@@ -390,7 +390,7 @@ class AgentStudioService:
                 after_sequence=clean_after_sequence,
                 limit=clean_limit,
             )
-            return _run_event_page_from_payload(
+            return public_run_event_page_from_payload(
                 raw_page,
                 run_id=run_id,
                 after_sequence=clean_after_sequence,
@@ -428,30 +428,6 @@ def _public_run_snapshot_from_payload(
     if is_workflow_run_payload(payload):
         return workflow_run_snapshot_from_payload(payload)
     return run_timeline_snapshot_from_payload(payload)
-
-
-def _run_event_page_from_payload(
-    payload: Mapping[str, Any],
-    *,
-    run_id: str,
-    after_sequence: int,
-    limit: int,
-) -> RunEventPageSnapshot:
-    events = [
-        public_run_event_from_payload(event, run_id=run_id)
-        for event in _payload_items(payload, "events")
-    ]
-    next_after_sequence = _optional_int(payload.get("next_after_sequence"))
-    if next_after_sequence is None:
-        next_after_sequence = max([int(event.sequence or 0) for event in events] or [after_sequence])
-    return RunEventPageSnapshot(
-        run_id=str(payload.get("run_id") or run_id),
-        after_sequence=_optional_int(payload.get("after_sequence")) or after_sequence,
-        limit=_optional_int(payload.get("limit")) or limit,
-        next_after_sequence=next_after_sequence,
-        has_more=bool(payload.get("has_more", False)),
-        events=events,
-    )
 
 
 def _payload_items(payload: Any, key: str) -> list[dict[str, Any]]:
