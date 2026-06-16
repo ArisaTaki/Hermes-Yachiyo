@@ -471,6 +471,116 @@ def test_run_timeline_derives_approvals_and_artifacts_from_events() -> None:
     assert timeline.artifacts[1].size_bytes == 42
 
 
+def test_run_timeline_merges_approval_lifecycle_events_into_stable_cards() -> None:
+    timeline = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "run-approval-lifecycle",
+            "status": "cancelled",
+            "events": [
+                {
+                    "event_type": "tool.approval_required",
+                    "payload": {
+                        "pending_approval": {
+                            "approval_id": "approval-terminal",
+                            "tool": "terminal.run",
+                            "input_preview": {"command": "npm test"},
+                            "requested_at": "2026-06-15T00:00:00Z",
+                        },
+                    },
+                    "created_at": "2026-06-15T00:00:00Z",
+                },
+                {
+                    "event_type": "agent.tool.approval_approved",
+                    "payload": {
+                        "tool": "terminal.run",
+                        "input_preview": {"command": "npm test"},
+                        "status": "completed",
+                    },
+                    "created_at": "2026-06-15T00:00:01Z",
+                },
+                {
+                    "event_type": "workflow.node.approval_required",
+                    "payload": {
+                        "workflow_id": "workflow-1",
+                        "workflow_node_id": "review",
+                        "workflow_node_label": "Review Gate",
+                        "pending_approval": {
+                            "approval_id": "approval-workflow",
+                            "tool": "workflow.approval",
+                            "input_preview": {"checkpoint": "Review Gate"},
+                        },
+                    },
+                    "created_at": "2026-06-15T00:00:02Z",
+                },
+                {
+                    "event_type": "workflow.node.approval_rejected",
+                    "payload": {
+                        "workflow_id": "workflow-1",
+                        "workflow_node_id": "review",
+                        "workflow_node_label": "Review Gate",
+                        "input_preview": {"checkpoint": "Review Gate"},
+                        "reason": "Needs more detail",
+                    },
+                    "created_at": "2026-06-15T00:00:03Z",
+                },
+            ],
+        }
+    )
+
+    assert timeline.pending_approval is None
+    assert [approval.approval_id for approval in timeline.approvals] == [
+        "approval-terminal",
+        "approval-workflow",
+    ]
+    assert [approval.status for approval in timeline.approvals] == ["approved", "rejected"]
+    assert timeline.approvals[0].requested_at == "2026-06-15T00:00:00Z"
+    assert timeline.approvals[0].resolved_at == "2026-06-15T00:00:01Z"
+    assert timeline.approvals[0].input_preview == {"command": "npm test"}
+    assert timeline.approvals[1].description == "Needs more detail"
+    assert timeline.approvals[1].resolved_at == "2026-06-15T00:00:03Z"
+    assert timeline.approvals[1].input_preview == {
+        "checkpoint": "Review Gate",
+        "workflow_id": "workflow-1",
+        "workflow_node_id": "review",
+        "workflow_node_label": "Review Gate",
+    }
+
+
+def test_run_timeline_projects_approval_timeout_as_expired_card() -> None:
+    timeline = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "run-approval-timeout",
+            "status": "cancelled",
+            "events": [
+                {
+                    "event_type": "agent.tool.approval_required",
+                    "payload": {
+                        "approval_id": "approval-timeout",
+                        "tool": "terminal.run",
+                        "input_preview": {"command": "npm test"},
+                    },
+                    "created_at": "2026-06-15T00:00:00Z",
+                },
+                {
+                    "event_type": "approval.timeout",
+                    "payload": {
+                        "tool": "terminal.run",
+                        "input_preview": {"command": "npm test"},
+                        "reason": "approval_wait_timeout",
+                    },
+                    "created_at": "2026-06-15T00:00:01Z",
+                },
+            ],
+        }
+    )
+
+    assert len(timeline.approvals) == 1
+    assert timeline.approvals[0].approval_id == "approval-timeout"
+    assert timeline.approvals[0].status == "expired"
+    assert timeline.approvals[0].description == "approval_wait_timeout"
+    assert timeline.approvals[0].resolved_at == "2026-06-15T00:00:01Z"
+
+
 def test_chat_task_snapshot_derives_approval_and_artifact_cards_from_events() -> None:
     task = agent_task_snapshot_from_payload(
         {
@@ -504,6 +614,38 @@ def test_chat_task_snapshot_derives_approval_and_artifact_cards_from_events() ->
     assert task.pending_approvals[0].tool_name == "workspace.write"
     assert task.artifacts[0].path == "notes.md"
     assert task.artifacts[0].source_run_id == "run-task-events"
+
+
+def test_chat_task_snapshot_ignores_resolved_approval_cards_for_user_action() -> None:
+    task = agent_task_snapshot_from_payload(
+        {
+            "task_id": "task-approved",
+            "run_id": "run-approved",
+            "title": "Run tests",
+            "status": "completed",
+            "recent_events": [
+                {
+                    "event_type": "agent.tool.approval_required",
+                    "payload": {
+                        "approval_id": "approval-approved",
+                        "tool": "terminal.run",
+                        "input_preview": {"command": "npm test"},
+                    },
+                },
+                {
+                    "event_type": "agent.tool.approval_approved",
+                    "payload": {
+                        "tool": "terminal.run",
+                        "input_preview": {"command": "npm test"},
+                    },
+                },
+            ],
+        }
+    )
+
+    assert task.status == "completed"
+    assert task.needs_user_action is False
+    assert task.pending_approvals == []
 
 
 def test_group_run_snapshot_reuses_shared_run_projection_for_children_artifacts_and_approvals() -> None:

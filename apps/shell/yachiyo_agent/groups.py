@@ -95,13 +95,17 @@ def group_run_snapshot_from_payload(
             run_id=group_run_id,
             events=events,
         ),
-        pending_approvals=_RUN_PROJECTOR.approvals_from_payload(
-            payload,
-            run_id=group_run_id,
-            group_run_id=group_run_id,
-            keys=("pending_approvals", "pending_approval"),
-            events=events,
-        ),
+        pending_approvals=[
+            approval
+            for approval in _RUN_PROJECTOR.approvals_from_payload(
+                payload,
+                run_id=group_run_id,
+                group_run_id=group_run_id,
+                keys=("pending_approvals", "pending_approval"),
+                events=events,
+            )
+            if approval.status == "pending"
+        ],
         final_answer=_optional_text(payload.get("final_answer") or payload.get("summary")),
         created_at=_text(payload.get("created_at")),
         updated_at=_text(payload.get("updated_at")),

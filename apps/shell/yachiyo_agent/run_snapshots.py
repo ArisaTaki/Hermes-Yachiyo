@@ -10,6 +10,7 @@ from .approvals import approval_card_from_payload, approval_cards_from_payloads
 from .artifacts import artifact_snapshot_from_payload, artifact_snapshots_from_payloads
 from .contracts import (
     AgentTaskSnapshot,
+    ApprovalCardSnapshot,
     PublicRunEvent,
     RunTimelineChildSnapshot,
     RunTimelineSnapshot,
@@ -37,13 +38,17 @@ class RunSnapshotProjector:
             run_id=run_id,
             keys=("recent_events", "events", "timeline"),
         )
-        approvals = self.approvals_from_payload(
-            payload,
-            run_id=run_id,
-            group_run_id=group_run_id,
-            keys=("pending_approvals", "pending_approval"),
-            events=recent_events,
-        )
+        approvals = [
+            approval
+            for approval in self.approvals_from_payload(
+                payload,
+                run_id=run_id,
+                group_run_id=group_run_id,
+                keys=("pending_approvals", "pending_approval"),
+                events=recent_events,
+            )
+            if approval.status == "pending"
+        ]
 
         return AgentTaskSnapshot(
             task_id=task_id,
@@ -207,6 +212,7 @@ class RunSnapshotProjector:
         group_run_id: str = "",
     ):
         approvals = []
+        active_by_key: dict[str, int] = {}
         for event in events:
             approval_payload = _approval_payload_from_event(event)
             if approval_payload:
@@ -215,13 +221,26 @@ class RunSnapshotProjector:
                         approval_payload,
                         {"group_run_id": group_run_id},
                     )
-                approvals.append(
-                    approval_card_from_payload(
-                        approval_payload,
-                        run_id=event.run_id,
-                        group_run_id=group_run_id or _group_run_id(event.payload),
-                    )
+                approval = approval_card_from_payload(
+                    approval_payload,
+                    run_id=event.run_id,
+                    group_run_id=group_run_id or _group_run_id(event.payload),
                 )
+                key = _approval_correlation_key(approval_payload, approval)
+                active_index = active_by_key.get(key) if key else None
+                if active_index is None:
+                    active_index = len(approvals)
+                    approvals.append(approval)
+                else:
+                    approvals[active_index] = _merge_approval_snapshots(
+                        approvals[active_index],
+                        approval,
+                    )
+                if key:
+                    if approval.status == "pending":
+                        active_by_key[key] = active_index
+                    else:
+                        active_by_key.pop(key, None)
         return approvals
 
     def artifacts_from_events(self, events: list[PublicRunEvent]):
@@ -349,7 +368,7 @@ def timeline_children_from_payloads(payloads: Any) -> list[RunTimelineChildSnaps
 
 
 def _approval_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
-    if event.event_type not in {
+    if event.event_type in {
         "agent.tool.approval_required",
         "group.approval_required",
         "group.member.approval_required",
@@ -357,26 +376,91 @@ def _approval_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
         "workflow.node.approval_required",
         "workflow.run.approval_required",
     }:
-        return {}
+        return _approval_required_payload_from_event(event)
+    if event.event_type in {
+        "agent.tool.approval_approved",
+        "agent.tool.approval_rejected",
+        "agent.tool.approval_timeout",
+        "approval.approved",
+        "approval.rejected",
+        "approval.timeout",
+        "tool.approved",
+        "tool.rejected",
+        "workflow.node.approval_approved",
+        "workflow.node.approval_rejected",
+        "workflow.node.approval_timeout",
+    }:
+        return _approval_resolution_payload_from_event(event)
+    return {}
+
+
+def _approval_required_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
     payload = dict(event.payload)
     pending = payload.get("pending_approval") or payload.get("approval")
     source = dict(pending) if isinstance(pending, Mapping) else payload
+    if not source and event.detail:
+        source = {"tool": event.detail}
     if not source:
         return {}
-    if event.event_type.startswith("group.") and not source.get("tool"):
-        source["tool"] = "group.approval"
-    if event.event_type.startswith("workflow.") and not source.get("tool"):
-        source["tool"] = "workflow.approval"
-    if not source.get("title") and payload.get("workflow_node_label"):
-        source["title"] = f"Approve {payload['workflow_node_label']}"
-    if not source.get("title") and payload.get("member_agent_name"):
-        source["title"] = f"Approve {payload['member_agent_name']}"
-    _merge_trace_context_into_approval(source, payload)
+    _normalize_approval_payload_for_event(source, event, payload)
     source.setdefault("approval_id", f"{event.run_id}:{event.event_type}:{event.sequence}")
     source.setdefault("status", "pending")
     source.setdefault("created_at", event.created_at)
     source.setdefault("run_id", event.run_id)
     return source
+
+
+def _approval_resolution_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
+    payload = dict(event.payload)
+    pending = payload.get("pending_approval") or payload.get("approval")
+    source = dict(pending) if isinstance(pending, Mapping) else payload
+    if not source and event.detail:
+        source = {"tool": event.detail}
+    if not source:
+        return {}
+    _normalize_approval_payload_for_event(source, event, payload)
+    source["status"] = _approval_status_from_event_type(event.event_type)
+    source.setdefault("resolved_at", event.created_at)
+    source.setdefault("run_id", event.run_id)
+    if payload.get("reason") and not source.get("reason") and not source.get("description"):
+        source["reason"] = payload.get("reason")
+    if not source.get("approval_id"):
+        source["approval_id"] = f"{event.run_id}:{event.event_type}:{event.sequence}"
+    return source
+
+
+def _normalize_approval_payload_for_event(
+    source: dict[str, Any],
+    event: PublicRunEvent,
+    payload: dict[str, Any],
+) -> None:
+    if event.event_type.startswith("group.") and not source.get("tool"):
+        source["tool"] = "group.approval"
+    if (
+        event.event_type.startswith("workflow.")
+        or payload.get("workflow_node_id")
+        or payload.get("workflow_run_id")
+    ) and not source.get("tool"):
+        source["tool"] = "workflow.approval"
+    if not source.get("tool") and payload.get("tool"):
+        source["tool"] = payload.get("tool")
+    if not source.get("tool") and event.detail:
+        source["tool"] = event.detail
+    if not source.get("title") and payload.get("workflow_node_label"):
+        source["title"] = f"Approve {payload['workflow_node_label']}"
+    if not source.get("title") and payload.get("member_agent_name"):
+        source["title"] = f"Approve {payload['member_agent_name']}"
+    _merge_trace_context_into_approval(source, payload)
+
+
+def _approval_status_from_event_type(event_type: str) -> str:
+    if event_type.endswith("approval_approved") or event_type in {"approval.approved", "tool.approved"}:
+        return "approved"
+    if event_type.endswith("approval_rejected") or event_type in {"approval.rejected", "tool.rejected"}:
+        return "rejected"
+    if event_type.endswith("approval_timeout") or event_type == "approval.timeout":
+        return "expired"
+    return "pending"
 
 
 def _tool_call_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
@@ -522,6 +606,81 @@ def _merge_artifacts(*artifact_lists):
             if key and key not in by_key:
                 by_key[key] = artifact
     return list(by_key.values())
+
+
+def _merge_approval_snapshots(
+    current: ApprovalCardSnapshot,
+    next_approval: ApprovalCardSnapshot,
+) -> ApprovalCardSnapshot:
+    return ApprovalCardSnapshot(
+        approval_id=current.approval_id or next_approval.approval_id,
+        run_id=current.run_id or next_approval.run_id,
+        title=current.title or next_approval.title,
+        description=next_approval.description or current.description,
+        status=next_approval.status or current.status,
+        tool_name=current.tool_name or next_approval.tool_name,
+        risk_level=current.risk_level or next_approval.risk_level,
+        input_preview={**current.input_preview, **next_approval.input_preview},
+        policy_reason=current.policy_reason or next_approval.policy_reason,
+        requested_at=current.requested_at or next_approval.requested_at,
+        resolved_at=next_approval.resolved_at or current.resolved_at,
+        open_in_studio_url=current.open_in_studio_url or next_approval.open_in_studio_url,
+    )
+
+
+def _approval_correlation_key(
+    payload: Mapping[str, Any],
+    approval: ApprovalCardSnapshot,
+) -> str:
+    run_id = approval.run_id or _text(payload.get("run_id"))
+    tool_name = approval.tool_name or _text(payload.get("tool") or payload.get("tool_name"))
+    preview = _approval_correlation_preview(approval.input_preview)
+    workflow_node_id = _text(payload.get("workflow_node_id") or approval.input_preview.get("workflow_node_id"))
+    group_run_id = _text(
+        payload.get("group_run_id")
+        or payload.get("run_group_id")
+        or approval.input_preview.get("group_run_id")
+        or approval.input_preview.get("run_group_id")
+    )
+    member_agent_id = _text(payload.get("member_agent_id") or approval.input_preview.get("member_agent_id"))
+    if tool_name or workflow_node_id or group_run_id or member_agent_id or preview:
+        return ":".join(
+            [
+                run_id,
+                "approval",
+                tool_name,
+                workflow_node_id,
+                group_run_id,
+                member_agent_id,
+                _stable_json(preview),
+            ]
+        )
+
+    explicit_id = _text(
+        payload.get("approval_id")
+        or payload.get("id")
+        or payload.get("approval_signature")
+        or approval.approval_id
+    )
+    return f"{run_id}:approval_id:{explicit_id}" if explicit_id else ""
+
+
+def _approval_correlation_preview(preview: Mapping[str, Any]) -> dict[str, Any]:
+    trace_keys = {
+        "approval_id",
+        "group_id",
+        "group_run_id",
+        "member_agent_id",
+        "member_agent_name",
+        "policy_reason",
+        "risk_level",
+        "run_group_id",
+        "workflow_id",
+        "workflow_node_id",
+        "workflow_node_label",
+        "workflow_run_id",
+    }
+    return {key: value for key, value in preview.items() if key not in trace_keys}
 
 
 def _merge_tool_call_snapshots(
