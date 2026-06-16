@@ -268,6 +268,7 @@ def test_run_timeline_preserves_memory_and_skill_trace_events() -> None:
                     "event_type": "memory.retrieved",
                     "payload": {
                         "count": 1,
+                        "group_run_id": "group-run-1",
                         "memories": [
                             {
                                 "memory_id": "memory-1",
@@ -275,22 +276,33 @@ def test_run_timeline_preserves_memory_and_skill_trace_events() -> None:
                                 "scope": "global",
                             }
                         ],
+                        "member_agent_id": "agent-researcher",
+                        "member_agent_name": "Researcher",
+                        "workflow_node_id": "retrieve-context",
+                        "workflow_node_label": "Retrieve Context",
                     },
                 },
                 {
                     "event_type": "skill.selected",
                     "payload": {
+                        "group_run_id": "group-run-1",
+                        "member_agent_id": "agent-researcher",
                         "result": {
                             "skill_id": "skill-1",
                             "name": "Demo Skill",
+                            "source_ref": "skills/demo/SKILL.md",
                         }
                     },
                 },
                 {
                     "event_type": "skill.dispatch.read",
                     "payload": {
+                        "group_run_id": "group-run-1",
+                        "member_agent_id": "agent-researcher",
                         "tool": "skill.read",
                         "status": "completed",
+                        "workflow_node_id": "read-skill",
+                        "workflow_node_label": "Read Skill",
                         "result": {
                             "skill_id": "skill-1",
                             "name": "Demo Skill",
@@ -308,9 +320,15 @@ def test_run_timeline_preserves_memory_and_skill_trace_events() -> None:
     ]
     assert timeline.events[0].payload["memories"][0]["memory_id"] == "memory-1"
     assert timeline.events[0].payload["memories"][0]["kind"] == "preference"
+    assert timeline.events[0].payload["workflow_node_id"] == "retrieve-context"
+    assert timeline.events[0].payload["member_agent_id"] == "agent-researcher"
+    assert timeline.events[0].payload["group_run_id"] == "group-run-1"
     assert timeline.events[1].payload["result"]["skill_id"] == "skill-1"
+    assert timeline.events[1].payload["result"]["source_ref"] == "skills/demo/SKILL.md"
+    assert timeline.events[1].payload["member_agent_id"] == "agent-researcher"
     assert timeline.events[2].payload["tool"] == "skill.read"
     assert timeline.events[2].payload["status"] == "completed"
+    assert timeline.events[2].payload["workflow_node_label"] == "Read Skill"
     assert timeline.tool_calls == []
 
 

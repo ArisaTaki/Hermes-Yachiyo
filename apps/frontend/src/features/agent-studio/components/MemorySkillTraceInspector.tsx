@@ -5,14 +5,26 @@ type MemorySkillTrace = {
   count: string;
   detail: string;
   eventType: string;
+  groupRunId: string;
   id: string;
   key: string;
   kind: 'memory' | 'skill';
+  memberAgentId: string;
+  metadata: MemorySkillTraceMetadataItem[];
+  memoryId: string;
   payload: string;
   sequence: string;
+  skillId: string;
   status: string;
   title: string;
   tool: string;
+  workflowNodeId: string;
+};
+
+type MemorySkillTraceMetadataItem = {
+  key: string;
+  label: string;
+  value: string;
 };
 
 type MemorySkillTraceInspectorProps = {
@@ -43,8 +55,13 @@ export function MemorySkillTraceInspector({
             className={`run-memory-skill-trace ${trace.kind} ${traceStatusTone(trace.status)}`}
             data-run-event={trace.eventType}
             data-run-event-sequence={trace.sequence}
+            data-group-run-id={trace.groupRunId}
+            data-member-agent-id={trace.memberAgentId}
+            data-memory-id={trace.memoryId}
             data-runtime-trace-kind={trace.kind}
+            data-skill-id={trace.skillId}
             data-testid="agent-run-detail-memory-skill-trace"
+            data-workflow-node-id={trace.workflowNodeId}
             key={trace.key}
           >
             <div>
@@ -59,6 +76,19 @@ export function MemorySkillTraceInspector({
               {trace.count ? <span>{trace.count}</span> : null}
               {trace.sequence ? <span>#{trace.sequence}</span> : null}
             </div>
+            {trace.metadata.length ? (
+              <div
+                className="run-memory-skill-trace-context"
+                data-testid="agent-run-detail-memory-skill-trace-context"
+              >
+                {trace.metadata.map((item) => (
+                  <span data-trace-context={item.key} key={item.key}>
+                    <small>{item.label}</small>
+                    <code>{item.value}</code>
+                  </span>
+                ))}
+              </div>
+            ) : null}
             {trace.payload ? (
               <ExpandableRuntimeContent
                 content={trace.payload}
@@ -84,25 +114,62 @@ function memorySkillTraceFromEvent(event: PublicRunEvent): MemorySkillTrace | nu
   const memories = Array.isArray(payload.memories) ? payload.memories.map(objectRecord) : [];
   const sequence = Number.isFinite(event.sequence) ? String(event.sequence) : '';
   const status = normalizeTraceStatus(stringValue(payload.status) || stringValue((event as Record<string, unknown>).status));
-  const id = kind === 'memory'
-    ? stringValue(result.memory_id) || stringValue(memories[0]?.memory_id)
-    : stringValue(result.skill_id) || stringValue(payload.skill_id);
+  const memoryId = stringValue(result.memory_id) || stringValue(payload.memory_id) || stringValue(memories[0]?.memory_id);
+  const skillId = stringValue(result.skill_id) || stringValue(payload.skill_id);
+  const id = kind === 'memory' ? memoryId : skillId;
   const title = traceTitle(eventType, payload, result, memories);
   const detail = stringValue(event.detail) || traceDetail(eventType, payload, result, memories);
   const count = eventType === 'memory.retrieved' ? traceMemoryCount(payload, memories) : '';
+  const groupRunId = stringValue(payload.group_run_id) || stringValue(payload.run_group_id);
+  const memberAgentId = stringValue(payload.member_agent_id);
+  const workflowNodeId = stringValue(payload.workflow_node_id);
   return {
     count,
     detail,
     eventType,
+    groupRunId,
     id,
     key: stringValue(event.event_id) || `${eventType}-${sequence || title}-${id}`,
     kind,
+    memberAgentId,
+    metadata: memorySkillTraceMetadata(kind, payload, result, memories),
+    memoryId,
     payload: JSON.stringify(payload, null, 2),
     sequence,
+    skillId,
     status,
     title,
     tool: stringValue(payload.tool),
+    workflowNodeId,
   };
+}
+
+function memorySkillTraceMetadata(
+  kind: MemorySkillTrace['kind'],
+  payload: Record<string, unknown>,
+  result: Record<string, unknown>,
+  memories: Array<Record<string, unknown>>,
+): MemorySkillTraceMetadataItem[] {
+  const firstMemory = memories[0] || {};
+  const candidates = kind === 'memory'
+    ? [
+      ['memory', stringValue(result.memory_id) || stringValue(payload.memory_id) || stringValue(firstMemory.memory_id)],
+      ['kind', stringValue(result.kind) || stringValue(payload.memory_kind) || stringValue(firstMemory.kind)],
+      ['scope', stringValue(result.scope) || stringValue(payload.scope) || stringValue(firstMemory.scope)],
+      ['workflow', stringValue(payload.workflow_node_label) || stringValue(payload.workflow_node_id)],
+      ['member', stringValue(payload.member_agent_name) || stringValue(payload.member_agent_id)],
+      ['group', stringValue(payload.group_run_id) || stringValue(payload.run_group_id) || stringValue(payload.group_id)],
+    ]
+    : [
+      ['skill', stringValue(result.name) || stringValue(payload.skill_name) || stringValue(result.skill_id) || stringValue(payload.skill_id)],
+      ['source', stringValue(result.source_ref) || stringValue(result.source_type)],
+      ['workflow', stringValue(payload.workflow_node_label) || stringValue(payload.workflow_node_id)],
+      ['member', stringValue(payload.member_agent_name) || stringValue(payload.member_agent_id)],
+      ['group', stringValue(payload.group_run_id) || stringValue(payload.run_group_id) || stringValue(payload.group_id)],
+    ];
+  return candidates
+    .map(([label, value]) => ({ key: `${label}:${value}`, label, value }))
+    .filter((item) => Boolean(item.value));
 }
 
 function traceTitle(
