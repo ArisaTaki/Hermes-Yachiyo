@@ -147,7 +147,12 @@ function formatTimelinePayload(value: unknown): string {
   }
 }
 
+export function timelineEventIsSecret(event: Record<string, unknown>): boolean {
+  return String(event.sensitivity || '').trim() === 'secret';
+}
+
 export function timelineEventPayload(event: Record<string, unknown>): string {
+  if (timelineEventIsSecret(event)) return '';
   const inputPreview = event.input_preview;
   const result = event.result;
   if (inputPreview && result) {
@@ -169,6 +174,7 @@ export function timelineEventPayload(event: Record<string, unknown>): string {
 
 export function publicRunEventPayloadDetail(event: PublicRunEvent): string {
   const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
+  if (publicRunEventIsSecret(event)) return event.detail || event.title || '';
   return (
     event.detail
     || event.title
@@ -195,6 +201,10 @@ export function publicRunEventPayloadDetail(event: PublicRunEvent): string {
     || publicRunEventPayloadString(payload, 'result')
     || publicRunEventPayloadString(payload, 'error')
   );
+}
+
+function publicRunEventIsSecret(event: PublicRunEvent): boolean {
+  return String(event.sensitivity || '').trim() === 'secret';
 }
 
 export function runEventReplayToTimelineEvent(event: PublicRunEvent): Record<string, unknown> {

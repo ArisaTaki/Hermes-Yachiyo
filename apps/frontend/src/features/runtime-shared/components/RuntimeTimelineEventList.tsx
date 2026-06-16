@@ -55,13 +55,14 @@ export function RuntimeTimelineEventList({
         const eventSequence = defaultEventSequence(event);
         const eventId = defaultEventId(event);
         const eventRunId = defaultEventRunId(event);
-        const eventTitle = getEventTitle(event);
-        const detail = getEventDetail(event);
+        const eventIsSecret = defaultEventIsSecret(event);
+        const eventTitle = eventIsSecret ? defaultSecretEventTitle(event) : getEventTitle(event);
+        const detail = eventIsSecret ? '' : getEventDetail(event);
         if (variant === 'full') {
           const childRunId = getChildRunId(event);
           const childRunStatus = childRunId ? getChildRunStatus(childRunId, eventStatus) : '';
           const eventTone = getEventTone(event);
-          const payload = getEventPayload(event);
+          const payload = eventIsSecret ? '' : getEventPayload(event);
           const payloadRecord = runtimeEventPayloadRecord(event);
           const traceContext = runtimeEventTraceContext(event, payloadRecord);
           const eventMetadata = runtimeEventMetadata(
@@ -171,6 +172,10 @@ function defaultEventTitle(event: RuntimeTimelineEventRecord): string {
   return defaultString(event.title) || defaultEventName(event) || '运行事件';
 }
 
+function defaultSecretEventTitle(event: RuntimeTimelineEventRecord): string {
+  return defaultEventName(event) || '运行事件';
+}
+
 function defaultEventDetail(event: RuntimeTimelineEventRecord): string {
   return defaultString(event.detail);
 }
@@ -203,6 +208,10 @@ function defaultEventVisibility(event: RuntimeTimelineEventRecord): string {
 
 function defaultEventSensitivity(event: RuntimeTimelineEventRecord): string {
   return defaultString(event.sensitivity);
+}
+
+function defaultEventIsSecret(event: RuntimeTimelineEventRecord): boolean {
+  return defaultEventSensitivity(event) === 'secret';
 }
 
 function defaultEventSchemaVersion(event: RuntimeTimelineEventRecord): string {
