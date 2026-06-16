@@ -1,9 +1,4 @@
 import { useMemo } from 'react';
-import type { Edge, Node } from '@xyflow/react';
-import {
-  useEdgesState,
-  useNodesState,
-} from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -77,7 +72,6 @@ import {
 } from '../features/agent-studio/utils/runs';
 import {
   skippedWorkflowArtifactLabel,
-  starterNodes,
   validateWorkflowDraft,
   workflowRunArtifactForStep,
   workflowStepArtifacts,
@@ -101,12 +95,13 @@ export function AgentStudioView() {
   } = useAgentStudioRouteState();
   const {
     agentRunGoal, artifactPreview, busyAction, collapsedRunHistoryGroups, draft,
-    editingSkillFolderId, editingSkillFolderName, error, futureTasks, loading, memories,
-    modelDefaults, modelProfiles, newSkillFolderName, runDetailCache, runGroups,
+    editingSkillFolderId, editingSkillFolderName, edges, error, futureTasks, loading, memories,
+    modelDefaults, modelProfiles, newSkillFolderName, nodes, onEdgesChange, onNodesChange,
+    runDetailCache, runGroups,
     runKindFilter, runSearchQuery, runStatusFilter, runnables, runs, selectedSkillIds,
     setAgentRunGoal, setArtifactPreview, setBusyAction, setCollapsedRunHistoryGroups,
-    setDraft, setEditingSkillFolderId, setEditingSkillFolderName, setError, setFutureTasks,
-    setLoading, setMemories, setModelDefaults, setModelProfiles, setNewSkillFolderName,
+    setDraft, setEditingSkillFolderId, setEditingSkillFolderName, setEdges, setError, setFutureTasks,
+    setLoading, setMemories, setModelDefaults, setModelProfiles, setNewSkillFolderName, setNodes,
     setRunDetailCache, setRunGroups, setRunKindFilter, setRunSearchQuery, setRunStatusFilter,
     setRunnables, setRuns, setSelectedSkillIds, setSkillFolderDeleteModes, setSkillFolders,
     setSkillImportResults, setSkillInstallCommand, setSkillLibraryFilter,
@@ -119,8 +114,6 @@ export function AgentStudioView() {
     skillMountSearch, skillSources, skillTargetFolderId, skills, status, workflowDescription,
     workflowEnabled, workflowName, workflowRunGoal,
   } = useAgentStudioLocalState();
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(starterNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const busy = loading || Boolean(busyAction);
   const installingSkill = busyAction === '安装 Skill';
   const {

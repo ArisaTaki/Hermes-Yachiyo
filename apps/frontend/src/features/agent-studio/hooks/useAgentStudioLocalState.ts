@@ -1,4 +1,9 @@
 import { useState } from 'react';
+import type { Edge, Node } from '@xyflow/react';
+import {
+  useEdgesState,
+  useNodesState,
+} from '@xyflow/react';
 
 import type { ModelProfile, ModelProfileDefaults } from '../../../lib/modelProfiles';
 import type {
@@ -14,6 +19,7 @@ import type {
 } from '../types';
 import type { RunKindFilter, RunStatusFilter } from '../utils/runs';
 import type { SkillFolderFilter, SkillImportResult, SkillSourceFilter } from '../utils/skills';
+import { starterNodes } from '../utils/workflow';
 
 export const emptyAgentDraft: AgentDraft = {
   name: '',
@@ -82,6 +88,8 @@ export function useAgentStudioLocalState() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [busyAction, setBusyAction] = useState('');
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(starterNodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
 
   return {
     agentRunGoal,
@@ -91,6 +99,7 @@ export function useAgentStudioLocalState() {
     draft,
     editingSkillFolderId,
     editingSkillFolderName,
+    edges,
     error,
     futureTasks,
     loading,
@@ -98,6 +107,9 @@ export function useAgentStudioLocalState() {
     modelDefaults,
     modelProfiles,
     newSkillFolderName,
+    nodes,
+    onEdgesChange,
+    onNodesChange,
     runDetailCache,
     runGroups,
     runKindFilter,
@@ -113,6 +125,7 @@ export function useAgentStudioLocalState() {
     setDraft,
     setEditingSkillFolderId,
     setEditingSkillFolderName,
+    setEdges,
     setError,
     setFutureTasks,
     setLoading,
@@ -120,6 +133,7 @@ export function useAgentStudioLocalState() {
     setModelDefaults,
     setModelProfiles,
     setNewSkillFolderName,
+    setNodes,
     setRunDetailCache,
     setRunGroups,
     setRunKindFilter,

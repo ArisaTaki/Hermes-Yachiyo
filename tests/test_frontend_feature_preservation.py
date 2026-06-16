@@ -4225,11 +4225,15 @@ def test_agent_studio_exposes_runtime_memory_and_future_task_management() -> Non
             "const [memories, setMemories] = useState<MemorySpec[]>([]);",
             "const [futureTasks, setFutureTasks] = useState<FutureTaskSpec[]>([]);",
             "const [draft, setDraft] = useState<AgentDraft>(emptyAgentDraft);",
+            "const [nodes, setNodes, onNodesChange] = useNodesState<Node>(starterNodes);",
+            "const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);",
             "const [workflowName, setWorkflowName] = useState('New Workflow');",
             "const [runKindFilter, setRunKindFilter] = useState<RunKindFilter>('all');",
             "const [runStatusFilter, setRunStatusFilter] = useState<RunStatusFilter>('all');",
             "setMemories,",
             "setFutureTasks,",
+            "onNodesChange,",
+            "onEdgesChange,",
         ],
     )
     _assert_contains(
