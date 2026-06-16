@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import subprocess
 from typing import Any
 from uuid import uuid4
+
+from packages.security import redact_api_error_text
 
 from apps.shell.agent.runtime.agent_chat_entrypoints import (
     build_runtime_agent_chat_entrypoint_setup,
@@ -59,7 +62,11 @@ from apps.shell.agent.runtime.run_services import build_runtime_run_layer_setup
 from apps.shell.agent.runtime.runnable_services import build_runtime_runnable_services
 from apps.shell.agent.runtime.runnables import RuntimeRunnableResolver
 from apps.shell.agent.runtime.serialization import json_dump_sorted, json_load, slug
+from apps.shell.agent.runtime.seed_templates import RuntimeSeedTemplateService
 from apps.shell.agent.runtime.shutdown import RuntimeShutdownService
+from apps.shell.agent.runtime.skill_import_service import RuntimeSkillImportService
+from apps.shell.agent.runtime.skill_install_service import RuntimeSkillInstallService
+from apps.shell.agent.runtime.skill_sync_service import RuntimeSkillSyncService
 from apps.shell.agent.runtime.tooling import build_runtime_tooling_stack
 from apps.shell.agent.runtime.workflow_approval_execution import RuntimeWorkflowApprovalExecutionService
 from apps.shell.agent.runtime.workflow_runs import RuntimeWorkflowRunAsyncCoordinator, RuntimeWorkflowRunCoordinator
@@ -68,6 +75,7 @@ from apps.shell.agent.runtime.workflow_services import (
     build_runtime_workflow_planning_services,
     build_runtime_workflow_transition_services,
 )
+from apps.shell.agent.runtime.workspace_policy import RuntimeWorkspacePolicyService
 from apps.shell.agent.tools import cancel_terminal_process_groups
 
 
@@ -744,20 +752,19 @@ class RuntimeInstallationFacadeMixin:
         )
 
     def _install_runtime_post_db_support_services(self, *, seed_templates: bool) -> None:
-        legacy = _legacy_agent_runtime_module()
-        self.workspace_policy_service = legacy.RuntimeWorkspacePolicyService(
+        self.workspace_policy_service = RuntimeWorkspacePolicyService(
             conn=self._conn,
             agent_workspaces_dir=self.agent_workspaces_dir,
             trusted_workspaces=self.trusted_workspaces,
             compile_tool_policy=self._compile_tool_policy,
             compile_workspace_policy=self._compile_workspace_policy,
             default_workspace_policy=self._default_workspace_policy,
-            json_load=legacy._json_load,
-            json_dump=legacy._json_dump,
-            now=legacy._now,
+            json_load=json_load,
+            json_dump=json_dump_sorted,
+            now=utc_now_iso,
         )
         self._migrate_agent_workspace_policies()
-        self.seed_template_service = legacy.RuntimeSeedTemplateService(
+        self.seed_template_service = RuntimeSeedTemplateService(
             conn=self._conn,
             create_agent=self.create_agent,
             create_workflow=self.create_workflow,
@@ -765,7 +772,7 @@ class RuntimeInstallationFacadeMixin:
             default_workspace_policy=self._default_workspace_policy,
             has_studio_deletion=self._has_studio_deletion,
         )
-        self.skill_import_service = legacy.RuntimeSkillImportService(
+        self.skill_import_service = RuntimeSkillImportService(
             conn=self._conn,
             source_resolver=self.skill_import_sources,
             preparer=self.skill_import_preparer,
@@ -774,9 +781,9 @@ class RuntimeInstallationFacadeMixin:
             skill_deletion_key=self._skill_deletion_key,
             clear_studio_deletion=self._clear_studio_deletion,
             get_skill=self.get_skill,
-            error_type=legacy.AgentRuntimeError,
+            error_type=AgentRuntimeError,
         )
-        self.skill_sync_service = legacy.RuntimeSkillSyncService(
+        self.skill_sync_service = RuntimeSkillSyncService(
             conn=self._conn,
             skill_sync=self.skill_sync,
             normalize_skill_folder_id=self._normalize_skill_folder_id,
@@ -784,20 +791,20 @@ class RuntimeInstallationFacadeMixin:
             has_studio_deletion=self._has_studio_deletion,
             clear_studio_deletion=self._clear_studio_deletion,
             import_skill_root=self._import_skill_root,
-            now=legacy._now,
-            redact_error=legacy.redact_api_error_text,
-            error_type=legacy.AgentRuntimeError,
+            now=utc_now_iso,
+            redact_error=redact_api_error_text,
+            error_type=AgentRuntimeError,
         )
-        self.skill_install_service = legacy.RuntimeSkillInstallService(
+        self.skill_install_service = RuntimeSkillInstallService(
             validator=self.skill_install_validator,
             skill_installs_dir=self.skill_installs_dir,
             skill_installs_native_home=self.skill_installs_native_home,
             normalize_skill_folder_id=self._normalize_skill_folder_id,
             sync_installed_skills=self.sync_installed_skills,
-            run_command=lambda *args, **kwargs: legacy.subprocess.run(*args, **kwargs),
-            now=legacy._now,
-            redact_secrets=legacy.redact_secrets,
-            error_type=legacy.AgentRuntimeError,
+            run_command=subprocess.run,
+            now=utc_now_iso,
+            redact_secrets=redact_secrets,
+            error_type=AgentRuntimeError,
         )
         if seed_templates:
             self._seed_templates()

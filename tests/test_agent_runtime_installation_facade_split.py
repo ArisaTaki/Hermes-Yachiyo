@@ -1010,6 +1010,13 @@ def test_installation_facade_installs_post_db_support_services(monkeypatch) -> N
         def __init__(self, **kwargs) -> None:
             self.kwargs = kwargs
 
+    class ForbiddenLegacyCollaborator:
+        def __init__(self, **_kwargs) -> None:
+            raise AssertionError("post-db support should use split installation classes")
+
+    def fake_run_command(*_args, **_kwargs):
+        return None
+
     for name in (
         "RuntimeWorkspacePolicyService",
         "RuntimeSeedTemplateService",
@@ -1017,7 +1024,9 @@ def test_installation_facade_installs_post_db_support_services(monkeypatch) -> N
         "RuntimeSkillSyncService",
         "RuntimeSkillInstallService",
     ):
-        monkeypatch.setattr(agent_runtime, name, CapturedCollaborator)
+        monkeypatch.setattr(agent_runtime, name, ForbiddenLegacyCollaborator)
+        monkeypatch.setattr(installation_facade_mod, name, CapturedCollaborator)
+    monkeypatch.setattr(installation_facade_mod.subprocess, "run", fake_run_command)
 
     calls: list[str] = []
     engine = object.__new__(agent_runtime.NativeRunEngine)
@@ -1051,12 +1060,23 @@ def test_installation_facade_installs_post_db_support_services(monkeypatch) -> N
 
     assert isinstance(engine.workspace_policy_service, CapturedCollaborator)
     assert engine.workspace_policy_service.kwargs["trusted_workspaces"] == "trusted-workspaces"
+    assert engine.workspace_policy_service.kwargs["json_load"] is installation_facade_mod.json_load
+    assert engine.workspace_policy_service.kwargs["json_dump"] is installation_facade_mod.json_dump_sorted
+    assert engine.workspace_policy_service.kwargs["now"] is installation_facade_mod.utc_now_iso
     assert isinstance(engine.seed_template_service, CapturedCollaborator)
     assert engine.seed_template_service.kwargs["create_agent"] == "create-agent"
     assert isinstance(engine.skill_import_service, CapturedCollaborator)
     assert engine.skill_import_service.kwargs["source_resolver"] == "skill-import-sources"
+    assert engine.skill_import_service.kwargs["error_type"] is agent_runtime.AgentRuntimeError
     assert isinstance(engine.skill_sync_service, CapturedCollaborator)
     assert engine.skill_sync_service.kwargs["skill_sync"] == "skill-sync"
+    assert engine.skill_sync_service.kwargs["now"] is installation_facade_mod.utc_now_iso
+    assert engine.skill_sync_service.kwargs["redact_error"] is installation_facade_mod.redact_api_error_text
+    assert engine.skill_sync_service.kwargs["error_type"] is agent_runtime.AgentRuntimeError
     assert isinstance(engine.skill_install_service, CapturedCollaborator)
     assert engine.skill_install_service.kwargs["validator"] == "skill-install-validator"
+    assert engine.skill_install_service.kwargs["run_command"] is fake_run_command
+    assert engine.skill_install_service.kwargs["now"] is installation_facade_mod.utc_now_iso
+    assert engine.skill_install_service.kwargs["redact_secrets"] is installation_facade_mod.redact_secrets
+    assert engine.skill_install_service.kwargs["error_type"] is agent_runtime.AgentRuntimeError
     assert calls == ["migrate", "seed"]
