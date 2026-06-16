@@ -19,13 +19,13 @@ export function launcherAgentTaskFromPublicTasks(
 ): AgentTaskSnapshot | null {
   const snapshots = Array.isArray(tasks) ? tasks.filter(Boolean) : [];
   if (!snapshots.length) return fallback;
+  const preferredActiveTask = launcherPreferredActiveTask(snapshots);
+  if (preferredActiveTask) return preferredActiveTask;
   const fallbackTaskId = String(fallback?.task_id || '').trim();
   const matchingFallbackTask = fallbackTaskId
     ? snapshots.find((task) => String(task.task_id || '').trim() === fallbackTaskId)
     : null;
   if (matchingFallbackTask) return matchingFallbackTask;
-  const activeTask = snapshots.find(launcherAgentTaskIsActive);
-  if (activeTask) return activeTask;
   const fallbackConversationId = String(fallback?.conversation_id || '').trim();
   const matchingConversationTask = fallbackConversationId
     ? snapshots.find((task) => String(task.conversation_id || '').trim() === fallbackConversationId)
@@ -37,6 +37,27 @@ export function launcherAgentTaskIsActive(task: AgentTaskSnapshot | null | undef
   if (!task) return false;
   if (task.needs_user_action || task.pending_approvals?.length) return true;
   return task.status === 'queued' || task.status === 'running' || task.status === 'waiting_approval';
+}
+
+export function launcherPreferredActiveTask(tasks: AgentTaskSnapshot[]) {
+  const activeTasks = tasks.filter(launcherAgentTaskIsActive);
+  if (!activeTasks.length) return null;
+  return [...activeTasks].sort((left, right) => (
+    launcherAgentTaskPriority(left) - launcherAgentTaskPriority(right)
+      || launcherAgentTaskUpdatedAt(right) - launcherAgentTaskUpdatedAt(left)
+  ))[0] || null;
+}
+
+function launcherAgentTaskPriority(task: AgentTaskSnapshot) {
+  if (task.needs_user_action || task.pending_approvals?.length || task.status === 'waiting_approval') return 0;
+  if (task.status === 'running') return 1;
+  if (task.status === 'queued') return 2;
+  return 3;
+}
+
+function launcherAgentTaskUpdatedAt(task: AgentTaskSnapshot) {
+  const timestamp = Date.parse(String(task.updated_at || task.created_at || ''));
+  return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
 export function launcherTaskConversationId(mode: LauncherTaskMode, data: LauncherTaskPayloadContext) {

@@ -216,9 +216,15 @@ def test_launcher_views_expose_session_summary_e2e_selectors() -> None:
         [
             "export function launcherAgentTaskFromPublicTasks",
             "export function launcherAgentTaskIsActive",
+            "export function launcherPreferredActiveTask",
             "export function launcherTaskConversationId",
             "export function launcherTaskTitle",
-            "const activeTask = snapshots.find(launcherAgentTaskIsActive);",
+            "const preferredActiveTask = launcherPreferredActiveTask(snapshots);",
+            "if (preferredActiveTask) return preferredActiveTask;",
+            "task.status === 'waiting_approval') return 0;",
+            "task.status === 'running') return 1;",
+            "task.status === 'queued') return 2;",
+            "launcherAgentTaskUpdatedAt(right) - launcherAgentTaskUpdatedAt(left)",
             "return task.status === 'queued' || task.status === 'running' || task.status === 'waiting_approval';",
         ],
     )
