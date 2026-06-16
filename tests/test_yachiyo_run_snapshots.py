@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from apps.shell.yachiyo_agent.run_snapshots import (
     RunSnapshotProjector,
     agent_task_snapshot_from_payload,
@@ -509,6 +511,35 @@ def test_group_run_snapshot_reuses_shared_run_projection_for_children_artifacts_
     assert group_run.pending_approvals[0].open_in_studio_url == "#/agents?run_id=group-run-1&group_run=group-run-1"
 
 
+def test_legacy_group_run_payload_collects_child_group_events_for_replay() -> None:
+    runtime = _FakeLegacyGroupRuntime()
+    payload = LegacyRunPayloadProjector().group_run_from_legacy_run_group(
+        {
+            "run_group_id": "group-run-legacy",
+            "title": "Team review",
+            "status": "running",
+            "summary": "Compare options",
+            "child_run_ids": ["run-1", "run-2"],
+        },
+        runtime,
+    )
+    group_run = group_run_snapshot_from_payload(payload)
+
+    assert [event["event_type"] for event in payload["events"]] == [
+        "group.member.started",
+        "group.member.completed",
+    ]
+    assert [event.event_type for event in group_run.events[:3]] == [
+        "group.run.started",
+        "group.member.started",
+        "group.member.completed",
+    ]
+    assert group_run.events[1].run_id == "run-1"
+    assert group_run.events[1].payload["member_agent_id"] == "agent-1"
+    assert group_run.events[2].run_id == "run-2"
+    assert runtime.event_calls == ["run-1", "run-2"]
+
+
 def test_group_run_snapshot_falls_back_to_legacy_event_keys_when_events_is_empty() -> None:
     group_run = group_run_snapshot_from_payload(
         {
@@ -615,3 +646,51 @@ def test_group_run_snapshot_adds_terminal_lifecycle_event_from_status() -> None:
     ]
     assert group_run.events[-1].payload["status"] == "completed"
     assert group_run.events[-1].payload["child_run_ids"] == ["run-1"]
+
+
+class _FakeLegacyGroupRuntime:
+    def __init__(self) -> None:
+        self.event_calls: list[str] = []
+        self.runs = {
+            "run-1": {
+                "run_id": "run-1",
+                "runnable_id": "agent-1",
+                "runnable_name": "Planner",
+                "status": "running",
+                "timeline": [{"event": "agent.run.started"}],
+            },
+            "run-2": {
+                "run_id": "run-2",
+                "runnable_id": "agent-2",
+                "runnable_name": "Reviewer",
+                "status": "completed",
+                "timeline": [{"event": "group.member.completed"}],
+            },
+        }
+
+    def get_run(self, run_id: str) -> dict[str, Any]:
+        return dict(self.runs[run_id])
+
+    def list_run_events(self, run_id: str) -> dict[str, Any]:
+        self.event_calls.append(run_id)
+        if run_id == "run-1":
+            return {
+                "events": [
+                    {
+                        "event_type": "group.member.started",
+                        "payload": {"member_agent_id": "agent-1"},
+                    },
+                    {
+                        "event_type": "agent.tool.call",
+                        "payload": {"tool": "workspace.read"},
+                    },
+                ]
+            }
+        return {
+            "events": [
+                {
+                    "event_type": "group.member.completed",
+                    "payload": {"member_agent_id": "agent-2"},
+                }
+            ]
+        }

@@ -82,6 +82,10 @@ class LegacyRunPayloadProjector:
     ) -> dict[str, Any]:
         child_runs = self.child_runs_for_run_group(run_group, runtime)
         run_group_id = str(run_group.get("run_group_id") or run_group.get("group_run_id") or "")
+        events = [
+            *self.run_group_events(run_group),
+            *self.group_events_from_child_runs(child_runs, runtime),
+        ]
         return {
             "run_group_id": run_group_id,
             "group_run_id": run_group_id,
@@ -89,12 +93,7 @@ class LegacyRunPayloadProjector:
             "title": run_group.get("title") or "Run group",
             "status": run_group.get("status") or "unknown",
             "objective": run_group.get("summary") or run_group.get("title") or "",
-            "events": (
-                run_group.get("events")
-                or run_group.get("run_events")
-                or run_group.get("timeline")
-                or []
-            ),
+            "events": events,
             "runs": child_runs,
             "child_run_ids": run_group.get("child_run_ids") or [],
             "shared_artifacts": self.group_artifacts(child_runs),
@@ -108,6 +107,40 @@ class LegacyRunPayloadProjector:
             "updated_at": run_group.get("updated_at") or "",
         }
 
+    def run_group_events(self, run_group: dict[str, Any]) -> list[dict[str, Any]]:
+        return _event_list_from_payload(run_group, ("events", "run_events", "timeline"))
+
+    def group_events_from_child_runs(
+        self,
+        runs: list[dict[str, Any]],
+        runtime: Any,
+    ) -> list[dict[str, Any]]:
+        events: list[dict[str, Any]] = []
+        for run in runs:
+            run_id = str(run.get("run_id") or "").strip()
+            for event in self.events_for_run(run, runtime):
+                event_type = _event_type(event)
+                if not event_type.startswith("group."):
+                    continue
+                item = dict(event)
+                if run_id and not item.get("run_id"):
+                    item["run_id"] = run_id
+                events.append(item)
+        return events
+
+    def events_for_run(self, run: dict[str, Any], runtime: Any) -> list[dict[str, Any]]:
+        run_id = str(run.get("run_id") or "").strip()
+        list_run_events = getattr(runtime, "list_run_events", None)
+        if run_id and callable(list_run_events):
+            try:
+                payload = list_run_events(run_id)
+            except Exception:
+                payload = {}
+            events = _event_list_from_payload(payload, ("events",))
+            if events:
+                return events
+        return _event_list_from_payload(run, ("events", "run_events", "recent_events", "timeline"))
+
     def child_runs_for_run_group(
         self,
         run_group: dict[str, Any],
@@ -120,3 +153,18 @@ class LegacyRunPayloadProjector:
             except KeyError:
                 continue
         return child_runs
+
+
+def _event_list_from_payload(
+    payload: dict[str, Any],
+    keys: tuple[str, ...],
+) -> list[dict[str, Any]]:
+    for key in keys:
+        value = payload.get(key)
+        if value and isinstance(value, list):
+            return [dict(item) for item in value if isinstance(item, dict)]
+    return []
+
+
+def _event_type(event: dict[str, Any]) -> str:
+    return str(event.get("event_type") or event.get("event") or "").strip()
