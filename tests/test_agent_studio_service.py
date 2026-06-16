@@ -601,6 +601,53 @@ def test_agent_studio_service_maps_group_run_workflow_run_timeline_and_events() 
     assert ("list_run_timelines", 10) in port.calls
 
 
+def test_agent_studio_service_paginates_group_run_events_after_child_sequence_renumbering() -> None:
+    class SequencedGroupRunPort(_FakeStudioPort):
+        def get_group_run(self, group_run_id: str) -> dict[str, Any]:
+            return _group_run_payload(group_run_id=group_run_id) | {
+                "events": [
+                    {
+                        "event_type": "group.member.started",
+                        "run_id": "child-run-1",
+                        "sequence": 7,
+                        "payload": {"member_agent_id": "agent-1"},
+                    },
+                    {
+                        "event_type": "group.member.completed",
+                        "run_id": "child-run-2",
+                        "sequence": 3,
+                        "payload": {"member_agent_id": "agent-2"},
+                    },
+                ],
+            }
+
+    service = AgentStudioService(SequencedGroupRunPort())
+
+    first_child_page = service.get_group_run_event_page(
+        "group-run-1",
+        after_sequence=1,
+        limit=1,
+    )
+    second_child_page = service.get_group_run_event_page(
+        "group-run-1",
+        after_sequence=2,
+        limit=1,
+    )
+
+    assert first_child_page.events[0].sequence == 2
+    assert first_child_page.events[0].event_type == "group.member.started"
+    assert first_child_page.events[0].payload["source_run_id"] == "child-run-1"
+    assert first_child_page.events[0].payload["source_sequence"] == 7
+    assert first_child_page.next_after_sequence == 2
+    assert first_child_page.has_more is True
+    assert second_child_page.events[0].sequence == 3
+    assert second_child_page.events[0].event_type == "group.member.completed"
+    assert second_child_page.events[0].payload["source_run_id"] == "child-run-2"
+    assert second_child_page.events[0].payload["source_sequence"] == 3
+    assert second_child_page.next_after_sequence == 3
+    assert second_child_page.has_more is False
+
+
 def test_agent_studio_service_run_actions_return_public_timeline_snapshots() -> None:
     port = _FakeStudioPort()
     service = AgentStudioService(port)

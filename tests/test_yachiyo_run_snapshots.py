@@ -534,10 +534,44 @@ def test_legacy_group_run_payload_collects_child_group_events_for_replay() -> No
         "group.member.started",
         "group.member.completed",
     ]
+    assert [event.sequence for event in group_run.events[:3]] == [1, 2, 3]
     assert group_run.events[1].run_id == "run-1"
     assert group_run.events[1].payload["member_agent_id"] == "agent-1"
+    assert group_run.events[1].payload["source_run_id"] == "run-1"
+    assert group_run.events[1].payload["source_sequence"] == 7
     assert group_run.events[2].run_id == "run-2"
+    assert group_run.events[2].payload["source_run_id"] == "run-2"
+    assert group_run.events[2].payload["source_sequence"] == 3
     assert runtime.event_calls == ["run-1", "run-2"]
+
+
+def test_group_run_snapshot_renumbers_child_run_events_for_group_replay() -> None:
+    group_run = group_run_snapshot_from_payload(
+        {
+            "group_run_id": "group-run-1",
+            "status": "running",
+            "events": [
+                {
+                    "event_type": "group.run.started",
+                    "run_id": "child-run-1",
+                    "sequence": 9,
+                    "payload": {"run_group_id": "group-run-1"},
+                },
+                {
+                    "event_type": "group.member.completed",
+                    "run_id": "child-run-2",
+                    "sequence": 1,
+                    "payload": {"member_agent_id": "agent-2"},
+                },
+            ],
+        }
+    )
+
+    assert [event.sequence for event in group_run.events] == [1, 2]
+    assert group_run.events[0].payload["source_run_id"] == "child-run-1"
+    assert group_run.events[0].payload["source_sequence"] == 9
+    assert group_run.events[1].payload["source_run_id"] == "child-run-2"
+    assert group_run.events[1].payload["source_sequence"] == 1
 
 
 def test_group_run_snapshot_falls_back_to_legacy_event_keys_when_events_is_empty() -> None:
@@ -678,6 +712,7 @@ class _FakeLegacyGroupRuntime:
                 "events": [
                     {
                         "event_type": "group.member.started",
+                        "sequence": 7,
                         "payload": {"member_agent_id": "agent-1"},
                     },
                     {
@@ -690,6 +725,7 @@ class _FakeLegacyGroupRuntime:
             "events": [
                 {
                     "event_type": "group.member.completed",
+                    "sequence": 3,
                     "payload": {"member_agent_id": "agent-2"},
                 }
             ]
