@@ -145,11 +145,18 @@ export function RunDetailPanel({
   workflowStepKindLabel: (kind: RunDetailWorkflowStepRef['kind']) => string;
   workflowStepSummary: (step: RunDetailWorkflowStepRef, childRun: RunSpec | null) => string;
 }) {
+  const timelineMemoryTraces = selectedPublicRunTimeline?.memory_traces || [];
+  const timelineSkillTraces = selectedPublicRunTimeline?.skill_traces || [];
+  const hasTimelineMemorySkillTraces = Boolean(timelineMemoryTraces.length || timelineSkillTraces.length);
   const memorySkillTraceEvents = selectedRunReplayEvents.length
     ? selectedRunReplayEvents
+    : hasTimelineMemorySkillTraces
+      ? []
     : selectedPublicRunTimeline?.events || [];
   const memorySkillTraceSource = selectedRunReplayEvents.length
-    ? 'RunEvent replay trace facts · Memory / Skill'
+    ? hasTimelineMemorySkillTraces
+      ? 'RunTimelineSnapshot + RunEvent replay trace facts · Memory / Skill'
+      : 'RunEvent replay trace facts · Memory / Skill'
     : 'RunTimelineSnapshot trace facts · Memory / Skill';
   const replayToolCalls = selectedRunReplayEvents.length
     ? toolCallsFromRunEventReplay(selectedRunReplayEvents)
@@ -419,6 +426,8 @@ export function RunDetailPanel({
           {selectedPublicRunTimeline || selectedRunReplayEvents.length ? (
             <MemorySkillTraceInspector
               events={memorySkillTraceEvents}
+              memoryTraces={timelineMemoryTraces}
+              skillTraces={timelineSkillTraces}
               sourceLabel={memorySkillTraceSource}
             />
           ) : null}

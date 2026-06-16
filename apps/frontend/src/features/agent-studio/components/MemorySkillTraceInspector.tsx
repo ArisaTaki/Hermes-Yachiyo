@@ -1,5 +1,5 @@
 import { ExpandableRuntimeContent } from '../../runtime-shared/components/ExpandableRuntimeContent';
-import type { PublicRunEvent } from '../../yachiyo-studio/types';
+import type { MemoryTraceSnapshot, PublicRunEvent, SkillTraceSnapshot } from '../../yachiyo-studio/types';
 
 type MemorySkillTrace = {
   count: string;
@@ -29,14 +29,24 @@ type MemorySkillTraceMetadataItem = {
 
 type MemorySkillTraceInspectorProps = {
   events?: PublicRunEvent[];
+  memoryTraces?: MemoryTraceSnapshot[];
+  skillTraces?: SkillTraceSnapshot[];
   sourceLabel?: string;
 };
 
 export function MemorySkillTraceInspector({
   events = [],
+  memoryTraces = [],
+  skillTraces = [],
   sourceLabel = 'Memory 检索、写入和 Skill 调度的 Runtime 事实',
 }: MemorySkillTraceInspectorProps) {
-  const traces = events.map(memorySkillTraceFromEvent).filter((trace): trace is MemorySkillTrace => Boolean(trace));
+  const traces = mergeMemorySkillTraces(
+    [
+      ...memoryTraces.map(memorySkillTraceFromMemorySnapshot),
+      ...skillTraces.map(memorySkillTraceFromSkillSnapshot),
+    ],
+    events.map(memorySkillTraceFromEvent).filter((trace): trace is MemorySkillTrace => Boolean(trace)),
+  );
   return (
     <details
       className="run-detail-block run-detail-fold run-memory-skill-traces"
@@ -104,6 +114,64 @@ export function MemorySkillTraceInspector({
   );
 }
 
+function mergeMemorySkillTraces(
+  snapshotTraces: MemorySkillTrace[],
+  eventTraces: MemorySkillTrace[],
+): MemorySkillTrace[] {
+  const byKey = new Map<string, MemorySkillTrace>();
+  snapshotTraces.forEach((trace) => byKey.set(trace.key, trace));
+  eventTraces.forEach((trace) => {
+    if (!byKey.has(trace.key)) byKey.set(trace.key, trace);
+  });
+  return Array.from(byKey.values());
+}
+
+function memorySkillTraceFromMemorySnapshot(trace: MemoryTraceSnapshot): MemorySkillTrace {
+  const sequence = Number.isFinite(trace.sequence) ? String(trace.sequence) : '';
+  return {
+    count: trace.count ? `${trace.count} memories` : '',
+    detail: trace.detail || '',
+    eventType: trace.event_type,
+    groupRunId: trace.group_run_id || '',
+    id: trace.memory_id || '',
+    key: trace.trace_id,
+    kind: 'memory',
+    memberAgentId: trace.source_runnable_id || '',
+    metadata: memorySkillTraceMetadataFromMemorySnapshot(trace),
+    memoryId: trace.memory_id || '',
+    payload: formatTracePayload(trace.payload_preview),
+    sequence,
+    skillId: '',
+    status: normalizeTraceStatus(trace.status || ''),
+    title: trace.title,
+    tool: '',
+    workflowNodeId: trace.workflow_node_id || '',
+  };
+}
+
+function memorySkillTraceFromSkillSnapshot(trace: SkillTraceSnapshot): MemorySkillTrace {
+  const sequence = Number.isFinite(trace.sequence) ? String(trace.sequence) : '';
+  return {
+    count: '',
+    detail: trace.detail || '',
+    eventType: trace.event_type,
+    groupRunId: trace.group_run_id || '',
+    id: trace.skill_id || '',
+    key: trace.trace_id,
+    kind: 'skill',
+    memberAgentId: trace.source_runnable_id || '',
+    metadata: memorySkillTraceMetadataFromSkillSnapshot(trace),
+    memoryId: '',
+    payload: formatTracePayload(trace.payload_preview),
+    sequence,
+    skillId: trace.skill_id || '',
+    status: normalizeTraceStatus(trace.status || ''),
+    title: trace.title,
+    tool: trace.tool_name || '',
+    workflowNodeId: trace.workflow_node_id || '',
+  };
+}
+
 function memorySkillTraceFromEvent(event: PublicRunEvent): MemorySkillTrace | null {
   const eventType = String(event.event_type || '').trim();
   const kind = eventType.startsWith('memory.') ? 'memory' : eventType.startsWith('skill.') ? 'skill' : null;
@@ -144,6 +212,27 @@ function memorySkillTraceFromEvent(event: PublicRunEvent): MemorySkillTrace | nu
   };
 }
 
+function memorySkillTraceMetadataFromMemorySnapshot(trace: MemoryTraceSnapshot): MemorySkillTraceMetadataItem[] {
+  return traceMetadataItems([
+    ['memory', trace.memory_id || ''],
+    ['kind', trace.memory_kind || ''],
+    ['scope', trace.memory_scope || ''],
+    ['workflow', trace.workflow_node_label || trace.workflow_node_id || ''],
+    ['member', trace.source_runnable_name || trace.source_runnable_id || ''],
+    ['group', trace.group_run_id || trace.group_id || ''],
+  ]);
+}
+
+function memorySkillTraceMetadataFromSkillSnapshot(trace: SkillTraceSnapshot): MemorySkillTraceMetadataItem[] {
+  return traceMetadataItems([
+    ['skill', trace.skill_name || trace.skill_id || ''],
+    ['source', trace.source_ref || trace.source_type || ''],
+    ['workflow', trace.workflow_node_label || trace.workflow_node_id || ''],
+    ['member', trace.source_runnable_name || trace.source_runnable_id || ''],
+    ['group', trace.group_run_id || trace.group_id || ''],
+  ]);
+}
+
 function memorySkillTraceMetadata(
   kind: MemorySkillTrace['kind'],
   payload: Record<string, unknown>,
@@ -167,6 +256,10 @@ function memorySkillTraceMetadata(
       ['member', stringValue(payload.member_agent_name) || stringValue(payload.member_agent_id)],
       ['group', stringValue(payload.group_run_id) || stringValue(payload.run_group_id) || stringValue(payload.group_id)],
     ];
+  return traceMetadataItems(candidates);
+}
+
+function traceMetadataItems(candidates: string[][]): MemorySkillTraceMetadataItem[] {
   return candidates
     .map(([label, value]) => ({ key: `${label}:${value}`, label, value }))
     .filter((item) => Boolean(item.value));
@@ -250,6 +343,11 @@ function objectRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
+}
+
+function formatTracePayload(value: Record<string, unknown> | undefined): string {
+  if (!value || !Object.keys(value).length) return '';
+  return JSON.stringify(value, null, 2);
 }
 
 function stringValue(value: unknown): string {
