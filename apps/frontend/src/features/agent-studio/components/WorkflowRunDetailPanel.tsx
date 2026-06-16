@@ -1,7 +1,8 @@
-import type { YachiyoRunTimelineSnapshot } from '../../yachiyo-studio/types';
+import type { RunTimelineChildSnapshot, YachiyoRunTimelineSnapshot } from '../../yachiyo-studio/types';
 import type { RunSpec } from '../types';
 
 type WorkflowRunDetailPanelProps = {
+  onOpenRunDetail: (runId: string) => void;
   runStatusLabel: (status: string) => string;
   runStatusTone: (status: string) => string;
   selectedPublicRunTimeline: YachiyoRunTimelineSnapshot | null;
@@ -9,6 +10,7 @@ type WorkflowRunDetailPanelProps = {
 };
 
 export function WorkflowRunDetailPanel({
+  onOpenRunDetail,
   runStatusLabel,
   runStatusTone,
   selectedPublicRunTimeline,
@@ -26,6 +28,7 @@ export function WorkflowRunDetailPanel({
     ),
   );
   const publicSnapshotName = workflowRunSnapshotActive ? 'WorkflowRunSnapshot' : 'RunTimelineSnapshot';
+  const childSnapshots = selectedPublicRunTimeline.children || [];
 
   return (
     <section
@@ -55,6 +58,42 @@ export function WorkflowRunDetailPanel({
         <span>artifacts {selectedPublicRunTimeline.artifacts?.length || 0}</span>
         <span>children {selectedPublicRunTimeline.children?.length || 0}</span>
       </div>
+      {childSnapshots.length ? (
+        <div className="run-group-overview-children run-public-child-list" data-testid="agent-run-detail-public-children">
+          {childSnapshots.map((child) => (
+            <button
+              type="button"
+              data-group-run-id={child.group_run_id || child.run_group_id || ''}
+              data-run-id={child.run_id}
+              data-testid="agent-run-detail-public-child-run"
+              data-workflow-node-id={child.workflow_node_id || ''}
+              key={child.run_id}
+              onClick={() => onOpenRunDetail(child.run_id)}
+            >
+              <span>{publicChildRunTitle(child)}</span>
+              <small>{publicChildRunMeta(child, runStatusLabel(child.status || 'unknown'))}</small>
+            </button>
+          ))}
+        </div>
+      ) : null}
     </section>
   );
+}
+
+function publicChildRunTitle(child: RunTimelineChildSnapshot): string {
+  return child.title || child.agent_id || child.workflow_id || child.run_id;
+}
+
+function publicChildRunMeta(child: RunTimelineChildSnapshot, statusLabel: string): string {
+  const groupRunId = child.group_run_id || child.run_group_id || '';
+  return [
+    statusLabel,
+    child.kind,
+    child.agent_id ? `agent ${child.agent_id}` : '',
+    child.workflow_id ? `workflow ${child.workflow_id}` : '',
+    child.workflow_run_id ? `workflow run ${child.workflow_run_id}` : '',
+    child.workflow_node_label || child.workflow_node_id ? `node ${child.workflow_node_label || child.workflow_node_id}` : '',
+    groupRunId ? `group run ${groupRunId}` : '',
+    child.parent_run_id ? `parent ${child.parent_run_id}` : '',
+  ].filter(Boolean).join(' · ');
 }

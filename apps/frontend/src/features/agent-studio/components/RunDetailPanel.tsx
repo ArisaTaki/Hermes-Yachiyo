@@ -432,6 +432,7 @@ export function RunDetailPanel({
             selectedRunApproval={selectedRunApproval}
           />
           <WorkflowRunDetailPanel
+            onOpenRunDetail={onOpenRunDetail}
             runStatusLabel={runStatusLabel}
             runStatusTone={runStatusTone}
             selectedPublicRunTimeline={selectedPublicRunTimeline}

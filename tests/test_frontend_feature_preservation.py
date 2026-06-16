@@ -1970,6 +1970,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
         "apps/frontend/src/features/agent-studio/components/RunDetailPanel.tsx",
         [
             "WorkflowRunDetailPanel",
+            "onOpenRunDetail={onOpenRunDetail}",
             "selectedPublicRunTimeline={selectedPublicRunTimeline}",
             "selectedRun={selectedRun}",
         ],
@@ -1979,15 +1980,22 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
         [
             "export function WorkflowRunDetailPanel",
             'data-testid="agent-run-detail-public-timeline"',
+            'data-testid="agent-run-detail-public-children"',
+            'data-testid="agent-run-detail-public-child-run"',
             "data-public-snapshot-kind={publicSnapshotName}",
             "data-workflow-id={selectedPublicRunTimeline.workflow_id || ''}",
+            "data-workflow-node-id={child.workflow_node_id || ''}",
+            "data-group-run-id={child.group_run_id || child.run_group_id || ''}",
             "Public Runtime Snapshot",
             "const publicSnapshotName = workflowRunSnapshotActive ? 'WorkflowRunSnapshot' : 'RunTimelineSnapshot';",
+            "const childSnapshots = selectedPublicRunTimeline.children || [];",
             "{publicSnapshotName} · Approval · Artifact · Events",
             "Workflow {selectedPublicRunTimeline.workflow_id}",
             "objective {selectedPublicRunTimeline.objective}",
             "node {selectedPublicRunTimeline.current_node_label || selectedPublicRunTimeline.current_node_id}",
             "final answer recorded",
+            "onClick={() => onOpenRunDetail(child.run_id)}",
+            "function publicChildRunMeta",
         ],
     )
     _assert_contains(
