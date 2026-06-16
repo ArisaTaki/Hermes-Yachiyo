@@ -218,6 +218,52 @@ def test_group_and_workflow_acceptance_paths_are_guarded() -> None:
     )
 
 
+def test_runtime_memory_and_skill_trace_acceptance_paths_are_guarded() -> None:
+    _assert_contains(
+        "apps/shell/yachiyo_agent/contracts.py",
+        [
+            "class MemoryTraceSnapshot",
+            "class SkillTraceSnapshot",
+            "memory_traces: list[MemoryTraceSnapshot]",
+            "skill_traces: list[SkillTraceSnapshot]",
+            "class SkillSnapshot",
+            "class MemorySnapshot",
+        ],
+    )
+    _assert_contains(
+        "apps/shell/yachiyo_agent/legacy_ports.py",
+        [
+            "def _is_replay_enrichment_event",
+            '"memory.",',
+            '"skill.",',
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/RunDetailPanel.tsx",
+        [
+            "MemorySkillTraceInspector",
+            "const timelineMemoryTraces = selectedPublicRunTimeline?.memory_traces || [];",
+            "const timelineSkillTraces = selectedPublicRunTimeline?.skill_traces || [];",
+            "events={memorySkillTraceEvents}",
+            "memoryTraces={timelineMemoryTraces}",
+            "skillTraces={timelineSkillTraces}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/MemorySkillTraceInspector.tsx",
+        [
+            'data-testid="agent-run-detail-memory-skill-traces"',
+            'data-testid="agent-run-detail-memory-skill-trace"',
+            "memorySkillTraceFromMemorySnapshot",
+            "memorySkillTraceFromSkillSnapshot",
+            "memorySkillTraceFromEvent",
+            "publicRunEventIsSecret",
+            "eventType.startsWith('memory.')",
+            "eventType.startsWith('skill.')",
+        ],
+    )
+
+
 def test_legacy_agents_compatibility_acceptance_path_is_guarded() -> None:
     _assert_contains(
         "apps/bridge/routes/agents.py",
