@@ -4206,14 +4206,30 @@ def test_agent_studio_exposes_runtime_memory_and_future_task_management() -> Non
     _assert_contains(
         "apps/frontend/src/views/AgentStudioView.tsx",
         [
-            "const [memories, setMemories] = useState<MemorySpec[]>([]);",
-            "const [futureTasks, setFutureTasks] = useState<FutureTaskSpec[]>([]);",
+            "useAgentStudioLocalState",
+            "memories,",
+            "futureTasks,",
             "useAgentStudioRefresh({",
             "useRuntimeMemoryManagement",
             "requestDeleteMemory",
             "requestCancelFutureTask",
             "triggerDueFutureTaskRuns",
             "RuntimeMemoryPanel",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useAgentStudioLocalState.ts",
+        [
+            "export const emptyAgentDraft",
+            "export function useAgentStudioLocalState",
+            "const [memories, setMemories] = useState<MemorySpec[]>([]);",
+            "const [futureTasks, setFutureTasks] = useState<FutureTaskSpec[]>([]);",
+            "const [draft, setDraft] = useState<AgentDraft>(emptyAgentDraft);",
+            "const [workflowName, setWorkflowName] = useState('New Workflow');",
+            "const [runKindFilter, setRunKindFilter] = useState<RunKindFilter>('all');",
+            "const [runStatusFilter, setRunStatusFilter] = useState<RunStatusFilter>('all');",
+            "setMemories,",
+            "setFutureTasks,",
         ],
     )
     _assert_contains(
