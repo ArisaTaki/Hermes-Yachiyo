@@ -140,6 +140,37 @@ function currentRunEvents() {
   return bridgeState.runCompleted ? completedRunEvents : [startedRunEvent];
 }
 
+function currentGroupRunEvents() {
+  const started = {
+    event_id: 'event-chat-agent-progress-smoke-group-1',
+    run_id: RUN_GROUP_ID,
+    sequence: 1,
+    schema_version: 1,
+    event_type: 'group.run.started',
+    actor: 'runtime',
+    visibility: 'user',
+    sensitivity: 'normal',
+    payload: { child_run_id: RUN_ID, task_id: TASK_ID, goal: RUN_GOAL },
+    created_at: now,
+  };
+  if (!bridgeState.runCompleted) return [started];
+  return [
+    started,
+    {
+      event_id: 'event-chat-agent-progress-smoke-group-2',
+      run_id: RUN_GROUP_ID,
+      sequence: 2,
+      schema_version: 1,
+      event_type: 'group.run.completed',
+      actor: 'runtime',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: { child_run_id: RUN_ID, result: RUN_RESULT },
+      created_at: completedAt,
+    },
+  ];
+}
+
 const messages = [
   {
     id: 'user-chat-agent-progress-message',
@@ -210,6 +241,18 @@ function runEventsPage(url) {
   };
 }
 
+function groupRunEventsPage(url) {
+  const afterSequence = Math.max(0, Number(url.searchParams.get('after_sequence') || '0'));
+  const limit = Math.max(1, Number(url.searchParams.get('limit') || '200'));
+  return {
+    run_id: RUN_GROUP_ID,
+    after_sequence: afterSequence,
+    limit,
+    events: currentGroupRunEvents().filter((event) => event.sequence > afterSequence).slice(0, limit),
+  };
+}
+
+
 async function startMockBridge() {
   const server = http.createServer(async (request, response) => {
     try {
@@ -261,7 +304,15 @@ async function startMockBridge() {
         sendJson(response, 200, { agents: [agent] });
         return;
       }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/agents') {
+        sendJson(response, 200, { agents: [agent] });
+        return;
+      }
       if (request.method === 'GET' && url.pathname === '/ui/skills') {
+        sendJson(response, 200, { skills: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/skills') {
         sendJson(response, 200, { skills: [] });
         return;
       }
@@ -269,8 +320,28 @@ async function startMockBridge() {
         sendJson(response, 200, { roots: [] });
         return;
       }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/skills/sources') {
+        sendJson(response, 200, { roots: [] });
+        return;
+      }
       if (request.method === 'GET' && url.pathname === '/ui/skill-folders') {
         sendJson(response, 200, { folders: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/skill-folders') {
+        sendJson(response, 200, { folders: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/groups') {
+        sendJson(response, 200, { groups: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/memories') {
+        sendJson(response, 200, { memories: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/future-tasks') {
+        sendJson(response, 200, { future_tasks: [] });
         return;
       }
       if (request.method === 'GET' && url.pathname === '/ui/model-profiles') {
@@ -305,7 +376,19 @@ async function startMockBridge() {
         sendJson(response, 200, { runs: [currentRun()] });
         return;
       }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/runs') {
+        sendJson(response, 200, { runs: [currentRun()] });
+        return;
+      }
       if (request.method === 'GET' && url.pathname === `/ui/runs/${RUN_ID}`) {
+        sendJson(response, 200, currentRun());
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/yachiyo/studio/runs/${RUN_ID}`) {
+        sendJson(response, 200, currentRun());
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/yachiyo/studio/runs/${RUN_ID}/timeline`) {
         sendJson(response, 200, currentRun());
         return;
       }
@@ -313,8 +396,20 @@ async function startMockBridge() {
         sendJson(response, 200, { run_groups: [currentRunGroup()] });
         return;
       }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/group-runs') {
+        sendJson(response, 200, { group_runs: [currentRunGroup()] });
+        return;
+      }
       if (request.method === 'GET' && url.pathname === `/ui/run-groups/${RUN_GROUP_ID}`) {
         sendJson(response, 200, currentRunGroup());
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/yachiyo/studio/group-runs/${RUN_GROUP_ID}`) {
+        sendJson(response, 200, currentRunGroup());
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/yachiyo/studio/group-runs/${RUN_GROUP_ID}/events`) {
+        sendJson(response, 200, groupRunEventsPage(url));
         return;
       }
       if (request.method === 'GET' && url.pathname === `/yachiyo/studio/runs/${RUN_ID}/events`) {

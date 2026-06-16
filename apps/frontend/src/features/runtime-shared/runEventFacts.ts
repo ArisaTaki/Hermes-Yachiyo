@@ -223,7 +223,9 @@ function approvalFromRunEvent(event: PublicRunEvent): ApprovalCardSnapshot | nul
 function toolCallFromRunEvent(event: PublicRunEvent): ToolCallSnapshot | null {
   if (!isToolRunEvent(event.event_type)) return null;
   const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
+  const status = publicRunEventPayloadString(payload, 'status') || toolStatusFromRunEvent(event.event_type);
   const outputPreview = objectPreview(payload.output_preview)
+    || objectPreview(payload.output)
     || objectPreview(payload.result)
     || (payload.error !== undefined ? { error: payload.error } : {});
   const toolName = publicRunEventPayloadString(payload, 'tool_name')
@@ -231,9 +233,9 @@ function toolCallFromRunEvent(event: PublicRunEvent): ToolCallSnapshot | null {
     || event.detail
     || 'tool';
   return {
-    tool_call_id: event.event_id
-      || publicRunEventPayloadString(payload, 'tool_call_id')
+    tool_call_id: publicRunEventPayloadString(payload, 'tool_call_id')
       || publicRunEventPayloadString(payload, 'id')
+      || event.event_id
       || `${event.run_id}:${event.event_type}:${event.sequence}`,
     run_id: event.run_id,
     source_run_id: publicRunEventPayloadString(payload, 'source_run_id') || null,
@@ -256,15 +258,20 @@ function toolCallFromRunEvent(event: PublicRunEvent): ToolCallSnapshot | null {
       || publicRunEventPayloadString(payload, 'run_group_id')
       || null,
     tool_name: toolName,
-    status: publicRunEventPayloadString(payload, 'status') || toolStatusFromRunEvent(event.event_type),
+    status,
     risk_level: publicRunEventPayloadString(payload, 'risk_level')
       || publicRunEventPayloadString(payload, 'risk')
       || null,
-    input_preview: objectPreview(payload.input_preview) || objectPreview(payload.input) || {},
+    input_preview: objectPreview(payload.input_preview)
+      || objectPreview(payload.input)
+      || objectPreview(payload.arguments)
+      || objectPreview(payload.args)
+      || {},
     output_preview: outputPreview,
     approval_id: publicRunEventPayloadString(payload, 'approval_id') || null,
-    started_at: event.created_at || '',
-    completed_at: publicRunEventPayloadString(payload, 'completed_at') || null,
+    started_at: publicRunEventPayloadString(payload, 'started_at') || event.created_at || '',
+    completed_at: publicRunEventPayloadString(payload, 'completed_at')
+      || (toolCallStatusIsTerminal(status) ? event.created_at || null : null),
   };
 }
 
@@ -519,13 +526,18 @@ function isToolRunEvent(eventType: string): boolean {
     'agent.tool.completed',
     'approval.timeout',
     'tool.approved',
+    'tool.approval_approved',
+    'tool.approval_rejected',
     'tool.requested',
     'tool.started',
     'tool.approval_required',
     'tool.approval_timeout',
+    'tool.denied',
     'tool.rejected',
+    'tool.skipped',
     'tool.completed',
     'tool.failed',
+    'tool.cancelled',
   ].includes(eventType);
 }
 
@@ -533,16 +545,17 @@ function toolStatusFromRunEvent(eventType: string): string {
   if (eventType === 'tool.requested') return 'requested';
   if (eventType === 'tool.started' || eventType === 'agent.tool.started') return 'running';
   if (eventType === 'tool.approval_required' || eventType === 'agent.tool.approval_required') return 'waiting_approval';
-  if (eventType === 'agent.tool.approval_approved' || eventType === 'tool.approved') return 'approved';
-  if (eventType === 'agent.tool.approval_rejected' || eventType === 'agent.tool.denied' || eventType === 'tool.rejected') return 'denied';
+  if (eventType === 'agent.tool.approval_approved' || eventType === 'tool.approved' || eventType === 'tool.approval_approved') return 'approved';
+  if (eventType === 'agent.tool.approval_rejected' || eventType === 'agent.tool.denied' || eventType === 'tool.rejected' || eventType === 'tool.denied' || eventType === 'tool.approval_rejected') return 'denied';
   if (eventType === 'agent.tool.approval_timeout' || eventType === 'approval.timeout' || eventType === 'tool.approval_timeout') return 'expired';
   if (eventType === 'tool.failed' || eventType === 'agent.tool.failed') return 'failed';
-  if (eventType === 'agent.tool.skipped') return 'skipped';
+  if (eventType === 'agent.tool.skipped' || eventType === 'tool.skipped') return 'skipped';
+  if (eventType === 'tool.cancelled') return 'cancelled';
   return 'completed';
 }
 
 function toolCallStatusIsTerminal(status: string): boolean {
-  return ['completed', 'failed', 'denied', 'skipped', 'expired'].includes(status);
+  return ['completed', 'failed', 'denied', 'skipped', 'expired', 'cancelled'].includes(status);
 }
 
 function toolCallCorrelationKey(event: PublicRunEvent, toolCall: ToolCallSnapshot): string {

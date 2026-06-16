@@ -108,6 +108,8 @@ export function publicRunTimelineToRunSpec(
   const currentNodeLabel = 'current_node_label' in snapshot ? String(snapshot.current_node_label || '').trim() : '';
   const finalAnswer = 'final_answer' in snapshot ? String(snapshot.final_answer || '').trim() : '';
   const legacyResult = 'result' in snapshot ? String((snapshot as { result?: string }).result || '').trim() : '';
+  const legacyRunnableName = 'runnable_name' in snapshot ? String((snapshot as { runnable_name?: string }).runnable_name || '').trim() : '';
+  const legacyUserGoal = 'user_goal' in snapshot ? String((snapshot as { user_goal?: string }).user_goal || '').trim() : '';
   return {
     run_id: snapshot.run_id,
     parent_run_id: parentRunId || undefined,
@@ -136,9 +138,9 @@ export function publicRunTimelineToRunSpec(
     rerun_original_updated_at: snapshot.rerun_original_updated_at || undefined,
     kind,
     runnable_id: fallback.runnableId || (kind === 'workflow_run' ? workflowId || workflowRunId : agentId) || snapshot.run_id,
-    runnable_name: snapshot.title || fallback.runnableName || undefined,
+    runnable_name: snapshot.title || legacyRunnableName || fallback.runnableName || undefined,
     status: snapshot.status || 'processing',
-    user_goal: (fallback.userGoal ?? workflowObjective) || snapshot.title || '',
+    user_goal: (fallback.userGoal ?? workflowObjective) || legacyUserGoal || snapshot.title || '',
     result: finalAnswer || legacyResult || undefined,
     timeline: (snapshot.events || []).map(publicRunEventToTimelineEvent),
     artifacts: publicArtifactsOrLegacy(snapshot.artifacts, undefined),

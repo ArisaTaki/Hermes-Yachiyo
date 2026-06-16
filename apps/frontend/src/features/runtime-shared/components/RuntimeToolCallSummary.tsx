@@ -21,14 +21,19 @@ const TOOL_EVENT_TYPES = new Set([
   'agent.tool.approval_timeout',
   'approval.timeout',
   'tool.approved',
+  'tool.approval_approved',
+  'tool.approval_rejected',
   'tool.requested',
   'tool.started',
   'tool.approval_required',
   'tool.approval_timeout',
+  'tool.denied',
   'tool.rejected',
+  'tool.skipped',
   'tool.completed',
   'agent.tool.completed',
   'tool.failed',
+  'tool.cancelled',
   'skill.selected',
   'skill.dispatch.read',
   'memory.retrieved',
@@ -148,12 +153,13 @@ function runtimeToolStatusFromEvent(event: PublicRunEvent): string {
   if (eventType === 'agent.tool.denied') return 'denied';
   if (eventType === 'agent.tool.started') return 'running';
   if (eventType === 'agent.tool.failed' || eventType === 'tool.failed') return 'failed';
-  if (eventType === 'agent.tool.skipped') return 'skipped';
+  if (eventType === 'tool.cancelled') return 'cancelled';
+  if (eventType === 'agent.tool.skipped' || eventType === 'tool.skipped') return 'skipped';
   if (eventType === 'agent.tool.approval_required' || eventType === 'tool.approval_required') {
     return 'waiting_approval';
   }
-  if (eventType === 'agent.tool.approval_approved' || eventType === 'tool.approved') return 'approved';
-  if (eventType === 'agent.tool.approval_rejected' || eventType === 'tool.rejected') return 'denied';
+  if (eventType === 'agent.tool.approval_approved' || eventType === 'tool.approved' || eventType === 'tool.approval_approved') return 'approved';
+  if (eventType === 'agent.tool.approval_rejected' || eventType === 'tool.rejected' || eventType === 'tool.denied' || eventType === 'tool.approval_rejected') return 'denied';
   if (
     eventType === 'agent.tool.approval_timeout' ||
     eventType === 'approval.timeout' ||
@@ -181,7 +187,6 @@ function runtimeToolStatusFromEvent(event: PublicRunEvent): string {
 function normalizeRuntimeToolStatus(status: string): string {
   if (!status) return '';
   if (status === 'approval_required') return 'waiting_approval';
-  if (status === 'cancelled') return 'failed';
   const knownStatuses = [
     'queued',
     'running',
@@ -189,6 +194,7 @@ function normalizeRuntimeToolStatus(status: string): string {
     'approved',
     'completed',
     'failed',
+    'cancelled',
     'denied',
     'skipped',
     'expired',
@@ -218,6 +224,7 @@ function runtimeToolStatusLabel(status: string): string {
   if (status === 'approved') return '已批准';
   if (status === 'completed') return '已完成';
   if (status === 'failed') return '失败';
+  if (status === 'cancelled') return '已取消';
   if (status === 'denied') return '已拒绝';
   if (status === 'skipped') return '已跳过';
   if (status === 'expired') return '已超时';
