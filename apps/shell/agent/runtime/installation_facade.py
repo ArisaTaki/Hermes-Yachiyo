@@ -66,6 +66,7 @@ from apps.shell.agent.runtime.workflow_runs import RuntimeWorkflowRunAsyncCoordi
 from apps.shell.agent.runtime.workflow_services import (
     build_runtime_workflow_execution_services,
     build_runtime_workflow_planning_services,
+    build_runtime_workflow_transition_services,
 )
 from apps.shell.agent.tools import cancel_terminal_process_groups
 
@@ -631,8 +632,7 @@ class RuntimeInstallationFacadeMixin:
         *,
         runtime_timeline_factory: Any,
     ) -> None:
-        legacy = _legacy_agent_runtime_module()
-        workflow_transition_services = legacy._build_runtime_workflow_transition_services(
+        workflow_transition_services = build_runtime_workflow_transition_services(
             parent_runs_waiting_for_child=lambda child_run: self._workflow_parent_runs_waiting_for_child(child_run),
             workflow_run_is_group_root=lambda workflow_run: self._workflow_run_is_group_root(workflow_run),
             workflow_child_node_context=lambda timeline, child_run: self._workflow_child_node_context(

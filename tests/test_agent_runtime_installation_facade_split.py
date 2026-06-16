@@ -881,10 +881,13 @@ def test_installation_facade_installs_runnable_entrypoints(monkeypatch) -> None:
 
 
 def test_installation_facade_installs_workflow_transitions(monkeypatch) -> None:
+    def forbidden_workflow_transition_builder(**_kwargs):
+        raise AssertionError("workflow transitions should use split installation builder")
+
     def fake_build_runtime_workflow_transition_services(**kwargs):
         return SimpleNamespace(
             kwargs=kwargs,
-            workflow_parent_resume="workflow-parent-resume",
+            workflow_parent_resume=SimpleNamespace(kwargs=kwargs),
             approval_resume_projection="approval-resume-projection",
             run_transition_projection="run-transition-projection",
         )
@@ -892,6 +895,11 @@ def test_installation_facade_installs_workflow_transitions(monkeypatch) -> None:
     monkeypatch.setattr(
         agent_runtime,
         "_build_runtime_workflow_transition_services",
+        forbidden_workflow_transition_builder,
+    )
+    monkeypatch.setattr(
+        installation_facade_mod,
+        "build_runtime_workflow_transition_services",
         fake_build_runtime_workflow_transition_services,
     )
 
@@ -909,7 +917,8 @@ def test_installation_facade_installs_workflow_transitions(monkeypatch) -> None:
         runtime_timeline_factory="timeline-factory",
     )
 
-    assert engine.workflow_parent_resume == "workflow-parent-resume"
+    assert engine.workflow_parent_resume.kwargs["timeline_factory"] == "timeline-factory"
+    assert callable(engine.workflow_parent_resume.kwargs["get_run"])
     assert engine.approval_resume_projection == "approval-resume-projection"
     assert engine.run_transition_projection == "run-transition-projection"
 
