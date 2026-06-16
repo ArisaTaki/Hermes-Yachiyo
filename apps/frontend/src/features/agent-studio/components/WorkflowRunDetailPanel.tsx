@@ -53,6 +53,16 @@ export function WorkflowRunDetailPanel({
           <span>node {selectedPublicRunTimeline.current_node_label || selectedPublicRunTimeline.current_node_id}</span>
         ) : null}
         {selectedPublicRunTimeline.final_answer ? <span>final answer recorded</span> : null}
+        {selectedPublicRunTimeline.rerun_of_run_id ? (
+          <button
+            type="button"
+            data-rerun-of-run-id={selectedPublicRunTimeline.rerun_of_run_id}
+            data-testid="agent-run-detail-public-rerun-source"
+            onClick={() => onOpenRunDetail(selectedPublicRunTimeline.rerun_of_run_id || '')}
+          >
+            rerun of {selectedPublicRunTimeline.rerun_of_runnable_name || selectedPublicRunTimeline.rerun_of_run_id}
+          </button>
+        ) : null}
         <span>events {selectedPublicRunTimeline.events?.length || 0}</span>
         <span>approvals {selectedPublicRunTimeline.approvals?.length || 0}</span>
         <span>artifacts {selectedPublicRunTimeline.artifacts?.length || 0}</span>

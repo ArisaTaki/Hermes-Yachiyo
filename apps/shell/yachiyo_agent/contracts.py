@@ -238,6 +238,13 @@ class RunTimelineSnapshot(_PublicSnapshot):
     task_run_link_updated_at: str | None = None
     task_run_link_run_status: str | None = None
     task_run_link_last_event_sequence: int | None = None
+    rerun_of_run_id: str | None = None
+    rerun_of_kind: str | None = None
+    rerun_of_status: str | None = None
+    rerun_of_runnable_id: str | None = None
+    rerun_of_runnable_name: str | None = None
+    rerun_original_created_at: str | None = None
+    rerun_original_updated_at: str | None = None
     events: list[PublicRunEvent] = Field(default_factory=list)
     tool_calls: list[ToolCallSnapshot] = Field(default_factory=list)
     memory_traces: list[MemoryTraceSnapshot] = Field(default_factory=list)

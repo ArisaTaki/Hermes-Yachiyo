@@ -214,6 +214,13 @@ export type RunTimelineSnapshot = {
   task_run_link_updated_at?: string | null;
   task_run_link_run_status?: string | null;
   task_run_link_last_event_sequence?: number | null;
+  rerun_of_run_id?: string | null;
+  rerun_of_kind?: string | null;
+  rerun_of_status?: string | null;
+  rerun_of_runnable_id?: string | null;
+  rerun_of_runnable_name?: string | null;
+  rerun_original_created_at?: string | null;
+  rerun_original_updated_at?: string | null;
   events?: PublicRunEvent[];
   tool_calls?: ToolCallSnapshot[];
   memory_traces?: MemoryTraceSnapshot[];

@@ -162,6 +162,38 @@ def test_run_timeline_child_snapshots_preserve_orchestration_context() -> None:
     assert child.workflow_id == "workflow-1"
 
 
+def test_run_timeline_projects_rerun_provenance_from_replay_events() -> None:
+    timeline = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "rerun-1",
+            "kind": "agent_run",
+            "status": "running",
+            "events": [
+                {
+                    "event_type": "run.rerun.started",
+                    "payload": {
+                        "rerun_of_run_id": "original-run-1",
+                        "rerun_of_kind": "agent_run",
+                        "rerun_of_status": "completed",
+                        "rerun_of_runnable_id": "agent-1",
+                        "rerun_of_runnable_name": "Planner",
+                        "original_created_at": "2026-06-13T00:00:00Z",
+                        "original_updated_at": "2026-06-13T00:00:04Z",
+                    },
+                }
+            ],
+        }
+    )
+
+    assert timeline.rerun_of_run_id == "original-run-1"
+    assert timeline.rerun_of_kind == "agent_run"
+    assert timeline.rerun_of_status == "completed"
+    assert timeline.rerun_of_runnable_id == "agent-1"
+    assert timeline.rerun_of_runnable_name == "Planner"
+    assert timeline.rerun_original_created_at == "2026-06-13T00:00:00Z"
+    assert timeline.rerun_original_updated_at == "2026-06-13T00:00:04Z"
+
+
 def test_legacy_task_and_timeline_functions_delegate_to_shared_projector() -> None:
     payload = _run_payload()
 

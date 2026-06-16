@@ -113,6 +113,7 @@ class RunSnapshotProjector:
                 (approval for approval in approvals if approval.status == "pending"),
                 approvals[0],
             )
+        rerun_provenance = _rerun_provenance_from_payload(payload, events)
 
         return RunTimelineSnapshot(
             run_id=run_id,
@@ -131,6 +132,13 @@ class RunSnapshotProjector:
             task_run_link_last_event_sequence=_optional_int(
                 payload.get("task_run_link_last_event_sequence")
             ),
+            rerun_of_run_id=rerun_provenance.get("rerun_of_run_id"),
+            rerun_of_kind=rerun_provenance.get("rerun_of_kind"),
+            rerun_of_status=rerun_provenance.get("rerun_of_status"),
+            rerun_of_runnable_id=rerun_provenance.get("rerun_of_runnable_id"),
+            rerun_of_runnable_name=rerun_provenance.get("rerun_of_runnable_name"),
+            rerun_original_created_at=rerun_provenance.get("rerun_original_created_at"),
+            rerun_original_updated_at=rerun_provenance.get("rerun_original_updated_at"),
             events=events,
             tool_calls=self.tool_calls_from_payload(
                 payload.get("tool_calls"),
@@ -1312,6 +1320,37 @@ def _tool_status_from_event_type(event_type: str) -> str:
 
 def _group_run_id(payload: Mapping[str, Any]) -> str:
     return _text(payload.get("group_run_id") or payload.get("run_group_id"))
+
+
+def _rerun_provenance_from_payload(
+    payload: Mapping[str, Any],
+    events: list[PublicRunEvent],
+) -> dict[str, str | None]:
+    keys = (
+        "rerun_of_run_id",
+        "rerun_of_kind",
+        "rerun_of_status",
+        "rerun_of_runnable_id",
+        "rerun_of_runnable_name",
+    )
+    direct = {key: _optional_text(payload.get(key)) for key in keys}
+    direct["rerun_original_created_at"] = _optional_text(
+        payload.get("rerun_original_created_at") or payload.get("original_created_at")
+    )
+    direct["rerun_original_updated_at"] = _optional_text(
+        payload.get("rerun_original_updated_at") or payload.get("original_updated_at")
+    )
+    if direct.get("rerun_of_run_id"):
+        return direct
+    event = next((item for item in events if item.event_type == "run.rerun.started"), None)
+    if event is None:
+        return direct
+    source = event.payload
+    return {
+        **{key: _optional_text(source.get(key)) for key in keys},
+        "rerun_original_created_at": _optional_text(source.get("original_created_at")),
+        "rerun_original_updated_at": _optional_text(source.get("original_updated_at")),
+    }
 
 
 def _studio_url(run_id: str, group_run_id: str = "") -> str | None:

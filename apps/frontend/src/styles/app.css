@@ -15021,7 +15021,8 @@ button.activity-item {
 }
 
 .run-public-contract-grid span,
-.run-public-contract-grid code {
+.run-public-contract-grid code,
+.run-public-contract-grid button {
   padding: 4px 7px;
   border: 1px solid var(--hy-border-soft);
   border-radius: 8px;
@@ -15029,6 +15030,10 @@ button.activity-item {
   color: var(--hy-muted);
   font-size: 11px;
   overflow-wrap: anywhere;
+}
+
+.run-public-contract-grid button {
+  cursor: pointer;
 }
 
 .run-public-child-list {
