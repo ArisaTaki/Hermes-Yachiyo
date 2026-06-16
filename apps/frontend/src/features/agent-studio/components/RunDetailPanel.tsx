@@ -49,6 +49,7 @@ export function RunDetailPanel({
   onApproveRunById,
   onApproveSelectedRun,
   onCancelRunById,
+  onLoadMoreSelectedGroupRunEvents,
   onLoadMoreSelectedRunEvents,
   onOpenArtifact,
   onOpenRunDetail,
@@ -64,6 +65,11 @@ export function RunDetailPanel({
   runStatusLabel,
   runStatusTone,
   selectedGroupRunSnapshot,
+  selectedGroupRunReplayError,
+  selectedGroupRunReplayEvents,
+  selectedGroupRunReplayHasMore,
+  selectedGroupRunReplayLoading,
+  selectedGroupRunReplayNextAfterSequence,
   selectedPublicRunTimeline,
   selectedRouteGroupRunId,
   selectedRun,
@@ -101,6 +107,7 @@ export function RunDetailPanel({
   onApproveRunById: (runId: string, nextSelectedRunId?: string) => Promise<unknown>;
   onApproveSelectedRun: () => Promise<unknown>;
   onCancelRunById: (runId: string, nextSelectedRunId?: string) => Promise<unknown>;
+  onLoadMoreSelectedGroupRunEvents: () => Promise<void> | void;
   onLoadMoreSelectedRunEvents: () => Promise<void> | void;
   onOpenArtifact: (run: RunSpec | string, path: string) => Promise<void> | void;
   onOpenRunDetail: (runId: string) => void;
@@ -116,6 +123,11 @@ export function RunDetailPanel({
   runStatusLabel: (status: string) => string;
   runStatusTone: (status: string) => string;
   selectedGroupRunSnapshot: GroupRunSnapshot | null;
+  selectedGroupRunReplayError: string;
+  selectedGroupRunReplayEvents: PublicRunEvent[];
+  selectedGroupRunReplayHasMore: boolean;
+  selectedGroupRunReplayLoading: boolean;
+  selectedGroupRunReplayNextAfterSequence: number;
   selectedPublicRunTimeline: YachiyoRunTimelineSnapshot | null;
   selectedRouteGroupRunId: string;
   selectedRun: RunSpec | null;
@@ -279,6 +291,12 @@ export function RunDetailPanel({
             runKindLabel={runKindLabel}
             runStatusLabel={runStatusLabel}
             runStatusTone={runStatusTone}
+            onLoadMoreGroupRunEvents={onLoadMoreSelectedGroupRunEvents}
+            replayError={selectedGroupRunReplayError}
+            replayEvents={selectedGroupRunReplayEvents}
+            replayHasMore={selectedGroupRunReplayHasMore}
+            replayLoading={selectedGroupRunReplayLoading}
+            replayNextAfterSequence={selectedGroupRunReplayNextAfterSequence}
             selectedGroupRunSnapshot={selectedGroupRunSnapshot}
             selectedRouteGroupRunId={selectedRouteGroupRunId}
             selectedRun={selectedRun}

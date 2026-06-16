@@ -1,12 +1,18 @@
 import type { RunGroupSpec, RunSpec } from '../types';
-import type { GroupRunSnapshot } from '../../yachiyo-studio/types';
+import type { GroupRunSnapshot, PublicRunEvent } from '../../yachiyo-studio/types';
 import { RuntimeApprovalCard } from '../../runtime-shared/components/RuntimeApprovalCard';
 import { RuntimeArtifactList } from '../../runtime-shared/components/RuntimeArtifactList';
 import { RuntimeTimelineSummary } from '../../runtime-shared/components/RuntimeTimelineSummary';
 
 type GroupRunDetailPanelProps = {
   formatRunDate: (value?: string) => string;
+  onLoadMoreGroupRunEvents: () => Promise<unknown> | unknown;
   onOpenRunDetail: (runId: string) => void;
+  replayError: string;
+  replayEvents: PublicRunEvent[];
+  replayHasMore: boolean;
+  replayLoading: boolean;
+  replayNextAfterSequence: number;
   runById: Map<string, RunSpec>;
   runKindLabel: (kind: string) => string;
   runStatusLabel: (status: string) => string;
@@ -19,7 +25,13 @@ type GroupRunDetailPanelProps = {
 
 export function GroupRunDetailPanel({
   formatRunDate,
+  onLoadMoreGroupRunEvents,
   onOpenRunDetail,
+  replayError,
+  replayEvents,
+  replayHasMore,
+  replayLoading,
+  replayNextAfterSequence,
   runById,
   runKindLabel,
   runStatusLabel,
@@ -52,6 +64,8 @@ export function GroupRunDetailPanel({
   const groupRunEvents = selectedGroupRunSnapshot?.events?.length
     ? selectedGroupRunSnapshot.events
     : selectedRunGroup?.events || [];
+  const groupRunReplayEvents = replayEvents.length ? replayEvents : groupRunEvents;
+  const groupRunReplaySource = replayEvents.length ? 'RunEvent replay facts' : 'GroupRunSnapshot events';
   const groupRunApprovals = selectedGroupRunSnapshot?.pending_approvals?.length
     ? selectedGroupRunSnapshot.pending_approvals
     : selectedRunGroup?.pending_approvals || [];
@@ -110,13 +124,35 @@ export function GroupRunDetailPanel({
           ))}
         </div>
       ) : null}
-      {groupRunEvents.length ? (
-        <RuntimeTimelineSummary
-          className="group-run-event-summary run-group-overview-events"
-          events={groupRunEvents}
-          limit={6}
-          testId="agent-run-detail-group-run-events"
-        />
+      {groupRunReplayEvents.length || replayLoading || replayError ? (
+        <section className="group-run-runtime-section" data-testid="agent-run-detail-group-run-replay">
+          <div className="group-run-runtime-section-head">
+            <strong>GroupRun Events</strong>
+            <span>
+              {groupRunReplaySource}
+              {replayNextAfterSequence ? ` · cursor ${replayNextAfterSequence}` : ''}
+            </span>
+          </div>
+          {groupRunReplayEvents.length ? (
+            <RuntimeTimelineSummary
+              className="group-run-event-summary run-group-overview-events"
+              events={groupRunReplayEvents}
+              limit={6}
+              testId="agent-run-detail-group-run-events"
+            />
+          ) : null}
+          <div className="run-timeline-replay-controls" data-testid="agent-run-detail-group-run-replay-controls">
+            {replayError ? <span className="run-replay-error">{replayError}</span> : null}
+            <button
+              type="button"
+              disabled={replayLoading || (!replayHasMore && !replayError)}
+              data-testid="agent-run-detail-group-run-load-more-events"
+              onClick={() => void onLoadMoreGroupRunEvents()}
+            >
+              {replayLoading ? 'Loading GroupRun Events...' : replayHasMore ? 'Load more GroupRun Events' : 'GroupRun replay complete'}
+            </button>
+          </div>
+        </section>
       ) : null}
       {groupRunApprovals.length ? (
         <section className="group-run-runtime-section" data-testid="agent-run-detail-group-run-approvals">

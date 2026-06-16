@@ -389,7 +389,15 @@ export function AgentStudioView() {
     workflows,
   });
   const selectedGroupRunSnapshotId = selectedRouteGroupRunId || selectedRun?.run_group_id || '';
-  const { selectedGroupRunSnapshot } = useGroupRunSnapshot(
+  const {
+    loadMoreSelectedGroupRunEvents: loadMoreGroupRunReplayEvents,
+    selectedGroupRunReplayError,
+    selectedGroupRunReplayEvents,
+    selectedGroupRunReplayHasMore,
+    selectedGroupRunReplayLoading,
+    selectedGroupRunReplayNextAfterSequence,
+    selectedGroupRunSnapshot,
+  } = useGroupRunSnapshot(
     selectedGroupRunSnapshotId,
     selectedRunReplayRefreshKey,
   );
@@ -760,6 +768,10 @@ export function AgentStudioView() {
     setStatus,
     showConfirmDialog,
   });
+  async function loadMoreSelectedGroupRunEvents() {
+    const loadedCount = await loadMoreGroupRunReplayEvents();
+    setStatus(loadedCount ? `已加载 ${loadedCount} 条 GroupRun Event replay` : '没有更多 GroupRun Event replay');
+  }
 
   const {
     createRunFromTarget,
@@ -1100,6 +1112,7 @@ export function AgentStudioView() {
           onCreateRun={() => void runAction(createRunFromTarget, '创建 Run')}
           onFinishRunHistoryManagement={finishRunHistoryManagement}
           onLoadMoreSelectedRunEvents={loadMoreSelectedRunEvents}
+          onLoadMoreSelectedGroupRunEvents={loadMoreSelectedGroupRunEvents}
           onOpenArtifact={openArtifact}
           onOpenRunDetail={openRunDetail}
           onOpenWorkflowDesign={openWorkflowDesign}
@@ -1142,6 +1155,11 @@ export function AgentStudioView() {
           runnableCapabilityLine={runnableCapabilityLine}
           runnableOptionLabel={runnableOptionLabel}
           selectedHistoryRunCount={selectedHistoryRuns.length}
+          selectedGroupRunReplayError={selectedGroupRunReplayError}
+          selectedGroupRunReplayEvents={selectedGroupRunReplayEvents}
+          selectedGroupRunReplayHasMore={selectedGroupRunReplayHasMore}
+          selectedGroupRunReplayLoading={selectedGroupRunReplayLoading}
+          selectedGroupRunReplayNextAfterSequence={selectedGroupRunReplayNextAfterSequence}
           selectedGroupRunSnapshot={selectedGroupRunSnapshot}
           selectedPublicRunTimeline={selectedPublicRunTimeline}
           selectedRouteGroupRunId={selectedRouteGroupRunId}
