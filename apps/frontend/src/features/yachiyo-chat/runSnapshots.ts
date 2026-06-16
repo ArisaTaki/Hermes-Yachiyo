@@ -1,24 +1,24 @@
 import {
-  approveYachiyoRunApproval,
-  getYachiyoRunTimeline,
-  rejectYachiyoRunApproval,
-} from '../yachiyo-studio/api';
-import type { ApprovalCardSnapshot, RunTimelineSnapshot } from '../runtime-shared/types';
+  approveYachiyoChatRunApproval,
+  getYachiyoChatRunTimeline,
+  rejectYachiyoChatRunApproval,
+} from './api';
 import type { ChatApprovalPending, ChatApprovalRun } from './approvalItems';
+import type { ApprovalCardSnapshot, RunTimelineSnapshot } from './types';
 
 export async function getChatRunSnapshot(runId: string): Promise<ChatApprovalRun> {
-  return chatRunSnapshotFromTimeline(await getYachiyoRunTimeline(runId));
+  return chatRunSnapshotFromTimeline(await getYachiyoChatRunTimeline(runId));
 }
 
 export async function approveChatRunApproval(runId: string): Promise<ChatApprovalRun> {
-  return chatRunSnapshotFromTimeline(await approveYachiyoRunApproval(runId));
+  return chatRunSnapshotFromTimeline(await approveYachiyoChatRunApproval(runId));
 }
 
 export async function rejectChatRunApproval(
   runId: string,
   reason = '',
 ): Promise<ChatApprovalRun> {
-  return chatRunSnapshotFromTimeline(await rejectYachiyoRunApproval(runId, reason));
+  return chatRunSnapshotFromTimeline(await rejectYachiyoChatRunApproval(runId, reason));
 }
 
 export function chatRunSnapshotFromTimeline(snapshot: RunTimelineSnapshot): ChatApprovalRun {

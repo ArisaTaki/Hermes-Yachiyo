@@ -891,6 +891,14 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "'/yachiyo/readiness'",
             "'/yachiyo/tasks'",
             "`/yachiyo/tasks",
+            "listYachiyoChatAgents",
+            "listYachiyoChatWorkflows",
+            "getYachiyoChatRunTimeline",
+            "approveYachiyoChatRunApproval",
+            "rejectYachiyoChatRunApproval",
+            "'/yachiyo/studio/agents'",
+            "'/yachiyo/studio/workflows'",
+            "`/yachiyo/studio/runs/${encodeURIComponent(runId)}/timeline`",
             "approveYachiyoTask",
             "rejectYachiyoTask",
             "cancelYachiyoTask",
@@ -1116,8 +1124,11 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
         "apps/frontend/src/features/yachiyo-chat/types.ts",
         [
             "from '../runtime-shared/types';",
+            "AgentDefinitionSnapshot",
             "AgentTaskSnapshot",
             "PublicRunEvent",
+            "RunTimelineSnapshot",
+            "WorkflowSnapshot",
             "ApprovalCardSnapshot",
             "ArtifactSnapshot",
             "export type YachiyoReadinessSnapshot = ReadinessSnapshot;",
@@ -3059,24 +3070,36 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
     _assert_contains(
         "apps/frontend/src/features/yachiyo-chat/runSnapshots.ts",
         [
-            "getYachiyoRunTimeline",
-            "approveYachiyoRunApproval",
-            "rejectYachiyoRunApproval",
+            "getYachiyoChatRunTimeline",
+            "approveYachiyoChatRunApproval",
+            "rejectYachiyoChatRunApproval",
+            "from './api';",
+            "from './types';",
             "export function chatRunSnapshotFromTimeline",
             "pending_approval: chatPendingApprovalFromTimeline(snapshot)",
             "tool: approval.tool_name",
         ],
     )
+    _assert_not_contains(
+        "apps/frontend/src/features/yachiyo-chat/runSnapshots.ts",
+        ["../yachiyo-studio/api", "../runtime-shared/types"],
+    )
     _assert_contains(
         "apps/frontend/src/features/yachiyo-chat/runnables.ts",
         [
             "export async function listYachiyoChatRunnables",
-            "listYachiyoStudioAgents",
-            "listYachiyoWorkflows",
+            "listYachiyoChatAgents",
+            "listYachiyoChatWorkflows",
+            "from './api';",
+            "from './types';",
             "return chatRunnablesFromPublicSnapshots(agents, workflows)",
             "return listLegacyRunnables()",
             "participants: workflowParticipants(workflow, agentById)",
         ],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/features/yachiyo-chat/runnables.ts",
+        ["../yachiyo-studio/api", "../runtime-shared/types"],
     )
     _assert_contains(
         "apps/frontend/src/features/yachiyo-chat/components/AgentRunProgressCard.tsx",

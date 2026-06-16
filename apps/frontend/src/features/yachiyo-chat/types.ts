@@ -1,12 +1,15 @@
 import type { ReadinessSnapshot } from '../runtime-shared/types';
 
 export type {
+  AgentDefinitionSnapshot,
   AgentTaskSnapshot,
   ApprovalCardSnapshot,
   ArtifactSnapshot,
   PublicRunEvent,
+  RunTimelineSnapshot,
   StartChatTaskRequest,
   TaskStatus,
+  WorkflowSnapshot,
 } from '../runtime-shared/types';
 
 export type YachiyoReadinessSnapshot = ReadinessSnapshot;
