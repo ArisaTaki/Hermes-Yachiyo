@@ -274,16 +274,7 @@ class RunSnapshotProjector:
         for event in events:
             if not _is_tool_event(event.event_type):
                 continue
-            payload = {
-                **event.payload,
-                "run_id": event.run_id,
-                "sequence": event.sequence,
-                "tool_name": _tool_name_from_event(event),
-                "status": event.payload.get("status") or _tool_status_from_event_type(
-                    event.event_type
-                ),
-                "created_at": event.created_at,
-            }
+            payload = _tool_call_payload_from_event(event)
             calls.append(self.tool_call_from_payload(payload, run_id=event.run_id))
         return calls
 
@@ -372,6 +363,70 @@ def _approval_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
     source.setdefault("created_at", event.created_at)
     source.setdefault("run_id", event.run_id)
     return source
+
+
+def _tool_call_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
+    payload = dict(event.payload)
+    approval = _nested_mapping(payload, "pending_approval") or _nested_mapping(payload, "approval")
+    approval_id = (
+        _text(payload.get("approval_id"))
+        or _text(approval.get("approval_id"))
+        or _text(approval.get("id"))
+    )
+    risk_level = (
+        _text(payload.get("risk_level"))
+        or _text(payload.get("risk"))
+        or _text(approval.get("risk_level"))
+        or _text(approval.get("risk"))
+    )
+    policy_reason = (
+        _text(payload.get("policy_reason"))
+        or _text(approval.get("policy_reason"))
+        or _text(approval.get("reason"))
+    )
+    normalized = {
+        **payload,
+        "run_id": event.run_id,
+        "sequence": event.sequence,
+        "tool_name": _tool_name_from_event(event),
+        "status": payload.get("status") or _tool_status_from_event_type(event.event_type),
+        "created_at": event.created_at,
+    }
+    if approval_id:
+        normalized.setdefault("approval_id", approval_id)
+    if risk_level:
+        normalized.setdefault("risk_level", risk_level)
+    _merge_tool_trace_into_input_preview(
+        normalized,
+        {
+            "approval_id": approval_id,
+            "risk_level": risk_level,
+            "policy_reason": policy_reason,
+            "group_id": payload.get("group_id"),
+            "group_run_id": payload.get("group_run_id") or payload.get("run_group_id"),
+            "member_agent_id": payload.get("member_agent_id"),
+            "member_agent_name": payload.get("member_agent_name"),
+            "workflow_id": payload.get("workflow_id"),
+            "workflow_run_id": payload.get("workflow_run_id"),
+            "workflow_node_id": payload.get("workflow_node_id"),
+            "workflow_node_label": payload.get("workflow_node_label"),
+        },
+    )
+    return normalized
+
+
+def _merge_tool_trace_into_input_preview(
+    source: dict[str, Any],
+    context: dict[str, Any],
+) -> None:
+    clean_context = {key: value for key, value in context.items() if value}
+    if not clean_context:
+        return
+    input_preview = source.get("input_preview") or source.get("input")
+    preview = dict(input_preview) if isinstance(input_preview, Mapping) else {}
+    for key, value in clean_context.items():
+        preview.setdefault(key, value)
+    source["input_preview"] = preview
 
 
 def _artifact_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
@@ -489,6 +544,11 @@ def _workflow_run_id(payload: Mapping[str, Any], run_id: str) -> str | None:
 
 
 def _mapping(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _nested_mapping(payload: Mapping[str, Any], key: str) -> dict[str, Any]:
+    value = payload.get(key)
     return dict(value) if isinstance(value, Mapping) else {}
 
 

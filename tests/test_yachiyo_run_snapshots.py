@@ -158,6 +158,11 @@ def test_run_timeline_projects_tool_lifecycle_events_as_tool_call_snapshots() ->
                         "tool": "terminal.run",
                         "input_preview": {"command": "npm test"},
                         "output_preview": {"approval_required": True},
+                        "pending_approval": {
+                            "approval_id": "approval-tool",
+                            "risk_level": "high",
+                            "policy_reason": "terminal command requires approval",
+                        },
                     },
                 },
                 {
@@ -203,6 +208,14 @@ def test_run_timeline_projects_tool_lifecycle_events_as_tool_call_snapshots() ->
         "denied",
     ]
     assert timeline.tool_calls[0].input_preview == {"path": "README.md"}
+    assert timeline.tool_calls[2].approval_id == "approval-tool"
+    assert timeline.tool_calls[2].risk_level == "high"
+    assert timeline.tool_calls[2].input_preview == {
+        "command": "npm test",
+        "approval_id": "approval-tool",
+        "risk_level": "high",
+        "policy_reason": "terminal command requires approval",
+    }
     assert timeline.tool_calls[2].output_preview == {"approval_required": True}
     assert timeline.tool_calls[4].output_preview == {"error": "exit 1"}
     assert timeline.tool_calls[5].input_preview == {"path": "README.md"}
