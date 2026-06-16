@@ -8,7 +8,7 @@ import {
   artifactsFromRunEventReplay,
   mergeApprovalSnapshots,
   mergeArtifactSnapshots,
-} from '../utils/runTimeline';
+} from '../../runtime-shared/runEventFacts';
 
 type GroupRunDetailPanelProps = {
   formatRunDate: (value?: string) => string;

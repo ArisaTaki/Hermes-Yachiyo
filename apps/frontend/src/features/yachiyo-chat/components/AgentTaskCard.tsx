@@ -2,10 +2,16 @@ import { useEffect, useState } from 'react';
 
 import { UiIcon } from '../../../components/UiIcon';
 import { RuntimeTimelineSummary } from '../../runtime-shared/components/RuntimeTimelineSummary';
+import {
+  approvalsFromRunEventReplay,
+  artifactsFromRunEventReplay,
+  mergeApprovalSnapshots,
+  mergeArtifactSnapshots,
+} from '../../runtime-shared/runEventFacts';
 import { mergeRuntimeRunEventPages, runEventPageNextCursor } from '../../runtime-shared/runEvents';
 import { listYachiyoTaskEvents } from '../api';
 import { yachiyoTaskRunId, yachiyoTaskStudioRunId, yachiyoTaskStudioUrl } from '../taskSnapshots';
-import type { AgentTaskSnapshot, ApprovalCardSnapshot, PublicRunEvent } from '../types';
+import type { AgentTaskSnapshot, ApprovalCardSnapshot, ArtifactSnapshot, PublicRunEvent } from '../types';
 import { ApprovalCard } from './ApprovalCard';
 import { ArtifactPreview } from './ArtifactPreview';
 import { ToolCallSummary } from './ToolCallSummary';
@@ -40,6 +46,10 @@ export function AgentTaskCard({
   const artifacts = task.artifacts || [];
   const recentEvents = task.recent_events || [];
   const timelineEvents = replayEvents.length ? replayEvents : recentEvents;
+  const replayApprovals = replayEvents.length ? approvalsFromRunEventReplay(replayEvents) : [];
+  const replayArtifacts = replayEvents.length ? artifactsFromRunEventReplay(replayEvents) : [];
+  const approvalFacts = mergeApprovalSnapshots(approvals, replayApprovals);
+  const artifactFacts = mergeArtifactSnapshots(artifacts, replayArtifacts) as ArtifactSnapshot[];
   const timelineSummaryEvents = timelineEvents.slice(-3);
   const timelineEventSource = replayEvents.length ? 'run_event_page' : 'task_snapshot';
   const canCancel = onCancelTask && ['queued', 'running', 'waiting_approval'].includes(status);
@@ -179,9 +189,9 @@ export function AgentTaskCard({
           {replayLoading ? '加载任务事件中...' : '加载更多任务事件'}
         </button>
       ) : null}
-      {approvals.length ? (
+      {approvalFacts.length ? (
         <div className="yachiyo-agent-task-approvals">
-          {approvals.slice(0, 2).map((approval) => {
+          {approvalFacts.slice(0, 2).map((approval) => {
             const pending = (approval.status || 'pending') === 'pending';
             const actionable = pending && (onApproveApproval || onRejectApproval);
             return (
@@ -204,9 +214,9 @@ export function AgentTaskCard({
           })}
         </div>
       ) : null}
-      {artifacts.length ? (
+      {artifactFacts.length ? (
         <div className="yachiyo-agent-task-artifacts">
-          {artifacts.slice(0, 3).map((artifact) => (
+          {artifactFacts.slice(0, 3).map((artifact) => (
             <ArtifactPreview artifact={artifact} key={artifact.artifact_id} taskId={task.task_id} />
           ))}
         </div>

@@ -4,6 +4,12 @@ import type { RunGroupSpec, RunSpec, WorkflowSpec } from '../types';
 import type { GroupRunSnapshot, PublicRunEvent, YachiyoRunTimelineSnapshot } from '../../yachiyo-studio/types';
 import { ExpandableRuntimeContent as RunExpandableContent } from '../../runtime-shared/components/ExpandableRuntimeContent';
 import { RuntimeApprovalGate } from '../../runtime-shared/components/RuntimeApprovalGate';
+import {
+  approvalsFromRunEventReplay,
+  artifactsFromRunEventReplay,
+  mergeApprovalSnapshots,
+  mergeArtifactSnapshots,
+} from '../../runtime-shared/runEventFacts';
 import { ApprovalInspector, type RunPendingApproval } from './ApprovalInspector';
 import { ArtifactInspector } from './ArtifactInspector';
 import { GroupRunDetailPanel } from './GroupRunDetailPanel';
@@ -13,10 +19,6 @@ import { RunTimeline } from './RunTimeline';
 import { ToolCallInspector } from './ToolCallInspector';
 import { WorkflowRunDetailPanel } from './WorkflowRunDetailPanel';
 import {
-  approvalsFromRunEventReplay,
-  artifactsFromRunEventReplay,
-  mergeApprovalSnapshots,
-  mergeArtifactSnapshots,
   mergeToolCallSnapshots,
   toolCallsFromRunEventReplay,
 } from '../utils/runTimeline';
