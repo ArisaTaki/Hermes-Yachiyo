@@ -1,4 +1,6 @@
 import { runtimeToolDisplayLabel } from '../../runtime-shared/approval';
+import { RuntimeApprovalCard } from '../../runtime-shared/components/RuntimeApprovalCard';
+import type { ApprovalCardSnapshot } from '../types';
 
 export type ApprovalRequestDetails = {
   requester: string;
@@ -28,6 +30,12 @@ export function MessageApprovalRequestCard({
 }) {
   const workflowApproval = details.tool === 'workflow.approval';
   const toolLabel = runtimeToolDisplayLabel(details.tool);
+  const approval = messageApprovalSnapshot({
+    approvalId,
+    details,
+    runId,
+    toolLabel,
+  });
   return (
     <div
       className="message-content message-approval-card"
@@ -40,27 +48,25 @@ export function MessageApprovalRequestCard({
       data-run-id={runId}
       data-testid="chat-message-approval-card"
     >
-      <div className="message-approval-card-header">
-        <span className="message-approval-eyebrow">需要审批</span>
-        <div>
-          <strong>{workflowApproval ? `${details.requester} 等待人工确认` : `${details.requester} 请求执行工具调用`}</strong>
-          <span>{workflowApproval ? '批准后会继续当前 Workflow' : '批准后会继续当前任务'}</span>
-        </div>
-        <span className="message-approval-header-side">
-          <code>{workflowApproval ? '人工确认' : toolLabel}</code>
-          {runId ? (
-            <button
-              type="button"
-              data-run-id={runId}
-              data-run-status={runStatus}
-              data-testid="chat-message-approval-open-run-detail"
-              onClick={onOpenDetails}
-            >
-              Agent Studio
-            </button>
-          ) : null}
-        </span>
-      </div>
+      <RuntimeApprovalCard
+        actions={runId ? (
+          <button
+            type="button"
+            data-run-id={runId}
+            data-run-status={runStatus}
+            data-testid="chat-message-approval-open-run-detail"
+            onClick={onOpenDetails}
+          >
+            Agent Studio
+          </button>
+        ) : null}
+        actionsClassName="message-approval-header-side"
+        actionsTestId="chat-message-approval-open-run-detail-actions"
+        approval={approval}
+        className="message-approval-runtime-card"
+        testId="chat-message-approval-runtime-card"
+        variant="compact"
+      />
       {details.goal ? (
         <section className="message-approval-section">
           <span>关联任务</span>
@@ -90,4 +96,40 @@ export function MessageApprovalRequestCard({
       </section>
     </div>
   );
+}
+
+function messageApprovalSnapshot({
+  approvalId,
+  details,
+  runId,
+  toolLabel,
+}: {
+  approvalId?: string;
+  details: ApprovalRequestDetails;
+  runId: string;
+  toolLabel: string;
+}): ApprovalCardSnapshot {
+  const workflowApproval = details.tool === 'workflow.approval';
+  const title = workflowApproval
+    ? `${details.requester} 等待人工确认`
+    : `${details.requester} 请求${toolLabel}`;
+  return {
+    approval_id: approvalId || runId || `${details.tool}:message`,
+    description: workflowApproval ? '批准后会继续当前 Workflow' : '批准后会继续当前任务',
+    input_preview: messageApprovalInputPreview(details),
+    run_id: runId || undefined,
+    status: 'pending',
+    title,
+    tool_name: details.tool,
+  };
+}
+
+function messageApprovalInputPreview(details: ApprovalRequestDetails): Record<string, unknown> {
+  const preview: Record<string, unknown> = {};
+  if (details.goal) preview.goal = details.goal;
+  if (details.codeText) preview.command = details.codeText;
+  details.summary.forEach((item) => {
+    if (item.label && item.value) preview[item.label] = item.value;
+  });
+  return preview;
 }

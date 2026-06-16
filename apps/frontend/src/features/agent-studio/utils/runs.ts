@@ -97,7 +97,8 @@ export function publicRunTimelineToRunSpec(
   const hasWorkflowDefinition = 'workflow_id' in snapshot && Boolean(snapshot.workflow_id);
   const workflowChildParentRunId = parentRunId || (workflowRunId && workflowRunId !== snapshot.run_id ? workflowRunId : '');
   const inferredKind = agentId ? 'agent_run' : (workflowRunId || hasWorkflowDefinition ? 'workflow_run' : 'agent_run');
-  const kind = fallback.kind || inferredKind;
+  const snapshotKind = 'kind' in snapshot ? String((snapshot as { kind?: string }).kind || '').trim() : '';
+  const kind = fallback.kind || snapshotKind || inferredKind;
   const pendingApproval = snapshot.pending_approval || snapshot.approvals?.find(
     (approval) => approval.status === 'pending',
   );
@@ -106,6 +107,7 @@ export function publicRunTimelineToRunSpec(
   const currentNodeId = 'current_node_id' in snapshot ? String(snapshot.current_node_id || '').trim() : '';
   const currentNodeLabel = 'current_node_label' in snapshot ? String(snapshot.current_node_label || '').trim() : '';
   const finalAnswer = 'final_answer' in snapshot ? String(snapshot.final_answer || '').trim() : '';
+  const legacyResult = 'result' in snapshot ? String((snapshot as { result?: string }).result || '').trim() : '';
   return {
     run_id: snapshot.run_id,
     parent_run_id: parentRunId || undefined,
@@ -137,7 +139,7 @@ export function publicRunTimelineToRunSpec(
     runnable_name: snapshot.title || fallback.runnableName || undefined,
     status: snapshot.status || 'processing',
     user_goal: (fallback.userGoal ?? workflowObjective) || snapshot.title || '',
-    result: finalAnswer || undefined,
+    result: finalAnswer || legacyResult || undefined,
     timeline: (snapshot.events || []).map(publicRunEventToTimelineEvent),
     artifacts: publicArtifactsOrLegacy(snapshot.artifacts, undefined),
     pending_approval: pendingApproval
@@ -151,7 +153,7 @@ export function publicRunTimelineToRunSpec(
     objective: workflowObjective || undefined,
     current_node_id: currentNodeId || undefined,
     current_node_label: currentNodeLabel || undefined,
-    final_answer: finalAnswer || undefined,
+    final_answer: finalAnswer || legacyResult || undefined,
   };
 }
 
@@ -421,6 +423,7 @@ export function publicRunEventToTimelineEvent(event: PublicRunEvent): Record<str
 
 export function publicApprovalToRunPendingApproval(approval: ApprovalCardSnapshot | null) {
   if (!approval) return null;
+  const legacyTool = 'tool' in approval ? String((approval as { tool?: string }).tool || '').trim() : '';
   return {
     approval_id: approval.approval_id,
     input_preview: approval.input_preview || {},
@@ -431,7 +434,7 @@ export function publicApprovalToRunPendingApproval(approval: ApprovalCardSnapsho
     risk_level: approval.risk_level || '',
     run_id: approval.run_id || '',
     status: approval.status || '',
-    tool: approval.tool_name || '',
+    tool: approval.tool_name || legacyTool,
   };
 }
 

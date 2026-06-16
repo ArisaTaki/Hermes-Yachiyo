@@ -38,7 +38,13 @@ function resetApproval() {
 function pendingApproval() {
   return {
     approval_id: APPROVAL_ID,
+    run_id: RUN_ID,
+    source_run_id: RUN_ID,
+    status: 'pending',
     tool: 'terminal.run',
+    tool_name: 'terminal.run',
+    title: 'Approval Required · terminal.run',
+    requested_at: now,
     input_preview: {
       command: APPROVAL_COMMAND,
       cwd: '/workspace',
@@ -76,6 +82,31 @@ function runPayload() {
             { event: 'agent.tool.approval_rejected', status: 'cancelled', tool: 'terminal.run' },
             { event: 'agent.run.cancelled', status: 'cancelled' },
           ],
+    created_at: now,
+    updated_at: now,
+  };
+}
+
+function taskSnapshot() {
+  const run = runPayload();
+  const pending = bridgeState.status === 'pending';
+  return {
+    task_id: RUN_ID,
+    conversation_id: SESSION_ID,
+    title: 'Chat approval UI smoke',
+    status: pending
+      ? 'waiting_approval'
+      : bridgeState.status === 'approved'
+        ? 'completed'
+        : 'cancelled',
+    summary: run.result || 'Waiting for tool approval',
+    current_step: pending ? 'Waiting for tool approval' : '',
+    progress_text: pending ? 'terminal.run requires approval' : '',
+    needs_user_action: pending,
+    pending_approvals: pending ? [pendingApproval()] : [],
+    recent_events: runEvents(),
+    artifacts: [],
+    open_in_studio_url: `#/agents/${RUN_ID}`,
     created_at: now,
     updated_at: now,
   };
@@ -305,7 +336,15 @@ async function startMockBridge() {
         sendJson(response, 200, { agents: [] });
         return;
       }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/agents') {
+        sendJson(response, 200, { agents: [] });
+        return;
+      }
       if (request.method === 'GET' && url.pathname === '/ui/skills') {
+        sendJson(response, 200, { skills: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/skills') {
         sendJson(response, 200, { skills: [] });
         return;
       }
@@ -313,8 +352,28 @@ async function startMockBridge() {
         sendJson(response, 200, { roots: [] });
         return;
       }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/skills/sources') {
+        sendJson(response, 200, { roots: [] });
+        return;
+      }
       if (request.method === 'GET' && url.pathname === '/ui/skill-folders') {
         sendJson(response, 200, { folders: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/skill-folders') {
+        sendJson(response, 200, { folders: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/groups') {
+        sendJson(response, 200, { groups: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/memories') {
+        sendJson(response, 200, { memories: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/future-tasks') {
+        sendJson(response, 200, { future_tasks: [] });
         return;
       }
       if (request.method === 'GET' && url.pathname === '/ui/model-profiles') {
@@ -329,8 +388,16 @@ async function startMockBridge() {
         sendJson(response, 200, { runs: [runPayload()] });
         return;
       }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/runs') {
+        sendJson(response, 200, { runs: [runPayload()] });
+        return;
+      }
       if (request.method === 'GET' && url.pathname === '/ui/run-groups') {
         sendJson(response, 200, { run_groups: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/group-runs') {
+        sendJson(response, 200, { group_runs: [] });
         return;
       }
       if (request.method === 'GET' && url.pathname === '/ui/chat/sessions') {
@@ -342,6 +409,29 @@ async function startMockBridge() {
         return;
       }
       if (request.method === 'GET' && url.pathname === `/ui/runs/${RUN_ID}`) {
+        sendJson(response, 200, runPayload());
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/yachiyo/tasks/${RUN_ID}`) {
+        sendJson(response, 200, taskSnapshot());
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/yachiyo/tasks/${RUN_ID}/timeline`) {
+        sendJson(response, 200, runPayload());
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/yachiyo/tasks/${RUN_ID}/events`) {
+        const afterSequence = Number(url.searchParams.get('after_sequence') || '0');
+        const limit = Math.max(1, Number(url.searchParams.get('limit') || '200'));
+        sendJson(response, 200, {
+          run_id: RUN_ID,
+          after_sequence: Math.max(0, afterSequence),
+          limit,
+          events: runEvents().filter((event) => event.sequence > afterSequence).slice(0, limit),
+        });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/yachiyo/studio/runs/${RUN_ID}/timeline`) {
         sendJson(response, 200, runPayload());
         return;
       }
@@ -363,10 +453,38 @@ async function startMockBridge() {
         sendJson(response, 200, runPayload());
         return;
       }
+      if (request.method === 'POST' && url.pathname === `/yachiyo/tasks/${RUN_ID}/approve`) {
+        bridgeState.status = 'approved';
+        bridgeState.approveCalls += 1;
+        log(`mock bridge approved chat approval task (${bridgeState.approveCalls})`);
+        sendJson(response, 200, taskSnapshot());
+        return;
+      }
+      if (request.method === 'POST' && url.pathname === `/yachiyo/studio/runs/${RUN_ID}/approval/approve`) {
+        bridgeState.status = 'approved';
+        bridgeState.approveCalls += 1;
+        log(`mock bridge approved chat approval from studio (${bridgeState.approveCalls})`);
+        sendJson(response, 200, runPayload());
+        return;
+      }
       if (request.method === 'POST' && url.pathname === `/ui/runs/${RUN_ID}/approval/reject`) {
         bridgeState.status = 'rejected';
         bridgeState.rejectCalls += 1;
         log(`mock bridge rejected chat approval (${bridgeState.rejectCalls})`);
+        sendJson(response, 200, runPayload());
+        return;
+      }
+      if (request.method === 'POST' && url.pathname === `/yachiyo/tasks/${RUN_ID}/reject`) {
+        bridgeState.status = 'rejected';
+        bridgeState.rejectCalls += 1;
+        log(`mock bridge rejected chat approval task (${bridgeState.rejectCalls})`);
+        sendJson(response, 200, taskSnapshot());
+        return;
+      }
+      if (request.method === 'POST' && url.pathname === `/yachiyo/studio/runs/${RUN_ID}/approval/reject`) {
+        bridgeState.status = 'rejected';
+        bridgeState.rejectCalls += 1;
+        log(`mock bridge rejected chat approval from studio (${bridgeState.rejectCalls})`);
         sendJson(response, 200, runPayload());
         return;
       }
