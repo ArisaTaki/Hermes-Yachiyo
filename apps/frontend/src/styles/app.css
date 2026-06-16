@@ -9348,6 +9348,51 @@ body.electron-window .hy-traffic {
   background: oklch(255 0 0 / 0.03);
 }
 
+.hy-content .open-chat-shell .yachiyo-task-artifact-shell {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.hy-content .open-chat-shell .yachiyo-task-artifact-button {
+  width: 100%;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.hy-content .open-chat-shell .yachiyo-task-artifact-button:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.hy-content .open-chat-shell .yachiyo-task-artifact-button .ui-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--hy-faint);
+}
+
+.hy-content .open-chat-shell .yachiyo-task-artifact-status {
+  margin: 0;
+  color: var(--hy-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.hy-content .open-chat-shell .yachiyo-task-artifact-status.error {
+  color: var(--hy-danger);
+}
+
+.hy-content .open-chat-shell .yachiyo-task-artifact-content {
+  max-height: 180px;
+  min-width: 0;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .hy-content .open-chat-shell .yachiyo-task-approval span,
 .hy-content .open-chat-shell .yachiyo-task-artifact span {
   color: var(--hy-faint);

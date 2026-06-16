@@ -115,7 +115,7 @@ export function AgentTaskCard({
       {artifacts.length ? (
         <div className="yachiyo-agent-task-artifacts">
           {artifacts.slice(0, 3).map((artifact) => (
-            <ArtifactPreview artifact={artifact} key={artifact.artifact_id} />
+            <ArtifactPreview artifact={artifact} key={artifact.artifact_id} taskId={task.task_id} />
           ))}
         </div>
       ) : null}

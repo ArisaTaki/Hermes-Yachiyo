@@ -681,6 +681,7 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "ToolCallSummary",
             "ArtifactPreview",
             "<ArtifactPreview artifact={artifact}",
+            "taskId={task.task_id}",
             "<ToolCallSummary events={recentEvents} />",
             "在 Agent Studio 中查看",
         ],
@@ -740,8 +741,15 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
     _assert_contains(
         "apps/frontend/src/features/yachiyo-chat/components/ArtifactPreview.tsx",
         [
+            "useState",
             "RuntimeArtifactPreview",
+            "readYachiyoTaskArtifact",
+            "ArtifactContentSnapshot",
+            "async function togglePreview",
+            "setPreview(await readYachiyoTaskArtifact(taskId, path))",
+            'data-testid="yachiyo-task-artifact-shell"',
             'testId="yachiyo-task-artifact-preview"',
+            'data-testid="yachiyo-task-artifact-content"',
             'variant="compact"',
         ],
     )
