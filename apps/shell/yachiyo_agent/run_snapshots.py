@@ -103,7 +103,10 @@ class RunSnapshotProjector:
             and payload.get("pending_approval")
             and approvals
         ):
-            pending_approval = approvals[0]
+            pending_approval = next(
+                (approval for approval in approvals if approval.status == "pending"),
+                None,
+            )
         elif _task_status(payload.get("status")) == "waiting_approval" and approvals:
             pending_approval = next(
                 (approval for approval in approvals if approval.status == "pending"),
@@ -220,7 +223,9 @@ class RunSnapshotProjector:
         group_run_id: str = "",
     ):
         approvals = []
-        active_by_key: dict[str, int] = {}
+        active_by_strong_key: dict[str, int] = {}
+        active_by_weak_key: dict[str, int] = {}
+        active_keys_by_index: dict[int, tuple[list[str], str]] = {}
         for event in events:
             approval_payload = _approval_payload_from_event(event)
             if approval_payload:
@@ -234,8 +239,14 @@ class RunSnapshotProjector:
                     run_id=event.run_id,
                     group_run_id=group_run_id or _group_run_id(event.payload),
                 )
-                key = _approval_correlation_key(approval_payload, approval)
-                active_index = active_by_key.get(key) if key else None
+                strong_keys, weak_key = _approval_correlation_keys(approval_payload, approval)
+                active_index = _active_approval_index(
+                    strong_keys,
+                    weak_key,
+                    active_by_strong_key,
+                    active_by_weak_key,
+                    allow_weak=approval.status != "pending",
+                )
                 if active_index is None:
                     active_index = len(approvals)
                     approvals.append(approval)
@@ -244,11 +255,22 @@ class RunSnapshotProjector:
                         approvals[active_index],
                         approval,
                     )
-                if key:
-                    if approval.status == "pending":
-                        active_by_key[key] = active_index
-                    else:
-                        active_by_key.pop(key, None)
+                if approval.status == "pending":
+                    _register_active_approval(
+                        active_index,
+                        strong_keys,
+                        weak_key,
+                        active_by_strong_key,
+                        active_by_weak_key,
+                        active_keys_by_index,
+                    )
+                else:
+                    _unregister_active_approval(
+                        active_index,
+                        active_by_strong_key,
+                        active_by_weak_key,
+                        active_keys_by_index,
+                    )
         return approvals
 
     def artifacts_from_events(self, events: list[PublicRunEvent]):
@@ -876,12 +898,18 @@ def _merge_trace_context_into_approval(source: dict[str, Any], payload: dict[str
 
 def _merge_approvals(*approval_lists):
     by_key = {}
+    ordered_keys = []
     for approvals in approval_lists:
         for approval in approvals or []:
             key = approval.approval_id or approval.run_id or approval.title
-            if key and key not in by_key:
+            if not key:
+                continue
+            if key not in by_key:
                 by_key[key] = approval
-    return list(by_key.values())
+                ordered_keys.append(key)
+            else:
+                by_key[key] = _merge_approval_snapshots(by_key[key], approval)
+    return [by_key[key] for key in ordered_keys]
 
 
 def _merge_artifacts(*artifact_lists):
@@ -923,33 +951,47 @@ def _merge_approval_snapshots(
     )
 
 
-def _approval_correlation_key(
+_AMBIGUOUS_APPROVAL_INDEX = -1
+
+
+def _approval_correlation_keys(
     payload: Mapping[str, Any],
     approval: ApprovalCardSnapshot,
-) -> str:
+) -> tuple[list[str], str]:
     run_id = approval.run_id or _text(payload.get("run_id"))
     tool_name = approval.tool_name or _text(payload.get("tool") or payload.get("tool_name"))
     preview = _approval_correlation_preview(approval.input_preview)
-    workflow_node_id = _text(payload.get("workflow_node_id") or approval.input_preview.get("workflow_node_id"))
+    workflow_node_id = _text(
+        payload.get("workflow_node_id")
+        or approval.workflow_node_id
+        or approval.input_preview.get("workflow_node_id")
+    )
     group_run_id = _text(
         payload.get("group_run_id")
         or payload.get("run_group_id")
+        or approval.group_run_id
         or approval.input_preview.get("group_run_id")
         or approval.input_preview.get("run_group_id")
     )
-    member_agent_id = _text(payload.get("member_agent_id") or approval.input_preview.get("member_agent_id"))
-    if tool_name or workflow_node_id or group_run_id or member_agent_id or preview:
-        return ":".join(
-            [
-                run_id,
-                "approval",
-                tool_name,
-                workflow_node_id,
-                group_run_id,
-                member_agent_id,
-                _stable_json(preview),
-            ]
-        )
+    source_runnable_id = _text(
+        payload.get("source_runnable_id")
+        or payload.get("member_agent_id")
+        or payload.get("agent_id")
+        or approval.source_runnable_id
+        or approval.input_preview.get("source_runnable_id")
+        or approval.input_preview.get("member_agent_id")
+        or approval.input_preview.get("agent_id")
+    )
+
+    base_parts = [
+        run_id,
+        "approval",
+        tool_name,
+        workflow_node_id,
+        group_run_id,
+        source_runnable_id,
+    ]
+    strong_keys = []
 
     explicit_id = _text(
         payload.get("approval_id")
@@ -957,7 +999,64 @@ def _approval_correlation_key(
         or payload.get("approval_signature")
         or approval.approval_id
     )
-    return f"{run_id}:approval_id:{explicit_id}" if explicit_id else ""
+    if explicit_id:
+        strong_keys.append(f"{run_id}:approval_id:{explicit_id}")
+    if tool_name or workflow_node_id or group_run_id or source_runnable_id or preview:
+        strong_keys.append(":".join([*base_parts, _stable_json(preview)]))
+    weak_key = ":".join(base_parts) if any(base_parts[2:]) else ""
+    return list(dict.fromkeys(strong_keys)), weak_key
+
+
+def _active_approval_index(
+    strong_keys: list[str],
+    weak_key: str,
+    active_by_strong_key: Mapping[str, int],
+    active_by_weak_key: Mapping[str, int],
+    *,
+    allow_weak: bool,
+) -> int | None:
+    for key in strong_keys:
+        if key in active_by_strong_key:
+            return active_by_strong_key[key]
+    if not allow_weak:
+        return None
+    weak_index = active_by_weak_key.get(weak_key) if weak_key else None
+    if weak_index is not None and weak_index != _AMBIGUOUS_APPROVAL_INDEX:
+        return weak_index
+    return None
+
+
+def _register_active_approval(
+    index: int,
+    strong_keys: list[str],
+    weak_key: str,
+    active_by_strong_key: dict[str, int],
+    active_by_weak_key: dict[str, int],
+    active_keys_by_index: dict[int, tuple[list[str], str]],
+) -> None:
+    for key in strong_keys:
+        active_by_strong_key[key] = index
+    if weak_key:
+        existing = active_by_weak_key.get(weak_key)
+        if existing is None:
+            active_by_weak_key[weak_key] = index
+        elif existing != index:
+            active_by_weak_key[weak_key] = _AMBIGUOUS_APPROVAL_INDEX
+    active_keys_by_index[index] = (strong_keys, weak_key)
+
+
+def _unregister_active_approval(
+    index: int,
+    active_by_strong_key: dict[str, int],
+    active_by_weak_key: dict[str, int],
+    active_keys_by_index: dict[int, tuple[list[str], str]],
+) -> None:
+    strong_keys, weak_key = active_keys_by_index.pop(index, ([], ""))
+    for key in strong_keys:
+        if active_by_strong_key.get(key) == index:
+            active_by_strong_key.pop(key, None)
+    if weak_key and active_by_weak_key.get(weak_key) == index:
+        active_by_weak_key.pop(weak_key, None)
 
 
 def _approval_correlation_preview(preview: Mapping[str, Any]) -> dict[str, Any]:

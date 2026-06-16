@@ -1,5 +1,12 @@
 import type { ApprovalCardSnapshot, PublicRunEvent, ToolCallSnapshot } from './types';
 
+type ApprovalReplayCorrelationKeys = {
+  strongKeys: string[];
+  weakKey: string;
+};
+
+type ApprovalReplayWeakIndex = number | 'ambiguous';
+
 export function toolCallsFromRunEventReplay(events: PublicRunEvent[]): ToolCallSnapshot[] {
   const calls: ToolCallSnapshot[] = [];
   const activeByKey = new Map<string, number>();
@@ -68,26 +75,49 @@ export function mergeArtifactSnapshots(
 
 export function approvalsFromRunEventReplay(events: PublicRunEvent[]): ApprovalCardSnapshot[] {
   const approvals: ApprovalCardSnapshot[] = [];
-  const activeByKey = new Map<string, number>();
+  const activeByStrongKey = new Map<string, number>();
+  const activeByWeakKey = new Map<string, ApprovalReplayWeakIndex>();
+  const activeKeysByIndex = new Map<number, ApprovalReplayCorrelationKeys>();
   events.forEach((event) => {
     const approval = approvalFromRunEvent(event);
     if (!approval) return;
     const keys = approvalReplayCorrelationKeys(approval);
-    const activeKey = keys.find((key) => activeByKey.has(key));
-    const activeIndex = activeKey ? activeByKey.get(activeKey) : undefined;
+    const activeIndex = approvalReplayActiveIndex(
+      keys,
+      activeByStrongKey,
+      activeByWeakKey,
+      approval.status !== 'pending',
+    );
     if (activeIndex === undefined) {
       const nextIndex = approvals.length;
       approvals.push(approval);
       if (approval.status === 'pending') {
-        keys.forEach((key) => activeByKey.set(key, nextIndex));
+        registerActiveApprovalReplay(
+          nextIndex,
+          keys,
+          activeByStrongKey,
+          activeByWeakKey,
+          activeKeysByIndex,
+        );
       }
       return;
     }
     approvals[activeIndex] = mergeApprovalReplayTrace(approvals[activeIndex], approval);
     if (approval.status === 'pending') {
-      keys.forEach((key) => activeByKey.set(key, activeIndex));
+      registerActiveApprovalReplay(
+        activeIndex,
+        keys,
+        activeByStrongKey,
+        activeByWeakKey,
+        activeKeysByIndex,
+      );
     } else {
-      keys.forEach((key) => activeByKey.delete(key));
+      unregisterActiveApprovalReplay(
+        activeIndex,
+        activeByStrongKey,
+        activeByWeakKey,
+        activeKeysByIndex,
+      );
     }
   });
   return approvals;
@@ -571,7 +601,7 @@ function approvalRecordKey(approval: ApprovalCardSnapshot, index: number): strin
     || `approval:${index}`;
 }
 
-function approvalReplayCorrelationKeys(approval: ApprovalCardSnapshot): string[] {
+function approvalReplayCorrelationKeys(approval: ApprovalCardSnapshot): ApprovalReplayCorrelationKeys {
   const preview = approvalReplayCorrelationPreview(approval.input_preview || {});
   const baseParts = [
     approval.run_id || '',
@@ -581,12 +611,63 @@ function approvalReplayCorrelationKeys(approval: ApprovalCardSnapshot): string[]
     approval.group_run_id || '',
     approval.source_runnable_id || '',
   ];
-  const keys = [
+  const strongKeys = [
     [...baseParts, stableJson(preview)].join(':'),
-    baseParts.join(':'),
     approval.approval_id ? `${approval.run_id || ''}:approval_id:${approval.approval_id}` : '',
   ].filter(Boolean);
-  return Array.from(new Set(keys));
+  const weakKey = baseParts.slice(2).some(Boolean) ? baseParts.join(':') : '';
+  return { strongKeys: Array.from(new Set(strongKeys)), weakKey };
+}
+
+function approvalReplayActiveIndex(
+  keys: ApprovalReplayCorrelationKeys,
+  activeByStrongKey: Map<string, number>,
+  activeByWeakKey: Map<string, ApprovalReplayWeakIndex>,
+  allowWeak: boolean,
+): number | undefined {
+  for (const key of keys.strongKeys) {
+    const index = activeByStrongKey.get(key);
+    if (index !== undefined) return index;
+  }
+  if (!allowWeak) return undefined;
+  const weakIndex = keys.weakKey ? activeByWeakKey.get(keys.weakKey) : undefined;
+  return typeof weakIndex === 'number' ? weakIndex : undefined;
+}
+
+function registerActiveApprovalReplay(
+  index: number,
+  keys: ApprovalReplayCorrelationKeys,
+  activeByStrongKey: Map<string, number>,
+  activeByWeakKey: Map<string, ApprovalReplayWeakIndex>,
+  activeKeysByIndex: Map<number, ApprovalReplayCorrelationKeys>,
+) {
+  keys.strongKeys.forEach((key) => activeByStrongKey.set(key, index));
+  if (keys.weakKey) {
+    const existing = activeByWeakKey.get(keys.weakKey);
+    if (existing === undefined) {
+      activeByWeakKey.set(keys.weakKey, index);
+    } else if (existing !== index) {
+      activeByWeakKey.set(keys.weakKey, 'ambiguous');
+    }
+  }
+  activeKeysByIndex.set(index, keys);
+}
+
+function unregisterActiveApprovalReplay(
+  index: number,
+  activeByStrongKey: Map<string, number>,
+  activeByWeakKey: Map<string, ApprovalReplayWeakIndex>,
+  activeKeysByIndex: Map<number, ApprovalReplayCorrelationKeys>,
+) {
+  const keys = activeKeysByIndex.get(index);
+  if (!keys) return;
+  keys.strongKeys.forEach((key) => {
+    if (activeByStrongKey.get(key) === index) activeByStrongKey.delete(key);
+  });
+  if (keys.weakKey && activeByWeakKey.get(keys.weakKey) === index) {
+    activeByWeakKey.delete(keys.weakKey);
+  }
+  activeKeysByIndex.delete(index);
 }
 
 function approvalReplayCorrelationPreview(preview: Record<string, unknown>): Record<string, unknown> {

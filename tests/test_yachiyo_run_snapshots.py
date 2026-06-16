@@ -738,6 +738,86 @@ def test_run_timeline_projects_approval_timeout_as_expired_card() -> None:
     assert timeline.approvals[0].resolved_at == "2026-06-15T00:00:01Z"
 
 
+def test_run_timeline_merges_minimal_approval_resolution_with_pending_card() -> None:
+    timeline = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "run-minimal-approval-resolution",
+            "status": "completed",
+            "events": [
+                {
+                    "event_type": "tool.approval_required",
+                    "payload": {
+                        "approval_id": "approval-minimal-resolution",
+                        "tool": "terminal.run",
+                        "input_preview": {"command": "npm test"},
+                    },
+                    "created_at": "2026-06-15T00:00:00Z",
+                },
+                {
+                    "event_type": "tool.approved",
+                    "payload": {
+                        "tool": "terminal.run",
+                    },
+                    "created_at": "2026-06-15T00:00:01Z",
+                },
+            ],
+        }
+    )
+
+    assert len(timeline.approvals) == 1
+    assert timeline.approvals[0].approval_id == "approval-minimal-resolution"
+    assert timeline.approvals[0].status == "approved"
+    assert timeline.approvals[0].input_preview == {"command": "npm test"}
+    assert timeline.approvals[0].resolved_at == "2026-06-15T00:00:01Z"
+
+
+def test_run_timeline_keeps_ambiguous_minimal_approval_resolution_separate() -> None:
+    timeline = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "run-ambiguous-approval-resolution",
+            "status": "cancelled",
+            "events": [
+                {
+                    "event_type": "tool.approval_required",
+                    "payload": {
+                        "approval_id": "approval-test",
+                        "tool": "terminal.run",
+                        "input_preview": {"command": "npm test"},
+                    },
+                },
+                {
+                    "event_type": "tool.approval_required",
+                    "payload": {
+                        "approval_id": "approval-build",
+                        "tool": "terminal.run",
+                        "input_preview": {"command": "npm run build"},
+                    },
+                },
+                {
+                    "event_type": "tool.rejected",
+                    "payload": {
+                        "tool": "terminal.run",
+                        "reason": "ambiguous resolution payload",
+                    },
+                    "created_at": "2026-06-15T00:00:02Z",
+                },
+            ],
+        }
+    )
+
+    assert len(timeline.approvals) == 3
+    assert [approval.approval_id for approval in timeline.approvals] == [
+        "approval-test",
+        "approval-build",
+        "run-ambiguous-approval-resolution:tool.rejected:3",
+    ]
+    assert [approval.status for approval in timeline.approvals] == [
+        "pending",
+        "pending",
+        "rejected",
+    ]
+
+
 def test_chat_task_snapshot_derives_approval_and_artifact_cards_from_events() -> None:
     task = agent_task_snapshot_from_payload(
         {
@@ -803,6 +883,52 @@ def test_chat_task_snapshot_ignores_resolved_approval_cards_for_user_action() ->
     assert task.status == "completed"
     assert task.needs_user_action is False
     assert task.pending_approvals == []
+
+
+def test_run_snapshots_merge_stale_pending_approval_payload_with_resolved_events() -> None:
+    payload = {
+        "task_id": "task-stale-pending",
+        "run_id": "run-stale-pending",
+        "title": "Run tests",
+        "status": "completed",
+        "pending_approval": {
+            "approval_id": "approval-stale",
+            "tool": "terminal.run",
+            "input_preview": {"command": "npm test"},
+        },
+        "events": [
+            {
+                "event_type": "tool.approved",
+                "payload": {
+                    "approval_id": "approval-stale",
+                    "tool": "terminal.run",
+                },
+                "created_at": "2026-06-15T00:00:01Z",
+            },
+        ],
+        "recent_events": [
+            {
+                "event_type": "tool.approved",
+                "payload": {
+                    "approval_id": "approval-stale",
+                    "tool": "terminal.run",
+                },
+                "created_at": "2026-06-15T00:00:01Z",
+            },
+        ],
+    }
+
+    task = agent_task_snapshot_from_payload(payload)
+    timeline = run_timeline_snapshot_from_payload(payload)
+
+    assert task.needs_user_action is False
+    assert task.pending_approvals == []
+    assert timeline.pending_approval is None
+    assert len(timeline.approvals) == 1
+    assert timeline.approvals[0].approval_id == "approval-stale"
+    assert timeline.approvals[0].status == "approved"
+    assert timeline.approvals[0].input_preview == {"command": "npm test"}
+    assert timeline.approvals[0].resolved_at == "2026-06-15T00:00:01Z"
 
 
 def test_group_run_snapshot_reuses_shared_run_projection_for_children_artifacts_and_approvals() -> None:
