@@ -208,6 +208,19 @@ class AgentTaskSnapshot(_PublicSnapshot):
     updated_at: str = ""
 
 
+class AgentTaskLightSnapshot(_PublicSnapshot):
+    task_id: str
+    conversation_id: str | None = None
+    title: str
+    status: TaskStatus
+    detail: str | None = None
+    needs_user_action: bool = False
+    pending_approval: ApprovalCardSnapshot | None = None
+    open_in_studio_url: str | None = None
+    created_at: str = ""
+    updated_at: str = ""
+
+
 class RunTimelineChildSnapshot(_PublicSnapshot):
     run_id: str
     title: str | None = None

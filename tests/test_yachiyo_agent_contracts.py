@@ -8,6 +8,7 @@ from apps.shell.yachiyo_agent import (
     AgentDefinitionSnapshot,
     AgentGroupMemberSnapshot,
     AgentGroupSnapshot,
+    AgentTaskLightSnapshot,
     AgentTaskSnapshot,
     ApprovalCardSnapshot,
     ArtifactContentSnapshot,
@@ -40,6 +41,7 @@ from apps.shell.yachiyo_agent import (
     task_requires_user_action,
 )
 from apps.shell.yachiyo_agent.events import public_run_event_from_payload
+from apps.shell.yachiyo_agent.task_cards import agent_task_light_snapshot_from_task
 
 
 def _json(model) -> dict:
@@ -109,6 +111,84 @@ def test_agent_task_snapshot_json_shape_is_stable() -> None:
     assert payload["pending_approvals"][0]["approval_id"] == "approval-1"
     assert payload["recent_events"][0]["event_type"] == "agent.tool.approval_required"
     assert "event" not in payload["recent_events"][0]
+
+
+def test_agent_task_light_snapshot_json_shape_is_stable() -> None:
+    pending = ApprovalCardSnapshot(
+        approval_id="approval-1",
+        run_id="run-1",
+        title="Approve workspace.write_patch",
+        tool_name="workspace.write_patch",
+        input_preview={"path": "README.md"},
+    )
+    snapshot = AgentTaskLightSnapshot(
+        task_id="task-1",
+        conversation_id="chat-1",
+        title="Review README",
+        status="waiting_approval",
+        detail="Prepare patch",
+        needs_user_action=True,
+        pending_approval=pending,
+        open_in_studio_url="#/agents?run_id=run-1",
+        created_at="2026-06-14T00:00:00Z",
+        updated_at="2026-06-14T00:00:01Z",
+    )
+
+    payload = _json(snapshot)
+
+    assert list(payload) == [
+        "task_id",
+        "conversation_id",
+        "title",
+        "status",
+        "detail",
+        "needs_user_action",
+        "pending_approval",
+        "open_in_studio_url",
+        "created_at",
+        "updated_at",
+    ]
+    assert payload["pending_approval"]["approval_id"] == "approval-1"
+    assert payload["open_in_studio_url"] == "#/agents?run_id=run-1"
+
+
+def test_agent_task_light_snapshot_projects_full_task_for_launcher_surfaces() -> None:
+    approved = ApprovalCardSnapshot(
+        approval_id="approval-approved",
+        run_id="run-1",
+        title="Approved read",
+        tool_name="workspace.read",
+        status="approved",
+    )
+    pending = ApprovalCardSnapshot(
+        approval_id="approval-pending",
+        run_id="run-1",
+        title="Approve write",
+        tool_name="workspace.write_patch",
+    )
+    task = AgentTaskSnapshot(
+        task_id="task-1",
+        conversation_id="chat-1",
+        title="Review README",
+        status="waiting_approval",
+        summary="Waiting",
+        current_step="Prepare patch",
+        progress_text="1 approval pending",
+        needs_user_action=False,
+        pending_approvals=[approved, pending],
+        open_in_studio_url="#/agents?run_id=run-1",
+        created_at="2026-06-14T00:00:00Z",
+        updated_at="2026-06-14T00:00:01Z",
+    )
+
+    light = agent_task_light_snapshot_from_task(task)
+
+    assert light.task_id == "task-1"
+    assert light.detail == "Prepare patch"
+    assert light.needs_user_action is True
+    assert light.pending_approval is not None
+    assert light.pending_approval.approval_id == "approval-pending"
+    assert light.open_in_studio_url == "#/agents?run_id=run-1"
 
 
 def test_approval_card_snapshot_keeps_runtime_trace_fields() -> None:

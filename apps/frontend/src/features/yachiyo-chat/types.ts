@@ -2,6 +2,7 @@ import type { ReadinessSnapshot } from '../runtime-shared/types';
 
 export type {
   AgentDefinitionSnapshot,
+  AgentTaskLightSnapshot,
   AgentTaskSnapshot,
   ApprovalCardSnapshot,
   ArtifactContentSnapshot,

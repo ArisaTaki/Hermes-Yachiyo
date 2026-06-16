@@ -184,6 +184,19 @@ export type AgentTaskSnapshot = {
   updated_at?: string;
 };
 
+export type AgentTaskLightSnapshot = {
+  task_id: string;
+  conversation_id?: string | null;
+  title: string;
+  status: TaskStatus;
+  detail?: string | null;
+  needs_user_action?: boolean;
+  pending_approval?: ApprovalCardSnapshot | null;
+  open_in_studio_url?: string | null;
+  created_at?: string;
+  updated_at?: string;
+};
+
 export type RunTimelineChildSnapshot = {
   run_id: string;
   title?: string | null;

@@ -4,7 +4,7 @@ import { openAppView } from '../../../lib/bridge';
 import { runtimeToolDisplayLabelOrName } from '../../runtime-shared/approval';
 import { runtimeTimelineEventLabel } from '../../runtime-shared/components/RuntimeTimelineSummary';
 import { yachiyoTaskStudioGroupRunId, yachiyoTaskStudioRunId, yachiyoTaskStudioUrl } from '../taskSnapshots';
-import type { AgentTaskSnapshot, ApprovalCardSnapshot, PublicRunEvent } from '../types';
+import type { AgentTaskLightSnapshot, AgentTaskSnapshot, ApprovalCardSnapshot, PublicRunEvent } from '../types';
 
 type LauncherTaskMode = 'bubble' | 'live2d';
 type LauncherTaskApprovalAction = 'approve' | 'reject';
@@ -65,6 +65,23 @@ export function launcherAgentTaskChatParams(task: LauncherAgentTask): Record<str
   return Object.keys(params).length ? params : undefined;
 }
 
+export function launcherAgentTaskLightSnapshot(task: LauncherAgentTask): AgentTaskLightSnapshot | null {
+  if (!task) return null;
+  const approval = launcherAgentTaskPendingApproval(task);
+  return {
+    task_id: task.task_id,
+    conversation_id: task.conversation_id,
+    title: launcherAgentTaskTitle(task),
+    status: task.status || 'running',
+    detail: launcherAgentTaskDetail(task) || null,
+    needs_user_action: Boolean(task.needs_user_action || approval),
+    pending_approval: approval,
+    open_in_studio_url: yachiyoTaskStudioUrl(task) || null,
+    created_at: task.created_at || '',
+    updated_at: task.updated_at || '',
+  };
+}
+
 export function LauncherAgentTaskLight({
   mode,
   onApproveApproval,
@@ -85,14 +102,16 @@ export function LauncherAgentTaskLight({
   const [taskAction, setTaskAction] = useState<LauncherTaskAction | ''>('');
   if (!task) return null;
   const currentTask = task;
+  const lightTask = launcherAgentTaskLightSnapshot(currentTask);
+  if (!lightTask) return null;
   const runId = yachiyoTaskStudioRunId(currentTask);
   const groupRunId = yachiyoTaskStudioGroupRunId(currentTask);
-  const studioUrl = yachiyoTaskStudioUrl(currentTask);
-  const status = String(currentTask.status || '');
-  const approval = launcherAgentTaskPendingApproval(currentTask);
-  const needsAction = Boolean(currentTask.needs_user_action || approval);
+  const studioUrl = lightTask.open_in_studio_url || yachiyoTaskStudioUrl(currentTask);
+  const status = String(lightTask.status || currentTask.status || '');
+  const approval = lightTask.pending_approval || launcherAgentTaskPendingApproval(currentTask);
+  const needsAction = Boolean(lightTask.needs_user_action || approval);
   const taskTitle = launcherAgentTaskTitle(currentTask);
-  const detail = launcherAgentTaskDetail(currentTask);
+  const detail = lightTask.detail || launcherAgentTaskDetail(currentTask);
   const canHandleApproval = Boolean(approval && (onApproveApproval || onRejectApproval));
   const canCancel = Boolean(onCancelTask && launcherAgentTaskCanCancel(currentTask));
   async function handleApproval(action: LauncherTaskApprovalAction) {
