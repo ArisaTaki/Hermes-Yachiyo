@@ -19,6 +19,7 @@ from apps.shell.yachiyo_agent.task_cards import (
 from apps.shell.yachiyo_agent.timelines import (
     run_timeline_snapshot_from_payload as legacy_timeline_snapshot_from_payload,
 )
+from apps.shell.yachiyo_agent.workflows import workflow_run_snapshot_from_payload
 
 
 def _run_payload() -> dict:
@@ -131,6 +132,41 @@ def test_legacy_task_and_timeline_functions_delegate_to_shared_projector() -> No
 
     assert legacy_task_snapshot_from_payload(payload) == agent_task_snapshot_from_payload(payload)
     assert legacy_timeline_snapshot_from_payload(payload) == run_timeline_snapshot_from_payload(payload)
+
+
+def test_workflow_run_snapshot_derives_context_from_replay_events() -> None:
+    workflow_run = workflow_run_snapshot_from_payload(
+        {
+            "run_id": "workflow-run-events",
+            "kind": "workflow_run",
+            "status": "running",
+            "user_goal": "Review docs",
+            "events": [
+                {
+                    "event_type": "workflow.node.agent",
+                    "payload": {
+                        "workflow_id": "workflow-1",
+                        "workflow_node_id": "draft",
+                        "workflow_node_label": "Draft",
+                    },
+                },
+                {
+                    "event_type": "workflow.node.approval_required",
+                    "payload": {
+                        "workflow_id": "workflow-1",
+                        "workflow_node_id": "review",
+                        "workflow_node_label": "Review",
+                    },
+                },
+            ],
+        }
+    )
+
+    assert workflow_run.workflow_id == "workflow-1"
+    assert workflow_run.workflow_run_id == "workflow-run-events"
+    assert workflow_run.current_node_id == "review"
+    assert workflow_run.current_node_label == "Review"
+    assert workflow_run.objective == "Review docs"
 
 
 def test_run_timeline_projects_tool_lifecycle_events_as_tool_call_snapshots() -> None:
