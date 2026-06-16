@@ -142,6 +142,10 @@ from apps.shell.agent.runtime.engine_state import (
 )
 from apps.shell.agent.runtime.engine_facade import RuntimeEngineFacadeMixin
 from apps.shell.agent.runtime.errors import AgentApprovalRequired, AgentRuntimeError
+from apps.shell.agent.runtime.foundation import (
+    RuntimeFoundationSetup,
+    build_runtime_foundation_setup as _build_runtime_foundation_setup,
+)
 from apps.shell.agent.runtime.events import (
     RuntimeAgentRunEventRecorder,
     RuntimeRunEventRecorder,
