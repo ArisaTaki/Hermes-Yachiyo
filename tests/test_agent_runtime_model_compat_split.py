@@ -15,6 +15,18 @@ class _FakeProfileService:
     def get_defaults(self) -> dict[str, str]:
         return {"chat": "chat-profile"}
 
+    def get_profile_private(self, profile_id: str) -> dict[str, Any]:
+        return {
+            "profile_id": profile_id,
+            "enabled": True,
+            "status": "available",
+            "capability": "chat",
+            "provider": "openai_compatible",
+            "base_url": "https://api.example.test/v1",
+            "model": "demo-model",
+            "api_key": "sk-test",
+        }
+
 
 def test_runtime_model_compat_provider_preserves_legacy_monkeypatch_points() -> None:
     calls: list[tuple[str, str, str, list[dict[str, str]]]] = []
@@ -100,3 +112,4 @@ def test_runtime_model_compat_provider_preserves_legacy_monkeypatch_points() -> 
         "sk-test",
         [{"role": "user", "content": "hello"}],
     ) == {"content": "patched"}
+    assert provider.native_agent_readiness()["ready"] is True

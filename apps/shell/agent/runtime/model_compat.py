@@ -13,6 +13,7 @@ from apps.shell.agent.runtime.model_calling import (
     build_runtime_model_call_adapters,
 )
 from apps.shell.agent.runtime.model_profiles import RuntimeModelProfileResolver
+from apps.shell.agent.runtime.run_readiness import native_agent_readiness
 
 
 def _legacy_agent_runtime_module() -> Any:
@@ -91,6 +92,13 @@ class RuntimeModelCompatibilityProvider:
             supports_openai_compatible_api=self.supports_openai_compatible_api,
             default_agent_ids=DEFAULT_AGENT_IDS,
             error_type=AgentRuntimeError,
+        )
+
+    def native_agent_readiness(self) -> dict[str, Any]:
+        return native_agent_readiness(
+            profile_service_factory=self.profile_service,
+            supports_openai_compatible_api=self.supports_openai_compatible_api,
+            redact_error=self.redact_error,
         )
 
 

@@ -202,6 +202,7 @@ from apps.shell.agent.runtime.model_calling import (
 from apps.shell.agent.runtime.model_profiles import RuntimeAgentModelTester, RuntimeModelProfileResolver
 from apps.shell.agent.runtime.model_compat import (
     build_legacy_model_call_adapters as _build_legacy_model_call_adapters,
+    runtime_model_compat_provider as _runtime_model_compat_provider,
 )
 from apps.shell.agent.runtime.model_facade import RuntimeModelFacadeMixin
 from apps.shell.agent.runtime.model_messages import (
@@ -500,11 +501,7 @@ _runtime_service_lifecycle = RuntimeServiceLifecycle(factory=NativeRunEngine)
 
 def get_native_agent_readiness() -> dict[str, Any]:
     """Return native main-agent readiness."""
-    return _runtime_native_agent_readiness(
-        profile_service_factory=lambda: get_model_profile_service(),
-        supports_openai_compatible_api=supports_openai_compatible_api,
-        redact_error=redact_secrets,
-    )
+    return _runtime_model_compat_provider().native_agent_readiness()
 
 
 def get_native_run_engine() -> NativeRunEngine:
