@@ -237,8 +237,9 @@ function publicRunEventPayloadString(payload: Record<string, unknown>, key: stri
 }
 
 export function publicRunEventWorkflowStepPayload(payload: Record<string, unknown>): Record<string, unknown> {
+  const artifactPath = publicRunEventPayloadString(payload, 'artifact_path') || publicRunEventPayloadString(payload, 'path');
   return {
-    artifact: payload.artifact || (payload.artifact_path ? { path: payload.artifact_path } : null),
+    artifact: payload.artifact || (artifactPath ? { path: artifactPath } : null),
     artifact_count: payload.artifact_count,
     child_workflow_id: payload.child_workflow_id,
     child_workflow_name: payload.child_workflow_name,
