@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +15,12 @@ from apps.shell.agent.repositories.runs import RunRepository
 from apps.shell.agent.runtime.agent_runs import RuntimeAgentRunStarter
 from apps.shell.agent.runtime.approval_snapshots import ApprovalSnapshotBuilder
 from apps.shell.agent.runtime.run_projections import RunProjectionCoordinator
-from apps.shell.agent.runtime.run_services import RuntimeRunServiceBundle, build_runtime_run_services
+from apps.shell.agent.runtime.run_services import (
+    RuntimeRunLayerSetup,
+    RuntimeRunServiceBundle,
+    build_runtime_run_layer_setup,
+    build_runtime_run_services,
+)
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
 
@@ -26,6 +32,8 @@ class FakeTaskRunLinks:
 
 def test_runtime_run_service_helpers_remain_exported_from_legacy_module() -> None:
     assert agent_runtime.RuntimeRunServiceBundle is RuntimeRunServiceBundle
+    assert agent_runtime.RuntimeRunLayerSetup is RuntimeRunLayerSetup
+    assert agent_runtime._build_runtime_run_layer_setup is build_runtime_run_layer_setup
 
 
 def test_build_runtime_run_services_wires_repositories_and_projections(tmp_path) -> None:
@@ -82,6 +90,48 @@ def test_build_runtime_run_services_wires_repositories_and_projections(tmp_path)
     assert bundle.run_projections._task_run_links is task_run_links
     assert bundle.runs._sync_projections.__self__ is bundle.run_projections
     assert bundle.run_events._sync_event_cursor.__self__ is bundle.run_projections
+
+
+def test_build_runtime_run_layer_setup_wires_services_and_sync_coordinator(tmp_path) -> None:
+    conn = object()
+    db_lock = threading.RLock()
+    task_run_links = FakeTaskRunLinks()
+    executed: list[tuple[str, str]] = []
+
+    setup = build_runtime_run_layer_setup(
+        conn=conn,
+        db_lock=db_lock,
+        ensure_row_factory=lambda: None,
+        row_to_run_group=lambda row: dict(row) if isinstance(row, dict) else {},
+        row_to_run=lambda row: dict(row) if isinstance(row, dict) else {},
+        agent_artifacts_dir=tmp_path / "agent-artifacts",
+        workflow_artifacts_dir=tmp_path / "workflow-artifacts",
+        get_run=lambda run_id: {"run_id": run_id},
+        task_run_links=task_run_links,
+        accepting_runs=lambda: True,
+        append_run_to_group=lambda _group_id, _run_id: None,
+        get_run_group=lambda run_group_id: {"run_group_id": run_group_id},
+        insert_run_group=lambda **kwargs: {"run_group_id": "group-1", **kwargs},
+        insert_run=lambda **kwargs: {"run_id": "run-1", **kwargs},
+        run_by_client_request_id=lambda _client_request_id: None,
+        client_request_id_from_payload=lambda payload: str(payload.get("client_request_id") or ""),
+        agent_workspace_dir=lambda agent: str(tmp_path / "workspaces" / agent["agent_id"]),
+        get_agent_private=lambda agent_id: {"agent_id": agent_id, "name": "Agent"},
+        validate_agent_run_readiness=lambda _agent: None,
+        execute_agent_run=lambda run_id, _agent, user_goal, **_kwargs: executed.append((run_id, user_goal))
+        or {"run_id": run_id, "status": "completed"},
+        project_agent_run_group_if_root=lambda result: {**result, "projected": True},
+    )
+
+    assert isinstance(setup, RuntimeRunLayerSetup)
+    assert isinstance(setup.run_services, RuntimeRunServiceBundle)
+    assert setup.agent_run_coordinator._starter is setup.run_services.agent_run_starter
+    assert setup.agent_run_coordinator._lock is db_lock
+    result = setup.agent_run_coordinator.create_sync(
+        {"agent_id": "agent-1", "user_goal": "do work"}
+    )
+    assert result == {"run_id": "run-1", "status": "completed", "projected": True}
+    assert executed == [("run-1", "do work")]
 
 
 def test_native_runtime_installs_run_services_under_legacy_attribute_names(tmp_path) -> None:

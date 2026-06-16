@@ -13,6 +13,7 @@ from apps.shell.agent.runtime.model_calling import (
 )
 from apps.shell.agent.runtime.main_chat_model import build_runtime_main_chat_model_setup
 from apps.shell.agent.runtime.run_cancellation import RuntimeRunCancellationCoordinator
+from apps.shell.agent.runtime.run_services import build_runtime_run_layer_setup
 from apps.shell.agent.runtime.tooling import build_runtime_tooling_stack
 
 
@@ -150,27 +151,15 @@ class RuntimeInstallationFacadeMixin:
         self._install_runtime_definition_services(definition_services)
 
     def _install_runtime_run_layer(self) -> None:
-        legacy = _legacy_agent_runtime_module()
-        run_services = legacy._build_runtime_run_services(
+        setup = build_runtime_run_layer_setup(
             conn=self._conn,
             db_lock=self._db_lock,
             ensure_row_factory=self._ensure_row_factory,
             row_to_run_group=self._row_to_run_group,
             row_to_run=self._row_to_run,
-            now=legacy._now,
-            json_dump=legacy._json_dump,
-            json_load=legacy._json_load,
-            redact_secrets=legacy.redact_secrets,
-            redact_json_value=legacy._redact_json_value,
-            contains_sensitive_text=legacy.contains_sensitive_text,
-            error_type=legacy.AgentRuntimeError,
-            unset_sentinel=legacy._UNSET,
             agent_artifacts_dir=self.agent_artifacts_dir,
             workflow_artifacts_dir=self.workflow_artifacts_dir,
             get_run=self.get_run,
-            safe_rel_path=legacy._safe_rel_path,
-            is_within=legacy._is_within,
-            read_text=legacy._read_text,
             task_run_links=self.task_run_links,
             accepting_runs=lambda: self._accepting_runs,
             append_run_to_group=self._append_run_to_group,
@@ -180,12 +169,8 @@ class RuntimeInstallationFacadeMixin:
             run_by_client_request_id=self._run_by_client_request_id,
             client_request_id_from_payload=self.run_request_parser.client_request_id_from_payload,
             agent_workspace_dir=self._agent_workspace_dir,
-        )
-        self._install_runtime_run_services(run_services)
-        self.agent_run_coordinator = legacy.RuntimeAgentRunCoordinator(
             get_agent_private=lambda agent_id: self._get_agent_private(agent_id),
             validate_agent_run_readiness=lambda agent: self._validate_agent_run_readiness(agent),
-            starter=self.agent_run_starter,
             execute_agent_run=lambda run_id, agent, user_goal, **kwargs: self._execute_agent_run(
                 run_id,
                 agent,
@@ -193,9 +178,9 @@ class RuntimeInstallationFacadeMixin:
                 **kwargs,
             ),
             project_agent_run_group_if_root=lambda result: self._project_agent_run_group_if_root(result),
-            lock=self._db_lock,
-            error_type=legacy.AgentRuntimeError,
         )
+        self._install_runtime_run_services(setup.run_services)
+        self.agent_run_coordinator = setup.agent_run_coordinator
 
     def _install_runtime_memory_and_core(self) -> Any:
         setup = build_runtime_memory_core_setup(
