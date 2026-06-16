@@ -16,8 +16,13 @@ export type LauncherAgentTask = AgentTaskSnapshot | null | undefined;
 export function launcherAgentTaskSummary(task: LauncherAgentTask) {
   if (!task) return '';
   const label = launcherAgentTaskStatusLabel(task.status || '');
-  const title = String(task.title || '').trim();
+  const title = launcherAgentTaskTitle(task, '');
   return title ? `${label} · ${title}` : label;
+}
+
+export function launcherAgentTaskTitle(task: LauncherAgentTask, fallback = '八千代任务') {
+  if (!task) return fallback;
+  return String(task.title || '').trim() || fallback;
 }
 
 export function launcherAgentTaskDetail(task: LauncherAgentTask) {
@@ -67,6 +72,7 @@ export function LauncherAgentTaskLight({
   const status = String(currentTask.status || '');
   const approval = launcherAgentTaskPendingApproval(currentTask);
   const needsAction = Boolean(currentTask.needs_user_action || approval);
+  const taskTitle = launcherAgentTaskTitle(currentTask);
   const detail = launcherAgentTaskDetail(currentTask);
   const canHandleApproval = Boolean(approval && (onApproveApproval || onRejectApproval));
   async function handleApproval(action: LauncherTaskApprovalAction) {
@@ -99,7 +105,7 @@ export function LauncherAgentTaskLight({
         title="在 Chat 中查看任务"
       >
         <span>{launcherAgentTaskStatusLabel(status)}</span>
-        <strong>{currentTask.title || currentTask.task_id}</strong>
+        <strong>{taskTitle}</strong>
         {detail ? (
           <small data-testid={`${testIdPrefix}-agent-task-detail`}>{detail}</small>
         ) : null}
