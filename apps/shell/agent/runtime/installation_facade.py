@@ -741,6 +741,45 @@ class RuntimeInstallationFacadeMixin:
             ),
         )
 
+    def _install_runtime_workflow_transitions(
+        self,
+        *,
+        runtime_timeline_factory: Any,
+    ) -> None:
+        legacy = _legacy_agent_runtime_module()
+        workflow_transition_services = legacy._build_runtime_workflow_transition_services(
+            parent_runs_waiting_for_child=lambda child_run: self._workflow_parent_runs_waiting_for_child(child_run),
+            workflow_run_is_group_root=lambda workflow_run: self._workflow_run_is_group_root(workflow_run),
+            workflow_child_node_context=lambda timeline, child_run: self._workflow_child_node_context(
+                timeline,
+                child_run,
+            ),
+            merge_workflow_child_run_outcome=lambda timeline, artifacts, child_run, label: (
+                self._merge_workflow_child_run_outcome(timeline, artifacts, child_run, label)
+            ),
+            workflow_for_run_resume=lambda workflow_run: self._workflow_for_run_resume(workflow_run),
+            workflow_resume_start_index=lambda workflow, workflow_run, child_run_id: (
+                self._workflow_resume_start_index(workflow, workflow_run, child_run_id)
+            ),
+            workflow_next_node_id=lambda workflow, node_id, context: (
+                self._workflow_next_node_id(workflow, node_id, context)
+            ),
+            continue_workflow_run=lambda run, workflow, **kwargs: self.workflow_continuation.continue_run(
+                run,
+                workflow,
+                **kwargs,
+            ),
+            timeline_factory=runtime_timeline_factory,
+            append_run_event=lambda run_id, event_type, payload: self.append_run_event(run_id, event_type, payload),
+            update_run=lambda run_id, **kwargs: self._update_run(run_id, **kwargs),
+            update_run_group=lambda run_group_id, **kwargs: self._update_run_group(run_group_id, **kwargs),
+            update_agent_run_group_if_root=lambda run: self._update_agent_run_group_if_root(run),
+            mark_parent_workflows_child_running=lambda run: self._mark_parent_workflows_child_running(run),
+            resume_parent_workflows_after_child_update=lambda run: self._resume_parent_workflows_after_child_update(run),
+            get_run=lambda run_id: self.get_run(run_id),
+        )
+        self._install_runtime_workflow_transition_services(workflow_transition_services)
+
     def _install_runtime_engine_state(self, state: Any) -> None:
         self.workspace_dir = state.workspace_dir
         self.db_path = state.db_path

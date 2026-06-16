@@ -35,6 +35,7 @@ def test_runtime_installation_facade_mixin_remains_exported_from_legacy_module()
         "_install_runtime_workflow_planning_and_coordinator",
         "_install_runtime_workflow_execution_and_async",
         "_install_runtime_runnable_entrypoints",
+        "_install_runtime_workflow_transitions",
         "_install_runtime_engine_state",
         "_install_runtime_recorders",
         "_install_runtime_definition_services",
@@ -679,3 +680,37 @@ def test_installation_facade_installs_runnable_entrypoints(monkeypatch) -> None:
     assert isinstance(engine.agent_run_group_projection, CapturedAgentRunGroupProjection)
     assert "get_run_group" in engine.agent_run_group_projection.kwargs
     assert "update_run_group" in engine.agent_run_group_projection.kwargs
+
+
+def test_installation_facade_installs_workflow_transitions(monkeypatch) -> None:
+    def fake_build_runtime_workflow_transition_services(**kwargs):
+        return SimpleNamespace(
+            kwargs=kwargs,
+            workflow_parent_resume="workflow-parent-resume",
+            approval_resume_projection="approval-resume-projection",
+            run_transition_projection="run-transition-projection",
+        )
+
+    monkeypatch.setattr(
+        agent_runtime,
+        "_build_runtime_workflow_transition_services",
+        fake_build_runtime_workflow_transition_services,
+    )
+
+    engine = object.__new__(agent_runtime.NativeRunEngine)
+    engine.workflow_continuation = SimpleNamespace(continue_run="continue-run")
+    engine.append_run_event = "append-run-event"
+    engine._update_run = "update-run"
+    engine._update_run_group = "update-run-group"
+    engine._update_agent_run_group_if_root = "update-agent-run-group-if-root"
+    engine._mark_parent_workflows_child_running = "mark-parent-workflows-child-running"
+    engine._resume_parent_workflows_after_child_update = "resume-parent-workflows-after-child-update"
+    engine.get_run = "get-run"
+
+    engine._install_runtime_workflow_transitions(
+        runtime_timeline_factory="timeline-factory",
+    )
+
+    assert engine.workflow_parent_resume == "workflow-parent-resume"
+    assert engine.approval_resume_projection == "approval-resume-projection"
+    assert engine.run_transition_projection == "run-transition-projection"
