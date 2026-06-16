@@ -4400,7 +4400,7 @@ button:hover {
 .launcher-agent-task-actions {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(40px, 1fr));
   gap: 4px;
   padding: 0 3px 2px;
 }
@@ -4418,6 +4418,10 @@ button:hover {
 
 .launcher-agent-task-action.reject {
   color: #ffd7d7;
+}
+
+.launcher-agent-task-action.cancel {
+  color: #ffe3a3;
 }
 
 .launcher-agent-task-main:hover,

@@ -8,10 +8,12 @@ import type { AgentTaskSnapshot, ApprovalCardSnapshot, PublicRunEvent } from '..
 
 type LauncherTaskMode = 'bubble' | 'live2d';
 type LauncherTaskApprovalAction = 'approve' | 'reject';
+type LauncherTaskAction = LauncherTaskApprovalAction | 'cancel';
 type LauncherTaskApprovalHandler = (
   task: AgentTaskSnapshot,
   approval: ApprovalCardSnapshot,
 ) => unknown | Promise<unknown>;
+type LauncherTaskCancelHandler = (task: AgentTaskSnapshot) => unknown | Promise<unknown>;
 
 export type LauncherAgentTask = AgentTaskSnapshot | null | undefined;
 
@@ -66,6 +68,7 @@ export function launcherAgentTaskChatParams(task: LauncherAgentTask): Record<str
 export function LauncherAgentTaskLight({
   mode,
   onApproveApproval,
+  onCancelTask,
   onRejectApproval,
   task,
   testIdPrefix = `${mode}-launcher`,
@@ -73,12 +76,13 @@ export function LauncherAgentTaskLight({
 }: {
   mode: LauncherTaskMode;
   onApproveApproval?: LauncherTaskApprovalHandler;
+  onCancelTask?: LauncherTaskCancelHandler;
   onRejectApproval?: LauncherTaskApprovalHandler;
   task: LauncherAgentTask;
   testIdPrefix?: string;
   variant?: 'launcher' | 'panel';
 }) {
-  const [approvalAction, setApprovalAction] = useState<LauncherTaskApprovalAction | ''>('');
+  const [taskAction, setTaskAction] = useState<LauncherTaskAction | ''>('');
   if (!task) return null;
   const currentTask = task;
   const runId = yachiyoTaskStudioRunId(currentTask);
@@ -90,15 +94,25 @@ export function LauncherAgentTaskLight({
   const taskTitle = launcherAgentTaskTitle(currentTask);
   const detail = launcherAgentTaskDetail(currentTask);
   const canHandleApproval = Boolean(approval && (onApproveApproval || onRejectApproval));
+  const canCancel = Boolean(onCancelTask && launcherAgentTaskCanCancel(currentTask));
   async function handleApproval(action: LauncherTaskApprovalAction) {
-    if (!approval || approvalAction) return;
+    if (!approval || taskAction) return;
     const handler = action === 'approve' ? onApproveApproval : onRejectApproval;
     if (!handler) return;
-    setApprovalAction(action);
+    setTaskAction(action);
     try {
       await handler(currentTask, approval);
     } finally {
-      setApprovalAction('');
+      setTaskAction('');
+    }
+  }
+  async function handleCancel() {
+    if (!onCancelTask || taskAction || !canCancel) return;
+    setTaskAction('cancel');
+    try {
+      await onCancelTask(currentTask);
+    } finally {
+      setTaskAction('');
     }
   }
   return (
@@ -146,36 +160,56 @@ export function LauncherAgentTaskLight({
           Agent Studio
         </a>
       ) : null}
-      {canHandleApproval ? (
+      {canHandleApproval || canCancel ? (
         <div className="launcher-agent-task-actions" data-testid={`${testIdPrefix}-agent-task-approval-actions`}>
-          <button
-            type="button"
-            className="launcher-agent-task-action approve"
-            data-testid={`${testIdPrefix}-agent-task-approve`}
-            disabled={Boolean(approvalAction) || !onApproveApproval}
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              void handleApproval('approve');
-            }}
-            title="批准任务审批"
-          >
-            {approvalAction === 'approve' ? '处理中' : '批准'}
-          </button>
-          <button
-            type="button"
-            className="launcher-agent-task-action reject"
-            data-testid={`${testIdPrefix}-agent-task-reject`}
-            disabled={Boolean(approvalAction) || !onRejectApproval}
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              void handleApproval('reject');
-            }}
-            title="拒绝任务审批"
-          >
-            {approvalAction === 'reject' ? '处理中' : '拒绝'}
-          </button>
+          {canHandleApproval ? (
+            <>
+              <button
+                type="button"
+                className="launcher-agent-task-action approve"
+                data-testid={`${testIdPrefix}-agent-task-approve`}
+                disabled={Boolean(taskAction) || !onApproveApproval}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  void handleApproval('approve');
+                }}
+                title="批准任务审批"
+              >
+                {taskAction === 'approve' ? '处理中' : '批准'}
+              </button>
+              <button
+                type="button"
+                className="launcher-agent-task-action reject"
+                data-testid={`${testIdPrefix}-agent-task-reject`}
+                disabled={Boolean(taskAction) || !onRejectApproval}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  void handleApproval('reject');
+                }}
+                title="拒绝任务审批"
+              >
+                {taskAction === 'reject' ? '处理中' : '拒绝'}
+              </button>
+            </>
+          ) : null}
+          {canCancel ? (
+            <button
+              type="button"
+              className="launcher-agent-task-action cancel"
+              data-testid={`${testIdPrefix}-agent-task-cancel`}
+              disabled={Boolean(taskAction)}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                void handleCancel();
+              }}
+              title="取消任务"
+            >
+              {taskAction === 'cancel' ? '取消中' : '取消'}
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -186,6 +220,10 @@ function launcherAgentTaskPendingApproval(task: AgentTaskSnapshot): ApprovalCard
   return task.pending_approvals?.find((approval) => !approval.status || approval.status === 'pending')
     || task.pending_approvals?.[0]
     || null;
+}
+
+function launcherAgentTaskCanCancel(task: AgentTaskSnapshot): boolean {
+  return ['queued', 'running', 'waiting_approval'].includes(String(task.status || ''));
 }
 
 function launcherAgentTaskStatusLabel(status: string) {

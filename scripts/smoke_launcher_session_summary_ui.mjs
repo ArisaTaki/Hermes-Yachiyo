@@ -30,6 +30,7 @@ const bridgeState = {
   ackPayloads: [],
   approvalPayloads: [],
   bubbleDefaultOpenBehavior: 'reply_bubble',
+  cancelPayloads: [],
   live2dClickAction: 'toggle_reply',
   modeRequests: [],
   publicTaskDecision: '',
@@ -131,13 +132,17 @@ function launcherPayload(mode) {
 }
 
 function publicAgentTasks() {
-  const resolved = bridgeState.publicTaskDecision === 'approved' || bridgeState.publicTaskDecision === 'rejected';
+  const resolved = bridgeState.publicTaskDecision === 'approved'
+    || bridgeState.publicTaskDecision === 'rejected'
+    || bridgeState.publicTaskDecision === 'cancelled';
   return [
     {
       task_id: PUBLIC_TASK_ID,
       conversation_id: DELEGATED_SESSION_ID,
       title: PUBLIC_TASK_TITLE,
-      status: bridgeState.publicTaskDecision === 'rejected' ? 'cancelled' : resolved ? 'completed' : 'waiting_approval',
+      status: bridgeState.publicTaskDecision === 'cancelled'
+        ? 'cancelled'
+        : bridgeState.publicTaskDecision === 'rejected' ? 'failed' : resolved ? 'completed' : 'waiting_approval',
       summary: resolved ? `Launcher task ${bridgeState.publicTaskDecision}` : 'Launcher can observe public Yachiyo task snapshots.',
       current_step: resolved ? 'Launcher smoke approval resolved' : 'Awaiting launcher smoke approval',
       progress_text: resolved ? 'Approval resolved' : 'Waiting for approval',
@@ -246,6 +251,13 @@ async function startMockBridge() {
         sendJson(response, 200, publicAgentTasks()[0]);
         return;
       }
+      if (request.method === 'POST' && url.pathname === `/yachiyo/tasks/${PUBLIC_TASK_ID}/cancel`) {
+        const body = await readRequestJson(request);
+        bridgeState.publicTaskDecision = 'cancelled';
+        bridgeState.cancelPayloads.push({ action: 'cancel', body });
+        sendJson(response, 200, publicAgentTasks()[0]);
+        return;
+      }
       if (request.method === 'POST' && url.pathname === '/ui/launcher/ack') {
         const body = await readRequestJson(request);
         bridgeState.ackPayloads.push(body);
@@ -267,6 +279,7 @@ async function startMockBridge() {
           ackPayloads: bridgeState.ackPayloads,
           approvalPayloads: bridgeState.approvalPayloads,
           bubbleDefaultOpenBehavior: bridgeState.bubbleDefaultOpenBehavior,
+          cancelPayloads: bridgeState.cancelPayloads,
           live2dClickAction: bridgeState.live2dClickAction,
           modeRequests: bridgeState.modeRequests,
           publicTaskDecision: bridgeState.publicTaskDecision,
@@ -483,6 +496,7 @@ async function main() {
     const taskStudio = document.querySelector('[data-testid="bubble-launcher-agent-task-open-studio"]');
     const taskApprove = document.querySelector('[data-testid="bubble-launcher-agent-task-approve"]');
     const taskReject = document.querySelector('[data-testid="bubble-launcher-agent-task-reject"]');
+    const taskCancel = document.querySelector('[data-testid="bubble-launcher-agent-task-cancel"]');
     const sessions = Array.from(document.querySelectorAll('[data-testid="bubble-launcher-recent-session"]'));
     const bodyText = document.body.textContent || '';
     return summary
@@ -501,6 +515,8 @@ async function main() {
       && !taskApprove.disabled
       && taskReject
       && !taskReject.disabled
+      && taskCancel
+      && !taskCancel.disabled
       && sessions.length === 2
       && sessions[0].getAttribute('data-session-id') === ${JSON.stringify(GROUP_SESSION_ID)}
       && sessions[0].getAttribute('data-task-id') === ${JSON.stringify(GROUP_TASK_ID)}
@@ -517,9 +533,11 @@ async function main() {
   }, 'bubble summary and recent sessions');
   console.log('[electron-smoke] bubble summary rendered');
   await win.webContents.executeJavaScript(\`
-    const studio = document.querySelector('[data-testid="bubble-launcher-agent-task-open-studio"]');
-    if (!studio) throw new Error('missing bubble launcher task Agent Studio handoff');
-    studio.click();
+    (() => {
+      const studio = document.querySelector('[data-testid="bubble-launcher-agent-task-open-studio"]');
+      if (!studio) throw new Error('missing bubble launcher task Agent Studio handoff');
+      studio.click();
+    })();
   \`, true);
   await waitFor(win, () => (
     Array.isArray(window.__ohaLauncherOpenViewCalls)
@@ -529,6 +547,31 @@ async function main() {
     ))
   ), 'bubble launcher task opened Agent Studio');
   console.log('[electron-smoke] bubble launcher task Agent Studio handoff verified');
+  await win.webContents.executeJavaScript(\`
+    const cancel = document.querySelector('[data-testid="bubble-launcher-agent-task-cancel"]');
+    if (!cancel) throw new Error('missing bubble launcher task cancel');
+    cancel.click();
+  \`, true);
+  await waitForBridgeState((state) => (
+    Array.isArray(state.cancelPayloads)
+    && state.cancelPayloads.some((payload) => payload?.action === 'cancel')
+  ), 'bubble launcher task cancel');
+  console.log('[electron-smoke] bubble task cancel verified');
+  await requestBridgeJson('/__smoke/reset-public-task');
+  await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '&surface=desktop#/bubble');
+  await installOpenViewProbe(win);
+  await waitFor(win, () => {
+    const taskLight = document.querySelector('[data-testid="bubble-launcher-agent-task-light"]');
+    const taskApprove = document.querySelector('[data-testid="bubble-launcher-agent-task-approve"]');
+    const taskCancel = document.querySelector('[data-testid="bubble-launcher-agent-task-cancel"]');
+    return taskLight
+      && taskLight.getAttribute('data-task-id') === ${JSON.stringify(PUBLIC_TASK_ID)}
+      && taskLight.textContent.includes(${JSON.stringify(PUBLIC_TASK_TITLE)})
+      && taskApprove
+      && !taskApprove.disabled
+      && taskCancel
+      && !taskCancel.disabled;
+  }, 'bubble task restored after cancel smoke');
   await win.webContents.executeJavaScript(\`
     const approve = document.querySelector('[data-testid="bubble-launcher-agent-task-approve"]');
     if (!approve) throw new Error('missing bubble launcher task approve');
@@ -615,6 +658,7 @@ async function main() {
     const taskStudio = document.querySelector('[data-testid="live2d-launcher-agent-task-open-studio"]');
     const taskApprove = document.querySelector('[data-testid="live2d-launcher-agent-task-approve"]');
     const taskReject = document.querySelector('[data-testid="live2d-launcher-agent-task-reject"]');
+    const taskCancel = document.querySelector('[data-testid="live2d-launcher-agent-task-cancel"]');
     const sessions = Array.from(document.querySelectorAll('[data-testid="live2d-launcher-recent-session"]'));
     const bodyText = document.body.textContent || '';
     return quickInput
@@ -635,6 +679,8 @@ async function main() {
       && !taskApprove.disabled
       && taskReject
       && !taskReject.disabled
+      && taskCancel
+      && !taskCancel.disabled
       && sessions.length === 2
       && sessions[0].getAttribute('data-session-id') === ${JSON.stringify(GROUP_SESSION_ID)}
       && sessions[0].getAttribute('data-task-id') === ${JSON.stringify(GROUP_TASK_ID)}
@@ -651,9 +697,11 @@ async function main() {
   }, 'live2d quick input and recent sessions');
   console.log('[electron-smoke] live2d summary rendered');
   await win.webContents.executeJavaScript(\`
-    const studio = document.querySelector('[data-testid="live2d-launcher-agent-task-open-studio"]');
-    if (!studio) throw new Error('missing live2d launcher task Agent Studio handoff');
-    studio.click();
+    (() => {
+      const studio = document.querySelector('[data-testid="live2d-launcher-agent-task-open-studio"]');
+      if (!studio) throw new Error('missing live2d launcher task Agent Studio handoff');
+      studio.click();
+    })();
   \`, true);
   await waitFor(win, () => (
     Array.isArray(window.__ohaLauncherOpenViewCalls)
@@ -802,6 +850,9 @@ function assertMockBridgeContract() {
   }
   if (!approvalActions.includes('reject')) {
     throw new Error(`live2d launcher task rejection was not called: ${JSON.stringify(bridgeState.approvalPayloads)}`);
+  }
+  if (!bridgeState.cancelPayloads.some((payload) => payload?.action === 'cancel')) {
+    throw new Error(`bubble launcher task cancel was not called: ${JSON.stringify(bridgeState.cancelPayloads)}`);
   }
   const ackModes = bridgeState.ackPayloads.map((payload) => payload?.mode);
   if (!ackModes.includes('bubble')) {

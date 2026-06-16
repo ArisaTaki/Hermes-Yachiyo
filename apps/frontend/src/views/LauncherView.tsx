@@ -6,7 +6,13 @@ import {
   LauncherAgentTaskLight,
   launcherAgentTaskSummary,
 } from '../features/yachiyo-chat/components/LauncherAgentTaskLight';
-import { approveYachiyoTask, listYachiyoTasks, rejectYachiyoTask, startYachiyoTask } from '../features/yachiyo-chat/api';
+import {
+  approveYachiyoTask,
+  cancelYachiyoTask,
+  listYachiyoTasks,
+  rejectYachiyoTask,
+  startYachiyoTask,
+} from '../features/yachiyo-chat/api';
 import {
   launcherAgentTaskFromPublicTasks,
   launcherAgentTaskIsActive,
@@ -144,6 +150,7 @@ export function LauncherView({ view }: { view: AppView }) {
       <Live2DLauncher
         agentTask={launcher.agentTask}
         onApproveTaskApproval={launcher.approveAgentTaskApproval}
+        onCancelTask={launcher.cancelAgentTask}
         onRejectTaskApproval={launcher.rejectAgentTaskApproval}
         data={launcher.data}
         refresh={launcher.refresh}
@@ -155,6 +162,7 @@ export function LauncherView({ view }: { view: AppView }) {
     <BubbleLauncher
       agentTask={launcher.agentTask}
       onApproveTaskApproval={launcher.approveAgentTaskApproval}
+      onCancelTask={launcher.cancelAgentTask}
       onRejectTaskApproval={launcher.rejectAgentTaskApproval}
       data={launcher.data}
       refresh={launcher.refresh}
@@ -237,9 +245,19 @@ function useLauncher(mode: 'bubble' | 'live2d') {
     approval: ApprovalCardSnapshot,
   ) => resolveAgentTaskApproval(task, approval, false), [resolveAgentTaskApproval]);
 
+  const cancelAgentTask = useCallback(async (task: AgentTaskSnapshot) => {
+    const taskId = String(task.task_id || '').trim();
+    if (!taskId) return null;
+    const nextTask = await cancelYachiyoTask(taskId);
+    setPublicAgentTask(nextTask);
+    await refresh();
+    return nextTask;
+  }, [refresh]);
+
   return {
     agentTask: publicAgentTask || data?.chat?.agent_task || null,
     approveAgentTaskApproval,
+    cancelAgentTask,
     data,
     refresh,
     rejectAgentTaskApproval,
@@ -283,6 +301,7 @@ function handleContextMenu(event: MouseEvent, mode: LauncherMode) {
 function BubbleLauncher({
   agentTask: publicAgentTask,
   onApproveTaskApproval,
+  onCancelTask,
   onRejectTaskApproval,
   data,
   refresh,
@@ -290,6 +309,7 @@ function BubbleLauncher({
 }: {
   agentTask?: AgentTaskSnapshot | null;
   onApproveTaskApproval: (task: AgentTaskSnapshot, approval: ApprovalCardSnapshot) => Promise<AgentTaskSnapshot | null>;
+  onCancelTask: (task: AgentTaskSnapshot) => Promise<AgentTaskSnapshot | null>;
   onRejectTaskApproval: (task: AgentTaskSnapshot, approval: ApprovalCardSnapshot) => Promise<AgentTaskSnapshot | null>;
   data: LauncherPayload | null;
   refresh: () => Promise<void>;
@@ -498,6 +518,7 @@ function BubbleLauncher({
       <LauncherAgentTaskLight
         mode="bubble"
         onApproveApproval={onApproveTaskApproval}
+        onCancelTask={onCancelTask}
         onRejectApproval={onRejectTaskApproval}
         task={agentTask}
       />
@@ -580,6 +601,7 @@ function bubbleTitle(
 function Live2DLauncher({
   agentTask: publicAgentTask,
   onApproveTaskApproval,
+  onCancelTask,
   onRejectTaskApproval,
   data,
   refresh,
@@ -587,6 +609,7 @@ function Live2DLauncher({
 }: {
   agentTask?: AgentTaskSnapshot | null;
   onApproveTaskApproval: (task: AgentTaskSnapshot, approval: ApprovalCardSnapshot) => Promise<AgentTaskSnapshot | null>;
+  onCancelTask: (task: AgentTaskSnapshot) => Promise<AgentTaskSnapshot | null>;
   onRejectTaskApproval: (task: AgentTaskSnapshot, approval: ApprovalCardSnapshot) => Promise<AgentTaskSnapshot | null>;
   data: LauncherPayload | null;
   refresh: () => Promise<void>;
@@ -1041,6 +1064,7 @@ function Live2DLauncher({
       <LauncherAgentTaskLight
         mode="live2d"
         onApproveApproval={onApproveTaskApproval}
+        onCancelTask={onCancelTask}
         onRejectApproval={onRejectTaskApproval}
         task={agentTask}
       />

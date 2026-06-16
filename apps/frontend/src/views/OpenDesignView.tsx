@@ -4,7 +4,13 @@ import logoUrl from '../../../../docs/open-design/logo.png';
 import { useConfirmDialog } from '../components/ConfirmDialog';
 import { UiIcon, type UiIconName } from '../components/UiIcon';
 import { LauncherAgentTaskLight } from '../features/yachiyo-chat/components/LauncherAgentTaskLight';
-import { approveYachiyoTask, listYachiyoTasks, rejectYachiyoTask, startYachiyoTask } from '../features/yachiyo-chat/api';
+import {
+  approveYachiyoTask,
+  cancelYachiyoTask,
+  listYachiyoTasks,
+  rejectYachiyoTask,
+  startYachiyoTask,
+} from '../features/yachiyo-chat/api';
 import {
   launcherAgentTaskFromPublicTasks,
   launcherAgentTaskIsActive,
@@ -1328,6 +1334,15 @@ function useLauncherModePayload(mode: 'bubble' | 'live2d', active = true) {
     approval: ApprovalCardSnapshot,
   ) => resolveAgentTaskApproval(task, approval, false), [resolveAgentTaskApproval]);
 
+  const cancelAgentTask = useCallback(async (task: AgentTaskSnapshot) => {
+    const taskId = String(task.task_id || '').trim();
+    if (!taskId) return null;
+    const nextTask = await cancelYachiyoTask(taskId);
+    setPublicAgentTask(nextTask);
+    await refresh();
+    return nextTask;
+  }, [refresh]);
+
   const startAgentTask = useCallback(async (prompt: string) => {
     const text = prompt.trim();
     if (!text) return null;
@@ -1349,6 +1364,7 @@ function useLauncherModePayload(mode: 'bubble' | 'live2d', active = true) {
   return {
     agentTask: publicAgentTask || data?.chat?.agent_task || null,
     approveAgentTaskApproval,
+    cancelAgentTask,
     data,
     loading,
     refresh,
@@ -1365,6 +1381,7 @@ export function BubbleModePage() {
   const {
     agentTask,
     approveAgentTaskApproval,
+    cancelAgentTask,
     data,
     loading,
     rejectAgentTaskApproval,
@@ -1409,6 +1426,7 @@ export function BubbleModePage() {
           <LauncherAgentTaskLight
             mode="bubble"
             onApproveApproval={approveAgentTaskApproval}
+            onCancelTask={cancelAgentTask}
             onRejectApproval={rejectAgentTaskApproval}
             task={agentTask}
             testIdPrefix="bubble-mode"
@@ -1435,6 +1453,7 @@ export function Live2DModePage({ active = true }: { active?: boolean } = {}) {
   const {
     agentTask,
     approveAgentTaskApproval,
+    cancelAgentTask,
     data,
     loading,
     rejectAgentTaskApproval,
@@ -1487,6 +1506,7 @@ export function Live2DModePage({ active = true }: { active?: boolean } = {}) {
           <LauncherAgentTaskLight
             mode="live2d"
             onApproveApproval={approveAgentTaskApproval}
+            onCancelTask={cancelAgentTask}
             onRejectApproval={rejectAgentTaskApproval}
             task={agentTask}
             testIdPrefix="live2d-mode"
