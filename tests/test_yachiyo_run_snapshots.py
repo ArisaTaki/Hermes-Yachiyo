@@ -308,6 +308,7 @@ def test_run_timeline_projects_legacy_agent_tool_lifecycle_events() -> None:
             "run_id": "run-legacy-tools",
             "status": "running",
             "timeline": [
+                {"event": "agent.tool.started", "detail": "workspace.search"},
                 {"event": "agent.tool.completed", "detail": "workspace.read"},
                 {"event": "agent.tool.failed", "detail": "terminal.run", "error": "exit 1"},
                 {"event": "agent.tool.skipped", "detail": "workspace.write"},
@@ -319,6 +320,7 @@ def test_run_timeline_projects_legacy_agent_tool_lifecycle_events() -> None:
     )
 
     assert [call.tool_name for call in timeline.tool_calls] == [
+        "workspace.search",
         "workspace.read",
         "terminal.run",
         "workspace.write",
@@ -327,6 +329,7 @@ def test_run_timeline_projects_legacy_agent_tool_lifecycle_events() -> None:
         "workspace.delete",
     ]
     assert [call.status for call in timeline.tool_calls] == [
+        "running",
         "completed",
         "failed",
         "skipped",
@@ -334,7 +337,7 @@ def test_run_timeline_projects_legacy_agent_tool_lifecycle_events() -> None:
         "denied",
         "denied",
     ]
-    assert timeline.tool_calls[1].output_preview == {"error": "exit 1"}
+    assert timeline.tool_calls[2].output_preview == {"error": "exit 1"}
     assert all(call.run_id == "run-legacy-tools" for call in timeline.tool_calls)
 
 

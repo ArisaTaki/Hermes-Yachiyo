@@ -421,6 +421,7 @@ function isToolRunEvent(eventType: string): boolean {
   return [
     'agent.tool.call',
     'agent.tool.denied',
+    'agent.tool.started',
     'agent.tool.failed',
     'agent.tool.skipped',
     'agent.tool.approval_required',
@@ -439,7 +440,7 @@ function isToolRunEvent(eventType: string): boolean {
 
 function toolStatusFromRunEvent(eventType: string): string {
   if (eventType === 'tool.requested') return 'requested';
-  if (eventType === 'tool.started') return 'running';
+  if (eventType === 'tool.started' || eventType === 'agent.tool.started') return 'running';
   if (eventType === 'tool.approval_required' || eventType === 'agent.tool.approval_required') return 'waiting_approval';
   if (eventType === 'agent.tool.approval_approved' || eventType === 'tool.approved') return 'approved';
   if (eventType === 'agent.tool.approval_rejected' || eventType === 'agent.tool.denied' || eventType === 'tool.rejected') return 'denied';

@@ -11,6 +11,7 @@ export type RuntimeToolCallSummaryItem = {
 const TOOL_EVENT_TYPES = new Set([
   'agent.tool.call',
   'agent.tool.denied',
+  'agent.tool.started',
   'agent.tool.failed',
   'agent.tool.skipped',
   'agent.tool.approval_required',
@@ -140,6 +141,7 @@ function runtimeToolStatusFromEvent(event: PublicRunEvent): string {
 
   const eventType = String(event.event_type || '').trim();
   if (eventType === 'agent.tool.denied') return 'denied';
+  if (eventType === 'agent.tool.started') return 'running';
   if (eventType === 'agent.tool.failed' || eventType === 'tool.failed') return 'failed';
   if (eventType === 'agent.tool.skipped') return 'skipped';
   if (eventType === 'agent.tool.approval_required' || eventType === 'tool.approval_required') {

@@ -64,7 +64,7 @@ function runtimeTimelineEventTypeLabel(type: string): string {
   if (type === 'run.started' || type === 'task.started') return '任务已启动';
   if (type === 'task.linked') return 'Task 已关联';
   if (type === 'tool.requested') return '工具请求';
-  if (type === 'tool.started') return '工具执行中';
+  if (type === 'tool.started' || type === 'agent.tool.started') return '工具执行中';
   if (type === 'agent.tool.call') return '工具调用';
   if (type === 'agent.tool.skipped') return '工具已跳过';
   if (type === 'agent.tool.denied') return '工具已拒绝';

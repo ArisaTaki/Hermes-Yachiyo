@@ -1105,6 +1105,7 @@ def _is_tool_event(event_type: str) -> bool:
     return event_type in {
         "agent.tool.call",
         "agent.tool.denied",
+        "agent.tool.started",
         "agent.tool.failed",
         "agent.tool.skipped",
         "agent.tool.approval_required",
@@ -1133,7 +1134,7 @@ def _tool_name_from_event(event: PublicRunEvent) -> str:
 def _tool_status_from_event_type(event_type: str) -> str:
     if event_type in {"tool.requested"}:
         return "requested"
-    if event_type in {"tool.started"}:
+    if event_type in {"tool.started", "agent.tool.started"}:
         return "running"
     if event_type in {"tool.approval_required", "agent.tool.approval_required"}:
         return "waiting_approval"
