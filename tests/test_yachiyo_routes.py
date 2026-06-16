@@ -633,12 +633,24 @@ async def test_yachiyo_task_route_can_start_workflow_task_from_chat() -> None:
         request,
     )
     timeline = await yachiyo.get_task_timeline("task-workflow-1", request)
+    approved = await yachiyo.approve_task("task-workflow-1", None, request)
+    rejected = await yachiyo.reject_task(
+        "task-workflow-1",
+        yachiyo.TaskApprovalRequest(reason="No"),
+        request,
+    )
 
     assert started["task_id"] == "task-workflow-1"
     assert started["status"] == "waiting_approval"
     assert started["open_in_studio_url"] == "#/agents?run_id=workflow-run-1&group_run=group-run-1"
     assert timeline["workflow_run_id"] == "workflow-run-1"
     assert timeline["task_id"] == "task-workflow-1"
+    assert approved["task_id"] == "task-workflow-1"
+    assert approved["status"] == "completed"
+    assert approved["open_in_studio_url"] == "#/agents?run_id=workflow-run-1&group_run=group-run-1"
+    assert rejected["task_id"] == "task-workflow-1"
+    assert rejected["status"] == "failed"
+    assert rejected["open_in_studio_url"] == "#/agents?run_id=workflow-run-1&group_run=group-run-1"
     assert (
         "create_workflow_run",
         {
@@ -652,6 +664,8 @@ async def test_yachiyo_task_route_can_start_workflow_task_from_chat() -> None:
         "link_task_run",
         {"task_id": "task-workflow-1", "run_id": "workflow-run-1", "session_id": "chat-1"},
     ) in runtime.calls
+    assert ("approve_run_approval", "workflow-run-1") in runtime.calls
+    assert ("reject_run_approval", {"run_id": "workflow-run-1", "reason": "No"}) in runtime.calls
 
 
 @pytest.mark.asyncio

@@ -63,6 +63,35 @@ def test_legacy_runtime_port_starts_and_links_chat_workflow_task() -> None:
     ) in runtime.calls
 
 
+def test_legacy_runtime_port_preserves_workflow_identity_after_task_approval() -> None:
+    runtime = _FakeRuntime()
+    port = LegacyRuntimePort(runtime)
+    port.start_chat_task(
+        {
+            "prompt": "Build report",
+            "conversation_id": "chat-1",
+            "client_task_id": "task-workflow-1",
+            "workflow_id": "workflow-1",
+        }
+    )
+
+    approved = port.approve("task-workflow-1")
+    rejected = port.reject("task-workflow-1", "No")
+
+    assert approved["task_id"] == "task-workflow-1"
+    assert approved["status"] == "completed"
+    assert approved["kind"] == "workflow_run"
+    assert approved["workflow_run_id"] == "workflow-run-1"
+    assert approved["workflow_id"] == "workflow-1"
+    assert rejected["task_id"] == "task-workflow-1"
+    assert rejected["status"] == "failed"
+    assert rejected["kind"] == "workflow_run"
+    assert rejected["workflow_run_id"] == "workflow-run-1"
+    assert rejected["workflow_id"] == "workflow-1"
+    assert ("approve_run_approval", "workflow-run-1") in runtime.calls
+    assert ("reject_run_approval", {"run_id": "workflow-run-1", "reason": "No"}) in runtime.calls
+
+
 def test_legacy_runtime_port_resolves_task_link_for_approval_actions() -> None:
     runtime = _FakeRuntime()
     port = LegacyRuntimePort(runtime)
@@ -155,6 +184,7 @@ class _FakeRuntime:
             },
             "workflow-run-1": {
                 "run_id": "workflow-run-1",
+                "kind": "workflow_run",
                 "workflow_run_id": "workflow-run-1",
                 "workflow_id": "workflow-1",
                 "user_goal": "Build report",
@@ -223,4 +253,12 @@ class _FakeRuntime:
             "run_id": run_id,
             "user_goal": "Patch README",
             "status": "completed",
+        }
+
+    def reject_run_approval(self, run_id: str, reason: str = "") -> dict[str, Any]:
+        self.calls.append(("reject_run_approval", {"run_id": run_id, "reason": reason}))
+        return {
+            "run_id": run_id,
+            "user_goal": "Patch README",
+            "status": "failed",
         }

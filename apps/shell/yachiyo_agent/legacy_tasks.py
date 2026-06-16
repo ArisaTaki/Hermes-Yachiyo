@@ -146,7 +146,7 @@ class LegacyRuntimePort:
         return self._projector.chat_task_payload(
             self._payload_with_task_link(
                 approval_id,
-                self._runtime.approve_run_approval(run_id),
+                self._run_action_payload(run_id, self._runtime.approve_run_approval(run_id)),
             )
         )
 
@@ -155,14 +155,20 @@ class LegacyRuntimePort:
         return self._projector.chat_task_payload(
             self._payload_with_task_link(
                 approval_id,
-                self._runtime.reject_run_approval(run_id, reason or ""),
+                self._run_action_payload(
+                    run_id,
+                    self._runtime.reject_run_approval(run_id, reason or ""),
+                ),
             )
         )
 
     def cancel(self, task_id: str) -> dict[str, Any]:
         run_id = self._run_id_for_task(task_id)
         return self._projector.chat_task_payload(
-            self._payload_with_task_link(task_id, self._runtime.cancel_run(run_id))
+            self._payload_with_task_link(
+                task_id,
+                self._run_action_payload(run_id, self._runtime.cancel_run(run_id)),
+            )
         )
 
     def _run_id_for_task(self, task_id: str) -> str:
@@ -202,6 +208,33 @@ class LegacyRuntimePort:
             "task_run_link_run_status": link.get("run_status") or run.get("status") or "",
             "task_run_link_last_event_sequence": link.get("last_event_sequence") or 0,
         }
+
+    def _run_action_payload(self, run_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if payload.get("kind") and payload.get("workflow_run_id"):
+            return payload
+        try:
+            existing = self._runtime.get_run(run_id)
+        except KeyError:
+            return payload
+        merged = {**payload, "run_id": payload.get("run_id") or existing.get("run_id")}
+        preserve_workflow_identity = (
+            existing.get("kind") == "workflow_run"
+            and payload.get("kind") != "workflow_run"
+        )
+        for key in (
+            "kind",
+            "workflow_id",
+            "workflow_run_id",
+            "workflow_node_id",
+            "workflow_node_label",
+            "run_group_id",
+            "group_run_id",
+            "runnable_id",
+            "runnable_name",
+        ):
+            if existing.get(key) and (preserve_workflow_identity or not merged.get(key)):
+                merged[key] = existing[key]
+        return merged
 
     def _payload_items(self, payload: Any, key: str) -> list[dict[str, Any]]:
         items = payload.get(key) if isinstance(payload, dict) else payload
