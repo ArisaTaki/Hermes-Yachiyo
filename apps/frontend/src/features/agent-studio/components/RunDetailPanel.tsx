@@ -187,6 +187,15 @@ export function RunDetailPanel({
   const approvalHistorySource = replayApprovals.length
     ? 'RunTimelineSnapshot + RunEvent replay approval facts'
     : 'RunTimelineSnapshot approval facts';
+  const rerunSourceRunId = selectedPublicRunTimeline?.rerun_of_run_id || selectedRun?.rerun_of_run_id || '';
+  const rerunSourceLabel = selectedPublicRunTimeline?.rerun_of_runnable_name
+    || selectedRun?.rerun_of_runnable_name
+    || rerunSourceRunId;
+  const showRunDetailRerunSource = Boolean(
+    selectedRun
+    && selectedRun.kind !== 'workflow_run'
+    && rerunSourceRunId,
+  );
   return (
     <div className="agent-studio-panel">
       <div className="section-heading-row"><h2>Run Detail</h2></div>
@@ -223,6 +232,17 @@ export function RunDetailPanel({
             ) : null}
             {selectedRun.task_run_link_updated_at || selectedRun.task_run_link_created_at ? (
               <span>Task link updated {formatRunDate(selectedRun.task_run_link_updated_at || selectedRun.task_run_link_created_at)}</span>
+            ) : null}
+            {showRunDetailRerunSource ? (
+              <button
+                type="button"
+                className="run-rerun-source-link"
+                data-rerun-of-run-id={rerunSourceRunId}
+                data-testid="agent-run-detail-rerun-source"
+                onClick={() => onOpenRunDetail(rerunSourceRunId)}
+              >
+                rerun of {rerunSourceLabel}
+              </button>
             ) : null}
             <code>{selectedRun.run_id}</code>
             <button

@@ -2033,6 +2033,12 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "onOpenRunDetail={onOpenRunDetail}",
             "selectedPublicRunTimeline={selectedPublicRunTimeline}",
             "selectedRun={selectedRun}",
+            "const rerunSourceRunId = selectedPublicRunTimeline?.rerun_of_run_id || selectedRun?.rerun_of_run_id || '';",
+            "selectedRun.kind !== 'workflow_run'",
+            'data-testid="agent-run-detail-rerun-source"',
+            "data-rerun-of-run-id={rerunSourceRunId}",
+            "onClick={() => onOpenRunDetail(rerunSourceRunId)}",
+            "rerun of {rerunSourceLabel}",
         ],
     )
     _assert_contains(
