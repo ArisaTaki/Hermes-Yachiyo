@@ -7,6 +7,7 @@ from typing import Any
 from apps.shell.chat_api import ChatAPI
 
 from .legacy_groups import (
+    append_group_run_event,
     append_group_member_event,
     chat_group_snapshot,
     chat_group_snapshots,
@@ -322,6 +323,19 @@ class LegacyStudioPort:
             )
             if not run_group_id:
                 run_group_id = str(child_run.get("run_group_id") or "")
+                append_group_run_event(
+                    self._runtime,
+                    child_run,
+                    "group.run.started",
+                    group_id=group_id,
+                    group=group,
+                    run_group_id=run_group_id,
+                    objective=objective,
+                    status="running",
+                    members=members,
+                    child_run_ids=[str(child_run.get("run_id") or "")],
+                    client_run_id=client_run_id,
+                )
             append_group_member_event(
                 self._runtime,
                 child_run,
@@ -371,6 +385,7 @@ class LegacyStudioPort:
             "runs": child_runs,
             "child_run_ids": run_group.get("child_run_ids")
             or [run.get("run_id") for run in child_runs if run.get("run_id")],
+            "events": self._projector.group_events_from_child_runs(child_runs, self._runtime),
             "shared_artifacts": self._projector.group_artifacts(child_runs),
             "pending_approvals": [
                 run.get("pending_approval")

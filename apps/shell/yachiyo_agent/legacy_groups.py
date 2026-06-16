@@ -174,6 +174,40 @@ def append_group_member_event(
     append_run_event(run_id, event_type, payload)
 
 
+def append_group_run_event(
+    runtime: Any,
+    run: dict[str, Any],
+    event_type: str,
+    *,
+    group_id: str,
+    group: dict[str, Any] | None = None,
+    run_group_id: str,
+    objective: str,
+    status: str = "",
+    members: list[dict[str, Any]] | None = None,
+    child_run_ids: list[str] | None = None,
+    client_run_id: str = "",
+) -> None:
+    append_run_event = getattr(runtime, "append_run_event", None)
+    run_id = str(run.get("run_id") or "").strip()
+    if not callable(append_run_event) or not run_id:
+        return
+    payload = {
+        "child_run_ids": [str(item) for item in child_run_ids or [] if str(item)],
+        "group_id": group_id,
+        "group_run_id": run_group_id or str(run.get("run_group_id") or ""),
+        "objective": objective,
+        "participant_count": len(members or []),
+        "run_group_id": run_group_id or str(run.get("run_group_id") or ""),
+        "status": status or str(run.get("status") or "running"),
+    }
+    if group:
+        payload.update(_group_event_context(group))
+    if client_run_id:
+        payload["client_run_id"] = client_run_id
+    append_run_event(run_id, event_type, payload)
+
+
 def _chat_store() -> Any:
     from apps.core.chat_store import get_chat_store
 
