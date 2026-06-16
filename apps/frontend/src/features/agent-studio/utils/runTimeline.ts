@@ -49,6 +49,10 @@ export function timelineEventTitle(event: Record<string, unknown>): string {
   if (name === 'run.completed') return 'Run 已完成';
   if (name === 'run.failed') return 'Run 执行失败';
   if (name === 'run.rerun.started') return '从原 Run 重跑';
+  if (name === 'group.run.started') return detail ? `群组运行启动 · ${detail}` : '群组运行启动';
+  if (name === 'group.run.completed') return detail ? `群组运行完成 · ${detail}` : '群组运行完成';
+  if (name === 'group.run.failed') return detail ? `群组运行失败 · ${detail}` : '群组运行失败';
+  if (name === 'group.run.cancelled') return detail ? `群组运行已取消 · ${detail}` : '群组运行已取消';
   if (name === 'group.member.started') return detail ? `群组成员启动 · ${detail}` : '群组成员启动';
   if (name === 'group.member.completed') return detail ? `群组成员完成 · ${detail}` : '群组成员完成';
   if (name === 'group.approval_required') return detail ? `群组审批 · ${detail}` : '群组审批';
@@ -92,6 +96,9 @@ export function timelineEventTone(event: Record<string, unknown>): string {
   if (status === 'approval_required' || name.includes('approval')) return 'approval';
   if (status === 'running' || status === 'processing' || name.includes('resumed')) return 'running';
   if (name === 'group.artifact.created' || name === 'group.shared_artifact.created') return 'ready';
+  if (name === 'group.run.started') return 'running';
+  if (name === 'group.run.completed') return 'ready';
+  if (name === 'group.run.failed' || name === 'group.run.cancelled') return 'danger';
   if (name.startsWith('group.member.')) return name.includes('started') ? 'running' : 'ready';
   if (name.startsWith('skill.') || name.startsWith('memory.')) return 'tool';
   if (name.includes('tool')) return 'tool';

@@ -548,19 +548,25 @@ def test_agent_studio_service_maps_group_run_workflow_run_timeline_and_events() 
     assert group_run.group_id == "group-1"
     assert group_run.run_group_id == "group-run-1"
     assert group_run.objective == "Compare designs"
-    assert group_run.events[0].event_type == "group.member.started"
-    assert group_run.events[0].payload["member_agent_id"] == "agent-1"
+    assert [event.event_type for event in group_run.events[:2]] == [
+        "group.run.started",
+        "group.member.started",
+    ]
+    assert group_run.events[0].payload["group_run_id"] == "group-run-1"
+    assert group_run.events[1].payload["member_agent_id"] == "agent-1"
     assert group_run.runs[0].events[0].event_type == "agent.tool.call"
     assert group_run.pending_approvals[0].approval_id == "approval-1"
     assert group_runs[0].group_run_id == "group-run-listed"
     assert fetched_group_run.group_run_id == "group-run-1"
     assert fetched_group_run.run_group_id == "group-run-1"
     assert fetched_group_run.child_run_ids == ["child-run-1"]
-    assert group_events[0].event_type == "group.member.started"
-    assert group_events[0].payload["member_agent_id"] == "agent-1"
+    assert group_events[0].event_type == "group.run.started"
+    assert group_events[0].payload["group_run_id"] == "group-run-1"
+    assert group_events[1].event_type == "group.member.started"
+    assert group_events[1].payload["member_agent_id"] == "agent-1"
     assert group_event_page.run_id == "group-run-1"
-    assert group_event_page.events[0].event_type == "group.member.started"
-    assert group_event_page.has_more is False
+    assert group_event_page.events[0].event_type == "group.run.started"
+    assert group_event_page.has_more is True
     assert workflow_run.workflow_run_id == "workflow-run-1"
     assert workflow_run.run_id == "workflow-run-1"
     assert workflow_run.title == "Build report"

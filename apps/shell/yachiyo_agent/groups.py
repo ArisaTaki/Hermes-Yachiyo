@@ -60,10 +60,19 @@ def group_run_snapshot_from_payload(
     group_run_id = _text(payload.get("group_run_id") or legacy_run_group_id)
     group_id = _text(payload.get("group_id") or payload.get("agent_group_id"))
     runs_payload = payload.get("runs") or payload.get("child_runs") or []
+    child_run_ids = [str(item) for item in payload.get("child_run_ids") or [] if str(item)]
     events = _RUN_PROJECTOR.events_from_payload(
-        payload,
+        {
+            "events": _group_run_events_with_lifecycle(
+                payload,
+                group_run_id=group_run_id,
+                group_id=group_id,
+                objective=_text(payload.get("objective") or payload.get("user_goal")),
+                child_run_ids=child_run_ids,
+            )
+        },
         run_id=group_run_id,
-        keys=("events", "run_events", "recent_events", "timeline"),
+        keys=("events",),
     )
     return GroupRunSnapshot(
         group_run_id=group_run_id,
@@ -80,7 +89,7 @@ def group_run_snapshot_from_payload(
             for item in runs_payload
             if isinstance(item, Mapping)
         ],
-        child_run_ids=[str(item) for item in payload.get("child_run_ids") or [] if str(item)],
+        child_run_ids=child_run_ids,
         shared_artifacts=_RUN_PROJECTOR.artifacts_from_payload(
             {"artifacts": payload.get("shared_artifacts") or payload.get("artifacts")},
             run_id=group_run_id,
@@ -108,6 +117,121 @@ def _group_mode(value: Any) -> str:
 def _memory_scope(value: Any) -> str:
     scope = _text(value) or "shared"
     return scope if scope in {"shared", "per_agent", "hybrid"} else "shared"
+
+
+def _group_run_events_with_lifecycle(
+    payload: Mapping[str, Any],
+    *,
+    group_run_id: str,
+    group_id: str,
+    objective: str,
+    child_run_ids: list[str],
+) -> list[dict[str, Any]]:
+    raw_events = _raw_events_from_payload(
+        payload,
+        ("events", "run_events", "recent_events", "timeline"),
+    )
+    if not group_run_id:
+        return raw_events
+
+    existing_types = {_event_type(event) for event in raw_events}
+    lifecycle_context = _group_run_lifecycle_context(
+        payload,
+        group_run_id=group_run_id,
+        group_id=group_id,
+        objective=objective,
+        child_run_ids=child_run_ids,
+    )
+    events: list[dict[str, Any]] = []
+    if "group.run.started" not in existing_types:
+        events.append(
+            _group_run_lifecycle_event(
+                "group.run.started",
+                payload,
+                lifecycle_context,
+                created_at=_text(payload.get("created_at")),
+            )
+        )
+    events.extend(raw_events)
+
+    terminal_event_type = _group_run_terminal_event_type(payload.get("status"))
+    if terminal_event_type and terminal_event_type not in existing_types:
+        events.append(
+            _group_run_lifecycle_event(
+                terminal_event_type,
+                payload,
+                {**lifecycle_context, "status": _text(payload.get("status"))},
+                created_at=_text(payload.get("updated_at") or payload.get("created_at")),
+            )
+        )
+    return events
+
+
+def _raw_events_from_payload(
+    payload: Mapping[str, Any],
+    keys: tuple[str, ...],
+) -> list[dict[str, Any]]:
+    for key in keys:
+        value = payload.get(key)
+        if value and isinstance(value, list):
+            return [dict(item) for item in value if isinstance(item, Mapping)]
+    return []
+
+
+def _event_type(event: Mapping[str, Any]) -> str:
+    return _text(event.get("event_type") or event.get("event"))
+
+
+def _group_run_lifecycle_context(
+    payload: Mapping[str, Any],
+    *,
+    group_run_id: str,
+    group_id: str,
+    objective: str,
+    child_run_ids: list[str],
+) -> dict[str, Any]:
+    return {
+        "group_run_id": group_run_id,
+        "run_group_id": _text(payload.get("run_group_id") or group_run_id),
+        "group_id": group_id,
+        "objective": objective,
+        "status": _text(payload.get("status") or "unknown"),
+        "child_run_ids": child_run_ids,
+        "participant_count": _len_list(payload.get("participants")),
+    }
+
+
+def _group_run_lifecycle_event(
+    event_type: str,
+    payload: Mapping[str, Any],
+    lifecycle_context: dict[str, Any],
+    *,
+    created_at: str = "",
+) -> dict[str, Any]:
+    label = _text(payload.get("title") or payload.get("objective") or "Group run")
+    event = {
+        "event_type": event_type,
+        "detail": label,
+        "payload": dict(lifecycle_context),
+    }
+    if created_at:
+        event["created_at"] = created_at
+    return event
+
+
+def _group_run_terminal_event_type(value: Any) -> str:
+    status = _text(value)
+    if status == "completed":
+        return "group.run.completed"
+    if status == "failed":
+        return "group.run.failed"
+    if status == "cancelled":
+        return "group.run.cancelled"
+    return ""
+
+
+def _len_list(value: Any) -> int:
+    return len(value) if isinstance(value, list) else 0
 
 
 def _text(value: Any) -> str:

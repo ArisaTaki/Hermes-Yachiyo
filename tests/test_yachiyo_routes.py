@@ -856,7 +856,7 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     assert group_run_events["limit"] == 1
     assert group_run_events["next_after_sequence"] == 1
     assert group_run_events["has_more"] is True
-    assert group_run_events["events"][0]["event_type"] == "group.member.started"
+    assert group_run_events["events"][0]["event_type"] == "group.run.started"
     assert events["after_sequence"] == 0
     assert events["limit"] == 1
     assert events["next_after_sequence"] == 1

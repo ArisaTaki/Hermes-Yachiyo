@@ -68,6 +68,10 @@ function runtimeTimelineEventLabel(event: RuntimeTimelineEventSnapshot): string 
   if (type === 'memory.write.replace') return 'Memory 更新';
   if (type === 'memory.write.remove') return 'Memory 删除';
   if (type === 'artifact.created') return '产物已生成';
+  if (type === 'group.run.started') return '群组运行启动';
+  if (type === 'group.run.completed') return '群组运行完成';
+  if (type === 'group.run.failed') return '群组运行失败';
+  if (type === 'group.run.cancelled') return '群组运行已取消';
   if (type === 'group.member.started') return '群组成员启动';
   if (type === 'group.member.completed') return '群组成员完成';
   if (type === 'group.member.failed') return '群组成员失败';

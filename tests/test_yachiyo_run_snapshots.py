@@ -492,8 +492,14 @@ def test_group_run_snapshot_reuses_shared_run_projection_for_children_artifacts_
     )
 
     assert group_run.group_run_id == "group-run-1"
-    assert group_run.events[0].event_type == "group.member.started"
-    assert group_run.events[0].payload["member_agent_id"] == "agent-1"
+    assert [event.event_type for event in group_run.events[:2]] == [
+        "group.run.started",
+        "group.member.started",
+    ]
+    assert group_run.events[0].payload["group_run_id"] == "group-run-1"
+    assert group_run.events[0].payload["group_id"] == "group-1"
+    assert group_run.events[0].payload["objective"] == "Compare options"
+    assert group_run.events[1].payload["member_agent_id"] == "agent-1"
     assert group_run.runs[0].run_id == "run-1"
     assert group_run.runs[0].tool_calls[0].tool_name == "workspace.read"
     assert group_run.runs[0].pending_approval is not None
@@ -501,6 +507,28 @@ def test_group_run_snapshot_reuses_shared_run_projection_for_children_artifacts_
     assert group_run.shared_artifacts[0].path == "team.md"
     assert group_run.pending_approvals[0].run_id == "group-run-1"
     assert group_run.pending_approvals[0].open_in_studio_url == "#/agents?run_id=group-run-1&group_run=group-run-1"
+
+
+def test_group_run_snapshot_falls_back_to_legacy_event_keys_when_events_is_empty() -> None:
+    group_run = group_run_snapshot_from_payload(
+        {
+            "group_run_id": "group-run-legacy-events",
+            "group_id": "group-1",
+            "status": "running",
+            "events": [],
+            "run_events": [
+                {
+                    "event_type": "group.member.started",
+                    "payload": {"member_agent_id": "agent-1"},
+                }
+            ],
+        }
+    )
+
+    assert [event.event_type for event in group_run.events[:2]] == [
+        "group.run.started",
+        "group.member.started",
+    ]
 
 
 def test_group_run_snapshot_derives_approvals_and_artifacts_from_group_events() -> None:
@@ -541,7 +569,10 @@ def test_group_run_snapshot_derives_approvals_and_artifacts_from_group_events() 
         }
     )
 
-    assert group_run.events[0].event_type == "group.approval_required"
+    assert [event.event_type for event in group_run.events[:2]] == [
+        "group.run.started",
+        "group.approval_required",
+    ]
     assert group_run.pending_approvals[0].approval_id == "approval-group-event"
     assert group_run.pending_approvals[0].tool_name == "group.approval"
     assert group_run.pending_approvals[0].title == "Approve Planner"
@@ -557,3 +588,30 @@ def test_group_run_snapshot_derives_approvals_and_artifacts_from_group_events() 
     assert group_run.shared_artifacts[0].path == "team-summary.md"
     assert group_run.shared_artifacts[0].size_bytes == 33
     assert group_run.shared_artifacts[0].source_run_id == "group-events-only"
+
+
+def test_group_run_snapshot_adds_terminal_lifecycle_event_from_status() -> None:
+    group_run = group_run_snapshot_from_payload(
+        {
+            "group_run_id": "group-completed",
+            "group_id": "group-1",
+            "title": "Team review",
+            "status": "completed",
+            "objective": "Compare options",
+            "child_run_ids": ["run-1"],
+            "events": [
+                {
+                    "event_type": "group.member.completed",
+                    "payload": {"member_agent_id": "agent-1"},
+                },
+            ],
+        }
+    )
+
+    assert [event.event_type for event in group_run.events] == [
+        "group.run.started",
+        "group.member.completed",
+        "group.run.completed",
+    ]
+    assert group_run.events[-1].payload["status"] == "completed"
+    assert group_run.events[-1].payload["child_run_ids"] == ["run-1"]
