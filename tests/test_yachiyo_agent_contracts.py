@@ -36,6 +36,8 @@ from apps.shell.yachiyo_agent import (
     ToolCallSnapshot,
     WorkflowRunSnapshot,
     WorkflowSnapshot,
+    approval_is_pending,
+    task_requires_user_action,
 )
 from apps.shell.yachiyo_agent.events import public_run_event_from_payload
 
@@ -162,6 +164,35 @@ def test_approval_card_snapshot_keeps_runtime_trace_fields() -> None:
     assert payload["workflow_node_id"] == "review"
     assert payload["source_runnable_name"] == "Planner"
     assert payload["group_run_id"] == "group-run-1"
+
+
+def test_product_policy_helpers_use_public_snapshots() -> None:
+    pending = ApprovalCardSnapshot(
+        approval_id="approval-pending",
+        run_id="run-1",
+        title="Approve write",
+        tool_name="workspace.write_patch",
+    )
+    approved = ApprovalCardSnapshot(
+        approval_id="approval-approved",
+        run_id="run-1",
+        title="Approved read",
+        tool_name="workspace.read",
+        status="approved",
+    )
+    task = AgentTaskSnapshot(
+        task_id="task-1",
+        title="Review README",
+        status="running",
+        pending_approvals=[approved, pending],
+    )
+
+    assert approval_is_pending(pending) is True
+    assert approval_is_pending(approved) is False
+    assert task_requires_user_action(task) is True
+
+    cleared = task.model_copy(update={"pending_approvals": [approved]})
+    assert task_requires_user_action(cleared) is False
 
 
 def test_chat_runnable_catalog_snapshot_json_shape_is_stable() -> None:

@@ -39,6 +39,7 @@ from .contracts import (
     WorkflowSnapshot,
 )
 from .links import studio_run_url
+from .policy import approval_is_pending, task_requires_user_action
 from .service import YachiyoAgentService
 from .studio_service import AgentStudioService
 
@@ -48,6 +49,7 @@ __all__ = [
     "AgentGroupSnapshot",
     "AgentStudioService",
     "AgentTaskSnapshot",
+    "approval_is_pending",
     "ApprovalCardSnapshot",
     "ApprovalDecision",
     "ArtifactContentSnapshot",
@@ -82,4 +84,5 @@ __all__ = [
     "WorkflowSnapshot",
     "YachiyoAgentService",
     "studio_run_url",
+    "task_requires_user_action",
 ]
