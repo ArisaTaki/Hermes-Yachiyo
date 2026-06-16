@@ -130,6 +130,87 @@ def test_installation_facade_installs_engine_state_under_legacy_attributes(tmp_p
         credential_store.close()
 
 
+def test_installation_facade_installs_definition_layer_from_split_builder(monkeypatch) -> None:
+    def forbidden_legacy_builder(**_kwargs):
+        raise AssertionError("definition layer should use split installation builder")
+
+    def fake_build_runtime_definition_services(**kwargs):
+        return SimpleNamespace(
+            task_run_links=SimpleNamespace(kwargs=kwargs),
+            trusted_workspaces="trusted-workspaces",
+            studio_deletions="studio-deletions",
+            skill_folders="skill-folders",
+            skill_records="skill-records",
+            agent_definitions="agent-definitions",
+            agent_skill_attachments="agent-skill-attachments",
+            skill_install_validator="skill-install-validator",
+            skill_sources="skill-sources",
+            skill_content="skill-content",
+            skill_import_sources="skill-import-sources",
+            skill_import_preparer="skill-import-preparer",
+            skill_sync="skill-sync",
+            workflows="workflows",
+        )
+
+    monkeypatch.setattr(agent_runtime, "_build_runtime_definition_services", forbidden_legacy_builder)
+    monkeypatch.setattr(
+        installation_facade_mod,
+        "build_runtime_definition_services",
+        fake_build_runtime_definition_services,
+    )
+
+    engine = object.__new__(agent_runtime.NativeRunEngine)
+    engine._conn = "conn"
+    engine._ensure_row_factory = "ensure-row-factory"
+    engine.get_run = "get-run"
+    engine._row_to_skill_folder = "row-to-skill-folder"
+    engine.delete_skill = "delete-skill"
+    engine._row_to_skill = "row-to-skill"
+    engine._normalize_skill_folder_id = "normalize-skill-folder-id"
+    engine._installed_skill_source_map = "installed-skill-source-map"
+    engine._record_studio_deletion = "record-studio-deletion"
+    engine._skill_deletion_key = "skill-deletion-key"
+    engine.skills_dir = "skills-dir"
+    engine.skill_installs_dir = "skill-installs-dir"
+    engine._row_to_agent = "row-to-agent"
+    engine._row_to_agent_private = "row-to-agent-private"
+    engine._coerce_named_row = "coerce-named-row"
+    engine._main_chat_virtual_agent = "main-chat-virtual-agent"
+    engine.definition_name_guard = SimpleNamespace(ensure_available="ensure-available")
+    engine._validate_agent_profile_refs = "validate-agent-profile-refs"
+    engine._compile_tool_policy = "compile-tool-policy"
+    engine._compile_workspace_policy = "compile-workspace-policy"
+    engine._assign_default_agent_workdir = "assign-default-agent-workdir"
+    engine._trust_workspace_from_policy = "trust-workspace-from-policy"
+    engine._agent_model_credential_ref = "agent-model-credential-ref"
+    engine._store_credential = "store-credential"
+    engine._delete_credential = "delete-credential"
+    engine._clear_studio_deletion = "clear-studio-deletion"
+    engine.skill_installs_native_home = "skill-installs-native-home"
+    engine.workspace_dir = "workspace-dir"
+    engine._row_to_workflow = "row-to-workflow"
+    engine.validate_workflow = "validate-workflow"
+    engine._validate_workflow_agent_nodes = "validate-workflow-agent-nodes"
+    engine._validate_workflow_subworkflow_nodes = "validate-workflow-subworkflow-nodes"
+
+    engine._install_runtime_definition_layer()
+
+    kwargs = engine.task_run_links.kwargs
+    assert kwargs["conn"] == "conn"
+    assert kwargs["now"] is installation_facade_mod.utc_now_iso
+    assert kwargs["error_type"] is agent_runtime.AgentRuntimeError
+    assert kwargs["slug"] is installation_facade_mod.slug
+    assert kwargs["json_dump"] is installation_facade_mod.json_dump_sorted
+    assert kwargs["json_load"] is installation_facade_mod.json_load
+    assert kwargs["system_agent_ids"] is installation_facade_mod.SYSTEM_AGENT_IDS
+    assert kwargs["main_chat_agent_id"] == installation_facade_mod.MAIN_CHAT_AGENT_ID
+    assert kwargs["native_skill_home"] is installation_facade_mod.native_skill_home
+    assert kwargs["normalize_execution_backend"] is installation_facade_mod.normalize_execution_backend
+    assert kwargs["normalize_skill_source_type"] is installation_facade_mod.normalize_skill_source_type
+    assert engine.agent_definitions == "agent-definitions"
+    assert engine.workflows == "workflows"
+
+
 def test_installation_facade_installs_cancellation_and_service_bundles() -> None:
     engine = object.__new__(agent_runtime.NativeRunEngine)
     engine._run_cancel_locks = {}
