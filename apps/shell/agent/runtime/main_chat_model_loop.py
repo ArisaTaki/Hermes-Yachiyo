@@ -5,6 +5,55 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from apps.shell.agent.runtime.errors import AgentApprovalRequired
+from apps.shell.agent.runtime.errors import AgentRuntimeError
+from apps.shell.agent.runtime.events import redact_secrets
+from apps.shell.agent.runtime.model_messages import model_output_metadata
+
+
+def build_runtime_main_chat_model_loop_runner(
+    *,
+    get_run: Callable[[str], dict[str, Any]],
+    profile_service_factory: Callable[[], Any],
+    model_profile_config_private: Callable[[str], dict[str, Any]],
+    main_chat_agent_config: Callable[..., dict[str, Any]],
+    compile_agent_runtime: Callable[[dict[str, Any]], dict[str, Any]],
+    run_budget: Callable[[str, list[dict[str, Any]]], Any],
+    check_context_budget: Callable[[Any, list[dict[str, Any]]], None],
+    runtime_agent_timeline: Any,
+    timeline_factory: Callable[..., dict[str, Any]],
+    update_run: Callable[..., dict[str, Any]],
+    append_run_event: Callable[[str, str, dict[str, Any]], dict[str, Any]],
+    task_model_events: Any,
+    tool_brokers: Any,
+    continue_custom_api_agent: Callable[..., str],
+    main_chat_pending_approval: Callable[..., dict[str, Any]],
+    approval_pause: Any,
+    terminal_run_or_none: Callable[[str], dict[str, Any] | None],
+) -> "MainChatModelLoopRunner":
+    return MainChatModelLoopRunner(
+        get_run=get_run,
+        default_profile_id=lambda: str(
+            profile_service_factory().get_defaults().get("chat") or ""
+        ).strip(),
+        model_profile_config_private=model_profile_config_private,
+        main_chat_agent_config=main_chat_agent_config,
+        compile_agent_runtime=compile_agent_runtime,
+        run_budget=run_budget,
+        check_context_budget=check_context_budget,
+        runtime_agent_timeline=runtime_agent_timeline,
+        timeline_factory=timeline_factory,
+        update_run=update_run,
+        append_run_event=append_run_event,
+        task_model_events=task_model_events,
+        tool_brokers=tool_brokers,
+        continue_custom_api_agent=continue_custom_api_agent,
+        main_chat_pending_approval=main_chat_pending_approval,
+        approval_pause=approval_pause,
+        terminal_run_or_none=terminal_run_or_none,
+        redact_secrets=redact_secrets,
+        model_output_metadata=model_output_metadata,
+        error_type=AgentRuntimeError,
+    )
 
 
 class MainChatModelLoopRunner:

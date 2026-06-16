@@ -16,6 +16,9 @@ from apps.shell.agent.runtime.model_calling import (
     build_runtime_model_call_adapters,
 )
 from apps.shell.agent.runtime.main_chat_model import build_runtime_main_chat_model_setup
+from apps.shell.agent.runtime.main_chat_model_loop import (
+    build_runtime_main_chat_model_loop_runner,
+)
 from apps.shell.agent.runtime.run_cancellation import RuntimeRunCancellationCoordinator
 from apps.shell.agent.runtime.run_services import build_runtime_run_layer_setup
 from apps.shell.agent.runtime.tooling import build_runtime_tooling_stack
@@ -392,13 +395,10 @@ class RuntimeInstallationFacadeMixin:
         runtime_timeline_factory: Any,
         runtime_context_budget_checker: Any,
     ) -> None:
-        legacy = _legacy_agent_runtime_module()
         self._install_runtime_main_chat_model_loop(
-            legacy.MainChatModelLoopRunner(
+            build_runtime_main_chat_model_loop_runner(
                 get_run=self.get_run,
-                default_profile_id=lambda: str(
-                    legacy.get_model_profile_service().get_defaults().get("chat") or ""
-                ).strip(),
+                profile_service_factory=lambda: _legacy_agent_runtime_module().get_model_profile_service(),
                 model_profile_config_private=lambda profile_id: self._model_profile_config_private(
                     profile_id,
                     capability="chat",
@@ -417,9 +417,6 @@ class RuntimeInstallationFacadeMixin:
                 main_chat_pending_approval=self._main_chat_pending_approval,
                 approval_pause=self.approval_pause,
                 terminal_run_or_none=self.terminal_run_resolver.terminal_run_or_none,
-                redact_secrets=legacy.redact_secrets,
-                model_output_metadata=legacy._model_output_metadata,
-                error_type=legacy.AgentRuntimeError,
             )
         )
 

@@ -6,7 +6,10 @@ from typing import Any
 
 from apps.shell import agent_runtime
 from apps.shell.agent.runtime.errors import AgentApprovalRequired
-from apps.shell.agent.runtime.main_chat_model_loop import MainChatModelLoopRunner
+from apps.shell.agent.runtime.main_chat_model_loop import (
+    MainChatModelLoopRunner,
+    build_runtime_main_chat_model_loop_runner,
+)
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
 
@@ -60,6 +63,48 @@ class FakeApprovalPause:
 
 def _timeline(event: str, detail: str = "", **extra: Any) -> dict[str, Any]:
     return {"event": event, "detail": detail, **extra}
+
+
+class FakeProfileService:
+    def get_defaults(self) -> dict[str, str]:
+        return {"chat": "profile-chat"}
+
+
+def test_main_chat_model_loop_builder_remains_exported_from_legacy_module() -> None:
+    assert (
+        agent_runtime._build_runtime_main_chat_model_loop_runner
+        is build_runtime_main_chat_model_loop_runner
+    )
+
+
+def test_build_runtime_main_chat_model_loop_runner_wires_runtime_dependencies() -> None:
+    runner = build_runtime_main_chat_model_loop_runner(
+        get_run=lambda _run_id: {"run_id": "run-1", "kind": "main_chat_run", "timeline": []},
+        profile_service_factory=FakeProfileService,
+        model_profile_config_private=lambda _profile_id: {},
+        main_chat_agent_config=lambda **kwargs: {"agent_id": "builtin:yachiyo-main", **kwargs},
+        compile_agent_runtime=lambda _agent: {"tool_policy": {}, "workspace_policy": {}},
+        run_budget=lambda _run_id, _timeline_value: FakeBudget(),
+        check_context_budget=lambda _budget, _messages: None,
+        runtime_agent_timeline=FakeRuntimeAgentTimeline(),
+        timeline_factory=_timeline,
+        update_run=lambda _run_id, **payload: {"run_id": "run-1", **payload},
+        append_run_event=lambda _run_id, event_type, payload: {
+            "event_type": event_type,
+            "payload": payload,
+        },
+        task_model_events=FakeTaskModelEvents(),
+        tool_brokers=FakeToolBrokers(),
+        continue_custom_api_agent=lambda *_args, **_kwargs: "done",
+        main_chat_pending_approval=lambda pending, **payload: {"pending": pending, **payload},
+        approval_pause=FakeApprovalPause(),
+        terminal_run_or_none=lambda _run_id: None,
+    )
+
+    assert isinstance(runner, MainChatModelLoopRunner)
+    assert runner._default_profile_id() == "profile-chat"
+    assert getattr(runner._run_budget, "__self__", None) is None
+    assert getattr(runner._check_context_budget, "__self__", None) is None
 
 
 def _runner(**overrides: Any) -> tuple[MainChatModelLoopRunner, dict[str, Any]]:

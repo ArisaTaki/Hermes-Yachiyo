@@ -428,11 +428,14 @@ def test_installation_facade_installs_approval_runtime_services(monkeypatch) -> 
 
 
 def test_installation_facade_installs_main_chat_model_loop_runner(monkeypatch) -> None:
-    class CapturedMainChatModelLoopRunner:
-        def __init__(self, **kwargs) -> None:
-            self.kwargs = kwargs
+    def fake_build_runtime_main_chat_model_loop_runner(**kwargs):
+        return SimpleNamespace(kwargs=kwargs)
 
-    monkeypatch.setattr(agent_runtime, "MainChatModelLoopRunner", CapturedMainChatModelLoopRunner)
+    monkeypatch.setattr(
+        installation_facade_mod,
+        "build_runtime_main_chat_model_loop_runner",
+        fake_build_runtime_main_chat_model_loop_runner,
+    )
 
     engine = object.__new__(agent_runtime.NativeRunEngine)
     engine.get_run = "get-run"
@@ -455,7 +458,6 @@ def test_installation_facade_installs_main_chat_model_loop_runner(monkeypatch) -
         runtime_context_budget_checker="context-budget-checker",
     )
 
-    assert isinstance(engine.main_chat_model_loop, CapturedMainChatModelLoopRunner)
     assert engine.main_chat_model_loop.kwargs["get_run"] == "get-run"
     assert engine.main_chat_model_loop.kwargs["run_budget"] == "runtime-run-budget"
     assert engine.main_chat_model_loop.kwargs["check_context_budget"] == "context-budget-checker"
