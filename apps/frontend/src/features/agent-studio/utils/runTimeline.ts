@@ -1,4 +1,5 @@
 import type { PublicRunEvent } from '../../yachiyo-studio/types';
+import { publicRunEventIsSecret } from '../../runtime-shared/runEvents';
 export {
   approvalsFromRunEventReplay,
   artifactsFromRunEventReplay,
@@ -147,7 +148,7 @@ function formatTimelinePayload(value: unknown): string {
 }
 
 export function timelineEventIsSecret(event: Record<string, unknown>): boolean {
-  return String(event.sensitivity || '').trim() === 'secret';
+  return publicRunEventIsSecret(event);
 }
 
 export function timelineEventPayload(event: Record<string, unknown>): string {
@@ -200,10 +201,6 @@ export function publicRunEventPayloadDetail(event: PublicRunEvent): string {
     || publicRunEventPayloadString(payload, 'result')
     || publicRunEventPayloadString(payload, 'error')
   );
-}
-
-function publicRunEventIsSecret(event: PublicRunEvent): boolean {
-  return String(event.sensitivity || '').trim() === 'secret';
 }
 
 export function runEventReplayToTimelineEvent(event: PublicRunEvent): Record<string, unknown> {

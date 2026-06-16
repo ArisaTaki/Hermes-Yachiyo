@@ -1,5 +1,9 @@
 import type { PublicRunEvent, RunEventPageSnapshot } from './types';
 
+export function publicRunEventIsSecret(event: { sensitivity?: unknown }): boolean {
+  return String(event.sensitivity || '').trim() === 'secret';
+}
+
 export function mergeRuntimeRunEventPages(
   current: PublicRunEvent[],
   incoming: PublicRunEvent[],

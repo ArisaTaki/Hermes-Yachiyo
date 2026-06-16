@@ -1,4 +1,5 @@
 import { ExpandableRuntimeContent } from '../../runtime-shared/components/ExpandableRuntimeContent';
+import { publicRunEventIsSecret } from '../../runtime-shared/runEvents';
 import type { MemoryTraceSnapshot, PublicRunEvent, SkillTraceSnapshot } from '../../yachiyo-studio/types';
 
 type MemorySkillTrace = {
@@ -368,10 +369,6 @@ function objectRecord(value: unknown): Record<string, unknown> {
 function formatTracePayload(value: Record<string, unknown> | undefined): string {
   if (!value || !Object.keys(value).length) return '';
   return JSON.stringify(value, null, 2);
-}
-
-function publicRunEventIsSecret(event: PublicRunEvent): boolean {
-  return String(event.sensitivity || '').trim() === 'secret';
 }
 
 function stringValue(value: unknown): string {

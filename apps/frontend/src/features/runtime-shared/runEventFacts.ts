@@ -1,4 +1,5 @@
 import type { ApprovalCardSnapshot, PublicRunEvent, ToolCallSnapshot } from './types';
+import { publicRunEventIsSecret } from './runEvents';
 
 type ApprovalReplayCorrelationKeys = {
   strongKeys: string[];
@@ -217,10 +218,6 @@ function approvalFromRunEvent(event: PublicRunEvent): ApprovalCardSnapshot | nul
     title: publicRunEventPayloadString(source, 'title') || `Approval · ${toolName}`,
     tool_name: toolName,
   };
-}
-
-function publicRunEventIsSecret(event: PublicRunEvent): boolean {
-  return String(event.sensitivity || '').trim() === 'secret';
 }
 
 function toolCallFromRunEvent(event: PublicRunEvent): ToolCallSnapshot | null {
