@@ -182,6 +182,8 @@ function memorySkillTraceFromEvent(event: PublicRunEvent): MemorySkillTrace | nu
   const eventIsSecret = publicRunEventIsSecret(event);
   const visiblePayload = eventIsSecret ? {} : payload;
   const result = objectRecord(visiblePayload.result);
+  const skill = objectRecord(visiblePayload.skill || result.skill);
+  const traceResult = Object.keys(skill).length ? { ...skill, ...result } : result;
   const payloadMemories = Array.isArray(visiblePayload.memories) ? visiblePayload.memories.map(objectRecord) : [];
   const resultMemories = Array.isArray(result.memories) ? result.memories.map(objectRecord) : [];
   const memories = payloadMemories.length ? payloadMemories : resultMemories;
@@ -189,13 +191,13 @@ function memorySkillTraceFromEvent(event: PublicRunEvent): MemorySkillTrace | nu
   const status = normalizeTraceStatus(
     stringValue(visiblePayload.status) || stringValue((event as Record<string, unknown>).status),
   );
-  const memoryId = stringValue(result.memory_id) || stringValue(visiblePayload.memory_id) || stringValue(memories[0]?.memory_id);
-  const skillId = stringValue(result.skill_id) || stringValue(visiblePayload.skill_id);
+  const memoryId = stringValue(traceResult.memory_id) || stringValue(visiblePayload.memory_id) || stringValue(memories[0]?.memory_id);
+  const skillId = stringValue(traceResult.skill_id) || stringValue(visiblePayload.skill_id);
   const id = kind === 'memory' ? memoryId : skillId;
-  const title = traceTitle(eventType, visiblePayload, result, memories);
+  const title = traceTitle(eventType, visiblePayload, traceResult, memories);
   const detail = eventIsSecret
     ? ''
-    : stringValue(event.detail) || traceDetail(eventType, visiblePayload, result, memories);
+    : stringValue(event.detail) || traceDetail(eventType, visiblePayload, traceResult, memories);
   const count = eventType === 'memory.retrieved' ? traceMemoryCount(visiblePayload, memories) : '';
   const groupRunId = stringValue(visiblePayload.group_run_id) || stringValue(visiblePayload.run_group_id);
   const memberAgentId = stringValue(visiblePayload.member_agent_id);
@@ -209,7 +211,7 @@ function memorySkillTraceFromEvent(event: PublicRunEvent): MemorySkillTrace | nu
     key: runtimeTraceKeyFromEvent(event, eventType, sequence, title, id),
     kind,
     memberAgentId,
-    metadata: eventIsSecret ? [] : memorySkillTraceMetadata(kind, visiblePayload, result, memories),
+    metadata: eventIsSecret ? [] : memorySkillTraceMetadata(kind, visiblePayload, traceResult, memories),
     memoryId,
     payload: eventIsSecret ? '' : JSON.stringify(payload, null, 2),
     sequence,

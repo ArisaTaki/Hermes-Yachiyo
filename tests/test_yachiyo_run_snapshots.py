@@ -767,6 +767,42 @@ def test_run_timeline_derives_memory_trace_from_result_memories() -> None:
     assert trace.group_run_id == "group-run-1"
 
 
+def test_run_timeline_derives_skill_trace_from_nested_skill_payload() -> None:
+    timeline = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "run-skill-payload",
+            "status": "completed",
+            "events": [
+                {
+                    "event_type": "skill.selected",
+                    "payload": {
+                        "skill": {
+                            "skill_id": "skill-nested-1",
+                            "name": "Nested Skill",
+                            "description": "Reads nested skill payloads",
+                            "source_ref": "skills/nested/SKILL.md",
+                            "source_type": "local_dir",
+                        },
+                        "workflow_node_id": "select-skill",
+                        "group_run_id": "group-run-1",
+                    },
+                    "created_at": "2026-06-15T00:00:02Z",
+                }
+            ],
+        }
+    )
+
+    assert len(timeline.skill_traces) == 1
+    trace = timeline.skill_traces[0]
+    assert trace.skill_id == "skill-nested-1"
+    assert trace.skill_name == "Nested Skill"
+    assert trace.source_ref == "skills/nested/SKILL.md"
+    assert trace.source_type == "local_dir"
+    assert trace.detail == "Reads nested skill payloads · skills/nested/SKILL.md · local_dir"
+    assert trace.workflow_node_id == "select-skill"
+    assert trace.group_run_id == "group-run-1"
+
+
 def test_run_timeline_derives_approvals_and_artifacts_from_events() -> None:
     timeline = run_timeline_snapshot_from_payload(
         {

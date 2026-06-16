@@ -560,12 +560,15 @@ def _skill_trace_from_event(event: PublicRunEvent) -> SkillTraceSnapshot | None:
         return None
     payload = dict(event.payload)
     result = _nested_mapping(payload, "result")
-    skill_id = _optional_text(result.get("skill_id") or payload.get("skill_id"))
-    skill_name = _optional_text(result.get("name") or payload.get("skill_name"))
-    source_ref = _optional_text(result.get("source_ref") or payload.get("source_ref"))
-    source_type = _optional_text(result.get("source_type") or payload.get("source_type"))
+    skill = _nested_mapping(payload, "skill") or _nested_mapping(result, "skill")
+    skill_id = _optional_text(result.get("skill_id") or skill.get("skill_id") or payload.get("skill_id"))
+    skill_name = _optional_text(result.get("name") or skill.get("name") or payload.get("skill_name"))
+    source_ref = _optional_text(result.get("source_ref") or skill.get("source_ref") or payload.get("source_ref"))
+    source_type = _optional_text(
+        result.get("source_type") or skill.get("source_type") or payload.get("source_type")
+    )
     detail_parts = [
-        _optional_text(result.get("description")),
+        _optional_text(result.get("description") or skill.get("description")),
         source_ref,
         source_type,
     ]
