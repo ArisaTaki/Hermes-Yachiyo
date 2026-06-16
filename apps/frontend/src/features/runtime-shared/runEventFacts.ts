@@ -67,9 +67,30 @@ export function mergeArtifactSnapshots(
 }
 
 export function approvalsFromRunEventReplay(events: PublicRunEvent[]): ApprovalCardSnapshot[] {
-  return events
-    .map(approvalFromRunEvent)
-    .filter((approval): approval is ApprovalCardSnapshot => Boolean(approval));
+  const approvals: ApprovalCardSnapshot[] = [];
+  const activeByKey = new Map<string, number>();
+  events.forEach((event) => {
+    const approval = approvalFromRunEvent(event);
+    if (!approval) return;
+    const keys = approvalReplayCorrelationKeys(approval);
+    const activeKey = keys.find((key) => activeByKey.has(key));
+    const activeIndex = activeKey ? activeByKey.get(activeKey) : undefined;
+    if (activeIndex === undefined) {
+      const nextIndex = approvals.length;
+      approvals.push(approval);
+      if (approval.status === 'pending') {
+        keys.forEach((key) => activeByKey.set(key, nextIndex));
+      }
+      return;
+    }
+    approvals[activeIndex] = mergeApprovalReplayTrace(approvals[activeIndex], approval);
+    if (approval.status === 'pending') {
+      keys.forEach((key) => activeByKey.set(key, activeIndex));
+    } else {
+      keys.forEach((key) => activeByKey.delete(key));
+    }
+  });
+  return approvals;
 }
 
 export function mergeApprovalSnapshots(
@@ -282,6 +303,35 @@ function mergeApprovalTrace(current: ApprovalCardSnapshot, incoming: ApprovalCar
     workflow_node_label: current.workflow_node_label || incoming.workflow_node_label || null,
     group_id: current.group_id || incoming.group_id || null,
     group_run_id: current.group_run_id || incoming.group_run_id || null,
+  };
+}
+
+function mergeApprovalReplayTrace(
+  current: ApprovalCardSnapshot,
+  incoming: ApprovalCardSnapshot,
+): ApprovalCardSnapshot {
+  return {
+    ...current,
+    source_run_id: current.source_run_id || incoming.source_run_id || null,
+    source_runnable_id: current.source_runnable_id || incoming.source_runnable_id || null,
+    source_runnable_name: current.source_runnable_name || incoming.source_runnable_name || null,
+    workflow_id: current.workflow_id || incoming.workflow_id || null,
+    workflow_run_id: current.workflow_run_id || incoming.workflow_run_id || null,
+    workflow_node_id: current.workflow_node_id || incoming.workflow_node_id || null,
+    workflow_node_label: current.workflow_node_label || incoming.workflow_node_label || null,
+    group_id: current.group_id || incoming.group_id || null,
+    group_run_id: current.group_run_id || incoming.group_run_id || null,
+    description: incoming.description || current.description || null,
+    input_preview: {
+      ...(current.input_preview || {}),
+      ...(incoming.input_preview || {}),
+    },
+    policy_reason: current.policy_reason || incoming.policy_reason || null,
+    requested_at: current.requested_at || incoming.requested_at || '',
+    resolved_at: incoming.resolved_at || current.resolved_at || null,
+    risk_level: current.risk_level || incoming.risk_level || null,
+    status: incoming.status || current.status,
+    tool_name: current.tool_name || incoming.tool_name,
   };
 }
 
@@ -519,6 +569,44 @@ function approvalRecordKey(approval: ApprovalCardSnapshot, index: number): strin
   return approval.approval_id
     || [approval.run_id || '', approval.tool_name || '', approval.title || ''].filter(Boolean).join(':')
     || `approval:${index}`;
+}
+
+function approvalReplayCorrelationKeys(approval: ApprovalCardSnapshot): string[] {
+  const preview = approvalReplayCorrelationPreview(approval.input_preview || {});
+  const baseParts = [
+    approval.run_id || '',
+    'approval',
+    approval.tool_name || '',
+    approval.workflow_node_id || '',
+    approval.group_run_id || '',
+    approval.source_runnable_id || '',
+  ];
+  const keys = [
+    [...baseParts, stableJson(preview)].join(':'),
+    baseParts.join(':'),
+    approval.approval_id ? `${approval.run_id || ''}:approval_id:${approval.approval_id}` : '',
+  ].filter(Boolean);
+  return Array.from(new Set(keys));
+}
+
+function approvalReplayCorrelationPreview(preview: Record<string, unknown>): Record<string, unknown> {
+  const traceKeys = new Set([
+    'approval_id',
+    'group_id',
+    'group_run_id',
+    'member_agent_id',
+    'member_agent_name',
+    'policy_reason',
+    'risk_level',
+    'run_group_id',
+    'workflow_id',
+    'workflow_node_id',
+    'workflow_node_label',
+    'workflow_run_id',
+  ]);
+  return Object.fromEntries(
+    Object.entries(preview).filter(([key]) => !traceKeys.has(key)),
+  );
 }
 
 function objectPreview(value: unknown): Record<string, unknown> | null {
