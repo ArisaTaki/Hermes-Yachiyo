@@ -3961,6 +3961,9 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "publicRunTimelineToRunSpec(selectedPublicRunTimeline, {",
             "const publicSteps = workflowStepRefs(publicTimelineRun, selectedRunWorkflow);",
             "if (publicSteps.length) return publicSteps;",
+            "const publicChildRefs = publicTimelineWorkflowChildRefs(selectedPublicRunTimeline, publicTimelineRun);",
+            "return publicChildRefs.length ? publicChildRefs : workflowChildRunRefs(selectedRun);",
+            "publicTimelineApprovalChildRunId(selectedPublicRunTimeline, publicTimelineRun)",
             "publicApprovalToRunPendingApproval(selectedPublicRunApproval)",
             "publicArtifactsOrLegacy(",
             "workflowPendingApprovalChildRunId(selectedRun)",
@@ -5677,6 +5680,10 @@ def test_agent_studio_preserves_workflow_child_approval_run_detail_wiring() -> N
             "maybeAdd(selectedWorkflowApprovalChildRunId);",
             "selectedWorkflowChildRefs.forEach((ref) => maybeAdd(ref.childRunId));",
             "selectedWorkflowApprovalChildRunId,",
+            "function publicTimelineWorkflowChildRefs",
+            "for (const child of timeline?.children || [])",
+            "function publicTimelineApprovalChildRunId",
+            "timeline?.pending_approval?.source_run_id",
         ],
     )
     _assert_contains(

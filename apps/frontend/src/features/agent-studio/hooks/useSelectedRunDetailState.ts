@@ -28,6 +28,7 @@ import {
   workflowPendingApprovalChildRunId,
   workflowRunHasChildRun,
   workflowRunnableStepRequiredMessage,
+  type WorkflowChildRunRef,
   workflowStepRefs,
 } from '../utils/workflow';
 
@@ -105,29 +106,39 @@ export function useSelectedRunDetailState({
     if (!selectedRun?.run_group_id) return null;
     return runGroups.find((group) => group.run_group_id === selectedRun.run_group_id) || null;
   }, [runGroups, selectedRouteGroupRunId, selectedRun]);
+  const publicTimelineRun = useMemo(
+    () => {
+      if (!selectedPublicRunTimeline) return null;
+      return publicRunTimelineToRunSpec(selectedPublicRunTimeline, {
+        kind: selectedRun?.kind,
+        runnableId: selectedRun?.runnable_id,
+        runnableName: selectedRun?.runnable_name,
+        userGoal: selectedRun?.user_goal,
+      });
+    },
+    [selectedPublicRunTimeline, selectedRun],
+  );
   const selectedWorkflowSteps = useMemo(
     () => {
-      if (selectedPublicRunTimeline) {
-        const publicTimelineRun = publicRunTimelineToRunSpec(selectedPublicRunTimeline, {
-          kind: selectedRun?.kind,
-          runnableId: selectedRun?.runnable_id,
-          runnableName: selectedRun?.runnable_name,
-          userGoal: selectedRun?.user_goal,
-        });
-        const publicSteps = workflowStepRefs(publicTimelineRun, selectedRunWorkflow);
-        if (publicSteps.length) return publicSteps;
-      }
+      const publicSteps = workflowStepRefs(publicTimelineRun, selectedRunWorkflow);
+      if (publicSteps.length) return publicSteps;
       return workflowStepRefs(selectedRun, selectedRunWorkflow);
     },
-    [selectedPublicRunTimeline, selectedRun, selectedRunWorkflow],
+    [publicTimelineRun, selectedRun, selectedRunWorkflow],
   );
   const selectedWorkflowChildRefs = useMemo(
-    () => workflowChildRunRefs(selectedRun),
-    [selectedRun],
+    () => {
+      const publicChildRefs = publicTimelineWorkflowChildRefs(selectedPublicRunTimeline, publicTimelineRun);
+      return publicChildRefs.length ? publicChildRefs : workflowChildRunRefs(selectedRun);
+    },
+    [publicTimelineRun, selectedPublicRunTimeline, selectedRun],
   );
   const selectedWorkflowApprovalChildRunId = useMemo(
-    () => workflowPendingApprovalChildRunId(selectedRun),
-    [selectedRun],
+    () => (
+      publicTimelineApprovalChildRunId(selectedPublicRunTimeline, publicTimelineRun)
+      || workflowPendingApprovalChildRunId(selectedRun)
+    ),
+    [publicTimelineRun, selectedPublicRunTimeline, selectedRun],
   );
   const selectedWorkflowApprovalChildRun = selectedWorkflowApprovalChildRunId
     ? runById.get(selectedWorkflowApprovalChildRunId) || null
@@ -227,4 +238,38 @@ export function useSelectedRunDetailState({
     selectedWorkflowParentRunId,
     selectedWorkflowSteps,
   };
+}
+
+function publicTimelineWorkflowChildRefs(
+  timeline: YachiyoRunTimelineSnapshot | null,
+  run: RunSpec | null,
+): WorkflowChildRunRef[] {
+  const refs = workflowChildRunRefs(run);
+  const seen = new Set(refs.map((ref) => ref.childRunId));
+  for (const child of timeline?.children || []) {
+    if (!child.run_id || seen.has(child.run_id)) continue;
+    seen.add(child.run_id);
+    refs.push({
+      childRunId: child.run_id,
+      label: child.workflow_node_label || child.title || child.agent_id || child.workflow_id || child.run_id,
+      status: child.status || '',
+    });
+  }
+  return refs;
+}
+
+function publicTimelineApprovalChildRunId(
+  timeline: YachiyoRunTimelineSnapshot | null,
+  run: RunSpec | null,
+): string {
+  return (
+    workflowPendingApprovalChildRunId(run)
+    || timeline?.pending_approval?.source_run_id
+    || timeline?.approvals?.find((approval) => approval.status === 'pending')?.source_run_id
+    || timeline?.children?.find((child) => (
+      child.status === 'approval_required'
+      || child.status === 'waiting_approval'
+    ))?.run_id
+    || ''
+  );
 }
