@@ -19,7 +19,7 @@ import {
   agentCapabilityLine,
   runnableCapabilityLine,
 } from './agents';
-import { publicRunEventPayloadDetail } from './runTimeline';
+import { publicRunEventPayloadDetail, publicRunEventWorkflowStepPayload } from './runTimeline';
 
 export type RunKindFilter = 'all' | 'workflow' | 'agent';
 export type RunStatusFilter = 'all' | 'completed' | 'failed' | 'active';
@@ -407,6 +407,7 @@ export function publicRunEventToTimelineEvent(event: PublicRunEvent): Record<str
     workflow_node_id: payload.workflow_node_id,
     workflow_node_kind: payload.workflow_node_kind,
     workflow_node_label: payload.workflow_node_label,
+    ...publicRunEventWorkflowStepPayload(payload),
     payload,
   };
 }

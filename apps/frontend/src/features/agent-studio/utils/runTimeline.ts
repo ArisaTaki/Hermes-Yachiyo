@@ -219,6 +219,7 @@ export function runEventReplayToTimelineEvent(event: PublicRunEvent): Record<str
     workflow_node_id: payload.workflow_node_id,
     workflow_node_kind: payload.workflow_node_kind,
     workflow_node_label: payload.workflow_node_label,
+    ...publicRunEventWorkflowStepPayload(payload),
     payload,
   };
 }
@@ -233,6 +234,29 @@ export function mergeRunEventReplayPages(
 function publicRunEventPayloadString(payload: Record<string, unknown>, key: string): string {
   const value = payload[key];
   return typeof value === 'string' ? value.trim() : '';
+}
+
+export function publicRunEventWorkflowStepPayload(payload: Record<string, unknown>): Record<string, unknown> {
+  return {
+    artifact: payload.artifact || (payload.artifact_path ? { path: payload.artifact_path } : null),
+    artifact_count: payload.artifact_count,
+    child_workflow_id: payload.child_workflow_id,
+    child_workflow_name: payload.child_workflow_name,
+    criteria: payload.criteria,
+    step_task: payload.step_task,
+    workflow_node_approval_criteria: payload.workflow_node_approval_criteria,
+    workflow_node_branch_count: payload.workflow_node_branch_count,
+    workflow_node_completed_branch_count: payload.workflow_node_completed_branch_count,
+    workflow_node_condition: payload.workflow_node_condition,
+    workflow_node_condition_matched: payload.workflow_node_condition_matched,
+    workflow_node_join_target: payload.workflow_node_join_target,
+    workflow_node_loop_iteration: payload.workflow_node_loop_iteration,
+    workflow_node_loop_limit_reached: payload.workflow_node_loop_limit_reached,
+    workflow_node_loop_max_iterations: payload.workflow_node_loop_max_iterations,
+    workflow_node_selected_branch: payload.workflow_node_selected_branch,
+    workflow_node_selected_target: payload.workflow_node_selected_target,
+    workflow_node_task: payload.workflow_node_task,
+  };
 }
 
 function publicRunEventMemorySummary(payload: Record<string, unknown>): string {
