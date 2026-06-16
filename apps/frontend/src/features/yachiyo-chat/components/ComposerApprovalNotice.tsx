@@ -1,3 +1,4 @@
+import { runtimeToolDisplayLabel } from '../../runtime-shared/approval';
 import type { ApprovalRequestDetails } from './MessageApprovalRequestCard';
 
 export type ComposerApprovalSource = 'message' | 'activity' | 'workflow-child';
@@ -38,6 +39,7 @@ export function ComposerApprovalNotice({
   const preview = details.codeText || details.summary.map((item) => item.value).join(' ');
   const hasMultiple = total > 1 && currentIndex >= 0;
   const workflowApproval = details.tool === 'workflow.approval';
+  const toolLabel = runtimeToolDisplayLabel(details.tool);
   const subtitle = workflowApproval
     ? workflowApprovalNoticeSubtitle(details, preview)
     : compactApprovalText(preview, 86) || details.goal || '需要确认工具调用后继续执行';
@@ -57,7 +59,7 @@ export function ComposerApprovalNotice({
       <div className="composer-approval-main">
         <span className="composer-approval-badge">{hasMultiple ? `待审批 ${currentIndex + 1}/${total}` : '待审批'}</span>
         <div>
-          <strong>{workflowApproval ? `${details.requester} 等待人工确认` : `${details.requester} 请求 ${details.tool}`}</strong>
+          <strong>{workflowApproval ? `${details.requester} 等待人工确认` : `${details.requester} 请求${toolLabel}`}</strong>
           <span>{subtitle}</span>
         </div>
       </div>
@@ -93,7 +95,9 @@ export function composerApprovalStatusText(
   total: number,
 ) {
   const position = total > 1 && currentIndex >= 0 ? ` ${currentIndex + 1}/${total}` : '';
-  const target = [details.requester, details.tool].filter(Boolean).join(' 请求 ');
+  const target = details.tool === 'workflow.approval'
+    ? `${details.requester} 等待人工确认`
+    : [details.requester, runtimeToolDisplayLabel(details.tool)].filter(Boolean).join(' 请求');
   const preview = details.tool === 'workflow.approval'
     ? workflowApprovalNoticeSubtitle(details, '')
     : compactApprovalText(

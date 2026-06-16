@@ -1,3 +1,5 @@
+import { runtimeToolDisplayLabel } from '../../runtime-shared/approval';
+
 export type ApprovalRequestDetails = {
   requester: string;
   tool: string;
@@ -25,6 +27,7 @@ export function MessageApprovalRequestCard({
   runStatus: string;
 }) {
   const workflowApproval = details.tool === 'workflow.approval';
+  const toolLabel = runtimeToolDisplayLabel(details.tool);
   return (
     <div
       className="message-content message-approval-card"
@@ -44,7 +47,7 @@ export function MessageApprovalRequestCard({
           <span>{workflowApproval ? '批准后会继续当前 Workflow' : '批准后会继续当前任务'}</span>
         </div>
         <span className="message-approval-header-side">
-          <code>{details.tool}</code>
+          <code>{workflowApproval ? '人工确认' : toolLabel}</code>
           {runId ? (
             <button
               type="button"

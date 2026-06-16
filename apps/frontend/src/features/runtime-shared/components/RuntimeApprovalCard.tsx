@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 
 import type { ApprovalCardSnapshot } from '../types';
-import { approvalPreviewRecord, approvalPreviewValue } from '../approval';
+import { approvalPreviewRecord, approvalPreviewValue, runtimeToolDisplayLabel } from '../approval';
 
 export type RuntimeApprovalCardSnapshot = Pick<
   ApprovalCardSnapshot,
@@ -51,6 +51,10 @@ export function RuntimeApprovalCard({
   const status = approval.status || 'pending';
   const preview = approvalPreviewRecord(approval.input_preview);
   const target = approvalPreviewValue(preview, ['command', 'cmd', 'path', 'file', 'target']);
+  const displayTool = variant === 'compact' ? runtimeToolDisplayLabel(toolName) : toolName;
+  const title = variant === 'compact'
+    ? compactApprovalTitle(approval.title, toolName, displayTool)
+    : approval.title || toolName;
   const metadata = variant === 'inspector' ? approvalMetadataItems(approval, toolName) : [];
   return (
     <div
@@ -71,9 +75,9 @@ export function RuntimeApprovalCard({
       data-testid={testId}
     >
       <span>{status === 'pending' ? '待审批' : approvalStatusLabel(status)}</span>
-      <strong>{approval.title || toolName}</strong>
+      <strong>{title}</strong>
       {approval.description ? <p>{approval.description}</p> : null}
-      {target || toolName ? <code>{target || toolName}</code> : null}
+      {target || displayTool ? <code>{target || displayTool}</code> : null}
       {metadata.length ? (
         <div className="runtime-approval-meta" data-testid={`${testId}-metadata`}>
           {metadata.map(({ label, value }) => (
@@ -88,6 +92,15 @@ export function RuntimeApprovalCard({
       ) : null}
     </div>
   );
+}
+
+function compactApprovalTitle(title: string | null | undefined, toolName: string, displayTool: string) {
+  const rawTitle = String(title || '').trim();
+  if (!rawTitle) return displayTool;
+  if (rawTitle === toolName || rawTitle === `Approve ${toolName}` || rawTitle.includes(toolName)) {
+    return displayTool;
+  }
+  return rawTitle;
 }
 
 function approvalMetadataItems(approval: RuntimeApprovalCardSnapshot, toolName: string) {

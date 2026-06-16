@@ -21,3 +21,14 @@ export function approvalPreviewValue(record: Record<string, unknown>, keys: stri
   }
   return '';
 }
+
+export function runtimeToolDisplayLabel(toolName: string): string {
+  const tool = String(toolName || '').trim();
+  if (tool === 'terminal.run') return '运行终端命令';
+  if (tool === 'workspace.write_patch') return '写入工作区文件';
+  if (tool === 'workspace.read' || tool === 'workspace.list') return '读取工作区';
+  if (tool === 'artifact.write') return '生成产物';
+  if (tool === 'workflow.approval') return 'Workflow 人工确认';
+  if (tool === 'group.approval') return '群组人工确认';
+  return '工具调用';
+}

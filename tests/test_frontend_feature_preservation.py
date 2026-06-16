@@ -851,6 +851,9 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "export type RuntimeApprovalVariant",
             "export function RuntimeApprovalCard",
             "variant = 'compact'",
+            "runtimeToolDisplayLabel",
+            "const displayTool = variant === 'compact' ? runtimeToolDisplayLabel(toolName) : toolName;",
+            "compactApprovalTitle",
             "actions?: ReactNode;",
             "actionsClassName = 'runtime-approval-actions'",
             "actionsTestId = 'runtime-approval-actions'",
@@ -874,6 +877,15 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "risk_level",
             "run_id",
             "data-testid={actionsTestId}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/runtime-shared/approval.ts",
+        [
+            "export function runtimeToolDisplayLabel",
+            "if (tool === 'terminal.run') return '运行终端命令';",
+            "if (tool === 'workspace.write_patch') return '写入工作区文件';",
+            "if (tool === 'workflow.approval') return 'Workflow 人工确认';",
         ],
     )
     _assert_contains(
@@ -2851,7 +2863,9 @@ def test_chat_cancel_ui_smoke_uses_stop_buttons_and_cancel_route() -> None:
     _assert_contains(
         "apps/frontend/src/features/yachiyo-chat/components/MessageApprovalRequestCard.tsx",
         [
+            "runtimeToolDisplayLabel",
             "export function MessageApprovalRequestCard",
+            "const toolLabel = runtimeToolDisplayLabel(details.tool);",
             "data-testid=\"chat-message-approval-card\"",
             "data-approval-id={approvalId || ''}",
             "data-approval-kind={workflowApproval ? 'workflow' : 'tool'}",
@@ -2860,14 +2874,17 @@ def test_chat_cancel_ui_smoke_uses_stop_buttons_and_cancel_route() -> None:
             "data-run-id={runId}",
             "data-run-status={runStatus}",
             "data-testid=\"chat-message-approval-open-run-detail\"",
+            "{workflowApproval ? '人工确认' : toolLabel}",
             "Agent Studio",
         ],
     )
     _assert_contains(
         "apps/frontend/src/features/yachiyo-chat/components/ComposerApprovalNotice.tsx",
         [
+            "runtimeToolDisplayLabel",
             "export function ComposerApprovalNotice",
             "export function composerApprovalStatusText",
+            "const toolLabel = runtimeToolDisplayLabel(details.tool);",
             "className=\"composer-approval-nav\"",
             "data-testid=\"chat-composer-approval-notice\"",
             "data-approval-id={approvalId || ''}",
@@ -2879,6 +2896,8 @@ def test_chat_cancel_ui_smoke_uses_stop_buttons_and_cancel_route() -> None:
             "data-testid=\"chat-composer-approval-approve\"",
             "data-testid=\"chat-composer-approval-reject\"",
             "data-testid=\"chat-composer-approval-open-run-detail\"",
+            "`${details.requester} 请求${toolLabel}`",
+            "runtimeToolDisplayLabel(details.tool)",
             "Agent Studio",
             "data-testid=\"chat-composer-approval-reveal\"",
             "data-testid=\"chat-composer-approval-previous\"",
