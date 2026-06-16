@@ -61,6 +61,7 @@ import {
   messageRunStatus,
   messageText,
   normalizeRunStatus,
+  runnableResultLabel,
   runnableResultRunId,
   runnableResultStatus,
 } from '../features/yachiyo-chat/messageState';
@@ -818,7 +819,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         pendingReplyTaskIdRef.current = '';
         const resultRunId = runnableResultRunId(result);
         const resultRunStatus = runnableResultStatus(result);
-        const runnableLabel = result.workflow_run_id ? 'Workflow' : 'Agent';
+        const runnableLabel = runnableResultLabel(result);
         if (resultRunStatus === 'processing' && resultRunId) {
           setStatus(`${runnableLabel} 执行中...`);
           stickToBottomRef.current = true;
@@ -1299,7 +1300,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         pendingReplyTaskIdRef.current = '';
         const resultRunId = runnableResultRunId(result);
         const resultRunStatus = runnableResultStatus(result);
-        const runnableLabel = result.workflow_run_id ? 'Workflow' : 'Agent';
+        const runnableLabel = runnableResultLabel(result);
         if (resultRunStatus === 'processing' && resultRunId) {
           setStatus(`${runnableLabel} 执行中...`);
           await refreshMessages();

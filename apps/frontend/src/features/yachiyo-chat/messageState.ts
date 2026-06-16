@@ -90,6 +90,10 @@ export function runnableResultStatus(result: { run_status?: string; status?: str
   return normalizeRunStatus(result.run_status || result.status || '');
 }
 
+export function runnableResultLabel(result: { workflow_run_id?: string }) {
+  return result.workflow_run_id ? 'Workflow' : 'Agent';
+}
+
 export function messageRunStatus(message?: YachiyoChatMessage | null) {
   return normalizeRunStatus(message?.metadata?.run_status || message?.metadata?.workflow_status || '');
 }
