@@ -8,7 +8,11 @@ import {
   mergeApprovalSnapshots,
   mergeArtifactSnapshots,
 } from '../../runtime-shared/runEventFacts';
-import { mergeRuntimeRunEventPages, runEventPageNextCursor } from '../../runtime-shared/runEvents';
+import {
+  mergeRuntimeRunEventPages,
+  runEventPageNextCursor,
+  runEventSequenceCursor,
+} from '../../runtime-shared/runEvents';
 import { listYachiyoTaskEvents } from '../api';
 import { yachiyoTaskRunId, yachiyoTaskStudioRunId, yachiyoTaskStudioUrl } from '../taskSnapshots';
 import type { AgentTaskSnapshot, ApprovalCardSnapshot, ArtifactSnapshot, PublicRunEvent } from '../types';
@@ -90,7 +94,7 @@ export function AgentTaskCard({
   async function loadMoreTaskEvents() {
     const taskId = String(task.task_id || '').trim();
     if (!taskId || replayLoading) return;
-    const afterSequence = replayNextAfterSequence || taskEventSequenceCursor(replayEvents, 0);
+    const afterSequence = replayNextAfterSequence || runEventSequenceCursor(replayEvents, 0);
     setReplayLoading(true);
     setReplayError('');
     try {
@@ -99,19 +103,12 @@ export function AgentTaskCard({
       const events = mergeRuntimeRunEventPages(replayEvents, incomingEvents);
       setReplayEvents(events);
       setReplayHasMore(page.has_more ?? incomingEvents.length >= (page.limit || TASK_EVENT_PAGE_SIZE));
-      setReplayNextAfterSequence(runEventPageNextCursor(page, incomingEvents, afterSequence));
+      setReplayNextAfterSequence(runEventPageNextCursor(page, events, afterSequence));
     } catch (err) {
       setReplayError(err instanceof Error ? err.message : '读取更多任务事件失败');
     } finally {
       setReplayLoading(false);
     }
-  }
-
-  function taskEventSequenceCursor(events: PublicRunEvent[], fallback: number) {
-    return events.reduce((cursor, event) => {
-      const sequence = Number(event.sequence) || 0;
-      return sequence > cursor ? sequence : cursor;
-    }, fallback);
   }
 
   return (
