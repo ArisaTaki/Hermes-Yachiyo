@@ -463,6 +463,66 @@ class RuntimeInstallationFacadeMixin:
             approval_pause=self.approval_pause,
         )
 
+    def _install_runtime_approval_runtime_services(self) -> None:
+        legacy = _legacy_agent_runtime_module()
+        self._install_runtime_approval_transitions(
+            legacy.RuntimeApprovalTransitionService(
+                get_run=lambda run_id: self.get_run(run_id),
+                pending_approval_private=lambda run_id: self.runs.pending_approval_private(run_id),
+                approvals=self.approvals,
+                project_child_run_transition=lambda result: self._project_child_run_transition(result),
+                project_cancelled_workflow_group_if_root=lambda run, result: self._project_cancelled_workflow_group_if_root(
+                    run,
+                    result,
+                ),
+                cancel_run=lambda run_id: self.cancel_run(run_id),
+            )
+        )
+        self._install_runtime_tool_approval_resume(
+            legacy.RuntimeToolApprovalResumeService(
+                pending_approval_private=lambda run_id: self.runs.pending_approval_private(run_id),
+                get_agent_private=lambda agent_id: self._get_agent_private(agent_id),
+                compile_agent_runtime=lambda agent: self._compile_agent_runtime(agent),
+                load_agent_skills=lambda skill_ids: self._load_agent_skills(skill_ids),
+                tool_brokers=self.tool_brokers,
+                run_budget=self.runtime_run_budget,
+                resume_approved_tool_run=lambda **kwargs: self._resume_approved_tool_run(**kwargs),
+                main_chat_agent_config=lambda **kwargs: self._main_chat_agent_config(**kwargs),
+                main_chat_pending_approval=lambda pending_approval, **kwargs: self._main_chat_pending_approval(
+                    pending_approval,
+                    **kwargs,
+                ),
+                default_chat_profile_id=lambda: str(
+                    legacy.get_model_profile_service().get_defaults().get("chat") or ""
+                ).strip(),
+                project_agent_running=lambda running: self._project_agent_approval_resume_running(running),
+                project_agent_completed=lambda context, result_text: self._project_agent_approval_resume_completed(
+                    context,
+                    result_text,
+                ),
+                project_main_chat_completed=lambda context, result_text: self._project_main_chat_approval_resume_completed(
+                    context,
+                    result_text,
+                ),
+                project_child_run_transition=lambda result: self._project_child_run_transition(result),
+                redact_agent_error=legacy.redact_secrets,
+                main_chat_agent_id=legacy._MAIN_CHAT_AGENT_ID,
+                error_type=legacy.AgentRuntimeError,
+            )
+        )
+        self.approval_resume_dispatcher = legacy.RuntimeApprovalRunDispatcher(
+            approve_workflow_run=lambda run: self._approve_workflow_run_approval(run),
+            approve_main_chat_run=lambda run: self._approve_main_chat_run_approval(run),
+            approve_agent_run=lambda run: self.tool_approval_resume.approve_agent_run(run),
+            error_type=legacy.AgentRuntimeError,
+        )
+        self.approval_execution = legacy.RuntimeApprovalExecutionService(
+            execution_lock=self._approval_execution_lock,
+            execution_in_progress=self._approval_execution_in_progress,
+            get_run=lambda run_id: self.get_run(run_id),
+            approve_once=self.approval_resume_dispatcher.approve_once,
+        )
+
     def _install_runtime_engine_state(self, state: Any) -> None:
         self.workspace_dir = state.workspace_dir
         self.db_path = state.db_path

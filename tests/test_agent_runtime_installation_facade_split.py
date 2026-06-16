@@ -30,6 +30,7 @@ def test_runtime_installation_facade_mixin_remains_exported_from_legacy_module()
         "_install_runtime_run_budget_and_main_chat_model",
         "_install_runtime_tooling_and_custom_agent_loop",
         "_install_runtime_agent_and_approval_services",
+        "_install_runtime_approval_runtime_services",
         "_install_runtime_engine_state",
         "_install_runtime_recorders",
         "_install_runtime_definition_services",
@@ -378,3 +379,45 @@ def test_installation_facade_installs_agent_and_approval_services(monkeypatch) -
     assert engine.agent_run_executor.kwargs["preparer"] == "agent-run-preparer"
     assert engine.agent_run_executor.kwargs["continue_custom_api_agent"] == "run-custom-api-agent"
     assert engine.agent_run_executor.kwargs["approval_pause"] == "approval-pause"
+
+
+def test_installation_facade_installs_approval_runtime_services(monkeypatch) -> None:
+    class CapturedCollaborator:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+
+    class CapturedToolApprovalResume(CapturedCollaborator):
+        approve_agent_run = "approve-agent-run"
+
+    class CapturedApprovalDispatcher(CapturedCollaborator):
+        approve_once = "approve-once"
+
+    monkeypatch.setattr(agent_runtime, "RuntimeApprovalTransitionService", CapturedCollaborator)
+    monkeypatch.setattr(agent_runtime, "RuntimeToolApprovalResumeService", CapturedToolApprovalResume)
+    monkeypatch.setattr(agent_runtime, "RuntimeApprovalRunDispatcher", CapturedApprovalDispatcher)
+    monkeypatch.setattr(agent_runtime, "RuntimeApprovalExecutionService", CapturedCollaborator)
+
+    engine = object.__new__(agent_runtime.NativeRunEngine)
+    engine.get_run = "get-run"
+    engine.runs = SimpleNamespace(pending_approval_private="pending-approval-private")
+    engine.approvals = "approvals"
+    engine.cancel_run = "cancel-run"
+    engine.tool_brokers = "tool-brokers"
+    engine.runtime_run_budget = "run-budget"
+    engine._approval_execution_lock = "approval-execution-lock"
+    engine._approval_execution_in_progress = "approval-execution-in-progress"
+
+    engine._install_runtime_approval_runtime_services()
+
+    assert isinstance(engine.approval_transitions, CapturedCollaborator)
+    assert engine.approval_transitions.kwargs["approvals"] == "approvals"
+    assert isinstance(engine.tool_approval_resume, CapturedToolApprovalResume)
+    assert engine.tool_approval_resume.kwargs["tool_brokers"] == "tool-brokers"
+    assert engine.tool_approval_resume.kwargs["run_budget"] == "run-budget"
+    assert isinstance(engine.approval_resume_dispatcher, CapturedApprovalDispatcher)
+    assert "approve_workflow_run" in engine.approval_resume_dispatcher.kwargs
+    assert "approve_main_chat_run" in engine.approval_resume_dispatcher.kwargs
+    assert "approve_agent_run" in engine.approval_resume_dispatcher.kwargs
+    assert isinstance(engine.approval_execution, CapturedCollaborator)
+    assert engine.approval_execution.kwargs["execution_lock"] == "approval-execution-lock"
+    assert engine.approval_execution.kwargs["approve_once"] == "approve-once"
