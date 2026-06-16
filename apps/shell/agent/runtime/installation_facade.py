@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from apps.shell.agent.runtime.agent_chat_entrypoints import (
+    build_runtime_agent_chat_entrypoint_setup,
+)
 from apps.shell.agent.runtime.credentials import RuntimeCredentialService
 from apps.shell.agent.runtime.core_services import build_runtime_memory_core_setup
 from apps.shell.agent.runtime.model_calling import (
@@ -199,11 +202,10 @@ class RuntimeInstallationFacadeMixin:
         *,
         runtime_timeline_factory: Any,
     ) -> None:
-        legacy = _legacy_agent_runtime_module()
-        self.agent_run_async_coordinator = legacy.RuntimeAgentRunAsyncCoordinator(
+        setup = build_runtime_agent_chat_entrypoint_setup(
             get_agent_private=lambda agent_id: self._get_agent_private(agent_id),
             validate_agent_run_readiness=lambda agent: self._validate_agent_run_readiness(agent),
-            starter=self.agent_run_starter,
+            agent_run_starter=self.agent_run_starter,
             execute_agent_run=lambda run_id, agent, user_goal, **kwargs: self._execute_agent_run(
                 run_id,
                 agent,
@@ -215,66 +217,34 @@ class RuntimeInstallationFacadeMixin:
             update_run=lambda run_id, **kwargs: self._update_run(run_id, **kwargs),
             runtime_agent_timeline=self.runtime_agent_timeline,
             runtime_agent_run_events=self.runtime_agent_run_events,
-            redact_error=legacy.redact_secrets,
-            error_type=legacy.AgentRuntimeError,
-        )
-        self.agent_model_tester = legacy.RuntimeAgentModelTester(
-            profile_service_factory=lambda: legacy.get_model_profile_service(),
-            default_agent_ids=legacy._DEFAULT_AGENT_IDS,
             call_custom_api=self.openai_compatible_chat_adapter.call,
-            now_seconds=legacy.time.time,
-            redact_error=legacy.redact_api_error_text,
-            error_type=legacy.AgentRuntimeError,
+            runs=self.runs,
+            run_groups=self.run_groups,
+            runtime_events=self.runtime_events,
+            run_artifacts=self.run_artifacts,
+            agent_workspaces_dir=self.agent_workspaces_dir,
+            agent_artifacts_dir=self.agent_artifacts_dir,
+            memory_store=self._memory_store,
+            future_task_store=self._future_task_store,
+            insert_run=self._insert_run,
+            link_task_run=self.link_task_run,
+            get_run=self.get_run,
+            task_run_links=self.task_run_links,
+            runtime_task_events=self.runtime_task_events,
+            runtime_timeline_factory=runtime_timeline_factory,
+            compile_tool_policy=self._compile_tool_policy,
+            compile_workspace_policy=self._compile_workspace_policy,
+            trust_workspace_from_policy=self._trust_workspace_from_policy,
+            profile_service_factory=lambda: _legacy_agent_runtime_module().get_model_profile_service(),
+            workspace_status=lambda: _legacy_agent_runtime_module().get_workspace_status(),
         )
-        self._install_runtime_run_timeline(
-            legacy.RuntimeRunTimelineService(
-                runs=self.runs,
-                run_groups=self.run_groups,
-                runtime_events=self.runtime_events,
-                run_artifacts=self.run_artifacts,
-            )
-        )
-        self._install_runtime_main_chat_config(
-            legacy.MainChatRuntimeConfigBuilder(
-                main_chat_agent_id=legacy._MAIN_CHAT_AGENT_ID,
-                agent_workspaces_dir=self.agent_workspaces_dir,
-                workspace_status=lambda: legacy.get_workspace_status(),
-                compile_tool_policy=self._compile_tool_policy,
-                compile_workspace_policy=self._compile_workspace_policy,
-                trust_workspace_from_policy=self._trust_workspace_from_policy,
-                memory_tool_names=list(legacy._MEMORY_TOOL_NAMES),
-                future_task_tool_names=list(legacy._FUTURE_TASK_TOOL_NAMES),
-            )
-        )
-        self.main_chat_virtual_agent_projector = legacy.MainChatVirtualAgentProjector(
-            main_chat_config=self.main_chat_config,
-            default_profile_id=lambda: str(
-                legacy.get_model_profile_service().get_defaults().get("chat") or ""
-            ).strip(),
-        )
-        self._install_runtime_tool_brokers(
-            legacy.RuntimeToolBrokerFactory(
-                agent_artifacts_dir=self.agent_artifacts_dir,
-                tool_broker_factory=legacy.ToolBroker,
-                memory_store=self._memory_store,
-                future_task_store=self._future_task_store,
-                main_chat_agent_id=legacy._MAIN_CHAT_AGENT_ID,
-            )
-        )
-        self._install_runtime_main_chat_runs(
-            legacy.MainChatRunLifecycle(
-                main_chat_agent_id=legacy._MAIN_CHAT_AGENT_ID,
-                insert_run=self._insert_run,
-                link_task_run=self.link_task_run,
-                get_run=self.get_run,
-                update_run=self._update_run,
-                task_run_links=self.task_run_links,
-                task_events=self.runtime_task_events,
-                timeline_factory=runtime_timeline_factory,
-                redact_secrets=legacy.redact_secrets,
-                final_statuses=legacy._FINAL_RUN_STATUSES,
-            )
-        )
+        self.agent_run_async_coordinator = setup.agent_run_async_coordinator
+        self.agent_model_tester = setup.agent_model_tester
+        self._install_runtime_run_timeline(setup.run_timeline)
+        self._install_runtime_main_chat_config(setup.main_chat_config)
+        self.main_chat_virtual_agent_projector = setup.main_chat_virtual_agent_projector
+        self._install_runtime_tool_brokers(setup.tool_brokers)
+        self._install_runtime_main_chat_runs(setup.main_chat_runs)
 
     def _install_runtime_run_budget_and_main_chat_model(
         self,

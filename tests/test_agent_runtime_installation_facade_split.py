@@ -155,20 +155,23 @@ def test_installation_facade_installs_cancellation_and_service_bundles() -> None
 
 
 def test_installation_facade_installs_agent_chat_entrypoints(monkeypatch) -> None:
-    class CapturedCollaborator:
-        def __init__(self, **kwargs) -> None:
-            self.kwargs = kwargs
+    def fake_build_runtime_agent_chat_entrypoint_setup(**kwargs):
+        return SimpleNamespace(
+            kwargs=kwargs,
+            agent_run_async_coordinator=SimpleNamespace(kwargs=kwargs),
+            agent_model_tester=SimpleNamespace(kwargs=kwargs),
+            run_timeline=SimpleNamespace(kwargs=kwargs),
+            main_chat_config=SimpleNamespace(kwargs=kwargs),
+            main_chat_virtual_agent_projector=SimpleNamespace(kwargs=kwargs),
+            tool_brokers=SimpleNamespace(kwargs=kwargs),
+            main_chat_runs=SimpleNamespace(kwargs=kwargs),
+        )
 
-    for name in (
-        "RuntimeAgentRunAsyncCoordinator",
-        "RuntimeAgentModelTester",
-        "RuntimeRunTimelineService",
-        "MainChatRuntimeConfigBuilder",
-        "MainChatVirtualAgentProjector",
-        "RuntimeToolBrokerFactory",
-        "MainChatRunLifecycle",
-    ):
-        monkeypatch.setattr(agent_runtime, name, CapturedCollaborator)
+    monkeypatch.setattr(
+        installation_facade_mod,
+        "build_runtime_agent_chat_entrypoint_setup",
+        fake_build_runtime_agent_chat_entrypoint_setup,
+    )
 
     engine = object.__new__(agent_runtime.NativeRunEngine)
     engine.agent_run_starter = "starter"
@@ -194,19 +197,12 @@ def test_installation_facade_installs_agent_chat_entrypoints(monkeypatch) -> Non
         runtime_timeline_factory="timeline-factory",
     )
 
-    assert isinstance(engine.agent_run_async_coordinator, CapturedCollaborator)
-    assert engine.agent_run_async_coordinator.kwargs["starter"] == "starter"
-    assert isinstance(engine.agent_model_tester, CapturedCollaborator)
+    assert engine.agent_run_async_coordinator.kwargs["agent_run_starter"] == "starter"
     assert engine.agent_model_tester.kwargs["call_custom_api"] == "custom-api-call"
-    assert isinstance(engine.run_timeline, CapturedCollaborator)
     assert engine.run_timeline.kwargs["runs"] == "runs"
-    assert isinstance(engine.main_chat_config, CapturedCollaborator)
     assert engine.main_chat_config.kwargs["agent_workspaces_dir"] == "agent-workspaces"
-    assert isinstance(engine.main_chat_virtual_agent_projector, CapturedCollaborator)
-    assert isinstance(engine.tool_brokers, CapturedCollaborator)
     assert engine.tool_brokers.kwargs["memory_store"] == "memory-store"
-    assert isinstance(engine.main_chat_runs, CapturedCollaborator)
-    assert engine.main_chat_runs.kwargs["timeline_factory"] == "timeline-factory"
+    assert engine.main_chat_runs.kwargs["runtime_timeline_factory"] == "timeline-factory"
 
 
 def test_installation_facade_installs_run_budget_and_main_chat_model(monkeypatch) -> None:

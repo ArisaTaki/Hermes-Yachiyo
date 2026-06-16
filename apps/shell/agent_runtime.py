@@ -80,6 +80,10 @@ from apps.shell.agent.runtime.agent_context import (
     agent_output_contract_rules as _agent_output_contract_rules,
     user_goal_from_agent_messages as _user_goal_from_agent_messages,
 )
+from apps.shell.agent.runtime.agent_chat_entrypoints import (
+    RuntimeAgentChatEntrypointSetup,
+    build_runtime_agent_chat_entrypoint_setup as _build_runtime_agent_chat_entrypoint_setup,
+)
 from apps.shell.agent.runtime.agent_facade import RuntimeAgentFacadeMixin
 from apps.shell.agent.runtime.agent_outcomes import RuntimeAgentRunOutcomeProjector
 from apps.shell.agent.runtime.agent_preparation import RuntimeAgentRunPreparer
