@@ -3273,6 +3273,7 @@ def test_chat_approval_run_detail_handoff_preserves_route_and_replay_wiring() ->
             "runIdFromStudioUrl(studioUrl) || String(runId || '').trim();",
             "const groupRunId = groupRunIdFromStudioUrl(studioUrl);",
             "group_run: groupRunId",
+            "['tab', 'target', 'goal', 'group_run', 'group_run_id', 'run_group_id']",
             "onOpenRunDetails={openRunDetails}",
             "onOpenDetails={() => onOpenRunDetails(runId)}",
             "onOpenDetails={() => openRunDetails(composerApprovalItem.runId)}",

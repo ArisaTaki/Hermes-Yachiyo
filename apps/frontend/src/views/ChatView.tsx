@@ -1546,7 +1546,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     navigateTo('agents', {
       run: clean,
       ...(groupRunId ? { group_run: groupRunId } : {}),
-    }, ['tab', 'target', 'goal']);
+    }, ['tab', 'target', 'goal', 'group_run', 'group_run_id', 'run_group_id']);
   }
 
   function openWorkflowStudio(runnableId = '', suggestedGoal = '') {
