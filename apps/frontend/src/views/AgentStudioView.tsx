@@ -1,4 +1,3 @@
-import { useMemo } from 'react';
 import '@xyflow/react/dist/style.css';
 
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -23,6 +22,7 @@ import { useAgentStudioActionRunner } from '../features/agent-studio/hooks/useAg
 import { useAgentStudioConfirmDialog } from '../features/agent-studio/hooks/useAgentStudioConfirmDialog';
 import { emptyAgentDraft, useAgentStudioLocalState } from '../features/agent-studio/hooks/useAgentStudioLocalState';
 import { useAgentStudioLoadLifecycle } from '../features/agent-studio/hooks/useAgentStudioLoadLifecycle';
+import { useAgentStudioModelProfiles } from '../features/agent-studio/hooks/useAgentStudioModelProfiles';
 import { useAgentStudioRefresh } from '../features/agent-studio/hooks/useAgentStudioRefresh';
 import { useAgentStudioRouteState } from '../features/agent-studio/hooks/useAgentStudioRouteState';
 import { useAgentStudioSelectionSynchronization } from '../features/agent-studio/hooks/useAgentStudioSelectionSynchronization';
@@ -215,14 +215,7 @@ export function AgentStudioView() {
     setStatus,
   });
 
-  const chatModelProfiles = useMemo(
-    () => modelProfiles.filter((profile) => profile.capability === 'chat' && profile.status === 'available' && profile.enabled !== false),
-    [modelProfiles],
-  );
-  const visionModelProfiles = useMemo(
-    () => modelProfiles.filter((profile) => profile.capability === 'vision' && profile.status === 'available' && profile.enabled !== false),
-    [modelProfiles],
-  );
+  const { chatModelProfiles, visionModelProfiles } = useAgentStudioModelProfiles(modelProfiles);
   const {
     workflowErrors,
     workflowNameError,

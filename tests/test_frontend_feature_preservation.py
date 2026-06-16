@@ -1614,6 +1614,18 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
         ],
     )
     _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useAgentStudioModelProfiles.ts",
+        [
+            "export function useAgentStudioModelProfiles",
+            "profile.capability === 'chat'",
+            "profile.capability === 'vision'",
+            "profile.status === 'available'",
+            "profile.enabled !== false",
+            "chatModelProfiles",
+            "visionModelProfiles",
+        ],
+    )
+    _assert_contains(
         "apps/frontend/src/features/agent-studio/hooks/useApprovedRunGuard.ts",
         [
             "export function useApprovedRunGuard",
