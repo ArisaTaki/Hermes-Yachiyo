@@ -80,12 +80,15 @@ export function RuntimeTimelineEventList({
               data-run-event-sequence={eventSequence}
               data-run-event-sensitivity={defaultEventSensitivity(event)}
               data-run-event-schema-version={defaultEventSchemaVersion(event)}
+              data-run-event-group-id={traceContext.groupId}
               data-run-event-group-run-id={traceContext.groupRunId}
               data-run-event-member-agent-id={traceContext.memberAgentId}
               data-run-event-status={eventStatus || ''}
               data-run-event-tone={eventTone}
               data-run-event-visibility={defaultEventVisibility(event)}
+              data-run-event-workflow-id={traceContext.workflowId}
               data-run-event-workflow-node-id={traceContext.workflowNodeId}
+              data-run-event-workflow-run-id={traceContext.workflowRunId}
               data-testid={eventTestId}
               key={`${eventName || 'event'}-${index}`}
             >
@@ -272,7 +275,13 @@ function runtimeEventMetadata(
     { label: 'artifact', value: runtimeEventString(event, payload, 'artifact_id') },
     { label: 'memory', value: runtimeEventMemoryId(event, payload) },
     { label: 'skill', value: runtimeEventSkillId(event, payload) },
-    { label: 'workflow', value: traceContext.workflowNodeLabel || traceContext.workflowNodeId },
+    {
+      label: 'workflow',
+      value: traceContext.workflowNodeLabel
+        || traceContext.workflowNodeId
+        || traceContext.workflowRunId
+        || traceContext.workflowId,
+    },
     { label: 'group', value: traceContext.groupRunId || traceContext.groupId },
     { label: 'member', value: traceContext.memberAgentName || traceContext.memberAgentId },
     { label: 'child', value: defaultChildRunId(event) || runtimeEventString(event, payload, 'child_run_id') },
@@ -288,8 +297,10 @@ type RuntimeTimelineTraceContext = {
   groupRunId: string;
   memberAgentId: string;
   memberAgentName: string;
+  workflowId: string;
   workflowNodeId: string;
   workflowNodeLabel: string;
+  workflowRunId: string;
 };
 
 function runtimeEventTraceContext(
@@ -302,8 +313,10 @@ function runtimeEventTraceContext(
       || runtimeEventString(event, payload, 'run_group_id'),
     memberAgentId: runtimeEventString(event, payload, 'member_agent_id'),
     memberAgentName: runtimeEventString(event, payload, 'member_agent_name'),
+    workflowId: runtimeEventString(event, payload, 'workflow_id'),
     workflowNodeId: runtimeEventString(event, payload, 'workflow_node_id'),
     workflowNodeLabel: runtimeEventString(event, payload, 'workflow_node_label'),
+    workflowRunId: runtimeEventString(event, payload, 'workflow_run_id'),
   };
 }
 
