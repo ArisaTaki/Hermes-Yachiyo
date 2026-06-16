@@ -1138,6 +1138,153 @@ function sendJson(response, statusCode, payload) {
   response.end(JSON.stringify(payload));
 }
 
+function currentRuns() {
+  const runs = [activeCancelRun(), workflowCancelRun(), workflowRejectRun(), workflowRun(), run, approvalRun()];
+  return (rerunCreated ? [rerun, ...runs] : runs).filter((item) => !deletedRunIds.includes(item.run_id));
+}
+
+function currentRunById(runId) {
+  const runs = [
+    activeCancelRun(),
+    workflowCancelRun(),
+    workflowCancelChildRun(),
+    workflowRejectRun(),
+    workflowRejectChildRun(),
+    workflowRun(),
+    workflowChildRun(),
+    approvalRun(),
+    run,
+    rerun,
+  ];
+  return runs.find((item) => item.run_id === runId && !deletedRunIds.includes(item.run_id)) || null;
+}
+
+function publicRunSnapshot(item) {
+  const isWorkflow = item.kind === 'workflow_run';
+  const parentRunId = workflowParentRunId(item.run_id);
+  const pendingApproval = publicPendingApproval(item);
+  return {
+    run_id: item.run_id,
+    parent_run_id: parentRunId || null,
+    group_run_id: item.run_group_id || null,
+    run_group_id: item.run_group_id || null,
+    workflow_run_id: isWorkflow ? item.run_id : parentRunId || null,
+    workflow_id: isWorkflow ? item.runnable_id : null,
+    agent_id: isWorkflow ? null : item.runnable_id,
+    status: item.status,
+    title: item.runnable_name || item.runnable_id || item.run_id,
+    task_id: item.task_id || null,
+    session_id: item.session_id || null,
+    task_run_link_run_status: item.task_run_link_run_status || null,
+    task_run_link_last_event_sequence: item.task_run_link_last_event_sequence ?? null,
+    events: publicRunEvents(item.run_id),
+    tool_calls: [],
+    approvals: pendingApproval ? [pendingApproval] : [],
+    pending_approval: pendingApproval,
+    artifacts: publicArtifacts(item),
+    children: publicRunChildren(item),
+    objective: item.user_goal || '',
+    current_node_id: isWorkflow && item.status === 'approval_required' ? 'agent-1' : null,
+    current_node_label: isWorkflow && item.status === 'approval_required' ? 'Coding Agent' : null,
+    final_answer: item.result || '',
+    created_at: item.created_at || now,
+    updated_at: item.updated_at || item.created_at || now,
+  };
+}
+
+function publicPendingApproval(item) {
+  const pending = item.pending_approval;
+  if (!pending) return null;
+  return {
+    approval_id: pending.approval_id || item.run_id,
+    run_id: pending.run_id || item.run_id,
+    source_run_id: item.run_id,
+    source_runnable_id: item.runnable_id || null,
+    source_runnable_name: item.runnable_name || null,
+    workflow_run_id: workflowParentRunId(item.run_id) || null,
+    title: `Approve ${pending.tool || 'tool'}`,
+    description: null,
+    status: pending.status || 'pending',
+    tool_name: pending.tool || 'tool',
+    risk_level: pending.risk_level || 'high',
+    input_preview: typeof pending.input_preview === 'string'
+      ? { preview: pending.input_preview }
+      : pending.input_preview || {},
+    policy_reason: pending.policy_reason || null,
+    requested_at: pending.requested_at || now,
+    resolved_at: pending.resolved_at || null,
+    open_in_studio_url: pending.open_in_studio_url || null,
+  };
+}
+
+function publicArtifacts(item) {
+  return (item.artifacts || []).map((artifact, index) => ({
+    artifact_id: artifact.artifact_id || `${item.run_id}:${artifact.path || artifact.kind || index}`,
+    run_id: item.run_id,
+    source_run_id: artifact.source_run_id || item.run_id,
+    source_tool: artifact.source_tool || null,
+    source_runnable_id: item.runnable_id || null,
+    source_runnable_name: artifact.source_runnable_name || item.runnable_name || null,
+    workflow_id: item.kind === 'workflow_run' ? item.runnable_id : null,
+    workflow_run_id: item.kind === 'workflow_run' ? item.run_id : workflowParentRunId(item.run_id) || null,
+    group_run_id: item.run_group_id || null,
+    title: artifact.title || artifact.path || artifact.kind || 'Artifact',
+    kind: artifact.kind || 'artifact',
+    path: artifact.path || null,
+    mime_type: artifact.mime_type || null,
+    size_bytes: artifact.size_bytes ?? null,
+    preview_text: artifact.preview_text || null,
+    url: artifact.url || null,
+    created_at: artifact.created_at || item.updated_at || now,
+  }));
+}
+
+function publicRunChildren(item) {
+  if (item.run_id === WORKFLOW_RUN_ID) return [publicRunChild(workflowChildRun())];
+  if (item.run_id === WORKFLOW_REJECT_RUN_ID) return [publicRunChild(workflowRejectChildRun())];
+  if (item.run_id === WORKFLOW_CANCEL_RUN_ID) return [publicRunChild(workflowCancelChildRun())];
+  return [];
+}
+
+function publicRunChild(item) {
+  const parentRunId = workflowParentRunId(item.run_id);
+  return {
+    run_id: item.run_id,
+    title: item.runnable_name || item.runnable_id || item.run_id,
+    status: item.status,
+    kind: item.kind,
+    parent_run_id: parentRunId || null,
+    group_run_id: item.run_group_id || null,
+    run_group_id: item.run_group_id || null,
+    workflow_run_id: parentRunId || null,
+    workflow_node_id: 'agent-1',
+    workflow_node_label: 'Coding Agent',
+    agent_id: item.runnable_id || null,
+    workflow_id: null,
+  };
+}
+
+function workflowParentRunId(runId) {
+  if (runId === WORKFLOW_CHILD_RUN_ID) return WORKFLOW_RUN_ID;
+  if (runId === WORKFLOW_REJECT_CHILD_RUN_ID) return WORKFLOW_REJECT_RUN_ID;
+  if (runId === WORKFLOW_CANCEL_CHILD_RUN_ID) return WORKFLOW_CANCEL_RUN_ID;
+  return '';
+}
+
+function publicRunEvents(runId) {
+  if (runId === RUN_ID) return runEvents;
+  if (runId === APPROVAL_RUN_ID) return approvalRunEvents();
+  if (runId === WORKFLOW_RUN_ID) return workflowRunEvents();
+  if (runId === WORKFLOW_CHILD_RUN_ID) return workflowChildRunEvents();
+  if (runId === WORKFLOW_REJECT_RUN_ID) return workflowRejectRunEvents();
+  if (runId === WORKFLOW_REJECT_CHILD_RUN_ID) return workflowRejectChildRunEvents();
+  if (runId === WORKFLOW_CANCEL_RUN_ID) return workflowCancelRunEvents();
+  if (runId === WORKFLOW_CANCEL_CHILD_RUN_ID) return workflowCancelChildRunEvents();
+  if (runId === ACTIVE_CANCEL_RUN_ID) return activeCancelRunEvents();
+  if (runId === RERUN_RUN_ID) return rerunEvents;
+  return [];
+}
+
 async function startMockBridge() {
   const server = http.createServer((request, response) => {
     try {
@@ -1146,7 +1293,10 @@ async function startMockBridge() {
         return;
       }
       const url = new URL(request.url || '/', 'http://127.0.0.1');
-      if (request.method === 'GET' && url.pathname === '/ui/agents') {
+      if (
+        request.method === 'GET'
+        && (url.pathname === '/ui/agents' || url.pathname === '/yachiyo/studio/agents')
+      ) {
         sendJson(response, 200, {
           agents: [{
             agent_id: 'agent-run-detail-smoke',
@@ -1161,16 +1311,37 @@ async function startMockBridge() {
         });
         return;
       }
-      if (request.method === 'GET' && url.pathname === '/ui/skills') {
+      if (
+        request.method === 'GET'
+        && (url.pathname === '/ui/skills' || url.pathname === '/yachiyo/studio/skills')
+      ) {
         sendJson(response, 200, { skills: [] });
         return;
       }
-      if (request.method === 'GET' && url.pathname === '/ui/skills/sources') {
+      if (
+        request.method === 'GET'
+        && (url.pathname === '/ui/skills/sources' || url.pathname === '/yachiyo/studio/skills/sources')
+      ) {
         sendJson(response, 200, { roots: [] });
         return;
       }
-      if (request.method === 'GET' && url.pathname === '/ui/skill-folders') {
+      if (
+        request.method === 'GET'
+        && (url.pathname === '/ui/skill-folders' || url.pathname === '/yachiyo/studio/skill-folders')
+      ) {
         sendJson(response, 200, { folders: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/memories') {
+        sendJson(response, 200, { memories: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/future-tasks') {
+        sendJson(response, 200, { future_tasks: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/groups') {
+        sendJson(response, 200, { groups: [] });
         return;
       }
       if (request.method === 'GET' && url.pathname === '/ui/model-profiles') {
@@ -1229,11 +1400,131 @@ async function startMockBridge() {
         });
         return;
       }
-      if (request.method === 'GET' && url.pathname === '/ui/runs') {
-        const runs = [activeCancelRun(), workflowCancelRun(), workflowRejectRun(), workflowRun(), run, approvalRun()];
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/group-runs') {
         sendJson(response, 200, {
-          runs: (rerunCreated ? [rerun, ...runs] : runs).filter((item) => !deletedRunIds.includes(item.run_id)),
+          group_runs: [
+            workflowCancelRunGroup(),
+            workflowRejectRunGroup(),
+            workflowRunGroup(),
+            runGroup(),
+          ].map((group) => ({
+            group_run_id: group.run_group_id,
+            run_group_id: group.run_group_id,
+            group_id: group.run_group_id,
+            title: group.title,
+            status: group.status,
+            objective: group.summary || group.title,
+            participants: [],
+            active_speaker_agent_id: null,
+            events: [],
+            runs: group.child_run_ids.map(currentRunById).filter(Boolean).map(publicRunSnapshot),
+            child_run_ids: group.child_run_ids,
+            shared_artifacts: [],
+            pending_approvals: [],
+            final_answer: group.summary || '',
+            created_at: group.created_at,
+            updated_at: group.updated_at,
+          })),
         });
+        return;
+      }
+      if (
+        request.method === 'GET'
+        && url.pathname.startsWith('/yachiyo/studio/group-runs/')
+        && url.pathname.endsWith('/events')
+      ) {
+        const groupRunId = decodeURIComponent(
+          url.pathname.slice('/yachiyo/studio/group-runs/'.length, -'/events'.length),
+        );
+        const afterSequence = Number(url.searchParams.get('after_sequence') || '0');
+        const limit = Math.max(1, Number(url.searchParams.get('limit') || '200'));
+        sendJson(response, 200, {
+          run_id: groupRunId,
+          after_sequence: Math.max(0, afterSequence),
+          limit,
+          events: [],
+          has_more: false,
+          next_after_sequence: Math.max(0, afterSequence),
+        });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/runs') {
+        sendJson(response, 200, { runs: currentRuns().map(publicRunSnapshot) });
+        return;
+      }
+      if (
+        request.method === 'GET'
+        && url.pathname.startsWith('/yachiyo/studio/runs/')
+        && url.pathname.endsWith('/timeline')
+      ) {
+        const runId = decodeURIComponent(
+          url.pathname.slice('/yachiyo/studio/runs/'.length, -'/timeline'.length),
+        );
+        const item = currentRunById(runId);
+        if (item) sendJson(response, 200, publicRunSnapshot(item));
+        else sendJson(response, 404, { ok: false, error: `run not found: ${runId}` });
+        return;
+      }
+      if (request.method === 'POST' && url.pathname === `/yachiyo/studio/runs/${APPROVAL_RUN_ID}/approval/approve`) {
+        approvalApproved = true;
+        sendJson(response, 200, publicRunSnapshot(approvalRun()));
+        return;
+      }
+      if (request.method === 'POST' && url.pathname === `/yachiyo/studio/runs/${WORKFLOW_CHILD_RUN_ID}/approval/approve`) {
+        workflowChildApproved = true;
+        sendJson(response, 200, publicRunSnapshot(workflowChildRun()));
+        return;
+      }
+      if (request.method === 'POST' && url.pathname === `/yachiyo/studio/runs/${WORKFLOW_REJECT_CHILD_RUN_ID}/approval/reject`) {
+        workflowChildRejected = true;
+        sendJson(response, 200, publicRunSnapshot(workflowRejectChildRun()));
+        return;
+      }
+      if (request.method === 'POST' && url.pathname === `/yachiyo/studio/runs/${WORKFLOW_CANCEL_CHILD_RUN_ID}/cancel`) {
+        workflowChildCancelled = true;
+        sendJson(response, 200, publicRunSnapshot(workflowCancelChildRun()));
+        return;
+      }
+      if (request.method === 'POST' && url.pathname === `/yachiyo/studio/runs/${ACTIVE_CANCEL_RUN_ID}/cancel`) {
+        activeRunCancelled = true;
+        sendJson(response, 200, publicRunSnapshot(activeCancelRun()));
+        return;
+      }
+      if (request.method === 'POST' && url.pathname === `/yachiyo/studio/runs/${RUN_ID}/rerun`) {
+        rerunCreated = true;
+        sendJson(response, 200, publicRunSnapshot(rerun));
+        return;
+      }
+      if (request.method === 'DELETE' && url.pathname.startsWith('/yachiyo/studio/runs/')) {
+        const runId = decodeURIComponent(url.pathname.slice('/yachiyo/studio/runs/'.length));
+        deletedRunIds.push(runId);
+        sendJson(response, 200, { ok: true, deleted_run_ids: [runId], deleted_run_count: 1 });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/yachiyo/studio/runs/${RUN_ID}/artifacts/${ARTIFACT_PATH}`) {
+        sendJson(response, 200, {
+          ok: true,
+          run_id: RUN_ID,
+          path: ARTIFACT_PATH,
+          content: ARTIFACT_CONTENT,
+          mime_type: 'text/markdown',
+          truncated: false,
+        });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/yachiyo/studio/runs/${WORKFLOW_RUN_ID}/artifacts/${WORKFLOW_ARTIFACT_PATH}`) {
+        sendJson(response, 200, {
+          ok: true,
+          run_id: WORKFLOW_RUN_ID,
+          path: WORKFLOW_ARTIFACT_PATH,
+          content: '# Workflow Summary\n\nWorkflow artifact preview loaded from mock Bridge.',
+          mime_type: 'text/markdown',
+          truncated: false,
+        });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/runs') {
+        sendJson(response, 200, { runs: currentRuns() });
         return;
       }
       if (request.method === 'GET' && url.pathname === `/ui/runs/${ACTIVE_CANCEL_RUN_ID}`) {
@@ -1590,8 +1881,9 @@ async function main() {
     const detail = document.querySelector('[data-testid="agent-run-detail"]');
     const cancel = document.querySelector('[data-testid="agent-run-detail-cancel"]');
     const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
+    const status = detail?.getAttribute('data-run-status');
     return detail?.getAttribute('data-run-id') === ${JSON.stringify(ACTIVE_CANCEL_RUN_ID)}
-      && detail?.getAttribute('data-run-status') === 'running'
+      && (status === 'running' || status === 'processing')
       && detail?.getAttribute('data-task-id') === ${JSON.stringify(ACTIVE_CANCEL_TASK_ID)}
       && detail?.getAttribute('data-session-id') === ${JSON.stringify(ACTIVE_CANCEL_SESSION_ID)}
       && document.querySelector('[data-testid="agent-run-detail-task"]')?.textContent.includes('Cancel active Agent Run from Run Detail smoke')

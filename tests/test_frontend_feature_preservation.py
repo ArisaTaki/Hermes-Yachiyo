@@ -2113,8 +2113,7 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
             "approvalsFromRunEventReplay(selectedRunReplayEvents)",
             "mergeApprovalSnapshots(",
             "RunTimelineSnapshot + RunEvent replay approval facts",
-            "RuntimeApprovalGate",
-            "RunApprovalRequest",
+            "WorkflowChildApprovalBridge",
             "RunTimeline",
             "ExpandableRuntimeContent as RunExpandableContent",
             "ArtifactInspector",
@@ -2143,6 +2142,13 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
             "selectedGroupRunSnapshot={selectedGroupRunSnapshot}",
             "selectedRouteGroupRunId={selectedRouteGroupRunId}",
             "selectedRunGroup={selectedRunGroup}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/WorkflowChildApprovalBridge.tsx",
+        [
+            "RuntimeApprovalGate",
+            "RunApprovalRequest",
         ],
     )
     _assert_contains(
@@ -3339,7 +3345,9 @@ def test_agent_run_detail_ui_smoke_uses_replay_route_and_dom_attributes() -> Non
             'toolEvent?.textContent.includes(\'"path": "README.md"\')',
             "modelEvent?.textContent.includes('Replay page smoke event 3')",
             "completedEvent?.textContent.includes",
-            "detail?.getAttribute('data-run-status') === 'running'\n      && detail?.getAttribute('data-task-id') === ${JSON.stringify(ACTIVE_CANCEL_TASK_ID)}",
+            "const status = detail?.getAttribute('data-run-status');",
+            "&& (status === 'running' || status === 'processing')",
+            "&& detail?.getAttribute('data-task-id') === ${JSON.stringify(ACTIVE_CANCEL_TASK_ID)}",
             "detail?.getAttribute('data-run-status') === 'cancelled'\n      && detail?.getAttribute('data-task-id') === ${JSON.stringify(ACTIVE_CANCEL_TASK_ID)}",
             "detail?.getAttribute('data-run-status') === 'approval_required'\n      && detail?.getAttribute('data-task-id') === ${JSON.stringify(APPROVAL_TASK_ID)}",
             "detail?.getAttribute('data-task-id') === ${JSON.stringify(APPROVAL_TASK_ID)}",
@@ -4692,18 +4700,7 @@ def test_agent_studio_exposes_stable_e2e_selectors_for_run_detail_and_approval_f
             "data-testid=\"agent-run-detail-open-workflow-studio\"",
             "ApprovalInspector",
             "ToolCallInspector",
-            "data-testid=\"agent-run-detail-workflow-child-approval\"",
-            "testId=\"agent-run-detail-workflow-child-approval-gate\"",
-            "cardTestId=\"agent-run-detail-workflow-child-approval-card\"",
-            "cardVariant=\"inspector\"",
-            "data-testid=\"agent-run-detail-workflow-child-approval-actions\"",
-            "approveTestId=\"agent-run-detail-workflow-child-approve\"",
-            "rejectTestId=\"agent-run-detail-workflow-child-reject\"",
-            "data-testid=\"agent-run-detail-workflow-child-cancel\"",
-            "data-testid=\"agent-run-detail-workflow-child-open-run\"",
-            "data-testid=\"agent-run-detail-workflow-child-secondary-actions\"",
-            "data-run-id={selectedWorkflowApprovalChildRunId}",
-            "data-run-status={selectedWorkflowApprovalChildRun?.status || 'approval_required'}",
+            "WorkflowChildApprovalBridge",
             "data-testid=\"agent-run-detail-task\"",
             "data-testid=\"agent-run-detail-result\"",
             "data-testid=\"agent-run-detail-workflow-steps\"",
@@ -4716,6 +4713,25 @@ def test_agent_studio_exposes_stable_e2e_selectors_for_run_detail_and_approval_f
             "data-run-id={step.childRunId}",
             "data-run-status={childStatus}",
             "ArtifactInspector",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/WorkflowChildApprovalBridge.tsx",
+        [
+            "data-testid=\"agent-run-detail-workflow-child-approval\"",
+            "testId=\"agent-run-detail-workflow-child-approval-gate\"",
+            "cardTestId=\"agent-run-detail-workflow-child-approval-card\"",
+            "cardVariant=\"inspector\"",
+            "data-testid=\"agent-run-detail-workflow-child-approval-actions\"",
+            "approveTestId=\"agent-run-detail-workflow-child-approve\"",
+            "rejectTestId=\"agent-run-detail-workflow-child-reject\"",
+            "data-testid=\"agent-run-detail-workflow-child-cancel\"",
+            "data-testid=\"agent-run-detail-workflow-child-open-run\"",
+            "data-testid=\"agent-run-detail-workflow-child-secondary-actions\"",
+            "data-run-id={selectedWorkflowApprovalChildRunId}",
+            "data-run-status={selectedWorkflowApprovalChildRun?.status || 'approval_required'}",
+            "RuntimeApprovalGate",
+            "RunApprovalRequest",
         ],
     )
     _assert_contains(
@@ -5699,7 +5715,7 @@ def test_agent_studio_preserves_workflow_child_approval_refresh_wiring() -> None
         ],
     )
     _assert_contains(
-        "apps/frontend/src/features/agent-studio/components/RunDetailPanel.tsx",
+        "apps/frontend/src/features/agent-studio/components/WorkflowChildApprovalBridge.tsx",
         [
             "() => onApproveRunById(selectedWorkflowApprovalChildRunId, selectedRun.run_id)",
             "() => onRejectRunById(selectedWorkflowApprovalChildRunId, selectedRun.run_id)",
@@ -5788,7 +5804,7 @@ def test_agent_studio_preserves_workflow_child_approval_run_detail_wiring() -> N
         ],
     )
     _assert_contains(
-        "apps/frontend/src/features/agent-studio/components/RunDetailPanel.tsx",
+        "apps/frontend/src/features/agent-studio/components/WorkflowChildApprovalBridge.tsx",
         [
             "className=\"run-approval-box workflow-approval-bridge\"",
             "RunApprovalRequest",

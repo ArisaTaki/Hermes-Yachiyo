@@ -3,7 +3,6 @@ import type { ReactNode } from 'react';
 import type { RunGroupSpec, RunSpec, WorkflowSpec } from '../types';
 import type { GroupRunSnapshot, PublicRunEvent, YachiyoRunTimelineSnapshot } from '../../yachiyo-studio/types';
 import { ExpandableRuntimeContent as RunExpandableContent } from '../../runtime-shared/components/ExpandableRuntimeContent';
-import { RuntimeApprovalGate } from '../../runtime-shared/components/RuntimeApprovalGate';
 import {
   approvalsFromRunEventReplay,
   artifactsFromRunEventReplay,
@@ -14,27 +13,14 @@ import { ApprovalInspector, type RunPendingApproval } from './ApprovalInspector'
 import { ArtifactInspector } from './ArtifactInspector';
 import { GroupRunDetailPanel } from './GroupRunDetailPanel';
 import { MemorySkillTraceInspector } from './MemorySkillTraceInspector';
-import { RunApprovalRequest } from './RunApprovalRequest';
 import { RunTimeline } from './RunTimeline';
 import { ToolCallInspector } from './ToolCallInspector';
+import { WorkflowChildApprovalBridge, type RunDetailWorkflowStepRef } from './WorkflowChildApprovalBridge';
 import { WorkflowRunDetailPanel } from './WorkflowRunDetailPanel';
 import {
   mergeToolCallSnapshots,
   toolCallsFromRunEventReplay,
 } from '../utils/runTimeline';
-
-export type RunDetailWorkflowStepRef = {
-  key: string;
-  kind: 'start' | 'agent' | 'approval' | 'artifact' | 'condition' | 'parallel' | 'workflow' | 'loop' | 'unknown';
-  nodeId?: string;
-  label: string;
-  status: string;
-  childRunId?: string;
-  payload?: string;
-  artifactPath?: string;
-  artifactCount?: number;
-  task?: string;
-};
 
 type ArtifactPreview = {
   path: string;
@@ -305,119 +291,20 @@ export function RunDetailPanel({
             selectedRunGroup={selectedRunGroup}
           />
           {selectedWorkflowApprovalChildRunId ? (
-            <section className="run-approval-box workflow-approval-bridge" data-testid="agent-run-detail-workflow-child-approval">
-              <div className="workflow-approval-bridge-head" data-testid="agent-run-detail-workflow-child-approval-head">
-                <div>
-                  <h4>Workflow 正在等待子 Agent 审批</h4>
-                  <p>
-                    {selectedWorkflowApprovalStep?.label || selectedWorkflowApprovalChildRun?.runnable_name || selectedWorkflowApprovalChildRunId}
-                    {' '}需要确认工具调用，处理后 Workflow 会继续执行后续步骤。
-                  </p>
-                  {selectedWorkflowApprovalStep?.task ? (
-                    <small>Step Task：{selectedWorkflowApprovalStep.task}</small>
-                  ) : null}
-                </div>
-                <span className={`run-status-pill ${runStatusTone(selectedWorkflowApprovalChildRun?.status || 'approval_required')}`}>
-                  {selectedWorkflowApprovalChildRun ? runStatusLabel(selectedWorkflowApprovalChildRun.status) : '加载中'}
-                </span>
-              </div>
-              {selectedWorkflowApprovalChildRun?.pending_approval?.tool ? (
-                <RuntimeApprovalGate
-                  actionsClassName="run-approval-actions"
-                  actionsTestId="agent-run-detail-workflow-child-approval-actions"
-                  approval={{
-                    approval_id: (
-                      selectedWorkflowApprovalChildRun.pending_approval.approval_id
-                      || selectedWorkflowApprovalChildRunId
-                    ),
-                    description: '这个子 Agent 工具调用需要人工确认后，父 Workflow 才会继续。',
-                    input_preview: typeof selectedWorkflowApprovalChildRun.pending_approval.input_preview === 'string'
-                      ? { preview: selectedWorkflowApprovalChildRun.pending_approval.input_preview }
-                      : selectedWorkflowApprovalChildRun.pending_approval.input_preview,
-                    open_in_studio_url: selectedWorkflowApprovalChildRun.pending_approval.open_in_studio_url,
-                    policy_reason: selectedWorkflowApprovalChildRun.pending_approval.policy_reason,
-                    requested_at: selectedWorkflowApprovalChildRun.pending_approval.requested_at,
-                    resolved_at: selectedWorkflowApprovalChildRun.pending_approval.resolved_at,
-                    risk_level: selectedWorkflowApprovalChildRun.pending_approval.risk_level,
-                    run_id: selectedWorkflowApprovalChildRun.pending_approval.run_id || selectedWorkflowApprovalChildRun.run_id,
-                    status: selectedWorkflowApprovalChildRun.pending_approval.status || 'pending',
-                    title: `Child Agent Approval · ${selectedWorkflowApprovalChildRun.pending_approval.tool}`,
-                    tool_name: selectedWorkflowApprovalChildRun.pending_approval.tool,
-                  }}
-                  approveButtonClassName="primary-action"
-                  approveLabel="批准子 Agent"
-                  approveTestId="agent-run-detail-workflow-child-approve"
-                  busy={busy}
-                  cardClassName="studio-runtime-approval workflow-child-runtime-approval-card"
-                  cardTestId="agent-run-detail-workflow-child-approval-card"
-                  cardVariant="inspector"
-                  className="workflow-child-runtime-approval"
-                  onApprove={() => onRunAction(
-                    () => onApproveRunById(selectedWorkflowApprovalChildRunId, selectedRun.run_id),
-                    '批准子 Agent 工具调用',
-                  )}
-                  onReject={() => onRunAction(
-                    () => onRejectRunById(selectedWorkflowApprovalChildRunId, selectedRun.run_id),
-                    '拒绝子 Agent 工具调用',
-                  )}
-                  rejectButtonClassName="danger-action"
-                  rejectLabel="拒绝子 Agent"
-                  rejectTestId="agent-run-detail-workflow-child-reject"
-                  testId="agent-run-detail-workflow-child-approval-gate"
-                >
-                  <RunApprovalRequest
-                    inputPreview={selectedWorkflowApprovalChildRun.pending_approval.input_preview}
-                    runGoal={selectedWorkflowApprovalChildRun.user_goal || ''}
-                    runId={selectedWorkflowApprovalChildRun.run_id}
-                    runLabel={selectedWorkflowApprovalChildRun.runnable_name || 'Child Run'}
-                    tool={selectedWorkflowApprovalChildRun.pending_approval.tool}
-                  />
-                  <div
-                    className="run-approval-actions workflow-child-secondary-actions"
-                    data-testid="agent-run-detail-workflow-child-secondary-actions"
-                  >
-                    <button
-                      type="button"
-                      className="danger-action"
-                      data-testid="agent-run-detail-workflow-child-cancel"
-                      disabled={busy}
-                      onClick={() => onRunAction(
-                        () => onCancelRunById(selectedWorkflowApprovalChildRunId, selectedRun.run_id),
-                        '取消子 Agent Run',
-                      )}
-                    >
-                      取消子 Run
-                    </button>
-                    <button
-                      type="button"
-                      className="run-timeline-child"
-                      data-run-id={selectedWorkflowApprovalChildRunId}
-                      data-run-status={selectedWorkflowApprovalChildRun?.status || 'approval_required'}
-                      data-testid="agent-run-detail-workflow-child-open-run"
-                      onClick={() => onOpenRunDetail(selectedWorkflowApprovalChildRunId)}
-                    >
-                      打开子 Run
-                    </button>
-                  </div>
-                </RuntimeApprovalGate>
-              ) : (
-                <>
-                  <pre>{selectedWorkflowApprovalChildRun ? (selectedWorkflowApprovalChildRun.result || 'Child run has no approval payload.') : 'Loading child run...'}</pre>
-                  <div className="run-approval-actions" data-testid="agent-run-detail-workflow-child-approval-actions">
-                    <button
-                      type="button"
-                      className="run-timeline-child"
-                      data-run-id={selectedWorkflowApprovalChildRunId}
-                      data-run-status={selectedWorkflowApprovalChildRun?.status || 'approval_required'}
-                      data-testid="agent-run-detail-workflow-child-open-run"
-                      onClick={() => onOpenRunDetail(selectedWorkflowApprovalChildRunId)}
-                    >
-                      打开子 Run
-                    </button>
-                  </div>
-                </>
-              )}
-            </section>
+            <WorkflowChildApprovalBridge
+              busy={busy}
+              onApproveRunById={onApproveRunById}
+              onCancelRunById={onCancelRunById}
+              onOpenRunDetail={onOpenRunDetail}
+              onRejectRunById={onRejectRunById}
+              onRunAction={onRunAction}
+              runStatusLabel={runStatusLabel}
+              runStatusTone={runStatusTone}
+              selectedRun={selectedRun}
+              selectedWorkflowApprovalChildRun={selectedWorkflowApprovalChildRun}
+              selectedWorkflowApprovalChildRunId={selectedWorkflowApprovalChildRunId}
+              selectedWorkflowApprovalStep={selectedWorkflowApprovalStep}
+            />
           ) : null}
           <ApprovalInspector
             approvalHistory={selectedRunApprovalHistory}
