@@ -879,16 +879,41 @@ def _artifact_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
             artifact_payload["title"] = (
                 f"{payload['member_agent_name']} / {artifact_path or 'Artifact'}"
             )
-    elif event.event_type == "workflow.node.artifact" and isinstance(payload.get("artifact"), Mapping):
-        artifact_payload = {
-            "kind": "workflow_artifact",
-            "title": payload.get("workflow_node_label") or "Workflow Artifact",
-            "workflow_id": payload.get("workflow_id"),
-            "workflow_run_id": payload.get("workflow_run_id") or event.run_id,
-            "workflow_node_id": payload.get("workflow_node_id"),
-            "workflow_node_label": payload.get("workflow_node_label"),
-            **dict(payload["artifact"]),
-        }
+    elif event.event_type == "workflow.node.artifact":
+        artifact = payload.get("artifact")
+        artifact_payload = dict(artifact) if isinstance(artifact, Mapping) else {}
+        artifact_payload.setdefault("path", payload.get("artifact_path") or payload.get("path") or event.detail)
+        artifact_payload.setdefault("kind", payload.get("kind") or "workflow_artifact")
+        artifact_payload.setdefault(
+            "title",
+            payload.get("title")
+            or payload.get("workflow_node_label")
+            or artifact_payload.get("path")
+            or "Workflow Artifact",
+        )
+        artifact_payload.setdefault("workflow_id", payload.get("workflow_id"))
+        artifact_payload.setdefault("workflow_run_id", payload.get("workflow_run_id") or event.run_id)
+        artifact_payload.setdefault("workflow_node_id", payload.get("workflow_node_id"))
+        artifact_payload.setdefault("workflow_node_label", payload.get("workflow_node_label"))
+        for key in (
+            "artifact_id",
+            "id",
+            "size_bytes",
+            "bytes",
+            "mime_type",
+            "content_type",
+            "preview_text",
+            "content_preview",
+            "url",
+        ):
+            if payload.get(key) is not None:
+                artifact_payload.setdefault(key, payload.get(key))
+        if not (
+            artifact_payload.get("path")
+            or artifact_payload.get("artifact_id")
+            or artifact_payload.get("id")
+        ):
+            return {}
     else:
         return {}
     _merge_artifact_trace_context(artifact_payload, payload)

@@ -836,6 +836,45 @@ def test_run_timeline_derives_approvals_and_artifacts_from_events() -> None:
     assert timeline.artifacts[1].workflow_node_label == "Report"
 
 
+def test_run_timeline_derives_workflow_artifact_from_event_path() -> None:
+    timeline = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "run-workflow-artifact-path",
+            "status": "completed",
+            "events": [
+                {
+                    "event_type": "workflow.node.artifact",
+                    "payload": {
+                        "workflow_id": "workflow-1",
+                        "workflow_run_id": "workflow-run-1",
+                        "workflow_node_id": "summary",
+                        "workflow_node_label": "Summary",
+                        "artifact_path": "reports/workflow-summary.md",
+                        "bytes": 128,
+                        "content_type": "text/markdown",
+                    },
+                    "created_at": "2026-06-15T00:00:04Z",
+                },
+            ],
+        }
+    )
+
+    assert len(timeline.artifacts) == 1
+    artifact = timeline.artifacts[0]
+    assert artifact.artifact_id == "run-workflow-artifact-path:reports/workflow-summary.md"
+    assert artifact.kind == "workflow_artifact"
+    assert artifact.title == "Summary"
+    assert artifact.path == "reports/workflow-summary.md"
+    assert artifact.size_bytes == 128
+    assert artifact.mime_type == "text/markdown"
+    assert artifact.workflow_id == "workflow-1"
+    assert artifact.workflow_run_id == "workflow-run-1"
+    assert artifact.workflow_node_id == "summary"
+    assert artifact.workflow_node_label == "Summary"
+    assert artifact.source_run_id == "run-workflow-artifact-path"
+    assert artifact.created_at == "2026-06-15T00:00:04Z"
+
+
 def test_run_timeline_keeps_secret_events_out_of_derived_runtime_facts() -> None:
     timeline = run_timeline_snapshot_from_payload(
         {
