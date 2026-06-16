@@ -220,7 +220,7 @@ class _FakeStudioPort:
 
     def get_group_run(self, group_run_id: str) -> dict[str, Any]:
         self.calls.append(("get_group_run", group_run_id))
-        return {
+        return _group_run_payload(group_run_id=group_run_id) | {
             "run_group_id": group_run_id,
             "title": "Legacy run group",
             "status": "running",
@@ -532,6 +532,8 @@ def test_agent_studio_service_maps_group_run_workflow_run_timeline_and_events() 
     )
     group_runs = service.list_group_runs(5)
     fetched_group_run = service.get_group_run("group-run-1")
+    group_events = list(service.get_group_run_event_stream("group-run-1"))
+    group_event_page = service.get_group_run_event_page("group-run-1", after_sequence=0, limit=1)
     workflow_run = service.start_workflow_run(
         StartWorkflowRunRequest(workflow_id="workflow-1", objective="Build report")
     )
@@ -554,6 +556,11 @@ def test_agent_studio_service_maps_group_run_workflow_run_timeline_and_events() 
     assert fetched_group_run.group_run_id == "group-run-1"
     assert fetched_group_run.run_group_id == "group-run-1"
     assert fetched_group_run.child_run_ids == ["child-run-1"]
+    assert group_events[0].event_type == "group.member.started"
+    assert group_events[0].payload["member_agent_id"] == "agent-1"
+    assert group_event_page.run_id == "group-run-1"
+    assert group_event_page.events[0].event_type == "group.member.started"
+    assert group_event_page.has_more is False
     assert workflow_run.workflow_run_id == "workflow-run-1"
     assert workflow_run.run_id == "workflow-run-1"
     assert workflow_run.title == "Build report"

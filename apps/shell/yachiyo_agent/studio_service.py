@@ -254,6 +254,14 @@ class AgentStudioService:
     def get_group_run(self, group_run_id: str) -> GroupRunSnapshot:
         return group_run_snapshot_from_payload(self._studio_port.get_group_run(group_run_id))
 
+    def get_group_run_event_stream(self, group_run_id: str) -> Iterable[PublicRunEvent]:
+        group_run = self.get_group_run(group_run_id)
+        if group_run.events:
+            yield from group_run.events
+            return
+        for run in group_run.runs:
+            yield from run.events
+
     def get_group_run_event_page(
         self,
         group_run_id: str,
@@ -264,7 +272,7 @@ class AgentStudioService:
         clean_limit = max(1, min(500, int(limit or 200)))
         events = [
             event
-            for event in self.get_group_run(group_run_id).events
+            for event in self.get_group_run_event_stream(group_run_id)
             if int(event.sequence or 0) > clean_after_sequence
         ]
         page = events[:clean_limit]
