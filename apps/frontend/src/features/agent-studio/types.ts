@@ -163,6 +163,7 @@ export type RunnableSummary = {
 
 export type RunSpec = {
   run_id: string;
+  parent_run_id?: string;
   run_group_id?: string;
   run_group_source?: string;
   task_id?: string;

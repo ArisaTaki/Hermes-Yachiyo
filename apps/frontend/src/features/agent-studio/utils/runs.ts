@@ -91,7 +91,13 @@ export function publicRunTimelineToRunSpec(
     userGoal?: string;
   } = {},
 ): RunSpec {
-  const kind = fallback.kind || (snapshot.workflow_run_id ? 'workflow_run' : 'agent_run');
+  const agentId = String(snapshot.agent_id || '').trim();
+  const workflowRunId = String(snapshot.workflow_run_id || '').trim();
+  const parentRunId = String(snapshot.parent_run_id || '').trim();
+  const hasWorkflowDefinition = 'workflow_id' in snapshot && Boolean(snapshot.workflow_id);
+  const workflowChildParentRunId = parentRunId || (workflowRunId && workflowRunId !== snapshot.run_id ? workflowRunId : '');
+  const inferredKind = agentId ? 'agent_run' : (workflowRunId || hasWorkflowDefinition ? 'workflow_run' : 'agent_run');
+  const kind = fallback.kind || inferredKind;
   const pendingApproval = snapshot.pending_approval || snapshot.approvals?.find(
     (approval) => approval.status === 'pending',
   );
@@ -102,8 +108,9 @@ export function publicRunTimelineToRunSpec(
   const finalAnswer = 'final_answer' in snapshot ? String(snapshot.final_answer || '').trim() : '';
   return {
     run_id: snapshot.run_id,
+    parent_run_id: parentRunId || undefined,
     run_group_id: snapshot.run_group_id || snapshot.group_run_id || undefined,
-    run_group_source: kind === 'workflow_run' ? 'workflow' : undefined,
+    run_group_source: kind === 'workflow_run' || workflowChildParentRunId ? 'workflow' : undefined,
     task_id: 'task_id' in snapshot ? snapshot.task_id || undefined : undefined,
     session_id: 'session_id' in snapshot ? snapshot.session_id || undefined : undefined,
     task_run_link_created_at: 'task_run_link_created_at' in snapshot
@@ -119,7 +126,7 @@ export function publicRunTimelineToRunSpec(
       ? snapshot.task_run_link_last_event_sequence ?? undefined
       : undefined,
     kind,
-    runnable_id: fallback.runnableId || workflowId || snapshot.workflow_run_id || snapshot.agent_id || snapshot.run_id,
+    runnable_id: fallback.runnableId || (kind === 'workflow_run' ? workflowId || workflowRunId : agentId) || snapshot.run_id,
     runnable_name: snapshot.title || fallback.runnableName || undefined,
     status: snapshot.status || 'processing',
     user_goal: (fallback.userGoal ?? workflowObjective) || snapshot.title || '',
@@ -132,8 +139,8 @@ export function publicRunTimelineToRunSpec(
     created_at: snapshot.created_at,
     updated_at: snapshot.updated_at,
     agent_run_id: kind === 'agent_run' ? snapshot.run_id : undefined,
-    workflow_id: kind === 'workflow_run' ? workflowId || undefined : undefined,
-    workflow_run_id: kind === 'workflow_run' ? snapshot.workflow_run_id || snapshot.run_id : undefined,
+    workflow_id: workflowId || undefined,
+    workflow_run_id: workflowRunId || (kind === 'workflow_run' ? snapshot.run_id : undefined),
     objective: workflowObjective || undefined,
     current_node_id: currentNodeId || undefined,
     current_node_label: currentNodeLabel || undefined,
