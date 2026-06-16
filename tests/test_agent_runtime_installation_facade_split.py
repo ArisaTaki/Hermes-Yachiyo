@@ -36,6 +36,7 @@ def test_runtime_installation_facade_mixin_remains_exported_from_legacy_module()
         "_install_runtime_workflow_execution_and_async",
         "_install_runtime_runnable_entrypoints",
         "_install_runtime_workflow_transitions",
+        "_install_runtime_run_control_and_shutdown",
         "_install_runtime_engine_state",
         "_install_runtime_recorders",
         "_install_runtime_definition_services",
@@ -714,3 +715,63 @@ def test_installation_facade_installs_workflow_transitions(monkeypatch) -> None:
     assert engine.workflow_parent_resume == "workflow-parent-resume"
     assert engine.approval_resume_projection == "approval-resume-projection"
     assert engine.run_transition_projection == "run-transition-projection"
+
+
+def test_installation_facade_installs_run_control_and_shutdown(monkeypatch) -> None:
+    class CapturedRunCancellation:
+        cancel_once = "cancel-once"
+
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+
+    class CapturedCollaborator:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+
+    monkeypatch.setattr(agent_runtime, "RuntimeRunCancellationService", CapturedRunCancellation)
+    monkeypatch.setattr(agent_runtime, "RuntimeRunRerunService", CapturedCollaborator)
+    monkeypatch.setattr(agent_runtime, "RuntimeRunDeletionService", CapturedCollaborator)
+    monkeypatch.setattr(agent_runtime, "RuntimeShutdownService", CapturedCollaborator)
+
+    engine = object.__new__(agent_runtime.NativeRunEngine)
+    engine._run_cancel_locks = {}
+    engine._run_cancel_locks_guard = threading.RLock()
+    engine.get_run = "get-run"
+    engine._update_run = "update-run"
+    engine.append_run_event = "append-run-event"
+    engine.workflow_cancellation = "workflow-cancellation"
+    engine.create_agent_run = "create-agent-run"
+    engine.create_workflow_run = "create-workflow-run"
+    engine.resolve_runnable = "resolve-runnable"
+    engine.run_groups = SimpleNamespace(
+        runs="group-runs",
+        delete="delete-group",
+        remove_run_ids="remove-run-ids",
+    )
+    engine.runs = SimpleNamespace(delete_rows="delete-run-rows")
+    engine.run_artifacts = SimpleNamespace(delete_files="delete-artifacts")
+    engine._conn = SimpleNamespace(commit=lambda: "commit")
+    engine._credential_store = "credential-store"
+    engine._closed = False
+    engine.cancel_run = "cancel-run"
+    engine._ensure_row_factory = "ensure-row-factory"
+
+    engine._install_runtime_run_control_and_shutdown(
+        runtime_timeline_factory="timeline-factory",
+    )
+
+    assert isinstance(engine.run_cancellation, CapturedRunCancellation)
+    assert engine.run_cancellation.kwargs["workflow_cancellation"] == "workflow-cancellation"
+    assert engine.run_cancellation.kwargs["timeline_factory"] == "timeline-factory"
+    assert isinstance(engine.run_cancellation_coordinator, RuntimeRunCancellationCoordinator)
+    assert engine.run_cancellation_coordinator._cancel_once == "cancel-once"
+    assert isinstance(engine.run_rerun, CapturedCollaborator)
+    assert callable(engine.run_rerun.kwargs["create_agent_run"])
+    assert callable(engine.run_rerun.kwargs["create_workflow_run"])
+    assert engine.run_rerun.kwargs["timeline_factory"] == "timeline-factory"
+    assert isinstance(engine.run_deletion, CapturedCollaborator)
+    assert "delete_run_rows" in engine.run_deletion.kwargs
+    assert "delete_artifacts" in engine.run_deletion.kwargs
+    assert isinstance(engine.runtime_shutdown, CapturedCollaborator)
+    assert engine.runtime_shutdown.kwargs["conn"] is engine._conn
+    assert engine.runtime_shutdown.kwargs["credential_store"] == "credential-store"

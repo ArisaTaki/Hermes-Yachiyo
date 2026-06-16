@@ -540,77 +540,8 @@ class NativeRunEngine(
         self._install_runtime_workflow_transitions(
             runtime_timeline_factory=runtime_timeline_factory,
         )
-        self._install_runtime_run_cancellation(
-            RuntimeRunCancellationService(
-                get_run=lambda run_id: self.get_run(run_id),
-                update_run=lambda run_id, **kwargs: self._update_run(run_id, **kwargs),
-                append_run_event=lambda run_id, event_type, payload: self.append_run_event(
-                    run_id,
-                    event_type,
-                    payload,
-                ),
-                timeline_factory=runtime_timeline_factory,
-                workflow_cancellation=self.workflow_cancellation,
-                workflow_run_is_group_root=lambda result: self._workflow_run_is_group_root(result),
-                project_cancelled_workflow_group_if_root=lambda run, result: (
-                    self._project_cancelled_workflow_group_if_root(run, result)
-                ),
-                resume_parent_workflows_after_child_update=lambda projected: (
-                    self._resume_parent_workflows_after_child_update(projected)
-                ),
-                project_child_run_transition=lambda result: self._project_child_run_transition(result),
-                final_statuses=_FINAL_RUN_STATUSES,
-            )
-        )
-        self._install_runtime_run_rerun(
-            RuntimeRunRerunService(
-                get_run=lambda run_id: self.get_run(run_id),
-                create_agent_run=lambda payload: self.create_agent_run(payload),
-                create_workflow_run=lambda payload: self.create_workflow_run(payload),
-                timeline_factory=runtime_timeline_factory,
-                append_run_event=lambda run_id, event_type, payload: self.append_run_event(
-                    run_id,
-                    event_type,
-                    payload,
-                ),
-                update_run=lambda run_id, **kwargs: self._update_run(run_id, **kwargs),
-                resolve_runnable=lambda **kwargs: self.resolve_runnable(**kwargs),
-                final_statuses=_FINAL_RUN_STATUSES,
-                error_type=AgentRuntimeError,
-            )
-        )
-        self._install_runtime_run_deletion(
-            RuntimeRunDeletionService(
-                get_run=lambda run_id: self.get_run(run_id),
-                group_runs=lambda run_group_id: self.run_groups.runs(run_group_id),
-                delete_run_rows=lambda targets, **kwargs: self.runs.delete_rows(
-                    targets,
-                    **kwargs,
-                ),
-                delete_artifacts=lambda *args, **kwargs: self.run_artifacts.delete_files(
-                    *args,
-                    **kwargs,
-                ),
-                delete_group=lambda run_group_id: self.run_groups.delete(run_group_id),
-                remove_group_run_ids=lambda run_group_id, deleted_ids: (
-                    self.run_groups.remove_run_ids(run_group_id, deleted_ids)
-                ),
-                commit=lambda: self._conn.commit(),
-                is_active_run_status=_is_active_run_status,
-                error_type=AgentRuntimeError,
-            )
-        )
-        self._install_runtime_shutdown(
-            RuntimeShutdownService(
-                conn=self._conn,
-                credential_store=self._credential_store,
-                is_closed=lambda: self._closed,
-                mark_not_accepting=lambda: setattr(self, "_accepting_runs", False),
-                mark_closed=lambda: setattr(self, "_closed", True),
-                cancel_terminal_process_groups=lambda: cancel_terminal_process_groups(),
-                ensure_row_factory=lambda: self._ensure_row_factory(),
-                cancel_run=lambda run_id: self.cancel_run(run_id),
-            )
+        self._install_runtime_run_control_and_shutdown(
+            runtime_timeline_factory=runtime_timeline_factory,
         )
         self._init_db()
         self.workspace_policy_service = RuntimeWorkspacePolicyService(
