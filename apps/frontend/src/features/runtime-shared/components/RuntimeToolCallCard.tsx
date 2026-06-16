@@ -41,15 +41,19 @@ export function RuntimeToolCallCard({
     <div
       className={className}
       data-approval-id={toolCall.approval_id || ''}
+      data-group-id={toolCall.group_id || ''}
       data-group-run-id={toolCall.group_run_id || ''}
       data-risk-level={toolCall.risk_level || ''}
+      data-run-id={toolCall.run_id || ''}
       data-source-runnable-id={toolCall.source_runnable_id || ''}
       data-source-run-id={toolCall.source_run_id || ''}
       data-testid={testId}
       data-tool-call-id={toolCall.tool_call_id}
       data-tool-name={toolCall.tool_name}
       data-tool-status={toolCall.status}
+      data-workflow-id={toolCall.workflow_id || ''}
       data-workflow-node-id={toolCall.workflow_node_id || ''}
+      data-workflow-run-id={toolCall.workflow_run_id || ''}
     >
       <span>{toolCall.status || 'tool'}</span>
       <strong>{toolCall.tool_name || 'tool'}</strong>
@@ -91,7 +95,7 @@ function toolCallMetadataItems(toolCall: RuntimeToolCallCardSnapshot): Array<{ l
     { label: 'run', value: toolCall.run_id || '' },
     { label: 'source', value: toolCall.source_run_id || '' },
     { label: 'agent', value: toolCall.source_runnable_name || toolCall.source_runnable_id || '' },
-    { label: 'workflow', value: toolCall.workflow_node_label || toolCall.workflow_node_id || '' },
+    { label: 'workflow', value: toolCall.workflow_node_label || toolCall.workflow_node_id || toolCall.workflow_run_id || toolCall.workflow_id || '' },
     { label: 'group', value: toolCall.group_run_id || toolCall.group_id || '' },
   ].filter((item) => item.value);
 }
