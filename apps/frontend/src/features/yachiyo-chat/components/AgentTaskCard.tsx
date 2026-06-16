@@ -1,7 +1,10 @@
+import { useEffect, useState } from 'react';
+
 import { UiIcon } from '../../../components/UiIcon';
 import { RuntimeTimelineSummary } from '../../runtime-shared/components/RuntimeTimelineSummary';
+import { listYachiyoTaskEvents } from '../api';
 import { yachiyoTaskRunId, yachiyoTaskStudioRunId, yachiyoTaskStudioUrl } from '../taskSnapshots';
-import type { AgentTaskSnapshot, ApprovalCardSnapshot } from '../types';
+import type { AgentTaskSnapshot, ApprovalCardSnapshot, PublicRunEvent } from '../types';
 import { ApprovalCard } from './ApprovalCard';
 import { ArtifactPreview } from './ArtifactPreview';
 import { ToolCallSummary } from './ToolCallSummary';
@@ -21,6 +24,7 @@ export function AgentTaskCard({
   onRejectApproval?: (task: AgentTaskSnapshot, approval: ApprovalCardSnapshot) => void | Promise<void>;
   task: AgentTaskSnapshot;
 }) {
+  const [replayEvents, setReplayEvents] = useState<PublicRunEvent[]>([]);
   const status = task.status || 'running';
   const runId = yachiyoTaskRunId(task);
   const studioRunId = yachiyoTaskStudioRunId(task);
@@ -28,11 +32,32 @@ export function AgentTaskCard({
   const approvals = task.pending_approvals || [];
   const artifacts = task.artifacts || [];
   const recentEvents = task.recent_events || [];
+  const timelineEvents = replayEvents.length ? replayEvents : recentEvents;
+  const timelineEventSource = replayEvents.length ? 'run_event_page' : 'task_snapshot';
   const canCancel = onCancelTask && ['queued', 'running', 'waiting_approval'].includes(status);
   const hasHeaderActions = Boolean((studioRunId && studioUrl && onOpenStudio) || canCancel);
+
+  useEffect(() => {
+    const taskId = String(task.task_id || '').trim();
+    setReplayEvents([]);
+    if (!taskId) return undefined;
+    let disposed = false;
+    void listYachiyoTaskEvents(taskId, 0, 200)
+      .then((page) => {
+        if (!disposed) setReplayEvents(page.events || []);
+      })
+      .catch(() => {
+        if (!disposed) setReplayEvents([]);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [task.task_id, task.updated_at]);
+
   return (
     <section
       className={`yachiyo-agent-task-card ${status}`}
+      data-event-source={timelineEventSource}
       data-task-id={task.task_id}
       data-task-status={status}
       data-run-id={studioRunId || runId}
@@ -79,11 +104,11 @@ export function AgentTaskCard({
         ) : null}
       </header>
       {task.summary ? <p className="yachiyo-agent-task-summary">{task.summary}</p> : null}
-      {recentEvents.length ? <ToolCallSummary events={recentEvents} /> : null}
-      {recentEvents.length ? (
+      {timelineEvents.length ? <ToolCallSummary events={timelineEvents} /> : null}
+      {timelineEvents.length ? (
         <RuntimeTimelineSummary
           className="yachiyo-agent-task-timeline"
-          events={recentEvents}
+          events={timelineEvents}
           testId="yachiyo-agent-task-timeline"
         />
       ) : null}

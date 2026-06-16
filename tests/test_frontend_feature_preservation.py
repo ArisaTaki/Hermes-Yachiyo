@@ -660,10 +660,18 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
     _assert_contains(
         "apps/frontend/src/features/yachiyo-chat/components/AgentTaskCard.tsx",
         [
+            "useEffect",
+            "useState",
+            "listYachiyoTaskEvents",
             "import { yachiyoTaskRunId, yachiyoTaskStudioRunId, yachiyoTaskStudioUrl } from '../taskSnapshots';",
+            "PublicRunEvent",
+            "const [replayEvents, setReplayEvents] = useState<PublicRunEvent[]>([]);",
             "const runId = yachiyoTaskRunId(task);",
             "const studioRunId = yachiyoTaskStudioRunId(task);",
             "const studioUrl = yachiyoTaskStudioUrl(task);",
+            "const timelineEvents = replayEvents.length ? replayEvents : recentEvents;",
+            "listYachiyoTaskEvents(taskId, 0, 200)",
+            "data-event-source={timelineEventSource}",
             'data-testid="yachiyo-agent-task-card"',
             'data-testid="yachiyo-agent-task-open-studio"',
             "href={studioUrl}",
@@ -682,7 +690,7 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "ArtifactPreview",
             "<ArtifactPreview artifact={artifact}",
             "taskId={task.task_id}",
-            "<ToolCallSummary events={recentEvents} />",
+            "<ToolCallSummary events={timelineEvents} />",
             "在 Agent Studio 中查看",
         ],
     )
