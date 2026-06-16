@@ -3,6 +3,12 @@ import type { GroupRunSnapshot, PublicRunEvent } from '../../yachiyo-studio/type
 import { RuntimeApprovalCard } from '../../runtime-shared/components/RuntimeApprovalCard';
 import { RuntimeArtifactList } from '../../runtime-shared/components/RuntimeArtifactList';
 import { RuntimeTimelineSummary } from '../../runtime-shared/components/RuntimeTimelineSummary';
+import {
+  approvalsFromRunEventReplay,
+  artifactsFromRunEventReplay,
+  mergeApprovalSnapshots,
+  mergeArtifactSnapshots,
+} from '../utils/runTimeline';
 
 type GroupRunDetailPanelProps = {
   formatRunDate: (value?: string) => string;
@@ -72,6 +78,10 @@ export function GroupRunDetailPanel({
   const groupRunArtifacts = selectedGroupRunSnapshot?.shared_artifacts?.length
     ? selectedGroupRunSnapshot.shared_artifacts
     : selectedRunGroup?.shared_artifacts || [];
+  const replayApprovals = replayEvents.length ? approvalsFromRunEventReplay(replayEvents) : [];
+  const replayArtifacts = replayEvents.length ? artifactsFromRunEventReplay(replayEvents) : [];
+  const groupRunApprovalFacts = mergeApprovalSnapshots(groupRunApprovals, replayApprovals);
+  const groupRunArtifactFacts = mergeArtifactSnapshots(groupRunArtifacts, replayArtifacts);
   const groupRunFinalAnswer = selectedGroupRunSnapshot?.final_answer || selectedRunGroup?.final_answer || '';
 
   return (
@@ -154,14 +164,14 @@ export function GroupRunDetailPanel({
           </div>
         </section>
       ) : null}
-      {groupRunApprovals.length ? (
+      {groupRunApprovalFacts.length ? (
         <section className="group-run-runtime-section" data-testid="agent-run-detail-group-run-approvals">
           <div className="group-run-runtime-section-head">
-            <strong>Pending Approvals</strong>
-            <span>{groupRunApprovals.length}</span>
+            <strong>Approvals</strong>
+            <span>{groupRunApprovalFacts.length}</span>
           </div>
           <div className="group-run-approval-list">
-            {groupRunApprovals.map((approval) => (
+            {groupRunApprovalFacts.map((approval) => (
               <RuntimeApprovalCard
                 approval={approval}
                 className="studio-runtime-approval group-run-approval-card"
@@ -173,14 +183,14 @@ export function GroupRunDetailPanel({
           </div>
         </section>
       ) : null}
-      {groupRunArtifacts.length ? (
+      {groupRunArtifactFacts.length ? (
         <section className="group-run-runtime-section" data-testid="agent-run-detail-group-run-artifacts">
           <div className="group-run-runtime-section-head">
             <strong>Shared Artifacts</strong>
-            <span>{groupRunArtifacts.length}</span>
+            <span>{groupRunArtifactFacts.length}</span>
           </div>
           <RuntimeArtifactList
-            artifacts={groupRunArtifacts}
+            artifacts={groupRunArtifactFacts}
             className="group-run-artifact-list run-group-overview-artifact-list"
             fallbackRunId={selectedGroupRunSnapshot?.group_run_id || groupOverviewId}
             itemTestId="agent-run-detail-group-run-artifact-item"
