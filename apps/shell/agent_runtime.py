@@ -321,7 +321,9 @@ from apps.shell.agent.runtime.tool_approval_resume import RuntimeToolApprovalRes
 from apps.shell.agent.runtime.tool_execution import RuntimeToolCallExecutor, RuntimeToolRequestRunner
 from apps.shell.agent.runtime.tooling import (
     RuntimeToolingBundle,
+    RuntimeToolingStack,
     build_runtime_tooling as _build_runtime_tooling,
+    build_runtime_tooling_stack as _build_runtime_tooling_stack,
 )
 from apps.shell.agent.runtime.tool_operations import RuntimeToolOperations
 from apps.shell.agent.runtime.tool_facade import RuntimeToolFacadeMixin
