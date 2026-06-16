@@ -692,6 +692,7 @@ def canonical_run_event_aliases(
         "workflow.run.completed": ["workflow.completed"],
         "workflow.run.failed": ["workflow.failed"],
         "skill.dispatch.read": ["skill.selected"],
+        "agent.tool.approval_required": ["tool.approval_required"],
         "agent.tool.approval_approved": ["tool.approved", "approval.approved"],
         "agent.tool.approval_rejected": ["tool.rejected", "approval.rejected"],
         "agent.tool.approval_timeout": ["approval.timeout"],

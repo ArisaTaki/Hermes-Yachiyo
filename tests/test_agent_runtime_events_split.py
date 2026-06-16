@@ -98,6 +98,9 @@ def test_runtime_run_event_recorder_appends_compatibility_aliases() -> None:
         "workflow.node.completed",
     ]
     assert canonical_run_event_aliases("model.output.completed") == ["model.completed"]
+    assert canonical_run_event_aliases("agent.tool.approval_required") == [
+        "tool.approval_required"
+    ]
     assert canonical_run_event_aliases("agent.tool.approval_approved") == [
         "tool.approved",
         "approval.approved",
@@ -119,6 +122,17 @@ def test_runtime_run_event_recorder_appends_compatibility_aliases() -> None:
         "approval.timeout"
     ]
     assert agent_runtime._canonical_run_event_aliases("model.output.completed") == ["model.completed"]
+
+    repository.calls.clear()
+    recorder.append(
+        "run-1",
+        "agent.tool.approval_required",
+        {"tool": "terminal.run", "status": "approval_required"},
+    )
+    assert [call[1] for call in repository.calls] == [
+        "agent.tool.approval_required",
+        "tool.approval_required",
+    ]
 
     repository.calls.clear()
     recorder.append(
