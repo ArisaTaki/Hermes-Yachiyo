@@ -56,6 +56,7 @@ export function MessageActivityList({
         const studioUrl = runId ? studioRunUrl(runId, { groupRunId }) || '' : '';
         const eventKey = activityEventKey(event, index);
         const activityTitle = messageActivityTitle(event);
+        const activityDetail = messageActivityDetail(event, activityTitle);
         return (
           <div
             className={`message-activity-row ${activityStatusClass(displayStatus)}${runId ? ' has-detail' : ''}`}
@@ -84,7 +85,7 @@ export function MessageActivityList({
                   </button>
                 ) : null}
               </div>
-              {event.detail ? <small>{event.detail}</small> : null}
+              {activityDetail ? <small>{activityDetail}</small> : null}
             </div>
             <time>{formatTime(event.created_at)}</time>
             {runId ? (
@@ -125,6 +126,30 @@ function messageActivityTitle(event: MessageActivityEvent) {
   if (title && title !== toolName) return runtimeToolDisplayLabelOrName(title);
   if (toolName) return runtimeToolDisplayLabelOrName(toolName);
   return title || 'Native 活动';
+}
+
+function messageActivityDetail(event: MessageActivityEvent, activityTitle: string) {
+  const detail = String(event.detail || '').trim();
+  if (!detail) return '';
+  const display = runtimeToolDisplayLabelOrName(detail);
+  if (display !== detail && display !== '工具调用') return display;
+  if (detail === activityTitle || display === activityTitle) return '';
+  if (messageActivityLooksJson(detail)) return '';
+  if (messageActivityLooksInternalLabel(detail)) return '';
+  if (messageActivityLooksRuntimeId(detail)) return '';
+  return detail;
+}
+
+function messageActivityLooksJson(value: string) {
+  return /^[{[]/.test(value);
+}
+
+function messageActivityLooksInternalLabel(value: string) {
+  return /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/i.test(value);
+}
+
+function messageActivityLooksRuntimeId(value: string) {
+  return /^(run|task|workflow|group|agent|approval|artifact)[-_][A-Za-z0-9_.:-]+$/i.test(value);
 }
 
 function activityStatusClass(status?: string) {

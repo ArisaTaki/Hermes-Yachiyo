@@ -3499,9 +3499,15 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
             "data-run-id={runId || ''}",
             "data-run-status={displayStatus || ''}",
             "const activityTitle = messageActivityTitle(event);",
+            "const activityDetail = messageActivityDetail(event, activityTitle);",
             "<strong>{activityTitle}</strong>",
+            "{activityDetail ? <small>{activityDetail}</small> : null}",
             "function messageActivityTitle",
             "return runtimeToolDisplayLabelOrName(toolName);",
+            "function messageActivityDetail",
+            "if (messageActivityLooksJson(detail)) return '';",
+            "if (messageActivityLooksInternalLabel(detail)) return '';",
+            "if (messageActivityLooksRuntimeId(detail)) return '';",
             'data-testid="chat-message-activity-open"',
             'data-testid="chat-message-activity-open-run-detail"',
         ],
@@ -3513,6 +3519,7 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
             "message-activity-expanded",
             'data-testid="chat-message-activity-toggle"',
             "展开调用记录",
+            "{event.detail ? <small>{event.detail}</small> : null}",
         ],
     )
     _assert_not_contains(
