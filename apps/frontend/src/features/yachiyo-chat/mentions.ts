@@ -15,6 +15,10 @@ export type MentionOption = {
   participants?: MentionParticipant[];
 };
 
+export type PublicTaskMentionTarget = MentionOption & {
+  kind: 'agent' | 'workflow';
+};
+
 export type MentionRunnable = {
   id: string;
   name: string;
@@ -151,10 +155,10 @@ export function yachiyoPublicTaskTarget(
   input: string,
   runnables: MentionRunnable[],
   assistantProfile: MentionAssistantProfile | null,
-): MentionOption | null {
+): PublicTaskMentionTarget | null {
   const mentions = activeMentions(input, runnables, assistantProfile);
   if (mentions.length !== 1) return null;
-  return mentions[0].kind === 'agent' ? mentions[0] : null;
+  return mentions[0].kind === 'main' ? null : mentions[0] as PublicTaskMentionTarget;
 }
 
 export function yachiyoPublicTaskPrompt(input: string, target: MentionOption): string {

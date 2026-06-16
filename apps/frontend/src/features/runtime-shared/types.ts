@@ -322,5 +322,6 @@ export type StartChatTaskRequest = {
   conversation_id?: string | null;
   title?: string | null;
   agent_id?: string | null;
+  workflow_id?: string | null;
   metadata?: Record<string, unknown>;
 };

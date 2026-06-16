@@ -619,6 +619,42 @@ async def test_yachiyo_task_route_uses_chat_backed_agent_entry(monkeypatch: pyte
 
 
 @pytest.mark.asyncio
+async def test_yachiyo_task_route_can_start_workflow_task_from_chat() -> None:
+    runtime = _FakeAgentRuntime()
+    request = _request(runtime)
+
+    started = await yachiyo.start_task(
+        yachiyo.StartChatTaskRequest(
+            prompt="Build report",
+            conversation_id="chat-1",
+            workflow_id="workflow-1",
+            metadata={"client_task_id": "task-workflow-1"},
+        ),
+        request,
+    )
+    timeline = await yachiyo.get_task_timeline("task-workflow-1", request)
+
+    assert started["task_id"] == "task-workflow-1"
+    assert started["status"] == "waiting_approval"
+    assert started["open_in_studio_url"] == "#/agents?run_id=workflow-run-1&group_run=group-run-1"
+    assert timeline["workflow_run_id"] == "workflow-run-1"
+    assert timeline["task_id"] == "task-workflow-1"
+    assert (
+        "create_workflow_run",
+        {
+            "workflow_id": "workflow-1",
+            "user_goal": "Build report",
+            "source": "yachiyo_chat",
+            "client_run_id": "task-workflow-1",
+        },
+    ) in runtime.calls
+    assert (
+        "link_task_run",
+        {"task_id": "task-workflow-1", "run_id": "workflow-run-1", "session_id": "chat-1"},
+    ) in runtime.calls
+
+
+@pytest.mark.asyncio
 async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     runtime = _FakeAgentRuntime()
     request = _request(runtime)

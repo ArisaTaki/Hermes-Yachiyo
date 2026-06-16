@@ -33,6 +33,36 @@ def test_legacy_runtime_port_starts_and_links_chat_task() -> None:
     ]
 
 
+def test_legacy_runtime_port_starts_and_links_chat_workflow_task() -> None:
+    runtime = _FakeRuntime()
+
+    task = LegacyRuntimePort(runtime).start_chat_task(
+        {
+            "prompt": "Build report",
+            "conversation_id": "chat-1",
+            "client_task_id": "task-workflow-1",
+            "workflow_id": "workflow-1",
+        }
+    )
+
+    assert task["task_id"] == "task-workflow-1"
+    assert task["conversation_id"] == "chat-1"
+    assert task["open_in_studio_url"] == "#/agents?run_id=workflow-run-1"
+    assert (
+        "create_workflow_run",
+        {
+            "workflow_id": "workflow-1",
+            "user_goal": "Build report",
+            "source": "yachiyo_chat",
+            "client_run_id": "task-workflow-1",
+        },
+    ) in runtime.calls
+    assert (
+        "link_task_run",
+        {"task_id": "task-workflow-1", "run_id": "workflow-run-1", "session_id": "chat-1"},
+    ) in runtime.calls
+
+
 def test_legacy_runtime_port_resolves_task_link_for_approval_actions() -> None:
     runtime = _FakeRuntime()
     port = LegacyRuntimePort(runtime)
@@ -122,7 +152,15 @@ class _FakeRuntime:
                 "user_goal": "Patch README",
                 "status": "running",
                 "timeline": [{"event": "run.started"}],
-            }
+            },
+            "workflow-run-1": {
+                "run_id": "workflow-run-1",
+                "workflow_run_id": "workflow-run-1",
+                "workflow_id": "workflow-1",
+                "user_goal": "Build report",
+                "status": "running",
+                "timeline": [{"event": "workflow.run.started"}],
+            },
         }
         self.task_links: dict[str, dict[str, Any]] = {}
 
@@ -133,6 +171,10 @@ class _FakeRuntime:
     def create_run_for_runnable_async(self, **payload: Any) -> dict[str, Any]:
         self.calls.append(("create_run_for_runnable_async", payload))
         return dict(self.runs["run-1"])
+
+    def create_workflow_run(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append(("create_workflow_run", payload))
+        return dict(self.runs["workflow-run-1"])
 
     def get_run(self, run_id: str) -> dict[str, Any]:
         self.calls.append(("get_run", run_id))

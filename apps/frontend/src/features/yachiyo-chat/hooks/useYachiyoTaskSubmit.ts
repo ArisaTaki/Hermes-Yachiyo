@@ -4,10 +4,11 @@ import { startYachiyoTask } from '../api';
 import type { AgentTaskSnapshot } from '../types';
 
 type StartPublicYachiyoTaskRequest = {
-  agentId: string;
   clientMessageId: string;
   conversationId: string | null;
   prompt: string;
+  runnableId: string;
+  runnableKind: 'agent' | 'workflow';
 };
 
 type UseYachiyoTaskSubmitOptions = {
@@ -35,25 +36,30 @@ export function useYachiyoTaskSubmit({
   setStatus,
 }: UseYachiyoTaskSubmitOptions) {
   const startPublicYachiyoTask = useCallback(async ({
-    agentId,
     clientMessageId,
     conversationId,
     prompt,
+    runnableId,
+    runnableKind,
   }: StartPublicYachiyoTaskRequest) => {
     try {
+      const runnableLabel = runnableKind === 'workflow' ? 'Workflow' : 'Agent';
       const task = await startYachiyoTask({
         prompt,
         conversation_id: conversationId,
-        agent_id: agentId,
+        ...(runnableKind === 'workflow'
+          ? { workflow_id: runnableId }
+          : { agent_id: runnableId }),
         metadata: {
           client_message_id: clientMessageId,
           source: 'chat',
+          runnable_kind: runnableKind,
         },
       });
       rememberYachiyoTasks([task]);
       onAccepted();
       if (task.status === 'running' && task.task_id) {
-        setStatus('Agent 执行中...');
+        setStatus(`${runnableLabel} 执行中...`);
         onRunning();
         await refreshMessages();
         pollAgentRunInBackground(task.task_id);
@@ -61,11 +67,11 @@ export function useYachiyoTaskSubmit({
       }
       onSettled();
       setStatus(task.status === 'waiting_approval'
-        ? 'Agent 等待审批...'
+        ? `${runnableLabel} 等待审批...`
         : task.status === 'completed'
-          ? 'Agent Run 已处理。'
+          ? `${runnableLabel} Run 已处理。`
           : task.status === 'failed'
-            ? 'Agent Run 失败。'
+            ? `${runnableLabel} Run 失败。`
             : 'Agent/Workflow 指令已处理。');
       await refreshMessages();
       await loadSessions();

@@ -38,6 +38,7 @@ class LegacyRuntimePort:
 
     def start_chat_task(self, request: dict[str, Any]) -> dict[str, Any]:
         prompt = str(request.get("prompt") or request.get("goal") or "").strip()
+        workflow_id = str(request.get("workflow_id") or "").strip()
         runnable_id = str(
             request.get("agent_id") or request.get("runnable_id") or MAIN_CHAT_AGENT_ID
         )
@@ -50,17 +51,27 @@ class LegacyRuntimePort:
             or metadata.get("client_task_id")
             or ""
         ).strip()
-        create_run = getattr(self._runtime, "create_run_for_runnable_async", None)
-        if callable(create_run):
-            run = create_run(
-                runnable_id=runnable_id,
-                user_goal=prompt,
+        if workflow_id:
+            run = self._runtime.create_workflow_run(
+                {
+                    "workflow_id": workflow_id,
+                    "user_goal": prompt,
+                    "source": "yachiyo_chat",
+                    "client_run_id": request.get("client_run_id") or requested_task_id or None,
+                }
             )
         else:
-            run = self._runtime.create_run_for_runnable(
-                runnable_id=runnable_id,
-                user_goal=prompt,
-            )
+            create_run = getattr(self._runtime, "create_run_for_runnable_async", None)
+            if callable(create_run):
+                run = create_run(
+                    runnable_id=runnable_id,
+                    user_goal=prompt,
+                )
+            else:
+                run = self._runtime.create_run_for_runnable(
+                    runnable_id=runnable_id,
+                    user_goal=prompt,
+                )
         run_id = str(run.get("run_id") or "").strip()
         task_id = requested_task_id or run_id
         if task_id and run_id:

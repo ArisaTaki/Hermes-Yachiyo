@@ -352,6 +352,7 @@ class StartChatTaskRequest(BaseModel):
     conversation_id: str | None = None
     title: str | None = None
     agent_id: str | None = None
+    workflow_id: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

@@ -28,6 +28,7 @@ from apps.shell.yachiyo_agent import (
     SkillFolderSnapshot,
     SkillSnapshot,
     SkillSourceRootSnapshot,
+    StartChatTaskRequest,
     ToolCallSnapshot,
     WorkflowRunSnapshot,
     WorkflowSnapshot,
@@ -574,6 +575,24 @@ def test_future_task_snapshots_keep_runtime_schedule_fields() -> None:
     assert payload["last_run_id"] == "run-1"
     assert triggered_payload["future_task"]["future_task_id"] == "future-1"
     assert triggered_payload["run"]["run_id"] == "run-1"
+
+
+def test_start_chat_task_request_keeps_workflow_target_field() -> None:
+    request = StartChatTaskRequest(
+        prompt="Build report",
+        conversation_id="chat-1",
+        workflow_id="workflow-1",
+        metadata={"client_task_id": "task-workflow-1"},
+    )
+
+    payload = request.model_dump(mode="json", exclude_none=True)
+
+    assert payload == {
+        "prompt": "Build report",
+        "conversation_id": "chat-1",
+        "workflow_id": "workflow-1",
+        "metadata": {"client_task_id": "task-workflow-1"},
+    }
 
 
 def test_studio_save_requests_keep_public_field_names() -> None:

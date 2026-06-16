@@ -787,10 +787,11 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         : null;
       if (publicTaskTarget) {
         const handled = await startPublicYachiyoTask({
-          agentId: publicTaskTarget.id,
           clientMessageId,
           conversationId: sessions?.current_session_id || latestChatSnapshotRef.current.currentSessionId || null,
           prompt: yachiyoPublicTaskPrompt(text, publicTaskTarget),
+          runnableId: publicTaskTarget.id,
+          runnableKind: publicTaskTarget.kind,
         });
         if (handled) {
           return;

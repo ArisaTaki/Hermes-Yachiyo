@@ -262,7 +262,8 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "useYachiyoTaskSubmit",
             "startPublicYachiyoTask({",
             "yachiyoPublicTaskTarget(text, runnables, assistantProfile)",
-            "agentId: publicTaskTarget.id",
+            "runnableId: publicTaskTarget.id",
+            "runnableKind: publicTaskTarget.kind",
             "attachments: outgoingAttachments",
             "canAttachImages(executor)",
             "onPaste={(event) => void handlePaste(event)}",
@@ -296,8 +297,11 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
         [
             "export function useYachiyoTaskSubmit",
             "startYachiyoTask({",
-            "agent_id: agentId",
+            "runnableKind === 'workflow'",
+            "? { workflow_id: runnableId }",
+            ": { agent_id: runnableId }",
             "client_message_id: clientMessageId",
+            "runnable_kind: runnableKind",
             "source: 'chat'",
             "rememberYachiyoTasks([task])",
             "pollAgentRunInBackground(task.task_id)",
@@ -330,6 +334,7 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
         "apps/frontend/src/features/yachiyo-chat/mentions.ts",
         [
             "export type MentionOption",
+            "export type PublicTaskMentionTarget",
             "export function mentionQueryAtEnd",
             "export function mentionOptionsForQuery",
             "export function allMentionOptions",
@@ -340,7 +345,8 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "export function yachiyoPublicTaskTarget",
             "export function yachiyoPublicTaskPrompt",
             "conversation_kind === 'group'",
-            "return mentions[0].kind === 'agent' ? mentions[0] : null;",
+            "): PublicTaskMentionTarget | null",
+            "return mentions[0].kind === 'main' ? null : mentions[0] as PublicTaskMentionTarget;",
         ],
     )
     _assert_contains(
@@ -1088,6 +1094,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "export type ToolCallSnapshot",
             "export type RunTimelineSnapshot",
             "export type WorkflowRunSnapshot",
+            "export type StartChatTaskRequest",
             "workflow_id?: string | null;",
             "current_node_id?: string | null;",
             "final_answer?: string | null;",
