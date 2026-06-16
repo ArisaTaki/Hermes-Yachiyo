@@ -7,14 +7,18 @@ import {
 export type RuntimeArtifactSource = RuntimeArtifactSnapshot | Record<string, unknown>;
 
 export type RuntimeArtifactListItem = RuntimeArtifactSnapshot & {
+  group_id?: string | null;
+  group_run_id?: string | null;
   run_id?: string | null;
   source_label?: string | null;
   source_runnable_id?: string | null;
   source_runnable_name?: string | null;
   source_run_id?: string | null;
   source_tool?: string | null;
+  workflow_id?: string | null;
   workflow_node_id?: string | null;
   workflow_node_label?: string | null;
+  workflow_run_id?: string | null;
 };
 
 type RuntimeArtifactListProps = {
@@ -93,6 +97,10 @@ export function runtimeArtifactListItem(
   const sourceRunnableId = artifactStringValue(artifact, 'source_runnable_id');
   const sourceRunnableName = artifactStringValue(artifact, 'source_runnable_name');
   const sourceTool = artifactStringValue(artifact, 'source_tool');
+  const groupId = artifactStringValue(artifact, 'group_id');
+  const groupRunId = artifactStringValue(artifact, 'group_run_id');
+  const workflowId = artifactStringValue(artifact, 'workflow_id');
+  const workflowRunId = artifactStringValue(artifact, 'workflow_run_id');
   const workflowNodeId = artifactStringValue(artifact, 'workflow_node_id');
   const workflowNodeLabel = artifactStringValue(artifact, 'workflow_node_label') || artifactStringValue(artifact, 'workflow_step_label');
   const sourceLabel = sourceRunnableName || workflowNodeLabel || sourceTool;
@@ -107,6 +115,8 @@ export function runtimeArtifactListItem(
   return {
     artifact_id: artifactId,
     created_at: createdAt,
+    group_id: groupId,
+    group_run_id: groupRunId,
     kind,
     mime_type: mimeType,
     path,
@@ -120,8 +130,10 @@ export function runtimeArtifactListItem(
     source_tool: sourceTool,
     title,
     url,
+    workflow_id: workflowId,
     workflow_node_id: workflowNodeId,
     workflow_node_label: workflowNodeLabel,
+    workflow_run_id: workflowRunId,
   };
 }
 

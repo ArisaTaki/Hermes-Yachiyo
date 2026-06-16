@@ -55,6 +55,8 @@ export function RuntimeArtifactPreview({
     <Component
       className={className}
       data-artifact-id={artifact.artifact_id}
+      data-artifact-group-id={artifact.group_id || ''}
+      data-artifact-group-run-id={artifact.group_run_id || ''}
       data-artifact-kind={artifact.kind}
       data-artifact-mime-type={artifact.mime_type || ''}
       data-artifact-path={artifact.path || ''}
@@ -64,7 +66,9 @@ export function RuntimeArtifactPreview({
       data-artifact-source-tool={artifact.source_tool || ''}
       data-artifact-source-run-id={artifact.source_run_id || ''}
       data-artifact-variant={variant}
+      data-artifact-workflow-id={artifact.workflow_id || ''}
       data-artifact-workflow-node-id={artifact.workflow_node_id || ''}
+      data-artifact-workflow-run-id={artifact.workflow_run_id || ''}
       data-testid={testId}
       title={artifact.path || label}
     >
@@ -96,7 +100,7 @@ function artifactMetadataItems(artifact: RuntimeArtifactSnapshot) {
     { label: 'source', value: artifact.source_run_id || '' },
     { label: 'tool', value: artifact.source_tool || '' },
     { label: 'agent', value: artifact.source_runnable_name || artifact.source_runnable_id || '' },
-    { label: 'workflow', value: artifact.workflow_node_label || artifact.workflow_node_id || '' },
+    { label: 'workflow', value: artifact.workflow_node_label || artifact.workflow_node_id || artifact.workflow_run_id || artifact.workflow_id || '' },
     { label: 'group', value: artifact.group_run_id || artifact.group_id || '' },
     { label: 'mime', value: artifact.mime_type || '' },
     { label: 'size', value: artifactDisplaySize(artifact.size_bytes) },
