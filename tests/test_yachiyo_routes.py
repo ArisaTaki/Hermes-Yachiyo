@@ -425,6 +425,12 @@ async def test_yachiyo_task_routes_use_injected_runtime_and_return_public_snapsh
     tasks = await yachiyo.list_tasks("chat-1", request)
     fetched_by_run_id = await yachiyo.get_task("run-1", request)
     task_timeline = await yachiyo.get_task_timeline("run-1", request)
+    task_events = await yachiyo.get_task_events(
+        "run-1",
+        request,
+        after_sequence=0,
+        limit=1,
+    )
     approved = await yachiyo.approve_task("run-1", None, request)
     rejected = await yachiyo.reject_task(
         "run-1",
@@ -452,6 +458,12 @@ async def test_yachiyo_task_routes_use_injected_runtime_and_return_public_snapsh
     assert task_timeline["events"][0]["event_type"] == "agent.tool.call"
     assert task_timeline["pending_approval"]["approval_id"] == "run-1"
     assert task_timeline["artifacts"][0]["path"] == "report.md"
+    assert task_events["run_id"] == "run-1"
+    assert task_events["after_sequence"] == 0
+    assert task_events["limit"] == 1
+    assert task_events["next_after_sequence"] == 1
+    assert task_events["has_more"] is True
+    assert task_events["events"][0]["event_type"] == "agent.started"
     assert approved["status"] == "completed"
     assert rejected["status"] == "failed"
     assert cancelled["status"] == "cancelled"
@@ -917,6 +929,7 @@ def test_yachiyo_chat_routes_are_registered_as_light_surface_aliases() -> None:
     assert '@router.post("/tasks")' in source
     assert '@router.get("/tasks/{task_id}")' in source
     assert '@router.get("/tasks/{task_id}/timeline")' in source
+    assert '@router.get("/tasks/{task_id}/events")' in source
     assert '@router.post("/tasks/{task_id}/approve")' in source
     assert '@router.post("/tasks/{task_id}/reject")' in source
     assert '@router.post("/tasks/{task_id}/cancel")' in source
@@ -926,6 +939,7 @@ def test_yachiyo_chat_routes_are_registered_as_light_surface_aliases() -> None:
     assert '@router.post("/chat/tasks")' in source
     assert '@router.get("/chat/tasks/{task_id}")' in source
     assert '@router.get("/chat/tasks/{task_id}/timeline")' in source
+    assert '@router.get("/chat/tasks/{task_id}/events")' in source
     assert '@router.post("/chat/tasks/{task_id}/approve")' in source
     assert '@router.post("/chat/tasks/{task_id}/reject")' in source
     assert '@router.post("/chat/tasks/{task_id}/cancel")' in source

@@ -75,6 +75,24 @@ def test_legacy_runtime_port_resolves_task_link_for_timeline() -> None:
     assert ("get_task_run_link", "task-1") in runtime.calls
 
 
+def test_legacy_runtime_port_resolves_task_link_for_event_stream() -> None:
+    runtime = _FakeRuntime()
+    port = LegacyRuntimePort(runtime)
+    port.start_chat_task(
+        {
+            "prompt": "Patch README",
+            "conversation_id": "chat-1",
+            "client_task_id": "task-1",
+        }
+    )
+
+    events = port.get_task_event_stream("task-1")
+
+    assert events["run_id"] == "run-1"
+    assert events["events"][0]["event"] == "run.started"
+    assert ("list_run_events", "run-1") in runtime.calls
+
+
 class _FakeRuntime:
     def __init__(self) -> None:
         self.calls: list[tuple[str, Any]] = []
@@ -99,6 +117,10 @@ class _FakeRuntime:
     def get_run(self, run_id: str) -> dict[str, Any]:
         self.calls.append(("get_run", run_id))
         return dict(self.runs[run_id])
+
+    def list_run_events(self, run_id: str) -> dict[str, Any]:
+        self.calls.append(("list_run_events", run_id))
+        return {"events": list(self.runs[run_id]["timeline"])}
 
     def link_task_run(self, *, task_id: str, run_id: str, session_id: str = "") -> dict[str, Any]:
         self.calls.append(

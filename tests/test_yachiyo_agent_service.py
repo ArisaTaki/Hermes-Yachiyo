@@ -73,6 +73,17 @@ class _FakeRuntimePort:
             ],
         )
 
+    def get_task_event_stream(self, task_id: str) -> dict[str, Any]:
+        self.calls.append(("get_task_event_stream", task_id))
+        return {
+            "run_id": "run-1",
+            "events": [
+                {"event": "task.started", "sequence": 1},
+                {"event": "tool.requested", "sequence": 2, "tool": "workspace.read"},
+                {"event": "task.completed", "sequence": 3},
+            ],
+        }
+
     def list_recent_tasks(self, conversation_id: str | None = None) -> list[dict[str, Any]]:
         self.calls.append(("list_recent_tasks", conversation_id))
         return [_task_payload(task_id="task-recent", status="running")]
@@ -158,6 +169,21 @@ def test_yachiyo_agent_service_maps_task_timeline_snapshot() -> None:
     assert timeline.pending_approval.tool_name == "workspace.write_patch"
     assert timeline.tool_calls[0].tool_name == "workspace.write_patch"
     assert port.calls == [("get_task_timeline", "task-1")]
+
+
+def test_yachiyo_agent_service_pages_task_events() -> None:
+    port = _FakeRuntimePort()
+    service = YachiyoAgentService(port)
+
+    page = service.get_task_event_page("task-1", after_sequence=1, limit=1)
+
+    assert page.run_id == "run-1"
+    assert page.after_sequence == 1
+    assert page.limit == 1
+    assert page.next_after_sequence == 2
+    assert page.has_more is True
+    assert [event.event_type for event in page.events] == ["tool.requested"]
+    assert port.calls == [("get_task_event_stream", "task-1")]
 
 
 def test_yachiyo_agent_service_prefers_chat_backed_starter_when_available() -> None:

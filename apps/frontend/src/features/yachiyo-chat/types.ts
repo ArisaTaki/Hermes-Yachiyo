@@ -7,6 +7,7 @@ export type {
   ArtifactSnapshot,
   ChatRunnableCatalogSnapshot,
   PublicRunEvent,
+  RunEventPageSnapshot,
   RunTimelineSnapshot,
   StartChatTaskRequest,
   TaskStatus,

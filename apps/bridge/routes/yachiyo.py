@@ -87,6 +87,22 @@ async def get_task_timeline(
     return await yachiyo_chat_handlers.get_task_timeline(task_id, http_request)
 
 
+@router.get("/tasks/{task_id}/events")
+@router.get("/chat/tasks/{task_id}/events")
+async def get_task_events(
+    task_id: str,
+    http_request: Request = None,  # type: ignore[assignment]
+    after_sequence: int = 0,
+    limit: int = 200,
+) -> dict[str, Any]:
+    return await yachiyo_chat_handlers.get_task_events(
+        task_id,
+        http_request,
+        after_sequence,
+        limit,
+    )
+
+
 @router.post("/tasks/{task_id}/approve")
 @router.post("/chat/tasks/{task_id}/approve")
 async def approve_task(

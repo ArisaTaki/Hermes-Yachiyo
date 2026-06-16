@@ -88,6 +88,17 @@ class LegacyRuntimePort:
             payload = {**payload, "task_id": task_id}
         return payload
 
+    def get_task_event_stream(self, task_id: str) -> dict[str, Any]:
+        run_id = self._run_id_for_task(task_id)
+        list_run_events = getattr(self._runtime, "list_run_events", None)
+        if callable(list_run_events):
+            payload = list_run_events(run_id)
+            if isinstance(payload, dict):
+                return {**payload, "run_id": payload.get("run_id") or run_id}
+            return {"run_id": run_id, "events": payload if isinstance(payload, list) else []}
+        run = self._runtime.get_run(run_id)
+        return {"run_id": run_id, "events": run.get("timeline") or []}
+
     def list_recent_tasks(self, conversation_id: str | None = None) -> list[dict[str, Any]]:
         payload = self._runtime.list_runs(30)
         runs = payload.get("runs") or []

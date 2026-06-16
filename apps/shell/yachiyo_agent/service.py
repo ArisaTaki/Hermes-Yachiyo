@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 from .adapters import agent_definition_snapshot_from_payload, readiness_snapshot_from_payload
@@ -10,10 +10,13 @@ from .contracts import (
     AgentTaskSnapshot,
     ApprovalDecision,
     ChatRunnableCatalogSnapshot,
+    PublicRunEvent,
     ReadinessSnapshot,
+    RunEventPageSnapshot,
     RunTimelineSnapshot,
     StartChatTaskRequest,
 )
+from .events import public_run_event_from_payload
 from .ports import ChatTaskStarter, RuntimePort
 from .run_snapshots import run_timeline_snapshot_from_payload
 from .task_cards import agent_task_snapshot_from_payload, agent_task_snapshots_from_payloads
@@ -64,6 +67,40 @@ class YachiyoAgentService:
     def get_task_timeline(self, task_id: str) -> RunTimelineSnapshot:
         return run_timeline_snapshot_from_payload(self._runtime_port.get_task_timeline(task_id))
 
+    def get_task_event_stream(self, task_id: str) -> Iterable[PublicRunEvent]:
+        raw_events = self._runtime_port.get_task_event_stream(task_id)
+        run_id = _payload_run_id(raw_events) or task_id
+        for event in _payload_items(raw_events, "events"):
+            yield public_run_event_from_payload(event, run_id=run_id)
+
+    def get_task_event_page(
+        self,
+        task_id: str,
+        after_sequence: int = 0,
+        limit: int = 200,
+    ) -> RunEventPageSnapshot:
+        clean_after_sequence = max(0, int(after_sequence or 0))
+        clean_limit = max(1, min(500, int(limit or 200)))
+        events = list(self.get_task_event_stream(task_id))
+        filtered_events = [
+            event
+            for event in events
+            if int(event.sequence or 0) > clean_after_sequence
+        ]
+        page = filtered_events[:clean_limit]
+        next_after_sequence = max(
+            [int(event.sequence or 0) for event in page] or [clean_after_sequence]
+        )
+        run_id = events[0].run_id if events else task_id
+        return RunEventPageSnapshot(
+            run_id=run_id,
+            after_sequence=clean_after_sequence,
+            limit=clean_limit,
+            next_after_sequence=next_after_sequence,
+            has_more=len(filtered_events) > clean_limit,
+            events=page,
+        )
+
     def list_recent_tasks(self, conversation_id: str | None = None) -> list[AgentTaskSnapshot]:
         return agent_task_snapshots_from_payloads(
             self._runtime_port.list_recent_tasks(conversation_id)
@@ -103,6 +140,14 @@ def _optional_request_payload(
 
 def _payload_items(payload: Any, key: str) -> list[dict[str, Any]]:
     items = payload.get(key) if isinstance(payload, Mapping) else payload
-    if not isinstance(items, list):
+    if isinstance(items, list):
+        return [dict(item) for item in items if isinstance(item, Mapping)]
+    if not isinstance(items, Iterable) or isinstance(items, (str, bytes)):
         return []
     return [dict(item) for item in items if isinstance(item, Mapping)]
+
+
+def _payload_run_id(payload: Any) -> str:
+    if not isinstance(payload, Mapping):
+        return ""
+    return str(payload.get("run_id") or "").strip()

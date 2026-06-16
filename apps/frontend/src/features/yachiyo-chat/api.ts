@@ -2,6 +2,7 @@ import { apiGet, apiPost } from '../../lib/bridge';
 import type {
   AgentTaskSnapshot,
   ChatRunnableCatalogSnapshot,
+  RunEventPageSnapshot,
   RunTimelineSnapshot,
   StartChatTaskRequest,
   YachiyoReadinessSnapshot,
@@ -27,6 +28,18 @@ export async function getYachiyoTask(taskId: string): Promise<AgentTaskSnapshot>
 
 export async function getYachiyoTaskTimeline(taskId: string): Promise<RunTimelineSnapshot> {
   return apiGet(`/yachiyo/tasks/${encodeURIComponent(taskId)}/timeline`);
+}
+
+export async function listYachiyoTaskEvents(
+  taskId: string,
+  afterSequence = 0,
+  limit = 200,
+): Promise<RunEventPageSnapshot> {
+  const query = new URLSearchParams({
+    after_sequence: String(Math.max(0, afterSequence)),
+    limit: String(Math.max(1, Math.min(500, limit))),
+  });
+  return apiGet(`/yachiyo/tasks/${encodeURIComponent(taskId)}/events?${query.toString()}`);
 }
 
 export async function listYachiyoChatRunnableCatalog(): Promise<ChatRunnableCatalogSnapshot> {
