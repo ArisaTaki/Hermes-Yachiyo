@@ -34,6 +34,7 @@ def test_runtime_installation_facade_mixin_remains_exported_from_legacy_module()
         "_install_runtime_main_chat_model_loop_runner",
         "_install_runtime_workflow_planning_and_coordinator",
         "_install_runtime_workflow_execution_and_async",
+        "_install_runtime_runnable_entrypoints",
         "_install_runtime_engine_state",
         "_install_runtime_recorders",
         "_install_runtime_definition_services",
@@ -614,3 +615,67 @@ def test_installation_facade_installs_workflow_execution_and_async(monkeypatch) 
         engine.workflow_approval_execution.kwargs["workflow_approval_resume"]
         == "workflow-approval-resume"
     )
+
+
+def test_installation_facade_installs_runnable_entrypoints(monkeypatch) -> None:
+    class CapturedRunnableResolver:
+        resolve = "resolve-runnable"
+
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+
+    class CapturedFutureTaskService:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+
+    class CapturedAgentRunGroupProjection:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+
+    def fake_build_runtime_runnable_services(**kwargs):
+        return SimpleNamespace(
+            kwargs=kwargs,
+            future_task_scheduler="future-task-scheduler",
+            chat_runnable_parser="chat-runnable-parser",
+            runnable_catalog="runnable-catalog",
+            runnable_run_coordinator="runnable-run-coordinator",
+        )
+
+    monkeypatch.setattr(agent_runtime, "RuntimeRunnableResolver", CapturedRunnableResolver)
+    monkeypatch.setattr(agent_runtime, "_build_runtime_runnable_services", fake_build_runtime_runnable_services)
+    monkeypatch.setattr(agent_runtime, "RuntimeFutureTaskService", CapturedFutureTaskService)
+    monkeypatch.setattr(agent_runtime, "AgentRunGroupProjectionCoordinator", CapturedAgentRunGroupProjection)
+
+    engine = object.__new__(agent_runtime.NativeRunEngine)
+    engine._main_chat_virtual_agent = "main-chat-virtual-agent"
+    engine._ensure_row_factory = "ensure-row-factory"
+    engine._conn = "conn"
+    engine._row_to_agent = "row-to-agent"
+    engine._row_to_workflow = "row-to-workflow"
+    engine._agent_runnable_summary = "agent-runnable-summary"
+    engine._workflow_runnable_summary = "workflow-runnable-summary"
+    engine._db_lock = "db-lock"
+    engine.create_run_for_runnable = "create-run-for-runnable"
+    engine._node_kind = "node-kind"
+    engine.get_agent = "get-agent"
+    engine.create_agent_run = "create-agent-run"
+    engine.create_workflow_run = "create-workflow-run"
+    engine.create_agent_run_async = "create-agent-run-async"
+    engine.create_workflow_run_async = "create-workflow-run-async"
+    engine.get_run_group = "get-run-group"
+    engine._update_run_group = "update-run-group"
+
+    engine._install_runtime_runnable_entrypoints()
+
+    assert isinstance(engine.runnable_resolver, CapturedRunnableResolver)
+    assert engine.runnable_resolver.kwargs["main_chat_virtual_agent"] == "main-chat-virtual-agent"
+    assert engine.future_task_scheduler == "future-task-scheduler"
+    assert engine.chat_runnable_parser == "chat-runnable-parser"
+    assert engine.runnable_catalog == "runnable-catalog"
+    assert engine.runnable_run_coordinator == "runnable-run-coordinator"
+    assert isinstance(engine.future_task_service, CapturedFutureTaskService)
+    assert engine.future_task_service.kwargs["resolve_runnable"] == "resolve-runnable"
+    assert engine.future_task_service.kwargs["trigger_scheduler"] == "future-task-scheduler"
+    assert isinstance(engine.agent_run_group_projection, CapturedAgentRunGroupProjection)
+    assert "get_run_group" in engine.agent_run_group_projection.kwargs
+    assert "update_run_group" in engine.agent_run_group_projection.kwargs

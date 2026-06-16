@@ -536,64 +536,7 @@ class NativeRunEngine(
         self._install_runtime_workflow_execution_and_async(
             runtime_timeline_factory=runtime_timeline_factory,
         )
-        self.runnable_resolver = RuntimeRunnableResolver(
-            main_chat_agent_id=_MAIN_CHAT_AGENT_ID,
-            main_chat_virtual_agent=self._main_chat_virtual_agent,
-            ensure_row_factory=self._ensure_row_factory,
-            fetch_agent_by_id=lambda agent_id: self._conn.execute(
-                "SELECT * FROM agents WHERE agent_id=?",
-                (agent_id,),
-            ).fetchone(),
-            fetch_workflow_by_id=lambda workflow_id: self._conn.execute(
-                "SELECT * FROM workflows WHERE workflow_id=?",
-                (workflow_id,),
-            ).fetchone(),
-            fetch_agents_by_name=lambda name: self._conn.execute(
-                "SELECT * FROM agents WHERE LOWER(name)=LOWER(?) OR LOWER(nickname)=LOWER(?)",
-                (name, name),
-            ).fetchall(),
-            fetch_workflow_by_name=lambda name: self._conn.execute(
-                "SELECT * FROM workflows WHERE LOWER(name)=LOWER(?)",
-                (name,),
-            ).fetchone(),
-            row_to_agent=self._row_to_agent,
-            row_to_workflow=self._row_to_workflow,
-            agent_summary=self._agent_runnable_summary,
-            workflow_summary=self._workflow_runnable_summary,
-            error_type=AgentRuntimeError,
-        )
-        runnable_services = _build_runtime_runnable_services(
-            conn=self._conn,
-            db_lock=self._db_lock,
-            create_run_for_runnable=lambda **kwargs: self.create_run_for_runnable(**kwargs),
-            future_task_store=lambda **kwargs: self._future_task_store(**kwargs),
-            now=_now,
-            redact_secrets=redact_secrets,
-            error_type=AgentRuntimeError,
-            list_runnables=lambda: list(self.list_runnables().get("runnables") or []),
-            node_kind=self._node_kind,
-            get_agent=self.get_agent,
-            resolve_runnable=self.runnable_resolver.resolve,
-            create_agent_run=self.create_agent_run,
-            create_workflow_run=self.create_workflow_run,
-            create_agent_run_async=self.create_agent_run_async,
-            create_workflow_run_async=self.create_workflow_run_async,
-        )
-        self._install_runtime_runnable_services(runnable_services)
-        self.future_task_service = RuntimeFutureTaskService(
-            future_task_store=lambda **kwargs: self._future_task_store(**kwargs),
-            resolve_runnable=self.runnable_resolver.resolve,
-            trigger_scheduler=self.future_task_scheduler,
-            default_runnable_id=_MAIN_CHAT_AGENT_ID,
-            error_type=AgentRuntimeError,
-        )
-        self.agent_run_group_projection = AgentRunGroupProjectionCoordinator(
-            get_run_group=lambda run_group_id: self.get_run_group(run_group_id),
-            update_run_group=lambda run_group_id, **kwargs: self._update_run_group(
-                run_group_id,
-                **kwargs,
-            ),
-        )
+        self._install_runtime_runnable_entrypoints()
         workflow_transition_services = _build_runtime_workflow_transition_services(
             parent_runs_waiting_for_child=lambda child_run: self._workflow_parent_runs_waiting_for_child(child_run),
             workflow_run_is_group_root=lambda workflow_run: self._workflow_run_is_group_root(workflow_run),
