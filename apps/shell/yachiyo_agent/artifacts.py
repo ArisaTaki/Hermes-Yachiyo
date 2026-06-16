@@ -29,6 +29,25 @@ def artifact_snapshot_from_payload(
         artifact_id=artifact_id,
         run_id=_optional_text(run_id),
         source_run_id=source_run_id,
+        source_tool=_optional_text(payload.get("source_tool") or payload.get("tool")),
+        source_runnable_id=_optional_text(
+            payload.get("source_runnable_id")
+            or payload.get("source_agent_id")
+            or payload.get("member_agent_id")
+        ),
+        source_runnable_name=_optional_text(
+            payload.get("source_runnable_name")
+            or payload.get("source_agent_name")
+            or payload.get("member_agent_name")
+        ),
+        workflow_id=_optional_text(payload.get("workflow_id")),
+        workflow_run_id=_optional_text(payload.get("workflow_run_id")),
+        workflow_node_id=_optional_text(payload.get("workflow_node_id")),
+        workflow_node_label=_optional_text(
+            payload.get("workflow_node_label") or payload.get("workflow_step_label")
+        ),
+        group_id=_optional_text(payload.get("group_id")),
+        group_run_id=_optional_text(payload.get("group_run_id") or payload.get("run_group_id")),
         title=title,
         kind=_text(payload.get("kind") or "artifact"),
         path=path,

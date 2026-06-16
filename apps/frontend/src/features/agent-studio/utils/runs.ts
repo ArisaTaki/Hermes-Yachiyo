@@ -433,9 +433,19 @@ export function publicArtifactsOrLegacy(
       preview_text: artifact.preview_text,
       run_id: artifact.run_id || artifact.source_run_id || '',
       size_bytes: artifact.size_bytes,
+      group_id: artifact.group_id || '',
+      group_run_id: artifact.group_run_id || '',
+      source_runnable_id: artifact.source_runnable_id || '',
+      source_runnable_name: artifact.source_runnable_name || '',
       source_run_id: artifact.source_run_id || artifact.run_id || '',
+      source_tool: artifact.source_tool || '',
       title: artifact.title,
       url: artifact.url,
+      workflow_id: artifact.workflow_id || '',
+      workflow_run_id: artifact.workflow_run_id || '',
+      workflow_node_id: artifact.workflow_node_id || '',
+      workflow_node_label: artifact.workflow_node_label || '',
+      workflow_step_label: artifact.workflow_node_label || '',
     }));
   }
   return legacyArtifacts || [];

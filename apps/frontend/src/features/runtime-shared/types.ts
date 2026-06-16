@@ -53,6 +53,15 @@ export type ArtifactSnapshot = {
   artifact_id: string;
   run_id?: string | null;
   source_run_id?: string | null;
+  source_tool?: string | null;
+  source_runnable_id?: string | null;
+  source_runnable_name?: string | null;
+  workflow_id?: string | null;
+  workflow_run_id?: string | null;
+  workflow_node_id?: string | null;
+  workflow_node_label?: string | null;
+  group_id?: string | null;
+  group_run_id?: string | null;
   title: string;
   kind: string;
   path?: string | null;

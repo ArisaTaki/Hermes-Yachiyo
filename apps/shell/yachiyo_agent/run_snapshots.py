@@ -535,6 +535,11 @@ def _artifact_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
         artifact = payload.get("artifact")
         artifact_payload = dict(artifact) if isinstance(artifact, Mapping) else payload
         artifact_payload.setdefault("kind", "group_artifact")
+        artifact_payload.setdefault("group_id", payload.get("group_id"))
+        artifact_payload.setdefault(
+            "group_run_id",
+            payload.get("group_run_id") or payload.get("run_group_id") or event.run_id,
+        )
         if payload.get("member_agent_name"):
             artifact_payload.setdefault("source_runnable_name", payload.get("member_agent_name"))
         if payload.get("member_agent_id"):
@@ -548,16 +553,43 @@ def _artifact_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
         artifact_payload = {
             "kind": "workflow_artifact",
             "title": payload.get("workflow_node_label") or "Workflow Artifact",
+            "workflow_id": payload.get("workflow_id"),
+            "workflow_run_id": payload.get("workflow_run_id") or event.run_id,
             "workflow_node_id": payload.get("workflow_node_id"),
             "workflow_node_label": payload.get("workflow_node_label"),
             **dict(payload["artifact"]),
         }
     else:
         return {}
+    _merge_artifact_trace_context(artifact_payload, payload)
     artifact_payload.setdefault("source_run_id", event.run_id)
     artifact_payload.setdefault("run_id", event.run_id)
     artifact_payload.setdefault("created_at", event.created_at)
     return artifact_payload
+
+
+def _merge_artifact_trace_context(
+    artifact_payload: dict[str, Any],
+    payload: dict[str, Any],
+) -> None:
+    for key in (
+        "group_id",
+        "group_run_id",
+        "run_group_id",
+        "source_tool",
+        "source_runnable_id",
+        "source_runnable_name",
+        "workflow_id",
+        "workflow_run_id",
+        "workflow_node_id",
+        "workflow_node_label",
+    ):
+        if payload.get(key):
+            artifact_payload.setdefault(key, payload.get(key))
+    if payload.get("member_agent_id"):
+        artifact_payload.setdefault("source_runnable_id", payload.get("member_agent_id"))
+    if payload.get("member_agent_name"):
+        artifact_payload.setdefault("source_runnable_name", payload.get("member_agent_name"))
 
 
 def _merge_trace_context_into_approval(source: dict[str, Any], payload: dict[str, Any]) -> None:

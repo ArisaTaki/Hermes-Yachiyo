@@ -261,6 +261,59 @@ def test_artifact_content_snapshot_json_shape_is_stable() -> None:
     assert payload["truncated"] is True
 
 
+def test_artifact_snapshot_keeps_runtime_trace_fields() -> None:
+    snapshot = ArtifactSnapshot(
+        artifact_id="artifact-1",
+        run_id="run-1",
+        source_run_id="run-source-1",
+        source_tool="artifact.write",
+        source_runnable_id="agent-1",
+        source_runnable_name="Planner",
+        workflow_id="workflow-1",
+        workflow_run_id="workflow-run-1",
+        workflow_node_id="report",
+        workflow_node_label="Report",
+        group_id="group-1",
+        group_run_id="group-run-1",
+        title="Report",
+        kind="workflow_artifact",
+        path="reports/out.md",
+        mime_type="text/markdown",
+        size_bytes=42,
+        preview_text="# Report",
+        url="/ui/runs/run-1/artifacts/reports/out.md",
+        created_at="2026-06-14T00:00:00Z",
+    )
+
+    payload = _json(snapshot)
+
+    assert list(payload) == [
+        "artifact_id",
+        "run_id",
+        "source_run_id",
+        "source_tool",
+        "source_runnable_id",
+        "source_runnable_name",
+        "workflow_id",
+        "workflow_run_id",
+        "workflow_node_id",
+        "workflow_node_label",
+        "group_id",
+        "group_run_id",
+        "title",
+        "kind",
+        "path",
+        "mime_type",
+        "size_bytes",
+        "preview_text",
+        "url",
+        "created_at",
+    ]
+    assert payload["source_tool"] == "artifact.write"
+    assert payload["workflow_node_id"] == "report"
+    assert payload["group_run_id"] == "group-run-1"
+
+
 def test_public_run_event_mapping_preserves_runtime_trace_payload_fields() -> None:
     event = public_run_event_from_payload(
         {

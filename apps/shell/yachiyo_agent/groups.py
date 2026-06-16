@@ -137,7 +137,11 @@ def _group_run_events_with_lifecycle(
     )
     if not group_run_id:
         return raw_events
-    raw_events = _group_run_stream_events(raw_events, group_run_id=group_run_id)
+    raw_events = _group_run_stream_events(
+        raw_events,
+        group_run_id=group_run_id,
+        group_id=group_id,
+    )
 
     existing_types = {_event_type(event) for event in raw_events}
     lifecycle_context = _group_run_lifecycle_context(
@@ -176,9 +180,14 @@ def _group_run_stream_events(
     events: list[dict[str, Any]],
     *,
     group_run_id: str,
+    group_id: str,
 ) -> list[dict[str, Any]]:
     return [
-        _group_run_stream_event(event, group_run_id=group_run_id)
+        _group_run_stream_event(
+            event,
+            group_run_id=group_run_id,
+            group_id=group_id,
+        )
         for event in events
     ]
 
@@ -187,14 +196,20 @@ def _group_run_stream_event(
     event: dict[str, Any],
     *,
     group_run_id: str,
+    group_id: str,
 ) -> dict[str, Any]:
     item = dict(event)
+    payload = dict(item.get("payload")) if isinstance(item.get("payload"), Mapping) else {}
+    payload.setdefault("group_run_id", group_run_id)
+    if group_id:
+        payload.setdefault("group_id", group_id)
+    item["payload"] = payload
+
     event_run_id = _text(item.get("run_id"))
     if not event_run_id or event_run_id == group_run_id or "sequence" not in item:
         return item
 
     source_sequence = item.pop("sequence")
-    payload = dict(item.get("payload")) if isinstance(item.get("payload"), Mapping) else {}
     payload.setdefault("source_run_id", event_run_id)
     payload.setdefault("source_sequence", source_sequence)
     item["payload"] = payload

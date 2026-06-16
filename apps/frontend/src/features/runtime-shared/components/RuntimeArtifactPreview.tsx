@@ -12,9 +12,18 @@ export type RuntimeArtifactSnapshot = Pick<
   | 'preview_text'
   | 'run_id'
   | 'size_bytes'
+  | 'source_runnable_id'
+  | 'source_runnable_name'
   | 'source_run_id'
+  | 'source_tool'
   | 'title'
   | 'url'
+  | 'workflow_id'
+  | 'workflow_node_id'
+  | 'workflow_node_label'
+  | 'workflow_run_id'
+  | 'group_id'
+  | 'group_run_id'
 >;
 
 export type RuntimeArtifactVariant = 'compact' | 'full';
@@ -51,8 +60,11 @@ export function RuntimeArtifactPreview({
       data-artifact-path={artifact.path || ''}
       data-artifact-run-id={artifact.run_id || ''}
       data-artifact-size-bytes={artifact.size_bytes ?? ''}
+      data-artifact-source-runnable-id={artifact.source_runnable_id || ''}
+      data-artifact-source-tool={artifact.source_tool || ''}
       data-artifact-source-run-id={artifact.source_run_id || ''}
       data-artifact-variant={variant}
+      data-artifact-workflow-node-id={artifact.workflow_node_id || ''}
       data-testid={testId}
       title={artifact.path || label}
     >
@@ -82,6 +94,10 @@ function artifactMetadataItems(artifact: RuntimeArtifactSnapshot) {
     { label: 'artifact', value: artifact.artifact_id },
     { label: 'run', value: artifact.run_id || '' },
     { label: 'source', value: artifact.source_run_id || '' },
+    { label: 'tool', value: artifact.source_tool || '' },
+    { label: 'agent', value: artifact.source_runnable_name || artifact.source_runnable_id || '' },
+    { label: 'workflow', value: artifact.workflow_node_label || artifact.workflow_node_id || '' },
+    { label: 'group', value: artifact.group_run_id || artifact.group_id || '' },
     { label: 'mime', value: artifact.mime_type || '' },
     { label: 'size', value: artifactDisplaySize(artifact.size_bytes) },
     { label: 'path', value: artifact.path || '' },

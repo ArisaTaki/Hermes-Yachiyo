@@ -9,7 +9,12 @@ export type RuntimeArtifactSource = RuntimeArtifactSnapshot | Record<string, unk
 export type RuntimeArtifactListItem = RuntimeArtifactSnapshot & {
   run_id?: string | null;
   source_label?: string | null;
+  source_runnable_id?: string | null;
+  source_runnable_name?: string | null;
   source_run_id?: string | null;
+  source_tool?: string | null;
+  workflow_node_id?: string | null;
+  workflow_node_label?: string | null;
 };
 
 type RuntimeArtifactListProps = {
@@ -85,7 +90,12 @@ export function runtimeArtifactListItem(
   const kind = artifactStringValue(artifact, 'kind') || artifactStringValue(artifact, 'artifact_kind') || 'artifact';
   const runId = artifactStringValue(artifact, 'run_id');
   const sourceRunId = artifactStringValue(artifact, 'source_run_id') || runId || fallbackRunId;
-  const sourceLabel = artifactStringValue(artifact, 'source_runnable_name') || artifactStringValue(artifact, 'workflow_step_label');
+  const sourceRunnableId = artifactStringValue(artifact, 'source_runnable_id');
+  const sourceRunnableName = artifactStringValue(artifact, 'source_runnable_name');
+  const sourceTool = artifactStringValue(artifact, 'source_tool');
+  const workflowNodeId = artifactStringValue(artifact, 'workflow_node_id');
+  const workflowNodeLabel = artifactStringValue(artifact, 'workflow_node_label') || artifactStringValue(artifact, 'workflow_step_label');
+  const sourceLabel = sourceRunnableName || workflowNodeLabel || sourceTool;
   const mimeType = artifactStringValue(artifact, 'mime_type');
   const previewText = artifactStringValue(artifact, 'preview_text');
   const url = artifactStringValue(artifact, 'url');
@@ -104,9 +114,14 @@ export function runtimeArtifactListItem(
     run_id: runId,
     size_bytes: sizeBytes,
     source_label: sourceLabel,
+    source_runnable_id: sourceRunnableId,
+    source_runnable_name: sourceRunnableName,
     source_run_id: sourceRunId,
+    source_tool: sourceTool,
     title,
     url,
+    workflow_node_id: workflowNodeId,
+    workflow_node_label: workflowNodeLabel,
   };
 }
 

@@ -431,6 +431,8 @@ def test_run_timeline_derives_approvals_and_artifacts_from_events() -> None:
                 {
                     "event_type": "workflow.node.artifact",
                     "payload": {
+                        "workflow_id": "workflow-1",
+                        "workflow_run_id": "workflow-run-1",
                         "workflow_node_id": "report",
                         "workflow_node_label": "Report",
                         "artifact": {
@@ -466,9 +468,14 @@ def test_run_timeline_derives_approvals_and_artifacts_from_events() -> None:
     ]
     assert timeline.artifacts[0].kind == "artifact"
     assert timeline.artifacts[0].size_bytes == 9
+    assert timeline.artifacts[0].source_tool == "artifact.write"
     assert timeline.artifacts[1].kind == "workflow_artifact"
     assert timeline.artifacts[1].title == "Report"
     assert timeline.artifacts[1].size_bytes == 42
+    assert timeline.artifacts[1].workflow_id == "workflow-1"
+    assert timeline.artifacts[1].workflow_run_id == "workflow-run-1"
+    assert timeline.artifacts[1].workflow_node_id == "report"
+    assert timeline.artifacts[1].workflow_node_label == "Report"
 
 
 def test_run_timeline_merges_approval_lifecycle_events_into_stable_cards() -> None:
@@ -829,6 +836,10 @@ def test_group_run_snapshot_derives_approvals_and_artifacts_from_group_events() 
     assert group_run.shared_artifacts[0].path == "team-summary.md"
     assert group_run.shared_artifacts[0].size_bytes == 33
     assert group_run.shared_artifacts[0].source_run_id == "group-events-only"
+    assert group_run.shared_artifacts[0].source_runnable_id == "agent-1"
+    assert group_run.shared_artifacts[0].source_runnable_name == "Planner"
+    assert group_run.shared_artifacts[0].group_id == "group-1"
+    assert group_run.shared_artifacts[0].group_run_id == "group-events-only"
 
 
 def test_group_run_snapshot_adds_terminal_lifecycle_event_from_status() -> None:
