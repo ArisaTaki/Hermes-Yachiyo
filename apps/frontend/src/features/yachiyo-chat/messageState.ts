@@ -18,6 +18,11 @@ export type GroupAgentSummaryNotice = {
   text: string;
 };
 
+export function metadataListAttribute(value: unknown): string {
+  if (!Array.isArray(value)) return '';
+  return value.map((item) => String(item || '').trim()).filter(Boolean).join(',');
+}
+
 export function messageText(message: YachiyoChatMessage) {
   return String(message.content || message.text || '');
 }
@@ -102,12 +107,59 @@ export function messageRunId(message?: YachiyoChatMessage | null) {
   return String(message?.metadata?.run_id || message?.metadata?.workflow_run_id || '').trim();
 }
 
+export function messageHasRunContext(message?: YachiyoChatMessage | null) {
+  const kind = String(message?.metadata?.runnable_kind || '').trim();
+  return Boolean(messageRunId(message) || kind === 'agent' || kind === 'workflow');
+}
+
+export function messageRunProgressTitle(message?: YachiyoChatMessage | null) {
+  return String(message?.metadata?.run_progress_title || 'Agent 正在执行');
+}
+
+export function messageRunProgressDetail(message: YachiyoChatMessage | null | undefined, progressName: string) {
+  return String(message?.metadata?.run_progress_detail || `${progressName} 正在继续处理当前任务。`);
+}
+
+export function messageRunProgressRunnableKind(message?: YachiyoChatMessage | null) {
+  return String(message?.metadata?.runnable_kind || message?.metadata?.sender?.kind || '').trim();
+}
+
+export function messageRunProgressRunnableId(message?: YachiyoChatMessage | null) {
+  return String(message?.metadata?.runnable_id || message?.metadata?.sender?.id || '').trim();
+}
+
+export function messageRunProgressRunGroupId(message?: YachiyoChatMessage | null) {
+  return String(message?.metadata?.run_group_id || '').trim();
+}
+
 export function messageArtifactCount(message?: YachiyoChatMessage | null) {
   return Number(message?.metadata?.run_artifact_count || 0);
 }
 
 export function messageArtifactTitle(message?: YachiyoChatMessage | null) {
   return message?.metadata?.run_artifacts?.map((artifact) => artifact.path).filter(Boolean).join('\n') || '查看运行产物';
+}
+
+export function groupAgentSummaryTaskId(message?: YachiyoChatMessage | null) {
+  return String(message?.metadata?.group_agent_summary_task_id || '').trim();
+}
+
+export function groupAgentSummaryStatus(message?: YachiyoChatMessage | null) {
+  const metadata = message?.metadata || {};
+  return String(metadata.group_agent_summary_status || (metadata.group_agent_summary_pending ? 'pending' : '')).trim();
+}
+
+export function groupAgentSummaryRunGroupId(message?: YachiyoChatMessage | null) {
+  const metadata = message?.metadata || {};
+  return String(metadata.group_dispatch_run_group_id || metadata.run_group_id || '').trim();
+}
+
+export function groupFollowupTaskIdsAttribute(message?: YachiyoChatMessage | null) {
+  return metadataListAttribute(message?.metadata?.group_followup_for_task_ids);
+}
+
+export function groupFollowupAgentMessageIdsAttribute(message?: YachiyoChatMessage | null) {
+  return metadataListAttribute(message?.metadata?.group_followup_for_agent_message_ids);
 }
 
 export function latestFailedMessage(messages: YachiyoChatMessage[]) {

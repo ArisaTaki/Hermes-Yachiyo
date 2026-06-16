@@ -52,16 +52,28 @@ import {
   activityRunId,
   chatStatusLabel,
   compactStatusText,
+  groupAgentSummaryRunGroupId,
   groupAgentSummaryNotice,
+  groupAgentSummaryStatus,
+  groupAgentSummaryTaskId,
+  groupFollowupAgentMessageIdsAttribute,
   groupFollowupNotice,
+  groupFollowupTaskIdsAttribute,
   latestFailedMessage,
   latestVisibleActivity,
   messageArtifactCount,
   messageArtifactTitle,
   messageErrorText,
+  messageHasRunContext,
+  messageRunProgressDetail,
+  messageRunProgressRunGroupId,
+  messageRunProgressRunnableId,
+  messageRunProgressRunnableKind,
+  messageRunProgressTitle,
   messageRunId,
   messageRunStatus,
   messageText,
+  metadataListAttribute,
   normalizeRunStatus,
   runnableResultLabel,
   runnableResultRunId,
@@ -127,11 +139,6 @@ import logoUrl from '../../../../docs/open-design/logo.png';
 import { type AssistantProfileSeed, useAssistantProfileSeed } from '../lib/assistantProfileSeed';
 import { apiGet, apiPatch, apiPost, bridgeUrl, canChooseChatImages, chooseChatImages, copyText, openAppView, openExternalUrl, restartDesktopBridge, type ChatImageSelection } from '../lib/bridge';
 import { ROUTE_CHANGE_EVENT, currentParam, navigateTo } from '../lib/view';
-
-function metadataListAttribute(value: unknown): string {
-  if (!Array.isArray(value)) return '';
-  return value.map((item) => String(item || '').trim()).filter(Boolean).join(',');
-}
 
 type ChatViewProps = {
   embedded?: boolean;
@@ -2580,24 +2587,24 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
   const approvalDetails = showApprovalActions ? approvalRequestDetails(message) : null;
   const approvalId = approvalDetails ? approvalIdFromPending(message.metadata?.pending_approval) : '';
   const approvalSignature = approvalDetails ? messageApprovalSignature(message) : '';
-  const showAgentProgress = isProcessingEmpty && Boolean(runId || message.metadata?.runnable_kind === 'agent' || message.metadata?.runnable_kind === 'workflow');
+  const showAgentProgress = isProcessingEmpty && messageHasRunContext(message);
   const progressSender = message.metadata?.sender;
   const progressName = participantDisplayName(progressSender) || messageRoleLabel(message);
-  const progressTitle = String(message.metadata?.run_progress_title || 'Agent 正在执行');
-  const progressDetail = String(message.metadata?.run_progress_detail || `${progressName} 正在继续处理当前任务。`);
-  const progressRunnableKind = String(message.metadata?.runnable_kind || progressSender?.kind || '').trim();
-  const progressRunnableId = String(message.metadata?.runnable_id || progressSender?.id || '').trim();
-  const progressRunGroupId = String(message.metadata?.run_group_id || '').trim();
+  const progressTitle = messageRunProgressTitle(message);
+  const progressDetail = messageRunProgressDetail(message, progressName);
+  const progressRunnableKind = messageRunProgressRunnableKind(message);
+  const progressRunnableId = messageRunProgressRunnableId(message);
+  const progressRunGroupId = messageRunProgressRunGroupId(message);
   const showInlineRunDetails = role === 'assistant' && Boolean(runId) && !approvalDetails && !showAgentProgress;
   const artifactCount = messageArtifactCount(message);
   const duplicateError = Boolean(message.error && displayContent.trim() && message.error.trim() === displayContent.trim());
   const summaryNotice = groupAgentSummaryNotice(message);
   const followupNotice = groupFollowupNotice(message);
-  const summaryTaskId = String(message.metadata?.group_agent_summary_task_id || '').trim();
-  const summaryStatus = String(message.metadata?.group_agent_summary_status || (message.metadata?.group_agent_summary_pending ? 'pending' : '')).trim();
-  const summaryRunGroupId = String(message.metadata?.group_dispatch_run_group_id || message.metadata?.run_group_id || '').trim();
-  const followupTaskIds = metadataListAttribute(message.metadata?.group_followup_for_task_ids);
-  const followupAgentMessageIds = metadataListAttribute(message.metadata?.group_followup_for_agent_message_ids);
+  const summaryTaskId = groupAgentSummaryTaskId(message);
+  const summaryStatus = groupAgentSummaryStatus(message);
+  const summaryRunGroupId = groupAgentSummaryRunGroupId(message);
+  const followupTaskIds = groupFollowupTaskIdsAttribute(message);
+  const followupAgentMessageIds = groupFollowupAgentMessageIdsAttribute(message);
   const showWorkflowStudioAction = message.metadata?.guidance_type === 'workflow_chat_entry_disabled';
   return (
     <article
@@ -3021,7 +3028,7 @@ function messageRoleLabel(message: ChatMessage) {
 
 function messageMetaText(message: ChatMessage, status?: string, createdAt?: string) {
   const runStatus = messageRunStatus(message);
-  const hasRunContext = Boolean(messageRunId(message) || message.metadata?.runnable_kind === 'agent' || message.metadata?.runnable_kind === 'workflow');
+  const hasRunContext = messageHasRunContext(message);
   const statusText = status === 'pending'
     ? ' · 等待中'
     : runStatus === 'approval_required'
