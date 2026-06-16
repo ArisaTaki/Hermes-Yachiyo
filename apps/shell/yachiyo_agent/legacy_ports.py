@@ -349,7 +349,22 @@ class LegacyStudioPort:
                 client_run_id=client_run_id,
                 child_client_run_id=child_client_run_id,
             )
-            if str(child_run.get("status") or "") in {"completed", "failed", "cancelled"}:
+            child_status = str(child_run.get("status") or "").strip()
+            if child_status in {"approval_required", "waiting_approval"}:
+                append_group_member_event(
+                    self._runtime,
+                    child_run,
+                    "group.member.approval_required",
+                    group_id=group_id,
+                    group=group,
+                    run_group_id=run_group_id,
+                    objective=objective,
+                    member=member,
+                    member_index=index,
+                    client_run_id=client_run_id,
+                    child_client_run_id=child_client_run_id,
+                )
+            elif child_status in {"completed", "failed", "cancelled"}:
                 append_group_member_event(
                     self._runtime,
                     child_run,
@@ -375,7 +390,29 @@ class LegacyStudioPort:
                 update_run_group(
                     run_group_id,
                     status=projected_status,
-                    summary=_group_run_summary_from_child_runs(child_runs),
+                    summary=(
+                        _group_run_summary_from_child_runs(child_runs)
+                        if projected_status in {"completed", "failed", "cancelled"}
+                        else None
+                    ),
+                )
+            if projected_status == "approval_required" and child_runs:
+                append_group_run_event(
+                    self._runtime,
+                    child_runs[0],
+                    "group.run.approval_required",
+                    group_id=group_id,
+                    group=group,
+                    run_group_id=run_group_id,
+                    objective=objective,
+                    status=projected_status,
+                    members=members,
+                    child_run_ids=[
+                        str(run.get("run_id") or "")
+                        for run in child_runs
+                        if str(run.get("run_id") or "")
+                    ],
+                    client_run_id=client_run_id,
                 )
 
         run_group = self._runtime.get_run_group(run_group_id) if run_group_id else {}

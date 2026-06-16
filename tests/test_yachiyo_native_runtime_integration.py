@@ -362,6 +362,131 @@ def test_agent_studio_start_group_run_records_native_group_replay(tmp_path, monk
         runtime.close()
 
 
+def test_agent_studio_start_group_run_surfaces_native_group_approval(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    credential_store = MemoryCredentialStore()
+    runtime = NativeRunEngine(
+        db_path=tmp_path / "agent-runtime-group-approval.db",
+        workspace_dir=tmp_path / "runtime-group-approval",
+        credential_store=credential_store,
+        seed_templates=False,
+    )
+    try:
+        group = {
+            "group_id": "native-approval-group",
+            "name": "Native approval team",
+            "mode": "parallel",
+            "memory_scope": "shared",
+            "members": [
+                {"agent_id": "agent-planner", "name": "Planner", "role": "planner"},
+                {"agent_id": "agent-reviewer", "name": "Reviewer", "role": "reviewer"},
+            ],
+        }
+
+        def get_agent_group(group_id: str) -> dict[str, object]:
+            if group_id != group["group_id"]:
+                raise KeyError(group_id)
+            return dict(group)
+
+        def launch_child_run(
+            *,
+            runnable_id: str,
+            user_goal: str,
+            run_group_id: str = "",
+            on_complete=None,
+        ) -> dict[str, object]:
+            del on_complete
+            target_group_id = run_group_id
+            if not target_group_id:
+                run_group = runtime._insert_run_group(
+                    title="Native approval team",
+                    source="agent_group",
+                    workspace_dir=str(tmp_path / "group-approval-workspace"),
+                )
+                target_group_id = run_group["run_group_id"]
+            run = runtime._insert_run(
+                kind="agent_run",
+                runnable_id=runnable_id,
+                user_goal=user_goal,
+                run_group_id=target_group_id,
+            )
+            if runnable_id == "agent-planner":
+                pending_approval = {
+                    "approval_id": "approval-native-group-start",
+                    "tool": "terminal.run",
+                    "title": "Approve planner command",
+                    "risk_level": "execute",
+                    "input_preview": {"command": "printf plan"},
+                }
+                paused = runtime.approval_pause.project_tool_required(
+                    run["run_id"],
+                    pending_approval=pending_approval,
+                    timeline=[],
+                    artifacts=[],
+                )
+                return {
+                    **paused,
+                    "agent_run_id": paused["run_id"],
+                    "runnable_name": runnable_id,
+                }
+            completed = runtime._update_run(
+                run["run_id"],
+                status="completed",
+                result="reviewer finished",
+                artifacts=[],
+                pending_approval=None,
+            )
+            return {
+                **completed,
+                "agent_run_id": completed["run_id"],
+                "runnable_name": runnable_id,
+            }
+
+        monkeypatch.setattr(runtime, "get_agent_group", get_agent_group, raising=False)
+        monkeypatch.setattr(
+            runtime,
+            "create_run_for_runnable_async",
+            launch_child_run,
+            raising=False,
+        )
+
+        studio = AgentStudioService(LegacyStudioPort(runtime))
+
+        started = studio.start_group_run(
+            StartGroupRunRequest(
+                group_id="native-approval-group",
+                objective="Prepare a gated launch plan",
+                client_run_id="native-approval-client",
+            )
+        )
+        replayed = studio.get_group_run(started.group_run_id)
+        events = list(studio.get_group_run_event_stream(started.group_run_id))
+        page = studio.get_group_run_event_page(started.group_run_id, limit=10)
+
+        event_types = [event.event_type for event in events]
+
+        assert started.status == "approval_required"
+        assert started.pending_approvals[0].approval_id == "approval-native-group-start"
+        assert started.pending_approvals[0].tool_name == "terminal.run"
+        assert started.runs[0].status == "approval_required"
+        assert started.runs[0].pending_approval is not None
+        assert replayed.status == "approval_required"
+        assert replayed.group_id == "native-approval-group"
+        assert replayed.objective == "Prepare a gated launch plan"
+        assert replayed.final_answer is None
+        assert "group.member.approval_required" in event_types
+        assert "group.run.approval_required" in event_types
+        assert any(
+            event.event_type == "group.run.approval_required"
+            and event.payload.get("group_id") == "native-approval-group"
+            for event in page.events
+        )
+    finally:
+        runtime.close()
+
+
 def test_agent_studio_workflow_run_timeline_uses_native_runtime_events(tmp_path) -> None:
     credential_store = MemoryCredentialStore()
     runtime = NativeRunEngine(
