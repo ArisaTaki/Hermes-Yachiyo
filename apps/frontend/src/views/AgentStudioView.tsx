@@ -15,6 +15,7 @@ import { useAgentDefinitions } from '../features/agent-studio/hooks/useAgentDefi
 import { useAgentDraftActions } from '../features/agent-studio/hooks/useAgentDraftActions';
 import { useAgentGroupActions } from '../features/agent-studio/hooks/useAgentGroupActions';
 import { useAgentGroups } from '../features/agent-studio/hooks/useAgentGroups';
+import { useAgentModelTestActions } from '../features/agent-studio/hooks/useAgentModelTestActions';
 import { useAgentRunReadiness } from '../features/agent-studio/hooks/useAgentRunReadiness';
 import { useAgentSaveActions } from '../features/agent-studio/hooks/useAgentSaveActions';
 import { useAgentSkillMountActions } from '../features/agent-studio/hooks/useAgentSkillMountActions';
@@ -79,7 +80,6 @@ import {
   workflowStepKindLabel,
   workflowStepSummary,
 } from '../features/agent-studio/utils/workflow';
-import { testYachiyoStudioAgentModel } from '../features/yachiyo-studio/api';
 import { openAppView } from '../lib/bridge';
 
 export function AgentStudioView() {
@@ -604,6 +604,10 @@ export function AgentStudioView() {
     setError,
     setStatus,
   });
+  const { testAgentModel } = useAgentModelTestActions({
+    draftAgentId: draft.agent_id || '',
+    setStatus,
+  });
   const {
     requestDeleteSelectedWorkflows,
     requestDeleteWorkflow,
@@ -882,10 +886,7 @@ export function AgentStudioView() {
           onSetSkillMountFolderFilter={setSkillMountFolderFilter}
           onSetSkillMountSearch={setSkillMountSearch}
           onStartNewAgent={startNewAgent}
-          onTestAgentModel={() => void runAction(async () => {
-            const result = await testYachiyoStudioAgentModel(draft.agent_id || '');
-            setStatus(result.message || (result.ok ? '模型测试通过' : '模型测试失败'));
-          }, '测试模型')}
+          onTestAgentModel={() => void runAction(testAgentModel, '测试模型')}
           onToggleAgentSelected={toggleAgentSelected}
           onToggleSkillMount={toggleAgentSkillMount}
           onUnmountVisibleSkills={() => void runAction(unmountVisibleSkills, '移除当前筛选 Skills')}

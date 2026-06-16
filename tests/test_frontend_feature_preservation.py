@@ -1354,6 +1354,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "onBack={() => void openAppView('main')}",
             "AgentGroupPanel",
             "useAgentDefinitions",
+            "useAgentModelTestActions({",
             "mergeAgent",
             "mergeWorkflow",
             "useAgentDraftActions({",
@@ -4719,6 +4720,15 @@ def test_agent_studio_agents_ui_smoke_uses_definition_crud_paths() -> None:
             "selectedAgentReadOnly",
             "onSetSelectedAgentIds={setSelectedAgentIds}",
             "useAgentRunReadiness",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useAgentModelTestActions.ts",
+        [
+            "export function useAgentModelTestActions",
+            "testYachiyoStudioAgentModel(draftAgentId)",
+            "result.message || (result.ok ? '模型测试通过' : '模型测试失败')",
+            "testAgentModel",
         ],
     )
     _assert_contains(
