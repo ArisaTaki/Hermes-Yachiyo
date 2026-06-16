@@ -422,6 +422,7 @@ async def test_yachiyo_task_routes_use_injected_runtime_and_return_public_snapsh
         request,
     )
     tasks = await yachiyo.list_tasks("chat-1", request)
+    fetched_by_run_id = await yachiyo.get_task("run-1", request)
     approved = await yachiyo.approve_task("run-1", None, request)
     rejected = await yachiyo.reject_task(
         "run-1",
@@ -438,6 +439,9 @@ async def test_yachiyo_task_routes_use_injected_runtime_and_return_public_snapsh
     assert tasks["tasks"][0]["task_id"] == "run-1"
     assert tasks["tasks"][0]["conversation_id"] == "chat-1"
     assert all(task["task_id"] != "studio-run" for task in tasks["tasks"])
+    assert fetched_by_run_id["task_id"] == "run-1"
+    assert fetched_by_run_id["status"] == "waiting_approval"
+    assert fetched_by_run_id["pending_approvals"][0]["approval_id"] == "run-1"
     assert approved["status"] == "completed"
     assert rejected["status"] == "failed"
     assert cancelled["status"] == "cancelled"
