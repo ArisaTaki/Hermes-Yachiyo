@@ -1,8 +1,15 @@
+import { useState } from 'react';
+
 import { openAppView } from '../../../lib/bridge';
 import { yachiyoTaskStudioGroupRunId, yachiyoTaskStudioRunId, yachiyoTaskStudioUrl } from '../taskSnapshots';
-import type { AgentTaskSnapshot } from '../types';
+import type { AgentTaskSnapshot, ApprovalCardSnapshot } from '../types';
 
 type LauncherTaskMode = 'bubble' | 'live2d';
+type LauncherTaskApprovalAction = 'approve' | 'reject';
+type LauncherTaskApprovalHandler = (
+  task: AgentTaskSnapshot,
+  approval: ApprovalCardSnapshot,
+) => unknown | Promise<unknown>;
 
 export type LauncherAgentTask = AgentTaskSnapshot | null | undefined;
 
@@ -38,27 +45,46 @@ export function launcherAgentTaskChatParams(task: LauncherAgentTask): Record<str
 
 export function LauncherAgentTaskLight({
   mode,
+  onApproveApproval,
+  onRejectApproval,
   task,
   testIdPrefix = `${mode}-launcher`,
   variant = 'launcher',
 }: {
   mode: LauncherTaskMode;
+  onApproveApproval?: LauncherTaskApprovalHandler;
+  onRejectApproval?: LauncherTaskApprovalHandler;
   task: LauncherAgentTask;
   testIdPrefix?: string;
   variant?: 'launcher' | 'panel';
 }) {
+  const [approvalAction, setApprovalAction] = useState<LauncherTaskApprovalAction | ''>('');
   if (!task) return null;
-  const runId = yachiyoTaskStudioRunId(task);
-  const groupRunId = yachiyoTaskStudioGroupRunId(task);
-  const studioUrl = yachiyoTaskStudioUrl(task);
-  const status = String(task.status || '');
-  const needsAction = Boolean(task.needs_user_action || task.pending_approvals?.length);
-  const detail = launcherAgentTaskDetail(task);
+  const currentTask = task;
+  const runId = yachiyoTaskStudioRunId(currentTask);
+  const groupRunId = yachiyoTaskStudioGroupRunId(currentTask);
+  const studioUrl = yachiyoTaskStudioUrl(currentTask);
+  const status = String(currentTask.status || '');
+  const approval = launcherAgentTaskPendingApproval(currentTask);
+  const needsAction = Boolean(currentTask.needs_user_action || approval);
+  const detail = launcherAgentTaskDetail(currentTask);
+  const canHandleApproval = Boolean(approval && (onApproveApproval || onRejectApproval));
+  async function handleApproval(action: LauncherTaskApprovalAction) {
+    if (!approval || approvalAction) return;
+    const handler = action === 'approve' ? onApproveApproval : onRejectApproval;
+    if (!handler) return;
+    setApprovalAction(action);
+    try {
+      await handler(currentTask, approval);
+    } finally {
+      setApprovalAction('');
+    }
+  }
   return (
     <div
       className={`launcher-agent-task-light ${launcherAgentTaskTone(status)} ${variant === 'panel' ? 'is-panel' : ''}`}
       data-run-id={runId}
-      data-task-id={task.task_id}
+      data-task-id={currentTask.task_id}
       data-testid={`${testIdPrefix}-agent-task-light`}
     >
       <button
@@ -68,12 +94,12 @@ export function LauncherAgentTaskLight({
         onClick={(event) => {
           event.preventDefault();
           event.stopPropagation();
-          void openAppView('chat', launcherAgentTaskChatParams(task));
+          void openAppView('chat', launcherAgentTaskChatParams(currentTask));
         }}
         title="在 Chat 中查看任务"
       >
         <span>{launcherAgentTaskStatusLabel(status)}</span>
-        <strong>{task.title || task.task_id}</strong>
+        <strong>{currentTask.title || currentTask.task_id}</strong>
         {detail ? (
           <small data-testid={`${testIdPrefix}-agent-task-detail`}>{detail}</small>
         ) : null}
@@ -99,8 +125,46 @@ export function LauncherAgentTaskLight({
           Studio
         </a>
       ) : null}
+      {canHandleApproval ? (
+        <div className="launcher-agent-task-actions" data-testid={`${testIdPrefix}-agent-task-approval-actions`}>
+          <button
+            type="button"
+            className="launcher-agent-task-action approve"
+            data-testid={`${testIdPrefix}-agent-task-approve`}
+            disabled={Boolean(approvalAction) || !onApproveApproval}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              void handleApproval('approve');
+            }}
+            title="批准任务审批"
+          >
+            {approvalAction === 'approve' ? '处理中' : '批准'}
+          </button>
+          <button
+            type="button"
+            className="launcher-agent-task-action reject"
+            data-testid={`${testIdPrefix}-agent-task-reject`}
+            disabled={Boolean(approvalAction) || !onRejectApproval}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              void handleApproval('reject');
+            }}
+            title="拒绝任务审批"
+          >
+            {approvalAction === 'reject' ? '处理中' : '拒绝'}
+          </button>
+        </div>
+      ) : null}
     </div>
   );
+}
+
+function launcherAgentTaskPendingApproval(task: AgentTaskSnapshot): ApprovalCardSnapshot | null {
+  return task.pending_approvals?.find((approval) => !approval.status || approval.status === 'pending')
+    || task.pending_approvals?.[0]
+    || null;
 }
 
 function launcherAgentTaskStatusLabel(status: string) {

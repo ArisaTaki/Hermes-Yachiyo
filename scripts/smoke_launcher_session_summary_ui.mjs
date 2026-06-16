@@ -28,9 +28,11 @@ const now = new Date().toISOString();
 
 const bridgeState = {
   ackPayloads: [],
+  approvalPayloads: [],
   bubbleDefaultOpenBehavior: 'reply_bubble',
   live2dClickAction: 'toggle_reply',
   modeRequests: [],
+  publicTaskDecision: '',
   taskRequests: [],
   quickMessagePayload: null,
   quickMessagePayloads: [],
@@ -129,17 +131,18 @@ function launcherPayload(mode) {
 }
 
 function publicAgentTasks() {
+  const resolved = bridgeState.publicTaskDecision === 'approved' || bridgeState.publicTaskDecision === 'rejected';
   return [
     {
       task_id: PUBLIC_TASK_ID,
       conversation_id: DELEGATED_SESSION_ID,
       title: PUBLIC_TASK_TITLE,
-      status: 'waiting_approval',
-      summary: 'Launcher can observe public Yachiyo task snapshots.',
-      current_step: 'Awaiting launcher smoke approval',
-      progress_text: 'Waiting for approval',
-      needs_user_action: true,
-      pending_approvals: [
+      status: bridgeState.publicTaskDecision === 'rejected' ? 'cancelled' : resolved ? 'completed' : 'waiting_approval',
+      summary: resolved ? `Launcher task ${bridgeState.publicTaskDecision}` : 'Launcher can observe public Yachiyo task snapshots.',
+      current_step: resolved ? 'Launcher smoke approval resolved' : 'Awaiting launcher smoke approval',
+      progress_text: resolved ? 'Approval resolved' : 'Waiting for approval',
+      needs_user_action: !resolved,
+      pending_approvals: resolved ? [] : [
         {
           approval_id: 'launcher-public-approval',
           run_id: PUBLIC_RUN_ID,
@@ -229,6 +232,20 @@ async function startMockBridge() {
         sendJson(response, 200, { ok: true, tasks: publicAgentTasks() });
         return;
       }
+      if (request.method === 'POST' && url.pathname === `/yachiyo/tasks/${PUBLIC_TASK_ID}/approve`) {
+        const body = await readRequestJson(request);
+        bridgeState.publicTaskDecision = 'approved';
+        bridgeState.approvalPayloads.push({ action: 'approve', body });
+        sendJson(response, 200, publicAgentTasks()[0]);
+        return;
+      }
+      if (request.method === 'POST' && url.pathname === `/yachiyo/tasks/${PUBLIC_TASK_ID}/reject`) {
+        const body = await readRequestJson(request);
+        bridgeState.publicTaskDecision = 'rejected';
+        bridgeState.approvalPayloads.push({ action: 'reject', body });
+        sendJson(response, 200, publicAgentTasks()[0]);
+        return;
+      }
       if (request.method === 'POST' && url.pathname === '/ui/launcher/ack') {
         const body = await readRequestJson(request);
         bridgeState.ackPayloads.push(body);
@@ -248,9 +265,11 @@ async function startMockBridge() {
       if (request.method === 'GET' && url.pathname === '/__smoke/state') {
         sendJson(response, 200, {
           ackPayloads: bridgeState.ackPayloads,
+          approvalPayloads: bridgeState.approvalPayloads,
           bubbleDefaultOpenBehavior: bridgeState.bubbleDefaultOpenBehavior,
           live2dClickAction: bridgeState.live2dClickAction,
           modeRequests: bridgeState.modeRequests,
+          publicTaskDecision: bridgeState.publicTaskDecision,
           taskRequests: bridgeState.taskRequests,
           quickMessagePayload: bridgeState.quickMessagePayload,
           quickMessagePayloads: bridgeState.quickMessagePayloads,
@@ -265,6 +284,11 @@ async function startMockBridge() {
       if (request.method === 'GET' && url.pathname === '/__smoke/live2d-open-chat') {
         bridgeState.live2dClickAction = 'open_chat';
         sendJson(response, 200, { ok: true, live2dClickAction: bridgeState.live2dClickAction });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/__smoke/reset-public-task') {
+        bridgeState.publicTaskDecision = '';
+        sendJson(response, 200, { ok: true, publicTaskDecision: bridgeState.publicTaskDecision });
         return;
       }
       sendJson(response, 404, { ok: false, error: `not found: ${request.method} ${url.pathname}` });
@@ -456,10 +480,12 @@ async function main() {
     const probe = document.querySelector('[data-testid="bubble-launcher-session-summary-probe"]');
     const status = document.querySelector('[data-testid="bubble-launcher-status-label"]');
     const taskLight = document.querySelector('[data-testid="bubble-launcher-agent-task-light"]');
+    const taskApprove = document.querySelector('[data-testid="bubble-launcher-agent-task-approve"]');
+    const taskReject = document.querySelector('[data-testid="bubble-launcher-agent-task-reject"]');
     const sessions = Array.from(document.querySelectorAll('[data-testid="bubble-launcher-recent-session"]'));
     const bodyText = document.body.textContent || '';
     return summary
-      && summary.textContent.includes(${JSON.stringify(BUBBLE_SUMMARY)})
+      && summary.textContent.includes(${JSON.stringify(PUBLIC_TASK_TITLE)})
       && probe
       && status?.textContent.includes('2 recent sessions')
       && taskLight
@@ -467,6 +493,10 @@ async function main() {
       && taskLight.getAttribute('data-run-id') === ${JSON.stringify(PUBLIC_RUN_ID)}
       && taskLight.textContent.includes(${JSON.stringify(PUBLIC_TASK_TITLE)})
       && taskLight.textContent.includes('待处理')
+      && taskApprove
+      && !taskApprove.disabled
+      && taskReject
+      && !taskReject.disabled
       && sessions.length === 2
       && sessions[0].getAttribute('data-session-id') === ${JSON.stringify(GROUP_SESSION_ID)}
       && sessions[0].getAttribute('data-task-id') === ${JSON.stringify(GROUP_TASK_ID)}
@@ -482,6 +512,19 @@ async function main() {
       && !bodyText.includes('<oha_delegation>');
   }, 'bubble summary and recent sessions');
   console.log('[electron-smoke] bubble summary rendered');
+  await win.webContents.executeJavaScript(\`
+    const approve = document.querySelector('[data-testid="bubble-launcher-agent-task-approve"]');
+    if (!approve) throw new Error('missing bubble launcher task approve');
+    approve.click();
+  \`, true);
+  await waitForBridgeState((state) => (
+    Array.isArray(state.approvalPayloads)
+    && state.approvalPayloads.some((payload) => (
+      payload?.action === 'approve'
+      && payload?.body?.approval_id === 'launcher-public-approval'
+    ))
+  ), 'bubble launcher task approval');
+  console.log('[electron-smoke] bubble task approval verified');
   await win.webContents.executeJavaScript(\`
     const button = document.querySelector('[data-testid="bubble-launcher-button"]');
     if (!button) throw new Error('missing bubble launcher button');
@@ -539,6 +582,7 @@ async function main() {
   await waitFor(win, () => !document.querySelector('[data-testid="bubble-launcher-quick-input"]'), 'bubble quick input submitted');
   console.log('[electron-smoke] bubble quick input submitted: ' + bubbleQuickText);
 
+  await requestBridgeJson('/__smoke/reset-public-task');
   await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '&surface=desktop#/live2d');
   await installOpenViewProbe(win);
   console.log('[electron-smoke] live2d loaded');
@@ -551,6 +595,8 @@ async function main() {
     const probe = document.querySelector('[data-testid="live2d-launcher-session-summary-probe"]');
     const preview = document.querySelector('[data-testid="live2d-launcher-preview-fallback"]');
     const taskLight = document.querySelector('[data-testid="live2d-launcher-agent-task-light"]');
+    const taskApprove = document.querySelector('[data-testid="live2d-launcher-agent-task-approve"]');
+    const taskReject = document.querySelector('[data-testid="live2d-launcher-agent-task-reject"]');
     const sessions = Array.from(document.querySelectorAll('[data-testid="live2d-launcher-recent-session"]'));
     const bodyText = document.body.textContent || '';
     return quickInput
@@ -564,6 +610,10 @@ async function main() {
       && taskLight.getAttribute('data-run-id') === ${JSON.stringify(PUBLIC_RUN_ID)}
       && taskLight.textContent.includes(${JSON.stringify(PUBLIC_TASK_TITLE)})
       && taskLight.textContent.includes('待处理')
+      && taskApprove
+      && !taskApprove.disabled
+      && taskReject
+      && !taskReject.disabled
       && sessions.length === 2
       && sessions[0].getAttribute('data-session-id') === ${JSON.stringify(GROUP_SESSION_ID)}
       && sessions[0].getAttribute('data-task-id') === ${JSON.stringify(GROUP_TASK_ID)}
@@ -579,6 +629,19 @@ async function main() {
       && !bodyText.includes('<oha_delegation>');
   }, 'live2d quick input and recent sessions');
   console.log('[electron-smoke] live2d summary rendered');
+  await win.webContents.executeJavaScript(\`
+    const reject = document.querySelector('[data-testid="live2d-launcher-agent-task-reject"]');
+    if (!reject) throw new Error('missing live2d launcher task reject');
+    reject.click();
+  \`, true);
+  await waitForBridgeState((state) => (
+    Array.isArray(state.approvalPayloads)
+    && state.approvalPayloads.some((payload) => (
+      payload?.action === 'reject'
+      && payload?.body?.approval_id === 'launcher-public-approval'
+    ))
+  ), 'live2d launcher task rejection');
+  console.log('[electron-smoke] live2d task rejection verified');
   await win.webContents.executeJavaScript(\`
     {
       const field = document.querySelector('[data-testid="live2d-launcher-quick-input-field"]');
@@ -698,6 +761,13 @@ function assertMockBridgeContract() {
   }
   if (!bridgeState.taskRequests.length) {
     throw new Error('launcher public Yachiyo task snapshots were not requested');
+  }
+  const approvalActions = bridgeState.approvalPayloads.map((payload) => payload?.action);
+  if (!approvalActions.includes('approve')) {
+    throw new Error(`bubble launcher task approval was not called: ${JSON.stringify(bridgeState.approvalPayloads)}`);
+  }
+  if (!approvalActions.includes('reject')) {
+    throw new Error(`live2d launcher task rejection was not called: ${JSON.stringify(bridgeState.approvalPayloads)}`);
   }
   const ackModes = bridgeState.ackPayloads.map((payload) => payload?.mode);
   if (!ackModes.includes('bubble')) {

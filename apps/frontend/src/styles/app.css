@@ -4354,7 +4354,8 @@ button:hover {
 }
 
 .launcher-agent-task-main,
-.launcher-agent-task-studio {
+.launcher-agent-task-studio,
+.launcher-agent-task-action {
   min-width: 0;
   border: 0;
   background: transparent;
@@ -4379,9 +4380,38 @@ button:hover {
   font-size: 9px;
 }
 
+.launcher-agent-task-actions {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  padding: 0 3px 2px;
+}
+
+.launcher-agent-task-action {
+  min-height: 18px;
+  border: 1px solid rgba(255, 244, 203, 0.18);
+  border-radius: 6px;
+  font-size: 9px;
+}
+
+.launcher-agent-task-action.approve {
+  color: #d9ffd2;
+}
+
+.launcher-agent-task-action.reject {
+  color: #ffd7d7;
+}
+
 .launcher-agent-task-main:hover,
-.launcher-agent-task-studio:hover {
+.launcher-agent-task-studio:hover,
+.launcher-agent-task-action:hover:not(:disabled) {
   color: #fff7df;
+}
+
+.launcher-agent-task-action:disabled {
+  cursor: default;
+  opacity: 0.54;
 }
 
 .launcher-agent-task-main span,

@@ -6,8 +6,8 @@ import {
   LauncherAgentTaskLight,
   launcherAgentTaskSummary,
 } from '../features/yachiyo-chat/components/LauncherAgentTaskLight';
-import { listYachiyoTasks, startYachiyoTask } from '../features/yachiyo-chat/api';
-import type { AgentTaskSnapshot } from '../features/yachiyo-chat/types';
+import { approveYachiyoTask, listYachiyoTasks, rejectYachiyoTask, startYachiyoTask } from '../features/yachiyo-chat/api';
+import type { AgentTaskSnapshot, ApprovalCardSnapshot } from '../features/yachiyo-chat/types';
 import type { AppView } from '../lib/view';
 import {
   LIVE2D_DEFAULT_RENDER_FPS,
@@ -137,6 +137,8 @@ export function LauncherView({ view }: { view: AppView }) {
     return (
       <Live2DLauncher
         agentTask={launcher.agentTask}
+        onApproveTaskApproval={launcher.approveAgentTaskApproval}
+        onRejectTaskApproval={launcher.rejectAgentTaskApproval}
         data={launcher.data}
         refresh={launcher.refresh}
         startAgentTask={launcher.startAgentTask}
@@ -146,6 +148,8 @@ export function LauncherView({ view }: { view: AppView }) {
   return (
     <BubbleLauncher
       agentTask={launcher.agentTask}
+      onApproveTaskApproval={launcher.approveAgentTaskApproval}
+      onRejectTaskApproval={launcher.rejectAgentTaskApproval}
       data={launcher.data}
       refresh={launcher.refresh}
       startAgentTask={launcher.startAgentTask}
@@ -201,7 +205,40 @@ function useLauncher(mode: 'bubble' | 'live2d') {
     return task;
   }, [data, mode, refresh]);
 
-  return { agentTask: publicAgentTask || data?.chat?.agent_task || null, data, refresh, startAgentTask };
+  const resolveAgentTaskApproval = useCallback(async (
+    task: AgentTaskSnapshot,
+    approval: ApprovalCardSnapshot,
+    approved: boolean,
+  ) => {
+    const taskId = String(task.task_id || '').trim();
+    if (!taskId) return null;
+    const approvalId = String(approval.approval_id || '').trim() || undefined;
+    const nextTask = approved
+      ? await approveYachiyoTask(taskId, approvalId)
+      : await rejectYachiyoTask(taskId, approvalId, 'Rejected from launcher task card');
+    setPublicAgentTask(nextTask);
+    await refresh();
+    return nextTask;
+  }, [refresh]);
+
+  const approveAgentTaskApproval = useCallback((
+    task: AgentTaskSnapshot,
+    approval: ApprovalCardSnapshot,
+  ) => resolveAgentTaskApproval(task, approval, true), [resolveAgentTaskApproval]);
+
+  const rejectAgentTaskApproval = useCallback((
+    task: AgentTaskSnapshot,
+    approval: ApprovalCardSnapshot,
+  ) => resolveAgentTaskApproval(task, approval, false), [resolveAgentTaskApproval]);
+
+  return {
+    agentTask: publicAgentTask || data?.chat?.agent_task || null,
+    approveAgentTaskApproval,
+    data,
+    refresh,
+    rejectAgentTaskApproval,
+    startAgentTask,
+  };
 }
 
 function launcherAgentTaskFromPublicTasks(
@@ -278,11 +315,15 @@ function handleContextMenu(event: MouseEvent, mode: LauncherMode) {
 
 function BubbleLauncher({
   agentTask: publicAgentTask,
+  onApproveTaskApproval,
+  onRejectTaskApproval,
   data,
   refresh,
   startAgentTask,
 }: {
   agentTask?: AgentTaskSnapshot | null;
+  onApproveTaskApproval: (task: AgentTaskSnapshot, approval: ApprovalCardSnapshot) => Promise<AgentTaskSnapshot | null>;
+  onRejectTaskApproval: (task: AgentTaskSnapshot, approval: ApprovalCardSnapshot) => Promise<AgentTaskSnapshot | null>;
   data: LauncherPayload | null;
   refresh: () => Promise<void>;
   startAgentTask: (prompt: string) => Promise<AgentTaskSnapshot | null>;
@@ -487,7 +528,12 @@ function BubbleLauncher({
           {summaryText}
         </span>
       </button>
-      <LauncherAgentTaskLight mode="bubble" task={agentTask} />
+      <LauncherAgentTaskLight
+        mode="bubble"
+        onApproveApproval={onApproveTaskApproval}
+        onRejectApproval={onRejectTaskApproval}
+        task={agentTask}
+      />
       {launcher.enable_quick_input !== false && quickInputVisible ? (
         <form ref={quickInputRef} className="bubble-quick-input" data-testid="bubble-launcher-quick-input" onSubmit={sendQuickMessage} onClick={(event) => event.stopPropagation()}>
           <input
@@ -566,11 +612,15 @@ function bubbleTitle(
 
 function Live2DLauncher({
   agentTask: publicAgentTask,
+  onApproveTaskApproval,
+  onRejectTaskApproval,
   data,
   refresh,
   startAgentTask,
 }: {
   agentTask?: AgentTaskSnapshot | null;
+  onApproveTaskApproval: (task: AgentTaskSnapshot, approval: ApprovalCardSnapshot) => Promise<AgentTaskSnapshot | null>;
+  onRejectTaskApproval: (task: AgentTaskSnapshot, approval: ApprovalCardSnapshot) => Promise<AgentTaskSnapshot | null>;
   data: LauncherPayload | null;
   refresh: () => Promise<void>;
   startAgentTask: (prompt: string) => Promise<AgentTaskSnapshot | null>;
@@ -1021,7 +1071,12 @@ function Live2DLauncher({
         </button>
       ) : null}
 
-      <LauncherAgentTaskLight mode="live2d" task={agentTask} />
+      <LauncherAgentTaskLight
+        mode="live2d"
+        onApproveApproval={onApproveTaskApproval}
+        onRejectApproval={onRejectTaskApproval}
+        task={agentTask}
+      />
 
       {launcher.enable_quick_input !== false && quickInputVisible ? (
         <form ref={quickInputRef} className="live2d-quick-input" data-testid="live2d-launcher-quick-input" onSubmit={sendQuickMessage} onClick={(event) => event.stopPropagation()}>
