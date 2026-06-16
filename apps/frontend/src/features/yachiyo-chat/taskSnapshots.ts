@@ -144,13 +144,21 @@ export function yachiyoTaskCacheKeys(task: AgentTaskSnapshot): string[] {
 }
 
 export function yachiyoTaskRunId(task: AgentTaskSnapshot): string {
-  const artifactRun = (task.artifacts || []).find((artifact) => artifact.run_id || artifact.source_run_id);
+  const approvalRunKeys = (task.pending_approvals || []).flatMap((approval) => [
+    approval.run_id,
+    approval.source_run_id,
+    approval.workflow_run_id,
+  ]);
+  const artifactRunKeys = (task.artifacts || []).flatMap((artifact) => [
+    artifact.run_id,
+    artifact.source_run_id,
+    artifact.workflow_run_id,
+  ]);
   return uniqueStrings([
     runIdFromStudioUrl(task.open_in_studio_url),
     ...(task.recent_events || []).map((event) => event.run_id),
-    ...(task.pending_approvals || []).map((approval) => approval.run_id || ''),
-    artifactRun?.run_id,
-    artifactRun?.source_run_id,
+    ...approvalRunKeys,
+    ...artifactRunKeys,
     task.task_id,
   ])[0] || '';
 }
