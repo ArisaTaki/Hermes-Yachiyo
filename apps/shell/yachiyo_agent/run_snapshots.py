@@ -11,6 +11,7 @@ from .artifacts import artifact_snapshot_from_payload, artifact_snapshots_from_p
 from .contracts import (
     AgentTaskSnapshot,
     ApprovalCardSnapshot,
+    ArtifactSnapshot,
     MemoryTraceSnapshot,
     PublicRunEvent,
     RunTimelineChildSnapshot,
@@ -805,8 +806,13 @@ def _merge_tool_trace_into_input_preview(
 
 def _artifact_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
     payload = dict(event.payload)
-    if event.event_type == "artifact.created":
-        artifact_payload = payload
+    if event.event_type in {"artifact.created", "agent.artifact.write"}:
+        artifact = payload.get("artifact")
+        artifact_payload = dict(artifact) if isinstance(artifact, Mapping) else payload
+        if event.event_type == "agent.artifact.write":
+            artifact_payload.setdefault("kind", "agent_artifact")
+            if event.detail:
+                artifact_payload.setdefault("path", event.detail)
     elif event.event_type in {"group.artifact.created", "group.shared_artifact.created"}:
         artifact = payload.get("artifact")
         artifact_payload = dict(artifact) if isinstance(artifact, Mapping) else payload
@@ -914,12 +920,18 @@ def _merge_approvals(*approval_lists):
 
 def _merge_artifacts(*artifact_lists):
     by_key = {}
+    ordered_keys = []
     for artifacts in artifact_lists:
         for artifact in artifacts or []:
             key = artifact.artifact_id or artifact.path or artifact.title
-            if key and key not in by_key:
+            if not key:
+                continue
+            if key not in by_key:
                 by_key[key] = artifact
-    return list(by_key.values())
+                ordered_keys.append(key)
+            else:
+                by_key[key] = _merge_artifact_snapshots(by_key[key], artifact)
+    return [by_key[key] for key in ordered_keys]
 
 
 def _merge_approval_snapshots(
@@ -948,6 +960,34 @@ def _merge_approval_snapshots(
         requested_at=current.requested_at or next_approval.requested_at,
         resolved_at=next_approval.resolved_at or current.resolved_at,
         open_in_studio_url=current.open_in_studio_url or next_approval.open_in_studio_url,
+    )
+
+
+def _merge_artifact_snapshots(
+    current: ArtifactSnapshot,
+    next_artifact: ArtifactSnapshot,
+) -> ArtifactSnapshot:
+    return ArtifactSnapshot(
+        artifact_id=current.artifact_id or next_artifact.artifact_id,
+        run_id=current.run_id or next_artifact.run_id,
+        source_run_id=current.source_run_id or next_artifact.source_run_id,
+        source_tool=current.source_tool or next_artifact.source_tool,
+        source_runnable_id=current.source_runnable_id or next_artifact.source_runnable_id,
+        source_runnable_name=current.source_runnable_name or next_artifact.source_runnable_name,
+        workflow_id=current.workflow_id or next_artifact.workflow_id,
+        workflow_run_id=current.workflow_run_id or next_artifact.workflow_run_id,
+        workflow_node_id=current.workflow_node_id or next_artifact.workflow_node_id,
+        workflow_node_label=current.workflow_node_label or next_artifact.workflow_node_label,
+        group_id=current.group_id or next_artifact.group_id,
+        group_run_id=current.group_run_id or next_artifact.group_run_id,
+        title=current.title or next_artifact.title,
+        kind=current.kind or next_artifact.kind,
+        path=current.path or next_artifact.path,
+        mime_type=current.mime_type or next_artifact.mime_type,
+        size_bytes=current.size_bytes if current.size_bytes is not None else next_artifact.size_bytes,
+        preview_text=current.preview_text or next_artifact.preview_text,
+        url=current.url or next_artifact.url,
+        created_at=current.created_at or next_artifact.created_at,
     )
 
 

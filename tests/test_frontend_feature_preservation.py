@@ -4434,6 +4434,8 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "function isApprovalRunEvent(eventType: string): boolean",
             "function approvalStatusFromRunEvent(eventType: string): ApprovalCardSnapshot['status']",
             "function artifactFromRunEvent(event: PublicRunEvent): Record<string, unknown> | null",
+            "artifactPayload = { ...(objectPreview(payload.artifact) || payload) };",
+            "artifactPayload.kind = artifactPayload.kind || 'agent_artifact';",
             "function mergeArtifactTraceContext(",
             "function isArtifactRunEvent(eventType: string): boolean",
             "source_runnable_id: publicRunEventPayloadString(source, 'source_runnable_id')",

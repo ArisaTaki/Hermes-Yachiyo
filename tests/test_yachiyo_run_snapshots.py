@@ -594,6 +594,83 @@ def test_run_timeline_derives_approvals_and_artifacts_from_events() -> None:
     assert timeline.artifacts[1].workflow_node_label == "Report"
 
 
+def test_run_timeline_projects_legacy_agent_artifact_write_events() -> None:
+    timeline = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "run-agent-artifact",
+            "status": "completed",
+            "timeline": [
+                {
+                    "event": "agent.artifact.write",
+                    "detail": "agent-context.md",
+                    "artifact": {
+                        "kind": "context",
+                        "path": "agent-context.md",
+                        "bytes": 21,
+                    },
+                    "created_at": "2026-06-15T00:00:00Z",
+                }
+            ],
+        }
+    )
+
+    assert len(timeline.artifacts) == 1
+    assert timeline.artifacts[0].artifact_id == "run-agent-artifact:agent-context.md"
+    assert timeline.artifacts[0].kind == "context"
+    assert timeline.artifacts[0].path == "agent-context.md"
+    assert timeline.artifacts[0].size_bytes == 21
+    assert timeline.artifacts[0].source_run_id == "run-agent-artifact"
+    assert timeline.artifacts[0].created_at == "2026-06-15T00:00:00Z"
+
+
+def test_run_snapshots_merge_artifact_payloads_with_event_trace_context() -> None:
+    payload = {
+        "run_id": "run-artifact-merge",
+        "status": "completed",
+        "artifacts": [
+            {
+                "kind": "markdown",
+                "path": "reports/final.md",
+                "bytes": 42,
+            }
+        ],
+        "events": [
+            {
+                "event_type": "artifact.created",
+                "payload": {
+                    "path": "reports/final.md",
+                    "source_tool": "artifact.write",
+                    "workflow_id": "workflow-1",
+                    "workflow_run_id": "workflow-run-1",
+                    "workflow_node_id": "report",
+                    "workflow_node_label": "Report",
+                    "group_id": "group-1",
+                    "group_run_id": "group-run-1",
+                    "member_agent_id": "agent-writer",
+                    "member_agent_name": "Writer",
+                },
+                "created_at": "2026-06-15T00:00:01Z",
+            },
+        ],
+    }
+
+    timeline = run_timeline_snapshot_from_payload(payload)
+
+    assert len(timeline.artifacts) == 1
+    assert timeline.artifacts[0].kind == "markdown"
+    assert timeline.artifacts[0].path == "reports/final.md"
+    assert timeline.artifacts[0].size_bytes == 42
+    assert timeline.artifacts[0].source_tool == "artifact.write"
+    assert timeline.artifacts[0].source_runnable_id == "agent-writer"
+    assert timeline.artifacts[0].source_runnable_name == "Writer"
+    assert timeline.artifacts[0].workflow_id == "workflow-1"
+    assert timeline.artifacts[0].workflow_run_id == "workflow-run-1"
+    assert timeline.artifacts[0].workflow_node_id == "report"
+    assert timeline.artifacts[0].workflow_node_label == "Report"
+    assert timeline.artifacts[0].group_id == "group-1"
+    assert timeline.artifacts[0].group_run_id == "group-run-1"
+
+
 def test_run_timeline_merges_approval_lifecycle_events_into_stable_cards() -> None:
     timeline = run_timeline_snapshot_from_payload(
         {

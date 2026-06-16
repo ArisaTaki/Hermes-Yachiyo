@@ -269,7 +269,11 @@ function artifactFromRunEvent(event: PublicRunEvent): Record<string, unknown> | 
   const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
   let artifactPayload: Record<string, unknown> | null = null;
   if (event.event_type === 'artifact.created' || event.event_type === 'agent.artifact.write') {
-    artifactPayload = { ...payload };
+    artifactPayload = { ...(objectPreview(payload.artifact) || payload) };
+    if (event.event_type === 'agent.artifact.write') {
+      artifactPayload.kind = artifactPayload.kind || 'agent_artifact';
+      artifactPayload.path = artifactPayload.path || event.detail;
+    }
   } else if (event.event_type === 'group.artifact.created' || event.event_type === 'group.shared_artifact.created') {
     artifactPayload = { ...(objectPreview(payload.artifact) || payload) };
     artifactPayload.kind = artifactPayload.kind || 'group_artifact';
