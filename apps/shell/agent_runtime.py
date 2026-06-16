@@ -517,54 +517,10 @@ class NativeRunEngine(
                 runtime_timeline_factory=runtime_timeline_factory,
             )
         )
-        tooling = _build_runtime_tooling(
-            normalize_tool_name=_normalize_tool_name,
-            input_preview=_tool_input_preview,
-            run_budget=self.runtime_run_budget,
-            validate_tool_payload=RuntimeToolOperations.validate_tool_payload,
-            limit_tool_result=_runtime_tool_result_limiter(
-                limits=lambda: self.runtime_limits,
-                redact_json_value=_redact_json_value,
-            ),
-            timeline_factory=runtime_timeline_factory,
-            tool_call_events=self.runtime_tool_call_events,
-            trace_events=self.runtime_trace_events,
-            append_run_event=self.append_run_event,
-            allows_tool=PolicyGate.allows_tool,
-            user_goal_from_messages=_user_goal_from_agent_messages,
-            goal_disallows_tool=_agent_goal_disallows_tool,
-            pending_approval_builder=self.tool_pending_approvals,
-            call_agent_tool=self._call_agent_tool,
-        )
-        self._install_runtime_tooling(tooling)
-        self.tool_operations = RuntimeToolOperations(
-            tool_request_runner=self.tool_request_runner,
-            tool_call_executor=self.tool_call_executor,
-        )
-        self._install_runtime_custom_api_agent_loop(
-            RuntimeCustomApiAgentLoop(
-                agent_model_config_private=self._agent_model_config_private,
-                compile_agent_runtime=self._compile_agent_runtime,
-                run_budget=self.runtime_run_budget,
-                check_context_budget=runtime_context_budget_checker,
-                tool_schemas=RuntimeToolOperations.model_tool_schemas,
-                normalize_tool_iteration=_normalize_tool_iteration,
-                max_tool_iterations=_MAX_AGENT_TOOL_ITERATIONS,
-                operating_doctrine=_MARKET_AGENT_OPERATING_DOCTRINE,
-                memory_tool_names=_MEMORY_TOOL_NAMES,
-                future_task_tool_names=_FUTURE_TASK_TOOL_NAMES,
-                call_model=self.model_profile_chat_adapter.call,
-                coalesce_model_message=_coalesce_model_message,
-                message_visible_content_text=_message_visible_content_text,
-                model_message_metadata=_model_message_metadata,
-                tool_requests_from_message=self._tool_requests_from_message,
-                timeline_factory=runtime_timeline_factory,
-                limit_model_output=runtime_model_output_limiter,
-                model_output_text_factory=_ModelOutputText,
-                tool_loop_projection=self.tool_loop_projection,
-                run_tool_requests=self._run_tool_requests,
-                error_type=AgentRuntimeError,
-            )
+        self._install_runtime_tooling_and_custom_agent_loop(
+            runtime_timeline_factory=runtime_timeline_factory,
+            runtime_context_budget_checker=runtime_context_budget_checker,
+            runtime_model_output_limiter=runtime_model_output_limiter,
         )
         agent_services = _build_runtime_agent_services(
             get_skill=self.get_skill,

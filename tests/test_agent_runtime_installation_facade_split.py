@@ -28,6 +28,7 @@ def test_runtime_installation_facade_mixin_remains_exported_from_legacy_module()
         "_install_runtime_memory_and_core",
         "_install_runtime_agent_chat_entrypoints",
         "_install_runtime_run_budget_and_main_chat_model",
+        "_install_runtime_tooling_and_custom_agent_loop",
         "_install_runtime_engine_state",
         "_install_runtime_recorders",
         "_install_runtime_definition_services",
@@ -243,3 +244,69 @@ def test_installation_facade_installs_run_budget_and_main_chat_model(monkeypatch
     assert engine.main_chat_model.kwargs["timeline_factory"] == "timeline-factory"
     assert engine.main_chat_model.kwargs["call_model"] == "model-call"
     assert engine.main_chat_model.kwargs["terminal_run_or_none"] == "terminal-run-or-none"
+
+
+def test_installation_facade_installs_tooling_and_custom_agent_loop(monkeypatch) -> None:
+    class CapturedRuntimeToolOperations:
+        model_tool_schemas = "model-tool-schemas"
+
+        @staticmethod
+        def validate_tool_payload(payload):
+            return payload
+
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+
+    class CapturedCustomApiAgentLoop:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+
+    def fake_build_runtime_tooling(**kwargs):
+        return SimpleNamespace(
+            kwargs=kwargs,
+            tool_loop_projection="tool-loop-projection",
+            tool_call_executor="tool-call-executor",
+            tool_request_runner="tool-request-runner",
+        )
+
+    monkeypatch.setattr(agent_runtime, "RuntimeToolOperations", CapturedRuntimeToolOperations)
+    monkeypatch.setattr(agent_runtime, "RuntimeCustomApiAgentLoop", CapturedCustomApiAgentLoop)
+    monkeypatch.setattr(agent_runtime, "_build_runtime_tooling", fake_build_runtime_tooling)
+    monkeypatch.setattr(
+        agent_runtime,
+        "_runtime_tool_result_limiter",
+        lambda **kwargs: ("tool-result-limiter", kwargs),
+    )
+
+    engine = object.__new__(agent_runtime.NativeRunEngine)
+    engine.runtime_run_budget = "run-budget"
+    engine.runtime_limits = "runtime-limits"
+    engine.runtime_tool_call_events = "tool-call-events"
+    engine.runtime_trace_events = "trace-events"
+    engine.append_run_event = "append-run-event"
+    engine.tool_pending_approvals = "pending-approval-builder"
+    engine._call_agent_tool = "call-agent-tool"
+    engine._agent_model_config_private = "agent-model-config-private"
+    engine._compile_agent_runtime = "compile-agent-runtime"
+    engine.model_profile_chat_adapter = SimpleNamespace(call="model-call")
+    engine._tool_requests_from_message = "tool-requests-from-message"
+    engine._run_tool_requests = "run-tool-requests"
+
+    engine._install_runtime_tooling_and_custom_agent_loop(
+        runtime_timeline_factory="timeline-factory",
+        runtime_context_budget_checker="context-budget-checker",
+        runtime_model_output_limiter="model-output-limiter",
+    )
+
+    assert engine.tool_loop_projection == "tool-loop-projection"
+    assert engine.tool_call_executor == "tool-call-executor"
+    assert engine.tool_request_runner == "tool-request-runner"
+    assert isinstance(engine.tool_operations, CapturedRuntimeToolOperations)
+    assert engine.tool_operations.kwargs["tool_request_runner"] == "tool-request-runner"
+    assert engine.tool_operations.kwargs["tool_call_executor"] == "tool-call-executor"
+    assert isinstance(engine.custom_api_agent_loop, CapturedCustomApiAgentLoop)
+    assert engine.custom_api_agent_loop.kwargs["run_budget"] == "run-budget"
+    assert engine.custom_api_agent_loop.kwargs["check_context_budget"] == "context-budget-checker"
+    assert engine.custom_api_agent_loop.kwargs["tool_schemas"] == "model-tool-schemas"
+    assert engine.custom_api_agent_loop.kwargs["limit_model_output"] == "model-output-limiter"
+    assert engine.custom_api_agent_loop.kwargs["tool_loop_projection"] == "tool-loop-projection"
