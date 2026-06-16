@@ -61,8 +61,7 @@ class YachiyoAgentService:
         return agent_task_snapshot_from_payload(self._runtime_port.get_task_snapshot(task_id))
 
     def get_task_timeline(self, task_id: str) -> RunTimelineSnapshot:
-        timeline = run_timeline_snapshot_from_payload(self._runtime_port.get_task_timeline(task_id))
-        return timeline.model_copy(update={"events": _chat_visible_events(timeline.events)})
+        return _chat_timeline_snapshot_from_payload(self._runtime_port.get_task_timeline(task_id))
 
     def get_task_event_stream(self, task_id: str) -> Iterable[PublicRunEvent]:
         raw_events = self._runtime_port.get_task_event_stream(task_id)
@@ -189,6 +188,17 @@ def _payload_run_id(payload: Any) -> str:
     if not isinstance(payload, Mapping):
         return ""
     return str(payload.get("run_id") or "").strip()
+
+
+def _chat_timeline_snapshot_from_payload(payload: Mapping[str, Any]) -> RunTimelineSnapshot:
+    timeline = run_timeline_snapshot_from_payload(payload)
+    visible_events = _chat_visible_events(timeline.events)
+    clean_payload = dict(payload)
+    clean_payload.pop("run_events", None)
+    clean_payload.pop("recent_events", None)
+    clean_payload.pop("timeline", None)
+    clean_payload["events"] = [event.model_dump() for event in visible_events]
+    return run_timeline_snapshot_from_payload(clean_payload)
 
 
 def _chat_visible_events(events: list[PublicRunEvent]) -> list[PublicRunEvent]:

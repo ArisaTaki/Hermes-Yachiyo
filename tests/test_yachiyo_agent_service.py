@@ -199,6 +199,15 @@ class _SensitiveTaskRuntimePort(_FakeRuntimePort):
                     "visibility": "internal",
                     "payload": {"step": "internal"},
                 },
+                {
+                    "event_type": "agent.tool.call",
+                    "sequence": 4,
+                    "visibility": "internal",
+                    "payload": {
+                        "tool": "workspace.read",
+                        "input_preview": {"path": "internal.md"},
+                    },
+                },
             ],
         )
 
@@ -223,7 +232,16 @@ class _SensitiveTaskRuntimePort(_FakeRuntimePort):
                     "visibility": "internal",
                     "payload": {"step": "internal"},
                 },
-                {"event_type": "task.completed", "sequence": 4, "payload": {"step": "done"}},
+                {
+                    "event_type": "agent.tool.call",
+                    "sequence": 4,
+                    "visibility": "internal",
+                    "payload": {
+                        "tool": "workspace.read",
+                        "input_preview": {"path": "internal.md"},
+                    },
+                },
+                {"event_type": "task.completed", "sequence": 5, "payload": {"step": "done"}},
             ],
         }
 
