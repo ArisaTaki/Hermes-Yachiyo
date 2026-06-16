@@ -41,6 +41,7 @@ from apps.shell.agent.runtime.model_calling import (
     RuntimeOpenAICompatibleChatAdapter,
     build_runtime_model_call_adapters,
 )
+from apps.shell.agent.runtime.model_compat import runtime_model_compat_provider
 from apps.shell.agent.runtime.model_messages import model_output_metadata
 from apps.shell.agent.runtime.approval_services import (
     build_runtime_approval_services,
@@ -79,21 +80,16 @@ from apps.shell.agent.runtime.workspace_policy import RuntimeWorkspacePolicyServ
 from apps.shell.agent.tools import cancel_terminal_process_groups
 
 
-def _legacy_agent_runtime_module() -> Any:
-    from apps.shell import agent_runtime
-
-    return agent_runtime
-
-
 class RuntimeInstallationFacadeMixin:
     """Keeps legacy runtime collaborator installation methods."""
 
     def _install_runtime_model_adapters(self) -> None:
+        model_provider = runtime_model_compat_provider()
         adapters = build_runtime_model_call_adapters(
-            chat_message_provider=lambda: _legacy_agent_runtime_module().openai_compatible_chat_message,
-            timeout_provider=lambda: _legacy_agent_runtime_module().read_openai_compatible_chat_timeout(),
-            urlopen=lambda *args, **kwargs: _legacy_agent_runtime_module().urlopen_with_bundled_ca(*args, **kwargs),
-            redact_error=lambda value: _legacy_agent_runtime_module().redact_secrets(value),
+            chat_message_provider=model_provider.chat_message,
+            timeout_provider=model_provider.chat_timeout,
+            urlopen=model_provider.urlopen,
+            redact_error=model_provider.redact_error,
         )
         self.model_profile_chat_adapter = adapters.model_profile_chat_adapter
         self.openai_compatible_chat_adapter = adapters.openai_compatible_chat_adapter
@@ -218,12 +214,13 @@ class RuntimeInstallationFacadeMixin:
         self.agent_run_coordinator = setup.agent_run_coordinator
 
     def _install_runtime_memory_and_core(self) -> Any:
+        model_provider = runtime_model_compat_provider()
         setup = build_runtime_memory_core_setup(
             conn=self._conn,
             db_lock=self._db_lock,
             run_events=self.run_events,
-            profile_service_factory=lambda: _legacy_agent_runtime_module().get_model_profile_service(),
-            supports_openai_compatible_api=_legacy_agent_runtime_module().supports_openai_compatible_api,
+            profile_service_factory=model_provider.profile_service,
+            supports_openai_compatible_api=model_provider.supports_openai_compatible_api,
         )
         self._install_runtime_memory_services(setup.memory_services)
         self._install_runtime_core_services(setup.core_services)
@@ -234,6 +231,7 @@ class RuntimeInstallationFacadeMixin:
         *,
         runtime_timeline_factory: Any,
     ) -> None:
+        model_provider = runtime_model_compat_provider()
         setup = build_runtime_agent_chat_entrypoint_setup(
             get_agent_private=lambda agent_id: self._get_agent_private(agent_id),
             validate_agent_run_readiness=lambda agent: self._validate_agent_run_readiness(agent),
@@ -267,8 +265,8 @@ class RuntimeInstallationFacadeMixin:
             compile_tool_policy=self._compile_tool_policy,
             compile_workspace_policy=self._compile_workspace_policy,
             trust_workspace_from_policy=self._trust_workspace_from_policy,
-            profile_service_factory=lambda: _legacy_agent_runtime_module().get_model_profile_service(),
-            workspace_status=lambda: _legacy_agent_runtime_module().get_workspace_status(),
+            profile_service_factory=model_provider.profile_service,
+            workspace_status=model_provider.workspace_status,
         )
         self.agent_run_async_coordinator = setup.agent_run_async_coordinator
         self.agent_model_tester = setup.agent_model_tester
@@ -283,12 +281,11 @@ class RuntimeInstallationFacadeMixin:
         *,
         runtime_timeline_factory: Any,
     ) -> tuple[Any, Any]:
+        model_provider = runtime_model_compat_provider()
         setup = build_runtime_main_chat_model_setup(
             runtime_limits=lambda: self.runtime_limits,
             get_run=self.get_run,
-            default_profile_id=lambda capability: str(
-                _legacy_agent_runtime_module().get_model_profile_service().get_defaults().get(capability) or ""
-            ).strip(),
+            default_profile_id=model_provider.default_profile_id,
             model_profile_config_private=lambda profile_id, capability="chat": self._model_profile_config_private(
                 profile_id,
                 capability=capability,
@@ -383,6 +380,7 @@ class RuntimeInstallationFacadeMixin:
         )
 
     def _install_runtime_approval_runtime_services(self) -> None:
+        model_provider = runtime_model_compat_provider()
         setup = build_runtime_approval_runtime_services(
             get_run=lambda run_id: self.get_run(run_id),
             pending_approval_private=lambda run_id: self.runs.pending_approval_private(run_id),
@@ -404,9 +402,7 @@ class RuntimeInstallationFacadeMixin:
                 pending_approval,
                 **kwargs,
             ),
-            default_chat_profile_id=lambda: str(
-                _legacy_agent_runtime_module().get_model_profile_service().get_defaults().get("chat") or ""
-            ).strip(),
+            default_chat_profile_id=model_provider.chat_default_profile_id,
             project_agent_running=lambda running: self._project_agent_approval_resume_running(running),
             project_agent_completed=lambda context, result_text: self._project_agent_approval_resume_completed(
                 context,
@@ -432,10 +428,11 @@ class RuntimeInstallationFacadeMixin:
         runtime_timeline_factory: Any,
         runtime_context_budget_checker: Any,
     ) -> None:
+        model_provider = runtime_model_compat_provider()
         self._install_runtime_main_chat_model_loop(
             build_runtime_main_chat_model_loop_runner(
                 get_run=self.get_run,
-                profile_service_factory=lambda: _legacy_agent_runtime_module().get_model_profile_service(),
+                profile_service_factory=model_provider.profile_service,
                 model_profile_config_private=lambda profile_id: self._model_profile_config_private(
                     profile_id,
                     capability="chat",
