@@ -5,11 +5,31 @@ from __future__ import annotations
 from typing import Any
 
 from apps.shell.agent.runtime.credentials import RuntimeCredentialService
+from apps.shell.agent.runtime.model_calling import (
+    RuntimeModelProfileChatAdapter,
+    RuntimeOpenAICompatibleChatAdapter,
+)
 from apps.shell.agent.runtime.run_cancellation import RuntimeRunCancellationCoordinator
+
+
+def _legacy_agent_runtime_module() -> Any:
+    from apps.shell import agent_runtime
+
+    return agent_runtime
 
 
 class RuntimeInstallationFacadeMixin:
     """Keeps legacy runtime collaborator installation methods."""
+
+    def _install_runtime_model_adapters(self) -> None:
+        self.model_profile_chat_adapter = RuntimeModelProfileChatAdapter(
+            chat_message_provider=lambda: _legacy_agent_runtime_module().openai_compatible_chat_message,
+        )
+        self.openai_compatible_chat_adapter = RuntimeOpenAICompatibleChatAdapter(
+            timeout_provider=lambda: _legacy_agent_runtime_module().read_openai_compatible_chat_timeout(),
+            urlopen=lambda *args, **kwargs: _legacy_agent_runtime_module().urlopen_with_bundled_ca(*args, **kwargs),
+            redact_error=lambda value: _legacy_agent_runtime_module().redact_secrets(value),
+        )
 
     def _install_runtime_engine_state(self, state: Any) -> None:
         self.workspace_dir = state.workspace_dir

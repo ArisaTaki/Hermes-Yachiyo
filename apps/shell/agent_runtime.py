@@ -500,14 +500,7 @@ class NativeRunEngine(
         credential_store: CredentialStore | None = None,
         seed_templates: bool = True,
     ) -> None:
-        self.model_profile_chat_adapter = RuntimeModelProfileChatAdapter(
-            chat_message_provider=lambda: openai_compatible_chat_message,
-        )
-        self.openai_compatible_chat_adapter = RuntimeOpenAICompatibleChatAdapter(
-            timeout_provider=lambda: read_openai_compatible_chat_timeout(),
-            urlopen=lambda *args, **kwargs: urlopen_with_bundled_ca(*args, **kwargs),
-            redact_error=lambda value: redact_secrets(value),
-        )
+        self._install_runtime_model_adapters()
         engine_state = _build_runtime_engine_state(
             db_path=db_path,
             workspace_dir=workspace_dir,

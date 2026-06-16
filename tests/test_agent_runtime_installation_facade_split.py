@@ -9,6 +9,10 @@ from apps.shell import agent_runtime
 from apps.shell.agent.runtime.credentials import RuntimeCredentialService
 from apps.shell.agent.runtime.engine_state import build_runtime_engine_state
 from apps.shell.agent.runtime.installation_facade import RuntimeInstallationFacadeMixin
+from apps.shell.agent.runtime.model_calling import (
+    RuntimeModelProfileChatAdapter,
+    RuntimeOpenAICompatibleChatAdapter,
+)
 from apps.shell.agent.runtime.run_cancellation import RuntimeRunCancellationCoordinator
 from apps.shell.credential_store import MemoryCredentialStore
 
@@ -17,6 +21,7 @@ def test_runtime_installation_facade_mixin_remains_exported_from_legacy_module()
     assert agent_runtime.RuntimeInstallationFacadeMixin is RuntimeInstallationFacadeMixin
     assert issubclass(agent_runtime.NativeRunEngine, RuntimeInstallationFacadeMixin)
     for method_name in (
+        "_install_runtime_model_adapters",
         "_install_runtime_engine_state",
         "_install_runtime_recorders",
         "_install_runtime_definition_services",
@@ -45,6 +50,42 @@ def test_runtime_installation_facade_mixin_remains_exported_from_legacy_module()
         "_install_runtime_shutdown",
     ):
         assert method_name not in agent_runtime.NativeRunEngine.__dict__
+
+
+def test_installation_facade_installs_model_adapters(monkeypatch) -> None:
+    calls: list[tuple[str, str, str, list[dict[str, str]]]] = []
+
+    def fake_chat(
+        base_url: str,
+        model: str,
+        api_key: str,
+        messages: list[dict[str, str]],
+        **_kwargs,
+    ) -> dict[str, str]:
+        calls.append((base_url, model, api_key, messages))
+        return {"content": "patched"}
+
+    monkeypatch.setattr(agent_runtime, "openai_compatible_chat_message", fake_chat)
+    engine = object.__new__(agent_runtime.NativeRunEngine)
+
+    engine._install_runtime_model_adapters()
+
+    assert isinstance(engine.model_profile_chat_adapter, RuntimeModelProfileChatAdapter)
+    assert isinstance(engine.openai_compatible_chat_adapter, RuntimeOpenAICompatibleChatAdapter)
+    assert engine.model_profile_chat_adapter.call(
+        "https://api.example.test/v1",
+        "demo-model",
+        "sk-test",
+        [{"role": "user", "content": "hi"}],
+    ) == {"content": "patched"}
+    assert calls == [
+        (
+            "https://api.example.test/v1",
+            "demo-model",
+            "sk-test",
+            [{"role": "user", "content": "hi"}],
+        )
+    ]
 
 
 def test_installation_facade_installs_engine_state_under_legacy_attributes(tmp_path) -> None:
