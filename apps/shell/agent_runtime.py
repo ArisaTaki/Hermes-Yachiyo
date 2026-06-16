@@ -1999,6 +1999,88 @@ class NativeRunEngine:
         summary: str | None = None,
     ) -> None:
         self.run_groups.update(run_group_id, status=status, summary=summary)
+        self._record_run_group_terminal_event(run_group_id, status=status)
+
+    def _record_run_group_terminal_event(
+        self,
+        run_group_id: str,
+        *,
+        status: str | None = None,
+    ) -> None:
+        event_type = self._run_group_terminal_event_type(status)
+        if not event_type:
+            return
+        try:
+            group = self.get_run_group(run_group_id)
+        except KeyError:
+            return
+        child_run_ids = [
+            str(item)
+            for item in group.get("child_run_ids") or []
+            if str(item)
+        ]
+        if not child_run_ids or self._run_group_event_recorded(
+            child_run_ids,
+            event_type=event_type,
+            run_group_id=run_group_id,
+        ):
+            return
+        self.append_run_event(
+            child_run_ids[0],
+            event_type,
+            {
+                "child_run_ids": child_run_ids,
+                "group_run_id": run_group_id,
+                "objective": str(group.get("summary") or group.get("title") or ""),
+                "participant_count": len(child_run_ids),
+                "run_group_id": run_group_id,
+                "source": str(group.get("source") or ""),
+                "status": str(group.get("status") or status or ""),
+                "summary": str(group.get("summary") or ""),
+                "title": str(group.get("title") or ""),
+            },
+        )
+
+    def _run_group_event_recorded(
+        self,
+        run_ids: list[str],
+        *,
+        event_type: str,
+        run_group_id: str,
+    ) -> bool:
+        for run_id in run_ids:
+            try:
+                events = self.list_run_events(
+                    run_id,
+                    include_internal=True,
+                    limit=1000,
+                )["events"]
+            except KeyError:
+                continue
+            for event in events:
+                payload = event.get("payload") if isinstance(event, dict) else {}
+                if (
+                    event.get("event_type") == event_type
+                    and isinstance(payload, dict)
+                    and str(
+                        payload.get("run_group_id")
+                        or payload.get("group_run_id")
+                        or ""
+                    ) == run_group_id
+                ):
+                    return True
+        return False
+
+    @staticmethod
+    def _run_group_terminal_event_type(status: str | None) -> str:
+        clean_status = str(status or "").strip()
+        if clean_status == "completed":
+            return "group.run.completed"
+        if clean_status == "failed":
+            return "group.run.failed"
+        if clean_status == "cancelled":
+            return "group.run.cancelled"
+        return ""
 
     def _insert_run(
         self,

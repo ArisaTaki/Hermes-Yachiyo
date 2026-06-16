@@ -9814,6 +9814,101 @@ def test_run_group_repository_manages_membership_and_cleanup(tmp_path):
         service.close()
 
 
+def test_update_run_group_records_terminal_run_event(tmp_path):
+    service = make_service(tmp_path)
+    try:
+        group = service.run_groups.insert(title="Grouped Runs", source="workflow")
+        first = service.runs.insert(
+            kind="workflow_run",
+            runnable_id="workflow_group_root",
+            user_goal="Ship workflow",
+            run_group_id=group["run_group_id"],
+        )
+        second = service.runs.insert(
+            kind="agent_run",
+            runnable_id="agent_group_child",
+            user_goal="Ship workflow",
+            run_group_id=group["run_group_id"],
+        )
+
+        service._update_run_group(
+            group["run_group_id"],
+            status="completed",
+            summary="Workflow complete",
+        )
+        service._update_run_group(
+            group["run_group_id"],
+            status="completed",
+            summary="Workflow complete",
+        )
+
+        first_events = service.list_run_events(first["run_id"])["events"]
+        second_events = service.list_run_events(second["run_id"])["events"]
+        group_events = [
+            event
+            for event in first_events
+            if event["event_type"] == "group.run.completed"
+        ]
+
+        assert len(group_events) == 1
+        assert second_events == []
+        assert group_events[0]["payload"]["run_group_id"] == group["run_group_id"]
+        assert group_events[0]["payload"]["group_run_id"] == group["run_group_id"]
+        assert group_events[0]["payload"]["child_run_ids"] == [
+            first["run_id"],
+            second["run_id"],
+        ]
+        assert group_events[0]["payload"]["status"] == "completed"
+        assert group_events[0]["payload"]["summary"] == "Workflow complete"
+        assert group_events[0]["payload"]["participant_count"] == 2
+    finally:
+        service.close()
+
+
+def test_update_run_group_records_failed_and_cancelled_run_events(tmp_path):
+    service = make_service(tmp_path)
+    try:
+        failed_group = service.run_groups.insert(title="Failed group", source="workflow")
+        failed_run = service.runs.insert(
+            kind="workflow_run",
+            runnable_id="workflow_failed",
+            user_goal="Ship workflow",
+            run_group_id=failed_group["run_group_id"],
+        )
+        cancelled_group = service.run_groups.insert(title="Cancelled group", source="workflow")
+        cancelled_run = service.runs.insert(
+            kind="workflow_run",
+            runnable_id="workflow_cancelled",
+            user_goal="Ship workflow",
+            run_group_id=cancelled_group["run_group_id"],
+        )
+
+        service._update_run_group(
+            failed_group["run_group_id"],
+            status="failed",
+            summary="Workflow failed",
+        )
+        service._update_run_group(
+            cancelled_group["run_group_id"],
+            status="cancelled",
+            summary="Workflow cancelled",
+        )
+
+        failed_events = [
+            event["event_type"]
+            for event in service.list_run_events(failed_run["run_id"])["events"]
+        ]
+        cancelled_events = [
+            event["event_type"]
+            for event in service.list_run_events(cancelled_run["run_id"])["events"]
+        ]
+
+        assert "group.run.failed" in failed_events
+        assert "group.run.cancelled" in cancelled_events
+    finally:
+        service.close()
+
+
 def test_run_group_repository_redacts_summary_projection(tmp_path):
     service = make_service(tmp_path)
     leaked_secret = "sk-run-group-summary-secret123456"
