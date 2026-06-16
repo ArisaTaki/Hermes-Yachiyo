@@ -90,6 +90,22 @@ async def get_task_events(
         raise HTTPException(status_code=404, detail="Task 不存在") from exc
 
 
+async def read_task_artifact(
+    task_id: str,
+    artifact_path: str,
+    http_request: Request | None = None,
+) -> dict[str, Any]:
+    try:
+        artifact = await asyncio.to_thread(
+            agent_service(http_request).read_task_artifact,
+            task_id,
+            artifact_path,
+        )
+        return snapshot(artifact)
+    except (AgentRuntimeError, KeyError) as exc:
+        raise HTTPException(status_code=404, detail="Artifact 不存在") from exc
+
+
 async def approve_task(
     task_id: str,
     request: TaskApprovalRequest | None = None,

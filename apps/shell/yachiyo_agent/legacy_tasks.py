@@ -99,6 +99,16 @@ class LegacyRuntimePort:
         run = self._runtime.get_run(run_id)
         return {"run_id": run_id, "events": run.get("timeline") or []}
 
+    def read_task_artifact(self, task_id: str, artifact_path: str) -> dict[str, Any]:
+        run_id = self._run_id_for_task(task_id)
+        payload = self._runtime.read_run_artifact(run_id, artifact_path)
+        return {
+            **payload,
+            "run_id": payload.get("run_id") or run_id,
+            "task_id": payload.get("task_id") or task_id,
+            "path": payload.get("path") or artifact_path,
+        }
+
     def list_recent_tasks(self, conversation_id: str | None = None) -> list[dict[str, Any]]:
         payload = self._runtime.list_runs(30)
         runs = payload.get("runs") or []

@@ -899,6 +899,9 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "RunEventPageSnapshot",
             "after_sequence: String(Math.max(0, afterSequence))",
             "`/yachiyo/tasks/${encodeURIComponent(taskId)}/events?${query.toString()}`",
+            "readYachiyoTaskArtifact",
+            "ArtifactContentSnapshot",
+            "`/yachiyo/tasks/${encodeURIComponent(taskId)}/artifacts/${encodedPath}`",
             "getYachiyoChatRunTaskSnapshot",
             "approveYachiyoChatRunApproval",
             "rejectYachiyoChatRunApproval",
@@ -918,6 +921,7 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "/yachiyo/studio/agents",
             "/yachiyo/studio/workflows",
             "/yachiyo/studio/runs/${encodeURIComponent(runId)}",
+            "/yachiyo/studio/runs/${encodeURIComponent(taskId)}",
         ],
     )
 
@@ -1064,6 +1068,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "export type GroupRunSnapshot",
             "export type PublicRunEvent",
             "export type RunEventPageSnapshot",
+            "export type ArtifactContentSnapshot",
             "export type ToolCallSnapshot",
             "export type RunTimelineSnapshot",
             "export type WorkflowRunSnapshot",
@@ -1138,6 +1143,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "ChatRunnableCatalogSnapshot",
             "PublicRunEvent",
             "RunEventPageSnapshot",
+            "ArtifactContentSnapshot",
             "RunTimelineSnapshot",
             "WorkflowSnapshot",
             "ApprovalCardSnapshot",

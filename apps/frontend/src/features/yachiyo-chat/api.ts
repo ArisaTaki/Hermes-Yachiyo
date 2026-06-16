@@ -1,6 +1,7 @@
 import { apiGet, apiPost } from '../../lib/bridge';
 import type {
   AgentTaskSnapshot,
+  ArtifactContentSnapshot,
   ChatRunnableCatalogSnapshot,
   RunEventPageSnapshot,
   RunTimelineSnapshot,
@@ -40,6 +41,14 @@ export async function listYachiyoTaskEvents(
     limit: String(Math.max(1, Math.min(500, limit))),
   });
   return apiGet(`/yachiyo/tasks/${encodeURIComponent(taskId)}/events?${query.toString()}`);
+}
+
+export async function readYachiyoTaskArtifact(
+  taskId: string,
+  path: string,
+): Promise<ArtifactContentSnapshot> {
+  const encodedPath = path.split('/').map((part) => encodeURIComponent(part)).join('/');
+  return apiGet(`/yachiyo/tasks/${encodeURIComponent(taskId)}/artifacts/${encodedPath}`);
 }
 
 export async function listYachiyoChatRunnableCatalog(): Promise<ChatRunnableCatalogSnapshot> {

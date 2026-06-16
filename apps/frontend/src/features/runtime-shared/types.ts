@@ -63,6 +63,16 @@ export type ArtifactSnapshot = {
   created_at?: string;
 };
 
+export type ArtifactContentSnapshot = {
+  ok?: boolean;
+  run_id?: string | null;
+  task_id?: string | null;
+  path: string;
+  content?: string;
+  mime_type?: string | null;
+  truncated?: boolean;
+};
+
 export type ToolCallSnapshot = {
   tool_call_id: string;
   run_id?: string | null;

@@ -87,6 +87,16 @@ class ArtifactSnapshot(_PublicSnapshot):
     created_at: str = ""
 
 
+class ArtifactContentSnapshot(_PublicSnapshot):
+    ok: bool = True
+    run_id: str | None = None
+    task_id: str | None = None
+    path: str
+    content: str = ""
+    mime_type: str | None = None
+    truncated: bool = False
+
+
 class ToolCallSnapshot(_PublicSnapshot):
     tool_call_id: str
     run_id: str | None = None

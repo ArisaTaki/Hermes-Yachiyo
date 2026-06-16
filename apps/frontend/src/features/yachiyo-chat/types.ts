@@ -4,6 +4,7 @@ export type {
   AgentDefinitionSnapshot,
   AgentTaskSnapshot,
   ApprovalCardSnapshot,
+  ArtifactContentSnapshot,
   ArtifactSnapshot,
   ChatRunnableCatalogSnapshot,
   PublicRunEvent,

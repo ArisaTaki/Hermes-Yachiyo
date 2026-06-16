@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from .contracts import ArtifactSnapshot
+from .contracts import ArtifactContentSnapshot, ArtifactSnapshot
 
 
 def artifact_snapshot_from_payload(
@@ -48,6 +48,28 @@ def artifact_snapshots_from_payloads(
     if not isinstance(payloads, list):
         return []
     return [artifact_snapshot_from_payload(item, run_id=run_id) for item in payloads]
+
+
+def artifact_content_snapshot_from_payload(
+    payload: Mapping[str, Any] | ArtifactContentSnapshot,
+    *,
+    run_id: str = "",
+    task_id: str = "",
+    path: str = "",
+) -> ArtifactContentSnapshot:
+    if isinstance(payload, ArtifactContentSnapshot):
+        return payload
+
+    artifact_path = _text(payload.get("path") or path)
+    return ArtifactContentSnapshot(
+        ok=bool(payload.get("ok", True)),
+        run_id=_optional_text(payload.get("run_id") or run_id),
+        task_id=_optional_text(payload.get("task_id") or task_id),
+        path=artifact_path,
+        content=_text(payload.get("content")),
+        mime_type=_optional_text(payload.get("mime_type") or payload.get("content_type")),
+        truncated=bool(payload.get("truncated")),
+    )
 
 
 def _text(value: Any) -> str:

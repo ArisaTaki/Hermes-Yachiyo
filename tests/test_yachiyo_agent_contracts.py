@@ -10,6 +10,7 @@ from apps.shell.yachiyo_agent import (
     AgentGroupSnapshot,
     AgentTaskSnapshot,
     ApprovalCardSnapshot,
+    ArtifactContentSnapshot,
     ArtifactSnapshot,
     ChatRunnableCatalogSnapshot,
     FutureTaskSnapshot,
@@ -228,6 +229,35 @@ def test_run_event_page_snapshot_json_shape_is_stable() -> None:
     assert payload["next_after_sequence"] == 3
     assert payload["has_more"] is True
     assert payload["events"][0]["event_type"] == "agent.tool.call"
+
+
+def test_artifact_content_snapshot_json_shape_is_stable() -> None:
+    snapshot = ArtifactContentSnapshot(
+        run_id="run-1",
+        task_id="task-1",
+        path="reports/out.md",
+        content="# Report",
+        mime_type="text/markdown",
+        truncated=True,
+    )
+
+    payload = _json(snapshot)
+
+    assert list(payload) == [
+        "ok",
+        "run_id",
+        "task_id",
+        "path",
+        "content",
+        "mime_type",
+        "truncated",
+    ]
+    assert payload["ok"] is True
+    assert payload["run_id"] == "run-1"
+    assert payload["task_id"] == "task-1"
+    assert payload["path"] == "reports/out.md"
+    assert payload["content"] == "# Report"
+    assert payload["truncated"] is True
 
 
 def test_public_run_event_mapping_preserves_runtime_trace_payload_fields() -> None:

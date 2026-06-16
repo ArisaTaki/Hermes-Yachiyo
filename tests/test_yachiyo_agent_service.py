@@ -84,6 +84,18 @@ class _FakeRuntimePort:
             ],
         }
 
+    def read_task_artifact(self, task_id: str, artifact_path: str) -> dict[str, Any]:
+        self.calls.append(("read_task_artifact", {"task_id": task_id, "path": artifact_path}))
+        return {
+            "ok": True,
+            "run_id": "run-1",
+            "task_id": task_id,
+            "path": artifact_path,
+            "content": "# Report",
+            "mime_type": "text/markdown",
+            "truncated": False,
+        }
+
     def list_recent_tasks(self, conversation_id: str | None = None) -> list[dict[str, Any]]:
         self.calls.append(("list_recent_tasks", conversation_id))
         return [_task_payload(task_id="task-recent", status="running")]
@@ -184,6 +196,21 @@ def test_yachiyo_agent_service_pages_task_events() -> None:
     assert page.has_more is True
     assert [event.event_type for event in page.events] == ["tool.requested"]
     assert port.calls == [("get_task_event_stream", "task-1")]
+
+
+def test_yachiyo_agent_service_reads_task_artifact_content() -> None:
+    port = _FakeRuntimePort()
+    service = YachiyoAgentService(port)
+
+    artifact = service.read_task_artifact("task-1", "reports/out.md")
+
+    assert artifact.ok is True
+    assert artifact.run_id == "run-1"
+    assert artifact.task_id == "task-1"
+    assert artifact.path == "reports/out.md"
+    assert artifact.content == "# Report"
+    assert artifact.mime_type == "text/markdown"
+    assert port.calls == [("read_task_artifact", {"task_id": "task-1", "path": "reports/out.md"})]
 
 
 def test_yachiyo_agent_service_prefers_chat_backed_starter_when_available() -> None:

@@ -431,6 +431,7 @@ async def test_yachiyo_task_routes_use_injected_runtime_and_return_public_snapsh
         after_sequence=0,
         limit=1,
     )
+    task_artifact = await yachiyo.get_task_artifact("run-1", "report.md", request)
     approved = await yachiyo.approve_task("run-1", None, request)
     rejected = await yachiyo.reject_task(
         "run-1",
@@ -464,6 +465,11 @@ async def test_yachiyo_task_routes_use_injected_runtime_and_return_public_snapsh
     assert task_events["next_after_sequence"] == 1
     assert task_events["has_more"] is True
     assert task_events["events"][0]["event_type"] == "agent.started"
+    assert task_artifact["ok"] is True
+    assert task_artifact["run_id"] == "run-1"
+    assert task_artifact["task_id"] == "run-1"
+    assert task_artifact["path"] == "report.md"
+    assert task_artifact["content"] == "# Report"
     assert approved["status"] == "completed"
     assert rejected["status"] == "failed"
     assert cancelled["status"] == "cancelled"
@@ -930,6 +936,7 @@ def test_yachiyo_chat_routes_are_registered_as_light_surface_aliases() -> None:
     assert '@router.get("/tasks/{task_id}")' in source
     assert '@router.get("/tasks/{task_id}/timeline")' in source
     assert '@router.get("/tasks/{task_id}/events")' in source
+    assert '@router.get("/tasks/{task_id}/artifacts/{artifact_path:path}")' in source
     assert '@router.post("/tasks/{task_id}/approve")' in source
     assert '@router.post("/tasks/{task_id}/reject")' in source
     assert '@router.post("/tasks/{task_id}/cancel")' in source
@@ -940,6 +947,7 @@ def test_yachiyo_chat_routes_are_registered_as_light_surface_aliases() -> None:
     assert '@router.get("/chat/tasks/{task_id}")' in source
     assert '@router.get("/chat/tasks/{task_id}/timeline")' in source
     assert '@router.get("/chat/tasks/{task_id}/events")' in source
+    assert '@router.get("/chat/tasks/{task_id}/artifacts/{artifact_path:path}")' in source
     assert '@router.post("/chat/tasks/{task_id}/approve")' in source
     assert '@router.post("/chat/tasks/{task_id}/reject")' in source
     assert '@router.post("/chat/tasks/{task_id}/cancel")' in source

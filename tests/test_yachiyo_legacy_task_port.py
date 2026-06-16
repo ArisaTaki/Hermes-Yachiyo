@@ -93,6 +93,26 @@ def test_legacy_runtime_port_resolves_task_link_for_event_stream() -> None:
     assert ("list_run_events", "run-1") in runtime.calls
 
 
+def test_legacy_runtime_port_resolves_task_link_for_artifact_read() -> None:
+    runtime = _FakeRuntime()
+    port = LegacyRuntimePort(runtime)
+    port.start_chat_task(
+        {
+            "prompt": "Patch README",
+            "conversation_id": "chat-1",
+            "client_task_id": "task-1",
+        }
+    )
+
+    artifact = port.read_task_artifact("task-1", "reports/out.md")
+
+    assert artifact["run_id"] == "run-1"
+    assert artifact["task_id"] == "task-1"
+    assert artifact["path"] == "reports/out.md"
+    assert artifact["content"] == "# Report"
+    assert ("read_run_artifact", {"run_id": "run-1", "artifact_path": "reports/out.md"}) in runtime.calls
+
+
 class _FakeRuntime:
     def __init__(self) -> None:
         self.calls: list[tuple[str, Any]] = []
@@ -121,6 +141,17 @@ class _FakeRuntime:
     def list_run_events(self, run_id: str) -> dict[str, Any]:
         self.calls.append(("list_run_events", run_id))
         return {"events": list(self.runs[run_id]["timeline"])}
+
+    def read_run_artifact(self, run_id: str, artifact_path: str) -> dict[str, Any]:
+        self.calls.append(
+            ("read_run_artifact", {"run_id": run_id, "artifact_path": artifact_path})
+        )
+        return {
+            "ok": True,
+            "run_id": run_id,
+            "path": artifact_path,
+            "content": "# Report",
+        }
 
     def link_task_run(self, *, task_id: str, run_id: str, session_id: str = "") -> dict[str, Any]:
         self.calls.append(

@@ -6,9 +6,11 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 from .adapters import agent_definition_snapshot_from_payload, readiness_snapshot_from_payload
+from .artifacts import artifact_content_snapshot_from_payload
 from .contracts import (
     AgentTaskSnapshot,
     ApprovalDecision,
+    ArtifactContentSnapshot,
     ChatRunnableCatalogSnapshot,
     PublicRunEvent,
     ReadinessSnapshot,
@@ -99,6 +101,13 @@ class YachiyoAgentService:
             next_after_sequence=next_after_sequence,
             has_more=len(filtered_events) > clean_limit,
             events=page,
+        )
+
+    def read_task_artifact(self, task_id: str, artifact_path: str) -> ArtifactContentSnapshot:
+        return artifact_content_snapshot_from_payload(
+            self._runtime_port.read_task_artifact(task_id, artifact_path),
+            task_id=task_id,
+            path=artifact_path,
         )
 
     def list_recent_tasks(self, conversation_id: str | None = None) -> list[AgentTaskSnapshot]:

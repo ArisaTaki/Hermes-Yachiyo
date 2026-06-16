@@ -103,6 +103,20 @@ async def get_task_events(
     )
 
 
+@router.get("/tasks/{task_id}/artifacts/{artifact_path:path}")
+@router.get("/chat/tasks/{task_id}/artifacts/{artifact_path:path}")
+async def get_task_artifact(
+    task_id: str,
+    artifact_path: str,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    return await yachiyo_chat_handlers.read_task_artifact(
+        task_id,
+        artifact_path,
+        http_request,
+    )
+
+
 @router.post("/tasks/{task_id}/approve")
 @router.post("/chat/tasks/{task_id}/approve")
 async def approve_task(
