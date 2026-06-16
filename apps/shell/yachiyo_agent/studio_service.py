@@ -362,6 +362,20 @@ class AgentStudioService:
     ) -> RunEventPageSnapshot:
         clean_after_sequence = max(0, int(after_sequence or 0))
         clean_limit = max(1, min(500, int(limit or 200)))
+        port_event_page = getattr(self._studio_port, "get_run_event_page", None)
+        if callable(port_event_page):
+            raw_page = port_event_page(
+                run_id,
+                after_sequence=clean_after_sequence,
+                limit=clean_limit,
+            )
+            return _run_event_page_from_payload(
+                raw_page,
+                run_id=run_id,
+                after_sequence=clean_after_sequence,
+                limit=clean_limit,
+            )
+
         filtered_events = [
             event
             for event in self.get_run_event_stream(run_id)
@@ -395,8 +409,39 @@ def _public_run_snapshot_from_payload(
     return run_timeline_snapshot_from_payload(payload)
 
 
+def _run_event_page_from_payload(
+    payload: Mapping[str, Any],
+    *,
+    run_id: str,
+    after_sequence: int,
+    limit: int,
+) -> RunEventPageSnapshot:
+    events = [
+        public_run_event_from_payload(event, run_id=run_id)
+        for event in _payload_items(payload, "events")
+    ]
+    next_after_sequence = _optional_int(payload.get("next_after_sequence"))
+    if next_after_sequence is None:
+        next_after_sequence = max([int(event.sequence or 0) for event in events] or [after_sequence])
+    return RunEventPageSnapshot(
+        run_id=str(payload.get("run_id") or run_id),
+        after_sequence=_optional_int(payload.get("after_sequence")) or after_sequence,
+        limit=_optional_int(payload.get("limit")) or limit,
+        next_after_sequence=next_after_sequence,
+        has_more=bool(payload.get("has_more", False)),
+        events=events,
+    )
+
+
 def _payload_items(payload: Any, key: str) -> list[dict[str, Any]]:
     items = payload.get(key) if isinstance(payload, Mapping) else payload
     if not isinstance(items, Iterable) or isinstance(items, (str, bytes, Mapping)):
         return []
     return [dict(item) for item in items if isinstance(item, Mapping)]
+
+
+def _optional_int(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None

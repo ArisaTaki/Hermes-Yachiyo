@@ -108,3 +108,37 @@ def test_native_runtime_installs_run_services_under_legacy_attribute_names(tmp_p
         assert service.run_events._sync_event_cursor.__self__ is service.run_projections
     finally:
         service.close()
+
+
+def test_run_event_repository_pages_with_replay_metadata(tmp_path) -> None:
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime.db",
+        workspace_dir=tmp_path / "runtime",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    try:
+        run = service._insert_run(
+            kind="agent_run",
+            runnable_id="agent-1",
+            user_goal="Replay page metadata",
+        )
+        service.append_run_event(run["run_id"], "agent.started", {})
+        service.append_run_event(run["run_id"], "agent.tool.call", {"tool": "workspace.read"})
+        service.append_run_event(run["run_id"], "agent.completed", {})
+
+        first_page = service.list_run_events(run["run_id"], after_sequence=0, limit=2)
+        second_page = service.list_run_events(
+            run["run_id"],
+            after_sequence=first_page["next_after_sequence"],
+            limit=2,
+        )
+
+        assert [event["sequence"] for event in first_page["events"]] == [1, 2]
+        assert first_page["next_after_sequence"] == 2
+        assert first_page["has_more"] is True
+        assert [event["sequence"] for event in second_page["events"]] == [3]
+        assert second_page["next_after_sequence"] == 3
+        assert second_page["has_more"] is False
+    finally:
+        service.close()

@@ -648,6 +648,61 @@ def test_agent_studio_service_paginates_group_run_events_after_child_sequence_re
     assert second_child_page.has_more is False
 
 
+def test_agent_studio_service_prefers_runtime_run_event_page_port() -> None:
+    class PagedRunEventPort(_FakeStudioPort):
+        def get_run_event_page(
+            self,
+            run_id: str,
+            *,
+            after_sequence: int = 0,
+            limit: int = 200,
+        ) -> dict[str, Any]:
+            self.calls.append(
+                (
+                    "get_run_event_page",
+                    {
+                        "run_id": run_id,
+                        "after_sequence": after_sequence,
+                        "limit": limit,
+                    },
+                )
+            )
+            return {
+                "run_id": run_id,
+                "after_sequence": after_sequence,
+                "limit": limit,
+                "next_after_sequence": 7,
+                "has_more": True,
+                "events": [
+                    {
+                        "event_id": "event-page-7",
+                        "run_id": run_id,
+                        "sequence": 7,
+                        "event_type": "agent.tool.call",
+                        "payload": {"tool": "workspace.read"},
+                    }
+                ],
+            }
+
+    port = PagedRunEventPort()
+    service = AgentStudioService(port)
+
+    page = service.get_run_event_page("run-1", after_sequence=3, limit=1)
+
+    assert page.run_id == "run-1"
+    assert page.after_sequence == 3
+    assert page.limit == 1
+    assert page.next_after_sequence == 7
+    assert page.has_more is True
+    assert page.events[0].sequence == 7
+    assert page.events[0].event_type == "agent.tool.call"
+    assert (
+        "get_run_event_page",
+        {"run_id": "run-1", "after_sequence": 3, "limit": 1},
+    ) in port.calls
+    assert ("get_run_event_stream", "run-1") not in port.calls
+
+
 def test_agent_studio_service_run_actions_return_public_timeline_snapshots() -> None:
     port = _FakeStudioPort()
     service = AgentStudioService(port)

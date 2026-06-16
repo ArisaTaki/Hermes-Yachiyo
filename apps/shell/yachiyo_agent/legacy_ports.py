@@ -476,9 +476,64 @@ class LegacyStudioPort:
     def get_run_event_stream(self, run_id: str) -> dict[str, Any]:
         return self._runtime.list_run_events(run_id)
 
+    def get_run_event_page(
+        self,
+        run_id: str,
+        *,
+        after_sequence: int = 0,
+        limit: int = 200,
+    ) -> dict[str, Any]:
+        try:
+            return self._runtime.list_run_events(
+                run_id,
+                after_sequence=after_sequence,
+                limit=limit,
+            )
+        except TypeError:
+            raw_page = self._runtime.list_run_events(run_id)
+        return _run_event_page_from_legacy_stream(
+            raw_page,
+            run_id=run_id,
+            after_sequence=after_sequence,
+            limit=limit,
+        )
+
 
 def _chat_task_payload(run: dict[str, Any], *, conversation_id: str = "") -> dict[str, Any]:
     return _LEGACY_RUN_PROJECTOR.chat_task_payload(run, conversation_id=conversation_id)
+
+
+def _run_event_page_from_legacy_stream(
+    payload: dict[str, Any],
+    *,
+    run_id: str,
+    after_sequence: int,
+    limit: int,
+) -> dict[str, Any]:
+    clean_after_sequence = max(0, int(after_sequence or 0))
+    clean_limit = max(1, min(500, int(limit or 200)))
+    events = [
+        dict(event)
+        for event in payload.get("events", [])
+        if isinstance(event, dict) and _event_sequence(event) > clean_after_sequence
+    ]
+    page = events[:clean_limit]
+    next_after_sequence = max([_event_sequence(event) for event in page] or [clean_after_sequence])
+    return {
+        "run_id": payload.get("run_id") or run_id,
+        "after_sequence": clean_after_sequence,
+        "limit": clean_limit,
+        "next_after_sequence": next_after_sequence,
+        "has_more": len(events) > clean_limit,
+        "events": page,
+    }
+
+
+def _event_sequence(event: dict[str, Any]) -> int:
+    try:
+        return int(event.get("sequence") or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _group_artifacts(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:

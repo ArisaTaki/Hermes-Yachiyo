@@ -154,3 +154,11 @@ class StudioPort(Protocol):
         self,
         run_id: str,
     ) -> Iterable[dict[str, Any]] | Mapping[str, Any]: ...
+
+    def get_run_event_page(
+        self,
+        run_id: str,
+        *,
+        after_sequence: int = 0,
+        limit: int = 200,
+    ) -> Mapping[str, Any]: ...

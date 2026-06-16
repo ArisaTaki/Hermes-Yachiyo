@@ -122,7 +122,8 @@ class RunEventRepository:
         visibility_clause = ""
         if not include_internal:
             visibility_clause = " AND visibility='user' AND sensitivity!='secret'"
-        params.append(safe_limit)
+        fetch_limit = safe_limit + 1
+        params.append(fetch_limit)
         rows = self._conn.execute(
             f"""
             SELECT * FROM run_events
@@ -132,11 +133,17 @@ class RunEventRepository:
             """,
             tuple(params),
         ).fetchall()
+        page_rows = rows[:safe_limit]
+        next_after_sequence = max(
+            [int(row["sequence"]) for row in page_rows] or [safe_after_sequence]
+        )
         return {
             "ok": True,
             "run_id": clean_run_id,
             "after_sequence": safe_after_sequence,
             "limit": safe_limit,
+            "next_after_sequence": next_after_sequence,
+            "has_more": len(rows) > safe_limit,
             "events": [
                 {
                     "event_id": str(row["event_id"]),
@@ -150,6 +157,6 @@ class RunEventRepository:
                     "payload": self._json_load(row["payload_json"], {}),
                     "created_at": str(row["created_at"]),
                 }
-                for row in rows
+                for row in page_rows
             ],
         }

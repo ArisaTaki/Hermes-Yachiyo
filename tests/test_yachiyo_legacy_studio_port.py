@@ -60,10 +60,27 @@ def test_legacy_studio_group_run_records_member_failed_and_cancelled_events() ->
     assert group_run["events"][4]["payload"]["status"] == "cancelled"
 
 
+def test_legacy_studio_port_forwards_run_event_page_cursor_to_runtime() -> None:
+    runtime = _FakeGroupRuntime()
+    port = LegacyStudioPort(runtime)
+
+    page = port.get_run_event_page("run-1", after_sequence=4, limit=2)
+
+    assert page["run_id"] == "run-1"
+    assert page["after_sequence"] == 4
+    assert page["limit"] == 2
+    assert runtime.last_event_page_request == {
+        "run_id": "run-1",
+        "after_sequence": 4,
+        "limit": 2,
+    }
+
+
 class _FakeGroupRuntime:
     def __init__(self, statuses: dict[str, str] | None = None) -> None:
         self.child_run_ids: list[str] = []
         self.events: dict[str, list[dict[str, Any]]] = {}
+        self.last_event_page_request: dict[str, Any] | None = None
         self.runs: dict[str, dict[str, Any]] = {}
         self.statuses = statuses or {}
         self.group = {
@@ -133,5 +150,21 @@ class _FakeGroupRuntime:
             "updated_at": "2026-06-16T00:00:00Z",
         }
 
-    def list_run_events(self, run_id: str) -> dict[str, Any]:
-        return {"events": list(self.events.get(run_id, []))}
+    def list_run_events(
+        self,
+        run_id: str,
+        *,
+        after_sequence: int = 0,
+        limit: int = 200,
+    ) -> dict[str, Any]:
+        self.last_event_page_request = {
+            "run_id": run_id,
+            "after_sequence": after_sequence,
+            "limit": limit,
+        }
+        return {
+            "run_id": run_id,
+            "after_sequence": after_sequence,
+            "limit": limit,
+            "events": list(self.events.get(run_id, [])),
+        }
