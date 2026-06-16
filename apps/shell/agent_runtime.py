@@ -167,7 +167,11 @@ from apps.shell.agent.runtime.main_chat_config import (
     MainChatVirtualAgentProjector,
 )
 from apps.shell.agent.runtime.main_chat_facade import RuntimeMainChatFacadeMixin
-from apps.shell.agent.runtime.main_chat_model import MainChatModelCaller
+from apps.shell.agent.runtime.main_chat_model import (
+    MainChatModelCaller,
+    RuntimeMainChatModelSetup,
+    build_runtime_main_chat_model_setup as _build_runtime_main_chat_model_setup,
+)
 from apps.shell.agent.runtime.main_chat_model_loop import MainChatModelLoopRunner
 from apps.shell.agent.runtime.main_chat_runs import MainChatRunLifecycle
 from apps.shell.agent.runtime.memory_services import RuntimeMemoryService

@@ -6,7 +6,11 @@ from typing import Any
 
 from apps.shell import agent_runtime
 from apps.shell.agent.runtime.budget import RunBudgetLimits
-from apps.shell.agent.runtime.main_chat_model import MainChatModelCaller
+from apps.shell.agent.runtime.main_chat_model import (
+    MainChatModelCaller,
+    RuntimeMainChatModelSetup,
+    build_runtime_main_chat_model_setup,
+)
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
 
@@ -40,6 +44,44 @@ class FakeTaskModelEvents:
 
 def _timeline(event: str, detail: str = "", **extra: Any) -> dict[str, Any]:
     return {"event": event, "detail": detail, **extra}
+
+
+def test_main_chat_model_setup_builder_remains_exported_from_legacy_module() -> None:
+    assert agent_runtime.RuntimeMainChatModelSetup is RuntimeMainChatModelSetup
+    assert agent_runtime._build_runtime_main_chat_model_setup is build_runtime_main_chat_model_setup
+
+
+def test_main_chat_model_setup_builder_wires_budget_and_caller() -> None:
+    run = {
+        "run_id": "run-1",
+        "kind": "main_chat_run",
+        "created_at": "2026-06-16T00:00:00Z",
+        "timeline": [],
+    }
+    setup = build_runtime_main_chat_model_setup(
+        runtime_limits=lambda: RunBudgetLimits(max_model_output_chars=5),
+        get_run=lambda _run_id: run,
+        default_profile_id=lambda _capability: "profile-chat",
+        model_profile_config_private=lambda _profile_id, *, capability: {
+            "base_url": "https://model.local",
+            "model": capability,
+            "api_key": "key",
+        },
+        runtime_timeline_factory=_timeline,
+        update_run=lambda _run_id, **payload: {"run_id": "run-1", **payload},
+        append_run_event=lambda _run_id, event_type, payload: {"event_type": event_type, "payload": payload},
+        task_model_events=FakeTaskModelEvents(),
+        call_model=lambda *_args, **_kwargs: {"role": "assistant", "content": "abcdefghi"},
+        terminal_run_or_none=lambda _run_id: None,
+    )
+
+    assert isinstance(setup, RuntimeMainChatModelSetup)
+    assert isinstance(setup.main_chat_model, MainChatModelCaller)
+    assert setup.main_chat_model._run_budget is setup.run_budget
+    assert setup.main_chat_model._check_context_budget is setup.context_budget_checker
+    assert setup.main_chat_model._limit_model_output is setup.model_output_limiter
+    limited, truncated = setup.model_output_limiter("abcdefghi")
+    assert (limited, truncated) == ("abcde", True)
 
 
 def test_main_chat_model_caller_records_replayable_model_events() -> None:

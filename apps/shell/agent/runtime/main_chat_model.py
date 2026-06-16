@@ -2,7 +2,81 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Callable
+
+from apps.shell.agent.runtime.budget import (
+    context_budget_checker,
+    model_output_limiter,
+    run_budget_factory,
+)
+from apps.shell.agent.runtime.clock import iso_epoch
+from apps.shell.agent.runtime.errors import AgentRuntimeError
+from apps.shell.agent.runtime.events import redact_json_value, redact_secrets
+from apps.shell.agent.runtime.model_messages import (
+    coalesce_model_message,
+    message_visible_content_text,
+    model_message_metadata,
+)
+
+
+@dataclass(frozen=True)
+class RuntimeMainChatModelSetup:
+    context_budget_checker: Callable[[Any, list[dict[str, Any]]], None]
+    model_output_limiter: Callable[[Any], tuple[str, bool]]
+    run_budget: Callable[[str, list[dict[str, Any]]], Any]
+    main_chat_model: "MainChatModelCaller"
+
+
+def build_runtime_main_chat_model_setup(
+    *,
+    runtime_limits: Callable[[], Any],
+    get_run: Callable[[str], dict[str, Any]],
+    default_profile_id: Callable[[str], str],
+    model_profile_config_private: Callable[..., dict[str, Any]],
+    runtime_timeline_factory: Callable[..., dict[str, Any]],
+    update_run: Callable[..., dict[str, Any]],
+    append_run_event: Callable[[str, str, dict[str, Any]], dict[str, Any]],
+    task_model_events: Any,
+    call_model: Callable[..., Any],
+    terminal_run_or_none: Callable[[str], dict[str, Any] | None],
+) -> RuntimeMainChatModelSetup:
+    runtime_context_budget_checker = context_budget_checker(
+        redact_json_value=redact_json_value,
+    )
+    runtime_model_output_limiter = model_output_limiter(
+        limits=runtime_limits,
+        redact_text=redact_secrets,
+    )
+    runtime_run_budget = run_budget_factory(
+        limits=runtime_limits,
+        get_run=get_run,
+        iso_epoch=iso_epoch,
+    )
+    return RuntimeMainChatModelSetup(
+        context_budget_checker=runtime_context_budget_checker,
+        model_output_limiter=runtime_model_output_limiter,
+        run_budget=runtime_run_budget,
+        main_chat_model=MainChatModelCaller(
+            get_run=get_run,
+            default_profile_id=default_profile_id,
+            model_profile_config_private=model_profile_config_private,
+            run_budget=runtime_run_budget,
+            check_context_budget=runtime_context_budget_checker,
+            limit_model_output=runtime_model_output_limiter,
+            timeline_factory=runtime_timeline_factory,
+            update_run=update_run,
+            append_run_event=append_run_event,
+            task_model_events=task_model_events,
+            call_model=call_model,
+            coalesce_model_message=coalesce_model_message,
+            message_visible_content_text=message_visible_content_text,
+            model_message_metadata=model_message_metadata,
+            terminal_run_or_none=terminal_run_or_none,
+            redact_secrets=redact_secrets,
+            error_type=AgentRuntimeError,
+        ),
+    )
 
 
 class MainChatModelCaller:

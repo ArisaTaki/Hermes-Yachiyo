@@ -210,25 +210,19 @@ def test_installation_facade_installs_agent_chat_entrypoints(monkeypatch) -> Non
 
 
 def test_installation_facade_installs_run_budget_and_main_chat_model(monkeypatch) -> None:
-    class CapturedMainChatModel:
-        def __init__(self, **kwargs) -> None:
-            self.kwargs = kwargs
+    def fake_build_runtime_main_chat_model_setup(**kwargs):
+        return SimpleNamespace(
+            kwargs=kwargs,
+            context_budget_checker="context-checker",
+            model_output_limiter="output-limiter",
+            run_budget="run-budget",
+            main_chat_model=SimpleNamespace(kwargs=kwargs),
+        )
 
-    monkeypatch.setattr(agent_runtime, "MainChatModelCaller", CapturedMainChatModel)
     monkeypatch.setattr(
-        agent_runtime,
-        "_runtime_context_budget_checker",
-        lambda **kwargs: ("context-checker", kwargs),
-    )
-    monkeypatch.setattr(
-        agent_runtime,
-        "_runtime_model_output_limiter",
-        lambda **kwargs: ("output-limiter", kwargs),
-    )
-    monkeypatch.setattr(
-        agent_runtime,
-        "_runtime_run_budget_factory",
-        lambda **kwargs: ("run-budget", kwargs),
+        installation_facade_mod,
+        "build_runtime_main_chat_model_setup",
+        fake_build_runtime_main_chat_model_setup,
     )
 
     engine = object.__new__(agent_runtime.NativeRunEngine)
@@ -244,14 +238,11 @@ def test_installation_facade_installs_run_budget_and_main_chat_model(monkeypatch
         runtime_timeline_factory="timeline-factory",
     )
 
-    assert context_checker[0] == "context-checker"
-    assert output_limiter[0] == "output-limiter"
-    assert engine.runtime_run_budget[0] == "run-budget"
-    assert isinstance(engine.main_chat_model, CapturedMainChatModel)
-    assert engine.main_chat_model.kwargs["run_budget"] is engine.runtime_run_budget
-    assert engine.main_chat_model.kwargs["check_context_budget"] is context_checker
-    assert engine.main_chat_model.kwargs["limit_model_output"] is output_limiter
-    assert engine.main_chat_model.kwargs["timeline_factory"] == "timeline-factory"
+    assert context_checker == "context-checker"
+    assert output_limiter == "output-limiter"
+    assert engine.runtime_run_budget == "run-budget"
+    assert engine.main_chat_model.kwargs["runtime_timeline_factory"] == "timeline-factory"
+    assert engine.main_chat_model.kwargs["get_run"] == "get-run"
     assert engine.main_chat_model.kwargs["call_model"] == "model-call"
     assert engine.main_chat_model.kwargs["terminal_run_or_none"] == "terminal-run-or-none"
 
