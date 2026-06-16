@@ -1,4 +1,5 @@
 import type { PublicRunEvent } from '../types';
+import { runtimeToolDisplayLabel } from '../approval';
 
 export type RuntimeToolCallSummaryItem = {
   count: number;
@@ -63,7 +64,7 @@ export function RuntimeToolCallSummary({
             data-tool-status={tool.status}
             key={tool.name}
           >
-            <strong>{tool.name}</strong>
+            <strong>{runtimeToolSummaryDisplayName(tool.name)}</strong>
             {tool.count > 1 ? <em>x{tool.count}</em> : null}
             <small>{runtimeToolStatusLabel(tool.status)}</small>
           </span>
@@ -205,4 +206,10 @@ function runtimeToolStatusLabel(status: string): string {
   if (status === 'denied') return '已拒绝';
   if (status === 'skipped') return '已跳过';
   return status || '工具';
+}
+
+function runtimeToolSummaryDisplayName(name: string): string {
+  const displayName = runtimeToolDisplayLabel(name);
+  if (displayName !== '工具调用') return displayName;
+  return String(name || '').trim() || displayName;
 }

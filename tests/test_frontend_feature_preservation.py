@@ -791,6 +791,8 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "export type RuntimeToolCallSummaryItem",
             "export function RuntimeToolCallSummary",
             "export function summarizeRuntimeToolCalls",
+            "runtimeToolDisplayLabel",
+            "<strong>{runtimeToolSummaryDisplayName(tool.name)}</strong>",
             'testId = \'runtime-tool-call-summary\'',
             'itemTestId = \'runtime-tool-call-summary-item\'',
             "'agent.tool.approval_required'",
@@ -809,6 +811,9 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "if (eventType === 'skill.selected' || eventType.startsWith('skill.dispatch.'))",
             "function objectPayload",
             "function runtimeToolStatusFromEvent",
+            "function runtimeToolSummaryDisplayName",
+            "if (displayName !== '工具调用') return displayName;",
+            "return String(name || '').trim() || displayName;",
         ],
     )
     _assert_contains(
