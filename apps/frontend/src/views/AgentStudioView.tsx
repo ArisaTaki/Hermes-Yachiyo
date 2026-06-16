@@ -25,6 +25,7 @@ import { emptyAgentDraft, useAgentStudioLocalState } from '../features/agent-stu
 import { useAgentStudioLoadLifecycle } from '../features/agent-studio/hooks/useAgentStudioLoadLifecycle';
 import { useAgentStudioModelProfiles } from '../features/agent-studio/hooks/useAgentStudioModelProfiles';
 import { useAgentStudioRefresh } from '../features/agent-studio/hooks/useAgentStudioRefresh';
+import { useAgentStudioRunSnapshots } from '../features/agent-studio/hooks/useAgentStudioRunSnapshots';
 import { useAgentStudioRouteState } from '../features/agent-studio/hooks/useAgentStudioRouteState';
 import { useAgentStudioSelectionSynchronization } from '../features/agent-studio/hooks/useAgentStudioSelectionSynchronization';
 import { useAgentStudioTabActions } from '../features/agent-studio/hooks/useAgentStudioTabActions';
@@ -36,14 +37,11 @@ import { useRunArtifactActions } from '../features/agent-studio/hooks/useRunArti
 import { useRunCacheActions } from '../features/agent-studio/hooks/useRunCacheActions';
 import { useRunDebugActions } from '../features/agent-studio/hooks/useRunDebugActions';
 import { useRunDetailSynchronization } from '../features/agent-studio/hooks/useRunDetailSynchronization';
-import { useRunEventReplay } from '../features/agent-studio/hooks/useRunEventReplay';
-import { useGroupRunSnapshot } from '../features/agent-studio/hooks/useGroupRunSnapshot';
 import { useRunHistoryManagement } from '../features/agent-studio/hooks/useRunHistoryManagement';
 import { useRunLaunchActions } from '../features/agent-studio/hooks/useRunLaunchActions';
 import { useRunListDerivedState } from '../features/agent-studio/hooks/useRunListDerivedState';
 import { useRunNavigationActions } from '../features/agent-studio/hooks/useRunNavigationActions';
 import { useRunTargetReadiness } from '../features/agent-studio/hooks/useRunTargetReadiness';
-import { useRunTimeline } from '../features/agent-studio/hooks/useRunTimeline';
 import { useRuntimeMemoryManagement } from '../features/agent-studio/hooks/useRuntimeMemoryManagement';
 import { useSelectedRunDetailState } from '../features/agent-studio/hooks/useSelectedRunDetailState';
 import { useSkillDeletionActions } from '../features/agent-studio/hooks/useSkillDeletionActions';
@@ -317,29 +315,29 @@ export function AgentStudioView() {
     selectedRunId,
     workflows,
   });
-  const selectedGroupRunSnapshotId = selectedRouteGroupRunId || selectedRun?.run_group_id || '';
   const {
-    loadMoreSelectedGroupRunEvents: loadMoreGroupRunReplayEvents,
+    clearRunEventReplay,
+    loadMoreGroupRunReplayEvents,
+    loadMoreRunReplayEvents,
+    selectedGroupRunSnapshotId,
     selectedGroupRunReplayError,
     selectedGroupRunReplayEvents,
     selectedGroupRunReplayHasMore,
     selectedGroupRunReplayLoading,
     selectedGroupRunReplayNextAfterSequence,
     selectedGroupRunSnapshot,
-  } = useGroupRunSnapshot(
-    selectedGroupRunSnapshotId,
+    selectedPublicRunTimeline,
+    selectedRunReplayError,
+    selectedRunReplayEvents,
+    selectedRunReplayHasMore,
+    selectedRunReplayLoading,
+    selectedRunReplayState,
+  } = useAgentStudioRunSnapshots({
+    selectedRouteGroupRunId,
+    selectedRun,
+    selectedRunId,
     selectedRunReplayRefreshKey,
-  );
-  const { selectedPublicRunTimeline } = useRunTimeline(selectedRunId, selectedRunReplayRefreshKey);
-  const {
-    clearRunEventReplay,
-    loadMoreSelectedRunEvents: loadMoreRunReplayEvents,
-    selectedReplayError: selectedRunReplayError,
-    selectedReplayEvents: selectedRunReplayEvents,
-    selectedReplayHasMore: selectedRunReplayHasMore,
-    selectedReplayLoading: selectedRunReplayLoading,
-    selectedReplayState: selectedRunReplayState,
-  } = useRunEventReplay(selectedRunId, selectedRunReplayRefreshKey);
+  });
   const {
     acceptedRunUpdates,
     rememberApprovedRun,
