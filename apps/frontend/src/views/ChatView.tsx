@@ -33,7 +33,7 @@ import {
 } from '../features/yachiyo-chat/components/MessageApprovalRequestCard';
 import { MessageActivityList } from '../features/yachiyo-chat/components/MessageActivityList';
 import {
-  approvalIdFromPending,
+  messageApprovalId,
   approvalRequestDetails,
   approvalRequiredItems,
   approvalRequiredMessages,
@@ -71,6 +71,8 @@ import {
   messageRunProgressRunnableKind,
   messageRunProgressTitle,
   messageRunId,
+  messageRoleLabel,
+  messageSender,
   messageRunStatus,
   messageText,
   messageWorkflowStudioAction,
@@ -2586,10 +2588,10 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
   const runStatus = messageRunStatus(message);
   const showApprovalActions = hasActionableApproval(message) && Boolean(runId);
   const approvalDetails = showApprovalActions ? approvalRequestDetails(message) : null;
-  const approvalId = approvalDetails ? approvalIdFromPending(message.metadata?.pending_approval) : '';
+  const approvalId = approvalDetails ? messageApprovalId(message) : '';
   const approvalSignature = approvalDetails ? messageApprovalSignature(message) : '';
   const showAgentProgress = isProcessingEmpty && messageHasRunContext(message);
-  const progressSender = message.metadata?.sender;
+  const progressSender = messageSender(message);
   const progressName = participantDisplayName(progressSender) || messageRoleLabel(message);
   const progressTitle = messageRunProgressTitle(message);
   const progressDetail = messageRunProgressDetail(message, progressName);
@@ -2971,7 +2973,7 @@ function messageAvatar(message: ChatMessage, profile: AssistantProfilePayload | 
   const role = message.role || 'system';
   if (role === 'user') return avatarNode(profile?.user_avatar_url, '你', '你', profileLoading);
   if (role === 'assistant') {
-    const sender = message.metadata?.sender;
+    const sender = messageSender(message);
     if (sender?.kind === 'workflow') {
       // 从 runnables 中获取最新的参与者信息
       const runnable = runnables.find((r) => r.id === sender.id);
@@ -3012,19 +3014,6 @@ function agentAvatarNode(avatarUrl: string | undefined, name: string) {
       {agentInitial(name)}
     </span>
   );
-}
-
-function messageRoleLabel(message: ChatMessage) {
-  const role = message.role || 'system';
-  if (role === 'user') return '你';
-  if (role === 'assistant') {
-    const sender = message.metadata?.sender;
-    if (sender?.kind === 'agent' || sender?.kind === 'workflow') {
-      return participantDisplayName(sender) || 'Agent';
-    }
-    return 'Yachiyo';
-  }
-  return '系统';
 }
 
 function messageMetaText(message: ChatMessage, status?: string, createdAt?: string) {

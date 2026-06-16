@@ -2,6 +2,7 @@ import {
   approvalRequiredMessages,
   nextApprovalStatusText,
 } from './approvalItems';
+import { participantDisplayName } from './sessionState';
 import { runtimeToolDisplayLabelOrName } from '../runtime-shared/approval';
 import type {
   ChatActivityEvent,
@@ -111,6 +112,23 @@ export function messageRunStatus(message?: YachiyoChatMessage | null) {
 
 export function messageRunId(message?: YachiyoChatMessage | null) {
   return String(message?.metadata?.run_id || message?.metadata?.workflow_run_id || '').trim();
+}
+
+export function messageSender(message?: YachiyoChatMessage | null) {
+  return message?.metadata?.sender || null;
+}
+
+export function messageRoleLabel(message: YachiyoChatMessage) {
+  const role = message.role || 'system';
+  if (role === 'user') return '你';
+  if (role === 'assistant') {
+    const sender = messageSender(message);
+    if (sender?.kind === 'agent' || sender?.kind === 'workflow') {
+      return participantDisplayName(sender) || 'Agent';
+    }
+    return 'Yachiyo';
+  }
+  return '系统';
 }
 
 export function messageHasRunContext(message?: YachiyoChatMessage | null) {

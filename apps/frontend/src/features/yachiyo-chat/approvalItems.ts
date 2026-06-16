@@ -211,6 +211,10 @@ export function messageApprovalSignature(message: ChatApprovalMessage) {
   return approvalSignatureFromPending(message.metadata?.pending_approval);
 }
 
+export function messageApprovalId(message: ChatApprovalMessage) {
+  return approvalIdFromPending(message.metadata?.pending_approval);
+}
+
 export function approvalSignatureFromPending(pending: unknown) {
   if (!isRecord(pending)) return 'none';
   const approvalId = stringValue(pending.approval_id);
