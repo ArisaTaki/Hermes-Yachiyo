@@ -308,6 +308,52 @@ class RuntimeInstallationFacadeMixin:
             )
         )
 
+    def _install_runtime_run_budget_and_main_chat_model(
+        self,
+        *,
+        runtime_timeline_factory: Any,
+    ) -> tuple[Any, Any]:
+        legacy = _legacy_agent_runtime_module()
+        runtime_context_budget_checker = legacy._runtime_context_budget_checker(
+            redact_json_value=legacy._redact_json_value,
+        )
+        runtime_model_output_limiter = legacy._runtime_model_output_limiter(
+            limits=lambda: self.runtime_limits,
+            redact_text=legacy.redact_secrets,
+        )
+        self.runtime_run_budget = legacy._runtime_run_budget_factory(
+            limits=lambda: self.runtime_limits,
+            get_run=lambda run_id: self.get_run(run_id),
+            iso_epoch=lambda value: legacy._iso_epoch(value),
+        )
+        self._install_runtime_main_chat_model(
+            legacy.MainChatModelCaller(
+                get_run=self.get_run,
+                default_profile_id=lambda capability: str(
+                    legacy.get_model_profile_service().get_defaults().get(capability) or ""
+                ).strip(),
+                model_profile_config_private=lambda profile_id, capability="chat": self._model_profile_config_private(
+                    profile_id,
+                    capability=capability,
+                ),
+                run_budget=self.runtime_run_budget,
+                check_context_budget=runtime_context_budget_checker,
+                limit_model_output=runtime_model_output_limiter,
+                timeline_factory=runtime_timeline_factory,
+                update_run=self._update_run,
+                append_run_event=self.append_run_event,
+                task_model_events=self.runtime_task_model_events,
+                call_model=self.model_profile_chat_adapter.call,
+                coalesce_model_message=legacy._coalesce_model_message,
+                message_visible_content_text=legacy._message_visible_content_text,
+                model_message_metadata=legacy._model_message_metadata,
+                terminal_run_or_none=self.terminal_run_resolver.terminal_run_or_none,
+                redact_secrets=legacy.redact_secrets,
+                error_type=legacy.AgentRuntimeError,
+            )
+        )
+        return runtime_context_budget_checker, runtime_model_output_limiter
+
     def _install_runtime_engine_state(self, state: Any) -> None:
         self.workspace_dir = state.workspace_dir
         self.db_path = state.db_path

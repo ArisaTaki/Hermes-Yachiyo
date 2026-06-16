@@ -27,6 +27,7 @@ def test_runtime_installation_facade_mixin_remains_exported_from_legacy_module()
         "_install_runtime_run_layer",
         "_install_runtime_memory_and_core",
         "_install_runtime_agent_chat_entrypoints",
+        "_install_runtime_run_budget_and_main_chat_model",
         "_install_runtime_engine_state",
         "_install_runtime_recorders",
         "_install_runtime_definition_services",
@@ -195,3 +196,50 @@ def test_installation_facade_installs_agent_chat_entrypoints(monkeypatch) -> Non
     assert engine.tool_brokers.kwargs["memory_store"] == "memory-store"
     assert isinstance(engine.main_chat_runs, CapturedCollaborator)
     assert engine.main_chat_runs.kwargs["timeline_factory"] == "timeline-factory"
+
+
+def test_installation_facade_installs_run_budget_and_main_chat_model(monkeypatch) -> None:
+    class CapturedMainChatModel:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+
+    monkeypatch.setattr(agent_runtime, "MainChatModelCaller", CapturedMainChatModel)
+    monkeypatch.setattr(
+        agent_runtime,
+        "_runtime_context_budget_checker",
+        lambda **kwargs: ("context-checker", kwargs),
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "_runtime_model_output_limiter",
+        lambda **kwargs: ("output-limiter", kwargs),
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "_runtime_run_budget_factory",
+        lambda **kwargs: ("run-budget", kwargs),
+    )
+
+    engine = object.__new__(agent_runtime.NativeRunEngine)
+    engine.runtime_limits = "runtime-limits"
+    engine.get_run = "get-run"
+    engine._update_run = "update-run"
+    engine.append_run_event = "append-run-event"
+    engine.runtime_task_model_events = "task-model-events"
+    engine.model_profile_chat_adapter = SimpleNamespace(call="model-call")
+    engine.terminal_run_resolver = SimpleNamespace(terminal_run_or_none="terminal-run-or-none")
+
+    context_checker, output_limiter = engine._install_runtime_run_budget_and_main_chat_model(
+        runtime_timeline_factory="timeline-factory",
+    )
+
+    assert context_checker[0] == "context-checker"
+    assert output_limiter[0] == "output-limiter"
+    assert engine.runtime_run_budget[0] == "run-budget"
+    assert isinstance(engine.main_chat_model, CapturedMainChatModel)
+    assert engine.main_chat_model.kwargs["run_budget"] is engine.runtime_run_budget
+    assert engine.main_chat_model.kwargs["check_context_budget"] is context_checker
+    assert engine.main_chat_model.kwargs["limit_model_output"] is output_limiter
+    assert engine.main_chat_model.kwargs["timeline_factory"] == "timeline-factory"
+    assert engine.main_chat_model.kwargs["call_model"] == "model-call"
+    assert engine.main_chat_model.kwargs["terminal_run_or_none"] == "terminal-run-or-none"
