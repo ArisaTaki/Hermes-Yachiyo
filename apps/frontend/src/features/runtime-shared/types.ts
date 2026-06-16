@@ -380,9 +380,38 @@ export type WorkflowSnapshot = {
   updated_at?: string;
 };
 
+export type ChatRunnableParticipantSnapshot = {
+  runnable_id: string;
+  agent_id?: string | null;
+  workflow_id?: string | null;
+  kind: 'agent' | 'workflow';
+  name: string;
+  nickname?: string | null;
+  avatar_url?: string | null;
+  category?: string | null;
+  enabled?: boolean;
+};
+
+export type ChatRunnableSnapshot = {
+  runnable_id: string;
+  agent_id?: string | null;
+  workflow_id?: string | null;
+  kind: 'agent' | 'workflow';
+  name: string;
+  nickname?: string | null;
+  description?: string | null;
+  avatar_url?: string | null;
+  category?: string | null;
+  output_contract?: string | null;
+  enabled?: boolean;
+  tool_capabilities?: string[];
+  approval_required_tools?: string[];
+  participants?: ChatRunnableParticipantSnapshot[];
+};
+
 export type ChatRunnableCatalogSnapshot = {
-  agents: AgentDefinitionSnapshot[];
-  workflows: WorkflowSnapshot[];
+  agents: ChatRunnableSnapshot[];
+  workflows: ChatRunnableSnapshot[];
 };
 
 export type WorkflowRunSnapshot = RunTimelineSnapshot & {

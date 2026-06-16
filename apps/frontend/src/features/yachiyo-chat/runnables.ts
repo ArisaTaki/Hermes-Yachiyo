@@ -1,6 +1,6 @@
 import { listRunnables as listLegacyRunnables } from '../../lib/agents';
 import { listYachiyoChatRunnableCatalog } from './api';
-import type { AgentDefinitionSnapshot, WorkflowSnapshot } from './types';
+import type { ChatRunnableParticipantSnapshot, ChatRunnableSnapshot } from './types';
 
 export type ChatRunnableSummary = {
   id: string;
@@ -29,93 +29,56 @@ export async function listYachiyoChatRunnables(): Promise<ChatRunnableSummary[]>
 }
 
 export function chatRunnablesFromPublicSnapshots(
-  agents: AgentDefinitionSnapshot[],
-  workflows: WorkflowSnapshot[],
+  agents: ChatRunnableSnapshot[],
+  workflows: ChatRunnableSnapshot[],
 ): ChatRunnableSummary[] {
-  const agentRunnables = agents.map(chatAgentRunnable);
-  const agentById = new Map(agentRunnables.map((agent) => [agent.id, agent]));
-  const workflowRunnables = workflows.map((workflow): ChatRunnableSummary => ({
-    id: workflow.workflow_id,
-    name: workflow.name,
-    description: workflow.description || undefined,
-    output_contract: 'workflow',
-    kind: 'workflow',
-    enabled: workflow.enabled,
-    participants: workflowParticipants(workflow, agentById),
-  }));
+  const agentRunnables = agents.map(chatRunnableSummary);
+  const workflowRunnables = workflows.map(chatRunnableSummary);
   return [...agentRunnables, ...workflowRunnables];
 }
 
-function chatAgentRunnable(agent: AgentDefinitionSnapshot): ChatRunnableSummary {
+function chatRunnableSummary(runnable: ChatRunnableSnapshot): ChatRunnableSummary {
   return {
-    id: agent.agent_id,
-    name: agent.name,
-    nickname: agent.nickname || undefined,
-    description: agent.description || undefined,
-    avatar_url: agent.avatar_url || undefined,
-    category: agent.category || undefined,
-    output_contract: agent.output_contract || undefined,
-    kind: 'agent',
-    enabled: agent.enabled,
-    tool_policy: chatToolPolicy(agent.tool_policy),
+    id: runnable.runnable_id || runnable.agent_id || runnable.workflow_id || '',
+    name: runnable.name,
+    nickname: runnable.nickname || undefined,
+    description: runnable.description || undefined,
+    avatar_url: runnable.avatar_url || undefined,
+    category: runnable.category || undefined,
+    output_contract: runnable.output_contract || undefined,
+    kind: runnable.kind,
+    enabled: runnable.enabled,
+    tool_policy: chatToolPolicy(runnable.tool_capabilities, runnable.approval_required_tools),
+    participants: (runnable.participants || []).map(chatParticipantRunnable),
   };
 }
 
 function chatToolPolicy(
-  policy: AgentDefinitionSnapshot['tool_policy'],
+  toolCapabilities: string[] | undefined,
+  approvalRequiredTools: string[] | undefined,
 ): ChatRunnableSummary['tool_policy'] | undefined {
-  if (!policy || typeof policy !== 'object') return undefined;
-  const allowedTools = Array.isArray(policy.allowed_tools)
-    ? policy.allowed_tools.map((tool) => String(tool || '').trim()).filter(Boolean)
-    : undefined;
+  const allowedTools = Array.isArray(toolCapabilities)
+    ? toolCapabilities.map((tool) => String(tool || '').trim()).filter(Boolean)
+    : [];
   const approvalRequired: Record<string, boolean> = {};
-  if (
-    policy.approval_required
-    && typeof policy.approval_required === 'object'
-    && !Array.isArray(policy.approval_required)
-  ) {
-    Object.entries(policy.approval_required as Record<string, unknown>).forEach(([tool, required]) => {
-      if (tool.trim()) approvalRequired[tool] = required === true;
-    });
-  }
+  (approvalRequiredTools || []).forEach((tool) => {
+    const cleanTool = String(tool || '').trim();
+    if (cleanTool) approvalRequired[cleanTool] = true;
+  });
   const normalized: ChatRunnableSummary['tool_policy'] = {};
   if (allowedTools?.length) normalized.allowed_tools = allowedTools;
   if (Object.keys(approvalRequired).length) normalized.approval_required = approvalRequired;
   return normalized.allowed_tools || normalized.approval_required ? normalized : undefined;
 }
 
-function workflowParticipants(
-  workflow: WorkflowSnapshot,
-  agentById: Map<string, ChatRunnableSummary>,
-): ChatRunnableSummary[] {
-  const participants: ChatRunnableSummary[] = [];
-  const seen = new Set<string>();
-  (workflow.nodes || []).forEach((node) => {
-    const agentId = workflowNodeAgentId(node);
-    const participant = agentId ? agentById.get(agentId) : undefined;
-    if (!participant || seen.has(participant.id)) return;
-    seen.add(participant.id);
-    participants.push(participant);
-  });
-  return participants;
-}
-
-function workflowNodeAgentId(node: Record<string, unknown>): string {
-  const data = recordValue(node.data);
-  if (workflowNodeKind(node, data) !== 'agent') return '';
-  for (const key of ['agent_id', 'agentId', 'runnable_id', 'runnableId']) {
-    const value = data[key];
-    if (typeof value === 'string' && value.trim()) return value.trim();
-  }
-  return '';
-}
-
-function workflowNodeKind(node: Record<string, unknown>, data: Record<string, unknown>): string {
-  return String(data.kind || data.node_type || node.type || 'agent').trim();
-}
-
-function recordValue(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
+function chatParticipantRunnable(participant: ChatRunnableParticipantSnapshot): ChatRunnableSummary {
+  return {
+    id: participant.runnable_id || participant.agent_id || participant.workflow_id || '',
+    name: participant.name,
+    nickname: participant.nickname || undefined,
+    avatar_url: participant.avatar_url || undefined,
+    category: participant.category || undefined,
+    kind: participant.kind,
+    enabled: participant.enabled,
+  };
 }

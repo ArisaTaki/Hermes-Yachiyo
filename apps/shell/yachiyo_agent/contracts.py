@@ -415,9 +415,38 @@ class WorkflowSnapshot(_PublicSnapshot):
     updated_at: str = ""
 
 
+class ChatRunnableParticipantSnapshot(_PublicSnapshot):
+    runnable_id: str
+    agent_id: str | None = None
+    workflow_id: str | None = None
+    kind: Literal["agent", "workflow"]
+    name: str
+    nickname: str | None = None
+    avatar_url: str | None = None
+    category: str | None = None
+    enabled: bool = True
+
+
+class ChatRunnableSnapshot(_PublicSnapshot):
+    runnable_id: str
+    agent_id: str | None = None
+    workflow_id: str | None = None
+    kind: Literal["agent", "workflow"]
+    name: str
+    nickname: str | None = None
+    description: str | None = None
+    avatar_url: str | None = None
+    category: str | None = None
+    output_contract: str | None = None
+    enabled: bool = True
+    tool_capabilities: list[str] = Field(default_factory=list)
+    approval_required_tools: list[str] = Field(default_factory=list)
+    participants: list[ChatRunnableParticipantSnapshot] = Field(default_factory=list)
+
+
 class ChatRunnableCatalogSnapshot(_PublicSnapshot):
-    agents: list[AgentDefinitionSnapshot] = Field(default_factory=list)
-    workflows: list[WorkflowSnapshot] = Field(default_factory=list)
+    agents: list[ChatRunnableSnapshot] = Field(default_factory=list)
+    workflows: list[ChatRunnableSnapshot] = Field(default_factory=list)
 
 
 class WorkflowRunSnapshot(RunTimelineSnapshot):

@@ -13,6 +13,8 @@ from apps.shell.yachiyo_agent import (
     ArtifactContentSnapshot,
     ArtifactSnapshot,
     ChatRunnableCatalogSnapshot,
+    ChatRunnableParticipantSnapshot,
+    ChatRunnableSnapshot,
     FutureTaskSnapshot,
     FutureTaskTriggerResultSnapshot,
     GroupRunSnapshot,
@@ -164,15 +166,62 @@ def test_approval_card_snapshot_keeps_runtime_trace_fields() -> None:
 
 def test_chat_runnable_catalog_snapshot_json_shape_is_stable() -> None:
     snapshot = ChatRunnableCatalogSnapshot(
-        agents=[AgentDefinitionSnapshot(agent_id="agent-1", name="Planner")],
-        workflows=[WorkflowSnapshot(workflow_id="workflow-1", name="Review workflow")],
+        agents=[
+            ChatRunnableSnapshot(
+                runnable_id="agent-1",
+                agent_id="agent-1",
+                kind="agent",
+                name="Planner",
+                tool_capabilities=["workspace.read", "workspace.write_patch"],
+                approval_required_tools=["workspace.write_patch"],
+            )
+        ],
+        workflows=[
+            ChatRunnableSnapshot(
+                runnable_id="workflow-1",
+                workflow_id="workflow-1",
+                kind="workflow",
+                name="Review workflow",
+                output_contract="workflow",
+                participants=[
+                    ChatRunnableParticipantSnapshot(
+                        runnable_id="agent-1",
+                        agent_id="agent-1",
+                        kind="agent",
+                        name="Planner",
+                    )
+                ],
+            )
+        ],
     )
 
     payload = _json(snapshot)
 
     assert list(payload) == ["agents", "workflows"]
+    assert list(payload["agents"][0]) == [
+        "runnable_id",
+        "agent_id",
+        "workflow_id",
+        "kind",
+        "name",
+        "nickname",
+        "description",
+        "avatar_url",
+        "category",
+        "output_contract",
+        "enabled",
+        "tool_capabilities",
+        "approval_required_tools",
+        "participants",
+    ]
     assert payload["agents"][0]["agent_id"] == "agent-1"
+    assert payload["agents"][0]["tool_capabilities"] == ["workspace.read", "workspace.write_patch"]
+    assert payload["agents"][0]["approval_required_tools"] == ["workspace.write_patch"]
     assert payload["workflows"][0]["workflow_id"] == "workflow-1"
+    assert payload["workflows"][0]["participants"][0]["agent_id"] == "agent-1"
+    assert "tool_policy" not in payload["agents"][0]
+    assert "nodes" not in payload["workflows"][0]
+    assert "edges" not in payload["workflows"][0]
 
 
 def test_run_timeline_snapshot_json_shape_covers_runtime_debug_objects() -> None:

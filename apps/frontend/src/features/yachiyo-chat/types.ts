@@ -7,6 +7,8 @@ export type {
   ArtifactContentSnapshot,
   ArtifactSnapshot,
   ChatRunnableCatalogSnapshot,
+  ChatRunnableParticipantSnapshot,
+  ChatRunnableSnapshot,
   PublicRunEvent,
   RunEventPageSnapshot,
   RunTimelineSnapshot,

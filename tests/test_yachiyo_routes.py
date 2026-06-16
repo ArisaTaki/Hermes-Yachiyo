@@ -441,8 +441,16 @@ async def test_yachiyo_task_routes_use_injected_runtime_and_return_public_snapsh
     cancelled = await yachiyo.cancel_task("run-1", request)
 
     assert readiness["ready"] is True
+    assert runnables["agents"][0]["runnable_id"] == "agent-1"
     assert runnables["agents"][0]["agent_id"] == "agent-1"
+    assert runnables["agents"][0]["kind"] == "agent"
+    assert "model_config" not in runnables["agents"][0]
+    assert "tool_policy" not in runnables["agents"][0]
+    assert runnables["workflows"][0]["runnable_id"] == "workflow-1"
     assert runnables["workflows"][0]["workflow_id"] == "workflow-1"
+    assert runnables["workflows"][0]["kind"] == "workflow"
+    assert "nodes" not in runnables["workflows"][0]
+    assert "edges" not in runnables["workflows"][0]
     assert started["task_id"] == "run-1"
     assert started["status"] == "waiting_approval"
     assert started["conversation_id"] == "chat-1"

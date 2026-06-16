@@ -5,8 +5,9 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from .adapters import agent_definition_snapshot_from_payload, readiness_snapshot_from_payload
+from .adapters import readiness_snapshot_from_payload
 from .artifacts import artifact_content_snapshot_from_payload
+from .chat_runnables import chat_runnable_catalog_from_payloads
 from .contracts import (
     AgentTaskSnapshot,
     ApprovalDecision,
@@ -22,7 +23,6 @@ from .events import public_run_event_from_payload, public_run_event_page_from_pa
 from .ports import ChatTaskStarter, RuntimePort
 from .run_snapshots import run_timeline_snapshot_from_payload
 from .task_cards import agent_task_snapshot_from_payload, agent_task_snapshots_from_payloads
-from .workflows import workflow_snapshot_from_payload
 
 
 class YachiyoAgentService:
@@ -41,15 +41,9 @@ class YachiyoAgentService:
 
     def list_runnable_catalog(self) -> ChatRunnableCatalogSnapshot:
         payload = self._runtime_port.list_runnable_catalog()
-        return ChatRunnableCatalogSnapshot(
-            agents=[
-                agent_definition_snapshot_from_payload(item)
-                for item in _payload_items(payload, "agents")
-            ],
-            workflows=[
-                workflow_snapshot_from_payload(item)
-                for item in _payload_items(payload, "workflows")
-            ],
+        return chat_runnable_catalog_from_payloads(
+            _payload_items(payload, "agents"),
+            _payload_items(payload, "workflows"),
         )
 
     def start_chat_task(

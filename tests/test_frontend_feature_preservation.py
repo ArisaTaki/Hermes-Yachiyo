@@ -1251,6 +1251,8 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "export type MemoryTraceSnapshot",
             "export type SkillTraceSnapshot",
             "export type RunTimelineSnapshot",
+            "export type ChatRunnableParticipantSnapshot",
+            "export type ChatRunnableSnapshot",
             "export type WorkflowRunSnapshot",
             "export type StartChatTaskRequest",
             "workflow_id?: string | null;",
@@ -1336,6 +1338,8 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "AgentDefinitionSnapshot",
             "AgentTaskSnapshot",
             "ChatRunnableCatalogSnapshot",
+            "ChatRunnableParticipantSnapshot",
+            "ChatRunnableSnapshot",
             "PublicRunEvent",
             "RunEventPageSnapshot",
             "ArtifactContentSnapshot",
@@ -3399,7 +3403,9 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
             "const catalog = await listYachiyoChatRunnableCatalog();",
             "return chatRunnablesFromPublicSnapshots(catalog.agents, catalog.workflows)",
             "return listLegacyRunnables()",
-            "participants: workflowParticipants(workflow, agentById)",
+            "participants: (runnable.participants || []).map(chatParticipantRunnable)",
+            "tool_capabilities",
+            "approval_required_tools",
         ],
     )
     _assert_not_contains(

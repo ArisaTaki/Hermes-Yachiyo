@@ -22,14 +22,25 @@ class _FakeRuntimePort:
                 {
                     "agent_id": "agent-1",
                     "name": "Planner",
-                    "tool_policy": {"allowed_tools": ["workspace.read"]},
+                    "tool_policy": {
+                        "allowed_tools": ["workspace.read", "workspace.write_patch"],
+                        "approval_required": {"workspace.write_patch": True},
+                    },
+                    "workspace_policy": {"allowed_roots": ["/private"]},
                 }
             ],
             "workflows": [
                 {
                     "workflow_id": "workflow-1",
                     "name": "Review workflow",
-                    "nodes": [{"id": "review", "type": "agent"}],
+                    "nodes": [
+                        {
+                            "id": "review",
+                            "type": "agent",
+                            "data": {"agent_id": "agent-1"},
+                        }
+                    ],
+                    "edges": [{"source": "start", "target": "review"}],
                 }
             ],
         }
@@ -192,10 +203,15 @@ def test_yachiyo_agent_service_maps_chat_runnable_catalog() -> None:
 
     catalog = service.list_runnable_catalog()
 
+    assert catalog.agents[0].runnable_id == "agent-1"
     assert catalog.agents[0].agent_id == "agent-1"
-    assert catalog.agents[0].tool_policy == {"allowed_tools": ["workspace.read"]}
+    assert catalog.agents[0].kind == "agent"
+    assert catalog.agents[0].tool_capabilities == ["workspace.read", "workspace.write_patch"]
+    assert catalog.agents[0].approval_required_tools == ["workspace.write_patch"]
+    assert catalog.workflows[0].runnable_id == "workflow-1"
     assert catalog.workflows[0].workflow_id == "workflow-1"
-    assert catalog.workflows[0].nodes == [{"id": "review", "type": "agent"}]
+    assert catalog.workflows[0].kind == "workflow"
+    assert catalog.workflows[0].participants[0].runnable_id == "agent-1"
     assert port.calls == [("list_runnable_catalog", None)]
 
 
