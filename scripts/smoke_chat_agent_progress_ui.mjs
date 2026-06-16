@@ -465,7 +465,8 @@ async function main() {
       && card.getAttribute('data-run-group-id') === smoke.runGroupId
       && card.textContent.includes(smoke.progressTitle)
       && button?.getAttribute('data-run-id') === smoke.runId
-      && button?.getAttribute('data-run-status') === 'processing';
+      && button?.getAttribute('data-run-status') === 'processing'
+      && button.textContent.includes('Agent Studio');
   }, 'Chat Agent progress card');
   await win.webContents.executeJavaScript(
     "const openRun = document.querySelector('[data-testid=\"chat-agent-run-progress-open-run-detail\"]');" +
@@ -473,6 +474,7 @@ async function main() {
       "if (!openRun) throw new Error('missing Chat Agent progress Run Detail button');" +
       "if (openRun.getAttribute('data-run-id') !== smoke.runId) throw new Error('Chat Agent progress Run Detail button has wrong run id');" +
       "if (openRun.getAttribute('data-run-status') !== 'processing') throw new Error('Chat Agent progress Run Detail button has wrong status');" +
+      "if (!openRun.textContent.includes('Agent Studio')) throw new Error('Chat Agent progress handoff should point to Agent Studio');" +
       "openRun.click();",
     true
   );

@@ -2898,6 +2898,10 @@ def test_chat_cancel_ui_smoke_uses_stop_buttons_and_cancel_route() -> None:
 def test_chat_smokes_use_agent_studio_handoff_copy() -> None:
     smoke_scripts = [
         "scripts/smoke_chat_cancel_ui.mjs",
+        "scripts/smoke_chat_agent_progress_ui.mjs",
+        "scripts/smoke_chat_approval_ui.mjs",
+        "scripts/smoke_chat_delegated_summary_ui.mjs",
+        "scripts/smoke_chat_group_summary_ui.mjs",
         "scripts/smoke_chat_image_attachment_ui.mjs",
         "scripts/smoke_chat_run_detail_handoff_ui.mjs",
         "scripts/smoke_packaged_chat_native_file_upload.mjs",
@@ -3525,6 +3529,7 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
             "if (messageActivityLooksRuntimeId(detail)) return '';",
             'data-testid="chat-message-activity-open"',
             'data-testid="chat-message-activity-open-run-detail"',
+            "Agent Studio",
         ],
     )
     _assert_not_contains(

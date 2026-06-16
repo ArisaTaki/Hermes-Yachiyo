@@ -494,13 +494,15 @@ async function waitForApproval(win, label) {
       && reject
       && openRun?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
       && openRun?.getAttribute('data-run-status') === 'approval_required'
+      && openRun.textContent.includes('Agent Studio')
       && composer?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
       && composer?.getAttribute('data-run-status') === 'approval_required'
       && composer?.getAttribute('data-approval-id') === ${JSON.stringify(APPROVAL_ID)}
       && composerApprove
       && composerReject
       && composerOpenRun?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
-      && composerOpenRun?.getAttribute('data-run-status') === 'approval_required';
+      && composerOpenRun?.getAttribute('data-run-status') === 'approval_required'
+      && composerOpenRun.textContent.includes('Agent Studio');
   }, label);
 }
 async function waitForRunDetailHandoff(win, label) {

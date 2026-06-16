@@ -763,6 +763,7 @@ async function waitForActivityApproval(win) {
       && row.textContent.includes('Coding Agent')
       && openRun?.getAttribute('data-run-id') === ${JSON.stringify(DELEGATED_RUN_ID)}
       && openRun?.getAttribute('data-run-status') === 'approval_required'
+      && openRun.textContent.includes('Agent Studio')
       && approve
       && reject;
   }, 'activity approval composer notice');
@@ -896,7 +897,8 @@ async function main() {
       && row?.getAttribute('data-run-status') === 'cancelled'
       && row.textContent.includes(${JSON.stringify(REJECTED_RESULT)})
       && openRun?.getAttribute('data-run-id') === ${JSON.stringify(DELEGATED_RUN_ID)}
-      && openRun?.getAttribute('data-run-status') === 'cancelled';
+      && openRun?.getAttribute('data-run-status') === 'cancelled'
+      && openRun.textContent.includes('Agent Studio');
   }, 'delegated reject summary created in Chat');
   console.log('[electron-smoke] delegated reject summary rendered');
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-message-activity-open-run-detail\\"]').click()", true);
@@ -927,7 +929,8 @@ async function main() {
       && row?.getAttribute('data-activity-status') === 'completed'
       && row.textContent.includes(${JSON.stringify(DELEGATED_RESULT)})
       && openSummary
-      && openRun;
+      && openRun
+      && openRun.textContent.includes('Agent Studio');
   }, 'delegated summary created in Chat');
   console.log('[electron-smoke] delegated summary rendered');
   await loadChat(win, {
@@ -956,7 +959,8 @@ async function main() {
       && row?.getAttribute('data-run-status') === 'completed'
       && row.textContent.includes(${JSON.stringify(DELEGATED_RESULT)})
       && openRun?.getAttribute('data-run-id') === ${JSON.stringify(DELEGATED_RUN_ID)}
-      && openRun?.getAttribute('data-run-status') === 'completed';
+      && openRun?.getAttribute('data-run-status') === 'completed'
+      && openRun.textContent.includes('Agent Studio');
   }, 'delegated summary chat restored after Run Detail');
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-message-activity-open-run-detail\\"]').click()", true);
   await waitForCompletedRunDetail(win);

@@ -943,7 +943,8 @@ async function main() {
       && row?.getAttribute('data-run-status') === 'completed'
       && row.textContent.includes('Group UI Agent')
       && openRun?.getAttribute('data-run-id') === ${JSON.stringify(GROUP_AGENT_RUN_ID)}
-      && openRun?.getAttribute('data-run-status') === 'completed';
+      && openRun?.getAttribute('data-run-status') === 'completed'
+      && openRun.textContent.includes('Agent Studio');
   }, 'group activity Run Detail action');
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-message-activity-open-run-detail\\"]').click()", true);
   await waitFor(win, () => {

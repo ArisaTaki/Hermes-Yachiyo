@@ -98,7 +98,7 @@ export function MessageActivityList({
                 data-testid="chat-message-activity-open-run-detail"
                 onClick={() => onOpenRunDetails(runId, studioUrl)}
               >
-                详情
+                Agent Studio
               </button>
             ) : null}
           </div>
