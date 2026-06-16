@@ -1,6 +1,7 @@
 import { useState } from 'react';
 
 import { openAppView } from '../../../lib/bridge';
+import { runtimeToolDisplayLabelOrName } from '../../runtime-shared/approval';
 import { yachiyoTaskStudioGroupRunId, yachiyoTaskStudioRunId, yachiyoTaskStudioUrl } from '../taskSnapshots';
 import type { AgentTaskSnapshot, ApprovalCardSnapshot } from '../types';
 
@@ -28,7 +29,12 @@ export function launcherAgentTaskTitle(task: LauncherAgentTask, fallback = '八�
 export function launcherAgentTaskDetail(task: LauncherAgentTask) {
   if (!task) return '';
   const approval = task.pending_approvals?.find((item) => item.tool_name || item.title);
-  if (approval) return `审批 · ${approval.tool_name || approval.title}`;
+  if (approval) {
+    const approvalTitle = approval.tool_name
+      ? runtimeToolDisplayLabelOrName(approval.tool_name)
+      : String(approval.title || '').trim();
+    return `审批 · ${approvalTitle || '人工确认'}`;
+  }
   const step = String(task.current_step || task.progress_text || '').trim();
   if (step) return step;
   const event = task.recent_events?.find((item) => item.title || item.detail || item.event_type);

@@ -32,3 +32,16 @@ export function runtimeToolDisplayLabel(toolName: string): string {
   if (tool === 'group.approval') return '群组人工确认';
   return '工具调用';
 }
+
+export function runtimeToolDisplayLabelOrName(toolName: string): string {
+  const tool = String(toolName || '').trim();
+  const display = runtimeToolDisplayLabel(tool);
+  if (display !== '工具调用') return display;
+  if (runtimeToolLooksInternalId(tool)) return display;
+  return tool || display;
+}
+
+function runtimeToolLooksInternalId(toolName: string): boolean {
+  return /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/i.test(toolName)
+    || /^[a-z][a-z0-9]+(?:_[a-z0-9]+)+$/i.test(toolName);
+}

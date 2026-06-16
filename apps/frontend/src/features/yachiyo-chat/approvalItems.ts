@@ -1,5 +1,6 @@
 import type { ComposerApprovalSource } from './components/ComposerApprovalNotice';
 import type { ApprovalRequestDetails } from './components/MessageApprovalRequestCard';
+import { runtimeToolDisplayLabelOrName } from '../runtime-shared/approval';
 
 export type ChatApprovalParticipant = {
   kind?: 'main' | 'agent' | 'workflow' | 'group' | string;
@@ -396,7 +397,7 @@ function activityApprovalRequester(event: ChatApprovalActivityEvent) {
   const title = String(event.title || '').trim();
   return title
     .replace(/\s*(等待审批|请求执行工具调用|请求工具调用|委派失败|委派完成)\s*$/u, '')
-    .trim() || String(event.tool_name || 'Agent').trim();
+    .trim() || runtimeToolDisplayLabelOrName(String(event.tool_name || 'Agent').trim());
 }
 
 function activityApprovalSignature(event: ChatApprovalActivityEvent) {

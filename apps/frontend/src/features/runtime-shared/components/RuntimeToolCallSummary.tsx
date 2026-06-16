@@ -1,5 +1,5 @@
 import type { PublicRunEvent } from '../types';
-import { runtimeToolDisplayLabel } from '../approval';
+import { runtimeToolDisplayLabelOrName } from '../approval';
 
 export type RuntimeToolCallSummaryItem = {
   count: number;
@@ -209,7 +209,5 @@ function runtimeToolStatusLabel(status: string): string {
 }
 
 function runtimeToolSummaryDisplayName(name: string): string {
-  const displayName = runtimeToolDisplayLabel(name);
-  if (displayName !== '工具调用') return displayName;
-  return String(name || '').trim() || displayName;
+  return runtimeToolDisplayLabelOrName(name);
 }

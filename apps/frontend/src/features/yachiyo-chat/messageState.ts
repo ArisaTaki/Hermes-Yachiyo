@@ -2,6 +2,7 @@ import {
   approvalRequiredMessages,
   nextApprovalStatusText,
 } from './approvalItems';
+import { runtimeToolDisplayLabelOrName } from '../runtime-shared/approval';
 import type {
   ChatActivityEvent,
   ChatMessage,
@@ -126,7 +127,9 @@ export function latestVisibleActivity(messages: YachiyoChatMessage[]) {
 
 export function activityLabel(event?: YachiyoChatActivityEvent | null) {
   if (!event) return '';
-  return String(event.title || event.detail || event.tool_name || '').trim();
+  const label = String(event.title || event.detail || '').trim();
+  if (label) return runtimeToolDisplayLabelOrName(label);
+  return runtimeToolDisplayLabelOrName(String(event.tool_name || '').trim());
 }
 
 export function activityRunId(event?: YachiyoChatActivityEvent | null) {

@@ -1,5 +1,6 @@
 import { UiIcon } from '../../../components/UiIcon';
 import { navigateTo } from '../../../lib/view';
+import { runtimeToolDisplayLabelOrName } from '../../runtime-shared/approval';
 import { studioRunUrl } from '../../runtime-shared/studioLinks';
 
 export type MessageActivityEvent = {
@@ -54,6 +55,7 @@ export function MessageActivityList({
         const groupRunId = activityGroupRunId(event);
         const studioUrl = runId ? studioRunUrl(runId, { groupRunId }) || '' : '';
         const eventKey = activityEventKey(event, index);
+        const activityTitle = messageActivityTitle(event);
         return (
           <div
             className={`message-activity-row ${activityStatusClass(displayStatus)}${runId ? ' has-detail' : ''}`}
@@ -67,7 +69,7 @@ export function MessageActivityList({
             <span className="message-activity-icon" aria-hidden="true">{activityStatusIcon(displayStatus)}</span>
             <div className="message-activity-text">
               <div className="message-activity-heading">
-                <strong>{event.title || event.tool_name || 'Native 活动'}</strong>
+                <strong>{activityTitle}</strong>
                 {event.event_id ? (
                   <button
                     type="button"
@@ -115,6 +117,14 @@ function activityRunId(event?: MessageActivityEvent | null) {
 
 function activityGroupRunId(event?: MessageActivityEvent | null) {
   return String(event?.metadata?.run_group_id || event?.metadata?.group_dispatch_run_group_id || '').trim();
+}
+
+function messageActivityTitle(event: MessageActivityEvent) {
+  const title = String(event.title || '').trim();
+  const toolName = String(event.tool_name || '').trim();
+  if (title && title !== toolName) return runtimeToolDisplayLabelOrName(title);
+  if (toolName) return runtimeToolDisplayLabelOrName(toolName);
+  return title || 'Native 活动';
 }
 
 function activityStatusClass(status?: string) {
