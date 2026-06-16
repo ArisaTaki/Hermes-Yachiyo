@@ -15,6 +15,7 @@ import {
   publicApprovalToRunPendingApproval,
   publicArtifactsOrLegacy,
   publicRunEventToTimelineEvent,
+  publicRunTimelineToRunSpec,
 } from '../utils/runs';
 import { runEventReplayToTimelineEvent } from '../utils/runTimeline';
 import {
@@ -105,8 +106,20 @@ export function useSelectedRunDetailState({
     return runGroups.find((group) => group.run_group_id === selectedRun.run_group_id) || null;
   }, [runGroups, selectedRouteGroupRunId, selectedRun]);
   const selectedWorkflowSteps = useMemo(
-    () => workflowStepRefs(selectedRun, selectedRunWorkflow),
-    [selectedRun, selectedRunWorkflow],
+    () => {
+      if (selectedPublicRunTimeline) {
+        const publicTimelineRun = publicRunTimelineToRunSpec(selectedPublicRunTimeline, {
+          kind: selectedRun?.kind,
+          runnableId: selectedRun?.runnable_id,
+          runnableName: selectedRun?.runnable_name,
+          userGoal: selectedRun?.user_goal,
+        });
+        const publicSteps = workflowStepRefs(publicTimelineRun, selectedRunWorkflow);
+        if (publicSteps.length) return publicSteps;
+      }
+      return workflowStepRefs(selectedRun, selectedRunWorkflow);
+    },
+    [selectedPublicRunTimeline, selectedRun, selectedRunWorkflow],
   );
   const selectedWorkflowChildRefs = useMemo(
     () => workflowChildRunRefs(selectedRun),
