@@ -143,7 +143,7 @@ export function LauncherAgentTaskLight({
           }}
           title="在 Agent Studio 中查看"
         >
-          Studio
+          Agent Studio
         </a>
       ) : null}
       {canHandleApproval ? (

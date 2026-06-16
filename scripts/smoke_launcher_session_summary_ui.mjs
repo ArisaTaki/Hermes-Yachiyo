@@ -480,6 +480,7 @@ async function main() {
     const probe = document.querySelector('[data-testid="bubble-launcher-session-summary-probe"]');
     const status = document.querySelector('[data-testid="bubble-launcher-status-label"]');
     const taskLight = document.querySelector('[data-testid="bubble-launcher-agent-task-light"]');
+    const taskStudio = document.querySelector('[data-testid="bubble-launcher-agent-task-open-studio"]');
     const taskApprove = document.querySelector('[data-testid="bubble-launcher-agent-task-approve"]');
     const taskReject = document.querySelector('[data-testid="bubble-launcher-agent-task-reject"]');
     const sessions = Array.from(document.querySelectorAll('[data-testid="bubble-launcher-recent-session"]'));
@@ -493,6 +494,9 @@ async function main() {
       && taskLight.getAttribute('data-run-id') === ${JSON.stringify(PUBLIC_RUN_ID)}
       && taskLight.textContent.includes(${JSON.stringify(PUBLIC_TASK_TITLE)})
       && taskLight.textContent.includes('待处理')
+      && taskStudio?.getAttribute('data-run-id') === ${JSON.stringify(PUBLIC_RUN_ID)}
+      && taskStudio?.getAttribute('data-studio-url')?.includes(${JSON.stringify(PUBLIC_RUN_ID)})
+      && taskStudio.textContent.includes('Agent Studio')
       && taskApprove
       && !taskApprove.disabled
       && taskReject
@@ -595,6 +599,7 @@ async function main() {
     const probe = document.querySelector('[data-testid="live2d-launcher-session-summary-probe"]');
     const preview = document.querySelector('[data-testid="live2d-launcher-preview-fallback"]');
     const taskLight = document.querySelector('[data-testid="live2d-launcher-agent-task-light"]');
+    const taskStudio = document.querySelector('[data-testid="live2d-launcher-agent-task-open-studio"]');
     const taskApprove = document.querySelector('[data-testid="live2d-launcher-agent-task-approve"]');
     const taskReject = document.querySelector('[data-testid="live2d-launcher-agent-task-reject"]');
     const sessions = Array.from(document.querySelectorAll('[data-testid="live2d-launcher-recent-session"]'));
@@ -610,6 +615,9 @@ async function main() {
       && taskLight.getAttribute('data-run-id') === ${JSON.stringify(PUBLIC_RUN_ID)}
       && taskLight.textContent.includes(${JSON.stringify(PUBLIC_TASK_TITLE)})
       && taskLight.textContent.includes('待处理')
+      && taskStudio?.getAttribute('data-run-id') === ${JSON.stringify(PUBLIC_RUN_ID)}
+      && taskStudio?.getAttribute('data-studio-url')?.includes(${JSON.stringify(PUBLIC_RUN_ID)})
+      && taskStudio.textContent.includes('Agent Studio')
       && taskApprove
       && !taskApprove.disabled
       && taskReject
