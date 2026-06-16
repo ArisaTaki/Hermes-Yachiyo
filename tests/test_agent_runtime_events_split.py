@@ -106,11 +106,17 @@ def test_runtime_run_event_recorder_appends_compatibility_aliases() -> None:
         "tool.rejected",
         "approval.rejected",
     ]
+    assert canonical_run_event_aliases("agent.tool.approval_timeout") == [
+        "approval.timeout"
+    ]
     assert canonical_run_event_aliases("workflow.node.approval_approved") == [
         "approval.approved"
     ]
     assert canonical_run_event_aliases("workflow.node.approval_rejected") == [
         "approval.rejected"
+    ]
+    assert canonical_run_event_aliases("workflow.node.approval_timeout") == [
+        "approval.timeout"
     ]
     assert agent_runtime._canonical_run_event_aliases("model.output.completed") == ["model.completed"]
 
@@ -158,6 +164,28 @@ def test_runtime_run_event_recorder_appends_compatibility_aliases() -> None:
     assert [call[1] for call in repository.calls] == [
         "workflow.node.approval_rejected",
         "approval.rejected",
+    ]
+
+    repository.calls.clear()
+    recorder.append(
+        "run-1",
+        "agent.tool.approval_timeout",
+        {"tool": "terminal.run", "status": "cancelled"},
+    )
+    assert [call[1] for call in repository.calls] == [
+        "agent.tool.approval_timeout",
+        "approval.timeout",
+    ]
+
+    repository.calls.clear()
+    recorder.append(
+        "run-1",
+        "workflow.node.approval_timeout",
+        {"workflow_node_id": "approval-1", "status": "cancelled"},
+    )
+    assert [call[1] for call in repository.calls] == [
+        "workflow.node.approval_timeout",
+        "approval.timeout",
     ]
 
 
