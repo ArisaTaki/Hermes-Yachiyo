@@ -124,6 +124,19 @@ class StudioPort(Protocol):
 
     def get_group_run(self, group_run_id: str) -> dict[str, Any]: ...
 
+    def get_group_run_event_stream(
+        self,
+        group_run_id: str,
+    ) -> Iterable[dict[str, Any]] | Mapping[str, Any]: ...
+
+    def get_group_run_event_page(
+        self,
+        group_run_id: str,
+        *,
+        after_sequence: int = 0,
+        limit: int = 200,
+    ) -> Mapping[str, Any]: ...
+
     def list_workflows(self) -> list[dict[str, Any]] | Mapping[str, Any]: ...
 
     def get_workflow(self, workflow_id: str) -> dict[str, Any]: ...

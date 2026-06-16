@@ -648,6 +648,79 @@ def test_agent_studio_service_paginates_group_run_events_after_child_sequence_re
     assert second_child_page.has_more is False
 
 
+def test_agent_studio_service_prefers_runtime_group_run_event_page_port() -> None:
+    class PagedGroupRunEventPort(_FakeStudioPort):
+        def get_group_run_event_stream(self, group_run_id: str) -> dict[str, Any]:
+            self.calls.append(("get_group_run_event_stream", group_run_id))
+            return {
+                "events": [
+                    {
+                        "event_id": "group-event-4",
+                        "run_id": group_run_id,
+                        "sequence": 4,
+                        "event_type": "group.member.started",
+                        "payload": {"member_agent_id": "agent-1"},
+                    }
+                ],
+            }
+
+        def get_group_run_event_page(
+            self,
+            group_run_id: str,
+            *,
+            after_sequence: int = 0,
+            limit: int = 200,
+        ) -> dict[str, Any]:
+            self.calls.append(
+                (
+                    "get_group_run_event_page",
+                    {
+                        "group_run_id": group_run_id,
+                        "after_sequence": after_sequence,
+                        "limit": limit,
+                    },
+                )
+            )
+            return {
+                "run_id": group_run_id,
+                "after_sequence": after_sequence,
+                "limit": limit,
+                "next_after_sequence": 9,
+                "has_more": True,
+                "events": [
+                    {
+                        "event_id": "group-event-9",
+                        "run_id": group_run_id,
+                        "sequence": 9,
+                        "event_type": "group.run.completed",
+                        "payload": {"group_run_id": group_run_id},
+                    }
+                ],
+            }
+
+    port = PagedGroupRunEventPort()
+    service = AgentStudioService(port)
+
+    stream = list(service.get_group_run_event_stream("group-run-1"))
+    page = service.get_group_run_event_page("group-run-1", after_sequence=3, limit=1)
+
+    assert stream[0].sequence == 4
+    assert stream[0].event_type == "group.member.started"
+    assert page.run_id == "group-run-1"
+    assert page.after_sequence == 3
+    assert page.limit == 1
+    assert page.next_after_sequence == 9
+    assert page.has_more is True
+    assert page.events[0].sequence == 9
+    assert page.events[0].event_type == "group.run.completed"
+    assert ("get_group_run_event_stream", "group-run-1") in port.calls
+    assert (
+        "get_group_run_event_page",
+        {"group_run_id": "group-run-1", "after_sequence": 3, "limit": 1},
+    ) in port.calls
+    assert ("get_group_run", "group-run-1") not in port.calls
+
+
 def test_agent_studio_service_prefers_runtime_run_event_page_port() -> None:
     class PagedRunEventPort(_FakeStudioPort):
         def get_run_event_page(

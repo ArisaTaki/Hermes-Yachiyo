@@ -18,6 +18,7 @@ from .legacy_groups import (
 )
 from .legacy_runs import LegacyRunPayloadProjector
 from .legacy_tasks import LegacyRuntimePort
+from .groups import group_run_snapshot_from_payload
 
 
 _LEGACY_RUN_PROJECTOR = LegacyRunPayloadProjector()
@@ -466,6 +467,27 @@ class LegacyStudioPort:
     def get_group_run(self, group_run_id: str) -> dict[str, Any]:
         run_group = self._runtime.get_run_group(group_run_id)
         return self._projector.group_run_from_legacy_run_group(run_group, self._runtime)
+
+    def get_group_run_event_stream(self, group_run_id: str) -> dict[str, Any]:
+        group_run = group_run_snapshot_from_payload(self.get_group_run(group_run_id))
+        return {
+            "run_id": group_run.group_run_id,
+            "events": [event.model_dump(mode="python") for event in group_run.events],
+        }
+
+    def get_group_run_event_page(
+        self,
+        group_run_id: str,
+        *,
+        after_sequence: int = 0,
+        limit: int = 200,
+    ) -> dict[str, Any]:
+        return _run_event_page_from_legacy_stream(
+            self.get_group_run_event_stream(group_run_id),
+            run_id=group_run_id,
+            after_sequence=after_sequence,
+            limit=limit,
+        )
 
     def list_workflows(self) -> dict[str, Any]:
         return self._runtime.list_workflows()

@@ -255,6 +255,13 @@ class AgentStudioService:
         return group_run_snapshot_from_payload(self._studio_port.get_group_run(group_run_id))
 
     def get_group_run_event_stream(self, group_run_id: str) -> Iterable[PublicRunEvent]:
+        port_event_stream = getattr(self._studio_port, "get_group_run_event_stream", None)
+        if callable(port_event_stream):
+            raw_events = port_event_stream(group_run_id)
+            for event in _payload_items(raw_events, "events"):
+                yield public_run_event_from_payload(event, run_id=group_run_id)
+            return
+
         group_run = self.get_group_run(group_run_id)
         if group_run.events:
             yield from group_run.events
@@ -270,6 +277,20 @@ class AgentStudioService:
     ) -> RunEventPageSnapshot:
         clean_after_sequence = max(0, int(after_sequence or 0))
         clean_limit = max(1, min(500, int(limit or 200)))
+        port_event_page = getattr(self._studio_port, "get_group_run_event_page", None)
+        if callable(port_event_page):
+            raw_page = port_event_page(
+                group_run_id,
+                after_sequence=clean_after_sequence,
+                limit=clean_limit,
+            )
+            return _run_event_page_from_payload(
+                raw_page,
+                run_id=group_run_id,
+                after_sequence=clean_after_sequence,
+                limit=clean_limit,
+            )
+
         events = [
             event
             for event in self.get_group_run_event_stream(group_run_id)
