@@ -560,6 +560,53 @@ class RuntimeInstallationFacadeMixin:
             )
         )
 
+    def _install_runtime_workflow_planning_and_coordinator(
+        self,
+        *,
+        runtime_timeline_factory: Any,
+    ) -> None:
+        legacy = _legacy_agent_runtime_module()
+        workflow_planning_services = legacy._build_runtime_workflow_planning_services(
+            get_run_group=self.get_run_group,
+            get_run=self.get_run,
+            node_kind=self._node_kind,
+            node_types=legacy._WORKFLOW_NODE_TYPES,
+            get_agent_private=self._get_agent_private,
+            get_workflow=self.get_workflow,
+            load_agent_skills=self._load_agent_skills,
+            agent_model_config_private=self._agent_model_config_private,
+            default_agent_ids=legacy._DEFAULT_AGENT_IDS,
+            timeline_factory=runtime_timeline_factory,
+            workflow_path_snapshot=self._workflow_path_snapshot,
+            workflow_runtime_snapshot=self._workflow_runtime_snapshot,
+            insert_run_group=self._insert_run_group,
+            insert_run=self._insert_run,
+            run_by_client_request_id=self._run_by_client_request_id,
+            client_request_id_from_payload=self.run_request_parser.client_request_id_from_payload,
+            workflow_path=self._workflow_path,
+        )
+        self._install_runtime_workflow_planning_services(workflow_planning_services)
+        self.workflow_run_coordinator = legacy.RuntimeWorkflowRunCoordinator(
+            get_workflow=lambda workflow_id: self.get_workflow(workflow_id),
+            validate_workflow=lambda nodes, edges: self.validate_workflow(nodes, edges),
+            validate_workflow_agent_nodes=lambda nodes: self._validate_workflow_agent_nodes(nodes),
+            validate_workflow_subworkflow_nodes=lambda nodes, **kwargs: (
+                self._validate_workflow_subworkflow_nodes(nodes, **kwargs)
+            ),
+            validate_workflow_runnable_steps=lambda nodes: self._validate_workflow_runnable_steps(nodes),
+            validate_workflow_agent_run_readiness=lambda nodes: self._validate_workflow_agent_run_readiness(nodes),
+            starter=self.workflow_run_starter,
+            start_projector=self.workflow_run_start_projector,
+            append_run_event=lambda run_id, event_type, payload: self.append_run_event(run_id, event_type, payload),
+            continue_workflow_run=lambda run, workflow, **kwargs: self._continue_workflow_run(
+                run,
+                workflow,
+                **kwargs,
+            ),
+            lock=self._db_lock,
+            error_type=legacy.AgentRuntimeError,
+        )
+
     def _install_runtime_engine_state(self, state: Any) -> None:
         self.workspace_dir = state.workspace_dir
         self.db_path = state.db_path

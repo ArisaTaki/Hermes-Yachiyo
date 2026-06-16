@@ -32,6 +32,7 @@ def test_runtime_installation_facade_mixin_remains_exported_from_legacy_module()
         "_install_runtime_agent_and_approval_services",
         "_install_runtime_approval_runtime_services",
         "_install_runtime_main_chat_model_loop_runner",
+        "_install_runtime_workflow_planning_and_coordinator",
         "_install_runtime_engine_state",
         "_install_runtime_recorders",
         "_install_runtime_definition_services",
@@ -460,3 +461,68 @@ def test_installation_facade_installs_main_chat_model_loop_runner(monkeypatch) -
     assert engine.main_chat_model_loop.kwargs["tool_brokers"] == "tool-brokers"
     assert engine.main_chat_model_loop.kwargs["approval_pause"] == "approval-pause"
     assert engine.main_chat_model_loop.kwargs["terminal_run_or_none"] == "terminal-run-or-none"
+
+
+def test_installation_facade_installs_workflow_planning_and_coordinator(monkeypatch) -> None:
+    class CapturedWorkflowRunCoordinator:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+
+    def fake_build_runtime_workflow_planning_services(**kwargs):
+        return SimpleNamespace(
+            kwargs=kwargs,
+            workflow_parent_locator="workflow-parent-locator",
+            workflow_path_planner="workflow-path-planner",
+            workflow_definition_validator="workflow-definition-validator",
+            run_readiness_validator="run-readiness-validator",
+            workflow_run_start_projector="workflow-run-start-projector",
+            workflow_run_starter="workflow-run-starter",
+            workflow_resume_planner="workflow-resume-planner",
+        )
+
+    monkeypatch.setattr(
+        agent_runtime,
+        "_build_runtime_workflow_planning_services",
+        fake_build_runtime_workflow_planning_services,
+    )
+    monkeypatch.setattr(agent_runtime, "RuntimeWorkflowRunCoordinator", CapturedWorkflowRunCoordinator)
+
+    engine = object.__new__(agent_runtime.NativeRunEngine)
+    engine.get_run_group = "get-run-group"
+    engine.get_run = "get-run"
+    engine._node_kind = "node-kind"
+    engine._get_agent_private = "get-agent-private"
+    engine.get_workflow = "get-workflow"
+    engine._load_agent_skills = "load-agent-skills"
+    engine._agent_model_config_private = "agent-model-config-private"
+    engine._workflow_path_snapshot = "workflow-path-snapshot"
+    engine._workflow_runtime_snapshot = "workflow-runtime-snapshot"
+    engine._insert_run_group = "insert-run-group"
+    engine._insert_run = "insert-run"
+    engine._run_by_client_request_id = "run-by-client-request-id"
+    engine.run_request_parser = SimpleNamespace(client_request_id_from_payload="client-request-id-from-payload")
+    engine._workflow_path = "workflow-path"
+    engine.validate_workflow = "validate-workflow"
+    engine._validate_workflow_agent_nodes = "validate-workflow-agent-nodes"
+    engine._validate_workflow_subworkflow_nodes = "validate-workflow-subworkflow-nodes"
+    engine._validate_workflow_runnable_steps = "validate-workflow-runnable-steps"
+    engine._validate_workflow_agent_run_readiness = "validate-workflow-agent-run-readiness"
+    engine.append_run_event = "append-run-event"
+    engine._continue_workflow_run = "continue-workflow-run"
+    engine._db_lock = "db-lock"
+
+    engine._install_runtime_workflow_planning_and_coordinator(
+        runtime_timeline_factory="timeline-factory",
+    )
+
+    assert engine.workflow_parent_locator == "workflow-parent-locator"
+    assert engine.workflow_path_planner == "workflow-path-planner"
+    assert engine.workflow_definition_validator == "workflow-definition-validator"
+    assert engine.run_readiness_validator == "run-readiness-validator"
+    assert engine.workflow_run_start_projector == "workflow-run-start-projector"
+    assert engine.workflow_run_starter == "workflow-run-starter"
+    assert engine.workflow_resume_planner == "workflow-resume-planner"
+    assert isinstance(engine.workflow_run_coordinator, CapturedWorkflowRunCoordinator)
+    assert engine.workflow_run_coordinator.kwargs["starter"] == "workflow-run-starter"
+    assert engine.workflow_run_coordinator.kwargs["start_projector"] == "workflow-run-start-projector"
+    assert engine.workflow_run_coordinator.kwargs["lock"] == "db-lock"
