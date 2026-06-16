@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 from apps.shell import agent_runtime
+from apps.shell.agent.runtime.service_access import (
+    close_runtime_service,
+    resolve_runtime_service,
+)
 from apps.shell.agent.runtime.service_lifecycle import RuntimeServiceLifecycle
 
 
@@ -36,6 +40,20 @@ def test_runtime_service_lifecycle_lazily_creates_and_closes_once() -> None:
     assert first is second
     assert created == [first]
     assert first.closes == 1
+    assert lifecycle.current is None
+
+
+def test_runtime_service_access_helpers_sync_legacy_injection() -> None:
+    injected = FakeRuntimeService()
+    lifecycle = RuntimeServiceLifecycle(
+        factory=lambda: (_ for _ in ()).throw(AssertionError("factory should not run"))
+    )
+
+    resolved = resolve_runtime_service(lifecycle=lifecycle, current=injected)
+    close_runtime_service(lifecycle=lifecycle, current=injected)
+
+    assert resolved is injected
+    assert injected.closes == 1
     assert lifecycle.current is None
 
 
