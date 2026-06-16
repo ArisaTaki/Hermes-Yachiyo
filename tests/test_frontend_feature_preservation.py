@@ -1473,6 +1473,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "useAgentStudioLoadLifecycle({",
             "useAgentStudioRefresh({",
             "useAgentStudioRouteState()",
+            "useAgentStudioRunDebugControls({",
             "useAgentStudioRunSnapshots({",
             "useAgentStudioSelectionSynchronization({",
             "useAgentStudioTabActions({",
@@ -1480,7 +1481,6 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "useRunApprovalActions",
             "useRunDetailSynchronization({",
             "useRunApprovalFollowup",
-            "useGroupRunDebugActions({",
             "useRunListDerivedState({",
             "useRunTargetReadiness({",
             "useWorkflowDefinitions",
@@ -3835,6 +3835,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "useAgentStudioLoadLifecycle",
             "useAgentStudioRefresh",
             "useAgentStudioRouteState",
+            "useAgentStudioRunDebugControls",
             "useAgentStudioRunSnapshots",
             "useAgentStudioSelectionSynchronization",
             "useAgentStudioTabActions",
@@ -3845,7 +3846,6 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "useRunApprovalActions",
             "useRunDetailSynchronization",
             "useRunArtifactActions",
-            "useRunDebugActions",
             "useRunHistoryManagement",
             "useRunLaunchActions",
             "useRunListDerivedState",
@@ -4030,6 +4030,17 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "confirmLabel: '取消 Run',",
             "variant: 'danger',",
             "onConfirm: () => void runAction(cancelSelectedRun, '取消 Run'),",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useAgentStudioRunDebugControls.ts",
+        [
+            "export function useAgentStudioRunDebugControls",
+            "useRunDebugActions({",
+            "useGroupRunDebugActions({",
+            "loadMoreSelectedGroupRunEvents",
+            "loadMoreSelectedRunEvents",
+            "requestCancelSelectedRun",
         ],
     )
     _assert_contains(

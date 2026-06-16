@@ -25,17 +25,16 @@ import { emptyAgentDraft, useAgentStudioLocalState } from '../features/agent-stu
 import { useAgentStudioLoadLifecycle } from '../features/agent-studio/hooks/useAgentStudioLoadLifecycle';
 import { useAgentStudioModelProfiles } from '../features/agent-studio/hooks/useAgentStudioModelProfiles';
 import { useAgentStudioRefresh } from '../features/agent-studio/hooks/useAgentStudioRefresh';
+import { useAgentStudioRunDebugControls } from '../features/agent-studio/hooks/useAgentStudioRunDebugControls';
 import { useAgentStudioRunSnapshots } from '../features/agent-studio/hooks/useAgentStudioRunSnapshots';
 import { useAgentStudioRouteState } from '../features/agent-studio/hooks/useAgentStudioRouteState';
 import { useAgentStudioSelectionSynchronization } from '../features/agent-studio/hooks/useAgentStudioSelectionSynchronization';
 import { useAgentStudioTabActions } from '../features/agent-studio/hooks/useAgentStudioTabActions';
 import { useApprovedRunGuard } from '../features/agent-studio/hooks/useApprovedRunGuard';
-import { useGroupRunDebugActions } from '../features/agent-studio/hooks/useGroupRunDebugActions';
 import { useRunApprovalActions } from '../features/agent-studio/hooks/useRunApprovalActions';
 import { useRunApprovalFollowup } from '../features/agent-studio/hooks/useRunApprovalFollowup';
 import { useRunArtifactActions } from '../features/agent-studio/hooks/useRunArtifactActions';
 import { useRunCacheActions } from '../features/agent-studio/hooks/useRunCacheActions';
-import { useRunDebugActions } from '../features/agent-studio/hooks/useRunDebugActions';
 import { useRunDetailSynchronization } from '../features/agent-studio/hooks/useRunDetailSynchronization';
 import { useRunHistoryManagement } from '../features/agent-studio/hooks/useRunHistoryManagement';
 import { useRunLaunchActions } from '../features/agent-studio/hooks/useRunLaunchActions';
@@ -691,17 +690,15 @@ export function AgentStudioView() {
   const {
     loadMoreSelectedRunEvents,
     requestCancelSelectedRun,
-  } = useRunDebugActions({
+    loadMoreSelectedGroupRunEvents,
+  } = useAgentStudioRunDebugControls({
     cancelSelectedRun,
+    loadMoreGroupRunReplayEvents,
     loadMoreRunReplayEvents,
     runAction,
     selectedRun,
     setStatus,
     showConfirmDialog,
-  });
-  const { loadMoreSelectedGroupRunEvents } = useGroupRunDebugActions({
-    loadMoreGroupRunReplayEvents,
-    setStatus,
   });
 
   const {
