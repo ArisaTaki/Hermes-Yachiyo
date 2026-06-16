@@ -56,14 +56,18 @@ export function RuntimeApprovalCard({
     <div
       className={className}
       data-approval-id={approval.approval_id}
+      data-approval-group-id={approval.group_id || ''}
       data-approval-group-run-id={approval.group_run_id || ''}
       data-approval-risk-level={approval.risk_level || ''}
+      data-approval-run-id={approval.run_id || ''}
       data-approval-source-runnable-id={approval.source_runnable_id || ''}
       data-approval-source-run-id={approval.source_run_id || ''}
       data-approval-status={status}
       data-approval-tool={toolName}
       data-approval-variant={variant}
+      data-approval-workflow-id={approval.workflow_id || ''}
       data-approval-workflow-node-id={approval.workflow_node_id || ''}
+      data-approval-workflow-run-id={approval.workflow_run_id || ''}
       data-testid={testId}
     >
       <span>{status === 'pending' ? '待审批' : approvalStatusLabel(status)}</span>
@@ -92,7 +96,7 @@ function approvalMetadataItems(approval: RuntimeApprovalCardSnapshot, toolName: 
     { label: 'run', value: approval.run_id || '' },
     { label: 'source', value: approval.source_run_id || '' },
     { label: 'agent', value: approval.source_runnable_name || approval.source_runnable_id || '' },
-    { label: 'workflow', value: approval.workflow_node_label || approval.workflow_node_id || '' },
+    { label: 'workflow', value: approval.workflow_node_label || approval.workflow_node_id || approval.workflow_run_id || approval.workflow_id || '' },
     { label: 'group', value: approval.group_run_id || approval.group_id || '' },
     { label: 'tool', value: toolName },
     { label: 'risk', value: approval.risk_level || '' },
