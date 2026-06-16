@@ -320,7 +320,16 @@ class RunSnapshotProjector:
         tool_call_id = _text(payload.get("tool_call_id") or payload.get("id"))
         if not tool_call_id:
             tool_call_id = f"{run_id or 'run'}:{tool_name}:{payload.get('sequence') or 0}"
-        input_preview = _mapping(payload.get("input_preview") or payload.get("input"))
+        input_preview = _mapping(
+            payload.get("input_preview")
+            or payload.get("input")
+            or payload.get("arguments")
+            or payload.get("args")
+        )
+        status = _text(payload.get("status") or "completed")
+        completed_at = _optional_text(payload.get("completed_at"))
+        if not completed_at and _tool_call_status_is_terminal(status):
+            completed_at = _optional_text(payload.get("created_at") or payload.get("started_at"))
         return ToolCallSnapshot(
             tool_call_id=tool_call_id,
             run_id=_optional_text(payload.get("run_id") or run_id),
@@ -363,13 +372,13 @@ class RunSnapshotProjector:
                 or input_preview.get("run_group_id")
             ),
             tool_name=tool_name,
-            status=_text(payload.get("status") or "completed"),
+            status=status,
             risk_level=_optional_text(payload.get("risk_level") or payload.get("risk")),
             input_preview=input_preview,
             output_preview=_tool_output_preview(payload),
             approval_id=_optional_text(payload.get("approval_id")),
             started_at=_text(payload.get("started_at") or payload.get("created_at")),
-            completed_at=_optional_text(payload.get("completed_at")),
+            completed_at=completed_at,
         )
 
     def tool_calls_from_events(self, events: list[PublicRunEvent]) -> list[ToolCallSnapshot]:
@@ -831,7 +840,12 @@ def _merge_tool_trace_into_input_preview(
     clean_context = {key: value for key, value in context.items() if value}
     if not clean_context:
         return
-    input_preview = source.get("input_preview") or source.get("input")
+    input_preview = (
+        source.get("input_preview")
+        or source.get("input")
+        or source.get("arguments")
+        or source.get("args")
+    )
     preview = dict(input_preview) if isinstance(input_preview, Mapping) else {}
     for key, value in clean_context.items():
         preview.setdefault(key, value)
@@ -1214,7 +1228,7 @@ def _tool_call_correlation_preview(preview: Mapping[str, Any]) -> dict[str, Any]
 
 
 def _tool_call_status_is_terminal(status: str) -> bool:
-    return status in {"completed", "failed", "denied", "skipped", "expired"}
+    return status in {"completed", "failed", "denied", "skipped", "expired", "cancelled"}
 
 
 def _stable_json(value: Any) -> str:
@@ -1279,7 +1293,11 @@ def _nested_mapping(payload: Mapping[str, Any], key: str) -> dict[str, Any]:
 
 
 def _tool_output_preview(payload: Mapping[str, Any]) -> dict[str, Any]:
-    explicit = _mapping(payload.get("output_preview") or payload.get("result"))
+    explicit = _mapping(
+        payload.get("output_preview")
+        or payload.get("output")
+        or payload.get("result")
+    )
     if explicit:
         return explicit
     error = payload.get("error")
@@ -1300,13 +1318,18 @@ def _is_tool_event(event_type: str) -> bool:
         "agent.tool.completed",
         "approval.timeout",
         "tool.approved",
+        "tool.approval_approved",
+        "tool.approval_rejected",
         "tool.requested",
         "tool.started",
         "tool.approval_required",
         "tool.approval_timeout",
+        "tool.denied",
         "tool.rejected",
+        "tool.skipped",
         "tool.completed",
         "tool.failed",
+        "tool.cancelled",
     }
 
 
@@ -1326,9 +1349,15 @@ def _tool_status_from_event_type(event_type: str) -> str:
         return "running"
     if event_type in {"tool.approval_required", "agent.tool.approval_required"}:
         return "waiting_approval"
-    if event_type in {"agent.tool.approval_approved", "tool.approved"}:
+    if event_type in {"agent.tool.approval_approved", "tool.approved", "tool.approval_approved"}:
         return "approved"
-    if event_type in {"agent.tool.approval_rejected", "agent.tool.denied", "tool.rejected"}:
+    if event_type in {
+        "agent.tool.approval_rejected",
+        "agent.tool.denied",
+        "tool.approval_rejected",
+        "tool.denied",
+        "tool.rejected",
+    }:
         return "denied"
     if event_type in {"agent.tool.approval_timeout", "approval.timeout", "tool.approval_timeout"}:
         return "expired"
@@ -1336,8 +1365,10 @@ def _tool_status_from_event_type(event_type: str) -> str:
         return "completed"
     if event_type in {"tool.failed", "agent.tool.failed"}:
         return "failed"
-    if event_type in {"agent.tool.skipped"}:
+    if event_type in {"agent.tool.skipped", "tool.skipped"}:
         return "skipped"
+    if event_type in {"tool.cancelled"}:
+        return "cancelled"
     return "completed"
 
 

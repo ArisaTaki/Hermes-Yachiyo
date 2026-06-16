@@ -90,6 +90,80 @@ def test_run_snapshot_projector_drives_chat_task_and_studio_timeline_shapes() ->
     assert timeline.children[0].run_id == "child-1"
 
 
+def test_run_timeline_tool_calls_merge_replay_aliases_with_stable_ids() -> None:
+    timeline = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "run-tool-replay",
+            "status": "completed",
+            "events": [
+                {
+                    "event_id": "event-tool-1",
+                    "event_type": "tool.requested",
+                    "created_at": "2026-06-14T00:00:00Z",
+                    "payload": {
+                        "tool_call_id": "call-write",
+                        "tool": "workspace.write_patch",
+                        "arguments": {"path": "README.md"},
+                        "risk": "high",
+                    },
+                },
+                {
+                    "event_id": "event-tool-2",
+                    "event_type": "tool.approval_approved",
+                    "created_at": "2026-06-14T00:00:01Z",
+                    "payload": {
+                        "tool_call_id": "call-write",
+                        "tool": "workspace.write_patch",
+                        "approval_id": "approval-write",
+                    },
+                },
+                {
+                    "event_id": "event-tool-3",
+                    "event_type": "tool.completed",
+                    "created_at": "2026-06-14T00:00:02Z",
+                    "payload": {
+                        "tool_call_id": "call-write",
+                        "tool": "workspace.write_patch",
+                        "output": {"path": "README.md", "ok": True},
+                    },
+                },
+                {
+                    "event_id": "event-tool-4",
+                    "event_type": "tool.cancelled",
+                    "created_at": "2026-06-14T00:00:03Z",
+                    "payload": {
+                        "tool_call_id": "call-cancelled",
+                        "tool": "terminal.run",
+                        "args": {"command": "sleep 10"},
+                    },
+                },
+            ],
+        }
+    )
+
+    assert len(timeline.tool_calls) == 2
+    write_call = timeline.tool_calls[0]
+    assert write_call.tool_call_id == "call-write"
+    assert write_call.tool_name == "workspace.write_patch"
+    assert write_call.status == "completed"
+    assert write_call.risk_level == "high"
+    assert write_call.input_preview == {
+        "path": "README.md",
+        "approval_id": "approval-write",
+        "risk_level": "high",
+    }
+    assert write_call.output_preview == {"path": "README.md", "ok": True}
+    assert write_call.approval_id == "approval-write"
+    assert write_call.started_at == "2026-06-14T00:00:00Z"
+    assert write_call.completed_at == "2026-06-14T00:00:02Z"
+
+    cancelled_call = timeline.tool_calls[1]
+    assert cancelled_call.tool_call_id == "call-cancelled"
+    assert cancelled_call.status == "cancelled"
+    assert cancelled_call.input_preview == {"command": "sleep 10"}
+    assert cancelled_call.completed_at == "2026-06-14T00:00:03Z"
+
+
 def test_agent_task_snapshot_filters_secret_and_internal_recent_events() -> None:
     task = agent_task_snapshot_from_payload(
         {
