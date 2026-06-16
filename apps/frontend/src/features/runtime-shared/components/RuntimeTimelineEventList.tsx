@@ -281,7 +281,8 @@ function runtimeEventMetadata(
     {
       label: 'approval',
       value: runtimeEventString(event, payload, 'approval_id')
-        || runtimeEventNestedString(payload, 'pending_approval', 'approval_id'),
+        || runtimeEventNestedString(payload, 'pending_approval', 'approval_id')
+        || runtimeEventNestedString(payload, 'approval', 'approval_id'),
     },
     { label: 'artifact', value: runtimeEventString(event, payload, 'artifact_id') },
     { label: 'memory', value: runtimeEventMemoryId(event, payload) },

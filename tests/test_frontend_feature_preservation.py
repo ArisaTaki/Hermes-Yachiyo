@@ -4907,6 +4907,7 @@ def test_agent_studio_exposes_stable_e2e_selectors_for_run_detail_and_approval_f
             "runtimeEventString(event, payload, 'tool_call_id')",
             "runtimeEventString(event, payload, 'approval_id')",
             "runtimeEventNestedString(payload, 'pending_approval', 'approval_id')",
+            "runtimeEventNestedString(payload, 'approval', 'approval_id')",
             "runtimeEventString(event, payload, 'artifact_id')",
             "runtimeEventMemoryId(event, payload)",
             "runtimeEventSkillId(event, payload)",
