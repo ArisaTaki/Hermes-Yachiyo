@@ -209,6 +209,11 @@ class RunSnapshotProjector:
         for event in events:
             approval_payload = _approval_payload_from_event(event)
             if approval_payload:
+                if group_run_id:
+                    _merge_trace_context_into_approval(
+                        approval_payload,
+                        {"group_run_id": group_run_id},
+                    )
                 approvals.append(
                     approval_card_from_payload(
                         approval_payload,
@@ -361,6 +366,7 @@ def _approval_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
         source["title"] = f"Approve {payload['workflow_node_label']}"
     if not source.get("title") and payload.get("member_agent_name"):
         source["title"] = f"Approve {payload['member_agent_name']}"
+    _merge_trace_context_into_approval(source, payload)
     source.setdefault("approval_id", f"{event.run_id}:{event.event_type}:{event.sequence}")
     source.setdefault("status", "pending")
     source.setdefault("created_at", event.created_at)
@@ -380,6 +386,11 @@ def _artifact_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
             artifact_payload.setdefault("source_runnable_name", payload.get("member_agent_name"))
         if payload.get("member_agent_id"):
             artifact_payload.setdefault("source_runnable_id", payload.get("member_agent_id"))
+        if payload.get("member_agent_name") and not artifact_payload.get("title"):
+            artifact_path = _text(artifact_payload.get("path") or artifact_payload.get("artifact_path"))
+            artifact_payload["title"] = (
+                f"{payload['member_agent_name']} / {artifact_path or 'Artifact'}"
+            )
     elif event.event_type == "workflow.node.artifact" and isinstance(payload.get("artifact"), Mapping):
         artifact_payload = {
             "kind": "workflow_artifact",
@@ -394,6 +405,34 @@ def _artifact_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
     artifact_payload.setdefault("run_id", event.run_id)
     artifact_payload.setdefault("created_at", event.created_at)
     return artifact_payload
+
+
+def _merge_trace_context_into_approval(source: dict[str, Any], payload: dict[str, Any]) -> None:
+    context = {
+        key: payload.get(key)
+        for key in (
+            "group_id",
+            "group_run_id",
+            "run_group_id",
+            "member_agent_id",
+            "member_agent_name",
+            "workflow_id",
+            "workflow_run_id",
+            "workflow_node_id",
+            "workflow_node_label",
+        )
+        if payload.get(key)
+    }
+    if not context:
+        return
+    for key, value in context.items():
+        source.setdefault(key, value)
+    input_preview = source.get("input_preview")
+    preview = dict(input_preview) if isinstance(input_preview, Mapping) else {}
+    for key, value in context.items():
+        preview.setdefault(key, value)
+    if preview:
+        source["input_preview"] = preview
 
 
 def _merge_approvals(*approval_lists):

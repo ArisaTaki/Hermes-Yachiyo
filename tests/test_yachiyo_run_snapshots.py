@@ -319,6 +319,8 @@ def test_run_timeline_derives_approvals_and_artifacts_from_events() -> None:
                 {
                     "event_type": "workflow.node.approval_required",
                     "payload": {
+                        "workflow_id": "workflow-1",
+                        "workflow_run_id": "run-events-only",
                         "workflow_node_id": "review",
                         "workflow_node_label": "Review Gate",
                         "pending_approval": {
@@ -364,6 +366,13 @@ def test_run_timeline_derives_approvals_and_artifacts_from_events() -> None:
     assert timeline.approvals[0].approval_id == "run-events-only:tool.approval_required:1"
     assert timeline.approvals[0].input_preview == {"command": "npm test"}
     assert timeline.approvals[1].approval_id == "approval-workflow"
+    assert timeline.approvals[1].input_preview == {
+        "checkpoint": "Review Gate",
+        "workflow_id": "workflow-1",
+        "workflow_run_id": "run-events-only",
+        "workflow_node_id": "review",
+        "workflow_node_label": "Review Gate",
+    }
     assert [artifact.path for artifact in timeline.artifacts] == [
         "notes.md",
         "workflow-report.md",
@@ -455,6 +464,7 @@ def test_group_run_snapshot_derives_approvals_and_artifacts_from_group_events() 
                 {
                     "event_type": "group.approval_required",
                     "payload": {
+                        "group_id": "group-1",
                         "member_agent_id": "agent-1",
                         "member_agent_name": "Planner",
                         "pending_approval": {
@@ -484,8 +494,15 @@ def test_group_run_snapshot_derives_approvals_and_artifacts_from_group_events() 
     assert group_run.pending_approvals[0].approval_id == "approval-group-event"
     assert group_run.pending_approvals[0].tool_name == "group.approval"
     assert group_run.pending_approvals[0].title == "Approve Planner"
-    assert group_run.pending_approvals[0].input_preview == {"decision": "continue"}
+    assert group_run.pending_approvals[0].input_preview == {
+        "decision": "continue",
+        "group_id": "group-1",
+        "group_run_id": "group-events-only",
+        "member_agent_id": "agent-1",
+        "member_agent_name": "Planner",
+    }
     assert group_run.shared_artifacts[0].kind == "group_artifact"
+    assert group_run.shared_artifacts[0].title == "Planner / team-summary.md"
     assert group_run.shared_artifacts[0].path == "team-summary.md"
     assert group_run.shared_artifacts[0].size_bytes == 33
     assert group_run.shared_artifacts[0].source_run_id == "group-events-only"
