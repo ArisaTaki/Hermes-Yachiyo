@@ -730,6 +730,43 @@ def test_run_timeline_preserves_memory_and_skill_trace_events() -> None:
     assert timeline.tool_calls == []
 
 
+def test_run_timeline_derives_memory_trace_from_result_memories() -> None:
+    timeline = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "run-memory-result",
+            "status": "completed",
+            "events": [
+                {
+                    "event_type": "memory.retrieved",
+                    "payload": {
+                        "result": {
+                            "memories": [
+                                {
+                                    "memory_id": "memory-result-1",
+                                    "kind": "preference",
+                                    "scope": "session",
+                                }
+                            ],
+                        },
+                        "workflow_node_id": "retrieve-context",
+                        "group_run_id": "group-run-1",
+                    },
+                    "created_at": "2026-06-15T00:00:01Z",
+                }
+            ],
+        }
+    )
+
+    assert len(timeline.memory_traces) == 1
+    trace = timeline.memory_traces[0]
+    assert trace.memory_id == "memory-result-1"
+    assert trace.memory_kind == "preference"
+    assert trace.memory_scope == "session"
+    assert trace.count == 1
+    assert trace.workflow_node_id == "retrieve-context"
+    assert trace.group_run_id == "group-run-1"
+
+
 def test_run_timeline_derives_approvals_and_artifacts_from_events() -> None:
     timeline = run_timeline_snapshot_from_payload(
         {

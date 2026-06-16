@@ -182,7 +182,9 @@ function memorySkillTraceFromEvent(event: PublicRunEvent): MemorySkillTrace | nu
   const eventIsSecret = publicRunEventIsSecret(event);
   const visiblePayload = eventIsSecret ? {} : payload;
   const result = objectRecord(visiblePayload.result);
-  const memories = Array.isArray(visiblePayload.memories) ? visiblePayload.memories.map(objectRecord) : [];
+  const payloadMemories = Array.isArray(visiblePayload.memories) ? visiblePayload.memories.map(objectRecord) : [];
+  const resultMemories = Array.isArray(result.memories) ? result.memories.map(objectRecord) : [];
+  const memories = payloadMemories.length ? payloadMemories : resultMemories;
   const sequence = Number.isFinite(event.sequence) ? String(event.sequence) : '';
   const status = normalizeTraceStatus(
     stringValue(visiblePayload.status) || stringValue((event as Record<string, unknown>).status),

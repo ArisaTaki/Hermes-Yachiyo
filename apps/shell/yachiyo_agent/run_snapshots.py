@@ -509,7 +509,7 @@ def _memory_trace_from_event(event: PublicRunEvent) -> MemoryTraceSnapshot | Non
         return None
     payload = dict(event.payload)
     result = _nested_mapping(payload, "result")
-    memories = _mapping_items(payload.get("memories"))
+    memories = _mapping_items(payload.get("memories")) or _mapping_items(result.get("memories"))
     first_memory = memories[0] if memories else {}
     action = _memory_trace_action(event.event_type)
     memory_id = _optional_text(
