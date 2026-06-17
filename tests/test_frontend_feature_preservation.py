@@ -1597,11 +1597,16 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "studioTabLabel(item)",
             "AgentStudioLoadingState",
             'className="agent-studio-hero"',
+            "Workflow 图",
             'className="agent-studio-tabs"',
             'className="skill-library-subnav"',
             "Skills 列表",
             "分组管理",
         ],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/features/agent-studio/components/AgentStudioChrome.tsx",
+        ["线性 Workflow"],
     )
     _assert_not_contains(
         "apps/frontend/src/views/AgentStudioView.tsx",

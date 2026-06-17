@@ -31,7 +31,7 @@ export function AgentStudioChrome({
         <div>
           <span className="section-eyebrow">Agent Runtime</span>
           <h1>Agent Studio</h1>
-          <p>创建可配置 Agent，导入本地 Skills，并用线性 Workflow 把多个 Agent 编排成可运行链路。</p>
+          <p>创建可配置 Agent，导入本地 Skills，并用 Workflow 图把多个 Agent 编排成可运行链路。</p>
         </div>
       </header>
 
