@@ -485,6 +485,17 @@ def test_shared_runtime_surface_components_acceptance_paths_are_guarded() -> Non
 
 def test_runtime_core_split_acceptance_paths_are_guarded() -> None:
     _assert_contains(
+        "tests/test_agent_runtime_pr8_compatibility.py",
+        [
+            "test_pr8_runtime_split_keeps_legacy_agent_runtime_import_surface",
+            "agent_runtime.RunRepository is RunRepository",
+            "agent_runtime.RuntimeToolBrokerFactory is RuntimeToolBrokerFactory",
+            "agent_runtime.PolicyGate is PolicyGate",
+            "agent_runtime.RuntimeRunEventRecorder is RuntimeRunEventRecorder",
+            "agent_runtime._RunBudgetLimits is RunBudgetLimits",
+        ],
+    )
+    _assert_contains(
         "apps/shell/agent_runtime.py",
         [
             "from apps.shell.agent.runtime.native_engine import NativeRunEngine",
