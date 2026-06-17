@@ -1,0 +1,425 @@
+"""GroupRun public snapshot mapping."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Any
+
+from apps.shell.agent.runtime.events import redact_secrets
+
+from .contracts import (
+    ArtifactSnapshot,
+    GroupRunSnapshot,
+    MemoryTraceSnapshot,
+    RunTimelineSnapshot,
+    SkillTraceSnapshot,
+    ToolCallSnapshot,
+)
+from .group_member_snapshots import group_run_participants_from_payload
+from .run_snapshots import RunSnapshotProjector
+
+_RUN_PROJECTOR = RunSnapshotProjector()
+
+
+def group_run_snapshot_from_payload(
+    payload: Mapping[str, Any] | GroupRunSnapshot,
+) -> GroupRunSnapshot:
+    if isinstance(payload, GroupRunSnapshot):
+        return payload
+
+    legacy_run_group_id = _optional_text(payload.get("run_group_id"))
+    group_run_id = _text(payload.get("group_run_id") or legacy_run_group_id)
+    group_id = _text(payload.get("group_id") or payload.get("agent_group_id"))
+    runs_payload = payload.get("runs") or payload.get("child_runs") or []
+    child_run_ids = [_text(item) for item in payload.get("child_run_ids") or [] if _text(item)]
+    participants = group_run_participants_from_payload(payload)
+    events = _RUN_PROJECTOR.events_from_payload(
+        {
+            "events": group_run_events_with_lifecycle(
+                payload,
+                group_run_id=group_run_id,
+                group_id=group_id,
+                objective=_text(payload.get("objective") or payload.get("user_goal")),
+                child_run_ids=child_run_ids,
+            )
+        },
+        run_id=group_run_id,
+        keys=("events",),
+    )
+    runs = [
+        _RUN_PROJECTOR.timeline_snapshot_from_payload(
+            group_run_child_payload(
+                item,
+                group_run_id=group_run_id,
+                group_id=group_id,
+            )
+        )
+        for item in runs_payload
+        if isinstance(item, Mapping)
+    ]
+    return GroupRunSnapshot(
+        group_run_id=group_run_id,
+        run_group_id=legacy_run_group_id or group_run_id or None,
+        group_id=group_id,
+        title=_text(payload.get("title") or "Group run"),
+        status=_text(payload.get("status") or "unknown"),
+        objective=_text(payload.get("objective") or payload.get("user_goal")),
+        participants=participants,
+        active_speaker_agent_id=_optional_text(payload.get("active_speaker_agent_id")),
+        events=events,
+        runs=runs,
+        child_run_ids=child_run_ids,
+        tool_calls=_group_run_tool_calls(payload, runs, events, group_run_id=group_run_id),
+        memory_traces=_group_run_memory_traces(runs, events),
+        skill_traces=_group_run_skill_traces(runs, events),
+        shared_artifacts=_group_run_shared_artifacts(
+            payload,
+            runs,
+            events,
+            group_run_id=group_run_id,
+            group_id=group_id,
+        ),
+        pending_approvals=[
+            approval
+            for approval in _RUN_PROJECTOR.approvals_from_payload(
+                payload,
+                run_id=group_run_id,
+                group_run_id=group_run_id,
+                keys=("pending_approvals", "pending_approval"),
+                events=events,
+            )
+            if approval.status == "pending"
+        ],
+        final_answer=_optional_text(payload.get("final_answer") or payload.get("summary")),
+        created_at=_text(payload.get("created_at")),
+        updated_at=_text(payload.get("updated_at")),
+    )
+
+
+def group_run_events_with_lifecycle(
+    payload: Mapping[str, Any],
+    *,
+    group_run_id: str,
+    group_id: str,
+    objective: str,
+    child_run_ids: list[str],
+) -> list[dict[str, Any]]:
+    raw_events = _raw_events_from_payload(
+        payload,
+        ("events", "run_events", "recent_events", "timeline"),
+    )
+    if not group_run_id:
+        return raw_events
+    raw_events = _group_run_stream_events(
+        raw_events,
+        group_run_id=group_run_id,
+        group_id=group_id,
+    )
+
+    existing_types = {_event_type(event) for event in raw_events}
+    lifecycle_context = _group_run_lifecycle_context(
+        payload,
+        group_run_id=group_run_id,
+        group_id=group_id,
+        objective=objective,
+        child_run_ids=child_run_ids,
+    )
+    events: list[dict[str, Any]] = []
+    if "group.run.started" not in existing_types:
+        events.append(
+            _group_run_lifecycle_event(
+                "group.run.started",
+                payload,
+                lifecycle_context,
+                created_at=_text(payload.get("created_at")),
+            )
+        )
+    events.extend(raw_events)
+
+    terminal_event_type = _group_run_terminal_event_type(payload.get("status"))
+    if terminal_event_type and terminal_event_type not in existing_types:
+        events.append(
+            _group_run_lifecycle_event(
+                terminal_event_type,
+                payload,
+                {**lifecycle_context, "status": _text(payload.get("status"))},
+                created_at=_text(payload.get("updated_at") or payload.get("created_at")),
+            )
+        )
+    return events
+
+
+def group_run_child_payload(
+    payload: Mapping[str, Any],
+    *,
+    group_run_id: str,
+    group_id: str,
+) -> dict[str, Any]:
+    child = dict(payload)
+    if group_run_id:
+        child.setdefault("group_run_id", group_run_id)
+        child.setdefault("run_group_id", group_run_id)
+    if group_id:
+        child.setdefault("group_id", group_id)
+    for key in ("events", "run_events", "recent_events", "timeline"):
+        value = child.get(key)
+        if isinstance(value, list):
+            child[key] = [
+                _group_run_child_event_context(
+                    item,
+                    group_run_id=group_run_id,
+                    group_id=group_id,
+                )
+                for item in value
+                if isinstance(item, Mapping)
+            ]
+    return child
+
+
+def _group_run_tool_calls(
+    payload: Mapping[str, Any],
+    runs: list[RunTimelineSnapshot],
+    events: list[Any],
+    *,
+    group_run_id: str,
+) -> list[ToolCallSnapshot]:
+    direct_tool_calls = (
+        _RUN_PROJECTOR.tool_calls_from_payload(payload.get("tool_calls"), run_id=group_run_id)
+        if isinstance(payload.get("tool_calls"), list)
+        else []
+    )
+    child_tool_calls = [tool_call for run in runs for tool_call in run.tool_calls]
+    event_tool_calls = (
+        []
+        if direct_tool_calls or child_tool_calls
+        else _RUN_PROJECTOR.tool_calls_from_events(events)
+    )
+    return _unique_by(
+        [*direct_tool_calls, *child_tool_calls, *event_tool_calls],
+        lambda tool_call: tool_call.tool_call_id,
+    )
+
+
+def _group_run_memory_traces(
+    runs: list[RunTimelineSnapshot],
+    events: list[Any],
+) -> list[MemoryTraceSnapshot]:
+    child_traces = [trace for run in runs for trace in run.memory_traces]
+    event_traces = [] if child_traces else _RUN_PROJECTOR.memory_traces_from_events(events)
+    return _unique_by(
+        [*child_traces, *event_traces],
+        lambda trace: trace.trace_id,
+    )
+
+
+def _group_run_skill_traces(
+    runs: list[RunTimelineSnapshot],
+    events: list[Any],
+) -> list[SkillTraceSnapshot]:
+    child_traces = [trace for run in runs for trace in run.skill_traces]
+    event_traces = [] if child_traces else _RUN_PROJECTOR.skill_traces_from_events(events)
+    return _unique_by(
+        [*child_traces, *event_traces],
+        lambda trace: trace.trace_id,
+    )
+
+
+def _group_run_shared_artifacts(
+    payload: Mapping[str, Any],
+    runs: list[RunTimelineSnapshot],
+    events: list[Any],
+    *,
+    group_run_id: str,
+    group_id: str,
+) -> list[ArtifactSnapshot]:
+    direct_artifacts = _RUN_PROJECTOR.artifacts_from_payload(
+        {"artifacts": payload.get("shared_artifacts") or payload.get("artifacts")},
+        run_id=group_run_id,
+        events=events,
+    )
+    child_artifacts = [
+        _group_context_artifact(artifact, group_run_id=group_run_id, group_id=group_id)
+        for run in runs
+        for artifact in run.artifacts
+    ]
+    return _unique_by(
+        [*direct_artifacts, *child_artifacts],
+        _artifact_identity,
+    )
+
+
+def _group_context_artifact(
+    artifact: ArtifactSnapshot,
+    *,
+    group_run_id: str,
+    group_id: str,
+) -> ArtifactSnapshot:
+    return artifact.model_copy(
+        update={
+            "group_run_id": artifact.group_run_id or group_run_id or None,
+            "group_id": artifact.group_id or group_id or None,
+        }
+    )
+
+
+def _artifact_identity(artifact: ArtifactSnapshot) -> str:
+    return _text(
+        artifact.artifact_id
+        or f"{artifact.source_run_id or artifact.run_id or ''}:{artifact.path or artifact.title}"
+    )
+
+
+def _unique_by(items: list[Any], key_fn: Any) -> list[Any]:
+    seen: set[str] = set()
+    unique: list[Any] = []
+    for item in items:
+        key = _text(key_fn(item))
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        unique.append(item)
+    return unique
+
+
+def _group_run_stream_events(
+    events: list[dict[str, Any]],
+    *,
+    group_run_id: str,
+    group_id: str,
+) -> list[dict[str, Any]]:
+    return [
+        _group_run_stream_event(
+            event,
+            group_run_id=group_run_id,
+            group_id=group_id,
+        )
+        for event in events
+    ]
+
+
+def _group_run_stream_event(
+    event: dict[str, Any],
+    *,
+    group_run_id: str,
+    group_id: str,
+) -> dict[str, Any]:
+    item = dict(event)
+    payload = dict(item.get("payload")) if isinstance(item.get("payload"), Mapping) else {}
+    payload.setdefault("group_run_id", group_run_id)
+    if group_id:
+        payload.setdefault("group_id", group_id)
+    item["payload"] = payload
+
+    event_run_id = _text(item.get("run_id"))
+    if not event_run_id or event_run_id == group_run_id or "sequence" not in item:
+        return item
+
+    source_sequence = item.pop("sequence")
+    payload.setdefault("source_run_id", event_run_id)
+    payload.setdefault("source_sequence", source_sequence)
+    item["payload"] = payload
+    return item
+
+
+def _group_run_child_event_context(
+    event: Mapping[str, Any],
+    *,
+    group_run_id: str,
+    group_id: str,
+) -> dict[str, Any]:
+    item = dict(event)
+    payload = dict(item.get("payload")) if isinstance(item.get("payload"), Mapping) else {}
+    timeline_payload = {
+        key: item.get(key)
+        for key in (
+            "input_preview",
+            "input",
+            "output_preview",
+            "result",
+            "pending_approval",
+            "approval",
+            "artifact",
+        )
+        if key in item
+    }
+    payload = {**timeline_payload, **payload}
+    if group_run_id:
+        payload.setdefault("group_run_id", group_run_id)
+        payload.setdefault("run_group_id", group_run_id)
+    if group_id:
+        payload.setdefault("group_id", group_id)
+    if payload:
+        item["payload"] = payload
+    return item
+
+
+def _raw_events_from_payload(
+    payload: Mapping[str, Any],
+    keys: tuple[str, ...],
+) -> list[dict[str, Any]]:
+    for key in keys:
+        value = payload.get(key)
+        if value and isinstance(value, list):
+            return [dict(item) for item in value if isinstance(item, Mapping)]
+    return []
+
+
+def _event_type(event: Mapping[str, Any]) -> str:
+    return _text(event.get("event_type") or event.get("event"))
+
+
+def _group_run_lifecycle_context(
+    payload: Mapping[str, Any],
+    *,
+    group_run_id: str,
+    group_id: str,
+    objective: str,
+    child_run_ids: list[str],
+) -> dict[str, Any]:
+    return {
+        "group_run_id": group_run_id,
+        "run_group_id": _text(payload.get("run_group_id") or group_run_id),
+        "group_id": group_id,
+        "objective": objective,
+        "status": _text(payload.get("status") or "unknown"),
+        "child_run_ids": child_run_ids,
+        "participant_count": len(group_run_participants_from_payload(payload)),
+    }
+
+
+def _group_run_lifecycle_event(
+    event_type: str,
+    payload: Mapping[str, Any],
+    lifecycle_context: dict[str, Any],
+    *,
+    created_at: str = "",
+) -> dict[str, Any]:
+    label = _text(payload.get("title") or payload.get("objective") or "Group run")
+    event = {
+        "event_type": event_type,
+        "detail": label,
+        "payload": dict(lifecycle_context),
+    }
+    if created_at:
+        event["created_at"] = created_at
+    return event
+
+
+def _group_run_terminal_event_type(value: Any) -> str:
+    status = _text(value)
+    if status == "completed":
+        return "group.run.completed"
+    if status == "failed":
+        return "group.run.failed"
+    if status == "cancelled":
+        return "group.run.cancelled"
+    return ""
+
+
+def _text(value: Any) -> str:
+    return str(redact_secrets(value) or "").strip()
+
+
+def _optional_text(value: Any) -> str | None:
+    text = _text(value)
+    return text or None

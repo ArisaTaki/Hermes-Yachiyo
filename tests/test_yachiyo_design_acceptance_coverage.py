@@ -891,7 +891,24 @@ def test_runtime_core_split_acceptance_paths_are_guarded() -> None:
         [
             "redact_secrets",
             "def agent_group_snapshot_from_payload",
+            "group_run_snapshot_from_payload",
+            "agent_group_members_from_payloads(payload.get(\"members\"))",
+        ],
+    )
+    _assert_contains(
+        "apps/shell/yachiyo_agent/group_member_snapshots.py",
+        [
+            "def agent_group_member_from_payload",
+            "def agent_group_members_from_payloads",
+            "def group_run_participants_from_payload",
+        ],
+    )
+    _assert_contains(
+        "apps/shell/yachiyo_agent/group_run_snapshots.py",
+        [
             "def group_run_snapshot_from_payload",
+            "def group_run_events_with_lifecycle",
+            "def group_run_child_payload",
             "objective=_text(payload.get(\"objective\") or payload.get(\"user_goal\"))",
         ],
     )
@@ -1144,7 +1161,7 @@ def test_group_and_workflow_acceptance_paths_are_guarded() -> None:
         ],
     )
     _assert_contains(
-        "apps/shell/yachiyo_agent/groups.py",
+        "apps/shell/yachiyo_agent/group_run_snapshots.py",
         [
             "def _group_run_tool_calls",
             "def _group_run_memory_traces",
