@@ -1963,6 +1963,13 @@ def test_group_run_snapshot_injects_group_context_into_child_run_facts() -> None
                             "event_type": "memory.retrieved",
                             "payload": {"count": 1},
                         },
+                        {
+                            "event_type": "skill.selected",
+                            "payload": {
+                                "skill_id": "skill-1",
+                                "skill_name": "Research",
+                            },
+                        },
                     ],
                 },
             ],
@@ -1987,6 +1994,14 @@ def test_group_run_snapshot_injects_group_context_into_child_run_facts() -> None
     assert child.artifacts[0].group_run_id == "group-run-child-context"
     assert child.memory_traces[0].group_id == "group-child-context"
     assert child.memory_traces[0].group_run_id == "group-run-child-context"
+    assert child.skill_traces[0].group_id == "group-child-context"
+    assert child.skill_traces[0].group_run_id == "group-run-child-context"
+    assert group_run.tool_calls[0].group_id == "group-child-context"
+    assert group_run.tool_calls[0].group_run_id == "group-run-child-context"
+    assert group_run.memory_traces[0].group_id == "group-child-context"
+    assert group_run.memory_traces[0].group_run_id == "group-run-child-context"
+    assert group_run.skill_traces[0].group_id == "group-child-context"
+    assert group_run.skill_traces[0].group_run_id == "group-run-child-context"
 
 
 def test_group_run_snapshot_accepts_members_as_participants() -> None:

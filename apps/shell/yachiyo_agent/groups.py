@@ -7,7 +7,15 @@ from typing import Any
 
 from apps.shell.agent.runtime.events import redact_secrets
 
-from .contracts import AgentGroupMemberSnapshot, AgentGroupSnapshot, GroupRunSnapshot
+from .contracts import (
+    AgentGroupMemberSnapshot,
+    AgentGroupSnapshot,
+    GroupRunSnapshot,
+    MemoryTraceSnapshot,
+    RunTimelineSnapshot,
+    SkillTraceSnapshot,
+    ToolCallSnapshot,
+)
 from .run_snapshots import RunSnapshotProjector
 
 
@@ -84,6 +92,17 @@ def group_run_snapshot_from_payload(
         run_id=group_run_id,
         keys=("events",),
     )
+    runs = [
+        _RUN_PROJECTOR.timeline_snapshot_from_payload(
+            _group_run_child_payload(
+                item,
+                group_run_id=group_run_id,
+                group_id=group_id,
+            )
+        )
+        for item in runs_payload
+        if isinstance(item, Mapping)
+    ]
     return GroupRunSnapshot(
         group_run_id=group_run_id,
         run_group_id=legacy_run_group_id or group_run_id or None,
@@ -94,18 +113,11 @@ def group_run_snapshot_from_payload(
         participants=participants,
         active_speaker_agent_id=_optional_text(payload.get("active_speaker_agent_id")),
         events=events,
-        runs=[
-            _RUN_PROJECTOR.timeline_snapshot_from_payload(
-                _group_run_child_payload(
-                    item,
-                    group_run_id=group_run_id,
-                    group_id=group_id,
-                )
-            )
-            for item in runs_payload
-            if isinstance(item, Mapping)
-        ],
+        runs=runs,
         child_run_ids=child_run_ids,
+        tool_calls=_group_run_tool_calls(payload, runs, events, group_run_id=group_run_id),
+        memory_traces=_group_run_memory_traces(runs, events),
+        skill_traces=_group_run_skill_traces(runs, events),
         shared_artifacts=_RUN_PROJECTOR.artifacts_from_payload(
             {"artifacts": payload.get("shared_artifacts") or payload.get("artifacts")},
             run_id=group_run_id,
@@ -126,6 +138,66 @@ def group_run_snapshot_from_payload(
         created_at=_text(payload.get("created_at")),
         updated_at=_text(payload.get("updated_at")),
     )
+
+
+def _group_run_tool_calls(
+    payload: Mapping[str, Any],
+    runs: list[RunTimelineSnapshot],
+    events: list[Any],
+    *,
+    group_run_id: str,
+) -> list[ToolCallSnapshot]:
+    direct_tool_calls = (
+        _RUN_PROJECTOR.tool_calls_from_payload(payload.get("tool_calls"), run_id=group_run_id)
+        if isinstance(payload.get("tool_calls"), list)
+        else []
+    )
+    child_tool_calls = [tool_call for run in runs for tool_call in run.tool_calls]
+    event_tool_calls = (
+        []
+        if direct_tool_calls or child_tool_calls
+        else _RUN_PROJECTOR.tool_calls_from_events(events)
+    )
+    return _unique_by(
+        [*direct_tool_calls, *child_tool_calls, *event_tool_calls],
+        lambda tool_call: tool_call.tool_call_id,
+    )
+
+
+def _group_run_memory_traces(
+    runs: list[RunTimelineSnapshot],
+    events: list[Any],
+) -> list[MemoryTraceSnapshot]:
+    child_traces = [trace for run in runs for trace in run.memory_traces]
+    event_traces = [] if child_traces else _RUN_PROJECTOR.memory_traces_from_events(events)
+    return _unique_by(
+        [*child_traces, *event_traces],
+        lambda trace: trace.trace_id,
+    )
+
+
+def _group_run_skill_traces(
+    runs: list[RunTimelineSnapshot],
+    events: list[Any],
+) -> list[SkillTraceSnapshot]:
+    child_traces = [trace for run in runs for trace in run.skill_traces]
+    event_traces = [] if child_traces else _RUN_PROJECTOR.skill_traces_from_events(events)
+    return _unique_by(
+        [*child_traces, *event_traces],
+        lambda trace: trace.trace_id,
+    )
+
+
+def _unique_by(items: list[Any], key_fn: Any) -> list[Any]:
+    seen: set[str] = set()
+    unique: list[Any] = []
+    for item in items:
+        key = _text(key_fn(item))
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        unique.append(item)
+    return unique
 
 
 def _group_mode(value: Any) -> str:

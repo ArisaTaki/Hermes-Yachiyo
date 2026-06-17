@@ -1,13 +1,17 @@
 import type { RunGroupSpec, RunSpec } from '../types';
 import type { GroupRunSnapshot, PublicRunEvent, RunTimelineSnapshot } from '../../yachiyo-studio/types';
+import { MemorySkillTraceInspector } from './MemorySkillTraceInspector';
 import { RuntimeApprovalCard } from '../../runtime-shared/components/RuntimeApprovalCard';
 import { RuntimeArtifactList } from '../../runtime-shared/components/RuntimeArtifactList';
 import { RuntimeTimelineSummary } from '../../runtime-shared/components/RuntimeTimelineSummary';
+import { ToolCallInspector } from './ToolCallInspector';
 import {
   approvalsFromRunEventReplay,
   artifactsFromRunEventReplay,
   mergeApprovalSnapshots,
   mergeArtifactSnapshots,
+  mergeToolCallSnapshots,
+  toolCallsFromRunEventReplay,
 } from '../../runtime-shared/runEventFacts';
 
 type GroupRunDetailPanelProps = {
@@ -93,8 +97,21 @@ export function GroupRunDetailPanel({
     : selectedRunGroup?.shared_artifacts || [];
   const replayApprovals = replayEvents.length ? approvalsFromRunEventReplay(replayEvents) : [];
   const replayArtifacts = replayEvents.length ? artifactsFromRunEventReplay(replayEvents) : [];
+  const replayToolCalls = replayEvents.length ? toolCallsFromRunEventReplay(replayEvents) : [];
   const groupRunApprovalFacts = mergeApprovalSnapshots(groupRunApprovals, replayApprovals);
   const groupRunArtifactFacts = mergeArtifactSnapshots(groupRunArtifacts, replayArtifacts);
+  const snapshotToolCalls = selectedGroupRunSnapshot?.tool_calls?.length
+    ? selectedGroupRunSnapshot.tool_calls
+    : groupRunChildToolCalls(selectedGroupRunSnapshot?.runs || []);
+  const groupRunToolCalls = snapshotToolCalls.length
+    ? mergeToolCallSnapshots(snapshotToolCalls, [])
+    : replayToolCalls;
+  const groupRunMemoryTraces = selectedGroupRunSnapshot?.memory_traces?.length
+    ? selectedGroupRunSnapshot.memory_traces
+    : groupRunChildMemoryTraces(selectedGroupRunSnapshot?.runs || []);
+  const groupRunSkillTraces = selectedGroupRunSnapshot?.skill_traces?.length
+    ? selectedGroupRunSnapshot.skill_traces
+    : groupRunChildSkillTraces(selectedGroupRunSnapshot?.runs || []);
   const groupRunFinalAnswer = selectedGroupRunSnapshot?.final_answer || selectedRunGroup?.final_answer || '';
 
   return (
@@ -196,6 +213,31 @@ export function GroupRunDetailPanel({
           </div>
         </section>
       ) : null}
+      {groupRunToolCalls.length ? (
+        <section className="group-run-runtime-section" data-testid="agent-run-detail-group-run-tool-calls">
+          <ToolCallInspector
+            cardTestId="agent-run-detail-group-run-tool-call-card"
+            listTestId="agent-run-detail-group-run-tool-call-list"
+            sourceLabel="GroupRunSnapshot + RunEvent replay tool facts"
+            testId="agent-run-detail-group-run-tool-call-inspector"
+            toolCalls={groupRunToolCalls}
+          />
+        </section>
+      ) : null}
+      {groupRunMemoryTraces.length || groupRunSkillTraces.length || groupRunReplayEvents.some(groupRunEventIsMemorySkillTrace) ? (
+        <section className="group-run-runtime-section" data-testid="agent-run-detail-group-run-memory-skill-traces">
+          <MemorySkillTraceInspector
+            contextTestId="agent-run-detail-group-run-memory-skill-trace-context"
+            events={groupRunReplayEvents}
+            itemTestId="agent-run-detail-group-run-memory-skill-trace"
+            listTestId="agent-run-detail-group-run-memory-skill-trace-list"
+            memoryTraces={groupRunMemoryTraces}
+            skillTraces={groupRunSkillTraces}
+            sourceLabel="GroupRunSnapshot + RunEvent replay trace facts"
+            testId="agent-run-detail-group-run-memory-skill-trace-inspector"
+          />
+        </section>
+      ) : null}
       {groupRunArtifactFacts.length ? (
         <section className="group-run-runtime-section" data-testid="agent-run-detail-group-run-artifacts">
           <div className="group-run-runtime-section-head">
@@ -269,6 +311,23 @@ function groupRunChildRunRefs(
     refs.push({ loadedRun: runById.get(runId) || null, publicRun: null, runId });
   }
   return refs;
+}
+
+function groupRunChildToolCalls(publicRuns: RunTimelineSnapshot[]) {
+  return publicRuns.flatMap((run) => run.tool_calls || []);
+}
+
+function groupRunChildMemoryTraces(publicRuns: RunTimelineSnapshot[]) {
+  return publicRuns.flatMap((run) => run.memory_traces || []);
+}
+
+function groupRunChildSkillTraces(publicRuns: RunTimelineSnapshot[]) {
+  return publicRuns.flatMap((run) => run.skill_traces || []);
+}
+
+function groupRunEventIsMemorySkillTrace(event: PublicRunEvent): boolean {
+  const eventType = String(event.event_type || '').trim();
+  return eventType.startsWith('memory.') || eventType.startsWith('skill.');
 }
 
 function groupRunChildKind(publicRun: RunTimelineSnapshot | null, childRun: RunSpec | null): string {

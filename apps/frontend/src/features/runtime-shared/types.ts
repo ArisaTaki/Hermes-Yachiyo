@@ -387,6 +387,9 @@ export type GroupRunSnapshot = {
   events?: PublicRunEvent[];
   runs?: RunTimelineSnapshot[];
   child_run_ids?: string[];
+  tool_calls?: ToolCallSnapshot[];
+  memory_traces?: MemoryTraceSnapshot[];
+  skill_traces?: SkillTraceSnapshot[];
   shared_artifacts?: ArtifactSnapshot[];
   pending_approvals?: ApprovalCardSnapshot[];
   final_answer?: string | null;

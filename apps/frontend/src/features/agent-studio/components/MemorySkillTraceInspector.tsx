@@ -29,17 +29,25 @@ type MemorySkillTraceMetadataItem = {
 };
 
 type MemorySkillTraceInspectorProps = {
+  contextTestId?: string;
   events?: PublicRunEvent[];
+  itemTestId?: string;
+  listTestId?: string;
   memoryTraces?: MemoryTraceSnapshot[];
   skillTraces?: SkillTraceSnapshot[];
   sourceLabel?: string;
+  testId?: string;
 };
 
 export function MemorySkillTraceInspector({
+  contextTestId = 'agent-run-detail-memory-skill-trace-context',
   events = [],
+  itemTestId = 'agent-run-detail-memory-skill-trace',
+  listTestId = 'agent-run-detail-memory-skill-trace-list',
   memoryTraces = [],
   skillTraces = [],
   sourceLabel = 'Memory 检索、写入和 Skill 调度的 Runtime 事实',
+  testId = 'agent-run-detail-memory-skill-traces',
 }: MemorySkillTraceInspectorProps) {
   const traces = mergeMemorySkillTraces(
     [
@@ -51,7 +59,7 @@ export function MemorySkillTraceInspector({
   return (
     <details
       className="run-detail-block run-detail-fold run-memory-skill-traces"
-      data-testid="agent-run-detail-memory-skill-traces"
+      data-testid={testId}
       open={traces.length > 0}
     >
       <summary className="run-detail-section-head">
@@ -60,7 +68,7 @@ export function MemorySkillTraceInspector({
           <span>{sourceLabel}</span>
         </div>
       </summary>
-      <div className="run-detail-fold-body run-memory-skill-trace-list" data-testid="agent-run-detail-memory-skill-trace-list">
+      <div className="run-detail-fold-body run-memory-skill-trace-list" data-testid={listTestId}>
         {traces.map((trace) => (
           <article
             className={`run-memory-skill-trace ${trace.kind} ${traceStatusTone(trace.status)}`}
@@ -71,7 +79,7 @@ export function MemorySkillTraceInspector({
             data-memory-id={trace.memoryId}
             data-runtime-trace-kind={trace.kind}
             data-skill-id={trace.skillId}
-            data-testid="agent-run-detail-memory-skill-trace"
+            data-testid={itemTestId}
             data-workflow-node-id={trace.workflowNodeId}
             key={trace.key}
           >
@@ -90,7 +98,7 @@ export function MemorySkillTraceInspector({
             {trace.metadata.length ? (
               <div
                 className="run-memory-skill-trace-context"
-                data-testid="agent-run-detail-memory-skill-trace-context"
+                data-testid={contextTestId}
               >
                 {trace.metadata.map((item) => (
                   <span data-trace-context={item.key} key={item.key}>

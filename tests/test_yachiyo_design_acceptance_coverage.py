@@ -907,6 +907,28 @@ def test_group_and_workflow_acceptance_paths_are_guarded() -> None:
         ],
     )
     _assert_contains(
+        "apps/shell/yachiyo_agent/contracts.py",
+        [
+            "class GroupRunSnapshot",
+            "tool_calls: list[ToolCallSnapshot]",
+            "memory_traces: list[MemoryTraceSnapshot]",
+            "skill_traces: list[SkillTraceSnapshot]",
+        ],
+    )
+    _assert_contains(
+        "apps/shell/yachiyo_agent/groups.py",
+        [
+            "def _group_run_tool_calls",
+            "def _group_run_memory_traces",
+            "def _group_run_skill_traces",
+            "child_tool_calls = [tool_call for run in runs for tool_call in run.tool_calls]",
+            "child_traces = [trace for run in runs for trace in run.memory_traces]",
+            "child_traces = [trace for run in runs for trace in run.skill_traces]",
+            "event_tool_calls = (",
+            "event_traces = [] if child_traces else",
+        ],
+    )
+    _assert_contains(
         "apps/frontend/src/features/agent-studio/components/AgentGroupPanel.tsx",
         [
             "agent-group-settings-grid",
@@ -931,9 +953,13 @@ def test_group_and_workflow_acceptance_paths_are_guarded() -> None:
             "RuntimeTimelineSummary",
             "RuntimeApprovalCard",
             "RuntimeArtifactList",
+            "ToolCallInspector",
+            "MemorySkillTraceInspector",
             "onOpenArtifact={onOpenArtifact}",
             'data-testid="agent-run-detail-group-run-replay"',
             'data-testid="agent-run-detail-group-run-approvals"',
+            'data-testid="agent-run-detail-group-run-tool-calls"',
+            'data-testid="agent-run-detail-group-run-memory-skill-traces"',
             'data-testid="agent-run-detail-group-run-artifacts"',
             'itemTestId="agent-run-detail-group-run-artifact-item"',
         ],
@@ -1118,8 +1144,8 @@ def test_runtime_memory_and_skill_trace_acceptance_paths_are_guarded() -> None:
     _assert_contains(
         "apps/frontend/src/features/agent-studio/components/MemorySkillTraceInspector.tsx",
         [
-            'data-testid="agent-run-detail-memory-skill-traces"',
-            'data-testid="agent-run-detail-memory-skill-trace"',
+            "testId = 'agent-run-detail-memory-skill-traces'",
+            "itemTestId = 'agent-run-detail-memory-skill-trace'",
             "memorySkillTraceFromMemorySnapshot",
             "memorySkillTraceFromSkillSnapshot",
             "memorySkillTraceFromEvent",

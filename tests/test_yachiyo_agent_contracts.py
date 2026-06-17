@@ -845,6 +845,36 @@ def test_group_run_and_workflow_snapshots_keep_group_and_workflow_fields() -> No
                 detail="Planner started",
             )
         ],
+        tool_calls=[
+            ToolCallSnapshot(
+                tool_call_id="tool-1",
+                run_id="agent-run-1",
+                source_runnable_id="agent-1",
+                group_run_id="group-run-1",
+                tool_name="workspace.read",
+                status="completed",
+            )
+        ],
+        memory_traces=[
+            MemoryTraceSnapshot(
+                trace_id="memory-trace-1",
+                run_id="agent-run-1",
+                event_type="memory.retrieved",
+                source_runnable_id="agent-1",
+                group_run_id="group-run-1",
+                title="Memory retrieved",
+            )
+        ],
+        skill_traces=[
+            SkillTraceSnapshot(
+                trace_id="skill-trace-1",
+                run_id="agent-run-1",
+                event_type="skill.selected",
+                source_runnable_id="agent-1",
+                group_run_id="group-run-1",
+                title="Skill selected",
+            )
+        ],
     )
     workflow = WorkflowSnapshot(
         workflow_id="workflow-1",
@@ -874,6 +904,9 @@ def test_group_run_and_workflow_snapshots_keep_group_and_workflow_fields() -> No
     assert _json(group)["members"][0]["role"] == "planner"
     assert _json(group_run)["participants"][0]["agent_id"] == "agent-1"
     assert _json(group_run)["events"][0]["event_type"] == "group.member.started"
+    assert _json(group_run)["tool_calls"][0]["tool_name"] == "workspace.read"
+    assert _json(group_run)["memory_traces"][0]["event_type"] == "memory.retrieved"
+    assert _json(group_run)["skill_traces"][0]["event_type"] == "skill.selected"
     assert _json(workflow)["default_input_schema"] == {"type": "object"}
     assert _json(workflow_run)["run_id"] == "workflow-run-1"
     assert _json(workflow_run)["workflow_id"] == "workflow-1"

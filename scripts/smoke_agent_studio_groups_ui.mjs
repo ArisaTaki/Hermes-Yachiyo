@@ -92,6 +92,65 @@ const artifact = {
   created_at: now,
 };
 
+const toolCall = {
+  tool_call_id: 'agent-studio-groups-ui-smoke-tool-call',
+  run_id: GROUP_RUN_ROOT_RUN_ID,
+  source_run_id: GROUP_RUN_ROOT_RUN_ID,
+  source_runnable_id: AGENT_ID,
+  source_runnable_name: smokeAgent.name,
+  group_id: CREATED_GROUP_ID,
+  group_run_id: GROUP_RUN_ID,
+  tool_name: 'workspace.write',
+  status: 'waiting_approval',
+  risk_level: 'medium',
+  input_preview: { path: ARTIFACT_PATH },
+  approval_id: approval.approval_id,
+  started_at: now,
+  completed_at: null,
+};
+
+const memoryTrace = {
+  trace_id: 'agent-studio-groups-ui-smoke-memory-trace',
+  run_id: GROUP_RUN_ROOT_RUN_ID,
+  sequence: 4,
+  event_type: 'memory.retrieved',
+  status: 'completed',
+  action: 'retrieved',
+  memory_id: 'agent-studio-groups-ui-smoke-memory',
+  memory_kind: 'preference',
+  count: 1,
+  source_run_id: GROUP_RUN_ROOT_RUN_ID,
+  source_runnable_id: AGENT_ID,
+  source_runnable_name: smokeAgent.name,
+  group_id: CREATED_GROUP_ID,
+  group_run_id: GROUP_RUN_ID,
+  title: 'Memory retrieved',
+  detail: 'preference',
+  payload_preview: { count: 1 },
+  created_at: now,
+};
+
+const skillTrace = {
+  trace_id: 'agent-studio-groups-ui-smoke-skill-trace',
+  run_id: GROUP_RUN_ROOT_RUN_ID,
+  sequence: 5,
+  event_type: 'skill.selected',
+  status: 'completed',
+  skill_id: 'agent-studio-groups-ui-smoke-skill',
+  skill_name: 'Group smoke skill',
+  source_ref: 'native://group-smoke',
+  source_type: 'native',
+  source_run_id: GROUP_RUN_ROOT_RUN_ID,
+  source_runnable_id: AGENT_ID,
+  source_runnable_name: smokeAgent.name,
+  group_id: CREATED_GROUP_ID,
+  group_run_id: GROUP_RUN_ID,
+  title: 'Skill selected',
+  detail: 'native://group-smoke · native',
+  payload_preview: { skill_id: 'agent-studio-groups-ui-smoke-skill' },
+  created_at: now,
+};
+
 const rootRunEvents = [
   {
     event_id: 'agent-studio-groups-ui-smoke-run-started',
@@ -118,14 +177,7 @@ const rootRunEvents = [
     sensitivity: 'public',
     payload: {
       approval,
-      tool_call: {
-        tool_call_id: 'agent-studio-groups-ui-smoke-tool-call',
-        tool_name: 'workspace.write',
-        status: 'waiting_approval',
-        risk_level: 'medium',
-        input_preview: { path: ARTIFACT_PATH },
-        approval_id: approval.approval_id,
-      },
+      tool_call: toolCall,
     },
     created_at: now,
   },
@@ -145,7 +197,7 @@ const rootRunEvents = [
   {
     event_id: 'agent-studio-groups-ui-smoke-run-completed',
     run_id: GROUP_RUN_ROOT_RUN_ID,
-    sequence: 4,
+    sequence: 6,
     event_type: 'group.run.completed',
     title: 'Group run completed',
     detail: 'Group run finished with observable timeline facts.',
@@ -191,22 +243,9 @@ function runTimelineSnapshot() {
     task_id: 'agent-studio-groups-ui-smoke-task',
     session_id: 'agent-studio-groups-ui-smoke-session',
     events: rootRunEvents,
-    tool_calls: [{
-      tool_call_id: 'agent-studio-groups-ui-smoke-tool-call',
-      run_id: GROUP_RUN_ROOT_RUN_ID,
-      source_run_id: GROUP_RUN_ROOT_RUN_ID,
-      source_runnable_id: AGENT_ID,
-      source_runnable_name: smokeAgent.name,
-      group_id: CREATED_GROUP_ID,
-      group_run_id: GROUP_RUN_ID,
-      tool_name: 'workspace.write',
-      status: 'waiting_approval',
-      risk_level: 'medium',
-      input_preview: { path: ARTIFACT_PATH },
-      approval_id: approval.approval_id,
-      started_at: now,
-      completed_at: null,
-    }],
+    tool_calls: [toolCall],
+    memory_traces: [memoryTrace],
+    skill_traces: [skillTrace],
     approvals: [approval],
     pending_approval: approval,
     artifacts: [artifact],
@@ -235,6 +274,9 @@ function groupRunSnapshot() {
     events: rootRunEvents,
     runs: [runTimelineSnapshot()],
     child_run_ids: [GROUP_RUN_ROOT_RUN_ID],
+    tool_calls: [toolCall],
+    memory_traces: [memoryTrace],
+    skill_traces: [skillTrace],
     shared_artifacts: [artifact],
     pending_approvals: [approval],
     final_answer: 'Group run completed with approval and artifact replay facts.',
@@ -702,6 +744,11 @@ async function main() {
     document.querySelector('[data-testid="agent-run-detail-group-run-overview"]')
     && document.querySelector('[data-testid="agent-run-detail-group-run-replay"]')
     && document.querySelector('[data-testid="agent-run-detail-group-run-approvals"]')
+    && document.querySelector('[data-testid="agent-run-detail-group-run-tool-calls"]')
+    && document.querySelector('[data-testid="agent-run-detail-group-run-tool-call-card"]')?.textContent.includes('workspace.write')
+    && document.querySelector('[data-testid="agent-run-detail-group-run-memory-skill-traces"]')
+    && Array.from(document.querySelectorAll('[data-testid="agent-run-detail-group-run-memory-skill-trace"]'))
+      .some((node) => node.textContent.includes('Group smoke skill'))
     && document.querySelector('[data-testid="agent-run-detail-group-run-artifacts"]')
     && document.querySelector('[data-testid="agent-run-detail-group-run-artifact-item"]')
   ), 'group run detail runtime facts');

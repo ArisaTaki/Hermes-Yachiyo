@@ -415,6 +415,9 @@ class GroupRunSnapshot(_PublicSnapshot):
     events: list[PublicRunEvent] = Field(default_factory=list)
     runs: list[RunTimelineSnapshot] = Field(default_factory=list)
     child_run_ids: list[str] = Field(default_factory=list)
+    tool_calls: list[ToolCallSnapshot] = Field(default_factory=list)
+    memory_traces: list[MemoryTraceSnapshot] = Field(default_factory=list)
+    skill_traces: list[SkillTraceSnapshot] = Field(default_factory=list)
     shared_artifacts: list[ArtifactSnapshot] = Field(default_factory=list)
     pending_approvals: list[ApprovalCardSnapshot] = Field(default_factory=list)
     final_answer: str | None = None
