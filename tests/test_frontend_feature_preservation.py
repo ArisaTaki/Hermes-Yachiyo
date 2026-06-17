@@ -397,6 +397,7 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "runnableKind: publicTaskTarget.kind",
             "attachments: outgoingAttachments",
             "canAttachImages(executor)",
+            "useChatExecutor(EXECUTOR_POLL_INTERVAL_MS)",
             "onComposerPaste={(event) => void handlePaste(event)}",
             "clipboardImageFiles(event.clipboardData)",
             "await addImageFiles(files)",
@@ -737,6 +738,7 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "from '../features/yachiyo-chat/layoutState';",
             "from '../features/yachiyo-chat/components/ChatFullPageLoading';",
             "from '../features/yachiyo-chat/hooks/useChatCopyFeedback';",
+            "from '../features/yachiyo-chat/hooks/useChatExecutor';",
             "from '../features/yachiyo-chat/hooks/useChatNotice';",
             "from '../features/yachiyo-chat/hooks/useLegacyChatRunnableResult';",
             "from '../features/yachiyo-chat/hooks/useChatRunnables';",
@@ -779,6 +781,10 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "setRunnables",
             "listYachiyoChatRunnables()",
             "window.setInterval(refreshRunnables, 10_000)",
+            "setExecutor",
+            "loadExecutor",
+            "ExecutorPayload",
+            "apiGet<ExecutorPayload>('/ui/chat/executor')",
             "result.workflow_run_id ? 'Workflow' : 'Agent'",
             "result.runnable_command",
             "legacyChatRunnableResult(result)",
@@ -3387,6 +3393,17 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
             "payload.filter((item) => item.enabled !== false)",
             "window.setInterval(refreshRunnables, CHAT_RUNNABLE_REFRESH_MS)",
             "if (!enabled) return;",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/hooks/useChatExecutor.ts",
+        [
+            "export function useChatExecutor",
+            "apiGet<ExecutorPayload>('/ui/chat/executor')",
+            "setExecutor({ executor: 'none', available: false });",
+            "window.setInterval(() => {",
+            "void refreshExecutor();",
+            "return () => window.clearInterval(timer);",
         ],
     )
     _assert_not_contains(

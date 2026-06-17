@@ -97,6 +97,7 @@ import {
 } from '../features/yachiyo-chat/sessionState';
 import { useYachiyoTaskActions } from '../features/yachiyo-chat/hooks/useYachiyoTaskActions';
 import { useChatCopyFeedback } from '../features/yachiyo-chat/hooks/useChatCopyFeedback';
+import { useChatExecutor } from '../features/yachiyo-chat/hooks/useChatExecutor';
 import { useChatNotice } from '../features/yachiyo-chat/hooks/useChatNotice';
 import { useChatRunPolling } from '../features/yachiyo-chat/hooks/useChatRunPolling';
 import { useChatRunnables } from '../features/yachiyo-chat/hooks/useChatRunnables';
@@ -129,7 +130,6 @@ import type {
   ChatE2EImageDetail,
   ChatMessage,
   ChatSessionContext,
-  ExecutorPayload,
   MessagesPayload,
   PendingAttachment,
   RenderState,
@@ -168,7 +168,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const [sessions, setSessions] = useState<SessionsPayload | null>(null);
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const [conversationTokenCount, setConversationTokenCount] = useState(0);
-  const [executor, setExecutor] = useState<ExecutorPayload | null>(null);
+  const { executor, refreshExecutor } = useChatExecutor(EXECUTOR_POLL_INTERVAL_MS);
   const [assistantProfile, setAssistantProfile] = useState<AssistantProfilePayload | null>(() => initialAssistantProfile);
   const [assistantProfileLoading, setAssistantProfileLoading] = useState(() => !initialAssistantProfile);
   const [sessionQuery, setSessionQuery] = useState('');
@@ -436,14 +436,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     void loadSessions();
   }, [loadSessions]);
 
-  const loadExecutor = useCallback(async () => {
-    try {
-      setExecutor(await apiGet<ExecutorPayload>('/ui/chat/executor'));
-    } catch {
-      setExecutor({ executor: 'none', available: false });
-    }
-  }, []);
-
   const loadAssistantProfile = useCallback(async () => {
     try {
       const profile = await apiGet<AssistantProfilePayload>('/assistant/profile');
@@ -495,7 +487,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     const requestedSessionId = routeSessionId;
     const requestedTaskId = routeTaskId;
     void (async () => {
-      await Promise.all([loadAssistantProfile(), loadExecutor()]);
+      await Promise.all([loadAssistantProfile(), refreshExecutor()]);
       if (requestedSessionId) {
         try {
           const result = await apiPost<{ ok?: boolean; error?: string }>('/ui/chat/sessions/load', {
@@ -515,7 +507,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         }
       }
     })();
-  }, [loadAssistantProfile, loadExecutor, loadSessions, refreshMessages, routeSessionId, routeTaskId]);
+  }, [loadAssistantProfile, loadSessions, refreshExecutor, refreshMessages, routeSessionId, routeTaskId]);
 
   useEffect(() => {
     const interval = isProcessing ? ACTIVE_POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS;
@@ -530,13 +522,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     );
     return () => window.clearInterval(timer);
   }, [isProcessing, loadSessions]);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      void loadExecutor();
-    }, EXECUTOR_POLL_INTERVAL_MS);
-    return () => window.clearInterval(timer);
-  }, [loadExecutor]);
 
   useEffect(() => {
     const refreshProfile = () => void loadAssistantProfile();
