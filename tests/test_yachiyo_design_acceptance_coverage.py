@@ -447,6 +447,14 @@ def test_shared_runtime_surface_components_acceptance_paths_are_guarded() -> Non
         ],
     )
     _assert_contains(
+        "apps/frontend/src/features/runtime-shared/components/RuntimeApprovalGate.tsx",
+        [
+            "function runtimeApprovalIsPending",
+            "const actions = actionable && (onApprove || onReject)",
+            "data-approval-actionable={actionable ? 'true' : 'false'}",
+        ],
+    )
+    _assert_contains(
         "apps/frontend/src/features/runtime-shared/components/RuntimeArtifactPreview.tsx",
         [
             "export type RuntimeArtifactVariant",

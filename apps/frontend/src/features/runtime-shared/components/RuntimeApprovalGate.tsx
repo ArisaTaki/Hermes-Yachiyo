@@ -51,7 +51,8 @@ export function RuntimeApprovalGate({
   rejectTestId,
   testId = 'runtime-approval-gate',
 }: RuntimeApprovalGateProps) {
-  const actions = onApprove || onReject ? (
+  const actionable = runtimeApprovalIsPending(approval);
+  const actions = actionable && (onApprove || onReject) ? (
     <>
       {onApprove ? (
         <button
@@ -81,7 +82,11 @@ export function RuntimeApprovalGate({
   ) : undefined;
 
   return (
-    <section className={className} data-testid={testId}>
+    <section
+      className={className}
+      data-approval-actionable={actionable ? 'true' : 'false'}
+      data-testid={testId}
+    >
       <RuntimeApprovalCard
         actions={actions}
         actionsClassName={actionsClassName}
@@ -94,4 +99,8 @@ export function RuntimeApprovalGate({
       {children}
     </section>
   );
+}
+
+function runtimeApprovalIsPending(approval: RuntimeApprovalCardSnapshot) {
+  return (approval.status || 'pending') === 'pending';
 }
