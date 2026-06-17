@@ -396,14 +396,11 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "runnableKind: publicTaskTarget.kind",
             "attachments: outgoingAttachments",
             "canAttachImages(executor)",
-            "onPaste={(event) => void handlePaste(event)}",
+            "onComposerPaste={(event) => void handlePaste(event)}",
             "clipboardImageFiles(event.clipboardData)",
             "await addImageFiles(files)",
             "Promise.all(accepted.map(readPendingAttachment))",
             "setStatus(next.length > 1 ? `已添加 ${next.length} 张图片附件` : '已添加图片附件')",
-            "aria-label=\"添加附件，当前仅支持图片\"",
-            "type=\"file\"",
-            "accept=\"image/*\"",
             "listYachiyoChatRunnables()",
             "const [sessionTab, setSessionTab] = useState<'agents' | 'groups'>('agents');",
             "apiPost<{",
@@ -411,13 +408,22 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "'/ui/chat/groups'",
             "approveChatRunApproval(runId)",
             "rejectChatRunApproval(runId, 'Rejected from chat')",
-            "ComposerApprovalNotice",
             "from '../features/yachiyo-chat/components/ChatAvatars';",
+            "openRunDetails(runId",
+            "openWorkflowStudio(runnableId",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/ChatComposer.tsx",
+        [
+            "ComposerApprovalNotice",
             "approvalId={composerApprovalItem.approvalId}",
             "itemId={composerApprovalItem.id}",
             "source={composerApprovalItem.source}",
-            "openRunDetails(runId",
-            "openWorkflowStudio(runnableId",
+            "onPaste={onComposerPaste}",
+            "aria-label=\"添加附件，当前仅支持图片\"",
+            "type=\"file\"",
+            "accept=\"image/*\"",
         ],
     )
     _assert_contains(
@@ -640,6 +646,11 @@ def test_chat_group_ui_exposes_stable_e2e_selectors() -> None:
             "<ChatGroupDialog",
             "agentRunnables={agentRunnables}",
             "onToggleAgent={toggleGroupAgent}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/ChatComposer.tsx",
+        [
             'data-testid="chat-composer-input"',
             'data-testid="chat-composer-send"',
         ],
@@ -2991,32 +3002,42 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
             "async function openImageAttachmentPicker()",
             "fileInputRef.current?.click();",
             "await addDesktopImageSelections(selections);",
-            "type=\"file\"",
-            "accept=\"image/*\"",
-            "multiple",
-            "hidden",
-            "aria-label={`移除 ${attachment.name}`}",
-            "onClick={() => removeAttachment(attachment.id)}",
             "const result = await apiPost<MessagesPayload & { cancelled_tasks?: number }>('/ui/chat/session/cancel');",
             "setMessages(result.messages || []);",
             "setProcessingCount(nextProcessingCount);",
-            "onClick={() => void cancelProcessing()}",
+            "onCancelProcessing={() => void cancelProcessing()}",
             "const approvalPromise = approveChatRunApproval(runId);",
             "const run = await rejectChatRunApproval(runId, 'Rejected from chat');",
             "pollAgentRunInBackground(runId, { summarizeDelegatedRun, ignoreInitialApprovalRequired: true });",
             "onApprove={() => void resolveApprovalMessage(message, 'approve')}",
             "onReject={() => void resolveApprovalMessage(message, 'reject')}",
-            "onApprove={() => void resolveApprovalItem(composerApprovalItem, 'approve')}",
-            "onReject={() => void resolveApprovalItem(composerApprovalItem, 'reject')}",
-            "onOpenDetails={() => openRunDetails(composerApprovalItem.runId)}",
-            "onReveal={() => revealMessage(composerApprovalItem.messageId)}",
+            "onApproveComposerApproval={() => {",
+            "if (composerApprovalItem) void resolveApprovalItem(composerApprovalItem, 'approve');",
+            "onRejectComposerApproval={() => {",
+            "if (composerApprovalItem) void resolveApprovalItem(composerApprovalItem, 'reject');",
+            "onOpenComposerApprovalDetails={() => {",
+            "if (composerApprovalItem) openRunDetails(composerApprovalItem.runId);",
+            "onRevealComposerApproval={() => {",
+            "if (composerApprovalItem) revealMessage(composerApprovalItem.messageId);",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/ChatComposer.tsx",
+        [
+            "type=\"file\"",
+            "accept=\"image/*\"",
+            "multiple",
+            "hidden",
+            "aria-label={`移除 ${attachment.name}`}",
+            "onClick={() => onRemoveAttachment(attachment.id)}",
+            "onClick={onCancelProcessing}",
             "className=\"chat-stop-btn\"",
             "aria-label={processingCount > 1 ? `停止当前 ${processingCount} 项任务` : '停止当前任务'}",
         ],
     )
-    _assert_occurs(chat_view, "onClick={() => void openImageAttachmentPicker()}", 2)
-    _assert_occurs(chat_view, "data-testid=\"chat-image-file-input\"", 1)
-    _assert_occurs(chat_view, "disabled={imageAttachDisabled}", 3)
+    _assert_occurs(chat_view, "openImageAttachmentPicker()", 3)
+    _assert_occurs("apps/frontend/src/features/yachiyo-chat/components/ChatComposer.tsx", "data-testid=\"chat-image-file-input\"", 1)
+    _assert_occurs("apps/frontend/src/features/yachiyo-chat/components/ChatComposer.tsx", "disabled={imageAttachDisabled}", 2)
     _assert_occurs(chat_view, "if (imageAttachDisabled) {", 3)
     _assert_occurs(chat_view, "import.meta.env.DEV", 1)
     _assert_contains(
@@ -3044,6 +3065,11 @@ def test_chat_ui_exposes_stable_e2e_selectors_for_image_cancel_approval_flow() -
         [
             "data-testid=\"chat-header-image-attach-button\"",
             "data-testid=\"chat-header-stop-button\"",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/ChatComposer.tsx",
+        [
             "data-testid=\"chat-composer-image-attach-button\"",
             "data-testid=\"chat-composer-stop-button\"",
             "data-testid=\"chat-image-file-input\"",
@@ -3684,7 +3710,8 @@ def test_chat_approval_run_detail_handoff_preserves_route_and_replay_wiring() ->
             "function openWorkflowStudio(runnableId = '', suggestedGoal = '')",
             "openYachiyoWorkflowStudio(runnableId, suggestedGoal);",
             "onOpenRunDetails={openRunDetails}",
-            "onOpenDetails={() => openRunDetails(composerApprovalItem.runId)}",
+            "onOpenComposerApprovalDetails={() => {",
+            "if (composerApprovalItem) openRunDetails(composerApprovalItem.runId);",
         ],
     )
     _assert_contains(

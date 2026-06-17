@@ -17,18 +17,14 @@ import {
   withResolvedAttachmentUrls,
 } from '../features/yachiyo-chat/attachments';
 import { createDelegatedRunSummary } from '../features/yachiyo-chat/delegatedSummary';
-import {
-  ComposerApprovalNotice,
-  composerApprovalStatusText,
-} from '../features/yachiyo-chat/components/ComposerApprovalNotice';
+import { ChatComposer } from '../features/yachiyo-chat/components/ChatComposer';
+import { composerApprovalStatusText } from '../features/yachiyo-chat/components/ComposerApprovalNotice';
 import { ChatGroupDialog } from '../features/yachiyo-chat/components/ChatGroupDialog';
 import { SessionIdDialog } from '../features/yachiyo-chat/components/SessionIdDialog';
 import { MessageBubble } from '../features/yachiyo-chat/components/MessageBubble';
 import type { ApprovalRequestDetails } from '../features/yachiyo-chat/components/MessageApprovalRequestCard';
 import {
-  AvatarStack,
   SessionAvatar,
-  participantAvatarContent,
 } from '../features/yachiyo-chat/components/ChatAvatars';
 import {
   approvalRequiredItems,
@@ -65,7 +61,6 @@ import {
 import { openYachiyoStudioRun, openYachiyoWorkflowStudio } from '../features/yachiyo-chat/studioNavigation';
 import {
   activeMentions,
-  mentionKindLabel,
   mentionOptionsForQuery,
   mentionQueryAtEnd,
   mentionTextForOption,
@@ -1856,7 +1851,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const chatWorkspaceStyle = embedded
     ? undefined
     : ({ '--chat-sidebar-width': `${sidebarWidth}px` } as CSSProperties);
-  const composerInputStyle = { height: `${composerHeight}px` } as CSSProperties;
   const initialChatLoading = !embedded && !chatBootstrapped;
   const conversationLoading = !messagesLoaded;
 
@@ -2267,185 +2261,70 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
             </div>
           </section>
 
-          <form className="chat-input-area composer refined-composer" onSubmit={submit}>
-            {composerApprovalItem && composerApprovalDetails ? (
-              <ComposerApprovalNotice
-                approvalId={composerApprovalItem.approvalId}
-                busy={approvalActionMessageId === composerApprovalItem.id}
-                currentIndex={composerApprovalIndex}
-                details={composerApprovalDetails}
-                itemId={composerApprovalItem.id}
-                onApprove={() => void resolveApprovalItem(composerApprovalItem, 'approve')}
-                onReject={() => void resolveApprovalItem(composerApprovalItem, 'reject')}
-                onOpenDetails={() => openRunDetails(composerApprovalItem.runId)}
-                onPrevious={() => selectComposerApproval(-1)}
-                onReveal={() => revealMessage(composerApprovalItem.messageId)}
-                onNext={() => selectComposerApproval(1)}
-                runId={composerApprovalItem.runId}
-                runStatus={composerApprovalItem.runStatus}
-                source={composerApprovalItem.source}
-                total={composerApprovalCount}
-              />
-            ) : null}
-            <div className={`chat-input-wrapper${isProcessing ? ' is-processing' : ''}`}>
-              <div className="composer-body">
-                {attachments.length ? (
-                  <div className="composer-attachments" aria-label="已添加图片附件">
-                    {attachments.map((attachment) => (
-                      <figure
-                        className="composer-attachment"
-                        data-testid="chat-composer-attachment-preview"
-                        data-attachment-id={attachment.id}
-                        data-attachment-mime={attachment.mime_type}
-                        data-attachment-name={attachment.name}
-                        data-attachment-size={attachment.size}
-                        data-attachment-width={attachment.width || ''}
-                        data-attachment-height={attachment.height || ''}
-                        key={attachment.id}
-                      >
-                        <img src={attachment.data_url} alt={attachment.name} />
-                        <figcaption>{attachment.name}</figcaption>
-                        <button
-                          type="button"
-                          aria-label={`移除 ${attachment.name}`}
-                          data-testid="chat-composer-attachment-remove"
-                          onClick={() => removeAttachment(attachment.id)}
-                        >
-                          ×
-                        </button>
-                      </figure>
-                    ))}
-                  </div>
-                ) : null}
-                {activeMentionChips.length ? (
-                  <div className="composer-mention-chips" aria-label="当前提及">
-                    {activeMentionChips.map((mention) => (
-                      <span className={`composer-mention-chip ${mention.kind}`} key={`${mention.kind}-${mention.id}`}>
-                        @{mention.nickname || mention.name}
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
-                {mentionSuggestions.length ? (
-                  <div className="composer-mention-menu" id="composer-mention-menu" role="listbox" aria-label="选择提及对象">
-                    {mentionSuggestions.map((option, index) => (
-                      <button
-                        type="button"
-                        className={`composer-mention-option ${option.kind}${index === mentionActiveIndex ? ' active' : ''}`}
-                        id={`composer-mention-option-${index}`}
-                        key={`${option.kind}-${option.id}`}
-                        role="option"
-                        aria-selected={index === mentionActiveIndex}
-                        onClick={() => insertMention(option)}
-                        onMouseEnter={() => setMentionActiveIndex(index)}
-                      >
-                        <span className="composer-mention-avatar">
-                          {option.kind === 'workflow' ? (
-                            <AvatarStack participants={option.participants || []} />
-                          ) : (
-                            participantAvatarContent(option, option.kind === 'main' ? '月' : 'A')
-                          )}
-                        </span>
-                        <span className="composer-mention-text">
-                          <strong>{option.nickname || option.name}</strong>
-                          <small>{mentionKindLabel(option)}</small>
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-                <textarea
-                  className="chat-input"
-                  data-testid="chat-composer-input"
-                  ref={inputRef}
-                  value={input}
-                  onChange={(event) => setInput(event.target.value)}
-                  onCompositionEnd={() => {
-                    composerComposingRef.current = false;
-                  }}
-                  onCompositionStart={() => {
-                    composerComposingRef.current = true;
-                  }}
-                  onKeyDown={handleComposerKeyDown}
-                  onPaste={(event) => void handlePaste(event)}
-                  placeholder="输入消息..."
-                  aria-activedescendant={activeMentionOptionId}
-                  aria-disabled={isSending}
-                  aria-controls={mentionSuggestions.length ? 'composer-mention-menu' : undefined}
-                  aria-expanded={mentionSuggestions.length > 0}
-                  aria-haspopup="listbox"
-                  readOnly={isSending}
-                  rows={1}
-                  style={composerInputStyle}
-                />
-              </div>
-              <div
-                className="composer-resize-handle"
-                role="separator"
-                aria-label="调整输入框高度"
-                aria-orientation="horizontal"
-                aria-valuemin={COMPOSER_MIN_HEIGHT}
-                aria-valuemax={COMPOSER_MAX_HEIGHT}
-                aria-valuenow={composerHeight}
-                tabIndex={0}
-                title="拖动或用方向键调整输入框高度"
-                onKeyDown={handleComposerResizeKeyDown}
-                onPointerDown={startComposerResize}
-              />
-              <button
-                type="button"
-                className="chat-attach-btn"
-                disabled={imageAttachDisabled}
-                title={attachmentHelpText(executor)}
-                aria-label="添加附件，当前仅支持图片"
-                data-testid="chat-composer-image-attach-button"
-                onClick={() => void openImageAttachmentPicker()}
-              >
-                <UiIcon name="paperclip" />
-              </button>
-              {isProcessing ? (
-                <button
-                  type="button"
-                  className="chat-stop-btn"
-                  aria-label={processingCount > 1 ? `停止当前 ${processingCount} 项任务` : '停止当前任务'}
-                  title={processingCount > 1 ? `停止当前 ${processingCount} 项任务` : '停止当前任务'}
-                  data-testid="chat-composer-stop-button"
-                  onClick={() => void cancelProcessing()}
-                >
-                  <UiIcon name="stop" />
-                </button>
-              ) : null}
-              <button
-                type="submit"
-                className="chat-send-btn neon-glow"
-                data-testid="chat-composer-send"
-                disabled={isSending || (!input.trim() && attachments.length === 0)}
-                aria-label="发送消息"
-                title={isProcessing ? '继续发送消息' : '发送消息'}
-              >
-                <UiIcon name="send" />
-              </button>
-            </div>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              multiple
-              hidden
-              disabled={imageAttachDisabled}
-              data-testid="chat-image-file-input"
-              onChange={(event) => {
-                const files = Array.from(event.target.files || []);
-                event.target.value = '';
-                if (files.length === 0) return;
-                if (imageAttachDisabled) {
-                  showImageInputBlocked();
-                  return;
-                }
-                void addImageFiles(files);
-              }}
-            />
-          </form>
+          <ChatComposer
+            activeMentionChips={activeMentionChips}
+            activeMentionOptionId={activeMentionOptionId}
+            attachmentHelpText={attachmentHelpText(executor)}
+            attachments={attachments}
+            composerApprovalBusy={Boolean(composerApprovalItem && approvalActionMessageId === composerApprovalItem.id)}
+            composerApprovalCount={composerApprovalCount}
+            composerApprovalDetails={composerApprovalDetails}
+            composerApprovalIndex={composerApprovalIndex}
+            composerApprovalItem={composerApprovalItem}
+            composerHeight={composerHeight}
+            composerMaxHeight={COMPOSER_MAX_HEIGHT}
+            composerMinHeight={COMPOSER_MIN_HEIGHT}
+            fileInputRef={fileInputRef}
+            imageAttachDisabled={imageAttachDisabled}
+            input={input}
+            inputRef={inputRef}
+            isProcessing={isProcessing}
+            isSending={isSending}
+            mentionActiveIndex={mentionActiveIndex}
+            mentionSuggestions={mentionSuggestions}
+            processingCount={processingCount}
+            onApproveComposerApproval={() => {
+              if (composerApprovalItem) void resolveApprovalItem(composerApprovalItem, 'approve');
+            }}
+            onCancelProcessing={() => void cancelProcessing()}
+            onComposerCompositionEnd={() => {
+              composerComposingRef.current = false;
+            }}
+            onComposerCompositionStart={() => {
+              composerComposingRef.current = true;
+            }}
+            onComposerKeyDown={handleComposerKeyDown}
+            onComposerPaste={(event) => void handlePaste(event)}
+            onComposerResizeKeyDown={handleComposerResizeKeyDown}
+            onComposerResizePointerDown={startComposerResize}
+            onFileInputChange={(event) => {
+              const files = Array.from(event.target.files || []);
+              event.target.value = '';
+              if (files.length === 0) return;
+              if (imageAttachDisabled) {
+                showImageInputBlocked();
+                return;
+              }
+              void addImageFiles(files);
+            }}
+            onInputChange={setInput}
+            onMentionHover={setMentionActiveIndex}
+            onMentionSelect={insertMention}
+            onOpenComposerApprovalDetails={() => {
+              if (composerApprovalItem) openRunDetails(composerApprovalItem.runId);
+            }}
+            onOpenImageAttachmentPicker={() => void openImageAttachmentPicker()}
+            onPreviousComposerApproval={() => selectComposerApproval(-1)}
+            onRejectComposerApproval={() => {
+              if (composerApprovalItem) void resolveApprovalItem(composerApprovalItem, 'reject');
+            }}
+            onRemoveAttachment={removeAttachment}
+            onRevealComposerApproval={() => {
+              if (composerApprovalItem) revealMessage(composerApprovalItem.messageId);
+            }}
+            onNextComposerApproval={() => selectComposerApproval(1)}
+            onSubmit={submit}
+          />
           <footer className="status-line refined-status-line">{footerStatus}</footer>
         </section>
       </div>
