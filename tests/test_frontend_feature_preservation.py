@@ -639,13 +639,22 @@ def test_chat_group_ui_exposes_stable_e2e_selectors() -> None:
         "apps/frontend/src/views/ChatView.tsx",
         [
             "import { ChatGroupDialog } from '../features/yachiyo-chat/components/ChatGroupDialog';",
-            'data-testid="chat-session-tab-agents"',
-            'data-testid="chat-session-tab-groups"',
-            'data-testid="chat-session-tab-create"',
             'data-testid="chat-group-settings"',
             "<ChatGroupDialog",
             "agentRunnables={agentRunnables}",
             "onToggleAgent={toggleGroupAgent}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/ChatSessionSidebar.tsx",
+        [
+            "export function ChatSessionSidebar",
+            'data-testid="chat-session-tab-agents"',
+            'data-testid="chat-session-tab-groups"',
+            'data-testid="chat-session-tab-create"',
+            "agent-group-header",
+            "agent-group-sessions",
+            "HighlightedText",
         ],
     )
     _assert_contains(

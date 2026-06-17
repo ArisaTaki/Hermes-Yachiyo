@@ -20,6 +20,10 @@ import { createDelegatedRunSummary } from '../features/yachiyo-chat/delegatedSum
 import { ChatComposer } from '../features/yachiyo-chat/components/ChatComposer';
 import { composerApprovalStatusText } from '../features/yachiyo-chat/components/ComposerApprovalNotice';
 import { ChatGroupDialog } from '../features/yachiyo-chat/components/ChatGroupDialog';
+import {
+  ChatSessionSidebar,
+  type ChatSessionAgentGroup,
+} from '../features/yachiyo-chat/components/ChatSessionSidebar';
 import { SessionIdDialog } from '../features/yachiyo-chat/components/SessionIdDialog';
 import { MessageBubble } from '../features/yachiyo-chat/components/MessageBubble';
 import type { ApprovalRequestDetails } from '../features/yachiyo-chat/components/MessageApprovalRequestCard';
@@ -78,9 +82,6 @@ import {
   groupMemberCount,
   isUnassignedSession,
   normalizeSessionContext,
-  sessionDisplayName,
-  sessionKindLabel,
-  sessionPreview,
 } from '../features/yachiyo-chat/sessionState';
 import { useYachiyoTaskActions } from '../features/yachiyo-chat/hooks/useYachiyoTaskActions';
 import { useChatRunPolling } from '../features/yachiyo-chat/hooks/useChatRunPolling';
@@ -1060,6 +1061,18 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     }
   }
 
+  function toggleAgentGroup(agentId: string) {
+    setExpandedAgents((prev) => {
+      const next = new Set(prev);
+      if (next.has(agentId)) {
+        next.delete(agentId);
+      } else {
+        next.add(agentId);
+      }
+      return next;
+    });
+  }
+
   function handleSessionTabCreate() {
     if (sessionTab === 'groups') {
       openGroupDialog();
@@ -1746,15 +1759,8 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   );
 
   // Agent 分组逻辑
-  type AgentGroup = {
-    agent_id: string;
-    agent_name: string;
-    agent_avatar?: string;
-    sessions: SessionItem[];
-  };
-
   const agentGroups = useMemo(() => {
-    const groups = new Map<string, AgentGroup>();
+    const groups = new Map<string, ChatSessionAgentGroup>();
 
     sessionItems
       .filter((s) => !isUnassignedSession(s) && (s.conversation_kind === 'main' || s.conversation_kind === 'agent'))
@@ -1896,232 +1902,29 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         className={`chat-layout hy-chat-workspace${embedded ? '' : ' resizable-chat-workspace'}`}
         style={chatWorkspaceStyle}
       >
-        <aside className="chat-sidebar hy-chat-sessions" aria-label="会话列表">
-          <div className="chat-sidebar-header hy-chat-sessions-head">
-            <div className="chat-sidebar-title">会话列表</div>
-            <input
-              type="search"
-              className="chat-search"
-              value={sessionQuery}
-              onChange={(event) => setSessionQuery(event.target.value)}
-              placeholder="搜索会话..."
-              aria-label="搜索会话"
-            />
-            {normalizedSessionQuery ? (
-              <div className="chat-search-meta">
-                {sessionsLoaded ? `找到 ${visibleSessions.length} 个相关会话` : '正在搜索...'}
-              </div>
-            ) : null}
-          </div>
-
-          {/* Tab 切换 */}
-          <div className="session-tabs">
-            <button
-              type="button"
-              className={`session-tab ${sessionTab === 'agents' ? 'active' : ''}`}
-              data-testid="chat-session-tab-agents"
-              onClick={() => setSessionTab('agents')}
-            >
-              Agent
-            </button>
-            <button
-              type="button"
-              className={`session-tab ${sessionTab === 'groups' ? 'active' : ''}`}
-              data-testid="chat-session-tab-groups"
-              onClick={() => setSessionTab('groups')}
-            >
-              群组
-            </button>
-            <button
-              type="button"
-              className="session-tab-create"
-              data-testid="chat-session-tab-create"
-              title={sessionTab === 'groups' ? '创建群组' : '新建对话'}
-              aria-label={sessionTab === 'groups' ? '创建群组' : '新建对话'}
-              onClick={handleSessionTabCreate}
-            >
-              <UiIcon name="plus" />
-            </button>
-          </div>
-
-          <div className="chat-list hy-chat-session-list">
-            {/* 搜索结果显示所有匹配的会话 */}
-            {normalizedSessionQuery ? (
-              visibleSessions.length > 0 ? (
-                visibleSessions.map((session) => (
-                  <button
-                    type="button"
-                    className={`chat-item ${session.session_id === sessions?.current_session_id ? 'active' : ''}`}
-                    key={session.session_id}
-                    onClick={() => void switchSession(session.session_id, session.search_match?.message_id || '')}
-                  >
-                    <SessionAvatar
-                      assistantProfile={assistantProfile}
-                      context={contextFromSession(session)}
-                      loading={assistantProfileLoading}
-                      size="small"
-                      runnables={runnables}
-                    />
-                    <span className="chat-item-info">
-                      <strong className="chat-item-name">{sessionDisplayName(session, assistantProfile)}</strong>
-                      {session.conversation_kind === 'agent' || session.conversation_kind === 'workflow' || session.conversation_kind === 'group' ? (
-                        <span className="chat-item-kind">{sessionKindLabel(session)}</span>
-                      ) : null}
-                      <span className={session.search_match ? 'chat-item-preview search-hit' : 'chat-item-preview'}>
-                        <HighlightedText text={sessionPreview(session)} query={normalizedSessionQuery} />
-                      </span>
-                    </span>
-                    <span className="chat-item-side">
-                      <span className="chat-item-time">
-                        {sessionSideLabel(session)}
-                      </span>
-                      <span className="chat-item-token">{formatTokenCount(session.token_count)}</span>
-                    </span>
-                  </button>
-                ))
-              ) : (
-                <div className="empty-state inline-empty">
-                  无匹配会话
-                </div>
-              )
-            ) : sessionTab === 'agents' ? (
-              /* Agent 分组视图 */
-              unassignedSessions.length > 0 || agentGroups.length > 0 ? (
-                <>
-                  {unassignedSessions.map((session) => (
-                    <button
-                      type="button"
-                      className={`chat-item unassigned-chat-item ${session.session_id === sessions?.current_session_id ? 'active' : ''}`}
-                      key={session.session_id}
-                      onClick={() => void switchSession(session.session_id, session.search_match?.message_id || '')}
-                    >
-                      <SessionAvatar
-                        assistantProfile={assistantProfile}
-                        context={{ ...contextFromSession(session), conversation_kind: 'unassigned' }}
-                        loading={assistantProfileLoading}
-                        size="small"
-                        runnables={runnables}
-                      />
-                      <span className="chat-item-info">
-                        <strong className="chat-item-name">{sessionDisplayName(session, assistantProfile)}</strong>
-                        <span className={session.search_match ? 'chat-item-preview search-hit' : 'chat-item-preview'}>
-                          <HighlightedText text={sessionPreview(session)} query={normalizedSessionQuery} />
-                        </span>
-                      </span>
-                      <span className="chat-item-side">
-                        <span className="chat-item-time">
-                          {sessionSideLabel(session)}
-                        </span>
-                        <span className="chat-item-token">{formatTokenCount(session.token_count)}</span>
-                      </span>
-                    </button>
-                  ))}
-                  {agentGroups.map((group) => {
-                  const isExpanded = expandedAgents.has(group.agent_id);
-                  return (
-                    <div key={group.agent_id} className="agent-group">
-                      <button
-                        type="button"
-                        className="agent-group-header"
-                        onClick={() => {
-                          setExpandedAgents((prev) => {
-                            const next = new Set(prev);
-                            if (next.has(group.agent_id)) {
-                              next.delete(group.agent_id);
-                            } else {
-                              next.add(group.agent_id);
-                            }
-                            return next;
-                          });
-                        }}
-                      >
-                        <span className={`agent-group-toggle ${isExpanded ? 'expanded' : ''}`}>
-                          {'>'}
-                        </span>
-                        <span className="agent-group-name">{group.agent_name}</span>
-                        <span className="agent-group-count">{group.sessions.length}</span>
-                      </button>
-                      <div className={`agent-group-sessions ${isExpanded ? 'expanded' : ''}`}>
-                        <div className="agent-group-sessions-inner">
-                          {group.sessions.map((session) => (
-                            <button
-                              type="button"
-                              className={`chat-item ${session.session_id === sessions?.current_session_id ? 'active' : ''}`}
-                              key={session.session_id}
-                              onClick={() => void switchSession(session.session_id, session.search_match?.message_id || '')}
-                            >
-                              <SessionAvatar
-                                assistantProfile={assistantProfile}
-                                context={contextFromSession(session)}
-                                loading={assistantProfileLoading}
-                                size="small"
-                                runnables={runnables}
-                              />
-                              <span className="chat-item-info">
-                                <strong className="chat-item-name">{sessionDisplayName(session, assistantProfile)}</strong>
-                                <span className={session.search_match ? 'chat-item-preview search-hit' : 'chat-item-preview'}>
-                                  <HighlightedText text={sessionPreview(session)} query={normalizedSessionQuery} />
-                                </span>
-                              </span>
-                              <span className="chat-item-side">
-                                <span className="chat-item-time">
-                                  {sessionSideLabel(session)}
-                                </span>
-                                <span className="chat-item-token">{formatTokenCount(session.token_count)}</span>
-                              </span>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-                </>
-              ) : (
-                <div className="empty-state inline-empty">
-                  {sessionItems.length ? '无匹配会话' : '暂无对话'}
-                </div>
-              )
-            ) : (
-              /* 群组视图 (Workflow) */
-              groupSessions.length > 0 ? (
-                groupSessions.map((session) => (
-                  <button
-                    type="button"
-                    className={`chat-item ${session.session_id === sessions?.current_session_id ? 'active' : ''}`}
-                    key={session.session_id}
-                    onClick={() => void switchSession(session.session_id, session.search_match?.message_id || '')}
-                  >
-                    <SessionAvatar
-                      assistantProfile={assistantProfile}
-                      context={contextFromSession(session)}
-                      loading={assistantProfileLoading}
-                      size="small"
-                      runnables={runnables}
-                    />
-                    <span className="chat-item-info">
-                      <strong className="chat-item-name">{sessionDisplayName(session, assistantProfile)}</strong>
-                      <span className="chat-item-kind">{sessionKindLabel(session)}</span>
-                      <span className={session.search_match ? 'chat-item-preview search-hit' : 'chat-item-preview'}>
-                        <HighlightedText text={sessionPreview(session)} query={normalizedSessionQuery} />
-                      </span>
-                    </span>
-                    <span className="chat-item-side">
-                      <span className="chat-item-time">
-                        {sessionSideLabel(session)}
-                      </span>
-                      <span className="chat-item-token">{formatTokenCount(session.token_count)}</span>
-                    </span>
-                  </button>
-                ))
-              ) : (
-                <div className="empty-state inline-empty">
-                  {sessionItems.length ? '无群组会话' : '暂无对话'}
-                </div>
-              )
-            )}
-          </div>
-        </aside>
+        <ChatSessionSidebar
+          agentGroups={agentGroups}
+          assistantProfile={assistantProfile}
+          assistantProfileLoading={assistantProfileLoading}
+          currentSessionId={sessions?.current_session_id || ''}
+          expandedAgentIds={expandedAgents}
+          formatSessionSideLabel={sessionSideLabel}
+          formatTokenCount={formatTokenCount}
+          groupSessions={groupSessions}
+          normalizedSessionQuery={normalizedSessionQuery}
+          onCreate={handleSessionTabCreate}
+          onSearchChange={setSessionQuery}
+          onSwitchSession={switchSession}
+          onTabChange={setSessionTab}
+          onToggleAgentGroup={toggleAgentGroup}
+          runnables={runnables}
+          sessionItemsCount={sessionItems.length}
+          sessionsLoaded={sessionsLoaded}
+          sessionQuery={sessionQuery}
+          sessionTab={sessionTab}
+          unassignedSessions={unassignedSessions}
+          visibleSessions={visibleSessions}
+        />
 
         {embedded ? null : (
           <div
@@ -2385,25 +2188,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
 function isMissingGroupEditRouteError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error || '');
   return /\b(?:HTTP 404|404|Not Found)\b/i.test(message);
-}
-
-function HighlightedText({ text, query }: { text: string; query: string }) {
-  const needle = query.trim();
-  if (!needle) return <>{text}</>;
-  const lowerText = text.toLowerCase();
-  const lowerNeedle = needle.toLowerCase();
-  const index = lowerText.indexOf(lowerNeedle);
-  if (index < 0) return <>{text}</>;
-  const before = text.slice(0, index);
-  const match = text.slice(index, index + needle.length);
-  const after = text.slice(index + needle.length);
-  return (
-    <>
-      {before}
-      <mark>{match}</mark>
-      {after}
-    </>
-  );
 }
 
 function isRetryableMessage(message: ChatMessage, messages: ChatMessage[]) {
