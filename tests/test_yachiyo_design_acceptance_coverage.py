@@ -47,6 +47,11 @@ ACCEPTANCE_10_3_MATRIX: tuple[AcceptanceScenario, ...] = (
                 "apps/frontend/src/features/yachiyo-chat/api.ts",
                 ("apiPost('/yachiyo/tasks'",),
             ),
+            (
+                "smoke",
+                "scripts/smoke_chat_public_task_ui.mjs",
+                ("/yachiyo/tasks", "assertPublicTaskContract", "taskRequest.metadata?.source !== 'chat'"),
+            ),
         ),
     ),
     (
@@ -62,6 +67,15 @@ ACCEPTANCE_10_3_MATRIX: tuple[AcceptanceScenario, ...] = (
                 "source",
                 "apps/frontend/src/features/yachiyo-chat/components/AgentTaskCard.tsx",
                 ('data-testid="yachiyo-agent-task-card"', "RuntimeTimelineSummary"),
+            ),
+            (
+                "smoke",
+                "scripts/smoke_chat_public_task_ui.mjs",
+                (
+                    'data-testid="yachiyo-agent-task-card"',
+                    'data-testid="yachiyo-agent-task-open-studio"',
+                    "Chat public task card rendered",
+                ),
             ),
         ),
     ),
@@ -296,6 +310,16 @@ def test_chat_daily_entry_acceptance_paths_are_guarded() -> None:
             "approveYachiyoTask(task.task_id, approval.approval_id)",
             "rejectYachiyoTask(task.task_id, approval.approval_id, 'Rejected from chat task card')",
             "cancelYachiyoTask(task.task_id)",
+        ],
+    )
+    _assert_smoke_script(
+        "scripts/smoke_chat_public_task_ui.mjs",
+        [
+            "/yachiyo/tasks",
+            "assertPublicTaskContract",
+            'data-testid="yachiyo-agent-task-card"',
+            'data-testid="yachiyo-agent-task-open-studio"',
+            "Chat public task card rendered",
         ],
     )
 
