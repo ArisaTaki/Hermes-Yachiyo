@@ -68,6 +68,7 @@ import {
   chatRunCompletionProcessingState,
 } from '../features/yachiyo-chat/runPolling';
 import { openYachiyoStudioRun, openYachiyoWorkflowStudio } from '../features/yachiyo-chat/studioNavigation';
+import { chatRunnableRunningStatusText, chatRunnableSettledStatusText } from '../features/yachiyo-chat/taskStatusText';
 import {
   activeMentions,
   mentionOptionsForQuery,
@@ -797,7 +798,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         const resultRunStatus = runnableResult.status;
         const runnableLabel = runnableResult.label;
         if (resultRunStatus === 'processing' && resultRunId) {
-          setStatus(`${runnableLabel} 执行中...`);
+          setStatus(chatRunnableRunningStatusText(runnableLabel));
           stickToBottomRef.current = true;
           void refreshYachiyoTaskById(resultRunId);
           await refreshMessages();
@@ -806,11 +807,12 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         }
         if (resultRunId) void refreshYachiyoTaskById(resultRunId);
         pendingReplyScrollRef.current = false;
-        setStatus(resultRunStatus === 'approval_required'
-          ? `${runnableLabel} 等待审批...`
-          : resultRunId
-            ? `${runnableLabel} Run 已处理。`
-            : runnableResult.error || 'Agent/Workflow 指令已处理。');
+        setStatus(chatRunnableSettledStatusText({
+          error: runnableResult.error,
+          hasRunId: Boolean(resultRunId),
+          label: runnableLabel,
+          status: resultRunStatus,
+        }));
         await refreshMessages();
         await loadSessions();
         return;
@@ -1279,17 +1281,18 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         const resultRunStatus = runnableResult.status;
         const runnableLabel = runnableResult.label;
         if (resultRunStatus === 'processing' && resultRunId) {
-          setStatus(`${runnableLabel} 执行中...`);
+          setStatus(chatRunnableRunningStatusText(runnableLabel));
           await refreshMessages();
           pollAgentRunInBackground(resultRunId);
           return;
         }
         pendingReplyScrollRef.current = false;
-        setStatus(resultRunStatus === 'approval_required'
-          ? `${runnableLabel} 等待审批...`
-          : resultRunId
-            ? `${runnableLabel} Run 已处理。`
-            : 'Agent/Workflow 指令已处理。');
+        setStatus(chatRunnableSettledStatusText({
+          error: runnableResult.error,
+          hasRunId: Boolean(resultRunId),
+          label: runnableLabel,
+          status: resultRunStatus,
+        }));
         await refreshMessages();
         await loadSessions();
         return;

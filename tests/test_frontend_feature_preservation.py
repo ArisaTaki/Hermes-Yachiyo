@@ -488,8 +488,30 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "runnable_kind: runnableKind",
             "source: 'chat'",
             "rememberYachiyoTasks([task])",
+            "chatRunnableRunningStatusText(runnableLabel)",
+            "chatRunnableSettledStatusText({",
             "pollAgentRunInBackground(task.task_id)",
             "Fall through to the legacy Chat API with the same idempotency key.",
+        ],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/features/yachiyo-chat/hooks/useYachiyoTaskSubmit.ts",
+        [
+            "Run 已处理",
+            "Run 失败",
+            "Agent/Workflow 指令已处理",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/taskStatusText.ts",
+        [
+            "export function chatRunnableRunningStatusText",
+            "export function chatRunnableSettledStatusText",
+            "if (status === 'approval_required' || status === 'waiting_approval') return `${runnableLabel} 等待审批...`;",
+            "if (status === 'failed') return error || `${runnableLabel} 任务失败。`;",
+            "if (status === 'completed') return `${runnableLabel} 任务已完成。`;",
+            "if (hasRunId) return `${runnableLabel} 任务已处理。`;",
+            "return error || 'Agent/Workflow 任务已处理。';",
         ],
     )
     _assert_contains(
@@ -726,6 +748,9 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "function activeMentions",
             "function yachiyoPublicTaskTarget",
             "function yachiyoPublicTaskPrompt",
+            "Run 已处理",
+            "Run 失败",
+            "Agent/Workflow 指令已处理",
             "function normalizeSessionContext",
             "function contextFromSession",
             "function sessionDisplayName",

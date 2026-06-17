@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 
 import { startYachiyoTask } from '../api';
+import { chatRunnableRunningStatusText, chatRunnableSettledStatusText } from '../taskStatusText';
 import type { AgentTaskSnapshot } from '../types';
 
 type StartPublicYachiyoTaskRequest = {
@@ -59,20 +60,18 @@ export function useYachiyoTaskSubmit({
       rememberYachiyoTasks([task]);
       onAccepted();
       if (task.status === 'running' && task.task_id) {
-        setStatus(`${runnableLabel} 执行中...`);
+        setStatus(chatRunnableRunningStatusText(runnableLabel));
         onRunning();
         await refreshMessages();
         pollAgentRunInBackground(task.task_id);
         return true;
       }
       onSettled();
-      setStatus(task.status === 'waiting_approval'
-        ? `${runnableLabel} 等待审批...`
-        : task.status === 'completed'
-          ? `${runnableLabel} Run 已处理。`
-          : task.status === 'failed'
-            ? `${runnableLabel} Run 失败。`
-            : 'Agent/Workflow 指令已处理。');
+      setStatus(chatRunnableSettledStatusText({
+        hasRunId: Boolean(task.task_id),
+        label: runnableLabel,
+        status: task.status,
+      }));
       await refreshMessages();
       await loadSessions();
       return true;
