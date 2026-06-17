@@ -5921,7 +5921,7 @@ def test_agent_studio_skills_ui_smoke_uses_skill_library_paths() -> None:
     _assert_contains(
         "apps/frontend/src/views/AgentStudioView.tsx",
         [
-            "SkillLibraryTab",
+            "AgentStudioSkillsTab",
             "onInstallSkill={() => void runAction(installSkillFromCommand, '安装 Skill')}",
             "onSyncNativeSkillLibrary={() => void runAction(syncNativeSkillLibrary, '同步 Native Skills')}",
             "onMoveSkillFolder={moveSkillFolder}",
@@ -5953,6 +5953,14 @@ def test_agent_studio_skills_ui_smoke_uses_skill_library_paths() -> None:
             "await updateYachiyoSkill(skill.skill_id, { folder_id: folderId });",
             "await openPath(skill.local_path || '');",
             "await updateYachiyoSkill(skill.skill_id, { enabled: skill.enabled === false });",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/AgentStudioSkillsTab.tsx",
+        [
+            "export function AgentStudioSkillsTab",
+            "SkillLibraryTab",
+            "<SkillLibraryTab {...props} />",
         ],
     )
     _assert_contains(
@@ -6153,7 +6161,7 @@ def test_agent_studio_skill_folders_ui_smoke_uses_folder_management_paths() -> N
     _assert_contains(
         "apps/frontend/src/views/AgentStudioView.tsx",
         [
-            "SkillFolderPanel",
+            "AgentStudioSkillFoldersTab",
             "useSkillFolderManagement",
             "createSkillFolderFromDraft",
             "updateSkillFolderFromDraft",
@@ -6165,6 +6173,14 @@ def test_agent_studio_skill_folders_ui_smoke_uses_folder_management_paths() -> N
     _assert_not_contains(
         "apps/frontend/src/views/AgentStudioView.tsx",
         ['data-testid="skill-folder-page"'],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/AgentStudioSkillFoldersTab.tsx",
+        [
+            "export function AgentStudioSkillFoldersTab",
+            "SkillFolderPanel",
+            "<SkillFolderPanel {...props} />",
+        ],
     )
     _assert_contains(
         "apps/frontend/src/features/agent-studio/components/SkillFolderPanel.tsx",

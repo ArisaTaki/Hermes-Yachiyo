@@ -901,6 +901,8 @@ def test_agent_studio_professional_entry_acceptance_paths_are_guarded() -> None:
         [
             "AgentDefinitionsTab",
             "AgentStudioGroupsTab",
+            "AgentStudioSkillsTab",
+            "AgentStudioSkillFoldersTab",
             "AgentStudioRunsTab",
             "AgentStudioWorkflowsTab",
         ],
@@ -912,6 +914,22 @@ def test_agent_studio_professional_entry_acceptance_paths_are_guarded() -> None:
             "AgentGroupPanel",
             "agentGroupMemoryScope={agentGroupMemoryScope || 'shared'}",
             "agentGroupMode={agentGroupMode || 'moderated'}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/AgentStudioSkillsTab.tsx",
+        [
+            "export function AgentStudioSkillsTab",
+            "SkillLibraryTab",
+            "<SkillLibraryTab {...props} />",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/AgentStudioSkillFoldersTab.tsx",
+        [
+            "export function AgentStudioSkillFoldersTab",
+            "SkillFolderPanel",
+            "<SkillFolderPanel {...props} />",
         ],
     )
     _assert_contains(

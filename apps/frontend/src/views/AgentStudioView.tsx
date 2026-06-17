@@ -6,8 +6,8 @@ import { AgentStudioChrome } from '../features/agent-studio/components/AgentStud
 import { AgentStudioGroupsTab } from '../features/agent-studio/components/AgentStudioGroupsTab';
 import { AgentStudioMemoryTab } from '../features/agent-studio/components/AgentStudioMemoryTab';
 import { AgentStudioRunsTab } from '../features/agent-studio/components/AgentStudioRunsTab';
-import { SkillFolderPanel } from '../features/agent-studio/components/SkillFolderPanel';
-import { SkillLibraryTab } from '../features/agent-studio/components/SkillLibraryTab';
+import { AgentStudioSkillFoldersTab } from '../features/agent-studio/components/AgentStudioSkillFoldersTab';
+import { AgentStudioSkillsTab } from '../features/agent-studio/components/AgentStudioSkillsTab';
 import { AgentStudioWorkflowsTab } from '../features/agent-studio/components/AgentStudioWorkflowsTab';
 import { useAgentAvatarActions } from '../features/agent-studio/hooks/useAgentAvatarActions';
 import { useAgentDeletionActions } from '../features/agent-studio/hooks/useAgentDeletionActions';
@@ -855,7 +855,7 @@ export function AgentStudioView() {
       ) : null}
 
       {!loading && tab === 'skills' ? (
-        <SkillLibraryTab
+        <AgentStudioSkillsTab
           allLibrarySkillsSelected={allLibrarySkillsSelected}
           busy={busy}
           filteredLibrarySkillIds={filteredLibrarySkillIds}
@@ -896,7 +896,7 @@ export function AgentStudioView() {
       ) : null}
 
       {!loading && tab === 'skill-groups' ? (
-        <SkillFolderPanel
+        <AgentStudioSkillFoldersTab
           busy={busy}
           editingSkillFolderError={editingSkillFolderError}
           editingSkillFolderId={editingSkillFolderId}
