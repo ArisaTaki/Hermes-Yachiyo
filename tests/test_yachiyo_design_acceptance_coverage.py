@@ -599,6 +599,18 @@ def test_agent_studio_professional_entry_acceptance_paths_are_guarded() -> None:
             "Agent Definition Smoke v2",
         ],
     )
+    _assert_smoke_script(
+        "scripts/smoke_agent_run_detail_ui.mjs",
+        [
+            'data-testid="agent-run-detail-approval"',
+            'data-testid="agent-run-detail-approval-approve"',
+            "approval action completed",
+            'data-testid="agent-run-detail-execution-event"',
+            "agent.tool.call",
+            'data-testid="agent-run-detail-artifact-preview"',
+            "artifact preview rendered",
+        ],
+    )
 
 
 def test_group_and_workflow_acceptance_paths_are_guarded() -> None:
