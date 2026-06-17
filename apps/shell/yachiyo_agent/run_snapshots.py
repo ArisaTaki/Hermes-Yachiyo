@@ -114,7 +114,7 @@ class RunSnapshotProjector:
         elif _task_status(payload.get("status")) == "waiting_approval" and approvals:
             pending_approval = next(
                 (approval for approval in approvals if approval.status == "pending"),
-                approvals[0],
+                None,
             )
         rerun_provenance = _rerun_provenance_from_payload(payload, events)
 

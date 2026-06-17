@@ -1939,6 +1939,42 @@ def test_run_snapshots_merge_stale_pending_approval_payload_with_resolved_events
     assert timeline.approvals[0].resolved_at == "2026-06-15T00:00:01Z"
 
 
+def test_run_timeline_does_not_fallback_to_resolved_approval_for_stale_waiting_status() -> None:
+    timeline = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "run-stale-status",
+            "status": "approval_required",
+            "events": [
+                {
+                    "event_type": "agent.tool.approval_required",
+                    "payload": {
+                        "approval_id": "approval-stale-status",
+                        "tool": "terminal.run",
+                        "input_preview": {"command": "npm test"},
+                    },
+                    "created_at": "2026-06-16T00:00:00Z",
+                },
+                {
+                    "event_type": "approval.cancelled",
+                    "payload": {
+                        "approval_id": "approval-stale-status",
+                        "tool": "terminal.run",
+                        "input_preview": {"command": "npm test"},
+                        "reason": "Run cancelled",
+                    },
+                    "created_at": "2026-06-16T00:00:01Z",
+                },
+            ],
+        }
+    )
+
+    assert timeline.status == "approval_required"
+    assert timeline.pending_approval is None
+    assert len(timeline.approvals) == 1
+    assert timeline.approvals[0].status == "cancelled"
+    assert timeline.approvals[0].resolved_at == "2026-06-16T00:00:01Z"
+
+
 def test_group_run_snapshot_reuses_shared_run_projection_for_children_artifacts_and_approvals() -> None:
     group_run = group_run_snapshot_from_payload(
         {
