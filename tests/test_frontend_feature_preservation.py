@@ -559,6 +559,10 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "if (label) return runtimeToolDisplayLabelOrName(label);",
             "return runtimeToolDisplayLabelOrName(String(event.tool_name || '').trim());",
             "export function activityRunId",
+            "export function activityGroupRunId",
+            "event?.metadata?.group_dispatch_run_group_id",
+            "export function activityRunDetailTarget",
+            "studioUrl: runId ? studioRunUrl(runId, { groupRunId }) || '' : '',",
             "export function compactStatusText",
             "export function chatStatusLabel",
             "approvalRequiredMessages(messages)",
@@ -4521,6 +4525,7 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
         "apps/frontend/src/features/yachiyo-chat/components/MessageActivityList.tsx",
         [
             "export function MessageActivityList",
+            "activityRunDetailTarget",
             "runtimeToolDisplayLabelOrName",
             'data-testid="chat-message-activity-list"',
             'data-testid="chat-message-activity-row"',
@@ -4528,6 +4533,7 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
             "data-activity-tool={event.tool_name || ''}",
             "data-run-id={runId || ''}",
             "data-run-status={displayStatus || ''}",
+            "const { runId, studioUrl } = activityRunDetailTarget(event);",
             "const activityTitle = messageActivityTitle(event);",
             "const activityDetail = messageActivityDetail(event, activityTitle);",
             "<strong>{activityTitle}</strong>",
@@ -4541,6 +4547,18 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
             'data-testid="chat-message-activity-open"',
             'data-testid="chat-message-activity-open-run-detail"',
             "Agent Studio",
+        ],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/MessageActivityList.tsx",
+        [
+            "studioRunUrl",
+            "function activityRunId",
+            "function activityGroupRunId",
+            "event?.metadata?.run_id",
+            "event?.metadata?.workflow_run_id",
+            "event?.metadata?.run_group_id",
+            "event?.metadata?.group_dispatch_run_group_id",
         ],
     )
     _assert_not_contains(

@@ -1,23 +1,10 @@
 import { UiIcon } from '../../../components/UiIcon';
 import { navigateTo } from '../../../lib/view';
 import { runtimeToolDisplayLabelOrName } from '../../runtime-shared/approval';
-import { studioRunUrl } from '../../runtime-shared/studioLinks';
+import { activityRunDetailTarget } from '../messageState';
+import type { ChatActivityEvent } from '../types';
 
-export type MessageActivityEvent = {
-  event_id?: string;
-  task_id?: string;
-  tool_name?: string;
-  title?: string;
-  detail?: string;
-  status?: string;
-  created_at?: string;
-  metadata?: {
-    run_id?: string;
-    workflow_run_id?: string;
-    run_group_id?: string;
-    group_dispatch_run_group_id?: string;
-  } & Record<string, unknown>;
-};
+export type MessageActivityEvent = ChatActivityEvent;
 
 export function MessageActivityList({
   events,
@@ -51,9 +38,7 @@ export function MessageActivityList({
     <div className="message-activity-list" data-testid="chat-message-activity-list" aria-label="执行活动">
       {visibleRows.map((event, index) => {
         const displayStatus = activityDisplayStatus(event.status, messageStatus);
-        const runId = activityRunId(event);
-        const groupRunId = activityGroupRunId(event);
-        const studioUrl = runId ? studioRunUrl(runId, { groupRunId }) || '' : '';
+        const { runId, studioUrl } = activityRunDetailTarget(event);
         const eventKey = activityEventKey(event, index);
         const activityTitle = messageActivityTitle(event);
         const activityDetail = messageActivityDetail(event, activityTitle);
@@ -110,14 +95,6 @@ export function MessageActivityList({
 
 function activityEventKey(event: MessageActivityEvent, index: number) {
   return event.event_id || `${event.created_at || 'activity'}-${event.task_id || event.title || index}-${index}`;
-}
-
-function activityRunId(event?: MessageActivityEvent | null) {
-  return String(event?.metadata?.run_id || event?.metadata?.workflow_run_id || '').trim();
-}
-
-function activityGroupRunId(event?: MessageActivityEvent | null) {
-  return String(event?.metadata?.run_group_id || event?.metadata?.group_dispatch_run_group_id || '').trim();
 }
 
 function messageActivityTitle(event: MessageActivityEvent) {

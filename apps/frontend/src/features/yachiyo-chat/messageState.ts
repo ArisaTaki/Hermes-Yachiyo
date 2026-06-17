@@ -5,6 +5,7 @@ import {
 import { participantDisplayName } from './sessionState';
 import { latestGroupAgentSummaryNotice } from './messageGroups';
 import { runtimeToolDisplayLabelOrName } from '../runtime-shared/approval';
+import { studioRunUrl } from '../runtime-shared/studioLinks';
 import type { ChatActivityEvent, ChatMessage } from './types';
 
 export type YachiyoChatActivityEvent = ChatActivityEvent;
@@ -134,6 +135,20 @@ export function activityLabel(event?: YachiyoChatActivityEvent | null) {
 
 export function activityRunId(event?: YachiyoChatActivityEvent | null) {
   return String(event?.metadata?.run_id || event?.metadata?.workflow_run_id || '').trim();
+}
+
+export function activityGroupRunId(event?: YachiyoChatActivityEvent | null) {
+  return String(event?.metadata?.run_group_id || event?.metadata?.group_dispatch_run_group_id || '').trim();
+}
+
+export function activityRunDetailTarget(event?: YachiyoChatActivityEvent | null) {
+  const runId = activityRunId(event);
+  const groupRunId = activityGroupRunId(event);
+  return {
+    groupRunId,
+    runId,
+    studioUrl: runId ? studioRunUrl(runId, { groupRunId }) || '' : '',
+  };
 }
 
 export function compactStatusText(text: string, maxLength = 96) {
