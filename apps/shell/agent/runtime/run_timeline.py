@@ -39,8 +39,11 @@ class RuntimeRunTimelineService:
         include_internal: bool = False,
     ) -> dict[str, Any]:
         group = self._run_groups.get(run_group_id)
-        safe_after_sequence = max(0, int(after_sequence or 0))
-        safe_limit = max(1, min(int(limit or 200), 500))
+        safe_after_sequence, safe_limit = _normalize_event_page_request(
+            after_sequence,
+            limit,
+            max_limit=500,
+        )
         child_runs = self._ordered_child_runs(group, run_group_id)
         events: list[dict[str, Any]] = []
         for run in child_runs:
@@ -112,10 +115,15 @@ class RuntimeRunTimelineService:
         limit: int = 200,
         include_internal: bool = False,
     ) -> dict[str, Any]:
+        safe_after_sequence, safe_limit = _normalize_event_page_request(
+            after_sequence,
+            limit,
+            max_limit=1000,
+        )
         return self._runtime_events.list(
             run_id,
-            after_sequence=after_sequence,
-            limit=limit,
+            after_sequence=safe_after_sequence,
+            limit=safe_limit,
             include_internal=include_internal,
         )
 
@@ -178,6 +186,17 @@ class RuntimeRunTimelineService:
 def _is_group_event(event: dict[str, Any]) -> bool:
     event_type = str(event.get("event_type") or event.get("event") or "").strip()
     return event_type.startswith("group.")
+
+
+def _normalize_event_page_request(
+    after_sequence: int,
+    limit: int,
+    *,
+    max_limit: int,
+) -> tuple[int, int]:
+    safe_after_sequence = max(0, int(after_sequence or 0))
+    safe_limit = max(1, min(int(limit or 200), max_limit))
+    return safe_after_sequence, safe_limit
 
 
 def _group_scoped_event(

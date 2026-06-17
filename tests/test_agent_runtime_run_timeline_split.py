@@ -207,6 +207,30 @@ def test_runtime_run_timeline_service_delegates_event_append_and_replay() -> Non
     ]
 
 
+def test_runtime_run_timeline_service_normalizes_run_event_page_requests() -> None:
+    runtime_events = _FakeRuntimeEvents()
+    service = RuntimeRunTimelineService(
+        runs=_FakeRuns(),
+        run_groups=_FakeRunGroups(),
+        runtime_events=runtime_events,
+        run_artifacts=_FakeArtifacts(),
+    )
+
+    service.list_events("run-1", after_sequence=-5, limit=5000)
+
+    assert runtime_events.calls == [
+        (
+            "list",
+            {
+                "run_id": "run-1",
+                "after_sequence": 0,
+                "limit": 1000,
+                "include_internal": False,
+            },
+        )
+    ]
+
+
 def test_runtime_run_timeline_service_projects_group_event_page_from_child_runs() -> None:
     run_groups = _FakeRunGroups()
     runtime_events = _FakeRuntimeEvents()

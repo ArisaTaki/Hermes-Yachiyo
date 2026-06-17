@@ -576,6 +576,18 @@ def test_runtime_core_split_acceptance_paths_are_guarded() -> None:
         ],
     )
     _assert_contains(
+        "apps/shell/agent/runtime/run_timeline.py",
+        [
+            "class RuntimeRunTimelineService",
+            "def list_events",
+            "def list_group_events",
+            "_normalize_event_page_request(",
+            "max_limit=1000",
+            "max_limit=500",
+            "def _group_scoped_event",
+        ],
+    )
+    _assert_contains(
         "apps/shell/agent/runtime/budget.py",
         [
             "class RunBudgetLimits",
