@@ -11,6 +11,7 @@ from apps.bridge.routes.yachiyo_studio_agent_handlers import (
     save_agent,
     start_agent_run,
     test_agent_model,
+    update_agent,
 )
 from apps.bridge.routes.yachiyo_studio_group_handlers import (
     get_group,
@@ -20,6 +21,7 @@ from apps.bridge.routes.yachiyo_studio_group_handlers import (
     list_groups,
     save_group,
     start_group_run,
+    update_group,
 )
 from apps.bridge.routes.yachiyo_studio_memory_handlers import (
     cancel_future_task,
@@ -60,6 +62,7 @@ from apps.bridge.routes.yachiyo_studio_workflow_handlers import (
     list_workflows,
     save_workflow,
     start_workflow_run,
+    update_workflow,
 )
 
 __all__ = [
@@ -107,7 +110,10 @@ __all__ = [
     "sync_native_skills",
     "test_agent_model",
     "trigger_due_future_tasks",
+    "update_agent",
+    "update_group",
     "update_memory",
     "update_skill",
     "update_skill_folder",
+    "update_workflow",
 ]

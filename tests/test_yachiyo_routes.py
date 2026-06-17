@@ -1298,11 +1298,23 @@ def test_yachiyo_chat_routes_are_registered_as_light_surface_aliases() -> None:
 def test_yachiyo_public_routes_delegate_to_chat_and_studio_handlers() -> None:
     source = Path(yachiyo.__file__).read_text(encoding="utf-8")
     legacy_agents_source = (Path(yachiyo.__file__).with_name("agents.py")).read_text(encoding="utf-8")
+    studio_agent_handlers_source = (
+        Path(yachiyo.__file__).with_name("yachiyo_studio_agent_handlers.py").read_text(encoding="utf-8")
+    )
+    studio_group_handlers_source = (
+        Path(yachiyo.__file__).with_name("yachiyo_studio_group_handlers.py").read_text(encoding="utf-8")
+    )
+    studio_workflow_handlers_source = (
+        Path(yachiyo.__file__).with_name("yachiyo_studio_workflow_handlers.py").read_text(encoding="utf-8")
+    )
 
     assert "from apps.bridge.routes import yachiyo_chat_handlers" in source
     assert "from apps.bridge.routes import yachiyo_studio_handlers" in source
     assert "return await yachiyo_chat_handlers.start_task(request, http_request)" in source
     assert "return await yachiyo_chat_handlers.get_task_timeline(task_id, http_request)" in source
+    assert "return await yachiyo_studio_handlers.update_agent(agent_id, request, http_request)" in source
+    assert "return await yachiyo_studio_handlers.update_group(group_id, request, http_request)" in source
+    assert "return await yachiyo_studio_handlers.update_workflow(workflow_id, request, http_request)" in source
     assert "return await yachiyo_studio_handlers.start_agent_run(agent_id, request, http_request)" in source
     assert "return await yachiyo_studio_handlers.start_group_run(group_id, request, http_request)" in source
     assert "return await yachiyo_studio_handlers.start_workflow_run(workflow_id, request, http_request)" in source
@@ -1311,6 +1323,10 @@ def test_yachiyo_public_routes_delegate_to_chat_and_studio_handlers() -> None:
     assert '@router.get("/agents")' in legacy_agents_source
     assert '@router.post("/agents")' in legacy_agents_source
     assert "_studio_service(http_request).start_agent_run" not in source
+    assert "model_copy(update=" not in source
+    assert 'request.model_copy(update={"agent_id": agent_id})' in studio_agent_handlers_source
+    assert 'request.model_copy(update={"group_id": group_id})' in studio_group_handlers_source
+    assert 'request.model_copy(update={"workflow_id": workflow_id})' in studio_workflow_handlers_source
 
 
 def test_yachiyo_studio_routes_include_run_action_facade() -> None:

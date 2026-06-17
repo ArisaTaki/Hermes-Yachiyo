@@ -36,6 +36,14 @@ async def save_workflow(
         raise bad_request(exc) from exc
 
 
+async def update_workflow(
+    workflow_id: str,
+    request: SaveWorkflowRequest,
+    http_request: Request | None = None,
+) -> dict[str, Any]:
+    return await save_workflow(request.model_copy(update={"workflow_id": workflow_id}), http_request)
+
+
 async def get_workflow(
     workflow_id: str,
     http_request: Request | None = None,

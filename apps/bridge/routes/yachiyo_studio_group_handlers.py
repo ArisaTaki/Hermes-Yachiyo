@@ -38,6 +38,14 @@ async def save_group(
         raise bad_request(exc) from exc
 
 
+async def update_group(
+    group_id: str,
+    request: SaveAgentGroupRequest,
+    http_request: Request | None = None,
+) -> dict[str, Any]:
+    return await save_group(request.model_copy(update={"group_id": group_id}), http_request)
+
+
 async def get_group(
     group_id: str,
     http_request: Request | None = None,

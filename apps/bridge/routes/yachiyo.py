@@ -158,10 +158,7 @@ async def update_studio_agent(
     request: SaveAgentRequest,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    return await yachiyo_studio_handlers.save_agent(
-        request.model_copy(update={"agent_id": agent_id}),
-        http_request,
-    )
+    return await yachiyo_studio_handlers.update_agent(agent_id, request, http_request)
 
 
 @router.get("/studio/agents/{agent_id}")
@@ -374,10 +371,7 @@ async def update_studio_group(
     request: SaveAgentGroupRequest,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    return await yachiyo_studio_handlers.save_group(
-        request.model_copy(update={"group_id": group_id}),
-        http_request,
-    )
+    return await yachiyo_studio_handlers.update_group(group_id, request, http_request)
 
 
 @router.get("/studio/groups/{group_id}")
@@ -447,10 +441,7 @@ async def update_studio_workflow(
     request: SaveWorkflowRequest,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    return await yachiyo_studio_handlers.save_workflow(
-        request.model_copy(update={"workflow_id": workflow_id}),
-        http_request,
-    )
+    return await yachiyo_studio_handlers.update_workflow(workflow_id, request, http_request)
 
 
 @router.get("/studio/workflows/{workflow_id}")

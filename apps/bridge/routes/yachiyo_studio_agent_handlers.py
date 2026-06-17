@@ -33,6 +33,14 @@ async def save_agent(
         raise bad_request(exc) from exc
 
 
+async def update_agent(
+    agent_id: str,
+    request: SaveAgentRequest,
+    http_request: Request | None = None,
+) -> dict[str, Any]:
+    return await save_agent(request.model_copy(update={"agent_id": agent_id}), http_request)
+
+
 async def get_agent(
     agent_id: str,
     http_request: Request | None = None,
