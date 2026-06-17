@@ -7,14 +7,14 @@ from typing import Any
 
 from fastapi import HTTPException, Request
 
-from apps.bridge.routes.yachiyo_models import AgentSkillBody
+from apps.bridge.routes.yachiyo_models import AgentSkillBody, StartAgentRunBody
 from apps.bridge.routes.yachiyo_services import (
     bad_request,
     snapshot,
     studio_service,
 )
 from apps.shell.agent_runtime import AgentRuntimeError
-from apps.shell.yachiyo_agent import SaveAgentRequest
+from apps.shell.yachiyo_agent import SaveAgentRequest, StartAgentRunRequest
 
 
 async def list_agents(http_request: Request | None = None) -> dict[str, Any]:
@@ -65,6 +65,27 @@ async def test_agent_model(
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Agent 不存在") from exc
     except AgentRuntimeError as exc:
+        raise bad_request(exc) from exc
+
+
+async def start_agent_run(
+    agent_id: str,
+    request: StartAgentRunBody,
+    http_request: Request | None = None,
+) -> dict[str, Any]:
+    try:
+        run_request = StartAgentRunRequest(
+            agent_id=agent_id,
+            objective=request.objective,
+            title=request.title,
+            client_run_id=request.client_run_id,
+        )
+        run_snapshot = await asyncio.to_thread(
+            studio_service(http_request).start_agent_run,
+            run_request,
+        )
+        return snapshot(run_snapshot)
+    except (AgentRuntimeError, KeyError) as exc:
         raise bad_request(exc) from exc
 
 

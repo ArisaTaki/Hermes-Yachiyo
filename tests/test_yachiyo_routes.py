@@ -1303,12 +1303,14 @@ def test_yachiyo_public_routes_delegate_to_chat_and_studio_handlers() -> None:
     assert "from apps.bridge.routes import yachiyo_studio_handlers" in source
     assert "return await yachiyo_chat_handlers.start_task(request, http_request)" in source
     assert "return await yachiyo_chat_handlers.get_task_timeline(task_id, http_request)" in source
+    assert "return await yachiyo_studio_handlers.start_agent_run(agent_id, request, http_request)" in source
     assert "return await yachiyo_studio_handlers.start_group_run(group_id, request, http_request)" in source
     assert "return await yachiyo_studio_handlers.start_workflow_run(workflow_id, request, http_request)" in source
     assert "return await yachiyo_studio_handlers.get_run_timeline(run_id, http_request)" in source
     assert 'APIRouter(prefix="/ui", tags=["Agent Studio"])' in legacy_agents_source
     assert '@router.get("/agents")' in legacy_agents_source
     assert '@router.post("/agents")' in legacy_agents_source
+    assert "_studio_service(http_request).start_agent_run" not in source
 
 
 def test_yachiyo_studio_routes_include_run_action_facade() -> None:

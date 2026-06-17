@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -24,17 +23,10 @@ from apps.bridge.routes.yachiyo_models import (
     StartWorkflowRunBody,
     TaskApprovalRequest,
 )
-from apps.bridge.routes.yachiyo_services import (
-    bad_request as _bad_request,
-    snapshot as _snapshot,
-    studio_service as _studio_service,
-)
-from apps.shell.agent_runtime import AgentRuntimeError
 from apps.shell.yachiyo_agent import (
     SaveAgentGroupRequest,
     SaveAgentRequest,
     SaveWorkflowRequest,
-    StartAgentRunRequest,
     StartChatTaskRequest,
     StartGroupRunRequest,
     StartWorkflowRunRequest,
@@ -360,20 +352,7 @@ async def start_studio_agent_run(
     request: StartAgentRunBody,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    try:
-        run_request = StartAgentRunRequest(
-            agent_id=agent_id,
-            objective=request.objective,
-            title=request.title,
-            client_run_id=request.client_run_id,
-        )
-        snapshot = await asyncio.to_thread(
-            _studio_service(http_request).start_agent_run,
-            run_request,
-        )
-        return _snapshot(snapshot)
-    except (AgentRuntimeError, KeyError) as exc:
-        raise _bad_request(exc) from exc
+    return await yachiyo_studio_handlers.start_agent_run(agent_id, request, http_request)
 
 
 @router.get("/studio/groups")

@@ -9,6 +9,7 @@ from apps.bridge.routes.yachiyo_studio_agent_handlers import (
     get_agent,
     list_agents,
     save_agent,
+    start_agent_run,
     test_agent_model,
 )
 from apps.bridge.routes.yachiyo_studio_group_handlers import (
@@ -98,6 +99,7 @@ __all__ = [
     "reject_run_approval",
     "rerun_run",
     "save_agent",
+    "start_agent_run",
     "save_group",
     "save_workflow",
     "start_group_run",
