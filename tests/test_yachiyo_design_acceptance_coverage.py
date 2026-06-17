@@ -823,13 +823,27 @@ def test_runtime_core_split_acceptance_paths_are_guarded() -> None:
     _assert_contains(
         "apps/shell/yachiyo_agent/approval_event_snapshots.py",
         [
+            "ApprovalEventCorrelationTracker",
+            "approval_correlation_keys",
             "def approval_snapshots_from_events",
             "def approval_payload_from_event",
+            "merge_trace_context_into_approval",
+            "event.sensitivity == \"secret\"",
+        ],
+    )
+    _assert_contains(
+        "apps/shell/yachiyo_agent/approval_event_correlation.py",
+        [
+            "class ApprovalEventCorrelationTracker",
+            "def approval_correlation_keys",
+            "_AMBIGUOUS_APPROVAL_INDEX",
+        ],
+    )
+    _assert_contains(
+        "apps/shell/yachiyo_agent/approval_snapshot_merging.py",
+        [
             "def merge_approval_snapshots",
             "def merge_approval_snapshot_lists",
-            "merge_trace_context_into_approval",
-            "_AMBIGUOUS_APPROVAL_INDEX",
-            "event.sensitivity == \"secret\"",
         ],
     )
     _assert_contains(
