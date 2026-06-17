@@ -16,8 +16,6 @@ import {
   groupFollowupAgentMessageIdsAttribute,
   groupFollowupNotice,
   groupFollowupTaskIdsAttribute,
-  messageArtifactCount,
-  messageArtifactTitle,
   messageHasRunContext,
   messageRoleLabel,
   messageRunId,
@@ -30,6 +28,7 @@ import {
   messageSender,
   messageWorkflowStudioAction,
 } from '../messageState';
+import { messageArtifactCount, messageArtifactTitle } from '../messageArtifacts';
 import { participantDisplayName } from '../sessionState';
 import type {
   AgentTaskSnapshot,

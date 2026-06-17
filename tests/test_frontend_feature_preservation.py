@@ -516,8 +516,6 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "export function messageRunProgressRunnableKind",
             "export function messageRunProgressRunnableId",
             "export function messageRunProgressRunGroupId",
-            "export function messageArtifactCount",
-            "export function messageArtifactTitle",
             "export function messageWorkflowStudioAction",
             "export function taskHandoffMessageId",
             "export function messageMatchesTaskHandoff",
@@ -536,6 +534,14 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "approvalRequiredMessages(messages)",
             "nextApprovalStatusText({ pending_approval: approval.metadata?.pending_approval })",
             "group_agent_summary_pending",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/messageArtifacts.ts",
+        [
+            "export function messageArtifactCount",
+            "export function messageArtifactTitle",
+            "message?.metadata?.run_artifacts",
         ],
     )
     _assert_contains(

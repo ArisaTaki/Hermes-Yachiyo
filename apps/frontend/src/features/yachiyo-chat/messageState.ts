@@ -149,14 +149,6 @@ export function messageRunProgressRunGroupId(message?: YachiyoChatMessage | null
   return String(message?.metadata?.run_group_id || '').trim();
 }
 
-export function messageArtifactCount(message?: YachiyoChatMessage | null) {
-  return Number(message?.metadata?.run_artifact_count || 0);
-}
-
-export function messageArtifactTitle(message?: YachiyoChatMessage | null) {
-  return message?.metadata?.run_artifacts?.map((artifact) => artifact.path).filter(Boolean).join('\n') || '查看运行产物';
-}
-
 export function groupAgentSummaryTaskId(message?: YachiyoChatMessage | null) {
   return String(message?.metadata?.group_agent_summary_task_id || '').trim();
 }
