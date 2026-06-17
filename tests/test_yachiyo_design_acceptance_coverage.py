@@ -661,6 +661,8 @@ def test_runtime_core_split_acceptance_paths_are_guarded() -> None:
             "def tool_call_from_payload",
             "return _redacted_tool_call_snapshot(payload)",
             "def _tool_output_preview",
+            "def _trace_payload_preview",
+            "return _mapping(payload)",
         ],
     )
     _assert_contains(

@@ -11,10 +11,12 @@ from apps.shell.yachiyo_agent.artifacts import (
 from apps.shell.yachiyo_agent.run_snapshots import (
     RunSnapshotProjector,
     agent_task_snapshot_from_payload,
+    memory_trace_snapshots_from_events,
     run_timeline_snapshot_from_payload,
+    skill_trace_snapshots_from_events,
     tool_call_snapshot_from_payload,
 )
-from apps.shell.yachiyo_agent import ToolCallSnapshot
+from apps.shell.yachiyo_agent import PublicRunEvent, ToolCallSnapshot
 from apps.shell.yachiyo_agent.approvals import approval_card_from_payload
 from apps.shell.yachiyo_agent.events import public_run_event_from_payload
 from apps.shell.yachiyo_agent.groups import group_run_snapshot_from_payload
@@ -353,6 +355,48 @@ def test_tool_call_public_snapshots_redact_sensitive_previews() -> None:
     assert "sensitive-token-value" not in rendered
     assert direct.input_preview["api_key"] == "[redacted]"
     assert direct.input_preview["api_key_configured"] is True
+    assert "[redacted]" in rendered
+
+
+def test_trace_payload_previews_redact_direct_public_events() -> None:
+    memory_event = PublicRunEvent(
+        run_id="run-1",
+        sequence=1,
+        event_type="memory.retrieved",
+        payload={
+            "api_key": "secret-api-key-value",
+            "api_key_configured": True,
+            "memories": [
+                {
+                    "memory_id": "memory-1",
+                    "kind": "preference",
+                    "content": "token sk-sensitive-value",
+                }
+            ],
+        },
+    )
+    skill_event = PublicRunEvent(
+        run_id="run-1",
+        sequence=2,
+        event_type="skill.selected",
+        payload={
+            "skill_id": "skill-1",
+            "skill_name": "Demo sk-sensitive-value",
+            "result": {"description": "bearer sensitive-token-value"},
+        },
+    )
+
+    memory_traces = memory_trace_snapshots_from_events([memory_event])
+    skill_traces = skill_trace_snapshots_from_events([skill_event])
+    rendered = str({
+        "memory_traces": [trace.model_dump(mode="json") for trace in memory_traces],
+        "skill_traces": [trace.model_dump(mode="json") for trace in skill_traces],
+    })
+
+    assert "sk-sensitive-value" not in rendered
+    assert "sensitive-token-value" not in rendered
+    assert memory_traces[0].payload_preview["api_key"] == "[redacted]"
+    assert memory_traces[0].payload_preview["api_key_configured"] is True
     assert "[redacted]" in rendered
 
 

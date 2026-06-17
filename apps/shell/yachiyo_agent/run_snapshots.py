@@ -656,7 +656,7 @@ def _trace_status(value: Any) -> str:
 
 
 def _trace_payload_preview(payload: Mapping[str, Any]) -> dict[str, Any]:
-    return dict(payload)
+    return _mapping(payload)
 
 
 def _mapping_items(value: Any) -> list[dict[str, Any]]:
