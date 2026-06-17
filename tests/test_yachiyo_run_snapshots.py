@@ -12,7 +12,9 @@ from apps.shell.yachiyo_agent.run_snapshots import (
     RunSnapshotProjector,
     agent_task_snapshot_from_payload,
     run_timeline_snapshot_from_payload,
+    tool_call_snapshot_from_payload,
 )
+from apps.shell.yachiyo_agent import ToolCallSnapshot
 from apps.shell.yachiyo_agent.approvals import approval_card_from_payload
 from apps.shell.yachiyo_agent.events import public_run_event_from_payload
 from apps.shell.yachiyo_agent.groups import group_run_snapshot_from_payload
@@ -315,6 +317,43 @@ def test_artifact_public_snapshots_redact_sensitive_preview_and_content() -> Non
     assert "[redacted]" in rendered
     assert artifact.source_run_id == "run-1"
     assert content.run_id == "run-1"
+
+
+def test_tool_call_public_snapshots_redact_sensitive_previews() -> None:
+    direct = tool_call_snapshot_from_payload(
+        {
+            "tool_call_id": "call-sk-sensitive-value",
+            "run_id": "run-1",
+            "tool_name": "terminal.run",
+            "input_preview": {
+                "command": "printf sk-sensitive-value",
+                "api_key": "secret-api-key-value",
+                "api_key_configured": True,
+            },
+            "error": "bearer sensitive-token-value",
+        }
+    )
+    existing = tool_call_snapshot_from_payload(
+        ToolCallSnapshot(
+            tool_call_id="call-2",
+            run_id="run-1",
+            tool_name="workspace.read",
+            status="completed",
+            input_preview={"path": "sk-sensitive-value.md"},
+            output_preview={"content": "token sk-sensitive-value"},
+        )
+    )
+
+    rendered = str({
+        "direct": direct.model_dump(mode="json"),
+        "existing": existing.model_dump(mode="json"),
+    })
+
+    assert "sk-sensitive-value" not in rendered
+    assert "sensitive-token-value" not in rendered
+    assert direct.input_preview["api_key"] == "[redacted]"
+    assert direct.input_preview["api_key_configured"] is True
+    assert "[redacted]" in rendered
 
 
 def test_studio_run_url_is_shared_by_run_task_and_approval_snapshots() -> None:
