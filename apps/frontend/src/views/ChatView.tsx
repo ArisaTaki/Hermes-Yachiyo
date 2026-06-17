@@ -93,6 +93,14 @@ import {
   shouldContinueTyping,
   syncRenderStates,
 } from '../features/yachiyo-chat/renderState';
+import {
+  CHAT_SIDEBAR_BASE_MAX_WIDTH,
+  CHAT_SIDEBAR_MIN_WIDTH,
+  clampChatSidebarWidth,
+  isMessageTextSelectionActive,
+  isNearBottom,
+  responsiveChatSidebarMaxWidth,
+} from '../features/yachiyo-chat/layoutState';
 import { listYachiyoChatRunnables, type ChatRunnableSummary as RunnableSummary } from '../features/yachiyo-chat/runnables';
 import { publicTaskSnapshotForMessage } from '../features/yachiyo-chat/taskSnapshots';
 import type {
@@ -161,15 +169,10 @@ const IDLE_POLL_INTERVAL_MS = 3000;
 const EXECUTOR_POLL_INTERVAL_MS = 3000;
 const TYPE_BASE_CHARS_PER_SECOND = 85;
 const TYPE_MAX_CHARS_PER_SECOND = 360;
-const SCROLL_BOTTOM_THRESHOLD = 14;
 const COPY_FEEDBACK_MS = 1500;
 const CODE_COPY_FEEDBACK_MS = 2600;
 const MAX_ATTACHMENTS = 4;
 const MIN_LOADING_MS = 1400;
-const CHAT_SIDEBAR_MIN_WIDTH = 220;
-const CHAT_SIDEBAR_BASE_MAX_WIDTH = 280;
-const CHAT_SIDEBAR_WIDE_MAX_WIDTH = 360;
-const CHAT_WIDE_VIEWPORT_WIDTH = 1500;
 const ASSISTANT_PROFILE_UPDATED_EVENT = 'oha-assistant-profile-updated';
 const CHAT_E2E_ADD_IMAGE_EVENT = 'oha-chat-e2e-add-image';
 
@@ -578,7 +581,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       const maxWidth = responsiveChatSidebarMaxWidth();
       setSidebarMaxWidth(maxWidth);
       setSidebarWidth((width) => {
-        return Math.min(Math.max(width, CHAT_SIDEBAR_MIN_WIDTH), maxWidth);
+        return clampChatSidebarWidth(width, maxWidth);
       });
     };
     syncResponsiveSidebarWidth();
@@ -1575,10 +1578,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     }
 
     const handlePointerMove = (moveEvent: PointerEvent) => {
-      const nextWidth = Math.max(
-        CHAT_SIDEBAR_MIN_WIDTH,
-        Math.min(sidebarMaxWidth, startWidth + moveEvent.clientX - startX),
-      );
+      const nextWidth = clampChatSidebarWidth(startWidth + moveEvent.clientX - startX, sidebarMaxWidth);
       setSidebarWidth(Math.round(nextWidth));
     };
 
@@ -1597,10 +1597,10 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     if (embedded) return;
     if (event.key === 'ArrowLeft') {
       event.preventDefault();
-      setSidebarWidth((value) => Math.max(CHAT_SIDEBAR_MIN_WIDTH, value - 12));
+      setSidebarWidth((value) => clampChatSidebarWidth(value - 12, sidebarMaxWidth));
     } else if (event.key === 'ArrowRight') {
       event.preventDefault();
-      setSidebarWidth((value) => Math.min(sidebarMaxWidth, value + 12));
+      setSidebarWidth((value) => clampChatSidebarWidth(value + 12, sidebarMaxWidth));
     } else if (event.key === 'Home') {
       event.preventDefault();
       setSidebarWidth(CHAT_SIDEBAR_MIN_WIDTH);
@@ -2143,29 +2143,4 @@ function ChatFullPageLoading({ avatarUrl, label }: { avatarUrl?: string; label: 
 function createClientMessageId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
-}
-
-function isMessageTextSelectionActive(root: HTMLElement | null) {
-  if (typeof window === 'undefined') return false;
-  const selection = window.getSelection();
-  if (!selection || selection.isCollapsed) return false;
-  return selectionNodeInMessageContent(selection.anchorNode, root)
-    || selectionNodeInMessageContent(selection.focusNode, root);
-}
-
-function selectionNodeInMessageContent(node: Node | null, root: HTMLElement | null) {
-  if (!node || !root) return false;
-  const element = node instanceof Element ? node : node.parentElement;
-  return Boolean(element && root.contains(element) && element.closest('.message-content'));
-}
-
-function isNearBottom(container: HTMLDivElement) {
-  return container.scrollHeight - container.scrollTop - container.clientHeight <= SCROLL_BOTTOM_THRESHOLD;
-}
-
-function responsiveChatSidebarMaxWidth() {
-  if (typeof window === 'undefined') return CHAT_SIDEBAR_BASE_MAX_WIDTH;
-  return window.innerWidth >= CHAT_WIDE_VIEWPORT_WIDTH
-    ? CHAT_SIDEBAR_WIDE_MAX_WIDTH
-    : CHAT_SIDEBAR_BASE_MAX_WIDTH;
 }

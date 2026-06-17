@@ -621,10 +621,29 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
         ],
     )
     _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/layoutState.ts",
+        [
+            "export const SCROLL_BOTTOM_THRESHOLD = 14;",
+            "export const CHAT_SIDEBAR_MIN_WIDTH = 220;",
+            "export const CHAT_SIDEBAR_BASE_MAX_WIDTH = 280;",
+            "export const CHAT_SIDEBAR_WIDE_MAX_WIDTH = 360;",
+            "export const CHAT_WIDE_VIEWPORT_WIDTH = 1500;",
+            "export function isMessageTextSelectionActive",
+            "export function isNearBottom",
+            "export function responsiveChatSidebarMaxWidth",
+            "export function clampChatSidebarWidth",
+            "selectionNodeInMessageContent(selection.anchorNode, root)",
+            "container.scrollHeight - container.scrollTop - container.clientHeight <= SCROLL_BOTTOM_THRESHOLD",
+            "window.innerWidth >= CHAT_WIDE_VIEWPORT_WIDTH",
+            "Math.min(Math.max(value, CHAT_SIDEBAR_MIN_WIDTH), maxWidth)",
+        ],
+    )
+    _assert_contains(
         "apps/frontend/src/views/ChatView.tsx",
         [
             "from '../features/yachiyo-chat/displayState';",
             "from '../features/yachiyo-chat/renderState';",
+            "from '../features/yachiyo-chat/layoutState';",
             "import { deriveChatSessionState } from '../features/yachiyo-chat/sessionDerivedState';",
             "} = useMemo(() => deriveChatSessionState({",
             "selectedGroupAgentIds,",
@@ -691,6 +710,13 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "function displayMessageText",
             "function shouldContinueTyping",
             "function containsGroupDispatchPayload",
+            "function isMessageTextSelectionActive",
+            "function selectionNodeInMessageContent",
+            "function isNearBottom",
+            "function responsiveChatSidebarMaxWidth",
+            "const SCROLL_BOTTOM_THRESHOLD =",
+            "const CHAT_SIDEBAR_WIDE_MAX_WIDTH =",
+            "const CHAT_WIDE_VIEWPORT_WIDTH =",
             "const COMPOSER_MIN_HEIGHT =",
             "const COMPOSER_HEIGHT_STORAGE_KEY =",
             "type PendingAttachment =",
