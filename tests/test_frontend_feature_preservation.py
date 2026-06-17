@@ -402,7 +402,7 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "await addImageFiles(files)",
             "Promise.all(accepted.map(readPendingAttachment))",
             "setStatus(next.length > 1 ? `已添加 ${next.length} 张图片附件` : '已添加图片附件')",
-            "listYachiyoChatRunnables()",
+            "useChatRunnables(!embedded)",
             "const [sessionTab, setSessionTab] = useState<'agents' | 'groups'>('agents');",
             "apiPost<{",
             "`/ui/chat/groups/${encodeURIComponent(currentSessionId)}`",
@@ -739,6 +739,7 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "from '../features/yachiyo-chat/hooks/useChatCopyFeedback';",
             "from '../features/yachiyo-chat/hooks/useChatNotice';",
             "from '../features/yachiyo-chat/hooks/useLegacyChatRunnableResult';",
+            "from '../features/yachiyo-chat/hooks/useChatRunnables';",
             "import { deriveChatSessionState } from '../features/yachiyo-chat/sessionDerivedState';",
             "handleLegacyChatRunnableResult(result, { refreshTaskSnapshot: true })",
             "handleLegacyChatRunnableResult(result)",
@@ -775,6 +776,9 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "codeCopyTimerRef",
             "COPY_FEEDBACK_MS",
             "CODE_COPY_FEEDBACK_MS",
+            "setRunnables",
+            "listYachiyoChatRunnables()",
+            "window.setInterval(refreshRunnables, 10_000)",
             "result.workflow_run_id ? 'Workflow' : 'Agent'",
             "result.runnable_command",
             "legacyChatRunnableResult(result)",
@@ -3372,6 +3376,17 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
             "const markSessionCopied = useCallback(",
             "setCopiedCodeBlockKey((current) => (current === codeBlockKey ? '' : current));",
             "if (codeCopyTimerRef.current !== null) window.clearTimeout(codeCopyTimerRef.current);",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/hooks/useChatRunnables.ts",
+        [
+            "export function useChatRunnables",
+            "const CHAT_RUNNABLE_REFRESH_MS = 10_000;",
+            "listYachiyoChatRunnables()",
+            "payload.filter((item) => item.enabled !== false)",
+            "window.setInterval(refreshRunnables, CHAT_RUNNABLE_REFRESH_MS)",
+            "if (!enabled) return;",
         ],
     )
     _assert_not_contains(

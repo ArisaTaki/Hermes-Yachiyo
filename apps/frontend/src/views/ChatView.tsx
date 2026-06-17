@@ -99,6 +99,7 @@ import { useYachiyoTaskActions } from '../features/yachiyo-chat/hooks/useYachiyo
 import { useChatCopyFeedback } from '../features/yachiyo-chat/hooks/useChatCopyFeedback';
 import { useChatNotice } from '../features/yachiyo-chat/hooks/useChatNotice';
 import { useChatRunPolling } from '../features/yachiyo-chat/hooks/useChatRunPolling';
+import { useChatRunnables } from '../features/yachiyo-chat/hooks/useChatRunnables';
 import { useLegacyChatRunnableResult } from '../features/yachiyo-chat/hooks/useLegacyChatRunnableResult';
 import { useYachiyoTaskSnapshots } from '../features/yachiyo-chat/hooks/useYachiyoTaskSnapshots';
 import { useYachiyoTaskSubmit } from '../features/yachiyo-chat/hooks/useYachiyoTaskSubmit';
@@ -120,7 +121,6 @@ import {
   isNearBottom,
   responsiveChatSidebarMaxWidth,
 } from '../features/yachiyo-chat/layoutState';
-import { listYachiyoChatRunnables, type ChatRunnableSummary as RunnableSummary } from '../features/yachiyo-chat/runnables';
 import { publicTaskSnapshotForMessage } from '../features/yachiyo-chat/taskSnapshots';
 import type {
   AgentTaskSnapshot,
@@ -189,7 +189,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const [sidebarMaxWidth, setSidebarMaxWidth] = useState(() => responsiveChatSidebarMaxWidth());
   const [sidebarWidth, setSidebarWidth] = useState(CHAT_SIDEBAR_BASE_MAX_WIDTH);
   const [composerHeight, setComposerHeight] = useState(() => storedComposerHeight());
-  const [runnables, setRunnables] = useState<RunnableSummary[]>([]);
+  const runnables = useChatRunnables(!embedded);
   const [sessionTab, setSessionTab] = useState<'agents' | 'groups'>('agents');
   const [expandedAgents, setExpandedAgents] = useState<Set<string>>(new Set());
   const [groupDialogOpen, setGroupDialogOpen] = useState(false);
@@ -435,26 +435,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   useEffect(() => {
     void loadSessions();
   }, [loadSessions]);
-
-  useEffect(() => {
-    if (embedded) return;
-    let disposed = false;
-    async function refreshRunnables() {
-      try {
-        const payload = await listYachiyoChatRunnables();
-        if (disposed) return;
-        setRunnables(payload.filter((item) => item.enabled !== false));
-      } catch {
-        if (!disposed) setRunnables([]);
-      }
-    }
-    void refreshRunnables();
-    const timer = window.setInterval(refreshRunnables, 10_000);
-    return () => {
-      disposed = true;
-      window.clearInterval(timer);
-    };
-  }, [embedded]);
 
   const loadExecutor = useCallback(async () => {
     try {
