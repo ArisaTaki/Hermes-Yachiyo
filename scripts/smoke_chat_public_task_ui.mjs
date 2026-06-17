@@ -23,6 +23,7 @@ const TASK_STEP = 'Public runtime events are visible in Chat.';
 const TASK_SUMMARY = 'Chat accepted a public Agent task through /yachiyo/tasks.';
 const now = new Date().toISOString();
 const approvedAt = new Date(Date.now() + 1000).toISOString();
+const rejectedAt = new Date(Date.now() + 2000).toISOString();
 
 const bridgeState = {
   approvalStatus: 'pending',
@@ -31,11 +32,26 @@ const bridgeState = {
   legacyMessagePayloads: [],
   legacyRunnableCatalogHits: 0,
   messagesRequested: 0,
+  rejectCalls: 0,
   requestLog: [],
   runnableCatalogHits: 0,
   taskEventsRequested: 0,
   taskRequest: null,
 };
+
+function resetBridgeState() {
+  bridgeState.approvalStatus = 'pending';
+  bridgeState.approveCalls = 0;
+  bridgeState.approvePayloads = [];
+  bridgeState.legacyMessagePayloads = [];
+  bridgeState.legacyRunnableCatalogHits = 0;
+  bridgeState.messagesRequested = 0;
+  bridgeState.rejectCalls = 0;
+  bridgeState.requestLog = [];
+  bridgeState.runnableCatalogHits = 0;
+  bridgeState.taskEventsRequested = 0;
+  bridgeState.taskRequest = null;
+}
 
 const publicAgent = {
   runnable_id: AGENT_ID,
@@ -157,7 +173,7 @@ function currentTaskEvents() {
       visibility: 'user',
       sensitivity: 'normal',
       payload: { approval_id: APPROVAL_ID, tool: 'workspace.write', status: 'rejected' },
-      created_at: now,
+      created_at: rejectedAt,
     });
   }
   return events;
@@ -179,7 +195,11 @@ function publicTaskSnapshot() {
     artifacts: [],
     open_in_studio_url: `#/agents?run=${encodeURIComponent(RUN_ID)}`,
     created_at: now,
-    updated_at: bridgeState.approvalStatus === 'approved' ? approvedAt : now,
+    updated_at: bridgeState.approvalStatus === 'approved'
+      ? approvedAt
+      : bridgeState.approvalStatus === 'rejected'
+        ? rejectedAt
+        : now,
   };
 }
 
@@ -196,7 +216,11 @@ function runTimelineSnapshot() {
     artifacts: [],
     children: [],
     created_at: now,
-    updated_at: bridgeState.approvalStatus === 'approved' ? approvedAt : now,
+    updated_at: bridgeState.approvalStatus === 'approved'
+      ? approvedAt
+      : bridgeState.approvalStatus === 'rejected'
+        ? rejectedAt
+        : now,
   };
 }
 
@@ -288,6 +312,7 @@ function publicState() {
     legacyMessagePayloads: bridgeState.legacyMessagePayloads,
     legacyRunnableCatalogHits: bridgeState.legacyRunnableCatalogHits,
     messagesRequested: bridgeState.messagesRequested,
+    rejectCalls: bridgeState.rejectCalls,
     requestLog: bridgeState.requestLog,
     runnableCatalogHits: bridgeState.runnableCatalogHits,
     taskEventsRequested: bridgeState.taskEventsRequested,
@@ -295,7 +320,7 @@ function publicState() {
   };
 }
 
-function assertPublicTaskContract() {
+function assertPublicTaskContract(action) {
   const { taskRequest } = bridgeState;
   if (!taskRequest) throw new Error('/yachiyo/tasks was not called');
   if (bridgeState.legacyMessagePayloads.length !== 0) {
@@ -319,14 +344,26 @@ function assertPublicTaskContract() {
   if (!taskRequest.metadata?.client_message_id) {
     throw new Error(`public task missing client_message_id metadata: ${JSON.stringify(taskRequest.metadata)}`);
   }
-  if (bridgeState.approveCalls !== 1) {
-    throw new Error(`expected one public task approval call, saw ${bridgeState.approveCalls}`);
-  }
   if (bridgeState.approvePayloads[0]?.approval_id !== APPROVAL_ID) {
     throw new Error(`public task approval payload mismatch: ${JSON.stringify(bridgeState.approvePayloads[0])}`);
   }
-  if (bridgeState.approvalStatus !== 'approved') {
-    throw new Error(`public task approval did not continue task: ${bridgeState.approvalStatus}`);
+  if (action === 'approve') {
+    if (bridgeState.approveCalls !== 1) {
+      throw new Error(`expected one public task approval call, saw ${bridgeState.approveCalls}`);
+    }
+    if (bridgeState.approvalStatus !== 'approved') {
+      throw new Error(`public task approval did not continue task: ${bridgeState.approvalStatus}`);
+    }
+    return;
+  }
+  if (bridgeState.rejectCalls !== 1) {
+    throw new Error(`expected one public task rejection call, saw ${bridgeState.rejectCalls}`);
+  }
+  if (bridgeState.approvePayloads[0]?.action !== 'reject') {
+    throw new Error(`public task rejection payload mismatch: ${JSON.stringify(bridgeState.approvePayloads[0])}`);
+  }
+  if (bridgeState.approvalStatus !== 'rejected') {
+    throw new Error(`public task rejection did not stop task: ${bridgeState.approvalStatus}`);
   }
 }
 
@@ -474,6 +511,7 @@ async function startMockBridge() {
       }
       if (request.method === 'POST' && url.pathname === `/yachiyo/tasks/${TASK_ID}/reject`) {
         const body = await readRequestJson(request);
+        bridgeState.rejectCalls += 1;
         bridgeState.approvePayloads.push({ ...body, action: 'reject' });
         bridgeState.approvalStatus = 'rejected';
         sendJson(response, 200, publicTaskSnapshot());
@@ -536,11 +574,12 @@ function killProcess(child) {
   child.kill('SIGTERM');
 }
 
-function runElectronSmoke(devUrl, bridgeUrl) {
+function runElectronSmoke(devUrl, bridgeUrl, action) {
   const script = String.raw`
 const { app, BrowserWindow } = require('electron');
 const devUrl = process.env.OHA_YACHIYO_SMOKE_DEV_URL;
 const bridgeUrl = process.env.OHA_YACHIYO_SMOKE_BRIDGE_URL;
+const approvalAction = process.env.OHA_YACHIYO_SMOKE_APPROVAL_ACTION === 'reject' ? 'reject' : 'approve';
 const watchdog = setTimeout(() => {
   console.error('electron smoke timed out');
   app.exit(1);
@@ -600,6 +639,7 @@ async function main() {
   await win.webContents.executeJavaScript('window.__ohaSmoke = ' + JSON.stringify({
     agentId: process.env.OHA_YACHIYO_SMOKE_AGENT_ID,
     approvalId: process.env.OHA_YACHIYO_SMOKE_APPROVAL_ID,
+    approvalAction: process.env.OHA_YACHIYO_SMOKE_APPROVAL_ACTION,
     bridgeUrl,
     composerText: process.env.OHA_YACHIYO_SMOKE_COMPOSER_TEXT,
     prompt: process.env.OHA_YACHIYO_SMOKE_PROMPT,
@@ -661,35 +701,43 @@ async function main() {
       && studio.textContent.includes('Agent Studio');
   }, 'Chat public task card rendered');
   await win.webContents.executeJavaScript(
-    "const approve = document.querySelector('[data-testid=\"yachiyo-task-approval-approve\"]');" +
-      "if (!approve) throw new Error('missing public task approval approve button');" +
-      "approve.click();",
+    "(() => {" +
+      "const smoke = window.__ohaSmoke || {};" +
+      "const action = smoke.approvalAction === 'reject' ? 'reject' : 'approve';" +
+      "const selector = action === 'reject' ? '[data-testid=\"yachiyo-task-approval-reject\"]' : '[data-testid=\"yachiyo-task-approval-approve\"]';" +
+      "const button = document.querySelector(selector);" +
+      "if (!button) throw new Error('missing public task approval ' + action + ' button');" +
+      "button.click();" +
+    "})();",
     true
   );
   await waitFor(win, async () => {
     const smoke = window.__ohaSmoke || {};
     const response = await fetch(smoke.bridgeUrl + '/__smoke/state');
     const state = await response.json();
-    return state.approvalStatus === 'approved'
-      && state.approveCalls === 1
+    const action = smoke.approvalAction === 'reject' ? 'reject' : 'approve';
+    return state.approvalStatus === (action === 'reject' ? 'rejected' : 'approved')
+      && (action === 'reject' ? state.rejectCalls === 1 : state.approveCalls === 1)
       && state.approvePayloads[0]?.approval_id === smoke.approvalId;
   }, 'public task approval request');
   await waitFor(win, () => {
     const smoke = window.__ohaSmoke || {};
+    const action = smoke.approvalAction === 'reject' ? 'reject' : 'approve';
     const card = document.querySelector('[data-testid="yachiyo-agent-task-card"]');
     const approval = document.querySelector('[data-testid="yachiyo-task-approval-card"]');
     const approve = document.querySelector('[data-testid="yachiyo-task-approval-approve"]');
     const reject = document.querySelector('[data-testid="yachiyo-task-approval-reject"]');
-    const approvedEvent = Array.from(document.querySelectorAll('[data-testid="yachiyo-agent-task-timeline-event"]'))
-      .find((node) => node.getAttribute('data-run-event') === 'agent.tool.approval_approved');
+    const expectedRunEvent = action === 'reject' ? 'agent.tool.approval_rejected' : 'agent.tool.approval_approved';
+    const actionEvent = Array.from(document.querySelectorAll('[data-testid="yachiyo-agent-task-timeline-event"]'))
+      .find((node) => node.getAttribute('data-run-event') === expectedRunEvent);
     return Boolean(card)
       && card.getAttribute('data-task-id') === smoke.taskId
       && card.getAttribute('data-run-id') === smoke.runId
-      && card.getAttribute('data-task-status') === 'running'
-      && approval?.getAttribute('data-approval-status') === 'approved'
+      && card.getAttribute('data-task-status') === (action === 'reject' ? 'cancelled' : 'running')
+      && approval?.getAttribute('data-approval-status') === (action === 'reject' ? 'rejected' : 'approved')
       && !approve
       && !reject
-      && Boolean(approvedEvent);
+      && Boolean(actionEvent);
   }, 'public task approval continued');
   await waitFor(win, async () => {
     const smoke = window.__ohaSmoke || {};
@@ -698,7 +746,11 @@ async function main() {
     return state.taskEventsRequested > 0;
   }, 'public task event replay');
   console.log('[electron-smoke] Chat public task card rendered');
-  console.log('[electron-smoke] Chat public task approval approved');
+  if (approvalAction === 'reject') {
+    console.log('[electron-smoke] Chat public task approval rejected');
+  } else {
+    console.log('[electron-smoke] Chat public task approval approved');
+  }
   clearTimeout(watchdog);
   await win.close();
   app.quit();
@@ -720,6 +772,7 @@ main().catch((error) => {
         ELECTRON_ENABLE_LOGGING: '1',
         OHA_YACHIYO_SMOKE_AGENT_ID: AGENT_ID,
         OHA_YACHIYO_SMOKE_APPROVAL_ID: APPROVAL_ID,
+        OHA_YACHIYO_SMOKE_APPROVAL_ACTION: action,
         OHA_YACHIYO_SMOKE_COMPOSER_TEXT: COMPOSER_TEXT,
         OHA_YACHIYO_SMOKE_DEV_URL: devUrl,
         OHA_YACHIYO_SMOKE_BRIDGE_URL: bridgeUrl,
@@ -756,8 +809,11 @@ async function main() {
   try {
     const devUrl = `http://127.0.0.1:${vitePort}`;
     await waitForHttp(devUrl);
-    await runElectronSmoke(devUrl, bridge.url);
-    assertPublicTaskContract();
+    await runElectronSmoke(devUrl, bridge.url, 'approve');
+    assertPublicTaskContract('approve');
+    resetBridgeState();
+    await runElectronSmoke(devUrl, bridge.url, 'reject');
+    assertPublicTaskContract('reject');
     log('passed');
   } finally {
     killProcess(vite);

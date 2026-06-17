@@ -135,6 +135,11 @@ ACCEPTANCE_10_3_MATRIX: tuple[AcceptanceScenario, ...] = (
                 "scripts/smoke_chat_approval_ui.mjs",
                 ('data-testid="chat-message-approval-reject"', "waitForRejected"),
             ),
+            (
+                "smoke",
+                "scripts/smoke_chat_public_task_ui.mjs",
+                ("/yachiyo/tasks/${TASK_ID}/reject", "Chat public task approval rejected"),
+            ),
         ),
     ),
     (
@@ -364,8 +369,10 @@ def test_chat_daily_entry_acceptance_paths_are_guarded() -> None:
             'data-testid="yachiyo-agent-task-card"',
             'data-testid="yachiyo-task-approval-card"',
             'data-testid="yachiyo-task-approval-approve"',
+            'data-testid="yachiyo-task-approval-reject"',
             'data-testid="yachiyo-agent-task-open-studio"',
             "Chat public task approval approved",
+            "Chat public task approval rejected",
             "Chat public task card rendered",
         ],
     )
