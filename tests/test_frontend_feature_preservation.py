@@ -1914,7 +1914,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "AgentStudioChrome",
             "onActivateTab={activateTab}",
             "onBack={() => void openAppView('main')}",
-            "AgentGroupPanel",
+            "AgentStudioGroupsTab",
             "useAgentDefinitions",
             "useAgentModelTestActions({",
             "mergeAgent",

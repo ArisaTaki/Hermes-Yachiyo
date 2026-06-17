@@ -2,8 +2,8 @@ import '@xyflow/react/dist/style.css';
 
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { AgentDefinitionsTab } from '../features/agent-studio/components/AgentDefinitionsTab';
-import { AgentGroupPanel } from '../features/agent-studio/components/AgentGroupPanel';
 import { AgentStudioChrome } from '../features/agent-studio/components/AgentStudioChrome';
+import { AgentStudioGroupsTab } from '../features/agent-studio/components/AgentStudioGroupsTab';
 import { AgentStudioMemoryTab } from '../features/agent-studio/components/AgentStudioMemoryTab';
 import { AgentStudioRunsTab } from '../features/agent-studio/components/AgentStudioRunsTab';
 import { SkillFolderPanel } from '../features/agent-studio/components/SkillFolderPanel';
@@ -755,15 +755,15 @@ export function AgentStudioView() {
       />
 
       {!loading && tab === 'groups' ? (
-        <AgentGroupPanel
+        <AgentStudioGroupsTab
           agents={agents}
           agentGroups={agentGroups}
           agentGroupDefaultModel={agentGroupDefaultModel}
           agentGroupDescription={agentGroupDescription}
           agentGroupEnabled={agentGroupEnabled}
-          agentGroupMemoryScope={agentGroupMemoryScope || 'shared'}
+          agentGroupMemoryScope={agentGroupMemoryScope}
           agentGroupMemberIds={agentGroupMemberIds}
-          agentGroupMode={agentGroupMode || 'moderated'}
+          agentGroupMode={agentGroupMode}
           agentGroupModeratorId={agentGroupModeratorId}
           agentGroupName={agentGroupName}
           agentGroupRunGoal={agentGroupRunGoal}

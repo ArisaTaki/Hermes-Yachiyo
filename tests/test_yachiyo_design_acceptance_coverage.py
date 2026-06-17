@@ -279,7 +279,12 @@ ACCEPTANCE_10_3_MATRIX: tuple[AcceptanceScenario, ...] = (
             (
                 "source",
                 "apps/frontend/src/views/AgentStudioView.tsx",
-                ("AgentDefinitionsTab", "AgentGroupPanel", "AgentStudioRunsTab", "AgentStudioWorkflowsTab"),
+                ("AgentDefinitionsTab", "AgentStudioGroupsTab", "AgentStudioRunsTab", "AgentStudioWorkflowsTab"),
+            ),
+            (
+                "source",
+                "apps/frontend/src/features/agent-studio/components/AgentStudioGroupsTab.tsx",
+                ("AgentGroupPanel", "agentGroupMemoryScope={agentGroupMemoryScope || 'shared'}"),
             ),
             (
                 "source",
@@ -895,9 +900,18 @@ def test_agent_studio_professional_entry_acceptance_paths_are_guarded() -> None:
         "apps/frontend/src/views/AgentStudioView.tsx",
         [
             "AgentDefinitionsTab",
-            "AgentGroupPanel",
+            "AgentStudioGroupsTab",
             "AgentStudioRunsTab",
             "AgentStudioWorkflowsTab",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/AgentStudioGroupsTab.tsx",
+        [
+            "export function AgentStudioGroupsTab",
+            "AgentGroupPanel",
+            "agentGroupMemoryScope={agentGroupMemoryScope || 'shared'}",
+            "agentGroupMode={agentGroupMode || 'moderated'}",
         ],
     )
     _assert_contains(
@@ -1303,7 +1317,7 @@ def test_agent_studio_view_preservation_acceptance_path_is_guarded() -> None:
         "apps/frontend/src/views/AgentStudioView.tsx",
         [
             "AgentDefinitionsTab",
-            "AgentGroupPanel",
+            "AgentStudioGroupsTab",
             "AgentStudioRunsTab",
             "AgentStudioWorkflowsTab",
         ],
