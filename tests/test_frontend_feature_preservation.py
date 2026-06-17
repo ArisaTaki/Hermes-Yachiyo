@@ -756,6 +756,13 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "onApproveApproval={onApproveTaskApproval}",
             "onRejectApproval={onRejectTaskApproval}",
             "onCancelTask={onCancelTask}",
+            "const showPublicTaskCard = Boolean(publicTaskSnapshot);",
+            "const showLegacyApprovalDetails = Boolean(approvalDetails && !showPublicTaskCard);",
+            "const showLegacyAgentProgress = Boolean(showAgentProgress && !showPublicTaskCard);",
+            "{showLegacyApprovalDetails && approvalDetails ? (",
+            ") : showLegacyAgentProgress ? (",
+            ") : isProcessingEmpty && !showPublicTaskCard ? (",
+            "hidden={Boolean(showLegacyApprovalDetails || showLegacyAgentProgress)}",
         ],
     )
     _assert_contains(

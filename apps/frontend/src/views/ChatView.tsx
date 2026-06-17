@@ -2599,6 +2599,9 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
   const progressRunnableId = messageRunProgressRunnableId(message);
   const progressRunGroupId = messageRunProgressRunGroupId(message);
   const showInlineRunDetails = role === 'assistant' && Boolean(runId) && !approvalDetails && !showAgentProgress;
+  const showPublicTaskCard = Boolean(publicTaskSnapshot);
+  const showLegacyApprovalDetails = Boolean(approvalDetails && !showPublicTaskCard);
+  const showLegacyAgentProgress = Boolean(showAgentProgress && !showPublicTaskCard);
   const artifactCount = messageArtifactCount(message);
   const duplicateError = Boolean(message.error && displayContent.trim() && message.error.trim() === displayContent.trim());
   const summaryNotice = groupAgentSummaryNotice(message);
@@ -2618,7 +2621,7 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
       <div className="message-avatar">{messageAvatar(message, assistantProfile, assistantProfileLoading, runnables)}</div>
       <div className="message-stack">
         <div className="message-bubble">
-          {approvalDetails ? (
+          {showLegacyApprovalDetails && approvalDetails ? (
             <MessageApprovalRequestCard
               approvalId={approvalId}
               approvalSignature={approvalSignature}
@@ -2630,7 +2633,7 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
               runId={runId}
               runStatus={runStatus}
             />
-          ) : showAgentProgress ? (
+          ) : showLegacyAgentProgress ? (
             <AgentRunProgressCard
               detail={progressDetail}
               onOpenDetails={() => onOpenRunDetails(runId)}
@@ -2641,7 +2644,7 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
               runnableKind={progressRunnableKind}
               title={progressTitle}
             />
-          ) : isProcessingEmpty ? (
+          ) : isProcessingEmpty && !showPublicTaskCard ? (
             <TypingIndicator />
           ) : (
             <div className="message-content markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(displayContent, message.id || '', copiedCodeBlockKey) }} />
@@ -2681,7 +2684,7 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
         <MessageAgentTaskCard
           busy={approvalBusy}
           displayContent={displayContent}
-          hidden={Boolean(approvalDetails || showAgentProgress)}
+          hidden={Boolean(showLegacyApprovalDetails || showLegacyAgentProgress)}
           message={message}
           onApproveApproval={onApproveTaskApproval}
           onCancelTask={onCancelTask}
