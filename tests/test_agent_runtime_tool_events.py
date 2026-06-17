@@ -210,7 +210,12 @@ def test_agent_artifact_write_emits_artifact_created_without_content(tmp_path, m
             {"agent_id": agent["agent_id"], "user_goal": "Write artifact"}
         )
         events = service.list_run_events(run["run_id"], limit=100)["events"]
-        artifact_event = next(event for event in events if event["event_type"] == "artifact.created")
+        artifact_event = next(
+            event
+            for event in events
+            if event["event_type"] == "artifact.created"
+            and event["payload"].get("path") == "notes.md"
+        )
         serialized_payload = json.dumps(artifact_event["payload"], ensure_ascii=False)
 
         assert artifact_event["payload"]["path"] == "notes.md"

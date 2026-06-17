@@ -580,6 +580,16 @@ def test_runtime_core_split_acceptance_paths_are_guarded() -> None:
         ],
     )
     _assert_contains(
+        "apps/shell/agent/runtime/agent_preparation.py",
+        [
+            "def write_context_artifact",
+            '"memory.retrieved"',
+            '"agent.artifact.write"',
+            '"kind": "agent_artifact"',
+            "**artifact",
+        ],
+    )
+    _assert_contains(
         "apps/shell/agent/runtime/run_timeline.py",
         [
             "class RuntimeRunTimelineService",

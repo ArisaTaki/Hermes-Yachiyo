@@ -261,7 +261,17 @@ def test_agent_run_preparer_writes_observable_context_artifact(tmp_path: Path) -
                 "memory_count": 1,
                 "memories": [{"memory_id": "memory-1", "content": "Remember this"}],
             },
-        )
+        ),
+        (
+            "run-1",
+            "agent.artifact.write",
+            {
+                "kind": "agent_artifact",
+                "artifact": {"path": "agent-context.md", "bytes": len("model visible context")},
+                "path": "agent-context.md",
+                "bytes": len("model visible context"),
+            },
+        ),
     ]
     assert state["broker"].writes == [("agent-context.md", "model visible context")]
     assert preparation.artifacts == [{"kind": "context", "path": "agent-context.md", "bytes": 21}]

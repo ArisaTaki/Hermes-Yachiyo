@@ -141,4 +141,9 @@ class RuntimeAgentRunPreparer:
         preparation.timeline.append(
             self._timeline_factory("agent.artifact.write", "agent-context.md", artifact=artifact)
         )
+        self._append_run_event(
+            run_id,
+            "agent.artifact.write",
+            {"kind": "agent_artifact", "artifact": artifact, **artifact},
+        )
         return artifact
