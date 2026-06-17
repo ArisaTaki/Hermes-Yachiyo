@@ -10,6 +10,7 @@ from apps.shell.agent.runtime.events import redact_secrets
 from .contracts import (
     AgentGroupMemberSnapshot,
     AgentGroupSnapshot,
+    ArtifactSnapshot,
     GroupRunSnapshot,
     MemoryTraceSnapshot,
     RunTimelineSnapshot,
@@ -118,10 +119,12 @@ def group_run_snapshot_from_payload(
         tool_calls=_group_run_tool_calls(payload, runs, events, group_run_id=group_run_id),
         memory_traces=_group_run_memory_traces(runs, events),
         skill_traces=_group_run_skill_traces(runs, events),
-        shared_artifacts=_RUN_PROJECTOR.artifacts_from_payload(
-            {"artifacts": payload.get("shared_artifacts") or payload.get("artifacts")},
-            run_id=group_run_id,
-            events=events,
+        shared_artifacts=_group_run_shared_artifacts(
+            payload,
+            runs,
+            events,
+            group_run_id=group_run_id,
+            group_id=group_id,
         ),
         pending_approvals=[
             approval
@@ -185,6 +188,51 @@ def _group_run_skill_traces(
     return _unique_by(
         [*child_traces, *event_traces],
         lambda trace: trace.trace_id,
+    )
+
+
+def _group_run_shared_artifacts(
+    payload: Mapping[str, Any],
+    runs: list[RunTimelineSnapshot],
+    events: list[Any],
+    *,
+    group_run_id: str,
+    group_id: str,
+) -> list[ArtifactSnapshot]:
+    direct_artifacts = _RUN_PROJECTOR.artifacts_from_payload(
+        {"artifacts": payload.get("shared_artifacts") or payload.get("artifacts")},
+        run_id=group_run_id,
+        events=events,
+    )
+    child_artifacts = [
+        _group_context_artifact(artifact, group_run_id=group_run_id, group_id=group_id)
+        for run in runs
+        for artifact in run.artifacts
+    ]
+    return _unique_by(
+        [*direct_artifacts, *child_artifacts],
+        _artifact_identity,
+    )
+
+
+def _group_context_artifact(
+    artifact: ArtifactSnapshot,
+    *,
+    group_run_id: str,
+    group_id: str,
+) -> ArtifactSnapshot:
+    return artifact.model_copy(
+        update={
+            "group_run_id": artifact.group_run_id or group_run_id or None,
+            "group_id": artifact.group_id or group_id or None,
+        }
+    )
+
+
+def _artifact_identity(artifact: ArtifactSnapshot) -> str:
+    return _text(
+        artifact.artifact_id
+        or f"{artifact.source_run_id or artifact.run_id or ''}:{artifact.path or artifact.title}"
     )
 
 
