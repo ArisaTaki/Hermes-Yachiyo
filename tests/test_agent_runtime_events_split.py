@@ -99,6 +99,10 @@ def test_runtime_run_event_recorder_appends_compatibility_aliases() -> None:
     ]
     assert canonical_run_event_aliases("model.output.completed") == ["model.completed"]
     assert canonical_run_event_aliases("workflow.run.started") == ["workflow.started"]
+    assert canonical_run_event_aliases("workflow.run.approval_required") == [
+        "workflow.paused_for_approval",
+        "approval.required",
+    ]
     assert canonical_run_event_aliases("workflow.run.cancelled") == [
         "workflow.cancelled"
     ]
@@ -107,7 +111,12 @@ def test_runtime_run_event_recorder_appends_compatibility_aliases() -> None:
     assert canonical_run_event_aliases("agent.tool.failed") == ["tool.failed"]
     assert canonical_run_event_aliases("agent.tool.denied") == ["tool.denied"]
     assert canonical_run_event_aliases("agent.tool.approval_required") == [
-        "tool.approval_required"
+        "tool.approval_required",
+        "approval.required",
+    ]
+    assert canonical_run_event_aliases("workflow.node.approval_required") == [
+        "workflow.paused_for_approval",
+        "approval.required",
     ]
     assert canonical_run_event_aliases("agent.tool.approval_approved") == [
         "tool.approved",
@@ -140,6 +149,18 @@ def test_runtime_run_event_recorder_appends_compatibility_aliases() -> None:
     assert [call[1] for call in repository.calls] == [
         "workflow.run.started",
         "workflow.started",
+    ]
+
+    repository.calls.clear()
+    recorder.append(
+        "run-1",
+        "workflow.run.approval_required",
+        {"workflow_id": "workflow-1", "status": "approval_required"},
+    )
+    assert [call[1] for call in repository.calls] == [
+        "workflow.run.approval_required",
+        "workflow.paused_for_approval",
+        "approval.required",
     ]
 
     repository.calls.clear()
@@ -206,6 +227,19 @@ def test_runtime_run_event_recorder_appends_compatibility_aliases() -> None:
     assert [call[1] for call in repository.calls] == [
         "agent.tool.approval_required",
         "tool.approval_required",
+        "approval.required",
+    ]
+
+    repository.calls.clear()
+    recorder.append(
+        "run-1",
+        "workflow.node.approval_required",
+        {"workflow_node_id": "approval-1", "status": "approval_required"},
+    )
+    assert [call[1] for call in repository.calls] == [
+        "workflow.node.approval_required",
+        "workflow.paused_for_approval",
+        "approval.required",
     ]
 
     repository.calls.clear()

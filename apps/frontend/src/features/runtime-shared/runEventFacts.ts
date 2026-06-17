@@ -485,7 +485,7 @@ function isApprovalRunEvent(eventType: string): boolean {
   return eventType.includes('approval_required')
     || eventType.includes('approval_approved')
     || eventType.includes('approval_rejected')
-    || ['approval.approved', 'approval.rejected', 'approval.timeout', 'tool.approved', 'tool.rejected'].includes(eventType);
+    || ['approval.required', 'approval.approved', 'approval.rejected', 'approval.timeout', 'tool.approved', 'tool.rejected'].includes(eventType);
 }
 
 function approvalStatusFromRunEvent(eventType: string): ApprovalCardSnapshot['status'] {

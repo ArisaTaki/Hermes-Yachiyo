@@ -1147,6 +1147,7 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "if (type === 'agent.tool.call') return '工具调用';",
             "if (type === 'agent.tool.skipped' || type === 'tool.skipped') return '工具已跳过';",
             "if (type === 'agent.tool.denied' || type === 'tool.denied') return '工具已拒绝';",
+            "if (type === 'approval.required' || type === 'tool.approval_required' || type === 'agent.tool.approval_required') return '等待审批';",
             "if (type === 'tool.requested') return '工具请求';",
             "if (type === 'tool.approved') return '工具审批通过';",
             "if (type === 'tool.rejected') return '工具审批拒绝';",
@@ -4659,7 +4660,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "source_tool: publicRunEventPayloadString(artifactPayload, 'source_tool')",
             "group_run_id: publicRunEventPayloadString(artifactPayload, 'group_run_id')",
             "eventType.includes('approval_timeout') || eventType === 'approval.timeout'",
-            "['approval.approved', 'approval.rejected', 'approval.timeout', 'tool.approved', 'tool.rejected'].includes(eventType)",
+            "['approval.required', 'approval.approved', 'approval.rejected', 'approval.timeout', 'tool.approved', 'tool.rejected'].includes(eventType)",
         ],
     )
     _assert_contains(

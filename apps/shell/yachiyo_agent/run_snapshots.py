@@ -666,6 +666,7 @@ def _mapping_items(value: Any) -> list[dict[str, Any]]:
 def _approval_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
     if event.event_type in {
         "agent.tool.approval_required",
+        "approval.required",
         "group.approval_required",
         "group.member.approval_required",
         "tool.approval_required",

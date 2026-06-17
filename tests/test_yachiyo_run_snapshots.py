@@ -952,6 +952,32 @@ def test_run_timeline_derives_approvals_and_artifacts_from_events() -> None:
     assert timeline.artifacts[1].workflow_node_label == "Report"
 
 
+def test_run_timeline_projects_generic_approval_required_alias() -> None:
+    timeline = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "run-generic-approval-required",
+            "status": "approval_required",
+            "events": [
+                {
+                    "event_type": "approval.required",
+                    "payload": {
+                        "approval_id": "approval-generic-required",
+                        "tool": "terminal.run",
+                        "input_preview": {"command": "npm test"},
+                    },
+                    "created_at": "2026-06-15T00:00:00Z",
+                }
+            ],
+        }
+    )
+
+    assert len(timeline.approvals) == 1
+    assert timeline.approvals[0].approval_id == "approval-generic-required"
+    assert timeline.approvals[0].status == "pending"
+    assert timeline.approvals[0].tool_name == "terminal.run"
+    assert timeline.approvals[0].input_preview == {"command": "npm test"}
+
+
 def test_run_timeline_derives_workflow_artifact_from_event_path() -> None:
     timeline = run_timeline_snapshot_from_payload(
         {
