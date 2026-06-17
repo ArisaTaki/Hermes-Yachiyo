@@ -4778,6 +4778,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "function toolStatusFromRunEvent(eventType: string): string",
             "function toolCallStatusIsTerminal(status: string): boolean",
             "eventType === 'agent.tool.approval_timeout' || eventType === 'approval.timeout' || eventType === 'tool.approval_timeout'",
+            "eventType === 'agent.tool.approval_cancelled' || eventType === 'approval.cancelled' || eventType === 'tool.approval_cancelled'",
             "return ['completed', 'failed', 'denied', 'skipped', 'expired', 'cancelled'].includes(status);",
             "function stableJson(value: unknown): string",
             "function stableJsonValue(value: unknown): unknown",
@@ -4810,7 +4811,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "source_tool: publicRunEventPayloadString(artifactPayload, 'source_tool')",
             "group_run_id: publicRunEventPayloadString(artifactPayload, 'group_run_id')",
             "eventType.includes('approval_timeout') || eventType === 'approval.timeout'",
-            "['approval.required', 'approval.approved', 'approval.rejected', 'approval.timeout', 'tool.approved', 'tool.rejected'].includes(eventType)",
+            "['approval.required', 'approval.approved', 'approval.cancelled', 'approval.rejected', 'approval.timeout', 'tool.approved', 'tool.rejected'].includes(eventType)",
         ],
     )
     _assert_contains(

@@ -135,6 +135,10 @@ def test_runtime_run_event_recorder_appends_compatibility_aliases() -> None:
     assert canonical_run_event_aliases("agent.tool.approval_timeout") == [
         "approval.timeout"
     ]
+    assert canonical_run_event_aliases("agent.tool.approval_cancelled") == [
+        "tool.cancelled",
+        "approval.cancelled",
+    ]
     assert canonical_run_event_aliases("workflow.node.approval_approved") == [
         "approval.approved"
     ]
@@ -143,6 +147,9 @@ def test_runtime_run_event_recorder_appends_compatibility_aliases() -> None:
     ]
     assert canonical_run_event_aliases("workflow.node.approval_timeout") == [
         "approval.timeout"
+    ]
+    assert canonical_run_event_aliases("workflow.node.approval_cancelled") == [
+        "approval.cancelled"
     ]
     assert agent_runtime._canonical_run_event_aliases("model.output.completed") == ["model.completed"]
 

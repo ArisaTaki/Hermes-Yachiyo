@@ -1665,6 +1665,52 @@ def test_run_timeline_projects_approval_timeout_as_expired_card() -> None:
     assert timeline.tool_calls[0].completed_at == "2026-06-15T00:00:01Z"
 
 
+def test_run_timeline_projects_approval_cancelled_as_cancelled_card() -> None:
+    timeline = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "run-approval-cancelled",
+            "status": "cancelled",
+            "events": [
+                {
+                    "event_type": "agent.tool.approval_required",
+                    "payload": {
+                        "approval_id": "approval-cancelled",
+                        "tool": "terminal.run",
+                        "input_preview": {"command": "npm test"},
+                    },
+                    "created_at": "2026-06-16T00:00:00Z",
+                },
+                {
+                    "event_type": "approval.cancelled",
+                    "payload": {
+                        "approval_id": "approval-cancelled",
+                        "tool": "terminal.run",
+                        "input_preview": {"command": "npm test"},
+                        "reason": "Run cancelled",
+                    },
+                    "created_at": "2026-06-16T00:00:01Z",
+                },
+                {
+                    "event_type": "run.cancelled",
+                    "payload": {"status": "cancelled", "result": "Run cancelled"},
+                    "created_at": "2026-06-16T00:00:02Z",
+                },
+            ],
+        }
+    )
+
+    assert timeline.pending_approval is None
+    assert len(timeline.approvals) == 1
+    assert timeline.approvals[0].approval_id == "approval-cancelled"
+    assert timeline.approvals[0].status == "cancelled"
+    assert timeline.approvals[0].description == "Run cancelled"
+    assert timeline.approvals[0].resolved_at == "2026-06-16T00:00:01Z"
+    assert len(timeline.tool_calls) == 1
+    assert timeline.tool_calls[0].approval_id == "approval-cancelled"
+    assert timeline.tool_calls[0].status == "cancelled"
+    assert timeline.tool_calls[0].completed_at == "2026-06-16T00:00:01Z"
+
+
 def test_run_timeline_projects_legacy_approval_timeout_aliases_as_expired_tool_calls() -> None:
     timeline = run_timeline_snapshot_from_payload(
         {

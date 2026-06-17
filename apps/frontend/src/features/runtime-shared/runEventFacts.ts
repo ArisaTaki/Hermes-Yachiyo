@@ -507,12 +507,14 @@ function isApprovalRunEvent(eventType: string): boolean {
   return eventType.includes('approval_required')
     || eventType.includes('approval_approved')
     || eventType.includes('approval_rejected')
-    || ['approval.required', 'approval.approved', 'approval.rejected', 'approval.timeout', 'tool.approved', 'tool.rejected'].includes(eventType);
+    || eventType.includes('approval_cancelled')
+    || ['approval.required', 'approval.approved', 'approval.cancelled', 'approval.rejected', 'approval.timeout', 'tool.approved', 'tool.rejected'].includes(eventType);
 }
 
 function approvalStatusFromRunEvent(eventType: string): ApprovalCardSnapshot['status'] {
   if (eventType.includes('approval_approved') || eventType === 'approval.approved' || eventType === 'tool.approved') return 'approved';
   if (eventType.includes('approval_rejected') || eventType === 'approval.rejected' || eventType === 'tool.rejected') return 'rejected';
+  if (eventType.includes('approval_cancelled') || eventType === 'approval.cancelled') return 'cancelled';
   if (eventType.includes('approval_timeout') || eventType === 'approval.timeout') return 'expired';
   return 'pending';
 }
@@ -545,10 +547,13 @@ function isToolRunEvent(eventType: string): boolean {
     'agent.tool.approval_approved',
     'agent.tool.approval_rejected',
     'agent.tool.approval_timeout',
+    'agent.tool.approval_cancelled',
     'agent.tool.completed',
+    'approval.cancelled',
     'approval.timeout',
     'tool.approved',
     'tool.approval_approved',
+    'tool.approval_cancelled',
     'tool.approval_rejected',
     'tool.requested',
     'tool.started',
@@ -570,6 +575,7 @@ function toolStatusFromRunEvent(eventType: string): string {
   if (eventType === 'agent.tool.approval_approved' || eventType === 'tool.approved' || eventType === 'tool.approval_approved') return 'approved';
   if (eventType === 'agent.tool.approval_rejected' || eventType === 'agent.tool.denied' || eventType === 'tool.rejected' || eventType === 'tool.denied' || eventType === 'tool.approval_rejected') return 'denied';
   if (eventType === 'agent.tool.approval_timeout' || eventType === 'approval.timeout' || eventType === 'tool.approval_timeout') return 'expired';
+  if (eventType === 'agent.tool.approval_cancelled' || eventType === 'approval.cancelled' || eventType === 'tool.approval_cancelled') return 'cancelled';
   if (eventType === 'tool.failed' || eventType === 'agent.tool.failed') return 'failed';
   if (eventType === 'agent.tool.skipped' || eventType === 'tool.skipped') return 'skipped';
   if (eventType === 'tool.cancelled') return 'cancelled';

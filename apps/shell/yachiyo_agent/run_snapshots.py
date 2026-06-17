@@ -680,12 +680,16 @@ def _approval_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
         "agent.tool.approval_approved",
         "agent.tool.approval_rejected",
         "agent.tool.approval_timeout",
+        "agent.tool.approval_cancelled",
         "approval.approved",
+        "approval.cancelled",
         "approval.rejected",
         "approval.timeout",
         "tool.approved",
+        "tool.approval_cancelled",
         "tool.rejected",
         "workflow.node.approval_approved",
+        "workflow.node.approval_cancelled",
         "workflow.node.approval_rejected",
         "workflow.node.approval_timeout",
     }:
@@ -757,6 +761,8 @@ def _approval_status_from_event_type(event_type: str) -> str:
         return "approved"
     if event_type.endswith("approval_rejected") or event_type in {"approval.rejected", "tool.rejected"}:
         return "rejected"
+    if event_type.endswith("approval_cancelled") or event_type == "approval.cancelled":
+        return "cancelled"
     if event_type.endswith("approval_timeout") or event_type == "approval.timeout":
         return "expired"
     return "pending"
@@ -1451,10 +1457,13 @@ def _is_tool_event(event_type: str) -> bool:
         "agent.tool.approval_approved",
         "agent.tool.approval_rejected",
         "agent.tool.approval_timeout",
+        "agent.tool.approval_cancelled",
         "agent.tool.completed",
+        "approval.cancelled",
         "approval.timeout",
         "tool.approved",
         "tool.approval_approved",
+        "tool.approval_cancelled",
         "tool.approval_rejected",
         "tool.requested",
         "tool.started",
@@ -1497,6 +1506,12 @@ def _tool_status_from_event_type(event_type: str) -> str:
         return "denied"
     if event_type in {"agent.tool.approval_timeout", "approval.timeout", "tool.approval_timeout"}:
         return "expired"
+    if event_type in {
+        "agent.tool.approval_cancelled",
+        "approval.cancelled",
+        "tool.approval_cancelled",
+    }:
+        return "cancelled"
     if event_type in {"tool.completed", "agent.tool.call", "agent.tool.completed"}:
         return "completed"
     if event_type in {"tool.failed", "agent.tool.failed"}:

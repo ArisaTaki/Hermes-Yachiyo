@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from apps.shell.agent.runtime.approval_snapshots import public_pending_approval
+
 FINAL_RUN_STATUSES = {"completed", "failed", "cancelled"}
 
 
@@ -95,6 +97,34 @@ class RunCancellationProjection:
             "artifacts": self.artifacts,
             "pending_approval": None,
         }
+
+
+def pending_approval_cancelled_event_payload(
+    run_id: str,
+    run: dict[str, Any],
+    *,
+    reason: str,
+    parent_run_id: str = "",
+) -> dict[str, Any]:
+    pending = public_pending_approval(run.get("pending_approval"))
+    if not pending:
+        return {}
+    payload = {
+        **pending,
+        "run_id": str(run_id or ""),
+        "status": "cancelled",
+        "reason": str(reason or "Run cancelled"),
+        "previous_status": str(run.get("status") or ""),
+    }
+    if not payload.get("tool"):
+        payload["tool"] = (
+            "workflow.approval"
+            if str(run.get("kind") or "") == "workflow_run"
+            else "tool.approval"
+        )
+    if parent_run_id:
+        payload["parent_run_id"] = str(parent_run_id)
+    return payload
 
 
 class WorkflowCancellationProjectionCoordinator:
@@ -208,6 +238,18 @@ class WorkflowCancellationProjectionCoordinator:
             if isinstance(event, dict)
         ]
         child_timeline.append(self._timeline("run.cancelled", "Parent Workflow cancelled"))
+        approval_cancelled = pending_approval_cancelled_event_payload(
+            child_run_id,
+            child_run,
+            reason="Parent Workflow cancelled",
+            parent_run_id=parent_run_id,
+        )
+        if approval_cancelled:
+            self._append_run_event(
+                child_run_id,
+                "approval.cancelled",
+                approval_cancelled,
+            )
         self._append_run_event(
             child_run_id,
             "run.cancelled",

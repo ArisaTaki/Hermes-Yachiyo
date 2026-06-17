@@ -5,7 +5,10 @@ from __future__ import annotations
 import threading
 from typing import Any, Callable
 
-from apps.shell.agent.runtime.cancellation import RunCancellationProjection
+from apps.shell.agent.runtime.cancellation import (
+    RunCancellationProjection,
+    pending_approval_cancelled_event_payload,
+)
 
 
 class RuntimeRunCancellationService:
@@ -63,6 +66,11 @@ class RuntimeRunCancellationService:
             )
         else:
             projection = RunCancellationProjection.plain(timeline, self._timeline)
+        approval_cancelled = pending_approval_cancelled_event_payload(
+            run_id,
+            run,
+            reason=projection.result_text,
+        )
         result = self._update_run(
             run_id,
             **projection.update_fields(),
@@ -72,6 +80,12 @@ class RuntimeRunCancellationService:
             if result.get("kind") == "workflow_run"
             else "run.cancelled"
         )
+        if approval_cancelled:
+            self._append_run_event(
+                run_id,
+                "approval.cancelled",
+                approval_cancelled,
+            )
         self._append_run_event(
             run_id,
             cancel_event_type,

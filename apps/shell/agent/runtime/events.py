@@ -712,9 +712,11 @@ def canonical_run_event_aliases(
         "agent.tool.approval_approved": ["tool.approved", "approval.approved"],
         "agent.tool.approval_rejected": ["tool.rejected", "approval.rejected"],
         "agent.tool.approval_timeout": ["approval.timeout"],
+        "agent.tool.approval_cancelled": ["tool.cancelled", "approval.cancelled"],
         "workflow.node.approval_approved": ["approval.approved"],
         "workflow.node.approval_rejected": ["approval.rejected"],
         "workflow.node.approval_timeout": ["approval.timeout"],
+        "workflow.node.approval_cancelled": ["approval.cancelled"],
     }.get(clean_event_type)
     if direct_aliases:
         return direct_aliases

@@ -98,6 +98,68 @@ def test_runtime_run_cancellation_service_cancels_plain_run() -> None:
     ]
 
 
+def test_runtime_run_cancellation_service_records_pending_approval_cancelled_fact() -> None:
+    runs = {
+        "run-approval": {
+            "run_id": "run-approval",
+            "kind": "agent_run",
+            "status": "approval_required",
+            "result": "等待审批：terminal.run",
+            "timeline": [{"event": "agent.tool.approval_required"}],
+            "pending_approval": {
+                "approval_id": "approval-cancel",
+                "tool": "terminal.run",
+                "input_preview": {"command": "npm test"},
+                "requested_at": "2026-06-16T00:00:00Z",
+            },
+        }
+    }
+    events: list[tuple[str, str, dict[str, Any]]] = []
+
+    def update_run(run_id: str, **kwargs: Any) -> dict[str, Any]:
+        runs[run_id] = {**runs[run_id], **kwargs}
+        return runs[run_id]
+
+    service = RuntimeRunCancellationService(
+        get_run=lambda run_id: runs[run_id],
+        update_run=update_run,
+        append_run_event=lambda run_id, event_type, payload: events.append(
+            (run_id, event_type, payload)
+        ),
+        timeline_factory=lambda event, detail="", **payload: {
+            "event": event,
+            "detail": detail,
+            **payload,
+        },
+        workflow_cancellation=object(),
+        workflow_run_is_group_root=lambda _run: False,
+        project_cancelled_workflow_group_if_root=lambda *_args: pytest.fail(
+            "plain run cancellation should not project workflow groups"
+        ),
+        resume_parent_workflows_after_child_update=lambda *_args: pytest.fail(
+            "plain run cancellation should not resume workflow parents"
+        ),
+        project_child_run_transition=lambda result: result,
+        final_statuses={"completed", "failed", "cancelled"},
+    )
+
+    result = service.cancel_once("run-approval")
+
+    assert result["status"] == "cancelled"
+    assert result["pending_approval"] is None
+    assert [event_type for _, event_type, _ in events] == [
+        "approval.cancelled",
+        "run.cancelled",
+    ]
+    approval_payload = events[0][2]
+    assert approval_payload["approval_id"] == "approval-cancel"
+    assert approval_payload["tool"] == "terminal.run"
+    assert approval_payload["input_preview"] == {"command": "npm test"}
+    assert approval_payload["status"] == "cancelled"
+    assert approval_payload["previous_status"] == "approval_required"
+    assert approval_payload["reason"] == "Run cancelled"
+
+
 def test_runtime_run_cancellation_service_returns_terminal_run_without_events() -> None:
     run = {
         "run_id": "run-done",
@@ -224,6 +286,82 @@ def test_runtime_run_cancellation_service_cancels_workflow_root_and_resumes_pare
         (workflow_cancellation.calls[0]["run"], runs["run-workflow"])
     ]
     assert resumed_parents == [result]
+
+
+def test_workflow_cancellation_records_child_pending_approval_cancelled_fact() -> None:
+    runs = {
+        "child-run": {
+            "run_id": "child-run",
+            "kind": "agent_run",
+            "status": "approval_required",
+            "result": "等待审批：terminal.run",
+            "timeline": [{"event": "agent.tool.approval_required"}],
+            "pending_approval": {
+                "approval_id": "approval-child-cancel",
+                "tool": "terminal.run",
+                "input_preview": {"command": "npm test"},
+            },
+        }
+    }
+    parent_timeline = [
+        {
+            "event": "workflow.node.agent",
+            "detail": "Build",
+            "workflow_node_id": "build",
+            "workflow_node_kind": "agent",
+            "workflow_node_label": "Build",
+            "child_run_id": "child-run",
+        },
+        {
+            "event": "workflow.run.approval_required",
+            "child_run_id": "child-run",
+        },
+    ]
+    events: list[tuple[str, str, dict[str, Any]]] = []
+    merged_children: list[tuple[str, str]] = []
+
+    def update_run(run_id: str, **kwargs: Any) -> dict[str, Any]:
+        runs[run_id] = {**runs[run_id], **kwargs}
+        return runs[run_id]
+
+    coordinator = WorkflowCancellationProjectionCoordinator(
+        pending_approval_private=lambda _run_id: None,
+        get_run=lambda run_id: runs[run_id],
+        merge_workflow_child_run_outcome=lambda timeline, _artifacts, child, label: (
+            merged_children.append((child["run_id"], label)),
+            timeline.append({"event": "workflow.child.merged", "child_run_id": child["run_id"]}),
+        ),
+        timeline_factory=lambda event, detail="", **payload: {
+            "event": event,
+            "detail": detail,
+            **payload,
+        },
+        append_run_event=lambda run_id, event_type, payload: events.append(
+            (run_id, event_type, payload)
+        ),
+        update_run=update_run,
+    )
+
+    timeline, artifacts, result_text = coordinator.project_cancelled_workflow_run(
+        "parent-run",
+        {"run_id": "parent-run", "artifacts": []},
+        parent_timeline,
+    )
+
+    assert result_text == "Workflow 已取消：Build"
+    assert artifacts == []
+    assert timeline[-1]["event"] == "workflow.run.cancelled"
+    assert runs["child-run"]["status"] == "cancelled"
+    assert runs["child-run"]["pending_approval"] is None
+    assert [event_type for _, event_type, _ in events] == [
+        "approval.cancelled",
+        "run.cancelled",
+    ]
+    assert events[0][0] == "child-run"
+    assert events[0][2]["approval_id"] == "approval-child-cancel"
+    assert events[0][2]["parent_run_id"] == "parent-run"
+    assert events[0][2]["previous_status"] == "approval_required"
+    assert merged_children == [("child-run", "Build")]
 
 
 def test_run_cancellation_coordinator_serializes_and_cleans_locks() -> None:
