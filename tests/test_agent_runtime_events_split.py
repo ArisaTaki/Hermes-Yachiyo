@@ -105,6 +105,7 @@ def test_runtime_run_event_recorder_appends_compatibility_aliases() -> None:
     assert canonical_run_event_aliases("agent.tool.started") == ["tool.started"]
     assert canonical_run_event_aliases("agent.tool.completed") == ["tool.completed"]
     assert canonical_run_event_aliases("agent.tool.failed") == ["tool.failed"]
+    assert canonical_run_event_aliases("agent.tool.denied") == ["tool.denied"]
     assert canonical_run_event_aliases("agent.tool.approval_required") == [
         "tool.approval_required"
     ]
@@ -139,6 +140,17 @@ def test_runtime_run_event_recorder_appends_compatibility_aliases() -> None:
     assert [call[1] for call in repository.calls] == [
         "workflow.run.started",
         "workflow.started",
+    ]
+
+    repository.calls.clear()
+    recorder.append(
+        "run-1",
+        "agent.tool.denied",
+        {"tool": "terminal.run", "input_preview": {"command": "rm -rf tmp"}},
+    )
+    assert [call[1] for call in repository.calls] == [
+        "agent.tool.denied",
+        "tool.denied",
     ]
 
     repository.calls.clear()

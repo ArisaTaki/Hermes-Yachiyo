@@ -697,6 +697,7 @@ def canonical_run_event_aliases(
         "agent.tool.started": ["tool.started"],
         "agent.tool.completed": ["tool.completed"],
         "agent.tool.failed": ["tool.failed"],
+        "agent.tool.denied": ["tool.denied"],
         "agent.tool.approval_required": ["tool.approval_required"],
         "agent.tool.approval_approved": ["tool.approved", "approval.approved"],
         "agent.tool.approval_rejected": ["tool.rejected", "approval.rejected"],

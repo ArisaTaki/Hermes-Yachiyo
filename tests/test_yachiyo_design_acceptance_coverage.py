@@ -573,6 +573,7 @@ def test_runtime_core_split_acceptance_paths_are_guarded() -> None:
             "def canonical_tool_event_payload",
             "def model_request_started_payload",
             "def task_run_event_payload",
+            '"agent.tool.denied": ["tool.denied"]',
         ],
     )
     _assert_contains(
