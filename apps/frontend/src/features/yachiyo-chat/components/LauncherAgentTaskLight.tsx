@@ -14,8 +14,41 @@ type LauncherTaskApprovalHandler = (
   approval: ApprovalCardSnapshot,
 ) => unknown | Promise<unknown>;
 type LauncherTaskCancelHandler = (task: AgentTaskSnapshot) => unknown | Promise<unknown>;
+type LauncherAgentTaskTestIds = {
+  approvalActions: string;
+  approve: string;
+  cancel: string;
+  detail: string;
+  light: string;
+  openChat: string;
+  openStudio: string;
+  reject: string;
+};
 
 export type LauncherAgentTask = AgentTaskSnapshot | null | undefined;
+
+const DEFAULT_LAUNCHER_AGENT_TASK_TEST_IDS: Record<LauncherTaskMode, LauncherAgentTaskTestIds> = {
+  bubble: {
+    approvalActions: 'bubble-launcher-agent-task-approval-actions',
+    approve: 'bubble-launcher-agent-task-approve',
+    cancel: 'bubble-launcher-agent-task-cancel',
+    detail: 'bubble-launcher-agent-task-detail',
+    light: 'bubble-launcher-agent-task-light',
+    openChat: 'bubble-launcher-agent-task-open-chat',
+    openStudio: 'bubble-launcher-agent-task-open-studio',
+    reject: 'bubble-launcher-agent-task-reject',
+  },
+  live2d: {
+    approvalActions: 'live2d-launcher-agent-task-approval-actions',
+    approve: 'live2d-launcher-agent-task-approve',
+    cancel: 'live2d-launcher-agent-task-cancel',
+    detail: 'live2d-launcher-agent-task-detail',
+    light: 'live2d-launcher-agent-task-light',
+    openChat: 'live2d-launcher-agent-task-open-chat',
+    openStudio: 'live2d-launcher-agent-task-open-studio',
+    reject: 'live2d-launcher-agent-task-reject',
+  },
+};
 
 export function launcherAgentTaskSummary(task: LauncherAgentTask) {
   if (!task) return '';
@@ -82,6 +115,23 @@ export function launcherAgentTaskLightSnapshot(task: LauncherAgentTask): AgentTa
   };
 }
 
+function launcherAgentTaskTestIds(
+  mode: LauncherTaskMode,
+  testIdPrefix: string,
+): LauncherAgentTaskTestIds {
+  if (testIdPrefix === `${mode}-launcher`) return DEFAULT_LAUNCHER_AGENT_TASK_TEST_IDS[mode];
+  return {
+    approvalActions: `${testIdPrefix}-agent-task-approval-actions`,
+    approve: `${testIdPrefix}-agent-task-approve`,
+    cancel: `${testIdPrefix}-agent-task-cancel`,
+    detail: `${testIdPrefix}-agent-task-detail`,
+    light: `${testIdPrefix}-agent-task-light`,
+    openChat: `${testIdPrefix}-agent-task-open-chat`,
+    openStudio: `${testIdPrefix}-agent-task-open-studio`,
+    reject: `${testIdPrefix}-agent-task-reject`,
+  };
+}
+
 export function LauncherAgentTaskLight({
   mode,
   onApproveApproval,
@@ -114,6 +164,7 @@ export function LauncherAgentTaskLight({
   const detail = lightTask.detail || launcherAgentTaskDetail(currentTask);
   const canHandleApproval = Boolean(approval && (onApproveApproval || onRejectApproval));
   const canCancel = Boolean(onCancelTask && launcherAgentTaskCanCancel(currentTask));
+  const testIds = launcherAgentTaskTestIds(mode, testIdPrefix);
   async function handleApproval(action: LauncherTaskApprovalAction) {
     if (!approval || taskAction) return;
     const handler = action === 'approve' ? onApproveApproval : onRejectApproval;
@@ -139,12 +190,12 @@ export function LauncherAgentTaskLight({
       className={`launcher-agent-task-light ${launcherAgentTaskTone(status)} ${variant === 'panel' ? 'is-panel' : ''}`}
       data-run-id={runId}
       data-task-id={currentTask.task_id}
-      data-testid={`${testIdPrefix}-agent-task-light`}
+      data-testid={testIds.light}
     >
       <button
         type="button"
         className="launcher-agent-task-main"
-        data-testid={`${testIdPrefix}-agent-task-open-chat`}
+        data-testid={testIds.openChat}
         onClick={(event) => {
           event.preventDefault();
           event.stopPropagation();
@@ -155,7 +206,7 @@ export function LauncherAgentTaskLight({
         <span>{launcherAgentTaskStatusLabel(status)}</span>
         <strong>{taskTitle}</strong>
         {detail ? (
-          <small data-testid={`${testIdPrefix}-agent-task-detail`}>{detail}</small>
+          <small data-testid={testIds.detail}>{detail}</small>
         ) : null}
         {needsAction ? <em>待处理</em> : null}
       </button>
@@ -165,7 +216,7 @@ export function LauncherAgentTaskLight({
           className="launcher-agent-task-studio"
           data-run-id={runId}
           data-studio-url={studioUrl}
-          data-testid={`${testIdPrefix}-agent-task-open-studio`}
+          data-testid={testIds.openStudio}
           onClick={(event) => {
             event.preventDefault();
             event.stopPropagation();
@@ -177,13 +228,13 @@ export function LauncherAgentTaskLight({
         </a>
       ) : null}
       {canHandleApproval || canCancel ? (
-        <div className="launcher-agent-task-actions" data-testid={`${testIdPrefix}-agent-task-approval-actions`}>
+        <div className="launcher-agent-task-actions" data-testid={testIds.approvalActions}>
           {canHandleApproval ? (
             <>
               <button
                 type="button"
                 className="launcher-agent-task-action approve"
-                data-testid={`${testIdPrefix}-agent-task-approve`}
+                data-testid={testIds.approve}
                 disabled={Boolean(taskAction) || !onApproveApproval}
                 onClick={(event) => {
                   event.preventDefault();
@@ -197,7 +248,7 @@ export function LauncherAgentTaskLight({
               <button
                 type="button"
                 className="launcher-agent-task-action reject"
-                data-testid={`${testIdPrefix}-agent-task-reject`}
+                data-testid={testIds.reject}
                 disabled={Boolean(taskAction) || !onRejectApproval}
                 onClick={(event) => {
                   event.preventDefault();
@@ -214,7 +265,7 @@ export function LauncherAgentTaskLight({
             <button
               type="button"
               className="launcher-agent-task-action cancel"
-              data-testid={`${testIdPrefix}-agent-task-cancel`}
+              data-testid={testIds.cancel}
               disabled={Boolean(taskAction)}
               onClick={(event) => {
                 event.preventDefault();

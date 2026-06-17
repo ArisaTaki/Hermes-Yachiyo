@@ -786,8 +786,8 @@ def test_verifier_scans_legacy_protocol_and_workspace_tokens(tmp_path):
         messages_by_path.setdefault(finding.path, []).append(finding.message)
     assert "contains legacy product token 'run_yachiyo'" in messages_by_path[bundle]
     assert "contains legacy product token 'yachiyo_group_dispatch'" in messages_by_path[bundle]
-    assert "contains legacy product token 'yachiyo_agent'" in messages_by_path[bundle]
     assert "contains legacy product token 'Runtime: Yachiyo Agent Runtime'" in messages_by_path[bundle]
+    assert "contains legacy product token 'yachiyo_agent'" not in messages_by_path[bundle]
     assert "path contains legacy product token 'configs/yachiyo.json'" in messages_by_path[old_workspace_config]
 
 

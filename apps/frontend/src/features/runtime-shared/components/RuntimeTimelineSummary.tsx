@@ -14,11 +14,13 @@ export type RuntimeTimelineEventSnapshot = {
 
 export function RuntimeTimelineSummary({
   className = 'runtime-timeline-summary',
+  eventTestId,
   events,
   limit = 3,
   testId = 'runtime-timeline-summary',
 }: {
   className?: string;
+  eventTestId?: string;
   events: RuntimeTimelineEventSnapshot[];
   limit?: number;
   testId?: string;
@@ -28,7 +30,7 @@ export function RuntimeTimelineSummary({
   return (
     <RuntimeTimelineEventList
       className={className}
-      eventTestId={`${testId}-event`}
+      eventTestId={eventTestId || `${testId}-event`}
       events={visibleEvents as RuntimeTimelineEventRecord[]}
       getEventDetail={(event) => runtimeTimelineEventDetail(event as RuntimeTimelineEventSnapshot)}
       getEventName={(event) => String(event.event_type || event.title || 'event').trim()}

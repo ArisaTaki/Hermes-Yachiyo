@@ -100,6 +100,7 @@ export function AgentTaskCard({
       {timelineEvents.length ? (
         <RuntimeTimelineSummary
           className="yachiyo-agent-task-timeline"
+          eventTestId="yachiyo-agent-task-timeline-event"
           events={timelineSummaryEvents}
           testId="yachiyo-agent-task-timeline"
         />
