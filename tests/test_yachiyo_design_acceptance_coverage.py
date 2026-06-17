@@ -300,6 +300,92 @@ def test_chat_daily_entry_acceptance_paths_are_guarded() -> None:
     )
 
 
+def test_shared_runtime_surface_components_acceptance_paths_are_guarded() -> None:
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/ApprovalCard.tsx",
+        [
+            "RuntimeApprovalGate",
+            "RuntimeApprovalCard",
+            'cardVariant="compact"',
+            'variant="compact"',
+            'approveTestId="yachiyo-task-approval-approve"',
+            'rejectTestId="yachiyo-task-approval-reject"',
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/ArtifactPreview.tsx",
+        [
+            "RuntimeReadableArtifactPreview",
+            "readYachiyoRunArtifact(sourceRunId, artifactPath)",
+            "readYachiyoTaskArtifact(taskId, artifactPath)",
+            'previewVariant="compact"',
+            'previewTestId="yachiyo-task-artifact-preview"',
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/AgentTaskCard.tsx",
+        [
+            "RuntimeTimelineSummary",
+            'testId="yachiyo-agent-task-timeline"',
+            "<ApprovalCard",
+            "<ArtifactPreview artifact={artifact}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/ApprovalInspector.tsx",
+        [
+            "RuntimeApprovalGate",
+            "RuntimeApprovalCard",
+            'cardVariant="inspector"',
+            'variant="inspector"',
+            'testId="agent-run-detail-approval"',
+            'testId="agent-run-detail-approval-history-card"',
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/ArtifactInspector.tsx",
+        [
+            "RuntimeArtifactList",
+            'previewVariant="full"',
+            'testId="agent-run-detail-artifact-list"',
+            'previewTestId="agent-run-detail-artifact-preview-card"',
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/RunTimeline.tsx",
+        [
+            "RuntimeTimelinePanel",
+            'eventTestId="agent-run-detail-execution-event"',
+            'panelTestId="agent-run-detail-execution"',
+            "onLoadMoreEvents={replayEventCount ? onLoadMoreEvents : undefined}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/runtime-shared/components/RuntimeApprovalCard.tsx",
+        [
+            "export type RuntimeApprovalVariant",
+            "variant = 'compact'",
+            "data-approval-variant={variant}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/runtime-shared/components/RuntimeArtifactPreview.tsx",
+        [
+            "export type RuntimeArtifactVariant",
+            "variant = 'compact'",
+            "data-artifact-variant={variant}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/runtime-shared/components/RuntimeTimelinePanel.tsx",
+        [
+            "RuntimeTimelineEventList",
+            "replayHasMore && onLoadMoreEvents",
+            "data-testid={loadMoreTestId}",
+        ],
+    )
+
+
 def test_light_launcher_entry_acceptance_paths_are_guarded() -> None:
     _assert_contains(
         "apps/frontend/src/views/LauncherView.tsx",
