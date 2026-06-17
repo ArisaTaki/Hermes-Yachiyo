@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from apps.shell.agent.runtime.events import redact_secrets
+
 from .contracts import MemorySnapshot
 
 
@@ -40,7 +42,7 @@ def _float(value: Any) -> float:
 
 
 def _text(value: Any) -> str:
-    return str(value or "").strip()
+    return str(redact_secrets(value) or "").strip()
 
 
 def _optional_text(value: Any) -> str | None:

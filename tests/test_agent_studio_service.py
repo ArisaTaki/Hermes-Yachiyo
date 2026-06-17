@@ -527,6 +527,47 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
     ) in port.calls
 
 
+def test_agent_studio_service_redacts_sensitive_public_memory_and_future_task_text() -> None:
+    class _SensitiveStudioPort:
+        def list_memories(
+            self,
+            include_deleted: bool = False,
+            limit: int = 100,
+        ) -> dict[str, Any]:
+            return {
+                "memories": [
+                    _memory_payload(
+                        content="Never store token sk-sensitive-value in public memory."
+                    )
+                ]
+            }
+
+        def list_future_tasks(
+            self,
+            include_finished: bool = True,
+            limit: int = 100,
+        ) -> dict[str, Any]:
+            return {
+                "future_tasks": [
+                    _future_task_payload(
+                        prompt="Follow up with bearer sensitive-token-value.",
+                        error="authorization: bearer sensitive-token-value failed",
+                    )
+                ]
+            }
+
+    service = AgentStudioService(_SensitiveStudioPort())
+
+    memories = service.list_memories()
+    future_tasks = service.list_future_tasks()
+
+    assert "sk-sensitive-value" not in memories[0].content
+    assert "[redacted]" in memories[0].content
+    assert "sensitive-token-value" not in future_tasks[0].prompt
+    assert "sensitive-token-value" not in str(future_tasks[0].error)
+    assert "[redacted]" in future_tasks[0].prompt
+
+
 def test_agent_studio_service_maps_group_run_workflow_run_timeline_and_events() -> None:
     port = _FakeStudioPort()
     service = AgentStudioService(port)
@@ -1030,6 +1071,8 @@ def _memory_payload(
 
 def _future_task_payload(
     future_task_id: str = "future-1",
+    prompt: str = "Follow up on the report",
+    error: str = "",
     status: str = "scheduled",
     last_run_id: str = "",
     run_count: int = 0,
@@ -1038,7 +1081,7 @@ def _future_task_payload(
     return {
         "future_task_id": future_task_id,
         "title": "Follow up later",
-        "prompt": "Follow up on the report",
+        "prompt": prompt,
         "runnable_id": "agent-1",
         "runnable_name": "Planner",
         "status": status,
@@ -1047,7 +1090,7 @@ def _future_task_payload(
         "source_run_id": "run-source-1",
         "last_run_id": last_run_id,
         "run_count": run_count,
-        "error": "",
+        "error": error,
         "created_at": "2026-06-14T00:00:00Z",
         "updated_at": "2026-06-14T00:00:01Z",
         "cancelled_at": cancelled_at,

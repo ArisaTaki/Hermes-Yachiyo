@@ -664,6 +664,23 @@ def test_runtime_core_split_acceptance_paths_are_guarded() -> None:
         ],
     )
     _assert_contains(
+        "apps/shell/yachiyo_agent/future_tasks.py",
+        [
+            "redact_secrets",
+            "def future_task_snapshot_from_payload",
+            "prompt=_text(raw.get(\"prompt\"))",
+            "error=_optional_text(raw.get(\"error\"))",
+        ],
+    )
+    _assert_contains(
+        "apps/shell/yachiyo_agent/memories.py",
+        [
+            "redact_secrets",
+            "def memory_snapshot_from_payload",
+            "content=_text(payload.get(\"content\"))",
+        ],
+    )
+    _assert_contains(
         "apps/shell/agent/runtime/agent_preparation.py",
         [
             "def write_context_artifact",

@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from apps.shell.agent.runtime.events import redact_secrets
+
 from .contracts import FutureTaskSnapshot, FutureTaskTriggerResultSnapshot
 from .timelines import run_timeline_snapshot_from_payload
 
@@ -13,8 +15,8 @@ def future_task_snapshot_from_payload(payload: Mapping[str, Any] | None) -> Futu
     raw = payload if isinstance(payload, Mapping) else {}
     return FutureTaskSnapshot(
         future_task_id=str(raw.get("future_task_id") or ""),
-        title=str(raw.get("title") or ""),
-        prompt=str(raw.get("prompt") or ""),
+        title=_text(raw.get("title")),
+        prompt=_text(raw.get("prompt")),
         runnable_id=_optional_text(raw.get("runnable_id")),
         runnable_name=_optional_text(raw.get("runnable_name")),
         status=str(raw.get("status") or "scheduled"),
@@ -53,8 +55,12 @@ def future_task_trigger_result_snapshot_from_payload(
 
 
 def _optional_text(value: Any) -> str | None:
-    text = str(value or "").strip()
+    text = _text(value)
     return text or None
+
+
+def _text(value: Any) -> str:
+    return str(redact_secrets(value) or "").strip()
 
 
 def _float(value: Any) -> float:

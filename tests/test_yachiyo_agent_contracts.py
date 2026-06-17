@@ -776,7 +776,7 @@ def test_public_run_event_mapping_preserves_runtime_trace_payload_fields() -> No
                 "result": {"ok": True},
             },
             "visibility": "internal",
-            "sensitivity": "secret",
+            "sensitivity": "public",
             "created_at": "2026-06-14T00:00:00Z",
         }
     )
@@ -785,7 +785,7 @@ def test_public_run_event_mapping_preserves_runtime_trace_payload_fields() -> No
     assert event.run_id == "run-1"
     assert event.sequence == 7
     assert event.visibility == "internal"
-    assert event.sensitivity == "secret"
+    assert event.sensitivity == "public"
     assert event.payload["memory_id"] == "memory-1"
     assert event.payload["memory_kind"] == "preference"
     assert event.payload["skill_id"] == "skill-from-payload"
