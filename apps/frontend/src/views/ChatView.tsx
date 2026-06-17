@@ -86,7 +86,7 @@ import {
   chatApprovalRejectionCompletionStatusText,
   chatRunCompletionProcessingState,
 } from '../features/yachiyo-chat/runPolling';
-import { groupRunIdFromStudioUrl, runIdFromStudioUrl } from '../features/runtime-shared/studioLinks';
+import { openYachiyoStudioRun, openYachiyoWorkflowStudio } from '../features/yachiyo-chat/studioNavigation';
 import {
   activeMentions,
   mentionKindLabel,
@@ -141,7 +141,7 @@ import type {
 import logoUrl from '../../../../docs/open-design/logo.png';
 import { type AssistantProfileSeed, useAssistantProfileSeed } from '../lib/assistantProfileSeed';
 import { apiGet, apiPatch, apiPost, bridgeUrl, canChooseChatImages, chooseChatImages, copyText, openAppView, openExternalUrl, restartDesktopBridge, type ChatImageSelection } from '../lib/bridge';
-import { ROUTE_CHANGE_EVENT, currentParam, navigateTo } from '../lib/view';
+import { ROUTE_CHANGE_EVENT, currentParam } from '../lib/view';
 
 type ChatViewProps = {
   embedded?: boolean;
@@ -1553,26 +1553,11 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   }
 
   function openRunDetails(runId: string | undefined, studioUrl = '') {
-    const clean = runIdFromStudioUrl(studioUrl) || String(runId || '').trim();
-    if (!clean) return;
-    const groupRunId = groupRunIdFromStudioUrl(studioUrl);
-    navigateTo('agents', {
-      run: clean,
-      ...(groupRunId ? { group_run: groupRunId } : {}),
-    }, ['tab', 'target', 'goal', 'group_run', 'group_run_id', 'run_group_id']);
+    openYachiyoStudioRun(runId, studioUrl);
   }
 
   function openWorkflowStudio(runnableId = '', suggestedGoal = '') {
-    const cleanRunnableId = String(runnableId || '').trim();
-    if (cleanRunnableId) {
-      navigateTo('agents', {
-        tab: 'runs',
-        target: cleanRunnableId,
-        goal: String(suggestedGoal || '').trim(),
-      }, ['run']);
-      return;
-    }
-    navigateTo('agents', { tab: 'workflows' }, ['run', 'target', 'goal']);
+    openYachiyoWorkflowStudio(runnableId, suggestedGoal);
   }
 
   function handleMessageListClick(event: ReactMouseEvent<HTMLDivElement>) {

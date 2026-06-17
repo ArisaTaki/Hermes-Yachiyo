@@ -3623,13 +3623,25 @@ def test_chat_approval_run_detail_handoff_preserves_route_and_replay_wiring() ->
         "apps/frontend/src/views/ChatView.tsx",
         [
             "function openRunDetails(runId: string | undefined, studioUrl = '')",
+            "openYachiyoStudioRun(runId, studioUrl);",
+            "function openWorkflowStudio(runnableId = '', suggestedGoal = '')",
+            "openYachiyoWorkflowStudio(runnableId, suggestedGoal);",
+            "onOpenRunDetails={openRunDetails}",
+            "onOpenDetails={() => onOpenRunDetails(runId)}",
+            "onOpenDetails={() => openRunDetails(composerApprovalItem.runId)}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/studioNavigation.ts",
+        [
+            "export function openYachiyoStudioRun(runId: string | undefined, studioUrl = '')",
             "runIdFromStudioUrl(studioUrl) || String(runId || '').trim();",
             "const groupRunId = groupRunIdFromStudioUrl(studioUrl);",
             "group_run: groupRunId",
             "['tab', 'target', 'goal', 'group_run', 'group_run_id', 'run_group_id']",
-            "onOpenRunDetails={openRunDetails}",
-            "onOpenDetails={() => onOpenRunDetails(runId)}",
-            "onOpenDetails={() => openRunDetails(composerApprovalItem.runId)}",
+            "export function openYachiyoWorkflowStudio(runnableId = '', suggestedGoal = '')",
+            "navigateTo('agents', {",
+            "navigateTo('agents', { tab: 'workflows' }, ['run', 'target', 'goal']);",
         ],
     )
     _assert_contains(
