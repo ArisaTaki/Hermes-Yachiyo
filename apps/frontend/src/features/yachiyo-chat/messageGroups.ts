@@ -76,6 +76,11 @@ export function groupFollowupAgentMessageIdsAttribute(message?: ChatMessage | nu
   return metadataListAttribute(message?.metadata?.group_followup_for_agent_message_ids);
 }
 
+export function isMissingGroupEditRouteError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error || '');
+  return /\b(?:HTTP 404|404|Not Found)\b/i.test(message);
+}
+
 function groupAgentSummarySubject(metadata: ChatMessageMetadata) {
   const hasGroupDispatch = (
     metadata.group_dispatch_count !== undefined

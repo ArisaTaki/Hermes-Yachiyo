@@ -51,6 +51,7 @@ import {
   messageText,
   normalizeRunStatus,
 } from '../features/yachiyo-chat/messageState';
+import { isMissingGroupEditRouteError } from '../features/yachiyo-chat/messageGroups';
 import { taskHandoffMessageId } from '../features/yachiyo-chat/messageTaskHandoff';
 import {
   COMPOSER_HEIGHT_STORAGE_KEY,
@@ -2061,9 +2062,4 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       {confirmDialog}
     </section>
   );
-}
-
-function isMissingGroupEditRouteError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error || '');
-  return /\b(?:HTTP 404|404|Not Found)\b/i.test(message);
 }
