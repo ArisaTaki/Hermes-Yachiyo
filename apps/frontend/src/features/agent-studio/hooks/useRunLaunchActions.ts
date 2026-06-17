@@ -10,6 +10,7 @@ import {
   startYachiyoAgentRun,
   startYachiyoWorkflowRun,
 } from '../../yachiyo-studio/api';
+import type { RerunRunRequest } from '../../yachiyo-studio/types';
 import { publicRunTimelineToRunSpec } from '../utils/runs';
 
 export type RunLaunchActionRefreshOptions = {
@@ -164,9 +165,49 @@ export function useRunLaunchActions({
     upsertRunDetailCache,
   ]);
 
+  const rerunWorkflowScope = useCallback(async (
+    request: RerunRunRequest,
+  ): Promise<RunLaunchActionRefreshOptions> => {
+    if (!selectedRun) throw new Error('请选择要重跑的 Workflow Run');
+    if (selectedRun.kind !== 'workflow_run') throw new Error('只能重跑 Workflow 节点或分支。');
+    if (!['completed', 'failed', 'cancelled'].includes(selectedRun.status)) {
+      throw new Error('当前 Workflow Run 还在进行中，请完成、失败或取消后再重跑。');
+    }
+    if (!selectedRun.user_goal?.trim()) throw new Error('原 Workflow Run 没有记录任务目标，无法重跑。');
+    const workflowTargetId = selectedRunRerunTarget?.id || selectedRun.runnable_id;
+    if (!workflowTargetId) throw new Error('找不到原 Workflow，无法重跑。');
+    const run = publicRunTimelineToRunSpec(
+      await rerunYachiyoRun(selectedRun.run_id, request),
+      {
+        kind: 'workflow_run',
+        runnableId: selectedRun.runnable_id,
+        runnableName: selectedRun.runnable_name,
+        userGoal: selectedRun.user_goal,
+      },
+    );
+    upsertRunDetailCache([run]);
+    await refreshRunGroupsForRuns([run]);
+    openRunDetail(run.run_id, { revealInHistory: true });
+    return {
+      selectedWorkflowId: workflowTargetId,
+      selectedRunId: run.run_id,
+      runTarget: workflowTargetId,
+      statusMessage: request.scope === 'workflow_branch'
+        ? '已从 Workflow 分支重新运行。'
+        : '已从 Workflow 节点重新运行。',
+    };
+  }, [
+    openRunDetail,
+    refreshRunGroupsForRuns,
+    selectedRun,
+    selectedRunRerunTarget,
+    upsertRunDetailCache,
+  ]);
+
   return {
     createRunFromTarget,
     prepareSelectedRunRerun,
+    rerunWorkflowScope,
     rerunSelectedRun,
     runCurrentAgent,
     runCurrentWorkflow,

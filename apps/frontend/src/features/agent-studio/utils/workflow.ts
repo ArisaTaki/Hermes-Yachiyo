@@ -25,6 +25,8 @@ export type WorkflowStepRef = {
   artifactPath?: string;
   artifactCount?: number;
   task?: string;
+  selectedBranch?: string;
+  selectedTargetNodeId?: string;
 };
 
 export type WorkflowValidationReport = {
@@ -845,6 +847,8 @@ export function workflowStepRefs(run: RunSpec | null, workflow: WorkflowSpec | n
         status: timelineStatus(event) || 'completed',
         payload: `条件${matched ? '命中' : '未命中'}，选择 ${branch || 'unknown'}${target ? ` -> ${target}` : ''}`,
         task: condition,
+        selectedBranch: branch,
+        selectedTargetNodeId: target,
       });
       return;
     }
@@ -877,6 +881,8 @@ export function workflowStepRefs(run: RunSpec | null, workflow: WorkflowSpec | n
         status: timelineStatus(event) || 'completed',
         payload: `循环${branch === 'continue' ? '继续' : '退出'} · ${iteration}/${maxIterations || '?'}${limitReached ? ' · 已达到上限' : ''}${target ? ` -> ${target}` : ''}`,
         task: condition,
+        selectedBranch: branch,
+        selectedTargetNodeId: target,
       });
       return;
     }

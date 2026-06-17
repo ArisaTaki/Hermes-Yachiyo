@@ -19,6 +19,7 @@ export type {
   MemorySnapshot,
   MemoryTraceSnapshot,
   PublicRunEvent,
+  RerunRunRequest,
   RunEventPageSnapshot,
   RunTimelineChildSnapshot,
   RunTimelineSnapshot,

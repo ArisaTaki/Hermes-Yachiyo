@@ -690,6 +690,7 @@ export function AgentStudioView() {
   const {
     createRunFromTarget,
     prepareSelectedRunRerun,
+    rerunWorkflowScope,
     rerunSelectedRun,
     runCurrentAgent,
     runCurrentWorkflow,
@@ -1034,6 +1035,7 @@ export function AgentStudioView() {
           onRequestCancelSelectedRun={requestCancelSelectedRun}
           onRequestDeleteSelectedRuns={requestDeleteSelectedRuns}
           onRerunSelectedRun={rerunSelectedRun}
+          onRerunWorkflowScope={rerunWorkflowScope}
           onRunAction={(action, label) => void runAction(action, label)}
           onRunGoalChange={setRunGoal}
           onRunSearchQueryChange={setRunSearchQuery}

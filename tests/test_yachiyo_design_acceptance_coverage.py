@@ -1042,7 +1042,7 @@ def test_run_replay_rerun_and_workflow_branch_acceptance_paths_are_guarded() -> 
         "apps/bridge/routes/yachiyo.py",
         [
             '@router.post("/studio/runs/{run_id}/rerun")',
-            "return await yachiyo_studio_handlers.rerun_run(run_id, http_request)",
+            "return await yachiyo_studio_handlers.rerun_run(run_id, request_body, http_request)",
             '@router.get("/studio/runs/{run_id}/events")',
         ],
     )
@@ -1051,6 +1051,7 @@ def test_run_replay_rerun_and_workflow_branch_acceptance_paths_are_guarded() -> 
         [
             "export async function listYachiyoRunEvents",
             "export async function rerunYachiyoRun",
+            "request: RerunRunRequest = {}",
             "/yachiyo/studio/runs/${encodeURIComponent(runId)}/events?${query.toString()}",
             "/yachiyo/studio/runs/${encodeURIComponent(runId)}/rerun",
         ],
@@ -1060,6 +1061,8 @@ def test_run_replay_rerun_and_workflow_branch_acceptance_paths_are_guarded() -> 
         [
             "const rerunSelectedRun = useCallback",
             "await rerunYachiyoRun(selectedRun.run_id)",
+            "const rerunWorkflowScope = useCallback",
+            "await rerunYachiyoRun(selectedRun.run_id, request)",
             "openRunDetail(run.run_id, { revealInHistory: true });",
         ],
     )
@@ -1070,6 +1073,7 @@ def test_run_replay_rerun_and_workflow_branch_acceptance_paths_are_guarded() -> 
             'data-testid="agent-run-detail-rerun"',
             'data-testid="agent-run-detail-rerun-source"',
             "onRerunSelectedRun",
+            "onRerunWorkflowScope",
         ],
     )
     _assert_contains(
@@ -1078,6 +1082,8 @@ def test_run_replay_rerun_and_workflow_branch_acceptance_paths_are_guarded() -> 
             "class RuntimeRunRerunService",
             '"run.rerun.started"',
             '"source": "rerun"',
+            '"start_node_id": rerun_request["workflow_start_node_id"]',
+            '"rerun_scope": rerun_request["scope"]',
             '"original_goal": user_goal',
         ],
     )
@@ -1108,6 +1114,8 @@ def test_run_replay_rerun_and_workflow_branch_acceptance_paths_are_guarded() -> 
         [
             "workflow_node_selected_branch",
             "workflow_node_selected_target",
+            "selectedBranch: branch",
+            "selectedTargetNodeId: target",
             "workflow_node_branch_count",
             "workflow_node_completed_branch_count",
         ],
@@ -1116,6 +1124,8 @@ def test_run_replay_rerun_and_workflow_branch_acceptance_paths_are_guarded() -> 
         "scripts/smoke_agent_run_detail_ui.mjs",
         [
             'data-testid="agent-run-detail-rerun"',
+            "agent-run-detail-workflow-step-rerun-branch",
+            "workflow scoped branch rerun detail",
             "run.rerun.started",
             "rerun replay events",
             "loaded more run event replay page",

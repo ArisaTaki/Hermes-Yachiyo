@@ -13,6 +13,7 @@ const VITE = path.join(FRONTEND, 'node_modules', '.bin', process.platform === 'w
 const RUN_ID = 'agent_run_detail_ui_smoke';
 const APPROVAL_RUN_ID = 'agent_run_detail_ui_smoke_approval';
 const WORKFLOW_RUN_ID = 'workflow_run_detail_ui_smoke_child_approval';
+const WORKFLOW_SCOPED_RERUN_RUN_ID = 'workflow_run_detail_ui_smoke_scoped_rerun';
 const WORKFLOW_CHILD_RUN_ID = 'agent_run_detail_ui_smoke_workflow_child';
 const WORKFLOW_REJECT_RUN_ID = 'workflow_run_detail_ui_smoke_child_reject';
 const WORKFLOW_REJECT_CHILD_RUN_ID = 'agent_run_detail_ui_smoke_workflow_child_reject';
@@ -53,9 +54,11 @@ let approvalApproved = false;
 let workflowChildApproved = false;
 let workflowChildRejected = false;
 let workflowChildCancelled = false;
+let workflowScopedRerunCreated = false;
 let activeRunCancelled = false;
 const runEventRequests = [];
 const deletedRunIds = [];
+const scopedRerunRequests = [];
 
 const run = {
   run_id: RUN_ID,
@@ -235,6 +238,29 @@ function workflowRun() {
   };
 }
 
+function workflowScopedRerun() {
+  return {
+    run_id: WORKFLOW_SCOPED_RERUN_RUN_ID,
+    run_group_id: WORKFLOW_RUN_GROUP_ID,
+    run_group_source: 'rerun',
+    task_id: WORKFLOW_TASK_ID,
+    session_id: WORKFLOW_SESSION_ID,
+    task_run_link_run_status: 'completed',
+    task_run_link_last_event_sequence: 3,
+    kind: 'workflow_run',
+    runnable_id: WORKFLOW_ID,
+    runnable_name: 'Run Detail Child Approval Workflow',
+    status: 'completed',
+    user_goal: 'Approve Workflow child from Run Detail smoke',
+    result: 'Workflow scoped rerun completed from selected branch',
+    timeline: [],
+    artifacts: [],
+    created_at: now,
+    updated_at: now,
+    workflow_run_id: WORKFLOW_SCOPED_RERUN_RUN_ID,
+  };
+}
+
 function activeCancelRun() {
   return {
     run_id: ACTIVE_CANCEL_RUN_ID,
@@ -285,7 +311,11 @@ function workflowRunGroup() {
     source: 'workflow',
     status: workflowChildApproved ? 'completed' : 'approval_required',
     summary: workflowChildApproved ? 'Workflow child approval completed' : 'Workflow waiting for child approval',
-    child_run_ids: [WORKFLOW_RUN_ID, WORKFLOW_CHILD_RUN_ID],
+    child_run_ids: [
+      ...(workflowScopedRerunCreated ? [WORKFLOW_SCOPED_RERUN_RUN_ID] : []),
+      WORKFLOW_RUN_ID,
+      WORKFLOW_CHILD_RUN_ID,
+    ],
     created_at: now,
     updated_at: now,
   };
@@ -678,6 +708,63 @@ const rerunEvents = [
   },
 ];
 
+function workflowScopedRerunEvents() {
+  const request = scopedRerunRequests[scopedRerunRequests.length - 1] || {};
+  return [
+    {
+      event_id: 'event-workflow-scoped-rerun-1',
+      run_id: WORKFLOW_SCOPED_RERUN_RUN_ID,
+      sequence: 1,
+      schema_version: 1,
+      event_type: 'run.rerun.started',
+      actor: 'runtime',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: {
+        rerun_of_run_id: WORKFLOW_RUN_ID,
+        rerun_of_kind: 'workflow_run',
+        rerun_of_status: 'completed',
+        rerun_of_runnable_id: WORKFLOW_ID,
+        rerun_of_runnable_name: 'Run Detail Child Approval Workflow',
+        rerun_scope: request.scope || 'workflow_branch',
+        workflow_node_id: request.workflow_node_id || 'route',
+        workflow_edge_branch: request.workflow_edge_branch || 'true',
+        workflow_node_selected_target: request.workflow_node_selected_target || 'agent-1',
+        workflow_start_node_id: request.workflow_node_selected_target || 'agent-1',
+      },
+      created_at: now,
+    },
+    {
+      event_id: 'event-workflow-scoped-rerun-2',
+      run_id: WORKFLOW_SCOPED_RERUN_RUN_ID,
+      sequence: 2,
+      schema_version: 1,
+      event_type: 'workflow.node.agent',
+      actor: 'workflow',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: {
+        workflow_node_id: 'agent-1',
+        workflow_node_label: 'Coding Agent',
+        status: 'completed',
+      },
+      created_at: now,
+    },
+    {
+      event_id: 'event-workflow-scoped-rerun-3',
+      run_id: WORKFLOW_SCOPED_RERUN_RUN_ID,
+      sequence: 3,
+      schema_version: 1,
+      event_type: 'workflow.run.completed',
+      actor: 'workflow',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: { result: 'Workflow scoped rerun completed from selected branch' },
+      created_at: now,
+    },
+  ];
+}
+
 function approvalRunEvents() {
   const events = [
     {
@@ -766,6 +853,26 @@ function workflowRunEvents() {
       run_id: WORKFLOW_RUN_ID,
       sequence: 2,
       schema_version: 1,
+      event_type: 'workflow.node.condition',
+      actor: 'workflow',
+      visibility: 'user',
+      sensitivity: 'normal',
+      payload: {
+        workflow_node_id: 'route',
+        workflow_node_label: 'Route',
+        workflow_node_condition: 'approve',
+        workflow_node_condition_matched: true,
+        workflow_node_selected_branch: 'true',
+        workflow_node_selected_target: 'agent-1',
+        status: 'completed',
+      },
+      created_at: now,
+    },
+    {
+      event_id: 'event-workflow-child-smoke-3',
+      run_id: WORKFLOW_RUN_ID,
+      sequence: 3,
+      schema_version: 1,
       event_type: 'workflow.node.agent',
       actor: 'workflow',
       visibility: 'user',
@@ -783,9 +890,9 @@ function workflowRunEvents() {
     return [
       ...events,
       {
-        event_id: 'event-workflow-child-smoke-3',
+        event_id: 'event-workflow-child-smoke-4',
         run_id: WORKFLOW_RUN_ID,
-        sequence: 3,
+        sequence: 4,
         schema_version: 1,
         event_type: 'workflow.run.approval_required',
         actor: 'workflow',
@@ -799,9 +906,9 @@ function workflowRunEvents() {
   return [
     ...events,
     {
-      event_id: 'event-workflow-child-smoke-3',
+      event_id: 'event-workflow-child-smoke-4',
       run_id: WORKFLOW_RUN_ID,
-      sequence: 3,
+      sequence: 4,
       schema_version: 1,
       event_type: 'workflow.run.child_resumed',
       actor: 'workflow',
@@ -811,9 +918,9 @@ function workflowRunEvents() {
       created_at: now,
     },
     {
-      event_id: 'event-workflow-child-smoke-4',
+      event_id: 'event-workflow-child-smoke-5',
       run_id: WORKFLOW_RUN_ID,
-      sequence: 4,
+      sequence: 5,
       schema_version: 1,
       event_type: 'workflow.run.resumed',
       actor: 'workflow',
@@ -823,9 +930,9 @@ function workflowRunEvents() {
       created_at: now,
     },
     {
-      event_id: 'event-workflow-child-smoke-5',
+      event_id: 'event-workflow-child-smoke-6',
       run_id: WORKFLOW_RUN_ID,
-      sequence: 5,
+      sequence: 6,
       schema_version: 1,
       event_type: 'workflow.node.artifact',
       actor: 'workflow',
@@ -840,9 +947,9 @@ function workflowRunEvents() {
       created_at: now,
     },
     {
-      event_id: 'event-workflow-child-smoke-6',
+      event_id: 'event-workflow-child-smoke-7',
       run_id: WORKFLOW_RUN_ID,
-      sequence: 6,
+      sequence: 7,
       schema_version: 1,
       event_type: 'workflow.run.completed',
       actor: 'workflow',
@@ -1185,13 +1292,39 @@ function sendJson(response, statusCode, payload) {
   response.end(JSON.stringify(payload));
 }
 
+function readJsonBody(request) {
+  return new Promise((resolve) => {
+    let body = '';
+    request.on('data', (chunk) => {
+      body += chunk.toString('utf8');
+    });
+    request.on('end', () => {
+      if (!body.trim()) {
+        resolve({});
+        return;
+      }
+      try {
+        resolve(JSON.parse(body));
+      } catch {
+        resolve({});
+      }
+    });
+    request.on('error', () => resolve({}));
+  });
+}
+
 function currentRuns() {
   const runs = [activeCancelRun(), workflowCancelRun(), workflowRejectRun(), workflowRun(), run, approvalRun()];
-  return (rerunCreated ? [rerun, ...runs] : runs).filter((item) => !deletedRunIds.includes(item.run_id));
+  return [
+    ...(workflowScopedRerunCreated ? [workflowScopedRerun()] : []),
+    ...(rerunCreated ? [rerun] : []),
+    ...runs,
+  ].filter((item) => !deletedRunIds.includes(item.run_id));
 }
 
 function currentRunById(runId) {
   const runs = [
+    workflowScopedRerun(),
     activeCancelRun(),
     workflowCancelRun(),
     workflowCancelChildRun(),
@@ -1322,6 +1455,7 @@ function publicRunEvents(runId) {
   if (runId === RUN_ID) return runEvents;
   if (runId === APPROVAL_RUN_ID) return approvalRunEvents();
   if (runId === WORKFLOW_RUN_ID) return workflowRunEvents();
+  if (runId === WORKFLOW_SCOPED_RERUN_RUN_ID) return workflowScopedRerunEvents();
   if (runId === WORKFLOW_CHILD_RUN_ID) return workflowChildRunEvents();
   if (runId === WORKFLOW_REJECT_RUN_ID) return workflowRejectRunEvents();
   if (runId === WORKFLOW_REJECT_CHILD_RUN_ID) return workflowRejectChildRunEvents();
@@ -1333,7 +1467,7 @@ function publicRunEvents(runId) {
 }
 
 async function startMockBridge() {
-  const server = http.createServer((request, response) => {
+  const server = http.createServer(async (request, response) => {
     try {
       if (request.method === 'OPTIONS') {
         sendJson(response, 204, {});
@@ -1416,10 +1550,15 @@ async function startMockBridge() {
             enabled: true,
             nodes: [
               { id: 'start', type: 'input', data: { kind: 'start', label: 'Start' } },
+              { id: 'route', type: 'default', data: { kind: 'condition', label: 'Route', condition: 'approve' } },
               { id: 'agent-1', type: 'default', data: { kind: 'agent', label: 'Coding Agent', agent_id: 'agent-run-detail-smoke', task: 'Approve child Agent from Workflow Run Detail smoke' } },
               { id: 'artifact-1', type: 'output', data: { kind: 'artifact', label: WORKFLOW_ARTIFACT_PATH, path: WORKFLOW_ARTIFACT_PATH } },
             ],
-            edges: [],
+            edges: [
+              { source: 'start', target: 'route' },
+              { source: 'route', target: 'agent-1', branch: 'true' },
+              { source: 'agent-1', target: 'artifact-1' },
+            ],
             created_at: now,
             updated_at: now,
           }],
@@ -1540,6 +1679,13 @@ async function startMockBridge() {
       if (request.method === 'POST' && url.pathname === `/yachiyo/studio/runs/${RUN_ID}/rerun`) {
         rerunCreated = true;
         sendJson(response, 200, publicRunSnapshot(rerun));
+        return;
+      }
+      if (request.method === 'POST' && url.pathname === `/yachiyo/studio/runs/${WORKFLOW_RUN_ID}/rerun`) {
+        const body = await readJsonBody(request);
+        scopedRerunRequests.push(body);
+        workflowScopedRerunCreated = true;
+        sendJson(response, 200, publicRunSnapshot(workflowScopedRerun()));
         return;
       }
       if (request.method === 'DELETE' && url.pathname.startsWith('/yachiyo/studio/runs/')) {
@@ -2175,6 +2321,46 @@ async function main() {
       && runIds.every((id) => id === ${JSON.stringify(WORKFLOW_RUN_ID)});
   }, 'workflow child approval completed parent detail');
   console.log('[electron-smoke] workflow child approval completed parent detail');
+  const scopedRerunButtonState = await win.webContents.executeJavaScript("(() => {"
+    + "const nodeButton = document.querySelector('[data-testid=\\\"agent-run-detail-workflow-step-rerun-node\\\"][data-workflow-node-id=\\\"route\\\"]');"
+    + "const branchButton = document.querySelector('[data-testid=\\\"agent-run-detail-workflow-step-rerun-branch\\\"][data-workflow-node-id=\\\"route\\\"]');"
+    + "return {"
+    + "hasNode: Boolean(nodeButton),"
+    + "hasBranch: Boolean(branchButton),"
+    + "nodeDisabled: Boolean(nodeButton?.disabled),"
+    + "branchDisabled: Boolean(branchButton?.disabled),"
+    + "branch: branchButton?.getAttribute('data-workflow-edge-branch') || '',"
+    + "target: branchButton?.getAttribute('data-workflow-node-selected-target') || '',"
+    + "};"
+    + "})()", true);
+  if (
+    !scopedRerunButtonState.hasNode
+    || !scopedRerunButtonState.hasBranch
+    || scopedRerunButtonState.nodeDisabled
+    || scopedRerunButtonState.branchDisabled
+    || scopedRerunButtonState.branch !== 'true'
+    || scopedRerunButtonState.target !== 'agent-1'
+  ) {
+    throw new Error('unexpected scoped rerun button state ' + JSON.stringify(scopedRerunButtonState));
+  }
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"agent-run-detail-workflow-step-rerun-branch\\"][data-workflow-node-id=\\"route\\"]').click()", true);
+  await waitFor(win, () => {
+    const detail = document.querySelector('[data-testid="agent-run-detail"]');
+    const result = document.querySelector('[data-testid="agent-run-detail-result"]');
+    const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
+    const rerunStartedEvent = events.find((node) => node.getAttribute('data-run-event') === 'run.rerun.started');
+    return window.location.hash.includes(${JSON.stringify(WORKFLOW_SCOPED_RERUN_RUN_ID)})
+      && detail?.getAttribute('data-run-id') === ${JSON.stringify(WORKFLOW_SCOPED_RERUN_RUN_ID)}
+      && result?.textContent.includes('Workflow scoped rerun completed from selected branch')
+      && rerunStartedEvent?.textContent.includes('workflow_branch')
+      && rerunStartedEvent?.textContent.includes('agent-1');
+  }, 'workflow scoped branch rerun detail');
+  console.log('[electron-smoke] workflow scoped branch rerun detail rendered');
+  await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '#/agents/' + encodeURIComponent(${JSON.stringify(WORKFLOW_RUN_ID)}));
+  await waitFor(win, () => (
+    document.querySelector('[data-testid="agent-run-detail"]')?.getAttribute('data-run-id') === ${JSON.stringify(WORKFLOW_RUN_ID)}
+    && document.querySelector('[data-testid="agent-run-detail-workflow-step-open-run"]')?.getAttribute('data-run-id') === ${JSON.stringify(WORKFLOW_CHILD_RUN_ID)}
+  ), 'workflow parent detail restored after scoped rerun');
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"agent-run-detail-workflow-step-open-run\\"]').click()", true);
   await waitFor(win, () => window.location.hash.includes(${JSON.stringify(WORKFLOW_CHILD_RUN_ID)}), 'workflow child route hash');
   await win.loadURL('about:blank');
@@ -2426,6 +2612,15 @@ async function main() {
     const devUrl = `http://127.0.0.1:${vitePort}`;
     await waitForHttp(devUrl);
     await runElectronSmoke(devUrl, bridge.url);
+    const scopedRequest = scopedRerunRequests[scopedRerunRequests.length - 1] || {};
+    if (
+      scopedRequest.scope !== 'workflow_branch'
+      || scopedRequest.workflow_node_id !== 'route'
+      || scopedRequest.workflow_edge_branch !== 'true'
+      || scopedRequest.workflow_node_selected_target !== 'agent-1'
+    ) {
+      throw new Error(`unexpected scoped rerun request ${JSON.stringify(scopedRequest)}`);
+    }
     if (!workflowChildRejected) throw new Error('workflow child reject action was not called');
     if (!workflowChildCancelled) throw new Error('workflow child cancel action was not called');
     if (!activeRunCancelled) throw new Error('active Run Detail cancel action was not called');

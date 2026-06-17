@@ -9,6 +9,8 @@ export type RunDetailWorkflowStepRef = {
   artifactPath?: string;
   artifactCount?: number;
   task?: string;
+  selectedBranch?: string;
+  selectedTargetNodeId?: string;
 };
 
 export type RunArtifactPreview = {

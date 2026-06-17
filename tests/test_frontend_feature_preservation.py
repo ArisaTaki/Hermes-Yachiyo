@@ -2400,7 +2400,7 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
             "<span>{sourceLabel}</span>",
             "RuntimeToolCallCard",
             "agent-run-detail-tool-calls",
-            'testId="agent-run-detail-tool-call-card"',
+            "testId={cardTestId}",
         ],
     )
     _assert_contains(
@@ -4585,6 +4585,8 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "await startYachiyoAgentRun(target.id, goal)",
             "await startYachiyoWorkflowRun(target.id, goal)",
             "await rerunYachiyoRun(selectedRun.run_id)",
+            "const rerunWorkflowScope = useCallback",
+            "await rerunYachiyoRun(selectedRun.run_id, request)",
             "upsertRunDetailCache([run]);",
             "await refreshRunGroupsForRuns([run]);",
             "openRunDetail(run.run_id, { revealInHistory: true });",
@@ -4997,6 +4999,9 @@ def test_agent_studio_exposes_stable_e2e_selectors_for_run_detail_and_approval_f
             "data-workflow-step-node-id={step.nodeId || ''}",
             "data-workflow-step-status={childStatus}",
             "data-testid=\"agent-run-detail-workflow-step-open-run\"",
+            "data-testid=\"agent-run-detail-workflow-step-rerun-node\"",
+            "data-testid=\"agent-run-detail-workflow-step-rerun-branch\"",
+            "data-workflow-node-selected-target={step.selectedTargetNodeId || ''}",
             "data-run-id={step.childRunId}",
             "data-run-status={childStatus}",
             "workflowArtifact ?",
@@ -5041,8 +5046,8 @@ def test_agent_studio_exposes_stable_e2e_selectors_for_run_detail_and_approval_f
     _assert_contains(
         "apps/frontend/src/features/agent-studio/components/ToolCallInspector.tsx",
         [
-            "data-testid=\"agent-run-detail-tool-calls\"",
-            "data-testid=\"agent-run-detail-tool-call-list\"",
+            "data-testid={testId}",
+            "data-testid={listTestId}",
             "agent-run-detail-tool-call-card",
             "RuntimeToolCallCard",
         ],
@@ -5050,9 +5055,9 @@ def test_agent_studio_exposes_stable_e2e_selectors_for_run_detail_and_approval_f
     _assert_contains(
         "apps/frontend/src/features/agent-studio/components/MemorySkillTraceInspector.tsx",
         [
-            "data-testid=\"agent-run-detail-memory-skill-traces\"",
-            "data-testid=\"agent-run-detail-memory-skill-trace-list\"",
-            "data-testid=\"agent-run-detail-memory-skill-trace\"",
+            "data-testid={testId}",
+            "data-testid={listTestId}",
+            "data-testid={itemTestId}",
             "data-runtime-trace-kind={trace.kind}",
             "data-run-event={trace.eventType}",
             "data-memory-id={trace.memoryId}",
@@ -5060,7 +5065,7 @@ def test_agent_studio_exposes_stable_e2e_selectors_for_run_detail_and_approval_f
             "data-workflow-node-id={trace.workflowNodeId}",
             "data-group-run-id={trace.groupRunId}",
             "data-member-agent-id={trace.memberAgentId}",
-            "data-testid=\"agent-run-detail-memory-skill-trace-context\"",
+            "data-testid={contextTestId}",
             "data-trace-context={item.key}",
             "const eventIsSecret = publicRunEventIsSecret(event);",
             "const visiblePayload = eventIsSecret ? {} : payload;",

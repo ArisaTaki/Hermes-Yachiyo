@@ -8,6 +8,7 @@ import type {
   GroupRunSnapshot,
   MemorySnapshot,
   RunEventPageSnapshot,
+  RerunRunRequest,
   SaveAgentGroupRequest,
   SkillFolderSnapshot,
   SkillSnapshot,
@@ -337,8 +338,11 @@ export async function readYachiyoRunArtifact(
   return apiGet(`/yachiyo/studio/runs/${encodeURIComponent(runId)}/artifacts/${encodedPath}`);
 }
 
-export async function rerunYachiyoRun(runId: string): Promise<YachiyoRunTimelineSnapshot> {
-  return apiPost(`/yachiyo/studio/runs/${encodeURIComponent(runId)}/rerun`, {});
+export async function rerunYachiyoRun(
+  runId: string,
+  request: RerunRunRequest = {},
+): Promise<YachiyoRunTimelineSnapshot> {
+  return apiPost(`/yachiyo/studio/runs/${encodeURIComponent(runId)}/rerun`, request);
 }
 
 export async function cancelYachiyoRun(runId: string): Promise<YachiyoRunTimelineSnapshot> {

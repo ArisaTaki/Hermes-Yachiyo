@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 
 import type { RunGroupSpec, RunSpec, WorkflowSpec } from '../types';
-import type { GroupRunSnapshot, PublicRunEvent, YachiyoRunTimelineSnapshot } from '../../yachiyo-studio/types';
+import type { GroupRunSnapshot, PublicRunEvent, RerunRunRequest, YachiyoRunTimelineSnapshot } from '../../yachiyo-studio/types';
 import { ExpandableRuntimeContent as RunExpandableContent } from '../../runtime-shared/components/ExpandableRuntimeContent';
 import {
   approvalsFromRunEventReplay,
@@ -43,6 +43,7 @@ export function RunDetailPanel({
   onRejectSelectedRun,
   onRequestCancelSelectedRun,
   onRerunSelectedRun,
+  onRerunWorkflowScope,
   onRunAction,
   runById,
   runKindLabel,
@@ -101,6 +102,7 @@ export function RunDetailPanel({
   onRejectSelectedRun: () => Promise<unknown>;
   onRequestCancelSelectedRun: () => void;
   onRerunSelectedRun: () => Promise<unknown>;
+  onRerunWorkflowScope: (request: RerunRunRequest) => Promise<unknown>;
   onRunAction: (action: () => Promise<unknown> | unknown, label: string) => void;
   runById: Map<string, RunSpec>;
   runKindLabel: (kind: string) => string;
@@ -190,6 +192,13 @@ export function RunDetailPanel({
     && selectedRun.kind !== 'workflow_run'
     && rerunSourceRunId,
   );
+  const selectedRunScopedWorkflowRerunDisabledReason = selectedRun?.kind === 'workflow_run'
+    ? isActiveRunStatus(selectedRun.status)
+      ? '当前 Workflow Run 还在进行中，请完成、失败或取消后再重跑。'
+      : !selectedRun.user_goal?.trim()
+        ? '原 Workflow Run 没有记录任务目标，无法重跑。'
+        : ''
+    : selectedRunRerunDisabledReason;
   return (
     <div className="agent-studio-panel">
       <div className="section-heading-row"><h2>Run Detail</h2></div>
@@ -380,12 +389,16 @@ export function RunDetailPanel({
             />
           </section>
           <WorkflowStepResults
+            busy={busy}
             onOpenArtifact={onOpenArtifact}
             onOpenRunDetail={onOpenRunDetail}
+            onRerunWorkflowScope={onRerunWorkflowScope}
+            onRunAction={onRunAction}
             runById={runById}
             runStatusLabel={runStatusLabel}
             runStatusTone={runStatusTone}
             selectedRun={selectedRun}
+            selectedRunRerunDisabledReason={selectedRunScopedWorkflowRerunDisabledReason}
             selectedWorkflowSteps={selectedWorkflowSteps}
             skippedWorkflowArtifactLabel={skippedWorkflowArtifactLabel}
             workflowRunArtifactForStep={workflowRunArtifactForStep}

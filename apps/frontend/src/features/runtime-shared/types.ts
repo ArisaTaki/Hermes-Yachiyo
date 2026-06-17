@@ -34,6 +34,16 @@ export type RunEventPageSnapshot = {
   events: PublicRunEvent[];
 };
 
+export type RerunRunRequest = {
+  scope?: 'run' | 'workflow_node' | 'workflow_branch' | string;
+  workflow_node_id?: string | null;
+  workflow_node_label?: string | null;
+  workflow_edge_branch?: string | null;
+  workflow_node_selected_target?: string | null;
+  reason?: string | null;
+  metadata?: Record<string, unknown>;
+};
+
 export type ApprovalCardSnapshot = {
   approval_id: string;
   run_id?: string | null;

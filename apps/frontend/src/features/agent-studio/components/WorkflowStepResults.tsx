@@ -1,14 +1,19 @@
 import { ExpandableRuntimeContent as RunExpandableContent } from '../../runtime-shared/components/ExpandableRuntimeContent';
+import type { RerunRunRequest } from '../../yachiyo-studio/types';
 import type { RunSpec } from '../types';
 import type { RunDetailWorkflowStepRef } from './runDetailTypes';
 
 type WorkflowStepResultsProps = {
+  busy: boolean;
   onOpenArtifact: (run: RunSpec | string, path: string) => Promise<void> | void;
   onOpenRunDetail: (runId: string) => void;
+  onRerunWorkflowScope: (request: RerunRunRequest) => Promise<unknown>;
+  onRunAction: (action: () => Promise<unknown> | unknown, label: string) => void;
   runById: Map<string, RunSpec>;
   runStatusLabel: (status: string) => string;
   runStatusTone: (status: string) => string;
   selectedRun: RunSpec;
+  selectedRunRerunDisabledReason: string;
   selectedWorkflowSteps: RunDetailWorkflowStepRef[];
   skippedWorkflowArtifactLabel: (run: RunSpec | null, step: RunDetailWorkflowStepRef) => string;
   workflowRunArtifactForStep: (run: RunSpec | null, step: RunDetailWorkflowStepRef) => Record<string, unknown> | null | undefined;
@@ -18,12 +23,16 @@ type WorkflowStepResultsProps = {
 };
 
 export function WorkflowStepResults({
+  busy,
   onOpenArtifact,
   onOpenRunDetail,
+  onRerunWorkflowScope,
+  onRunAction,
   runById,
   runStatusLabel,
   runStatusTone,
   selectedRun,
+  selectedRunRerunDisabledReason,
   selectedWorkflowSteps,
   skippedWorkflowArtifactLabel,
   workflowRunArtifactForStep,
@@ -47,6 +56,9 @@ export function WorkflowStepResults({
           const summary = workflowStepSummary(step, childRun);
           const childArtifacts = workflowStepArtifacts(childRun);
           const workflowArtifact = workflowRunArtifactForStep(selectedRun, step);
+          const rerunDisabled = Boolean(busy || selectedRunRerunDisabledReason || !step.nodeId);
+          const stepLabel = step.label || step.nodeId || 'Workflow node';
+          const canRerunBranch = Boolean(step.nodeId && step.selectedTargetNodeId);
           return (
             <article
               className={`workflow-child-result workflow-step-result ${step.kind}`}
@@ -75,6 +87,50 @@ export function WorkflowStepResults({
                       onClick={() => onOpenRunDetail(step.childRunId || '')}
                     >
                       Open Run
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="run-timeline-child workflow-step-rerun"
+                    data-testid="agent-run-detail-workflow-step-rerun-node"
+                    data-workflow-node-id={step.nodeId || ''}
+                    disabled={rerunDisabled}
+                    title={selectedRunRerunDisabledReason || undefined}
+                    onClick={() => onRunAction(
+                      () => onRerunWorkflowScope({
+                        scope: 'workflow_node',
+                        workflow_node_id: step.nodeId || '',
+                        workflow_node_label: stepLabel,
+                        reason: `Rerun workflow node ${stepLabel}`,
+                      }),
+                      '重跑 Workflow 节点',
+                    )}
+                  >
+                    重跑节点
+                  </button>
+                  {canRerunBranch ? (
+                    <button
+                      type="button"
+                      className="run-timeline-child workflow-step-rerun"
+                      data-testid="agent-run-detail-workflow-step-rerun-branch"
+                      data-workflow-edge-branch={step.selectedBranch || ''}
+                      data-workflow-node-id={step.nodeId || ''}
+                      data-workflow-node-selected-target={step.selectedTargetNodeId || ''}
+                      disabled={rerunDisabled}
+                      title={selectedRunRerunDisabledReason || undefined}
+                      onClick={() => onRunAction(
+                        () => onRerunWorkflowScope({
+                          scope: 'workflow_branch',
+                          workflow_node_id: step.nodeId || '',
+                          workflow_node_label: stepLabel,
+                          workflow_edge_branch: step.selectedBranch || '',
+                          workflow_node_selected_target: step.selectedTargetNodeId || '',
+                          reason: `Rerun workflow branch ${step.selectedBranch || 'selected'}`,
+                        }),
+                        '重跑 Workflow 分支',
+                      )}
+                    >
+                      重跑分支
                     </button>
                   ) : null}
                 </div>
