@@ -386,6 +386,99 @@ def test_shared_runtime_surface_components_acceptance_paths_are_guarded() -> Non
     )
 
 
+def test_runtime_core_split_acceptance_paths_are_guarded() -> None:
+    _assert_contains(
+        "apps/shell/agent_runtime.py",
+        [
+            "from apps.shell.agent.runtime.native_engine import NativeRunEngine",
+            "AgentRuntimeService = NativeRunEngine",
+            "_RunBudgetLimits",
+        ],
+    )
+    _assert_contains(
+        "apps/shell/agent/runtime/native_engine.py",
+        [
+            "class NativeRunEngine(",
+            "RuntimeStudioFacadeMixin",
+            "RuntimeMainChatFacadeMixin",
+            "RuntimeRunFacadeMixin",
+            "RuntimeAgentFacadeMixin",
+            "RuntimeToolFacadeMixin",
+            "RuntimeWorkflowFacadeMixin",
+            "_install_runtime_run_layer()",
+            "_install_runtime_tooling_and_custom_agent_loop(",
+            "_install_runtime_agent_and_approval_services(",
+        ],
+    )
+    _assert_contains(
+        "apps/shell/agent/repositories/runs.py",
+        [
+            "class RunRepository",
+            "def insert(",
+            "def update(",
+            "pending_approval_private",
+            "_sync_projections",
+        ],
+    )
+    _assert_contains(
+        "apps/shell/agent/repositories/events.py",
+        [
+            "class RunEventRepository",
+            "def append(",
+            "def list(",
+            "redact_run_event_payload",
+        ],
+    )
+    _assert_contains(
+        "apps/shell/agent/repositories/approvals.py",
+        [
+            "class ApprovalRepository",
+            "def sync(",
+            "def upsert_pending(",
+            "def claim_pending_approval(",
+            "def resolve_pending(",
+        ],
+    )
+    _assert_contains(
+        "apps/shell/agent/runtime/tool_brokers.py",
+        [
+            "class RuntimeToolBrokerFactory",
+            "def for_run(",
+            "def for_main_chat(",
+            "def write_artifact_with_tool_broker(",
+        ],
+    )
+    _assert_contains(
+        "apps/shell/agent/tools/policy.py",
+        [
+            "class ToolDescriptor",
+            "def validate_payload(",
+            "class PolicyGate",
+            "class RuntimePolicyCompiler",
+            "HIGH_RISK_AGENT_TOOLS",
+        ],
+    )
+    _assert_contains(
+        "apps/shell/agent/runtime/events.py",
+        [
+            "def redact_run_event_payload",
+            "def canonical_tool_event_payload",
+            "def model_request_started_payload",
+            "def task_run_event_payload",
+        ],
+    )
+    _assert_contains(
+        "apps/shell/agent/runtime/budget.py",
+        [
+            "class RunBudgetLimits",
+            "class RunBudget",
+            "def run_budget_from_timeline",
+            "def check_context_budget",
+            "class WorkflowRunBudget",
+        ],
+    )
+
+
 def test_light_launcher_entry_acceptance_paths_are_guarded() -> None:
     _assert_contains(
         "apps/frontend/src/views/LauncherView.tsx",
