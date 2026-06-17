@@ -10,6 +10,7 @@ from apps.shell.yachiyo_agent.run_snapshots import (
     run_timeline_snapshot_from_payload,
 )
 from apps.shell.yachiyo_agent.approvals import approval_card_from_payload
+from apps.shell.yachiyo_agent.events import public_run_event_from_payload
 from apps.shell.yachiyo_agent.groups import group_run_snapshot_from_payload
 from apps.shell.yachiyo_agent.legacy_runs import LegacyRunPayloadProjector
 from apps.shell.yachiyo_agent.links import studio_run_url
@@ -193,6 +194,68 @@ def test_agent_task_snapshot_filters_secret_and_internal_recent_events() -> None
     assert task.recent_events[0].payload == {"step": "visible"}
     assert task.pending_approvals == []
     assert task.artifacts == []
+
+
+def test_public_run_event_redacts_secret_payload_and_sensitive_public_text() -> None:
+    secret_event = public_run_event_from_payload(
+        {
+            "event_type": "agent.tool.call",
+            "run_id": "run-secret",
+            "sequence": 7,
+            "title": "terminal command",
+            "detail": "printf sk-secret-value",
+            "sensitivity": "secret",
+            "payload": {
+                "tool": "terminal.run",
+                "input_preview": {"command": "printf sk-secret-value"},
+            },
+        }
+    )
+
+    assert secret_event.sensitivity == "secret"
+    assert secret_event.title == "Secret event"
+    assert secret_event.detail is None
+    assert secret_event.payload == {"redacted": True, "reason": "secret_event"}
+
+    public_event = public_run_event_from_payload(
+        {
+            "event_type": "model.request.failed",
+            "run_id": "run-public",
+            "detail": "provider returned sk-public-secret-value",
+            "payload": {"error": "token sk-public-secret-value failed"},
+        }
+    )
+
+    assert public_event.sensitivity == "public"
+    assert "sk-public-secret-value" not in str(public_event.detail)
+    assert "sk-public-secret-value" not in str(public_event.payload)
+
+
+def test_run_timeline_snapshot_redacts_secret_run_events() -> None:
+    timeline = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "run-secret-timeline",
+            "status": "running",
+            "events": [
+                {"event_type": "task.started", "payload": {"step": "visible"}},
+                {
+                    "event_type": "agent.tool.call",
+                    "sensitivity": "secret",
+                    "detail": "printf sk-secret-value",
+                    "payload": {
+                        "tool": "terminal.run",
+                        "input_preview": {"command": "printf sk-secret-value"},
+                    },
+                },
+            ],
+        }
+    )
+
+    assert [event.event_type for event in timeline.events] == ["task.started", "agent.tool.call"]
+    assert timeline.events[0].payload == {"step": "visible"}
+    assert timeline.events[1].sensitivity == "secret"
+    assert timeline.events[1].detail is None
+    assert timeline.events[1].payload == {"redacted": True, "reason": "secret_event"}
 
 
 def test_studio_run_url_is_shared_by_run_task_and_approval_snapshots() -> None:
@@ -1166,7 +1229,9 @@ def test_run_timeline_keeps_secret_events_out_of_derived_runtime_facts() -> None
     )
 
     assert [event.sensitivity for event in timeline.events] == ["secret"] * 5
-    assert timeline.events[0].payload["input_preview"]["command"] == "printf sk-secret-value"
+    assert [event.payload for event in timeline.events] == [
+        {"redacted": True, "reason": "secret_event"},
+    ] * 5
     assert timeline.tool_calls == []
     assert timeline.approvals == []
     assert timeline.pending_approval is None

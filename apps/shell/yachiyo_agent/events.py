@@ -5,7 +5,11 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from apps.shell.agent.runtime.events import redact_run_event_payload, redact_secrets
+
 from .contracts import PublicRunEvent, RunEventPageSnapshot
+
+_SECRET_EVENT_PAYLOAD = {"redacted": True, "reason": "secret_event"}
 
 
 def public_run_event_from_payload(
@@ -15,7 +19,7 @@ def public_run_event_from_payload(
     sequence: int = 0,
 ) -> PublicRunEvent:
     if isinstance(payload, PublicRunEvent):
-        return payload
+        return _redacted_public_run_event(payload)
 
     raw_payload = _mapping(payload.get("payload"))
     event_type = _text(payload.get("event_type") or payload.get("event"))
@@ -55,12 +59,12 @@ def public_run_event_from_payload(
         sequence=event_sequence,
         schema_version=_int(payload.get("schema_version"), default=1),
         event_type=event_type or "run.event",
-        title=_optional_text(title),
-        detail=_optional_text(detail),
+        title=_public_event_title(title, sensitivity),
+        detail=_public_event_detail(detail, sensitivity),
         actor=_optional_text(payload.get("actor")),
         visibility=visibility,
         sensitivity=sensitivity,
-        payload=raw_payload,
+        payload=_public_event_payload(raw_payload, sensitivity),
         created_at=_text(payload.get("created_at")),
     )
 
@@ -97,6 +101,35 @@ def public_run_event_page_from_payload(
 
 def _mapping(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _redacted_public_run_event(event: PublicRunEvent) -> PublicRunEvent:
+    return event.model_copy(
+        update={
+            "title": _public_event_title(event.title, event.sensitivity),
+            "detail": _public_event_detail(event.detail, event.sensitivity),
+            "payload": _public_event_payload(event.payload, event.sensitivity),
+        }
+    )
+
+
+def _public_event_payload(payload: Mapping[str, Any], sensitivity: str) -> dict[str, Any]:
+    if sensitivity == "secret":
+        return dict(_SECRET_EVENT_PAYLOAD)
+    redacted = redact_run_event_payload(dict(payload))
+    return dict(redacted) if isinstance(redacted, Mapping) else {}
+
+
+def _public_event_title(value: Any, sensitivity: str) -> str | None:
+    if sensitivity == "secret":
+        return "Secret event"
+    return _optional_text(redact_secrets(value)) if value is not None else None
+
+
+def _public_event_detail(value: Any, sensitivity: str) -> str | None:
+    if sensitivity == "secret":
+        return None
+    return _optional_text(redact_secrets(value)) if value is not None else None
 
 
 def _payload_items(payload: Any, key: str) -> list[dict[str, Any]]:

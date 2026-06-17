@@ -654,6 +654,16 @@ def test_runtime_core_split_acceptance_paths_are_guarded() -> None:
         ],
     )
     _assert_contains(
+        "apps/shell/yachiyo_agent/events.py",
+        [
+            "redact_run_event_payload",
+            "_SECRET_EVENT_PAYLOAD",
+            '"reason": "secret_event"',
+            "def _public_event_payload",
+            "if sensitivity == \"secret\"",
+        ],
+    )
+    _assert_contains(
         "apps/shell/agent/runtime/agent_preparation.py",
         [
             "def write_context_artifact",
