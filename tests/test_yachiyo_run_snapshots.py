@@ -258,6 +258,29 @@ def test_run_timeline_snapshot_redacts_secret_run_events() -> None:
     assert timeline.events[1].payload == {"redacted": True, "reason": "secret_event"}
 
 
+def test_approval_card_redacts_sensitive_public_preview_and_text() -> None:
+    approval = approval_card_from_payload(
+        {
+            "tool": "workspace.write",
+            "title": "Approve command sk-sensitive-value",
+            "description": "Needs token sk-sensitive-value",
+            "input_preview": {
+                "command": "printf sk-sensitive-value",
+                "api_key": "secret-api-key-value",
+            },
+            "policy_reason": "bearer sensitive-token-value",
+        },
+        run_id="run-approval-redaction",
+    )
+
+    rendered = str(approval.model_dump(mode="json"))
+
+    assert "sk-sensitive-value" not in rendered
+    assert "sensitive-token-value" not in rendered
+    assert approval.input_preview["api_key"] == "[redacted]"
+    assert "[redacted]" in rendered
+
+
 def test_studio_run_url_is_shared_by_run_task_and_approval_snapshots() -> None:
     run_id = "run with/slash"
     expected_url = "#/agents?run_id=run%20with%2Fslash"

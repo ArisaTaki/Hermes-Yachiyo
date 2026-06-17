@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from apps.shell.agent.runtime.events import redact_run_event_payload, redact_secrets
+
 from .contracts import ApprovalCardSnapshot
 from .links import studio_run_url
 
@@ -112,7 +114,8 @@ def _approval_status(value: Any) -> str:
 
 
 def _mapping(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, Mapping) else {}
+    redacted = redact_run_event_payload(dict(value)) if isinstance(value, Mapping) else {}
+    return dict(redacted) if isinstance(redacted, Mapping) else {}
 
 
 def _studio_url(run_id: str | None, group_run_id: str | None = None) -> str | None:
@@ -120,7 +123,7 @@ def _studio_url(run_id: str | None, group_run_id: str | None = None) -> str | No
 
 
 def _text(value: Any) -> str:
-    return str(value or "").strip()
+    return str(redact_secrets(value) or "").strip()
 
 
 def _optional_text(value: Any) -> str | None:
