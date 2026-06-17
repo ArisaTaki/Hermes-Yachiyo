@@ -777,6 +777,8 @@ def test_group_and_workflow_acceptance_paths_are_guarded() -> None:
     _assert_contains(
         "apps/frontend/src/features/runtime-shared/components/RuntimeTimelineSummary.tsx",
         [
+            "export function runtimeTimelineSummaryEvents",
+            "slice(-Math.max(1, limit))",
             "task.created",
             "model.requested",
             "model.completed",

@@ -1127,9 +1127,11 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
         "apps/frontend/src/features/runtime-shared/components/RuntimeTimelineSummary.tsx",
         [
             "export function RuntimeTimelineSummary",
+            "export function runtimeTimelineSummaryEvents",
             "export function runtimeTimelineEventLabel",
             "export type RuntimeTimelineEventSnapshot",
             "RuntimeTimelineEventList",
+            "slice(-Math.max(1, limit))",
             "eventTestId={`${testId}-event`}",
             "variant=\"compact\"",
             "getEventDetail={(event) => runtimeTimelineEventDetail(event as RuntimeTimelineEventSnapshot)}",

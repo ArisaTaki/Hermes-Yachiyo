@@ -23,7 +23,7 @@ export function RuntimeTimelineSummary({
   limit?: number;
   testId?: string;
 }) {
-  const visibleEvents = (events || []).slice(0, Math.max(1, limit));
+  const visibleEvents = runtimeTimelineSummaryEvents(events || [], limit);
   if (!visibleEvents.length) return null;
   return (
     <RuntimeTimelineEventList
@@ -39,6 +39,13 @@ export function RuntimeTimelineSummary({
       variant="compact"
     />
   );
+}
+
+export function runtimeTimelineSummaryEvents(
+  events: RuntimeTimelineEventSnapshot[],
+  limit = 3,
+): RuntimeTimelineEventSnapshot[] {
+  return (events || []).slice(-Math.max(1, limit));
 }
 
 export function runtimeTimelineEventLabel(event: RuntimeTimelineEventSnapshot): string {
