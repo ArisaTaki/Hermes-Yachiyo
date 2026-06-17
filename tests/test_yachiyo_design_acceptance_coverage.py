@@ -678,6 +678,17 @@ def test_group_and_workflow_acceptance_paths_are_guarded() -> None:
             "workflow.node.approval_required",
         ],
     )
+    _assert_smoke_script(
+        "scripts/smoke_workflow_management_ui.mjs",
+        [
+            "/yachiyo/studio/workflows",
+            'data-testid="workflow-list-manage"',
+            'data-testid="workflow-delete-selected"',
+            'data-testid="workflow-delete"',
+            "workflow management delete paths rendered",
+            "assertMockBridgeContract",
+        ],
+    )
     _assert_contains(
         "apps/frontend/src/features/runtime-shared/components/RuntimeTimelineSummary.tsx",
         [
