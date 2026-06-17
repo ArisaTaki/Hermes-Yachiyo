@@ -15,7 +15,7 @@ import {
   publicApprovalToRunPendingApproval,
   publicArtifactsOrLegacy,
   publicRunEventToTimelineEvent,
-  publicRunTimelineToRunSpec,
+  publicRunTimelineToStudioRunSpec,
 } from '../utils/runs';
 import { runEventReplayToTimelineEvent } from '../utils/runTimeline';
 import {
@@ -109,7 +109,7 @@ export function useSelectedRunDetailState({
   const publicTimelineRun = useMemo(
     () => {
       if (!selectedPublicRunTimeline) return null;
-      return publicRunTimelineToRunSpec(selectedPublicRunTimeline, {
+      return publicRunTimelineToStudioRunSpec(selectedPublicRunTimeline, {
         kind: selectedRun?.kind,
         runnableId: selectedRun?.runnable_id,
         runnableName: selectedRun?.runnable_name,

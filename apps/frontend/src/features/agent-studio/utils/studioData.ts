@@ -28,7 +28,7 @@ import {
 } from '../../yachiyo-studio/api';
 import type { AgentGroupSnapshot } from '../../yachiyo-studio/types';
 import { publicAgentToAgentSpec } from './agents';
-import { publicGroupRunToRunGroupSpec, publicRunTimelineToRunSpec } from './runs';
+import { publicGroupRunToRunGroupSpec, publicRunTimelineToStudioRunSpec } from './runs';
 import {
   publicSkillFolderToSkillFolderSpec,
   publicSkillSourceRootToSkillSourceRoot,
@@ -191,7 +191,7 @@ export function studioRunnablesForView(agents: AgentSpec[], workflows: WorkflowS
 }
 
 export async function listStudioRunsForView(): Promise<RunSpec[]> {
-  return (await listYachiyoRunTimelines()).map((snapshot) => publicRunTimelineToRunSpec(snapshot));
+  return (await listYachiyoRunTimelines()).map((snapshot) => publicRunTimelineToStudioRunSpec(snapshot));
 }
 
 export async function listStudioRunGroupsForView(): Promise<RunGroupSpec[]> {
@@ -199,5 +199,5 @@ export async function listStudioRunGroupsForView(): Promise<RunGroupSpec[]> {
 }
 
 export async function getStudioRunForView(runId: string): Promise<RunSpec> {
-  return publicRunTimelineToRunSpec(await getYachiyoRunTimeline(runId));
+  return publicRunTimelineToStudioRunSpec(await getYachiyoRunTimeline(runId));
 }

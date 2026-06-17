@@ -9,7 +9,7 @@ import type {
 } from '../features/runtime-shared/types';
 import {
   publicGroupRunToRunGroupSpec,
-  publicRunTimelineToRunSpec,
+  publicRunTimelineToStudioRunSpec,
 } from '../features/agent-studio/utils/runs';
 
 export type AgentModelMode = 'follow_main' | 'profile' | 'custom_api';
@@ -523,7 +523,7 @@ export async function createAgentRun(agentId: string, userGoal: string): Promise
     objective: userGoal,
     client_run_id: clientRunId,
   })
-    .then((snapshot) => publicRunTimelineToRunSpec(snapshot, {
+    .then((snapshot) => publicRunTimelineToStudioRunSpec(snapshot, {
       kind: 'agent_run',
       runnableId: agentId,
       userGoal,
@@ -539,7 +539,7 @@ export async function createWorkflowRun(workflowId: string, userGoal: string): P
     objective: userGoal,
     client_run_id: clientRunId,
   })
-    .then((snapshot) => publicRunTimelineToRunSpec(snapshot, {
+    .then((snapshot) => publicRunTimelineToStudioRunSpec(snapshot, {
       kind: 'workflow_run',
       runnableId: workflowId,
       userGoal,
@@ -559,7 +559,7 @@ function runGroupSpecFromPublicGroupRun(snapshot: YachiyoGroupRunSnapshot): RunG
 }
 
 function runSpecFromPublicTimelineSnapshot(snapshot: YachiyoRunTimelineSnapshot): RunSpec {
-  return publicRunTimelineToRunSpec(snapshot);
+  return publicRunTimelineToStudioRunSpec(snapshot);
 }
 
 function futureTaskTriggerResultFromPublicSnapshot(

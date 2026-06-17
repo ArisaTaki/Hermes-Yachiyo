@@ -11,7 +11,7 @@ import {
   startYachiyoWorkflowRun,
 } from '../../yachiyo-studio/api';
 import type { RerunRunRequest } from '../../yachiyo-studio/types';
-import { publicRunTimelineToRunSpec } from '../utils/runs';
+import { publicRunTimelineToStudioRunSpec } from '../utils/runs';
 
 export type RunLaunchActionRefreshOptions = {
   selectedAgentId?: string;
@@ -72,7 +72,7 @@ export function useRunLaunchActions({
     if (agentQuickRunDisabledReason) throw new Error(agentQuickRunDisabledReason);
     const agentId = draftAgentId || '';
     const goal = agentRunGoal.trim();
-    const run = publicRunTimelineToRunSpec(
+    const run = publicRunTimelineToStudioRunSpec(
       await startYachiyoAgentRun(agentId, goal),
       { kind: 'agent_run', runnableId: agentId, userGoal: goal },
     );
@@ -86,7 +86,7 @@ export function useRunLaunchActions({
     if (workflowRunDisabledReason) throw new Error(workflowRunDisabledReason);
     const goal = workflowRunGoal.trim();
     const saved = await saveWorkflowDraft();
-    const run = publicRunTimelineToRunSpec(
+    const run = publicRunTimelineToStudioRunSpec(
       await startYachiyoWorkflowRun(saved.workflow_id, goal),
       { kind: 'workflow_run', runnableId: saved.workflow_id, userGoal: goal },
     );
@@ -101,11 +101,11 @@ export function useRunLaunchActions({
     if (!target) return;
     const goal = runGoal.trim();
     const run = target.kind === 'agent'
-      ? publicRunTimelineToRunSpec(
+      ? publicRunTimelineToStudioRunSpec(
         await startYachiyoAgentRun(target.id, goal),
         { kind: 'agent_run', runnableId: target.id, runnableName: target.name, userGoal: goal },
       )
-      : publicRunTimelineToRunSpec(
+      : publicRunTimelineToStudioRunSpec(
         await startYachiyoWorkflowRun(target.id, goal),
         { kind: 'workflow_run', runnableId: target.id, runnableName: target.name, userGoal: goal },
       );
@@ -130,7 +130,7 @@ export function useRunLaunchActions({
     if (!selectedRun) throw new Error('请选择要重跑的 Run');
     if (selectedRunRerunDisabledReason) throw new Error(selectedRunRerunDisabledReason);
     if (!selectedRunRerunTarget) throw new Error('找不到原 Run 对应的 Agent 或 Workflow，无法重跑。');
-    const run = publicRunTimelineToRunSpec(
+    const run = publicRunTimelineToStudioRunSpec(
       await rerunYachiyoRun(selectedRun.run_id),
       {
         kind: selectedRun.kind,
@@ -176,7 +176,7 @@ export function useRunLaunchActions({
     if (!selectedRun.user_goal?.trim()) throw new Error('原 Workflow Run 没有记录任务目标，无法重跑。');
     const workflowTargetId = selectedRunRerunTarget?.id || selectedRun.runnable_id;
     if (!workflowTargetId) throw new Error('找不到原 Workflow，无法重跑。');
-    const run = publicRunTimelineToRunSpec(
+    const run = publicRunTimelineToStudioRunSpec(
       await rerunYachiyoRun(selectedRun.run_id, request),
       {
         kind: 'workflow_run',

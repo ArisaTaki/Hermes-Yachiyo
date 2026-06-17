@@ -6,7 +6,7 @@ import {
   approvedRunStatusMessage,
   isActiveRunStatus,
   normalizeRunStatus,
-  publicRunTimelineToRunSpec,
+  publicRunTimelineToStudioRunSpec,
 } from '../utils/runs';
 
 type ApprovalFollowupRefreshOptions = {
@@ -60,7 +60,7 @@ export function useRunApprovalFollowup({
         window.setTimeout(resolve, attempt === 0 ? 300 : runApprovalPollIntervalMs);
       });
       const loadedRuns = (await Promise.all(pollRunIds.map((id) => (
-        getYachiyoRunTimeline(id).then(publicRunTimelineToRunSpec).catch(() => null)
+        getYachiyoRunTimeline(id).then(publicRunTimelineToStudioRunSpec).catch(() => null)
       ))))
         .filter((run): run is RunSpec => Boolean(run));
       const visibleRuns = acceptedRunUpdates(loadedRuns);

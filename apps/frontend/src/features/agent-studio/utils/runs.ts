@@ -24,6 +24,17 @@ import { publicRunEventPayloadDetail, publicRunEventWorkflowStepPayload } from '
 export type RunKindFilter = 'all' | 'workflow' | 'agent';
 export type RunStatusFilter = 'all' | 'completed' | 'failed' | 'active';
 
+type PublicRunTimelineRunSpecFallback = {
+  kind?: RunSpec['kind'];
+  runnableId?: string;
+  runnableName?: string;
+  userGoal?: string;
+};
+
+type PublicRunTimelineRunSpecOptions = PublicRunTimelineRunSpecFallback & {
+  allowLegacyFields?: boolean;
+};
+
 export type RunHistoryGroup = {
   key: string;
   label: string;
@@ -84,13 +95,9 @@ export function approvedRunStatusMessage(run: RunSpec): string {
 
 export function publicRunTimelineToRunSpec(
   snapshot: RunTimelineSnapshot | YachiyoRunTimelineSnapshot,
-  fallback: {
-    kind?: RunSpec['kind'];
-    runnableId?: string;
-    runnableName?: string;
-    userGoal?: string;
-  } = {},
+  fallback: PublicRunTimelineRunSpecOptions = {},
 ): RunSpec {
+  const allowLegacyFields = fallback.allowLegacyFields !== false;
   const agentId = String(snapshot.agent_id || '').trim();
   const workflowRunId = String(snapshot.workflow_run_id || '').trim();
   const parentRunId = String(snapshot.parent_run_id || '').trim();
@@ -107,9 +114,9 @@ export function publicRunTimelineToRunSpec(
   const currentNodeId = 'current_node_id' in snapshot ? String(snapshot.current_node_id || '').trim() : '';
   const currentNodeLabel = 'current_node_label' in snapshot ? String(snapshot.current_node_label || '').trim() : '';
   const finalAnswer = 'final_answer' in snapshot ? String(snapshot.final_answer || '').trim() : '';
-  const legacyResult = 'result' in snapshot ? String((snapshot as { result?: string }).result || '').trim() : '';
-  const legacyRunnableName = 'runnable_name' in snapshot ? String((snapshot as { runnable_name?: string }).runnable_name || '').trim() : '';
-  const legacyUserGoal = 'user_goal' in snapshot ? String((snapshot as { user_goal?: string }).user_goal || '').trim() : '';
+  const legacyResult = allowLegacyFields && 'result' in snapshot ? String((snapshot as { result?: string }).result || '').trim() : '';
+  const legacyRunnableName = allowLegacyFields && 'runnable_name' in snapshot ? String((snapshot as { runnable_name?: string }).runnable_name || '').trim() : '';
+  const legacyUserGoal = allowLegacyFields && 'user_goal' in snapshot ? String((snapshot as { user_goal?: string }).user_goal || '').trim() : '';
   return {
     run_id: snapshot.run_id,
     parent_run_id: parentRunId || undefined,
@@ -157,6 +164,16 @@ export function publicRunTimelineToRunSpec(
     current_node_label: currentNodeLabel || undefined,
     final_answer: finalAnswer || legacyResult || undefined,
   };
+}
+
+export function publicRunTimelineToStudioRunSpec(
+  snapshot: RunTimelineSnapshot | YachiyoRunTimelineSnapshot,
+  fallback: PublicRunTimelineRunSpecFallback = {},
+): RunSpec {
+  return publicRunTimelineToRunSpec(snapshot, {
+    ...fallback,
+    allowLegacyFields: false,
+  });
 }
 
 export function publicGroupRunToRunGroupSpec(
