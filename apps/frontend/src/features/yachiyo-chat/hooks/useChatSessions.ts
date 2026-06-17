@@ -4,10 +4,16 @@ import { apiGet } from '../../../lib/bridge';
 import type { SessionsPayload } from '../types';
 
 type UseChatSessionsOptions = {
+  activePollIntervalMs: number;
+  idlePollIntervalMs: number;
+  isProcessing: boolean;
   refreshYachiyoTasksForSession: (sessionId: string) => void | Promise<void>;
 };
 
 export function useChatSessions({
+  activePollIntervalMs,
+  idlePollIntervalMs,
+  isProcessing,
   refreshYachiyoTasksForSession,
 }: UseChatSessionsOptions) {
   const [sessions, setSessions] = useState<SessionsPayload | null>(null);
@@ -37,6 +43,18 @@ export function useChatSessions({
     }, 180);
     return () => window.clearTimeout(timer);
   }, [sessionQuery]);
+
+  useEffect(() => {
+    void loadSessions();
+  }, [loadSessions]);
+
+  useEffect(() => {
+    const timer = window.setInterval(
+      () => void loadSessions(),
+      isProcessing ? activePollIntervalMs : idlePollIntervalMs,
+    );
+    return () => window.clearInterval(timer);
+  }, [activePollIntervalMs, idlePollIntervalMs, isProcessing, loadSessions]);
 
   return {
     debouncedSessionQuery,

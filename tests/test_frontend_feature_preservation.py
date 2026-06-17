@@ -377,7 +377,10 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
         "apps/frontend/src/views/ChatView.tsx",
         [
             "apiGet<MessagesPayload>(`/ui/chat/messages?",
-            "useChatSessions({ refreshYachiyoTasksForSession })",
+            "useChatSessions({",
+            "activePollIntervalMs: ACTIVE_POLL_INTERVAL_MS",
+            "idlePollIntervalMs: IDLE_POLL_INTERVAL_MS",
+            "refreshYachiyoTasksForSession,",
             "apiPost<",
             "sendLegacyChatMessage({",
             "retryLegacyChatMessage(message.id)",
@@ -803,6 +806,8 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "setSessionsLoaded",
             "setDebouncedSessionQuery",
             "apiGet<SessionsPayload>(`/ui/chat/sessions?",
+            "() => void loadSessions(),",
+            "isProcessing ? activePollIntervalMs : idlePollIntervalMs",
             "result.workflow_run_id ? 'Workflow' : 'Agent'",
             "result.runnable_command",
             "legacyChatRunnableResult(result)",
@@ -3467,6 +3472,11 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
             "setSessionsLoaded(true);",
             "setDebouncedSessionQuery(sessionQuery.trim());",
             "setTimeout(() => {",
+            "void loadSessions();",
+            "const timer = window.setInterval(",
+            "() => void loadSessions(),",
+            "isProcessing ? activePollIntervalMs : idlePollIntervalMs",
+            "return () => window.clearInterval(timer);",
         ],
     )
     _assert_not_contains(

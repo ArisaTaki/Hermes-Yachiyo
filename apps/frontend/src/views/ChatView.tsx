@@ -243,7 +243,12 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     sessionsLoaded,
     sessionQuery,
     setSessionQuery,
-  } = useChatSessions({ refreshYachiyoTasksForSession });
+  } = useChatSessions({
+    activePollIntervalMs: ACTIVE_POLL_INTERVAL_MS,
+    idlePollIntervalMs: IDLE_POLL_INTERVAL_MS,
+    isProcessing,
+    refreshYachiyoTasksForSession,
+  });
 
   const refreshMessages = useCallback(async (options: { allowDuringTransition?: boolean; anchorMessageId?: string } = {}) => {
     if (conversationTransitionRef.current && !options.allowDuringTransition) return;
@@ -410,10 +415,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   }, [isProcessing, isSending, messages.length, sessions?.current_session_id]);
 
   useEffect(() => {
-    void loadSessions();
-  }, [loadSessions]);
-
-  useEffect(() => {
     const requestedSessionId = routeSessionId;
     const requestedTaskId = routeTaskId;
     void (async () => {
@@ -444,14 +445,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     const timer = window.setInterval(refreshMessages, interval);
     return () => window.clearInterval(timer);
   }, [isProcessing, refreshMessages]);
-
-  useEffect(() => {
-    const timer = window.setInterval(
-      () => void loadSessions(),
-      isProcessing ? ACTIVE_POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS,
-    );
-    return () => window.clearInterval(timer);
-  }, [isProcessing, loadSessions]);
 
   useEffect(() => {
     if (embedded || chatBootstrapped) return;
