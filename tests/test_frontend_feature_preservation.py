@@ -776,6 +776,7 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "from '../features/yachiyo-chat/hooks/useChatAssistantProfile';",
             "from '../features/yachiyo-chat/hooks/useChatCopyFeedback';",
             "from '../features/yachiyo-chat/hooks/useChatExecutor';",
+            "from '../features/yachiyo-chat/hooks/useChatGroupDialog';",
             "from '../features/yachiyo-chat/hooks/useChatNotice';",
             "from '../features/yachiyo-chat/hooks/useChatRouteHandoffParams';",
             "from '../features/yachiyo-chat/hooks/useLegacyChatRunnableResult';",
@@ -970,9 +971,38 @@ def test_chat_group_ui_exposes_stable_e2e_selectors() -> None:
         "apps/frontend/src/views/ChatView.tsx",
         [
             "import { ChatGroupDialog } from '../features/yachiyo-chat/components/ChatGroupDialog';",
+            "useChatGroupDialog()",
             "<ChatGroupDialog",
             "agentRunnables={agentRunnables}",
             "onToggleAgent={toggleGroupAgent}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/hooks/useChatGroupDialog.ts",
+        [
+            "export function useChatGroupDialog",
+            "const [open, setOpen] = useState(false);",
+            "const [mode, setMode] = useState<ChatGroupDialogMode>('create');",
+            "const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>([]);",
+            "function toggleAgent(agentId: string)",
+            "function openCreate()",
+            "function openEdit({",
+            "activeSessionContext.conversation_kind !== 'group'",
+            "function resetAfterCreate()",
+        ],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/views/ChatView.tsx",
+        [
+            "const [groupDialogOpen, setGroupDialogOpen]",
+            "const [groupDialogMode, setGroupDialogMode]",
+            "const [groupDialogError, setGroupDialogError]",
+            "const [groupName, setGroupName]",
+            "const [groupAvatarUrl, setGroupAvatarUrl]",
+            "const [selectedGroupAgentIds, setSelectedGroupAgentIds]",
+            "function toggleGroupAgent(agentId: string)",
+            "function openGroupDialog()",
+            "function closeGroupDialog()",
         ],
     )
     _assert_contains(

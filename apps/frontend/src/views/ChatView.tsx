@@ -84,6 +84,7 @@ import { useYachiyoTaskActions } from '../features/yachiyo-chat/hooks/useYachiyo
 import { useChatAssistantProfile } from '../features/yachiyo-chat/hooks/useChatAssistantProfile';
 import { useChatCopyFeedback } from '../features/yachiyo-chat/hooks/useChatCopyFeedback';
 import { useChatExecutor } from '../features/yachiyo-chat/hooks/useChatExecutor';
+import { useChatGroupDialog } from '../features/yachiyo-chat/hooks/useChatGroupDialog';
 import { useChatNotice } from '../features/yachiyo-chat/hooks/useChatNotice';
 import { useChatRouteHandoff } from '../features/yachiyo-chat/hooks/useChatRouteHandoffParams';
 import { useChatRunApprovalActions } from '../features/yachiyo-chat/hooks/useChatRunApprovalActions';
@@ -168,13 +169,25 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const runnables = useChatRunnables(!embedded);
   const [sessionTab, setSessionTab] = useState<'agents' | 'groups'>('agents');
   const [expandedAgents, setExpandedAgents] = useState<Set<string>>(new Set());
-  const [groupDialogOpen, setGroupDialogOpen] = useState(false);
-  const [groupDialogMode, setGroupDialogMode] = useState<'create' | 'edit'>('create');
-  const [groupDialogError, setGroupDialogError] = useState('');
-  const [groupName, setGroupName] = useState('');
-  const [groupAvatarUrl, setGroupAvatarUrl] = useState('');
-  const [selectedGroupAgentIds, setSelectedGroupAgentIds] = useState<string[]>([]);
-  const [isCreatingGroup, setIsCreatingGroup] = useState(false);
+  const {
+    avatarUrl: groupAvatarUrl,
+    changeAvatarUrl: changeGroupAvatarUrl,
+    changeName: changeGroupName,
+    close: closeGroupDialog,
+    error: groupDialogError,
+    isCreating: isCreatingGroup,
+    mode: groupDialogMode,
+    name: groupName,
+    open: groupDialogOpen,
+    openCreate: openGroupDialog,
+    openEdit: openGroupSettingsDialog,
+    reportAvatarError: reportGroupAvatarError,
+    resetAfterCreate: resetGroupDialogAfterCreate,
+    selectedAgentIds: selectedGroupAgentIds,
+    setError: setGroupDialogError,
+    setIsCreating: setIsCreatingGroup,
+    toggleAgent: toggleGroupAgent,
+  } = useChatGroupDialog();
   const [mentionActiveIndex, setMentionActiveIndex] = useState(0);
   const [dismissedMentionInput, setDismissedMentionInput] = useState('');
   const [, setRenderTick] = useState(0);
@@ -834,40 +847,12 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     });
   }
 
-  function toggleGroupAgent(agentId: string) {
-    setGroupDialogError('');
-    setSelectedGroupAgentIds((current) => (
-      current.includes(agentId)
-        ? current.filter((item) => item !== agentId)
-        : [...current, agentId]
-    ));
-  }
-
-  function openGroupDialog() {
-    setGroupDialogMode('create');
-    setGroupDialogOpen(true);
-    setGroupDialogError('');
-    setGroupName('');
-    setGroupAvatarUrl('');
-    setSelectedGroupAgentIds([]);
-  }
-
   function openGroupSettings() {
-    if (!currentSessionId || activeSessionContext.conversation_kind !== 'group') return;
-    const currentAgentIds = (activeSessionContext.participants || [])
-      .filter((participant) => participant.kind === 'agent' && participant.id)
-      .map((participant) => String(participant.id));
-    setGroupDialogMode('edit');
-    setGroupDialogOpen(true);
-    setGroupDialogError('');
-    setGroupName(activeSessionContext.runnable_name || currentTitle || '');
-    setGroupAvatarUrl(activeSessionContext.avatar_url || '');
-    setSelectedGroupAgentIds(currentAgentIds);
-  }
-
-  function closeGroupDialog() {
-    setGroupDialogOpen(false);
-    setGroupDialogError('');
+    openGroupSettingsDialog({
+      activeSessionContext,
+      currentSessionId,
+      currentTitle,
+    });
   }
 
   function toggleAgentGroup(agentId: string) {
@@ -910,7 +895,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
           },
         );
         setSessionContext(result.session_context || activeSessionContext);
-        setGroupDialogOpen(false);
+        closeGroupDialog();
         setStatus('群组资料已更新');
         await loadSessions();
         await refreshMessages({ allowDuringTransition: true });
@@ -933,10 +918,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       setMessages([]);
       setSessionContext(result.session_context || null);
       setSessionTab('groups');
-      setGroupDialogOpen(false);
-      setGroupName('');
-      setGroupAvatarUrl('');
-      setSelectedGroupAgentIds([]);
+      resetGroupDialogAfterCreate();
       isProcessingRef.current = false;
       setIsProcessing(false);
       setProcessingCount(0);
@@ -1686,19 +1668,13 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
           mode={groupDialogMode}
           isCreating={isCreatingGroup}
           selectedAgentIds={selectedGroupAgentIds}
-          onAvatarUrlChange={(value) => {
-            setGroupDialogError('');
-            setGroupAvatarUrl(value);
-          }}
+          onAvatarUrlChange={changeGroupAvatarUrl}
           onAvatarError={(message) => {
-            setGroupDialogError(message);
+            reportGroupAvatarError(message);
             setStatus(message);
           }}
           onClose={closeGroupDialog}
-          onNameChange={(value) => {
-            setGroupDialogError('');
-            setGroupName(value);
-          }}
+          onNameChange={changeGroupName}
           onSubmit={submitGroupDialog}
           onToggleAgent={toggleGroupAgent}
         />
