@@ -1203,6 +1203,7 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "export function yachiyoTaskStudioRunId",
             "export function yachiyoTaskStudioGroupRunId",
             "export function yachiyoTaskApprovalStudioTarget",
+            "export function yachiyoTaskArtifactReadTarget",
             "export function yachiyoTaskStatusMessage",
             "const groupRunId = messageGroupRunId(message);",
             "const pendingApprovals = messageTaskApprovals(message, runId, groupRunId) || [];",
@@ -1225,6 +1226,11 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "approval.run_id",
             "approval.workflow_run_id",
             "String(approval.group_run_id || '').trim() || yachiyoTaskStudioGroupRunId(task)",
+            "path: String(artifact.path || '').trim()",
+            "artifact.source_run_id",
+            "artifact.run_id",
+            "artifact.workflow_run_id",
+            "taskId: String(taskId || '').trim()",
             "const approvalKeys = (task.pending_approvals || []).flatMap((approval) => [",
             "approval.workflow_run_id",
             "artifact.workflow_run_id",
@@ -1434,10 +1440,10 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "RuntimeReadableArtifactPreview",
             "readYachiyoChatRunArtifact",
             "readYachiyoTaskArtifact",
-            "const sourceRunId = String(artifact.source_run_id || artifact.run_id || '').trim();",
+            "yachiyoTaskArtifactReadTarget",
             "canReadRunArtifact",
-            "readYachiyoChatRunArtifact(sourceRunId, artifactPath)",
-            "readYachiyoTaskArtifact(taskId, artifactPath)",
+            "readYachiyoChatRunArtifact(artifactTarget.runId, artifactPath)",
+            "readYachiyoTaskArtifact(artifactTarget.taskId, artifactPath)",
             'shellTestId="yachiyo-task-artifact-shell"',
             'errorTestId="yachiyo-task-artifact-error"',
             'previewActionClassName="yachiyo-task-artifact-action"',
@@ -1450,7 +1456,13 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
     )
     _assert_not_contains(
         "apps/frontend/src/features/yachiyo-chat/components/ArtifactPreview.tsx",
-        ["yachiyo-studio/api"],
+        [
+            "yachiyo-studio/api",
+            "artifact.source_run_id",
+            "artifact.run_id",
+            "artifact.workflow_run_id",
+            "sourceRunId",
+        ],
     )
     _assert_contains(
         "apps/frontend/src/features/runtime-shared/components/RuntimeApprovalCard.tsx",

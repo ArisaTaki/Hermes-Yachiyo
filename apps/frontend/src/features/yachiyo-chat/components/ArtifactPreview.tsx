@@ -1,5 +1,6 @@
 import { RuntimeReadableArtifactPreview } from '../../runtime-shared/components/RuntimeReadableArtifactPreview';
 import { readYachiyoChatRunArtifact, readYachiyoTaskArtifact } from '../api';
+import { yachiyoTaskArtifactReadTarget } from '../taskSnapshots';
 import type { ArtifactSnapshot } from '../types';
 
 export function ArtifactPreview({
@@ -9,10 +10,9 @@ export function ArtifactPreview({
   artifact: ArtifactSnapshot;
   taskId?: string;
 }) {
-  const path = String(artifact.path || '').trim();
-  const sourceRunId = String(artifact.source_run_id || artifact.run_id || '').trim();
-  const canReadRunArtifact = Boolean(sourceRunId && path);
-  const canReadTaskArtifact = Boolean(taskId && path);
+  const artifactTarget = yachiyoTaskArtifactReadTarget(artifact, taskId);
+  const canReadRunArtifact = Boolean(artifactTarget.runId && artifactTarget.path);
+  const canReadTaskArtifact = Boolean(artifactTarget.taskId && artifactTarget.path);
   return (
     <RuntimeReadableArtifactPreview
       artifact={artifact}
@@ -28,9 +28,9 @@ export function ArtifactPreview({
       previewVariant="compact"
       readArtifact={
         canReadRunArtifact
-          ? (artifactPath) => readYachiyoChatRunArtifact(sourceRunId, artifactPath)
+          ? (artifactPath) => readYachiyoChatRunArtifact(artifactTarget.runId, artifactPath)
           : canReadTaskArtifact
-            ? (artifactPath) => readYachiyoTaskArtifact(taskId, artifactPath)
+            ? (artifactPath) => readYachiyoTaskArtifact(artifactTarget.taskId, artifactPath)
             : undefined
       }
       shellTestId="yachiyo-task-artifact-shell"

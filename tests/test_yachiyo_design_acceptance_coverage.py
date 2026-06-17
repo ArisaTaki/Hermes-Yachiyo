@@ -531,10 +531,21 @@ def test_shared_runtime_surface_components_acceptance_paths_are_guarded() -> Non
         "apps/frontend/src/features/yachiyo-chat/components/ArtifactPreview.tsx",
         [
             "RuntimeReadableArtifactPreview",
-            "readYachiyoChatRunArtifact(sourceRunId, artifactPath)",
-            "readYachiyoTaskArtifact(taskId, artifactPath)",
+            "yachiyoTaskArtifactReadTarget",
+            "readYachiyoChatRunArtifact(artifactTarget.runId, artifactPath)",
+            "readYachiyoTaskArtifact(artifactTarget.taskId, artifactPath)",
             'previewVariant="compact"',
             'previewTestId="yachiyo-task-artifact-preview"',
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/taskSnapshots.ts",
+        [
+            "export function yachiyoTaskArtifactReadTarget",
+            "path: String(artifact.path || '').trim()",
+            "artifact.source_run_id",
+            "artifact.workflow_run_id",
+            "taskId: String(taskId || '').trim()",
         ],
     )
     _assert_contains(
