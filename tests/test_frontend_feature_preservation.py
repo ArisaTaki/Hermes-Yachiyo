@@ -582,6 +582,13 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "export function messageArtifactCount",
             "export function messageArtifactTitle",
             "message?.metadata?.run_artifacts",
+            "'查看任务产物'",
+        ],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/features/yachiyo-chat/messageArtifacts.ts",
+        [
+            "查看运行产物",
         ],
     )
     _assert_contains(

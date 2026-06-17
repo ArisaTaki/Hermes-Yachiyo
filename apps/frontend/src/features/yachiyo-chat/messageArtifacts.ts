@@ -8,5 +8,5 @@ export function messageArtifactTitle(message?: ChatMessage | null) {
   return message?.metadata?.run_artifacts
     ?.map((artifact) => artifact.path)
     .filter(Boolean)
-    .join('\n') || '查看运行产物';
+    .join('\n') || '查看任务产物';
 }
