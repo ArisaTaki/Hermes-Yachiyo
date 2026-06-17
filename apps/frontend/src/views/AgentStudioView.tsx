@@ -4,8 +4,8 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { AgentDefinitionsTab } from '../features/agent-studio/components/AgentDefinitionsTab';
 import { AgentGroupPanel } from '../features/agent-studio/components/AgentGroupPanel';
 import { AgentStudioChrome } from '../features/agent-studio/components/AgentStudioChrome';
+import { AgentStudioMemoryTab } from '../features/agent-studio/components/AgentStudioMemoryTab';
 import { AgentStudioRunsTab } from '../features/agent-studio/components/AgentStudioRunsTab';
-import { RuntimeMemoryPanel } from '../features/agent-studio/components/RuntimeMemoryPanel';
 import { SkillFolderPanel } from '../features/agent-studio/components/SkillFolderPanel';
 import { SkillLibraryTab } from '../features/agent-studio/components/SkillLibraryTab';
 import { AgentStudioWorkflowsTab } from '../features/agent-studio/components/AgentStudioWorkflowsTab';
@@ -55,9 +55,6 @@ import { useWorkflowDraftActions } from '../features/agent-studio/hooks/useWorkf
 import { useWorkflowRunReadiness } from '../features/agent-studio/hooks/useWorkflowRunReadiness';
 import { useWorkflowSaveActions } from '../features/agent-studio/hooks/useWorkflowSaveActions';
 import { useWorkflowCanvasActions } from '../features/agent-studio/hooks/useWorkflowCanvasActions';
-import {
-  formatRunDate,
-} from '../features/agent-studio/utils/runs';
 import { openAppView } from '../lib/bridge';
 
 export function AgentStudioView() {
@@ -976,9 +973,8 @@ export function AgentStudioView() {
       ) : null}
 
       {!loading && tab === 'memory' ? (
-        <RuntimeMemoryPanel
+        <AgentStudioMemoryTab
           busy={busy}
-          formatRunDate={formatRunDate}
           futureTasks={futureTasks}
           memories={memories}
           onCancelFutureTask={requestCancelFutureTask}

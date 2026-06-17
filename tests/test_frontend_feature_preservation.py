@@ -5198,7 +5198,15 @@ def test_agent_studio_exposes_runtime_memory_and_future_task_management() -> Non
             "requestDeleteMemory",
             "requestCancelFutureTask",
             "triggerDueFutureTaskRuns",
+            "AgentStudioMemoryTab",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/AgentStudioMemoryTab.tsx",
+        [
+            "export function AgentStudioMemoryTab",
             "RuntimeMemoryPanel",
+            "formatRunDate={formatRunDate}",
         ],
     )
     _assert_contains(
