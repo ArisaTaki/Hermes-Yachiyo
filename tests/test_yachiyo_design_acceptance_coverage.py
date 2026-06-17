@@ -806,6 +806,18 @@ def test_runtime_core_split_acceptance_paths_are_guarded() -> None:
         ],
     )
     _assert_contains(
+        "apps/shell/yachiyo_agent/artifact_event_snapshots.py",
+        [
+            "def artifact_snapshots_from_events",
+            "def artifact_payload_from_event",
+            "def merge_artifact_snapshot_lists",
+            "def merge_artifact_snapshots",
+            "event.sensitivity == \"secret\"",
+            "\"workflow.node.artifact\"",
+            "\"group.shared_artifact.created\"",
+        ],
+    )
+    _assert_contains(
         "apps/shell/yachiyo_agent/groups.py",
         [
             "redact_secrets",
