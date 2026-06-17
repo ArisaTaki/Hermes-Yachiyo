@@ -567,6 +567,31 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "looksLikeTitlePromptEcho",
         ],
     )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/sessionDerivedState.ts",
+        [
+            "export type ChatSessionAgentGroup",
+            "export type ChatSessionDerivedState",
+            "export function deriveChatSessionState",
+            "const defaultGroupName = groupDefaultName(agentRunnables, selectedGroupAgentIds, assistantProfile);",
+            "const agentGroups = deriveAgentGroups(sessionItems, runnables, assistantProfile);",
+            "const groupSessions = sessionItems.filter((session) => (",
+            "const currentIsUnassigned = currentSession",
+            "const activeSessionContext = currentIsUnassigned",
+            "const currentTitle = conversationDisplayName(",
+            "const deleteTarget = deleteTargetLabel(activeSessionContext);",
+            "function deriveAgentGroups",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/views/ChatView.tsx",
+        [
+            "import { deriveChatSessionState } from '../features/yachiyo-chat/sessionDerivedState';",
+            "} = useMemo(() => deriveChatSessionState({",
+            "selectedGroupAgentIds,",
+            "sessionContext,",
+        ],
+    )
     _assert_not_contains(
         "apps/frontend/src/views/ChatView.tsx",
         [
@@ -608,6 +633,11 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "function conversationDisplayName",
             "function groupDefaultName",
             "function deleteTargetLabel",
+            "const groups = new Map<string, ChatSessionAgentGroup>();",
+            "sessionItems.filter((session) => isUnassignedSession(session))",
+            "sessionItems.filter((s) => s.conversation_kind === 'workflow' || s.conversation_kind === 'group')",
+            "conversationDisplayName(currentSession",
+            "deleteTargetLabel(activeSessionContext)",
             "type PendingAttachment =",
             "type ChatE2EImageDetail =",
             "type ChatMessage =",

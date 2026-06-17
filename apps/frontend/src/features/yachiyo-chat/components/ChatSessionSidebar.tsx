@@ -4,6 +4,7 @@ import {
   sessionKindLabel,
   sessionPreview,
 } from '../sessionState';
+import type { ChatSessionAgentGroup } from '../sessionDerivedState';
 import type { ChatRunnableSummary as RunnableSummary } from '../runnables';
 import type {
   AssistantProfilePayload,
@@ -11,12 +12,6 @@ import type {
 } from '../types';
 import { SessionAvatar } from './ChatAvatars';
 import { UiIcon } from '../../../components/UiIcon';
-
-export type ChatSessionAgentGroup = {
-  agent_id: string;
-  agent_name: string;
-  sessions: SessionItem[];
-};
 
 type ChatSessionSidebarProps = {
   agentGroups: ChatSessionAgentGroup[];

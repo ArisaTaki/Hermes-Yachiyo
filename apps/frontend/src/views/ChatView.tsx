@@ -20,10 +20,7 @@ import { ChatComposer } from '../features/yachiyo-chat/components/ChatComposer';
 import { composerApprovalStatusText } from '../features/yachiyo-chat/components/ComposerApprovalNotice';
 import { ChatGroupDialog } from '../features/yachiyo-chat/components/ChatGroupDialog';
 import { ChatHeader } from '../features/yachiyo-chat/components/ChatHeader';
-import {
-  ChatSessionSidebar,
-  type ChatSessionAgentGroup,
-} from '../features/yachiyo-chat/components/ChatSessionSidebar';
+import { ChatSessionSidebar } from '../features/yachiyo-chat/components/ChatSessionSidebar';
 import { SessionIdDialog } from '../features/yachiyo-chat/components/SessionIdDialog';
 import { MessageBubble } from '../features/yachiyo-chat/components/MessageBubble';
 import type { ApprovalRequestDetails } from '../features/yachiyo-chat/components/MessageApprovalRequestCard';
@@ -72,14 +69,10 @@ import {
 } from '../features/yachiyo-chat/mentions';
 import { codeBlockStateKey } from '../features/yachiyo-chat/markdown';
 import {
-  contextFromSession,
-  conversationDisplayName,
-  deleteTargetLabel,
-  groupDefaultName,
   groupMemberCount,
-  isUnassignedSession,
   normalizeSessionContext,
 } from '../features/yachiyo-chat/sessionState';
+import { deriveChatSessionState } from '../features/yachiyo-chat/sessionDerivedState';
 import { useYachiyoTaskActions } from '../features/yachiyo-chat/hooks/useYachiyoTaskActions';
 import { useChatRunPolling } from '../features/yachiyo-chat/hooks/useChatRunPolling';
 import { useYachiyoTaskSnapshots } from '../features/yachiyo-chat/hooks/useYachiyoTaskSnapshots';
@@ -1204,7 +1197,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   }
 
   function requestDeleteSession() {
-    const targetLabel = deleteTargetLabel(activeSessionContext);
+    const targetLabel = deleteTarget;
     requestConfirm({
       title: `删除此${targetLabel}？`,
       description: `当前${targetLabel}记录会从本机删除，此操作不可恢复。`,
@@ -1739,53 +1732,29 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     });
   }
 
-  const sessionItems = sessions?.sessions || [];
-  const normalizedSessionQuery = debouncedSessionQuery.trim();
-  const visibleSessions = sessionItems;
-  const agentRunnables = useMemo(
-    () => runnables.filter((item) => item.kind === 'agent' && item.enabled !== false),
-    [runnables],
-  );
-  const defaultGroupName = useMemo(
-    () => groupDefaultName(agentRunnables, selectedGroupAgentIds, assistantProfile),
-    [agentRunnables, assistantProfile, selectedGroupAgentIds],
-  );
-  const unassignedSessions = useMemo(
-    () => sessionItems.filter((session) => isUnassignedSession(session)),
-    [sessionItems],
-  );
-
-  // Agent 分组逻辑
-  const agentGroups = useMemo(() => {
-    const groups = new Map<string, ChatSessionAgentGroup>();
-
-    sessionItems
-      .filter((s) => !isUnassignedSession(s) && (s.conversation_kind === 'main' || s.conversation_kind === 'agent'))
-      .forEach((session) => {
-        const agentId = session.runnable_id || 'main';
-
-        // 从 runnables 中获取最新的 Agent 名称
-        const runnable = runnables.find((r) => r.id === agentId);
-        const agentName = agentId === 'main'
-          ? (assistantProfile?.agent_nickname || assistantProfile?.agent_name || '主模型')
-          : runnable?.nickname || runnable?.name || session.runnable_name || 'Agent';
-
-        if (!groups.has(agentId)) {
-          groups.set(agentId, {
-            agent_id: agentId,
-            agent_name: agentName,
-            sessions: [],
-          });
-        }
-        groups.get(agentId)!.sessions.push(session);
-      });
-
-    return Array.from(groups.values());
-  }, [sessionItems, runnables, assistantProfile]);
-
-  const groupSessions = useMemo(() => {
-    return sessionItems.filter((s) => s.conversation_kind === 'workflow' || s.conversation_kind === 'group');
-  }, [sessionItems]);
+  const {
+    activeSessionContext,
+    agentGroups,
+    agentRunnables,
+    currentSession,
+    currentSessionId,
+    currentTitle,
+    defaultGroupName,
+    deleteTarget,
+    groupSessions,
+    normalizedSessionQuery,
+    sessionItems,
+    unassignedSessions,
+    visibleSessions,
+  } = useMemo(() => deriveChatSessionState({
+    assistantProfile,
+    debouncedSessionQuery,
+    messages,
+    runnables,
+    selectedGroupAgentIds,
+    sessionContext,
+    sessions,
+  }), [assistantProfile, debouncedSessionQuery, messages, runnables, selectedGroupAgentIds, sessionContext, sessions]);
 
   // 初始化展开状态（默认全部展开）
   const initializedAgentsRef = useRef(false);
@@ -1795,14 +1764,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       setExpandedAgents(new Set(agentGroups.map((g) => g.agent_id)));
     }
   }, [agentGroups]);
-  const currentSession = sessionItems.find((session) => session.session_id === sessions?.current_session_id);
-  const currentSessionId = sessions?.current_session_id || '';
-  const currentIsUnassigned = currentSession
-    ? isUnassignedSession(currentSession)
-    : messages.length === 0 && normalizeSessionContext(sessionContext).conversation_kind === 'main';
-  const activeSessionContext = currentIsUnassigned
-    ? { ...normalizeSessionContext(currentSession ? contextFromSession(currentSession) : sessionContext), conversation_kind: 'unassigned' }
-    : currentSession ? contextFromSession(currentSession) : normalizeSessionContext(sessionContext);
   useEffect(() => {
     if (approvalSessionIdRef.current === currentSessionId) return;
     approvalSessionIdRef.current = currentSessionId;
@@ -1810,13 +1771,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     setResolvedComposerApprovalIds([]);
     setComposerApprovalMessageId('');
   }, [currentSessionId]);
-  const currentTitle = conversationDisplayName(
-    currentSession,
-    activeSessionContext,
-    assistantProfile,
-    messages,
-  );
-  const deleteTarget = deleteTargetLabel(activeSessionContext);
   const mentionQuery = mentionQueryAtEnd(input);
   const rawMentionSuggestions = useMemo(
     () => mentionOptionsForQuery(runnables, mentionQuery, assistantProfile, activeSessionContext),
