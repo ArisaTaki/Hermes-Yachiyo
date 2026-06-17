@@ -19,9 +19,9 @@ import {
   messageRunProgressTitle,
   messageRunStatus,
   messageSender,
-  messageWorkflowStudioAction,
 } from '../messageState';
 import { messageArtifactCount, messageArtifactTitle } from '../messageArtifacts';
+import { messageWorkflowStudioAction } from '../messageWorkflowGuidance';
 import {
   groupAgentSummaryNotice,
   groupAgentSummaryRunGroupId,

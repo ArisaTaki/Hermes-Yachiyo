@@ -5,31 +5,10 @@ import {
 import { participantDisplayName } from './sessionState';
 import { latestGroupAgentSummaryNotice } from './messageGroups';
 import { runtimeToolDisplayLabelOrName } from '../runtime-shared/approval';
-import type {
-  ChatActivityEvent,
-  ChatMessage,
-  ChatMessageMetadata,
-} from './types';
+import type { ChatActivityEvent, ChatMessage } from './types';
 
 export type YachiyoChatActivityEvent = ChatActivityEvent;
-export type YachiyoChatMessageMetadata = ChatMessageMetadata;
 export type YachiyoChatMessage = ChatMessage;
-
-export type MessageWorkflowStudioAction = {
-  label: string;
-  runnableId: string;
-  suggestedGoal: string;
-};
-
-export function metadataListAttribute(value: unknown): string {
-  if (!Array.isArray(value)) return '';
-  return value.map((item) => String(item || '').trim()).filter(Boolean).join(',');
-}
-
-function metadataStringValue(value: unknown) {
-  if (value === undefined || value === null) return '';
-  return String(value).trim();
-}
 
 export function messageText(message: YachiyoChatMessage) {
   return String(message.content || message.text || '');
@@ -94,38 +73,6 @@ export function messageRunProgressRunnableId(message?: YachiyoChatMessage | null
 
 export function messageRunProgressRunGroupId(message?: YachiyoChatMessage | null) {
   return String(message?.metadata?.run_group_id || '').trim();
-}
-
-export function messageWorkflowStudioAction(message?: YachiyoChatMessage | null): MessageWorkflowStudioAction | null {
-  const metadata = message?.metadata || {};
-  if (metadata.guidance_type !== 'workflow_chat_entry_disabled') return null;
-  const runnableId = String(metadata.runnable_id || '').trim();
-  return {
-    label: runnableId ? '在 Agent Studio 中运行' : '打开 Workflow Studio',
-    runnableId,
-    suggestedGoal: String(metadata.suggested_goal || '').trim(),
-  };
-}
-
-export function taskHandoffMessageId(messages: YachiyoChatMessage[], taskId: string) {
-  const clean = String(taskId || '').trim();
-  if (!clean) return '';
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (!message?.id) continue;
-    if (messageMatchesTaskHandoff(message, clean)) return message.id;
-  }
-  return '';
-}
-
-export function messageMatchesTaskHandoff(message: YachiyoChatMessage, taskId: string) {
-  const metadata = message.metadata || {};
-  if (String(message.task_id || '').trim() === taskId) return true;
-  if (metadataStringValue(metadata.group_agent_summary_task_id) === taskId) return true;
-  if (metadataStringValue(metadata.group_agent_summary_for_task_id) === taskId) return true;
-  if (metadataStringValue(metadata.delegated_run_source_task_id) === taskId) return true;
-  if (metadataListAttribute(metadata.group_followup_for_task_ids).split(',').includes(taskId)) return true;
-  return false;
 }
 
 export function latestFailedMessage(messages: YachiyoChatMessage[]) {

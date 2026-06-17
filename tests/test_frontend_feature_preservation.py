@@ -497,7 +497,6 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
         [
             "export function messageText",
             "export function messageErrorText",
-            "export function metadataListAttribute",
             "export function normalizeRunStatus",
             "export function messageRunStatus",
             "export function messageRunId",
@@ -509,12 +508,6 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "export function messageRunProgressRunnableKind",
             "export function messageRunProgressRunnableId",
             "export function messageRunProgressRunGroupId",
-            "export function messageWorkflowStudioAction",
-            "export function taskHandoffMessageId",
-            "export function messageMatchesTaskHandoff",
-            "metadataStringValue(metadata.group_agent_summary_task_id) === taskId",
-            "metadataStringValue(metadata.delegated_run_source_task_id) === taskId",
-            "metadataListAttribute(metadata.group_followup_for_task_ids).split(',').includes(taskId)",
             "export function latestFailedMessage",
             "export function latestVisibleActivity",
             "export function activityLabel",
@@ -526,6 +519,25 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "export function chatStatusLabel",
             "approvalRequiredMessages(messages)",
             "nextApprovalStatusText({ pending_approval: approval.metadata?.pending_approval })",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/messageTaskHandoff.ts",
+        [
+            "export function taskHandoffMessageId",
+            "export function messageMatchesTaskHandoff",
+            "metadataStringValue(metadata.group_agent_summary_task_id) === taskId",
+            "metadataStringValue(metadata.delegated_run_source_task_id) === taskId",
+            "metadataListAttribute(metadata.group_followup_for_task_ids).split(',').includes(taskId)",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/messageWorkflowGuidance.ts",
+        [
+            "export type MessageWorkflowStudioAction",
+            "export function messageWorkflowStudioAction",
+            "metadata.guidance_type !== 'workflow_chat_entry_disabled'",
+            "suggestedGoal: String(metadata.suggested_goal || '').trim()",
         ],
     )
     _assert_contains(
@@ -4260,7 +4272,7 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
         ["workflowStudioAction.label"],
     )
     _assert_contains(
-        "apps/frontend/src/features/yachiyo-chat/messageState.ts",
+        "apps/frontend/src/features/yachiyo-chat/messageWorkflowGuidance.ts",
         ["在 Agent Studio 中运行"],
     )
     _assert_not_contains("apps/frontend/src/views/ChatView.tsx", ["运行详情", "去 Runs 运行"])

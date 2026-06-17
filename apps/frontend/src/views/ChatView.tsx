@@ -46,8 +46,8 @@ import {
   messageRunStatus,
   messageText,
   normalizeRunStatus,
-  taskHandoffMessageId,
 } from '../features/yachiyo-chat/messageState';
+import { taskHandoffMessageId } from '../features/yachiyo-chat/messageTaskHandoff';
 import {
   COMPOSER_HEIGHT_STORAGE_KEY,
   COMPOSER_MAX_HEIGHT,
