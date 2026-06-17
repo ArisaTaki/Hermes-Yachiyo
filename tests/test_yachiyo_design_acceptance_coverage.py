@@ -238,6 +238,30 @@ ACCEPTANCE_10_3_MATRIX: tuple[AcceptanceScenario, ...] = (
         "旧 AgentStudioView 关键功能未丢失。",
         (
             (
+                "smoke",
+                "scripts/smoke_agent_studio_agents_ui.mjs",
+                ('data-testid="agent-studio-agents"', "agent updated", "agent deleted"),
+            ),
+            (
+                "smoke",
+                "scripts/smoke_agent_studio_groups_ui.mjs",
+                ('data-testid="agent-studio-groups"', "group run detail verified"),
+            ),
+            (
+                "smoke",
+                "scripts/smoke_workflow_management_ui.mjs",
+                ('data-testid="workflow-list-manage"', "workflow management delete paths rendered"),
+            ),
+            (
+                "smoke",
+                "scripts/smoke_agent_run_detail_ui.mjs",
+                (
+                    'data-testid="agent-run-detail-approval"',
+                    "artifact preview rendered",
+                    "run detail memory skill trace replay verified",
+                ),
+            ),
+            (
                 "source",
                 "apps/frontend/src/views/AgentStudioView.tsx",
                 ("AgentDefinitionsTab", "AgentGroupPanel", "RunManagementTab", "WorkflowCanvas"),
@@ -833,5 +857,56 @@ def test_legacy_agents_compatibility_acceptance_path_is_guarded() -> None:
             'assert responses[0].json() == {"agents": [{"agent_id": "agent-1"}]}',
             'assert responses[1].json() == {"agent_id": "agent-1", "name": "Agent 1"}',
             'assert responses[6].json() == {"ok": True, "agent_id": "agent-1", "skill_id": "skill-1"}',
+        ],
+    )
+
+
+def test_agent_studio_view_preservation_acceptance_path_is_guarded() -> None:
+    _assert_contains(
+        "apps/frontend/src/views/AgentStudioView.tsx",
+        [
+            "AgentDefinitionsTab",
+            "AgentGroupPanel",
+            "RunManagementTab",
+            "WorkflowCanvas",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/RunDetailPanel.tsx",
+        [
+            "ToolCallInspector",
+            "ApprovalInspector",
+            "ArtifactInspector",
+            "RunTimeline",
+        ],
+    )
+    _assert_smoke_script(
+        "scripts/smoke_agent_studio_agents_ui.mjs",
+        [
+            'data-testid="agent-studio-agents"',
+            "agent updated",
+            "agent deleted",
+        ],
+    )
+    _assert_smoke_script(
+        "scripts/smoke_agent_studio_groups_ui.mjs",
+        [
+            'data-testid="agent-studio-groups"',
+            "group run detail verified",
+        ],
+    )
+    _assert_smoke_script(
+        "scripts/smoke_workflow_management_ui.mjs",
+        [
+            'data-testid="workflow-list-manage"',
+            "workflow management delete paths rendered",
+        ],
+    )
+    _assert_smoke_script(
+        "scripts/smoke_agent_run_detail_ui.mjs",
+        [
+            'data-testid="agent-run-detail-approval"',
+            "artifact preview rendered",
+            "run detail memory skill trace replay verified",
         ],
     )
