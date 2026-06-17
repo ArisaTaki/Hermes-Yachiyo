@@ -131,7 +131,7 @@ export function useChatRunPolling({
   ) => {
     void pollAgentRunCompletion(runId, options).catch((error) => {
       console.error('后台轮询 Agent Run 状态失败:', error);
-      setStatus(error instanceof Error ? error.message : 'Agent Run 状态刷新失败');
+      setStatus(error instanceof Error ? error.message : 'Agent 任务状态刷新失败');
     });
   }, [pollAgentRunCompletion, setStatus]);
 

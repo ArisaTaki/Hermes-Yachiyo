@@ -4168,8 +4168,12 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
             "chatRunProgressStatusText(runLabel, attempt, interval)",
             "chatRunPollingTimeoutStatusText(chatStillProcessing)",
             "void pollAgentRunCompletion(runId, options).catch((error) =>",
-            "setStatus(error instanceof Error ? error.message : 'Agent Run 状态刷新失败')",
+            "setStatus(error instanceof Error ? error.message : 'Agent 任务状态刷新失败')",
         ],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/features/yachiyo-chat/hooks/useChatRunPolling.ts",
+        ["Agent Run 状态刷新失败"],
     )
     _assert_contains(
         "apps/frontend/src/features/yachiyo-chat/runSnapshots.ts",
