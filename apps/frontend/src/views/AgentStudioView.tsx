@@ -1,10 +1,9 @@
 import '@xyflow/react/dist/style.css';
 
-import { ConfirmDialog } from '../components/ConfirmDialog';
 import { AgentDefinitionsTab } from '../features/agent-studio/components/AgentDefinitionsTab';
-import { AgentStudioChrome } from '../features/agent-studio/components/AgentStudioChrome';
 import { AgentStudioGroupsTab } from '../features/agent-studio/components/AgentStudioGroupsTab';
 import { AgentStudioMemoryTab } from '../features/agent-studio/components/AgentStudioMemoryTab';
+import { AgentStudioPageFrame } from '../features/agent-studio/components/AgentStudioPageFrame';
 import { AgentStudioRunsTab } from '../features/agent-studio/components/AgentStudioRunsTab';
 import { AgentStudioSkillFoldersTab } from '../features/agent-studio/components/AgentStudioSkillFoldersTab';
 import { AgentStudioSkillsTab } from '../features/agent-studio/components/AgentStudioSkillsTab';
@@ -744,16 +743,17 @@ export function AgentStudioView() {
   });
 
   return (
-    <section className="agent-studio-page hy-route-page">
-      <AgentStudioChrome
-        error={error}
-        loading={loading}
-        status={status}
-        tab={tab}
-        onActivateTab={activateTab}
-        onBack={() => void openAppView('main')}
-      />
-
+    <AgentStudioPageFrame
+      confirmDialog={confirmDialog}
+      error={error}
+      loading={loading}
+      status={status}
+      tab={tab}
+      onActivateTab={activateTab}
+      onBack={() => void openAppView('main')}
+      onCancelConfirmDialog={closeConfirmDialog}
+      onConfirmCurrentDialog={confirmCurrentDialog}
+    >
       {!loading && tab === 'groups' ? (
         <AgentStudioGroupsTab
           agents={agents}
@@ -1074,16 +1074,6 @@ export function AgentStudioView() {
           selectedWorkflowSteps={selectedWorkflowSteps}
         />
       ) : null}
-
-      <ConfirmDialog
-        confirmLabel={confirmDialog?.confirmLabel}
-        description={confirmDialog?.description}
-        onCancel={closeConfirmDialog}
-        onConfirm={confirmCurrentDialog}
-        open={Boolean(confirmDialog)}
-        title={confirmDialog?.title || ''}
-        variant={confirmDialog?.variant}
-      />
-    </section>
+    </AgentStudioPageFrame>
   );
 }

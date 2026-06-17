@@ -2151,7 +2151,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
     _assert_contains(
         "apps/frontend/src/views/AgentStudioView.tsx",
         [
-            "AgentStudioChrome",
+            "AgentStudioPageFrame",
             "onActivateTab={activateTab}",
             "onBack={() => void openAppView('main')}",
             "AgentStudioGroupsTab",
@@ -2185,6 +2185,16 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "selectedRouteGroupRunId={selectedRouteGroupRunId}",
             "selectedRunReplayNextAfterSequence={selectedRunReplayState?.nextAfterSequence ?? 0}",
             "selectedRunArtifacts",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/AgentStudioPageFrame.tsx",
+        [
+            "export function AgentStudioPageFrame",
+            "AgentStudioChrome",
+            "ConfirmDialog",
+            "onCancelConfirmDialog",
+            "onConfirmCurrentDialog",
         ],
     )
     _assert_contains(
@@ -4880,7 +4890,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
     _assert_contains(
         "apps/frontend/src/views/AgentStudioView.tsx",
         [
-            "AgentStudioChrome",
+            "AgentStudioPageFrame",
             "useAgentAvatarActions",
             "useAgentDeletionActions",
             "useAgentDraftActions",
