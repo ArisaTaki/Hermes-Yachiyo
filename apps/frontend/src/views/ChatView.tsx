@@ -96,6 +96,7 @@ import {
   retainComposerDraft,
 } from '../features/yachiyo-chat/sessionState';
 import { useYachiyoTaskActions } from '../features/yachiyo-chat/hooks/useYachiyoTaskActions';
+import { useChatCopyFeedback } from '../features/yachiyo-chat/hooks/useChatCopyFeedback';
 import { useChatNotice } from '../features/yachiyo-chat/hooks/useChatNotice';
 import { useChatRunPolling } from '../features/yachiyo-chat/hooks/useChatRunPolling';
 import { useLegacyChatRunnableResult } from '../features/yachiyo-chat/hooks/useLegacyChatRunnableResult';
@@ -147,8 +148,6 @@ const IDLE_POLL_INTERVAL_MS = 3000;
 const EXECUTOR_POLL_INTERVAL_MS = 3000;
 const TYPE_BASE_CHARS_PER_SECOND = 85;
 const TYPE_MAX_CHARS_PER_SECOND = 360;
-const COPY_FEEDBACK_MS = 1500;
-const CODE_COPY_FEEDBACK_MS = 2600;
 const MAX_ATTACHMENTS = 4;
 const MIN_LOADING_MS = 1400;
 const ASSISTANT_PROFILE_UPDATED_EVENT = 'oha-assistant-profile-updated';
@@ -176,9 +175,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const [debouncedSessionQuery, setDebouncedSessionQuery] = useState('');
   const [routeSessionId, setRouteSessionId] = useState(() => currentParam('session_id').trim());
   const [routeTaskId, setRouteTaskId] = useState(() => currentParam('task_id').trim());
-  const [copiedMessageId, setCopiedMessageId] = useState('');
-  const [copiedCodeBlockKey, setCopiedCodeBlockKey] = useState('');
-  const [copiedSessionId, setCopiedSessionId] = useState('');
   const [sessionIdDialogOpen, setSessionIdDialogOpen] = useState(false);
   const [sessionIdCopyError, setSessionIdCopyError] = useState('');
   const [retryingMessageId, setRetryingMessageId] = useState('');
@@ -207,6 +203,14 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const [dismissedMentionInput, setDismissedMentionInput] = useState('');
   const [, setRenderTick] = useState(0);
   const { confirmDialog, requestConfirm } = useConfirmDialog();
+  const {
+    copiedCodeBlockKey,
+    copiedMessageId,
+    copiedSessionId,
+    markCodeBlockCopied,
+    markMessageCopied,
+    markSessionCopied,
+  } = useChatCopyFeedback();
   const { dismissNotice, notice, showNotice } = useChatNotice();
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -219,7 +223,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const stickToBottomRef = useRef(true);
   const lastScrollTopRef = useRef(0);
   const bottomAnchorRef = useRef<HTMLDivElement>(null);
-  const codeCopyTimerRef = useRef<number | null>(null);
   const messagesLoadedRef = useRef(false);
   const messageLoadTokenRef = useRef(0);
   const conversationLoadTokenRef = useRef(0);
@@ -640,7 +643,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     return () => {
       if (animationFrameRef.current !== null) window.cancelAnimationFrame(animationFrameRef.current);
       if (scrollFrameRef.current !== null) window.cancelAnimationFrame(scrollFrameRef.current);
-      if (codeCopyTimerRef.current !== null) window.clearTimeout(codeCopyTimerRef.current);
       if (highlightClearTimerRef.current !== null) window.clearTimeout(highlightClearTimerRef.current);
       const snapshot = latestChatSnapshotRef.current;
       const transientSessionId = transientEmptySessionIdRef.current;
@@ -1217,9 +1219,8 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     }
     try {
       await copyText(content);
-      setCopiedMessageId(message.id || '');
+      markMessageCopied(message.id || '');
       setStatus('已复制');
-      window.setTimeout(() => setCopiedMessageId(''), COPY_FEEDBACK_MS);
     } catch {
       setStatus('复制失败');
     }
@@ -1406,13 +1407,8 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     const codeBlockKey = codeBlockStateKey(messageNode?.dataset.messageId || '', blockIndex);
     try {
       await copyText(content);
-      setCopiedCodeBlockKey(codeBlockKey);
+      markCodeBlockCopied(codeBlockKey);
       setStatus('已复制代码');
-      if (codeCopyTimerRef.current !== null) window.clearTimeout(codeCopyTimerRef.current);
-      codeCopyTimerRef.current = window.setTimeout(() => {
-        setCopiedCodeBlockKey((current) => (current === codeBlockKey ? '' : current));
-        codeCopyTimerRef.current = null;
-      }, CODE_COPY_FEEDBACK_MS);
     } catch {
       setStatus('复制代码失败');
     }
@@ -1427,9 +1423,8 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     setSessionIdCopyError('');
     try {
       await copyText(sessionId);
-      setCopiedSessionId(sessionId);
+      markSessionCopied(sessionId);
       setStatus('已复制会话调试 ID');
-      window.setTimeout(() => setCopiedSessionId(''), COPY_FEEDBACK_MS);
     } catch (error) {
       setSessionIdDialogOpen(true);
       setSessionIdCopyError(error instanceof Error ? error.message : '复制失败');

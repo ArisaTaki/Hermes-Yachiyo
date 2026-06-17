@@ -736,6 +736,7 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "from '../features/yachiyo-chat/renderState';",
             "from '../features/yachiyo-chat/layoutState';",
             "from '../features/yachiyo-chat/components/ChatFullPageLoading';",
+            "from '../features/yachiyo-chat/hooks/useChatCopyFeedback';",
             "from '../features/yachiyo-chat/hooks/useChatNotice';",
             "from '../features/yachiyo-chat/hooks/useLegacyChatRunnableResult';",
             "import { deriveChatSessionState } from '../features/yachiyo-chat/sessionDerivedState';",
@@ -768,6 +769,12 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "function isMissingGroupEditRouteError(",
             "function showNotice(",
             "noticeTimerRef",
+            "setCopiedMessageId",
+            "setCopiedCodeBlockKey",
+            "setCopiedSessionId",
+            "codeCopyTimerRef",
+            "COPY_FEEDBACK_MS",
+            "CODE_COPY_FEEDBACK_MS",
             "result.workflow_run_id ? 'Workflow' : 'Agent'",
             "result.runnable_command",
             "legacyChatRunnableResult(result)",
@@ -3352,6 +3359,19 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
             "const showNotice = useCallback(",
             "noticeTimerRef.current = window.setTimeout(",
             "useEffect(() => dismissNotice, [dismissNotice]);",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/hooks/useChatCopyFeedback.ts",
+        [
+            "export function useChatCopyFeedback",
+            "const COPY_FEEDBACK_MS = 1500;",
+            "const CODE_COPY_FEEDBACK_MS = 2600;",
+            "const markMessageCopied = useCallback(",
+            "const markCodeBlockCopied = useCallback(",
+            "const markSessionCopied = useCallback(",
+            "setCopiedCodeBlockKey((current) => (current === codeBlockKey ? '' : current));",
+            "if (codeCopyTimerRef.current !== null) window.clearTimeout(codeCopyTimerRef.current);",
         ],
     )
     _assert_not_contains(
