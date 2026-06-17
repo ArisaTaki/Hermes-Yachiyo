@@ -7,7 +7,6 @@ import type {
 } from 'react';
 
 import { useConfirmDialog } from '../components/ConfirmDialog';
-import { UiIcon } from '../components/UiIcon';
 import {
   clipboardImageFiles,
   fileFromDesktopImageSelection,
@@ -20,6 +19,7 @@ import { createDelegatedRunSummary } from '../features/yachiyo-chat/delegatedSum
 import { ChatComposer } from '../features/yachiyo-chat/components/ChatComposer';
 import { composerApprovalStatusText } from '../features/yachiyo-chat/components/ComposerApprovalNotice';
 import { ChatGroupDialog } from '../features/yachiyo-chat/components/ChatGroupDialog';
+import { ChatHeader } from '../features/yachiyo-chat/components/ChatHeader';
 import {
   ChatSessionSidebar,
   type ChatSessionAgentGroup,
@@ -27,9 +27,6 @@ import {
 import { SessionIdDialog } from '../features/yachiyo-chat/components/SessionIdDialog';
 import { MessageBubble } from '../features/yachiyo-chat/components/MessageBubble';
 import type { ApprovalRequestDetails } from '../features/yachiyo-chat/components/MessageApprovalRequestCard';
-import {
-  SessionAvatar,
-} from '../features/yachiyo-chat/components/ChatAvatars';
 import {
   approvalRequiredItems,
   approvalRequiredMessages,
@@ -1943,69 +1940,27 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         )}
 
         <section className="chat-main hy-chat-mainpane">
-          <header className="chat-header">
-            <div className="chat-header-info">
-              <SessionAvatar
-                assistantProfile={assistantProfile}
-                context={activeSessionContext}
-                loading={assistantProfileLoading}
-                size="header"
-                runnables={runnables}
-              />
-              <div>
-                <div className="chat-header-name">{currentTitle}</div>
-                <div className="chat-header-status">
-                  <div className={`status-dot ${isProcessing ? 'processing' : 'completed'}`} />
-                  <span>{computedHeaderStatusText}</span>
-                </div>
-              </div>
-            </div>
-            <div className="chat-header-actions">
-              {activeSessionContext.conversation_kind === 'group' ? (
-                <button
-                  type="button"
-                  className="chat-action-btn"
-                  data-testid="chat-group-settings"
-                  title="群组设置"
-                  aria-label="群组设置"
-                  disabled={!currentSessionId}
-                  onClick={openGroupSettings}
-                >
-                  <UiIcon name="settings" />
-                </button>
-              ) : null}
-              <button
-                type="button"
-                className={`chat-action-btn ${copiedSessionId === currentSessionId ? 'copied' : ''}`}
-                title={currentSessionId ? `查看/复制会话 ID：${currentSessionId}` : '查看/复制会话 ID'}
-                aria-label="查看/复制会话 ID，不复制聊天记录"
-                disabled={!currentSessionId}
-                onClick={openSessionIdDialog}
-              >
-                <UiIcon name={copiedSessionId === currentSessionId ? 'check' : 'copy'} />
-              </button>
-              <button
-                type="button"
-                className="chat-action-btn"
-                title={attachmentHelpText(executor)}
-                aria-label="附加图片"
-                data-testid="chat-header-image-attach-button"
-                disabled={imageAttachDisabled}
-                onClick={() => void openImageAttachmentPicker()}
-              >
-                <UiIcon name="image" />
-              </button>
-              <button type="button" className="chat-action-btn" title="停止生成" aria-label="停止生成" data-testid="chat-header-stop-button" onClick={() => void cancelProcessing()} disabled={!isProcessing}>
-                <UiIcon name="stop" />
-              </button>
-              <button type="button" className="chat-action-btn" title="新对话" aria-label="新对话" onClick={() => void clearSession()}>
-                <UiIcon name="plus" />
-              </button>
-              <button type="button" className="chat-action-btn danger-action" title={`删除${deleteTarget}`} aria-label={`删除${deleteTarget}`} onClick={requestDeleteSession} disabled={!sessions?.sessions?.length}>
-                <UiIcon name="trash" />
-              </button>
-            </div>
-          </header>
+          <ChatHeader
+            assistantProfile={assistantProfile}
+            assistantProfileLoading={assistantProfileLoading}
+            attachmentHelpText={attachmentHelpText(executor)}
+            copiedSessionId={copiedSessionId}
+            currentSessionId={currentSessionId}
+            currentTitle={currentTitle}
+            deleteTarget={deleteTarget}
+            hasSessions={Boolean(sessions?.sessions?.length)}
+            imageAttachDisabled={imageAttachDisabled}
+            isProcessing={isProcessing}
+            onCancelProcessing={() => void cancelProcessing()}
+            onClearSession={() => void clearSession()}
+            onOpenGroupSettings={openGroupSettings}
+            onOpenImageAttachmentPicker={() => void openImageAttachmentPicker()}
+            onOpenSessionIdDialog={openSessionIdDialog}
+            onRequestDeleteSession={requestDeleteSession}
+            runnables={runnables}
+            sessionContext={activeSessionContext}
+            statusText={computedHeaderStatusText}
+          />
 
           <section
             className={`chat-messages refined-chat-list${conversationLoading ? ' is-loading-conversation' : ''}`}

@@ -408,9 +408,15 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "'/ui/chat/groups'",
             "approveChatRunApproval(runId)",
             "rejectChatRunApproval(runId, 'Rejected from chat')",
-            "from '../features/yachiyo-chat/components/ChatAvatars';",
             "openRunDetails(runId",
             "openWorkflowStudio(runnableId",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/ChatHeader.tsx",
+        [
+            "from './ChatAvatars';",
+            "SessionAvatar",
         ],
     )
     _assert_contains(
@@ -639,10 +645,16 @@ def test_chat_group_ui_exposes_stable_e2e_selectors() -> None:
         "apps/frontend/src/views/ChatView.tsx",
         [
             "import { ChatGroupDialog } from '../features/yachiyo-chat/components/ChatGroupDialog';",
-            'data-testid="chat-group-settings"',
             "<ChatGroupDialog",
             "agentRunnables={agentRunnables}",
             "onToggleAgent={toggleGroupAgent}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/ChatHeader.tsx",
+        [
+            "export function ChatHeader",
+            'data-testid="chat-group-settings"',
         ],
     )
     _assert_contains(
@@ -3001,7 +3013,6 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
             "if (isSending) return '正在发送中，稍后再添加图片';",
             "const detail = imageInputBlockedNoticeText();",
             "setStatus(detail);",
-            "disabled={imageAttachDisabled}",
             "const files = Array.from(event.target.files || []);",
             "event.target.value = '';",
             "if (files.length === 0) return;",
@@ -3044,6 +3055,12 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
             "aria-label={processingCount > 1 ? `停止当前 ${processingCount} 项任务` : '停止当前任务'}",
         ],
     )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/ChatHeader.tsx",
+        [
+            "disabled={imageAttachDisabled}",
+        ],
+    )
     _assert_occurs(chat_view, "openImageAttachmentPicker()", 3)
     _assert_occurs("apps/frontend/src/features/yachiyo-chat/components/ChatComposer.tsx", "data-testid=\"chat-image-file-input\"", 1)
     _assert_occurs("apps/frontend/src/features/yachiyo-chat/components/ChatComposer.tsx", "disabled={imageAttachDisabled}", 2)
@@ -3070,7 +3087,7 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
 
 def test_chat_ui_exposes_stable_e2e_selectors_for_image_cancel_approval_flow() -> None:
     _assert_contains(
-        "apps/frontend/src/views/ChatView.tsx",
+        "apps/frontend/src/features/yachiyo-chat/components/ChatHeader.tsx",
         [
             "data-testid=\"chat-header-image-attach-button\"",
             "data-testid=\"chat-header-stop-button\"",
