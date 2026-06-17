@@ -412,6 +412,7 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "approveChatRunApproval(runId)",
             "rejectChatRunApproval(runId, 'Rejected from chat')",
             "ComposerApprovalNotice",
+            "from '../features/yachiyo-chat/components/ChatAvatars';",
             "approvalId={composerApprovalItem.approvalId}",
             "itemId={composerApprovalItem.id}",
             "source={composerApprovalItem.source}",
@@ -419,6 +420,27 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "onClick={onReject}",
             "openRunDetails(runId",
             "openWorkflowStudio(runnableId",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/ChatAvatars.tsx",
+        [
+            "export function SessionAvatar",
+            "export function AvatarStack",
+            "export function participantAvatarContent",
+            "export function messageAvatar",
+            "normalizeSessionContext(context)",
+            "messageSender(message)",
+            "agentAvatarNode(avatarUrl, name)",
+        ],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/views/ChatView.tsx",
+        [
+            "function SessionAvatar(",
+            "function messageAvatar(",
+            "function AvatarStack(",
+            "function agentAvatarNode(",
         ],
     )
     _assert_contains(

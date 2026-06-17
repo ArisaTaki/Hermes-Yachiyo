@@ -4,7 +4,6 @@ import type {
   CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
-  ReactNode,
 } from 'react';
 
 import { ImageAttachmentViewer } from '../components/ImageAttachmentViewer';
@@ -32,6 +31,12 @@ import {
   type ApprovalRequestDetails,
 } from '../features/yachiyo-chat/components/MessageApprovalRequestCard';
 import { MessageActivityList } from '../features/yachiyo-chat/components/MessageActivityList';
+import {
+  AvatarStack,
+  SessionAvatar,
+  messageAvatar,
+  participantAvatarContent,
+} from '../features/yachiyo-chat/components/ChatAvatars';
 import {
   messageApprovalId,
   approvalRequestDetails,
@@ -108,8 +113,6 @@ import {
   isUnassignedSession,
   normalizeSessionContext,
   participantDisplayName,
-  participantInitial,
-  primaryParticipant,
   sessionDisplayName,
   sessionKindLabel,
   sessionPreview,
@@ -129,7 +132,6 @@ import type {
   ChatE2EImageDetail,
   ChatMessage,
   ChatNotice,
-  ChatParticipant,
   ChatSessionContext,
   ExecutorPayload,
   MessagesPayload,
@@ -2821,91 +2823,6 @@ function messageVisualRole(role: string) {
   return 'system';
 }
 
-function avatarNode(url: string | undefined, label: string, fallback: string, loading = false): ReactNode {
-  if (loading) return <span className="chat-avatar-loading" aria-hidden="true" />;
-  return url ? <img src={url} alt={label} /> : fallback;
-}
-
-function participantAvatarContent(participant: ChatParticipant | null | undefined, fallback = '月') {
-  const label = participantDisplayName(participant) || fallback;
-  const url = participant?.avatar_url;
-  return avatarNode(url, label, participantInitial(participant, fallback));
-}
-
-function AvatarStack({ participants }: { participants: ChatParticipant[] }) {
-  const visible = participants.slice(0, 3);
-  if (!visible.length) return <>{'W'}</>;
-  return (
-    <span className="chat-avatar-stack-inner" aria-hidden="true">
-      {visible.map((participant, index) => (
-        <span className="chat-avatar-stack-face" key={participant.id || participant.name || index}>
-          {participantAvatarContent(participant, 'A')}
-        </span>
-      ))}
-    </span>
-  );
-}
-
-function SessionAvatar({ assistantProfile, context, loading, size, runnables }: {
-  assistantProfile: AssistantProfilePayload | null;
-  context?: ChatSessionContext | null;
-  loading?: boolean;
-  size: 'small' | 'header';
-  runnables?: RunnableSummary[];
-}) {
-  const normalized = normalizeSessionContext(context);
-  const className = size === 'header' ? 'chat-header-avatar' : 'chat-item-avatar';
-  if (normalized.conversation_kind === 'unassigned') {
-    return (
-      <span className={`${className} chat-neutral-avatar`} title="新对话">
-        <UiIcon name="chat" />
-      </span>
-    );
-  }
-  if (normalized.conversation_kind === 'workflow' || normalized.conversation_kind === 'group') {
-    if (normalized.conversation_kind === 'group' && normalized.avatar_url) {
-      const name = normalized.runnable_name || '群组';
-      return (
-        <span className={`${className} chat-group-custom-avatar`} title={name}>
-          {avatarNode(normalized.avatar_url, name, '群', loading)}
-        </span>
-      );
-    }
-    // 从 runnables 中获取最新的参与者信息
-    const runnable = runnables?.find((r) => r.id === normalized.runnable_id);
-    const participants = runnable?.participants || normalized.participants || [];
-    return (
-      <span className={`${className} chat-avatar-stack`} title={runnable?.name || normalized.runnable_name || '群组'}>
-        <AvatarStack participants={participants.map((p) => ({
-          kind: p.kind,
-          id: p.id,
-          name: p.name || p.nickname || '',
-          nickname: p.nickname,
-          avatar_url: p.avatar_url,
-        }))} />
-      </span>
-    );
-  }
-  if (normalized.conversation_kind === 'agent') {
-    // 从 runnables 中获取最新的 Agent 信息
-    const runnable = runnables?.find((r) => r.id === normalized.runnable_id);
-    const participant = primaryParticipant(normalized);
-    // 如果找到了 runnable，使用它的头像（即使为空），否则使用会话中的旧头像
-    const avatarUrl = runnable ? runnable.avatar_url : participant?.avatar_url;
-    const name = runnable?.nickname || runnable?.name || participantDisplayName(participant) || normalized.runnable_name || 'Agent';
-    return (
-      <span className={`${className} chat-agent-avatar`} title={name}>
-        {agentAvatarNode(avatarUrl, name)}
-      </span>
-    );
-  }
-  return (
-    <span className={className}>
-      {avatarNode(assistantProfile?.agent_avatar_url, assistantProfile?.agent_name || 'Yachiyo', '月', loading)}
-    </span>
-  );
-}
-
 function ChatFullPageLoading({ avatarUrl, label }: { avatarUrl?: string; label: string }) {
   return (
     <div className="chat-full-page-loading" role="status" aria-live="polite">
@@ -2918,59 +2835,6 @@ function ChatFullPageLoading({ avatarUrl, label }: { avatarUrl?: string; label: 
       <strong>{label}</strong>
       <span>正在准备对话...</span>
     </div>
-  );
-}
-
-// Agent Studio 风格的首字母获取函数
-function agentInitial(name: string): string {
-  const clean = (name || '').trim();
-  return clean ? clean.slice(0, 1).toUpperCase() : 'A';
-}
-
-function messageAvatar(message: ChatMessage, profile: AssistantProfilePayload | null, profileLoading = false, runnables: RunnableSummary[] = []) {
-  const role = message.role || 'system';
-  if (role === 'user') return avatarNode(profile?.user_avatar_url, '你', '你', profileLoading);
-  if (role === 'assistant') {
-    const sender = messageSender(message);
-    if (sender?.kind === 'workflow') {
-      // 从 runnables 中获取最新的参与者信息
-      const runnable = runnables.find((r) => r.id === sender.id);
-      const participants = runnable?.participants || sender.participants || [];
-      return <AvatarStack participants={participants.map((p) => ({
-        kind: p.kind,
-        id: p.id,
-        name: p.name || p.nickname || '',
-        nickname: p.nickname,
-        avatar_url: p.avatar_url,
-      }))} />;
-    }
-    if (sender?.kind === 'agent') {
-      // 从 runnables 中获取最新的 Agent 信息
-      const runnable = runnables.find((r) => r.id === sender.id);
-      // 如果找到了 runnable，使用它的信息，否则使用消息中的旧信息
-      const avatarUrl = runnable ? runnable.avatar_url : sender.avatar_url;
-      const name = runnable?.nickname || runnable?.name || participantDisplayName(sender) || 'Agent';
-      // 使用 Agent Studio 风格的头像
-      return agentAvatarNode(avatarUrl, name);
-    }
-    return avatarNode(profile?.agent_avatar_url, profile?.agent_name || 'Yachiyo', '月', profileLoading);
-  }
-  return 'i';
-}
-
-// Agent Studio 风格的头像节点
-function agentAvatarNode(avatarUrl: string | undefined, name: string) {
-  if (avatarUrl) {
-    return (
-      <span className="agent-avatar has-image" aria-hidden="true">
-        <img src={avatarUrl} alt="" />
-      </span>
-    );
-  }
-  return (
-    <span className="agent-avatar" aria-hidden="true">
-      {agentInitial(name)}
-    </span>
   );
 }
 
