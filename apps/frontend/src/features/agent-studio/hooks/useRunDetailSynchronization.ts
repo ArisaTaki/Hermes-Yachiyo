@@ -2,9 +2,8 @@ import { useEffect, type Dispatch, type SetStateAction } from 'react';
 
 import type { RunGroupSpec, RunSpec } from '../types';
 import { getStudioRunForView } from '../utils/studioData';
+import type { RunArtifactPreview } from '../components/runDetailTypes';
 import type { WorkflowChildRunRef } from '../utils/workflow';
-
-type ArtifactPreview = { path: string; content: string; truncated?: boolean } | null;
 
 type UseRunDetailSynchronizationOptions = {
   activeRunPollKey: string;
@@ -24,7 +23,7 @@ type UseRunDetailSynchronizationOptions = {
   selectedWorkflowApprovalChildRunId: string;
   selectedWorkflowChildRefs: WorkflowChildRunRef[];
   selectedWorkflowParentRunId: string;
-  setArtifactPreview: Dispatch<SetStateAction<ArtifactPreview>>;
+  setArtifactPreview: Dispatch<SetStateAction<RunArtifactPreview | null>>;
   upsertRunDetailCache: (runs: RunSpec[]) => void;
 };
 

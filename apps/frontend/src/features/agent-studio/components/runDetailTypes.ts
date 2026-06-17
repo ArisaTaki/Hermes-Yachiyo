@@ -10,3 +10,9 @@ export type RunDetailWorkflowStepRef = {
   artifactCount?: number;
   task?: string;
 };
+
+export type RunArtifactPreview = {
+  path: string;
+  content: string;
+  truncated?: boolean;
+};

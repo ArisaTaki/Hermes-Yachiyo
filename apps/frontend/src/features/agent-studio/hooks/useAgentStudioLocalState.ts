@@ -17,6 +17,7 @@ import type {
   SkillSourceRoot,
   SkillSpec,
 } from '../types';
+import type { RunArtifactPreview } from '../components/runDetailTypes';
 import type { RunKindFilter, RunStatusFilter } from '../utils/runs';
 import type { SkillFolderFilter, SkillImportResult, SkillSourceFilter } from '../utils/skills';
 import { starterNodes } from '../utils/workflow';
@@ -83,7 +84,7 @@ export function useAgentStudioLocalState() {
   const [runStatusFilter, setRunStatusFilter] = useState<RunStatusFilter>('all');
   const [runSearchQuery, setRunSearchQuery] = useState('');
   const [collapsedRunHistoryGroups, setCollapsedRunHistoryGroups] = useState<Set<string>>(new Set());
-  const [artifactPreview, setArtifactPreview] = useState<{ path: string; content: string; truncated?: boolean } | null>(null);
+  const [artifactPreview, setArtifactPreview] = useState<RunArtifactPreview | null>(null);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);

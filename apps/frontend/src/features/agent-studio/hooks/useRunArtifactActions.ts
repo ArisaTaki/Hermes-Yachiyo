@@ -1,13 +1,8 @@
 import { readYachiyoRunArtifact } from '../../yachiyo-studio/api';
-
-type ArtifactPreview = {
-  path: string;
-  content: string;
-  truncated?: boolean;
-};
+import type { RunArtifactPreview } from '../components/runDetailTypes';
 
 type UseRunArtifactActionsOptions = {
-  setArtifactPreview: (preview: ArtifactPreview | null) => void;
+  setArtifactPreview: (preview: RunArtifactPreview | null) => void;
   setError: (message: string) => void;
   setStatus: (message: string) => void;
 };

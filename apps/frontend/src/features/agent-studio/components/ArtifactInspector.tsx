@@ -1,14 +1,9 @@
 import type { RunSpec } from '../types';
 import { RuntimeArtifactList } from '../../runtime-shared/components/RuntimeArtifactList';
-
-type ArtifactPreview = {
-  path: string;
-  content: string;
-  truncated?: boolean;
-};
+import type { RunArtifactPreview } from './runDetailTypes';
 
 type ArtifactInspectorProps = {
-  artifactPreview: ArtifactPreview | null;
+  artifactPreview: RunArtifactPreview | null;
   onOpenArtifact: (run: RunSpec | string, path: string) => Promise<void> | void;
   selectedRun: RunSpec;
   selectedRunArtifacts: Array<Record<string, unknown>>;

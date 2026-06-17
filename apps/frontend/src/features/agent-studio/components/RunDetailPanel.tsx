@@ -18,17 +18,11 @@ import { ToolCallInspector } from './ToolCallInspector';
 import { WorkflowChildApprovalBridge } from './WorkflowChildApprovalBridge';
 import { WorkflowRunDetailPanel } from './WorkflowRunDetailPanel';
 import { WorkflowStepResults } from './WorkflowStepResults';
-import type { RunDetailWorkflowStepRef } from './runDetailTypes';
+import type { RunArtifactPreview, RunDetailWorkflowStepRef } from './runDetailTypes';
 import {
   mergeToolCallSnapshots,
   toolCallsFromRunEventReplay,
 } from '../utils/runTimeline';
-
-type ArtifactPreview = {
-  path: string;
-  content: string;
-  truncated?: boolean;
-};
 
 export function RunDetailPanel({
   artifactPreview,
@@ -89,7 +83,7 @@ export function RunDetailPanel({
   workflowStepKindLabel,
   workflowStepSummary,
 }: {
-  artifactPreview: ArtifactPreview | null;
+  artifactPreview: RunArtifactPreview | null;
   busy: boolean;
   formatRunDate: (value?: string) => string;
   isActiveRunStatus: (status: string) => boolean;

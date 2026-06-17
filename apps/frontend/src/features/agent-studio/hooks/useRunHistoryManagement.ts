@@ -3,6 +3,7 @@ import { useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 import type { RunGroupSpec, RunSpec } from '../types';
 import { navigateTo } from '../../../lib/view';
 import { deleteYachiyoRun } from '../../yachiyo-studio/api';
+import type { RunArtifactPreview } from '../components/runDetailTypes';
 import { isActiveRunStatus } from '../utils/runs';
 
 type RunHistoryRefreshOptions = {
@@ -23,7 +24,7 @@ type UseRunHistoryManagementOptions = {
   filteredRuns: RunSpec[];
   runAction: (action: () => Promise<RunHistoryRefreshOptions | void>, label: string) => void;
   selectedRunId: string;
-  setArtifactPreview: (preview: { path: string; content: string; truncated?: boolean } | null) => void;
+  setArtifactPreview: (preview: RunArtifactPreview | null) => void;
   setRunDetailCache: Dispatch<SetStateAction<RunSpec[]>>;
   setRunGroups: Dispatch<SetStateAction<RunGroupSpec[]>>;
   setRuns: Dispatch<SetStateAction<RunSpec[]>>;
