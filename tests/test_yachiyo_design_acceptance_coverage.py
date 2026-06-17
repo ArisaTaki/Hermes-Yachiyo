@@ -1267,11 +1267,13 @@ def test_runtime_memory_and_skill_trace_acceptance_paths_are_guarded() -> None:
         ],
     )
     _assert_contains(
-        "apps/shell/yachiyo_agent/legacy_ports.py",
+        "apps/shell/yachiyo_agent/legacy_event_pages.py",
         [
-            "def _is_replay_enrichment_event",
+            "def is_replay_enrichment_event",
             '"memory.",',
             '"skill.",',
+            "def run_with_replay_events",
+            "def run_event_page_from_legacy_stream",
         ],
     )
     _assert_contains(

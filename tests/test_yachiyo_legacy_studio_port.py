@@ -22,6 +22,7 @@ def test_legacy_studio_group_run_records_group_run_started_event() -> None:
     assert group_run["child_run_ids"] == ["run-1", "run-2"]
     assert [event["event_type"] for event in group_run["events"]] == [
         "group.run.started",
+        "group.run.plan",
         "group.member.started",
         "group.member.started",
     ]
@@ -32,6 +33,11 @@ def test_legacy_studio_group_run_records_group_run_started_event() -> None:
     assert started["payload"]["objective"] == "Compare options"
     assert started["payload"]["participant_count"] == 2
     assert started["payload"]["client_run_id"] == "client-group-run-1"
+    plan = group_run["events"][1]
+    assert plan["payload"]["group_execution_mode"] == "parallel"
+    assert plan["payload"]["group_execution_strategy"] == "fan_out"
+    assert plan["payload"]["group_parallel"] is True
+    assert plan["payload"]["group_member_order"] == ["agent-1", "agent-2"]
 
 
 def test_legacy_studio_group_run_records_member_failed_and_cancelled_events() -> None:
@@ -51,13 +57,14 @@ def test_legacy_studio_group_run_records_member_failed_and_cancelled_events() ->
 
     assert [event["event_type"] for event in group_run["events"]] == [
         "group.run.started",
+        "group.run.plan",
         "group.member.started",
         "group.member.failed",
         "group.member.started",
         "group.member.cancelled",
     ]
-    assert group_run["events"][2]["payload"]["status"] == "failed"
-    assert group_run["events"][4]["payload"]["status"] == "cancelled"
+    assert group_run["events"][3]["payload"]["status"] == "failed"
+    assert group_run["events"][5]["payload"]["status"] == "cancelled"
 
 
 def test_legacy_studio_port_forwards_run_event_page_cursor_to_runtime() -> None:
