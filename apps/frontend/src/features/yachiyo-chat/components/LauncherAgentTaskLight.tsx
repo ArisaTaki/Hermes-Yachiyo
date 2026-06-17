@@ -3,8 +3,7 @@ import { useState } from 'react';
 import { openAppView } from '../../../lib/bridge';
 import { runtimeToolDisplayLabelOrName } from '../../runtime-shared/approval';
 import { runtimeTimelineEventLabel } from '../../runtime-shared/components/RuntimeTimelineSummary';
-import { studioRunRouteParams } from '../../runtime-shared/studioLinks';
-import { yachiyoTaskStudioGroupRunId, yachiyoTaskStudioRunId, yachiyoTaskStudioUrl } from '../taskSnapshots';
+import { yachiyoTaskStudioTarget, yachiyoTaskStudioUrl } from '../taskSnapshots';
 import type { AgentTaskLightSnapshot, AgentTaskSnapshot, ApprovalCardSnapshot, PublicRunEvent } from '../types';
 
 type LauncherTaskMode = 'bubble' | 'live2d';
@@ -105,10 +104,9 @@ export function LauncherAgentTaskLight({
   const currentTask = task;
   const lightTask = launcherAgentTaskLightSnapshot(currentTask);
   if (!lightTask) return null;
-  const runId = yachiyoTaskStudioRunId(currentTask);
-  const groupRunId = yachiyoTaskStudioGroupRunId(currentTask);
-  const studioUrl = lightTask.open_in_studio_url || yachiyoTaskStudioUrl(currentTask);
-  const studioParams = studioRunRouteParams(runId, { groupRunId, studioUrl });
+  const studioTarget = yachiyoTaskStudioTarget(currentTask, lightTask.open_in_studio_url || '');
+  const { runId, studioUrl } = studioTarget;
+  const studioParams = studioTarget.routeParams;
   const status = String(lightTask.status || currentTask.status || '');
   const approval = lightTask.pending_approval || launcherAgentTaskPendingApproval(currentTask);
   const needsAction = Boolean(lightTask.needs_user_action || approval);

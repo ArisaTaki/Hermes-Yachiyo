@@ -1,5 +1,10 @@
 import type { AgentTaskSnapshot, ApprovalCardSnapshot, ArtifactSnapshot, TaskStatus } from './types';
-import { groupRunIdFromStudioUrl, runIdFromStudioUrl, studioRunUrl } from '../runtime-shared/studioLinks';
+import {
+  groupRunIdFromStudioUrl,
+  runIdFromStudioUrl,
+  studioRunRouteParams,
+  studioRunUrl,
+} from '../runtime-shared/studioLinks';
 
 type YachiyoTaskChatParticipant = {
   id?: string;
@@ -175,6 +180,26 @@ export function yachiyoTaskStudioRunId(task: AgentTaskSnapshot): string {
 
 export function yachiyoTaskStudioGroupRunId(task: AgentTaskSnapshot): string {
   return groupRunIdFromStudioUrl(yachiyoTaskStudioUrl(task));
+}
+
+export function yachiyoTaskStudioTarget(
+  task: AgentTaskSnapshot,
+  studioUrlOverride = '',
+): {
+  groupRunId: string;
+  routeParams: Record<string, string> | null;
+  runId: string;
+  studioUrl: string;
+} {
+  const runId = yachiyoTaskStudioRunId(task);
+  const groupRunId = yachiyoTaskStudioGroupRunId(task);
+  const studioUrl = String(studioUrlOverride || '').trim() || yachiyoTaskStudioUrl(task);
+  return {
+    groupRunId,
+    routeParams: studioRunRouteParams(runId, { groupRunId, studioUrl }),
+    runId,
+    studioUrl,
+  };
 }
 
 export function yachiyoTaskApprovalStudioTarget(
