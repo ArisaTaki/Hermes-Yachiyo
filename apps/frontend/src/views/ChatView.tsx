@@ -48,7 +48,6 @@ import {
   messageText,
 } from '../features/yachiyo-chat/messageState';
 import { isMissingGroupEditRouteError } from '../features/yachiyo-chat/messageGroups';
-import { taskHandoffMessageId } from '../features/yachiyo-chat/messageTaskHandoff';
 import {
   COMPOSER_HEIGHT_STORAGE_KEY,
   COMPOSER_MAX_HEIGHT,
@@ -87,7 +86,7 @@ import { useChatAssistantProfile } from '../features/yachiyo-chat/hooks/useChatA
 import { useChatCopyFeedback } from '../features/yachiyo-chat/hooks/useChatCopyFeedback';
 import { useChatExecutor } from '../features/yachiyo-chat/hooks/useChatExecutor';
 import { useChatNotice } from '../features/yachiyo-chat/hooks/useChatNotice';
-import { useChatRouteHandoffParams } from '../features/yachiyo-chat/hooks/useChatRouteHandoffParams';
+import { useChatRouteHandoff } from '../features/yachiyo-chat/hooks/useChatRouteHandoffParams';
 import { useChatRunApprovalActions } from '../features/yachiyo-chat/hooks/useChatRunApprovalActions';
 import { useChatRunPolling } from '../features/yachiyo-chat/hooks/useChatRunPolling';
 import { useChatRunnables } from '../features/yachiyo-chat/hooks/useChatRunnables';
@@ -151,7 +150,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const [conversationTokenCount, setConversationTokenCount] = useState(0);
   const { executor, refreshExecutor } = useChatExecutor(EXECUTOR_POLL_INTERVAL_MS);
   const { assistantProfile, assistantProfileLoading, refreshAssistantProfile } = useChatAssistantProfile();
-  const { routeSessionId, routeTaskId } = useChatRouteHandoffParams();
   const [sessionIdDialogOpen, setSessionIdDialogOpen] = useState(false);
   const [sessionIdCopyError, setSessionIdCopyError] = useState('');
   const [retryingMessageId, setRetryingMessageId] = useState('');
@@ -425,31 +423,14 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     }
   }, [isProcessing, isSending, messages.length, sessions?.current_session_id]);
 
-  useEffect(() => {
-    const requestedSessionId = routeSessionId;
-    const requestedTaskId = routeTaskId;
-    void (async () => {
-      await Promise.all([refreshAssistantProfile(), refreshExecutor()]);
-      if (requestedSessionId) {
-        try {
-          const result = await apiPost<{ ok?: boolean; error?: string }>('/ui/chat/sessions/load', {
-            session_id: requestedSessionId,
-          });
-          if (result.ok === false) throw new Error(result.error || '切换会话失败');
-        } catch (error) {
-          setStatus(error instanceof Error ? error.message : '切换会话失败');
-        }
-      }
-      const [messagePayload] = await Promise.all([refreshMessages(), loadSessions()]);
-      if (requestedTaskId && messagePayload?.messages) {
-        const messageId = taskHandoffMessageId(messagePayload.messages, requestedTaskId);
-        if (messageId) {
-          revealMessage(messageId);
-          setStatus('已定位到关联任务消息');
-        }
-      }
-    })();
-  }, [loadSessions, refreshAssistantProfile, refreshExecutor, refreshMessages, routeSessionId, routeTaskId]);
+  useChatRouteHandoff({
+    loadSessions,
+    refreshAssistantProfile,
+    refreshExecutor,
+    refreshMessages,
+    revealMessage,
+    setStatus,
+  });
 
   useEffect(() => {
     const interval = isProcessing ? ACTIVE_POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS;
