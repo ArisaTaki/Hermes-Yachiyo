@@ -74,7 +74,6 @@ import {
   chatRunCompletionProcessingState,
 } from '../features/yachiyo-chat/runPolling';
 import { openYachiyoStudioRun, openYachiyoWorkflowStudio } from '../features/yachiyo-chat/studioNavigation';
-import { chatRunnableRunningStatusText, chatRunnableSettledStatusText } from '../features/yachiyo-chat/taskStatusText';
 import {
   activeMentions,
   mentionOptionsForQuery,
@@ -99,11 +98,11 @@ import {
 import { useYachiyoTaskActions } from '../features/yachiyo-chat/hooks/useYachiyoTaskActions';
 import { useChatNotice } from '../features/yachiyo-chat/hooks/useChatNotice';
 import { useChatRunPolling } from '../features/yachiyo-chat/hooks/useChatRunPolling';
+import { useLegacyChatRunnableResult } from '../features/yachiyo-chat/hooks/useLegacyChatRunnableResult';
 import { useYachiyoTaskSnapshots } from '../features/yachiyo-chat/hooks/useYachiyoTaskSnapshots';
 import { useYachiyoTaskSubmit } from '../features/yachiyo-chat/hooks/useYachiyoTaskSubmit';
 import { approveChatRunApproval, rejectChatRunApproval } from '../features/yachiyo-chat/runSnapshots';
 import {
-  legacyChatRunnableResult,
   retryLegacyChatMessage,
   sendLegacyChatMessage,
 } from '../features/yachiyo-chat/api';
@@ -381,6 +380,22 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     refreshMessages,
     rememberYachiyoTasks,
     setApprovalActionMessageId,
+    setStatus,
+  });
+  const { handleLegacyChatRunnableResult } = useLegacyChatRunnableResult({
+    clearPendingReplyTask: () => {
+      pendingReplyTaskIdRef.current = '';
+    },
+    loadSessions,
+    onRunning: () => {
+      stickToBottomRef.current = true;
+    },
+    onSettled: () => {
+      pendingReplyScrollRef.current = false;
+    },
+    pollAgentRunInBackground,
+    refreshMessages,
+    refreshYachiyoTaskById,
     setStatus,
   });
   const { startPublicYachiyoTask } = useYachiyoTaskSubmit({
@@ -765,32 +780,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       });
       if (result.ok === false) throw new Error(result.error || '发送失败');
       transientEmptySessionIdRef.current = '';
-      const runnableResult = legacyChatRunnableResult(result);
-      if (runnableResult.runnableCommand) {
-        pendingReplyTaskIdRef.current = '';
-        const resultRunId = runnableResult.runId;
-        const resultRunStatus = runnableResult.status;
-        const runnableLabel = runnableResult.label;
-        if (resultRunStatus === 'processing' && resultRunId) {
-          setStatus(chatRunnableRunningStatusText(runnableLabel));
-          stickToBottomRef.current = true;
-          void refreshYachiyoTaskById(resultRunId);
-          await refreshMessages();
-          pollAgentRunInBackground(resultRunId);
-          return;
-        }
-        if (resultRunId) void refreshYachiyoTaskById(resultRunId);
-        pendingReplyScrollRef.current = false;
-        setStatus(chatRunnableSettledStatusText({
-          error: runnableResult.error,
-          hasRunId: Boolean(resultRunId),
-          label: runnableLabel,
-          status: resultRunStatus,
-        }));
-        await refreshMessages();
-        await loadSessions();
-        return;
-      }
+      if (await handleLegacyChatRunnableResult(result, { refreshTaskSnapshot: true })) return;
       const taskId = String(result.task_id || '');
       pendingReplyTaskIdRef.current = taskId;
       if (!taskId) pendingReplyScrollRef.current = false;
@@ -1248,29 +1238,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     try {
       const result = await retryLegacyChatMessage(message.id);
       if (result.ok === false) throw new Error(result.error || '重试失败');
-      const runnableResult = legacyChatRunnableResult(result);
-      if (runnableResult.runnableCommand) {
-        pendingReplyTaskIdRef.current = '';
-        const resultRunId = runnableResult.runId;
-        const resultRunStatus = runnableResult.status;
-        const runnableLabel = runnableResult.label;
-        if (resultRunStatus === 'processing' && resultRunId) {
-          setStatus(chatRunnableRunningStatusText(runnableLabel));
-          await refreshMessages();
-          pollAgentRunInBackground(resultRunId);
-          return;
-        }
-        pendingReplyScrollRef.current = false;
-        setStatus(chatRunnableSettledStatusText({
-          error: runnableResult.error,
-          hasRunId: Boolean(resultRunId),
-          label: runnableLabel,
-          status: resultRunStatus,
-        }));
-        await refreshMessages();
-        await loadSessions();
-        return;
-      }
+      if (await handleLegacyChatRunnableResult(result)) return;
       const taskId = String(result.task_id || '');
       pendingReplyTaskIdRef.current = taskId;
       if (!taskId) pendingReplyScrollRef.current = false;

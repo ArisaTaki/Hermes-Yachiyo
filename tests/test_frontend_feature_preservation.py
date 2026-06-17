@@ -494,6 +494,20 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "Fall through to the legacy Chat API with the same idempotency key.",
         ],
     )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/hooks/useLegacyChatRunnableResult.ts",
+        [
+            "export function useLegacyChatRunnableResult",
+            "legacyChatRunnableResult(result)",
+            "if (!runnableResult.runnableCommand) return false;",
+            "setStatus(chatRunnableRunningStatusText(runnableLabel));",
+            "if (options.refreshTaskSnapshot) void refreshYachiyoTaskById(resultRunId);",
+            "pollAgentRunInBackground(resultRunId);",
+            "setStatus(chatRunnableSettledStatusText({",
+            "await refreshMessages();",
+            "await loadSessions();",
+        ],
+    )
     _assert_not_contains(
         "apps/frontend/src/features/yachiyo-chat/hooks/useYachiyoTaskSubmit.ts",
         [
@@ -723,7 +737,10 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "from '../features/yachiyo-chat/layoutState';",
             "from '../features/yachiyo-chat/components/ChatFullPageLoading';",
             "from '../features/yachiyo-chat/hooks/useChatNotice';",
+            "from '../features/yachiyo-chat/hooks/useLegacyChatRunnableResult';",
             "import { deriveChatSessionState } from '../features/yachiyo-chat/sessionDerivedState';",
+            "handleLegacyChatRunnableResult(result, { refreshTaskSnapshot: true })",
+            "handleLegacyChatRunnableResult(result)",
             "} = useMemo(() => deriveChatSessionState({",
             "messageMatchesPendingAssistantReply(message, taskId)",
             "selectedGroupAgentIds,",
@@ -753,6 +770,9 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "noticeTimerRef",
             "result.workflow_run_id ? 'Workflow' : 'Agent'",
             "result.runnable_command",
+            "legacyChatRunnableResult(result)",
+            "chatRunnableRunningStatusText(runnableLabel)",
+            "chatRunnableSettledStatusText({",
             "agent_run_id?: string;",
             "workflow_run_id?: string;",
             "function messageRunStatus",
@@ -1042,7 +1062,7 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "cancelYachiyoTaskFromCard",
             "publicTaskSnapshotForMessage(message, agentTaskSnapshotsById)",
             "refreshYachiyoTasksForSession(payload.current_session_id)",
-            "refreshYachiyoTaskById(resultRunId)",
+            "useLegacyChatRunnableResult",
             "formatTime={formatShortTime}",
             "onApproveTaskApproval={(task, approval) => void resolveYachiyoTaskApproval(task, approval, 'approve')}",
             "onRejectTaskApproval={(task, approval) => void resolveYachiyoTaskApproval(task, approval, 'reject')}",
