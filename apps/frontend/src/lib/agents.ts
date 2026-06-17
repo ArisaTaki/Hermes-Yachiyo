@@ -257,6 +257,13 @@ export type FutureTaskSpec = {
   cancelled_at?: string;
 };
 
+export type FutureTaskTriggerResultSpec = {
+  ok?: boolean;
+  future_task?: FutureTaskSpec;
+  run?: RunSpec;
+  error?: string;
+};
+
 function uniqueByKey<T>(items: T[], getKey: (item: T) => string): T[] {
   const indexByKey = new Map<string, number>();
   const uniqueItems: T[] = [];
@@ -435,16 +442,28 @@ export async function deleteMemory(memoryId: string, reason = ''): Promise<{ ok?
 }
 
 export async function listFutureTasks(): Promise<FutureTaskSpec[]> {
-  const payload = await apiGet<{ future_tasks?: FutureTaskSpec[] }>('/ui/future-tasks');
+  const payload = await apiGet<{ future_tasks?: FutureTaskSpec[] }>('/yachiyo/studio/future-tasks').catch(() => (
+    apiGet<{ future_tasks?: FutureTaskSpec[] }>('/ui/future-tasks')
+  ));
   return payload.future_tasks || [];
 }
 
 export async function cancelFutureTask(futureTaskId: string, reason = ''): Promise<{ ok?: boolean; future_task?: FutureTaskSpec }> {
-  return apiPost(`/ui/future-tasks/${encodeURIComponent(futureTaskId)}/cancel`, reason ? { reason } : {});
+  return apiPost(`/yachiyo/studio/future-tasks/${encodeURIComponent(futureTaskId)}/cancel`, reason ? { reason } : {}).catch(() => (
+    apiPost(`/ui/future-tasks/${encodeURIComponent(futureTaskId)}/cancel`, reason ? { reason } : {})
+  ));
 }
 
-export async function triggerDueFutureTasks(): Promise<{ ok?: boolean; triggered?: Array<{ ok?: boolean; future_task?: FutureTaskSpec; run?: RunSpec; error?: string }> }> {
-  return apiPost('/ui/future-tasks/trigger-due', {});
+export async function triggerDueFutureTasks(): Promise<{ ok?: boolean; triggered?: FutureTaskTriggerResultSpec[] }> {
+  return apiPost<{
+    ok?: boolean;
+    triggered?: Array<{ ok?: boolean; future_task?: FutureTaskSpec; run?: YachiyoRunTimelineSnapshot; error?: string }>;
+  }>('/yachiyo/studio/future-tasks/trigger-due', {})
+    .then((payload) => ({
+      ...payload,
+      triggered: (payload.triggered || []).map(futureTaskTriggerResultFromPublicSnapshot),
+    }))
+    .catch(() => apiPost('/ui/future-tasks/trigger-due', {}));
 }
 
 export async function listRuns(): Promise<RunSpec[]> {
@@ -541,6 +560,15 @@ function runGroupSpecFromPublicGroupRun(snapshot: YachiyoGroupRunSnapshot): RunG
 
 function runSpecFromPublicTimelineSnapshot(snapshot: YachiyoRunTimelineSnapshot): RunSpec {
   return publicRunTimelineToRunSpec(snapshot);
+}
+
+function futureTaskTriggerResultFromPublicSnapshot(
+  snapshot: { ok?: boolean; future_task?: FutureTaskSpec; run?: YachiyoRunTimelineSnapshot; error?: string },
+): FutureTaskTriggerResultSpec {
+  return {
+    ...snapshot,
+    run: snapshot.run ? runSpecFromPublicTimelineSnapshot(snapshot.run) : undefined,
+  };
 }
 
 export async function rerunRun(runId: string): Promise<RunSpec> {

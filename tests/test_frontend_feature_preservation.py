@@ -4827,11 +4827,15 @@ def test_agent_studio_exposes_runtime_memory_and_future_task_management() -> Non
             "apiDelete(`/yachiyo/studio/memories/${encodeURIComponent(memoryId)}${query}`)",
             "apiDelete(`/ui/memories/${encodeURIComponent(memoryId)}${query}`)",
             "export async function listFutureTasks()",
+            "'/yachiyo/studio/future-tasks'",
             "'/ui/future-tasks'",
             "export async function cancelFutureTask(",
+            "/yachiyo/studio/future-tasks/${encodeURIComponent(futureTaskId)}/cancel",
             "/ui/future-tasks/${encodeURIComponent(futureTaskId)}/cancel",
             "export async function triggerDueFutureTasks()",
+            "'/yachiyo/studio/future-tasks/trigger-due'",
             "'/ui/future-tasks/trigger-due'",
+            "futureTaskTriggerResultFromPublicSnapshot",
         ],
     )
     _assert_function_contains(
@@ -4848,6 +4852,32 @@ def test_agent_studio_exposes_runtime_memory_and_future_task_management() -> Non
         [
             "apiDelete(`/yachiyo/studio/memories/${encodeURIComponent(memoryId)}${query}`)",
             "apiDelete(`/ui/memories/${encodeURIComponent(memoryId)}${query}`)",
+        ],
+    )
+    _assert_function_contains(
+        "apps/frontend/src/lib/agents.ts",
+        "listFutureTasks",
+        [
+            "apiGet<{ future_tasks?: FutureTaskSpec[] }>('/yachiyo/studio/future-tasks')",
+            "apiGet<{ future_tasks?: FutureTaskSpec[] }>('/ui/future-tasks')",
+        ],
+    )
+    _assert_function_contains(
+        "apps/frontend/src/lib/agents.ts",
+        "cancelFutureTask",
+        [
+            "apiPost(`/yachiyo/studio/future-tasks/${encodeURIComponent(futureTaskId)}/cancel`",
+            "apiPost(`/ui/future-tasks/${encodeURIComponent(futureTaskId)}/cancel`",
+        ],
+    )
+    _assert_function_contains(
+        "apps/frontend/src/lib/agents.ts",
+        "triggerDueFutureTasks",
+        [
+            "apiPost<",
+            "'/yachiyo/studio/future-tasks/trigger-due'",
+            "futureTaskTriggerResultFromPublicSnapshot",
+            "apiPost('/ui/future-tasks/trigger-due', {})",
         ],
     )
     _assert_contains(
