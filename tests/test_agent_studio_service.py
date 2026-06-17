@@ -1100,6 +1100,29 @@ def test_agent_studio_service_reads_run_artifact_through_port() -> None:
     ) in port.calls
 
 
+def test_agent_studio_service_redacts_sensitive_run_artifact_content() -> None:
+    class _SensitiveArtifactPort(_FakeStudioPort):
+        def read_run_artifact(self, run_id: str, artifact_path: str) -> dict[str, Any]:
+            return {
+                "ok": True,
+                "run_id": run_id,
+                "path": "reports/sk-sensitive-value.md",
+                "content": "token sk-sensitive-value",
+                "mime_type": "text/markdown",
+                "truncated": False,
+            }
+
+    service = AgentStudioService(_SensitiveArtifactPort())
+
+    artifact = service.read_run_artifact("run-1", "reports/sk-sensitive-value.md")
+    rendered = str(artifact.model_dump(mode="json"))
+
+    assert "sk-sensitive-value" not in rendered
+    assert "[redacted]" in rendered
+    assert artifact.run_id == "run-1"
+    assert artifact.mime_type == "text/markdown"
+
+
 def _agent_payload(
     agent_id: str = "agent-1",
     name: str = "Planner",

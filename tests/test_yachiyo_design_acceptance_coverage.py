@@ -682,6 +682,16 @@ def test_runtime_core_split_acceptance_paths_are_guarded() -> None:
         ],
     )
     _assert_contains(
+        "apps/shell/yachiyo_agent/artifacts.py",
+        [
+            "redact_secrets",
+            "def artifact_snapshot_from_payload",
+            "def artifact_content_snapshot_from_payload",
+            "return _redacted_artifact_snapshot(payload)",
+            "return _redacted_artifact_content_snapshot(payload)",
+        ],
+    )
+    _assert_contains(
         "apps/shell/yachiyo_agent/workflows.py",
         [
             "redact_run_event_payload",

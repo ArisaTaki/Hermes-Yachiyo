@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from apps.shell.yachiyo_agent.artifacts import (
+    artifact_content_snapshot_from_payload,
+    artifact_snapshot_from_payload,
+)
 from apps.shell.yachiyo_agent.run_snapshots import (
     RunSnapshotProjector,
     agent_task_snapshot_from_payload,
@@ -279,6 +283,38 @@ def test_approval_card_redacts_sensitive_public_preview_and_text() -> None:
     assert "sensitive-token-value" not in rendered
     assert approval.input_preview["api_key"] == "[redacted]"
     assert "[redacted]" in rendered
+
+
+def test_artifact_public_snapshots_redact_sensitive_preview_and_content() -> None:
+    artifact = artifact_snapshot_from_payload(
+        {
+            "artifact_id": "artifact-sk-sensitive-value",
+            "title": "Report sk-sensitive-value",
+            "path": "reports/sk-sensitive-value.md",
+            "preview_text": "token sk-sensitive-value",
+            "url": "https://example.test/sk-sensitive-value",
+            "kind": "artifact",
+        },
+        run_id="run-1",
+    )
+    content = artifact_content_snapshot_from_payload(
+        {
+            "run_id": "run-1",
+            "path": "reports/sk-sensitive-value.md",
+            "content": "token sk-sensitive-value",
+            "mime_type": "text/markdown",
+        }
+    )
+
+    rendered = str({
+        "artifact": artifact.model_dump(mode="json"),
+        "content": content.model_dump(mode="json"),
+    })
+
+    assert "sk-sensitive-value" not in rendered
+    assert "[redacted]" in rendered
+    assert artifact.source_run_id == "run-1"
+    assert content.run_id == "run-1"
 
 
 def test_studio_run_url_is_shared_by_run_task_and_approval_snapshots() -> None:

@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from apps.shell.agent.runtime.events import redact_secrets
+
 from .contracts import ArtifactContentSnapshot, ArtifactSnapshot
 
 
@@ -14,7 +16,7 @@ def artifact_snapshot_from_payload(
     run_id: str = "",
 ) -> ArtifactSnapshot:
     if isinstance(payload, ArtifactSnapshot):
-        return payload
+        return _redacted_artifact_snapshot(payload)
 
     path = _optional_text(payload.get("path") or payload.get("artifact_path"))
     source_run_id = _optional_text(payload.get("source_run_id")) or _optional_text(run_id)
@@ -77,7 +79,7 @@ def artifact_content_snapshot_from_payload(
     path: str = "",
 ) -> ArtifactContentSnapshot:
     if isinstance(payload, ArtifactContentSnapshot):
-        return payload
+        return _redacted_artifact_content_snapshot(payload)
 
     artifact_path = _text(payload.get("path") or path)
     return ArtifactContentSnapshot(
@@ -92,7 +94,7 @@ def artifact_content_snapshot_from_payload(
 
 
 def _text(value: Any) -> str:
-    return str(value or "").strip()
+    return str(redact_secrets(value) or "").strip()
 
 
 def _optional_text(value: Any) -> str | None:
@@ -107,3 +109,43 @@ def _optional_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _redacted_artifact_snapshot(snapshot: ArtifactSnapshot) -> ArtifactSnapshot:
+    return snapshot.model_copy(
+        update={
+            "artifact_id": _text(snapshot.artifact_id),
+            "run_id": _optional_text(snapshot.run_id),
+            "source_run_id": _optional_text(snapshot.source_run_id),
+            "source_tool": _optional_text(snapshot.source_tool),
+            "source_runnable_id": _optional_text(snapshot.source_runnable_id),
+            "source_runnable_name": _optional_text(snapshot.source_runnable_name),
+            "workflow_id": _optional_text(snapshot.workflow_id),
+            "workflow_run_id": _optional_text(snapshot.workflow_run_id),
+            "workflow_node_id": _optional_text(snapshot.workflow_node_id),
+            "workflow_node_label": _optional_text(snapshot.workflow_node_label),
+            "group_id": _optional_text(snapshot.group_id),
+            "group_run_id": _optional_text(snapshot.group_run_id),
+            "title": _text(snapshot.title),
+            "kind": _text(snapshot.kind),
+            "path": _optional_text(snapshot.path),
+            "mime_type": _optional_text(snapshot.mime_type),
+            "preview_text": _optional_text(snapshot.preview_text),
+            "url": _optional_text(snapshot.url),
+            "created_at": _text(snapshot.created_at),
+        }
+    )
+
+
+def _redacted_artifact_content_snapshot(
+    snapshot: ArtifactContentSnapshot,
+) -> ArtifactContentSnapshot:
+    return snapshot.model_copy(
+        update={
+            "run_id": _optional_text(snapshot.run_id),
+            "task_id": _optional_text(snapshot.task_id),
+            "path": _text(snapshot.path),
+            "content": _text(snapshot.content),
+            "mime_type": _optional_text(snapshot.mime_type),
+        }
+    )
