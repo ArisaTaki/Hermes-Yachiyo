@@ -691,6 +691,15 @@ def test_runtime_core_split_acceptance_paths_are_guarded() -> None:
         ],
     )
     _assert_contains(
+        "apps/shell/yachiyo_agent/skills.py",
+        [
+            "redact_secrets",
+            "def skill_snapshot_from_payload",
+            "content_summary=_optional_text(payload.get(\"content_summary\"))",
+            "skill_markdown=_optional_text(payload.get(\"skill_markdown\"))",
+        ],
+    )
+    _assert_contains(
         "apps/shell/yachiyo_agent/future_tasks.py",
         [
             "redact_secrets",

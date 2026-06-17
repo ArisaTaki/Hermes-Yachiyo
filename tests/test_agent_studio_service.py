@@ -568,6 +568,32 @@ def test_agent_studio_service_redacts_sensitive_public_memory_and_future_task_te
     assert "[redacted]" in future_tasks[0].prompt
 
 
+def test_agent_studio_service_redacts_sensitive_public_skill_text() -> None:
+    class _SensitiveSkillPort:
+        def list_skills(self) -> dict[str, Any]:
+            return {
+                "skills": [
+                    _skill_payload()
+                    | {
+                        "description": "Uses bearer sensitive-token-value internally.",
+                        "content_summary": "Never expose sk-sensitive-value.",
+                        "skill_markdown": "# Skill\nAPI key: sk-sensitive-value",
+                        "asset_paths": ["assets/sk-sensitive-value.png"],
+                    }
+                ]
+            }
+
+    service = AgentStudioService(_SensitiveSkillPort())
+
+    skill = service.list_skills()[0]
+    rendered = str(skill.model_dump(mode="json"))
+
+    assert "sk-sensitive-value" not in rendered
+    assert "sensitive-token-value" not in rendered
+    assert "[redacted]" in rendered
+    assert skill.skill_id == "skill-1"
+
+
 def test_agent_studio_service_redacts_sensitive_public_agent_configuration() -> None:
     class _SensitiveAgentPort:
         def list_agents(self) -> dict[str, Any]:

@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from apps.shell.agent.runtime.events import redact_secrets
+
 from .contracts import SkillFolderSnapshot, SkillSnapshot, SkillSourceRootSnapshot
 
 
@@ -28,7 +30,7 @@ def skill_snapshot_from_payload(payload: Mapping[str, Any] | SkillSnapshot) -> S
         sync_status=_optional_text(payload.get("sync_status")),
         content_summary=_optional_text(payload.get("content_summary")),
         skill_markdown=_optional_text(payload.get("skill_markdown")),
-        asset_paths=[str(item) for item in payload.get("asset_paths") or [] if str(item)],
+        asset_paths=_text_list(payload.get("asset_paths")),
         enabled=bool(payload.get("enabled", True)),
         created_at=_text(payload.get("created_at")),
         updated_at=_text(payload.get("updated_at")),
@@ -77,8 +79,14 @@ def _int(value: Any) -> int:
         return 0
 
 
+def _text_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [text for text in (_text(item) for item in value) if text]
+
+
 def _text(value: Any) -> str:
-    return str(value or "").strip()
+    return str(redact_secrets(value) or "").strip()
 
 
 def _optional_text(value: Any) -> str | None:
