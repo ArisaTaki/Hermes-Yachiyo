@@ -748,6 +748,17 @@ def test_runtime_core_split_acceptance_paths_are_guarded() -> None:
         ],
     )
     _assert_contains(
+        "apps/shell/yachiyo_agent/timeline_metadata_snapshots.py",
+        [
+            "def timeline_child_snapshots_from_payloads",
+            "def run_timeline_rerun_provenance_from_payload",
+            "def run_timeline_agent_id_from_payload",
+            "def workflow_run_id_from_payload",
+            "\"run.rerun.started\"",
+            "RunTimelineChildSnapshot",
+        ],
+    )
+    _assert_contains(
         "apps/shell/yachiyo_agent/trace_snapshots.py",
         [
             "def memory_trace_snapshots_from_events",
