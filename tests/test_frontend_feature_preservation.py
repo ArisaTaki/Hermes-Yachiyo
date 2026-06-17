@@ -83,6 +83,8 @@ def test_frontend_preserves_top_level_product_routes_and_navigation() -> None:
         [
             "| 'chat'",
             "| 'tasks'",
+            "| 'memories'",
+            "| 'skills'",
             "| 'agents'",
             "| 'settings'",
             "| 'provider'",
@@ -103,6 +105,8 @@ def test_frontend_preserves_top_level_product_routes_and_navigation() -> None:
         [
             "function isAppView(value: string): value is AppView",
             "'tasks'",
+            "'memories'",
+            "'skills'",
         ],
     )
     _assert_contains(
@@ -120,7 +124,7 @@ def test_frontend_preserves_top_level_product_routes_and_navigation() -> None:
             "const LauncherView = lazy(",
             "if (view === 'chat') page = <ChatView />;",
             "else if (view === 'tasks') page = <TasksView />;",
-            "else if (view === 'agents') page = <AgentStudioView />;",
+            "else if (view === 'agents' || view === 'skills' || view === 'memories') page = <AgentStudioView />;",
             "else if (view === 'proactive-tts') page = <ProactiveTtsSettingsView />;",
             "else if (view === 'live2d') page = null;",
             "<Live2DModePage active={view === 'live2d'} />",
@@ -132,12 +136,18 @@ def test_frontend_preserves_top_level_product_routes_and_navigation() -> None:
             "{ view: 'chat', label: '对话'",
             "{ view: 'tasks', label: '任务'",
             "{ view: 'agents', label: 'Agent Studio'",
+            "{ view: 'memories', label: '记忆'",
+            "{ view: 'skills', label: 'Skills'",
             "{ view: 'bubble', label: '气泡模式'",
             "{ view: 'live2d', label: 'Live2D 模式'",
             "{ view: 'proactive-tts', label: '主动关怀'",
             "{ view: 'tools', label: '能力中心'",
             "{ view: 'diagnostics', label: '诊断详情'",
             "if (view === 'tasks') return 'Oha Yachiyo — 任务';",
+            "if (view === 'memories') return 'Oha Yachiyo — 记忆';",
+            "if (view === 'skills') return 'Oha Yachiyo — Skills';",
+            "if (itemView === 'memories') return activeView === 'memories' || studioTab === 'memory';",
+            "if (itemView === 'skills') return activeView === 'skills' || studioTab === 'skills' || studioTab === 'skill-groups';",
         ],
     )
 
@@ -3581,6 +3591,9 @@ def test_chat_approval_run_detail_handoff_preserves_route_and_replay_wiring() ->
         "apps/frontend/src/features/agent-studio/hooks/useAgentStudioRouteState.ts",
         [
             "export function useAgentStudioRouteState",
+            "import { currentParam, currentView } from '../../../lib/view';",
+            "const view = currentView();",
+            "const routeTab = studioTabFromTopLevelView(view) || normalizeStudioTab(currentParam('tab'));",
             "const routeRunId = (currentParam('run') || currentParam('run_id')).trim();",
             "const routeGroupRunId = (currentParam('group_run') || currentParam('group_run_id') || currentParam('run_group_id')).trim();",
             "const [selectedRouteGroupRunId, setSelectedRouteGroupRunId] = useState(() => routeGroupRunId);",
@@ -3591,6 +3604,9 @@ def test_chat_approval_run_detail_handoff_preserves_route_and_replay_wiring() ->
             "selectedRouteGroupRunId,",
             "setSelectedRunId((current) => current === routeRunId ? current : routeRunId);",
             "setRunTarget((current) => current === routeRunTarget ? current : routeRunTarget);",
+            "function studioTabFromTopLevelView(view: string): StudioTab | null",
+            "if (view === 'skills') return 'skills';",
+            "if (view === 'memories') return 'memory';",
         ],
     )
     _assert_contains(

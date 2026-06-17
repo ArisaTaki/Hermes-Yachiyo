@@ -82,7 +82,7 @@ export function App() {
   let page: ReactNode = <DashboardPage />;
   if (view === 'chat') page = <ChatView />;
   else if (view === 'tasks') page = <TasksView />;
-  else if (view === 'agents') page = <AgentStudioView />;
+  else if (view === 'agents' || view === 'skills' || view === 'memories') page = <AgentStudioView />;
   else if (view === 'settings') page = <ModeSettingsView />;
   else if (view === 'diagnostics') page = <DiagnosticsView />;
   else if (view === 'tools') page = <ToolCenterView />;

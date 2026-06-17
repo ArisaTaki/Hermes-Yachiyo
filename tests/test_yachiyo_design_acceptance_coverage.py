@@ -383,7 +383,11 @@ def test_tasks_daily_entry_acceptance_paths_are_guarded() -> None:
         "apps/frontend/src/lib/view.ts",
         [
             "| 'tasks'",
+            "| 'memories'",
+            "| 'skills'",
             "'tasks'",
+            "'memories'",
+            "'skills'",
         ],
     )
     _assert_contains(
@@ -391,13 +395,18 @@ def test_tasks_daily_entry_acceptance_paths_are_guarded() -> None:
         [
             "const TasksView = lazy(() => import('./views/TasksView')",
             "else if (view === 'tasks') page = <TasksView />;",
+            "else if (view === 'agents' || view === 'skills' || view === 'memories') page = <AgentStudioView />;",
         ],
     )
     _assert_contains(
         "apps/frontend/src/views/OpenDesignView.tsx",
         [
             "{ view: 'tasks', label: '任务', icon: 'activity' }",
+            "{ view: 'memories', label: '记忆', icon: 'sparkle' }",
+            "{ view: 'skills', label: 'Skills', icon: 'resources' }",
             "if (view === 'tasks') return 'Oha Yachiyo — 任务';",
+            "if (view === 'memories') return 'Oha Yachiyo — 记忆';",
+            "if (view === 'skills') return 'Oha Yachiyo — Skills';",
             "if (view === 'tasks') {",
         ],
     )
@@ -413,6 +422,14 @@ def test_tasks_daily_entry_acceptance_paths_are_guarded() -> None:
             'data-testid="yachiyo-tasks-page"',
             'data-testid="yachiyo-tasks-filter-active"',
             'data-testid="yachiyo-tasks-filter-all"',
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useAgentStudioRouteState.ts",
+        [
+            "studioTabFromTopLevelView(view) || normalizeStudioTab(currentParam('tab'))",
+            "if (view === 'skills') return 'skills';",
+            "if (view === 'memories') return 'memory';",
         ],
     )
 

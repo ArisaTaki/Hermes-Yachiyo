@@ -312,6 +312,8 @@ function isAppView(value: string): value is AppView {
     'main',
     'chat',
     'tasks',
+    'memories',
+    'skills',
     'agents',
     'settings',
     'provider',

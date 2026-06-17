@@ -243,6 +243,8 @@ const NAV_GROUPS: Array<{
         { view: 'chat', label: '对话', icon: 'chat' },
         { view: 'tasks', label: '任务', icon: 'activity' },
         { view: 'agents', label: 'Agent Studio', icon: 'model' },
+        { view: 'memories', label: '记忆', icon: 'sparkle' },
+        { view: 'skills', label: 'Skills', icon: 'resources' },
         { view: 'bubble', label: '气泡模式', icon: 'bubble' },
         { view: 'live2d', label: 'Live2D 模式', icon: 'live2d' },
         { view: 'proactive-tts', label: '主动关怀', icon: 'voice' },
@@ -2991,6 +2993,8 @@ function routeTitle(view: AppView, settingsMode = ''): string {
   if (view === 'main') return 'Oha Yachiyo — 主控台';
   if (view === 'chat') return 'Oha Yachiyo — 对话';
   if (view === 'tasks') return 'Oha Yachiyo — 任务';
+  if (view === 'memories') return 'Oha Yachiyo — 记忆';
+  if (view === 'skills') return 'Oha Yachiyo — Skills';
   if (view === 'agents') return 'Oha Yachiyo — Agent Studio';
   if (view === 'provider') return 'Oha Yachiyo — 模型配置';
   if (view === 'bubble') return 'Oha Yachiyo — 气泡模式';
@@ -3008,6 +3012,10 @@ function routeTitle(view: AppView, settingsMode = ''): string {
 }
 
 function isNavActive(activeView: AppView, settingsMode: string, itemView: AppView): boolean {
+  const studioTab = activeView === 'agents' ? currentParam('tab') : '';
+  if (itemView === 'memories') return activeView === 'memories' || studioTab === 'memory';
+  if (itemView === 'skills') return activeView === 'skills' || studioTab === 'skills' || studioTab === 'skill-groups';
+  if (itemView === 'agents' && activeView === 'agents') return !['memory', 'skills', 'skill-groups'].includes(studioTab);
   if (activeView === itemView) return true;
   if (itemView === 'bubble' && activeView === 'settings' && settingsMode === 'bubble') return true;
   if (itemView === 'live2d' && activeView === 'settings' && settingsMode === 'live2d') return true;

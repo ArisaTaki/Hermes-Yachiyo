@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react';
 
-import { currentParam } from '../../../lib/view';
+import { currentParam, currentView } from '../../../lib/view';
 import { normalizeStudioTab, type StudioTab } from '../studioTabs';
 
 export function useAgentStudioRouteState() {
+  const view = currentView();
   const routeRunId = (currentParam('run') || currentParam('run_id')).trim();
   const routeGroupRunId = (currentParam('group_run') || currentParam('group_run_id') || currentParam('run_group_id')).trim();
   const routeRunTarget = currentParam('target').trim();
   const routeRunGoal = currentParam('goal').trim();
-  const routeTab = normalizeStudioTab(currentParam('tab'));
+  const routeTab = studioTabFromTopLevelView(view) || normalizeStudioTab(currentParam('tab'));
   const [tab, setTab] = useState<StudioTab>(() => routeRunId || routeRunTarget ? 'runs' : routeTab);
   const [runTarget, setRunTarget] = useState(() => routeRunTarget);
   const [runGoal, setRunGoal] = useState(() => routeRunGoal);
@@ -45,4 +46,10 @@ export function useAgentStudioRouteState() {
     setTab,
     tab,
   };
+}
+
+function studioTabFromTopLevelView(view: string): StudioTab | null {
+  if (view === 'skills') return 'skills';
+  if (view === 'memories') return 'memory';
+  return null;
 }
