@@ -106,6 +106,10 @@ def test_runtime_run_event_recorder_appends_compatibility_aliases() -> None:
     assert canonical_run_event_aliases("workflow.run.cancelled") == [
         "workflow.cancelled"
     ]
+    assert canonical_run_event_aliases("agent.run.started") == ["run.started"]
+    assert canonical_run_event_aliases("agent.run.completed") == ["run.completed"]
+    assert canonical_run_event_aliases("agent.run.failed") == ["run.failed"]
+    assert canonical_run_event_aliases("agent.run.cancelled") == ["run.cancelled"]
     assert canonical_run_event_aliases("agent.artifact.write") == ["artifact.created"]
     assert canonical_run_event_aliases("group.shared_artifact.created") == ["artifact.created"]
     assert canonical_run_event_aliases("agent.tool.started") == ["tool.started"]
@@ -185,6 +189,28 @@ def test_runtime_run_event_recorder_appends_compatibility_aliases() -> None:
     assert [call[1] for call in repository.calls] == [
         "workflow.run.cancelled",
         "workflow.cancelled",
+    ]
+
+    repository.calls.clear()
+    recorder.append(
+        "run-1",
+        "agent.run.completed",
+        {"agent_id": "agent-1", "status": "completed"},
+    )
+    assert [call[1] for call in repository.calls] == [
+        "agent.run.completed",
+        "run.completed",
+    ]
+
+    repository.calls.clear()
+    recorder.append(
+        "run-1",
+        "agent.run.cancelled",
+        {"agent_id": "agent-1", "status": "cancelled"},
+    )
+    assert [call[1] for call in repository.calls] == [
+        "agent.run.cancelled",
+        "run.cancelled",
     ]
 
     repository.calls.clear()

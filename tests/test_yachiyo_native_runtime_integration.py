@@ -802,10 +802,14 @@ def test_agent_studio_workflow_run_timeline_uses_native_runtime_events(tmp_path)
         assert timeline.workflow_id == "workflow-native-1"
         assert timeline.objective == "Build workflow report"
         assert timeline.final_answer == "Workflow report complete"
-        assert [event.event_type for event in timeline.events] == [
-            "workflow.node.started",
-            "workflow.node.completed",
-        ]
+        timeline_event_types = [event.event_type for event in timeline.events]
+        assert "workflow.run.started" in timeline_event_types
+        assert "workflow.node.started" in timeline_event_types
+        assert "workflow.node.completed" in timeline_event_types
+        assert "workflow.run.completed" in timeline_event_types
+        assert timeline_event_types.index("workflow.node.started") < timeline_event_types.index(
+            "workflow.node.completed"
+        )
         assert timeline.artifacts[0].artifact_id == "artifact-workflow-native"
         assert timeline.artifacts[0].workflow_node_label == "Report"
         workflow_events = [
@@ -895,8 +899,11 @@ def test_agent_studio_rejects_native_tool_approval_with_replay_events(tmp_path) 
         assert first_page.events[0].event_type == "agent.tool.approval_required"
         assert second_page.events[0].sequence > first_page.events[-1].sequence
         assert {
-            event.event_type for event in second_page.events
-        } & {"tool.rejected", "approval.rejected", "agent.run.cancelled"}
+            "tool.rejected",
+            "approval.rejected",
+            "agent.run.cancelled",
+            "run.cancelled",
+        }.issubset(set(event_types))
         assert "sk-native-reject-secret123456" not in serialized_events
     finally:
         runtime.close()

@@ -573,6 +573,8 @@ def test_runtime_core_split_acceptance_paths_are_guarded() -> None:
             "def canonical_tool_event_payload",
             "def model_request_started_payload",
             "def task_run_event_payload",
+            '"agent.run.completed": ["run.completed"]',
+            '"agent.run.cancelled": ["run.cancelled"]',
             '"agent.tool.denied": ["tool.denied"]',
             '"approval.required"',
             '"agent.artifact.write": ["artifact.created"]',
