@@ -213,6 +213,16 @@ ACCEPTANCE_10_3_MATRIX: tuple[AcceptanceScenario, ...] = (
         (
             (
                 "source",
+                "tests/test_bridge_server.py",
+                (
+                    "test_agent_studio_crud_http_routes_use_app_runtime_service",
+                    'client.get("/ui/agents")',
+                    'assert responses[0].json() == {"agents": [{"agent_id": "agent-1"}]}',
+                    'assert responses[1].json() == {"agent_id": "agent-1", "name": "Agent 1"}',
+                ),
+            ),
+            (
+                "source",
                 "apps/bridge/routes/agents.py",
                 ('APIRouter(prefix="/ui", tags=["Agent Studio"])', '@router.get("/agents")', '@router.post("/agents")'),
             ),
@@ -813,5 +823,15 @@ def test_legacy_agents_compatibility_acceptance_path_is_guarded() -> None:
             "assert '@router.post(\"/agents\")' in legacy_agents_source",
             "assert '@router.get(\"/tasks\")' in source",
             "assert \"return await yachiyo_chat_handlers.start_task(request, http_request)\" in source",
+        ],
+    )
+    _assert_contains(
+        "tests/test_bridge_server.py",
+        [
+            "test_agent_studio_crud_http_routes_use_app_runtime_service",
+            'client.get("/ui/agents")',
+            'assert responses[0].json() == {"agents": [{"agent_id": "agent-1"}]}',
+            'assert responses[1].json() == {"agent_id": "agent-1", "name": "Agent 1"}',
+            'assert responses[6].json() == {"ok": True, "agent_id": "agent-1", "skill_id": "skill-1"}',
         ],
     )

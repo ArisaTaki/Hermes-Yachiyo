@@ -6087,6 +6087,14 @@ def test_agent_studio_crud_http_routes_use_app_runtime_service(monkeypatch):
             ]
 
         assert all(response.status_code == 200 for response in responses)
+        assert responses[0].json() == {"agents": [{"agent_id": "agent-1"}]}
+        assert responses[1].json() == {"agent_id": "agent-1", "name": "Agent 1"}
+        assert responses[2].json() == {"agent_id": "agent-1"}
+        assert responses[3].json() == {"agent_id": "agent-1", "name": "Agent 2"}
+        assert responses[4].json() == {"ok": True, "agent_id": "agent-1"}
+        assert responses[5].json() == {"ok": True, "agent_id": "agent-1"}
+        assert responses[6].json() == {"ok": True, "agent_id": "agent-1", "skill_id": "skill-1"}
+        assert responses[7].json() == {"ok": True, "agent_id": "agent-1", "skill_id": "skill-1"}
         assert service.calls == [
             "list_agents",
             "create_agent",
