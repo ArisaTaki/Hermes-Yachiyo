@@ -518,6 +518,8 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
         "apps/frontend/src/features/yachiyo-chat/messageState.ts",
         [
             "export function messageText",
+            "export function isRetryableMessage",
+            "return !messages.some((candidate) => (",
             "export function messageErrorText",
             "export function normalizeRunStatus",
             "export function messageRunStatus",
@@ -708,8 +710,11 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
         "apps/frontend/src/views/ChatView.tsx",
         [
             "from '../features/yachiyo-chat/displayState';",
+            "from '../features/yachiyo-chat/clientMessages';",
+            "from '../features/yachiyo-chat/composerEvents';",
             "from '../features/yachiyo-chat/renderState';",
             "from '../features/yachiyo-chat/layoutState';",
+            "from '../features/yachiyo-chat/components/ChatFullPageLoading';",
             "import { deriveChatSessionState } from '../features/yachiyo-chat/sessionDerivedState';",
             "} = useMemo(() => deriveChatSessionState({",
             "selectedGroupAgentIds,",
@@ -730,6 +735,10 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "function runnableResultRunId",
             "function runnableResultStatus",
             "function runnableResultLabel",
+            "function isRetryableMessage(",
+            "function isImeComposing(",
+            "function ChatFullPageLoading(",
+            "function createClientMessageId(",
             "result.workflow_run_id ? 'Workflow' : 'Agent'",
             "result.runnable_command",
             "agent_run_id?: string;",
@@ -822,6 +831,30 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "export function readPendingAttachment",
             "export function loadImageDimensions",
             "dimensions.width < 16 || dimensions.height < 16",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/clientMessages.ts",
+        [
+            "export function createClientMessageId",
+            "globalThis.crypto?.randomUUID",
+            "Math.random().toString(36).slice(2, 12)",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/composerEvents.ts",
+        [
+            "export function isImeComposing",
+            "nativeEvent.isComposing",
+            "nativeEvent.keyCode === 229",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/ChatFullPageLoading.tsx",
+        [
+            "export function ChatFullPageLoading",
+            "role=\"status\"",
+            "正在准备对话...",
         ],
     )
 

@@ -15,8 +15,11 @@ import {
   readPendingAttachment,
   withResolvedAttachmentUrls,
 } from '../features/yachiyo-chat/attachments';
+import { createClientMessageId } from '../features/yachiyo-chat/clientMessages';
+import { isImeComposing } from '../features/yachiyo-chat/composerEvents';
 import { createDelegatedRunSummary } from '../features/yachiyo-chat/delegatedSummary';
 import { ChatComposer } from '../features/yachiyo-chat/components/ChatComposer';
+import { ChatFullPageLoading } from '../features/yachiyo-chat/components/ChatFullPageLoading';
 import { composerApprovalStatusText } from '../features/yachiyo-chat/components/ComposerApprovalNotice';
 import { ChatGroupDialog } from '../features/yachiyo-chat/components/ChatGroupDialog';
 import { ChatHeader } from '../features/yachiyo-chat/components/ChatHeader';
@@ -39,6 +42,7 @@ import {
   activityRunId,
   chatStatusLabel,
   compactStatusText,
+  isRetryableMessage,
   latestFailedMessage,
   latestVisibleActivity,
   messageErrorText,
@@ -129,7 +133,6 @@ import type {
   RenderState,
   SessionsPayload,
 } from '../features/yachiyo-chat/types';
-import logoUrl from '../../../../docs/open-design/logo.png';
 import { useAssistantProfileSeed } from '../lib/assistantProfileSeed';
 import { apiGet, apiPatch, apiPost, bridgeUrl, canChooseChatImages, chooseChatImages, copyText, openAppView, openExternalUrl, restartDesktopBridge, type ChatImageSelection } from '../lib/bridge';
 import { ROUTE_CHANGE_EVENT, currentParam } from '../lib/view';
@@ -2063,40 +2066,4 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
 function isMissingGroupEditRouteError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error || '');
   return /\b(?:HTTP 404|404|Not Found)\b/i.test(message);
-}
-
-function isRetryableMessage(message: ChatMessage, messages: ChatMessage[]) {
-  if (message.status !== 'failed' || !message.id) return false;
-  if (message.role === 'assistant') return true;
-  if (message.role !== 'user') return false;
-  if (!message.task_id) return true;
-  return !messages.some((candidate) => (
-    candidate.role === 'assistant'
-    && candidate.task_id === message.task_id
-  ));
-}
-
-function isImeComposing(event: ReactKeyboardEvent<HTMLElement>, fallback = false) {
-  const nativeEvent = event.nativeEvent as KeyboardEvent & { isComposing?: boolean };
-  return Boolean(fallback || nativeEvent.isComposing || nativeEvent.keyCode === 229);
-}
-
-function ChatFullPageLoading({ avatarUrl, label }: { avatarUrl?: string; label: string }) {
-  return (
-    <div className="chat-full-page-loading" role="status" aria-live="polite">
-      <div className="chat-full-page-avatar">
-        <img src={avatarUrl || logoUrl} alt="" />
-      </div>
-      <div className="chat-loading-dots">
-        <span /><span /><span />
-      </div>
-      <strong>{label}</strong>
-      <span>正在准备对话...</span>
-    </div>
-  );
-}
-
-function createClientMessageId() {
-  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
 }

@@ -14,6 +14,17 @@ export function messageText(message: YachiyoChatMessage) {
   return String(message.content || message.text || '');
 }
 
+export function isRetryableMessage(message: YachiyoChatMessage, messages: YachiyoChatMessage[]) {
+  if (message.status !== 'failed' || !message.id) return false;
+  if (message.role === 'assistant') return true;
+  if (message.role !== 'user') return false;
+  if (!message.task_id) return true;
+  return !messages.some((candidate) => (
+    candidate.role === 'assistant'
+    && candidate.task_id === message.task_id
+  ));
+}
+
 export function messageErrorText(message: YachiyoChatMessage) {
   return String(
     message.error || message.content || message.text || '任务执行失败',
