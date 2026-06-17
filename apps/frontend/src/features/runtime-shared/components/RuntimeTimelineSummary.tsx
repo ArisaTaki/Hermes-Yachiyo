@@ -85,9 +85,11 @@ function runtimeTimelineEventTypeLabel(type: string): string {
   if (type === 'tool.rejected') return '工具审批拒绝';
   if (type === 'agent.tool.approval_approved' || type === 'tool.approval_approved') return '审批已通过';
   if (type === 'agent.tool.approval_rejected' || type === 'tool.approval_rejected') return '审批已拒绝';
+  if (type === 'agent.tool.approval_cancelled' || type === 'tool.approval_cancelled') return '审批已取消';
   if (type === 'agent.tool.approval_timeout') return '审批已超时';
   if (type === 'approval.approved') return '审批已通过';
   if (type === 'approval.rejected') return '审批已拒绝';
+  if (type === 'approval.cancelled') return '审批已取消';
   if (type === 'tool.completed' || type === 'agent.tool.completed') return '工具完成';
   if (type === 'tool.failed' || type === 'agent.tool.failed') return '工具失败';
   if (type === 'tool.cancelled') return '工具已取消';
@@ -120,6 +122,7 @@ function runtimeTimelineEventTypeLabel(type: string): string {
   if (type === 'workflow.node.approval_required' || type === 'workflow.run.approval_required' || type === 'workflow.paused_for_approval') return 'Workflow 等待审批';
   if (type === 'workflow.node.approval_approved') return 'Workflow 审批通过';
   if (type === 'workflow.node.approval_rejected') return 'Workflow 审批拒绝';
+  if (type === 'workflow.node.approval_cancelled') return 'Workflow 审批取消';
   if (type === 'workflow.node.approval_timeout') return 'Workflow 审批超时';
   if (type === 'workflow.edge.followed') return 'Workflow 路由';
   if (type === 'workflow.run.child_resumed') return '子任务已继续';

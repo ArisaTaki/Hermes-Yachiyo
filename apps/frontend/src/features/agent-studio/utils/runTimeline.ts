@@ -47,9 +47,11 @@ export function timelineEventTitle(event: Record<string, unknown>): string {
   if (name === 'tool.rejected') return detail ? `工具审批拒绝 · ${detail}` : '工具审批拒绝';
   if (name === 'agent.tool.approval_approved' || name === 'tool.approval_approved') return detail ? `审批已通过 · ${detail}` : '审批已通过';
   if (name === 'agent.tool.approval_rejected' || name === 'tool.approval_rejected') return detail ? `审批已拒绝 · ${detail}` : '审批已拒绝';
+  if (name === 'agent.tool.approval_cancelled' || name === 'tool.approval_cancelled') return detail ? `审批已取消 · ${detail}` : '审批已取消';
   if (name === 'tool.cancelled') return detail ? `工具已取消 · ${detail}` : '工具已取消';
   if (name === 'approval.approved') return detail ? `审批已通过 · ${detail}` : '审批已通过';
   if (name === 'approval.rejected') return detail ? `审批已拒绝 · ${detail}` : '审批已拒绝';
+  if (name === 'approval.cancelled') return detail ? `审批已取消 · ${detail}` : '审批已取消';
   if (name === 'skill.selected') return detail ? `Skill 已选择 · ${detail}` : 'Skill 已选择';
   if (name.startsWith('skill.dispatch.')) return detail ? `Skill 调度 · ${detail}` : 'Skill 调度';
   if (name === 'memory.retrieved') return detail ? `Memory 检索 · ${detail}` : 'Memory 检索';
@@ -89,6 +91,7 @@ export function timelineEventTitle(event: Record<string, unknown>): string {
   if (name === 'workflow.node.approval_required') return detail ? `人工审批 · ${detail}` : '人工审批';
   if (name === 'workflow.node.approval_approved') return detail ? `审批已通过 · ${detail}` : '审批已通过';
   if (name === 'workflow.node.approval_rejected') return detail ? `审批已拒绝 · ${detail}` : '审批已拒绝';
+  if (name === 'workflow.node.approval_cancelled') return detail ? `审批已取消 · ${detail}` : '审批已取消';
   if (name === 'workflow.edge.followed') return detail ? `Workflow 路由 · ${detail}` : 'Workflow 路由';
   if (name === 'workflow.run.approval_required' || name === 'workflow.paused_for_approval') return 'Workflow 等待审批';
   if (name === 'workflow.run.child_resumed') return '子 Agent 已继续执行';
