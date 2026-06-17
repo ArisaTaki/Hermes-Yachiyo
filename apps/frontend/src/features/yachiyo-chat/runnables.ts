@@ -1,4 +1,7 @@
-import { listRunnables as listLegacyRunnables } from '../../lib/agents';
+import {
+  listRunnables as listLegacyRunnables,
+  type RunnableSummary as LegacyRunnableSummary,
+} from '../../lib/agents';
 import { listYachiyoChatRunnableCatalog } from './api';
 import type { ChatRunnableParticipantSnapshot, ChatRunnableSnapshot } from './types';
 
@@ -12,10 +15,8 @@ export type ChatRunnableSummary = {
   output_contract?: 'chat' | 'markdown' | 'diff' | 'report' | 'artifacts' | 'workflow' | string;
   kind: 'agent' | 'workflow';
   enabled?: boolean;
-  tool_policy?: {
-    allowed_tools?: string[];
-    approval_required?: Record<string, boolean>;
-  };
+  tool_capabilities?: string[];
+  approval_required_tools?: string[];
   participants?: ChatRunnableSummary[];
 };
 
@@ -24,7 +25,7 @@ export async function listYachiyoChatRunnables(): Promise<ChatRunnableSummary[]>
     const catalog = await listYachiyoChatRunnableCatalog();
     return chatRunnablesFromPublicSnapshots(catalog.agents, catalog.workflows);
   } catch {
-    return listLegacyRunnables();
+    return chatRunnablesFromLegacySummaries(await listLegacyRunnables());
   }
 }
 
@@ -48,27 +49,10 @@ function chatRunnableSummary(runnable: ChatRunnableSnapshot): ChatRunnableSummar
     output_contract: runnable.output_contract || undefined,
     kind: runnable.kind,
     enabled: runnable.enabled,
-    tool_policy: chatToolPolicy(runnable.tool_capabilities, runnable.approval_required_tools),
+    tool_capabilities: normalizedStringList(runnable.tool_capabilities),
+    approval_required_tools: normalizedStringList(runnable.approval_required_tools),
     participants: (runnable.participants || []).map(chatParticipantRunnable),
   };
-}
-
-function chatToolPolicy(
-  toolCapabilities: string[] | undefined,
-  approvalRequiredTools: string[] | undefined,
-): ChatRunnableSummary['tool_policy'] | undefined {
-  const allowedTools = Array.isArray(toolCapabilities)
-    ? toolCapabilities.map((tool) => String(tool || '').trim()).filter(Boolean)
-    : [];
-  const approvalRequired: Record<string, boolean> = {};
-  (approvalRequiredTools || []).forEach((tool) => {
-    const cleanTool = String(tool || '').trim();
-    if (cleanTool) approvalRequired[cleanTool] = true;
-  });
-  const normalized: ChatRunnableSummary['tool_policy'] = {};
-  if (allowedTools?.length) normalized.allowed_tools = allowedTools;
-  if (Object.keys(approvalRequired).length) normalized.approval_required = approvalRequired;
-  return normalized.allowed_tools || normalized.approval_required ? normalized : undefined;
 }
 
 function chatParticipantRunnable(participant: ChatRunnableParticipantSnapshot): ChatRunnableSummary {
@@ -81,4 +65,54 @@ function chatParticipantRunnable(participant: ChatRunnableParticipantSnapshot): 
     kind: participant.kind,
     enabled: participant.enabled,
   };
+}
+
+function chatRunnablesFromLegacySummaries(items: LegacyRunnableSummary[]): ChatRunnableSummary[] {
+  return items.map((item) => {
+    const toolPolicy = legacyToolPolicy(item.tool_policy);
+    return {
+      id: item.id,
+      name: item.name,
+      nickname: item.nickname,
+      description: item.description,
+      avatar_url: item.avatar_url,
+      category: item.category,
+      output_contract: item.output_contract,
+      kind: item.kind,
+      enabled: item.enabled,
+      tool_capabilities: normalizedStringList(toolPolicy.allowed_tools),
+      approval_required_tools: approvalRequiredToolsFromLegacyPolicy(toolPolicy),
+      participants: item.participants ? chatRunnablesFromLegacySummaries(item.participants) : undefined,
+    };
+  });
+}
+
+function legacyToolPolicy(value: unknown): { allowed_tools?: unknown; approval_required?: unknown } {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as { allowed_tools?: unknown; approval_required?: unknown }
+    : {};
+}
+
+function approvalRequiredToolsFromLegacyPolicy(
+  policy: { approval_required?: unknown },
+): string[] {
+  if (!policy.approval_required || typeof policy.approval_required !== 'object' || Array.isArray(policy.approval_required)) {
+    return [];
+  }
+  return normalizedStringList(Object.entries(policy.approval_required)
+    .filter(([, required]) => required === true)
+    .map(([tool]) => tool)) || [];
+}
+
+function normalizedStringList(value: unknown): string[] | undefined {
+  const items = Array.isArray(value)
+    ? value.map((item) => String(item || '').trim()).filter(Boolean)
+    : [];
+  const seen = new Set<string>();
+  const uniqueItems = items.filter((item) => {
+    if (seen.has(item)) return false;
+    seen.add(item);
+    return true;
+  });
+  return uniqueItems.length ? uniqueItems : undefined;
 }

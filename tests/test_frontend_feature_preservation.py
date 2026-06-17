@@ -680,7 +680,21 @@ def test_chat_group_summary_ui_smoke_uses_group_create_send_and_summary_status()
             "chat-group-ui-main-summary-message",
             "chat-group-ui-followup-message",
             "url.pathname === `/ui/runs/${GROUP_SUMMARY_RUN_ID}`",
+            "url.pathname === '/yachiyo/studio/agents'",
+            "url.pathname === '/yachiyo/studio/skills'",
+            "url.pathname === '/yachiyo/studio/skills/sources'",
+            "url.pathname === '/yachiyo/studio/skill-folders'",
+            "url.pathname === '/yachiyo/studio/groups'",
+            "url.pathname === '/yachiyo/studio/memories'",
+            "url.pathname === '/yachiyo/studio/future-tasks'",
+            "url.pathname === '/yachiyo/studio/runs'",
+            "url.pathname === '/yachiyo/studio/group-runs'",
+            "url.pathname === `/yachiyo/studio/runs/${GROUP_SUMMARY_RUN_ID}/timeline`",
+            "url.pathname === `/yachiyo/studio/runs/${GROUP_AGENT_RUN_ID}/timeline`",
             "url.pathname === `/yachiyo/studio/runs/${GROUP_SUMMARY_RUN_ID}/events`",
+            "url.pathname === `/yachiyo/studio/group-runs/${RUN_GROUP_ID}/events`",
+            "function eventPage",
+            "next_after_sequence",
             "group_followup_for_task_ids",
             "group_followup_for_agent_message_ids",
             "data-summary-tone') === 'completed'",
@@ -3815,15 +3829,39 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
             "from './types';",
             "const catalog = await listYachiyoChatRunnableCatalog();",
             "return chatRunnablesFromPublicSnapshots(catalog.agents, catalog.workflows)",
-            "return listLegacyRunnables()",
+            "return chatRunnablesFromLegacySummaries(await listLegacyRunnables())",
             "participants: (runnable.participants || []).map(chatParticipantRunnable)",
-            "tool_capabilities",
-            "approval_required_tools",
+            "tool_capabilities: normalizedStringList(runnable.tool_capabilities)",
+            "approval_required_tools: normalizedStringList(runnable.approval_required_tools)",
+            "function chatRunnablesFromLegacySummaries",
+            "tool_capabilities: normalizedStringList(toolPolicy.allowed_tools)",
+            "approval_required_tools: approvalRequiredToolsFromLegacyPolicy(toolPolicy)",
         ],
     )
     _assert_not_contains(
         "apps/frontend/src/features/yachiyo-chat/runnables.ts",
-        ["../yachiyo-studio/api", "../runtime-shared/types"],
+        [
+            "../yachiyo-studio/api",
+            "../runtime-shared/types",
+            "tool_policy?:",
+            "tool_policy: chatToolPolicy",
+            "function chatToolPolicy",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/ChatGroupDialog.tsx",
+        [
+            "const allowedTools = new Set((agent.tool_capabilities || []).map((tool) => String(tool)))",
+            "const approvalTools = new Set((agent.approval_required_tools || []).map((tool) => String(tool)))",
+            "const needsApproval = (tool: string) => approvalTools.has(tool);",
+        ],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/ChatGroupDialog.tsx",
+        [
+            "agent.tool_policy",
+            "approval_required || {}",
+        ],
     )
     _assert_contains(
         "apps/frontend/src/features/yachiyo-chat/components/AgentRunProgressCard.tsx",

@@ -56,8 +56,60 @@ const groupParticipants = [
   { kind: 'agent', id: AGENT_ID, name: agentRunnable.name, nickname: agentRunnable.nickname },
 ];
 
+const studioGroupParticipants = [
+  { agent_id: AGENT_ID, name: agentRunnable.name, role: 'member', sort_order: 1, enabled: true },
+];
+
 function log(message) {
   process.stdout.write(`[chat-group-summary-ui-smoke] ${message}\n`);
+}
+
+function studioAgentSnapshot() {
+  return {
+    agent_id: AGENT_ID,
+    name: agentRunnable.name,
+    nickname: agentRunnable.nickname,
+    description: 'Chat group UI smoke agent',
+    avatar_url: '',
+    category: 'smoke',
+    instructions: 'Handle the group UI smoke task.',
+    persona_prompt: '',
+    model_mode: 'follow_main',
+    execution_backend: 'native_profile',
+    model_profile_id: '',
+    vision_model_profile_id: '',
+    model_config: {},
+    tool_policy: agentRunnable.tool_policy,
+    workspace_policy: {
+      default_workdir: '',
+      readable_scopes: ['.'],
+      writable_scopes: [],
+    },
+    output_contract: agentRunnable.output_contract,
+    enabled: true,
+    editable: true,
+    deletable: true,
+    skill_ids: [],
+    created_at: now,
+    updated_at: now,
+  };
+}
+
+function studioGroupSnapshot() {
+  return {
+    group_id: GROUP_SESSION_ID,
+    name: GROUP_NAME,
+    description: GROUP_GOAL,
+    members: studioGroupParticipants,
+    mode: 'parallel',
+    moderator_agent_id: null,
+    default_model: null,
+    memory_scope: 'shared',
+    tool_policy_id: null,
+    enabled: true,
+    created_at: now,
+    updated_at: now,
+  };
 }
 
 function groupSessionContext() {
@@ -218,15 +270,19 @@ function groupAgentRun() {
     run_id: GROUP_AGENT_RUN_ID,
     kind: 'agent_run',
     status: 'completed',
+    title: agentRunnable.name,
+    agent_id: AGENT_ID,
     runnable_id: AGENT_ID,
     runnable_name: agentRunnable.name,
     session_id: GROUP_SESSION_ID,
     task_id: GROUP_AGENT_TASK_ID,
+    group_run_id: RUN_GROUP_ID,
     run_group_id: RUN_GROUP_ID,
     user_goal: GROUP_GOAL,
     result: GROUP_AGENT_RESULT,
     task_run_link_run_status: 'completed',
     task_run_link_last_event_sequence: 4,
+    events: groupAgentRunEvents(),
     timeline: [
       { event: 'agent.run.started', status: 'running', detail: 'Started Native group dispatch.' },
       { event: 'agent.tool.call', status: 'completed', tool: 'workspace.read', detail: 'Read workspace context.' },
@@ -289,13 +345,16 @@ function groupSummaryRun() {
     run_id: GROUP_SUMMARY_RUN_ID,
     kind: 'main_chat_run',
     status: 'completed',
+    title: 'Group summary',
     session_id: GROUP_SESSION_ID,
     task_id: SUMMARY_TASK_ID,
+    group_run_id: RUN_GROUP_ID,
     run_group_id: RUN_GROUP_ID,
     user_goal: `Summarize group agent task ${GROUP_AGENT_TASK_ID}`,
     result: GROUP_SUMMARY_RESULT,
     task_run_link_run_status: 'completed',
     task_run_link_last_event_sequence: 2,
+    events: groupSummaryRunEvents(),
     timeline: [
       { event: 'model.output.completed', status: 'completed', detail: GROUP_SUMMARY_RESULT },
       { event: 'run.completed', status: 'completed', detail: GROUP_SUMMARY_RESULT },
@@ -333,18 +392,67 @@ function groupSummaryRunEvents() {
 
 function groupRunGroup() {
   return {
+    group_run_id: RUN_GROUP_ID,
     run_group_id: RUN_GROUP_ID,
+    group_id: GROUP_SESSION_ID,
     kind: 'group_chat',
     status: 'completed',
     title: GROUP_NAME,
+    objective: GROUP_GOAL,
+    participants: studioGroupParticipants,
+    events: groupRunEvents(),
+    runs: bridgeState.groupSummaryStatus === 'completed'
+      ? [groupAgentRun(), groupSummaryRun()]
+      : [groupAgentRun()],
     summary: bridgeState.groupSummaryStatus === 'completed' ? GROUP_SUMMARY_RESULT : GROUP_AGENT_RESULT,
     root_run_id: GROUP_AGENT_RUN_ID,
     child_run_ids: bridgeState.groupSummaryStatus === 'completed'
       ? [GROUP_AGENT_RUN_ID, GROUP_SUMMARY_RUN_ID]
       : [GROUP_AGENT_RUN_ID],
+    final_answer: bridgeState.groupSummaryStatus === 'completed' ? GROUP_SUMMARY_RESULT : null,
+    shared_artifacts: [],
+    pending_approvals: [],
     created_at: now,
     updated_at: now,
   };
+}
+
+function groupRunEvents() {
+  const events = [
+    {
+      run_id: RUN_GROUP_ID,
+      sequence: 1,
+      event_type: 'group.run.started',
+      actor: 'runtime',
+      visibility: 'public',
+      sensitivity: 'normal',
+      payload: { group_id: GROUP_SESSION_ID, objective: GROUP_GOAL },
+      created_at: now,
+    },
+    {
+      run_id: RUN_GROUP_ID,
+      sequence: 2,
+      event_type: 'group.member.completed',
+      actor: 'agent',
+      visibility: 'public',
+      sensitivity: 'normal',
+      payload: { child_run_id: GROUP_AGENT_RUN_ID, agent_id: AGENT_ID },
+      created_at: now,
+    },
+  ];
+  if (bridgeState.groupSummaryStatus === 'completed') {
+    events.push({
+      run_id: RUN_GROUP_ID,
+      sequence: 3,
+      event_type: 'group.summary.completed',
+      actor: 'model',
+      visibility: 'public',
+      sensitivity: 'normal',
+      payload: { child_run_id: GROUP_SUMMARY_RUN_ID, result: GROUP_SUMMARY_RESULT },
+      created_at: now,
+    });
+  }
+  return events;
 }
 
 function pickPort() {
@@ -388,6 +496,21 @@ function sendJson(response, statusCode, payload) {
     'Content-Type': 'application/json; charset=utf-8',
   });
   response.end(JSON.stringify(payload));
+}
+
+function eventPage(runId, events, afterSequence, limit) {
+  const filtered = events.filter((event) => event.sequence > afterSequence).slice(0, limit);
+  const nextAfterSequence = filtered.length
+    ? Math.max(...filtered.map((event) => event.sequence))
+    : Math.max(0, afterSequence);
+  return {
+    run_id: runId,
+    after_sequence: Math.max(0, afterSequence),
+    limit,
+    next_after_sequence: nextAfterSequence,
+    has_more: events.some((event) => event.sequence > nextAfterSequence),
+    events: filtered,
+  };
 }
 
 async function startMockBridge() {
@@ -435,7 +558,15 @@ async function startMockBridge() {
         });
         return;
       }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/agents') {
+        sendJson(response, 200, { agents: [studioAgentSnapshot()] });
+        return;
+      }
       if (request.method === 'GET' && url.pathname === '/ui/skills') {
+        sendJson(response, 200, { skills: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/skills') {
         sendJson(response, 200, { skills: [] });
         return;
       }
@@ -443,7 +574,15 @@ async function startMockBridge() {
         sendJson(response, 200, { roots: [] });
         return;
       }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/skills/sources') {
+        sendJson(response, 200, { roots: [] });
+        return;
+      }
       if (request.method === 'GET' && url.pathname === '/ui/skill-folders') {
+        sendJson(response, 200, { folders: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/skill-folders') {
         sendJson(response, 200, { folders: [] });
         return;
       }
@@ -451,8 +590,46 @@ async function startMockBridge() {
         sendJson(response, 200, { ok: true, profiles: [], defaults: {} });
         return;
       }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/groups') {
+        sendJson(response, 200, { groups: [studioGroupSnapshot()] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/yachiyo/studio/groups/${GROUP_SESSION_ID}`) {
+        sendJson(response, 200, studioGroupSnapshot());
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/memories') {
+        sendJson(response, 200, { memories: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/future-tasks') {
+        sendJson(response, 200, { future_tasks: [] });
+        return;
+      }
       if (request.method === 'GET' && url.pathname === '/yachiyo/studio/workflows') {
         sendJson(response, 200, { workflows: [] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/runs') {
+        sendJson(response, 200, {
+          runs: bridgeState.groupSummaryStatus === 'completed'
+            ? [groupSummaryRun(), groupAgentRun()]
+            : [groupAgentRun()],
+        });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/studio/group-runs') {
+        sendJson(response, 200, { group_runs: [groupRunGroup()] });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/yachiyo/studio/group-runs/${RUN_GROUP_ID}`) {
+        sendJson(response, 200, groupRunGroup());
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/yachiyo/studio/group-runs/${RUN_GROUP_ID}/events`) {
+        const afterSequence = Number(url.searchParams.get('after_sequence') || '0');
+        const limit = Math.max(1, Number(url.searchParams.get('limit') || '200'));
+        sendJson(response, 200, eventPage(RUN_GROUP_ID, groupRunEvents(), afterSequence, limit));
         return;
       }
       if (request.method === 'GET' && url.pathname === '/ui/runs') {
@@ -477,6 +654,26 @@ async function startMockBridge() {
         );
         return;
       }
+      if (request.method === 'GET' && (
+        url.pathname === `/yachiyo/studio/runs/${GROUP_AGENT_RUN_ID}`
+        || url.pathname === `/yachiyo/studio/runs/${GROUP_AGENT_RUN_ID}/timeline`
+      )) {
+        sendJson(response, 200, groupAgentRun());
+        return;
+      }
+      if (request.method === 'GET' && (
+        url.pathname === `/yachiyo/studio/runs/${GROUP_SUMMARY_RUN_ID}`
+        || url.pathname === `/yachiyo/studio/runs/${GROUP_SUMMARY_RUN_ID}/timeline`
+      )) {
+        sendJson(
+          response,
+          bridgeState.groupSummaryStatus === 'completed' ? 200 : 404,
+          bridgeState.groupSummaryStatus === 'completed'
+            ? groupSummaryRun()
+            : { ok: false, error: 'summary run not created' },
+        );
+        return;
+      }
       if (request.method === 'GET' && url.pathname === '/ui/run-groups') {
         sendJson(response, 200, { run_groups: [groupRunGroup()] });
         return;
@@ -488,23 +685,13 @@ async function startMockBridge() {
       if (request.method === 'GET' && url.pathname === `/yachiyo/studio/runs/${GROUP_AGENT_RUN_ID}/events`) {
         const afterSequence = Number(url.searchParams.get('after_sequence') || '0');
         const limit = Math.max(1, Number(url.searchParams.get('limit') || '200'));
-        sendJson(response, 200, {
-          run_id: GROUP_AGENT_RUN_ID,
-          after_sequence: Math.max(0, afterSequence),
-          limit,
-          events: groupAgentRunEvents().filter((event) => event.sequence > afterSequence).slice(0, limit),
-        });
+        sendJson(response, 200, eventPage(GROUP_AGENT_RUN_ID, groupAgentRunEvents(), afterSequence, limit));
         return;
       }
       if (request.method === 'GET' && url.pathname === `/yachiyo/studio/runs/${GROUP_SUMMARY_RUN_ID}/events`) {
         const afterSequence = Number(url.searchParams.get('after_sequence') || '0');
         const limit = Math.max(1, Number(url.searchParams.get('limit') || '200'));
-        sendJson(response, 200, {
-          run_id: GROUP_SUMMARY_RUN_ID,
-          after_sequence: Math.max(0, afterSequence),
-          limit,
-          events: groupSummaryRunEvents().filter((event) => event.sequence > afterSequence).slice(0, limit),
-        });
+        sendJson(response, 200, eventPage(GROUP_SUMMARY_RUN_ID, groupSummaryRunEvents(), afterSequence, limit));
         return;
       }
       if (request.method === 'GET' && url.pathname === '/ui/chat/sessions') {

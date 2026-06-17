@@ -277,9 +277,9 @@ function groupAgentMetaLine(agent: ChatRunnableSummary): string {
 }
 
 function groupAgentToolLine(agent: ChatRunnableSummary): string {
-  const allowedTools = new Set((agent.tool_policy?.allowed_tools || []).map((tool) => String(tool)));
-  const approvals = agent.tool_policy?.approval_required || {};
-  const needsApproval = (tool: string) => Boolean(approvals[tool]);
+  const allowedTools = new Set((agent.tool_capabilities || []).map((tool) => String(tool)));
+  const approvalTools = new Set((agent.approval_required_tools || []).map((tool) => String(tool)));
+  const needsApproval = (tool: string) => approvalTools.has(tool);
   const parts: string[] = [];
   if (allowedTools.has('workspace.read') || allowedTools.has('workspace.list')) parts.push('读文件');
   if (allowedTools.has('workspace.write_patch')) parts.push(needsApproval('workspace.write_patch') ? '写补丁需审批' : '写补丁');
