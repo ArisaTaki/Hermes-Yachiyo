@@ -377,10 +377,21 @@ def test_chat_daily_entry_acceptance_paths_are_guarded() -> None:
             "onApproveApproval(task, approval)",
             "onRejectApproval(task, approval)",
             'data-testid="yachiyo-task-approval-open-studio"',
-            "approval.open_in_studio_url",
+            "yachiyoTaskApprovalStudioTarget(task, approval)",
             "ArtifactPreview",
             "ToolCallSummary",
             "在 Agent Studio 中查看",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/taskSnapshots.ts",
+        [
+            "export function yachiyoTaskApprovalStudioTarget",
+            "const publicUrl = String(approval.open_in_studio_url || '').trim();",
+            "runIdFromStudioUrl(publicUrl)",
+            "approval.source_run_id",
+            "approval.workflow_run_id",
+            "String(approval.group_run_id || '').trim() || yachiyoTaskStudioGroupRunId(task)",
         ],
     )
     _assert_contains(

@@ -1,10 +1,9 @@
 import { UiIcon } from '../../../components/UiIcon';
 import { RuntimeTimelineSummary } from '../../runtime-shared/components/RuntimeTimelineSummary';
-import { studioRunUrl } from '../../runtime-shared/studioLinks';
 import { useYachiyoTaskEventReplay } from '../hooks/useYachiyoTaskEventReplay';
 import {
+  yachiyoTaskApprovalStudioTarget,
   yachiyoTaskRunId,
-  yachiyoTaskStudioGroupRunId,
   yachiyoTaskStudioRunId,
   yachiyoTaskStudioUrl,
 } from '../taskSnapshots';
@@ -127,8 +126,10 @@ export function AgentTaskCard({
           {approvalFacts.slice(0, 2).map((approval) => {
             const pending = (approval.status || 'pending') === 'pending';
             const actionable = pending && (onApproveApproval || onRejectApproval);
-            const approvalStudioRunId = approvalStudioRunIdFor(approval);
-            const approvalStudioUrl = approvalStudioUrlFor(approval, task);
+            const {
+              runId: approvalStudioRunId,
+              studioUrl: approvalStudioUrl,
+            } = yachiyoTaskApprovalStudioTarget(task, approval);
             const canOpenApprovalStudio = Boolean(onOpenStudio && (approvalStudioRunId || approvalStudioUrl));
             return (
               <ApprovalCard
@@ -196,23 +197,4 @@ function taskStatusLabel(status: string) {
   if (status === 'failed') return '失败';
   if (status === 'cancelled') return '已取消';
   return status || '任务';
-}
-
-function approvalStudioRunIdFor(approval: ApprovalCardSnapshot) {
-  return String(
-    approval.source_run_id
-    || approval.run_id
-    || approval.workflow_run_id
-    || '',
-  ).trim();
-}
-
-function approvalStudioUrlFor(approval: ApprovalCardSnapshot, task: AgentTaskSnapshot) {
-  const publicUrl = String(approval.open_in_studio_url || '').trim();
-  if (publicUrl) return publicUrl;
-  const runId = approvalStudioRunIdFor(approval);
-  if (!runId) return '';
-  return studioRunUrl(runId, {
-    groupRunId: String(approval.group_run_id || '').trim() || yachiyoTaskStudioGroupRunId(task),
-  });
 }
