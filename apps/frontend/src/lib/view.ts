@@ -1,6 +1,7 @@
 export type AppView =
   | 'main'
   | 'chat'
+  | 'tasks'
   | 'agents'
   | 'settings'
   | 'provider'
@@ -98,6 +99,7 @@ function isAppView(value: string): value is AppView {
   return [
     'main',
     'chat',
+    'tasks',
     'agents',
     'settings',
     'provider',

@@ -378,6 +378,45 @@ def test_chat_daily_entry_acceptance_paths_are_guarded() -> None:
     )
 
 
+def test_tasks_daily_entry_acceptance_paths_are_guarded() -> None:
+    _assert_contains(
+        "apps/frontend/src/lib/view.ts",
+        [
+            "| 'tasks'",
+            "'tasks'",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/App.tsx",
+        [
+            "const TasksView = lazy(() => import('./views/TasksView')",
+            "else if (view === 'tasks') page = <TasksView />;",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/views/OpenDesignView.tsx",
+        [
+            "{ view: 'tasks', label: '任务', icon: 'activity' }",
+            "if (view === 'tasks') return 'Oha Yachiyo — 任务';",
+            "if (view === 'tasks') {",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/views/TasksView.tsx",
+        [
+            "listYachiyoTasks()",
+            "<AgentTaskCard",
+            "onApproveApproval={(nextTask, approval) => resolveTaskApproval(nextTask, approval, 'approve')}",
+            "onCancelTask={cancelTask}",
+            "onOpenStudio={openTaskInStudio}",
+            "onRejectApproval={(nextTask, approval) => resolveTaskApproval(nextTask, approval, 'reject')}",
+            'data-testid="yachiyo-tasks-page"',
+            'data-testid="yachiyo-tasks-filter-active"',
+            'data-testid="yachiyo-tasks-filter-all"',
+        ],
+    )
+
+
 def test_shared_runtime_surface_components_acceptance_paths_are_guarded() -> None:
     _assert_contains(
         "apps/frontend/src/features/yachiyo-chat/components/ApprovalCard.tsx",

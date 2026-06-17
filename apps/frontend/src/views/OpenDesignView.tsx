@@ -241,6 +241,7 @@ const NAV_GROUPS: Array<{
       label: '日常桌面',
       items: [
         { view: 'chat', label: '对话', icon: 'chat' },
+        { view: 'tasks', label: '任务', icon: 'activity' },
         { view: 'agents', label: 'Agent Studio', icon: 'model' },
         { view: 'bubble', label: '气泡模式', icon: 'bubble' },
         { view: 'live2d', label: 'Live2D 模式', icon: 'live2d' },
@@ -2989,6 +2990,7 @@ function groupActivitiesByDay(rows: ActivityRowData[]): Array<{ label: string; i
 function routeTitle(view: AppView, settingsMode = ''): string {
   if (view === 'main') return 'Oha Yachiyo — 主控台';
   if (view === 'chat') return 'Oha Yachiyo — 对话';
+  if (view === 'tasks') return 'Oha Yachiyo — 任务';
   if (view === 'agents') return 'Oha Yachiyo — Agent Studio';
   if (view === 'provider') return 'Oha Yachiyo — 模型配置';
   if (view === 'bubble') return 'Oha Yachiyo — 气泡模式';
@@ -3013,6 +3015,10 @@ function isNavActive(activeView: AppView, settingsMode: string, itemView: AppVie
 }
 
 function navBadge(view: AppView, data: DashboardData | null): string {
+  if (view === 'tasks') {
+    const activeTasks = Number(data?.tasks?.pending || 0) + Number(data?.tasks?.running || 0);
+    return activeTasks > 0 ? String(activeTasks) : '';
+  }
   if (view === 'workspace' && data?.workspace?.initialized) return 'ok';
   if (view === 'provider' && dashboardNativeAgent(data)?.ready) return 'ok';
   return '';

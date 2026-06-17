@@ -6312,6 +6312,82 @@ body.electron-window .hy-traffic {
   font-size: 13px;
 }
 
+.yachiyo-tasks-page {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+}
+
+.yachiyo-tasks-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.yachiyo-tasks-header .page-back-link {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
+.yachiyo-tasks-header h1,
+.yachiyo-tasks-header p {
+  margin: 0;
+}
+
+.yachiyo-tasks-header h1 {
+  color: var(--hy-fg);
+  font-size: 32px;
+  line-height: 1.1;
+}
+
+.yachiyo-tasks-header p {
+  margin-top: 6px;
+  color: var(--hy-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.yachiyo-tasks-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.yachiyo-tasks-toolbar button {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 12px;
+  border: 1px solid var(--hy-border);
+  border-radius: 8px;
+  background: var(--hy-surface);
+  color: var(--hy-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.yachiyo-tasks-toolbar button.active {
+  border-color: oklch(66% 0.12 188 / 0.35);
+  background: oklch(66% 0.12 188 / 0.1);
+  color: var(--hy-fg);
+}
+
+.yachiyo-tasks-toolbar button span {
+  min-width: 22px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: oklch(96% 0.01 240 / 0.08);
+  color: inherit;
+  text-align: center;
+}
+
+.yachiyo-tasks-list {
+  display: grid;
+  gap: 12px;
+  max-width: 840px;
+}
+
 .hy-keepalive-page {
   min-height: 100%;
 }

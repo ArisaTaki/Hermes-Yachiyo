@@ -82,6 +82,7 @@ def test_frontend_preserves_top_level_product_routes_and_navigation() -> None:
         "apps/frontend/src/lib/view.ts",
         [
             "| 'chat'",
+            "| 'tasks'",
             "| 'agents'",
             "| 'settings'",
             "| 'provider'",
@@ -98,9 +99,17 @@ def test_frontend_preserves_top_level_product_routes_and_navigation() -> None:
         ],
     )
     _assert_contains(
+        "apps/frontend/src/lib/bridge.ts",
+        [
+            "function isAppView(value: string): value is AppView",
+            "'tasks'",
+        ],
+    )
+    _assert_contains(
         "apps/frontend/src/App.tsx",
         [
             "const ChatView = lazy(",
+            "const TasksView = lazy(",
             "const AgentStudioView = lazy(",
             "const DiagnosticsView = lazy(",
             "const ModeSettingsView = lazy(",
@@ -110,6 +119,7 @@ def test_frontend_preserves_top_level_product_routes_and_navigation() -> None:
             "const AppUpdateView = lazy(",
             "const LauncherView = lazy(",
             "if (view === 'chat') page = <ChatView />;",
+            "else if (view === 'tasks') page = <TasksView />;",
             "else if (view === 'agents') page = <AgentStudioView />;",
             "else if (view === 'proactive-tts') page = <ProactiveTtsSettingsView />;",
             "else if (view === 'live2d') page = null;",
@@ -120,12 +130,14 @@ def test_frontend_preserves_top_level_product_routes_and_navigation() -> None:
         "apps/frontend/src/views/OpenDesignView.tsx",
         [
             "{ view: 'chat', label: '对话'",
+            "{ view: 'tasks', label: '任务'",
             "{ view: 'agents', label: 'Agent Studio'",
             "{ view: 'bubble', label: '气泡模式'",
             "{ view: 'live2d', label: 'Live2D 模式'",
             "{ view: 'proactive-tts', label: '主动关怀'",
             "{ view: 'tools', label: '能力中心'",
             "{ view: 'diagnostics', label: '诊断详情'",
+            "if (view === 'tasks') return 'Oha Yachiyo — 任务';",
         ],
     )
 
@@ -1254,6 +1266,39 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "/yachiyo/studio/workflows",
             "/yachiyo/studio/runs/${encodeURIComponent(runId)}",
             "/yachiyo/studio/runs/${encodeURIComponent(taskId)}",
+        ],
+    )
+
+
+def test_tasks_view_exposes_yachiyo_agent_task_entrypoint() -> None:
+    _assert_contains(
+        "apps/frontend/src/views/TasksView.tsx",
+        [
+            "export function TasksView",
+            "listYachiyoTasks()",
+            "const ACTIVE_TASK_STATUSES: TaskStatus[] = ['queued', 'running', 'waiting_approval'];",
+            "const visibleTasks = filter === 'active' ? activeTasks : tasks;",
+            "<AgentTaskCard",
+            "approveYachiyoTask(task.task_id, approval.approval_id)",
+            "rejectYachiyoTask(task.task_id, approval.approval_id, 'Rejected from tasks page')",
+            "cancelYachiyoTask(task.task_id)",
+            "runIdFromStudioUrl(studioUrl)",
+            "groupRunIdFromStudioUrl(studioUrl)",
+            "navigateTo('agents', {",
+            'data-testid="yachiyo-tasks-page"',
+            'data-testid="yachiyo-tasks-refresh"',
+            'data-testid="yachiyo-tasks-filter-active"',
+            'data-testid="yachiyo-tasks-filter-all"',
+            'data-testid="yachiyo-tasks-list"',
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/styles/app.css",
+        [
+            ".yachiyo-tasks-page",
+            ".yachiyo-tasks-header",
+            ".yachiyo-tasks-toolbar",
+            ".yachiyo-tasks-list",
         ],
     )
 
