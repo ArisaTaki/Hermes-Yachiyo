@@ -212,6 +212,7 @@ function useLauncher(mode: 'bubble' | 'live2d') {
       metadata: {
         source: 'launcher',
         launcher_mode: mode,
+        launcher_surface: 'desktop_launcher',
       },
     });
     setPublicAgentTask(task);

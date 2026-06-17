@@ -21,8 +21,10 @@ const PUBLIC_TASK_TITLE = 'Public launcher task from Yachiyo facade';
 const BUBBLE_SUMMARY = 'Group summary: Design and Coding finished Native dispatch.';
 const DELEGATED_SUMMARY = 'Delegated summary: Coding finished Native delegated run.';
 const BUBBLE_QUICK_TEXT = 'Bubble quick input from launcher smoke';
+const BUBBLE_TASK_TEXT = 'Bubble delegated task from launcher smoke';
 const LIVE2D_REPLY = 'Live2D latest reply from launcher smoke';
 const LIVE2D_QUICK_TEXT = 'Live2D quick input from launcher smoke';
+const LIVE2D_TASK_TEXT = 'Live2D delegated task from launcher smoke';
 const STATUS_LABEL = '2 recent sessions';
 const now = new Date().toISOString();
 
@@ -35,6 +37,7 @@ const bridgeState = {
   modeRequests: [],
   publicTaskDecision: '',
   taskRequests: [],
+  taskStartPayloads: [],
   quickMessagePayload: null,
   quickMessagePayloads: [],
 };
@@ -237,6 +240,20 @@ async function startMockBridge() {
         sendJson(response, 200, { ok: true, tasks: publicAgentTasks() });
         return;
       }
+      if (request.method === 'POST' && url.pathname === '/yachiyo/tasks') {
+        const body = await readRequestJson(request);
+        bridgeState.taskStartPayloads.push(body);
+        sendJson(response, 200, {
+          ...publicAgentTasks()[0],
+          task_id: `${PUBLIC_TASK_ID}-${bridgeState.taskStartPayloads.length}`,
+          title: String(body.title || body.prompt || PUBLIC_TASK_TITLE),
+          summary: 'Launcher desktop task started through Yachiyo facade.',
+          status: 'running',
+          needs_user_action: false,
+          pending_approvals: [],
+        });
+        return;
+      }
       if (request.method === 'POST' && url.pathname === `/yachiyo/tasks/${PUBLIC_TASK_ID}/approve`) {
         const body = await readRequestJson(request);
         bridgeState.publicTaskDecision = 'approved';
@@ -284,6 +301,7 @@ async function startMockBridge() {
           modeRequests: bridgeState.modeRequests,
           publicTaskDecision: bridgeState.publicTaskDecision,
           taskRequests: bridgeState.taskRequests,
+          taskStartPayloads: bridgeState.taskStartPayloads,
           quickMessagePayload: bridgeState.quickMessagePayload,
           quickMessagePayloads: bridgeState.quickMessagePayloads,
         });
@@ -558,7 +576,7 @@ async function main() {
   ), 'bubble launcher task cancel');
   console.log('[electron-smoke] bubble task cancel verified');
   await requestBridgeJson('/__smoke/reset-public-task');
-  await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '&surface=desktop#/bubble');
+  await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '&surface=desktop&smokeReload=bubble-task-reset#/bubble');
   await installOpenViewProbe(win);
   await waitFor(win, () => {
     const taskLight = document.querySelector('[data-testid="bubble-launcher-agent-task-light"]');
@@ -612,9 +630,50 @@ async function main() {
   await waitFor(win, () => {
     const quickInput = document.querySelector('[data-testid="bubble-launcher-quick-input"]');
     const quickField = document.querySelector('[data-testid="bubble-launcher-quick-input-field"]');
+    const quickDelegate = document.querySelector('[data-testid="bubble-launcher-quick-input-delegate"]');
+    const quickSubmit = document.querySelector('[data-testid="bubble-launcher-quick-input-submit"]');
+    return quickInput && quickField && quickDelegate && quickSubmit;
+  }, 'bubble quick input visible');
+  await win.webContents.executeJavaScript(\`
+    {
+      const field = document.querySelector('[data-testid="bubble-launcher-quick-input-field"]');
+      if (!field) throw new Error('missing bubble quick input field for task delegation');
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      setter.call(field, ${JSON.stringify(`  ${BUBBLE_TASK_TEXT}  `)});
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  \`, true);
+  await waitFor(win, () => {
+    const delegate = document.querySelector('[data-testid="bubble-launcher-quick-input-delegate"]');
+    return delegate && !delegate.disabled;
+  }, 'bubble quick input delegate enabled');
+  await win.webContents.executeJavaScript(\`
+    (() => {
+      const delegate = document.querySelector('[data-testid="bubble-launcher-quick-input-delegate"]');
+      if (!delegate) throw new Error('missing bubble quick input delegate');
+      delegate.click();
+    })();
+  \`, true);
+  await waitForBridgeState((state) => (
+    Array.isArray(state.taskStartPayloads)
+    && state.taskStartPayloads.some((payload) => (
+      payload?.prompt === ${JSON.stringify(BUBBLE_TASK_TEXT)}
+      && payload?.metadata?.source === 'launcher'
+      && payload?.metadata?.launcher_mode === 'bubble'
+      && payload?.metadata?.launcher_surface === 'desktop_launcher'
+    ))
+  ), 'bubble launcher delegated task payload');
+  await waitFor(win, () => !document.querySelector('[data-testid="bubble-launcher-quick-input"]'), 'bubble delegated task submitted');
+  console.log('[electron-smoke] bubble delegated task submitted');
+
+  await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '&surface=desktop&smokeReload=bubble-task-delegated#/bubble');
+  await installOpenViewProbe(win);
+  await waitFor(win, () => {
+    const quickInput = document.querySelector('[data-testid="bubble-launcher-quick-input"]');
+    const quickField = document.querySelector('[data-testid="bubble-launcher-quick-input-field"]');
     const quickSubmit = document.querySelector('[data-testid="bubble-launcher-quick-input-submit"]');
     return quickInput && quickField && quickSubmit;
-  }, 'bubble quick input visible');
+  }, 'bubble quick input restored after task delegation');
   await win.webContents.executeJavaScript(\`
     {
       const field = document.querySelector('[data-testid="bubble-launcher-quick-input-field"]');
@@ -643,7 +702,7 @@ async function main() {
   console.log('[electron-smoke] bubble quick input submitted: ' + bubbleQuickText);
 
   await requestBridgeJson('/__smoke/reset-public-task');
-  await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '&surface=desktop#/live2d');
+  await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '&surface=desktop&smokeReload=live2d-initial#/live2d');
   await installOpenViewProbe(win);
   console.log('[electron-smoke] live2d loaded');
   await waitFor(win, () => document.querySelector('[data-testid="live2d-launcher-shell"]'), 'live2d shell');
@@ -724,6 +783,46 @@ async function main() {
     ))
   ), 'live2d launcher task rejection');
   console.log('[electron-smoke] live2d task rejection verified');
+  await win.webContents.executeJavaScript(\`
+    {
+      const field = document.querySelector('[data-testid="live2d-launcher-quick-input-field"]');
+      if (!field) throw new Error('missing live2d quick input field for task delegation');
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      setter.call(field, ${JSON.stringify(`  ${LIVE2D_TASK_TEXT}  `)});
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  \`, true);
+  await waitFor(win, () => {
+    const delegate = document.querySelector('[data-testid="live2d-launcher-quick-input-delegate"]');
+    return delegate && !delegate.disabled;
+  }, 'live2d quick input delegate enabled');
+  await win.webContents.executeJavaScript(\`
+    (() => {
+      const delegate = document.querySelector('[data-testid="live2d-launcher-quick-input-delegate"]');
+      if (!delegate) throw new Error('missing live2d quick input delegate');
+      delegate.click();
+    })();
+  \`, true);
+  await waitForBridgeState((state) => (
+    Array.isArray(state.taskStartPayloads)
+    && state.taskStartPayloads.some((payload) => (
+      payload?.prompt === ${JSON.stringify(LIVE2D_TASK_TEXT)}
+      && payload?.metadata?.source === 'launcher'
+      && payload?.metadata?.launcher_mode === 'live2d'
+      && payload?.metadata?.launcher_surface === 'desktop_launcher'
+    ))
+  ), 'live2d launcher delegated task payload');
+  await waitFor(win, () => !document.querySelector('[data-testid="live2d-launcher-quick-input"]'), 'live2d delegated task submitted');
+  console.log('[electron-smoke] live2d delegated task submitted');
+
+  await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '&surface=desktop&smokeReload=live2d-task-delegated#/live2d');
+  await installOpenViewProbe(win);
+  await waitFor(win, () => {
+    const quickInput = document.querySelector('[data-testid="live2d-launcher-quick-input"]');
+    const quickField = document.querySelector('[data-testid="live2d-launcher-quick-input-field"]');
+    const quickSubmit = document.querySelector('[data-testid="live2d-launcher-quick-input-submit"]');
+    return quickInput && quickField && quickSubmit;
+  }, 'live2d quick input restored after task delegation');
   await win.webContents.executeJavaScript(\`
     {
       const field = document.querySelector('[data-testid="live2d-launcher-quick-input-field"]');
@@ -843,6 +942,29 @@ function assertMockBridgeContract() {
   }
   if (!bridgeState.taskRequests.length) {
     throw new Error('launcher public Yachiyo task snapshots were not requested');
+  }
+  const taskStartPayloads = bridgeState.taskStartPayloads;
+  const bubbleTaskPayload = taskStartPayloads.find((payload) => payload?.metadata?.launcher_mode === 'bubble');
+  if (!bubbleTaskPayload) {
+    throw new Error(`bubble delegated task did not call /yachiyo/tasks: ${JSON.stringify(taskStartPayloads)}`);
+  }
+  if (
+    bubbleTaskPayload.prompt !== BUBBLE_TASK_TEXT
+    || bubbleTaskPayload.metadata?.source !== 'launcher'
+    || bubbleTaskPayload.metadata?.launcher_surface !== 'desktop_launcher'
+  ) {
+    throw new Error(`bubble delegated task metadata mismatch: ${JSON.stringify(bubbleTaskPayload)}`);
+  }
+  const live2dTaskPayload = taskStartPayloads.find((payload) => payload?.metadata?.launcher_mode === 'live2d');
+  if (!live2dTaskPayload) {
+    throw new Error(`live2d delegated task did not call /yachiyo/tasks: ${JSON.stringify(taskStartPayloads)}`);
+  }
+  if (
+    live2dTaskPayload.prompt !== LIVE2D_TASK_TEXT
+    || live2dTaskPayload.metadata?.source !== 'launcher'
+    || live2dTaskPayload.metadata?.launcher_surface !== 'desktop_launcher'
+  ) {
+    throw new Error(`live2d delegated task metadata mismatch: ${JSON.stringify(live2dTaskPayload)}`);
   }
   const approvalActions = bridgeState.approvalPayloads.map((payload) => payload?.action);
   if (!approvalActions.includes('approve')) {

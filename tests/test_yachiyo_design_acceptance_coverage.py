@@ -694,6 +694,7 @@ def test_light_launcher_entry_acceptance_paths_are_guarded() -> None:
             "startYachiyoTask({",
             "source: 'launcher'",
             "launcher_mode: mode,",
+            "launcher_surface: 'desktop_launcher'",
             "LauncherAgentTaskLight",
             "onApproveTaskApproval={launcher.approveAgentTaskApproval}",
             "onCancelTask={launcher.cancelAgentTask}",
