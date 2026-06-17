@@ -120,6 +120,21 @@ async def approve_task(
     return await yachiyo_chat_handlers.approve_task(task_id, request, http_request)
 
 
+@router.post("/tasks/{task_id}/approvals/{approval_id}/approve")
+@router.post("/chat/tasks/{task_id}/approvals/{approval_id}/approve")
+async def approve_task_approval(
+    task_id: str,
+    approval_id: str,
+    request: TaskApprovalRequest | None = None,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    return await yachiyo_chat_handlers.approve_task(
+        task_id,
+        _task_approval_request_with_id(request, approval_id),
+        http_request,
+    )
+
+
 @router.post("/tasks/{task_id}/reject")
 @router.post("/chat/tasks/{task_id}/reject")
 async def reject_task(
@@ -130,6 +145,21 @@ async def reject_task(
     return await yachiyo_chat_handlers.reject_task(task_id, request, http_request)
 
 
+@router.post("/tasks/{task_id}/approvals/{approval_id}/reject")
+@router.post("/chat/tasks/{task_id}/approvals/{approval_id}/reject")
+async def reject_task_approval(
+    task_id: str,
+    approval_id: str,
+    request: TaskApprovalRequest | None = None,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    return await yachiyo_chat_handlers.reject_task(
+        task_id,
+        _task_approval_request_with_id(request, approval_id),
+        http_request,
+    )
+
+
 @router.post("/tasks/{task_id}/cancel")
 @router.post("/chat/tasks/{task_id}/cancel")
 async def cancel_task(
@@ -137,6 +167,15 @@ async def cancel_task(
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
     return await yachiyo_chat_handlers.cancel_task(task_id, http_request)
+
+
+def _task_approval_request_with_id(
+    request: TaskApprovalRequest | None,
+    approval_id: str,
+) -> TaskApprovalRequest:
+    payload = request.model_dump(exclude_none=True) if request is not None else {}
+    payload["approval_id"] = approval_id
+    return TaskApprovalRequest.model_validate(payload)
 
 
 @router.get("/studio/agents")

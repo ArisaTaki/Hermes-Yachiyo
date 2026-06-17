@@ -134,7 +134,7 @@ export async function approveYachiyoTask(
   taskId: string,
   approvalId?: string,
 ): Promise<AgentTaskSnapshot> {
-  return apiPost(`/yachiyo/tasks/${encodeURIComponent(taskId)}/approve`, {
+  return apiPost(yachiyoTaskApprovalPath(taskId, approvalId, 'approve'), {
     approval_id: approvalId || undefined,
   });
 }
@@ -144,7 +144,7 @@ export async function rejectYachiyoTask(
   approvalId?: string,
   reason = '',
 ): Promise<AgentTaskSnapshot> {
-  return apiPost(`/yachiyo/tasks/${encodeURIComponent(taskId)}/reject`, {
+  return apiPost(yachiyoTaskApprovalPath(taskId, approvalId, 'reject'), {
     approval_id: approvalId || undefined,
     reason: reason || undefined,
   });
@@ -152,4 +152,15 @@ export async function rejectYachiyoTask(
 
 export async function cancelYachiyoTask(taskId: string): Promise<AgentTaskSnapshot> {
   return apiPost(`/yachiyo/tasks/${encodeURIComponent(taskId)}/cancel`, {});
+}
+
+function yachiyoTaskApprovalPath(
+  taskId: string,
+  approvalId: string | undefined,
+  action: 'approve' | 'reject',
+) {
+  const encodedTaskId = encodeURIComponent(taskId);
+  const cleanApprovalId = String(approvalId || '').trim();
+  if (!cleanApprovalId) return `/yachiyo/tasks/${encodedTaskId}/${action}`;
+  return `/yachiyo/tasks/${encodedTaskId}/approvals/${encodeURIComponent(cleanApprovalId)}/${action}`;
 }

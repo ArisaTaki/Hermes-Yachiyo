@@ -254,14 +254,26 @@ async function startMockBridge() {
         });
         return;
       }
-      if (request.method === 'POST' && url.pathname === `/yachiyo/tasks/${PUBLIC_TASK_ID}/approve`) {
+      if (
+        request.method === 'POST'
+        && (
+          url.pathname === `/yachiyo/tasks/${PUBLIC_TASK_ID}/approve`
+          || url.pathname === `/yachiyo/tasks/${PUBLIC_TASK_ID}/approvals/launcher-public-approval/approve`
+        )
+      ) {
         const body = await readRequestJson(request);
         bridgeState.publicTaskDecision = 'approved';
         bridgeState.approvalPayloads.push({ action: 'approve', body });
         sendJson(response, 200, publicAgentTasks()[0]);
         return;
       }
-      if (request.method === 'POST' && url.pathname === `/yachiyo/tasks/${PUBLIC_TASK_ID}/reject`) {
+      if (
+        request.method === 'POST'
+        && (
+          url.pathname === `/yachiyo/tasks/${PUBLIC_TASK_ID}/reject`
+          || url.pathname === `/yachiyo/tasks/${PUBLIC_TASK_ID}/approvals/launcher-public-approval/reject`
+        )
+      ) {
         const body = await readRequestJson(request);
         bridgeState.publicTaskDecision = 'rejected';
         bridgeState.approvalPayloads.push({ action: 'reject', body });

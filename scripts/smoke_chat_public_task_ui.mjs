@@ -501,7 +501,13 @@ async function startMockBridge() {
         sendJson(response, 200, runEventPage(url));
         return;
       }
-      if (request.method === 'POST' && url.pathname === `/yachiyo/tasks/${TASK_ID}/approve`) {
+      if (
+        request.method === 'POST'
+        && (
+          url.pathname === `/yachiyo/tasks/${TASK_ID}/approve`
+          || url.pathname === `/yachiyo/tasks/${TASK_ID}/approvals/${APPROVAL_ID}/approve`
+        )
+      ) {
         const body = await readRequestJson(request);
         bridgeState.approveCalls += 1;
         bridgeState.approvePayloads.push(body);
@@ -509,7 +515,13 @@ async function startMockBridge() {
         sendJson(response, 200, publicTaskSnapshot());
         return;
       }
-      if (request.method === 'POST' && url.pathname === `/yachiyo/tasks/${TASK_ID}/reject`) {
+      if (
+        request.method === 'POST'
+        && (
+          url.pathname === `/yachiyo/tasks/${TASK_ID}/reject`
+          || url.pathname === `/yachiyo/tasks/${TASK_ID}/approvals/${APPROVAL_ID}/reject`
+        )
+      ) {
         const body = await readRequestJson(request);
         bridgeState.rejectCalls += 1;
         bridgeState.approvePayloads.push({ ...body, action: 'reject' });

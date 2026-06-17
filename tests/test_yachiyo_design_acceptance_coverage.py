@@ -394,10 +394,26 @@ def test_chat_daily_entry_acceptance_paths_are_guarded() -> None:
             "cancelYachiyoTask(task.task_id)",
         ],
     )
+    _assert_contains(
+        "apps/bridge/routes/yachiyo.py",
+        [
+            '@router.post("/tasks/{task_id}/approvals/{approval_id}/approve")',
+            '@router.post("/tasks/{task_id}/approvals/{approval_id}/reject")',
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/api.ts",
+        [
+            "function yachiyoTaskApprovalPath",
+            "approvals/${encodeURIComponent(cleanApprovalId)}/${action}",
+        ],
+    )
     _assert_smoke_script(
         "scripts/smoke_chat_public_task_ui.mjs",
         [
             "/yachiyo/tasks",
+            "approvals/${APPROVAL_ID}/approve",
+            "approvals/${APPROVAL_ID}/reject",
             "assertPublicTaskContract",
             'data-testid="yachiyo-agent-task-card"',
             'data-testid="yachiyo-task-approval-card"',
