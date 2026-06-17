@@ -777,6 +777,17 @@ def test_runtime_core_split_acceptance_paths_are_guarded() -> None:
         ],
     )
     _assert_contains(
+        "apps/shell/yachiyo_agent/approval_event_snapshots.py",
+        [
+            "def approval_snapshots_from_events",
+            "def approval_payload_from_event",
+            "def merge_approval_snapshots",
+            "merge_trace_context_into_approval",
+            "_AMBIGUOUS_APPROVAL_INDEX",
+            "event.sensitivity == \"secret\"",
+        ],
+    )
+    _assert_contains(
         "apps/shell/yachiyo_agent/artifacts.py",
         [
             "redact_secrets",
