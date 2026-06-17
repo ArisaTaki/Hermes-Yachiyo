@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { openAppView } from '../../../lib/bridge';
 import { runtimeToolDisplayLabelOrName } from '../../runtime-shared/approval';
 import { runtimeTimelineEventLabel } from '../../runtime-shared/components/RuntimeTimelineSummary';
+import { studioRunRouteParams } from '../../runtime-shared/studioLinks';
 import { yachiyoTaskStudioGroupRunId, yachiyoTaskStudioRunId, yachiyoTaskStudioUrl } from '../taskSnapshots';
 import type { AgentTaskLightSnapshot, AgentTaskSnapshot, ApprovalCardSnapshot, PublicRunEvent } from '../types';
 
@@ -107,6 +108,7 @@ export function LauncherAgentTaskLight({
   const runId = yachiyoTaskStudioRunId(currentTask);
   const groupRunId = yachiyoTaskStudioGroupRunId(currentTask);
   const studioUrl = lightTask.open_in_studio_url || yachiyoTaskStudioUrl(currentTask);
+  const studioParams = studioRunRouteParams(runId, { groupRunId, studioUrl });
   const status = String(lightTask.status || currentTask.status || '');
   const approval = lightTask.pending_approval || launcherAgentTaskPendingApproval(currentTask);
   const needsAction = Boolean(lightTask.needs_user_action || approval);
@@ -159,7 +161,7 @@ export function LauncherAgentTaskLight({
         ) : null}
         {needsAction ? <em>待处理</em> : null}
       </button>
-      {runId && studioUrl ? (
+      {runId && studioUrl && studioParams ? (
         <a
           href={studioUrl}
           className="launcher-agent-task-studio"
@@ -169,10 +171,7 @@ export function LauncherAgentTaskLight({
           onClick={(event) => {
             event.preventDefault();
             event.stopPropagation();
-            void openAppView('agents', {
-              run: runId,
-              ...(groupRunId ? { group_run: groupRunId } : {}),
-            });
+            void openAppView('agents', studioParams);
           }}
           title="在 Agent Studio 中查看"
         >

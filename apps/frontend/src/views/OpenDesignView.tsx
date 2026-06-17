@@ -18,6 +18,7 @@ import {
   launcherTaskTitle,
 } from '../features/yachiyo-chat/launcherTasks';
 import type { AgentTaskSnapshot, ApprovalCardSnapshot } from '../features/yachiyo-chat/types';
+import { studioRunClearParams, studioRunRouteParams } from '../features/runtime-shared/studioLinks';
 import { AssistantProfileSeedContext, type AssistantProfileSeed } from '../lib/assistantProfileSeed';
 import { apiDelete, apiGet, apiPost, checkAppUpdate, openDesktopMode, openExternalUrl, openPath, quitApp } from '../lib/bridge';
 import { type AppView, currentParam, navigateTo } from '../lib/view';
@@ -2273,7 +2274,7 @@ export function ActivityDetailPage() {
                   data-run-id={activityRunId}
                   data-run-status={event.status || ''}
                   data-testid="activity-detail-open-run"
-                  onClick={() => navigateTo('agents', { run: activityRunId }, ['tab', 'target', 'goal'])}
+                  onClick={() => navigateTo('agents', studioRunRouteParams(activityRunId) || {}, studioRunClearParams)}
                 >
                   打开 Run
                 </button>

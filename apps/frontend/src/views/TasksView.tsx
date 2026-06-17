@@ -8,7 +8,7 @@ import {
 } from '../features/yachiyo-chat/api';
 import { AgentTaskCard } from '../features/yachiyo-chat/components/AgentTaskCard';
 import type { AgentTaskSnapshot, ApprovalCardSnapshot, TaskStatus } from '../features/yachiyo-chat/types';
-import { groupRunIdFromStudioUrl, runIdFromStudioUrl } from '../features/runtime-shared/studioLinks';
+import { studioRunClearParams, studioRunRouteParams } from '../features/runtime-shared/studioLinks';
 import { navigateTo } from '../lib/view';
 
 type TaskFilter = 'active' | 'all';
@@ -94,16 +94,12 @@ export function TasksView() {
   }
 
   function openTaskInStudio(runId?: string, studioUrl?: string) {
-    const targetRunId = String(runId || '').trim() || runIdFromStudioUrl(studioUrl);
-    const groupRunId = groupRunIdFromStudioUrl(studioUrl);
-    if (!targetRunId) {
+    const params = studioRunRouteParams(runId, { studioUrl });
+    if (!params) {
       navigateTo('agents');
       return;
     }
-    navigateTo('agents', {
-      run: targetRunId,
-      ...(groupRunId ? { group_run: groupRunId } : {}),
-    }, ['tab', 'target', 'goal']);
+    navigateTo('agents', params, studioRunClearParams);
   }
 
   return (
