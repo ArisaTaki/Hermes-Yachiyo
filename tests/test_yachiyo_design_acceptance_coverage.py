@@ -432,6 +432,22 @@ def test_tasks_daily_entry_acceptance_paths_are_guarded() -> None:
             "if (view === 'memories') return 'memory';",
         ],
     )
+    _assert_smoke_script(
+        "scripts/smoke_yachiyo_entry_routes_ui.mjs",
+        [
+            "#/tasks",
+            "#/skills",
+            "#/memories",
+            "/yachiyo/tasks",
+            "/yachiyo/studio/skills",
+            "/yachiyo/studio/memories",
+            'data-testid="yachiyo-tasks-page"',
+            'data-testid="skill-library"',
+            'data-testid="agent-runtime-memory"',
+            "tasks handoff opened Agent Studio run route",
+            "assertMockBridgeContract",
+        ],
+    )
 
 
 def test_shared_runtime_surface_components_acceptance_paths_are_guarded() -> None:

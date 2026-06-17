@@ -150,6 +150,25 @@ def test_frontend_preserves_top_level_product_routes_and_navigation() -> None:
             "if (itemView === 'skills') return activeView === 'skills' || studioTab === 'skills' || studioTab === 'skill-groups';",
         ],
     )
+    _assert_contains(
+        "scripts/smoke_yachiyo_entry_routes_ui.mjs",
+        [
+            "#/tasks",
+            "#/skills",
+            "#/memories",
+            "/yachiyo/tasks",
+            "/yachiyo/studio/skills",
+            "/yachiyo/studio/memories",
+            'data-testid="yachiyo-tasks-page"',
+            'data-testid="yachiyo-agent-task-open-studio"',
+            'data-testid="skill-library"',
+            'data-testid="skill-card"',
+            'data-testid="agent-runtime-memory"',
+            'data-testid="agent-memory-item"',
+            "tasks handoff opened Agent Studio run route",
+            "assertMockBridgeContract",
+        ],
+    )
 
 
 def test_launcher_views_expose_session_summary_e2e_selectors() -> None:
