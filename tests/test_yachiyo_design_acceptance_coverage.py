@@ -1050,9 +1050,10 @@ def test_group_and_workflow_acceptance_paths_are_guarded() -> None:
         ],
     )
     _assert_contains(
-        "apps/shell/yachiyo_agent/legacy_ports.py",
+        "apps/shell/yachiyo_agent/legacy_group_runs.py",
         [
-            "def _group_orchestration_plan",
+            "def start_legacy_group_run",
+            "def group_orchestration_plan",
             '"group.run.plan"',
             '"participants_then_moderator"',
             '"fan_out"',
