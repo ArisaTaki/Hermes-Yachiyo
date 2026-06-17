@@ -47,7 +47,6 @@ import {
   messageRunStatus,
   messageText,
 } from '../features/yachiyo-chat/messageState';
-import { isMissingGroupEditRouteError } from '../features/yachiyo-chat/messageGroups';
 import {
   COMPOSER_HEIGHT_STORAGE_KEY,
   COMPOSER_MAX_HEIGHT,
@@ -95,8 +94,10 @@ import { useLegacyChatRunnableResult } from '../features/yachiyo-chat/hooks/useL
 import { useYachiyoTaskSnapshots } from '../features/yachiyo-chat/hooks/useYachiyoTaskSnapshots';
 import { useYachiyoTaskSubmit } from '../features/yachiyo-chat/hooks/useYachiyoTaskSubmit';
 import {
+  createChatGroupSession,
   retryLegacyChatMessage,
   sendLegacyChatMessage,
+  updateChatGroupSessionWithRecovery,
 } from '../features/yachiyo-chat/api';
 import {
   displayMessageText,
@@ -122,7 +123,7 @@ import type {
   PendingAttachment,
   RenderState,
 } from '../features/yachiyo-chat/types';
-import { apiGet, apiPatch, apiPost, bridgeUrl, canChooseChatImages, chooseChatImages, copyText, openAppView, openExternalUrl, restartDesktopBridge, type ChatImageSelection } from '../lib/bridge';
+import { apiGet, apiPost, bridgeUrl, canChooseChatImages, chooseChatImages, copyText, openAppView, openExternalUrl, type ChatImageSelection } from '../lib/bridge';
 
 type ChatViewProps = {
   embedded?: boolean;
@@ -869,36 +870,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     setGroupDialogError('');
   }
 
-  async function updateCurrentGroupSession() {
-    if (!currentSessionId) throw new Error('当前群组不可用');
-    const result = await apiPatch<{
-      ok?: boolean;
-      error?: string;
-      session_id?: string;
-      session_context?: ChatSessionContext;
-    }>(`/ui/chat/groups/${encodeURIComponent(currentSessionId)}`, {
-      name: groupName.trim() || defaultGroupName,
-      avatar_url: groupAvatarUrl.trim(),
-      participant_ids: selectedGroupAgentIds,
-    });
-    if (result.ok === false) throw new Error(result.error || '保存群组失败');
-    return result;
-  }
-
-  async function updateCurrentGroupSessionWithRecovery() {
-    try {
-      return await updateCurrentGroupSession();
-    } catch (error) {
-      if (!isMissingGroupEditRouteError(error)) throw error;
-      setStatus('Bridge 正在重启以加载群组编辑接口...');
-      const restartResult = await restartDesktopBridge();
-      if (!restartResult.success) {
-        throw new Error('当前 Bridge 尚未加载群组编辑接口，请重启 Oha-Yachiyo 后重试');
-      }
-      return await updateCurrentGroupSession();
-    }
-  }
-
   function toggleAgentGroup(agentId: string) {
     setExpandedAgents((prev) => {
       const next = new Set(prev);
@@ -926,7 +897,18 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     setGroupDialogError('');
     try {
       if (groupDialogMode === 'edit') {
-        const result = await updateCurrentGroupSessionWithRecovery();
+        const result = await updateChatGroupSessionWithRecovery(
+          {
+            avatarUrl: groupAvatarUrl,
+            defaultName: defaultGroupName,
+            name: groupName,
+            participantIds: selectedGroupAgentIds,
+            sessionId: currentSessionId,
+          },
+          {
+            onRestarting: () => setStatus('Bridge 正在重启以加载群组编辑接口...'),
+          },
+        );
         setSessionContext(result.session_context || activeSessionContext);
         setGroupDialogOpen(false);
         setStatus('群组资料已更新');
@@ -934,17 +916,12 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         await refreshMessages({ allowDuringTransition: true });
         return;
       }
-      const result = await apiPost<{
-        ok?: boolean;
-        error?: string;
-        session_id?: string;
-        session_context?: ChatSessionContext;
-      }>('/ui/chat/groups', {
-        name: groupName.trim() || defaultGroupName,
-        avatar_url: groupAvatarUrl.trim(),
-        participant_ids: selectedGroupAgentIds,
+      const result = await createChatGroupSession({
+        avatarUrl: groupAvatarUrl,
+        defaultName: defaultGroupName,
+        name: groupName,
+        participantIds: selectedGroupAgentIds,
       });
-      if (result.ok === false) throw new Error(result.error || '创建群组失败');
       const nextSessionId = String(result.session_id || '');
       transientEmptySessionIdRef.current = '';
       latestChatSnapshotRef.current = {

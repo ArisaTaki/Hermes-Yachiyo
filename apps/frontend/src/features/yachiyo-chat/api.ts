@@ -1,8 +1,10 @@
-import { apiGet, apiPost } from '../../lib/bridge';
+import { apiGet, apiPatch, apiPost, restartDesktopBridge } from '../../lib/bridge';
+import { isMissingGroupEditRouteError } from './messageGroups';
 import type {
   AgentTaskSnapshot,
   ArtifactContentSnapshot,
   ChatRunnableCatalogSnapshot,
+  ChatSessionContext,
   PendingAttachment,
   RunEventPageSnapshot,
   RunTimelineSnapshot,
@@ -36,6 +38,24 @@ export type SendLegacyChatMessageRequest = {
   client_message_id: string;
 };
 
+export type ChatGroupSessionResult = {
+  ok?: boolean;
+  error?: string;
+  session_id?: string;
+  session_context?: ChatSessionContext;
+};
+
+type ChatGroupSessionRequest = {
+  avatarUrl: string;
+  defaultName: string;
+  name: string;
+  participantIds: string[];
+};
+
+type UpdateChatGroupSessionRequest = ChatGroupSessionRequest & {
+  sessionId: string;
+};
+
 export async function getYachiyoReadiness(): Promise<YachiyoReadinessSnapshot> {
   return apiGet('/yachiyo/readiness');
 }
@@ -50,6 +70,51 @@ export async function retryLegacyChatMessage(messageId: string): Promise<LegacyC
   return apiPost('/ui/chat/messages/retry', {
     message_id: messageId,
   });
+}
+
+export async function createChatGroupSession(
+  request: ChatGroupSessionRequest,
+): Promise<ChatGroupSessionResult> {
+  const result = await apiPost<ChatGroupSessionResult>('/ui/chat/groups', {
+    name: request.name.trim() || request.defaultName,
+    avatar_url: request.avatarUrl.trim(),
+    participant_ids: request.participantIds,
+  });
+  if (result.ok === false) throw new Error(result.error || '创建群组失败');
+  return result;
+}
+
+export async function updateChatGroupSession(
+  request: UpdateChatGroupSessionRequest,
+): Promise<ChatGroupSessionResult> {
+  if (!request.sessionId) throw new Error('当前群组不可用');
+  const result = await apiPatch<ChatGroupSessionResult>(
+    `/ui/chat/groups/${encodeURIComponent(request.sessionId)}`,
+    {
+      name: request.name.trim() || request.defaultName,
+      avatar_url: request.avatarUrl.trim(),
+      participant_ids: request.participantIds,
+    },
+  );
+  if (result.ok === false) throw new Error(result.error || '保存群组失败');
+  return result;
+}
+
+export async function updateChatGroupSessionWithRecovery(
+  request: UpdateChatGroupSessionRequest,
+  options: { onRestarting?: () => void } = {},
+): Promise<ChatGroupSessionResult> {
+  try {
+    return await updateChatGroupSession(request);
+  } catch (error) {
+    if (!isMissingGroupEditRouteError(error)) throw error;
+    options.onRestarting?.();
+    const restartResult = await restartDesktopBridge();
+    if (!restartResult.success) {
+      throw new Error('当前 Bridge 尚未加载群组编辑接口，请重启 Oha-Yachiyo 后重试');
+    }
+    return await updateChatGroupSession(request);
+  }
 }
 
 export function legacyChatRunnableResult(
