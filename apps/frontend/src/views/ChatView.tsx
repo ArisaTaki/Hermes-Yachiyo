@@ -45,6 +45,7 @@ import {
   isRetryableMessage,
   latestFailedMessage,
   latestVisibleActivity,
+  messageMatchesPendingAssistantReply,
   messageErrorText,
   messageRunId,
   messageRunStatus,
@@ -1638,15 +1639,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     if (!pendingReplyScrollRef.current) return false;
     const taskId = pendingReplyTaskIdRef.current;
     if (!taskId) return false;
-    return nextMessages.some((message) => (
-      message.role === 'assistant'
-      && message.task_id === taskId
-      && (
-        message.status === 'processing'
-        || Boolean(messageText(message).trim())
-        || Boolean(message.activity_events?.length)
-      )
-    ));
+    return nextMessages.some((message) => messageMatchesPendingAssistantReply(message, taskId));
   }
 
   function beginConversationLoading() {

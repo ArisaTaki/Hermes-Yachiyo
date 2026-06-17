@@ -25,6 +25,18 @@ export function isRetryableMessage(message: YachiyoChatMessage, messages: Yachiy
   ));
 }
 
+export function messageMatchesPendingAssistantReply(message: YachiyoChatMessage, taskId: string) {
+  return (
+    message.role === 'assistant'
+    && message.task_id === taskId
+    && (
+      message.status === 'processing'
+      || Boolean(messageText(message).trim())
+      || Boolean(message.activity_events?.length)
+    )
+  );
+}
+
 export function messageErrorText(message: YachiyoChatMessage) {
   return String(
     message.error || message.content || message.text || '任务执行失败',
