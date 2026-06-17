@@ -87,15 +87,12 @@ import {
 import { codeBlockStateKey } from '../features/yachiyo-chat/markdown';
 import { deriveChatSessionState } from '../features/yachiyo-chat/sessionDerivedState';
 import {
-  cachedAssistantProfileSnapshot,
   clearRetainedComposerDraft,
-  mergeAssistantProfileSeed,
-  profileFromSeed,
-  rememberAssistantProfile,
   retainedComposerDraftSnapshot,
   retainComposerDraft,
 } from '../features/yachiyo-chat/sessionState';
 import { useYachiyoTaskActions } from '../features/yachiyo-chat/hooks/useYachiyoTaskActions';
+import { useChatAssistantProfile } from '../features/yachiyo-chat/hooks/useChatAssistantProfile';
 import { useChatCopyFeedback } from '../features/yachiyo-chat/hooks/useChatCopyFeedback';
 import { useChatExecutor } from '../features/yachiyo-chat/hooks/useChatExecutor';
 import { useChatNotice } from '../features/yachiyo-chat/hooks/useChatNotice';
@@ -126,7 +123,6 @@ import { publicTaskSnapshotForMessage } from '../features/yachiyo-chat/taskSnaps
 import type {
   AgentTaskSnapshot,
   ApprovalCardSnapshot,
-  AssistantProfilePayload,
   ChatE2EImageDetail,
   ChatMessage,
   ChatSessionContext,
@@ -135,7 +131,6 @@ import type {
   RenderState,
   SessionsPayload,
 } from '../features/yachiyo-chat/types';
-import { useAssistantProfileSeed } from '../lib/assistantProfileSeed';
 import { apiGet, apiPatch, apiPost, bridgeUrl, canChooseChatImages, chooseChatImages, copyText, openAppView, openExternalUrl, restartDesktopBridge, type ChatImageSelection } from '../lib/bridge';
 import { ROUTE_CHANGE_EVENT, currentParam } from '../lib/view';
 
@@ -150,13 +145,10 @@ const TYPE_BASE_CHARS_PER_SECOND = 85;
 const TYPE_MAX_CHARS_PER_SECOND = 360;
 const MAX_ATTACHMENTS = 4;
 const MIN_LOADING_MS = 1400;
-const ASSISTANT_PROFILE_UPDATED_EVENT = 'oha-assistant-profile-updated';
 const CHAT_E2E_ADD_IMAGE_EVENT = 'oha-chat-e2e-add-image';
 
 export function ChatView({ embedded = false }: ChatViewProps = {}) {
-  const assistantProfileSeed = useAssistantProfileSeed();
   const initialComposerDraft = retainedComposerDraftSnapshot();
-  const initialAssistantProfile = cachedAssistantProfileSnapshot() || profileFromSeed(assistantProfileSeed);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessionContext, setSessionContext] = useState<ChatSessionContext | null>(null);
   const [input, setInput] = useState(() => initialComposerDraft.input);
@@ -169,8 +161,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const [conversationTokenCount, setConversationTokenCount] = useState(0);
   const { executor, refreshExecutor } = useChatExecutor(EXECUTOR_POLL_INTERVAL_MS);
-  const [assistantProfile, setAssistantProfile] = useState<AssistantProfilePayload | null>(() => initialAssistantProfile);
-  const [assistantProfileLoading, setAssistantProfileLoading] = useState(() => !initialAssistantProfile);
+  const { assistantProfile, assistantProfileLoading, refreshAssistantProfile } = useChatAssistantProfile();
   const [sessionQuery, setSessionQuery] = useState('');
   const [debouncedSessionQuery, setDebouncedSessionQuery] = useState('');
   const [routeSessionId, setRouteSessionId] = useState(() => currentParam('session_id').trim());
@@ -227,7 +218,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const messageLoadTokenRef = useRef(0);
   const conversationLoadTokenRef = useRef(0);
   const conversationTransitionRef = useRef(false);
-  const assistantProfileSeedRef = useRef(assistantProfileSeed);
   const messageTextSelectingRef = useRef(false);
   const messageNodeRefs = useRef<Map<string, HTMLElement>>(new Map());
   const isProcessingRef = useRef(false);
@@ -436,30 +426,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     void loadSessions();
   }, [loadSessions]);
 
-  const loadAssistantProfile = useCallback(async () => {
-    try {
-      const profile = await apiGet<AssistantProfilePayload>('/assistant/profile');
-      if (profile.ok === false) throw new Error('读取助手资料失败');
-      setAssistantProfile(rememberAssistantProfile(profile));
-    } catch {
-      const fallback = cachedAssistantProfileSnapshot() || profileFromSeed(assistantProfileSeedRef.current);
-      setAssistantProfile(fallback);
-    } finally {
-      setAssistantProfileLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    assistantProfileSeedRef.current = assistantProfileSeed;
-    const seededProfile = profileFromSeed(assistantProfileSeed);
-    if (!seededProfile) return;
-    setAssistantProfile((current) => {
-      const merged = mergeAssistantProfileSeed(current, seededProfile);
-      return rememberAssistantProfile(merged);
-    });
-    setAssistantProfileLoading(false);
-  }, [assistantProfileSeed]);
-
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setDebouncedSessionQuery(sessionQuery.trim());
@@ -487,7 +453,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     const requestedSessionId = routeSessionId;
     const requestedTaskId = routeTaskId;
     void (async () => {
-      await Promise.all([loadAssistantProfile(), refreshExecutor()]);
+      await Promise.all([refreshAssistantProfile(), refreshExecutor()]);
       if (requestedSessionId) {
         try {
           const result = await apiPost<{ ok?: boolean; error?: string }>('/ui/chat/sessions/load', {
@@ -507,7 +473,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         }
       }
     })();
-  }, [loadAssistantProfile, loadSessions, refreshExecutor, refreshMessages, routeSessionId, routeTaskId]);
+  }, [loadSessions, refreshAssistantProfile, refreshExecutor, refreshMessages, routeSessionId, routeTaskId]);
 
   useEffect(() => {
     const interval = isProcessing ? ACTIVE_POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS;
@@ -522,12 +488,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     );
     return () => window.clearInterval(timer);
   }, [isProcessing, loadSessions]);
-
-  useEffect(() => {
-    const refreshProfile = () => void loadAssistantProfile();
-    window.addEventListener(ASSISTANT_PROFILE_UPDATED_EVENT, refreshProfile);
-    return () => window.removeEventListener(ASSISTANT_PROFILE_UPDATED_EVENT, refreshProfile);
-  }, [loadAssistantProfile]);
 
   useEffect(() => {
     if (embedded || chatBootstrapped) return;
