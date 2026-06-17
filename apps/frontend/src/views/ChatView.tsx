@@ -97,6 +97,7 @@ import {
   retainComposerDraft,
 } from '../features/yachiyo-chat/sessionState';
 import { useYachiyoTaskActions } from '../features/yachiyo-chat/hooks/useYachiyoTaskActions';
+import { useChatNotice } from '../features/yachiyo-chat/hooks/useChatNotice';
 import { useChatRunPolling } from '../features/yachiyo-chat/hooks/useChatRunPolling';
 import { useYachiyoTaskSnapshots } from '../features/yachiyo-chat/hooks/useYachiyoTaskSnapshots';
 import { useYachiyoTaskSubmit } from '../features/yachiyo-chat/hooks/useYachiyoTaskSubmit';
@@ -127,7 +128,6 @@ import type {
   AssistantProfilePayload,
   ChatE2EImageDetail,
   ChatMessage,
-  ChatNotice,
   ChatSessionContext,
   ExecutorPayload,
   MessagesPayload,
@@ -173,7 +173,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const [executor, setExecutor] = useState<ExecutorPayload | null>(null);
   const [assistantProfile, setAssistantProfile] = useState<AssistantProfilePayload | null>(() => initialAssistantProfile);
   const [assistantProfileLoading, setAssistantProfileLoading] = useState(() => !initialAssistantProfile);
-  const [notice, setNotice] = useState<ChatNotice | null>(null);
   const [sessionQuery, setSessionQuery] = useState('');
   const [debouncedSessionQuery, setDebouncedSessionQuery] = useState('');
   const [routeSessionId, setRouteSessionId] = useState(() => currentParam('session_id').trim());
@@ -209,6 +208,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const [dismissedMentionInput, setDismissedMentionInput] = useState('');
   const [, setRenderTick] = useState(0);
   const { confirmDialog, requestConfirm } = useConfirmDialog();
+  const { dismissNotice, notice, showNotice } = useChatNotice();
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -220,7 +220,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const stickToBottomRef = useRef(true);
   const lastScrollTopRef = useRef(0);
   const bottomAnchorRef = useRef<HTMLDivElement>(null);
-  const noticeTimerRef = useRef<number | null>(null);
   const codeCopyTimerRef = useRef<number | null>(null);
   const messagesLoadedRef = useRef(false);
   const messageLoadTokenRef = useRef(0);
@@ -626,7 +625,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     return () => {
       if (animationFrameRef.current !== null) window.cancelAnimationFrame(animationFrameRef.current);
       if (scrollFrameRef.current !== null) window.cancelAnimationFrame(scrollFrameRef.current);
-      if (noticeTimerRef.current !== null) window.clearTimeout(noticeTimerRef.current);
       if (codeCopyTimerRef.current !== null) window.clearTimeout(codeCopyTimerRef.current);
       if (highlightClearTimerRef.current !== null) window.clearTimeout(highlightClearTimerRef.current);
       const snapshot = latestChatSnapshotRef.current;
@@ -1571,12 +1569,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     }
   }
 
-  function showNotice(title: string, detail: string, kind: ChatNotice['kind'] = 'warn') {
-    if (noticeTimerRef.current !== null) window.clearTimeout(noticeTimerRef.current);
-    setNotice({ id: Date.now(), kind, title, detail });
-    noticeTimerRef.current = window.setTimeout(() => setNotice(null), 5200);
-  }
-
   function showImageInputBlocked() {
     const detail = imageInputBlockedNoticeText({
       attachmentCount: attachments.length,
@@ -1807,7 +1799,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         <div className={`chat-toast ${notice.kind}`} role="status">
           <strong>{notice.title}</strong>
           <span>{notice.detail}</span>
-          <button type="button" aria-label="关闭提示" onClick={() => setNotice(null)}>×</button>
+          <button type="button" aria-label="关闭提示" onClick={dismissNotice}>×</button>
         </div>
       ) : null}
 

@@ -722,6 +722,7 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "from '../features/yachiyo-chat/renderState';",
             "from '../features/yachiyo-chat/layoutState';",
             "from '../features/yachiyo-chat/components/ChatFullPageLoading';",
+            "from '../features/yachiyo-chat/hooks/useChatNotice';",
             "import { deriveChatSessionState } from '../features/yachiyo-chat/sessionDerivedState';",
             "} = useMemo(() => deriveChatSessionState({",
             "messageMatchesPendingAssistantReply(message, taskId)",
@@ -748,6 +749,8 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "function ChatFullPageLoading(",
             "function createClientMessageId(",
             "function isMissingGroupEditRouteError(",
+            "function showNotice(",
+            "noticeTimerRef",
             "result.workflow_run_id ? 'Workflow' : 'Agent'",
             "result.runnable_command",
             "agent_run_id?: string;",
@@ -3317,6 +3320,18 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
         chat_view,
         [
             "function imageInputBlockedNoticeText()",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/hooks/useChatNotice.ts",
+        [
+            "export function useChatNotice",
+            "const [notice, setNotice] = useState<ChatNotice | null>(null);",
+            "const noticeTimerRef = useRef<number | null>(null);",
+            "const dismissNotice = useCallback(",
+            "const showNotice = useCallback(",
+            "noticeTimerRef.current = window.setTimeout(",
+            "useEffect(() => dismissNotice, [dismissNotice]);",
         ],
     )
     _assert_not_contains(
