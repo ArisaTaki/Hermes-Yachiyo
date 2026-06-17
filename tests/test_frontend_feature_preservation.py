@@ -5513,9 +5513,17 @@ def test_workflow_studio_exposes_stable_e2e_selectors_for_edit_and_run_flow() ->
     _assert_contains(
         "apps/frontend/src/views/AgentStudioView.tsx",
         [
-            "WorkflowEditorPanel",
+            "AgentStudioWorkflowsTab",
             "onRunWorkflow={() => void runAction(runCurrentWorkflow, '保存并运行 Workflow')}",
             "onSaveWorkflow={() => void runAction(saveWorkflow, '保存 Workflow')}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/AgentStudioWorkflowsTab.tsx",
+        [
+            "export function AgentStudioWorkflowsTab",
+            "WorkflowEditorPanel",
+            "agentCapabilityLine={agentCapabilityLine}",
         ],
     )
     _assert_contains(

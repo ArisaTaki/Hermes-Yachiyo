@@ -279,7 +279,12 @@ ACCEPTANCE_10_3_MATRIX: tuple[AcceptanceScenario, ...] = (
             (
                 "source",
                 "apps/frontend/src/views/AgentStudioView.tsx",
-                ("AgentDefinitionsTab", "AgentGroupPanel", "AgentStudioRunsTab", "WorkflowCanvas"),
+                ("AgentDefinitionsTab", "AgentGroupPanel", "AgentStudioRunsTab", "AgentStudioWorkflowsTab"),
+            ),
+            (
+                "source",
+                "apps/frontend/src/features/agent-studio/components/AgentStudioWorkflowsTab.tsx",
+                ("WorkflowEditorPanel", "agentCapabilityLine"),
             ),
             (
                 "source",
@@ -876,7 +881,15 @@ def test_agent_studio_professional_entry_acceptance_paths_are_guarded() -> None:
             "AgentDefinitionsTab",
             "AgentGroupPanel",
             "AgentStudioRunsTab",
-            "WorkflowCanvas",
+            "AgentStudioWorkflowsTab",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/AgentStudioWorkflowsTab.tsx",
+        [
+            "export function AgentStudioWorkflowsTab",
+            "WorkflowEditorPanel",
+            "agentCapabilityLine={agentCapabilityLine}",
         ],
     )
     _assert_contains(
@@ -1276,7 +1289,7 @@ def test_agent_studio_view_preservation_acceptance_path_is_guarded() -> None:
             "AgentDefinitionsTab",
             "AgentGroupPanel",
             "AgentStudioRunsTab",
-            "WorkflowCanvas",
+            "AgentStudioWorkflowsTab",
         ],
     )
     _assert_contains(

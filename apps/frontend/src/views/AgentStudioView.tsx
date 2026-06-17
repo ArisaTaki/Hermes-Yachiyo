@@ -8,7 +8,7 @@ import { AgentStudioRunsTab } from '../features/agent-studio/components/AgentStu
 import { RuntimeMemoryPanel } from '../features/agent-studio/components/RuntimeMemoryPanel';
 import { SkillFolderPanel } from '../features/agent-studio/components/SkillFolderPanel';
 import { SkillLibraryTab } from '../features/agent-studio/components/SkillLibraryTab';
-import { WorkflowEditorPanel } from '../features/agent-studio/components/WorkflowEditorPanel';
+import { AgentStudioWorkflowsTab } from '../features/agent-studio/components/AgentStudioWorkflowsTab';
 import { useAgentAvatarActions } from '../features/agent-studio/hooks/useAgentAvatarActions';
 import { useAgentDeletionActions } from '../features/agent-studio/hooks/useAgentDeletionActions';
 import { useAgentDefinitions } from '../features/agent-studio/hooks/useAgentDefinitions';
@@ -55,9 +55,6 @@ import { useWorkflowDraftActions } from '../features/agent-studio/hooks/useWorkf
 import { useWorkflowRunReadiness } from '../features/agent-studio/hooks/useWorkflowRunReadiness';
 import { useWorkflowSaveActions } from '../features/agent-studio/hooks/useWorkflowSaveActions';
 import { useWorkflowCanvasActions } from '../features/agent-studio/hooks/useWorkflowCanvasActions';
-import {
-  agentCapabilityLine,
-} from '../features/agent-studio/utils/agents';
 import {
   formatRunDate,
 } from '../features/agent-studio/utils/runs';
@@ -930,9 +927,8 @@ export function AgentStudioView() {
       ) : null}
 
       {!loading && tab === 'workflows' ? (
-        <WorkflowEditorPanel
+        <AgentStudioWorkflowsTab
           agents={agents}
-          agentCapabilityLine={agentCapabilityLine}
           agentIssueById={agentRunIssueById}
           allWorkflowsSelected={allWorkflowsSelected}
           busy={busy}
