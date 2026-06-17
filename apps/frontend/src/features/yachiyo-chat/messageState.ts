@@ -3,6 +3,7 @@ import {
   nextApprovalStatusText,
 } from './approvalItems';
 import { participantDisplayName } from './sessionState';
+import { latestGroupAgentSummaryNotice } from './messageGroups';
 import { runtimeToolDisplayLabelOrName } from '../runtime-shared/approval';
 import type {
   ChatActivityEvent,
@@ -13,11 +14,6 @@ import type {
 export type YachiyoChatActivityEvent = ChatActivityEvent;
 export type YachiyoChatMessageMetadata = ChatMessageMetadata;
 export type YachiyoChatMessage = ChatMessage;
-
-export type GroupAgentSummaryNotice = {
-  tone: 'pending' | 'failed' | 'completed';
-  text: string;
-};
 
 export type MessageWorkflowStudioAction = {
   label: string;
@@ -43,55 +39,6 @@ export function messageErrorText(message: YachiyoChatMessage) {
   return String(
     message.error || message.content || message.text || '任务执行失败',
   ).trim();
-}
-
-export function groupAgentSummaryNotice(message: YachiyoChatMessage): GroupAgentSummaryNotice | null {
-  const metadata = message.metadata || {};
-  const status = String(metadata.group_agent_summary_status || '').trim();
-  const subject = groupAgentSummarySubject(metadata);
-  if (status === 'cancelled') {
-    return { tone: 'failed', text: `主模型整理${subject}已取消。` };
-  }
-  if (status === 'failed') {
-    const error = String(metadata.group_agent_summary_error || '').trim();
-    return {
-      tone: 'failed',
-      text: error ? `主模型整理${subject}失败：${error}` : `主模型整理${subject}失败，请查看后续消息或重试。`,
-    };
-  }
-  if (status === 'completed') {
-    return { tone: 'completed', text: `主模型已整理${subject}。` };
-  }
-  if (metadata.group_agent_summary_pending) {
-    return { tone: 'pending', text: `等待主模型整理${subject}...` };
-  }
-  return null;
-}
-
-export function groupFollowupNotice(message: YachiyoChatMessage): string {
-  if (message.role !== 'user') return '';
-  const metadata = message.metadata || {};
-  const taskCount = Array.isArray(metadata.group_followup_for_task_ids)
-    ? metadata.group_followup_for_task_ids.filter(Boolean).length
-    : 0;
-  const agentMessageCount = Array.isArray(metadata.group_followup_for_agent_message_ids)
-    ? metadata.group_followup_for_agent_message_ids.filter(Boolean).length
-    : 0;
-  if (!taskCount && !agentMessageCount) return '';
-  if (agentMessageCount && !taskCount) return '已作为当前 Agent 汇总补充';
-  return '已作为当前群组任务补充';
-}
-
-export function latestGroupAgentSummaryNotice(messages: YachiyoChatMessage[]) {
-  let pendingNotice: { tone: 'pending' | 'failed'; text: string } | null = null;
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const notice = groupAgentSummaryNotice(messages[index]);
-    if (!notice) continue;
-    if (notice.tone === 'completed') continue;
-    if (notice.tone === 'failed') return notice;
-    if (notice.tone === 'pending') pendingNotice ||= { tone: 'pending', text: notice.text };
-  }
-  return pendingNotice;
 }
 
 export function normalizeRunStatus(status?: unknown) {
@@ -147,28 +94,6 @@ export function messageRunProgressRunnableId(message?: YachiyoChatMessage | null
 
 export function messageRunProgressRunGroupId(message?: YachiyoChatMessage | null) {
   return String(message?.metadata?.run_group_id || '').trim();
-}
-
-export function groupAgentSummaryTaskId(message?: YachiyoChatMessage | null) {
-  return String(message?.metadata?.group_agent_summary_task_id || '').trim();
-}
-
-export function groupAgentSummaryStatus(message?: YachiyoChatMessage | null) {
-  const metadata = message?.metadata || {};
-  return String(metadata.group_agent_summary_status || (metadata.group_agent_summary_pending ? 'pending' : '')).trim();
-}
-
-export function groupAgentSummaryRunGroupId(message?: YachiyoChatMessage | null) {
-  const metadata = message?.metadata || {};
-  return String(metadata.group_dispatch_run_group_id || metadata.run_group_id || '').trim();
-}
-
-export function groupFollowupTaskIdsAttribute(message?: YachiyoChatMessage | null) {
-  return metadataListAttribute(message?.metadata?.group_followup_for_task_ids);
-}
-
-export function groupFollowupAgentMessageIdsAttribute(message?: YachiyoChatMessage | null) {
-  return metadataListAttribute(message?.metadata?.group_followup_for_agent_message_ids);
 }
 
 export function messageWorkflowStudioAction(message?: YachiyoChatMessage | null): MessageWorkflowStudioAction | null {
@@ -270,13 +195,4 @@ export function chatStatusLabel(
 function latestApprovalRequiredMessage(messages: YachiyoChatMessage[]) {
   const approvals = approvalRequiredMessages(messages);
   return approvals[approvals.length - 1] || null;
-}
-
-function groupAgentSummarySubject(metadata: YachiyoChatMessageMetadata) {
-  const hasGroupDispatch = (
-    metadata.group_dispatch_count !== undefined
-    || metadata.group_dispatch_run_group_id
-    || Array.isArray(metadata.group_dispatch_skipped)
-  );
-  return hasGroupDispatch ? '这一轮群组任务' : '这条 Agent 结果';
 }

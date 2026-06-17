@@ -498,13 +498,6 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "export function messageText",
             "export function messageErrorText",
             "export function metadataListAttribute",
-            "export function groupAgentSummaryNotice",
-            "export function groupAgentSummaryTaskId",
-            "export function groupAgentSummaryStatus",
-            "export function groupAgentSummaryRunGroupId",
-            "export function groupFollowupNotice",
-            "export function groupFollowupTaskIdsAttribute",
-            "export function groupFollowupAgentMessageIdsAttribute",
             "export function normalizeRunStatus",
             "export function messageRunStatus",
             "export function messageRunId",
@@ -533,6 +526,19 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "export function chatStatusLabel",
             "approvalRequiredMessages(messages)",
             "nextApprovalStatusText({ pending_approval: approval.metadata?.pending_approval })",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/messageGroups.ts",
+        [
+            "export function groupAgentSummaryNotice",
+            "export function groupAgentSummaryTaskId",
+            "export function groupAgentSummaryStatus",
+            "export function groupAgentSummaryRunGroupId",
+            "export function groupFollowupNotice",
+            "export function groupFollowupTaskIdsAttribute",
+            "export function groupFollowupAgentMessageIdsAttribute",
+            "export function latestGroupAgentSummaryNotice",
             "group_agent_summary_pending",
         ],
     )

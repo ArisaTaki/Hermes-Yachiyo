@@ -9,13 +9,6 @@ import {
 } from '../approvalItems';
 import { fencedCode, renderMarkdown } from '../markdown';
 import {
-  groupAgentSummaryNotice,
-  groupAgentSummaryRunGroupId,
-  groupAgentSummaryStatus,
-  groupAgentSummaryTaskId,
-  groupFollowupAgentMessageIdsAttribute,
-  groupFollowupNotice,
-  groupFollowupTaskIdsAttribute,
   messageHasRunContext,
   messageRoleLabel,
   messageRunId,
@@ -29,6 +22,15 @@ import {
   messageWorkflowStudioAction,
 } from '../messageState';
 import { messageArtifactCount, messageArtifactTitle } from '../messageArtifacts';
+import {
+  groupAgentSummaryNotice,
+  groupAgentSummaryRunGroupId,
+  groupAgentSummaryStatus,
+  groupAgentSummaryTaskId,
+  groupFollowupAgentMessageIdsAttribute,
+  groupFollowupNotice,
+  groupFollowupTaskIdsAttribute,
+} from '../messageGroups';
 import { participantDisplayName } from '../sessionState';
 import type {
   AgentTaskSnapshot,
