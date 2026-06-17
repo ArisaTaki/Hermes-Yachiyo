@@ -3189,6 +3189,8 @@ def test_workflow_approval_pause_projection_builds_private_and_public_payloads()
             "criteria": "Review output",
         },
         "requested_at": "2026-06-12T00:00:00+00:00",
+        "workflow_node_id": "gate",
+        "workflow_node_label": "Human Gate",
     }
     assert "workflow_context" not in projection.public_pending_approval()
     assert event == {
@@ -3408,6 +3410,8 @@ def test_workflow_continuation_coordinator_pauses_for_approval_node():
                     "tool": str(private_pending.get("tool") or ""),
                     "input_preview": private_pending.get("input_preview") or {},
                     "requested_at": str(private_pending.get("requested_at") or ""),
+                    "workflow_node_id": str(private_pending.get("workflow_node_id") or ""),
+                    "workflow_node_label": str(private_pending.get("workflow_node_label") or ""),
                 }
             return {
                 "run_id": run_id,
@@ -3456,6 +3460,8 @@ def test_workflow_continuation_coordinator_pauses_for_approval_node():
         "context": "Child result ready",
         "criteria": "Review child output before continuing.",
     }
+    assert pending["workflow_node_id"] == "gate"
+    assert pending["workflow_node_label"] == "Human Gate"
     assert "workflow_context" not in pending
     assert timeline == [
         {
@@ -9482,6 +9488,7 @@ def test_runtime_shutdown_cancels_active_runs_rejects_new_runs_and_records_fact(
     service = make_service(tmp_path)
     cancelled_process_groups = []
     monkeypatch.setattr("apps.shell.agent_runtime.cancel_terminal_process_groups", lambda: cancelled_process_groups.append(True))
+    service.runtime_shutdown._cancel_terminal_process_groups = lambda: cancelled_process_groups.append(True)
     try:
         run = service._insert_run(kind="main_chat_run", runnable_id="builtin:yachiyo-main", user_goal="test")
 
@@ -11218,6 +11225,7 @@ def test_skill_install_command_runs_whitelisted_npx_and_syncs(tmp_path, monkeypa
         return subprocess.CompletedProcess(argv, 0, stdout="installed", stderr="")
 
     monkeypatch.setattr("apps.shell.agent_runtime.subprocess.run", fake_run)
+    service.skill_install_service._run_command = fake_run
     try:
         result = service.install_skill_command("npx skills add owner/repo")
         assert result["ok"] is True
@@ -15431,8 +15439,20 @@ def test_agent_run_fails_when_run_duration_budget_is_exceeded(tmp_path, monkeypa
         }
 
     monkeypatch.setattr("apps.shell.agent_runtime.time.time", fake_time)
+    monkeypatch.setattr("apps.shell.agent.runtime.budget.time.time", fake_time)
     monkeypatch.setattr("apps.shell.agent_runtime._iso_epoch", lambda _value: 1000.0)
     monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    from apps.shell.agent.runtime.budget import run_budget_from_timeline
+
+    def fake_run_budget(_run_id, timeline):
+        return run_budget_from_timeline(
+            service.runtime_limits,
+            started_at_epoch=1000.0,
+            timeline=timeline,
+        )
+
+    service.runtime_run_budget = fake_run_budget
+    service.custom_api_agent_loop._run_budget = fake_run_budget
     try:
         agent = service.create_agent(
             {
@@ -19101,8 +19121,10 @@ def test_workflow_run_fails_when_duration_budget_is_exceeded_between_nodes(tmp_p
         return {"content": "Agent finished after timeout"}
 
     monkeypatch.setattr("apps.shell.agent_runtime.time.time", fake_time)
+    monkeypatch.setattr("apps.shell.agent.runtime.budget.time.time", fake_time)
     monkeypatch.setattr("apps.shell.agent_runtime._iso_epoch", lambda _value: 1000.0)
     monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    service.workflow_continuation._iso_epoch = lambda _value: 1000.0
     try:
         model_config = {
             "base_url": "https://api.example.test/v1",
@@ -20150,6 +20172,7 @@ async def test_skill_sync_and_install_routes(tmp_path, monkeypatch):
     monkeypatch.setenv("OHA_YACHIYO_HOME", str(tmp_path / ".oha-yachiyo"))
     monkeypatch.setattr(agent_routes, "get_agent_runtime_service", lambda: service)
     monkeypatch.setattr("apps.shell.agent_runtime.subprocess.run", fake_run)
+    service.skill_install_service._run_command = fake_run
     try:
         sources = await agent_routes.list_skill_sources()
         assert sources["roots"][0]["path"] == str(native_home / "skills")

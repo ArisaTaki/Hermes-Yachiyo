@@ -24,12 +24,15 @@ RELEASE_ELECTRON_SMOKE_SCRIPTS: tuple[str, ...] = (
     "scripts/smoke_launcher_session_summary_ui.mjs",
     "scripts/smoke_proactive_tts_ui.mjs",
     "scripts/smoke_agent_studio_agents_ui.mjs",
+    "scripts/smoke_agent_studio_groups_ui.mjs",
     "scripts/smoke_agent_studio_skills_ui.mjs",
     "scripts/smoke_agent_studio_skill_mount_ui.mjs",
     "scripts/smoke_agent_studio_skill_folders_ui.mjs",
     "scripts/smoke_agent_run_detail_ui.mjs",
+    "scripts/smoke_chat_public_task_ui.mjs",
     "scripts/smoke_workflow_save_run_ui.mjs",
     "scripts/smoke_workflow_management_ui.mjs",
+    "scripts/smoke_yachiyo_entry_routes_ui.mjs",
 )
 
 

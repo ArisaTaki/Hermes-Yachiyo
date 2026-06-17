@@ -98,9 +98,9 @@ def test_native_runtime_keeps_runnable_facade_methods_available_after_split(tmp_
 
     class _RunRerun:
         @staticmethod
-        def rerun(run_id: str) -> dict[str, Any]:
-            calls.append(("rerun", run_id))
-            return {"run_id": "rerun-1", "source_run_id": run_id}
+        def rerun(run_id: str, request: dict[str, Any] | None = None) -> dict[str, Any]:
+            calls.append(("rerun", run_id, request))
+            return {"run_id": "rerun-1", "source_run_id": run_id, "request": request or {}}
 
     class _ChatRunnableParser:
         @staticmethod
@@ -151,7 +151,11 @@ def test_native_runtime_keeps_runnable_facade_methods_available_after_split(tmp_
             upstream="context",
             on_complete=on_complete,
         )["run_id"] == "run-async"
-        assert service.rerun_run("run-1") == {"run_id": "rerun-1", "source_run_id": "run-1"}
+        assert service.rerun_run("run-1") == {
+            "run_id": "rerun-1",
+            "source_run_id": "run-1",
+            "request": {},
+        }
         assert service.delegate_runnable(
             kind="agent",
             runnable_id="agent-1",
@@ -163,7 +167,7 @@ def test_native_runtime_keeps_runnable_facade_methods_available_after_split(tmp_
         assert create_async_call[1]["on_complete"] is on_complete
         assert ("list", agents, workflows) in calls
         assert ("targets", agents, workflows) in calls
-        assert ("rerun", "run-1") in calls
+        assert ("rerun", "run-1", None) in calls
         assert ("parse-known", "@Agent summarize") in calls
     finally:
         service.close()

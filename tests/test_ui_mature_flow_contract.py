@@ -1703,7 +1703,7 @@ def test_agent_studio_bridge_contract_preserves_run_detail_workflow_artifact_and
         ("get_run", {"run_id": "run_workflow_1"}),
         ("get_run_group", {"run_group_id": "group-1"}),
         ("read_run_artifact", {"run_id": "run_workflow_1", "artifact_path": "reports/final.md"}),
-        ("rerun_run", {"run_id": "run_workflow_1"}),
+        ("rerun_run", {"run_id": "run_workflow_1", "request": {}}),
         ("delete_run", {"run_id": "run_workflow_1"}),
     ]
 
