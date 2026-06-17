@@ -91,7 +91,12 @@ ACCEPTANCE_10_3_MATRIX: tuple[AcceptanceScenario, ...] = (
             (
                 "source",
                 "apps/frontend/src/features/yachiyo-chat/components/AgentTaskCard.tsx",
-                ("ApprovalCard", "mergeApprovalSnapshots", "approvalFacts.slice(0, 2).map((approval)"),
+                ("ApprovalCard", "approvalFacts.slice(0, 2).map((approval)"),
+            ),
+            (
+                "source",
+                "apps/frontend/src/features/yachiyo-chat/hooks/useYachiyoTaskEventReplay.ts",
+                ("mergeApprovalSnapshots", "approvalsFromRunEventReplay(replayEvents)"),
             ),
             (
                 "smoke",
@@ -354,7 +359,6 @@ def test_chat_daily_entry_acceptance_paths_are_guarded() -> None:
         "apps/frontend/src/features/yachiyo-chat/components/AgentTaskCard.tsx",
         [
             "ApprovalCard",
-            "mergeApprovalSnapshots",
             "onApproveApproval(task, approval)",
             "onRejectApproval(task, approval)",
             'data-testid="yachiyo-task-approval-open-studio"',
@@ -362,6 +366,14 @@ def test_chat_daily_entry_acceptance_paths_are_guarded() -> None:
             "ArtifactPreview",
             "ToolCallSummary",
             "在 Agent Studio 中查看",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/hooks/useYachiyoTaskEventReplay.ts",
+        [
+            "mergeApprovalSnapshots",
+            "mergeArtifactSnapshots",
+            "timelineEventSource",
         ],
     )
     _assert_contains(

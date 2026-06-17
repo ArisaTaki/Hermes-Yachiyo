@@ -984,7 +984,7 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
         ],
     )
     _assert_contains(
-        "apps/frontend/src/features/yachiyo-chat/components/AgentTaskCard.tsx",
+        "apps/frontend/src/features/yachiyo-chat/hooks/useYachiyoTaskEventReplay.ts",
         [
             "useEffect",
             "useState",
@@ -995,8 +995,6 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "artifactsFromRunEventReplay",
             "mergeApprovalSnapshots",
             "mergeArtifactSnapshots",
-            "import { studioRunUrl } from '../../runtime-shared/studioLinks';",
-            "yachiyoTaskStudioGroupRunId",
             "PublicRunEvent",
             "const TASK_EVENT_PAGE_SIZE = 200;",
             "const [replayEvents, setReplayEvents] = useState<PublicRunEvent[]>([]);",
@@ -1004,20 +1002,32 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "const [replayHasMore, setReplayHasMore] = useState(false);",
             "const [replayLoading, setReplayLoading] = useState(false);",
             "const [replayNextAfterSequence, setReplayNextAfterSequence] = useState(0);",
-            "const runId = yachiyoTaskRunId(task);",
-            "const studioRunId = yachiyoTaskStudioRunId(task);",
-            "const studioUrl = yachiyoTaskStudioUrl(task);",
             "const timelineEvents = replayEvents.length ? replayEvents : recentEvents;",
             "const replayApprovals = replayEvents.length ? approvalsFromRunEventReplay(replayEvents) : [];",
             "const replayArtifacts = replayEvents.length ? artifactsFromRunEventReplay(replayEvents) : [];",
             "const approvalFacts = mergeApprovalSnapshots(approvals, replayApprovals);",
             "const artifactFacts = mergeArtifactSnapshots(artifacts, replayArtifacts) as ArtifactSnapshot[];",
             "const timelineSummaryEvents = timelineEvents.slice(-3);",
+            "const timelineEventSource = replayEvents.length ? 'run_event_page' : 'task_snapshot';",
             "listYachiyoTaskEvents(taskId, 0, TASK_EVENT_PAGE_SIZE)",
-            "async function loadMoreTaskEvents()",
+            "const loadMoreTaskEvents = useCallback(async () => {",
             "const events = mergeRuntimeRunEventPages(replayEvents, incomingEvents);",
             "setReplayNextAfterSequence(runEventPageNextCursor(page, events, afterSequence));",
             "runEventSequenceCursor(replayEvents, 0)",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/AgentTaskCard.tsx",
+        [
+            "useYachiyoTaskEventReplay",
+            "import { studioRunUrl } from '../../runtime-shared/studioLinks';",
+            "yachiyoTaskStudioGroupRunId",
+            "const runId = yachiyoTaskRunId(task);",
+            "const studioRunId = yachiyoTaskStudioRunId(task);",
+            "const studioUrl = yachiyoTaskStudioUrl(task);",
+            "timelineEvents,",
+            "timelineEventSource,",
+            "timelineSummaryEvents,",
             "data-event-source={timelineEventSource}",
             'data-testid="yachiyo-agent-task-card"',
             'data-testid="yachiyo-agent-task-open-studio"',
@@ -1049,6 +1059,16 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "approvalFacts.slice(0, 2).map((approval)",
             "artifactFacts.slice(0, 3).map((artifact)",
             "在 Agent Studio 中查看",
+        ],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/AgentTaskCard.tsx",
+        [
+            "listYachiyoTaskEvents",
+            "mergeRuntimeRunEventPages",
+            "approvalsFromRunEventReplay",
+            "const [replayEvents, setReplayEvents] = useState",
+            "async function loadMoreTaskEvents()",
         ],
     )
     _assert_contains(
