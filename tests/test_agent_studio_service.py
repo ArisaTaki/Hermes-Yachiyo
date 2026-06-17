@@ -690,6 +690,63 @@ def test_agent_studio_service_redacts_sensitive_public_workflow_configuration() 
     assert workflow.default_input_schema["properties"]["api_key"]["default"] == "[redacted]"
 
 
+def test_agent_studio_service_redacts_sensitive_public_group_snapshots() -> None:
+    class _SensitiveGroupPort:
+        def list_groups(self) -> dict[str, Any]:
+            return {
+                "groups": [
+                    _group_payload()
+                    | {
+                        "name": "Research sk-sensitive-value",
+                        "description": "Uses bearer sensitive-token-value internally.",
+                        "members": [
+                            {
+                                "agent_id": "agent-1",
+                                "name": "Planner sk-sensitive-value",
+                                "role": "token sk-sensitive-value",
+                            }
+                        ],
+                    }
+                ]
+            }
+
+        def get_group_run(self, group_run_id: str) -> dict[str, Any]:
+            return _group_run_payload(group_run_id=group_run_id) | {
+                "title": "Group run sk-sensitive-value",
+                "objective": "Compare bearer sensitive-token-value",
+                "summary": "token sk-sensitive-value",
+                "participants": [
+                    {
+                        "agent_id": "agent-1",
+                        "name": "Planner sk-sensitive-value",
+                    }
+                ],
+                "events": [
+                    {
+                        "event_type": "group.member.started",
+                        "detail": "Planner sk-sensitive-value started",
+                        "payload": {"member_agent_id": "agent-1"},
+                    }
+                ],
+            }
+
+    service = AgentStudioService(_SensitiveGroupPort())
+
+    group = service.list_groups()[0]
+    group_run = service.get_group_run("group-run-sensitive")
+    rendered = str({
+        "group": group.model_dump(mode="json"),
+        "group_run": group_run.model_dump(mode="json"),
+    })
+
+    assert "sk-sensitive-value" not in rendered
+    assert "sensitive-token-value" not in rendered
+    assert "[redacted]" in rendered
+    assert group.members[0].agent_id == "agent-1"
+    assert group_run.runs[0].run_id == "run-1"
+    assert group_run.events[0].event_type == "group.run.started"
+
+
 def test_agent_studio_service_maps_group_run_workflow_run_timeline_and_events() -> None:
     port = _FakeStudioPort()
     service = AgentStudioService(port)

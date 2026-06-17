@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from apps.shell.agent.runtime.events import redact_secrets
+
 from .contracts import AgentGroupMemberSnapshot, AgentGroupSnapshot, GroupRunSnapshot
 from .run_snapshots import RunSnapshotProjector
 
@@ -67,7 +69,7 @@ def group_run_snapshot_from_payload(
     group_run_id = _text(payload.get("group_run_id") or legacy_run_group_id)
     group_id = _text(payload.get("group_id") or payload.get("agent_group_id"))
     runs_payload = payload.get("runs") or payload.get("child_runs") or []
-    child_run_ids = [str(item) for item in payload.get("child_run_ids") or [] if str(item)]
+    child_run_ids = [_text(item) for item in payload.get("child_run_ids") or [] if _text(item)]
     participants = group_run_participants_from_payload(payload)
     events = _RUN_PROJECTOR.events_from_payload(
         {
@@ -353,7 +355,7 @@ def _group_run_terminal_event_type(value: Any) -> str:
 
 
 def _text(value: Any) -> str:
-    return str(value or "").strip()
+    return str(redact_secrets(value) or "").strip()
 
 
 def _optional_text(value: Any) -> str | None:
