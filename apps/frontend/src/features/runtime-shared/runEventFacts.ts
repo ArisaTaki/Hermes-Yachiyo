@@ -223,6 +223,19 @@ function approvalFromRunEvent(event: PublicRunEvent): ApprovalCardSnapshot | nul
 function toolCallFromRunEvent(event: PublicRunEvent): ToolCallSnapshot | null {
   if (!isToolRunEvent(event.event_type)) return null;
   const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
+  const approval = objectPreview(payload.pending_approval)
+    || objectPreview(payload.approval)
+    || {};
+  const approvalId = publicRunEventPayloadString(payload, 'approval_id')
+    || publicRunEventPayloadString(approval, 'approval_id')
+    || publicRunEventPayloadString(approval, 'id');
+  const riskLevel = publicRunEventPayloadString(payload, 'risk_level')
+    || publicRunEventPayloadString(payload, 'risk')
+    || publicRunEventPayloadString(approval, 'risk_level')
+    || publicRunEventPayloadString(approval, 'risk');
+  const policyReason = publicRunEventPayloadString(payload, 'policy_reason')
+    || publicRunEventPayloadString(approval, 'policy_reason')
+    || publicRunEventPayloadString(approval, 'reason');
   const status = publicRunEventPayloadString(payload, 'status') || toolStatusFromRunEvent(event.event_type);
   const outputPreview = objectPreview(payload.output_preview)
     || objectPreview(payload.output)
@@ -232,6 +245,26 @@ function toolCallFromRunEvent(event: PublicRunEvent): ToolCallSnapshot | null {
     || publicRunEventPayloadString(payload, 'tool')
     || event.detail
     || 'tool';
+  const inputPreview = toolCallInputPreviewWithTraceContext(
+    objectPreview(payload.input_preview)
+      || objectPreview(payload.input)
+      || objectPreview(payload.arguments)
+      || objectPreview(payload.args)
+      || {},
+    {
+      approval_id: approvalId,
+      risk_level: riskLevel,
+      policy_reason: policyReason,
+      group_id: payload.group_id,
+      group_run_id: payload.group_run_id || payload.run_group_id,
+      member_agent_id: payload.member_agent_id,
+      member_agent_name: payload.member_agent_name,
+      workflow_id: payload.workflow_id,
+      workflow_run_id: payload.workflow_run_id,
+      workflow_node_id: payload.workflow_node_id,
+      workflow_node_label: payload.workflow_node_label,
+    },
+  );
   return {
     tool_call_id: publicRunEventPayloadString(payload, 'tool_call_id')
       || publicRunEventPayloadString(payload, 'id')
@@ -259,16 +292,10 @@ function toolCallFromRunEvent(event: PublicRunEvent): ToolCallSnapshot | null {
       || null,
     tool_name: toolName,
     status,
-    risk_level: publicRunEventPayloadString(payload, 'risk_level')
-      || publicRunEventPayloadString(payload, 'risk')
-      || null,
-    input_preview: objectPreview(payload.input_preview)
-      || objectPreview(payload.input)
-      || objectPreview(payload.arguments)
-      || objectPreview(payload.args)
-      || {},
+    risk_level: riskLevel || null,
+    input_preview: inputPreview,
     output_preview: outputPreview,
-    approval_id: publicRunEventPayloadString(payload, 'approval_id') || null,
+    approval_id: approvalId || null,
     started_at: publicRunEventPayloadString(payload, 'started_at') || event.created_at || '',
     completed_at: publicRunEventPayloadString(payload, 'completed_at')
       || (toolCallStatusIsTerminal(status) ? event.created_at || null : null),
@@ -629,6 +656,22 @@ function toolCallCorrelationPreview(preview: Record<string, unknown>): Record<st
   return Object.fromEntries(
     Object.entries(preview).filter(([key]) => !traceKeys.has(key)),
   );
+}
+
+function toolCallInputPreviewWithTraceContext(
+  inputPreview: Record<string, unknown>,
+  traceContext: Record<string, unknown>,
+): Record<string, unknown> {
+  const preview = { ...inputPreview };
+  Object.entries(traceContext).forEach(([key, value]) => {
+    if (!preview[key] && traceContextValuePresent(value)) preview[key] = value;
+  });
+  return preview;
+}
+
+function traceContextValuePresent(value: unknown): boolean {
+  if (typeof value === 'string') return Boolean(value.trim());
+  return value !== undefined && value !== null && value !== false;
 }
 
 function stableJson(value: unknown): string {
