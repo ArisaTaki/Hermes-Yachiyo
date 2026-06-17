@@ -99,6 +99,7 @@ import { useChatNotice } from '../features/yachiyo-chat/hooks/useChatNotice';
 import { useChatRouteHandoffParams } from '../features/yachiyo-chat/hooks/useChatRouteHandoffParams';
 import { useChatRunPolling } from '../features/yachiyo-chat/hooks/useChatRunPolling';
 import { useChatRunnables } from '../features/yachiyo-chat/hooks/useChatRunnables';
+import { useChatSessions } from '../features/yachiyo-chat/hooks/useChatSessions';
 import { useLegacyChatRunnableResult } from '../features/yachiyo-chat/hooks/useLegacyChatRunnableResult';
 import { useYachiyoTaskSnapshots } from '../features/yachiyo-chat/hooks/useYachiyoTaskSnapshots';
 import { useYachiyoTaskSubmit } from '../features/yachiyo-chat/hooks/useYachiyoTaskSubmit';
@@ -130,7 +131,6 @@ import type {
   MessagesPayload,
   PendingAttachment,
   RenderState,
-  SessionsPayload,
 } from '../features/yachiyo-chat/types';
 import { apiGet, apiPatch, apiPost, bridgeUrl, canChooseChatImages, chooseChatImages, copyText, openAppView, openExternalUrl, restartDesktopBridge, type ChatImageSelection } from '../lib/bridge';
 
@@ -157,13 +157,9 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingCount, setProcessingCount] = useState(0);
   const [isSending, setIsSending] = useState(false);
-  const [sessions, setSessions] = useState<SessionsPayload | null>(null);
-  const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const [conversationTokenCount, setConversationTokenCount] = useState(0);
   const { executor, refreshExecutor } = useChatExecutor(EXECUTOR_POLL_INTERVAL_MS);
   const { assistantProfile, assistantProfileLoading, refreshAssistantProfile } = useChatAssistantProfile();
-  const [sessionQuery, setSessionQuery] = useState('');
-  const [debouncedSessionQuery, setDebouncedSessionQuery] = useState('');
   const { routeSessionId, routeTaskId } = useChatRouteHandoffParams();
   const [sessionIdDialogOpen, setSessionIdDialogOpen] = useState(false);
   const [sessionIdCopyError, setSessionIdCopyError] = useState('');
@@ -240,6 +236,14 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     refreshYachiyoTasksForSession,
     refreshYachiyoTaskSnapshotsForRunIds,
   } = useYachiyoTaskSnapshots();
+  const {
+    debouncedSessionQuery,
+    loadSessions,
+    sessions,
+    sessionsLoaded,
+    sessionQuery,
+    setSessionQuery,
+  } = useChatSessions({ refreshYachiyoTasksForSession });
 
   const refreshMessages = useCallback(async (options: { allowDuringTransition?: boolean; anchorMessageId?: string } = {}) => {
     if (conversationTransitionRef.current && !options.allowDuringTransition) return;
@@ -321,22 +325,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       return { is_processing: false, messages: [] };
     }
   }, []);
-
-  const loadSessions = useCallback(async () => {
-    try {
-      const query = new URLSearchParams();
-      query.set('limit', '0');
-      if (debouncedSessionQuery) query.set('query', debouncedSessionQuery);
-      const payload = await apiGet<SessionsPayload>(`/ui/chat/sessions?${query.toString()}`);
-      if (payload.ok === false) throw new Error('读取会话失败');
-      setSessions(payload);
-      if (payload.current_session_id) void refreshYachiyoTasksForSession(payload.current_session_id);
-    } catch {
-      setSessions(null);
-    } finally {
-      setSessionsLoaded(true);
-    }
-  }, [debouncedSessionQuery]);
 
   useEffect(() => {
     loadSessionsRef.current = loadSessions;
@@ -424,13 +412,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   useEffect(() => {
     void loadSessions();
   }, [loadSessions]);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setDebouncedSessionQuery(sessionQuery.trim());
-    }, 180);
-    return () => window.clearTimeout(timer);
-  }, [sessionQuery]);
 
   useEffect(() => {
     const requestedSessionId = routeSessionId;

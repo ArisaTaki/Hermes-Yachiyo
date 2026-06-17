@@ -377,7 +377,7 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
         "apps/frontend/src/views/ChatView.tsx",
         [
             "apiGet<MessagesPayload>(`/ui/chat/messages?",
-            "apiGet<SessionsPayload>(`/ui/chat/sessions?",
+            "useChatSessions({ refreshYachiyoTasksForSession })",
             "apiPost<",
             "sendLegacyChatMessage({",
             "retryLegacyChatMessage(message.id)",
@@ -744,6 +744,7 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "from '../features/yachiyo-chat/hooks/useChatRouteHandoffParams';",
             "from '../features/yachiyo-chat/hooks/useLegacyChatRunnableResult';",
             "from '../features/yachiyo-chat/hooks/useChatRunnables';",
+            "from '../features/yachiyo-chat/hooks/useChatSessions';",
             "import { deriveChatSessionState } from '../features/yachiyo-chat/sessionDerivedState';",
             "handleLegacyChatRunnableResult(result, { refreshTaskSnapshot: true })",
             "handleLegacyChatRunnableResult(result)",
@@ -798,6 +799,10 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "currentParam('task_id')",
             "currentParam('session_id')",
             "ROUTE_CHANGE_EVENT",
+            "setSessions",
+            "setSessionsLoaded",
+            "setDebouncedSessionQuery",
+            "apiGet<SessionsPayload>(`/ui/chat/sessions?",
             "result.workflow_run_id ? 'Workflow' : 'Agent'",
             "result.runnable_command",
             "legacyChatRunnableResult(result)",
@@ -1091,11 +1096,16 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "resolveYachiyoTaskApproval(task, approval, 'reject')",
             "cancelYachiyoTaskFromCard",
             "publicTaskSnapshotForMessage(message, agentTaskSnapshotsById)",
-            "refreshYachiyoTasksForSession(payload.current_session_id)",
             "useLegacyChatRunnableResult",
             "formatTime={formatShortTime}",
             "onApproveTaskApproval={(task, approval) => void resolveYachiyoTaskApproval(task, approval, 'approve')}",
             "onRejectTaskApproval={(task, approval) => void resolveYachiyoTaskApproval(task, approval, 'reject')}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/hooks/useChatSessions.ts",
+        [
+            "if (payload.current_session_id) void refreshYachiyoTasksForSession(payload.current_session_id);",
         ],
     )
     _assert_contains(
@@ -3443,6 +3453,20 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
             "window.addEventListener('popstate', syncRouteChatHandoffParams)",
             "window.addEventListener(ROUTE_CHANGE_EVENT, syncRouteChatHandoffParams)",
             "window.removeEventListener(ROUTE_CHANGE_EVENT, syncRouteChatHandoffParams)",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/hooks/useChatSessions.ts",
+        [
+            "export function useChatSessions",
+            "apiGet<SessionsPayload>(`/ui/chat/sessions?${query.toString()}`)",
+            "if (debouncedSessionQuery) query.set('query', debouncedSessionQuery);",
+            "setSessions(payload);",
+            "if (payload.current_session_id) void refreshYachiyoTasksForSession(payload.current_session_id);",
+            "setSessions(null);",
+            "setSessionsLoaded(true);",
+            "setDebouncedSessionQuery(sessionQuery.trim());",
+            "setTimeout(() => {",
         ],
     )
     _assert_not_contains(
