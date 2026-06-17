@@ -682,6 +682,15 @@ def test_runtime_core_split_acceptance_paths_are_guarded() -> None:
         ],
     )
     _assert_contains(
+        "apps/shell/yachiyo_agent/workflows.py",
+        [
+            "redact_run_event_payload",
+            "redact_json_value",
+            "nodes=_list_of_mappings(payload.get(\"nodes\"))",
+            "default_input_schema=_schema_mapping(payload.get(\"default_input_schema\"))",
+        ],
+    )
+    _assert_contains(
         "apps/shell/yachiyo_agent/future_tasks.py",
         [
             "redact_secrets",

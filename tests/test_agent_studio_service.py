@@ -609,6 +609,61 @@ def test_agent_studio_service_redacts_sensitive_public_agent_configuration() -> 
     assert agent.workspace_policy["default_workdir"] == "/workspace"
 
 
+def test_agent_studio_service_redacts_sensitive_public_workflow_configuration() -> None:
+    class _SensitiveWorkflowPort(_FakeStudioPort):
+        def list_workflows(self) -> dict[str, Any]:
+            return {
+                "workflows": [
+                    _workflow_payload()
+                    | {
+                        "description": "Calls bearer sensitive-token-value internally.",
+                        "nodes": [
+                            {
+                                "id": "tool",
+                                "type": "tool",
+                                "data": {
+                                    "api_key": "sk-sensitive-value",
+                                    "api_key_configured": True,
+                                    "headers": {
+                                        "authorization": "bearer sensitive-token-value",
+                                    },
+                                },
+                            }
+                        ],
+                        "edges": [
+                            {
+                                "source": "start",
+                                "target": "tool",
+                                "data": {"token": "secret-edge-token"},
+                            }
+                        ],
+                        "default_input_schema": {
+                            "type": "object",
+                            "properties": {
+                                "api_key": {
+                                    "type": "string",
+                                    "default": "sk-sensitive-value",
+                                }
+                            },
+                        },
+                    }
+                ]
+            }
+
+    service = AgentStudioService(_SensitiveWorkflowPort())
+
+    workflow = service.list_workflows()[0]
+    rendered = str(workflow.model_dump(mode="json"))
+
+    assert "sk-sensitive-value" not in rendered
+    assert "sensitive-token-value" not in rendered
+    assert "secret-edge-token" not in rendered
+    assert workflow.nodes[0]["data"]["api_key"] == "[redacted]"
+    assert workflow.nodes[0]["data"]["api_key_configured"] is True
+    assert "api_key" in workflow.default_input_schema["properties"]
+    assert workflow.default_input_schema["properties"]["api_key"]["default"] == "[redacted]"
+
+
 def test_agent_studio_service_maps_group_run_workflow_run_timeline_and_events() -> None:
     port = _FakeStudioPort()
     service = AgentStudioService(port)
