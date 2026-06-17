@@ -421,6 +421,9 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "return apiPost('/ui/chat/messages', request);",
             "export async function retryLegacyChatMessage",
             "return apiPost('/ui/chat/messages/retry', {",
+            "export function legacyChatRunnableResult",
+            "runnableCommand: Boolean(result.runnable_command)",
+            "runId: String(result.run_id || result.agent_run_id || result.workflow_run_id || '').trim()",
         ],
     )
     _assert_contains(
@@ -674,6 +677,7 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "metadata.group_followup_for_task_ids",
             "function runnableResultRunId",
             "result.workflow_run_id ? 'Workflow' : 'Agent'",
+            "result.runnable_command",
             "agent_run_id?: string;",
             "workflow_run_id?: string;",
             "function messageRunStatus",

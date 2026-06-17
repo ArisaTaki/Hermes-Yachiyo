@@ -22,6 +22,14 @@ export type LegacyChatMessageResult = {
   status?: string;
 };
 
+export type LegacyChatRunnableResultSnapshot = {
+  runnableCommand: boolean;
+  runId: string;
+  status: string;
+  label: 'Agent' | 'Workflow';
+  error: string;
+};
+
 export type SendLegacyChatMessageRequest = {
   text: string;
   attachments: PendingAttachment[];
@@ -42,6 +50,23 @@ export async function retryLegacyChatMessage(messageId: string): Promise<LegacyC
   return apiPost('/ui/chat/messages/retry', {
     message_id: messageId,
   });
+}
+
+export function legacyChatRunnableResult(
+  result: LegacyChatMessageResult,
+): LegacyChatRunnableResultSnapshot {
+  return {
+    runnableCommand: Boolean(result.runnable_command),
+    runId: String(result.run_id || result.agent_run_id || result.workflow_run_id || '').trim(),
+    status: normalizeLegacyRunStatus(result.run_status || result.status || ''),
+    label: result.workflow_run_id ? 'Workflow' : 'Agent',
+    error: String(result.error || '').trim(),
+  };
+}
+
+function normalizeLegacyRunStatus(status?: unknown) {
+  const value = String(status || '').trim();
+  return value === 'running' ? 'processing' : value;
 }
 
 export async function listYachiyoTasks(conversationId?: string): Promise<AgentTaskSnapshot[]> {

@@ -46,9 +46,6 @@ import {
   messageRunStatus,
   messageText,
   normalizeRunStatus,
-  runnableResultLabel,
-  runnableResultRunId,
-  runnableResultStatus,
   taskHandoffMessageId,
 } from '../features/yachiyo-chat/messageState';
 import {
@@ -89,6 +86,7 @@ import { useYachiyoTaskSnapshots } from '../features/yachiyo-chat/hooks/useYachi
 import { useYachiyoTaskSubmit } from '../features/yachiyo-chat/hooks/useYachiyoTaskSubmit';
 import { approveChatRunApproval, rejectChatRunApproval } from '../features/yachiyo-chat/runSnapshots';
 import {
+  legacyChatRunnableResult,
   retryLegacyChatMessage,
   sendLegacyChatMessage,
 } from '../features/yachiyo-chat/api';
@@ -792,11 +790,12 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       });
       if (result.ok === false) throw new Error(result.error || '发送失败');
       transientEmptySessionIdRef.current = '';
-      if (result.runnable_command) {
+      const runnableResult = legacyChatRunnableResult(result);
+      if (runnableResult.runnableCommand) {
         pendingReplyTaskIdRef.current = '';
-        const resultRunId = runnableResultRunId(result);
-        const resultRunStatus = runnableResultStatus(result);
-        const runnableLabel = runnableResultLabel(result);
+        const resultRunId = runnableResult.runId;
+        const resultRunStatus = runnableResult.status;
+        const runnableLabel = runnableResult.label;
         if (resultRunStatus === 'processing' && resultRunId) {
           setStatus(`${runnableLabel} 执行中...`);
           stickToBottomRef.current = true;
@@ -811,7 +810,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
           ? `${runnableLabel} 等待审批...`
           : resultRunId
             ? `${runnableLabel} Run 已处理。`
-            : result.error || 'Agent/Workflow 指令已处理。');
+            : runnableResult.error || 'Agent/Workflow 指令已处理。');
         await refreshMessages();
         await loadSessions();
         return;
@@ -1273,11 +1272,12 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     try {
       const result = await retryLegacyChatMessage(message.id);
       if (result.ok === false) throw new Error(result.error || '重试失败');
-      if (result.runnable_command) {
+      const runnableResult = legacyChatRunnableResult(result);
+      if (runnableResult.runnableCommand) {
         pendingReplyTaskIdRef.current = '';
-        const resultRunId = runnableResultRunId(result);
-        const resultRunStatus = runnableResultStatus(result);
-        const runnableLabel = runnableResultLabel(result);
+        const resultRunId = runnableResult.runId;
+        const resultRunStatus = runnableResult.status;
+        const runnableLabel = runnableResult.label;
         if (resultRunStatus === 'processing' && resultRunId) {
           setStatus(`${runnableLabel} 执行中...`);
           await refreshMessages();
