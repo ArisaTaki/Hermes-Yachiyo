@@ -17,7 +17,6 @@ import {
 } from '../features/yachiyo-chat/attachments';
 import { createClientMessageId } from '../features/yachiyo-chat/clientMessages';
 import { isImeComposing } from '../features/yachiyo-chat/composerEvents';
-import { createDelegatedRunSummary } from '../features/yachiyo-chat/delegatedSummary';
 import { ChatComposer } from '../features/yachiyo-chat/components/ChatComposer';
 import { ChatFullPageLoading } from '../features/yachiyo-chat/components/ChatFullPageLoading';
 import { composerApprovalStatusText } from '../features/yachiyo-chat/components/ComposerApprovalNotice';
@@ -31,11 +30,8 @@ import {
   approvalRequiredItems,
   approvalRequiredMessages,
   forgetRunApprovalOverride,
-  isWorkflowApprovalDetails,
   rememberRunApprovalOverride,
-  nextApprovalStatusText,
   type ChatApprovalRun,
-  type ComposerApprovalItem,
   type RunApprovalDetailOverride,
 } from '../features/yachiyo-chat/approvalItems';
 import {
@@ -50,7 +46,6 @@ import {
   messageRunId,
   messageRunStatus,
   messageText,
-  normalizeRunStatus,
 } from '../features/yachiyo-chat/messageState';
 import { isMissingGroupEditRouteError } from '../features/yachiyo-chat/messageGroups';
 import { taskHandoffMessageId } from '../features/yachiyo-chat/messageTaskHandoff';
@@ -69,10 +64,6 @@ import {
   sessionSideLabel,
   storedComposerHeight,
 } from '../features/yachiyo-chat/displayState';
-import {
-  chatApprovalRejectionCompletionStatusText,
-  chatRunCompletionProcessingState,
-} from '../features/yachiyo-chat/runPolling';
 import { openYachiyoStudioRun, openYachiyoWorkflowStudio } from '../features/yachiyo-chat/studioNavigation';
 import {
   activeMentions,
@@ -97,13 +88,13 @@ import { useChatCopyFeedback } from '../features/yachiyo-chat/hooks/useChatCopyF
 import { useChatExecutor } from '../features/yachiyo-chat/hooks/useChatExecutor';
 import { useChatNotice } from '../features/yachiyo-chat/hooks/useChatNotice';
 import { useChatRouteHandoffParams } from '../features/yachiyo-chat/hooks/useChatRouteHandoffParams';
+import { useChatRunApprovalActions } from '../features/yachiyo-chat/hooks/useChatRunApprovalActions';
 import { useChatRunPolling } from '../features/yachiyo-chat/hooks/useChatRunPolling';
 import { useChatRunnables } from '../features/yachiyo-chat/hooks/useChatRunnables';
 import { useChatSessions } from '../features/yachiyo-chat/hooks/useChatSessions';
 import { useLegacyChatRunnableResult } from '../features/yachiyo-chat/hooks/useLegacyChatRunnableResult';
 import { useYachiyoTaskSnapshots } from '../features/yachiyo-chat/hooks/useYachiyoTaskSnapshots';
 import { useYachiyoTaskSubmit } from '../features/yachiyo-chat/hooks/useYachiyoTaskSubmit';
-import { approveChatRunApproval, rejectChatRunApproval } from '../features/yachiyo-chat/runSnapshots';
 import {
   retryLegacyChatMessage,
   sendLegacyChatMessage,
@@ -351,6 +342,26 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     rememberRunApprovalDetails,
     setIsProcessing,
     setProcessingCount,
+    setStatus,
+  });
+
+  const {
+    resolveApprovalItem,
+    resolveApprovalMessage,
+  } = useChatRunApprovalActions({
+    approvalActionMessageId,
+    createDelegatedRunSummaryOptions: delegatedRunSummaryOptions,
+    focusComposerSoon,
+    forgetRunApprovalDetails,
+    isProcessingRef,
+    loadSessions,
+    pollAgentRunInBackground,
+    refreshMessages,
+    rememberRunApprovalDetails,
+    setApprovalActionMessageId,
+    setIsProcessing,
+    setProcessingCount,
+    setResolvedComposerApprovalIds,
     setStatus,
   });
 
@@ -1138,140 +1149,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       setStatus(error instanceof Error ? error.message : '重试失败');
     } finally {
       setRetryingMessageId('');
-      focusComposerSoon();
-    }
-  }
-
-  async function resolveApprovalMessage(message: ChatMessage, action: 'approve' | 'reject') {
-    const runId = messageRunId(message);
-    if (!message.id) return;
-    await resolveApprovalRun({
-      action,
-      busyId: message.id,
-      runId,
-    });
-  }
-
-  async function resolveApprovalItem(item: ComposerApprovalItem, action: 'approve' | 'reject') {
-    await resolveApprovalRun({
-      action,
-      busyId: item.id,
-      composerItemId: item.id,
-      runId: item.runId,
-      fallbackApprovalDetails: item.details,
-      summarizeDelegatedRun: item.source === 'activity',
-    });
-  }
-
-  async function resolveApprovalRun({ action, busyId, composerItemId, fallbackApprovalDetails, runId, summarizeDelegatedRun }: {
-    action: 'approve' | 'reject';
-    busyId: string;
-    composerItemId?: string;
-    fallbackApprovalDetails?: ApprovalRequestDetails;
-    runId: string;
-    summarizeDelegatedRun?: boolean;
-  }) {
-    if (!runId || approvalActionMessageId) return;
-    setApprovalActionMessageId(busyId);
-    setStatus(action === 'approve' ? '正在批准工具调用...' : '正在拒绝工具调用...');
-    if (action === 'approve') {
-      const approvalPromise = approveChatRunApproval(runId);
-      const approvalTargetLabel = fallbackApprovalDetails && isWorkflowApprovalDetails(fallbackApprovalDetails) ? 'Workflow' : 'Agent';
-      if (composerItemId) {
-        setResolvedComposerApprovalIds((current) => (
-          current.includes(composerItemId) ? current : [...current.slice(-20), composerItemId]
-        ));
-      }
-      forgetRunApprovalDetails(runId);
-      setIsProcessing(true);
-      isProcessingRef.current = true;
-      setProcessingCount((current) => Math.max(1, current || 1));
-      setStatus(`已批准，${approvalTargetLabel} 正在继续执行...`);
-      setApprovalActionMessageId('');
-      pollAgentRunInBackground(runId, { summarizeDelegatedRun, ignoreInitialApprovalRequired: true });
-      void approvalPromise
-        .then(async (run) => {
-          const refreshed = await refreshMessages();
-          await loadSessions();
-          const chatStillProcessing = Boolean(refreshed?.is_processing);
-          const chatProcessingCount = Math.max(0, Number(refreshed?.processing_count || 0));
-          const runStatus = normalizeRunStatus(run.status);
-          if (runStatus === 'approval_required') {
-            rememberRunApprovalDetails(run, fallbackApprovalDetails);
-            isProcessingRef.current = true;
-            setIsProcessing(true);
-            setProcessingCount(Math.max(1, chatProcessingCount));
-            setStatus(nextApprovalStatusText(run));
-          } else if (runStatus === 'processing') {
-            forgetRunApprovalDetails(runId);
-            isProcessingRef.current = true;
-            setIsProcessing(true);
-            setProcessingCount(Math.max(1, chatProcessingCount));
-          } else if (!chatStillProcessing) {
-            isProcessingRef.current = false;
-            setIsProcessing(false);
-            setProcessingCount(chatProcessingCount);
-          }
-        })
-        .catch(async (error) => {
-          setStatus(error instanceof Error ? error.message : '批准失败');
-          try {
-            await refreshMessages();
-            await loadSessions();
-          } catch {
-            // The approval error itself is the useful user-facing status here.
-          }
-        });
-      return;
-    }
-    try {
-      const run = await rejectChatRunApproval(runId, 'Rejected from chat');
-      const refreshed = await refreshMessages();
-      await loadSessions();
-      const chatStillProcessing = Boolean(refreshed?.is_processing);
-      const chatProcessingCount = Math.max(0, Number(refreshed?.processing_count || 0));
-      const runStatus = normalizeRunStatus(run.status);
-      let delegatedSummary = { created: false, error: '', taskId: '', isProcessing: false, processingCount: 0 };
-      if (summarizeDelegatedRun && ['completed', 'failed', 'cancelled'].includes(runStatus)) {
-        delegatedSummary = await createDelegatedRunSummary(runId, delegatedRunSummaryOptions());
-      }
-      if (composerItemId && runStatus !== 'approval_required') {
-        setResolvedComposerApprovalIds((current) => (
-          current.includes(composerItemId) ? current : [...current.slice(-20), composerItemId]
-        ));
-      }
-      if (runStatus === 'processing' || runStatus === 'approval_required') {
-        setIsProcessing(true);
-        isProcessingRef.current = true;
-        setProcessingCount(Math.max(1, chatProcessingCount));
-        if (runStatus === 'approval_required') {
-          rememberRunApprovalDetails(run, fallbackApprovalDetails);
-          setStatus(nextApprovalStatusText(run));
-        } else {
-          forgetRunApprovalDetails(runId);
-          setStatus('已拒绝，等待整理结果...');
-          pollAgentRunInBackground(runId, { summarizeDelegatedRun });
-        }
-      } else {
-        forgetRunApprovalDetails(runId);
-        const { nextProcessing, nextProcessingCount } = chatRunCompletionProcessingState(
-          delegatedSummary,
-          chatStillProcessing,
-          chatProcessingCount,
-        );
-        setIsProcessing(nextProcessing);
-        isProcessingRef.current = nextProcessing;
-        setProcessingCount(nextProcessingCount);
-        setStatus(chatApprovalRejectionCompletionStatusText({
-          chatStillProcessing,
-          delegatedSummary,
-          runStatus,
-        }));
-      }
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : '处理审批失败');
-    } finally {
-      setApprovalActionMessageId('');
       focusComposerSoon();
     }
   }

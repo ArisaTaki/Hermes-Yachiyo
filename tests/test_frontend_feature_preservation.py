@@ -418,10 +418,19 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "apiPost<{",
             "`/ui/chat/groups/${encodeURIComponent(currentSessionId)}`",
             "'/ui/chat/groups'",
-            "approveChatRunApproval(runId)",
-            "rejectChatRunApproval(runId, 'Rejected from chat')",
+            "useChatRunApprovalActions({",
+            "resolveApprovalMessage,",
+            "resolveApprovalItem,",
             "openRunDetails(runId",
             "openWorkflowStudio(runnableId",
+        ],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/views/ChatView.tsx",
+        [
+            "approveChatRunApproval(runId)",
+            "rejectChatRunApproval(runId, 'Rejected from chat')",
+            "function resolveApprovalRun",
         ],
     )
     _assert_contains(
@@ -3404,9 +3413,7 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
             "setMessages(result.messages || []);",
             "setProcessingCount(nextProcessingCount);",
             "onCancelProcessing={() => void cancelProcessing()}",
-            "const approvalPromise = approveChatRunApproval(runId);",
-            "const run = await rejectChatRunApproval(runId, 'Rejected from chat');",
-            "pollAgentRunInBackground(runId, { summarizeDelegatedRun, ignoreInitialApprovalRequired: true });",
+            "useChatRunApprovalActions({",
             "onApprove={() => void resolveApprovalMessage(message, 'approve')}",
             "onReject={() => void resolveApprovalMessage(message, 'reject')}",
             "onApproveComposerApproval={() => {",
@@ -4363,12 +4370,8 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
             "useChatRunPolling({",
             "activePollIntervalMs: ACTIVE_POLL_INTERVAL_MS",
             "createDelegatedRunSummaryOptions: delegatedRunSummaryOptions",
-            "createDelegatedRunSummary(runId, delegatedRunSummaryOptions())",
+            "useChatRunApprovalActions({",
             "function delegatedRunSummaryOptions()",
-            "chatRunCompletionProcessingState(",
-            "chatApprovalRejectionCompletionStatusText({",
-            "let delegatedSummary = { created: false, error: '', taskId: '', isProcessing: false, processingCount: 0 };",
-            "delegatedSummary = await createDelegatedRunSummary(runId, delegatedRunSummaryOptions());",
             "MessageBubble",
         ],
     )
@@ -4450,6 +4453,22 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
     _assert_not_contains(
         "apps/frontend/src/features/yachiyo-chat/hooks/useChatRunPolling.ts",
         ["Agent Run 状态刷新失败"],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/hooks/useChatRunApprovalActions.ts",
+        [
+            "export function useChatRunApprovalActions",
+            "const resolveApprovalRun = useCallback",
+            "const approvalPromise = approveChatRunApproval(runId);",
+            "const run = await rejectChatRunApproval(runId, 'Rejected from chat');",
+            "pollAgentRunInBackground(runId, { summarizeDelegatedRun, ignoreInitialApprovalRequired: true });",
+            "let delegatedSummary = { created: false, error: '', taskId: '', isProcessing: false, processingCount: 0 };",
+            "delegatedSummary = await createDelegatedRunSummary(runId, createDelegatedRunSummaryOptions());",
+            "chatRunCompletionProcessingState(",
+            "chatApprovalRejectionCompletionStatusText({",
+            "resolveApprovalMessage",
+            "resolveApprovalItem",
+        ],
     )
     _assert_contains(
         "apps/frontend/src/features/yachiyo-chat/runSnapshots.ts",
