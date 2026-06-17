@@ -61,7 +61,12 @@ ACCEPTANCE_10_3_MATRIX: tuple[AcceptanceScenario, ...] = (
             (
                 "source",
                 "apps/frontend/src/views/ChatView.tsx",
-                ("MessageAgentTaskCard", "publicTaskSnapshotForMessage"),
+                ("MessageBubble", "publicTaskSnapshotForMessage"),
+            ),
+            (
+                "source",
+                "apps/frontend/src/features/yachiyo-chat/components/MessageBubble.tsx",
+                ("MessageAgentTaskCard", "onOpenStudio={onOpenRunDetails}"),
             ),
             (
                 "source",
@@ -334,8 +339,14 @@ def test_chat_daily_entry_acceptance_paths_are_guarded() -> None:
     _assert_contains(
         "apps/frontend/src/views/ChatView.tsx",
         [
-            "MessageAgentTaskCard",
+            "MessageBubble",
             "publicTaskSnapshotForMessage",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/MessageBubble.tsx",
+        [
+            "MessageAgentTaskCard",
             "onOpenStudio={onOpenRunDetails}",
         ],
     )

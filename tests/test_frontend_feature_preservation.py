@@ -416,10 +416,15 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "approvalId={composerApprovalItem.approvalId}",
             "itemId={composerApprovalItem.id}",
             "source={composerApprovalItem.source}",
-            "onClick={onApprove}",
-            "onClick={onReject}",
             "openRunDetails(runId",
             "openWorkflowStudio(runnableId",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/MessageBubble.tsx",
+        [
+            "onClick={onApprove}",
+            "onClick={onReject}",
         ],
     )
     _assert_contains(
@@ -764,7 +769,7 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
     _assert_contains(
         "apps/frontend/src/views/ChatView.tsx",
         [
-            "MessageAgentTaskCard",
+            "MessageBubble",
             "useYachiyoTaskActions",
             "useYachiyoTaskSnapshots",
             "from '../features/yachiyo-chat/taskSnapshots';",
@@ -774,6 +779,23 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "publicTaskSnapshotForMessage(message, agentTaskSnapshotsById)",
             "refreshYachiyoTasksForSession(payload.current_session_id)",
             "refreshYachiyoTaskById(resultRunId)",
+            "formatTime={formatShortTime}",
+            "onApproveTaskApproval={(task, approval) => void resolveYachiyoTaskApproval(task, approval, 'approve')}",
+            "onRejectTaskApproval={(task, approval) => void resolveYachiyoTaskApproval(task, approval, 'reject')}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/MessageBubble.tsx",
+        [
+            "export function MessageBubble",
+            "MessageAgentTaskCard",
+            "MessageApprovalRequestCard",
+            "AgentRunProgressCard",
+            "MessageActivityList",
+            "ImageAttachmentViewer",
+            "renderMarkdown(fencedCode(codeText, codeLanguage), message.id || '', copiedCodeBlockKey)",
+            "formatTime={formatTime}",
+            "messageMetaText(message, formatTime, message.status, message.created_at)",
             "onOpenStudio={onOpenRunDetails}",
             "onApproveApproval={onApproveTaskApproval}",
             "onRejectApproval={onRejectTaskApproval}",
@@ -817,6 +839,9 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
     _assert_not_contains(
         "apps/frontend/src/views/ChatView.tsx",
         [
+            "function MessageBubble",
+            "function TypingIndicator",
+            "function messageMetaText",
             "function agentTaskSnapshotFromMessage",
             "function publicTaskSnapshotForMessage",
             "function yachiyoTaskCacheKeys",
@@ -3030,6 +3055,12 @@ def test_chat_ui_exposes_stable_e2e_selectors_for_image_cancel_approval_flow() -
             "data-attachment-width={attachment.width || ''}",
             "data-attachment-height={attachment.height || ''}",
             "data-testid=\"chat-composer-attachment-remove\"",
+            "ComposerApprovalNotice",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/MessageBubble.tsx",
+        [
             "data-testid=\"chat-message-attachments\"",
             "testId=\"chat-message-attachment-item\"",
             "MessageApprovalRequestCard",
@@ -3042,7 +3073,6 @@ def test_chat_ui_exposes_stable_e2e_selectors_for_image_cancel_approval_flow() -
             "data-testid=\"chat-message-retry\"",
             "data-testid=\"chat-message-open-run-detail\"",
             'data-testid="chat-message-open-run-detail"\n              onClick={() => onOpenRunDetails(runId)}\n            >\n              Agent Studio',
-            "ComposerApprovalNotice",
         ],
     )
     _assert_contains(
@@ -3654,8 +3684,13 @@ def test_chat_approval_run_detail_handoff_preserves_route_and_replay_wiring() ->
             "function openWorkflowStudio(runnableId = '', suggestedGoal = '')",
             "openYachiyoWorkflowStudio(runnableId, suggestedGoal);",
             "onOpenRunDetails={openRunDetails}",
-            "onOpenDetails={() => onOpenRunDetails(runId)}",
             "onOpenDetails={() => openRunDetails(composerApprovalItem.runId)}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/MessageBubble.tsx",
+        [
+            "onOpenDetails={() => onOpenRunDetails(runId)}",
         ],
     )
     _assert_contains(
@@ -3783,6 +3818,12 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
             "chatApprovalRejectionCompletionStatusText({",
             "let delegatedSummary = { created: false, error: '', taskId: '', isProcessing: false, processingCount: 0 };",
             "delegatedSummary = await createDelegatedRunSummary(runId, delegatedRunSummaryOptions());",
+            "MessageBubble",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/MessageBubble.tsx",
+        [
             "MessageActivityList",
             "AgentRunProgressCard",
             'data-testid="chat-message-summary-status"',
@@ -3984,7 +4025,7 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
         ["运行详情"],
     )
     _assert_contains(
-        "apps/frontend/src/views/ChatView.tsx",
+        "apps/frontend/src/features/yachiyo-chat/components/MessageBubble.tsx",
         ["workflowStudioAction.label"],
     )
     _assert_contains(
