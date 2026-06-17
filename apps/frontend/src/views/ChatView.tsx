@@ -36,7 +36,6 @@ import {
   type RunApprovalDetailOverride,
 } from '../features/yachiyo-chat/approvalItems';
 import {
-  activityLabel,
   activityRunId,
   chatStatusLabel,
   compactStatusText,
@@ -53,6 +52,21 @@ import {
   taskHandoffMessageId,
 } from '../features/yachiyo-chat/messageState';
 import {
+  COMPOSER_HEIGHT_STORAGE_KEY,
+  COMPOSER_MAX_HEIGHT,
+  COMPOSER_MIN_HEIGHT,
+  attachmentHelpText,
+  canAttachImages,
+  clampComposerHeight,
+  formatShortTime,
+  formatTokenCount,
+  headerStatusText,
+  imageInputUnavailableText,
+  normalizedTokenCount,
+  sessionSideLabel,
+  storedComposerHeight,
+} from '../features/yachiyo-chat/displayState';
+import {
   chatApprovalRejectionCompletionStatusText,
   chatRunCompletionProcessingState,
 } from '../features/yachiyo-chat/runPolling';
@@ -68,10 +82,6 @@ import {
   type MentionOption,
 } from '../features/yachiyo-chat/mentions';
 import { codeBlockStateKey } from '../features/yachiyo-chat/markdown';
-import {
-  groupMemberCount,
-  normalizeSessionContext,
-} from '../features/yachiyo-chat/sessionState';
 import { deriveChatSessionState } from '../features/yachiyo-chat/sessionDerivedState';
 import { useYachiyoTaskActions } from '../features/yachiyo-chat/hooks/useYachiyoTaskActions';
 import { useChatRunPolling } from '../features/yachiyo-chat/hooks/useChatRunPolling';
@@ -84,7 +94,6 @@ import type {
   AgentTaskSnapshot,
   ApprovalCardSnapshot,
   AssistantProfilePayload,
-  ChatActivityEvent,
   ChatE2EImageDetail,
   ChatMessage,
   ChatNotice,
@@ -93,7 +102,6 @@ import type {
   MessagesPayload,
   PendingAttachment,
   RenderState,
-  SessionItem,
   SessionsPayload,
 } from '../features/yachiyo-chat/types';
 import logoUrl from '../../../../docs/open-design/logo.png';
@@ -157,9 +165,6 @@ const CHAT_SIDEBAR_MIN_WIDTH = 220;
 const CHAT_SIDEBAR_BASE_MAX_WIDTH = 280;
 const CHAT_SIDEBAR_WIDE_MAX_WIDTH = 360;
 const CHAT_WIDE_VIEWPORT_WIDTH = 1500;
-const COMPOSER_MIN_HEIGHT = 48;
-const COMPOSER_MAX_HEIGHT = 260;
-const COMPOSER_HEIGHT_STORAGE_KEY = 'oha.chat.composerHeight';
 const ASSISTANT_PROFILE_UPDATED_EVENT = 'oha-assistant-profile-updated';
 const CHAT_E2E_ADD_IMAGE_EVENT = 'oha-chat-e2e-add-image';
 
@@ -2133,101 +2138,6 @@ function ChatFullPageLoading({ avatarUrl, label }: { avatarUrl?: string; label: 
 function createClientMessageId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
-}
-
-function executorLabel(executor: ExecutorPayload | null) {
-  if (!executor?.available) return '未就绪';
-  if (executor.executor === 'NativeAgentExecutor') return 'Native Agent';
-  return executor.executor || '可用';
-}
-
-function canAttachImages(executor: ExecutorPayload | null) {
-  return executor?.available === true && executor.image_input?.can_attach_images === true;
-}
-
-function imageInputUnavailableText(executor: ExecutorPayload | null) {
-  return executor?.image_input?.reason
-    || '当前 Yachiyo vision 链路不可用。请在主控台切换支持图片的主模型，或单独设置图片识别模型后再发送。';
-}
-
-function attachmentHelpText(executor: ExecutorPayload | null) {
-  const imageInput = executor?.image_input;
-  if (!imageInput) return '添加附件（当前仅支持图片）';
-  if (imageInput.reason) return `附件不可用：${imageInput.reason}`;
-  return `${imageInput.label || '添加图片附件'}（当前仅支持图片）`;
-}
-
-function headerStatusText(
-  isProcessing: boolean,
-  headerActivity: ChatActivityEvent | null,
-  status: string,
-  executor: ExecutorPayload | null,
-  context: ChatSessionContext,
-) {
-  const base = isProcessing
-    ? (
-      status.includes('等待审批')
-        ? status
-        : headerActivity
-          ? `处理中 · ${compactStatusText(activityLabel(headerActivity))}`
-          : '处理中'
-    )
-    : status;
-  const normalized = normalizeSessionContext(context);
-  if (normalized.conversation_kind === 'agent') return `${base} · Agent`;
-  if (normalized.conversation_kind === 'workflow') {
-    const count = normalized.participants?.length || 0;
-    return count ? `${base} · Workflow 群组 · ${count} Agents` : `${base} · Workflow 群组`;
-  }
-  if (normalized.conversation_kind === 'group') {
-    const count = groupMemberCount(normalized);
-    return count ? `${base} · 群组 · ${count} 成员` : `${base} · 群组`;
-  }
-  if (normalized.conversation_kind === 'unassigned') return base;
-  return `${base} · ${executorLabel(executor)}`;
-}
-
-function sessionSideLabel(session: SessionItem) {
-  const approvalCount = Number(session.approval_count || 0);
-  if (approvalCount > 0) return approvalCount > 1 ? `待审批 ${approvalCount}` : '待审批';
-  return session.is_processing ? '处理中' : formatShortTime(session.updated_at || session.created_at);
-}
-
-function normalizedTokenCount(value?: number) {
-  const numeric = Number(value || 0);
-  return Number.isFinite(numeric) && numeric > 0 ? Math.round(numeric) : 0;
-}
-
-function formatTokenCount(value?: number) {
-  const count = normalizedTokenCount(value);
-  if (count >= 1_000_000) return `≈${formatCompactNumber(count / 1_000_000)}m tok`;
-  if (count >= 1_000) return `≈${formatCompactNumber(count / 1_000)}k tok`;
-  return `≈${count} tok`;
-}
-
-function formatCompactNumber(value: number) {
-  return value >= 10 ? Math.round(value).toString() : value.toFixed(1).replace(/\.0$/, '');
-}
-
-function formatShortTime(value?: string) {
-  if (!value) return '—';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleTimeString(undefined, {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
-function clampComposerHeight(value: number) {
-  return Math.max(COMPOSER_MIN_HEIGHT, Math.min(COMPOSER_MAX_HEIGHT, Math.round(value)));
-}
-
-function storedComposerHeight() {
-  if (typeof window === 'undefined') return COMPOSER_MIN_HEIGHT;
-  const stored = Number(window.localStorage.getItem(COMPOSER_HEIGHT_STORAGE_KEY));
-  if (!Number.isFinite(stored)) return COMPOSER_MIN_HEIGHT;
-  return clampComposerHeight(stored);
 }
 
 function isMessageTextSelectionActive(root: HTMLElement | null) {
