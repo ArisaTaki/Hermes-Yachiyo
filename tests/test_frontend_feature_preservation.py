@@ -379,7 +379,8 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "apiGet<MessagesPayload>(`/ui/chat/messages?",
             "apiGet<SessionsPayload>(`/ui/chat/sessions?",
             "apiPost<",
-            "'/ui/chat/messages'",
+            "sendLegacyChatMessage({",
+            "retryLegacyChatMessage(message.id)",
             "'/ui/chat/session/clear'",
             "'/ui/chat/session/delete'",
             "'/ui/chat/session/discard-empty'",
@@ -410,6 +411,16 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "rejectChatRunApproval(runId, 'Rejected from chat')",
             "openRunDetails(runId",
             "openWorkflowStudio(runnableId",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/api.ts",
+        [
+            "export type LegacyChatMessageResult",
+            "export async function sendLegacyChatMessage",
+            "return apiPost('/ui/chat/messages', request);",
+            "export async function retryLegacyChatMessage",
+            "return apiPost('/ui/chat/messages/retry', {",
         ],
     )
     _assert_contains(
@@ -663,6 +674,8 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "metadata.group_followup_for_task_ids",
             "function runnableResultRunId",
             "result.workflow_run_id ? 'Workflow' : 'Agent'",
+            "agent_run_id?: string;",
+            "workflow_run_id?: string;",
             "function messageRunStatus",
             "function messageRoleLabel",
             "message.metadata?.pending_approval",

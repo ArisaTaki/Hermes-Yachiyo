@@ -3,14 +3,45 @@ import type {
   AgentTaskSnapshot,
   ArtifactContentSnapshot,
   ChatRunnableCatalogSnapshot,
+  PendingAttachment,
   RunEventPageSnapshot,
   RunTimelineSnapshot,
   StartChatTaskRequest,
   YachiyoReadinessSnapshot,
 } from './types';
 
+export type LegacyChatMessageResult = {
+  ok?: boolean;
+  error?: string;
+  task_id?: string;
+  runnable_command?: boolean;
+  agent_run_id?: string;
+  workflow_run_id?: string;
+  run_id?: string;
+  run_status?: string;
+  status?: string;
+};
+
+export type SendLegacyChatMessageRequest = {
+  text: string;
+  attachments: PendingAttachment[];
+  client_message_id: string;
+};
+
 export async function getYachiyoReadiness(): Promise<YachiyoReadinessSnapshot> {
   return apiGet('/yachiyo/readiness');
+}
+
+export async function sendLegacyChatMessage(
+  request: SendLegacyChatMessageRequest,
+): Promise<LegacyChatMessageResult> {
+  return apiPost('/ui/chat/messages', request);
+}
+
+export async function retryLegacyChatMessage(messageId: string): Promise<LegacyChatMessageResult> {
+  return apiPost('/ui/chat/messages/retry', {
+    message_id: messageId,
+  });
 }
 
 export async function listYachiyoTasks(conversationId?: string): Promise<AgentTaskSnapshot[]> {

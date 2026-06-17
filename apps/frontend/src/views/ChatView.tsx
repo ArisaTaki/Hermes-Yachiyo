@@ -89,6 +89,10 @@ import { useYachiyoTaskSnapshots } from '../features/yachiyo-chat/hooks/useYachi
 import { useYachiyoTaskSubmit } from '../features/yachiyo-chat/hooks/useYachiyoTaskSubmit';
 import { approveChatRunApproval, rejectChatRunApproval } from '../features/yachiyo-chat/runSnapshots';
 import {
+  retryLegacyChatMessage,
+  sendLegacyChatMessage,
+} from '../features/yachiyo-chat/api';
+import {
   displayMessageText,
   shouldContinueTyping,
   syncRenderStates,
@@ -781,17 +785,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
           return;
         }
       }
-      const result = await apiPost<{
-        ok?: boolean;
-        error?: string;
-        task_id?: string;
-        runnable_command?: boolean;
-        agent_run_id?: string;
-        workflow_run_id?: string;
-        run_id?: string;
-        run_status?: string;
-        status?: string;
-      }>('/ui/chat/messages', {
+      const result = await sendLegacyChatMessage({
         text,
         attachments: outgoingAttachments,
         client_message_id: clientMessageId,
@@ -1277,19 +1271,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     setProcessingCount((current) => Math.max(1, current || 1));
     stickToBottomRef.current = true;
     try {
-      const result = await apiPost<{
-        ok?: boolean;
-        error?: string;
-        task_id?: string;
-        runnable_command?: boolean;
-        agent_run_id?: string;
-        workflow_run_id?: string;
-        run_id?: string;
-        run_status?: string;
-        status?: string;
-      }>('/ui/chat/messages/retry', {
-        message_id: message.id,
-      });
+      const result = await retryLegacyChatMessage(message.id);
       if (result.ok === false) throw new Error(result.error || '重试失败');
       if (result.runnable_command) {
         pendingReplyTaskIdRef.current = '';
