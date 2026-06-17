@@ -1424,7 +1424,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
           setStatus(nextApprovalStatusText(run));
         } else {
           forgetRunApprovalDetails(runId);
-          setStatus('已批准，Run 正在继续执行...');
+          setStatus('已拒绝，等待整理结果...');
           pollAgentRunInBackground(runId, { summarizeDelegatedRun });
         }
       } else {

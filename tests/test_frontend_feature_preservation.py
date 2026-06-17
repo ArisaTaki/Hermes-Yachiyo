@@ -750,6 +750,7 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "function yachiyoPublicTaskPrompt",
             "Run 已处理",
             "Run 失败",
+            "Run 正在继续执行",
             "Agent/Workflow 指令已处理",
             "function normalizeSessionContext",
             "function contextFromSession",
