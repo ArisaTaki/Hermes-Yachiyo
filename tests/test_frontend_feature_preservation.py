@@ -605,9 +605,26 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
         ],
     )
     _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/renderState.ts",
+        [
+            "export function syncRenderStates",
+            "export function displayMessageText",
+            "export function shouldContinueTyping",
+            "export function containsGroupDispatchPayload",
+            "messageRunStatus(message) === 'approval_required'",
+            "message.status === 'processing' && !isApprovalRequired ? '' : content",
+            "states.delete(message.id)",
+            "compact.includes('ohagroupdispatch')",
+            "compact.includes('nativegroupdispatch')",
+            "compact.includes('dispatchgroupagent')",
+            "compact.includes('runohaagent')",
+        ],
+    )
+    _assert_contains(
         "apps/frontend/src/views/ChatView.tsx",
         [
             "from '../features/yachiyo-chat/displayState';",
+            "from '../features/yachiyo-chat/renderState';",
             "import { deriveChatSessionState } from '../features/yachiyo-chat/sessionDerivedState';",
             "} = useMemo(() => deriveChatSessionState({",
             "selectedGroupAgentIds,",
@@ -670,6 +687,10 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "function formatShortTime",
             "function clampComposerHeight",
             "function storedComposerHeight",
+            "function syncRenderStates",
+            "function displayMessageText",
+            "function shouldContinueTyping",
+            "function containsGroupDispatchPayload",
             "const COMPOSER_MIN_HEIGHT =",
             "const COMPOSER_HEIGHT_STORAGE_KEY =",
             "type PendingAttachment =",
