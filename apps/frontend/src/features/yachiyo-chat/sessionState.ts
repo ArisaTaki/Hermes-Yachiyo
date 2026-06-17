@@ -7,21 +7,84 @@ import type {
   AssistantProfilePayload,
   ChatParticipant,
   ChatSessionContext,
+  PendingAttachment,
   SessionItem,
   SessionSearchMatch,
 } from './types';
+import type { AssistantProfileSeed } from '../../lib/assistantProfileSeed';
 
 export type YachiyoChatParticipant = ChatParticipant;
 export type YachiyoChatSessionContext = ChatSessionContext;
 export type YachiyoChatSessionSearchMatch = SessionSearchMatch;
 export type YachiyoChatSessionItem = SessionItem;
 export type YachiyoChatAssistantProfile = AssistantProfilePayload;
+export type YachiyoChatComposerDraft = {
+  input: string;
+  attachments: PendingAttachment[];
+};
+
+let cachedAssistantProfile: AssistantProfilePayload | null = null;
+let retainedComposerDraft: YachiyoChatComposerDraft = {
+  input: '',
+  attachments: [],
+};
 
 export type YachiyoChatRunnable = {
   id: string;
   name: string;
   nickname?: string;
 };
+
+export function retainedComposerDraftSnapshot(): YachiyoChatComposerDraft {
+  return {
+    input: retainedComposerDraft.input,
+    attachments: [...retainedComposerDraft.attachments],
+  };
+}
+
+export function retainComposerDraft(input: string, attachments: PendingAttachment[]) {
+  retainedComposerDraft = {
+    input,
+    attachments: [...attachments],
+  };
+}
+
+export function clearRetainedComposerDraft() {
+  retainComposerDraft('', []);
+}
+
+export function cachedAssistantProfileSnapshot(): AssistantProfilePayload | null {
+  return cachedAssistantProfile;
+}
+
+export function rememberAssistantProfile(profile: AssistantProfilePayload): AssistantProfilePayload {
+  cachedAssistantProfile = profile;
+  return profile;
+}
+
+export function profileFromSeed(seed: AssistantProfileSeed | null): AssistantProfilePayload | null {
+  if (!seed?.agent_avatar_url && !seed?.agent_name && !seed?.agent_nickname && !seed?.user_avatar_url) return null;
+  return {
+    agent_name: seed.agent_name,
+    agent_nickname: seed.agent_nickname,
+    agent_avatar_url: seed.agent_avatar_url,
+    user_avatar_url: seed.user_avatar_url,
+  };
+}
+
+export function mergeAssistantProfileSeed(
+  current: AssistantProfilePayload | null,
+  seed: AssistantProfilePayload,
+): AssistantProfilePayload {
+  return {
+    ...seed,
+    ...(current || {}),
+    agent_name: current?.agent_name || seed.agent_name,
+    agent_nickname: current?.agent_nickname || seed.agent_nickname,
+    agent_avatar_url: current?.agent_avatar_url || seed.agent_avatar_url,
+    user_avatar_url: current?.user_avatar_url || seed.user_avatar_url,
+  };
+}
 
 export function normalizeSessionContext(context?: YachiyoChatSessionContext | null): YachiyoChatSessionContext {
   const kind = context?.conversation_kind || 'main';

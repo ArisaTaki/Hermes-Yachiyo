@@ -3225,7 +3225,8 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
     _assert_contains(
         chat_view,
         [
-            "const [attachments, setAttachments] = useState<PendingAttachment[]>(() => [...retainedComposerDraft.attachments]);",
+            "const initialComposerDraft = retainedComposerDraftSnapshot();",
+            "const [attachments, setAttachments] = useState<PendingAttachment[]>(() => initialComposerDraft.attachments);",
             "const CHAT_E2E_ADD_IMAGE_EVENT = 'oha-chat-e2e-add-image';",
             "if (!import.meta.env.DEV) return undefined;",
             "window.addEventListener(CHAT_E2E_ADD_IMAGE_EVENT, handleE2EAddImage as EventListener);",
@@ -3268,6 +3269,28 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
             "if (composerApprovalItem) openRunDetails(composerApprovalItem.runId);",
             "onRevealComposerApproval={() => {",
             "if (composerApprovalItem) revealMessage(composerApprovalItem.messageId);",
+        ],
+    )
+    _assert_not_contains(
+        chat_view,
+        [
+            "let retainedComposerDraft",
+            "let cachedAssistantProfile",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/sessionState.ts",
+        [
+            "export type YachiyoChatComposerDraft",
+            "let retainedComposerDraft: YachiyoChatComposerDraft",
+            "export function retainedComposerDraftSnapshot()",
+            "export function retainComposerDraft(input: string, attachments: PendingAttachment[])",
+            "export function clearRetainedComposerDraft()",
+            "let cachedAssistantProfile: AssistantProfilePayload | null = null;",
+            "export function cachedAssistantProfileSnapshot()",
+            "export function rememberAssistantProfile(profile: AssistantProfilePayload)",
+            "export function profileFromSeed(seed: AssistantProfileSeed | null)",
+            "export function mergeAssistantProfileSeed(",
         ],
     )
     _assert_contains(

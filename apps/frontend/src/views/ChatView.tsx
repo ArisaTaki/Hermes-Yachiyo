@@ -81,6 +81,15 @@ import {
 } from '../features/yachiyo-chat/mentions';
 import { codeBlockStateKey } from '../features/yachiyo-chat/markdown';
 import { deriveChatSessionState } from '../features/yachiyo-chat/sessionDerivedState';
+import {
+  cachedAssistantProfileSnapshot,
+  clearRetainedComposerDraft,
+  mergeAssistantProfileSeed,
+  profileFromSeed,
+  rememberAssistantProfile,
+  retainedComposerDraftSnapshot,
+  retainComposerDraft,
+} from '../features/yachiyo-chat/sessionState';
 import { useYachiyoTaskActions } from '../features/yachiyo-chat/hooks/useYachiyoTaskActions';
 import { useChatRunPolling } from '../features/yachiyo-chat/hooks/useChatRunPolling';
 import { useYachiyoTaskSnapshots } from '../features/yachiyo-chat/hooks/useYachiyoTaskSnapshots';
@@ -121,51 +130,13 @@ import type {
   SessionsPayload,
 } from '../features/yachiyo-chat/types';
 import logoUrl from '../../../../docs/open-design/logo.png';
-import { type AssistantProfileSeed, useAssistantProfileSeed } from '../lib/assistantProfileSeed';
+import { useAssistantProfileSeed } from '../lib/assistantProfileSeed';
 import { apiGet, apiPatch, apiPost, bridgeUrl, canChooseChatImages, chooseChatImages, copyText, openAppView, openExternalUrl, restartDesktopBridge, type ChatImageSelection } from '../lib/bridge';
 import { ROUTE_CHANGE_EVENT, currentParam } from '../lib/view';
 
 type ChatViewProps = {
   embedded?: boolean;
 };
-
-let cachedAssistantProfile: AssistantProfilePayload | null = null;
-let retainedComposerDraft = {
-  input: '',
-  attachments: [] as PendingAttachment[],
-};
-
-function retainComposerDraft(input: string, attachments: PendingAttachment[]) {
-  retainedComposerDraft = {
-    input,
-    attachments: [...attachments],
-  };
-}
-
-function clearRetainedComposerDraft() {
-  retainComposerDraft('', []);
-}
-
-function profileFromSeed(seed: AssistantProfileSeed | null): AssistantProfilePayload | null {
-  if (!seed?.agent_avatar_url && !seed?.agent_name && !seed?.agent_nickname && !seed?.user_avatar_url) return null;
-  return {
-    agent_name: seed.agent_name,
-    agent_nickname: seed.agent_nickname,
-    agent_avatar_url: seed.agent_avatar_url,
-    user_avatar_url: seed.user_avatar_url,
-  };
-}
-
-function mergeAssistantProfileSeed(current: AssistantProfilePayload | null, seed: AssistantProfilePayload): AssistantProfilePayload {
-  return {
-    ...seed,
-    ...(current || {}),
-    agent_name: current?.agent_name || seed.agent_name,
-    agent_nickname: current?.agent_nickname || seed.agent_nickname,
-    agent_avatar_url: current?.agent_avatar_url || seed.agent_avatar_url,
-    user_avatar_url: current?.user_avatar_url || seed.user_avatar_url,
-  };
-}
 
 const ACTIVE_POLL_INTERVAL_MS = 500;
 const IDLE_POLL_INTERVAL_MS = 3000;
@@ -181,10 +152,12 @@ const CHAT_E2E_ADD_IMAGE_EVENT = 'oha-chat-e2e-add-image';
 
 export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const assistantProfileSeed = useAssistantProfileSeed();
+  const initialComposerDraft = retainedComposerDraftSnapshot();
+  const initialAssistantProfile = cachedAssistantProfileSnapshot() || profileFromSeed(assistantProfileSeed);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessionContext, setSessionContext] = useState<ChatSessionContext | null>(null);
-  const [input, setInput] = useState(() => retainedComposerDraft.input);
-  const [attachments, setAttachments] = useState<PendingAttachment[]>(() => [...retainedComposerDraft.attachments]);
+  const [input, setInput] = useState(() => initialComposerDraft.input);
+  const [attachments, setAttachments] = useState<PendingAttachment[]>(() => initialComposerDraft.attachments);
   const [status, setStatus] = useState('就绪');
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingCount, setProcessingCount] = useState(0);
@@ -193,8 +166,8 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const [conversationTokenCount, setConversationTokenCount] = useState(0);
   const [executor, setExecutor] = useState<ExecutorPayload | null>(null);
-  const [assistantProfile, setAssistantProfile] = useState<AssistantProfilePayload | null>(() => cachedAssistantProfile || profileFromSeed(assistantProfileSeed));
-  const [assistantProfileLoading, setAssistantProfileLoading] = useState(() => !(cachedAssistantProfile || profileFromSeed(assistantProfileSeed)));
+  const [assistantProfile, setAssistantProfile] = useState<AssistantProfilePayload | null>(() => initialAssistantProfile);
+  const [assistantProfileLoading, setAssistantProfileLoading] = useState(() => !initialAssistantProfile);
   const [notice, setNotice] = useState<ChatNotice | null>(null);
   const [sessionQuery, setSessionQuery] = useState('');
   const [debouncedSessionQuery, setDebouncedSessionQuery] = useState('');
@@ -473,10 +446,9 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     try {
       const profile = await apiGet<AssistantProfilePayload>('/assistant/profile');
       if (profile.ok === false) throw new Error('读取助手资料失败');
-      cachedAssistantProfile = profile;
-      setAssistantProfile(profile);
+      setAssistantProfile(rememberAssistantProfile(profile));
     } catch {
-      const fallback = cachedAssistantProfile || profileFromSeed(assistantProfileSeedRef.current);
+      const fallback = cachedAssistantProfileSnapshot() || profileFromSeed(assistantProfileSeedRef.current);
       setAssistantProfile(fallback);
     } finally {
       setAssistantProfileLoading(false);
@@ -489,8 +461,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     if (!seededProfile) return;
     setAssistantProfile((current) => {
       const merged = mergeAssistantProfileSeed(current, seededProfile);
-      cachedAssistantProfile = merged;
-      return merged;
+      return rememberAssistantProfile(merged);
     });
     setAssistantProfileLoading(false);
   }, [assistantProfileSeed]);
