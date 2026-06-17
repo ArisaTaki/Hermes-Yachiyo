@@ -11,15 +11,17 @@ import type {
   WorkflowSpec,
 } from '../types';
 import {
+  getRun as getLegacyCompatibleRun,
+  listRunGroups as listLegacyCompatibleRunGroups,
+  listRuns as listLegacyCompatibleRuns,
+} from '../../../lib/agents';
+import {
   getYachiyoAgentGroup,
   getYachiyoStudioAgent,
   getYachiyoWorkflow,
-  getYachiyoRunTimeline,
   listYachiyoFutureTasks,
   listYachiyoAgentGroups,
-  listYachiyoGroupRuns,
   listYachiyoMemories,
-  listYachiyoRunTimelines,
   listYachiyoSkillFolders,
   listYachiyoSkills,
   listYachiyoSkillSources,
@@ -28,7 +30,6 @@ import {
 } from '../../yachiyo-studio/api';
 import type { AgentGroupSnapshot } from '../../yachiyo-studio/types';
 import { publicAgentToAgentSpec } from './agents';
-import { publicGroupRunToRunGroupSpec, publicRunTimelineToStudioRunSpec } from './runs';
 import {
   publicSkillFolderToSkillFolderSpec,
   publicSkillSourceRootToSkillSourceRoot,
@@ -191,13 +192,13 @@ export function studioRunnablesForView(agents: AgentSpec[], workflows: WorkflowS
 }
 
 export async function listStudioRunsForView(): Promise<RunSpec[]> {
-  return (await listYachiyoRunTimelines()).map((snapshot) => publicRunTimelineToStudioRunSpec(snapshot));
+  return listLegacyCompatibleRuns() as Promise<RunSpec[]>;
 }
 
 export async function listStudioRunGroupsForView(): Promise<RunGroupSpec[]> {
-  return (await listYachiyoGroupRuns()).map(publicGroupRunToRunGroupSpec);
+  return listLegacyCompatibleRunGroups() as Promise<RunGroupSpec[]>;
 }
 
 export async function getStudioRunForView(runId: string): Promise<RunSpec> {
-  return publicRunTimelineToStudioRunSpec(await getYachiyoRunTimeline(runId));
+  return getLegacyCompatibleRun(runId) as Promise<RunSpec>;
 }

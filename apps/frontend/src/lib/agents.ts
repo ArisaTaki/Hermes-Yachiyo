@@ -9,6 +9,7 @@ import type {
 } from '../features/runtime-shared/types';
 import {
   publicGroupRunToRunGroupSpec,
+  publicRunTimelineToRunSpec,
   publicRunTimelineToStudioRunSpec,
 } from '../features/agent-studio/utils/runs';
 
@@ -559,7 +560,7 @@ function runGroupSpecFromPublicGroupRun(snapshot: YachiyoGroupRunSnapshot): RunG
 }
 
 function runSpecFromPublicTimelineSnapshot(snapshot: YachiyoRunTimelineSnapshot): RunSpec {
-  return publicRunTimelineToStudioRunSpec(snapshot);
+  return publicRunTimelineToRunSpec(snapshot);
 }
 
 function futureTaskTriggerResultFromPublicSnapshot(

@@ -594,25 +594,40 @@ function waitFor(win, predicate, label, timeout = 18000) {
 async function waitForApproval(win, label) {
   await waitFor(win, () => {
     const card = document.querySelector('[data-testid="chat-message-approval-card"]');
+    const taskCard = document.querySelector('[data-testid="yachiyo-agent-task-card"]');
     const actions = document.querySelector('[data-testid="chat-message-approval-actions"]');
     const composer = document.querySelector('[data-testid="chat-composer-approval-notice"]');
     const approve = document.querySelector('[data-testid="chat-message-approval-approve"]');
     const reject = document.querySelector('[data-testid="chat-message-approval-reject"]');
     const openRun = document.querySelector('[data-testid="chat-message-approval-open-run-detail"]');
+    const taskApprovalOpenRun = document.querySelector('[data-testid="yachiyo-task-approval-open-studio"]');
     const composerApprove = document.querySelector('[data-testid="chat-composer-approval-approve"]');
     const composerReject = document.querySelector('[data-testid="chat-composer-approval-reject"]');
     const composerOpenRun = document.querySelector('[data-testid="chat-composer-approval-open-run-detail"]');
+    const visibleApproval = (
+      (
+        card?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
+        && card?.getAttribute('data-approval-id') === ${JSON.stringify(APPROVAL_ID)}
+        && card?.getAttribute('data-approval-tool') === 'terminal.run'
+        && card.textContent.includes(${JSON.stringify(APPROVAL_COMMAND)})
+        && openRun?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
+        && openRun?.getAttribute('data-run-status') === 'approval_required'
+        && openRun.textContent.includes('Agent Studio')
+      )
+      || (
+        taskCard?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
+        && taskCard?.textContent.includes(${JSON.stringify(APPROVAL_COMMAND)})
+        && taskApprovalOpenRun?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
+        && taskApprovalOpenRun.textContent.includes('Studio')
+      )
+    );
     return document.querySelector('textarea.chat-input')
-      && card?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
-      && card?.getAttribute('data-approval-id') === ${JSON.stringify(APPROVAL_ID)}
-      && card?.getAttribute('data-approval-tool') === 'terminal.run'
-      && card.textContent.includes(${JSON.stringify(APPROVAL_COMMAND)})
+      && visibleApproval
       && actions?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
+      && actions?.getAttribute('data-approval-id') === ${JSON.stringify(APPROVAL_ID)}
+      && actions?.getAttribute('data-approval-tool') === 'terminal.run'
       && approve
       && reject
-      && openRun?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
-      && openRun?.getAttribute('data-run-status') === 'approval_required'
-      && openRun.textContent.includes('Agent Studio')
       && composer?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
       && composer?.getAttribute('data-run-status') === 'approval_required'
       && composer?.getAttribute('data-approval-id') === ${JSON.stringify(APPROVAL_ID)}
@@ -714,7 +729,7 @@ async function main() {
   await win.loadURL(chatUrl);
   console.log('[electron-smoke] chat loaded for message approval');
   await waitForApproval(win, 'message approval card and composer notice');
-  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-message-approval-open-run-detail\\"]').click()", true);
+  await win.webContents.executeJavaScript('(document.querySelector("[data-testid=chat-message-approval-open-run-detail]") || document.querySelector("[data-testid=yachiyo-task-approval-open-studio]") || document.querySelector("[data-testid=yachiyo-agent-task-open-studio]")).click()', true);
   await waitForRunDetailHandoff(win, 'message approval Run Detail handoff');
   console.log('[electron-smoke] message approval opened Run Detail');
   await win.loadURL(chatUrl);

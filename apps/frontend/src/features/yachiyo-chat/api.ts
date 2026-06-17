@@ -192,6 +192,10 @@ export async function getYachiyoChatRunTaskSnapshot(runId: string): Promise<Agen
   return getYachiyoTask(runId);
 }
 
+export async function getLegacyChatRunSnapshot(runId: string): Promise<RunTimelineSnapshot> {
+  return apiGet(`/ui/runs/${encodeURIComponent(runId)}`);
+}
+
 export async function approveYachiyoChatRunApproval(runId: string): Promise<AgentTaskSnapshot> {
   return approveYachiyoTask(runId);
 }
@@ -201,6 +205,17 @@ export async function rejectYachiyoChatRunApproval(
   reason = '',
 ): Promise<AgentTaskSnapshot> {
   return rejectYachiyoTask(runId, undefined, reason);
+}
+
+export async function approveLegacyChatRunApproval(runId: string): Promise<RunTimelineSnapshot> {
+  return apiPost(`/ui/runs/${encodeURIComponent(runId)}/approval/approve`, {});
+}
+
+export async function rejectLegacyChatRunApproval(
+  runId: string,
+  reason = '',
+): Promise<RunTimelineSnapshot> {
+  return apiPost(`/ui/runs/${encodeURIComponent(runId)}/approval/reject`, reason ? { reason } : {});
 }
 
 export async function approveYachiyoTask(

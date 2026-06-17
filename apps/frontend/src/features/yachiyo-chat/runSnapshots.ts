@@ -1,7 +1,10 @@
 import {
+  approveLegacyChatRunApproval,
   approveYachiyoChatRunApproval,
+  getLegacyChatRunSnapshot,
   getYachiyoChatRunTaskSnapshot,
   getYachiyoTaskTimeline,
+  rejectLegacyChatRunApproval,
   rejectYachiyoChatRunApproval,
 } from './api';
 import type { ChatApprovalPending, ChatApprovalRun } from './approvalItems';
@@ -12,19 +15,31 @@ export async function getChatRunSnapshot(runId: string): Promise<ChatApprovalRun
   try {
     return chatRunSnapshotFromTimeline(await getYachiyoTaskTimeline(runId));
   } catch {
-    return chatRunSnapshotFromTaskSnapshot(await getYachiyoChatRunTaskSnapshot(runId));
+    try {
+      return chatRunSnapshotFromTaskSnapshot(await getYachiyoChatRunTaskSnapshot(runId));
+    } catch {
+      return chatRunSnapshotFromTimeline(await getLegacyChatRunSnapshot(runId));
+    }
   }
 }
 
 export async function approveChatRunApproval(runId: string): Promise<ChatApprovalRun> {
-  return chatRunSnapshotFromTaskSnapshot(await approveYachiyoChatRunApproval(runId));
+  try {
+    return chatRunSnapshotFromTaskSnapshot(await approveYachiyoChatRunApproval(runId));
+  } catch {
+    return chatRunSnapshotFromTimeline(await approveLegacyChatRunApproval(runId));
+  }
 }
 
 export async function rejectChatRunApproval(
   runId: string,
   reason = '',
 ): Promise<ChatApprovalRun> {
-  return chatRunSnapshotFromTaskSnapshot(await rejectYachiyoChatRunApproval(runId, reason));
+  try {
+    return chatRunSnapshotFromTaskSnapshot(await rejectYachiyoChatRunApproval(runId, reason));
+  } catch {
+    return chatRunSnapshotFromTimeline(await rejectLegacyChatRunApproval(runId, reason));
+  }
 }
 
 export function chatRunSnapshotFromTaskSnapshot(snapshot: AgentTaskSnapshot): ChatApprovalRun {

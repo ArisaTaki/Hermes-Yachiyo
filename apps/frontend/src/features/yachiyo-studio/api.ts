@@ -52,50 +52,78 @@ export type YachiyoSkillInstallResponse = {
 };
 
 export async function listYachiyoStudioAgents(): Promise<AgentDefinitionSnapshot[]> {
-  const payload = await apiGet<{ agents?: AgentDefinitionSnapshot[] }>('/yachiyo/studio/agents');
+  const payload = await apiGet<{ agents?: AgentDefinitionSnapshot[] }>('/yachiyo/studio/agents').catch(() => (
+    apiGet<{ agents?: AgentDefinitionSnapshot[] }>('/ui/agents')
+  ));
   return payload.agents || [];
 }
 
 export async function getYachiyoStudioAgent(agentId: string): Promise<AgentDefinitionSnapshot> {
-  return apiGet(`/yachiyo/studio/agents/${encodeURIComponent(agentId)}`);
+  const publicPath = `/yachiyo/studio/agents/${encodeURIComponent(agentId)}`;
+  const legacyPath = `/ui/agents/${encodeURIComponent(agentId)}`;
+  return apiGet<AgentDefinitionSnapshot>(publicPath).catch(() => (
+    apiGet<AgentDefinitionSnapshot>(legacyPath)
+  ));
 }
 
 export async function saveYachiyoStudioAgent(
   request: Partial<AgentDefinitionSnapshot>,
 ): Promise<AgentDefinitionSnapshot> {
   const agentId = String(request.agent_id || '').trim();
-  if (agentId) return apiPatch(`/yachiyo/studio/agents/${encodeURIComponent(agentId)}`, request);
-  return apiPost('/yachiyo/studio/agents', request);
+  if (agentId) {
+    const encodedAgentId = encodeURIComponent(agentId);
+    return apiPatch<AgentDefinitionSnapshot>(`/yachiyo/studio/agents/${encodedAgentId}`, request).catch(() => (
+      apiPatch<AgentDefinitionSnapshot>(`/ui/agents/${encodedAgentId}`, request)
+    ));
+  }
+  return apiPost<AgentDefinitionSnapshot>('/yachiyo/studio/agents', request).catch(() => (
+    apiPost<AgentDefinitionSnapshot>('/ui/agents', request)
+  ));
 }
 
 export async function deleteYachiyoStudioAgent(agentId: string): Promise<{ ok?: boolean }> {
-  return apiDelete(`/yachiyo/studio/agents/${encodeURIComponent(agentId)}`);
+  const encodedAgentId = encodeURIComponent(agentId);
+  return apiDelete(`/yachiyo/studio/agents/${encodedAgentId}`).catch(() => (
+    apiDelete(`/ui/agents/${encodedAgentId}`)
+  ));
 }
 
 export async function testYachiyoStudioAgentModel(
   agentId: string,
 ): Promise<{ ok?: boolean; message?: string; missing?: string[] }> {
-  return apiPost(`/yachiyo/studio/agents/${encodeURIComponent(agentId)}/test-model`, {});
+  const encodedAgentId = encodeURIComponent(agentId);
+  return apiPost<{ ok?: boolean; message?: string; missing?: string[] }>(`/yachiyo/studio/agents/${encodedAgentId}/test-model`, {}).catch(() => (
+    apiPost<{ ok?: boolean; message?: string; missing?: string[] }>(`/ui/agents/${encodedAgentId}/test-model`, {})
+  ));
 }
 
 export async function attachYachiyoAgentSkill(
   agentId: string,
   skillId: string,
 ): Promise<AgentDefinitionSnapshot> {
-  return apiPost(`/yachiyo/studio/agents/${encodeURIComponent(agentId)}/skills`, {
+  const encodedAgentId = encodeURIComponent(agentId);
+  return apiPost<AgentDefinitionSnapshot>(`/yachiyo/studio/agents/${encodedAgentId}/skills`, {
     skill_id: skillId,
-  });
+  }).catch(() => (
+    apiPost<AgentDefinitionSnapshot>(`/ui/agents/${encodedAgentId}/skills`, { skill_id: skillId })
+  ));
 }
 
 export async function detachYachiyoAgentSkill(
   agentId: string,
   skillId: string,
 ): Promise<AgentDefinitionSnapshot> {
-  return apiDelete(`/yachiyo/studio/agents/${encodeURIComponent(agentId)}/skills/${encodeURIComponent(skillId)}`);
+  const encodedAgentId = encodeURIComponent(agentId);
+  const encodedSkillId = encodeURIComponent(skillId);
+  return apiDelete<AgentDefinitionSnapshot>(`/yachiyo/studio/agents/${encodedAgentId}/skills/${encodedSkillId}`).catch(() => (
+    apiDelete<AgentDefinitionSnapshot>(`/ui/agents/${encodedAgentId}/skills/${encodedSkillId}`)
+  ));
 }
 
 export async function listYachiyoSkills(): Promise<SkillSnapshot[]> {
-  const payload = await apiGet<{ skills?: SkillSnapshot[] }>('/yachiyo/studio/skills');
+  const payload = await apiGet<{ skills?: SkillSnapshot[] }>('/yachiyo/studio/skills').catch(() => (
+    apiGet<{ skills?: SkillSnapshot[] }>('/ui/skills')
+  ));
   return payload.skills || [];
 }
 
@@ -103,29 +131,42 @@ export async function updateYachiyoSkill(
   skillId: string,
   request: Partial<SkillSnapshot>,
 ): Promise<SkillSnapshot> {
-  return apiPatch(`/yachiyo/studio/skills/${encodeURIComponent(skillId)}`, request);
+  const encodedSkillId = encodeURIComponent(skillId);
+  return apiPatch<SkillSnapshot>(`/yachiyo/studio/skills/${encodedSkillId}`, request).catch(() => (
+    apiPatch<SkillSnapshot>(`/ui/skills/${encodedSkillId}`, request)
+  ));
 }
 
 export async function deleteYachiyoSkill(skillId: string): Promise<{ ok?: boolean }> {
-  return apiDelete(`/yachiyo/studio/skills/${encodeURIComponent(skillId)}`);
+  const encodedSkillId = encodeURIComponent(skillId);
+  return apiDelete(`/yachiyo/studio/skills/${encodedSkillId}`).catch(() => (
+    apiDelete(`/ui/skills/${encodedSkillId}`)
+  ));
 }
 
 export async function listYachiyoSkillFolders(): Promise<SkillFolderSnapshot[]> {
-  const payload = await apiGet<{ folders?: SkillFolderSnapshot[] }>('/yachiyo/studio/skill-folders');
+  const payload = await apiGet<{ folders?: SkillFolderSnapshot[] }>('/yachiyo/studio/skill-folders').catch(() => (
+    apiGet<{ folders?: SkillFolderSnapshot[] }>('/ui/skill-folders')
+  ));
   return payload.folders || [];
 }
 
 export async function createYachiyoSkillFolder(
   request: Partial<SkillFolderSnapshot>,
 ): Promise<SkillFolderSnapshot> {
-  return apiPost('/yachiyo/studio/skill-folders', request);
+  return apiPost<SkillFolderSnapshot>('/yachiyo/studio/skill-folders', request).catch(() => (
+    apiPost<SkillFolderSnapshot>('/ui/skill-folders', request)
+  ));
 }
 
 export async function updateYachiyoSkillFolder(
   folderId: string,
   request: Partial<SkillFolderSnapshot>,
 ): Promise<SkillFolderSnapshot> {
-  return apiPatch(`/yachiyo/studio/skill-folders/${encodeURIComponent(folderId)}`, request);
+  const encodedFolderId = encodeURIComponent(folderId);
+  return apiPatch<SkillFolderSnapshot>(`/yachiyo/studio/skill-folders/${encodedFolderId}`, request).catch(() => (
+    apiPatch<SkillFolderSnapshot>(`/ui/skill-folders/${encodedFolderId}`, request)
+  ));
 }
 
 export async function deleteYachiyoSkillFolder(
@@ -133,11 +174,16 @@ export async function deleteYachiyoSkillFolder(
   options: { deleteSkills?: boolean } = {},
 ): Promise<{ ok?: boolean; deleted_skill_count?: number }> {
   const query = options.deleteSkills ? '?delete_skills=true' : '';
-  return apiDelete(`/yachiyo/studio/skill-folders/${encodeURIComponent(folderId)}${query}`);
+  const encodedFolderId = encodeURIComponent(folderId);
+  return apiDelete(`/yachiyo/studio/skill-folders/${encodedFolderId}${query}`).catch(() => (
+    apiDelete(`/ui/skill-folders/${encodedFolderId}${query}`)
+  ));
 }
 
 export async function listYachiyoSkillSources(): Promise<SkillSourceRootSnapshot[]> {
-  const payload = await apiGet<{ roots?: SkillSourceRootSnapshot[] }>('/yachiyo/studio/skills/sources');
+  const payload = await apiGet<{ roots?: SkillSourceRootSnapshot[] }>('/yachiyo/studio/skills/sources').catch(() => (
+    apiGet<{ roots?: SkillSourceRootSnapshot[] }>('/ui/skills/sources')
+  ));
   return payload.roots || [];
 }
 
@@ -145,24 +191,32 @@ export async function importYachiyoSkill(
   sourcePath: string,
   folderId?: string,
 ): Promise<SkillSnapshot> {
-  return apiPost('/yachiyo/studio/skills/import', {
+  const body = {
     source_path: sourcePath,
     folder_id: folderId || undefined,
-  });
+  };
+  return apiPost<SkillSnapshot>('/yachiyo/studio/skills/import', body).catch(() => (
+    apiPost<SkillSnapshot>('/ui/skills/import', body)
+  ));
 }
 
 export async function syncYachiyoNativeSkills(): Promise<YachiyoSkillSyncResponse> {
-  return apiPost('/yachiyo/studio/skills/sync', {});
+  return apiPost('/yachiyo/studio/skills/sync', {}).catch(() => (
+    apiPost('/ui/skills/sync', {})
+  ));
 }
 
 export async function installYachiyoSkillCommand(
   command: string,
   folderId?: string,
 ): Promise<YachiyoSkillInstallResponse> {
-  return apiPost('/yachiyo/studio/skills/install', {
+  const body = {
     command,
     folder_id: folderId || undefined,
-  });
+  };
+  return apiPost('/yachiyo/studio/skills/install', body).catch(() => (
+    apiPost('/ui/skills/install', body)
+  ));
 }
 
 export async function listYachiyoMemories(
@@ -173,21 +227,28 @@ export async function listYachiyoMemories(
     include_deleted: String(includeDeleted),
     limit: String(Math.max(1, Math.min(500, limit))),
   });
-  const payload = await apiGet<{ memories?: MemorySnapshot[] }>(`/yachiyo/studio/memories?${query.toString()}`);
+  const payload = await apiGet<{ memories?: MemorySnapshot[] }>(`/yachiyo/studio/memories?${query.toString()}`).catch(() => (
+    apiGet<{ memories?: MemorySnapshot[] }>('/ui/memories').catch(() => ({ memories: [] }))
+  ));
   return payload.memories || [];
 }
 
 export async function createYachiyoMemory(
   request: Partial<MemorySnapshot>,
 ): Promise<MemorySnapshot> {
-  return apiPost('/yachiyo/studio/memories', request);
+  return apiPost<MemorySnapshot>('/yachiyo/studio/memories', request).catch(() => (
+    apiPost<MemorySnapshot>('/ui/memories', request)
+  ));
 }
 
 export async function updateYachiyoMemory(
   memoryId: string,
   request: Partial<MemorySnapshot> & { old_content?: string },
 ): Promise<MemorySnapshot> {
-  return apiPatch(`/yachiyo/studio/memories/${encodeURIComponent(memoryId)}`, request);
+  const encodedMemoryId = encodeURIComponent(memoryId);
+  return apiPatch<MemorySnapshot>(`/yachiyo/studio/memories/${encodedMemoryId}`, request).catch(() => (
+    apiPatch<MemorySnapshot>(`/ui/memories/${encodedMemoryId}`, request)
+  ));
 }
 
 export async function deleteYachiyoMemory(
@@ -195,7 +256,10 @@ export async function deleteYachiyoMemory(
   reason = '',
 ): Promise<{ ok?: boolean }> {
   const query = reason ? `?reason=${encodeURIComponent(reason)}` : '';
-  return apiDelete(`/yachiyo/studio/memories/${encodeURIComponent(memoryId)}${query}`);
+  const encodedMemoryId = encodeURIComponent(memoryId);
+  return apiDelete(`/yachiyo/studio/memories/${encodedMemoryId}${query}`).catch(() => (
+    apiDelete(`/ui/memories/${encodedMemoryId}${query}`)
+  ));
 }
 
 export async function listYachiyoFutureTasks(
@@ -206,7 +270,9 @@ export async function listYachiyoFutureTasks(
     include_finished: String(includeFinished),
     limit: String(Math.max(1, Math.min(500, limit))),
   });
-  const payload = await apiGet<{ future_tasks?: FutureTaskSnapshot[] }>(`/yachiyo/studio/future-tasks?${query.toString()}`);
+  const payload = await apiGet<{ future_tasks?: FutureTaskSnapshot[] }>(`/yachiyo/studio/future-tasks?${query.toString()}`).catch(() => (
+    apiGet<{ future_tasks?: FutureTaskSnapshot[] }>('/ui/future-tasks').catch(() => ({ future_tasks: [] }))
+  ));
   return payload.future_tasks || [];
 }
 
@@ -214,16 +280,21 @@ export async function cancelYachiyoFutureTask(
   futureTaskId: string,
   reason = '',
 ): Promise<{ ok?: boolean; future_task?: FutureTaskSnapshot }> {
+  const encodedTaskId = encodeURIComponent(futureTaskId);
   return apiPost(
-    `/yachiyo/studio/future-tasks/${encodeURIComponent(futureTaskId)}/cancel`,
+    `/yachiyo/studio/future-tasks/${encodedTaskId}/cancel`,
     reason ? { reason } : {},
-  );
+  ).catch(() => (
+    apiPost(`/ui/future-tasks/${encodedTaskId}/cancel`, reason ? { reason } : {})
+  ));
 }
 
 export async function triggerDueYachiyoFutureTasks(
   limit = 20,
 ): Promise<{ ok?: boolean; triggered?: FutureTaskTriggerResultSnapshot[] }> {
-  return apiPost('/yachiyo/studio/future-tasks/trigger-due', { limit });
+  return apiPost('/yachiyo/studio/future-tasks/trigger-due', { limit }).catch(() => (
+    apiPost('/ui/future-tasks/trigger-due', { limit })
+  ));
 }
 
 export async function listYachiyoAgentGroups(): Promise<AgentGroupSnapshot[]> {
@@ -279,29 +350,48 @@ export async function listYachiyoGroupRunEvents(
 }
 
 export async function getYachiyoRunTimeline(runId: string): Promise<YachiyoRunTimelineSnapshot> {
-  return apiGet(`/yachiyo/studio/runs/${encodeURIComponent(runId)}/timeline`);
+  const publicPath = `/yachiyo/studio/runs/${encodeURIComponent(runId)}/timeline`;
+  const legacyPath = `/ui/runs/${encodeURIComponent(runId)}`;
+  return apiGet<YachiyoRunTimelineSnapshot>(publicPath).catch(() => (
+    apiGet<YachiyoRunTimelineSnapshot>(legacyPath)
+  ));
 }
 
 export async function listYachiyoWorkflows(): Promise<WorkflowSnapshot[]> {
-  const payload = await apiGet<{ workflows?: WorkflowSnapshot[] }>('/yachiyo/studio/workflows');
+  const payload = await apiGet<{ workflows?: WorkflowSnapshot[] }>('/yachiyo/studio/workflows').catch(() => (
+    apiGet<{ workflows?: WorkflowSnapshot[] }>('/ui/workflows')
+  ));
   return payload.workflows || [];
 }
 
 export async function getYachiyoWorkflow(workflowId: string): Promise<WorkflowSnapshot> {
-  return apiGet(`/yachiyo/studio/workflows/${encodeURIComponent(workflowId)}`);
+  const publicPath = `/yachiyo/studio/workflows/${encodeURIComponent(workflowId)}`;
+  const legacyPath = `/ui/workflows/${encodeURIComponent(workflowId)}`;
+  return apiGet<WorkflowSnapshot>(publicPath).catch(() => (
+    apiGet<WorkflowSnapshot>(legacyPath)
+  ));
 }
 
 export async function saveYachiyoWorkflow(
   request: Partial<WorkflowSnapshot>,
 ): Promise<WorkflowSnapshot> {
   const workflowId = String(request.workflow_id || '').trim();
-  if (workflowId) return apiPatch(`/yachiyo/studio/workflows/${encodeURIComponent(workflowId)}`, request);
-  return apiPost('/yachiyo/studio/workflows', request);
+  if (workflowId) {
+    const encodedWorkflowId = encodeURIComponent(workflowId);
+    return apiPatch<WorkflowSnapshot>(`/yachiyo/studio/workflows/${encodedWorkflowId}`, request).catch(() => (
+      apiPatch<WorkflowSnapshot>(`/ui/workflows/${encodedWorkflowId}`, request)
+    ));
+  }
+  return apiPost<WorkflowSnapshot>('/yachiyo/studio/workflows', request).catch(() => (
+    apiPost<WorkflowSnapshot>('/ui/workflows', request)
+  ));
 }
 
 export async function listYachiyoRunTimelines(limit = 50): Promise<YachiyoRunTimelineSnapshot[]> {
   const query = new URLSearchParams({ limit: String(Math.max(1, Math.min(200, limit))) });
-  const payload = await apiGet<{ runs?: YachiyoRunTimelineSnapshot[] }>(`/yachiyo/studio/runs?${query.toString()}`);
+  const payload = await apiGet<{ runs?: YachiyoRunTimelineSnapshot[] }>(`/yachiyo/studio/runs?${query.toString()}`).catch(() => (
+    apiGet<{ runs?: YachiyoRunTimelineSnapshot[] }>('/ui/runs')
+  ));
   return payload.runs || [];
 }
 
@@ -327,7 +417,11 @@ export async function listYachiyoRunEvents(
     after_sequence: String(Math.max(0, afterSequence)),
     limit: String(Math.max(1, limit)),
   });
-  return apiGet(`/yachiyo/studio/runs/${encodeURIComponent(runId)}/events?${query.toString()}`);
+  const publicPath = `/yachiyo/studio/runs/${encodeURIComponent(runId)}/events?${query.toString()}`;
+  const legacyPath = `/ui/runs/${encodeURIComponent(runId)}/events?${query.toString()}`;
+  return apiGet<YachiyoRunEventsPage>(publicPath).catch(() => (
+    apiGet<YachiyoRunEventsPage>(legacyPath)
+  ));
 }
 
 export async function readYachiyoRunArtifact(
@@ -335,38 +429,58 @@ export async function readYachiyoRunArtifact(
   path: string,
 ): Promise<YachiyoRunArtifactPayload> {
   const encodedPath = path.split('/').map((part) => encodeURIComponent(part)).join('/');
-  return apiGet(`/yachiyo/studio/runs/${encodeURIComponent(runId)}/artifacts/${encodedPath}`);
+  const publicPath = `/yachiyo/studio/runs/${encodeURIComponent(runId)}/artifacts/${encodedPath}`;
+  const legacyPath = `/ui/runs/${encodeURIComponent(runId)}/artifacts/${encodedPath}`;
+  return apiGet<YachiyoRunArtifactPayload>(publicPath).catch(() => (
+    apiGet<YachiyoRunArtifactPayload>(legacyPath)
+  ));
 }
 
 export async function rerunYachiyoRun(
   runId: string,
   request: RerunRunRequest = {},
 ): Promise<YachiyoRunTimelineSnapshot> {
-  return apiPost(`/yachiyo/studio/runs/${encodeURIComponent(runId)}/rerun`, request);
+  const publicPath = `/yachiyo/studio/runs/${encodeURIComponent(runId)}/rerun`;
+  const legacyPath = `/ui/runs/${encodeURIComponent(runId)}/rerun`;
+  return apiPost<YachiyoRunTimelineSnapshot>(publicPath, request).catch(() => (
+    apiPost<YachiyoRunTimelineSnapshot>(legacyPath, request)
+  ));
 }
 
 export async function cancelYachiyoRun(runId: string): Promise<YachiyoRunTimelineSnapshot> {
-  return apiPost(`/yachiyo/studio/runs/${encodeURIComponent(runId)}/cancel`, {});
+  const encodedRunId = encodeURIComponent(runId);
+  return apiPost<YachiyoRunTimelineSnapshot>(`/yachiyo/studio/runs/${encodedRunId}/cancel`, {}).catch(() => (
+    apiPost<YachiyoRunTimelineSnapshot>(`/ui/runs/${encodedRunId}/cancel`, {})
+  ));
 }
 
 export async function deleteYachiyoRun(
   runId: string,
 ): Promise<{ ok?: boolean; deleted_run_ids?: string[]; deleted_run_count?: number }> {
-  return apiDelete(`/yachiyo/studio/runs/${encodeURIComponent(runId)}`);
+  const encodedRunId = encodeURIComponent(runId);
+  return apiDelete(`/yachiyo/studio/runs/${encodedRunId}`).catch(() => (
+    apiDelete(`/ui/runs/${encodedRunId}`)
+  ));
 }
 
 export async function approveYachiyoRunApproval(runId: string): Promise<YachiyoRunTimelineSnapshot> {
-  return apiPost(`/yachiyo/studio/runs/${encodeURIComponent(runId)}/approval/approve`, {});
+  const encodedRunId = encodeURIComponent(runId);
+  return apiPost<YachiyoRunTimelineSnapshot>(`/yachiyo/studio/runs/${encodedRunId}/approval/approve`, {}).catch(() => (
+    apiPost<YachiyoRunTimelineSnapshot>(`/ui/runs/${encodedRunId}/approval/approve`, {})
+  ));
 }
 
 export async function rejectYachiyoRunApproval(
   runId: string,
   reason = '',
 ): Promise<YachiyoRunTimelineSnapshot> {
-  return apiPost(
-    `/yachiyo/studio/runs/${encodeURIComponent(runId)}/approval/reject`,
+  const encodedRunId = encodeURIComponent(runId);
+  return apiPost<YachiyoRunTimelineSnapshot>(
+    `/yachiyo/studio/runs/${encodedRunId}/approval/reject`,
     reason ? { reason } : {},
-  );
+  ).catch(() => (
+    apiPost<YachiyoRunTimelineSnapshot>(`/ui/runs/${encodedRunId}/approval/reject`, reason ? { reason } : {})
+  ));
 }
 
 export async function startYachiyoWorkflowRun(
@@ -383,7 +497,10 @@ export async function startYachiyoWorkflowRun(
 }
 
 export async function deleteYachiyoWorkflow(workflowId: string): Promise<{ ok?: boolean }> {
-  return apiDelete(`/yachiyo/studio/workflows/${encodeURIComponent(workflowId)}`);
+  const encodedWorkflowId = encodeURIComponent(workflowId);
+  return apiDelete(`/yachiyo/studio/workflows/${encodedWorkflowId}`).catch(() => (
+    apiDelete(`/ui/workflows/${encodedWorkflowId}`)
+  ));
 }
 
 function createClientRunId() {

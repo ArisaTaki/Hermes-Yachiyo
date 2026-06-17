@@ -192,6 +192,18 @@ async function startMockBridge() {
         sendJson(response, 200, { agents: [systemAgent, agent] });
         return;
       }
+      if (
+        request.method === 'GET'
+        && (
+          url.pathname === `/yachiyo/studio/agents/${encodeURIComponent(SYSTEM_AGENT_ID)}`
+          || url.pathname === `/ui/agents/${encodeURIComponent(SYSTEM_AGENT_ID)}`
+          || url.pathname === `/yachiyo/studio/agents/${SYSTEM_AGENT_ID}`
+          || url.pathname === `/ui/agents/${SYSTEM_AGENT_ID}`
+        )
+      ) {
+        sendJson(response, 200, systemAgent);
+        return;
+      }
       if (url.pathname.includes(encodeURIComponent(SYSTEM_AGENT_ID)) || url.pathname.includes(SYSTEM_AGENT_ID)) {
         systemMutationRequests.push({ method: request.method, path: url.pathname });
         sendJson(response, 403, { ok: false, error: 'system agent is read-only' });

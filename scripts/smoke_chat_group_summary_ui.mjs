@@ -694,6 +694,18 @@ async function startMockBridge() {
         sendJson(response, 200, eventPage(GROUP_SUMMARY_RUN_ID, groupSummaryRunEvents(), afterSequence, limit));
         return;
       }
+      if (request.method === 'GET' && url.pathname === `/yachiyo/tasks/${GROUP_AGENT_TASK_ID}/events`) {
+        const afterSequence = Number(url.searchParams.get('after_sequence') || '0');
+        const limit = Math.max(1, Number(url.searchParams.get('limit') || '200'));
+        sendJson(response, 200, eventPage(GROUP_AGENT_RUN_ID, groupAgentRunEvents(), afterSequence, limit));
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === `/yachiyo/tasks/${SUMMARY_TASK_ID}/events`) {
+        const afterSequence = Number(url.searchParams.get('after_sequence') || '0');
+        const limit = Math.max(1, Number(url.searchParams.get('limit') || '200'));
+        sendJson(response, 200, eventPage(GROUP_SUMMARY_RUN_ID, groupSummaryRunEvents(), afterSequence, limit));
+        return;
+      }
       if (request.method === 'GET' && url.pathname === '/ui/chat/sessions') {
         sendJson(response, 200, sessionsPayload());
         return;
@@ -1113,6 +1125,10 @@ async function main() {
   \`, true);
   await waitFor(win, () => !document.querySelector('[data-testid="chat-composer-send"]')?.disabled, 'enabled group follow-up send');
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-composer-send\\"]').click()", true);
+  await loadChat(win, {
+    session_id: ${JSON.stringify(GROUP_SESSION_ID)},
+    conversation_kind: 'group',
+  });
   await waitFor(win, () => {
     const followup = document.querySelector('[data-testid="chat-message-followup-status"]');
     return followup
