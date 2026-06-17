@@ -4,12 +4,11 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { AgentDefinitionsTab } from '../features/agent-studio/components/AgentDefinitionsTab';
 import { AgentGroupPanel } from '../features/agent-studio/components/AgentGroupPanel';
 import { AgentStudioChrome } from '../features/agent-studio/components/AgentStudioChrome';
+import { AgentStudioRunsTab } from '../features/agent-studio/components/AgentStudioRunsTab';
 import { RuntimeMemoryPanel } from '../features/agent-studio/components/RuntimeMemoryPanel';
-import { RunManagementTab } from '../features/agent-studio/components/RunManagementTab';
 import { SkillFolderPanel } from '../features/agent-studio/components/SkillFolderPanel';
 import { SkillLibraryTab } from '../features/agent-studio/components/SkillLibraryTab';
 import { WorkflowEditorPanel } from '../features/agent-studio/components/WorkflowEditorPanel';
-import { WorkflowRunPreview } from '../features/agent-studio/components/WorkflowRunPreview';
 import { useAgentAvatarActions } from '../features/agent-studio/hooks/useAgentAvatarActions';
 import { useAgentDeletionActions } from '../features/agent-studio/hooks/useAgentDeletionActions';
 import { useAgentDefinitions } from '../features/agent-studio/hooks/useAgentDefinitions';
@@ -58,25 +57,10 @@ import { useWorkflowSaveActions } from '../features/agent-studio/hooks/useWorkfl
 import { useWorkflowCanvasActions } from '../features/agent-studio/hooks/useWorkflowCanvasActions';
 import {
   agentCapabilityLine,
-  runnableCapabilityLine,
-  runnableOptionLabel,
 } from '../features/agent-studio/utils/agents';
 import {
   formatRunDate,
-  isActiveRunStatus,
-  normalizeRunStatus,
-  runHistoryGroupSummary,
-  runKindLabel,
-  runStatusLabel,
-  runStatusTone,
 } from '../features/agent-studio/utils/runs';
-import {
-  skippedWorkflowArtifactLabel,
-  workflowRunArtifactForStep,
-  workflowStepArtifacts,
-  workflowStepKindLabel,
-  workflowStepSummary,
-} from '../features/agent-studio/utils/workflow';
 import { openAppView } from '../lib/bridge';
 
 export function AgentStudioView() {
@@ -1009,16 +993,15 @@ export function AgentStudioView() {
       ) : null}
 
       {!loading && tab === 'runs' ? (
-        <RunManagementTab
+        <AgentStudioRunsTab
+          agents={agents}
+          agentIssueById={agentRunIssueById}
           allHistoryRunsSelected={allHistoryRunsSelected}
           artifactPreview={artifactPreview}
           busy={busy}
           collapsedRunHistoryGroups={collapsedRunHistoryGroups}
           filteredRunIds={filteredRunIds}
           filteredRuns={filteredRuns}
-          formatRunDate={formatRunDate}
-          isActiveRunStatus={isActiveRunStatus}
-          normalizeRunStatus={normalizeRunStatus}
           onApproveRunById={approveRunById}
           onApproveSelectedRun={approveSelectedRun}
           onCancelRunById={cancelRunById}
@@ -1050,24 +1033,18 @@ export function AgentStudioView() {
           runById={runById}
           runFilterCounts={runFilterCounts}
           runGoal={runGoal}
-          runHistoryGroupSummary={runHistoryGroupSummary}
           runHistoryGroups={runHistoryGroups}
           runHistoryManagementMode={runHistoryManagementMode}
           runKindFilter={runKindFilter}
-          runKindLabel={runKindLabel}
           runSearchActive={runSearchActive}
           runSearchQuery={runSearchQuery}
           runStatusFilter={runStatusFilter}
           runStatusFilterCounts={runStatusFilterCounts}
           runStatusFilteredRuns={runStatusFilteredRuns}
-          runStatusLabel={runStatusLabel}
-          runStatusTone={runStatusTone}
           runTarget={runTarget}
           runTargetDisabledReason={runTargetDisabledReason}
           runTargetWorkflowErrors={selectedRunTargetWorkflowValidation.errors}
           runnables={runnables}
-          runnableCapabilityLine={runnableCapabilityLine}
-          runnableOptionLabel={runnableOptionLabel}
           selectedHistoryRunCount={selectedHistoryRuns.length}
           selectedGroupRunReplayError={selectedGroupRunReplayError}
           selectedGroupRunReplayEvents={selectedGroupRunReplayEvents}
@@ -1094,6 +1071,8 @@ export function AgentStudioView() {
           selectedRunRerunDisabledReason={selectedRunRerunDisabledReason}
           selectedRunRerunTarget={selectedRunRerunTarget}
           selectedRunTarget={selectedRunTarget}
+          selectedRunTargetWorkflowNodes={selectedRunTargetWorkflowNodes}
+          selectedRunTargetWorkflowPreviewSteps={selectedRunTargetWorkflowPreviewSteps}
           selectedRunWorkflow={selectedRunWorkflow}
           selectedWorkflowApprovalChildRun={selectedWorkflowApprovalChildRun}
           selectedWorkflowApprovalChildRunId={selectedWorkflowApprovalChildRunId}
@@ -1101,20 +1080,6 @@ export function AgentStudioView() {
           selectedWorkflowParentRun={selectedWorkflowParentRun}
           selectedWorkflowParentRunId={selectedWorkflowParentRunId}
           selectedWorkflowSteps={selectedWorkflowSteps}
-          skippedWorkflowArtifactLabel={skippedWorkflowArtifactLabel}
-          workflowPreview={selectedRunTarget?.kind === 'workflow' ? (
-            <WorkflowRunPreview
-              agents={agents}
-              agentCapabilityLine={agentCapabilityLine}
-              agentIssueById={agentRunIssueById}
-              sourceNodes={selectedRunTargetWorkflowNodes}
-              steps={selectedRunTargetWorkflowPreviewSteps}
-            />
-          ) : null}
-          workflowRunArtifactForStep={workflowRunArtifactForStep}
-          workflowStepArtifacts={workflowStepArtifacts}
-          workflowStepKindLabel={workflowStepKindLabel}
-          workflowStepSummary={workflowStepSummary}
         />
       ) : null}
 

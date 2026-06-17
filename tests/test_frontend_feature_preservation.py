@@ -1894,7 +1894,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "useRunListDerivedState({",
             "useRunTargetReadiness({",
             "useWorkflowDefinitions",
-            "RunManagementTab",
+            "AgentStudioRunsTab",
             "useWorkflowRunReadiness({",
             "selectedGroupRunSnapshot={selectedGroupRunSnapshot}",
             "selectedPublicRunTimeline={selectedPublicRunTimeline}",
@@ -2463,9 +2463,22 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
     _assert_contains(
         "apps/frontend/src/views/AgentStudioView.tsx",
         [
-            "RunManagementTab",
+            "AgentStudioRunsTab",
             "onCreateRun={() => void runAction(createRunFromTarget, '创建 Run')}",
             "onRerunSelectedRun={rerunSelectedRun}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/AgentStudioRunsTab.tsx",
+        [
+            "export function AgentStudioRunsTab",
+            "RunManagementTab",
+            "WorkflowRunPreview",
+            "workflowPreview={workflowPreview}",
+            "runnableCapabilityLine={runnableCapabilityLine}",
+            "runnableOptionLabel={runnableOptionLabel}",
+            "workflowRunArtifactForStep={workflowRunArtifactForStep}",
+            "workflowStepSummary={workflowStepSummary}",
         ],
     )
     _assert_contains(
@@ -4491,7 +4504,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "onRunWorkflow={() => void runAction(runCurrentWorkflow, '保存并运行 Workflow')}",
             "onPrepareSelectedRunRerun={prepareSelectedRunRerun}",
             "onRerunSelectedRun={rerunSelectedRun}",
-            "RunManagementTab",
+            "AgentStudioRunsTab",
             "selectedWorkflowApprovalChildRunId",
             "selectedAgentReadOnly",
             "selectedAgentDeletable",
