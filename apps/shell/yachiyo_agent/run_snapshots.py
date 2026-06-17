@@ -9,7 +9,7 @@ from apps.shell.agent.runtime.events import redact_secrets
 
 from .approval_event_snapshots import (
     approval_snapshots_from_events as _approval_snapshots_from_events,
-    merge_approval_snapshots as _merge_approval_snapshots,
+    merge_approval_snapshot_lists as _merge_approval_snapshot_lists,
 )
 from .approvals import approval_cards_from_payloads
 from .artifact_event_snapshots import (
@@ -214,7 +214,7 @@ class RunSnapshotProjector:
                 group_run_id=group_run_id,
             )
             if approvals:
-                return _merge_approvals(
+                return _merge_approval_snapshot_lists(
                     approvals,
                     self.approvals_from_events(events or [], group_run_id=group_run_id),
                 )
@@ -330,22 +330,6 @@ def memory_trace_snapshots_from_events(events: list[PublicRunEvent]) -> list[Mem
 
 def skill_trace_snapshots_from_events(events: list[PublicRunEvent]) -> list[SkillTraceSnapshot]:
     return _skill_trace_snapshots_from_events(events)
-
-
-def _merge_approvals(*approval_lists):
-    by_key = {}
-    ordered_keys = []
-    for approvals in approval_lists:
-        for approval in approvals or []:
-            key = approval.approval_id or approval.run_id or approval.title
-            if not key:
-                continue
-            if key not in by_key:
-                by_key[key] = approval
-                ordered_keys.append(key)
-            else:
-                by_key[key] = _merge_approval_snapshots(by_key[key], approval)
-    return [by_key[key] for key in ordered_keys]
 
 
 def _task_status(value: Any) -> str:

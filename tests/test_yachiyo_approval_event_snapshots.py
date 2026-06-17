@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
-from apps.shell.yachiyo_agent.approval_event_snapshots import approval_snapshots_from_events
-from apps.shell.yachiyo_agent.contracts import PublicRunEvent
+from apps.shell.yachiyo_agent.approval_event_snapshots import (
+    approval_snapshots_from_events,
+    merge_approval_snapshot_lists,
+)
+from apps.shell.yachiyo_agent.approvals import approval_card_from_payload
+from apps.shell.yachiyo_agent.contracts import ApprovalCardSnapshot, PublicRunEvent
 
 
 def test_approval_event_mapper_merges_pending_and_resolution_events() -> None:
@@ -106,3 +110,46 @@ def test_approval_event_mapper_projects_workflow_group_context() -> None:
         "workflow_node_id": "review",
         "workflow_node_label": "Review Gate",
     }
+
+
+def test_merge_approval_snapshot_lists_preserves_order_and_fills_resolution() -> None:
+    pending = approval_card_from_payload(
+        {
+            "approval_id": "approval-1",
+            "tool": "terminal.run",
+            "input_preview": {"command": "npm test"},
+            "created_at": "2026-06-15T00:00:00Z",
+        },
+        run_id="run-1",
+    )
+    resolved = approval_card_from_payload(
+        {
+            "approval_id": "approval-1",
+            "tool": "terminal.run",
+            "status": "approved",
+            "resolved_at": "2026-06-15T00:00:01Z",
+        },
+        run_id="run-1",
+    )
+    second = approval_card_from_payload(
+        {"approval_id": "approval-2", "tool": "workspace.write"},
+        run_id="run-1",
+    )
+
+    merged = merge_approval_snapshot_lists([pending, second], [resolved])
+
+    assert [approval.approval_id for approval in merged] == ["approval-1", "approval-2"]
+    assert merged[0].status == "approved"
+    assert merged[0].requested_at == "2026-06-15T00:00:00Z"
+    assert merged[0].resolved_at == "2026-06-15T00:00:01Z"
+    assert merged[0].input_preview == {"command": "npm test"}
+
+
+def test_merge_approval_snapshot_lists_skips_empty_identity_snapshots() -> None:
+    anonymous = ApprovalCardSnapshot(
+        approval_id="",
+        title="",
+        status="pending",
+    )
+
+    assert merge_approval_snapshot_lists([anonymous]) == []

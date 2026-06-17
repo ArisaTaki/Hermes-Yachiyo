@@ -801,6 +801,7 @@ def test_runtime_core_split_acceptance_paths_are_guarded() -> None:
             "def approval_snapshots_from_events",
             "def approval_payload_from_event",
             "def merge_approval_snapshots",
+            "def merge_approval_snapshot_lists",
             "merge_trace_context_into_approval",
             "_AMBIGUOUS_APPROVAL_INDEX",
             "event.sensitivity == \"secret\"",

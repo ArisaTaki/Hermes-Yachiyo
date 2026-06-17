@@ -163,6 +163,24 @@ def merge_approval_snapshots(
     )
 
 
+def merge_approval_snapshot_lists(
+    *approval_lists: list[ApprovalCardSnapshot],
+) -> list[ApprovalCardSnapshot]:
+    by_key = {}
+    ordered_keys = []
+    for approvals in approval_lists:
+        for approval in approvals or []:
+            key = approval.approval_id or approval.run_id or approval.title
+            if not key:
+                continue
+            if key not in by_key:
+                by_key[key] = approval
+                ordered_keys.append(key)
+            else:
+                by_key[key] = merge_approval_snapshots(by_key[key], approval)
+    return [by_key[key] for key in ordered_keys]
+
+
 def _approval_required_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
     payload = dict(event.payload)
     pending = payload.get("pending_approval") or payload.get("approval")
