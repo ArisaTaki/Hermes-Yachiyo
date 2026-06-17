@@ -661,6 +661,9 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "export const COMPOSER_HEIGHT_STORAGE_KEY = 'oha.chat.composerHeight';",
             "export function canAttachImages",
             "export function imageInputUnavailableText",
+            "export function imageInputBlockedNoticeText",
+            "if (isSending) return '正在发送中，稍后再添加图片';",
+            "return `一次最多附加 ${maxAttachments} 张图片`;",
             "export function attachmentHelpText",
             "export function headerStatusText",
             "export function sessionSideLabel",
@@ -785,6 +788,7 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "deleteTargetLabel(activeSessionContext)",
             "function canAttachImages",
             "function imageInputUnavailableText",
+            "function imageInputBlockedNoticeText",
             "function attachmentHelpText",
             "function headerStatusText",
             "function sessionSideLabel",
@@ -3275,9 +3279,8 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
             "const imageAttachDisabled = isSending || !canAttachImages(executor) || attachments.length >= MAX_ATTACHMENTS;",
             "if (imageAttachDisabled) {",
             "if (isSending || !canAttachImages(executor)) {",
-            "function imageInputBlockedNoticeText()",
-            "if (isSending) return '正在发送中，稍后再添加图片';",
-            "const detail = imageInputBlockedNoticeText();",
+            "const detail = imageInputBlockedNoticeText({",
+            "attachmentCount: attachments.length,",
             "setStatus(detail);",
             "const files = Array.from(event.target.files || []);",
             "event.target.value = '';",
@@ -3305,6 +3308,12 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
             "if (composerApprovalItem) openRunDetails(composerApprovalItem.runId);",
             "onRevealComposerApproval={() => {",
             "if (composerApprovalItem) revealMessage(composerApprovalItem.messageId);",
+        ],
+    )
+    _assert_not_contains(
+        chat_view,
+        [
+            "function imageInputBlockedNoticeText()",
         ],
     )
     _assert_not_contains(

@@ -63,7 +63,7 @@ import {
   formatShortTime,
   formatTokenCount,
   headerStatusText,
-  imageInputUnavailableText,
+  imageInputBlockedNoticeText,
   normalizedTokenCount,
   sessionSideLabel,
   storedComposerHeight,
@@ -1576,14 +1576,13 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     noticeTimerRef.current = window.setTimeout(() => setNotice(null), 5200);
   }
 
-  function imageInputBlockedNoticeText() {
-    if (isSending) return '正在发送中，稍后再添加图片';
-    if (attachments.length >= MAX_ATTACHMENTS) return `一次最多附加 ${MAX_ATTACHMENTS} 张图片`;
-    return imageInputUnavailableText(executor);
-  }
-
   function showImageInputBlocked() {
-    const detail = imageInputBlockedNoticeText();
+    const detail = imageInputBlockedNoticeText({
+      attachmentCount: attachments.length,
+      executor,
+      isSending,
+      maxAttachments: MAX_ATTACHMENTS,
+    });
     showNotice('当前不能发送图片', detail, 'warn');
     setStatus(detail);
   }

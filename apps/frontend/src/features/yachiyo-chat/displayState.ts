@@ -32,6 +32,22 @@ export function imageInputUnavailableText(executor: ExecutorPayload | null) {
     || '当前 Yachiyo vision 链路不可用。请在主控台切换支持图片的主模型，或单独设置图片识别模型后再发送。';
 }
 
+export function imageInputBlockedNoticeText({
+  attachmentCount,
+  executor,
+  isSending,
+  maxAttachments,
+}: {
+  attachmentCount: number;
+  executor: ExecutorPayload | null;
+  isSending: boolean;
+  maxAttachments: number;
+}) {
+  if (isSending) return '正在发送中，稍后再添加图片';
+  if (attachmentCount >= maxAttachments) return `一次最多附加 ${maxAttachments} 张图片`;
+  return imageInputUnavailableText(executor);
+}
+
 export function attachmentHelpText(executor: ExecutorPayload | null) {
   const imageInput = executor?.image_input;
   if (!imageInput) return '添加附件（当前仅支持图片）';
