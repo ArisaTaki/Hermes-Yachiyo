@@ -385,8 +385,7 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "'/ui/chat/session/delete'",
             "'/ui/chat/session/discard-empty'",
             "'/ui/chat/sessions/load'",
-            "const [routeTaskId, setRouteTaskId] = useState(() => currentParam('task_id').trim());",
-            "setRouteTaskId(currentParam('task_id').trim());",
+            "useChatRouteHandoffParams()",
             "const requestedTaskId = routeTaskId;",
             "const messageId = taskHandoffMessageId(messagePayload.messages, requestedTaskId);",
             "client_message_id",
@@ -742,6 +741,7 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "from '../features/yachiyo-chat/hooks/useChatCopyFeedback';",
             "from '../features/yachiyo-chat/hooks/useChatExecutor';",
             "from '../features/yachiyo-chat/hooks/useChatNotice';",
+            "from '../features/yachiyo-chat/hooks/useChatRouteHandoffParams';",
             "from '../features/yachiyo-chat/hooks/useLegacyChatRunnableResult';",
             "from '../features/yachiyo-chat/hooks/useChatRunnables';",
             "import { deriveChatSessionState } from '../features/yachiyo-chat/sessionDerivedState';",
@@ -793,6 +793,11 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "assistantProfileSeedRef",
             "ASSISTANT_PROFILE_UPDATED_EVENT",
             "apiGet<AssistantProfilePayload>('/assistant/profile')",
+            "setRouteSessionId",
+            "setRouteTaskId",
+            "currentParam('task_id')",
+            "currentParam('session_id')",
+            "ROUTE_CHANGE_EVENT",
             "result.workflow_run_id ? 'Workflow' : 'Agent'",
             "result.runnable_command",
             "legacyChatRunnableResult(result)",
@@ -3426,6 +3431,18 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
             "mergeAssistantProfileSeed(current, seededProfile)",
             "window.addEventListener(ASSISTANT_PROFILE_UPDATED_EVENT, refreshProfile)",
             "window.removeEventListener(ASSISTANT_PROFILE_UPDATED_EVENT, refreshProfile)",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/hooks/useChatRouteHandoffParams.ts",
+        [
+            "export function useChatRouteHandoffParams",
+            "routeSessionId: currentParam('session_id').trim()",
+            "routeTaskId: currentParam('task_id').trim()",
+            "window.addEventListener('hashchange', syncRouteChatHandoffParams)",
+            "window.addEventListener('popstate', syncRouteChatHandoffParams)",
+            "window.addEventListener(ROUTE_CHANGE_EVENT, syncRouteChatHandoffParams)",
+            "window.removeEventListener(ROUTE_CHANGE_EVENT, syncRouteChatHandoffParams)",
         ],
     )
     _assert_not_contains(

@@ -96,6 +96,7 @@ import { useChatAssistantProfile } from '../features/yachiyo-chat/hooks/useChatA
 import { useChatCopyFeedback } from '../features/yachiyo-chat/hooks/useChatCopyFeedback';
 import { useChatExecutor } from '../features/yachiyo-chat/hooks/useChatExecutor';
 import { useChatNotice } from '../features/yachiyo-chat/hooks/useChatNotice';
+import { useChatRouteHandoffParams } from '../features/yachiyo-chat/hooks/useChatRouteHandoffParams';
 import { useChatRunPolling } from '../features/yachiyo-chat/hooks/useChatRunPolling';
 import { useChatRunnables } from '../features/yachiyo-chat/hooks/useChatRunnables';
 import { useLegacyChatRunnableResult } from '../features/yachiyo-chat/hooks/useLegacyChatRunnableResult';
@@ -132,7 +133,6 @@ import type {
   SessionsPayload,
 } from '../features/yachiyo-chat/types';
 import { apiGet, apiPatch, apiPost, bridgeUrl, canChooseChatImages, chooseChatImages, copyText, openAppView, openExternalUrl, restartDesktopBridge, type ChatImageSelection } from '../lib/bridge';
-import { ROUTE_CHANGE_EVENT, currentParam } from '../lib/view';
 
 type ChatViewProps = {
   embedded?: boolean;
@@ -164,8 +164,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const { assistantProfile, assistantProfileLoading, refreshAssistantProfile } = useChatAssistantProfile();
   const [sessionQuery, setSessionQuery] = useState('');
   const [debouncedSessionQuery, setDebouncedSessionQuery] = useState('');
-  const [routeSessionId, setRouteSessionId] = useState(() => currentParam('session_id').trim());
-  const [routeTaskId, setRouteTaskId] = useState(() => currentParam('task_id').trim());
+  const { routeSessionId, routeTaskId } = useChatRouteHandoffParams();
   const [sessionIdDialogOpen, setSessionIdDialogOpen] = useState(false);
   const [sessionIdCopyError, setSessionIdCopyError] = useState('');
   const [retryingMessageId, setRetryingMessageId] = useState('');
@@ -432,22 +431,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     }, 180);
     return () => window.clearTimeout(timer);
   }, [sessionQuery]);
-
-  useEffect(() => {
-    const syncRouteChatHandoffParams = () => {
-      setRouteSessionId(currentParam('session_id').trim());
-      setRouteTaskId(currentParam('task_id').trim());
-    };
-    window.addEventListener('hashchange', syncRouteChatHandoffParams);
-    window.addEventListener('popstate', syncRouteChatHandoffParams);
-    window.addEventListener(ROUTE_CHANGE_EVENT, syncRouteChatHandoffParams);
-    syncRouteChatHandoffParams();
-    return () => {
-      window.removeEventListener('hashchange', syncRouteChatHandoffParams);
-      window.removeEventListener('popstate', syncRouteChatHandoffParams);
-      window.removeEventListener(ROUTE_CHANGE_EVENT, syncRouteChatHandoffParams);
-    };
-  }, []);
 
   useEffect(() => {
     const requestedSessionId = routeSessionId;
