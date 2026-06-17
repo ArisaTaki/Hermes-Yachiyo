@@ -730,13 +730,21 @@ def test_runtime_core_split_acceptance_paths_are_guarded() -> None:
         ],
     )
     _assert_contains(
-        "apps/shell/yachiyo_agent/run_snapshots.py",
+        "apps/shell/yachiyo_agent/tool_call_snapshots.py",
         [
             "redact_run_event_payload",
             "redact_secrets",
-            "def tool_call_from_payload",
+            "def tool_call_snapshot_from_payload",
             "return _redacted_tool_call_snapshot(payload)",
             "def _tool_output_preview",
+        ],
+    )
+    _assert_contains(
+        "apps/shell/yachiyo_agent/run_snapshots.py",
+        [
+            "tool_call_snapshots_from_payloads as _tool_call_snapshots_from_payloads",
+            "return _tool_call_snapshots_from_payloads(payloads, run_id=run_id, events=events)",
+            "return _tool_call_snapshots_from_events(events)",
         ],
     )
     _assert_contains(
