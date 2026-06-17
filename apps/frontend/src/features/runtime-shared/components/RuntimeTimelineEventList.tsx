@@ -319,16 +319,34 @@ function runtimeEventTraceContext(
   event: RuntimeTimelineEventRecord,
   payload: RuntimeTimelineEventRecord,
 ): RuntimeTimelineTraceContext {
+  const approvalContext = runtimeEventNestedRecord(payload, 'pending_approval')
+    || runtimeEventNestedRecord(payload, 'approval')
+    || {};
   return {
-    groupId: runtimeEventString(event, payload, 'group_id'),
-    groupRunId: runtimeEventString(event, payload, 'group_run_id')
-      || runtimeEventString(event, payload, 'run_group_id'),
-    memberAgentId: runtimeEventString(event, payload, 'member_agent_id'),
-    memberAgentName: runtimeEventString(event, payload, 'member_agent_name'),
-    workflowId: runtimeEventString(event, payload, 'workflow_id'),
-    workflowNodeId: runtimeEventString(event, payload, 'workflow_node_id'),
-    workflowNodeLabel: runtimeEventString(event, payload, 'workflow_node_label'),
-    workflowRunId: runtimeEventString(event, payload, 'workflow_run_id'),
+    groupId: runtimeEventTraceString(event, payload, approvalContext, 'group_id'),
+    groupRunId: runtimeEventTraceString(event, payload, approvalContext, 'group_run_id', 'run_group_id'),
+    memberAgentId: runtimeEventTraceString(
+      event,
+      payload,
+      approvalContext,
+      'member_agent_id',
+      'source_runnable_id',
+      'source_agent_id',
+      'agent_id',
+    ),
+    memberAgentName: runtimeEventTraceString(
+      event,
+      payload,
+      approvalContext,
+      'member_agent_name',
+      'source_runnable_name',
+      'source_agent_name',
+      'agent_name',
+    ),
+    workflowId: runtimeEventTraceString(event, payload, approvalContext, 'workflow_id'),
+    workflowNodeId: runtimeEventTraceString(event, payload, approvalContext, 'workflow_node_id'),
+    workflowNodeLabel: runtimeEventTraceString(event, payload, approvalContext, 'workflow_node_label'),
+    workflowRunId: runtimeEventTraceString(event, payload, approvalContext, 'workflow_run_id'),
   };
 }
 
@@ -345,6 +363,19 @@ function runtimeEventString(
   key: string,
 ): string {
   return defaultString(event[key]) || defaultString(payload[key]);
+}
+
+function runtimeEventTraceString(
+  event: RuntimeTimelineEventRecord,
+  payload: RuntimeTimelineEventRecord,
+  nested: RuntimeTimelineEventRecord,
+  ...keys: string[]
+): string {
+  for (const key of keys) {
+    const value = runtimeEventString(event, payload, key) || defaultString(nested[key]);
+    if (value) return value;
+  }
+  return '';
 }
 
 function runtimeEventMemoryId(
@@ -373,7 +404,15 @@ function runtimeEventNestedString(
   key: string,
   nestedKey: string,
 ): string {
+  const record = runtimeEventNestedRecord(payload, key);
+  return record ? defaultString(record[nestedKey]) : '';
+}
+
+function runtimeEventNestedRecord(
+  payload: RuntimeTimelineEventRecord,
+  key: string,
+): RuntimeTimelineEventRecord | null {
   const value = payload[key];
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return '';
-  return defaultString((value as RuntimeTimelineEventRecord)[nestedKey]);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as RuntimeTimelineEventRecord;
 }
