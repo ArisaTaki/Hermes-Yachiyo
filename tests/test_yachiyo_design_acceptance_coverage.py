@@ -740,8 +740,22 @@ def test_runtime_core_split_acceptance_paths_are_guarded() -> None:
         ],
     )
     _assert_contains(
+        "apps/shell/yachiyo_agent/run_timeline_snapshots.py",
+        [
+            "def run_timeline_snapshot_from_payload",
+            "def approval_snapshots_from_payload",
+            "def artifact_snapshots_from_timeline_payload",
+            "tool_call_snapshots_from_payloads(",
+            "memory_trace_snapshots_from_events(events)",
+            "skill_trace_snapshots_from_events(events)",
+            "timeline_child_snapshots_from_payloads(",
+        ],
+    )
+    _assert_contains(
         "apps/shell/yachiyo_agent/run_snapshots.py",
         [
+            "run_timeline_snapshot_from_payload as _run_timeline_snapshot_from_payload",
+            "return _run_timeline_snapshot_from_payload(payload)",
             "tool_call_snapshots_from_payloads as _tool_call_snapshots_from_payloads",
             "return _tool_call_snapshots_from_payloads(payloads, run_id=run_id, events=events)",
             "return _tool_call_snapshots_from_events(events)",
