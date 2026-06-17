@@ -2,6 +2,12 @@ import type { Dispatch, SetStateAction } from 'react';
 
 import type { RunSpec } from '../types';
 import { navigateTo } from '../../../lib/view';
+import {
+  studioRunClearParams,
+  studioRunRouteParams,
+  studioTabRouteParams,
+  workflowStudioClearParams,
+} from '../../runtime-shared/studioLinks';
 import type { GroupRunSnapshot } from '../../yachiyo-studio/types';
 import { groupRunTimelineRunId } from '../utils/groups';
 import {
@@ -55,10 +61,8 @@ export function useRunNavigationActions({
         return next;
       });
     }
-    navigateTo('agents', {
-      run: runId,
-      ...(options.groupRunId ? { group_run: options.groupRunId } : {}),
-    }, ['tab', 'target', 'goal']);
+    const params = studioRunRouteParams(runId, { groupRunId: options.groupRunId });
+    if (params) navigateTo('agents', params, studioRunClearParams);
   }
 
   function openAgentGroupRunTimeline(groupRun: GroupRunSnapshot | null) {
@@ -85,7 +89,7 @@ export function useRunNavigationActions({
     if (selectedRunId) {
       setSelectedRunId('');
       setTab('runs');
-      navigateTo('agents', { tab: 'runs' }, ['run', 'target', 'goal']);
+      navigateTo('agents', studioTabRouteParams('runs'), workflowStudioClearParams);
     }
   }
 
@@ -95,7 +99,7 @@ export function useRunNavigationActions({
     if (selectedRunId) {
       setSelectedRunId('');
       setTab('runs');
-      navigateTo('agents', { tab: 'runs' }, ['run', 'target', 'goal']);
+      navigateTo('agents', studioTabRouteParams('runs'), workflowStudioClearParams);
     }
   }
 

@@ -2,6 +2,7 @@ import { useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 
 import type { RunGroupSpec, RunSpec } from '../types';
 import { navigateTo } from '../../../lib/view';
+import { studioTabRouteParams, workflowStudioClearParams } from '../../runtime-shared/studioLinks';
 import { deleteYachiyoRun } from '../../yachiyo-studio/api';
 import type { RunArtifactPreview } from '../components/runDetailTypes';
 import { isActiveRunStatus } from '../utils/runs';
@@ -108,7 +109,7 @@ export function useRunHistoryManagement({
         if (selectedRunId && deletedRunIds.has(selectedRunId)) {
           setSelectedRunId('');
           setArtifactPreview(null);
-          navigateTo('agents', { tab: 'runs' }, ['run', 'target', 'goal']);
+          navigateTo('agents', studioTabRouteParams('runs'), workflowStudioClearParams);
           return { selectedRunId: '' };
         }
         return undefined;

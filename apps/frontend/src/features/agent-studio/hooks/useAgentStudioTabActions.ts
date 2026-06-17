@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 
 import { navigateTo } from '../../../lib/view';
+import { studioTabClearParams, studioTabRouteParams } from '../../runtime-shared/studioLinks';
 import type { StudioTab } from '../studioTabs';
 import type { StudioRefreshOptions } from './useAgentStudioRefresh';
 
@@ -21,7 +22,7 @@ export function useAgentStudioTabActions({
     setTab(nextTab);
     setStatus('');
     setError('');
-    navigateTo('agents', nextTab === 'agents' ? {} : { tab: nextTab }, ['run', 'tab', 'target', 'goal']);
+    navigateTo('agents', studioTabRouteParams(nextTab), studioTabClearParams);
     if (nextTab === 'agents') {
       void refresh().catch((err: unknown) => {
         setError(err instanceof Error ? err.message : '刷新 Agent 列表失败');

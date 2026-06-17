@@ -3,6 +3,7 @@ import type { Edge, Node } from '@xyflow/react';
 
 import type { AgentSpec, WorkflowSpec } from '../types';
 import { navigateTo } from '../../../lib/view';
+import { workflowStudioClearParams, workflowStudioRouteParams } from '../../runtime-shared/studioLinks';
 import {
   buildPhase4WorkflowNodes,
   linearEdgesForNodes,
@@ -90,7 +91,7 @@ export function useWorkflowDraftActions({
         : '正在打开 Workflow Studio...',
     );
     setError('');
-    navigateTo('agents', { tab: 'workflows' }, ['run', 'target', 'goal']);
+    navigateTo('agents', workflowStudioRouteParams(), workflowStudioClearParams);
     void getStudioWorkflowForView(workflowId)
       .then((detail) => {
         mergeWorkflow(detail);

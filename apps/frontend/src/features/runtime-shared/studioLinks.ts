@@ -9,11 +9,10 @@ export const studioRunClearParams = ['tab', 'target', 'goal', 'group_run', 'grou
 
 export const workflowStudioClearParams = ['run', 'target', 'goal'];
 
+export const studioTabClearParams = ['run', 'tab', 'target', 'goal'];
+
 export function studioRunUrl(runId?: string | null, options: StudioRunLinkOptions = {}): string | null {
-  const cleanRunId = String(runId || '').trim();
-  if (!cleanRunId) return null;
-  const cleanGroupRunId = String(options.groupRunId || '').trim();
-  const params = studioRunRouteParams(cleanRunId, { groupRunId: cleanGroupRunId });
+  const params = studioRunRouteParams(runId, options);
   return params ? routePath('agents', params) : null;
 }
 
@@ -38,6 +37,11 @@ export function workflowStudioRouteParams(runnableId = '', suggestedGoal = ''): 
     target: cleanRunnableId,
     goal: String(suggestedGoal || '').trim(),
   };
+}
+
+export function studioTabRouteParams(tab = 'agents'): Record<string, string> {
+  const cleanTab = String(tab || '').trim();
+  return !cleanTab || cleanTab === 'agents' ? {} : { tab: cleanTab };
 }
 
 export function runIdFromStudioUrl(value?: string | null): string {

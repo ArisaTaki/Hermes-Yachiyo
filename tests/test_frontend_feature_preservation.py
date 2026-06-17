@@ -864,6 +864,8 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "export const studioRunClearParams",
             "export function workflowStudioRouteParams",
             "export const workflowStudioClearParams",
+            "export function studioTabRouteParams",
+            "export const studioTabClearParams",
             "group_run: cleanGroupRunId",
             "export function runIdFromStudioUrl",
             "url.match(/[?&](?:run|run_id)=([^&#]+)/)",
@@ -1785,7 +1787,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
         [
             "export function useAgentStudioTabActions",
             "const activateTab = useCallback((nextTab: StudioTab) => {",
-            "navigateTo('agents', nextTab === 'agents' ? {} : { tab: nextTab }, ['run', 'tab', 'target', 'goal']);",
+            "navigateTo('agents', studioTabRouteParams(nextTab), studioTabClearParams);",
             "if (nextTab === 'agents')",
             "刷新 Agent 列表失败",
         ],
@@ -4369,7 +4371,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "读取 Workflow 详情失败，已使用列表快照。",
             "setError('找不到对应的 Workflow 定义，可能已被删除。');",
             "setTab('workflows');",
-            "navigateTo('agents', { tab: 'workflows' }, ['run', 'target', 'goal']);",
+            "navigateTo('agents', workflowStudioRouteParams(), workflowStudioClearParams);",
         ],
     )
     _assert_contains(
@@ -4445,7 +4447,8 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "setRunStatusFilter('all');",
             "setRunSearchQuery('');",
             "const groupKey = runHistoryGroupKey(run);",
-            "group_run: options.groupRunId",
+            "const params = studioRunRouteParams(runId, { groupRunId: options.groupRunId });",
+            "if (params) navigateTo('agents', params, studioRunClearParams);",
             "function openAgentGroupRunTimeline(groupRun: GroupRunSnapshot | null)",
             "const runId = groupRunTimelineRunId(groupRun);",
             "openRunDetail(runId, { groupRunId: groupRun?.group_run_id || '', revealInHistory: true });",
@@ -4453,7 +4456,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "function toggleRunHistoryGroup(groupKey: string)",
             "function selectRunKindFilter(nextFilter: RunKindFilter)",
             "function selectRunStatusFilter(nextFilter: RunStatusFilter)",
-            "navigateTo('agents', { tab: 'runs' }, ['run', 'target', 'goal']);",
+            "navigateTo('agents', studioTabRouteParams('runs'), workflowStudioClearParams);",
         ],
     )
     _assert_contains(
@@ -4584,7 +4587,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "async () => deleteSkillFolderById(folder.folder_id, false)",
             "setSkillTargetFolderId(folder.folder_id);",
             "setSkillLibraryFolderFilter(folder.folder_id);",
-            "navigateTo('agents', { tab: 'skills' }, ['run', 'tab']);",
+            "navigateTo('agents', studioTabRouteParams('skills'), studioTabClearParams);",
         ],
     )
     _assert_contains(
@@ -4597,7 +4600,7 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "childRunIds.some((runId) => !deletedRunIds.has(runId))",
             "const result = await deleteYachiyoRun(run.run_id);",
             "setSelectedRunIds((current) => current.filter((id) => !deletedRunIds.has(id)))",
-            "navigateTo('agents', { tab: 'runs' }, ['run', 'target', 'goal']);",
+            "navigateTo('agents', studioTabRouteParams('runs'), workflowStudioClearParams);",
         ],
     )
     _assert_contains(

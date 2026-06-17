@@ -2,6 +2,7 @@ import type { Dispatch, SetStateAction } from 'react';
 
 import type { SkillFolderSpec, SkillSpec } from '../types';
 import { navigateTo } from '../../../lib/view';
+import { studioTabClearParams, studioTabRouteParams } from '../../runtime-shared/studioLinks';
 import {
   createYachiyoSkillFolder,
   deleteYachiyoSkillFolder,
@@ -154,7 +155,7 @@ export function useSkillFolderManagement({
     setSkillTargetFolderId(folder.folder_id);
     setSkillLibraryFolderFilter(folder.folder_id);
     setTab('skills');
-    navigateTo('agents', { tab: 'skills' }, ['run', 'tab']);
+    navigateTo('agents', studioTabRouteParams('skills'), studioTabClearParams);
   }
 
   return {
