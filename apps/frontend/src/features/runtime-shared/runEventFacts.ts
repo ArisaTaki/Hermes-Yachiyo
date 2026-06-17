@@ -284,6 +284,28 @@ function artifactFromRunEvent(event: PublicRunEvent): Record<string, unknown> | 
     if (event.event_type === 'agent.artifact.write') {
       artifactPayload.kind = artifactPayload.kind || 'agent_artifact';
       artifactPayload.path = artifactPayload.path || event.detail;
+    } else if (payload.workflow_node_id || payload.workflow_node_label) {
+      artifactPayload.kind = artifactPayload.kind || payload.kind || 'workflow_artifact';
+      artifactPayload.title = artifactPayload.title
+        || payload.title
+        || payload.workflow_node_label
+        || artifactPayload.path
+        || artifactPayload.artifact_path
+        || 'Workflow Artifact';
+      artifactPayload.workflow_id = artifactPayload.workflow_id || payload.workflow_id;
+      artifactPayload.workflow_run_id = artifactPayload.workflow_run_id || payload.workflow_run_id || event.run_id;
+      artifactPayload.workflow_node_id = artifactPayload.workflow_node_id || payload.workflow_node_id;
+      artifactPayload.workflow_node_label = artifactPayload.workflow_node_label || payload.workflow_node_label;
+      artifactPayload.workflow_step_label = artifactPayload.workflow_step_label || payload.workflow_node_label;
+    } else if (payload.group_id || payload.group_run_id || payload.run_group_id) {
+      artifactPayload.kind = artifactPayload.kind || 'group_artifact';
+      artifactPayload.group_id = artifactPayload.group_id || payload.group_id;
+      artifactPayload.group_run_id = artifactPayload.group_run_id || payload.group_run_id || payload.run_group_id || event.run_id;
+      artifactPayload.source_runnable_name = artifactPayload.source_runnable_name || payload.member_agent_name;
+      artifactPayload.source_runnable_id = artifactPayload.source_runnable_id || payload.member_agent_id;
+      if (payload.member_agent_name && !artifactPayload.title) {
+        artifactPayload.title = `${payload.member_agent_name} / ${artifactPayload.path || artifactPayload.artifact_path || 'Artifact'}`;
+      }
     }
   } else if (event.event_type === 'group.artifact.created' || event.event_type === 'group.shared_artifact.created') {
     artifactPayload = { ...(objectPreview(payload.artifact) || payload) };

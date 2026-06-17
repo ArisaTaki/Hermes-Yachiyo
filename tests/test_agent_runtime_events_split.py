@@ -106,6 +106,8 @@ def test_runtime_run_event_recorder_appends_compatibility_aliases() -> None:
     assert canonical_run_event_aliases("workflow.run.cancelled") == [
         "workflow.cancelled"
     ]
+    assert canonical_run_event_aliases("agent.artifact.write") == ["artifact.created"]
+    assert canonical_run_event_aliases("group.shared_artifact.created") == ["artifact.created"]
     assert canonical_run_event_aliases("agent.tool.started") == ["tool.started"]
     assert canonical_run_event_aliases("agent.tool.completed") == ["tool.completed"]
     assert canonical_run_event_aliases("agent.tool.failed") == ["tool.failed"]
@@ -183,6 +185,35 @@ def test_runtime_run_event_recorder_appends_compatibility_aliases() -> None:
     assert [call[1] for call in repository.calls] == [
         "workflow.run.cancelled",
         "workflow.cancelled",
+    ]
+
+    repository.calls.clear()
+    recorder.append(
+        "run-1",
+        "workflow.node.artifact",
+        {
+            "workflow_node_id": "report",
+            "workflow_node_label": "Report",
+            "status": "completed",
+            "artifact": {"path": "reports/final.md"},
+        },
+    )
+    assert [call[1] for call in repository.calls] == [
+        "workflow.node.artifact",
+        "workflow.node.started",
+        "workflow.node.completed",
+        "artifact.created",
+    ]
+
+    repository.calls.clear()
+    recorder.append(
+        "run-1",
+        "group.shared_artifact.created",
+        {"group_run_id": "group-run-1", "artifact": {"path": "reports/group.md"}},
+    )
+    assert [call[1] for call in repository.calls] == [
+        "group.shared_artifact.created",
+        "artifact.created",
     ]
 
     repository.calls.clear()

@@ -575,6 +575,8 @@ def test_runtime_core_split_acceptance_paths_are_guarded() -> None:
             "def task_run_event_payload",
             '"agent.tool.denied": ["tool.denied"]',
             '"approval.required"',
+            '"agent.artifact.write": ["artifact.created"]',
+            'aliases.append("artifact.created")',
         ],
     )
     _assert_contains(

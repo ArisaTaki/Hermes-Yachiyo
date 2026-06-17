@@ -693,6 +693,9 @@ def canonical_run_event_aliases(
         "workflow.run.completed": ["workflow.completed"],
         "workflow.run.failed": ["workflow.failed"],
         "workflow.run.cancelled": ["workflow.cancelled"],
+        "agent.artifact.write": ["artifact.created"],
+        "group.artifact.created": ["artifact.created"],
+        "group.shared_artifact.created": ["artifact.created"],
         "skill.dispatch.read": ["skill.selected"],
         "agent.tool.started": ["tool.started"],
         "agent.tool.completed": ["tool.completed"],
@@ -729,6 +732,8 @@ def canonical_run_event_aliases(
             aliases.append("workflow.node.failed")
         elif status == "approval_required":
             aliases.append("workflow.paused_for_approval")
+        if clean_event_type == "workflow.node.artifact":
+            aliases.append("artifact.created")
         return aliases
     return []
 

@@ -1017,6 +1017,105 @@ def test_run_timeline_derives_workflow_artifact_from_event_path() -> None:
     assert artifact.created_at == "2026-06-15T00:00:04Z"
 
 
+def test_run_timeline_projects_generic_workflow_artifact_alias() -> None:
+    timeline = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "run-generic-workflow-artifact",
+            "status": "completed",
+            "events": [
+                {
+                    "event_type": "artifact.created",
+                    "payload": {
+                        "workflow_id": "workflow-1",
+                        "workflow_run_id": "workflow-run-1",
+                        "workflow_node_id": "report",
+                        "workflow_node_label": "Report",
+                        "artifact": {"path": "reports/final.md", "bytes": 42},
+                    },
+                    "created_at": "2026-06-15T00:00:05Z",
+                },
+            ],
+        }
+    )
+
+    artifact = timeline.artifacts[0]
+    assert artifact.kind == "workflow_artifact"
+    assert artifact.title == "Report"
+    assert artifact.path == "reports/final.md"
+    assert artifact.size_bytes == 42
+    assert artifact.workflow_id == "workflow-1"
+    assert artifact.workflow_run_id == "workflow-run-1"
+    assert artifact.workflow_node_id == "report"
+    assert artifact.workflow_node_label == "Report"
+
+
+def test_run_timeline_projects_generic_group_artifact_alias() -> None:
+    timeline = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "run-generic-group-artifact",
+            "status": "completed",
+            "events": [
+                {
+                    "event_type": "artifact.created",
+                    "payload": {
+                        "group_id": "group-1",
+                        "group_run_id": "group-run-1",
+                        "member_agent_id": "agent-reviewer",
+                        "member_agent_name": "Reviewer",
+                        "artifact": {"path": "reports/group.md", "bytes": 31},
+                    },
+                    "created_at": "2026-06-15T00:00:06Z",
+                },
+            ],
+        }
+    )
+
+    artifact = timeline.artifacts[0]
+    assert artifact.kind == "group_artifact"
+    assert artifact.title == "Reviewer / reports/group.md"
+    assert artifact.path == "reports/group.md"
+    assert artifact.group_id == "group-1"
+    assert artifact.group_run_id == "group-run-1"
+    assert artifact.source_runnable_id == "agent-reviewer"
+    assert artifact.source_runnable_name == "Reviewer"
+
+
+def test_run_timeline_merges_artifact_alias_with_source_event() -> None:
+    timeline = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "run-artifact-alias-merge",
+            "status": "completed",
+            "events": [
+                {
+                    "event_type": "workflow.node.artifact",
+                    "payload": {
+                        "workflow_id": "workflow-1",
+                        "workflow_run_id": "workflow-run-1",
+                        "workflow_node_id": "report",
+                        "workflow_node_label": "Report",
+                        "artifact": {"path": "reports/final.md", "bytes": 42},
+                    },
+                },
+                {
+                    "event_type": "artifact.created",
+                    "payload": {
+                        "workflow_id": "workflow-1",
+                        "workflow_run_id": "workflow-run-1",
+                        "workflow_node_id": "report",
+                        "workflow_node_label": "Report",
+                        "artifact": {"path": "reports/final.md", "bytes": 42},
+                    },
+                },
+            ],
+        }
+    )
+
+    assert len(timeline.artifacts) == 1
+    assert timeline.artifacts[0].path == "reports/final.md"
+    assert timeline.artifacts[0].kind == "workflow_artifact"
+    assert timeline.artifacts[0].workflow_node_label == "Report"
+
+
 def test_run_timeline_keeps_secret_events_out_of_derived_runtime_facts() -> None:
     timeline = run_timeline_snapshot_from_payload(
         {

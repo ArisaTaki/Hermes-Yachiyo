@@ -865,6 +865,36 @@ def _artifact_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
             artifact_payload.setdefault("kind", "agent_artifact")
             if event.detail:
                 artifact_payload.setdefault("path", event.detail)
+        elif payload.get("workflow_node_id") or payload.get("workflow_node_label"):
+            artifact_payload.setdefault("kind", payload.get("kind") or "workflow_artifact")
+            artifact_payload.setdefault(
+                "title",
+                payload.get("title")
+                or payload.get("workflow_node_label")
+                or artifact_payload.get("path")
+                or artifact_payload.get("artifact_path")
+                or "Workflow Artifact",
+            )
+            artifact_payload.setdefault("workflow_id", payload.get("workflow_id"))
+            artifact_payload.setdefault("workflow_run_id", payload.get("workflow_run_id") or event.run_id)
+            artifact_payload.setdefault("workflow_node_id", payload.get("workflow_node_id"))
+            artifact_payload.setdefault("workflow_node_label", payload.get("workflow_node_label"))
+        elif payload.get("group_id") or payload.get("group_run_id") or payload.get("run_group_id"):
+            artifact_payload.setdefault("kind", "group_artifact")
+            artifact_payload.setdefault("group_id", payload.get("group_id"))
+            artifact_payload.setdefault(
+                "group_run_id",
+                payload.get("group_run_id") or payload.get("run_group_id") or event.run_id,
+            )
+            if payload.get("member_agent_name"):
+                artifact_payload.setdefault("source_runnable_name", payload.get("member_agent_name"))
+            if payload.get("member_agent_id"):
+                artifact_payload.setdefault("source_runnable_id", payload.get("member_agent_id"))
+            if payload.get("member_agent_name") and not artifact_payload.get("title"):
+                artifact_path = _text(artifact_payload.get("path") or artifact_payload.get("artifact_path"))
+                artifact_payload["title"] = (
+                    f"{payload['member_agent_name']} / {artifact_path or 'Artifact'}"
+                )
     elif event.event_type in {"group.artifact.created", "group.shared_artifact.created"}:
         artifact = payload.get("artifact")
         artifact_payload = dict(artifact) if isinstance(artifact, Mapping) else payload
