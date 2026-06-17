@@ -145,9 +145,9 @@ ACCEPTANCE_10_3_MATRIX: tuple[AcceptanceScenario, ...] = (
         "Agent Studio 可查看/编辑群组。",
         (
             (
-                "source",
-                "apps/frontend/src/features/agent-studio/components/AgentGroupPanel.tsx",
-                ('data-testid="agent-group-list"', 'data-testid="agent-group-editor"', 'data-testid="agent-group-save"'),
+                "smoke",
+                "scripts/smoke_agent_studio_groups_ui.mjs",
+                ("/yachiyo/studio/groups", 'data-testid="agent-group-editor"', 'data-testid="agent-group-save"', "existing group edited"),
             ),
             (
                 "source",
@@ -161,14 +161,14 @@ ACCEPTANCE_10_3_MATRIX: tuple[AcceptanceScenario, ...] = (
         "Agent Studio 可发起群组 run。",
         (
             (
-                "source",
-                "apps/frontend/src/features/yachiyo-studio/api.ts",
-                ("export async function startYachiyoGroupRun", "/yachiyo/studio/groups/${encodeURIComponent(groupId)}/runs"),
-            ),
-            (
-                "source",
-                "apps/frontend/src/features/agent-studio/hooks/useAgentGroupActions.ts",
-                ("runCurrentAgentGroup", "openRunDetail(runId, { revealInHistory: true });"),
+                "smoke",
+                "scripts/smoke_agent_studio_groups_ui.mjs",
+                (
+                    "/yachiyo/studio/groups/${encodeURIComponent(CREATED_GROUP_ID)}/runs",
+                    'data-testid="agent-group-run"',
+                    'data-testid="agent-run-detail-group-run-artifacts"',
+                    "group run detail verified",
+                ),
             ),
         ),
     ),
@@ -442,6 +442,17 @@ def test_group_and_workflow_acceptance_paths_are_guarded() -> None:
             'data-testid="agent-run-detail-group-run-approvals"',
             'data-testid="agent-run-detail-group-run-artifacts"',
             'itemTestId="agent-run-detail-group-run-artifact-item"',
+        ],
+    )
+    _assert_smoke_script(
+        "scripts/smoke_agent_studio_groups_ui.mjs",
+        [
+            "/yachiyo/studio/groups",
+            "/yachiyo/studio/groups/${encodeURIComponent(CREATED_GROUP_ID)}/runs",
+            "/yachiyo/studio/runs/${encodeURIComponent(GROUP_RUN_ROOT_RUN_ID)}/timeline",
+            'data-testid="agent-group-run-artifact-item"',
+            'data-testid="agent-run-detail-group-run-artifacts"',
+            "assertMockBridgeContract",
         ],
     )
     _assert_smoke_script(
