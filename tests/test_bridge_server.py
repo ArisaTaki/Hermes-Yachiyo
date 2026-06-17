@@ -3617,9 +3617,10 @@ def test_run_detail_management_http_routes_use_app_runtime_service(monkeypatch):
                 return {"ok": True, "run_id": run_id, "path": artifact_path, "content": "# Final"}
 
             def rerun_run(self, run_id, request=None):
-                self.calls.append(
-                    ("rerun_run", {"run_id": run_id, "request": dict(request or {})})
-                )
+                call = {"run_id": run_id}
+                if request is not None:
+                    call["request"] = dict(request or {})
+                self.calls.append(("rerun_run", call))
                 return {"run_id": "run-http-2", "rerun_of_run_id": run_id, "status": "completed"}
 
             def delete_run(self, run_id):
