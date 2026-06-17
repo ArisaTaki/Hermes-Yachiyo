@@ -26,8 +26,12 @@ from .contracts import (
     SkillTraceSnapshot,
     ToolCallSnapshot,
 )
-from .events import public_run_event_from_payload
-from .links import studio_run_url
+from .task_snapshots import (
+    agent_task_snapshot_from_payload as _agent_task_snapshot_from_payload,
+    agent_task_snapshots_from_payloads as _agent_task_snapshots_from_payloads,
+    run_events_from_payload as _run_events_from_payload,
+    task_status_from_value as _task_status,
+)
 from .trace_snapshots import (
     memory_trace_snapshots_from_events as _memory_trace_snapshots_from_events,
     skill_trace_snapshots_from_events as _skill_trace_snapshots_from_events,
@@ -52,52 +56,10 @@ class RunSnapshotProjector:
         self,
         payload: Mapping[str, Any] | AgentTaskSnapshot,
     ) -> AgentTaskSnapshot:
-        if isinstance(payload, AgentTaskSnapshot):
-            return payload
-
-        task_id = _text(payload.get("task_id") or payload.get("run_id"))
-        run_id = _text(payload.get("run_id") or task_id)
-        group_run_id = _group_run_id(payload)
-        recent_events = self.events_from_payload(
-            payload,
-            run_id=run_id,
-            keys=("recent_events", "events", "timeline"),
-        )
-        recent_events = _chat_visible_events(recent_events)
-        approvals = [
-            approval
-            for approval in self.approvals_from_payload(
-                payload,
-                run_id=run_id,
-                group_run_id=group_run_id,
-                keys=("pending_approvals", "pending_approval"),
-                events=recent_events,
-            )
-            if approval.status == "pending"
-        ]
-
-        return AgentTaskSnapshot(
-            task_id=task_id,
-            conversation_id=_optional_text(payload.get("conversation_id") or payload.get("session_id")),
-            title=_text(payload.get("title") or payload.get("user_goal") or "Yachiyo task"),
-            status=_task_status(payload.get("status")),
-            summary=_optional_text(payload.get("summary") or payload.get("result")),
-            current_step=_optional_text(payload.get("current_step")),
-            progress_text=_optional_text(payload.get("progress_text")),
-            needs_user_action=bool(payload.get("needs_user_action") or approvals),
-            pending_approvals=approvals,
-            recent_events=recent_events,
-            artifacts=self.artifacts_from_payload(payload, run_id=run_id, events=recent_events),
-            open_in_studio_url=_optional_text(payload.get("open_in_studio_url"))
-            or _studio_url(run_id, group_run_id),
-            created_at=_text(payload.get("created_at")),
-            updated_at=_text(payload.get("updated_at")),
-        )
+        return _agent_task_snapshot_from_payload(payload)
 
     def task_snapshots_from_payloads(self, payloads: Any) -> list[AgentTaskSnapshot]:
-        if not isinstance(payloads, list):
-            return []
-        return [self.task_snapshot_from_payload(item) for item in payloads]
+        return _agent_task_snapshots_from_payloads(payloads)
 
     def timeline_snapshot_from_payload(
         self,
@@ -187,16 +149,7 @@ class RunSnapshotProjector:
         run_id: str,
         keys: tuple[str, ...],
     ) -> list[PublicRunEvent]:
-        raw_events = []
-        for key in keys:
-            value = payload.get(key)
-            if value:
-                raw_events = value
-                break
-        return [
-            public_run_event_from_payload(event, run_id=run_id, sequence=index + 1)
-            for index, event in enumerate(raw_events if isinstance(raw_events, list) else [])
-        ]
+        return _run_events_from_payload(payload, run_id=run_id, keys=keys)
 
     def approvals_from_payload(
         self,
@@ -330,40 +283,6 @@ def memory_trace_snapshots_from_events(events: list[PublicRunEvent]) -> list[Mem
 
 def skill_trace_snapshots_from_events(events: list[PublicRunEvent]) -> list[SkillTraceSnapshot]:
     return _skill_trace_snapshots_from_events(events)
-
-
-def _task_status(value: Any) -> str:
-    status = _text(value)
-    status_map = {
-        "approval_required": "waiting_approval",
-        "pending_approval": "waiting_approval",
-        "processing": "running",
-        "success": "completed",
-        "succeeded": "completed",
-        "done": "completed",
-        "error": "failed",
-        "canceled": "cancelled",
-    }
-    normalized = status_map.get(status, status)
-    if normalized in {"queued", "running", "waiting_approval", "completed", "failed", "cancelled"}:
-        return normalized
-    return "running"
-
-
-def _chat_visible_events(events: list[PublicRunEvent]) -> list[PublicRunEvent]:
-    return [
-        event
-        for event in events
-        if event.visibility == "user" and event.sensitivity == "public"
-    ]
-
-
-def _group_run_id(payload: Mapping[str, Any]) -> str:
-    return _text(payload.get("group_run_id") or payload.get("run_group_id"))
-
-
-def _studio_url(run_id: str, group_run_id: str = "") -> str | None:
-    return studio_run_url(run_id, group_run_id=group_run_id)
 
 
 def _text(value: Any) -> str:

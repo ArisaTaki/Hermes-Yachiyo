@@ -759,6 +759,17 @@ def test_runtime_core_split_acceptance_paths_are_guarded() -> None:
         ],
     )
     _assert_contains(
+        "apps/shell/yachiyo_agent/task_snapshots.py",
+        [
+            "def agent_task_snapshot_from_payload",
+            "def run_events_from_payload",
+            "def approval_snapshots_from_payload",
+            "def artifact_snapshots_from_task_payload",
+            "def task_status_from_value",
+            "studio_run_url(run_id, group_run_id=group_run_id)",
+        ],
+    )
+    _assert_contains(
         "apps/shell/yachiyo_agent/trace_snapshots.py",
         [
             "def memory_trace_snapshots_from_events",

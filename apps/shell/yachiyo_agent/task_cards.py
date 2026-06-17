@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from .contracts import AgentTaskLightSnapshot, AgentTaskSnapshot, ApprovalCardSnapshot
 from .policy import task_requires_user_action
-from .run_snapshots import agent_task_snapshot_from_payload, agent_task_snapshots_from_payloads
+from .task_snapshots import agent_task_snapshot_from_payload, agent_task_snapshots_from_payloads
 
 
 def agent_task_light_snapshot_from_task(task: AgentTaskSnapshot) -> AgentTaskLightSnapshot:
