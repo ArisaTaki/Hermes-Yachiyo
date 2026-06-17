@@ -7,6 +7,7 @@ from typing import Any
 from apps.shell.yachiyo_agent import (
     AgentStudioService,
     ApprovalDecision,
+    RerunRunRequest,
     SaveAgentGroupMemberRequest,
     SaveAgentGroupRequest,
     SaveAgentRequest,
@@ -265,8 +266,18 @@ class _FakeStudioPort:
         self.calls.append(("get_run_timeline", run_id))
         return _run_payload(run_id=run_id)
 
-    def rerun_run(self, run_id: str) -> dict[str, Any]:
-        self.calls.append(("rerun_run", run_id))
+    def rerun_run(
+        self,
+        run_id: str,
+        request: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        clean_request = dict(request or {})
+        self.calls.append(
+            (
+                "rerun_run",
+                {"run_id": run_id, "request": clean_request} if clean_request else run_id,
+            )
+        )
         payload = _run_payload(run_id=f"{run_id}-rerun", user_goal="Rerun task")
         payload["timeline"] = [
             _rerun_started_event(
@@ -1070,10 +1081,53 @@ def test_agent_studio_service_run_actions_return_public_timeline_snapshots() -> 
     ) in port.calls
 
 
+def test_agent_studio_service_passes_scoped_rerun_request_to_port() -> None:
+    port = _FakeStudioPort()
+    service = AgentStudioService(port)
+
+    service.rerun_run(
+        "workflow-run-1",
+        RerunRunRequest(
+            scope="workflow_branch",
+            workflow_node_id="route",
+            workflow_edge_branch="true",
+            workflow_node_selected_target="ship",
+            reason="Retry selected branch",
+        ),
+    )
+
+    assert (
+        "rerun_run",
+        {
+            "run_id": "workflow-run-1",
+            "request": {
+                "scope": "workflow_branch",
+                "workflow_node_id": "route",
+                "workflow_edge_branch": "true",
+                "workflow_node_selected_target": "ship",
+                "reason": "Retry selected branch",
+                "metadata": {},
+            },
+        },
+    ) in port.calls
+
+
 def test_agent_studio_service_run_actions_preserve_workflow_run_snapshots() -> None:
     class _WorkflowActionPort(_FakeStudioPort):
-        def rerun_run(self, run_id: str) -> dict[str, Any]:
-            self.calls.append(("rerun_run", run_id))
+        def rerun_run(
+            self,
+            run_id: str,
+            request: dict[str, Any] | None = None,
+        ) -> dict[str, Any]:
+            clean_request = dict(request or {})
+            self.calls.append(
+                (
+                    "rerun_run",
+                    {"run_id": run_id, "request": clean_request}
+                    if clean_request
+                    else run_id,
+                )
+            )
             payload = _workflow_run_payload(run_id=f"{run_id}-rerun", status="running")
             payload["timeline"] = [
                 _rerun_started_event(

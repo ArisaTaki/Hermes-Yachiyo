@@ -595,3 +595,15 @@ class StartWorkflowRunRequest(BaseModel):
     objective: str
     title: str | None = None
     client_run_id: str | None = None
+
+
+class RerunRunRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    scope: Literal["run", "workflow_node", "workflow_branch"] | str = "run"
+    workflow_node_id: str | None = None
+    workflow_node_label: str | None = None
+    workflow_edge_branch: str | None = None
+    workflow_node_selected_target: str | None = None
+    reason: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)

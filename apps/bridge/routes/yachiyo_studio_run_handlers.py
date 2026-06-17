@@ -7,7 +7,7 @@ from typing import Any
 
 from fastapi import HTTPException, Request
 
-from apps.bridge.routes.yachiyo_models import TaskApprovalRequest
+from apps.bridge.routes.yachiyo_models import RerunRunBody, TaskApprovalRequest
 from apps.bridge.routes.yachiyo_services import (
     bad_request,
     snapshot,
@@ -41,10 +41,15 @@ async def list_runs(
 
 async def rerun_run(
     run_id: str,
+    request: RerunRunBody | None = None,
     http_request: Request | None = None,
 ) -> dict[str, Any]:
     try:
-        run_snapshot = await asyncio.to_thread(studio_service(http_request).rerun_run, run_id)
+        run_snapshot = await asyncio.to_thread(
+            studio_service(http_request).rerun_run,
+            run_id,
+            request,
+        )
         return snapshot(run_snapshot)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Run 不存在") from exc

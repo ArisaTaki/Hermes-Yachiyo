@@ -81,3 +81,15 @@ class StartWorkflowRunBody(BaseModel):
     objective: str = Field(..., min_length=1, max_length=60000)
     title: str | None = Field(default=None, max_length=1000)
     client_run_id: str | None = Field(default=None, max_length=160)
+
+
+class RerunRunBody(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    scope: str | None = Field(default=None, max_length=40)
+    workflow_node_id: str | None = Field(default=None, max_length=240)
+    workflow_node_label: str | None = Field(default=None, max_length=1000)
+    workflow_edge_branch: str | None = Field(default=None, max_length=160)
+    workflow_node_selected_target: str | None = Field(default=None, max_length=240)
+    reason: str | None = Field(default=None, max_length=2000)
+    metadata: dict[str, Any] = Field(default_factory=dict)

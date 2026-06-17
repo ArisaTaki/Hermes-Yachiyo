@@ -583,8 +583,12 @@ class LegacyStudioPort:
     def get_run_timeline(self, run_id: str) -> dict[str, Any]:
         return _run_with_replay_events(self._runtime.get_run(run_id), self._runtime)
 
-    def rerun_run(self, run_id: str) -> dict[str, Any]:
-        return self._runtime.rerun_run(run_id)
+    def rerun_run(
+        self,
+        run_id: str,
+        request: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return self._runtime.rerun_run(run_id, request)
 
     def cancel_run(self, run_id: str) -> dict[str, Any]:
         return self._runtime.cancel_run(run_id)

@@ -106,9 +106,20 @@ class _FakeAgentRuntime:
         self.calls.append(("cancel_run", run_id))
         return _run_payload(run_id=run_id, status="cancelled")
 
-    def rerun_run(self, run_id: str) -> dict[str, Any]:
-        self.calls.append(("rerun_run", run_id))
+    def rerun_run(
+        self,
+        run_id: str,
+        request: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        clean_request = dict(request or {})
+        self.calls.append(
+            (
+                "rerun_run",
+                {"run_id": run_id, "request": clean_request} if clean_request else run_id,
+            )
+        )
         payload = _run_payload(run_id=f"{run_id}-rerun", status="processing")
+        rerun_scope = str(clean_request.get("scope") or "")
         payload["timeline"] = [
             _rerun_started_event(
                 run_id,
@@ -116,6 +127,15 @@ class _FakeAgentRuntime:
                 status="completed",
                 runnable_id="agent-1",
                 runnable_name="Planner",
+                extra={
+                    "rerun_scope": rerun_scope,
+                    "workflow_node_id": clean_request.get("workflow_node_id", ""),
+                    "workflow_edge_branch": clean_request.get("workflow_edge_branch", ""),
+                    "workflow_node_selected_target": clean_request.get(
+                        "workflow_node_selected_target",
+                        "",
+                    ),
+                } if rerun_scope else None,
             )
         ]
         return payload
@@ -997,6 +1017,17 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     )
     events = await yachiyo.get_studio_run_events("run-1", request, after_sequence=0, limit=1)
     rerun = await yachiyo.rerun_studio_run("run-1", request)
+    scoped_rerun = await yachiyo.rerun_studio_run(
+        "workflow-run-1",
+        request,
+        yachiyo.RerunRunBody(
+            scope="workflow_branch",
+            workflow_node_id="route",
+            workflow_edge_branch="true",
+            workflow_node_selected_target="ship",
+            reason="Retry selected branch",
+        ),
+    )
     cancelled = await yachiyo.cancel_studio_run("run-1", request)
     deleted_run = await yachiyo.delete_studio_run("run-1", request)
     approved = await yachiyo.approve_studio_run_approval("run-1", request)
@@ -1090,6 +1121,10 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     assert rerun["rerun_of_runnable_name"] == "Planner"
     assert rerun["rerun_original_created_at"] == "2026-06-13T00:00:00Z"
     assert rerun["rerun_original_updated_at"] == "2026-06-13T00:00:04Z"
+    assert scoped_rerun["events"][0]["payload"]["rerun_scope"] == "workflow_branch"
+    assert scoped_rerun["events"][0]["payload"]["workflow_node_id"] == "route"
+    assert scoped_rerun["events"][0]["payload"]["workflow_edge_branch"] == "true"
+    assert scoped_rerun["events"][0]["payload"]["workflow_node_selected_target"] == "ship"
     assert cancelled["status"] == "cancelled"
     assert deleted_run == {"ok": True, "deleted_run_ids": ["run-1"], "deleted_run_count": 1}
     assert approved["status"] == "completed"
@@ -1100,6 +1135,20 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     assert artifact["content"] == "# Report"
     assert artifact["truncated"] is False
     assert ("rerun_run", "run-1") in runtime.calls
+    assert (
+        "rerun_run",
+        {
+            "run_id": "workflow-run-1",
+            "request": {
+                "scope": "workflow_branch",
+                "workflow_node_id": "route",
+                "workflow_edge_branch": "true",
+                "workflow_node_selected_target": "ship",
+                "reason": "Retry selected branch",
+                "metadata": {},
+            },
+        },
+    ) in runtime.calls
     assert ("cancel_run", "run-1") in runtime.calls
     assert ("delete_run", "run-1") in runtime.calls
     assert ("approve_run_approval", "run-1") in runtime.calls
@@ -1481,6 +1530,7 @@ def _rerun_started_event(
     status: str,
     runnable_id: str,
     runnable_name: str,
+    extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "event_type": "run.rerun.started",
@@ -1492,5 +1542,6 @@ def _rerun_started_event(
             "rerun_of_runnable_name": runnable_name,
             "original_created_at": "2026-06-13T00:00:00Z",
             "original_updated_at": "2026-06-13T00:00:04Z",
+            **dict(extra or {}),
         },
     }

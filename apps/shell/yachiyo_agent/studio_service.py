@@ -17,6 +17,7 @@ from .contracts import (
     GroupRunSnapshot,
     MemorySnapshot,
     PublicRunEvent,
+    RerunRunRequest,
     RunEventPageSnapshot,
     RunTimelineSnapshot,
     SaveAgentGroupRequest,
@@ -349,8 +350,14 @@ class AgentStudioService:
     def get_run_timeline(self, run_id: str) -> RunTimelineSnapshot | WorkflowRunSnapshot:
         return _public_run_snapshot_from_payload(self._studio_port.get_run_timeline(run_id))
 
-    def rerun_run(self, run_id: str) -> RunTimelineSnapshot | WorkflowRunSnapshot:
-        return _public_run_snapshot_from_payload(self._studio_port.rerun_run(run_id))
+    def rerun_run(
+        self,
+        run_id: str,
+        request: RerunRunRequest | Mapping[str, Any] | None = None,
+    ) -> RunTimelineSnapshot | WorkflowRunSnapshot:
+        return _public_run_snapshot_from_payload(
+            self._studio_port.rerun_run(run_id, _request_payload(request))
+        )
 
     def cancel_run(self, run_id: str) -> RunTimelineSnapshot | WorkflowRunSnapshot:
         return _public_run_snapshot_from_payload(self._studio_port.cancel_run(run_id))
@@ -430,6 +437,8 @@ class AgentStudioService:
 
 
 def _request_payload(request: Any) -> dict[str, Any]:
+    if request is None:
+        return {}
     if hasattr(request, "model_dump"):
         return request.model_dump(exclude_none=True, by_alias=True)
     return dict(request)

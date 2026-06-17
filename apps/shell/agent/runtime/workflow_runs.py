@@ -151,6 +151,9 @@ class RuntimeWorkflowRunCoordinator:
         self._validate_workflow_subworkflow_nodes(nodes, parent_workflow_id=workflow_id)
         self._validate_workflow_runnable_steps(nodes)
         self._validate_workflow_agent_run_readiness(nodes)
+        start_node_id = str(payload.get("start_node_id") or "").strip()
+        if start_node_id and start_node_id not in {str(node.get("id") or "") for node in nodes}:
+            raise self._error_type("Workflow 重跑节点不存在")
         start = self._starter.start_sync(
             payload,
             workflow=workflow,
@@ -174,6 +177,7 @@ class RuntimeWorkflowRunCoordinator:
             artifacts=[],
             start_index=0,
             root_group=start.root_group,
+            start_node_id=start_node_id,
         )
 
 

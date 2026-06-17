@@ -1603,8 +1603,8 @@ def test_agent_studio_bridge_contract_preserves_run_detail_workflow_artifact_and
             calls.append(("read_run_artifact", {"run_id": run_id, "artifact_path": artifact_path}))
             return {"ok": True, "run_id": run_id, "path": artifact_path, "content": "# Final"}
 
-        def rerun_run(self, run_id):
-            calls.append(("rerun_run", {"run_id": run_id}))
+        def rerun_run(self, run_id, request=None):
+            calls.append(("rerun_run", {"run_id": run_id, "request": dict(request or {})}))
             return {"run_id": "run_workflow_2", "rerun_of_run_id": run_id, "status": "completed"}
 
         def delete_run(self, run_id):

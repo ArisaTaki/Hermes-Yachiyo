@@ -14,6 +14,7 @@ from apps.bridge.routes.yachiyo_models import (
     FutureTaskCancelBody,
     FutureTaskTriggerBody,
     MemoryBody,
+    RerunRunBody,
     SkillFolderBody,
     SkillImportBody,
     SkillInstallBody,
@@ -526,8 +527,9 @@ async def get_studio_run(
 async def rerun_studio_run(
     run_id: str,
     http_request: Request = None,  # type: ignore[assignment]
+    request_body: RerunRunBody | None = None,
 ) -> dict[str, Any]:
-    return await yachiyo_studio_handlers.rerun_run(run_id, http_request)
+    return await yachiyo_studio_handlers.rerun_run(run_id, request_body, http_request)
 
 
 @router.post("/studio/runs/{run_id}/cancel")

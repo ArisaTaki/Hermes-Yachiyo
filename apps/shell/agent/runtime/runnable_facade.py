@@ -75,8 +75,12 @@ class RuntimeRunnableFacadeMixin:
             on_complete=on_complete,
         )
 
-    def rerun_run(self, run_id: str) -> dict[str, Any]:
-        return self.run_rerun.rerun(run_id)
+    def rerun_run(
+        self,
+        run_id: str,
+        request: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return self.run_rerun.rerun(run_id, request)
 
     def delegate_runnable(
         self,
