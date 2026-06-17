@@ -424,6 +424,8 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "export function legacyChatRunnableResult",
             "runnableCommand: Boolean(result.runnable_command)",
             "runId: String(result.run_id || result.agent_run_id || result.workflow_run_id || '').trim()",
+            "status: normalizeLegacyRunStatus(result.run_status || result.status || '')",
+            "label: result.workflow_run_id ? 'Workflow' : 'Agent'",
         ],
     )
     _assert_contains(
@@ -504,9 +506,6 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "export function groupFollowupTaskIdsAttribute",
             "export function groupFollowupAgentMessageIdsAttribute",
             "export function normalizeRunStatus",
-            "export function runnableResultRunId",
-            "export function runnableResultStatus",
-            "export function runnableResultLabel",
             "export function messageRunStatus",
             "export function messageRunId",
             "export function messageSender",
@@ -676,6 +675,8 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "metadata.group_agent_summary_task_id",
             "metadata.group_followup_for_task_ids",
             "function runnableResultRunId",
+            "function runnableResultStatus",
+            "function runnableResultLabel",
             "result.workflow_run_id ? 'Workflow' : 'Agent'",
             "result.runnable_command",
             "agent_run_id?: string;",

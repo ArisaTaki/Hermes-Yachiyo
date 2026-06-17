@@ -99,18 +99,6 @@ export function normalizeRunStatus(status?: unknown) {
   return value === 'running' ? 'processing' : value;
 }
 
-export function runnableResultRunId(result: { run_id?: string; agent_run_id?: string; workflow_run_id?: string }) {
-  return String(result.run_id || result.agent_run_id || result.workflow_run_id || '').trim();
-}
-
-export function runnableResultStatus(result: { run_status?: string; status?: string }) {
-  return normalizeRunStatus(result.run_status || result.status || '');
-}
-
-export function runnableResultLabel(result: { workflow_run_id?: string }) {
-  return result.workflow_run_id ? 'Workflow' : 'Agent';
-}
-
 export function messageRunStatus(message?: YachiyoChatMessage | null) {
   return normalizeRunStatus(message?.metadata?.run_status || message?.metadata?.workflow_status || '');
 }
