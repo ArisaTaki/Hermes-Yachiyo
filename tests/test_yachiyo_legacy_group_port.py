@@ -129,19 +129,116 @@ def test_legacy_studio_port_updates_existing_chat_group_and_starts_member_runs(
     assert event_calls[0][1]["event_type"] == "group.run.started"
     assert event_calls[0][1]["payload"]["group_id"] == created["group_id"]
     assert event_calls[0][1]["payload"]["group_run_id"] == "run-group-1"
-    assert event_calls[1][1]["event_type"] == "group.member.started"
-    assert event_calls[1][1]["payload"]["group_id"] == created["group_id"]
-    assert event_calls[1][1]["payload"]["agent_id"] == "agent-reviewer"
-    assert event_calls[1][1]["payload"]["group_mode"] == "debate"
-    assert event_calls[1][1]["payload"]["group_memory_scope"] == "per_agent"
-    assert event_calls[1][1]["payload"]["group_moderator_agent_id"] == "agent-reviewer"
-    assert event_calls[1][1]["payload"]["group_tool_policy_id"] == "policy-original"
+    member_started = next(
+        call[1] for call in event_calls if call[1]["event_type"] == "group.member.started"
+    )
+    assert member_started["payload"]["group_id"] == created["group_id"]
+    assert member_started["payload"]["agent_id"] == "agent-reviewer"
+    assert member_started["payload"]["group_mode"] == "debate"
+    assert member_started["payload"]["group_memory_scope"] == "per_agent"
+    assert member_started["payload"]["group_moderator_agent_id"] == "agent-reviewer"
+    assert member_started["payload"]["group_tool_policy_id"] == "policy-original"
 
     runtime.complete_run(started["runs"][0]["run_id"], status="completed")
     event_calls = [call for call in runtime.calls if call[0] == "append_run_event"]
     assert event_calls[-1][1]["event_type"] == "group.member.completed"
     assert event_calls[-1][1]["payload"]["agent_id"] == "agent-reviewer"
     assert event_calls[-1][1]["payload"]["group_mode"] == "debate"
+
+
+def test_legacy_group_run_fallback_records_mode_specific_orchestration(
+    monkeypatch,
+) -> None:
+    store = _FakeChatStore()
+    runtime = _FakeRuntime()
+    monkeypatch.setattr("apps.core.chat_store.get_chat_store", lambda: store)
+    port = LegacyStudioPort(runtime)
+
+    debate_group = port.save_group(
+        {
+            "name": "Debate Team",
+            "mode": "debate",
+            "moderator_agent_id": "agent-writer",
+            "members": [
+                {"agent_id": "agent-writer", "role": "moderator", "sort_order": 0},
+                {"agent_id": "agent-reviewer", "role": "critic", "sort_order": 1},
+            ],
+        }
+    )
+    debate_run = port.start_group_run(
+        {
+            "group_id": debate_group["group_id"],
+            "objective": "Debate the plan",
+        }
+    )
+    create_calls = [
+        call[1]
+        for call in runtime.calls
+        if call[0] == "create_run_for_runnable_async"
+    ]
+    event_calls = [call for call in runtime.calls if call[0] == "append_run_event"]
+    plan_event = next(call for call in event_calls if call[1]["event_type"] == "group.run.plan")
+    member_events = [
+        call[1]["payload"]
+        for call in event_calls
+        if call[1]["event_type"] == "group.member.started"
+    ]
+
+    assert [call["runnable_id"] for call in create_calls] == [
+        "agent-reviewer",
+        "agent-writer",
+    ]
+    assert [member["agent_id"] for member in debate_run["participants"]] == [
+        "agent-reviewer",
+        "agent-writer",
+    ]
+    assert debate_run["active_speaker_agent_id"] == "agent-reviewer"
+    assert plan_event[1]["payload"]["group_execution_mode"] == "debate"
+    assert plan_event[1]["payload"]["group_execution_strategy"] == "participants_then_moderator"
+    assert plan_event[1]["payload"]["group_member_order"] == [
+        "agent-reviewer",
+        "agent-writer",
+    ]
+    assert member_events[0]["group_member_phase"] == "debate_argument"
+    assert member_events[0]["group_member_turn"] == 1
+    assert member_events[0]["group_member_is_moderator"] is False
+    assert member_events[1]["group_member_phase"] == "moderator_summary"
+    assert member_events[1]["group_member_turn"] == 2
+    assert member_events[1]["group_member_is_moderator"] is True
+
+    runtime.calls.clear()
+    parallel_group = port.save_group(
+        {
+            "name": "Parallel Team",
+            "mode": "parallel",
+            "members": [
+                {"agent_id": "agent-writer", "role": "writer", "sort_order": 0},
+                {"agent_id": "agent-reviewer", "role": "reviewer", "sort_order": 1},
+            ],
+        }
+    )
+    port.start_group_run(
+        {
+            "group_id": parallel_group["group_id"],
+            "objective": "Fan out the plan",
+        }
+    )
+    event_calls = [call for call in runtime.calls if call[0] == "append_run_event"]
+    plan_event = next(call for call in event_calls if call[1]["event_type"] == "group.run.plan")
+    member_events = [
+        call[1]["payload"]
+        for call in event_calls
+        if call[1]["event_type"] == "group.member.started"
+    ]
+
+    assert plan_event[1]["payload"]["group_execution_mode"] == "parallel"
+    assert plan_event[1]["payload"]["group_execution_strategy"] == "fan_out"
+    assert plan_event[1]["payload"]["group_parallel"] is True
+    assert [payload["group_member_phase"] for payload in member_events] == [
+        "parallel_branch",
+        "parallel_branch",
+    ]
+    assert {payload["group_member_parallel"] for payload in member_events} == {True}
 
 
 class _FakeChatStore:

@@ -149,6 +149,7 @@ def append_group_member_event(
     member_index: int,
     client_run_id: str = "",
     child_client_run_id: str = "",
+    orchestration: dict[str, Any] | None = None,
 ) -> None:
     append_run_event = getattr(runtime, "append_run_event", None)
     run_id = str(run.get("run_id") or "").strip()
@@ -171,6 +172,8 @@ def append_group_member_event(
         payload["client_run_id"] = client_run_id
     if child_client_run_id:
         payload["child_client_run_id"] = child_client_run_id
+    if orchestration:
+        payload.update(orchestration)
     append_run_event(run_id, event_type, payload)
 
 
@@ -187,6 +190,7 @@ def append_group_run_event(
     members: list[dict[str, Any]] | None = None,
     child_run_ids: list[str] | None = None,
     client_run_id: str = "",
+    orchestration: dict[str, Any] | None = None,
 ) -> None:
     append_run_event = getattr(runtime, "append_run_event", None)
     run_id = str(run.get("run_id") or "").strip()
@@ -205,6 +209,8 @@ def append_group_run_event(
         payload.update(_group_event_context(group))
     if client_run_id:
         payload["client_run_id"] = client_run_id
+    if orchestration:
+        payload.update(orchestration)
     append_run_event(run_id, event_type, payload)
 
 

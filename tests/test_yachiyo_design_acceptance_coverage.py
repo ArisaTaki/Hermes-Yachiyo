@@ -929,6 +929,18 @@ def test_group_and_workflow_acceptance_paths_are_guarded() -> None:
         ],
     )
     _assert_contains(
+        "apps/shell/yachiyo_agent/legacy_ports.py",
+        [
+            "def _group_orchestration_plan",
+            '"group.run.plan"',
+            '"participants_then_moderator"',
+            '"fan_out"',
+            '"moderator_first"',
+            "group_member_phase",
+            "group_member_parallel",
+        ],
+    )
+    _assert_contains(
         "apps/frontend/src/features/agent-studio/components/AgentGroupPanel.tsx",
         [
             "agent-group-settings-grid",
@@ -1020,6 +1032,7 @@ def test_group_and_workflow_acceptance_paths_are_guarded() -> None:
             "workflow.resumed",
             "workflow.completed",
             "workflow.failed",
+            "group.run.plan",
         ],
     )
 

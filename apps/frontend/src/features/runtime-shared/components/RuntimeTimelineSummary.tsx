@@ -99,6 +99,7 @@ function runtimeTimelineEventTypeLabel(type: string): string {
   if (type === 'memory.write.remove') return 'Memory 删除';
   if (type === 'artifact.created') return '产物已生成';
   if (type === 'group.run.started') return '群组运行启动';
+  if (type === 'group.run.plan') return '群组调度计划';
   if (type === 'group.run.completed') return '群组运行完成';
   if (type === 'group.run.failed') return '群组运行失败';
   if (type === 'group.run.cancelled') return '群组运行已取消';

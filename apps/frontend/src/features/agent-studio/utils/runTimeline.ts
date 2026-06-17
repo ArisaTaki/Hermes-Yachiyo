@@ -66,6 +66,7 @@ export function timelineEventTitle(event: Record<string, unknown>): string {
   if (name === 'run.failed') return 'Run 执行失败';
   if (name === 'run.rerun.started') return '从原 Run 重跑';
   if (name === 'group.run.started') return detail ? `群组运行启动 · ${detail}` : '群组运行启动';
+  if (name === 'group.run.plan') return detail ? `群组调度计划 · ${detail}` : '群组调度计划';
   if (name === 'group.run.completed') return detail ? `群组运行完成 · ${detail}` : '群组运行完成';
   if (name === 'group.run.failed') return detail ? `群组运行失败 · ${detail}` : '群组运行失败';
   if (name === 'group.run.cancelled') return detail ? `群组运行已取消 · ${detail}` : '群组运行已取消';
@@ -115,6 +116,7 @@ export function timelineEventTone(event: Record<string, unknown>): string {
   if (status === 'running' || status === 'processing' || name.includes('resumed')) return 'running';
   if (name === 'group.artifact.created' || name === 'group.shared_artifact.created') return 'ready';
   if (name === 'group.run.started') return 'running';
+  if (name === 'group.run.plan') return 'running';
   if (name === 'group.run.completed') return 'ready';
   if (name === 'group.run.failed' || name === 'group.run.cancelled') return 'danger';
   if (name.startsWith('group.member.')) return name.includes('started') ? 'running' : 'ready';
