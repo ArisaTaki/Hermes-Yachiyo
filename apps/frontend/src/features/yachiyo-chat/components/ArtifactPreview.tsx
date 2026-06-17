@@ -1,6 +1,5 @@
 import { RuntimeReadableArtifactPreview } from '../../runtime-shared/components/RuntimeReadableArtifactPreview';
-import { readYachiyoRunArtifact } from '../../yachiyo-studio/api';
-import { readYachiyoTaskArtifact } from '../api';
+import { readYachiyoChatRunArtifact, readYachiyoTaskArtifact } from '../api';
 import type { ArtifactSnapshot } from '../types';
 
 export function ArtifactPreview({
@@ -29,7 +28,7 @@ export function ArtifactPreview({
       previewVariant="compact"
       readArtifact={
         canReadRunArtifact
-          ? (artifactPath) => readYachiyoRunArtifact(sourceRunId, artifactPath)
+          ? (artifactPath) => readYachiyoChatRunArtifact(sourceRunId, artifactPath)
           : canReadTaskArtifact
             ? (artifactPath) => readYachiyoTaskArtifact(taskId, artifactPath)
             : undefined

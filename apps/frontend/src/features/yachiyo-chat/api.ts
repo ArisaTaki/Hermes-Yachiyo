@@ -107,6 +107,14 @@ export async function readYachiyoTaskArtifact(
   return apiGet(`/yachiyo/tasks/${encodeURIComponent(taskId)}/artifacts/${encodedPath}`);
 }
 
+export async function readYachiyoChatRunArtifact(
+  runId: string,
+  path: string,
+): Promise<ArtifactContentSnapshot> {
+  const encodedPath = path.split('/').map((part) => encodeURIComponent(part)).join('/');
+  return apiGet(`/ui/runs/${encodeURIComponent(runId)}/artifacts/${encodedPath}`);
+}
+
 export async function listYachiyoChatRunnableCatalog(): Promise<ChatRunnableCatalogSnapshot> {
   const payload = await apiGet<Partial<ChatRunnableCatalogSnapshot>>('/yachiyo/runnables');
   return {

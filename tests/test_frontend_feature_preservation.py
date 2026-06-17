@@ -1276,11 +1276,11 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
         "apps/frontend/src/features/yachiyo-chat/components/ArtifactPreview.tsx",
         [
             "RuntimeReadableArtifactPreview",
-            "readYachiyoRunArtifact",
+            "readYachiyoChatRunArtifact",
             "readYachiyoTaskArtifact",
             "const sourceRunId = String(artifact.source_run_id || artifact.run_id || '').trim();",
             "canReadRunArtifact",
-            "readYachiyoRunArtifact(sourceRunId, artifactPath)",
+            "readYachiyoChatRunArtifact(sourceRunId, artifactPath)",
             "readYachiyoTaskArtifact(taskId, artifactPath)",
             'shellTestId="yachiyo-task-artifact-shell"',
             'errorTestId="yachiyo-task-artifact-error"',
@@ -1291,6 +1291,10 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             'contentTestId="yachiyo-task-artifact-content"',
             'previewVariant="compact"',
         ],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/ArtifactPreview.tsx",
+        ["yachiyo-studio/api"],
     )
     _assert_contains(
         "apps/frontend/src/features/runtime-shared/components/RuntimeApprovalCard.tsx",
@@ -1556,8 +1560,10 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "after_sequence: String(Math.max(0, afterSequence))",
             "`/yachiyo/tasks/${encodeURIComponent(taskId)}/events?${query.toString()}`",
             "readYachiyoTaskArtifact",
+            "readYachiyoChatRunArtifact",
             "ArtifactContentSnapshot",
             "`/yachiyo/tasks/${encodeURIComponent(taskId)}/artifacts/${encodedPath}`",
+            "`/ui/runs/${encodeURIComponent(runId)}/artifacts/${encodedPath}`",
             "getYachiyoChatRunTaskSnapshot",
             "approveYachiyoChatRunApproval",
             "rejectYachiyoChatRunApproval",

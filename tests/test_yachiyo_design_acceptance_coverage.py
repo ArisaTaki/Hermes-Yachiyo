@@ -520,7 +520,7 @@ def test_shared_runtime_surface_components_acceptance_paths_are_guarded() -> Non
         "apps/frontend/src/features/yachiyo-chat/components/ArtifactPreview.tsx",
         [
             "RuntimeReadableArtifactPreview",
-            "readYachiyoRunArtifact(sourceRunId, artifactPath)",
+            "readYachiyoChatRunArtifact(sourceRunId, artifactPath)",
             "readYachiyoTaskArtifact(taskId, artifactPath)",
             'previewVariant="compact"',
             'previewTestId="yachiyo-task-artifact-preview"',
