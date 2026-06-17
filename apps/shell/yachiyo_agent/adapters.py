@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from apps.shell.agent.runtime.events import redact_run_event_payload, redact_secrets
+
 from .contracts import AgentDefinitionSnapshot, ReadinessSnapshot
 from .groups import agent_group_snapshot_from_payload, group_run_snapshot_from_payload
 from .memories import memory_snapshot_from_payload
@@ -73,11 +75,19 @@ def agent_definition_snapshot_from_payload(payload: Mapping[str, Any]) -> AgentD
 
 
 def _mapping(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, Mapping) else {}
+    if not isinstance(value, Mapping):
+        return {}
+    redacted = redact_run_event_payload(dict(value))
+    result = dict(redacted) if isinstance(redacted, Mapping) else {}
+    for key, item in value.items():
+        key_text = _text(key)
+        if key_text.endswith("_configured") and isinstance(item, bool):
+            result[key_text] = item
+    return result
 
 
 def _text(value: Any) -> str:
-    return str(value or "").strip()
+    return str(redact_secrets(value) or "").strip()
 
 
 def _optional_text(value: Any) -> str | None:

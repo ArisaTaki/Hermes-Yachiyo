@@ -664,6 +664,15 @@ def test_runtime_core_split_acceptance_paths_are_guarded() -> None:
         ],
     )
     _assert_contains(
+        "apps/shell/yachiyo_agent/adapters.py",
+        [
+            "redact_run_event_payload",
+            "redact_secrets",
+            "model_settings=_mapping(payload.get(\"model_config\"))",
+            "if key_text.endswith(\"_configured\") and isinstance(item, bool)",
+        ],
+    )
+    _assert_contains(
         "apps/shell/yachiyo_agent/approvals.py",
         [
             "redact_run_event_payload",

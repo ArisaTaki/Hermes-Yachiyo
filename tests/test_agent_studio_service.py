@@ -568,6 +568,47 @@ def test_agent_studio_service_redacts_sensitive_public_memory_and_future_task_te
     assert "[redacted]" in future_tasks[0].prompt
 
 
+def test_agent_studio_service_redacts_sensitive_public_agent_configuration() -> None:
+    class _SensitiveAgentPort:
+        def list_agents(self) -> dict[str, Any]:
+            return {
+                "agents": [
+                    _agent_payload()
+                    | {
+                        "instructions": "Use bearer sensitive-token-value only privately.",
+                        "model_config": {
+                            "provider": "openai_compatible",
+                            "api_key": "sk-sensitive-value",
+                            "api_key_configured": True,
+                            "headers": {"authorization": "bearer sensitive-token-value"},
+                        },
+                        "tool_policy": {
+                            "allowed_tools": ["workspace.read"],
+                            "api_key": "secret-tool-key-value",
+                        },
+                        "workspace_policy": {
+                            "default_workdir": "/workspace",
+                            "token": "secret-workspace-token",
+                        },
+                    }
+                ]
+            }
+
+    service = AgentStudioService(_SensitiveAgentPort())
+
+    agent = service.list_agents()[0]
+    rendered = str(agent.model_dump(mode="json"))
+
+    assert "sk-sensitive-value" not in rendered
+    assert "sensitive-token-value" not in rendered
+    assert "secret-tool-key-value" not in rendered
+    assert "secret-workspace-token" not in rendered
+    assert agent.model_settings["api_key"] == "[redacted]"
+    assert agent.model_settings["api_key_configured"] is True
+    assert agent.tool_policy["allowed_tools"] == ["workspace.read"]
+    assert agent.workspace_policy["default_workdir"] == "/workspace"
+
+
 def test_agent_studio_service_maps_group_run_workflow_run_timeline_and_events() -> None:
     port = _FakeStudioPort()
     service = AgentStudioService(port)
