@@ -504,6 +504,60 @@ def test_run_timeline_projects_rerun_provenance_from_replay_events() -> None:
     assert timeline.rerun_original_updated_at == "2026-06-13T00:00:04Z"
 
 
+def test_run_timeline_preserves_workflow_branch_replay_payloads() -> None:
+    timeline = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "workflow-run-branch",
+            "kind": "workflow_run",
+            "status": "completed",
+            "events": [
+                {
+                    "event_type": "workflow.node.condition",
+                    "sequence": 1,
+                    "payload": {
+                        "workflow_id": "workflow-1",
+                        "workflow_node_id": "route",
+                        "workflow_node_label": "Route",
+                        "workflow_node_condition": "has_changes",
+                        "workflow_node_condition_matched": True,
+                        "workflow_node_selected_branch": "true",
+                        "workflow_node_selected_target": "ship",
+                    },
+                },
+                {
+                    "event_type": "workflow.edge.followed",
+                    "sequence": 2,
+                    "payload": {
+                        "workflow_id": "workflow-1",
+                        "workflow_node_id": "route",
+                        "workflow_node_selected_branch": "true",
+                        "workflow_node_selected_target": "ship",
+                    },
+                },
+                {
+                    "event_type": "workflow.run.resumed",
+                    "sequence": 3,
+                    "payload": {
+                        "workflow_id": "workflow-1",
+                        "workflow_node_id": "ship",
+                    },
+                },
+            ],
+        }
+    )
+
+    assert timeline.workflow_run_id == "workflow-run-branch"
+    assert [event.event_type for event in timeline.events] == [
+        "workflow.node.condition",
+        "workflow.edge.followed",
+        "workflow.run.resumed",
+    ]
+    assert timeline.events[0].payload["workflow_node_selected_branch"] == "true"
+    assert timeline.events[0].payload["workflow_node_selected_target"] == "ship"
+    assert timeline.events[1].payload["workflow_node_selected_branch"] == "true"
+    assert timeline.events[2].payload["workflow_node_id"] == "ship"
+
+
 def test_legacy_task_and_timeline_functions_delegate_to_shared_projector() -> None:
     payload = _run_payload()
 

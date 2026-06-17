@@ -998,6 +998,92 @@ def test_group_and_workflow_acceptance_paths_are_guarded() -> None:
     )
 
 
+def test_run_replay_rerun_and_workflow_branch_acceptance_paths_are_guarded() -> None:
+    _assert_contains(
+        "apps/bridge/routes/yachiyo.py",
+        [
+            '@router.post("/studio/runs/{run_id}/rerun")',
+            "return await yachiyo_studio_handlers.rerun_run(run_id, http_request)",
+            '@router.get("/studio/runs/{run_id}/events")',
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-studio/api.ts",
+        [
+            "export async function listYachiyoRunEvents",
+            "export async function rerunYachiyoRun",
+            "/yachiyo/studio/runs/${encodeURIComponent(runId)}/events?${query.toString()}",
+            "/yachiyo/studio/runs/${encodeURIComponent(runId)}/rerun",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useRunLaunchActions.ts",
+        [
+            "const rerunSelectedRun = useCallback",
+            "await rerunYachiyoRun(selectedRun.run_id)",
+            "openRunDetail(run.run_id, { revealInHistory: true });",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/RunDetailPanel.tsx",
+        [
+            "selectedRunReplayEvents",
+            'data-testid="agent-run-detail-rerun"',
+            'data-testid="agent-run-detail-rerun-source"',
+            "onRerunSelectedRun",
+        ],
+    )
+    _assert_contains(
+        "apps/shell/agent/runtime/run_rerun.py",
+        [
+            "class RuntimeRunRerunService",
+            '"run.rerun.started"',
+            '"source": "rerun"',
+            '"original_goal": user_goal',
+        ],
+    )
+    _assert_contains(
+        "apps/shell/agent/runtime/workflow_continuation.py",
+        [
+            '"workflow.edge.followed"',
+            "WorkflowEdgeFollowedProjection.from_node",
+        ],
+    )
+    _assert_contains(
+        "apps/shell/agent/runtime/workflow_projections.py",
+        [
+            "workflow_node_selected_branch",
+            "workflow_node_selected_target",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/utils/runTimeline.ts",
+        [
+            "if (name === 'workflow.edge.followed')",
+            "workflow_node_selected_branch: payload.workflow_node_selected_branch",
+            "workflow_node_selected_target: payload.workflow_node_selected_target",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/utils/workflow.ts",
+        [
+            "workflow_node_selected_branch",
+            "workflow_node_selected_target",
+            "workflow_node_branch_count",
+            "workflow_node_completed_branch_count",
+        ],
+    )
+    _assert_smoke_script(
+        "scripts/smoke_agent_run_detail_ui.mjs",
+        [
+            'data-testid="agent-run-detail-rerun"',
+            "run.rerun.started",
+            "rerun replay events",
+            "loaded more run event replay page",
+        ],
+    )
+
+
 def test_runtime_memory_and_skill_trace_acceptance_paths_are_guarded() -> None:
     _assert_contains(
         "apps/shell/yachiyo_agent/contracts.py",
