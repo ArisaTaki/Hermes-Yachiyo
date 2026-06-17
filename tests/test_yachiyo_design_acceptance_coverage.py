@@ -430,6 +430,17 @@ def test_shared_runtime_surface_components_acceptance_paths_are_guarded() -> Non
         ],
     )
     _assert_contains(
+        "apps/frontend/src/features/runtime-shared/components/RuntimeArtifactList.tsx",
+        [
+            "const openRunId = item.source_run_id || item.run_id || fallbackRunId",
+            "const openPath = item.path || ''",
+            "const openable = Boolean(openPath && openRunId)",
+            "data-artifact-openable={openable ? 'true' : 'false'}",
+            "disabled={!openable}",
+            "onOpenArtifact(openRunId, openPath)",
+        ],
+    )
+    _assert_contains(
         "apps/frontend/src/features/agent-studio/components/RunTimeline.tsx",
         [
             "RuntimeTimelinePanel",

@@ -53,6 +53,9 @@ export function RuntimeArtifactList({
     <div className={className} data-testid={testId}>
       {visibleArtifacts.map((artifact, index) => {
         const item = runtimeArtifactListItem(artifact, index, fallbackRunId);
+        const openRunId = item.source_run_id || item.run_id || fallbackRunId;
+        const openPath = item.path || '';
+        const openable = Boolean(openPath && openRunId);
         const preview = (
           <RuntimeArtifactPreview
             artifact={item}
@@ -68,13 +71,15 @@ export function RuntimeArtifactList({
           <button
             type="button"
             data-artifact-kind={item.kind}
+            data-artifact-openable={openable ? 'true' : 'false'}
             data-artifact-path={item.path || ''}
+            data-artifact-run-id={openRunId}
             data-artifact-source-label={item.source_label || ''}
             data-artifact-source-run-id={item.source_run_id || ''}
             data-testid={itemTestId}
-            disabled={!item.path}
+            disabled={!openable}
             key={`${item.artifact_id}-${index}`}
-            onClick={() => item.path ? void onOpenArtifact(item.source_run_id || fallbackRunId, item.path) : undefined}
+            onClick={() => openable ? void onOpenArtifact(openRunId, openPath) : undefined}
           >
             {preview}
           </button>
