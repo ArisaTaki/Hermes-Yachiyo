@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import time
 from datetime import datetime
 from typing import Any
 
 from apps.shell.agent.runtime.budget import RunBudgetLimits, WorkflowRunBudget
 from apps.shell.agent.runtime.errors import AgentRuntimeError
-from apps.shell.agent.runtime.events import redact_json_value, redact_secrets
+from apps.shell.agent.runtime.events import tool_input_preview
 from apps.shell.agent.runtime.tool_brokers import write_artifact_with_tool_broker
 from apps.shell.agent.runtime.workflow_approvals import WorkflowApprovalPauseProjection
 from apps.shell.agent.runtime.workflow_nodes import (
@@ -29,6 +28,14 @@ from apps.shell.agent.runtime.workflow_projections import (
     WorkflowStartNodeProjection,
 )
 from apps.shell.agent.runtime.workflow_run_outcomes import WorkflowRunOutcomeProjector
+from apps.shell.agent.runtime.workflow_state import (
+    parallel_completed_agent_context,
+    parallel_completed_artifact_exists,
+    parallel_node_resume_context,
+    workflow_context_chars,
+    workflow_path_index,
+    workflow_steps_used,
+)
 
 
 def _iso_epoch(value: Any) -> float:
@@ -39,26 +46,6 @@ def _iso_epoch(value: Any) -> float:
         return datetime.fromisoformat(text).timestamp()
     except ValueError:
         return time.time()
-
-
-def _json_chars(value: Any) -> int:
-    try:
-        return len(json.dumps(value, ensure_ascii=False, default=str))
-    except (TypeError, ValueError):
-        return len(str(value))
-
-
-def _tool_input_preview(value: Any, *, limit: int = 1200) -> Any:
-    if isinstance(value, dict):
-        return {str(key): _tool_input_preview(item, limit=limit) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_tool_input_preview(item, limit=limit) for item in value[:20]]
-    if value is None or isinstance(value, (bool, int, float)):
-        return value
-    text = redact_secrets(value)
-    if len(text) > limit:
-        return f"{text[:limit]}... [truncated]"
-    return text
 
 
 class WorkflowContinuationCoordinator:
@@ -526,20 +513,11 @@ class WorkflowContinuationCoordinator:
 
     @staticmethod
     def _workflow_steps_used(timeline: list[dict[str, Any]]) -> int:
-        return sum(
-            1
-            for event in timeline
-            if isinstance(event, dict)
-            and str(event.get("event") or "").startswith("workflow.node.")
-            and str(event.get("event") or "") not in {
-                "workflow.node.approval_rejected",
-                "workflow.node.approval_timeout",
-            }
-        )
+        return workflow_steps_used(timeline)
 
     @staticmethod
     def _workflow_context_chars(context: str) -> int:
-        return _json_chars(redact_json_value({"context": context}))
+        return workflow_context_chars(context)
 
     def _workflow_budget(
         self,
@@ -794,10 +772,7 @@ class WorkflowContinuationCoordinator:
 
     @staticmethod
     def _path_index(path: list[dict[str, Any]], node_id: str) -> int:
-        for index, node in enumerate(path):
-            if str(node.get("id") or "") == node_id:
-                return index
-        return len(path)
+        return workflow_path_index(path, node_id)
 
     def resume_after_approval_node(
         self,
@@ -866,17 +841,11 @@ class WorkflowContinuationCoordinator:
         parallel_node_id: str,
         fallback: str,
     ) -> str:
-        if not parallel_node_id:
-            return fallback
-        for event in reversed(timeline):
-            if not isinstance(event, dict):
-                continue
-            if str(event.get("workflow_parent_node_id") or "") != parallel_node_id:
-                continue
-            context = str(event.get("workflow_parent_node_context") or "")
-            if context:
-                return context
-        return fallback
+        return parallel_node_resume_context(
+            timeline,
+            parallel_node_id=parallel_node_id,
+            fallback=fallback,
+        )
 
     @staticmethod
     def _parallel_completed_agent_context(
@@ -885,21 +854,11 @@ class WorkflowContinuationCoordinator:
         parallel_node_id: str,
         branch_node_id: str,
     ) -> str | None:
-        if not parallel_node_id or not branch_node_id:
-            return None
-        for event in reversed(timeline):
-            if not isinstance(event, dict):
-                continue
-            if event.get("event") != "workflow.node.agent":
-                continue
-            if str(event.get("workflow_parent_node_id") or "") != parallel_node_id:
-                continue
-            if str(event.get("workflow_node_id") or "") != branch_node_id:
-                continue
-            if str(event.get("status") or "") != "completed":
-                continue
-            return str(event.get("workflow_node_context") or event.get("result") or "")
-        return None
+        return parallel_completed_agent_context(
+            timeline,
+            parallel_node_id=parallel_node_id,
+            branch_node_id=branch_node_id,
+        )
 
     @staticmethod
     def _parallel_completed_artifact_exists(
@@ -908,15 +867,10 @@ class WorkflowContinuationCoordinator:
         parallel_node_id: str,
         branch_node_id: str,
     ) -> bool:
-        if not parallel_node_id or not branch_node_id:
-            return False
-        return any(
-            isinstance(event, dict)
-            and event.get("event") == "workflow.node.artifact"
-            and str(event.get("workflow_parent_node_id") or "") == parallel_node_id
-            and str(event.get("workflow_node_id") or "") == branch_node_id
-            and str(event.get("status") or "") == "completed"
-            for event in timeline
+        return parallel_completed_artifact_exists(
+            timeline,
+            parallel_node_id=parallel_node_id,
+            branch_node_id=branch_node_id,
         )
 
     def _run_agent_node(
@@ -1023,7 +977,7 @@ class WorkflowContinuationCoordinator:
                 f"workflow.run.{status}",
                 {
                     **execution.status_event_payload(),
-                    "result": _tool_input_preview(next_context or execution.status, limit=1800),
+                    "result": tool_input_preview(next_context or execution.status, limit=1800),
                 },
             )
             result = self._update_run(
@@ -1127,7 +1081,7 @@ class WorkflowContinuationCoordinator:
                 f"workflow.run.{status}",
                 {
                     **execution.status_event_payload(),
-                    "result": _tool_input_preview(next_context or execution.status, limit=1800),
+                    "result": tool_input_preview(next_context or execution.status, limit=1800),
                 },
             )
             result = self._update_run(
@@ -1282,7 +1236,7 @@ class WorkflowContinuationCoordinator:
                 {
                     "entry_node_id": str(branch.get("entry_node_id") or ""),
                     "label": branch_label,
-                    "result": _tool_input_preview(branch_context, limit=1800),
+                    "result": tool_input_preview(branch_context, limit=1800),
                 }
             )
         aggregate_context = "\n".join(
