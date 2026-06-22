@@ -35,6 +35,8 @@ def test_desktop_permission_probe_aggregates_macos_permission_gaps(monkeypatch) 
             return False, "not authorized to send Apple events to System Events"
         if 'id of application "Finder"' in script:
             return True, "com.apple.finder"
+        if 'tell application "Finder"' in script:
+            return True, "Finder"
         if 'id of application "Music"' in script:
             return False, "application Music was not found"
         if "UI elements enabled" in script:
@@ -55,6 +57,39 @@ def test_desktop_permission_probe_aggregates_macos_permission_gaps(monkeypatch) 
         "foreground_input": ["accessibility"],
         "browser_control": ["chrome_cdp"],
     }
+
+
+def test_desktop_permission_probe_marks_music_automation_gap(monkeypatch) -> None:
+    monkeypatch.setattr(
+        desktop_permissions_mod,
+        "_check_screen_capture_permission",
+        lambda: {"ok": True, "allowed": True},
+    )
+    monkeypatch.setattr(desktop_permissions_mod, "_command_exists", lambda _command: True)
+    monkeypatch.setattr(desktop_permissions_mod, "_configured_browser_cdp_url", lambda: "http://127.0.0.1:9222")
+    monkeypatch.setattr(desktop_permissions_mod, "_browser_cdp_reachable", lambda _url: True)
+
+    def fake_osascript(script: str, *, timeout: float = 3.0) -> tuple[bool, str]:
+        if "first application process" in script:
+            return True, "Finder"
+        if 'id of application "Finder"' in script:
+            return True, "com.apple.finder"
+        if 'tell application "Finder"' in script:
+            return True, "Finder"
+        if 'id of application "Music"' in script:
+            return True, "com.apple.Music"
+        if 'tell application "Music"' in script:
+            return False, "Not authorized to send Apple events to Music"
+        if "UI elements enabled" in script:
+            return True, "true"
+        raise AssertionError(script)
+
+    monkeypatch.setattr(desktop_permissions_mod, "_run_osascript", fake_osascript)
+
+    assert desktop_permissions_mod.desktop_permission_missing_by_capability(
+        platform_name="Darwin",
+        use_cache=False,
+    ) == {"media_control": ["automation"]}
 
 
 def test_desktop_permission_probe_keeps_browser_available_when_cdp_is_reachable(monkeypatch) -> None:

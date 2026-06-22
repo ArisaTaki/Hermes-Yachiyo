@@ -87,12 +87,26 @@ def _probe_app_control(missing: dict[str, list[str]]) -> None:
     ok, _output = _run_osascript('id of application "Finder"', timeout=3.0)
     if not ok:
         _add_missing(missing, "app_control", "automation")
+        return
+    automation_ok, _automation_output = _run_osascript(
+        'tell application "Finder" to return name',
+        timeout=3.0,
+    )
+    if not automation_ok:
+        _add_missing(missing, "app_control", "automation")
 
 
 def _probe_media_control(missing: dict[str, list[str]]) -> None:
     ok, _output = _run_osascript('id of application "Music"', timeout=3.0)
     if not ok:
         _add_missing(missing, "media_control", "music_app")
+        return
+    automation_ok, _automation_output = _run_osascript(
+        'tell application "Music" to return name',
+        timeout=3.0,
+    )
+    if not automation_ok:
+        _add_missing(missing, "media_control", "automation")
 
 
 def _probe_foreground_input(missing: dict[str, list[str]]) -> None:
