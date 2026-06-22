@@ -16,6 +16,80 @@ type AgentReadinessNotice = {
 
 type SkillSourceFilter = 'installed' | 'native';
 type SkillFolderFilter = 'all' | 'uncategorized' | string;
+type AgentCapabilityToggle = {
+  draftKey: keyof Pick<
+    AgentDraft,
+    | 'allow_screen_context'
+    | 'allow_app_control'
+    | 'allow_media_control'
+    | 'allow_foreground_input'
+    | 'allow_browser_control'
+    | 'allow_terminal'
+    | 'allow_workspace_read'
+    | 'allow_workspace_write'
+    | 'allow_artifacts'
+  >;
+  id: string;
+  label: string;
+  testId: string;
+};
+
+const agentCapabilityToggles: AgentCapabilityToggle[] = [
+  {
+    draftKey: 'allow_screen_context',
+    id: 'screen_context',
+    label: 'Screen',
+    testId: 'agent-capability-screen',
+  },
+  {
+    draftKey: 'allow_app_control',
+    id: 'app_control',
+    label: 'App Control',
+    testId: 'agent-capability-app-control',
+  },
+  {
+    draftKey: 'allow_media_control',
+    id: 'media_control',
+    label: 'Media',
+    testId: 'agent-capability-media',
+  },
+  {
+    draftKey: 'allow_foreground_input',
+    id: 'foreground_input',
+    label: 'Foreground Input',
+    testId: 'agent-capability-foreground-input',
+  },
+  {
+    draftKey: 'allow_browser_control',
+    id: 'browser_control',
+    label: 'Browser',
+    testId: 'agent-capability-browser',
+  },
+  {
+    draftKey: 'allow_terminal',
+    id: 'terminal',
+    label: 'Terminal',
+    testId: 'agent-capability-terminal',
+  },
+  {
+    draftKey: 'allow_workspace_read',
+    id: 'workspace_read',
+    label: 'Read workspace',
+    testId: 'agent-capability-workspace-read',
+  },
+  {
+    draftKey: 'allow_workspace_write',
+    id: 'workspace_write',
+    label: 'Write files',
+    testId: 'agent-capability-workspace-write',
+  },
+  {
+    draftKey: 'allow_artifacts',
+    id: 'artifacts',
+    label: 'Write artifacts',
+    testId: 'agent-capability-artifacts',
+  },
+];
 
 type AgentEditorPanelProps = {
   agentQuickRunDisabled: boolean;
@@ -100,6 +174,9 @@ export function AgentEditorPanel({
 }: AgentEditorPanelProps) {
   const updateDraft = (patch: Partial<AgentDraft>) => onDraftChange({ ...draft, ...patch });
   const toolCapabilitySummaries = agentToolCapabilitySummaries(draft, toolCatalog);
+  const toolCapabilityById = new Map(
+    toolCapabilitySummaries.map((summary) => [summary.id, summary]),
+  );
   return (
     <form className="agent-studio-panel agent-editor" data-testid="agent-editor" onSubmit={(event) => { event.preventDefault(); onSaveAgent(); }}>
       <div className="section-heading-row">
@@ -218,47 +295,50 @@ export function AgentEditorPanel({
         </div>
         <p className="agent-section-help">这里会实际写入 ToolBroker 允许工具；写文件和运行命令即使开启，也仍然需要 Run 审批。</p>
         <div className="agent-capability-grid">
-          <label className="agent-checkbox-row">
-            <input type="checkbox" checked={draft.allow_screen_context} disabled={selectedAgentReadOnly} onChange={(event) => updateDraft({ allow_screen_context: event.target.checked })} />
-            <span>Screen</span>
-          </label>
-          <label className="agent-checkbox-row">
-            <input type="checkbox" checked={draft.allow_app_control} disabled={selectedAgentReadOnly} onChange={(event) => updateDraft({ allow_app_control: event.target.checked })} />
-            <span>App Control</span>
-          </label>
-          <label className="agent-checkbox-row">
-            <input type="checkbox" checked={draft.allow_media_control} disabled={selectedAgentReadOnly} onChange={(event) => updateDraft({ allow_media_control: event.target.checked })} />
-            <span>Media</span>
-          </label>
-          <label className="agent-checkbox-row">
-            <input type="checkbox" checked={draft.allow_foreground_input} disabled={selectedAgentReadOnly} onChange={(event) => updateDraft({ allow_foreground_input: event.target.checked })} />
-            <span>Foreground Input</span>
-          </label>
-          <label className="agent-checkbox-row">
-            <input
-              type="checkbox"
-              checked={draft.allow_browser_control}
-              disabled={selectedAgentReadOnly}
-              onChange={(event) => updateDraft({ allow_browser_control: event.target.checked })}
-            />
-            <span>Browser</span>
-          </label>
-          <label className="agent-checkbox-row">
-            <input type="checkbox" checked={draft.allow_workspace_read} disabled={selectedAgentReadOnly} onChange={(event) => updateDraft({ allow_workspace_read: event.target.checked })} />
-            <span>Read workspace</span>
-          </label>
-          <label className="agent-checkbox-row">
-            <input type="checkbox" checked={draft.allow_workspace_write} disabled={selectedAgentReadOnly} onChange={(event) => updateDraft({ allow_workspace_write: event.target.checked, allow_workspace_read: event.target.checked ? true : draft.allow_workspace_read })} />
-            <span>Write files</span>
-          </label>
-          <label className="agent-checkbox-row">
-            <input type="checkbox" checked={draft.allow_terminal} disabled={selectedAgentReadOnly} onChange={(event) => updateDraft({ allow_terminal: event.target.checked })} />
-            <span>Run commands</span>
-          </label>
-          <label className="agent-checkbox-row">
-            <input type="checkbox" checked={draft.allow_artifacts} disabled={selectedAgentReadOnly} onChange={(event) => updateDraft({ allow_artifacts: event.target.checked })} />
-            <span>Write artifacts</span>
-          </label>
+          {agentCapabilityToggles.map((capability) => {
+            const summary = toolCapabilityById.get(capability.id);
+            const checked = Boolean(draft[capability.draftKey]);
+            const nextPatch = (enabled: boolean): Partial<AgentDraft> => {
+              if (capability.draftKey === 'allow_workspace_write') {
+                return {
+                  allow_workspace_read: enabled ? true : draft.allow_workspace_read,
+                  allow_workspace_write: enabled,
+                };
+              }
+              return { [capability.draftKey]: enabled } as Partial<AgentDraft>;
+            };
+            return (
+              <label
+                className={checked ? 'agent-capability-toggle enabled' : 'agent-capability-toggle'}
+                data-capability-id={capability.id}
+                data-testid={capability.testId}
+                key={capability.id}
+              >
+                <span className="agent-capability-toggle-head">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={selectedAgentReadOnly}
+                    onChange={(event) => updateDraft(nextPatch(event.target.checked))}
+                  />
+                  <strong>{summary?.label || capability.label}</strong>
+                </span>
+                <span className="agent-capability-toggle-tools">
+                  {(summary?.tools || []).join(', ') || 'No tools'}
+                </span>
+                <span className="agent-capability-toggle-meta">
+                  <span className={`studio-tool-risk ${summary?.riskLevel || 'unknown'}`}>
+                    {summary?.riskLevel || 'unknown'}
+                  </span>
+                  {summary?.approvalRequired ? <span className="agent-policy-pill warn">approval</span> : null}
+                  <span className={checked ? 'agent-policy-pill on' : 'agent-policy-pill'}>{checked ? 'on' : 'off'}</span>
+                </span>
+                {summary?.missingPermissions.length ? (
+                  <em>Missing: {summary.missingPermissions.join(', ')}</em>
+                ) : null}
+              </label>
+            );
+          })}
         </div>
         {agentReadinessNotices.length ? (
           <div className="agent-readiness-list" aria-label="Agent 运行状态">

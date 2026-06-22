@@ -78,7 +78,7 @@ const capabilityDefinitions: AgentToolCapabilityDefinition[] = [
   },
   {
     id: 'terminal',
-    label: 'Run commands',
+    label: 'Terminal',
     tools: terminalTools,
     enabled: (draft) => draft.allow_terminal,
   },

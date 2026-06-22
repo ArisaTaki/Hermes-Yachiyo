@@ -15848,8 +15848,68 @@ button.activity-item {
 
 .agent-capability-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
+}
+
+.agent-capability-toggle {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 8px;
+  background: oklch(255 0 0 / 0.025);
+  color: var(--hy-muted);
+}
+
+.agent-capability-toggle.enabled {
+  border-color: oklch(66% 0.12 188 / 0.34);
+  background: oklch(66% 0.12 188 / 0.075);
+  color: var(--hy-fg);
+}
+
+.agent-capability-toggle-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.agent-capability-toggle-head input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--hy-accent);
+}
+
+.agent-capability-toggle-head strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: inherit;
+  font-size: 12px;
+  font-weight: 620;
+}
+
+.agent-capability-toggle-tools,
+.agent-capability-toggle em {
+  min-width: 0;
+  color: var(--hy-faint);
+  font-size: 11px;
+  line-height: 1.38;
+  overflow-wrap: anywhere;
+}
+
+.agent-capability-toggle em {
+  color: oklch(84% 0.13 86);
+  font-style: normal;
+}
+
+.agent-capability-toggle-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+  min-width: 0;
 }
 
 .agent-readiness-list {
