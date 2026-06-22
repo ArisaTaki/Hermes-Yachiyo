@@ -73,6 +73,14 @@ class RegisteredPluginTool:
     skill_docs: str = ""
 
 
+@dataclass(frozen=True)
+class RestrictedPluginInstallState:
+    plugin_id: str
+    enabled: bool
+    tool_names: tuple[str, ...] = ()
+    skill_docs: str = ""
+
+
 @dataclass
 class _PluginRegistration:
     plugin_id: str
@@ -84,12 +92,87 @@ _REGISTERED_PLUGIN_TOOLS: dict[str, RegisteredPluginTool] = {}
 _PLUGIN_REGISTRATIONS: dict[str, _PluginRegistration] = {}
 
 
+class RestrictedToolPluginManager:
+    """In-memory install layer for restricted tool-only plugins.
+
+    This deliberately does not persist plugins or load third-party code. It is
+    a small management boundary over the existing global registry so future
+    Studio routes can install, disable, re-enable, and uninstall tool-only
+    plugins without bypassing ToolBroker, policy, timeline, or approval gates.
+    """
+
+    def __init__(self) -> None:
+        self._plugins: dict[str, RestrictedToolPlugin] = {}
+
+    def install(
+        self,
+        plugin: RestrictedToolPlugin,
+        *,
+        enabled: bool = True,
+    ) -> RestrictedPluginInstallState:
+        plugin_id = _validate_plugin_metadata(plugin)
+        if plugin_id in self._plugins:
+            raise AgentRuntimeError(f"插件已安装：{plugin_id}")
+        clean_plugin = RestrictedToolPlugin(
+            plugin_id=plugin_id,
+            tools=tuple(plugin.tools),
+            skill_docs=str(plugin.skill_docs or ""),
+        )
+        self._plugins[plugin_id] = clean_plugin
+        try:
+            if enabled:
+                register_restricted_tool_plugin(clean_plugin)
+        except Exception:
+            self._plugins.pop(plugin_id, None)
+            raise
+        return self.state(plugin_id)
+
+    def enable(self, plugin_id: str) -> RestrictedPluginInstallState:
+        clean_plugin_id = _validate_plugin_id(plugin_id)
+        plugin = self._plugin_or_error(clean_plugin_id)
+        if not self._is_enabled(clean_plugin_id):
+            register_restricted_tool_plugin(plugin)
+        return self.state(clean_plugin_id)
+
+    def disable(self, plugin_id: str) -> RestrictedPluginInstallState:
+        clean_plugin_id = _validate_plugin_id(plugin_id)
+        self._plugin_or_error(clean_plugin_id)
+        unregister_restricted_tool_plugin(clean_plugin_id)
+        return self.state(clean_plugin_id)
+
+    def uninstall(self, plugin_id: str) -> RestrictedPluginInstallState:
+        clean_plugin_id = _validate_plugin_id(plugin_id)
+        plugin = self._plugin_or_error(clean_plugin_id)
+        unregister_restricted_tool_plugin(clean_plugin_id)
+        self._plugins.pop(clean_plugin_id, None)
+        return _install_state(plugin, enabled=False)
+
+    def state(self, plugin_id: str) -> RestrictedPluginInstallState:
+        clean_plugin_id = _validate_plugin_id(plugin_id)
+        plugin = self._plugin_or_error(clean_plugin_id)
+        return _install_state(plugin, enabled=self._is_enabled(clean_plugin_id))
+
+    def list_installed(self) -> list[RestrictedPluginInstallState]:
+        return [
+            self.state(plugin_id)
+            for plugin_id in sorted(self._plugins)
+        ]
+
+    def _plugin_or_error(self, plugin_id: str) -> RestrictedToolPlugin:
+        plugin = self._plugins.get(plugin_id)
+        if plugin is None:
+            raise AgentRuntimeError(f"插件未安装：{plugin_id}")
+        return plugin
+
+    @staticmethod
+    def _is_enabled(plugin_id: str) -> bool:
+        return plugin_id in _PLUGIN_REGISTRATIONS
+
+
 def register_restricted_tool_plugin(plugin: RestrictedToolPlugin) -> list[RegisteredPluginTool]:
-    plugin_id = _validate_plugin_id(plugin.plugin_id)
+    plugin_id = _validate_plugin_metadata(plugin)
     if plugin_id in _PLUGIN_REGISTRATIONS:
         raise AgentRuntimeError(f"插件已注册：{plugin_id}")
-    if not plugin.tools:
-        raise AgentRuntimeError("插件至少需要提供一个工具")
 
     registered: list[RegisteredPluginTool] = []
     try:
@@ -179,7 +262,7 @@ def _register_plugin_tool(
     if not callable(tool.execute):
         raise AgentRuntimeError("插件工具 execute 必须可调用")
 
-    tool_name = f"plugin.{plugin_id}.{tool_id}"
+    tool_name = _plugin_tool_name(plugin_id, tool_id)
     if tool_name in TOOL_DESCRIPTORS or tool_name in TOOL_DISPATCH_REGISTRY:
         raise AgentRuntimeError(f"工具已注册：{tool_name}")
     function_name = _function_name(plugin_id, tool_id)
@@ -240,6 +323,18 @@ def _remove_plugin_tool(tool_name: str) -> None:
     TOOL_FUNCTION_NAMES.pop(tool_name, None)
 
 
+def _validate_plugin_metadata(plugin: RestrictedToolPlugin) -> str:
+    plugin_id = _validate_plugin_id(plugin.plugin_id)
+    if not plugin.tools:
+        raise AgentRuntimeError("插件至少需要提供一个工具")
+    for tool in plugin.tools:
+        _validate_tool_id(tool.tool_id)
+        _validate_risk_level(tool.risk_level)
+        if not callable(tool.execute):
+            raise AgentRuntimeError("插件工具 execute 必须可调用")
+    return plugin_id
+
+
 def _validate_plugin_id(value: str) -> str:
     plugin_id = str(value or "").strip().lower()
     if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{1,63}", plugin_id):
@@ -267,13 +362,36 @@ def _function_name(plugin_id: str, tool_id: str) -> str:
     return f"plugin_{safe_plugin_id}_{safe_tool_id}"
 
 
+def _plugin_tool_name(plugin_id: str, tool_id: str) -> str:
+    return f"plugin.{plugin_id}.{tool_id}"
+
+
+def _install_state(
+    plugin: RestrictedToolPlugin,
+    *,
+    enabled: bool,
+) -> RestrictedPluginInstallState:
+    plugin_id = _validate_plugin_id(plugin.plugin_id)
+    return RestrictedPluginInstallState(
+        plugin_id=plugin_id,
+        enabled=enabled,
+        tool_names=tuple(
+            _plugin_tool_name(plugin_id, _validate_tool_id(tool.tool_id))
+            for tool in plugin.tools
+        ),
+        skill_docs=str(plugin.skill_docs or ""),
+    )
+
+
 __all__ = [
     "PluginRiskLevel",
     "PluginToolHandler",
     "RegisteredPluginTool",
+    "RestrictedPluginInstallState",
     "RestrictedPluginTool",
     "RestrictedPluginToolContext",
     "RestrictedToolPlugin",
+    "RestrictedToolPluginManager",
     "call_restricted_plugin_tool",
     "clear_restricted_tool_plugins",
     "list_restricted_plugin_tools",

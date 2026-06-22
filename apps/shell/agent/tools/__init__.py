@@ -4,9 +4,11 @@ from apps.shell.agent.tools.broker import ToolBroker, cancel_terminal_process_gr
 from apps.shell.agent.tools.foreground_lock import ForegroundActionLease, ForegroundActionLock
 from apps.shell.agent.tools.plugins import (
     RegisteredPluginTool,
+    RestrictedPluginInstallState,
     RestrictedPluginTool,
     RestrictedPluginToolContext,
     RestrictedToolPlugin,
+    RestrictedToolPluginManager,
     call_restricted_plugin_tool,
     clear_restricted_tool_plugins,
     list_restricted_plugin_tools,
@@ -54,9 +56,11 @@ __all__ = [
     "MEMORY_TOOL_NAMES",
     "PolicyGate",
     "RegisteredPluginTool",
+    "RestrictedPluginInstallState",
     "RestrictedPluginTool",
     "RestrictedPluginToolContext",
     "RestrictedToolPlugin",
+    "RestrictedToolPluginManager",
     "RuntimePolicyCompiler",
     "TOOL_DESCRIPTORS",
     "TOOL_DISPATCH_REGISTRY",

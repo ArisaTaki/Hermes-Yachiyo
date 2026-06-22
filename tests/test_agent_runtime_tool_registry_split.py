@@ -19,6 +19,7 @@ from apps.shell.agent.tools.policy import (
 from apps.shell.agent.tools.plugins import (
     RestrictedPluginTool,
     RestrictedToolPlugin,
+    RestrictedToolPluginManager,
     clear_restricted_tool_plugins,
     list_restricted_plugin_tools,
     register_restricted_tool_plugin,
@@ -142,6 +143,66 @@ def test_restricted_plugin_tool_registers_schema_policy_and_dispatch(tmp_path) -
     assert restricted_plugin_tool_risk(tool_name) is None
     with pytest.raises(AgentRuntimeError, match="未知工具"):
         dispatch_tool_call(_broker(tmp_path), tool_name, {"text": "hello"})
+
+
+def test_restricted_plugin_manager_installs_disables_enables_and_uninstalls(
+    tmp_path,
+) -> None:
+    def echo_tool(payload, context):
+        return {"ok": True, "text": payload["text"], "plugin_id": context.plugin_id}
+
+    tool_name = "plugin.notes.echo"
+    manager = RestrictedToolPluginManager()
+    plugin = RestrictedToolPlugin(
+        plugin_id="notes",
+        tools=(
+            RestrictedPluginTool(
+                tool_id="echo",
+                description="Echo text through a managed test plugin.",
+                properties={"text": {"type": "string"}},
+                required=("text",),
+                risk_level="medium",
+                execute=echo_tool,
+            ),
+        ),
+        skill_docs="Use echo for managed plugin tests.",
+    )
+
+    installed = manager.install(plugin, enabled=False)
+    assert installed.plugin_id == "notes"
+    assert installed.enabled is False
+    assert installed.tool_names == (tool_name,)
+    assert installed.skill_docs == "Use echo for managed plugin tests."
+    assert list_restricted_plugin_tools() == []
+    assert tool_name not in TOOL_DISPATCH_REGISTRY
+
+    enabled = manager.enable("notes")
+    assert enabled.enabled is True
+    assert list_restricted_plugin_tools()[0].name == tool_name
+    assert restricted_plugin_tool_risk(tool_name) == "medium"
+    assert dispatch_tool_call(_broker(tmp_path), tool_name, {"text": "hello"}) == {
+        "ok": True,
+        "text": "hello",
+        "plugin_id": "notes",
+        "tool": tool_name,
+        "risk_level": "medium",
+    }
+
+    disabled = manager.disable("notes")
+    assert disabled.enabled is False
+    assert manager.list_installed()[0].enabled is False
+    assert list_restricted_plugin_tools() == []
+    assert tool_name not in TOOL_DISPATCH_REGISTRY
+    with pytest.raises(AgentRuntimeError, match="未知工具"):
+        dispatch_tool_call(_broker(tmp_path), tool_name, {"text": "hello"})
+
+    assert manager.enable("notes").enabled is True
+    uninstalled = manager.uninstall("notes")
+    assert uninstalled.enabled is False
+    assert manager.list_installed() == []
+    assert tool_name not in TOOL_DISPATCH_REGISTRY
+    with pytest.raises(AgentRuntimeError, match="插件未安装"):
+        manager.enable("notes")
 
 
 def test_high_risk_restricted_plugin_tool_uses_existing_approval_gate(tmp_path) -> None:
