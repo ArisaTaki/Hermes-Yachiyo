@@ -219,8 +219,13 @@ export function AgentEditorPanel({
             <input type="checkbox" checked={draft.allow_foreground_input} disabled={selectedAgentReadOnly} onChange={(event) => updateDraft({ allow_foreground_input: event.target.checked })} />
             <span>Foreground Input</span>
           </label>
-          <label className="agent-checkbox-row disabled" title="Browser/CDP tools are planned for the next execution batch.">
-            <input type="checkbox" checked={draft.allow_browser_control} disabled />
+          <label className="agent-checkbox-row">
+            <input
+              type="checkbox"
+              checked={draft.allow_browser_control}
+              disabled={selectedAgentReadOnly}
+              onChange={(event) => updateDraft({ allow_browser_control: event.target.checked })}
+            />
             <span>Browser</span>
           </label>
           <label className="agent-checkbox-row">

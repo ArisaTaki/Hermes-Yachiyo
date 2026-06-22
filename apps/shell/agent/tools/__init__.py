@@ -2,11 +2,14 @@
 
 from apps.shell.agent.tools.broker import ToolBroker, cancel_terminal_process_groups
 from apps.shell.agent.tools.policy import (
+    DAILY_BROWSER_TOOL_NAMES,
     DAILY_DESKTOP_TOOL_NAMES,
     FUTURE_TASK_TOOL_NAMES,
     HIGH_RISK_AGENT_TOOLS,
     KNOWN_AGENT_TOOLS,
+    LOW_RISK_BROWSER_TOOL_NAMES,
     LOW_RISK_DESKTOP_TOOL_NAMES,
+    MEDIUM_RISK_BROWSER_TOOL_NAMES,
     MEDIUM_RISK_DESKTOP_TOOL_NAMES,
     MEMORY_KINDS,
     MEMORY_SCOPES,
@@ -22,11 +25,14 @@ from apps.shell.agent.tools.policy import (
 from apps.shell.agent.tools.registry import TOOL_DISPATCH_REGISTRY, dispatch_tool_call
 
 __all__ = [
+    "DAILY_BROWSER_TOOL_NAMES",
     "DAILY_DESKTOP_TOOL_NAMES",
     "FUTURE_TASK_TOOL_NAMES",
     "HIGH_RISK_AGENT_TOOLS",
     "KNOWN_AGENT_TOOLS",
+    "LOW_RISK_BROWSER_TOOL_NAMES",
     "LOW_RISK_DESKTOP_TOOL_NAMES",
+    "MEDIUM_RISK_BROWSER_TOOL_NAMES",
     "MEDIUM_RISK_DESKTOP_TOOL_NAMES",
     "MEMORY_KINDS",
     "MEMORY_SCOPES",

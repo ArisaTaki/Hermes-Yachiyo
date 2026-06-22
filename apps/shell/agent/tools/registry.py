@@ -154,6 +154,49 @@ def _desktop_type_text(
     return broker.desktop_type_text(str(payload.get("text") or ""))
 
 
+def _browser_open_url(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
+    return broker.browser_open_url(str(payload.get("url") or ""))
+
+
+def _browser_current_page(
+    broker: Any,
+    _payload: dict[str, Any],
+    _approved: bool,
+) -> dict[str, Any]:
+    return broker.browser_current_page()
+
+
+def _browser_click(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
+    return broker.browser_click(str(payload.get("selector") or ""))
+
+
+def _browser_type_text(
+    broker: Any,
+    payload: dict[str, Any],
+    _approved: bool,
+) -> dict[str, Any]:
+    return broker.browser_type_text(
+        str(payload.get("selector") or ""),
+        str(payload.get("text") or ""),
+    )
+
+
+def _browser_extract_text(
+    broker: Any,
+    payload: dict[str, Any],
+    _approved: bool,
+) -> dict[str, Any]:
+    return broker.browser_extract_text(str(payload.get("selector") or ""))
+
+
+def _browser_screenshot(
+    broker: Any,
+    payload: dict[str, Any],
+    _approved: bool,
+) -> dict[str, Any]:
+    return broker.browser_screenshot(reason=str(payload.get("reason") or ""))
+
+
 TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "skill.read": _skill_read,
     "memory.add": _memory_add,
@@ -174,6 +217,12 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "media.apple_music_play": _media_apple_music_play,
     "desktop.hotkey": _desktop_hotkey,
     "desktop.type_text": _desktop_type_text,
+    "browser.open_url": _browser_open_url,
+    "browser.current_page": _browser_current_page,
+    "browser.click": _browser_click,
+    "browser.type_text": _browser_type_text,
+    "browser.extract_text": _browser_extract_text,
+    "browser.screenshot": _browser_screenshot,
 }
 
 

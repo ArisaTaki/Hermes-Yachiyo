@@ -33,6 +33,12 @@ TOOL_FUNCTION_NAMES = {
     "media.apple_music_play": "media_apple_music_play",
     "desktop.hotkey": "desktop_hotkey",
     "desktop.type_text": "desktop_type_text",
+    "browser.open_url": "browser_open_url",
+    "browser.current_page": "browser_current_page",
+    "browser.click": "browser_click",
+    "browser.type_text": "browser_type_text",
+    "browser.extract_text": "browser_extract_text",
+    "browser.screenshot": "browser_screenshot",
 }
 TOOL_NAME_ALIASES = {value: key for key, value in TOOL_FUNCTION_NAMES.items()}
 KNOWN_AGENT_TOOLS = set(TOOL_FUNCTION_NAMES)
@@ -47,7 +53,19 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "media.apple_music_play",
 )
 MEDIUM_RISK_DESKTOP_TOOL_NAMES = ("desktop.hotkey", "desktop.type_text")
-DAILY_DESKTOP_TOOL_NAMES = (*LOW_RISK_DESKTOP_TOOL_NAMES, *MEDIUM_RISK_DESKTOP_TOOL_NAMES)
+LOW_RISK_BROWSER_TOOL_NAMES = (
+    "browser.open_url",
+    "browser.current_page",
+    "browser.extract_text",
+    "browser.screenshot",
+)
+MEDIUM_RISK_BROWSER_TOOL_NAMES = ("browser.click", "browser.type_text")
+DAILY_BROWSER_TOOL_NAMES = (*LOW_RISK_BROWSER_TOOL_NAMES, *MEDIUM_RISK_BROWSER_TOOL_NAMES)
+DAILY_DESKTOP_TOOL_NAMES = (
+    *LOW_RISK_DESKTOP_TOOL_NAMES,
+    *MEDIUM_RISK_DESKTOP_TOOL_NAMES,
+    *DAILY_BROWSER_TOOL_NAMES,
+)
 
 
 def _redact_secrets(value: Any) -> str:
@@ -205,6 +223,22 @@ class ToolDescriptor:
                         "desktop.hotkey 参数 modifiers 只能包含 command/cmd、shift、"
                         "option/alt、control/ctrl"
                     )
+        if self.name == "browser.open_url":
+            value = str(payload.get("url") or "").strip()
+            if not value:
+                raise AgentRuntimeError("browser.open_url 参数 url 必须是非空字符串")
+            if not re.match(r"^https?://[^\s]+$", value):
+                raise AgentRuntimeError("browser.open_url 参数 url 必须是绝对 http(s) URL")
+        if self.name in {"browser.click", "browser.type_text"} and not str(
+            payload.get("selector") or ""
+        ).strip():
+            raise AgentRuntimeError(f"{self.name} 参数 selector 必须是非空字符串")
+        if self.name == "browser.type_text" and not str(payload.get("text") or "").strip():
+            raise AgentRuntimeError("browser.type_text 参数 text 必须是非空字符串")
+        if self.name in {"browser.extract_text", "browser.screenshot"}:
+            for key in ("selector", "reason"):
+                if key in payload and not isinstance(payload.get(key), str):
+                    raise AgentRuntimeError(f"{self.name} 参数 {key} 必须是字符串")
         serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
         if _redact_secrets(serialized) != serialized:
             raise AgentRuntimeError(f"{self.name} 参数包含敏感凭据，已拒绝执行和持久化")
@@ -483,6 +517,55 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
         description="Type text into the current foreground app.",
         properties={"text": {"type": "string", "description": "Text to type."}},
         required=("text",),
+    ),
+    "browser.open_url": ToolDescriptor(
+        name="browser.open_url",
+        description=(
+            "Open an absolute http(s) URL in a CDP-controlled browser tab. "
+            "Falls back to the system browser when Chrome CDP is unavailable."
+        ),
+        properties={"url": {"type": "string", "description": "Absolute http(s) URL."}},
+        required=("url",),
+    ),
+    "browser.current_page": ToolDescriptor(
+        name="browser.current_page",
+        description="Read the current CDP browser page title and URL.",
+        properties={},
+    ),
+    "browser.click": ToolDescriptor(
+        name="browser.click",
+        description="Click an element in the current browser page by CSS selector.",
+        properties={"selector": {"type": "string", "description": "CSS selector to click."}},
+        required=("selector",),
+    ),
+    "browser.type_text": ToolDescriptor(
+        name="browser.type_text",
+        description="Set text into an input-like element in the current browser page.",
+        properties={
+            "selector": {"type": "string", "description": "CSS selector to focus and edit."},
+            "text": {"type": "string", "description": "Text to enter."},
+        },
+        required=("selector", "text"),
+    ),
+    "browser.extract_text": ToolDescriptor(
+        name="browser.extract_text",
+        description="Extract visible text from the current browser page or a CSS selector.",
+        properties={
+            "selector": {
+                "type": "string",
+                "description": "Optional CSS selector. Defaults to document.body.",
+            }
+        },
+    ),
+    "browser.screenshot": ToolDescriptor(
+        name="browser.screenshot",
+        description="Capture the current browser page as a run artifact.",
+        properties={
+            "reason": {
+                "type": "string",
+                "description": "Optional short reason shown in the Run Timeline.",
+            }
+        },
     ),
 }
 

@@ -68,6 +68,12 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
         "media_apple_music_play",
         "desktop_hotkey",
         "desktop_type_text",
+        "browser_open_url",
+        "browser_current_page",
+        "browser_click",
+        "browser_type_text",
+        "browser_extract_text",
+        "browser_screenshot",
     }.issubset(schemas)
     assert "terminal.run" in HIGH_RISK_AGENT_TOOLS
     assert "workspace.write_patch" in HIGH_RISK_AGENT_TOOLS
@@ -83,6 +89,18 @@ def test_compile_tool_policy_accepts_desktop_tools_without_marking_them_high_ris
 
     assert policy["allowed_tools"] == ["screen.capture", "desktop.type_text", "terminal.run"]
     assert policy["approval_required"] == {"terminal.run": True}
+
+
+def test_compile_tool_policy_accepts_browser_tools_without_marking_them_high_risk() -> None:
+    compiler = RuntimePolicyCompiler()
+
+    policy = compiler.compile_tool_policy(
+        "custom",
+        {"allowed_tools": ["browser.open_url", "browser.click", "workspace.write_patch"]},
+    )
+
+    assert policy["allowed_tools"] == ["browser.open_url", "browser.click", "workspace.write_patch"]
+    assert policy["approval_required"] == {"workspace.write_patch": True}
 
 
 def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> None:
@@ -112,6 +130,34 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         {"key": "l", "modifiers": ["command"]},
     ) == {"ok": True}
     assert calls == [("music", "超时空辉夜姬"), ("hotkey", "l", ["command"])]
+
+
+def test_tool_dispatch_registry_routes_browser_tools(tmp_path, monkeypatch) -> None:
+    broker = _broker(tmp_path)
+    calls = []
+
+    monkeypatch.setattr(
+        broker,
+        "browser_open_url",
+        lambda url: calls.append(("open", url)) or {"ok": True},
+    )
+    monkeypatch.setattr(
+        broker,
+        "browser_type_text",
+        lambda selector, text: calls.append(("type", selector, text)) or {"ok": True},
+    )
+
+    assert dispatch_tool_call(
+        broker,
+        "browser.open_url",
+        {"url": "https://example.com"},
+    ) == {"ok": True}
+    assert dispatch_tool_call(
+        broker,
+        "browser.type_text",
+        {"selector": "#q", "text": "八千代"},
+    ) == {"ok": True}
+    assert calls == [("open", "https://example.com"), ("type", "#q", "八千代")]
 
 
 def test_screen_capture_tool_writes_artifact_metadata(tmp_path, monkeypatch) -> None:

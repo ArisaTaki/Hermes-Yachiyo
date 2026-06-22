@@ -2590,7 +2590,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "`workspace.write_patch` 已启用；每次写文件都会先进入审批。",
             "`terminal.run` 已启用；每次运行命令都会先进入审批。",
             "前台输入会作用在当前桌面焦点窗口",
-            "Browser/CDP 工具将在下一批执行能力中启用。",
+            "Browser/CDP 工具需要 Chrome 调试端口",
         ],
     )
     _assert_contains(

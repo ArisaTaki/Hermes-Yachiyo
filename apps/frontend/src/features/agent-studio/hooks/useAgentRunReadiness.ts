@@ -67,7 +67,10 @@ export function useAgentRunReadiness({
       notices.push({ tone: 'info', text: '前台输入会作用在当前桌面焦点窗口；适合明确的点击后输入或快捷键任务。' });
     }
     if (draft.allow_browser_control) {
-      notices.push({ tone: 'info', text: 'Browser/CDP 工具将在下一批执行能力中启用。' });
+      notices.push({
+        tone: 'info',
+        text: 'Browser/CDP 工具需要 Chrome 调试端口；未配置时会回退到打开 URL，点击、输入、截图会被标记为受限。',
+      });
     }
     const hasTools = draft.allow_workspace_read
       || draft.allow_workspace_write
@@ -76,7 +79,8 @@ export function useAgentRunReadiness({
       || draft.allow_screen_context
       || draft.allow_app_control
       || draft.allow_media_control
-      || draft.allow_foreground_input;
+      || draft.allow_foreground_input
+      || draft.allow_browser_control;
     if (!hasTools) {
       notices.push({ tone: 'info', text: '当前 Agent 只会调用模型，不会获得工作区、桌面执行、命令或 artifact 工具。' });
     }

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from apps.shell.agent.tools.policy import DAILY_DESKTOP_TOOL_NAMES
+from apps.shell.agent.tools.policy import DAILY_BROWSER_TOOL_NAMES, DAILY_DESKTOP_TOOL_NAMES
 
 
 class RuntimeCustomApiAgentLoop:
@@ -159,9 +159,14 @@ class RuntimeCustomApiAgentLoop:
             "For desktop requests, prefer structured desktop tools such as screen.capture, "
             "desktop.active_window, app.open/app.focus, media.apple_music_play, "
             "desktop.hotkey, and desktop.type_text when they are allowed. "
-            "Do not replace these with terminal.run. If a desktop permission is missing, "
-            "explain the exact missing permission and continue with the safest fallback. "
+            "For browser or web-page requests, prefer structured browser tools such as "
+            "browser.open_url, browser.current_page, browser.click, browser.type_text, "
+            "browser.extract_text, and browser.screenshot when they are allowed. "
+            "Do not replace these structured desktop or browser actions with terminal.run. "
+            "If a desktop or browser permission is missing, explain the exact missing permission "
+            "and continue with the safest fallback. "
             if any(tool in allowed_tools for tool in DAILY_DESKTOP_TOOL_NAMES)
+            or any(tool in allowed_tools for tool in DAILY_BROWSER_TOOL_NAMES)
             else ""
         )
         system_prompt = (

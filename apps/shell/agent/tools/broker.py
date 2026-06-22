@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from apps.shell.agent.runtime.errors import AgentRuntimeError
-from apps.shell.agent.tools import desktop
+from apps.shell.agent.tools import browser, desktop
 from apps.shell.agent.tools.registry import dispatch_tool_call
 from apps.shell.agent.tools.terminal import (
     _TERMINAL_PROCESS_LOCK,
@@ -395,6 +395,45 @@ class ToolBroker:
 
     def desktop_type_text(self, text: str) -> dict[str, Any]:
         return desktop.desktop_type_text(text)
+
+    def browser_open_url(self, url: str) -> dict[str, Any]:
+        return browser.open_url(url)
+
+    def browser_current_page(self) -> dict[str, Any]:
+        return browser.current_page()
+
+    def browser_click(self, selector: str) -> dict[str, Any]:
+        return browser.click(selector)
+
+    def browser_type_text(self, selector: str, text: str) -> dict[str, Any]:
+        return browser.type_text(selector, text)
+
+    def browser_extract_text(self, selector: str = "") -> dict[str, Any]:
+        return browser.extract_text(selector)
+
+    def browser_screenshot(self, *, reason: str = "") -> dict[str, Any]:
+        rel = Path("browser") / "current-page.png"
+        target = (self.artifact_root / rel).resolve()
+        if not _is_within(target, self.artifact_root):
+            raise AgentRuntimeError("browser artifact 路径越界")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        result = browser.screenshot(target)
+        if not result.get("ok"):
+            return result
+        data = dict(result.get("data") or {})
+        data["path"] = str(rel)
+        return {
+            **result,
+            "summary": result.get("summary") or "Captured current browser page",
+            "reason": str(reason or "").strip(),
+            "artifact": {
+                "path": str(rel),
+                "kind": "image",
+                "mime_type": data.get("mime_type") or "image/png",
+                "size_bytes": data.get("size") or data.get("size_bytes"),
+            },
+            "data": data,
+        }
 
     def call(self, name: str, payload: dict[str, Any], *, approved: bool = False) -> dict[str, Any]:
         return dispatch_tool_call(self, name, payload, approved=approved)
