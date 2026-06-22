@@ -20,6 +20,7 @@ class MainChatRuntimeConfigBuilder:
         trust_workspace_from_policy: Callable[..., None],
         memory_tool_names: Sequence[str],
         future_task_tool_names: Sequence[str],
+        desktop_tool_names: Sequence[str] = (),
         default_workspace_name: str = "builtin-yachiyo-main",
     ) -> None:
         self._main_chat_agent_id = main_chat_agent_id
@@ -30,6 +31,7 @@ class MainChatRuntimeConfigBuilder:
         self._trust_workspace_from_policy = trust_workspace_from_policy
         self._memory_tool_names = list(memory_tool_names)
         self._future_task_tool_names = list(future_task_tool_names)
+        self._desktop_tool_names = list(desktop_tool_names)
         self._default_workspace_name = default_workspace_name
 
     def _default_workspace_dir(self) -> Path:
@@ -74,6 +76,7 @@ class MainChatRuntimeConfigBuilder:
             "allowed_tools": [
                 "workspace.list",
                 "workspace.read",
+                *self._desktop_tool_names,
                 *self._memory_tool_names,
                 *self._future_task_tool_names,
                 "artifact.write",

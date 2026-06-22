@@ -110,6 +110,50 @@ def _artifact_write(broker: Any, payload: dict[str, Any], _approved: bool) -> di
     )
 
 
+def _screen_capture(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
+    return broker.screen_capture(reason=str(payload.get("reason") or ""))
+
+
+def _desktop_active_window(
+    broker: Any,
+    _payload: dict[str, Any],
+    _approved: bool,
+) -> dict[str, Any]:
+    return broker.desktop_active_window()
+
+
+def _app_open(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
+    return broker.app_open(str(payload.get("app_name") or ""))
+
+
+def _app_focus(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
+    return broker.app_focus(str(payload.get("app_name") or ""))
+
+
+def _media_apple_music_play(
+    broker: Any,
+    payload: dict[str, Any],
+    _approved: bool,
+) -> dict[str, Any]:
+    return broker.media_apple_music_play(str(payload.get("query") or ""))
+
+
+def _desktop_hotkey(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
+    modifiers = payload.get("modifiers")
+    return broker.desktop_hotkey(
+        str(payload.get("key") or ""),
+        modifiers=modifiers if isinstance(modifiers, list) else [],
+    )
+
+
+def _desktop_type_text(
+    broker: Any,
+    payload: dict[str, Any],
+    _approved: bool,
+) -> dict[str, Any]:
+    return broker.desktop_type_text(str(payload.get("text") or ""))
+
+
 TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "skill.read": _skill_read,
     "memory.add": _memory_add,
@@ -123,6 +167,13 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "workspace.write_patch": _workspace_write_patch,
     "terminal.run": _terminal_run,
     "artifact.write": _artifact_write,
+    "screen.capture": _screen_capture,
+    "desktop.active_window": _desktop_active_window,
+    "app.open": _app_open,
+    "app.focus": _app_focus,
+    "media.apple_music_play": _media_apple_music_play,
+    "desktop.hotkey": _desktop_hotkey,
+    "desktop.type_text": _desktop_type_text,
 }
 
 

@@ -48,7 +48,9 @@ def test_legacy_runtime_port_readiness_includes_desktop_execution_capabilities()
         "linux",
         "unknown",
     }
-    assert capabilities["desktop_execution"]["available"] is False
+    assert capabilities["desktop_execution"]["available"] is (
+        capabilities["desktop_execution"]["platform"] == "macos"
+    )
     assert "screen.capture" in capabilities["screen_capture"]["tools"]
     assert capabilities["foreground_input"]["risk_default"] == "medium"
     assert runtime.calls == [("list_runnables", None)]

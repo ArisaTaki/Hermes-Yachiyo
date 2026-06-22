@@ -10,6 +10,7 @@ from apps.shell.agent.runtime.main_chat_config import (
     MainChatVirtualAgentProjector,
 )
 from apps.shell.agent.tools.policy import (
+    DAILY_DESKTOP_TOOL_NAMES,
     FUTURE_TASK_TOOL_NAMES,
     MEMORY_TOOL_NAMES,
     RuntimePolicyCompiler,
@@ -34,6 +35,7 @@ def test_main_chat_config_builder_projects_daily_entrypoint_runtime(tmp_path) ->
         ),
         memory_tool_names=sorted(MEMORY_TOOL_NAMES),
         future_task_tool_names=sorted(FUTURE_TASK_TOOL_NAMES),
+        desktop_tool_names=sorted(DAILY_DESKTOP_TOOL_NAMES),
     )
 
     config = builder.agent_config(model_profile_id=" profile-chat ")
@@ -51,6 +53,7 @@ def test_main_chat_config_builder_projects_daily_entrypoint_runtime(tmp_path) ->
     assert "workspace.read" in config["tool_policy"]["allowed_tools"]
     assert "artifact.write" in config["tool_policy"]["allowed_tools"]
     allowed_tools = set(config["tool_policy"]["allowed_tools"])
+    assert set(DAILY_DESKTOP_TOOL_NAMES).issubset(allowed_tools)
     assert set(MEMORY_TOOL_NAMES).issubset(allowed_tools)
     assert set(FUTURE_TASK_TOOL_NAMES).issubset(allowed_tools)
 

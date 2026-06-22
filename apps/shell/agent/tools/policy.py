@@ -26,12 +26,28 @@ TOOL_FUNCTION_NAMES = {
     "workspace.write_patch": "workspace_write_patch",
     "terminal.run": "terminal_run",
     "artifact.write": "artifact_write",
+    "screen.capture": "screen_capture",
+    "desktop.active_window": "desktop_active_window",
+    "app.open": "app_open",
+    "app.focus": "app_focus",
+    "media.apple_music_play": "media_apple_music_play",
+    "desktop.hotkey": "desktop_hotkey",
+    "desktop.type_text": "desktop_type_text",
 }
 TOOL_NAME_ALIASES = {value: key for key, value in TOOL_FUNCTION_NAMES.items()}
 KNOWN_AGENT_TOOLS = set(TOOL_FUNCTION_NAMES)
 HIGH_RISK_AGENT_TOOLS = {"terminal.run", "workspace.write_patch"}
 MEMORY_TOOL_NAMES = ("memory.add", "memory.replace", "memory.remove")
 FUTURE_TASK_TOOL_NAMES = ("future_task.schedule", "future_task.list", "future_task.cancel")
+LOW_RISK_DESKTOP_TOOL_NAMES = (
+    "screen.capture",
+    "desktop.active_window",
+    "app.open",
+    "app.focus",
+    "media.apple_music_play",
+)
+MEDIUM_RISK_DESKTOP_TOOL_NAMES = ("desktop.hotkey", "desktop.type_text")
+DAILY_DESKTOP_TOOL_NAMES = (*LOW_RISK_DESKTOP_TOOL_NAMES, *MEDIUM_RISK_DESKTOP_TOOL_NAMES)
 
 
 def _redact_secrets(value: Any) -> str:
@@ -166,6 +182,29 @@ class ToolDescriptor:
                 raise AgentRuntimeError("terminal.run 参数 timeout_seconds 必须是 1-120 的整数")
         if "shell" in payload and not isinstance(payload.get("shell"), bool):
             raise AgentRuntimeError("terminal.run 参数 shell 必须是布尔值")
+        if self.name in {"app.open", "app.focus"} and not str(
+            payload.get("app_name") or ""
+        ).strip():
+            raise AgentRuntimeError(f"{self.name} 参数 app_name 必须是非空字符串")
+        if self.name == "media.apple_music_play" and not str(
+            payload.get("query") or ""
+        ).strip():
+            raise AgentRuntimeError("media.apple_music_play 参数 query 必须是非空字符串")
+        if self.name == "desktop.type_text" and not str(payload.get("text") or "").strip():
+            raise AgentRuntimeError("desktop.type_text 参数 text 必须是非空字符串")
+        if self.name == "desktop.hotkey":
+            if not str(payload.get("key") or "").strip():
+                raise AgentRuntimeError("desktop.hotkey 参数 key 必须是非空字符串")
+            modifiers = payload.get("modifiers", [])
+            if modifiers not in (None, "") and not isinstance(modifiers, list):
+                raise AgentRuntimeError("desktop.hotkey 参数 modifiers 必须是字符串数组")
+            allowed_modifiers = {"command", "cmd", "shift", "option", "alt", "control", "ctrl"}
+            for modifier in modifiers or []:
+                if str(modifier or "").strip().lower() not in allowed_modifiers:
+                    raise AgentRuntimeError(
+                        "desktop.hotkey 参数 modifiers 只能包含 command/cmd、shift、"
+                        "option/alt、control/ctrl"
+                    )
         serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
         if _redact_secrets(serialized) != serialized:
             raise AgentRuntimeError(f"{self.name} 参数包含敏感凭据，已拒绝执行和持久化")
@@ -383,6 +422,67 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             "content": {"type": "string", "description": "Artifact content."},
         },
         required=("path", "content"),
+    ),
+    "screen.capture": ToolDescriptor(
+        name="screen.capture",
+        description=(
+            "Capture the current desktop screen and save it as a run artifact. "
+            "Low-risk, observable desktop read action."
+        ),
+        properties={
+            "reason": {
+                "type": "string",
+                "description": "Optional short reason shown in the Run Timeline.",
+            }
+        },
+    ),
+    "desktop.active_window": ToolDescriptor(
+        name="desktop.active_window",
+        description="Read the current foreground app and window title.",
+        properties={},
+    ),
+    "app.open": ToolDescriptor(
+        name="app.open",
+        description="Open a local desktop application by display name.",
+        properties={"app_name": {"type": "string", "description": "Application name."}},
+        required=("app_name",),
+    ),
+    "app.focus": ToolDescriptor(
+        name="app.focus",
+        description="Bring a local desktop application to the foreground.",
+        properties={"app_name": {"type": "string", "description": "Application name."}},
+        required=("app_name",),
+    ),
+    "media.apple_music_play": ToolDescriptor(
+        name="media.apple_music_play",
+        description=(
+            "Search the local Apple Music library and start playback. "
+            "If direct playback fails, open Music as a fallback."
+        ),
+        properties={"query": {"type": "string", "description": "Song, album, or artist query."}},
+        required=("query",),
+    ),
+    "desktop.hotkey": ToolDescriptor(
+        name="desktop.hotkey",
+        description="Send a keyboard shortcut to the current foreground app.",
+        properties={
+            "key": {"type": "string", "description": "Key to press."},
+            "modifiers": {
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "enum": ["command", "cmd", "shift", "option", "alt", "control", "ctrl"],
+                },
+                "description": "Optional modifier keys.",
+            },
+        },
+        required=("key",),
+    ),
+    "desktop.type_text": ToolDescriptor(
+        name="desktop.type_text",
+        description="Type text into the current foreground app.",
+        properties={"text": {"type": "string", "description": "Text to type."}},
+        required=("text",),
     ),
 }
 

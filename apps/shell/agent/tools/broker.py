@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from apps.shell.agent.runtime.errors import AgentRuntimeError
+from apps.shell.agent.tools import desktop
 from apps.shell.agent.tools.registry import dispatch_tool_call
 from apps.shell.agent.tools.terminal import (
     _TERMINAL_PROCESS_LOCK,
@@ -350,6 +351,50 @@ class ToolBroker:
         safe_content = _redact_secrets(content)
         target.write_text(safe_content, encoding="utf-8")
         return {"ok": True, "path": rel, "bytes": len(safe_content.encode("utf-8"))}
+
+    def screen_capture(self, *, reason: str = "") -> dict[str, Any]:
+        rel = Path("screenshots") / "current-screen.png"
+        target = (self.artifact_root / rel).resolve()
+        if not _is_within(target, self.artifact_root):
+            raise AgentRuntimeError("screen artifact 路径越界")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        result = desktop.screen_capture(target)
+        if not result.get("ok"):
+            return result
+        data = dict(result.get("data") or {})
+        data["path"] = str(rel)
+        return {
+            **result,
+            "summary": result.get("summary") or "Captured current screen",
+            "reason": str(reason or "").strip(),
+            "artifact": {
+                "path": str(rel),
+                "kind": "image",
+                "mime_type": data.get("mime_type") or "image/png",
+                "size_bytes": data.get("size") or data.get("size_bytes"),
+                "width": data.get("width"),
+                "height": data.get("height"),
+            },
+            "data": data,
+        }
+
+    def desktop_active_window(self) -> dict[str, Any]:
+        return desktop.active_window()
+
+    def app_open(self, app_name: str) -> dict[str, Any]:
+        return desktop.app_open(app_name)
+
+    def app_focus(self, app_name: str) -> dict[str, Any]:
+        return desktop.app_focus(app_name)
+
+    def media_apple_music_play(self, query: str) -> dict[str, Any]:
+        return desktop.apple_music_play(query)
+
+    def desktop_hotkey(self, key: str, *, modifiers: list[str] | None = None) -> dict[str, Any]:
+        return desktop.desktop_hotkey(key, modifiers=modifiers)
+
+    def desktop_type_text(self, text: str) -> dict[str, Any]:
+        return desktop.desktop_type_text(text)
 
     def call(self, name: str, payload: dict[str, Any], *, approved: bool = False) -> dict[str, Any]:
         return dispatch_tool_call(self, name, payload, approved=approved)

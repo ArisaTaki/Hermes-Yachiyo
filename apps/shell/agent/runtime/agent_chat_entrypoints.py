@@ -26,7 +26,11 @@ from apps.shell.agent.runtime.model_profiles import RuntimeAgentModelTester
 from apps.shell.agent.runtime.run_timeline import RuntimeRunTimelineService
 from apps.shell.agent.runtime.tool_brokers import RuntimeToolBrokerFactory
 from apps.shell.agent.tools.broker import ToolBroker
-from apps.shell.agent.tools.policy import FUTURE_TASK_TOOL_NAMES, MEMORY_TOOL_NAMES
+from apps.shell.agent.tools.policy import (
+    DAILY_DESKTOP_TOOL_NAMES,
+    FUTURE_TASK_TOOL_NAMES,
+    MEMORY_TOOL_NAMES,
+)
 
 
 @dataclass(frozen=True)
@@ -81,6 +85,7 @@ def build_runtime_agent_chat_entrypoint_setup(
         trust_workspace_from_policy=trust_workspace_from_policy,
         memory_tool_names=list(MEMORY_TOOL_NAMES),
         future_task_tool_names=list(FUTURE_TASK_TOOL_NAMES),
+        desktop_tool_names=list(DAILY_DESKTOP_TOOL_NAMES),
     )
     return RuntimeAgentChatEntrypointSetup(
         agent_run_async_coordinator=RuntimeAgentRunAsyncCoordinator(
