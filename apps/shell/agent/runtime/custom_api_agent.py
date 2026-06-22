@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from apps.shell.agent.runtime.desktop_intents import daily_desktop_intent_tool_request
 from apps.shell.agent.tools.policy import DAILY_BROWSER_TOOL_NAMES, DAILY_DESKTOP_TOOL_NAMES
 
 
@@ -78,12 +79,34 @@ class RuntimeCustomApiAgentLoop:
             raise self._error_type("Agent 模型 Profile 缺少 base_url、model 或 API Key")
         runtime = self._compile_agent_runtime(agent)
         allowed_tools = runtime["tool_policy"].get("allowed_tools") or []
+        default_messages = messages is None
         if messages is None:
             messages = self._initial_messages(context, allowed_tools)
         budget = budget or self._run_budget(run_id, timeline)
         self._check_context_budget(budget, messages)
         tools = self._tool_schemas(allowed_tools)
         start_iteration = self._normalize_tool_iteration(start_iteration)
+        if default_messages:
+            planned_tool_request = daily_desktop_intent_tool_request(context, allowed_tools)
+            if planned_tool_request:
+                timeline.append(
+                    self._timeline(
+                        "agent.desktop.intent_planned",
+                        str(planned_tool_request.get("tool") or ""),
+                        input_preview=planned_tool_request.get("input") or {},
+                    )
+                )
+                self._run_tool_requests(
+                    [planned_tool_request],
+                    allowed_tools,
+                    broker,
+                    messages,
+                    timeline,
+                    artifacts,
+                    next_iteration=start_iteration,
+                    run_id=run_id,
+                    budget=budget,
+                )
         for iteration in range(start_iteration, self._max_tool_iterations):
             self._check_context_budget(budget, messages)
             budget.claim_model_call()
@@ -159,6 +182,9 @@ class RuntimeCustomApiAgentLoop:
             "For desktop requests, prefer structured desktop tools such as screen.capture, "
             "desktop.active_window, app.open/app.focus, media.apple_music_play, "
             "desktop.hotkey, and desktop.type_text when they are allowed. "
+            "For explicit daily commands, map 'play <song>' or '播放<歌曲>' to "
+            "media.apple_music_play, screen capture requests to screen.capture, and current "
+            "or foreground window questions to desktop.active_window before answering. "
             "For browser or web-page requests, prefer structured browser tools such as "
             "browser.open_url, browser.current_page, browser.click, browser.type_text, "
             "browser.extract_text, and browser.screenshot when they are allowed. "
