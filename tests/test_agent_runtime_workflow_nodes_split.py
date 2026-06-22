@@ -460,11 +460,13 @@ def test_workflow_artifact_node_legacy_helper_accepts_write_port() -> None:
         kind="artifact",
         context="Final workflow summary",
         artifacts=[],
+        node_info_extra={"workflow_parent_node_id": "fanout"},
         ports=ports,
     )
 
     assert write.artifact_record()["path"] == "reports/final.md"
     assert write.artifact_record()["bytes"] == len("Final workflow summary".encode("utf-8"))
+    assert write.event_payload()["workflow_parent_node_id"] == "fanout"
     assert calls == [
         ("path", "Final Report:reports/final.md"),
         ("write", "workflow_run:reports/final.md:Final workflow summary"),

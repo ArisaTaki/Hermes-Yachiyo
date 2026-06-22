@@ -1277,17 +1277,19 @@ class WorkflowContinuationCoordinator:
         timeline: list[dict[str, Any]],
         node_info_extra: dict[str, str] | None = None,
     ) -> None:
-        artifact_path = self._workflow_artifact_path(
-            label,
-            artifacts,
-            WorkflowArtifactNodeWrite.configured_path(node),
-        )
-        write = WorkflowArtifactNodeWrite.from_artifact(
+        write = WorkflowArtifactNodeWrite.from_node(
+            object(),
+            run,
             node,
-            self._workflow_artifact_write(run, artifact_path, context),
             label=label,
             kind=kind,
+            context=context,
+            artifacts=artifacts,
             node_info_extra=node_info_extra,
+            ports=WorkflowNodePortBundle(
+                workflow_artifact_path=self._workflow_artifact_path,
+                workflow_artifact_write=self._workflow_artifact_write,
+            ),
         )
         artifacts.append(write.artifact_record())
         timeline.append(write.timeline_event(self._timeline))
