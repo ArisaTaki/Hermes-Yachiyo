@@ -9,6 +9,7 @@ import socket
 import ssl
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlparse
@@ -90,7 +91,12 @@ def click(selector: str) -> dict[str, Any]:
     }
 
 
-def type_text(selector: str, text: str) -> dict[str, Any]:
+def type_text(
+    selector: str,
+    text: str,
+    *,
+    foreground_fallback: Callable[[str], dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     clean_selector = _clean_required(selector, "selector")
     clean_text = _clean_required(text, "text")
     expression = f"""
@@ -115,7 +121,8 @@ def type_text(selector: str, text: str) -> dict[str, Any]:
     try:
         value = _evaluate_current_page(expression)
     except Exception as exc:
-        return _cdp_unavailable("browser.type_text", exc)
+        fallback = foreground_fallback or _type_text_foreground_fallback
+        return _type_text_fallback(clean_selector, clean_text, exc, fallback)
     if not value.get("ok"):
         return {
             "ok": False,
@@ -133,6 +140,83 @@ def type_text(selector: str, text: str) -> dict[str, Any]:
         "permission_error": False,
         "fallback_used": False,
     }
+
+
+def _type_text_fallback(
+    selector: str,
+    text: str,
+    cdp_error: Any,
+    foreground_fallback: Callable[[str], dict[str, Any]],
+) -> dict[str, Any]:
+    try:
+        fallback_result = foreground_fallback(text)
+    except Exception as exc:
+        return _foreground_fallback_unavailable("browser.type_text", cdp_error, exc)
+    if not fallback_result.get("ok"):
+        return _foreground_fallback_unavailable(
+            "browser.type_text",
+            cdp_error,
+            fallback_result.get("error") or fallback_result.get("summary") or fallback_result,
+            fallback_result=fallback_result,
+        )
+    data = dict(fallback_result.get("data") or {})
+    data["selector"] = selector
+    data.setdefault("character_count", len(text))
+    payload = {
+        "ok": True,
+        "action": "browser.type_text",
+        "summary": "Typed text into the foreground app as browser fallback",
+        "data": data,
+        "permission_error": False,
+        "fallback_used": True,
+        "fallback": "desktop.type_text",
+        "fallback_reason": str(cdp_error),
+        "missing_permissions": ["chrome_cdp"],
+        "permission_targets": ["chrome_cdp"],
+    }
+    if fallback_result.get("foreground_lock"):
+        payload["foreground_lock"] = fallback_result["foreground_lock"]
+    return payload
+
+
+def _type_text_foreground_fallback(text: str) -> dict[str, Any]:
+    from apps.shell.agent.tools import desktop
+
+    return desktop.desktop_type_text(text)
+
+
+def _foreground_fallback_unavailable(
+    action: str,
+    cdp_error: Any,
+    fallback_error: Any,
+    *,
+    fallback_result: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    missing_permissions = ["chrome_cdp"]
+    permission_targets = ["chrome_cdp"]
+    result = fallback_result if isinstance(fallback_result, dict) else {}
+    missing_permissions.extend(_string_list(result.get("missing_permissions")))
+    permission_targets.extend(_string_list(result.get("permission_targets")))
+    if not result and _looks_like_foreground_permission_error(fallback_error):
+        missing_permissions.append("accessibility")
+        permission_targets.append("accessibility")
+    payload = {
+        "ok": False,
+        "action": action,
+        "summary": "Chrome CDP is unavailable and foreground input fallback failed",
+        "error": "browser_foreground_fallback_unavailable",
+        "permission_error": True,
+        "fallback_used": True,
+        "fallback": "desktop.type_text",
+        "missing_permissions": _dedupe(missing_permissions),
+        "permission_targets": _dedupe(permission_targets),
+        "detail": f"cdp: {cdp_error}; desktop.type_text: {fallback_error}",
+        "fallback_result": fallback_result or {},
+    }
+    for key in ("foreground_lock_busy", "locked_by", "foreground_lock"):
+        if key in result:
+            payload[key] = result[key]
+    return payload
 
 
 def extract_text(selector: str = "") -> dict[str, Any]:
@@ -413,6 +497,38 @@ def _looks_like_screen_capture_permission_error(value: Any) -> bool:
             "tcc",
         )
     )
+
+
+def _looks_like_foreground_permission_error(value: Any) -> bool:
+    normalized = str(value or "").lower()
+    return any(
+        marker in normalized
+        for marker in (
+            "accessibility",
+            "not authorized",
+            "not allowed",
+            "not permitted",
+            "privacy",
+            "tcc",
+        )
+    )
+
+
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value] if value else []
+    if not isinstance(value, (list, tuple, set)):
+        return []
+    return [str(item) for item in value if str(item or "").strip()]
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    clean: list[str] = []
+    for value in values:
+        item = str(value or "").strip()
+        if item and item not in clean:
+            clean.append(item)
+    return clean
 
 
 def _select_page(pages: list[dict[str, Any]]) -> dict[str, Any] | None:

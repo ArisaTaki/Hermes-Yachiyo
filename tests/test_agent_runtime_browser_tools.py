@@ -7,7 +7,9 @@ import subprocess
 from pathlib import Path
 
 from apps.shell.agent.tools import browser as browser_mod
+from apps.shell.agent.tools import desktop as desktop_mod
 from apps.shell.agent.tools.broker import ToolBroker
+from apps.shell.agent.tools.foreground_lock import ForegroundActionLock
 
 
 def _broker(tmp_path):
@@ -85,6 +87,131 @@ def test_browser_extract_text_uses_current_page_evaluation(monkeypatch) -> None:
         "text": "Hello from browser",
         "truncated": False,
     }
+
+
+def test_browser_type_text_falls_back_to_foreground_input(monkeypatch) -> None:
+    calls = []
+
+    def raise_no_cdp(_expression: str) -> dict[str, object]:
+        raise RuntimeError("browser.cdp_url is not configured")
+
+    def fake_foreground_type(text: str) -> dict[str, object]:
+        calls.append(text)
+        return {
+            "ok": True,
+            "action": "desktop.type_text",
+            "summary": "Typed text into the foreground app",
+            "data": {"character_count": len(text)},
+            "permission_error": False,
+            "fallback_used": False,
+        }
+
+    monkeypatch.setattr(browser_mod, "_evaluate_current_page", raise_no_cdp)
+    monkeypatch.setattr(browser_mod, "_type_text_foreground_fallback", fake_foreground_type)
+
+    result = browser_mod.type_text("#search", "kaguya")
+
+    assert result["ok"] is True
+    assert result["action"] == "browser.type_text"
+    assert result["fallback_used"] is True
+    assert result["fallback"] == "desktop.type_text"
+    assert result["missing_permissions"] == ["chrome_cdp"]
+    assert result["permission_targets"] == ["chrome_cdp"]
+    assert result["data"] == {"character_count": 6, "selector": "#search"}
+    assert calls == ["kaguya"]
+
+
+def test_browser_type_text_reports_foreground_permission_when_fallback_denied(
+    monkeypatch,
+) -> None:
+    def raise_no_cdp(_expression: str) -> dict[str, object]:
+        raise RuntimeError("No debuggable browser page found")
+
+    def deny_foreground_type(_text: str) -> dict[str, object]:
+        return {
+            "ok": False,
+            "action": "desktop.type_text",
+            "summary": "desktop.type_text failed",
+            "error": "not authorized for accessibility",
+            "permission_error": True,
+            "missing_permissions": ["accessibility"],
+            "permission_targets": ["accessibility"],
+            "fallback_used": False,
+        }
+
+    monkeypatch.setattr(browser_mod, "_evaluate_current_page", raise_no_cdp)
+    monkeypatch.setattr(browser_mod, "_type_text_foreground_fallback", deny_foreground_type)
+
+    result = browser_mod.type_text("#search", "kaguya")
+
+    assert result["ok"] is False
+    assert result["error"] == "browser_foreground_fallback_unavailable"
+    assert result["permission_error"] is True
+    assert result["fallback_used"] is True
+    assert result["fallback"] == "desktop.type_text"
+    assert result["missing_permissions"] == ["chrome_cdp", "accessibility"]
+    assert result["permission_targets"] == ["chrome_cdp", "accessibility"]
+
+
+def test_browser_type_text_broker_fallback_uses_foreground_lock(tmp_path, monkeypatch) -> None:
+    foreground_lock = ForegroundActionLock()
+    broker = ToolBroker(
+        {"default_workdir": str(tmp_path), "readable_scopes": ["."], "writable_scopes": []},
+        tmp_path / "artifacts",
+        foreground_lock=foreground_lock,
+        foreground_lock_owner="group-run-1:run-1",
+    )
+
+    def raise_no_cdp(_expression: str) -> dict[str, object]:
+        raise RuntimeError("browser.cdp_url is not configured")
+
+    monkeypatch.setattr(browser_mod, "_evaluate_current_page", raise_no_cdp)
+    monkeypatch.setattr(
+        desktop_mod,
+        "desktop_type_text",
+        lambda text: {"ok": True, "data": {"character_count": len(text)}},
+    )
+
+    result = broker.call("browser.type_text", {"selector": "#search", "text": "kaguya"})
+
+    assert result["ok"] is True
+    assert result["fallback_used"] is True
+    assert result["fallback"] == "desktop.type_text"
+    assert result["foreground_lock"] == {
+        "holder": "group-run-1:run-1",
+        "tool": "browser.type_text",
+    }
+
+
+def test_browser_type_text_broker_fallback_preserves_foreground_lock_busy(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    foreground_lock = ForegroundActionLock()
+    broker = ToolBroker(
+        {"default_workdir": str(tmp_path), "readable_scopes": ["."], "writable_scopes": []},
+        tmp_path / "artifacts",
+        foreground_lock=foreground_lock,
+        foreground_lock_owner="group-run-1:run-2",
+    )
+    lease = foreground_lock.acquire(holder="group-run-1:run-1", tool_name="browser.type_text")
+
+    def raise_no_cdp(_expression: str) -> dict[str, object]:
+        raise RuntimeError("browser.cdp_url is not configured")
+
+    monkeypatch.setattr(browser_mod, "_evaluate_current_page", raise_no_cdp)
+
+    try:
+        result = broker.call("browser.type_text", {"selector": "#search", "text": "kaguya"})
+    finally:
+        lease.release()
+
+    assert result["ok"] is False
+    assert result["error"] == "browser_foreground_fallback_unavailable"
+    assert result["fallback"] == "desktop.type_text"
+    assert result["foreground_lock_busy"] is True
+    assert result["locked_by"] == "group-run-1:run-1"
+    assert result["missing_permissions"] == ["chrome_cdp"]
 
 
 def test_browser_screenshot_tool_writes_artifact_metadata(tmp_path, monkeypatch) -> None:

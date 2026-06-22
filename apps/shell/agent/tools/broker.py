@@ -414,7 +414,14 @@ class ToolBroker:
         return browser.click(selector)
 
     def browser_type_text(self, selector: str, text: str) -> dict[str, Any]:
-        return browser.type_text(selector, text)
+        return browser.type_text(
+            selector,
+            text,
+            foreground_fallback=lambda value: self._with_foreground_lock(
+                "browser.type_text",
+                lambda: desktop.desktop_type_text(value),
+            ),
+        )
 
     def browser_extract_text(self, selector: str = "") -> dict[str, Any]:
         return browser.extract_text(selector)
