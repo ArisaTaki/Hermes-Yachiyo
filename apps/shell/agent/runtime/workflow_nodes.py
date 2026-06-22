@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from inspect import Parameter, signature
 from typing import Any
 
+from apps.shell.agent.runtime.callbacks import supports_keyword
 from apps.shell.agent.runtime.events import tool_input_preview as _tool_input_preview
 from apps.shell.agent.runtime.tool_brokers import write_artifact_with_tool_broker
 
@@ -50,17 +50,6 @@ def _port_source(
 ) -> Any:
     source = getattr(ports, name) if ports is not None else None
     return fallback if source is None else source
-
-
-def _supports_keyword(callback: Any, keyword: str) -> bool:
-    try:
-        parameters = signature(callback).parameters.values()
-    except (TypeError, ValueError):
-        return True
-    return any(
-        parameter.kind == Parameter.VAR_KEYWORD or parameter.name == keyword
-        for parameter in parameters
-    )
 
 
 @dataclass(frozen=True)
@@ -232,9 +221,9 @@ class WorkflowAgentNodeExecution:
             run_group_id=run_group_id,
         )
         execute_kwargs = {"upstream": handoff.upstream}
-        if _supports_keyword(execute_agent_run, "run_group_id"):
+        if supports_keyword(execute_agent_run, "run_group_id"):
             execute_kwargs["run_group_id"] = run_group_id
-        if workflow_run_id and _supports_keyword(execute_agent_run, "workflow_run_id"):
+        if workflow_run_id and supports_keyword(execute_agent_run, "workflow_run_id"):
             execute_kwargs["workflow_run_id"] = workflow_run_id
         child = execute_agent_run(
             child["run_id"],

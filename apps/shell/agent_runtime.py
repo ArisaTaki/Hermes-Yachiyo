@@ -106,6 +106,7 @@ from apps.shell.agent.runtime.cancellation import (
     WorkflowCancellationProjectionCoordinator,
     WorkflowCancellationTarget,
 )
+from apps.shell.agent.runtime.callbacks import supports_keyword
 from apps.shell.agent.runtime.core_services import (
     RuntimeCoreServiceBundle,
     build_runtime_core_services as _build_runtime_core_services,
@@ -372,6 +373,9 @@ from apps.shell.agent.runtime.workflow_approvals import (
     WorkflowApprovalResumeContext,
     WorkflowApprovalResumeCoordinator,
     WorkflowApprovalTransitionContext,
+)
+from apps.shell.agent.runtime.workflow_child_approvals import (
+    WorkflowChildPendingApprovalProjection,
 )
 from apps.shell.agent.runtime.workflow_outcomes import (
     WorkflowChildOutcomeCoordinator,

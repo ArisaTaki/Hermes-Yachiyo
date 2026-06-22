@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
-from inspect import Parameter, signature
 from typing import Any
 
 from apps.shell.agent.runtime.budget import RunBudgetLimits, WorkflowRunBudget
+from apps.shell.agent.runtime.callbacks import supports_keyword
 from apps.shell.agent.runtime.clock import iso_epoch as _iso_epoch
 from apps.shell.agent.runtime.errors import AgentRuntimeError
 from apps.shell.agent.runtime.events import tool_input_preview
 from apps.shell.agent.runtime.tool_brokers import write_artifact_with_tool_broker
 from apps.shell.agent.runtime.workflow_approvals import WorkflowApprovalPauseProjection
+from apps.shell.agent.runtime.workflow_child_approvals import (
+    WorkflowChildPendingApprovalProjection,
+)
 from apps.shell.agent.runtime.workflow_nodes import (
     WorkflowAgentNodeExecution,
     WorkflowAgentNodeHandoff,
@@ -362,9 +365,9 @@ class WorkflowContinuationCoordinator:
     ) -> dict[str, Any]:
         if self._execute_agent_run_callback is not None:
             kwargs: dict[str, str] = {"upstream": upstream}
-            if _supports_keyword(self._execute_agent_run_callback, "run_group_id"):
+            if supports_keyword(self._execute_agent_run_callback, "run_group_id"):
                 kwargs["run_group_id"] = run_group_id
-            if workflow_run_id and _supports_keyword(
+            if workflow_run_id and supports_keyword(
                 self._execute_agent_run_callback,
                 "workflow_run_id",
             ):
@@ -1007,24 +1010,15 @@ class WorkflowContinuationCoordinator:
         *,
         run_group_id: str,
     ) -> dict[str, Any]:
-        if str(child.get("status") or "") != "approval_required":
+        projection = WorkflowChildPendingApprovalProjection.from_child_run(
+            child,
+            workflow_run_id=str(run.get("run_id") or ""),
+            node_info=handoff.node_info(),
+            run_group_id=run_group_id,
+        )
+        if projection is None:
             return child
-        pending = child.get("pending_approval")
-        if not isinstance(pending, dict) or not pending:
-            return child
-        next_pending = dict(pending)
-        for key, value in {
-            "workflow_run_id": str(run.get("run_id") or ""),
-            **handoff.node_info(),
-            "group_run_id": run_group_id,
-            "run_group_id": run_group_id,
-        }.items():
-            clean_value = str(value or "").strip()
-            if clean_value and not str(next_pending.get(key) or "").strip():
-                next_pending[key] = clean_value
-        if next_pending == pending:
-            return child
-        updated = self._update_run(str(child.get("run_id") or ""), pending_approval=next_pending)
+        updated = projection.project(self._update_run)
         return {**child, **updated}
 
     def _run_workflow_node(
@@ -1380,14 +1374,3 @@ class WorkflowContinuationCoordinator:
         artifacts.append(write.artifact_record())
         timeline.append(write.timeline_event(self._timeline))
         self._append_run_event(str(run["run_id"]), "workflow.node.artifact", write.event_payload())
-
-
-def _supports_keyword(callback: Any, keyword: str) -> bool:
-    try:
-        parameters = signature(callback).parameters.values()
-    except (TypeError, ValueError):
-        return True
-    return any(
-        parameter.kind == Parameter.VAR_KEYWORD or parameter.name == keyword
-        for parameter in parameters
-    )
