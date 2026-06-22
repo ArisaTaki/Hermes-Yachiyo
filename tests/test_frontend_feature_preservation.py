@@ -6239,6 +6239,11 @@ def test_workflow_studio_exposes_stable_e2e_selectors_for_edit_and_run_flow() ->
             "data-testid=\"workflow-node-tool-policy\"",
             "data-testid=\"workflow-node-tool-policy-inherit\"",
             "data-testid={`workflow-node-tool-${capability.id}`}",
+            "workflowNodeToolCatalogSummary(toolCatalog, capability)",
+            "data-testid={`workflow-node-tool-${capability.id}-permissions`}",
+            "data-testid={`workflow-node-tool-${capability.id}-fallback`}",
+            "highestWorkflowNodeToolRisk",
+            "normalizedWorkflowNodeToolRisk",
             "updateWorkflowNodeToolPolicy(",
             "nextData.tool_policy =",
             "data-testid=\"workflow-node-artifact-path-input\"",
@@ -6257,6 +6262,15 @@ def test_workflow_studio_exposes_stable_e2e_selectors_for_edit_and_run_flow() ->
             "data-testid=\"workflow-run-preview\"",
             "data-testid=\"workflow-run-preview-step\"",
             "workflowStepKindLabel(step.kind)",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/styles/app.css",
+        [
+            ".workflow-node-tool-label",
+            ".workflow-node-tool-label strong",
+            ".workflow-node-tool-label em,",
+            ".workflow-node-tool-label small",
         ],
     )
     _assert_contains(

@@ -968,6 +968,7 @@ export function AgentStudioView() {
           setWorkflowEnabled={setWorkflowEnabled}
           setWorkflowName={setWorkflowName}
           setWorkflowRunGoal={setWorkflowRunGoal}
+          toolCatalog={toolCatalog}
           workflowDescription={workflowDescription}
           workflowEnabled={workflowEnabled}
           workflowErrors={workflowErrors}

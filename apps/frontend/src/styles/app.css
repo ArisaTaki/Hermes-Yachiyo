@@ -16253,6 +16253,35 @@ button.activity-item {
   line-height: 1.25;
 }
 
+.workflow-node-tool-label {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 5px;
+  min-width: 0;
+}
+
+.workflow-node-tool-label strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--hy-fg);
+  font-size: 12px;
+  font-weight: 620;
+}
+
+.workflow-node-tool-label em,
+.workflow-node-tool-label small {
+  min-width: 0;
+  color: var(--hy-faint);
+  font-size: 11px;
+  font-style: normal;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.workflow-node-tool-label em {
+  color: oklch(84% 0.13 86);
+}
+
 .agent-run-textarea {
   min-height: 82px;
   resize: vertical;

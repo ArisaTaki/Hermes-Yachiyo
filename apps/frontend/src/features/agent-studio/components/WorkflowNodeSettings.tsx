@@ -2,6 +2,7 @@ import type { Dispatch, SetStateAction } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 
 import type { AgentSpec, WorkflowSpec } from '../types';
+import type { ToolCatalogItemSnapshot, ToolCatalogSnapshot } from '../../yachiyo-studio/types';
 import {
   appControlTools,
   browserControlTools,
@@ -19,6 +20,13 @@ const workflowNodeToolCapabilities = [
   { id: 'terminal', label: 'Terminal', tools: ['terminal.run'] },
 ];
 
+type WorkflowNodeToolCapability = (typeof workflowNodeToolCapabilities)[number];
+type WorkflowNodeToolCatalogSummary = {
+  fallbackNotes: string[];
+  missingPermissions: string[];
+  riskLevel: 'low' | 'medium' | 'high' | 'unknown';
+};
+
 type WorkflowNodeSettingsProps = {
   agents: AgentSpec[];
   agentCapabilityLine: (agent: AgentSpec) => string;
@@ -29,6 +37,7 @@ type WorkflowNodeSettingsProps = {
   onRemoveFlowNode: (nodeId: string) => void;
   selectedWorkflow: WorkflowSpec | null;
   setNodes: Dispatch<SetStateAction<Node[]>>;
+  toolCatalog: ToolCatalogSnapshot | null;
   workflowErrors: string[];
   workflowHasErrors: boolean;
   workflows: WorkflowSpec[];
@@ -47,6 +56,7 @@ export function WorkflowNodeSettings({
   onRemoveFlowNode,
   selectedWorkflow,
   setNodes,
+  toolCatalog,
   workflowErrors,
   workflowHasErrors,
   workflows,
@@ -143,29 +153,45 @@ export function WorkflowNodeSettings({
                       </button>
                     </div>
                     <div className="workflow-node-tool-policy-grid">
-                      {workflowNodeToolCapabilities.map((capability) => (
-                        <label className="agent-checkbox-row" key={capability.id}>
-                          <input
-                            type="checkbox"
-                            data-testid={`workflow-node-tool-${capability.id}`}
-                            checked={workflowNodeCapabilityEnabled(node, selectedNodeAgent, capability.tools)}
-                            disabled={busy || !selectedNodeAgent}
-                            onChange={(event) => {
-                              const enabled = event.target.checked;
-                              setNodes((current) => current.map((item) => item.id === node.id ? {
-                                ...item,
-                                data: updateWorkflowNodeToolPolicy(
-                                  item.data as Record<string, unknown> | undefined,
-                                  selectedNodeAgent,
-                                  capability.tools,
-                                  enabled,
-                                ),
-                              } : item));
-                            }}
-                          />
-                          <span>{capability.label}</span>
-                        </label>
-                      ))}
+                      {workflowNodeToolCapabilities.map((capability) => {
+                        const summary = workflowNodeToolCatalogSummary(toolCatalog, capability);
+                        return (
+                          <label className="agent-checkbox-row" key={capability.id}>
+                            <input
+                              type="checkbox"
+                              data-testid={`workflow-node-tool-${capability.id}`}
+                              checked={workflowNodeCapabilityEnabled(node, selectedNodeAgent, capability.tools)}
+                              disabled={busy || !selectedNodeAgent}
+                              onChange={(event) => {
+                                const enabled = event.target.checked;
+                                setNodes((current) => current.map((item) => item.id === node.id ? {
+                                  ...item,
+                                  data: updateWorkflowNodeToolPolicy(
+                                    item.data as Record<string, unknown> | undefined,
+                                    selectedNodeAgent,
+                                    capability.tools,
+                                    enabled,
+                                  ),
+                                } : item));
+                              }}
+                            />
+                            <span className="workflow-node-tool-label">
+                              <strong>{capability.label}</strong>
+                              <span className={`studio-tool-risk ${summary.riskLevel}`}>{summary.riskLevel}</span>
+                              {summary.missingPermissions.length ? (
+                                <em data-testid={`workflow-node-tool-${capability.id}-permissions`}>
+                                  Missing: {summary.missingPermissions.join(', ')}
+                                </em>
+                              ) : null}
+                              {summary.fallbackNotes.length ? (
+                                <small data-testid={`workflow-node-tool-${capability.id}-fallback`}>
+                                  {summary.fallbackNotes[0]}
+                                </small>
+                              ) : null}
+                            </span>
+                          </label>
+                        );
+                      })}
                     </div>
                   </div>
                 </>
@@ -331,6 +357,46 @@ function workflowLoopMaxIterations(data: Record<string, unknown> | undefined): n
 
 function workflowNodeHasToolPolicy(node: Node): boolean {
   return Boolean(node.data?.tool_policy && typeof node.data.tool_policy === 'object');
+}
+
+function workflowNodeToolCatalogSummary(
+  catalog: ToolCatalogSnapshot | null,
+  capability: WorkflowNodeToolCapability,
+): WorkflowNodeToolCatalogSummary {
+  const tools = capability.tools
+    .map((toolName) => (catalog?.tools || []).find((tool) => tool.tool_name === toolName))
+    .filter((tool): tool is ToolCatalogItemSnapshot => Boolean(tool));
+  return {
+    fallbackNotes: uniqueStrings(tools.flatMap((tool) => tool.fallback_notes || [])),
+    missingPermissions: uniqueStrings(tools.flatMap((tool) => tool.missing_permissions || [])),
+    riskLevel: highestWorkflowNodeToolRisk(tools),
+  };
+}
+
+function highestWorkflowNodeToolRisk(tools: ToolCatalogItemSnapshot[]): WorkflowNodeToolCatalogSummary['riskLevel'] {
+  const rank = { unknown: 0, low: 1, medium: 2, high: 3 } as const;
+  return tools.reduce<WorkflowNodeToolCatalogSummary['riskLevel']>((highest, tool) => {
+    const next = normalizedWorkflowNodeToolRisk(tool.risk_level);
+    return rank[next] > rank[highest] ? next : highest;
+  }, 'unknown');
+}
+
+function normalizedWorkflowNodeToolRisk(value: unknown): WorkflowNodeToolCatalogSummary['riskLevel'] {
+  const risk = String(value || '').trim().toLowerCase();
+  if (risk === 'low' || risk === 'medium' || risk === 'high') return risk;
+  return 'unknown';
+}
+
+function uniqueStrings(values: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  values.forEach((value) => {
+    const clean = String(value || '').trim();
+    if (!clean || seen.has(clean)) return;
+    seen.add(clean);
+    result.push(clean);
+  });
+  return result;
 }
 
 function workflowNodeCapabilityEnabled(

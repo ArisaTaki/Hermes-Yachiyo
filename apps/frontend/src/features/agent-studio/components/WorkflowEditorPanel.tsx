@@ -2,6 +2,7 @@ import type { Dispatch, SetStateAction } from 'react';
 import type { Edge, Node, OnConnect, OnEdgesChange, OnNodesChange } from '@xyflow/react';
 
 import type { AgentSpec, WorkflowSpec } from '../types';
+import type { ToolCatalogSnapshot } from '../../yachiyo-studio/types';
 import { WorkflowCanvas } from './WorkflowCanvas';
 import { WorkflowNodeSettings } from './WorkflowNodeSettings';
 import { WorkflowRunPreview, type WorkflowPreviewStep } from './WorkflowRunPreview';
@@ -45,6 +46,7 @@ type WorkflowEditorPanelProps = {
   setWorkflowEnabled: (enabled: boolean) => void;
   setWorkflowName: (name: string) => void;
   setWorkflowRunGoal: (goal: string) => void;
+  toolCatalog: ToolCatalogSnapshot | null;
   workflowDescription: string;
   workflowEnabled: boolean;
   workflowErrors: string[];
@@ -93,6 +95,7 @@ export function WorkflowEditorPanel({
   setWorkflowEnabled,
   setWorkflowName,
   setWorkflowRunGoal,
+  toolCatalog,
   workflowDescription,
   workflowEnabled,
   workflowErrors,
@@ -239,6 +242,7 @@ export function WorkflowEditorPanel({
           onRemoveFlowNode={onRemoveFlowNode}
           selectedWorkflow={selectedWorkflow}
           setNodes={setNodes}
+          toolCatalog={toolCatalog}
           workflowErrors={workflowErrors}
           workflowHasErrors={workflowHasErrors}
           workflows={workflows}
