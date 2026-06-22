@@ -150,6 +150,38 @@ def test_runtime_tool_broker_factory_can_share_group_foreground_lock(tmp_path) -
     assert second_broker.kwargs["foreground_lock_owner"] == "group-run-1:run-2"
 
 
+def test_runtime_tool_broker_factory_reuses_foreground_lock_by_group_key(tmp_path) -> None:
+    factory = RuntimeToolBrokerFactory(
+        agent_artifacts_dir=tmp_path / "artifacts",
+        tool_broker_factory=FakeBroker,
+        memory_store=lambda **kwargs: {"memory": kwargs},
+        future_task_store=lambda **kwargs: {"future": kwargs},
+        main_chat_agent_id="builtin:yachiyo-main",
+    )
+
+    first_broker = factory.for_run(
+        run_id="run-1",
+        workspace_policy={},
+        foreground_lock_key="group-run-1",
+    )
+    second_broker = factory.for_run(
+        run_id="run-2",
+        workspace_policy={},
+        foreground_lock_key="group-run-1",
+    )
+    third_broker = factory.for_run(
+        run_id="run-3",
+        workspace_policy={},
+        foreground_lock_key="group-run-2",
+    )
+
+    assert first_broker.kwargs["foreground_lock"] is second_broker.kwargs["foreground_lock"]
+    assert third_broker.kwargs["foreground_lock"] is not first_broker.kwargs["foreground_lock"]
+    assert first_broker.kwargs["foreground_lock_owner"] == "group-run-1:run-1"
+    assert second_broker.kwargs["foreground_lock_owner"] == "group-run-1:run-2"
+    assert third_broker.kwargs["foreground_lock_owner"] == "group-run-2:run-3"
+
+
 def test_runtime_tool_broker_factory_writes_artifact_for_custom_artifacts_dir(tmp_path) -> None:
     factory = RuntimeToolBrokerFactory(
         agent_artifacts_dir=tmp_path / "agent-artifacts",

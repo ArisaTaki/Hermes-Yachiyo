@@ -135,8 +135,8 @@ def test_workflow_agent_node_legacy_helpers_accept_port_bundle() -> None:
         or f"{workflow_goal}\n\nStep: {step_task}",
         insert_run=lambda **kwargs: calls.append(("insert", str(kwargs["runnable_id"])))
         or {"run_id": "child_run"},
-        execute_agent_run=lambda run_id, _agent, _goal, *, upstream: calls.append(
-            ("execute", f"{run_id}:{upstream}")
+        execute_agent_run=lambda run_id, _agent, _goal, *, upstream, run_group_id="": calls.append(
+            ("execute", f"{run_id}:{upstream}:{run_group_id}")
         )
         or child_run,
         workflow_child_artifact_refs=lambda run, label: calls.append(
@@ -171,7 +171,7 @@ def test_workflow_agent_node_legacy_helpers_accept_port_bundle() -> None:
         ("task", "research"),
         ("goal", "Summarize launch risk."),
         ("insert", "agent_research"),
-        ("execute", "child_run:Previous result"),
+        ("execute", "child_run:Previous result:workflow_group"),
         ("artifacts", "child_run:Research"),
     ]
 

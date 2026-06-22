@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from apps.shell.agent.tools.broker import ToolBroker
+from apps.shell.agent.tools.foreground_lock import ForegroundActionLock
 
 
 class RuntimeToolBrokerFactory:
@@ -27,6 +28,7 @@ class RuntimeToolBrokerFactory:
         self._future_task_store = future_task_store
         self._main_chat_agent_id = main_chat_agent_id
         self._foreground_lock = foreground_lock
+        self._foreground_locks: dict[str, ForegroundActionLock] = {}
 
     def for_run(
         self,
@@ -38,15 +40,24 @@ class RuntimeToolBrokerFactory:
         skills: list[dict[str, Any]] | None = None,
         foreground_lock: Any | None = None,
         foreground_lock_owner: str = "",
+        foreground_lock_key: str = "",
     ) -> Any:
         clean_run_id = str(run_id or "").strip()
+        clean_lock_key = str(foreground_lock_key or "").strip()
         root = artifacts_dir or self._agent_artifacts_dir
-        lock = foreground_lock if foreground_lock is not None else self._foreground_lock
+        lock = foreground_lock
+        if lock is None and clean_lock_key:
+            lock = self._foreground_locks.setdefault(clean_lock_key, ForegroundActionLock())
+        if lock is None:
+            lock = self._foreground_lock
         extra: dict[str, Any] = {}
         if lock is not None:
             extra["foreground_lock"] = lock
-        if foreground_lock_owner:
-            extra["foreground_lock_owner"] = foreground_lock_owner
+        clean_owner = str(foreground_lock_owner or "").strip()
+        if not clean_owner and clean_lock_key:
+            clean_owner = f"{clean_lock_key}:{clean_run_id}"
+        if clean_owner:
+            extra["foreground_lock_owner"] = clean_owner
         return self._tool_broker_factory(
             workspace_policy,
             root / clean_run_id,

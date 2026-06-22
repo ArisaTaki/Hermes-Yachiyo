@@ -196,8 +196,14 @@ def build_runtime_workflow_execution_services(
             engine._workflow_child_goal(workflow_goal, step_task)
         ),
         insert_run=lambda **kwargs: engine._insert_run(**kwargs),
-        execute_agent_run=lambda run_id, agent, user_goal, *, upstream: (
-            engine._execute_agent_run(run_id, agent, user_goal, upstream=upstream)
+        execute_agent_run=lambda run_id, agent, user_goal, *, upstream, run_group_id="": (
+            engine._execute_agent_run(
+                run_id,
+                agent,
+                user_goal,
+                upstream=upstream,
+                run_group_id=run_group_id,
+            )
         ),
         workflow_child_artifact_refs=lambda child_run, label: (
             engine._workflow_child_artifact_refs(child_run, label)

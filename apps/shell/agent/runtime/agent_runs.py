@@ -111,12 +111,14 @@ class RuntimeAgentRunExecutor:
         agent: dict[str, Any],
         user_goal: str,
         upstream: str = "",
+        run_group_id: str = "",
     ) -> dict[str, Any]:
         preparation = self._preparer.prepare(
             run_id,
             agent,
             user_goal,
             upstream,
+            run_group_id=run_group_id,
         )
         timeline = preparation.timeline
         artifacts = preparation.artifacts
@@ -192,6 +194,7 @@ class RuntimeAgentRunCoordinator:
             agent,
             user_goal,
             upstream=str(payload.get("upstream") or ""),
+            run_group_id=str(run.get("run_group_id") or ""),
         )
         if start.root_group:
             result = self._project_agent_run_group_if_root(result)
@@ -262,6 +265,7 @@ class RuntimeAgentRunAsyncCoordinator:
                     agent,
                     user_goal,
                     upstream=str(payload.get("upstream") or ""),
+                    run_group_id=str(run.get("run_group_id") or ""),
                 )
                 if start.root_group:
                     exec_result = self._project_agent_run_group_if_root(exec_result)

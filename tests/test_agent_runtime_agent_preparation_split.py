@@ -68,15 +68,20 @@ class FakeSharedToolBrokers:
         workspace_policy: dict[str, Any],
         default_runnable_id: str = "",
         skills: list[dict[str, Any]] | None = None,
+        foreground_lock_key: str = "",
+        foreground_lock_owner: str = "",
     ) -> FakeBroker:
-        self.calls.append(
-            {
-                "run_id": run_id,
-                "workspace_policy": workspace_policy,
-                "default_runnable_id": default_runnable_id,
-                "skills": skills,
-            }
-        )
+        call = {
+            "run_id": run_id,
+            "workspace_policy": workspace_policy,
+            "default_runnable_id": default_runnable_id,
+            "skills": skills,
+        }
+        if foreground_lock_key:
+            call["foreground_lock_key"] = foreground_lock_key
+        if foreground_lock_owner:
+            call["foreground_lock_owner"] = foreground_lock_owner
+        self.calls.append(call)
         return self.broker
 
 
@@ -238,6 +243,35 @@ def test_agent_run_preparer_can_use_shared_tool_broker_factory(tmp_path: Path) -
     assert state["memory_store_calls"] == []
     assert state["future_task_store_calls"] == []
     assert "broker_args" not in state
+
+
+def test_agent_run_preparer_scopes_shared_tool_broker_to_run_group(tmp_path: Path) -> None:
+    state: dict[str, Any] = {}
+    tool_brokers = FakeSharedToolBrokers()
+    preparer = _preparer(tmp_path, state, tool_brokers=tool_brokers)
+
+    preparation = preparer.prepare(
+        "run-1",
+        {
+            "agent_id": "agent-1",
+            "name": "Prep Agent",
+            "skill_ids": ["skill-1"],
+        },
+        "Finish",
+        run_group_id="group-1",
+    )
+
+    assert preparation.broker is tool_brokers.broker
+    assert tool_brokers.calls == [
+        {
+            "run_id": "run-1",
+            "workspace_policy": {"default_workdir": "/tmp/project"},
+            "default_runnable_id": "agent-1",
+            "skills": [{"skill_id": "skill-1", "name": "Brief Reader"}],
+            "foreground_lock_key": "group-1",
+            "foreground_lock_owner": "group-1:run-1",
+        }
+    ]
 
 
 def test_agent_run_preparer_writes_observable_context_artifact(tmp_path: Path) -> None:

@@ -843,12 +843,13 @@ def test_workflow_continuation_uses_injected_agent_handoff_inputs() -> None:
         )
         or f"{workflow_goal}\n\nStep: {step_task}",
         insert_run=lambda **kwargs: inserted.append(kwargs) or {"run_id": "child_run"},
-        execute_agent_run=lambda run_id, received_agent, user_goal, *, upstream: executed.append(
+        execute_agent_run=lambda run_id, received_agent, user_goal, *, upstream, run_group_id="": executed.append(
             {
                 "run_id": run_id,
                 "agent": received_agent,
                 "user_goal": user_goal,
                 "upstream": upstream,
+                "run_group_id": run_group_id,
             }
         )
         or child_run,
@@ -902,6 +903,7 @@ def test_workflow_continuation_uses_injected_agent_handoff_inputs() -> None:
             "agent": agent,
             "user_goal": "Ship release candidate\n\nStep: Summarize launch risk.",
             "upstream": "",
+            "run_group_id": "workflow_group",
         }
     ]
     assert artifact_ref_calls == [("child_run", "Research")]

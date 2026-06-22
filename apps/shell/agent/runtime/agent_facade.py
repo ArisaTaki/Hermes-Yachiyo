@@ -45,12 +45,20 @@ class RuntimeAgentFacadeMixin:
     ) -> dict[str, Any]:
         return self.agent_run_async_coordinator.create_async(payload, on_complete=on_complete)
 
-    def _execute_agent_run(self, run_id: str, agent: dict[str, Any], user_goal: str, upstream: str = "") -> dict[str, Any]:
+    def _execute_agent_run(
+        self,
+        run_id: str,
+        agent: dict[str, Any],
+        user_goal: str,
+        upstream: str = "",
+        run_group_id: str = "",
+    ) -> dict[str, Any]:
         return self.agent_run_executor.execute(
             run_id,
             agent,
             user_goal,
             upstream,
+            run_group_id=run_group_id,
         )
 
     def _run_custom_api_agent(

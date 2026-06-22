@@ -64,6 +64,7 @@ class RuntimeAgentRunPreparer:
         agent: dict[str, Any],
         user_goal: str,
         upstream: str = "",
+        run_group_id: str = "",
     ) -> AgentRunPreparation:
         backend = self._normalize_execution_backend(
             agent.get("execution_backend"),
@@ -93,12 +94,18 @@ class RuntimeAgentRunPreparer:
         skills = self._load_agent_skills(agent.get("skill_ids") or [])
         context = self._agent_context(agent, user_goal, upstream, skills=skills)
         default_runnable_id = str(agent.get("agent_id") or "")
+        clean_run_group_id = str(run_group_id or "").strip()
         if self._tool_brokers is not None:
+            broker_kwargs: dict[str, Any] = {}
+            if clean_run_group_id:
+                broker_kwargs["foreground_lock_key"] = clean_run_group_id
+                broker_kwargs["foreground_lock_owner"] = f"{clean_run_group_id}:{run_id}"
             broker = self._tool_brokers.for_run(
                 run_id=run_id,
                 workspace_policy=runtime["workspace_policy"],
                 default_runnable_id=default_runnable_id,
                 skills=skills,
+                **broker_kwargs,
             )
         else:
             if self._tool_broker_factory is None:

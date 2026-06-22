@@ -245,6 +245,7 @@ class WorkflowAgentNodeExecution:
             handoff.agent,
             handoff.child_goal,
             upstream=handoff.upstream,
+            run_group_id=run_group_id,
         )
         return cls.from_child_run(
             handoff,

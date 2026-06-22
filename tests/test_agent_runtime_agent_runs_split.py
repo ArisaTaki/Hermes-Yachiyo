@@ -79,8 +79,15 @@ def test_agent_run_executor_projects_completed_agent_run() -> None:
 
     class _Preparer:
         @staticmethod
-        def prepare(run_id: str, agent: dict[str, Any], user_goal: str, upstream: str) -> _PreparedAgentRun:
-            calls.append(("prepare", run_id, agent["agent_id"], user_goal, upstream))
+        def prepare(
+            run_id: str,
+            agent: dict[str, Any],
+            user_goal: str,
+            upstream: str,
+            *,
+            run_group_id: str = "",
+        ) -> _PreparedAgentRun:
+            calls.append(("prepare", run_id, agent["agent_id"], user_goal, upstream, run_group_id))
             return prepared
 
         @staticmethod
@@ -103,11 +110,17 @@ def test_agent_run_executor_projects_completed_agent_run() -> None:
         approval_pause=object(),
     )
 
-    result = executor.execute("run-1", {"agent_id": "agent-1"}, "Ship", "Upstream")
+    result = executor.execute(
+        "run-1",
+        {"agent_id": "agent-1"},
+        "Ship",
+        "Upstream",
+        run_group_id="group-1",
+    )
 
     assert result == {"run_id": "run-1", "status": "completed", "result": "Done"}
     assert calls == [
-        ("prepare", "run-1", "agent-1", "Ship", "Upstream"),
+        ("prepare", "run-1", "agent-1", "Ship", "Upstream", "group-1"),
         ("context", "run-1", "prepared-context"),
         (
             "continue",
@@ -128,7 +141,7 @@ def test_agent_run_executor_projects_tool_approval_pause() -> None:
 
     class _Preparer:
         @staticmethod
-        def prepare(*_args: Any) -> _PreparedAgentRun:
+        def prepare(*_args: Any, **_kwargs: Any) -> _PreparedAgentRun:
             return prepared
 
         @staticmethod
@@ -175,7 +188,7 @@ def test_agent_run_executor_projects_failed_agent_run() -> None:
 
     class _Preparer:
         @staticmethod
-        def prepare(*_args: Any) -> _PreparedAgentRun:
+        def prepare(*_args: Any, **_kwargs: Any) -> _PreparedAgentRun:
             return prepared
 
         @staticmethod
@@ -287,7 +300,7 @@ def test_agent_run_coordinator_validates_starts_executes_and_projects_root_group
     class _Starter:
         def start_sync(self, payload: dict[str, Any], *, agent: dict[str, Any], lock: Any) -> AgentRunStart:
             calls.append(("start", payload, agent, lock))
-            return AgentRunStart({"run_id": "run-1"}, root_group=True)
+            return AgentRunStart({"run_id": "run-1", "run_group_id": "group-1"}, root_group=True)
 
     coordinator = RuntimeAgentRunCoordinator(
         get_agent_private=lambda agent_id: calls.append(("agent", agent_id)) or {
@@ -311,7 +324,13 @@ def test_agent_run_coordinator_validates_starts_executes_and_projects_root_group
     assert result == {"run_id": "run-1", "status": "completed", "group_projected": True}
     assert calls[0] == ("agent", "agent-1")
     assert calls[1] == ("readiness", "agent-1")
-    assert calls[3] == ("execute", "run-1", "agent-1", "Ship", {"upstream": "Context"})
+    assert calls[3] == (
+        "execute",
+        "run-1",
+        "agent-1",
+        "Ship",
+        {"upstream": "Context", "run_group_id": "group-1"},
+    )
     assert calls[4] == ("project", "run-1")
 
 
@@ -341,7 +360,10 @@ def test_agent_run_async_coordinator_returns_processing_and_completes_in_backgro
 
     class _Starter:
         def start_async(self, payload: dict[str, Any], *, agent: dict[str, Any]) -> AgentRunStart:
-            return AgentRunStart({"run_id": "run-1", "kind": "agent_run"}, root_group=True)
+            return AgentRunStart(
+                {"run_id": "run-1", "kind": "agent_run", "run_group_id": "group-1"},
+                root_group=True,
+            )
 
     coordinator = RuntimeAgentRunAsyncCoordinator(
         get_agent_private=lambda agent_id: {"agent_id": agent_id, "name": "Runner"},
@@ -377,6 +399,7 @@ def test_agent_run_async_coordinator_returns_processing_and_completes_in_backgro
             "status": "completed",
             "user_goal": "Ship",
             "upstream": "Context",
+            "run_group_id": "group-1",
             "group_projected": True,
         }
     ]

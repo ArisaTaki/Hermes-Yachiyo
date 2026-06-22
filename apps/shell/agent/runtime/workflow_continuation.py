@@ -418,6 +418,7 @@ class WorkflowContinuationCoordinator:
         user_goal: str,
         *,
         upstream: str,
+        run_group_id: str = "",
     ) -> dict[str, Any]:
         if self._execute_agent_run_callback is not None:
             return self._execute_agent_run_callback(
@@ -425,12 +426,14 @@ class WorkflowContinuationCoordinator:
                 agent,
                 user_goal,
                 upstream=upstream,
+                run_group_id=run_group_id,
             )
         return self._engine._execute_agent_run(
             run_id,
             agent,
             user_goal,
             upstream=upstream,
+            run_group_id=run_group_id,
         )
 
     def _workflow_child_artifact_refs(
@@ -994,6 +997,7 @@ class WorkflowContinuationCoordinator:
             handoff.agent,
             handoff.child_goal,
             upstream=handoff.upstream,
+            run_group_id=run_group_id,
         )
         execution = WorkflowAgentNodeExecution.from_child_run(
             handoff,
