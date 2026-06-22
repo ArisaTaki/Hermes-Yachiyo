@@ -6,6 +6,7 @@ from typing import Any
 
 from apps.shell import agent_runtime
 from apps.shell.agent.runtime.main_chat_config import (
+    MAIN_CHAT_DESKTOP_AGENT_INSTRUCTIONS,
     MainChatRuntimeConfigBuilder,
     MainChatVirtualAgentProjector,
 )
@@ -42,6 +43,15 @@ def test_main_chat_config_builder_projects_daily_entrypoint_runtime(tmp_path) ->
     config = builder.agent_config(model_profile_id=" profile-chat ")
 
     assert config["agent_id"] == "builtin:yachiyo-main"
+    assert config["instructions"] == MAIN_CHAT_DESKTOP_AGENT_INSTRUCTIONS
+    assert "桌面执行型 Agent" in config["instructions"]
+    assert "优先调用工具尝试执行" in config["instructions"]
+    assert "media.apple_music_play" in config["instructions"]
+    assert "screen.capture" in config["instructions"]
+    assert "desktop.active_window" in config["instructions"]
+    assert "低/中风险桌面动作默认直接执行" in config["instructions"]
+    assert "权限缺失" in config["instructions"]
+    assert "approval/policy gate" in config["instructions"]
     assert config["model_profile_id"] == "profile-chat"
     assert config["output_contract"] == "chat"
     assert config["workspace_policy"] == {
@@ -82,6 +92,7 @@ def test_main_chat_config_builder_projects_virtual_agent_without_trusting_worksp
     assert agent["virtual"] is True
     assert agent["system"] is True
     assert agent["builtin"] is True
+    assert agent["instructions"] == MAIN_CHAT_DESKTOP_AGENT_INSTRUCTIONS
     assert agent["model_config"]["api_key_configured"] is True
     assert agent["workspace_policy"]["default_workdir"] == str(
         tmp_path / "agent-workspaces" / "builtin-yachiyo-main"
