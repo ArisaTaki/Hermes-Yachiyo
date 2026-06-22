@@ -20,6 +20,7 @@ from .legacy_groups import (
 from .legacy_group_runs import start_legacy_group_run
 from .legacy_runs import LegacyRunPayloadProjector
 from .legacy_tasks import LegacyRuntimePort
+from .desk import LocalAgentDeskStore
 from .groups import group_run_snapshot_from_payload
 
 
@@ -108,6 +109,7 @@ class LegacyStudioPort:
     def __init__(self, runtime: Any) -> None:
         self._runtime = runtime
         self._projector = LegacyRunPayloadProjector()
+        self._desk_store = LocalAgentDeskStore(runtime=runtime)
 
     def list_agents(self) -> dict[str, Any]:
         return self._runtime.list_agents()
@@ -130,6 +132,22 @@ class LegacyStudioPort:
 
     def test_agent_model(self, agent_id: str) -> dict[str, Any]:
         return self._runtime.test_agent_model(agent_id)
+
+    def get_agent_desk(self, agent_id: str) -> dict[str, Any]:
+        return self._desk_store.get_agent_desk(agent_id)
+
+    def write_agent_desk_note(self, agent_id: str, request: dict[str, Any]) -> dict[str, Any]:
+        return self._desk_store.write_agent_desk_note(
+            agent_id,
+            str(request.get("content") or ""),
+        )
+
+    def write_agent_desk_file(self, agent_id: str, request: dict[str, Any]) -> dict[str, Any]:
+        return self._desk_store.write_agent_desk_file(
+            agent_id,
+            str(request.get("path") or ""),
+            str(request.get("content") or ""),
+        )
 
     def attach_skill(self, agent_id: str, skill_id: str) -> dict[str, Any]:
         return self._runtime.attach_skill(agent_id, skill_id)

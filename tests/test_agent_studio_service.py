@@ -8,6 +8,8 @@ from apps.shell.yachiyo_agent import (
     AgentStudioService,
     ApprovalDecision,
     RerunRunRequest,
+    SaveAgentDeskFileRequest,
+    SaveAgentDeskNoteRequest,
     SaveAgentGroupMemberRequest,
     SaveAgentGroupRequest,
     SaveAgentRequest,
@@ -41,6 +43,22 @@ class _FakeStudioPort:
     def test_agent_model(self, agent_id: str) -> dict[str, Any]:
         self.calls.append(("test_agent_model", agent_id))
         return {"ok": True, "message": "Model ready"}
+
+    def get_agent_desk(self, agent_id: str) -> dict[str, Any]:
+        self.calls.append(("get_agent_desk", agent_id))
+        return _desk_payload(agent_id=agent_id)
+
+    def write_agent_desk_note(self, agent_id: str, request: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append(("write_agent_desk_note", {"agent_id": agent_id, "request": request}))
+        return _desk_payload(agent_id=agent_id, note=request.get("content") or "")
+
+    def write_agent_desk_file(self, agent_id: str, request: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append(("write_agent_desk_file", {"agent_id": agent_id, "request": request}))
+        return _desk_payload(
+            agent_id=agent_id,
+            file_path=request.get("path") or "inputs/brief.md",
+            file_text=request.get("content") or "",
+        )
 
     def attach_skill(self, agent_id: str, skill_id: str) -> dict[str, Any]:
         self.calls.append(("attach_skill", {"agent_id": agent_id, "skill_id": skill_id}))
@@ -361,6 +379,15 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
     )
     deleted_agent = service.delete_agent("agent-2")
     model_test = service.test_agent_model("agent-2")
+    desk = service.get_agent_desk("agent-2")
+    desk_with_note = service.write_agent_desk_note(
+        "agent-2",
+        SaveAgentDeskNoteRequest(content="# Notes"),
+    )
+    desk_with_file = service.write_agent_desk_file(
+        "agent-2",
+        SaveAgentDeskFileRequest(path="inputs/brief.md", content="Brief"),
+    )
     agent_with_skill = service.attach_skill("agent-2", "skill-2")
     agent_without_skill = service.detach_skill("agent-2", "skill-2")
     skills = service.list_skills()
@@ -416,6 +443,11 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
     assert saved_agent.agent_id == "agent-2"
     assert deleted_agent == {"ok": True, "agent_id": "agent-2"}
     assert model_test == {"ok": True, "message": "Model ready"}
+    assert desk.agent_id == "agent-2"
+    assert desk.items[0].path == "desk-notes.md"
+    assert desk_with_note.items[0].preview_text == "# Notes"
+    assert desk_with_file.items[-1].path == "inputs/brief.md"
+    assert desk_with_file.items[-1].preview_text == "Brief"
     assert agent_with_skill.skill_ids == ["skill-2"]
     assert agent_without_skill.skill_ids == []
     assert skills[0].skill_id == "skill-1"
@@ -461,6 +493,15 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
     ) in port.calls
     assert ("delete_agent", "agent-2") in port.calls
     assert ("test_agent_model", "agent-2") in port.calls
+    assert ("get_agent_desk", "agent-2") in port.calls
+    assert (
+        "write_agent_desk_note",
+        {"agent_id": "agent-2", "request": {"content": "# Notes"}},
+    ) in port.calls
+    assert (
+        "write_agent_desk_file",
+        {"agent_id": "agent-2", "request": {"path": "inputs/brief.md", "content": "Brief"}},
+    ) in port.calls
     assert ("attach_skill", {"agent_id": "agent-2", "skill_id": "skill-2"}) in port.calls
     assert ("detach_skill", {"agent_id": "agent-2", "skill_id": "skill-2"}) in port.calls
     assert ("list_skills", None) in port.calls
@@ -1235,6 +1276,41 @@ def test_agent_studio_service_redacts_sensitive_run_artifact_content() -> None:
     assert "[redacted]" in rendered
     assert artifact.run_id == "run-1"
     assert artifact.mime_type == "text/markdown"
+
+
+def _desk_payload(
+    agent_id: str = "agent-1",
+    note: str = "# Desk Notes",
+    file_path: str = "inputs/brief.md",
+    file_text: str = "Brief",
+) -> dict[str, Any]:
+    return {
+        "agent_id": agent_id,
+        "root_path": f"/workspace/{agent_id}",
+        "notes_path": "desk-notes.md",
+        "metadata_path": ".yachiyo-desk.json",
+        "items": [
+            {
+                "path": "desk-notes.md",
+                "name": "desk-notes.md",
+                "kind": "note",
+                "size_bytes": len(note.encode("utf-8")),
+                "mime_type": "text/markdown",
+                "preview_text": note,
+                "updated_at": "2026-06-22T00:00:00Z",
+            },
+            {
+                "path": file_path,
+                "name": file_path.rsplit("/", 1)[-1],
+                "kind": "file",
+                "size_bytes": len(file_text.encode("utf-8")),
+                "mime_type": "text/markdown",
+                "preview_text": file_text,
+                "updated_at": "2026-06-22T00:00:01Z",
+            },
+        ],
+        "updated_at": "2026-06-22T00:00:02Z",
+    }
 
 
 def _agent_payload(

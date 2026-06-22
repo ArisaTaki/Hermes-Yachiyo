@@ -312,6 +312,25 @@ class AgentDefinitionSnapshot(_PublicSnapshot):
     updated_at: str = ""
 
 
+class AgentDeskItemSnapshot(_PublicSnapshot):
+    path: str
+    name: str
+    kind: Literal["file", "directory", "note"] = "file"
+    size_bytes: int | None = None
+    mime_type: str | None = None
+    preview_text: str | None = None
+    updated_at: str = ""
+
+
+class AgentDeskSnapshot(_PublicSnapshot):
+    agent_id: str
+    root_path: str
+    notes_path: str = "desk-notes.md"
+    metadata_path: str = ".yachiyo-desk.json"
+    items: list[AgentDeskItemSnapshot] = Field(default_factory=list)
+    updated_at: str = ""
+
+
 class SkillSnapshot(_PublicSnapshot):
     skill_id: str
     name: str
@@ -549,6 +568,19 @@ class SaveAgentRequest(BaseModel):
     skill_ids: list[str] | None = None
     output_contract: str | None = None
     enabled: bool | None = None
+
+
+class SaveAgentDeskNoteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    content: str = ""
+
+
+class SaveAgentDeskFileRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: str
+    content: str = ""
 
 
 class SaveAgentGroupRequest(BaseModel):

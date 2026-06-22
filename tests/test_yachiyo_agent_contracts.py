@@ -9,6 +9,8 @@ from pydantic import ValidationError
 
 from apps.shell.yachiyo_agent import (
     AgentDefinitionSnapshot,
+    AgentDeskItemSnapshot,
+    AgentDeskSnapshot,
     AgentGroupMemberSnapshot,
     AgentGroupSnapshot,
     AgentTaskLightSnapshot,
@@ -29,6 +31,8 @@ from apps.shell.yachiyo_agent import (
     RunEventPageSnapshot,
     RunTimelineChildSnapshot,
     RunTimelineSnapshot,
+    SaveAgentDeskFileRequest,
+    SaveAgentDeskNoteRequest,
     SaveAgentGroupMemberRequest,
     SaveAgentGroupRequest,
     SaveAgentRequest,
@@ -373,6 +377,55 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_risk_level("terminal.run") is None
     assert is_high_risk_desktop_action("raw_shell") is True
     assert is_high_risk_desktop_action("play_music") is False
+
+
+def test_agent_desk_snapshot_json_shape_is_stable() -> None:
+    snapshot = AgentDeskSnapshot(
+        agent_id="agent-1",
+        root_path="/workspace/agent-1",
+        items=[
+            AgentDeskItemSnapshot(
+                path="desk-notes.md",
+                name="desk-notes.md",
+                kind="note",
+                size_bytes=12,
+                mime_type="text/markdown",
+                preview_text="# Notes",
+                updated_at="2026-06-22T00:00:00Z",
+            ),
+            AgentDeskItemSnapshot(
+                path="inputs/brief.md",
+                name="brief.md",
+                kind="file",
+                size_bytes=20,
+                mime_type="text/markdown",
+                preview_text="Brief",
+                updated_at="2026-06-22T00:00:01Z",
+            ),
+        ],
+        updated_at="2026-06-22T00:00:02Z",
+    )
+
+    payload = _json(snapshot)
+
+    assert list(payload) == [
+        "agent_id",
+        "root_path",
+        "notes_path",
+        "metadata_path",
+        "items",
+        "updated_at",
+    ]
+    assert payload["notes_path"] == "desk-notes.md"
+    assert payload["metadata_path"] == ".yachiyo-desk.json"
+    assert payload["items"][0]["kind"] == "note"
+    assert payload["items"][1]["path"] == "inputs/brief.md"
+    with pytest.raises(ValidationError):
+        AgentDeskSnapshot(agent_id="agent-1", root_path="/workspace", unknown=True)
+    with pytest.raises(ValidationError):
+        SaveAgentDeskNoteRequest(content="note", unknown=True)
+    with pytest.raises(ValidationError):
+        SaveAgentDeskFileRequest(path="brief.md", content="body", unknown=True)
 
 
 def test_chat_runnable_catalog_snapshot_json_shape_is_stable() -> None:

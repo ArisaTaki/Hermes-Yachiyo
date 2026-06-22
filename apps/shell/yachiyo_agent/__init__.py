@@ -2,6 +2,8 @@
 
 from .contracts import (
     AgentDefinitionSnapshot,
+    AgentDeskItemSnapshot,
+    AgentDeskSnapshot,
     AgentGroupMemberSnapshot,
     AgentGroupSnapshot,
     AgentTaskLightSnapshot,
@@ -28,6 +30,8 @@ from .contracts import (
     RunTimelineSnapshot,
     SaveAgentGroupMemberRequest,
     SaveAgentGroupRequest,
+    SaveAgentDeskFileRequest,
+    SaveAgentDeskNoteRequest,
     SaveAgentRequest,
     SaveWorkflowRequest,
     SkillFolderSnapshot,
@@ -64,6 +68,8 @@ from .studio_service import AgentStudioService
 
 __all__ = [
     "AgentDefinitionSnapshot",
+    "AgentDeskItemSnapshot",
+    "AgentDeskSnapshot",
     "AgentGroupMemberSnapshot",
     "AgentGroupSnapshot",
     "AgentStudioService",
@@ -102,6 +108,8 @@ __all__ = [
     "RunTimelineSnapshot",
     "SaveAgentGroupMemberRequest",
     "SaveAgentGroupRequest",
+    "SaveAgentDeskFileRequest",
+    "SaveAgentDeskNoteRequest",
     "SaveAgentRequest",
     "SaveWorkflowRequest",
     "SkillFolderSnapshot",

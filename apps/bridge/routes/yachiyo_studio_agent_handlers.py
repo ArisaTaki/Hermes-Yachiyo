@@ -14,7 +14,12 @@ from apps.bridge.routes.yachiyo_services import (
     studio_service,
 )
 from apps.shell.agent_runtime import AgentRuntimeError
-from apps.shell.yachiyo_agent import SaveAgentRequest, StartAgentRunRequest
+from apps.shell.yachiyo_agent import (
+    SaveAgentDeskFileRequest,
+    SaveAgentDeskNoteRequest,
+    SaveAgentRequest,
+    StartAgentRunRequest,
+)
 
 
 async def list_agents(http_request: Request | None = None) -> dict[str, Any]:
@@ -70,6 +75,58 @@ async def test_agent_model(
 ) -> dict[str, Any]:
     try:
         return await asyncio.to_thread(studio_service(http_request).test_agent_model, agent_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Agent 不存在") from exc
+    except AgentRuntimeError as exc:
+        raise bad_request(exc) from exc
+
+
+async def get_agent_desk(
+    agent_id: str,
+    http_request: Request | None = None,
+) -> dict[str, Any]:
+    try:
+        desk_snapshot = await asyncio.to_thread(
+            studio_service(http_request).get_agent_desk,
+            agent_id,
+        )
+        return snapshot(desk_snapshot)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Agent 不存在") from exc
+    except AgentRuntimeError as exc:
+        raise bad_request(exc) from exc
+
+
+async def write_agent_desk_note(
+    agent_id: str,
+    request: SaveAgentDeskNoteRequest,
+    http_request: Request | None = None,
+) -> dict[str, Any]:
+    try:
+        desk_snapshot = await asyncio.to_thread(
+            studio_service(http_request).write_agent_desk_note,
+            agent_id,
+            request,
+        )
+        return snapshot(desk_snapshot)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Agent 不存在") from exc
+    except AgentRuntimeError as exc:
+        raise bad_request(exc) from exc
+
+
+async def write_agent_desk_file(
+    agent_id: str,
+    request: SaveAgentDeskFileRequest,
+    http_request: Request | None = None,
+) -> dict[str, Any]:
+    try:
+        desk_snapshot = await asyncio.to_thread(
+            studio_service(http_request).write_agent_desk_file,
+            agent_id,
+            request,
+        )
+        return snapshot(desk_snapshot)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Agent 不存在") from exc
     except AgentRuntimeError as exc:

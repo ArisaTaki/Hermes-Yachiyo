@@ -9,6 +9,7 @@ from .adapters import agent_definition_snapshot_from_payload
 from .artifacts import artifact_content_snapshot_from_payload
 from .contracts import (
     AgentDefinitionSnapshot,
+    AgentDeskSnapshot,
     AgentGroupSnapshot,
     ApprovalDecision,
     ArtifactContentSnapshot,
@@ -21,6 +22,8 @@ from .contracts import (
     RunEventPageSnapshot,
     RunTimelineSnapshot,
     SaveAgentGroupRequest,
+    SaveAgentDeskFileRequest,
+    SaveAgentDeskNoteRequest,
     SaveAgentRequest,
     SaveWorkflowRequest,
     SkillFolderSnapshot,
@@ -32,6 +35,7 @@ from .contracts import (
     WorkflowRunSnapshot,
     WorkflowSnapshot,
 )
+from .desk import agent_desk_snapshot_from_payload
 from .events import public_run_event_from_payload, public_run_event_page_from_payload
 from .future_tasks import (
     future_task_snapshot_from_payload,
@@ -81,6 +85,27 @@ class AgentStudioService:
 
     def test_agent_model(self, agent_id: str) -> dict[str, Any]:
         return dict(self._studio_port.test_agent_model(agent_id))
+
+    def get_agent_desk(self, agent_id: str) -> AgentDeskSnapshot:
+        return agent_desk_snapshot_from_payload(self._studio_port.get_agent_desk(agent_id))
+
+    def write_agent_desk_note(
+        self,
+        agent_id: str,
+        request: SaveAgentDeskNoteRequest | Mapping[str, Any],
+    ) -> AgentDeskSnapshot:
+        return agent_desk_snapshot_from_payload(
+            self._studio_port.write_agent_desk_note(agent_id, _request_payload(request))
+        )
+
+    def write_agent_desk_file(
+        self,
+        agent_id: str,
+        request: SaveAgentDeskFileRequest | Mapping[str, Any],
+    ) -> AgentDeskSnapshot:
+        return agent_desk_snapshot_from_payload(
+            self._studio_port.write_agent_desk_file(agent_id, _request_payload(request))
+        )
 
     def attach_skill(self, agent_id: str, skill_id: str) -> AgentDefinitionSnapshot:
         return agent_definition_snapshot_from_payload(

@@ -24,6 +24,8 @@ from apps.bridge.routes.yachiyo_models import (
     TaskApprovalRequest,
 )
 from apps.shell.yachiyo_agent import (
+    SaveAgentDeskFileRequest,
+    SaveAgentDeskNoteRequest,
     SaveAgentGroupRequest,
     SaveAgentRequest,
     SaveWorkflowRequest,
@@ -222,6 +224,32 @@ async def test_studio_agent_model(
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
     return await yachiyo_studio_handlers.test_agent_model(agent_id, http_request)
+
+
+@router.get("/studio/agents/{agent_id}/desk")
+async def get_studio_agent_desk(
+    agent_id: str,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    return await yachiyo_studio_handlers.get_agent_desk(agent_id, http_request)
+
+
+@router.post("/studio/agents/{agent_id}/desk/note")
+async def write_studio_agent_desk_note(
+    agent_id: str,
+    request: SaveAgentDeskNoteRequest,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    return await yachiyo_studio_handlers.write_agent_desk_note(agent_id, request, http_request)
+
+
+@router.post("/studio/agents/{agent_id}/desk/files")
+async def write_studio_agent_desk_file(
+    agent_id: str,
+    request: SaveAgentDeskFileRequest,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    return await yachiyo_studio_handlers.write_agent_desk_file(agent_id, request, http_request)
 
 
 @router.post("/studio/agents/{agent_id}/skills")

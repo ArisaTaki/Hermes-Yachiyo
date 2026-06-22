@@ -7,11 +7,14 @@ from apps.bridge.routes.yachiyo_studio_agent_handlers import (
     delete_agent,
     detach_agent_skill,
     get_agent,
+    get_agent_desk,
     list_agents,
     save_agent,
     start_agent_run,
     test_agent_model,
     update_agent,
+    write_agent_desk_file,
+    write_agent_desk_note,
 )
 from apps.bridge.routes.yachiyo_studio_group_handlers import (
     get_group,
@@ -80,6 +83,7 @@ __all__ = [
     "delete_workflow",
     "detach_agent_skill",
     "get_agent",
+    "get_agent_desk",
     "get_group",
     "get_group_run",
     "get_group_run_events",
@@ -116,4 +120,6 @@ __all__ = [
     "update_skill",
     "update_skill_folder",
     "update_workflow",
+    "write_agent_desk_file",
+    "write_agent_desk_note",
 ]

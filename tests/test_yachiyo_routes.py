@@ -895,8 +895,9 @@ async def test_yachiyo_task_route_can_start_workflow_task_from_chat() -> None:
 
 
 @pytest.mark.asyncio
-async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
+async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes(tmp_path: Path) -> None:
     runtime = _FakeAgentRuntime()
+    runtime.agent_workspaces_dir = tmp_path / "agent-workspaces"
     request = _request(runtime)
 
     agents = await yachiyo.list_studio_agents(request)
@@ -922,6 +923,17 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     )
     deleted_agent = await yachiyo.delete_studio_agent("agent-1", request)
     model_test = await yachiyo.test_studio_agent_model("agent-1", request)
+    agent_desk = await yachiyo.get_studio_agent_desk("agent-1", request)
+    agent_desk_note = await yachiyo.write_studio_agent_desk_note(
+        "agent-1",
+        yachiyo.SaveAgentDeskNoteRequest(content="# Notes"),
+        request,
+    )
+    agent_desk_file = await yachiyo.write_studio_agent_desk_file(
+        "agent-1",
+        yachiyo.SaveAgentDeskFileRequest(path="inputs/brief.md", content="Brief"),
+        request,
+    )
     agent_with_skill = await yachiyo.attach_studio_agent_skill(
         "agent-1",
         yachiyo.AgentSkillBody(skill_id="skill-1"),
@@ -1054,6 +1066,15 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes() -> None:
     assert agent_run["run_id"] == "agent-run-1"
     assert agent_run["agent_id"] == "agent-1"
     assert model_test == {"ok": True, "message": "Model ready"}
+    assert agent_desk["agent_id"] == "agent-1"
+    assert agent_desk["root_path"].startswith(str(tmp_path / "agent-workspaces"))
+    assert agent_desk_note["items"][0]["path"] == "desk-notes.md"
+    assert agent_desk_note["items"][0]["kind"] == "note"
+    assert agent_desk_note["items"][0]["preview_text"] == "# Notes"
+    assert any(item["path"] == "inputs/brief.md" for item in agent_desk_file["items"])
+    assert (Path(agent_desk_file["root_path"]) / "inputs" / "brief.md").read_text(
+        encoding="utf-8"
+    ) == "Brief"
     assert agent_with_skill["skill_ids"] == ["skill-1"]
     assert agent_without_skill["skill_ids"] == []
     assert skills["skills"][0]["skill_id"] == "skill-1"
@@ -1313,6 +1334,9 @@ def test_yachiyo_public_routes_delegate_to_chat_and_studio_handlers() -> None:
     assert "return await yachiyo_chat_handlers.start_task(request, http_request)" in source
     assert "return await yachiyo_chat_handlers.get_task_timeline(task_id, http_request)" in source
     assert "return await yachiyo_studio_handlers.update_agent(agent_id, request, http_request)" in source
+    assert "return await yachiyo_studio_handlers.get_agent_desk(agent_id, http_request)" in source
+    assert "return await yachiyo_studio_handlers.write_agent_desk_note(agent_id, request, http_request)" in source
+    assert "return await yachiyo_studio_handlers.write_agent_desk_file(agent_id, request, http_request)" in source
     assert "return await yachiyo_studio_handlers.update_group(group_id, request, http_request)" in source
     assert "return await yachiyo_studio_handlers.update_workflow(workflow_id, request, http_request)" in source
     assert "return await yachiyo_studio_handlers.start_agent_run(agent_id, request, http_request)" in source
@@ -1337,6 +1361,9 @@ def test_yachiyo_studio_routes_include_run_action_facade() -> None:
     assert '@router.patch("/studio/agents/{agent_id}")' in source
     assert '@router.delete("/studio/agents/{agent_id}")' in source
     assert '@router.post("/studio/agents/{agent_id}/test-model")' in source
+    assert '@router.get("/studio/agents/{agent_id}/desk")' in source
+    assert '@router.post("/studio/agents/{agent_id}/desk/note")' in source
+    assert '@router.post("/studio/agents/{agent_id}/desk/files")' in source
     assert '@router.post("/studio/agents/{agent_id}/skills")' in source
     assert '@router.delete("/studio/agents/{agent_id}/skills/{skill_id}")' in source
     assert '@router.get("/studio/skills")' in source
