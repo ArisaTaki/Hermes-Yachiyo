@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import time
-from datetime import datetime
 from typing import Any
 
 from apps.shell.agent.runtime.budget import RunBudgetLimits, WorkflowRunBudget
+from apps.shell.agent.runtime.clock import iso_epoch as _iso_epoch
 from apps.shell.agent.runtime.errors import AgentRuntimeError
 from apps.shell.agent.runtime.events import tool_input_preview
 from apps.shell.agent.runtime.tool_brokers import write_artifact_with_tool_broker
@@ -36,16 +35,6 @@ from apps.shell.agent.runtime.workflow_state import (
     workflow_path_index,
     workflow_steps_used,
 )
-
-
-def _iso_epoch(value: Any) -> float:
-    text = str(value or "").strip()
-    if not text:
-        return time.time()
-    try:
-        return datetime.fromisoformat(text).timestamp()
-    except ValueError:
-        return time.time()
 
 
 class WorkflowContinuationCoordinator:

@@ -6,6 +6,7 @@ from typing import Any
 
 from apps.shell import agent_runtime
 from apps.shell.agent.runtime.budget import RunBudgetLimits
+from apps.shell.agent.runtime.clock import iso_epoch
 from apps.shell.agent.runtime.workflow_continuation import (
     WorkflowContinuationCoordinator,
     WorkflowContinuationPortBundle,
@@ -25,6 +26,7 @@ def test_workflow_continuation_coordinator_remains_exported_from_legacy_module()
     assert agent_runtime.WorkflowContinuationPortBundle is WorkflowContinuationPortBundle
     assert WorkflowContinuationPortBundle is WorkflowContinuationPortBundleContract
     assert agent_runtime.WorkflowRunOutcomeProjector is WorkflowRunOutcomeProjector
+    assert WorkflowContinuationCoordinator(object())._iso_epoch is iso_epoch
 
 
 class FakeWorkflowOutcomeEngine:
