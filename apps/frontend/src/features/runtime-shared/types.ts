@@ -2,12 +2,43 @@ export type TaskStatus = 'queued' | 'running' | 'waiting_approval' | 'completed'
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'cancelled' | 'expired';
 export type GroupMode = 'moderated' | 'round_robin' | 'debate' | 'pipeline' | 'parallel' | 'custom';
 export type MemoryScope = 'shared' | 'per_agent' | 'hybrid';
+export type DesktopExecutionRisk = 'low' | 'medium' | 'high';
 
 export type ReadinessSnapshot = {
   ready: boolean;
   status?: string;
   message?: string | null;
   capabilities?: Record<string, unknown>;
+};
+
+export type DesktopExecutionCapabilitySnapshot = {
+  available?: boolean;
+  platform?: string;
+  missing_permissions?: string[];
+  tools?: string[];
+  risk_default?: DesktopExecutionRisk;
+  diagnostic_route?: string | null;
+};
+
+export type ToolCatalogItemSnapshot = {
+  tool_name: string;
+  function_name: string;
+  description?: string;
+  capability_id?: string | null;
+  risk_level?: DesktopExecutionRisk | string | null;
+  approval_required?: boolean;
+  input_schema?: Record<string, unknown>;
+  model_tool_schema?: Record<string, unknown>;
+  missing_permissions?: string[];
+  fallback_notes?: string[];
+  diagnostic_route?: string | null;
+  source?: string;
+};
+
+export type ToolCatalogSnapshot = {
+  tools: ToolCatalogItemSnapshot[];
+  capabilities?: Record<string, DesktopExecutionCapabilitySnapshot>;
+  source?: string;
 };
 
 export type PublicRunEvent = {

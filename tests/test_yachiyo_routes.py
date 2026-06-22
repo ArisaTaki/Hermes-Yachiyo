@@ -1316,6 +1316,36 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes(tmp_path: Path) 
 
 
 @pytest.mark.asyncio
+async def test_yachiyo_studio_tool_catalog_route_surfaces_desktop_tool_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        legacy_ports,
+        "desktop_permission_missing_by_capability",
+        lambda: {
+            "media_control": ["music_app"],
+            "browser_control": ["chrome_cdp"],
+        },
+    )
+    runtime = _FakeAgentRuntime()
+    request = _request(runtime)
+
+    catalog = await yachiyo.list_studio_tools(request)
+    tools = {tool["tool_name"]: tool for tool in catalog["tools"]}
+
+    assert tools["media.apple_music_play"]["capability_id"] == "media_control"
+    assert tools["media.apple_music_play"]["risk_level"] == "low"
+    assert tools["media.apple_music_play"]["input_schema"]["required"] == ["query"]
+    assert tools["media.apple_music_play"]["missing_permissions"] == ["music_app"]
+    assert any("Music" in note for note in tools["media.apple_music_play"]["fallback_notes"])
+    assert tools["browser.open_url"]["missing_permissions"] == ["chrome_cdp"]
+    assert any("Chrome CDP" in note for note in tools["browser.open_url"]["fallback_notes"])
+    assert tools["terminal.run"]["risk_level"] == "high"
+    assert tools["terminal.run"]["approval_required"] is True
+    assert catalog["capabilities"]["browser_control"]["missing_permissions"] == ["chrome_cdp"]
+
+
+@pytest.mark.asyncio
 async def test_yachiyo_studio_run_events_returns_404_for_missing_run() -> None:
     runtime = _FakeAgentRuntime()
     request = _request(runtime)
@@ -1376,6 +1406,7 @@ def test_yachiyo_public_routes_delegate_to_chat_and_studio_handlers() -> None:
     assert "return await yachiyo_studio_handlers.write_agent_desk_note(agent_id, request, http_request)" in source
     assert "return await yachiyo_studio_handlers.write_agent_desk_file(agent_id, request, http_request)" in source
     assert "trigger_agent_desk_file_event(" in source
+    assert "return await yachiyo_studio_handlers.list_tool_catalog(http_request)" in source
     assert "return await yachiyo_studio_handlers.update_group(group_id, request, http_request)" in source
     assert "return await yachiyo_studio_handlers.update_workflow(workflow_id, request, http_request)" in source
     assert "return await yachiyo_studio_handlers.start_agent_run(agent_id, request, http_request)" in source
@@ -1396,6 +1427,7 @@ def test_yachiyo_studio_routes_include_run_action_facade() -> None:
     source = Path(yachiyo.__file__).read_text(encoding="utf-8")
 
     assert '@router.post("/studio/agents/{agent_id}/runs")' in source
+    assert '@router.get("/studio/tools")' in source
     assert '@router.get("/studio/agents/{agent_id}")' in source
     assert '@router.patch("/studio/agents/{agent_id}")' in source
     assert '@router.delete("/studio/agents/{agent_id}")' in source

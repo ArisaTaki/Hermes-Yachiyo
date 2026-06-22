@@ -60,6 +60,7 @@ from apps.bridge.routes.yachiyo_studio_skill_handlers import (
     update_skill,
     update_skill_folder,
 )
+from apps.bridge.routes.yachiyo_studio_tool_handlers import list_tool_catalog
 from apps.bridge.routes.yachiyo_studio_workflow_handlers import (
     delete_workflow,
     get_workflow,
@@ -102,6 +103,7 @@ __all__ = [
     "list_skill_folders",
     "list_skill_sources",
     "list_skills",
+    "list_tool_catalog",
     "list_workflows",
     "read_run_artifact",
     "reject_run_approval",

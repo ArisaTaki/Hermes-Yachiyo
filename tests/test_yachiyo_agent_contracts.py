@@ -43,6 +43,8 @@ from apps.shell.yachiyo_agent import (
     SkillSourceRootSnapshot,
     SkillTraceSnapshot,
     StartChatTaskRequest,
+    ToolCatalogItemSnapshot,
+    ToolCatalogSnapshot,
     ToolCallSnapshot,
     WorkflowRunSnapshot,
     WorkflowSnapshot,
@@ -55,6 +57,7 @@ from apps.shell.yachiyo_agent import (
 from apps.shell.yachiyo_agent.events import public_run_event_from_payload
 from apps.shell.yachiyo_agent.group_run_snapshots import group_run_snapshot_from_payload
 from apps.shell.yachiyo_agent.task_cards import agent_task_light_snapshot_from_task
+from apps.shell.yachiyo_agent.tool_catalog import runtime_tool_catalog_snapshot
 
 
 def _json(model) -> dict:
@@ -379,6 +382,78 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_risk_level("terminal.run") is None
     assert is_high_risk_desktop_action("raw_shell") is True
     assert is_high_risk_desktop_action("play_music") is False
+
+
+def test_tool_catalog_snapshot_json_shape_is_stable() -> None:
+    snapshot = ToolCatalogSnapshot(
+        tools=[
+            ToolCatalogItemSnapshot(
+                tool_name="media.apple_music_play",
+                function_name="media_apple_music_play",
+                description="Play music",
+                capability_id="media_control",
+                risk_level="low",
+                approval_required=False,
+                input_schema={"type": "object"},
+                model_tool_schema={"type": "function"},
+                missing_permissions=["music_app"],
+                fallback_notes=["Open Music when direct playback is unavailable."],
+                diagnostic_route="/ui/native-agent/diagnostics/cache",
+            )
+        ],
+        capabilities={
+            "media_control": DesktopExecutionCapabilitySnapshot(
+                available=False,
+                platform="macos",
+                missing_permissions=["music_app"],
+                tools=["media.apple_music_play"],
+                risk_default="low",
+                diagnostic_route="/ui/native-agent/diagnostics/cache",
+            )
+        },
+    )
+
+    payload = _json(snapshot)
+
+    assert list(payload) == ["tools", "capabilities", "source"]
+    assert payload["tools"][0]["tool_name"] == "media.apple_music_play"
+    assert payload["tools"][0]["input_schema"] == {"type": "object"}
+    assert payload["tools"][0]["fallback_notes"] == [
+        "Open Music when direct playback is unavailable."
+    ]
+    with pytest.raises(ValidationError):
+        ToolCatalogItemSnapshot(
+            tool_name="terminal.run",
+            function_name="terminal_run",
+            unknown=True,
+        )
+
+
+def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> None:
+    catalog = runtime_tool_catalog_snapshot(
+        platform_name="Darwin",
+        missing_permissions={
+            "media_control": ["music_app"],
+            "browser_control": ["chrome_cdp"],
+        },
+    )
+    tools = {tool.tool_name: tool for tool in catalog.tools}
+
+    music = tools["media.apple_music_play"]
+    browser = tools["browser.open_url"]
+    terminal = tools["terminal.run"]
+
+    assert music.capability_id == "media_control"
+    assert music.risk_level == "low"
+    assert music.input_schema["required"] == ["query"]
+    assert music.missing_permissions == ["music_app"]
+    assert any("Music" in note for note in music.fallback_notes)
+    assert browser.capability_id == "browser_control"
+    assert browser.risk_level == "low"
+    assert browser.missing_permissions == ["chrome_cdp"]
+    assert any("Chrome CDP" in note for note in browser.fallback_notes)
+    assert terminal.risk_level == "high"
+    assert terminal.approval_required is True
 
 
 def test_agent_desk_snapshot_json_shape_is_stable() -> None:

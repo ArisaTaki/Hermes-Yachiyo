@@ -44,6 +44,27 @@ class DesktopExecutionCapabilitySnapshot(_PublicSnapshot):
     diagnostic_route: str | None = None
 
 
+class ToolCatalogItemSnapshot(_PublicSnapshot):
+    tool_name: str
+    function_name: str
+    description: str = ""
+    capability_id: str | None = None
+    risk_level: DesktopExecutionRisk | str | None = None
+    approval_required: bool = False
+    input_schema: dict[str, Any] = Field(default_factory=dict)
+    model_tool_schema: dict[str, Any] = Field(default_factory=dict)
+    missing_permissions: list[str] = Field(default_factory=list)
+    fallback_notes: list[str] = Field(default_factory=list)
+    diagnostic_route: str | None = None
+    source: str = "runtime"
+
+
+class ToolCatalogSnapshot(_PublicSnapshot):
+    tools: list[ToolCatalogItemSnapshot] = Field(default_factory=list)
+    capabilities: dict[str, DesktopExecutionCapabilitySnapshot] = Field(default_factory=dict)
+    source: str = "runtime"
+
+
 class PublicRunEvent(_PublicSnapshot):
     event_id: str | None = None
     run_id: str

@@ -29,6 +29,37 @@ class _FakeStudioPort:
         self.calls.append(("list_agents", None))
         return {"ok": True, "agents": [_agent_payload()]}
 
+    def list_tool_catalog(self) -> dict[str, Any]:
+        self.calls.append(("list_tool_catalog", None))
+        return {
+            "source": "fake-port",
+            "tools": [
+                {
+                    "tool_name": "media.apple_music_play",
+                    "function_name": "media_apple_music_play",
+                    "description": "Search and play Apple Music.",
+                    "capability_id": "media_control",
+                    "risk_level": "low",
+                    "approval_required": False,
+                    "input_schema": {"type": "object", "required": ["query"]},
+                    "model_tool_schema": {"type": "function"},
+                    "missing_permissions": ["music_app"],
+                    "fallback_notes": ["Open Music when direct playback is unavailable."],
+                    "diagnostic_route": "/ui/native-agent/diagnostics/cache",
+                }
+            ],
+            "capabilities": {
+                "media_control": {
+                    "available": False,
+                    "platform": "macos",
+                    "missing_permissions": ["music_app"],
+                    "tools": ["media.apple_music_play"],
+                    "risk_default": "low",
+                    "diagnostic_route": "/ui/native-agent/diagnostics/cache",
+                }
+            },
+        }
+
     def get_agent(self, agent_id: str) -> dict[str, Any]:
         self.calls.append(("get_agent", agent_id))
         return _agent_payload(agent_id=agent_id, name="Fetched")
@@ -388,6 +419,7 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
     service = AgentStudioService(port)
 
     agents = service.list_agents()
+    tool_catalog = service.list_tool_catalog()
     agent = service.get_agent("agent-1")
     saved_agent = service.save_agent(
         SaveAgentRequest(
@@ -468,6 +500,12 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
     deleted_workflow = service.delete_workflow("workflow-2")
 
     assert agents[0].agent_id == "agent-1"
+    assert tool_catalog.source == "fake-port"
+    assert tool_catalog.tools[0].tool_name == "media.apple_music_play"
+    assert tool_catalog.tools[0].risk_level == "low"
+    assert tool_catalog.tools[0].input_schema["required"] == ["query"]
+    assert tool_catalog.tools[0].missing_permissions == ["music_app"]
+    assert tool_catalog.capabilities["media_control"].available is False
     assert agent.name == "Fetched"
     assert saved_agent.agent_id == "agent-2"
     assert deleted_agent == {"ok": True, "agent_id": "agent-2"}
@@ -549,6 +587,7 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
     assert ("attach_skill", {"agent_id": "agent-2", "skill_id": "skill-2"}) in port.calls
     assert ("detach_skill", {"agent_id": "agent-2", "skill_id": "skill-2"}) in port.calls
     assert ("list_skills", None) in port.calls
+    assert ("list_tool_catalog", None) in port.calls
     assert (
         "update_skill",
         {"skill_id": "skill-1", "request": {"enabled": False, "folder_id": "folder-2"}},

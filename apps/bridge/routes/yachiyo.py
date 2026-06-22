@@ -186,6 +186,11 @@ async def list_studio_agents(http_request: Request = None) -> dict[str, Any]:  #
     return await yachiyo_studio_handlers.list_agents(http_request)
 
 
+@router.get("/studio/tools")
+async def list_studio_tools(http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
+    return await yachiyo_studio_handlers.list_tool_catalog(http_request)
+
+
 @router.post("/studio/agents")
 async def save_studio_agent(
     request: SaveAgentRequest,

@@ -14,6 +14,7 @@ import type {
   SkillFolderSnapshot,
   SkillSnapshot,
   SkillSourceRootSnapshot,
+  ToolCatalogSnapshot,
   WorkflowRunSnapshot,
   WorkflowSnapshot,
   YachiyoRunTimelineSnapshot,
@@ -51,6 +52,10 @@ export type YachiyoSkillInstallResponse = {
   stderr?: string;
   sync?: YachiyoSkillSyncResponse | null;
 };
+
+export async function getYachiyoStudioToolCatalog(): Promise<ToolCatalogSnapshot> {
+  return apiGet<ToolCatalogSnapshot>('/yachiyo/studio/tools');
+}
 
 export async function listYachiyoStudioAgents(): Promise<AgentDefinitionSnapshot[]> {
   const payload = await apiGet<{ agents?: AgentDefinitionSnapshot[] }>('/yachiyo/studio/agents').catch(() => (

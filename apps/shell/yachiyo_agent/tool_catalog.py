@@ -1,0 +1,315 @@
+"""Studio-facing catalog snapshots for runtime tools."""
+
+from __future__ import annotations
+
+from collections.abc import Iterable, Mapping
+from copy import deepcopy
+from typing import Any
+
+from apps.shell.agent.tools.policy import (
+    HIGH_RISK_AGENT_TOOLS,
+    LOW_RISK_BROWSER_TOOL_NAMES,
+    MEDIUM_RISK_BROWSER_TOOL_NAMES,
+    TOOL_DESCRIPTORS,
+    TOOL_FUNCTION_NAMES,
+)
+
+from .contracts import (
+    DesktopExecutionCapabilitySnapshot,
+    ToolCatalogItemSnapshot,
+    ToolCatalogSnapshot,
+)
+from .policy import (
+    DESKTOP_CAPABILITY_DIAGNOSTIC_ROUTES,
+    DESKTOP_CAPABILITY_TOOLS,
+    desktop_execution_capability_snapshots,
+    desktop_tool_risk_level,
+)
+
+
+def runtime_tool_catalog_snapshot(
+    *,
+    registered_tools: Iterable[str] | None = None,
+    platform_name: str | None = None,
+    missing_permissions: Mapping[str, Iterable[str]] | None = None,
+) -> ToolCatalogSnapshot:
+    """Build the public Studio tool catalog from runtime descriptors."""
+
+    clean_registered = _clean_tool_names(registered_tools or TOOL_DESCRIPTORS)
+    capabilities = _capability_snapshots(
+        registered_tools=clean_registered,
+        platform_name=platform_name,
+        missing_permissions=missing_permissions,
+    )
+    capability_payloads = {
+        capability_id: snapshot.model_dump(mode="json")
+        for capability_id, snapshot in capabilities.items()
+    }
+    tools = [
+        _catalog_item_from_descriptor(
+            tool_name,
+            capabilities=capability_payloads,
+            missing_permissions=missing_permissions or {},
+        )
+        for tool_name in sorted(clean_registered)
+        if tool_name in TOOL_DESCRIPTORS
+    ]
+    return ToolCatalogSnapshot(tools=tools, capabilities=capabilities)
+
+
+def tool_catalog_snapshot_from_payload(payload: Any) -> ToolCatalogSnapshot:
+    if isinstance(payload, ToolCatalogSnapshot):
+        return payload
+    if not isinstance(payload, Mapping):
+        return runtime_tool_catalog_snapshot()
+
+    raw_tools = payload.get("tools")
+    if isinstance(raw_tools, Iterable) and not isinstance(raw_tools, (str, bytes, Mapping)):
+        tools = [
+            _catalog_item_from_payload(item)
+            for item in raw_tools
+            if isinstance(item, Mapping)
+        ]
+    else:
+        tools = runtime_tool_catalog_snapshot().tools
+
+    raw_capabilities = payload.get("capabilities")
+    capabilities: dict[str, DesktopExecutionCapabilitySnapshot] = {}
+    if isinstance(raw_capabilities, Mapping):
+        for capability_id, capability_payload in raw_capabilities.items():
+            if not isinstance(capability_payload, Mapping):
+                continue
+            capabilities[str(capability_id)] = DesktopExecutionCapabilitySnapshot.model_validate(
+                dict(capability_payload)
+            )
+
+    return ToolCatalogSnapshot(
+        tools=tools,
+        capabilities=capabilities,
+        source=str(payload.get("source") or "runtime"),
+    )
+
+
+def _catalog_item_from_descriptor(
+    tool_name: str,
+    *,
+    capabilities: Mapping[str, Mapping[str, Any]],
+    missing_permissions: Mapping[str, Iterable[str]],
+) -> ToolCatalogItemSnapshot:
+    descriptor = TOOL_DESCRIPTORS[tool_name]
+    model_tool_schema = descriptor.to_model_tool_schema()
+    capability_id = _capability_id_for_tool(tool_name)
+    return ToolCatalogItemSnapshot(
+        tool_name=tool_name,
+        function_name=descriptor.function_name,
+        description=descriptor.description,
+        capability_id=capability_id,
+        risk_level=_risk_level_for_tool(tool_name),
+        approval_required=tool_name in HIGH_RISK_AGENT_TOOLS,
+        input_schema=deepcopy(model_tool_schema["function"]["parameters"]),
+        model_tool_schema=deepcopy(model_tool_schema),
+        missing_permissions=_missing_permissions_for_tool(
+            tool_name,
+            capability_id=capability_id,
+            capabilities=capabilities,
+            missing_permissions=missing_permissions,
+        ),
+        fallback_notes=_fallback_notes_for_tool(tool_name),
+        diagnostic_route=_diagnostic_route_for_tool(capability_id),
+    )
+
+
+def _catalog_item_from_payload(payload: Mapping[str, Any]) -> ToolCatalogItemSnapshot:
+    tool_name = str(payload.get("tool_name") or payload.get("name") or "").strip()
+    descriptor = TOOL_DESCRIPTORS.get(tool_name)
+    model_tool_schema = (
+        descriptor.to_model_tool_schema()
+        if descriptor is not None
+        else dict(payload.get("model_tool_schema") or {})
+    )
+    input_schema = payload.get("input_schema")
+    if not isinstance(input_schema, Mapping):
+        function_schema = model_tool_schema.get("function") if isinstance(model_tool_schema, Mapping) else None
+        input_schema = (
+            function_schema.get("parameters")
+            if isinstance(function_schema, Mapping)
+            and isinstance(function_schema.get("parameters"), Mapping)
+            else {}
+        )
+    return ToolCatalogItemSnapshot(
+        tool_name=tool_name,
+        function_name=str(
+            payload.get("function_name")
+            or TOOL_FUNCTION_NAMES.get(tool_name)
+            or ""
+        ),
+        description=str(payload.get("description") or (descriptor.description if descriptor else "")),
+        capability_id=_optional_string(payload.get("capability_id")),
+        risk_level=_optional_string(payload.get("risk_level")),
+        approval_required=bool(payload.get("approval_required", tool_name in HIGH_RISK_AGENT_TOOLS)),
+        input_schema=dict(input_schema),
+        model_tool_schema=dict(model_tool_schema),
+        missing_permissions=_string_list(payload.get("missing_permissions")),
+        fallback_notes=_string_list(payload.get("fallback_notes")),
+        diagnostic_route=_optional_string(payload.get("diagnostic_route")),
+        source=str(payload.get("source") or "runtime"),
+    )
+
+
+def _capability_snapshots(
+    *,
+    registered_tools: Iterable[str],
+    platform_name: str | None,
+    missing_permissions: Mapping[str, Iterable[str]] | None,
+) -> dict[str, DesktopExecutionCapabilitySnapshot]:
+    payload = desktop_execution_capability_snapshots(
+        registered_tools=registered_tools,
+        platform_name=platform_name,
+        missing_permissions=missing_permissions,
+    )
+    return {
+        capability_id: DesktopExecutionCapabilitySnapshot.model_validate(snapshot)
+        for capability_id, snapshot in payload.items()
+        if isinstance(snapshot, Mapping)
+    }
+
+
+def _clean_tool_names(values: Iterable[str]) -> set[str]:
+    return {str(value or "").strip() for value in values if str(value or "").strip()}
+
+
+def _capability_id_for_tool(tool_name: str) -> str | None:
+    for capability_id, tools in DESKTOP_CAPABILITY_TOOLS.items():
+        if capability_id == "desktop_execution":
+            continue
+        if tool_name in tools:
+            return capability_id
+    if tool_name.startswith("memory."):
+        return "memory"
+    if tool_name.startswith("future_task."):
+        return "future_task"
+    if tool_name.startswith("workspace."):
+        return "workspace"
+    if tool_name.startswith("browser."):
+        return "browser_control"
+    if tool_name.startswith("terminal."):
+        return "terminal"
+    if tool_name.startswith("skill."):
+        return "skill"
+    if tool_name.startswith("artifact."):
+        return "artifact"
+    return None
+
+
+def _risk_level_for_tool(tool_name: str) -> str | None:
+    if tool_name in HIGH_RISK_AGENT_TOOLS:
+        return "high"
+    desktop_risk = desktop_tool_risk_level(tool_name)
+    if desktop_risk is not None:
+        return desktop_risk
+    if tool_name in LOW_RISK_BROWSER_TOOL_NAMES:
+        return "low"
+    if tool_name in MEDIUM_RISK_BROWSER_TOOL_NAMES:
+        return "medium"
+    if tool_name in {"workspace.list", "workspace.read", "artifact.write", "skill.read"}:
+        return "low"
+    if tool_name.startswith("memory.") or tool_name.startswith("future_task."):
+        return "low"
+    return None
+
+
+def _missing_permissions_for_tool(
+    tool_name: str,
+    *,
+    capability_id: str | None,
+    capabilities: Mapping[str, Mapping[str, Any]],
+    missing_permissions: Mapping[str, Iterable[str]],
+) -> list[str]:
+    if not _is_desktop_or_browser_tool(tool_name):
+        return []
+    values: list[str] = []
+    for key in ("desktop_execution", capability_id or ""):
+        if not key:
+            continue
+        capability_payload = capabilities.get(key)
+        if isinstance(capability_payload, Mapping):
+            values.extend(_string_list(capability_payload.get("missing_permissions")))
+        values.extend(_string_list(missing_permissions.get(key)))
+    return _unique(values)
+
+
+def _fallback_notes_for_tool(tool_name: str) -> list[str]:
+    notes_by_tool = {
+        "media.apple_music_play": [
+            "Direct Apple Music playback falls back to opening Music when playback is unavailable.",
+        ],
+        "browser.open_url": [
+            "Falls back to the system browser when Chrome CDP is unavailable.",
+        ],
+        "screen.capture": [
+            "Requires Screen Recording permission; denial is reported in readiness diagnostics.",
+        ],
+        "desktop.active_window": [
+            "Requires Automation or Accessibility permission to read the foreground window.",
+        ],
+        "app.open": [
+            "Uses the local app launcher and surfaces launch failures as tool results.",
+        ],
+        "app.focus": [
+            "Uses desktop automation and surfaces focus failures as tool results.",
+        ],
+        "desktop.hotkey": [
+            "Requires Accessibility permission and is recorded in the Run Timeline.",
+        ],
+        "desktop.type_text": [
+            "Requires Accessibility permission and is recorded in the Run Timeline.",
+        ],
+        "terminal.run": [
+            "Always requires approval before command execution.",
+        ],
+        "workspace.write_patch": [
+            "Always requires approval before modifying workspace files.",
+        ],
+    }
+    notes = list(notes_by_tool.get(tool_name, []))
+    if tool_name in {
+        "browser.current_page",
+        "browser.click",
+        "browser.type_text",
+        "browser.extract_text",
+        "browser.screenshot",
+    }:
+        notes.append("Requires a reachable Chrome CDP endpoint.")
+    return notes
+
+
+def _diagnostic_route_for_tool(capability_id: str | None) -> str | None:
+    if not capability_id:
+        return None
+    return DESKTOP_CAPABILITY_DIAGNOSTIC_ROUTES.get(capability_id)
+
+
+def _is_desktop_or_browser_tool(tool_name: str) -> bool:
+    return tool_name in DESKTOP_CAPABILITY_TOOLS["desktop_execution"]
+
+
+def _optional_string(value: Any) -> str | None:
+    text = str(value or "").strip()
+    return text or None
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, Iterable) or isinstance(value, (str, bytes, Mapping)):
+        return []
+    return [str(item or "").strip() for item in value if str(item or "").strip()]
+
+
+def _unique(values: Iterable[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return result

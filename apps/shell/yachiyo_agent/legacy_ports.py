@@ -20,8 +20,10 @@ from .legacy_groups import (
 from .legacy_group_runs import start_legacy_group_run
 from .legacy_runs import LegacyRunPayloadProjector
 from .legacy_tasks import LegacyRuntimePort
+from .desktop_permissions import desktop_permission_missing_by_capability
 from .desk import LocalAgentDeskStore
 from .groups import group_run_snapshot_from_payload
+from .tool_catalog import runtime_tool_catalog_snapshot
 
 
 _LEGACY_RUN_PROJECTOR = LegacyRunPayloadProjector()
@@ -113,6 +115,15 @@ class LegacyStudioPort:
 
     def list_agents(self) -> dict[str, Any]:
         return self._runtime.list_agents()
+
+    def list_tool_catalog(self) -> dict[str, Any]:
+        try:
+            missing_permissions = desktop_permission_missing_by_capability()
+        except Exception:
+            missing_permissions = {"desktop_execution": ["permission_probe_failed"]}
+        return runtime_tool_catalog_snapshot(
+            missing_permissions=missing_permissions,
+        ).model_dump(mode="json")
 
     def get_agent(self, agent_id: str) -> dict[str, Any]:
         return self._runtime.get_agent(agent_id)

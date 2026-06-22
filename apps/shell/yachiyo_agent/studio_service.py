@@ -33,6 +33,7 @@ from .contracts import (
     StartAgentRunRequest,
     StartGroupRunRequest,
     StartWorkflowRunRequest,
+    ToolCatalogSnapshot,
     WorkflowRunSnapshot,
     WorkflowSnapshot,
 )
@@ -51,6 +52,7 @@ from .skills import (
     skill_source_root_snapshot_from_payload,
 )
 from .timelines import run_timeline_snapshot_from_payload
+from .tool_catalog import runtime_tool_catalog_snapshot, tool_catalog_snapshot_from_payload
 from .workflows import (
     is_workflow_run_payload,
     workflow_run_snapshot_from_payload,
@@ -69,6 +71,12 @@ class AgentStudioService:
             agent_definition_snapshot_from_payload(item)
             for item in _payload_items(self._studio_port.list_agents(), "agents")
         ]
+
+    def list_tool_catalog(self) -> ToolCatalogSnapshot:
+        list_catalog = getattr(self._studio_port, "list_tool_catalog", None)
+        if callable(list_catalog):
+            return tool_catalog_snapshot_from_payload(list_catalog())
+        return runtime_tool_catalog_snapshot()
 
     def get_agent(self, agent_id: str) -> AgentDefinitionSnapshot:
         return agent_definition_snapshot_from_payload(self._studio_port.get_agent(agent_id))
