@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import subprocess
+from pathlib import Path
 
 from apps.shell.agent.tools import browser as browser_mod
 from apps.shell.agent.tools.broker import ToolBroker
@@ -116,3 +117,71 @@ def test_browser_screenshot_tool_writes_artifact_metadata(tmp_path, monkeypatch)
         "size_bytes": len(png_bytes),
     }
     assert (tmp_path / "artifacts" / "browser" / "current-page.png").read_bytes() == png_bytes
+
+
+def test_browser_screenshot_falls_back_to_screen_capture_artifact(tmp_path, monkeypatch) -> None:
+    broker = _broker(tmp_path)
+    fallback_bytes = b"fallback-browser-png"
+
+    def raise_no_cdp() -> str:
+        raise RuntimeError("browser.cdp_url is not configured")
+
+    def fake_capture_screen(target_path) -> dict[str, object]:
+        target = Path(target_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(fallback_bytes)
+        return {
+            "path": str(target),
+            "mime_type": "image/png",
+            "format": "png",
+            "width": 32,
+            "height": 24,
+            "size": len(fallback_bytes),
+        }
+
+    monkeypatch.setattr(browser_mod, "_page_websocket_url", raise_no_cdp)
+    monkeypatch.setattr(browser_mod, "_capture_screen_fallback", fake_capture_screen)
+
+    result = broker.call("browser.screenshot", {"reason": "capture fallback page"})
+
+    assert result["ok"] is True
+    assert result["fallback_used"] is True
+    assert result["fallback"] == "screen.capture"
+    assert result["missing_permissions"] == ["chrome_cdp"]
+    assert result["permission_targets"] == ["chrome_cdp"]
+    assert result["reason"] == "capture fallback page"
+    assert result["artifact"] == {
+        "path": "browser/current-page.png",
+        "kind": "image",
+        "mime_type": "image/png",
+        "size_bytes": len(fallback_bytes),
+    }
+    assert result["data"]["path"] == "browser/current-page.png"
+    assert result["data"]["width"] == 32
+    assert (
+        tmp_path / "artifacts" / "browser" / "current-page.png"
+    ).read_bytes() == fallback_bytes
+
+
+def test_browser_screenshot_reports_screen_capture_permission_when_fallback_denied(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    def raise_no_cdp() -> str:
+        raise RuntimeError("No debuggable browser page found")
+
+    def raise_screen_permission(_target_path) -> dict[str, object]:
+        raise RuntimeError("screen recording not authorized")
+
+    monkeypatch.setattr(browser_mod, "_page_websocket_url", raise_no_cdp)
+    monkeypatch.setattr(browser_mod, "_capture_screen_fallback", raise_screen_permission)
+
+    result = browser_mod.screenshot(tmp_path / "page.png")
+
+    assert result["ok"] is False
+    assert result["error"] == "browser_screenshot_unavailable"
+    assert result["permission_error"] is True
+    assert result["fallback_used"] is True
+    assert result["fallback"] == "screen.capture"
+    assert result["missing_permissions"] == ["chrome_cdp", "screen_recording"]
+    assert result["permission_targets"] == ["chrome_cdp", "screen_recording"]

@@ -179,6 +179,7 @@ def extract_text(selector: str = "") -> dict[str, Any]:
 
 
 def screenshot(target_path: Path) -> dict[str, Any]:
+    target = Path(target_path)
     try:
         websocket_url = _page_websocket_url()
         result = _cdp_command(
@@ -187,7 +188,7 @@ def screenshot(target_path: Path) -> dict[str, Any]:
             {"format": "png", "fromSurface": True},
         )
     except Exception as exc:
-        return _cdp_unavailable("browser.screenshot", exc)
+        return _screenshot_fallback(target, exc)
     data = str(result.get("data") or "")
     if not data:
         return {
@@ -198,7 +199,6 @@ def screenshot(target_path: Path) -> dict[str, Any]:
             "permission_error": False,
             "fallback_used": False,
         }
-    target = Path(target_path)
     target.parent.mkdir(parents=True, exist_ok=True)
     image_bytes = base64.b64decode(data)
     target.write_bytes(image_bytes)
@@ -214,6 +214,56 @@ def screenshot(target_path: Path) -> dict[str, Any]:
         },
         "permission_error": False,
         "fallback_used": False,
+    }
+
+
+def _screenshot_fallback(target_path: Path, cdp_error: Any) -> dict[str, Any]:
+    try:
+        metadata = _capture_screen_fallback(target_path)
+    except Exception as exc:
+        return _screenshot_fallback_unavailable(cdp_error, exc)
+    data = dict(metadata if isinstance(metadata, dict) else {})
+    data.setdefault("path", str(target_path))
+    data.setdefault("mime_type", "image/png")
+    data.setdefault("format", "png")
+    return {
+        "ok": True,
+        "action": "browser.screenshot",
+        "summary": "Captured screen as browser screenshot fallback",
+        "data": data,
+        "permission_error": False,
+        "fallback_used": True,
+        "fallback": "screen.capture",
+        "fallback_reason": str(cdp_error),
+        "missing_permissions": ["chrome_cdp"],
+        "permission_targets": ["chrome_cdp"],
+    }
+
+
+def _capture_screen_fallback(target_path: Path) -> dict[str, Any]:
+    from apps.locald.screenshot import capture_screenshot_to_file
+
+    metadata = capture_screenshot_to_file(target_path)
+    return dict(metadata if isinstance(metadata, dict) else {})
+
+
+def _screenshot_fallback_unavailable(cdp_error: Any, fallback_error: Any) -> dict[str, Any]:
+    missing_permissions = ["chrome_cdp"]
+    permission_targets = ["chrome_cdp"]
+    if _looks_like_screen_capture_permission_error(fallback_error):
+        missing_permissions.append("screen_recording")
+        permission_targets.append("screen_recording")
+    return {
+        "ok": False,
+        "action": "browser.screenshot",
+        "summary": "Chrome CDP is unavailable and screen capture fallback failed",
+        "error": "browser_screenshot_unavailable",
+        "permission_error": True,
+        "fallback_used": True,
+        "fallback": "screen.capture",
+        "missing_permissions": missing_permissions,
+        "permission_targets": permission_targets,
+        "detail": f"cdp: {cdp_error}; screen.capture: {fallback_error}",
     }
 
 
@@ -346,6 +396,23 @@ def _cdp_unavailable(action: str, detail: Any = None) -> dict[str, Any]:
     if detail:
         payload["detail"] = str(detail)
     return payload
+
+
+def _looks_like_screen_capture_permission_error(value: Any) -> bool:
+    if value.__class__.__name__ == "ScreenCapturePermissionError":
+        return True
+    normalized = str(value or "").lower()
+    return any(
+        marker in normalized
+        for marker in (
+            "screen recording",
+            "screen capture",
+            "not authorized",
+            "not permitted",
+            "privacy",
+            "tcc",
+        )
+    )
 
 
 def _select_page(pages: list[dict[str, Any]]) -> dict[str, Any] | None:
