@@ -116,6 +116,23 @@ def artifact_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
             or artifact_payload.get("id")
         ):
             return {}
+    elif event.event_type in {"tool.completed", "agent.tool.completed"}:
+        result = payload.get("result")
+        result_payload = dict(result) if isinstance(result, Mapping) else {}
+        artifact = result_payload.get("artifact")
+        if not isinstance(artifact, Mapping):
+            return {}
+        artifact_payload = dict(artifact)
+        artifact_payload.setdefault("kind", artifact_payload.get("kind") or "tool_artifact")
+        artifact_payload.setdefault("source_tool", payload.get("tool_name") or payload.get("tool") or event.detail)
+        artifact_payload.setdefault(
+            "title",
+            artifact_payload.get("title")
+            or artifact_payload.get("path")
+            or payload.get("tool_name")
+            or payload.get("tool")
+            or "Tool Artifact",
+        )
     else:
         return {}
     _merge_artifact_trace_context(artifact_payload, payload)

@@ -105,6 +105,43 @@ def test_workflow_node_artifact_payload_defaults_without_nested_artifact() -> No
     assert artifacts[0].size_bytes == 9
 
 
+def test_tool_completed_event_artifact_result_projects_to_public_artifact() -> None:
+    event = PublicRunEvent(
+        event_id="evt-screen-artifact",
+        run_id="run-screen",
+        sequence=4,
+        event_type="tool.completed",
+        detail="screen.capture",
+        payload={
+            "tool": "screen.capture",
+            "status": "completed",
+            "result": {
+                "ok": True,
+                "artifact": {
+                    "path": "screenshots/current-screen.png",
+                    "kind": "image",
+                    "mime_type": "image/png",
+                    "size_bytes": 321,
+                },
+            },
+        },
+        created_at="2026-06-22T00:00:00Z",
+    )
+
+    payload = artifact_payload_from_event(event)
+    artifacts = artifact_snapshots_from_events([event])
+
+    assert payload["path"] == "screenshots/current-screen.png"
+    assert payload["source_tool"] == "screen.capture"
+    assert payload["title"] == "screenshots/current-screen.png"
+    assert len(artifacts) == 1
+    assert artifacts[0].path == "screenshots/current-screen.png"
+    assert artifacts[0].kind == "image"
+    assert artifacts[0].mime_type == "image/png"
+    assert artifacts[0].size_bytes == 321
+    assert artifacts[0].source_tool == "screen.capture"
+
+
 def test_group_artifact_events_default_titles_and_group_context() -> None:
     artifacts = artifact_snapshots_from_events(
         [
