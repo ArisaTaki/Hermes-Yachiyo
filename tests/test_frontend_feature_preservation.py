@@ -1393,6 +1393,8 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             'data-testid="yachiyo-agent-task-open-diagnostics"',
             "data-permission-targets={permissionRecovery.targets.join(',')}",
             "href={permissionRecovery.href}",
+            "permissionRecovery.hints.map((hint)",
+            "yachiyo-agent-task-recovery-hint",
             'data-testid="yachiyo-agent-task-open-studio"',
             "href={studioUrl}",
             "data-studio-url={studioUrl}",
@@ -1428,6 +1430,10 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "source.permission_error === true",
             "source.permission_targets",
             "source.missing_permissions",
+            "recoveryHintsFromEvent",
+            "browser_click_fallback_coordinates_required",
+            "required_fallback_fields",
+            "recommended_tools",
             "command: 'native doctor'",
             "return_to: 'chat'",
         ],
@@ -1462,6 +1468,7 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
         "apps/frontend/src/styles/app.css",
         [
             ".hy-content .open-chat-shell .yachiyo-agent-task-permission-recovery",
+            ".hy-content .open-chat-shell .yachiyo-agent-task-permission-recovery .yachiyo-agent-task-recovery-hint",
             ".hy-content .open-chat-shell .yachiyo-agent-task-permission-recovery a",
         ],
     )

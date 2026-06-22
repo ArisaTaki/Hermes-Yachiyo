@@ -108,6 +108,9 @@ export function AgentTaskCard({
           <div>
             <strong>需要恢复桌面权限</strong>
             <span>{permissionRecovery.labels.join('、')} 未就绪</span>
+            {permissionRecovery.hints.map((hint) => (
+              <span className="yachiyo-agent-task-recovery-hint" key={hint}>{hint}</span>
+            ))}
           </div>
           <a
             href={permissionRecovery.href}
@@ -223,6 +226,7 @@ function taskStatusLabel(status: string) {
 
 type TaskPermissionRecovery = {
   href: string;
+  hints: string[];
   labels: string[];
   targets: string[];
 };
@@ -242,6 +246,7 @@ const permissionTargetLabels: Record<string, string> = {
 export function taskPermissionRecoveryFromEvents(events: AgentTaskSnapshot['recent_events']): TaskPermissionRecovery | null {
   const targets = uniqueStrings((events || []).flatMap((event) => permissionTargetsFromEvent(event)));
   if (!targets.length) return null;
+  const hints = uniqueStrings((events || []).flatMap((event) => recoveryHintsFromEvent(event)));
   const params = new URLSearchParams({
     command: 'native doctor',
     permission_targets: targets.join(','),
@@ -249,6 +254,7 @@ export function taskPermissionRecoveryFromEvents(events: AgentTaskSnapshot['rece
   });
   return {
     href: `#/diagnostics?${params.toString()}`,
+    hints,
     labels: targets.map((target) => permissionTargetLabels[target] || target),
     targets,
   };
@@ -265,6 +271,27 @@ function permissionTargetsFromEvent(event: NonNullable<AgentTaskSnapshot['recent
   ]);
   const permissionError = sources.some((source) => source.permission_error === true);
   return permissionError || targets.length ? targets : [];
+}
+
+function recoveryHintsFromEvent(event: NonNullable<AgentTaskSnapshot['recent_events']>[number]): string[] {
+  if ((event.sensitivity || 'public') === 'secret') return [];
+  const payload = objectValue(event.payload);
+  const result = objectValue(payload.result);
+  const sources = [result, payload].filter(Boolean);
+  return sources.flatMap((source) => recoveryHintsFromSource(source));
+}
+
+function recoveryHintsFromSource(source: Record<string, unknown>): string[] {
+  const error = String(source.error || '').trim();
+  if (error !== 'browser_click_fallback_coordinates_required') return [];
+  const data = objectValue(source.data);
+  const fields = stringList(data.required_fallback_fields);
+  const tools = stringList(data.recommended_tools);
+  const fieldText = fields.length ? fields.join('/') : 'fallback_x/fallback_y';
+  const toolText = tools.length ? tools.join(' -> ') : 'screen.capture -> desktop.click';
+  return [
+    `Chrome CDP 不可用时不能直接用 CSS selector 点击；请先用 ${toolText} 观察目标位置，再提供 ${fieldText} 坐标。`,
+  ];
 }
 
 function objectValue(value: unknown): Record<string, unknown> {

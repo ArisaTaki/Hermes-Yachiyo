@@ -9401,6 +9401,12 @@ body.electron-window .hy-traffic {
   line-height: 1.25;
 }
 
+.hy-content .open-chat-shell .yachiyo-agent-task-permission-recovery .yachiyo-agent-task-recovery-hint {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+}
+
 .hy-content .open-chat-shell .yachiyo-agent-task-permission-recovery a {
   display: inline-flex;
   align-items: center;
