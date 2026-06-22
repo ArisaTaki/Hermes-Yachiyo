@@ -33,6 +33,27 @@ def test_legacy_runtime_port_starts_and_links_chat_task() -> None:
     ]
 
 
+def test_legacy_runtime_port_readiness_includes_desktop_execution_capabilities() -> None:
+    runtime = _FakeRuntime()
+
+    readiness = LegacyRuntimePort(runtime).readiness()
+    capabilities = readiness["capabilities"]
+
+    assert readiness["ok"] is True
+    assert capabilities["tasks"] is True
+    assert capabilities["runnables"] == 1
+    assert capabilities["desktop_execution"]["platform"] in {
+        "macos",
+        "windows",
+        "linux",
+        "unknown",
+    }
+    assert capabilities["desktop_execution"]["available"] is False
+    assert "screen.capture" in capabilities["screen_capture"]["tools"]
+    assert capabilities["foreground_input"]["risk_default"] == "medium"
+    assert runtime.calls == [("list_runnables", None)]
+
+
 def test_legacy_runtime_port_starts_and_links_chat_workflow_task() -> None:
     runtime = _FakeRuntime()
 

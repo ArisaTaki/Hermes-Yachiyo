@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 
+import pytest
+from pydantic import ValidationError
+
 from apps.shell.yachiyo_agent import (
     AgentDefinitionSnapshot,
     AgentGroupMemberSnapshot,
@@ -16,6 +19,7 @@ from apps.shell.yachiyo_agent import (
     ChatRunnableCatalogSnapshot,
     ChatRunnableParticipantSnapshot,
     ChatRunnableSnapshot,
+    DesktopExecutionCapabilitySnapshot,
     FutureTaskSnapshot,
     FutureTaskTriggerResultSnapshot,
     GroupRunSnapshot,
@@ -38,6 +42,9 @@ from apps.shell.yachiyo_agent import (
     WorkflowRunSnapshot,
     WorkflowSnapshot,
     approval_is_pending,
+    desktop_execution_capability_snapshots,
+    desktop_tool_risk_level,
+    is_high_risk_desktop_action,
     task_requires_user_action,
 )
 from apps.shell.yachiyo_agent.events import public_run_event_from_payload
@@ -273,6 +280,73 @@ def test_product_policy_helpers_use_public_snapshots() -> None:
 
     cleared = task.model_copy(update={"pending_approvals": [approved]})
     assert task_requires_user_action(cleared) is False
+
+
+def test_desktop_execution_capability_snapshot_json_shape_is_stable() -> None:
+    snapshot = DesktopExecutionCapabilitySnapshot(
+        available=True,
+        platform="macos",
+        missing_permissions=["accessibility"],
+        tools=["desktop.type_text"],
+        risk_default="medium",
+        diagnostic_route="/ui/native-agent/diagnostics/cache",
+    )
+
+    payload = _json(snapshot)
+
+    assert list(payload) == [
+        "available",
+        "platform",
+        "missing_permissions",
+        "tools",
+        "risk_default",
+        "diagnostic_route",
+    ]
+    assert payload["available"] is True
+    assert payload["risk_default"] == "medium"
+    with pytest.raises(ValidationError):
+        DesktopExecutionCapabilitySnapshot(
+            available=True,
+            platform="macos",
+            unknown=True,
+        )
+
+
+def test_desktop_execution_capability_policy_marks_registered_tools_available() -> None:
+    capabilities = desktop_execution_capability_snapshots(
+        platform_name="Darwin",
+        registered_tools={
+            "screen.capture",
+            "desktop.active_window",
+            "app.open",
+            "app.focus",
+            "media.apple_music_play",
+        },
+    )
+
+    assert list(capabilities) == [
+        "desktop_execution",
+        "screen_capture",
+        "active_window",
+        "app_control",
+        "media_control",
+        "foreground_input",
+        "browser_control",
+    ]
+    assert capabilities["desktop_execution"]["available"] is True
+    assert capabilities["screen_capture"]["available"] is True
+    assert capabilities["foreground_input"]["available"] is False
+    assert capabilities["foreground_input"]["risk_default"] == "medium"
+    assert capabilities["browser_control"]["available"] is False
+    assert capabilities["screen_capture"]["diagnostic_route"] == "/screen/current"
+
+
+def test_desktop_execution_policy_records_risk_boundaries() -> None:
+    assert desktop_tool_risk_level("screen.capture") == "low"
+    assert desktop_tool_risk_level("desktop.type_text") == "medium"
+    assert desktop_tool_risk_level("terminal.run") is None
+    assert is_high_risk_desktop_action("raw_shell") is True
+    assert is_high_risk_desktop_action("play_music") is False
 
 
 def test_chat_runnable_catalog_snapshot_json_shape_is_stable() -> None:

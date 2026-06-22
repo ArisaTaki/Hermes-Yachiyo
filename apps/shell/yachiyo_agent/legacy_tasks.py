@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from .legacy_runs import LegacyRunPayloadProjector
+from .policy import desktop_execution_capability_snapshots
 
 MAIN_CHAT_AGENT_ID = "builtin:yachiyo-main"
 
@@ -27,12 +28,19 @@ class LegacyRuntimePort:
             payload = self._runtime.list_runnables()
         except Exception as exc:
             return {"ok": False, "status": "unavailable", "message": str(exc)}
+        try:
+            from apps.shell.agent.tools import KNOWN_AGENT_TOOLS
+        except Exception:
+            known_tools = set()
+        else:
+            known_tools = set(KNOWN_AGENT_TOOLS)
         return {
             "ok": True,
             "status": "ready",
             "capabilities": {
                 "tasks": True,
                 "runnables": len(payload.get("runnables") or []),
+                **desktop_execution_capability_snapshots(registered_tools=known_tools),
             },
         }
 

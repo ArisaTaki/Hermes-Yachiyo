@@ -17,6 +17,7 @@ TaskStatus = Literal[
 GroupMode = Literal["moderated", "round_robin", "debate", "pipeline", "parallel", "custom"]
 MemoryScope = Literal["shared", "per_agent", "hybrid"]
 ApprovalStatus = Literal["pending", "approved", "rejected", "cancelled", "expired"]
+DesktopExecutionRisk = Literal["low", "medium", "high"]
 
 
 class _PublicSnapshot(BaseModel):
@@ -32,6 +33,15 @@ class ReadinessSnapshot(_PublicSnapshot):
     status: str = ""
     message: str | None = None
     capabilities: dict[str, Any] = Field(default_factory=dict)
+
+
+class DesktopExecutionCapabilitySnapshot(_PublicSnapshot):
+    available: bool = False
+    platform: str = ""
+    missing_permissions: list[str] = Field(default_factory=list)
+    tools: list[str] = Field(default_factory=list)
+    risk_default: DesktopExecutionRisk = "low"
+    diagnostic_route: str | None = None
 
 
 class PublicRunEvent(_PublicSnapshot):

@@ -13,6 +13,8 @@ from .contracts import (
     ChatRunnableCatalogSnapshot,
     ChatRunnableParticipantSnapshot,
     ChatRunnableSnapshot,
+    DesktopExecutionCapabilitySnapshot,
+    DesktopExecutionRisk,
     FutureTaskSnapshot,
     FutureTaskTriggerResultSnapshot,
     GroupRunSnapshot,
@@ -41,7 +43,18 @@ from .contracts import (
     WorkflowSnapshot,
 )
 from .links import studio_run_url
-from .policy import approval_is_pending, task_requires_user_action
+from .policy import (
+    DESKTOP_EXECUTION_CAPABILITY_IDS,
+    DESKTOP_TOOL_RISK_LEVELS,
+    HIGH_RISK_DESKTOP_ACTIONS,
+    LOW_RISK_DESKTOP_TOOLS,
+    MEDIUM_RISK_DESKTOP_TOOLS,
+    approval_is_pending,
+    desktop_execution_capability_snapshots,
+    desktop_tool_risk_level,
+    is_high_risk_desktop_action,
+    task_requires_user_action,
+)
 from .service import YachiyoAgentService
 from .studio_service import AgentStudioService
 
@@ -60,9 +73,19 @@ __all__ = [
     "ChatRunnableCatalogSnapshot",
     "ChatRunnableParticipantSnapshot",
     "ChatRunnableSnapshot",
+    "desktop_execution_capability_snapshots",
+    "DESKTOP_EXECUTION_CAPABILITY_IDS",
+    "DesktopExecutionCapabilitySnapshot",
+    "DesktopExecutionRisk",
+    "DESKTOP_TOOL_RISK_LEVELS",
+    "desktop_tool_risk_level",
     "FutureTaskSnapshot",
     "FutureTaskTriggerResultSnapshot",
     "GroupRunSnapshot",
+    "HIGH_RISK_DESKTOP_ACTIONS",
+    "is_high_risk_desktop_action",
+    "LOW_RISK_DESKTOP_TOOLS",
+    "MEDIUM_RISK_DESKTOP_TOOLS",
     "MemorySnapshot",
     "MemoryTraceSnapshot",
     "PublicRunEvent",
