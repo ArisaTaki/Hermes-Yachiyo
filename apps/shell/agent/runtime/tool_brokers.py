@@ -19,12 +19,14 @@ class RuntimeToolBrokerFactory:
         memory_store: Callable[..., Any],
         future_task_store: Callable[..., Any],
         main_chat_agent_id: str,
+        foreground_lock: Any | None = None,
     ) -> None:
         self._agent_artifacts_dir = agent_artifacts_dir
         self._tool_broker_factory = tool_broker_factory
         self._memory_store = memory_store
         self._future_task_store = future_task_store
         self._main_chat_agent_id = main_chat_agent_id
+        self._foreground_lock = foreground_lock
 
     def for_run(
         self,
@@ -34,9 +36,17 @@ class RuntimeToolBrokerFactory:
         default_runnable_id: str = "",
         artifacts_dir: Path | None = None,
         skills: list[dict[str, Any]] | None = None,
+        foreground_lock: Any | None = None,
+        foreground_lock_owner: str = "",
     ) -> Any:
         clean_run_id = str(run_id or "").strip()
         root = artifacts_dir or self._agent_artifacts_dir
+        lock = foreground_lock if foreground_lock is not None else self._foreground_lock
+        extra: dict[str, Any] = {}
+        if lock is not None:
+            extra["foreground_lock"] = lock
+        if foreground_lock_owner:
+            extra["foreground_lock_owner"] = foreground_lock_owner
         return self._tool_broker_factory(
             workspace_policy,
             root / clean_run_id,
@@ -46,6 +56,7 @@ class RuntimeToolBrokerFactory:
                 source_run_id=clean_run_id,
                 default_runnable_id=default_runnable_id,
             ),
+            **extra,
         )
 
     def for_main_chat(self, *, run_id: str, workspace_policy: dict[str, Any]) -> Any:

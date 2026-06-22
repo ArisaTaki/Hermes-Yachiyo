@@ -11,6 +11,7 @@ from apps.shell.agent.runtime.tool_brokers import (
     write_artifact_with_tool_broker,
 )
 from apps.shell.agent.tools.broker import ToolBroker
+from apps.shell.agent.tools.foreground_lock import ForegroundActionLock
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
 
@@ -118,6 +119,35 @@ def test_runtime_tool_broker_factory_can_use_custom_artifacts_dir(tmp_path) -> N
     )
 
     assert broker.artifact_root == tmp_path / "workflow-artifacts" / "workflow-run-1"
+
+
+def test_runtime_tool_broker_factory_can_share_group_foreground_lock(tmp_path) -> None:
+    foreground_lock = ForegroundActionLock()
+    factory = RuntimeToolBrokerFactory(
+        agent_artifacts_dir=tmp_path / "artifacts",
+        tool_broker_factory=FakeBroker,
+        memory_store=lambda **kwargs: {"memory": kwargs},
+        future_task_store=lambda **kwargs: {"future": kwargs},
+        main_chat_agent_id="builtin:yachiyo-main",
+    )
+
+    first_broker = factory.for_run(
+        run_id="run-1",
+        workspace_policy={},
+        foreground_lock=foreground_lock,
+        foreground_lock_owner="group-run-1:run-1",
+    )
+    second_broker = factory.for_run(
+        run_id="run-2",
+        workspace_policy={},
+        foreground_lock=foreground_lock,
+        foreground_lock_owner="group-run-1:run-2",
+    )
+
+    assert first_broker.kwargs["foreground_lock"] is foreground_lock
+    assert first_broker.kwargs["foreground_lock_owner"] == "group-run-1:run-1"
+    assert second_broker.kwargs["foreground_lock"] is foreground_lock
+    assert second_broker.kwargs["foreground_lock_owner"] == "group-run-1:run-2"
 
 
 def test_runtime_tool_broker_factory_writes_artifact_for_custom_artifacts_dir(tmp_path) -> None:

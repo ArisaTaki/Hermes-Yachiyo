@@ -19,6 +19,7 @@ from apps.shell.agent.repositories.task_run_links import TaskRunLinkRepository
 from apps.shell.agent.repositories.workflows import WorkflowRepository
 from apps.shell.agent.repositories.workspaces import TrustedWorkspaceRepository
 from apps.shell.agent.tools.broker import ToolBroker
+from apps.shell.agent.tools.foreground_lock import ForegroundActionLock
 from apps.shell.agent.tools.policy import (
     FUTURE_TASK_TOOL_NAMES,
     HIGH_RISK_AGENT_TOOLS,
@@ -56,6 +57,7 @@ def test_repository_package_exports_runtime_persistence_boundaries() -> None:
 
 def test_tools_package_exports_broker_policy_and_dispatch_boundaries() -> None:
     assert tools.ToolBroker is ToolBroker
+    assert tools.ForegroundActionLock is ForegroundActionLock
     assert tools.PolicyGate is PolicyGate
     assert tools.RuntimePolicyCompiler is RuntimePolicyCompiler
     assert tools.ToolDescriptorRegistry is ToolDescriptorRegistry

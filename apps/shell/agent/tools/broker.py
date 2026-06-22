@@ -53,6 +53,8 @@ class ToolBroker:
     skills: list[dict[str, Any]] | None = None
     memory_store: Any | None = None
     future_task_store: Any | None = None
+    foreground_lock: Any | None = None
+    foreground_lock_owner: str = ""
 
     def __post_init__(self) -> None:
         self.artifact_root.mkdir(parents=True, exist_ok=True)
@@ -391,10 +393,16 @@ class ToolBroker:
         return desktop.apple_music_play(query)
 
     def desktop_hotkey(self, key: str, *, modifiers: list[str] | None = None) -> dict[str, Any]:
-        return desktop.desktop_hotkey(key, modifiers=modifiers)
+        return self._with_foreground_lock(
+            "desktop.hotkey",
+            lambda: desktop.desktop_hotkey(key, modifiers=modifiers),
+        )
 
     def desktop_type_text(self, text: str) -> dict[str, Any]:
-        return desktop.desktop_type_text(text)
+        return self._with_foreground_lock(
+            "desktop.type_text",
+            lambda: desktop.desktop_type_text(text),
+        )
 
     def browser_open_url(self, url: str) -> dict[str, Any]:
         return browser.open_url(url)
@@ -437,3 +445,31 @@ class ToolBroker:
 
     def call(self, name: str, payload: dict[str, Any], *, approved: bool = False) -> dict[str, Any]:
         return dispatch_tool_call(self, name, payload, approved=approved)
+
+    def _with_foreground_lock(self, tool_name: str, action: Any) -> dict[str, Any]:
+        if self.foreground_lock is None:
+            return action()
+        holder = str(self.foreground_lock_owner or self.artifact_root).strip()
+        lease = self.foreground_lock.acquire(holder=holder, tool_name=tool_name)
+        if not lease.acquired:
+            return {
+                "ok": False,
+                "tool": tool_name,
+                "action": "foreground_lock",
+                "foreground_lock_busy": True,
+                "locked_by": lease.locked_by,
+                "summary": "Foreground desktop action is already locked by another run.",
+            }
+        try:
+            result = action()
+            if isinstance(result, dict):
+                return {
+                    **result,
+                    "foreground_lock": {
+                        "holder": holder,
+                        "tool": tool_name,
+                    },
+                }
+            return result
+        finally:
+            lease.release()

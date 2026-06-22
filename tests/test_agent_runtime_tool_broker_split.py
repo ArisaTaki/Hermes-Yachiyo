@@ -9,6 +9,7 @@ from apps.shell.agent.tools import broker as broker_module
 from apps.shell.agent.tools import terminal as terminal_module
 from apps.shell.agent.tools import workspace as workspace_module
 from apps.shell.agent.tools.broker import ToolBroker, cancel_terminal_process_groups
+from apps.shell.agent.tools.foreground_lock import ForegroundActionLock
 
 
 def test_tool_broker_remains_exported_from_legacy_runtime_module() -> None:
@@ -102,3 +103,72 @@ def test_tool_broker_artifact_write_redacts_secrets(tmp_path: Path) -> None:
     assert result["ok"] is True
     assert "sk-toolbrokersecret123456" not in content
     assert "api_key=[redacted]" in content
+
+
+def test_tool_broker_foreground_lock_blocks_concurrent_foreground_actions(
+    tmp_path: Path,
+) -> None:
+    foreground_lock = ForegroundActionLock()
+    first_broker = ToolBroker(
+        {"default_workdir": str(tmp_path), "readable_scopes": ["."], "writable_scopes": []},
+        tmp_path / "artifacts-1",
+        foreground_lock=foreground_lock,
+        foreground_lock_owner="group-run-1:run-1",
+    )
+    second_broker = ToolBroker(
+        {"default_workdir": str(tmp_path), "readable_scopes": ["."], "writable_scopes": []},
+        tmp_path / "artifacts-2",
+        foreground_lock=foreground_lock,
+        foreground_lock_owner="group-run-1:run-2",
+    )
+    lease = foreground_lock.acquire(
+        holder=first_broker.foreground_lock_owner,
+        tool_name="desktop.type_text",
+    )
+    try:
+        result = second_broker.desktop_type_text("hello")
+    finally:
+        lease.release()
+
+    assert result == {
+        "ok": False,
+        "tool": "desktop.type_text",
+        "action": "foreground_lock",
+        "foreground_lock_busy": True,
+        "locked_by": "group-run-1:run-1",
+        "summary": "Foreground desktop action is already locked by another run.",
+    }
+
+
+def test_tool_broker_foreground_lock_releases_after_action(tmp_path: Path, monkeypatch) -> None:
+    foreground_lock = ForegroundActionLock()
+    broker = ToolBroker(
+        {"default_workdir": str(tmp_path), "readable_scopes": ["."], "writable_scopes": []},
+        tmp_path / "artifacts",
+        foreground_lock=foreground_lock,
+        foreground_lock_owner="workflow-run-1:node-a",
+    )
+    monkeypatch.setattr(
+        broker_module.desktop,
+        "desktop_type_text",
+        lambda text: {"ok": True, "text": text},
+    )
+
+    result = broker.call("desktop.type_text", {"text": "hello"})
+    next_lease = foreground_lock.acquire(
+        holder="workflow-run-1:node-b",
+        tool_name="desktop.hotkey",
+    )
+    try:
+        assert result == {
+            "ok": True,
+            "text": "hello",
+            "foreground_lock": {
+                "holder": "workflow-run-1:node-a",
+                "tool": "desktop.type_text",
+            },
+        }
+        assert next_lease.acquired is True
+        assert foreground_lock.owner == "workflow-run-1:node-b"
+    finally:
+        next_lease.release()

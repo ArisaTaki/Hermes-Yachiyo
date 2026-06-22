@@ -1,6 +1,7 @@
 """Tool policy and broker boundaries for the Agent runtime."""
 
 from apps.shell.agent.tools.broker import ToolBroker, cancel_terminal_process_groups
+from apps.shell.agent.tools.foreground_lock import ForegroundActionLease, ForegroundActionLock
 from apps.shell.agent.tools.plugins import (
     RegisteredPluginTool,
     RestrictedPluginTool,
@@ -40,6 +41,8 @@ __all__ = [
     "DAILY_BROWSER_TOOL_NAMES",
     "DAILY_DESKTOP_TOOL_NAMES",
     "FUTURE_TASK_TOOL_NAMES",
+    "ForegroundActionLease",
+    "ForegroundActionLock",
     "HIGH_RISK_AGENT_TOOLS",
     "KNOWN_AGENT_TOOLS",
     "LOW_RISK_BROWSER_TOOL_NAMES",
