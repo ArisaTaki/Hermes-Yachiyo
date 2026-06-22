@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { ChatNotice } from '../types';
 
+type ChatNoticeAction = Pick<ChatNotice, 'action_label' | 'action_view' | 'action_params'>;
+
 export function useChatNotice() {
   const [notice, setNotice] = useState<ChatNotice | null>(null);
   const noticeTimerRef = useRef<number | null>(null);
@@ -14,9 +16,14 @@ export function useChatNotice() {
     setNotice(null);
   }, []);
 
-  const showNotice = useCallback((title: string, detail: string, kind: ChatNotice['kind'] = 'warn') => {
+  const showNotice = useCallback((
+    title: string,
+    detail: string,
+    kind: ChatNotice['kind'] = 'warn',
+    action: ChatNoticeAction = {},
+  ) => {
     if (noticeTimerRef.current !== null) window.clearTimeout(noticeTimerRef.current);
-    setNotice({ id: Date.now(), kind, title, detail });
+    setNotice({ id: Date.now(), kind, title, detail, ...action });
     noticeTimerRef.current = window.setTimeout(() => {
       noticeTimerRef.current = null;
       setNotice(null);

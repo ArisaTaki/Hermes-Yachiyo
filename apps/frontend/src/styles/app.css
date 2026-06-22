@@ -688,7 +688,7 @@ button:hover {
   line-height: 1.45;
 }
 
-.chat-toast button {
+.chat-toast-close {
   grid-row: 1;
   grid-column: 2;
   width: 24px;
@@ -696,6 +696,17 @@ button:hover {
   min-width: 0;
   padding: 0;
   border-radius: 6px;
+}
+
+.chat-toast-action {
+  grid-column: 1;
+  justify-self: start;
+  width: auto;
+  min-width: 0;
+  min-height: 28px;
+  padding: 5px 10px;
+  border-radius: 7px;
+  font-size: 12px;
 }
 
 @keyframes toast-in {

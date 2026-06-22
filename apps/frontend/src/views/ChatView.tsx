@@ -458,7 +458,11 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         const desktopNotice = chatDesktopPermissionNotice(readiness);
         if (!desktopNotice) return;
         desktopReadinessNoticeShownRef.current = true;
-        showNotice(desktopNotice.title, desktopNotice.detail, desktopNotice.kind);
+        showNotice(desktopNotice.title, desktopNotice.detail, desktopNotice.kind, {
+          action_label: desktopNotice.action_label,
+          action_view: desktopNotice.action_view,
+          action_params: desktopNotice.action_params,
+        });
       })
       .catch(() => undefined);
     return () => {
@@ -1481,7 +1485,26 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         <div className={`chat-toast ${notice.kind}`} role="status">
           <strong>{notice.title}</strong>
           <span>{notice.detail}</span>
-          <button type="button" aria-label="关闭提示" onClick={dismissNotice}>×</button>
+          {notice.action_label && notice.action_view ? (
+            <button
+              type="button"
+              className="chat-toast-action"
+              onClick={() => {
+                dismissNotice();
+                void openAppView(notice.action_view || 'diagnostics', notice.action_params || {});
+              }}
+            >
+              {notice.action_label}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="chat-toast-close"
+            aria-label="关闭提示"
+            onClick={dismissNotice}
+          >
+            ×
+          </button>
         </div>
       ) : null}
 

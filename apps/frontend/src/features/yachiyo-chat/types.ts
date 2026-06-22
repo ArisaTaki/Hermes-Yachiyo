@@ -243,4 +243,7 @@ export type ChatNotice = {
   kind: 'warn' | 'danger';
   title: string;
   detail: string;
+  action_label?: string;
+  action_view?: string;
+  action_params?: Record<string, string>;
 };

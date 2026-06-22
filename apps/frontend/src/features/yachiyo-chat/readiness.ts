@@ -25,13 +25,22 @@ const permissionLabels: Record<string, string> = {
 
 export function chatDesktopPermissionNotice(
   readiness: YachiyoReadinessSnapshot | null | undefined,
-): Pick<ChatNotice, 'kind' | 'title' | 'detail'> | null {
+): Pick<
+  ChatNotice,
+  'kind' | 'title' | 'detail' | 'action_label' | 'action_view' | 'action_params'
+> | null {
   const missing = missingDesktopPermissionLabels(readiness);
   if (!missing.length) return null;
   return {
     kind: 'warn',
     title: '桌面执行权限未就绪',
     detail: `${missing.join('、')} 未就绪；打开「诊断」中的桌面权限检查，按提示授权后再试。`,
+    action_label: '打开诊断',
+    action_view: 'diagnostics',
+    action_params: {
+      command: 'native doctor',
+      return_to: 'chat',
+    },
   };
 }
 

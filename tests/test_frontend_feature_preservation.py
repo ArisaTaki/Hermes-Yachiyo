@@ -791,6 +791,10 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "getYachiyoReadiness",
             "desktopReadinessNoticeShownRef",
             "const desktopNotice = chatDesktopPermissionNotice(readiness);",
+            "action_label: desktopNotice.action_label",
+            "className=\"chat-toast-action\"",
+            "void openAppView(notice.action_view || 'diagnostics', notice.action_params || {});",
+            "className=\"chat-toast-close\"",
             "import { deriveChatSessionState } from '../features/yachiyo-chat/sessionDerivedState';",
             "handleLegacyChatRunnableResult(result, { refreshTaskSnapshot: true })",
             "handleLegacyChatRunnableResult(result)",
@@ -1832,6 +1836,10 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "music_app: 'Music.app'",
             "chrome_cdp: 'Chrome CDP 调试端口'",
             "打开「诊断」中的桌面权限检查",
+            "action_label: '打开诊断'",
+            "action_view: 'diagnostics'",
+            "command: 'native doctor'",
+            "return_to: 'chat'",
         ],
     )
     _assert_not_contains(
@@ -2169,6 +2177,10 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "export type ChatSessionContext = {",
             "export type AssistantProfilePayload = {",
             "export type ExecutorPayload = {",
+            "export type ChatNotice = {",
+            "action_label?: string;",
+            "action_view?: string;",
+            "action_params?: Record<string, string>;",
         ],
     )
     _assert_contains(
@@ -3580,10 +3592,13 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
         "apps/frontend/src/features/yachiyo-chat/hooks/useChatNotice.ts",
         [
             "export function useChatNotice",
+            "type ChatNoticeAction",
             "const [notice, setNotice] = useState<ChatNotice | null>(null);",
             "const noticeTimerRef = useRef<number | null>(null);",
             "const dismissNotice = useCallback(",
             "const showNotice = useCallback(",
+            "action: ChatNoticeAction = {}",
+            "setNotice({ id: Date.now(), kind, title, detail, ...action });",
             "noticeTimerRef.current = window.setTimeout(",
             "useEffect(() => dismissNotice, [dismissNotice]);",
         ],
