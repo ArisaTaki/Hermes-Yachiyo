@@ -10,6 +10,9 @@ from apps.shell.agent.runtime.workflow_continuation import (
     WorkflowContinuationCoordinator,
     WorkflowContinuationPortBundle,
 )
+from apps.shell.agent.runtime.workflow_ports import (
+    WorkflowContinuationPortBundle as WorkflowContinuationPortBundleContract,
+)
 from apps.shell.agent.runtime.workflow_projections import (
     WorkflowContinuationFailureProjection,
     WorkflowRunCompletionProjection,
@@ -20,6 +23,7 @@ from apps.shell.agent.runtime.workflow_run_outcomes import WorkflowRunOutcomePro
 def test_workflow_continuation_coordinator_remains_exported_from_legacy_module() -> None:
     assert agent_runtime.WorkflowContinuationCoordinator is WorkflowContinuationCoordinator
     assert agent_runtime.WorkflowContinuationPortBundle is WorkflowContinuationPortBundle
+    assert WorkflowContinuationPortBundle is WorkflowContinuationPortBundleContract
     assert agent_runtime.WorkflowRunOutcomeProjector is WorkflowRunOutcomeProjector
 
 
