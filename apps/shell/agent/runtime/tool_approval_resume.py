@@ -59,6 +59,11 @@ class RuntimeToolApprovalResumeService:
         skills: list[dict[str, Any]] | None = None,
     ) -> ToolApprovalResumeContext:
         run_id = str(run["run_id"])
+        run_group_id = str(run.get("run_group_id") or "").strip()
+        broker_kwargs: dict[str, Any] = {}
+        if run_group_id:
+            broker_kwargs["foreground_lock_key"] = run_group_id
+            broker_kwargs["foreground_lock_owner"] = f"{run_group_id}:{run_id}"
         return ToolApprovalResumeContext.from_run(
             run,
             pending,
@@ -67,6 +72,7 @@ class RuntimeToolApprovalResumeService:
                 workspace_policy=runtime["workspace_policy"],
                 skills=skills,
                 default_runnable_id=str((run.get("runnable_id") or self._main_chat_agent_id)),
+                **broker_kwargs,
             ),
             allowed_tools=runtime["tool_policy"].get("allowed_tools") or [],
             budget_factory=lambda context_run_id, context_timeline: self._run_budget(

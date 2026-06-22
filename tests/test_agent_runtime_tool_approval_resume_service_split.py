@@ -116,6 +116,38 @@ def test_tool_approval_resume_service_builds_resume_context() -> None:
     ]
 
 
+def test_tool_approval_resume_service_scopes_group_resume_to_foreground_lock() -> None:
+    service, state = _service()
+    run = {
+        "run_id": "run-1",
+        "run_group_id": "group-run-1",
+        "runnable_id": "agent-1",
+        "timeline": [{"event": "agent.tool.approval_required"}],
+        "artifacts": [],
+    }
+
+    context = service.context(
+        run,
+        state["pending"],
+        runtime={
+            "tool_policy": {"allowed_tools": ["terminal.run"]},
+            "workspace_policy": {"default_workdir": "/tmp/project"},
+        },
+        skills=[{"skill_id": "skill-1"}],
+    )
+
+    assert context.broker == {
+        "broker": {
+            "run_id": "run-1",
+            "workspace_policy": {"default_workdir": "/tmp/project"},
+            "skills": [{"skill_id": "skill-1"}],
+            "default_runnable_id": "agent-1",
+            "foreground_lock_key": "group-run-1",
+            "foreground_lock_owner": "group-run-1:run-1",
+        }
+    }
+
+
 def test_tool_approval_resume_service_dispatches_agent_resume() -> None:
     service, state = _service()
     run = {
