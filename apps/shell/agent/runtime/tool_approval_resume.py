@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from apps.shell.agent.runtime.foreground_lock_scope import foreground_lock_broker_kwargs
 from apps.shell.agent.runtime.tool_approvals import ToolApprovalResumeContext
 from packages.security import redact_api_error_text
 
@@ -59,11 +60,18 @@ class RuntimeToolApprovalResumeService:
         skills: list[dict[str, Any]] | None = None,
     ) -> ToolApprovalResumeContext:
         run_id = str(run["run_id"])
-        run_group_id = str(run.get("run_group_id") or "").strip()
-        broker_kwargs: dict[str, Any] = {}
-        if run_group_id:
-            broker_kwargs["foreground_lock_key"] = run_group_id
-            broker_kwargs["foreground_lock_owner"] = f"{run_group_id}:{run_id}"
+        pending_context = pending if isinstance(pending, dict) else {}
+        run_group_id = str(
+            run.get("run_group_id")
+            or pending_context.get("run_group_id")
+            or pending_context.get("group_run_id")
+            or ""
+        ).strip()
+        workflow_run_id = str(
+            run.get("workflow_run_id")
+            or pending_context.get("workflow_run_id")
+            or ""
+        ).strip()
         return ToolApprovalResumeContext.from_run(
             run,
             pending,
@@ -72,7 +80,11 @@ class RuntimeToolApprovalResumeService:
                 workspace_policy=runtime["workspace_policy"],
                 skills=skills,
                 default_runnable_id=str((run.get("runnable_id") or self._main_chat_agent_id)),
-                **broker_kwargs,
+                **foreground_lock_broker_kwargs(
+                    run_id=run_id,
+                    run_group_id=run_group_id,
+                    workflow_run_id=workflow_run_id,
+                ),
             ),
             allowed_tools=runtime["tool_policy"].get("allowed_tools") or [],
             budget_factory=lambda context_run_id, context_timeline: self._run_budget(

@@ -112,6 +112,7 @@ class RuntimeAgentRunExecutor:
         user_goal: str,
         upstream: str = "",
         run_group_id: str = "",
+        workflow_run_id: str = "",
     ) -> dict[str, Any]:
         preparation = self._preparer.prepare(
             run_id,
@@ -119,6 +120,7 @@ class RuntimeAgentRunExecutor:
             user_goal,
             upstream,
             run_group_id=run_group_id,
+            workflow_run_id=workflow_run_id,
         )
         timeline = preparation.timeline
         artifacts = preparation.artifacts
@@ -189,12 +191,18 @@ class RuntimeAgentRunCoordinator:
         if start.existing:
             return start.run
         run = start.run
+        execute_kwargs = {
+            "upstream": str(payload.get("upstream") or ""),
+            "run_group_id": str(run.get("run_group_id") or ""),
+        }
+        workflow_run_id = str(payload.get("workflow_run_id") or "").strip()
+        if workflow_run_id:
+            execute_kwargs["workflow_run_id"] = workflow_run_id
         result = self._execute_agent_run(
             run["run_id"],
             agent,
             user_goal,
-            upstream=str(payload.get("upstream") or ""),
-            run_group_id=str(run.get("run_group_id") or ""),
+            **execute_kwargs,
         )
         if start.root_group:
             result = self._project_agent_run_group_if_root(result)
@@ -269,12 +277,18 @@ class RuntimeAgentRunAsyncCoordinator:
 
         def execute_in_background() -> None:
             try:
+                execute_kwargs = {
+                    "upstream": str(payload.get("upstream") or ""),
+                    "run_group_id": str(run.get("run_group_id") or ""),
+                }
+                workflow_run_id = str(payload.get("workflow_run_id") or "").strip()
+                if workflow_run_id:
+                    execute_kwargs["workflow_run_id"] = workflow_run_id
                 exec_result = self._execute_agent_run(
                     run["run_id"],
                     agent,
                     user_goal,
-                    upstream=str(payload.get("upstream") or ""),
-                    run_group_id=str(run.get("run_group_id") or ""),
+                    **execute_kwargs,
                 )
                 if start.root_group:
                     exec_result = self._project_agent_run_group_if_root(exec_result)

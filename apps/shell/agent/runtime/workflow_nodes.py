@@ -209,6 +209,7 @@ class WorkflowAgentNodeExecution:
         handoff: WorkflowAgentNodeHandoff,
         *,
         run_group_id: str,
+        workflow_run_id: str = "",
         ports: WorkflowNodePortBundle | None = None,
     ) -> "WorkflowAgentNodeExecution":
         insert_run = _port_callback(ports, "insert_run", engine, "_insert_run")
@@ -233,6 +234,8 @@ class WorkflowAgentNodeExecution:
         execute_kwargs = {"upstream": handoff.upstream}
         if _supports_keyword(execute_agent_run, "run_group_id"):
             execute_kwargs["run_group_id"] = run_group_id
+        if workflow_run_id and _supports_keyword(execute_agent_run, "workflow_run_id"):
+            execute_kwargs["workflow_run_id"] = workflow_run_id
         child = execute_agent_run(
             child["run_id"],
             handoff.agent,

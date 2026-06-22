@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from inspect import Parameter, signature
 from typing import Any, Callable
 
 from apps.shell.agent.runtime.paths import agent_workspace_dir as _runtime_agent_workspace_dir
@@ -52,13 +53,19 @@ class RuntimeAgentFacadeMixin:
         user_goal: str,
         upstream: str = "",
         run_group_id: str = "",
+        workflow_run_id: str = "",
     ) -> dict[str, Any]:
+        kwargs: dict[str, str] = {}
+        if run_group_id and _supports_keyword(self.agent_run_executor.execute, "run_group_id"):
+            kwargs["run_group_id"] = run_group_id
+        if workflow_run_id and _supports_keyword(self.agent_run_executor.execute, "workflow_run_id"):
+            kwargs["workflow_run_id"] = workflow_run_id
         return self.agent_run_executor.execute(
             run_id,
             agent,
             user_goal,
             upstream,
-            run_group_id=run_group_id,
+            **kwargs,
         )
 
     def _run_custom_api_agent(
@@ -89,3 +96,14 @@ class RuntimeAgentFacadeMixin:
     def test_agent_model(self, agent_id: str) -> dict[str, Any]:
         agent = self._get_agent_private(agent_id)
         return self.agent_model_tester.test_agent_model(agent)
+
+
+def _supports_keyword(callback: Any, keyword: str) -> bool:
+    try:
+        parameters = signature(callback).parameters.values()
+    except (TypeError, ValueError):
+        return True
+    return any(
+        parameter.kind == Parameter.VAR_KEYWORD or parameter.name == keyword
+        for parameter in parameters
+    )

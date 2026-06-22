@@ -274,6 +274,35 @@ def test_agent_run_preparer_scopes_shared_tool_broker_to_run_group(tmp_path: Pat
     ]
 
 
+def test_agent_run_preparer_scopes_shared_tool_broker_to_workflow_run(tmp_path: Path) -> None:
+    state: dict[str, Any] = {}
+    tool_brokers = FakeSharedToolBrokers()
+    preparer = _preparer(tmp_path, state, tool_brokers=tool_brokers)
+
+    preparation = preparer.prepare(
+        "child-run-1",
+        {
+            "agent_id": "agent-1",
+            "name": "Prep Agent",
+            "skill_ids": ["skill-1"],
+        },
+        "Finish",
+        workflow_run_id="workflow-run-1",
+    )
+
+    assert preparation.broker is tool_brokers.broker
+    assert tool_brokers.calls == [
+        {
+            "run_id": "child-run-1",
+            "workspace_policy": {"default_workdir": "/tmp/project"},
+            "default_runnable_id": "agent-1",
+            "skills": [{"skill_id": "skill-1", "name": "Brief Reader"}],
+            "foreground_lock_key": "workflow:workflow-run-1",
+            "foreground_lock_owner": "workflow:workflow-run-1:child-run-1",
+        }
+    ]
+
+
 def test_agent_run_preparer_writes_observable_context_artifact(tmp_path: Path) -> None:
     state: dict[str, Any] = {}
     preparer = _preparer(tmp_path, state)

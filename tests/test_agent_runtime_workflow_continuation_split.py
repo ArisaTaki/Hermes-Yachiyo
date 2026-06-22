@@ -920,6 +920,83 @@ def test_workflow_continuation_uses_injected_agent_handoff_inputs() -> None:
     assert agent_event["artifact_count"] == 1
 
 
+def test_workflow_continuation_scopes_child_agent_approval_to_workflow_run() -> None:
+    engine = FakeWorkflowAgentExecutionEngine()
+    agent = {"agent_id": "agent_research", "name": "Research Agent"}
+    child_run = {
+        "run_id": "child_run",
+        "kind": "agent_run",
+        "status": "approval_required",
+        "result": "Waiting for desktop tool approval",
+        "pending_approval": {
+            "approval_id": "approval-child",
+            "tool": "desktop.type_text",
+            "input": {"text": "hello"},
+        },
+    }
+    workflow = {
+        "nodes": [
+            {
+                "id": "desktop-node",
+                "type": "agent",
+                "data": {"label": "Type in app", "agentId": "fallback_agent"},
+            },
+        ]
+    }
+    executed: list[dict[str, Any]] = []
+    updates: list[tuple[str, dict[str, Any]]] = []
+    coordinator = WorkflowContinuationCoordinator(
+        engine,
+        workflow_path=lambda current_workflow: list(current_workflow["nodes"]),
+        workflow_nodes_by_id=lambda current_workflow: {
+            str(node["id"]): node for node in current_workflow["nodes"]
+        },
+        workflow_next_node_id=lambda _workflow, _node, _context: "",
+        workflow_agent_for_node=lambda _node: agent,
+        workflow_node_task=lambda _node: "Type into the focused app.",
+        workflow_child_goal=lambda workflow_goal, step_task: f"{workflow_goal}\n\nStep: {step_task}",
+        insert_run=lambda **_kwargs: {"run_id": "child_run"},
+        execute_agent_run=lambda run_id, received_agent, user_goal, *, upstream, workflow_run_id="": executed.append(
+            {
+                "run_id": run_id,
+                "agent": received_agent,
+                "user_goal": user_goal,
+                "upstream": upstream,
+                "workflow_run_id": workflow_run_id,
+            }
+        )
+        or child_run,
+        workflow_child_artifact_refs=lambda _child_run, _label: [],
+        merge_workflow_child_run_outcome=lambda *_args: None,
+        update_run=lambda run_id, **fields: updates.append((run_id, fields)) or {"run_id": run_id, **fields},
+        node_kind=lambda node: str(node["type"]),
+    )
+
+    result = coordinator.continue_run(
+        {
+            "run_id": "workflow_run",
+            "user_goal": "Ship release candidate",
+        },
+        workflow,
+        context="Previous result",
+        timeline=[],
+        artifacts=[],
+        start_index=0,
+        root_group=False,
+    )
+
+    assert result["status"] == "approval_required"
+    assert executed[0]["workflow_run_id"] == "workflow_run"
+    assert updates[0][0] == "child_run"
+    pending = updates[0][1]["pending_approval"]
+    assert pending["workflow_run_id"] == "workflow_run"
+    assert pending["workflow_node_id"] == "desktop-node"
+    assert pending["workflow_node_kind"] == "agent"
+    assert pending["workflow_node_label"] == "Type in app"
+    assert updates[-1][0] == "workflow_run"
+    assert updates[-1][1]["status"] == "approval_required"
+
+
 def test_workflow_continuation_uses_injected_subworkflow_execution_ports() -> None:
     engine = FakeWorkflowAgentExecutionEngine()
     child_workflow = {"workflow_id": "workflow_child", "name": "Child Flow"}

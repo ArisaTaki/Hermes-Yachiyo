@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from apps.shell import agent_runtime
+from apps.shell.agent.runtime.foreground_lock_scope import foreground_lock_broker_kwargs
 from apps.shell.agent.runtime.tool_brokers import (
     RuntimeToolBrokerFactory,
     write_artifact_with_tool_broker,
@@ -180,6 +181,56 @@ def test_runtime_tool_broker_factory_reuses_foreground_lock_by_group_key(tmp_pat
     assert first_broker.kwargs["foreground_lock_owner"] == "group-run-1:run-1"
     assert second_broker.kwargs["foreground_lock_owner"] == "group-run-1:run-2"
     assert third_broker.kwargs["foreground_lock_owner"] == "group-run-2:run-3"
+
+
+def test_foreground_lock_scope_prefers_group_then_workflow() -> None:
+    assert foreground_lock_broker_kwargs(
+        run_id="run-1",
+        run_group_id="group-run-1",
+        workflow_run_id="workflow-run-1",
+    ) == {
+        "foreground_lock_key": "group-run-1",
+        "foreground_lock_owner": "group-run-1:run-1",
+    }
+    assert foreground_lock_broker_kwargs(
+        run_id="child-run-1",
+        workflow_run_id="workflow-run-1",
+    ) == {
+        "foreground_lock_key": "workflow:workflow-run-1",
+        "foreground_lock_owner": "workflow:workflow-run-1:child-run-1",
+    }
+    assert foreground_lock_broker_kwargs(run_id="run-1") == {}
+
+
+def test_runtime_tool_broker_factory_reuses_foreground_lock_by_workflow_key(tmp_path) -> None:
+    factory = RuntimeToolBrokerFactory(
+        agent_artifacts_dir=tmp_path / "artifacts",
+        tool_broker_factory=FakeBroker,
+        memory_store=lambda **kwargs: {"memory": kwargs},
+        future_task_store=lambda **kwargs: {"future": kwargs},
+        main_chat_agent_id="builtin:yachiyo-main",
+    )
+
+    first_broker = factory.for_run(
+        run_id="run-1",
+        workspace_policy={},
+        **foreground_lock_broker_kwargs(
+            run_id="run-1",
+            workflow_run_id="workflow-run-1",
+        ),
+    )
+    second_broker = factory.for_run(
+        run_id="run-2",
+        workspace_policy={},
+        **foreground_lock_broker_kwargs(
+            run_id="run-2",
+            workflow_run_id="workflow-run-1",
+        ),
+    )
+
+    assert first_broker.kwargs["foreground_lock"] is second_broker.kwargs["foreground_lock"]
+    assert first_broker.kwargs["foreground_lock_owner"] == "workflow:workflow-run-1:run-1"
+    assert second_broker.kwargs["foreground_lock_owner"] == "workflow:workflow-run-1:run-2"
 
 
 def test_runtime_tool_broker_factory_writes_artifact_for_custom_artifacts_dir(tmp_path) -> None:

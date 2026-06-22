@@ -86,8 +86,19 @@ def test_agent_run_executor_projects_completed_agent_run() -> None:
             upstream: str,
             *,
             run_group_id: str = "",
+            workflow_run_id: str = "",
         ) -> _PreparedAgentRun:
-            calls.append(("prepare", run_id, agent["agent_id"], user_goal, upstream, run_group_id))
+            calls.append(
+                (
+                    "prepare",
+                    run_id,
+                    agent["agent_id"],
+                    user_goal,
+                    upstream,
+                    run_group_id,
+                    workflow_run_id,
+                )
+            )
             return prepared
 
         @staticmethod
@@ -120,7 +131,7 @@ def test_agent_run_executor_projects_completed_agent_run() -> None:
 
     assert result == {"run_id": "run-1", "status": "completed", "result": "Done"}
     assert calls == [
-        ("prepare", "run-1", "agent-1", "Ship", "Upstream", "group-1"),
+        ("prepare", "run-1", "agent-1", "Ship", "Upstream", "group-1", ""),
         ("context", "run-1", "prepared-context"),
         (
             "continue",
@@ -132,6 +143,58 @@ def test_agent_run_executor_projects_completed_agent_run() -> None:
             {"run_id": "run-1"},
         ),
         ("completed", "run-1", "Done", prepared.timeline, prepared.artifacts),
+    ]
+
+
+def test_agent_run_executor_passes_workflow_run_id_to_preparer() -> None:
+    calls: list[tuple[str, str]] = []
+    prepared = _PreparedAgentRun(timeline=[], artifacts=[])
+
+    class _Preparer:
+        @staticmethod
+        def prepare(
+            run_id: str,
+            _agent: dict[str, Any],
+            _user_goal: str,
+            _upstream: str,
+            *,
+            run_group_id: str = "",
+            workflow_run_id: str = "",
+        ) -> _PreparedAgentRun:
+            calls.append(("prepare", f"{run_id}:{run_group_id}:{workflow_run_id}"))
+            return prepared
+
+        @staticmethod
+        def write_context_artifact(_run_id: str, _preparation: _PreparedAgentRun) -> None:
+            calls.append(("context", _run_id))
+
+    class _Outcomes:
+        @staticmethod
+        def completed(
+            run_id: str,
+            result: str,
+            *,
+            timeline: list[dict[str, Any]],
+            artifacts: list[dict[str, Any]],
+        ) -> dict[str, Any]:
+            return {"run_id": run_id, "status": "completed", "result": result}
+
+    executor = RuntimeAgentRunExecutor(
+        preparer=_Preparer(),
+        continue_custom_api_agent=lambda *_args, **_kwargs: "Done",
+        agent_run_outcomes=_Outcomes(),
+        approval_pause=object(),
+    )
+
+    assert executor.execute(
+        "child-run-1",
+        {"agent_id": "agent-1"},
+        "Ship",
+        workflow_run_id="workflow-run-1",
+    ) == {"run_id": "child-run-1", "status": "completed", "result": "Done"}
+    assert calls == [
+        ("prepare", "child-run-1::workflow-run-1"),
+        ("context", "child-run-1"),
     ]
 
 

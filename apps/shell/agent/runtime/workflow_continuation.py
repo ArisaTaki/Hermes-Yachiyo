@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from inspect import Parameter, signature
 from typing import Any
 
 from apps.shell.agent.runtime.budget import RunBudgetLimits, WorkflowRunBudget
@@ -357,14 +358,22 @@ class WorkflowContinuationCoordinator:
         *,
         upstream: str,
         run_group_id: str = "",
+        workflow_run_id: str = "",
     ) -> dict[str, Any]:
         if self._execute_agent_run_callback is not None:
+            kwargs: dict[str, str] = {"upstream": upstream}
+            if _supports_keyword(self._execute_agent_run_callback, "run_group_id"):
+                kwargs["run_group_id"] = run_group_id
+            if workflow_run_id and _supports_keyword(
+                self._execute_agent_run_callback,
+                "workflow_run_id",
+            ):
+                kwargs["workflow_run_id"] = workflow_run_id
             return self._execute_agent_run_callback(
                 run_id,
                 agent,
                 user_goal,
-                upstream=upstream,
-                run_group_id=run_group_id,
+                **kwargs,
             )
         return self._engine._execute_agent_run(
             run_id,
@@ -372,6 +381,7 @@ class WorkflowContinuationCoordinator:
             user_goal,
             upstream=upstream,
             run_group_id=run_group_id,
+            workflow_run_id=workflow_run_id,
         )
 
     def _workflow_child_artifact_refs(
@@ -903,6 +913,13 @@ class WorkflowContinuationCoordinator:
             handoff.child_goal,
             upstream=handoff.upstream,
             run_group_id=run_group_id,
+            workflow_run_id=str(run["run_id"]),
+        )
+        child = self._project_workflow_child_pending_context(
+            child,
+            run,
+            handoff,
+            run_group_id=run_group_id,
         )
         execution = WorkflowAgentNodeExecution.from_child_run(
             handoff,
@@ -981,6 +998,34 @@ class WorkflowContinuationCoordinator:
                 result = self._get_run(result["run_id"])
             return {"done": True, "run": result}
         return {"done": False, "context": next_context}
+
+    def _project_workflow_child_pending_context(
+        self,
+        child: dict[str, Any],
+        run: dict[str, Any],
+        handoff: WorkflowAgentNodeHandoff,
+        *,
+        run_group_id: str,
+    ) -> dict[str, Any]:
+        if str(child.get("status") or "") != "approval_required":
+            return child
+        pending = child.get("pending_approval")
+        if not isinstance(pending, dict) or not pending:
+            return child
+        next_pending = dict(pending)
+        for key, value in {
+            "workflow_run_id": str(run.get("run_id") or ""),
+            **handoff.node_info(),
+            "group_run_id": run_group_id,
+            "run_group_id": run_group_id,
+        }.items():
+            clean_value = str(value or "").strip()
+            if clean_value and not str(next_pending.get(key) or "").strip():
+                next_pending[key] = clean_value
+        if next_pending == pending:
+            return child
+        updated = self._update_run(str(child.get("run_id") or ""), pending_approval=next_pending)
+        return {**child, **updated}
 
     def _run_workflow_node(
         self,
@@ -1335,3 +1380,14 @@ class WorkflowContinuationCoordinator:
         artifacts.append(write.artifact_record())
         timeline.append(write.timeline_event(self._timeline))
         self._append_run_event(str(run["run_id"]), "workflow.node.artifact", write.event_payload())
+
+
+def _supports_keyword(callback: Any, keyword: str) -> bool:
+    try:
+        parameters = signature(callback).parameters.values()
+    except (TypeError, ValueError):
+        return True
+    return any(
+        parameter.kind == Parameter.VAR_KEYWORD or parameter.name == keyword
+        for parameter in parameters
+    )
