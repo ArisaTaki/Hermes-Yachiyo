@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from apps.shell import agent_runtime
+from apps.shell.agent.runtime.events import tool_input_preview
 from apps.shell.agent.runtime.tool_approvals import (
+    _tool_input_preview,
     ToolApprovalClaimProjection,
     ToolApprovalContinuationHandoff,
     ToolApprovalContinuationOutcome,
@@ -34,6 +36,7 @@ def test_tool_approval_helpers_remain_exported_from_legacy_module() -> None:
     assert agent_runtime.ToolApprovalExecutionFollowup is ToolApprovalExecutionFollowup
     assert agent_runtime.ToolPendingApprovalBuilder is ToolPendingApprovalBuilder
     assert agent_runtime.ToolApprovalTransitionContext is ToolApprovalTransitionContext
+    assert _tool_input_preview is tool_input_preview
 
 
 def test_tool_pending_approval_builder_snapshots_private_payloads() -> None:

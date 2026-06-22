@@ -5,29 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from packages.security import redact_api_error_text, redact_sensitive_text
-
-
-def _redact_secrets(value: Any) -> str:
-    return redact_sensitive_text(
-        value,
-        limit=0,
-        collapse_whitespace=False,
-        trim=False,
-    )
-
-
-def _tool_input_preview(value: Any, *, limit: int = 1200) -> Any:
-    if isinstance(value, dict):
-        return {str(key): _tool_input_preview(item, limit=limit) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_tool_input_preview(item, limit=limit) for item in value[:20]]
-    if value is None or isinstance(value, (bool, int, float)):
-        return value
-    text = _redact_secrets(value)
-    if len(text) > limit:
-        return f"{text[:limit]}... [truncated]"
-    return text
+from apps.shell.agent.runtime.events import tool_input_preview as _tool_input_preview
+from packages.security import redact_api_error_text
 
 
 class WorkflowChildOutcomeCoordinator:

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from apps.shell import agent_runtime
+from apps.shell.agent.runtime.events import tool_input_preview
 from apps.shell.agent.runtime.workflow_nodes import (
+    _tool_input_preview,
     WorkflowAgentNodeExecution,
     WorkflowAgentNodeHandoff,
     WorkflowArtifactNodeWrite,
@@ -32,6 +34,7 @@ def test_workflow_node_handoffs_remain_exported_from_legacy_module() -> None:
     assert agent_runtime.WorkflowSubworkflowNodeExecution is WorkflowSubworkflowNodeExecution
     assert agent_runtime.WorkflowArtifactNodeWrite is WorkflowArtifactNodeWrite
     assert agent_runtime.WorkflowNodePortBundle is WorkflowNodePortBundle
+    assert _tool_input_preview is tool_input_preview
 
 
 def test_workflow_agent_node_handoff_accepts_prepared_agent_goal_and_task() -> None:
