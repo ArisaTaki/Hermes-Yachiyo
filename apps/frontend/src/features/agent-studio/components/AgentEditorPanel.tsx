@@ -1,6 +1,11 @@
 import type { ModelProfile } from '../../../lib/modelProfiles';
 import type { SkillFolderSpec, SkillSpec } from '../types';
 import type { AgentDraft } from '../types';
+import type { ToolCatalogSnapshot } from '../../yachiyo-studio/types';
+import {
+  agentToolCapabilitySummaries,
+  type AgentToolCapabilitySummary,
+} from '../utils/toolCatalog';
 import { AgentDeskPanel } from './AgentDeskPanel';
 import { AgentSkillMountsPanel } from './AgentSkillMountsPanel';
 
@@ -31,6 +36,9 @@ type AgentEditorPanelProps = {
   skillMountFilter: SkillSourceFilter;
   skillMountFolderFilter: SkillFolderFilter;
   skillMountSearch: string;
+  toolCatalog: ToolCatalogSnapshot | null;
+  toolCatalogError: string;
+  toolCatalogLoading: boolean;
   visibleMountedCount: number;
   visionModelProfiles: ModelProfile[];
   onAgentRunGoalChange: (value: string) => void;
@@ -44,6 +52,7 @@ type AgentEditorPanelProps = {
   onSetSkillMountFilter: (filter: SkillSourceFilter) => void;
   onSetSkillMountFolderFilter: (filter: SkillFolderFilter) => void;
   onSetSkillMountSearch: (query: string) => void;
+  onReloadToolCatalog: () => void;
   onTestAgentModel: () => void;
   onToggleSkillMount: (skill: SkillSpec, mounted: boolean) => void;
   onUnmountVisibleSkills: () => void;
@@ -68,6 +77,9 @@ export function AgentEditorPanel({
   skillMountFilter,
   skillMountFolderFilter,
   skillMountSearch,
+  toolCatalog,
+  toolCatalogError,
+  toolCatalogLoading,
   visibleMountedCount,
   visionModelProfiles,
   onAgentRunGoalChange,
@@ -81,11 +93,13 @@ export function AgentEditorPanel({
   onSetSkillMountFilter,
   onSetSkillMountFolderFilter,
   onSetSkillMountSearch,
+  onReloadToolCatalog,
   onTestAgentModel,
   onToggleSkillMount,
   onUnmountVisibleSkills,
 }: AgentEditorPanelProps) {
   const updateDraft = (patch: Partial<AgentDraft>) => onDraftChange({ ...draft, ...patch });
+  const toolCapabilitySummaries = agentToolCapabilitySummaries(draft, toolCatalog);
   return (
     <form className="agent-studio-panel agent-editor" data-testid="agent-editor" onSubmit={(event) => { event.preventDefault(); onSaveAgent(); }}>
       <div className="section-heading-row">
@@ -253,6 +267,12 @@ export function AgentEditorPanel({
             ))}
           </div>
         ) : null}
+        <AgentToolPolicyPreview
+          error={toolCatalogError}
+          loading={toolCatalogLoading}
+          summaries={toolCapabilitySummaries}
+          onReload={onReloadToolCatalog}
+        />
       </section>
       <div className="agent-form-row">
         <label>
@@ -337,6 +357,52 @@ export function AgentEditorPanel({
         />
       ) : null}
     </form>
+  );
+}
+
+function AgentToolPolicyPreview({
+  error,
+  loading,
+  summaries,
+  onReload,
+}: {
+  error: string;
+  loading: boolean;
+  summaries: AgentToolCapabilitySummary[];
+  onReload: () => void;
+}) {
+  return (
+    <div className="agent-tool-policy-preview" data-testid="agent-tool-policy-preview">
+      <div className="section-heading-row compact">
+        <div>
+          <h3>Tool Policy Preview</h3>
+          <span>{loading ? '同步工具目录中' : `${summaries.filter((summary) => summary.enabled).length} 个能力已启用`}</span>
+        </div>
+        <button type="button" className="hy-btn hy-btn-ghost" disabled={loading} onClick={onReload}>刷新</button>
+      </div>
+      {error ? <div className="agent-inline-note warn">{error}</div> : null}
+      <div className="agent-tool-policy-list">
+        {summaries.map((summary) => (
+          <div
+            className={summary.enabled ? 'agent-tool-policy-row enabled' : 'agent-tool-policy-row'}
+            key={summary.id}
+          >
+            <div className="agent-tool-policy-main">
+              <strong>{summary.label}</strong>
+              <span>{summary.tools.join(', ')}</span>
+              {summary.missingPermissions.length ? (
+                <em>Missing: {summary.missingPermissions.join(', ')}</em>
+              ) : null}
+            </div>
+            <div className="agent-tool-policy-meta">
+              <span className={`studio-tool-risk ${summary.riskLevel}`}>{summary.riskLevel}</span>
+              {summary.approvalRequired ? <span className="agent-policy-pill warn">approval</span> : null}
+              <span className={summary.enabled ? 'agent-policy-pill on' : 'agent-policy-pill'}>{summary.enabled ? 'on' : 'off'}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 

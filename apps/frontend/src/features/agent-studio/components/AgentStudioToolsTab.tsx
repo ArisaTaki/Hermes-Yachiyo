@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import { getYachiyoStudioToolCatalog } from '../../yachiyo-studio/api';
 import type { ToolCatalogItemSnapshot, ToolCatalogSnapshot } from '../../yachiyo-studio/types';
 
 type RiskFilter = 'all' | 'low' | 'medium' | 'high' | 'unknown';
@@ -10,35 +9,31 @@ const emptyCatalog: ToolCatalogSnapshot = {
   capabilities: {},
 };
 
-export function AgentStudioToolsTab() {
-  const [catalog, setCatalog] = useState<ToolCatalogSnapshot>(emptyCatalog);
+type AgentStudioToolsTabProps = {
+  catalog: ToolCatalogSnapshot | null;
+  error: string;
+  loading: boolean;
+  onReload: () => void;
+};
+
+export function AgentStudioToolsTab({
+  catalog: rawCatalog,
+  error,
+  loading,
+  onReload,
+}: AgentStudioToolsTabProps) {
+  const catalog = rawCatalog || emptyCatalog;
   const [selectedToolName, setSelectedToolName] = useState('');
   const [search, setSearch] = useState('');
   const [riskFilter, setRiskFilter] = useState<RiskFilter>('all');
   const [capabilityFilter, setCapabilityFilter] = useState('all');
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-
-  async function loadCatalog() {
-    setLoading(true);
-    setError('');
-    try {
-      const nextCatalog = await getYachiyoStudioToolCatalog();
-      setCatalog(nextCatalog);
-      const tools = nextCatalog.tools || [];
-      setSelectedToolName((current) => (
-        tools.some((tool) => tool.tool_name === current) ? current : tools[0]?.tool_name || ''
-      ));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Tool catalog unavailable');
-    } finally {
-      setLoading(false);
-    }
-  }
 
   useEffect(() => {
-    void loadCatalog();
-  }, []);
+    const tools = catalog.tools || [];
+    setSelectedToolName((current) => (
+      tools.some((tool) => tool.tool_name === current) ? current : tools[0]?.tool_name || ''
+    ));
+  }, [catalog.tools]);
 
   const capabilityOptions = useMemo(() => {
     const ids = new Set<string>();
@@ -81,7 +76,7 @@ export function AgentStudioToolsTab() {
             type="button"
             className="hy-btn hy-btn-ghost"
             disabled={loading}
-            onClick={() => void loadCatalog()}
+            onClick={onReload}
           >
             刷新
           </button>

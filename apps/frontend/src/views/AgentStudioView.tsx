@@ -32,6 +32,7 @@ import { useAgentStudioRunSnapshots } from '../features/agent-studio/hooks/useAg
 import { useAgentStudioRouteState } from '../features/agent-studio/hooks/useAgentStudioRouteState';
 import { useAgentStudioSelectionSynchronization } from '../features/agent-studio/hooks/useAgentStudioSelectionSynchronization';
 import { useAgentStudioTabActions } from '../features/agent-studio/hooks/useAgentStudioTabActions';
+import { useAgentToolCatalog } from '../features/agent-studio/hooks/useAgentToolCatalog';
 import { useApprovedRunGuard } from '../features/agent-studio/hooks/useApprovedRunGuard';
 import { useRunArtifactActions } from '../features/agent-studio/hooks/useRunArtifactActions';
 import { useRunCacheActions } from '../features/agent-studio/hooks/useRunCacheActions';
@@ -166,6 +167,12 @@ export function AgentStudioView() {
     workflowManagementMode,
     workflows,
   } = useWorkflowDefinitions();
+  const {
+    reloadToolCatalog,
+    toolCatalog,
+    toolCatalogError,
+    toolCatalogLoading,
+  } = useAgentToolCatalog();
 
   const refresh = useAgentStudioRefresh({
     applyAgents,
@@ -607,6 +614,7 @@ export function AgentStudioView() {
     draft,
     selectedAgent,
     selectedAgentReadOnly,
+    toolCatalog,
   });
   const {
     mountVisibleSkills,
@@ -828,6 +836,9 @@ export function AgentStudioView() {
           skillMountFilter={skillMountFilter}
           skillMountFolderFilter={skillMountFolderFilter}
           skillMountSearch={skillMountSearch}
+          toolCatalog={toolCatalog}
+          toolCatalogError={toolCatalogError}
+          toolCatalogLoading={toolCatalogLoading}
           visibleMountedCount={visibleMountedCount}
           visionModelProfiles={visionModelProfiles}
           onAgentRunGoalChange={setAgentRunGoal}
@@ -847,6 +858,7 @@ export function AgentStudioView() {
           onSetSkillMountFilter={setSkillMountFilter}
           onSetSkillMountFolderFilter={setSkillMountFolderFilter}
           onSetSkillMountSearch={setSkillMountSearch}
+          onReloadToolCatalog={() => void reloadToolCatalog()}
           onStartNewAgent={startNewAgent}
           onTestAgentModel={() => void runAction(testAgentModel, '测试模型')}
           onToggleAgentSelected={toggleAgentSelected}
@@ -986,7 +998,12 @@ export function AgentStudioView() {
       ) : null}
 
       {!loading && tab === 'tools' ? (
-        <AgentStudioToolsTab />
+        <AgentStudioToolsTab
+          catalog={toolCatalog}
+          error={toolCatalogError}
+          loading={toolCatalogLoading}
+          onReload={() => void reloadToolCatalog()}
+        />
       ) : null}
 
       {!loading && tab === 'runs' ? (

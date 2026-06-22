@@ -2192,6 +2192,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "useAgentStudioRunSnapshots({",
             "useAgentStudioSelectionSynchronization({",
             "useAgentStudioTabActions({",
+            "useAgentToolCatalog()",
             "useApprovedRunGuard",
             "useRunDetailSynchronization({",
             "useRunListDerivedState({",
@@ -2240,7 +2241,8 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
         "apps/frontend/src/features/agent-studio/components/AgentStudioToolsTab.tsx",
         [
             "export function AgentStudioToolsTab",
-            "getYachiyoStudioToolCatalog",
+            "catalog: rawCatalog",
+            "onReload",
             "data-testid=\"agent-studio-tools-tab\"",
             "data-testid=\"agent-studio-tool-list\"",
             "data-testid=\"agent-studio-tool-detail\"",
@@ -2614,6 +2616,28 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "`terminal.run` 已启用；每次运行命令都会先进入审批。",
             "前台输入会作用在当前桌面焦点窗口",
             "Browser/CDP 工具需要 Chrome 调试端口",
+            "agentToolCapabilitySummaries(draft, toolCatalog)",
+            "桌面工具权限未就绪",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useAgentToolCatalog.ts",
+        [
+            "export function useAgentToolCatalog",
+            "getYachiyoStudioToolCatalog",
+            "reloadToolCatalog",
+            "toolCatalogError",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/utils/toolCatalog.ts",
+        [
+            "export function agentToolCapabilitySummaries",
+            "export function enabledCapabilityPermissionNotices",
+            "mediaControlTools",
+            "browserControlTools",
+            "missingPermissions",
+            "approvalRequired",
         ],
     )
     _assert_contains(
@@ -6298,6 +6322,9 @@ def test_agent_studio_agents_ui_smoke_uses_definition_crud_paths() -> None:
             "selectedAgentReadOnly",
             "onSetSelectedAgentIds={setSelectedAgentIds}",
             "useAgentRunReadiness",
+            "toolCatalog={toolCatalog}",
+            "toolCatalogError={toolCatalogError}",
+            "onReloadToolCatalog={() => void reloadToolCatalog()}",
         ],
     )
     _assert_contains(
@@ -6353,6 +6380,11 @@ def test_agent_studio_agents_ui_smoke_uses_definition_crud_paths() -> None:
             "disabled={busy || selectedAgentReadOnly}",
             "agentId={draft.agent_id}",
             "系统 Agent 由 oha-yachiyo 管理，可查看但不能编辑、删除或直接挂载 Skill。",
+            "agentToolCapabilitySummaries(draft, toolCatalog)",
+            "function AgentToolPolicyPreview",
+            "data-testid=\"agent-tool-policy-preview\"",
+            "summary.missingPermissions.join(', ')",
+            "summary.approvalRequired",
         ],
     )
     _assert_contains(

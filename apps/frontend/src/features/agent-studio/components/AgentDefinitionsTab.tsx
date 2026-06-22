@@ -2,6 +2,7 @@ import type { AgentSpec, SkillFolderSpec, SkillSpec } from '../types';
 import type { ModelProfile } from '../../../lib/modelProfiles';
 import type { AgentDraft } from '../types';
 import type { SkillFolderFilter, SkillSourceFilter } from '../utils/skills';
+import type { ToolCatalogSnapshot } from '../../yachiyo-studio/types';
 import { AgentEditorPanel } from './AgentEditorPanel';
 import { AgentListPanel } from './AgentListPanel';
 
@@ -37,6 +38,9 @@ type AgentDefinitionsTabProps = {
   skillMountFilter: SkillSourceFilter;
   skillMountFolderFilter: SkillFolderFilter;
   skillMountSearch: string;
+  toolCatalog: ToolCatalogSnapshot | null;
+  toolCatalogError: string;
+  toolCatalogLoading: boolean;
   visibleMountedCount: number;
   visionModelProfiles: ModelProfile[];
   onAgentRunGoalChange: (value: string) => void;
@@ -56,6 +60,7 @@ type AgentDefinitionsTabProps = {
   onSetSkillMountFilter: (filter: SkillSourceFilter) => void;
   onSetSkillMountFolderFilter: (filter: SkillFolderFilter) => void;
   onSetSkillMountSearch: (query: string) => void;
+  onReloadToolCatalog: () => void;
   onStartNewAgent: () => void;
   onTestAgentModel: () => void;
   onToggleAgentSelected: (agentId: string) => void;
@@ -90,6 +95,9 @@ export function AgentDefinitionsTab({
   skillMountFilter,
   skillMountFolderFilter,
   skillMountSearch,
+  toolCatalog,
+  toolCatalogError,
+  toolCatalogLoading,
   visibleMountedCount,
   visionModelProfiles,
   onAgentRunGoalChange,
@@ -109,6 +117,7 @@ export function AgentDefinitionsTab({
   onSetSkillMountFilter,
   onSetSkillMountFolderFilter,
   onSetSkillMountSearch,
+  onReloadToolCatalog,
   onStartNewAgent,
   onTestAgentModel,
   onToggleAgentSelected,
@@ -155,6 +164,9 @@ export function AgentDefinitionsTab({
         skillMountFilter={skillMountFilter}
         skillMountFolderFilter={skillMountFolderFilter}
         skillMountSearch={skillMountSearch}
+        toolCatalog={toolCatalog}
+        toolCatalogError={toolCatalogError}
+        toolCatalogLoading={toolCatalogLoading}
         visibleMountedCount={visibleMountedCount}
         visionModelProfiles={visionModelProfiles}
         onAgentRunGoalChange={onAgentRunGoalChange}
@@ -168,6 +180,7 @@ export function AgentDefinitionsTab({
         onSetSkillMountFilter={onSetSkillMountFilter}
         onSetSkillMountFolderFilter={onSetSkillMountFolderFilter}
         onSetSkillMountSearch={onSetSkillMountSearch}
+        onReloadToolCatalog={onReloadToolCatalog}
         onTestAgentModel={onTestAgentModel}
         onToggleSkillMount={onToggleSkillMount}
         onUnmountVisibleSkills={onUnmountVisibleSkills}

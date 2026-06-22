@@ -15832,6 +15832,118 @@ button.activity-item {
   color: oklch(83% 0.1 24);
 }
 
+.agent-tool-policy-preview {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--hy-line);
+}
+
+.agent-tool-policy-preview .section-heading-row {
+  display: flex;
+  gap: 10px;
+  align-items: start;
+  justify-content: space-between;
+}
+
+.agent-tool-policy-preview .section-heading-row span {
+  display: block;
+  margin-top: 3px;
+  color: var(--hy-muted);
+  font-size: 11px;
+}
+
+.agent-tool-policy-list {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.agent-tool-policy-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 8px;
+  background: oklch(255 0 0 / 0.025);
+  opacity: 0.68;
+}
+
+.agent-tool-policy-row.enabled {
+  border-color: oklch(66% 0.12 188 / 0.34);
+  background: oklch(66% 0.12 188 / 0.075);
+  opacity: 1;
+}
+
+.agent-tool-policy-main {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.agent-tool-policy-main strong,
+.agent-tool-policy-main span,
+.agent-tool-policy-main em {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.agent-tool-policy-main strong {
+  color: var(--hy-fg);
+  font-size: 12px;
+  font-weight: 620;
+}
+
+.agent-tool-policy-main span {
+  color: var(--hy-muted);
+  font-size: 11px;
+  line-height: 1.38;
+}
+
+.agent-tool-policy-main em {
+  color: oklch(84% 0.13 86);
+  font-size: 11px;
+  font-style: normal;
+  line-height: 1.38;
+}
+
+.agent-tool-policy-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+  min-width: 0;
+}
+
+.agent-policy-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 4px 8px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 999px;
+  color: var(--hy-muted);
+  font-size: 10px;
+  font-weight: 620;
+  text-transform: uppercase;
+}
+
+.agent-policy-pill.on {
+  border-color: oklch(72% 0.10 174 / 0.34);
+  background: oklch(72% 0.10 174 / 0.11);
+  color: oklch(82% 0.11 174);
+}
+
+.agent-policy-pill.warn {
+  border-color: oklch(76% 0.12 86 / 0.36);
+  background: oklch(76% 0.12 86 / 0.12);
+  color: oklch(84% 0.13 86);
+}
+
 .agent-checkbox-row {
   display: flex !important;
   min-height: 34px;

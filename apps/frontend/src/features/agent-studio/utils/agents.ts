@@ -60,11 +60,11 @@ function policyTools(agent: AgentSpec): Set<string> {
   return new Set(Array.isArray(allowed) ? allowed.map((item) => String(item)) : []);
 }
 
-const screenContextTools = ['screen.capture', 'desktop.active_window'];
-const appControlTools = ['app.open', 'app.focus'];
-const mediaControlTools = ['media.apple_music_play'];
-const foregroundInputTools = ['desktop.hotkey', 'desktop.type_text'];
-const browserControlTools = [
+export const screenContextTools = ['screen.capture', 'desktop.active_window'];
+export const appControlTools = ['app.open', 'app.focus'];
+export const mediaControlTools = ['media.apple_music_play'];
+export const foregroundInputTools = ['desktop.hotkey', 'desktop.type_text'];
+export const browserControlTools = [
   'browser.open_url',
   'browser.current_page',
   'browser.click',

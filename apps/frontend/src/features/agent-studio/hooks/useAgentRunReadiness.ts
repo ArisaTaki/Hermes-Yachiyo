@@ -3,6 +3,11 @@ import { useMemo } from 'react';
 import type { AgentSpec, SkillSpec } from '../types';
 import type { ModelProfile } from '../../../lib/modelProfiles';
 import type { AgentDraft } from '../types';
+import type { ToolCatalogSnapshot } from '../../yachiyo-studio/types';
+import {
+  agentToolCapabilitySummaries,
+  enabledCapabilityPermissionNotices,
+} from '../utils/toolCatalog';
 
 export type AgentReadinessNotice = {
   tone: 'danger' | 'warn' | 'info';
@@ -17,6 +22,7 @@ type UseAgentRunReadinessOptions = {
   draft: AgentDraft;
   selectedAgent: AgentSpec | null;
   selectedAgentReadOnly: boolean;
+  toolCatalog: ToolCatalogSnapshot | null;
 };
 
 export function useAgentRunReadiness({
@@ -27,6 +33,7 @@ export function useAgentRunReadiness({
   draft,
   selectedAgent,
   selectedAgentReadOnly,
+  toolCatalog,
 }: UseAgentRunReadinessOptions) {
   const agentReadinessNotices = useMemo(() => {
     const notices: AgentReadinessNotice[] = [];
@@ -72,6 +79,15 @@ export function useAgentRunReadiness({
         text: 'Browser/CDP 工具需要 Chrome 调试端口；未配置时会回退到打开 URL，点击、输入、截图会被标记为受限。',
       });
     }
+    const permissionNotices = enabledCapabilityPermissionNotices(
+      agentToolCapabilitySummaries(draft, toolCatalog),
+    );
+    permissionNotices.forEach((message) => {
+      notices.push({
+        tone: 'warn',
+        text: `桌面工具权限未就绪：${message}。可在 Tools 页查看诊断入口和 fallback。`,
+      });
+    });
     const hasTools = draft.allow_workspace_read
       || draft.allow_workspace_write
       || draft.allow_terminal
@@ -105,6 +121,7 @@ export function useAgentRunReadiness({
     draft.model_profile_id,
     draft.writable_scopes,
     selectedAgent,
+    toolCatalog,
   ]);
 
   const agentQuickRunDisabledReason = useMemo(() => {
