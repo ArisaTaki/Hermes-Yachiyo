@@ -159,6 +159,10 @@ function runtimeToolStatusFromEvent(event: PublicRunEvent): string {
   const payloadStatus = normalizeRuntimeToolStatus(stringPayload(event.payload, 'status'));
   if (payloadStatus) return payloadStatus;
 
+  const resultStatus = runtimeToolResultStatus(objectPayload(event.payload, 'result'))
+    || runtimeToolResultStatus(event.payload);
+  if (resultStatus) return resultStatus;
+
   const eventType = String(event.event_type || '').trim();
   if (eventType === 'agent.tool.denied') return 'denied';
   if (eventType === 'agent.tool.started') return 'running';
@@ -210,11 +214,20 @@ function normalizeRuntimeToolStatus(status: string): string {
     'denied',
     'skipped',
     'expired',
+    'blocked',
   ];
   if (knownStatuses.includes(status)) {
     return status;
   }
   return 'running';
+}
+
+function runtimeToolResultStatus(result: Record<string, unknown> | undefined): string {
+  if (!result) return '';
+  if (result.foreground_lock_busy === true) return 'blocked';
+  if (result.approval_required === true) return 'waiting_approval';
+  if (result.ok === false) return 'failed';
+  return '';
 }
 
 function stringPayload(payload: Record<string, unknown> | undefined, key: string): string {
@@ -241,6 +254,7 @@ function runtimeToolStatusLabel(status: string): string {
   if (status === 'denied') return '已拒绝';
   if (status === 'skipped') return '已跳过';
   if (status === 'expired') return '已超时';
+  if (status === 'blocked') return '被占用';
   return status || '工具';
 }
 
