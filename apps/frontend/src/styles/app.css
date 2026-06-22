@@ -9624,6 +9624,14 @@ body.electron-window .hy-traffic {
   overflow-wrap: anywhere;
 }
 
+.hy-content .open-chat-shell img.yachiyo-task-artifact-content {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  object-fit: contain;
+}
+
 .hy-content .open-chat-shell .yachiyo-task-approval span,
 .hy-content .open-chat-shell .yachiyo-task-artifact span {
   color: var(--hy-faint);

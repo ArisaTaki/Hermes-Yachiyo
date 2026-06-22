@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import base64
+import mimetypes
 import shutil
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+
+_TEXT_ARTIFACT_READ_LIMIT = 300_000
+_IMAGE_ARTIFACT_READ_LIMIT = 8_000_000
 
 
 class RunArtifactRepository:
@@ -71,13 +76,35 @@ class RunArtifactRepository:
         target = (root / rel).resolve()
         if not self._is_within(target, root) or not target.is_file():
             raise KeyError(rel)
-        content = self._read_text(target, limit=300_000)
+        mime_type = mimetypes.guess_type(rel)[0] or ""
+        size_bytes = target.stat().st_size
+        if mime_type.startswith("image/"):
+            if size_bytes > _IMAGE_ARTIFACT_READ_LIMIT:
+                return {
+                    "ok": True,
+                    "run_id": run_id,
+                    "path": rel,
+                    "content": "",
+                    "mime_type": mime_type,
+                    "truncated": True,
+                }
+            content = base64.b64encode(target.read_bytes()).decode("ascii")
+            return {
+                "ok": True,
+                "run_id": run_id,
+                "path": rel,
+                "content": f"data:{mime_type};base64,{content}",
+                "mime_type": mime_type,
+                "truncated": False,
+            }
+
+        content = self._read_text(target, limit=_TEXT_ARTIFACT_READ_LIMIT)
         return {
             "ok": True,
             "run_id": run_id,
             "path": rel,
             "content": self._redact_secrets(content),
-            "truncated": target.stat().st_size > 300_000,
+            "truncated": size_bytes > _TEXT_ARTIFACT_READ_LIMIT,
         }
 
     def delete_files(self, run: dict[str, Any]) -> None:

@@ -1705,6 +1705,11 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "as=\"span\"",
             "data-testid={shellTestId}",
             "data-testid={contentTestId}",
+            "runtimeArtifactImagePreviewSource",
+            "content.startsWith('data:image/')",
+            "<img",
+            "className={`${contentClassName} runtime-readable-artifact-image`}",
+            "src={imagePreviewSrc}",
             "previewVariant = 'compact'",
         ],
     )
@@ -1734,6 +1739,14 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "workflow_run_id: workflowRunId",
             "url,",
             "artifactNumberValue",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/styles/app.css",
+        [
+            "img.yachiyo-task-artifact-content",
+            "max-width: 100%;",
+            "object-fit: contain;",
         ],
     )
     _assert_contains(

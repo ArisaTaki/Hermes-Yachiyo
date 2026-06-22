@@ -95,6 +95,7 @@ export function RuntimeReadableArtifactPreview({
   }
 
   const label = artifact.title || path || artifact.kind || 'Artifact';
+  const imagePreviewSrc = preview ? runtimeArtifactImagePreviewSource(preview, artifact) : '';
   return (
     <div
       className={className}
@@ -132,11 +133,29 @@ export function RuntimeReadableArtifactPreview({
           {error}
         </p>
       ) : null}
-      {preview ? (
+      {preview && imagePreviewSrc ? (
+        <img
+          alt={label}
+          className={`${contentClassName} runtime-readable-artifact-image`}
+          data-testid={contentTestId}
+          src={imagePreviewSrc}
+        />
+      ) : preview ? (
         <pre className={contentClassName} data-testid={contentTestId}>
           {preview.content || emptyContentLabel}
         </pre>
       ) : null}
     </div>
   );
+}
+
+function runtimeArtifactImagePreviewSource(
+  preview: RuntimeReadableArtifactContent,
+  artifact: RuntimeArtifactSnapshot,
+) {
+  const mimeType = String(preview.mime_type || artifact.mime_type || '').trim();
+  const content = String(preview.content || '').trim();
+  if (!mimeType.startsWith('image/') || !content) return '';
+  if (content.startsWith('data:image/')) return content;
+  return `data:${mimeType};base64,${content}`;
 }

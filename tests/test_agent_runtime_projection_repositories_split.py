@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import sqlite3
 import threading
@@ -141,6 +142,10 @@ def test_artifact_repository_sync_read_and_delete_files(tmp_path: Path) -> None:
     run_dir = agent_root / "run-1"
     run_dir.mkdir(parents=True)
     (run_dir / "report.md").write_text("hello secret", encoding="utf-8")
+    screenshot_bytes = b"\x89PNG\r\n\x1a\nfake-screenshot"
+    screenshot_dir = run_dir / "screenshots"
+    screenshot_dir.mkdir()
+    (screenshot_dir / "current-screen.png").write_bytes(screenshot_bytes)
 
     repo = RunArtifactRepository(
         conn,
@@ -166,6 +171,13 @@ def test_artifact_repository_sync_read_and_delete_files(tmp_path: Path) -> None:
     preview = repo.read("run-1", "report.md")
     assert preview["content"] == "hello [redacted]"
     assert preview["truncated"] is False
+
+    screenshot_preview = repo.read("run-1", "screenshots/current-screen.png")
+    assert screenshot_preview["mime_type"] == "image/png"
+    assert screenshot_preview["content"].startswith("data:image/png;base64,")
+    encoded_screenshot = screenshot_preview["content"].split(",", 1)[1]
+    assert base64.b64decode(encoded_screenshot) == screenshot_bytes
+    assert screenshot_preview["truncated"] is False
 
     repo.delete_files({"run_id": "run-1", "kind": "agent_run"})
     assert not run_dir.exists()
