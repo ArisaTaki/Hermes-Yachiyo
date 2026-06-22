@@ -21,13 +21,16 @@ from apps.shell.agent.runtime.workflow_nodes import (
     WorkflowNodePortBundle,
     WorkflowSubworkflowNodeExecution,
 )
+from apps.shell.agent.runtime.workflow_parallel import (
+    WorkflowParallelExecutionPortBundle,
+    WorkflowParallelNodeExecution,
+)
 from apps.shell.agent.runtime.workflow_ports import WorkflowContinuationPortBundle
 from apps.shell.agent.runtime.workflow_projections import (
     WorkflowConditionNodeProjection,
     WorkflowContinuationFailureProjection,
     WorkflowEdgeFollowedProjection,
     WorkflowLoopNodeProjection,
-    WorkflowParallelBranchProjection,
     WorkflowParallelNodeProjection,
     WorkflowRunCompletionProjection,
     WorkflowStartNodeProjection,
@@ -1104,90 +1107,40 @@ class WorkflowContinuationCoordinator:
     ) -> dict[str, Any]:
         plan = self._workflow_parallel_plan(workflow, node)
         nodes_by_id = self._workflow_nodes_by_id(workflow, self._workflow_path(workflow))
-        parallel_node_id = str(node.get("id") or "")
         parallel_context = self._parallel_node_resume_context(
             timeline,
-            parallel_node_id=parallel_node_id,
+            parallel_node_id=str(node.get("id") or ""),
             fallback=context,
         )
-        branch_results: list[dict[str, str]] = []
-        for branch in plan.get("branches") or []:
-            branch_context = parallel_context
-            branch_projection = WorkflowParallelBranchProjection.from_branch(
-                node,
-                branch,
-                label=label,
-                kind=kind,
-                context=parallel_context,
-            )
-            for branch_node_id in branch.get("node_ids") or []:
-                branch_node_id_text = str(branch_node_id)
-                branch_node = nodes_by_id.get(branch_node_id_text)
-                if branch_node is None:
-                    raise AgentRuntimeError(f"Parallel 分支引用了不存在的节点：{branch_node_id}")
-                branch_kind = self._node_kind(branch_node)
-                branch_node_label = str((branch_node.get("data") or {}).get("label") or branch_node.get("id"))
-                node_info_extra = branch_projection.child_node_info()
-                if branch_kind == "agent":
-                    completed_context = self._parallel_completed_agent_context(
-                        timeline,
-                        parallel_node_id=parallel_node_id,
-                        branch_node_id=branch_node_id_text,
-                    )
-                    if completed_context is not None:
-                        branch_context = completed_context
-                        continue
-                    result = self._run_agent_node(
-                        run,
-                        branch_node,
-                        label=branch_node_label,
-                        kind=branch_kind,
-                        workflow_goal=workflow_goal,
-                        context=branch_context,
-                        has_agent_upstream=has_agent_upstream,
-                        run_group_id=run_group_id,
-                        timeline=timeline,
-                        artifacts=artifacts,
-                        root_group=root_group,
-                        node_info_extra=node_info_extra,
-                    )
-                    if result.get("done"):
-                        return result
-                    branch_context = str(result.get("context") or "")
-                    continue
-                if branch_kind == "artifact":
-                    if self._parallel_completed_artifact_exists(
-                        timeline,
-                        parallel_node_id=parallel_node_id,
-                        branch_node_id=branch_node_id_text,
-                    ):
-                        continue
-                    self._write_artifact_node(
-                        run,
-                        branch_node,
-                        label=branch_node_label,
-                        kind=branch_kind,
-                        context=branch_context,
-                        artifacts=artifacts,
-                        timeline=timeline,
-                        node_info_extra=node_info_extra,
-                    )
-                    continue
-                raise AgentRuntimeError(
-                    f"Parallel 分支暂不支持 {branch_kind or 'unknown'} 节点：{branch_node_label}"
-                )
-            branch_results.append(
-                branch_projection.result_payload(branch_context)
-            )
-        aggregate_context = WorkflowParallelBranchProjection.aggregate_context(
-            label,
-            branch_results,
-            fallback=context,
+        execution = WorkflowParallelNodeExecution.from_plan(
+            run=run,
+            node=node,
+            plan=plan,
+            nodes_by_id=nodes_by_id,
+            label=label,
+            kind=kind,
+            workflow_goal=workflow_goal,
+            context=context,
+            parallel_context=parallel_context,
+            has_agent_upstream=has_agent_upstream,
+            run_group_id=run_group_id,
+            timeline=timeline,
+            artifacts=artifacts,
+            root_group=root_group,
+            ports=WorkflowParallelExecutionPortBundle(
+                node_kind=self._node_kind,
+                run_agent_node=self._run_agent_node,
+                write_artifact_node=self._write_artifact_node,
+                completed_agent_context=self._parallel_completed_agent_context,
+                completed_artifact_exists=self._parallel_completed_artifact_exists,
+            ),
         )
+        if execution.done:
+            return execution.early_result or {"done": True}
         projection = WorkflowParallelNodeProjection.from_plan(
             node,
             plan,
-            branch_results,
+            execution.branch_results,
             label=label,
             kind=kind,
         )
@@ -1195,7 +1148,7 @@ class WorkflowContinuationCoordinator:
         self._append_run_event(str(run["run_id"]), "workflow.node.parallel", projection.event_payload())
         return {
             "done": False,
-            "context": aggregate_context,
+            "context": execution.aggregate_context,
             "next_node_id": str(plan.get("join_node_id") or ""),
         }
 

@@ -398,6 +398,10 @@ from apps.shell.agent.runtime.workflow_nodes import (
     WorkflowSubworkflowNodeExecution,
 )
 from apps.shell.agent.runtime.workflow_parent_resume import WorkflowParentResumeCoordinator
+from apps.shell.agent.runtime.workflow_parallel import (
+    WorkflowParallelExecutionPortBundle,
+    WorkflowParallelNodeExecution,
+)
 from apps.shell.agent.runtime.workflow_projections import (
     WorkflowConditionNodeProjection,
     WorkflowContinuationFailureProjection,
