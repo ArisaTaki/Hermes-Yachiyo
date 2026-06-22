@@ -9354,9 +9354,78 @@ body.electron-window .hy-traffic {
 
 .hy-content .open-chat-shell .yachiyo-agent-task-approvals,
 .hy-content .open-chat-shell .yachiyo-agent-task-artifacts,
+.hy-content .open-chat-shell .yachiyo-agent-task-permission-recovery,
 .hy-content .open-chat-shell .yachiyo-agent-task-tools {
   display: grid;
   gap: 6px;
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-permission-recovery {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  padding: 7px 8px;
+  border: 1px solid oklch(82% 0.135 76 / 0.24);
+  border-radius: 6px;
+  background: oklch(82% 0.135 76 / 0.075);
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-permission-recovery > .ui-icon {
+  width: 15px;
+  height: 15px;
+  color: var(--hy-warning);
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-permission-recovery div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-permission-recovery strong,
+.hy-content .open-chat-shell .yachiyo-agent-task-permission-recovery span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-permission-recovery strong {
+  color: var(--hy-fg);
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-permission-recovery span {
+  color: var(--hy-muted);
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-permission-recovery a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid oklch(82% 0.135 76 / 0.26);
+  border-radius: 6px;
+  background: oklch(82% 0.135 76 / 0.08);
+  color: var(--hy-warning);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-permission-recovery a:hover {
+  border-color: oklch(82% 0.135 76 / 0.44);
+  color: var(--hy-fg);
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-permission-recovery a .ui-icon {
+  width: 14px;
+  height: 14px;
 }
 
 .hy-content .open-chat-shell .yachiyo-agent-task-tools {

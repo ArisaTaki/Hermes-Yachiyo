@@ -45,6 +45,7 @@ export function AgentTaskCard({
   } = useYachiyoTaskEventReplay(task);
   const canCancel = onCancelTask && ['queued', 'running', 'waiting_approval'].includes(status);
   const hasHeaderActions = Boolean((studioRunId && studioUrl && onOpenStudio) || canCancel);
+  const permissionRecovery = taskPermissionRecoveryFromEvents(timelineEvents);
 
   return (
     <section
@@ -97,6 +98,26 @@ export function AgentTaskCard({
       </header>
       {task.summary ? <p className="yachiyo-agent-task-summary">{task.summary}</p> : null}
       {timelineEvents.length ? <ToolCallSummary events={timelineEvents} /> : null}
+      {permissionRecovery ? (
+        <div
+          className="yachiyo-agent-task-permission-recovery"
+          data-permission-targets={permissionRecovery.targets.join(',')}
+          data-testid="yachiyo-agent-task-permission-recovery"
+        >
+          <UiIcon name="diagnostics" />
+          <div>
+            <strong>需要恢复桌面权限</strong>
+            <span>{permissionRecovery.labels.join('、')} 未就绪</span>
+          </div>
+          <a
+            href={permissionRecovery.href}
+            data-testid="yachiyo-agent-task-open-diagnostics"
+          >
+            <UiIcon name="diagnostics" />
+            <span>打开诊断</span>
+          </a>
+        </div>
+      ) : null}
       {timelineEvents.length ? (
         <RuntimeTimelineSummary
           className="yachiyo-agent-task-timeline"
@@ -198,4 +219,68 @@ function taskStatusLabel(status: string) {
   if (status === 'failed') return '失败';
   if (status === 'cancelled') return '已取消';
   return status || '任务';
+}
+
+type TaskPermissionRecovery = {
+  href: string;
+  labels: string[];
+  targets: string[];
+};
+
+const permissionTargetLabels: Record<string, string> = {
+  accessibility: '辅助功能权限',
+  automation: '自动化权限',
+  automation_or_accessibility: '自动化或辅助功能权限',
+  chrome_cdp: 'Chrome CDP',
+  music_app: 'Music.app',
+  open_command: 'macOS open 命令',
+  screen_capture_probe_failed: '屏幕录制探测',
+  screen_recording: '屏幕录制权限',
+  unsupported_platform: '当前平台',
+};
+
+export function taskPermissionRecoveryFromEvents(events: AgentTaskSnapshot['recent_events']): TaskPermissionRecovery | null {
+  const targets = uniqueStrings((events || []).flatMap((event) => permissionTargetsFromEvent(event)));
+  if (!targets.length) return null;
+  const params = new URLSearchParams({
+    command: 'native doctor',
+    permission_targets: targets.join(','),
+    return_to: 'chat',
+  });
+  return {
+    href: `#/diagnostics?${params.toString()}`,
+    labels: targets.map((target) => permissionTargetLabels[target] || target),
+    targets,
+  };
+}
+
+function permissionTargetsFromEvent(event: NonNullable<AgentTaskSnapshot['recent_events']>[number]): string[] {
+  if ((event.sensitivity || 'public') === 'secret') return [];
+  const payload = objectValue(event.payload);
+  const result = objectValue(payload.result);
+  const sources = [result, payload].filter(Boolean);
+  const targets = sources.flatMap((source) => [
+    ...stringList(source.permission_targets),
+    ...stringList(source.missing_permissions),
+  ]);
+  const permissionError = sources.some((source) => source.permission_error === true);
+  return permissionError || targets.length ? targets : [];
+}
+
+function objectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function stringList(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap((item) => stringList(item));
+  return String(value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function uniqueStrings(values: unknown[]): string[] {
+  return Array.from(new Set(values.map((value) => String(value || '').trim()).filter(Boolean)));
 }

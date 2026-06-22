@@ -1387,7 +1387,12 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "timelineEventSource,",
             "timelineSummaryEvents,",
             "data-event-source={timelineEventSource}",
+            "const permissionRecovery = taskPermissionRecoveryFromEvents(timelineEvents);",
             'data-testid="yachiyo-agent-task-card"',
+            'data-testid="yachiyo-agent-task-permission-recovery"',
+            'data-testid="yachiyo-agent-task-open-diagnostics"',
+            "data-permission-targets={permissionRecovery.targets.join(',')}",
+            "href={permissionRecovery.href}",
             'data-testid="yachiyo-agent-task-open-studio"',
             "href={studioUrl}",
             "data-studio-url={studioUrl}",
@@ -1417,6 +1422,14 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "approvalFacts.slice(0, 2).map((approval)",
             "artifactFacts.slice(0, 3).map((artifact)",
             "在 Agent Studio 中查看",
+            "export function taskPermissionRecoveryFromEvents",
+            "permissionTargetsFromEvent",
+            "payload.result",
+            "source.permission_error === true",
+            "source.permission_targets",
+            "source.missing_permissions",
+            "command: 'native doctor'",
+            "return_to: 'chat'",
         ],
     )
     _assert_not_contains(
@@ -1443,6 +1456,13 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "export function runEventPageNextCursor",
             "page.next_after_sequence",
             "return Array.from(bySequence.values()).sort(",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/styles/app.css",
+        [
+            ".hy-content .open-chat-shell .yachiyo-agent-task-permission-recovery",
+            ".hy-content .open-chat-shell .yachiyo-agent-task-permission-recovery a",
         ],
     )
     _assert_contains(
