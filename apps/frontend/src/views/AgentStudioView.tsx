@@ -7,6 +7,7 @@ import { AgentStudioPageFrame } from '../features/agent-studio/components/AgentS
 import { AgentStudioRunsTab } from '../features/agent-studio/components/AgentStudioRunsTab';
 import { AgentStudioSkillFoldersTab } from '../features/agent-studio/components/AgentStudioSkillFoldersTab';
 import { AgentStudioSkillsTab } from '../features/agent-studio/components/AgentStudioSkillsTab';
+import { AgentStudioToolsTab } from '../features/agent-studio/components/AgentStudioToolsTab';
 import { AgentStudioWorkflowsTab } from '../features/agent-studio/components/AgentStudioWorkflowsTab';
 import { useAgentAvatarActions } from '../features/agent-studio/hooks/useAgentAvatarActions';
 import { useAgentDeletionActions } from '../features/agent-studio/hooks/useAgentDeletionActions';
@@ -982,6 +983,10 @@ export function AgentStudioView() {
           onOpenRunDetail={openRunDetail}
           onTriggerDueFutureTasks={() => void runAction(triggerDueFutureTaskRuns, '触发到期 FutureTask')}
         />
+      ) : null}
+
+      {!loading && tab === 'tools' ? (
+        <AgentStudioToolsTab />
       ) : null}
 
       {!loading && tab === 'runs' ? (

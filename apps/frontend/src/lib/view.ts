@@ -144,5 +144,5 @@ function routeFromHash(hash: string): RouteState | null {
 }
 
 function isAgentStudioTab(value?: string): boolean {
-  return Boolean(value && ['agents', 'groups', 'skills', 'skill-groups', 'workflows', 'runs', 'memory'].includes(value));
+  return Boolean(value && ['agents', 'groups', 'skills', 'skill-groups', 'workflows', 'tools', 'runs', 'memory'].includes(value));
 }

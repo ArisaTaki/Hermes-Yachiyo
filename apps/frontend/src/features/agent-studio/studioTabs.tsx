@@ -1,4 +1,4 @@
-export type StudioTab = 'agents' | 'groups' | 'skills' | 'skill-groups' | 'workflows' | 'runs' | 'memory';
+export type StudioTab = 'agents' | 'groups' | 'skills' | 'skill-groups' | 'workflows' | 'tools' | 'runs' | 'memory';
 
 export const studioRouteTabs: StudioTab[] = [
   'agents',
@@ -6,6 +6,7 @@ export const studioRouteTabs: StudioTab[] = [
   'skills',
   'skill-groups',
   'workflows',
+  'tools',
   'runs',
   'memory',
 ];
@@ -15,6 +16,7 @@ export const studioTabs: StudioTab[] = [
   'groups',
   'skills',
   'workflows',
+  'tools',
   'runs',
   'memory',
 ];
@@ -33,6 +35,7 @@ export function studioTabLabel(item: StudioTab): string {
   if (item === 'groups') return 'Groups';
   if (item === 'skills') return 'Skill Library';
   if (item === 'workflows') return 'Workflow Studio';
+  if (item === 'tools') return 'Tools';
   if (item === 'runs') return 'Runs';
   if (item === 'memory') return 'Memory';
   return item;

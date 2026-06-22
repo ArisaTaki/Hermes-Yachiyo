@@ -97,7 +97,7 @@ def test_frontend_preserves_top_level_product_routes_and_navigation() -> None:
             "| 'bubble'",
             "| 'bubble-menu'",
             "| 'live2d'",
-            "['agents', 'groups', 'skills', 'skill-groups', 'workflows', 'runs', 'memory']",
+            "['agents', 'groups', 'skills', 'skill-groups', 'workflows', 'tools', 'runs', 'memory']",
         ],
     )
     _assert_contains(
@@ -1873,6 +1873,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "/yachiyo/studio/skills/sync",
             "/yachiyo/studio/skills/install",
             "/yachiyo/studio/skill-folders",
+            "/yachiyo/studio/tools",
             "/yachiyo/studio/memories",
             "/yachiyo/studio/groups",
             "/yachiyo/studio/group-runs",
@@ -1883,6 +1884,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "export type YachiyoRunEventsPage = RunEventPageSnapshot;",
             "YachiyoRunTimelineSnapshot",
             "listYachiyoStudioAgents",
+            "getYachiyoStudioToolCatalog",
             "getYachiyoStudioAgent",
             "/yachiyo/studio/agents/${encodeURIComponent(agentId)}",
             "saveYachiyoStudioAgent",
@@ -2033,6 +2035,9 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "export type MemoryTraceSnapshot",
             "export type SkillTraceSnapshot",
             "export type RunTimelineSnapshot",
+            "export type DesktopExecutionCapabilitySnapshot",
+            "export type ToolCatalogItemSnapshot",
+            "export type ToolCatalogSnapshot",
             "export type ChatRunnableParticipantSnapshot",
             "export type ChatRunnableSnapshot",
             "export type WorkflowRunSnapshot",
@@ -2095,6 +2100,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "AgentGroupSnapshot",
             "GroupRunSnapshot",
             "RunEventPageSnapshot",
+            "ToolCatalogSnapshot",
             "ArtifactContentSnapshot",
             "RunTimelineSnapshot",
             "WorkflowRunSnapshot",
@@ -2103,6 +2109,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "ArtifactSnapshot",
             "MemoryTraceSnapshot",
             "SkillTraceSnapshot",
+            "ToolCatalogItemSnapshot",
             "export type SaveAgentGroupRequest",
         ],
     )
@@ -2151,7 +2158,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
         "apps/frontend/src/features/agent-studio/studioTabs.tsx",
         [
             "export type StudioTab = 'agents' | 'groups' | 'skills' | 'skill-groups' | "
-            "'workflows' | 'runs' | 'memory';",
+            "'workflows' | 'tools' | 'runs' | 'memory';",
             "export const studioTabs: StudioTab[] = [",
             "export function normalizeStudioTab",
             "export function isStudioTopTabActive",
@@ -2166,6 +2173,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "onActivateTab={activateTab}",
             "onBack={() => void openAppView('main')}",
             "AgentStudioGroupsTab",
+            "AgentStudioToolsTab",
             "useAgentDefinitions",
             "useAgentModelTestActions({",
             "mergeAgent",
@@ -2190,6 +2198,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "useRunTargetReadiness({",
             "useWorkflowDefinitions",
             "AgentStudioRunsTab",
+            "tab === 'tools'",
             "useWorkflowRunReadiness({",
             "selectedGroupRunSnapshot={selectedGroupRunSnapshot}",
             "selectedPublicRunTimeline={selectedPublicRunTimeline}",
@@ -2226,6 +2235,20 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
     _assert_not_contains(
         "apps/frontend/src/features/agent-studio/components/AgentStudioChrome.tsx",
         ["线性 Workflow"],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/AgentStudioToolsTab.tsx",
+        [
+            "export function AgentStudioToolsTab",
+            "getYachiyoStudioToolCatalog",
+            "data-testid=\"agent-studio-tools-tab\"",
+            "data-testid=\"agent-studio-tool-list\"",
+            "data-testid=\"agent-studio-tool-detail\"",
+            "tool.input_schema",
+            "tool.missing_permissions",
+            "tool.fallback_notes",
+            "studio-tool-risk",
+        ],
     )
     _assert_not_contains(
         "apps/frontend/src/views/AgentStudioView.tsx",
@@ -5739,7 +5762,7 @@ def test_agent_studio_exposes_runtime_memory_and_future_task_management() -> Non
     _assert_contains(
         "apps/frontend/src/lib/view.ts",
         [
-            "['agents', 'groups', 'skills', 'skill-groups', 'workflows', 'runs', 'memory']",
+            "['agents', 'groups', 'skills', 'skill-groups', 'workflows', 'tools', 'runs', 'memory']",
         ],
     )
     _assert_contains(

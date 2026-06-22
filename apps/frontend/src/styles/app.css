@@ -14701,6 +14701,209 @@ button.activity-item {
   width: 100%;
 }
 
+.agent-studio-tools-grid {
+  grid-template-columns: minmax(300px, 0.38fr) minmax(520px, 1fr);
+}
+
+.studio-tool-list-panel {
+  align-self: stretch;
+}
+
+.studio-tool-list-panel .section-heading-row,
+.studio-tool-detail .section-heading-row {
+  display: flex;
+  gap: 12px;
+  align-items: start;
+  justify-content: space-between;
+}
+
+.studio-tool-list-panel .section-heading-row span,
+.studio-tool-detail .section-heading-row span {
+  display: block;
+  margin-top: 3px;
+  color: var(--hy-muted);
+  font-size: 12px;
+}
+
+.studio-tool-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(112px, 0.36fr) minmax(132px, 0.44fr);
+  gap: 10px;
+  min-width: 0;
+}
+
+.studio-tool-list {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  max-height: min(62vh, 680px);
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.studio-tool-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  min-height: 58px;
+  padding: 10px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 8px;
+  background: oklch(255 0 0 / 0.025);
+  color: var(--hy-fg);
+  text-align: left;
+}
+
+.studio-tool-item:hover {
+  border-color: oklch(66% 0.12 188 / 0.34);
+}
+
+.studio-tool-item.active {
+  border-color: oklch(66% 0.12 188 / 0.46);
+  background: oklch(66% 0.12 188 / 0.10);
+}
+
+.studio-tool-item strong,
+.studio-tool-item small {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.studio-tool-item strong {
+  color: var(--hy-fg);
+  font-size: 13px;
+  font-weight: 580;
+}
+
+.studio-tool-item small {
+  margin-top: 4px;
+  color: var(--hy-muted);
+  font-size: 11px;
+  text-transform: capitalize;
+}
+
+.studio-tool-risk {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 64px;
+  min-height: 24px;
+  padding: 4px 8px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 999px;
+  color: var(--hy-muted);
+  font-size: 11px;
+  font-weight: 620;
+  text-transform: uppercase;
+}
+
+.studio-tool-risk.low {
+  border-color: oklch(72% 0.10 174 / 0.36);
+  background: oklch(72% 0.10 174 / 0.12);
+  color: oklch(82% 0.11 174);
+}
+
+.studio-tool-risk.medium {
+  border-color: oklch(76% 0.12 86 / 0.38);
+  background: oklch(76% 0.12 86 / 0.13);
+  color: oklch(84% 0.13 86);
+}
+
+.studio-tool-risk.high {
+  border-color: oklch(66% 0.18 28 / 0.40);
+  background: oklch(66% 0.18 28 / 0.13);
+  color: oklch(82% 0.16 28);
+}
+
+.studio-tool-detail {
+  align-content: start;
+}
+
+.studio-tool-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  min-width: 0;
+}
+
+.studio-tool-detail-grid>span {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 8px;
+  background: oklch(255 0 0 / 0.025);
+}
+
+.studio-tool-detail-grid small,
+.studio-tool-detail-grid strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.studio-tool-detail-grid small {
+  color: var(--hy-muted);
+  font-size: 11px;
+}
+
+.studio-tool-detail-grid strong {
+  color: var(--hy-fg);
+  font-size: 12px;
+  font-weight: 580;
+}
+
+.studio-tool-description {
+  margin: 0;
+  color: var(--hy-subtle);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.studio-tool-pill-row,
+.studio-tool-note-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  min-width: 0;
+}
+
+.studio-tool-permission,
+.studio-tool-note-list span {
+  display: inline-flex;
+  max-width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 999px;
+  background: oklch(255 0 0 / 0.025);
+  color: var(--hy-muted);
+  font-size: 11px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.studio-tool-permission.missing {
+  border-color: oklch(76% 0.12 86 / 0.36);
+  background: oklch(76% 0.12 86 / 0.12);
+  color: oklch(84% 0.13 86);
+}
+
+.studio-tool-schema pre {
+  max-height: 420px;
+  margin: 0;
+  overflow: auto;
+}
+
+.studio-tool-empty {
+  color: var(--hy-muted);
+  font-size: 13px;
+}
+
 .agent-group-settings-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
