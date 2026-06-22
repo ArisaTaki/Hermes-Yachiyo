@@ -14845,7 +14845,7 @@ button.activity-item {
 
 .studio-tool-detail-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
   gap: 10px;
   min-width: 0;
 }
@@ -14884,6 +14884,38 @@ button.activity-item {
   line-height: 1.55;
 }
 
+.studio-tool-inspector-section {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--hy-line);
+}
+
+.studio-tool-inspector-heading {
+  display: flex;
+  gap: 10px;
+  align-items: start;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.studio-tool-inspector-heading h3 {
+  margin: 0;
+  color: var(--hy-fg);
+  font-size: 13px;
+  font-weight: 590;
+  line-height: 1.25;
+}
+
+.studio-tool-inspector-heading span {
+  color: var(--hy-muted);
+  font-size: 11px;
+  line-height: 1.35;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
 .studio-tool-pill-row,
 .studio-tool-note-list {
   display: flex;
@@ -14910,6 +14942,66 @@ button.activity-item {
   border-color: oklch(76% 0.12 86 / 0.36);
   background: oklch(76% 0.12 86 / 0.12);
   color: oklch(84% 0.13 86);
+}
+
+.studio-tool-schema-property-list {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.studio-tool-schema-property {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 12px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 8px;
+  background: oklch(255 0 0 / 0.025);
+}
+
+.studio-tool-schema-property>div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.studio-tool-schema-property strong,
+.studio-tool-schema-property span,
+.studio-tool-schema-property small,
+.studio-tool-schema-property p {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.studio-tool-schema-property strong {
+  color: var(--hy-fg);
+  font-size: 12px;
+  font-weight: 580;
+}
+
+.studio-tool-schema-property span,
+.studio-tool-schema-property small {
+  color: var(--hy-muted);
+  font-size: 11px;
+}
+
+.studio-tool-schema-property small {
+  padding: 2px 6px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 999px;
+  background: oklch(255 0 0 / 0.025);
+}
+
+.studio-tool-schema-property p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--hy-subtle);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .studio-tool-schema pre {

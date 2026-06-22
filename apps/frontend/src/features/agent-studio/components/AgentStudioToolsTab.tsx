@@ -158,17 +158,27 @@ function ToolDetail({
   tool: ToolCatalogItemSnapshot;
 }) {
   const capability = tool.capability_id ? catalog.capabilities?.[tool.capability_id] : undefined;
+  const inputSchema = toolInputSchema(tool);
+  const schemaProperties = schemaPropertyRows(inputSchema);
+  const missingPermissions = tool.missing_permissions || [];
+  const fallbackNotes = tool.fallback_notes || [];
+  const diagnosticRoute = tool.diagnostic_route || capability?.diagnostic_route || '';
+  const modelFunctionName = modelToolFunctionName(tool) || tool.function_name;
   return (
     <>
       <div className="section-heading-row">
         <div>
           <h2>{tool.tool_name}</h2>
-          <span>{tool.function_name}</span>
+          <span>{modelFunctionName}</span>
         </div>
         <span className={`studio-tool-risk ${normalizedRisk(tool)}`}>{riskLabel(tool)}</span>
       </div>
 
       <div className="studio-tool-detail-grid">
+        <span data-testid="studio-tool-risk-detail">
+          <small>Risk</small>
+          <strong>{riskLabel(tool)}</strong>
+        </span>
         <span>
           <small>Capability</small>
           <strong>{capabilityLabel(tool.capability_id || '')}</strong>
@@ -179,39 +189,87 @@ function ToolDetail({
         </span>
         <span>
           <small>Diagnostic</small>
-          <strong>{tool.diagnostic_route || capability?.diagnostic_route || 'None'}</strong>
+          <strong data-testid="studio-tool-diagnostic-route">{diagnosticRoute || 'None'}</strong>
         </span>
         <span>
           <small>Source</small>
           <strong>{tool.source || 'runtime'}</strong>
         </span>
+        <span>
+          <small>Function</small>
+          <strong>{tool.function_name}</strong>
+        </span>
       </div>
 
       {tool.description ? <p className="studio-tool-description">{tool.description}</p> : null}
 
-      <div className="studio-tool-pill-row">
-        {(tool.missing_permissions || []).map((permission) => (
-          <span className="studio-tool-permission missing" key={permission}>{permission}</span>
-        ))}
-        {!(tool.missing_permissions || []).length ? (
-          <span className="studio-tool-permission">permissions ready</span>
-        ) : null}
+      <div className="studio-tool-inspector-section" data-testid="studio-tool-permissions">
+        <div className="studio-tool-inspector-heading">
+          <h3>Permissions</h3>
+          <span>{missingPermissions.length ? 'Missing requirements' : 'Ready'}</span>
+        </div>
+        <div className="studio-tool-pill-row">
+          {missingPermissions.map((permission) => (
+            <span className="studio-tool-permission missing" key={permission}>{permission}</span>
+          ))}
+          {!missingPermissions.length ? (
+            <span className="studio-tool-permission">permissions ready</span>
+          ) : null}
+        </div>
       </div>
 
-      {(tool.fallback_notes || []).length ? (
-        <div className="studio-tool-note-list">
-          {tool.fallback_notes?.map((note) => <span key={note}>{note}</span>)}
+      <div className="studio-tool-inspector-section" data-testid="studio-tool-fallback-notes">
+        <div className="studio-tool-inspector-heading">
+          <h3>Fallback</h3>
+          <span>{fallbackNotes.length ? 'Runtime fallback path' : 'No fallback registered'}</span>
         </div>
-      ) : null}
+        <div className="studio-tool-note-list">
+          {fallbackNotes.map((note) => <span key={note}>{note}</span>)}
+          {!fallbackNotes.length ? <span>No fallback registered for this tool.</span> : null}
+        </div>
+      </div>
 
-      <details className="run-detail-block run-detail-fold studio-tool-schema" open>
+      <div className="studio-tool-inspector-section" data-testid="studio-tool-schema-properties">
+        <div className="studio-tool-inspector-heading">
+          <h3>Schema Properties</h3>
+          <span>{schemaProperties.length} parameters</span>
+        </div>
+        {schemaProperties.length ? (
+          <div className="studio-tool-schema-property-list">
+            {schemaProperties.map((property) => (
+              <div className="studio-tool-schema-property" key={property.name}>
+                <div>
+                  <strong>{property.name}</strong>
+                  {property.required ? <small>required</small> : null}
+                </div>
+                <span>{property.type}</span>
+                {property.description ? <p>{property.description}</p> : null}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <span className="studio-tool-empty">No input properties</span>
+        )}
+      </div>
+
+      <details className="run-detail-block run-detail-fold studio-tool-schema" data-testid="studio-tool-input-schema" open>
         <summary className="run-detail-section-head">
           <div>
             <h4>Input Schema</h4>
             <span>Model parameters</span>
           </div>
         </summary>
-        <pre>{JSON.stringify(tool.input_schema || {}, null, 2)}</pre>
+        <pre>{JSON.stringify(inputSchema, null, 2)}</pre>
+      </details>
+
+      <details className="run-detail-block run-detail-fold studio-tool-schema" data-testid="studio-tool-model-schema">
+        <summary className="run-detail-section-head">
+          <div>
+            <h4>Model Tool Schema</h4>
+            <span>{modelFunctionName}</span>
+          </div>
+        </summary>
+        <pre>{JSON.stringify(tool.model_tool_schema || {}, null, 2)}</pre>
       </details>
     </>
   );
@@ -232,4 +290,66 @@ function riskLabel(tool: ToolCatalogItemSnapshot): string {
 function capabilityLabel(value: string): string {
   if (!value) return 'Unscoped';
   return value.replace(/_/g, ' ');
+}
+
+type SchemaPropertyRow = {
+  name: string;
+  type: string;
+  description: string;
+  required: boolean;
+};
+
+function toolInputSchema(tool: ToolCatalogItemSnapshot): Record<string, unknown> {
+  const directSchema = objectRecord(tool.input_schema);
+  if (Object.keys(directSchema).length) return directSchema;
+  const modelSchema = objectRecord(tool.model_tool_schema);
+  const functionSchema = objectRecord(modelSchema.function);
+  return objectRecord(functionSchema.parameters);
+}
+
+function modelToolFunctionName(tool: ToolCatalogItemSnapshot): string {
+  const modelSchema = objectRecord(tool.model_tool_schema);
+  const functionSchema = objectRecord(modelSchema.function);
+  return typeof functionSchema.name === 'string' ? functionSchema.name : '';
+}
+
+function schemaPropertyRows(schema: Record<string, unknown>): SchemaPropertyRow[] {
+  const properties = objectRecord(schema.properties);
+  const required = new Set(stringArray(schema.required));
+  return Object.entries(properties).map(([name, value]) => {
+    const property = objectRecord(value);
+    return {
+      name,
+      type: schemaPropertyType(property),
+      description: typeof property.description === 'string' ? property.description : '',
+      required: required.has(name),
+    };
+  });
+}
+
+function schemaPropertyType(property: Record<string, unknown>): string {
+  const typeValue = property.type;
+  if (typeof typeValue === 'string' && typeValue.trim()) return typeValue;
+  if (Array.isArray(typeValue)) {
+    const types = stringArray(typeValue);
+    if (types.length) return types.join(' | ');
+  }
+  const anyOfTypes = Array.isArray(property.anyOf)
+    ? property.anyOf
+      .map((item) => objectRecord(item).type)
+      .flatMap((item) => stringArray(Array.isArray(item) ? item : [item]))
+    : [];
+  if (anyOfTypes.length) return Array.from(new Set(anyOfTypes)).join(' | ');
+  if (Array.isArray(property.enum) && property.enum.length) return `enum(${property.enum.length})`;
+  return 'unknown';
+}
+
+function objectRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return value as Record<string, unknown>;
+}
+
+function stringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => String(item || '').trim()).filter(Boolean);
 }
