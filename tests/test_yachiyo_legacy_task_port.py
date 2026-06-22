@@ -33,8 +33,12 @@ def test_legacy_runtime_port_starts_and_links_chat_task() -> None:
     ]
 
 
-def test_legacy_runtime_port_readiness_includes_desktop_execution_capabilities() -> None:
+def test_legacy_runtime_port_readiness_includes_desktop_execution_capabilities(monkeypatch) -> None:
     runtime = _FakeRuntime()
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.legacy_tasks.desktop_permission_missing_by_capability",
+        lambda: {},
+    )
 
     readiness = LegacyRuntimePort(runtime).readiness()
     capabilities = readiness["capabilities"]
@@ -53,6 +57,26 @@ def test_legacy_runtime_port_readiness_includes_desktop_execution_capabilities()
     )
     assert "screen.capture" in capabilities["screen_capture"]["tools"]
     assert capabilities["foreground_input"]["risk_default"] == "medium"
+    assert runtime.calls == [("list_runnables", None)]
+
+
+def test_legacy_runtime_port_readiness_reports_desktop_permission_gaps(monkeypatch) -> None:
+    runtime = _FakeRuntime()
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.legacy_tasks.desktop_permission_missing_by_capability",
+        lambda: {
+            "screen_capture": ["screen_recording"],
+            "foreground_input": ["accessibility"],
+        },
+    )
+
+    readiness = LegacyRuntimePort(runtime).readiness()
+    capabilities = readiness["capabilities"]
+
+    assert capabilities["screen_capture"]["missing_permissions"] == ["screen_recording"]
+    assert capabilities["screen_capture"]["available"] is False
+    assert capabilities["foreground_input"]["missing_permissions"] == ["accessibility"]
+    assert capabilities["foreground_input"]["available"] is False
     assert runtime.calls == [("list_runnables", None)]
 
 

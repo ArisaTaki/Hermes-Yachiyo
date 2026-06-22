@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .desktop_permissions import desktop_permission_missing_by_capability
 from .legacy_runs import LegacyRunPayloadProjector
 from .policy import desktop_execution_capability_snapshots
 
@@ -34,13 +35,20 @@ class LegacyRuntimePort:
             known_tools = set()
         else:
             known_tools = set(KNOWN_AGENT_TOOLS)
+        try:
+            missing_permissions = desktop_permission_missing_by_capability()
+        except Exception:
+            missing_permissions = {"desktop_execution": ["permission_probe_failed"]}
         return {
             "ok": True,
             "status": "ready",
             "capabilities": {
                 "tasks": True,
                 "runnables": len(payload.get("runnables") or []),
-                **desktop_execution_capability_snapshots(registered_tools=known_tools),
+                **desktop_execution_capability_snapshots(
+                    registered_tools=known_tools,
+                    missing_permissions=missing_permissions,
+                ),
             },
         }
 

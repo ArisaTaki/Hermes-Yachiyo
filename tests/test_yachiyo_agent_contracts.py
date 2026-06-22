@@ -341,6 +341,32 @@ def test_desktop_execution_capability_policy_marks_registered_tools_available() 
     assert capabilities["screen_capture"]["diagnostic_route"] == "/screen/current"
 
 
+def test_desktop_execution_capability_policy_applies_missing_permissions() -> None:
+    capabilities = desktop_execution_capability_snapshots(
+        platform_name="Darwin",
+        registered_tools={
+            "screen.capture",
+            "desktop.active_window",
+            "app.open",
+            "app.focus",
+            "media.apple_music_play",
+            "desktop.hotkey",
+            "desktop.type_text",
+        },
+        missing_permissions={
+            "screen_capture": ["screen_recording"],
+            "foreground_input": ["accessibility"],
+        },
+    )
+
+    assert capabilities["desktop_execution"]["available"] is True
+    assert capabilities["screen_capture"]["available"] is False
+    assert capabilities["screen_capture"]["missing_permissions"] == ["screen_recording"]
+    assert capabilities["foreground_input"]["available"] is False
+    assert capabilities["foreground_input"]["missing_permissions"] == ["accessibility"]
+    assert capabilities["media_control"]["available"] is True
+
+
 def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_risk_level("screen.capture") == "low"
     assert desktop_tool_risk_level("desktop.type_text") == "medium"

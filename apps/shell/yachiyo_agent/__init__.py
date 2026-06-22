@@ -42,6 +42,10 @@ from .contracts import (
     WorkflowRunSnapshot,
     WorkflowSnapshot,
 )
+from .desktop_permissions import (
+    clear_desktop_permission_probe_cache,
+    desktop_permission_missing_by_capability,
+)
 from .links import studio_run_url
 from .policy import (
     DESKTOP_EXECUTION_CAPABILITY_IDS,
@@ -73,7 +77,9 @@ __all__ = [
     "ChatRunnableCatalogSnapshot",
     "ChatRunnableParticipantSnapshot",
     "ChatRunnableSnapshot",
+    "clear_desktop_permission_probe_cache",
     "desktop_execution_capability_snapshots",
+    "desktop_permission_missing_by_capability",
     "DESKTOP_EXECUTION_CAPABILITY_IDS",
     "DesktopExecutionCapabilitySnapshot",
     "DesktopExecutionRisk",
