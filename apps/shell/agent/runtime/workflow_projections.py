@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from apps.shell.agent.runtime.events import tool_input_preview as _tool_input_preview
 from packages.security import redact_sensitive_text
 
 
@@ -243,6 +244,70 @@ class WorkflowParallelNodeProjection:
             self.node_label,
             **self.event_payload(),
         )
+
+
+@dataclass(frozen=True)
+class WorkflowParallelBranchProjection:
+    """Metadata and result projection for one Workflow parallel branch."""
+
+    parallel_node_id: str
+    parallel_node_kind: str
+    parallel_node_label: str
+    branch_entry_node_id: str
+    branch_label: str
+    parent_context: str
+
+    @classmethod
+    def from_branch(
+        cls,
+        node: dict[str, Any],
+        branch: dict[str, Any],
+        *,
+        label: str,
+        kind: str,
+        context: str,
+    ) -> "WorkflowParallelBranchProjection":
+        branch_entry_node_id = str(branch.get("entry_node_id") or "")
+        return cls(
+            parallel_node_id=str(node.get("id") or ""),
+            parallel_node_kind=kind,
+            parallel_node_label=label,
+            branch_entry_node_id=branch_entry_node_id,
+            branch_label=str(branch.get("label") or branch_entry_node_id or "Branch"),
+            parent_context=context,
+        )
+
+    def child_node_info(self) -> dict[str, str]:
+        return {
+            "workflow_parent_node_id": self.parallel_node_id,
+            "workflow_parent_node_kind": self.parallel_node_kind,
+            "workflow_parent_node_label": self.parallel_node_label,
+            "workflow_parallel_branch_entry_node_id": self.branch_entry_node_id,
+            "workflow_parallel_branch_label": self.branch_label,
+            "workflow_parent_node_context": self.parent_context,
+        }
+
+    def result_payload(self, context: str) -> dict[str, str]:
+        return {
+            "entry_node_id": self.branch_entry_node_id,
+            "label": self.branch_label,
+            "result": _tool_input_preview(context, limit=1800),
+        }
+
+    @staticmethod
+    def aggregate_context(
+        label: str,
+        branch_results: list[dict[str, str]],
+        *,
+        fallback: str,
+    ) -> str:
+        aggregate_context = "\n".join(
+            f"- {item['label']}: {item['result']}"
+            for item in branch_results
+        ).strip()
+        if aggregate_context:
+            return f"Parallel {label} results:\n{aggregate_context}"
+        return fallback
 
 
 @dataclass(frozen=True)

@@ -403,6 +403,7 @@ from apps.shell.agent.runtime.workflow_projections import (
     WorkflowContinuationFailureProjection,
     WorkflowEdgeFollowedProjection,
     WorkflowLoopNodeProjection,
+    WorkflowParallelBranchProjection,
     WorkflowParallelNodeProjection,
     WorkflowProjectionPortBundle,
     WorkflowRunCompletionProjection,

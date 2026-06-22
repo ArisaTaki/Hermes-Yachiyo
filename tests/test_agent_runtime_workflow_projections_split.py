@@ -8,6 +8,7 @@ from apps.shell.agent.runtime.workflow_projections import (
     WorkflowContinuationFailureProjection,
     WorkflowEdgeFollowedProjection,
     WorkflowLoopNodeProjection,
+    WorkflowParallelBranchProjection,
     WorkflowParallelNodeProjection,
     WorkflowProjectionPortBundle,
     WorkflowRunCompletionProjection,
@@ -19,6 +20,7 @@ def test_workflow_timeline_projections_remain_exported_from_legacy_module() -> N
     assert agent_runtime.WorkflowStartNodeProjection is WorkflowStartNodeProjection
     assert agent_runtime.WorkflowEdgeFollowedProjection is WorkflowEdgeFollowedProjection
     assert agent_runtime.WorkflowConditionNodeProjection is WorkflowConditionNodeProjection
+    assert agent_runtime.WorkflowParallelBranchProjection is WorkflowParallelBranchProjection
     assert agent_runtime.WorkflowParallelNodeProjection is WorkflowParallelNodeProjection
     assert agent_runtime.WorkflowLoopNodeProjection is WorkflowLoopNodeProjection
     assert agent_runtime.WorkflowRunCompletionProjection is WorkflowRunCompletionProjection
@@ -207,3 +209,40 @@ def test_workflow_parallel_projection_accepts_plan_payload() -> None:
         ],
         "status": "completed",
     }
+
+
+def test_workflow_parallel_branch_projection_builds_child_metadata_and_aggregate_context() -> None:
+    projection = WorkflowParallelBranchProjection.from_branch(
+        {"id": "fanout", "type": "parallel"},
+        {"entry_node_id": "design", "label": "Design"},
+        label="Parallel Work",
+        kind="parallel",
+        context="Parent context",
+    )
+
+    assert projection.child_node_info() == {
+        "workflow_parent_node_id": "fanout",
+        "workflow_parent_node_kind": "parallel",
+        "workflow_parent_node_label": "Parallel Work",
+        "workflow_parallel_branch_entry_node_id": "design",
+        "workflow_parallel_branch_label": "Design",
+        "workflow_parent_node_context": "Parent context",
+    }
+    assert projection.result_payload("Design ready") == {
+        "entry_node_id": "design",
+        "label": "Design",
+        "result": "Design ready",
+    }
+    assert WorkflowParallelBranchProjection.aggregate_context(
+        "Parallel Work",
+        [projection.result_payload("Design ready")],
+        fallback="Parent context",
+    ) == "Parallel Parallel Work results:\n- Design: Design ready"
+    assert (
+        WorkflowParallelBranchProjection.aggregate_context(
+            "Parallel Work",
+            [],
+            fallback="Parent context",
+        )
+        == "Parent context"
+    )

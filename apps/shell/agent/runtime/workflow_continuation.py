@@ -8,7 +8,6 @@ from apps.shell.agent.runtime.budget import RunBudgetLimits, WorkflowRunBudget
 from apps.shell.agent.runtime.callbacks import supports_keyword
 from apps.shell.agent.runtime.clock import iso_epoch as _iso_epoch
 from apps.shell.agent.runtime.errors import AgentRuntimeError
-from apps.shell.agent.runtime.events import tool_input_preview
 from apps.shell.agent.runtime.tool_brokers import write_artifact_with_tool_broker
 from apps.shell.agent.runtime.workflow_approvals import WorkflowApprovalPauseProjection
 from apps.shell.agent.runtime.workflow_child_approvals import (
@@ -28,6 +27,7 @@ from apps.shell.agent.runtime.workflow_projections import (
     WorkflowContinuationFailureProjection,
     WorkflowEdgeFollowedProjection,
     WorkflowLoopNodeProjection,
+    WorkflowParallelBranchProjection,
     WorkflowParallelNodeProjection,
     WorkflowRunCompletionProjection,
     WorkflowStartNodeProjection,
@@ -1113,8 +1113,13 @@ class WorkflowContinuationCoordinator:
         branch_results: list[dict[str, str]] = []
         for branch in plan.get("branches") or []:
             branch_context = parallel_context
-            branch_entry_node_id = str(branch.get("entry_node_id") or "")
-            branch_label = str(branch.get("label") or branch.get("entry_node_id") or "Branch")
+            branch_projection = WorkflowParallelBranchProjection.from_branch(
+                node,
+                branch,
+                label=label,
+                kind=kind,
+                context=parallel_context,
+            )
             for branch_node_id in branch.get("node_ids") or []:
                 branch_node_id_text = str(branch_node_id)
                 branch_node = nodes_by_id.get(branch_node_id_text)
@@ -1122,14 +1127,7 @@ class WorkflowContinuationCoordinator:
                     raise AgentRuntimeError(f"Parallel 分支引用了不存在的节点：{branch_node_id}")
                 branch_kind = self._node_kind(branch_node)
                 branch_node_label = str((branch_node.get("data") or {}).get("label") or branch_node.get("id"))
-                node_info_extra = {
-                    "workflow_parent_node_id": parallel_node_id,
-                    "workflow_parent_node_kind": kind,
-                    "workflow_parent_node_label": label,
-                    "workflow_parallel_branch_entry_node_id": branch_entry_node_id,
-                    "workflow_parallel_branch_label": branch_label,
-                    "workflow_parent_node_context": parallel_context,
-                }
+                node_info_extra = branch_projection.child_node_info()
                 if branch_kind == "agent":
                     completed_context = self._parallel_completed_agent_context(
                         timeline,
@@ -1179,20 +1177,13 @@ class WorkflowContinuationCoordinator:
                     f"Parallel 分支暂不支持 {branch_kind or 'unknown'} 节点：{branch_node_label}"
                 )
             branch_results.append(
-                {
-                    "entry_node_id": str(branch.get("entry_node_id") or ""),
-                    "label": branch_label,
-                    "result": tool_input_preview(branch_context, limit=1800),
-                }
+                branch_projection.result_payload(branch_context)
             )
-        aggregate_context = "\n".join(
-            f"- {item['label']}: {item['result']}"
-            for item in branch_results
-        ).strip()
-        if aggregate_context:
-            aggregate_context = f"Parallel {label} results:\n{aggregate_context}"
-        else:
-            aggregate_context = context
+        aggregate_context = WorkflowParallelBranchProjection.aggregate_context(
+            label,
+            branch_results,
+            fallback=context,
+        )
         projection = WorkflowParallelNodeProjection.from_plan(
             node,
             plan,
