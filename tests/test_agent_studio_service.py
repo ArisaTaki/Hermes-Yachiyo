@@ -58,6 +58,24 @@ class _FakeStudioPort:
                     "diagnostic_route": "/ui/native-agent/diagnostics/cache",
                 }
             },
+            "plugins": [
+                {
+                    "plugin_id": "notes",
+                    "enabled": False,
+                    "tool_names": ["plugin.notes.echo"],
+                    "tools": [
+                        {
+                            "tool_name": "plugin.notes.echo",
+                            "tool_id": "echo",
+                            "function_name": "plugin_notes_echo",
+                            "risk_level": "medium",
+                            "enabled": False,
+                        }
+                    ],
+                    "skill_docs": "Use echo for notes.",
+                    "source": "restricted_tool_plugin",
+                }
+            ],
         }
 
     def get_agent(self, agent_id: str) -> dict[str, Any]:
@@ -506,6 +524,9 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
     assert tool_catalog.tools[0].input_schema["required"] == ["query"]
     assert tool_catalog.tools[0].missing_permissions == ["music_app"]
     assert tool_catalog.capabilities["media_control"].available is False
+    assert tool_catalog.plugins[0].plugin_id == "notes"
+    assert tool_catalog.plugins[0].enabled is False
+    assert tool_catalog.plugins[0].tools[0].risk_level == "medium"
     assert agent.name == "Fetched"
     assert saved_agent.agent_id == "agent-2"
     assert deleted_agent == {"ok": True, "agent_id": "agent-2"}

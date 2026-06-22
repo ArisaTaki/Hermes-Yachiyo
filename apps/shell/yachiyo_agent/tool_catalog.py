@@ -17,6 +17,8 @@ from apps.shell.agent.tools.plugins import list_restricted_plugin_tools, restric
 
 from .contracts import (
     DesktopExecutionCapabilitySnapshot,
+    RestrictedPluginToolSnapshot,
+    RestrictedToolPluginSnapshot,
     ToolCatalogItemSnapshot,
     ToolCatalogSnapshot,
 )
@@ -33,6 +35,7 @@ def runtime_tool_catalog_snapshot(
     registered_tools: Iterable[str] | None = None,
     platform_name: str | None = None,
     missing_permissions: Mapping[str, Iterable[str]] | None = None,
+    plugin_states: Iterable[Any] | None = None,
 ) -> ToolCatalogSnapshot:
     """Build the public Studio tool catalog from runtime descriptors."""
 
@@ -55,7 +58,11 @@ def runtime_tool_catalog_snapshot(
         for tool_name in sorted(clean_registered)
         if tool_name in TOOL_DESCRIPTORS
     ]
-    return ToolCatalogSnapshot(tools=tools, capabilities=capabilities)
+    return ToolCatalogSnapshot(
+        tools=tools,
+        capabilities=capabilities,
+        plugins=_restricted_plugin_snapshots(plugin_states),
+    )
 
 
 def tool_catalog_snapshot_from_payload(payload: Any) -> ToolCatalogSnapshot:
@@ -87,6 +94,7 @@ def tool_catalog_snapshot_from_payload(payload: Any) -> ToolCatalogSnapshot:
     return ToolCatalogSnapshot(
         tools=tools,
         capabilities=capabilities,
+        plugins=_restricted_plugin_snapshots_from_payload(payload.get("plugins")),
         source=str(payload.get("source") or "runtime"),
     )
 
@@ -325,6 +333,129 @@ def _registered_plugin_tool(tool_name: str) -> Any | None:
         if plugin_tool.name == clean_tool_name:
             return plugin_tool
     return None
+
+
+def _restricted_plugin_snapshots(
+    plugin_states: Iterable[Any] | None,
+) -> list[RestrictedToolPluginSnapshot]:
+    by_plugin: dict[str, dict[str, Any]] = {}
+    for state in plugin_states or ():
+        plugin_id = _optional_string(_field_value(state, "plugin_id"))
+        if plugin_id is None:
+            continue
+        by_plugin[plugin_id] = {
+            "plugin_id": plugin_id,
+            "enabled": bool(_field_value(state, "enabled")),
+            "tool_names": _string_list(_field_value(state, "tool_names")),
+            "tools": [],
+            "skill_docs": str(_field_value(state, "skill_docs") or ""),
+            "source": "restricted_tool_plugin",
+        }
+
+    for plugin_tool in list_restricted_plugin_tools():
+        plugin_id = _optional_string(getattr(plugin_tool, "plugin_id", None))
+        if plugin_id is None:
+            continue
+        record = by_plugin.setdefault(
+            plugin_id,
+            {
+                "plugin_id": plugin_id,
+                "enabled": True,
+                "tool_names": [],
+                "tools": [],
+                "skill_docs": "",
+                "source": "restricted_tool_plugin",
+            },
+        )
+        record["enabled"] = True
+        tool_name = str(getattr(plugin_tool, "name", "") or "").strip()
+        if tool_name:
+            record["tool_names"] = _unique([*record["tool_names"], tool_name])
+        if not record["skill_docs"]:
+            record["skill_docs"] = str(getattr(plugin_tool, "skill_docs", "") or "")
+        record["tools"].append(
+            RestrictedPluginToolSnapshot(
+                tool_name=tool_name,
+                tool_id=str(getattr(plugin_tool, "tool_id", "") or ""),
+                function_name=str(getattr(plugin_tool, "function_name", "") or ""),
+                risk_level=_optional_string(getattr(plugin_tool, "risk_level", None)),
+                enabled=True,
+            )
+        )
+
+    return [
+        RestrictedToolPluginSnapshot(
+            plugin_id=record["plugin_id"],
+            enabled=bool(record["enabled"]),
+            tool_names=_unique(record["tool_names"]),
+            tools=sorted(record["tools"], key=lambda tool: tool.tool_name),
+            skill_docs=str(record["skill_docs"] or ""),
+            source=str(record["source"] or "restricted_tool_plugin"),
+        )
+        for record in (by_plugin[plugin_id] for plugin_id in sorted(by_plugin))
+    ]
+
+
+def _restricted_plugin_snapshots_from_payload(
+    payload: Any,
+) -> list[RestrictedToolPluginSnapshot]:
+    if not isinstance(payload, Iterable) or isinstance(payload, (str, bytes, Mapping)):
+        return []
+
+    snapshots: list[RestrictedToolPluginSnapshot] = []
+    for item in payload:
+        if not isinstance(item, Mapping):
+            continue
+        plugin_id = _optional_string(item.get("plugin_id"))
+        if plugin_id is None:
+            continue
+        tools = _restricted_plugin_tools_from_payload(item.get("tools"))
+        tool_names = _unique([
+            *_string_list(item.get("tool_names")),
+            *(tool.tool_name for tool in tools),
+        ])
+        snapshots.append(
+            RestrictedToolPluginSnapshot(
+                plugin_id=plugin_id,
+                enabled=bool(item.get("enabled", False)),
+                tool_names=tool_names,
+                tools=tools,
+                skill_docs=str(item.get("skill_docs") or ""),
+                source=str(item.get("source") or "restricted_tool_plugin"),
+            )
+        )
+    return snapshots
+
+
+def _restricted_plugin_tools_from_payload(
+    payload: Any,
+) -> list[RestrictedPluginToolSnapshot]:
+    if not isinstance(payload, Iterable) or isinstance(payload, (str, bytes, Mapping)):
+        return []
+
+    tools: list[RestrictedPluginToolSnapshot] = []
+    for item in payload:
+        if not isinstance(item, Mapping):
+            continue
+        tool_name = _optional_string(item.get("tool_name") or item.get("name"))
+        if tool_name is None:
+            continue
+        tools.append(
+            RestrictedPluginToolSnapshot(
+                tool_name=tool_name,
+                tool_id=str(item.get("tool_id") or ""),
+                function_name=str(item.get("function_name") or ""),
+                risk_level=_optional_string(item.get("risk_level")),
+                enabled=bool(item.get("enabled", False)),
+            )
+        )
+    return tools
+
+
+def _field_value(value: Any, field_name: str) -> Any:
+    if isinstance(value, Mapping):
+        return value.get(field_name)
+    return getattr(value, field_name, None)
 
 
 def _truncate_note(value: str, *, limit: int = 240) -> str:

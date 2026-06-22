@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from apps.shell.agent.tools.plugins import (
     RestrictedPluginTool,
+    RestrictedToolPluginManager,
     RestrictedToolPlugin,
     clear_restricted_tool_plugins,
     register_restricted_tool_plugin,
@@ -40,6 +41,8 @@ from apps.shell.yachiyo_agent import (
     RunEventPageSnapshot,
     RunTimelineChildSnapshot,
     RunTimelineSnapshot,
+    RestrictedPluginToolSnapshot,
+    RestrictedToolPluginSnapshot,
     SaveAgentDeskFileRequest,
     SaveAgentDeskNoteRequest,
     SaveAgentGroupMemberRequest,
@@ -482,22 +485,43 @@ def test_tool_catalog_snapshot_json_shape_is_stable() -> None:
                 diagnostic_route="/ui/native-agent/diagnostics/cache",
             )
         },
+        plugins=[
+            RestrictedToolPluginSnapshot(
+                plugin_id="notes",
+                enabled=False,
+                tool_names=["plugin.notes.echo"],
+                tools=[
+                    RestrictedPluginToolSnapshot(
+                        tool_name="plugin.notes.echo",
+                        tool_id="echo",
+                        function_name="plugin_notes_echo",
+                        risk_level="medium",
+                    )
+                ],
+                skill_docs="Use echo for notes.",
+            )
+        ],
     )
 
     payload = _json(snapshot)
 
-    assert list(payload) == ["tools", "capabilities", "source"]
+    assert list(payload) == ["tools", "capabilities", "plugins", "source"]
     assert payload["tools"][0]["tool_name"] == "media.apple_music_play"
     assert payload["tools"][0]["input_schema"] == {"type": "object"}
     assert payload["tools"][0]["fallback_notes"] == [
         "Open Music when direct playback is unavailable."
     ]
+    assert payload["plugins"][0]["plugin_id"] == "notes"
+    assert payload["plugins"][0]["enabled"] is False
+    assert payload["plugins"][0]["tools"][0]["risk_level"] == "medium"
     with pytest.raises(ValidationError):
         ToolCatalogItemSnapshot(
             tool_name="terminal.run",
             function_name="terminal_run",
             unknown=True,
         )
+    with pytest.raises(ValidationError):
+        RestrictedToolPluginSnapshot(plugin_id="notes", unknown=True)
 
 
 def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> None:
@@ -551,6 +575,10 @@ def test_runtime_tool_catalog_surfaces_restricted_plugin_metadata_and_uninstall(
             )
         )
         tools = {tool.tool_name: tool for tool in runtime_tool_catalog_snapshot().tools}
+        plugins = {
+            plugin.plugin_id: plugin
+            for plugin in runtime_tool_catalog_snapshot().plugins
+        }
         plugin_tool = tools["plugin.notes.echo"]
 
         assert plugin_tool.capability_id == "plugin_tool"
@@ -560,12 +588,82 @@ def test_runtime_tool_catalog_surfaces_restricted_plugin_metadata_and_uninstall(
         assert plugin_tool.input_schema["required"] == ["text"]
         assert "Restricted tool-only plugin: notes." in plugin_tool.fallback_notes
         assert any("Agent Desk note" in note for note in plugin_tool.fallback_notes)
+        assert plugins["notes"].enabled is True
+        assert plugins["notes"].tool_names == ["plugin.notes.echo"]
+        assert plugins["notes"].tools[0].function_name == "plugin_notes_echo"
+        assert plugins["notes"].tools[0].risk_level == "medium"
 
         unregister_restricted_tool_plugin("notes")
         tools_after_unregister = {
             tool.tool_name for tool in runtime_tool_catalog_snapshot().tools
         }
         assert "plugin.notes.echo" not in tools_after_unregister
+    finally:
+        clear_restricted_tool_plugins()
+
+
+def test_runtime_tool_catalog_surfaces_restricted_plugin_install_state() -> None:
+    clear_restricted_tool_plugins()
+    manager = RestrictedToolPluginManager()
+
+    def echo_tool(payload, context):
+        return {"ok": True, "text": payload["text"], "plugin_id": context.plugin_id}
+
+    plugin = RestrictedToolPlugin(
+        plugin_id="notes",
+        tools=(
+            RestrictedPluginTool(
+                tool_id="echo",
+                description="Echo text through a managed restricted test plugin.",
+                properties={"text": {"type": "string"}},
+                required=("text",),
+                risk_level="medium",
+                execute=echo_tool,
+            ),
+        ),
+        skill_docs="Use this plugin when an Agent Desk note needs a short echo.",
+    )
+
+    try:
+        manager.install(plugin, enabled=False)
+        disabled_catalog = runtime_tool_catalog_snapshot(
+            plugin_states=manager.list_installed()
+        )
+        disabled_plugins = {
+            plugin.plugin_id: plugin for plugin in disabled_catalog.plugins
+        }
+
+        assert "plugin.notes.echo" not in {
+            tool.tool_name for tool in disabled_catalog.tools
+        }
+        assert disabled_plugins["notes"].enabled is False
+        assert disabled_plugins["notes"].tool_names == ["plugin.notes.echo"]
+        assert disabled_plugins["notes"].tools == []
+        assert "Agent Desk note" in disabled_plugins["notes"].skill_docs
+
+        manager.enable("notes")
+        enabled_catalog = runtime_tool_catalog_snapshot(
+            plugin_states=manager.list_installed()
+        )
+        enabled_plugins = {
+            plugin.plugin_id: plugin for plugin in enabled_catalog.plugins
+        }
+
+        assert "plugin.notes.echo" in {
+            tool.tool_name for tool in enabled_catalog.tools
+        }
+        assert enabled_plugins["notes"].enabled is True
+        assert enabled_plugins["notes"].tools[0].tool_name == "plugin.notes.echo"
+        assert enabled_plugins["notes"].tools[0].risk_level == "medium"
+
+        manager.uninstall("notes")
+        uninstalled_catalog = runtime_tool_catalog_snapshot(
+            plugin_states=manager.list_installed()
+        )
+        assert uninstalled_catalog.plugins == []
+        assert "plugin.notes.echo" not in {
+            tool.tool_name for tool in uninstalled_catalog.tools
+        }
     finally:
         clear_restricted_tool_plugins()
 

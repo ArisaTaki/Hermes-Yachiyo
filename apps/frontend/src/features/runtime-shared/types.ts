@@ -35,9 +35,27 @@ export type ToolCatalogItemSnapshot = {
   source?: string;
 };
 
+export type RestrictedPluginToolSnapshot = {
+  tool_name: string;
+  tool_id?: string;
+  function_name?: string;
+  risk_level?: DesktopExecutionRisk | string | null;
+  enabled?: boolean;
+};
+
+export type RestrictedToolPluginSnapshot = {
+  plugin_id: string;
+  enabled?: boolean;
+  tool_names?: string[];
+  tools?: RestrictedPluginToolSnapshot[];
+  skill_docs?: string;
+  source?: string;
+};
+
 export type ToolCatalogSnapshot = {
   tools: ToolCatalogItemSnapshot[];
   capabilities?: Record<string, DesktopExecutionCapabilitySnapshot>;
+  plugins?: RestrictedToolPluginSnapshot[];
   source?: string;
 };
 

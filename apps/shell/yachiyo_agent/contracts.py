@@ -68,9 +68,27 @@ class ToolCatalogItemSnapshot(_PublicSnapshot):
     source: str = "runtime"
 
 
+class RestrictedPluginToolSnapshot(_PublicSnapshot):
+    tool_name: str
+    tool_id: str = ""
+    function_name: str = ""
+    risk_level: DesktopExecutionRisk | str | None = None
+    enabled: bool = False
+
+
+class RestrictedToolPluginSnapshot(_PublicSnapshot):
+    plugin_id: str
+    enabled: bool = False
+    tool_names: list[str] = Field(default_factory=list)
+    tools: list[RestrictedPluginToolSnapshot] = Field(default_factory=list)
+    skill_docs: str = ""
+    source: str = "restricted_tool_plugin"
+
+
 class ToolCatalogSnapshot(_PublicSnapshot):
     tools: list[ToolCatalogItemSnapshot] = Field(default_factory=list)
     capabilities: dict[str, DesktopExecutionCapabilitySnapshot] = Field(default_factory=dict)
+    plugins: list[RestrictedToolPluginSnapshot] = Field(default_factory=list)
     source: str = "runtime"
 
 
