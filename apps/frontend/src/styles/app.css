@@ -14930,6 +14930,37 @@ button.activity-item {
   min-width: 0;
 }
 
+.agent-group-tool-policy-preview {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--hy-line);
+}
+
+.agent-group-tool-policy-preview .section-heading-row {
+  display: flex;
+  gap: 10px;
+  align-items: start;
+  justify-content: space-between;
+}
+
+.agent-group-tool-policy-preview .section-heading-row span {
+  display: block;
+  margin-top: 3px;
+  color: var(--hy-muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.agent-group-tool-policy-empty {
+  min-width: 0;
+  color: var(--hy-muted);
+  font-size: 12px;
+  line-height: 1.42;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 720px) {
   .agent-group-settings-grid {
     grid-template-columns: 1fr;

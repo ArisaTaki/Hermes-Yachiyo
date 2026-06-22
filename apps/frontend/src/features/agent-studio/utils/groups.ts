@@ -4,6 +4,87 @@ import type {
   SaveAgentGroupRequest,
 } from '../../yachiyo-studio/types';
 
+export type AgentGroupToolPolicyPreset = {
+  id: string;
+  label: string;
+  summary: string;
+  risk: 'low' | 'medium';
+  tools: string[];
+};
+
+export const agentGroupToolPolicyPresets: AgentGroupToolPolicyPreset[] = [
+  {
+    id: 'desktop_execution',
+    label: 'Desktop execution',
+    summary: 'Screen, app, media, foreground input, and browser tools.',
+    risk: 'medium',
+    tools: [
+      'screen.capture',
+      'desktop.active_window',
+      'app.open',
+      'app.focus',
+      'media.apple_music_play',
+      'desktop.hotkey',
+      'desktop.type_text',
+      'browser.open_url',
+      'browser.current_page',
+      'browser.click',
+      'browser.type_text',
+      'browser.extract_text',
+      'browser.screenshot',
+    ],
+  },
+  {
+    id: 'screen_capture',
+    label: 'Screen',
+    summary: 'Read-only screen capture.',
+    risk: 'low',
+    tools: ['screen.capture'],
+  },
+  {
+    id: 'active_window',
+    label: 'Active window',
+    summary: 'Read the foreground app and window title.',
+    risk: 'low',
+    tools: ['desktop.active_window'],
+  },
+  {
+    id: 'app_control',
+    label: 'App control',
+    summary: 'Open and focus local desktop apps.',
+    risk: 'low',
+    tools: ['app.open', 'app.focus'],
+  },
+  {
+    id: 'media_control',
+    label: 'Media',
+    summary: 'Search and play Apple Music.',
+    risk: 'low',
+    tools: ['media.apple_music_play'],
+  },
+  {
+    id: 'foreground_input',
+    label: 'Foreground input',
+    summary: 'Send hotkeys and type text in the foreground app.',
+    risk: 'medium',
+    tools: ['desktop.hotkey', 'desktop.type_text'],
+  },
+  {
+    id: 'browser_control',
+    label: 'Browser',
+    summary: 'Open pages, inspect content, click, type, and capture browser screenshots.',
+    risk: 'medium',
+    tools: [
+      'browser.open_url',
+      'browser.current_page',
+      'browser.click',
+      'browser.type_text',
+      'browser.extract_text',
+      'browser.screenshot',
+    ],
+  },
+];
+
 export function agentInitial(name: string): string {
   const clean = name.trim();
   return clean ? clean.slice(0, 1).toUpperCase() : 'A';
@@ -21,6 +102,20 @@ export function agentGroupListMeta(group: AgentGroupSnapshot): string {
 
 export function agentGroupMemberSummary(group: AgentGroupSnapshot): string {
   return group.members.map((member) => member.name || member.agent_id).join('、') || 'No members';
+}
+
+export function agentGroupToolPolicyPresetFor(policyId: string): AgentGroupToolPolicyPreset | null {
+  const clean = normalizedAgentGroupToolPolicyId(policyId);
+  return agentGroupToolPolicyPresets.find((preset) => preset.id === clean) || null;
+}
+
+export function agentGroupToolPolicyLabel(policyId: string): string {
+  if (!policyId.trim()) return 'Member Agent policy';
+  return agentGroupToolPolicyPresetFor(policyId)?.label || policyId.trim();
+}
+
+export function agentGroupToolPolicyPreviewTools(policyId: string): string[] {
+  return agentGroupToolPolicyPresetFor(policyId)?.tools || [];
 }
 
 export function nextSelectedAgentGroupId(current: string, nextAgentGroups: AgentGroupSnapshot[]): string {
@@ -76,4 +171,10 @@ export function agentGroupSaveDisabled(busy: boolean, name: string, memberIds: s
 
 export function groupRunTimelineRunId(groupRun: GroupRunSnapshot | null): string {
   return groupRun?.runs?.[0]?.run_id || groupRun?.child_run_ids?.[0] || '';
+}
+
+function normalizedAgentGroupToolPolicyId(policyId: string): string {
+  const clean = policyId.trim().toLowerCase().replace(/[-\s]+/g, '_');
+  const withoutPrefix = clean.startsWith('policy_') ? clean.slice('policy_'.length) : clean;
+  return withoutPrefix.endsWith('_v1') ? withoutPrefix.slice(0, -'_v1'.length) : withoutPrefix;
 }

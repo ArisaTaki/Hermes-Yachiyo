@@ -7,6 +7,10 @@ import {
   agentGroupListMeta,
   agentGroupMemberSummary,
   agentGroupSaveDisabled,
+  agentGroupToolPolicyLabel,
+  agentGroupToolPolicyPresetFor,
+  agentGroupToolPolicyPresets,
+  agentGroupToolPolicyPreviewTools,
   agentInitial,
 } from '../utils/groups';
 import { GroupRunPanel } from './GroupRunPanel';
@@ -108,6 +112,12 @@ export function AgentGroupPanel({
   const moderatorValue = agentGroupMemberIdSet.has(agentGroupModeratorId)
     ? agentGroupModeratorId
     : '';
+  const selectedToolPolicyPreset = agentGroupToolPolicyPresetFor(agentGroupToolPolicyId);
+  const customToolPolicyId = agentGroupToolPolicyId.trim() && !selectedToolPolicyPreset
+    ? agentGroupToolPolicyId.trim()
+    : '';
+  const selectedToolPolicySelectValue = selectedToolPolicyPreset?.id || (customToolPolicyId ? '__custom__' : '');
+  const previewTools = agentGroupToolPolicyPreviewTools(agentGroupToolPolicyId);
   return (
     <section className="agent-studio-grid" data-testid="agent-studio-groups">
       <aside className="agent-studio-panel">
@@ -221,10 +231,30 @@ export function AgentGroupPanel({
           </label>
           <label>
             <span>Tool Policy</span>
+            <select
+              className="hy-select"
+              data-testid="agent-group-tool-policy"
+              value={selectedToolPolicySelectValue}
+              onChange={(event) => {
+                const value = event.target.value;
+                onAgentGroupToolPolicyIdChange(value === '__custom__' ? customToolPolicyId : value);
+              }}
+            >
+              <option value="">Member Agent policy</option>
+              {agentGroupToolPolicyPresets.map((preset) => (
+                <option key={preset.id} value={preset.id}>{preset.label}</option>
+              ))}
+              {customToolPolicyId ? (
+                <option value="__custom__">Custom: {customToolPolicyId}</option>
+              ) : null}
+            </select>
+          </label>
+          <label>
+            <span>Custom Policy</span>
             <input
               className="hy-input"
-              data-testid="agent-group-tool-policy"
-              value={agentGroupToolPolicyId}
+              data-testid="agent-group-tool-policy-custom"
+              value={customToolPolicyId}
               maxLength={160}
               onChange={(event) => onAgentGroupToolPolicyIdChange(event.target.value)}
             />
@@ -237,6 +267,39 @@ export function AgentGroupPanel({
             />
             <span>启用群组</span>
           </label>
+        </div>
+
+        <div className="agent-group-tool-policy-preview" data-testid="agent-group-tool-policy-preview">
+          <div className="section-heading-row compact">
+            <h3>Group Tool Policy</h3>
+            <span>{agentGroupToolPolicyLabel(agentGroupToolPolicyId)}</span>
+          </div>
+          {selectedToolPolicyPreset ? (
+            <div
+              className="agent-tool-policy-row enabled"
+              data-group-tool-policy-id={selectedToolPolicyPreset.id}
+              data-testid="agent-group-tool-policy-preset"
+            >
+              <div className="agent-tool-policy-main">
+                <strong>{selectedToolPolicyPreset.label}</strong>
+                <span>{selectedToolPolicyPreset.summary}</span>
+                <em>{previewTools.join(', ')}</em>
+              </div>
+              <div className="agent-tool-policy-meta">
+                <span className={selectedToolPolicyPreset.risk === 'medium' ? 'agent-policy-pill warn' : 'agent-policy-pill on'}>
+                  {selectedToolPolicyPreset.risk}
+                </span>
+                <span className="agent-policy-pill on">{previewTools.length} tools</span>
+              </div>
+            </div>
+          ) : (
+            <div
+              className="agent-group-tool-policy-empty"
+              data-testid="agent-group-tool-policy-empty"
+            >
+              {customToolPolicyId ? `Custom policy: ${customToolPolicyId}` : 'Members use their own Agent tool policy.'}
+            </div>
+          )}
         </div>
 
         <div className="section-heading-row compact">
