@@ -89,6 +89,125 @@ def test_browser_extract_text_uses_current_page_evaluation(monkeypatch) -> None:
     }
 
 
+def test_browser_click_falls_back_to_foreground_coordinates(monkeypatch) -> None:
+    calls = []
+
+    def raise_no_cdp(_expression: str) -> dict[str, object]:
+        raise RuntimeError("browser.cdp_url is not configured")
+
+    def fake_foreground_click(x, y, click_count) -> dict[str, object]:
+        calls.append((x, y, click_count))
+        return {
+            "ok": True,
+            "action": "desktop.click",
+            "summary": "Clicked foreground desktop",
+            "data": {"x": x, "y": y, "click_count": click_count},
+            "permission_error": False,
+            "fallback_used": False,
+        }
+
+    monkeypatch.setattr(browser_mod, "_evaluate_current_page", raise_no_cdp)
+    monkeypatch.setattr(browser_mod, "_click_foreground_fallback", fake_foreground_click)
+
+    result = browser_mod.click("#submit", fallback_x=12, fallback_y=34, click_count=2)
+
+    assert result["ok"] is True
+    assert result["action"] == "browser.click"
+    assert result["fallback_used"] is True
+    assert result["fallback"] == "desktop.click"
+    assert result["missing_permissions"] == ["chrome_cdp"]
+    assert result["permission_targets"] == ["chrome_cdp"]
+    assert result["data"] == {"x": 12, "y": 34, "click_count": 2, "selector": "#submit"}
+    assert calls == [(12, 34, 2)]
+
+
+def test_browser_click_without_fallback_coordinates_reports_recovery(monkeypatch) -> None:
+    def raise_no_cdp(_expression: str) -> dict[str, object]:
+        raise RuntimeError("No debuggable browser page found")
+
+    monkeypatch.setattr(browser_mod, "_evaluate_current_page", raise_no_cdp)
+
+    result = browser_mod.click("#submit")
+
+    assert result["ok"] is False
+    assert result["error"] == "browser_click_fallback_coordinates_required"
+    assert result["permission_error"] is True
+    assert result["fallback_used"] is False
+    assert result["fallback"] == "desktop.click"
+    assert result["missing_permissions"] == ["chrome_cdp"]
+    assert result["permission_targets"] == ["chrome_cdp"]
+    assert result["data"]["required_fallback_fields"] == ["fallback_x", "fallback_y"]
+    assert result["data"]["recommended_tools"] == ["screen.capture", "desktop.click"]
+
+
+def test_browser_click_reports_foreground_permission_when_fallback_denied(
+    monkeypatch,
+) -> None:
+    def raise_no_cdp(_expression: str) -> dict[str, object]:
+        raise RuntimeError("No debuggable browser page found")
+
+    def deny_foreground_click(_x, _y, _click_count) -> dict[str, object]:
+        return {
+            "ok": False,
+            "action": "desktop.click",
+            "summary": "desktop.click failed",
+            "error": "not allowed assistive access",
+            "permission_error": True,
+            "missing_permissions": ["accessibility"],
+            "permission_targets": ["accessibility"],
+            "fallback_used": False,
+        }
+
+    monkeypatch.setattr(browser_mod, "_evaluate_current_page", raise_no_cdp)
+    monkeypatch.setattr(browser_mod, "_click_foreground_fallback", deny_foreground_click)
+
+    result = browser_mod.click("#submit", fallback_x=12, fallback_y=34)
+
+    assert result["ok"] is False
+    assert result["error"] == "browser_foreground_click_fallback_unavailable"
+    assert result["permission_error"] is True
+    assert result["fallback_used"] is True
+    assert result["fallback"] == "desktop.click"
+    assert result["missing_permissions"] == ["chrome_cdp", "accessibility"]
+    assert result["permission_targets"] == ["chrome_cdp", "accessibility"]
+
+
+def test_browser_click_broker_fallback_uses_foreground_lock(tmp_path, monkeypatch) -> None:
+    foreground_lock = ForegroundActionLock()
+    broker = ToolBroker(
+        {"default_workdir": str(tmp_path), "readable_scopes": ["."], "writable_scopes": []},
+        tmp_path / "artifacts",
+        foreground_lock=foreground_lock,
+        foreground_lock_owner="group-run-1:run-1",
+    )
+
+    def raise_no_cdp(_expression: str) -> dict[str, object]:
+        raise RuntimeError("browser.cdp_url is not configured")
+
+    monkeypatch.setattr(browser_mod, "_evaluate_current_page", raise_no_cdp)
+    monkeypatch.setattr(
+        desktop_mod,
+        "desktop_click",
+        lambda x, y, *, click_count=1: {
+            "ok": True,
+            "data": {"x": x, "y": y, "click_count": click_count},
+        },
+    )
+
+    result = broker.call(
+        "browser.click",
+        {"selector": "#submit", "fallback_x": 12, "fallback_y": 34, "click_count": 2},
+    )
+
+    assert result["ok"] is True
+    assert result["fallback_used"] is True
+    assert result["fallback"] == "desktop.click"
+    assert result["foreground_lock"] == {
+        "holder": "group-run-1:run-1",
+        "tool": "browser.click",
+    }
+
+
 def test_browser_type_text_falls_back_to_foreground_input(monkeypatch) -> None:
     calls = []
 

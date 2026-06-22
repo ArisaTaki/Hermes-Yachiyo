@@ -416,8 +416,24 @@ class ToolBroker:
     def browser_current_page(self) -> dict[str, Any]:
         return browser.current_page()
 
-    def browser_click(self, selector: str) -> dict[str, Any]:
-        return browser.click(selector)
+    def browser_click(
+        self,
+        selector: str,
+        *,
+        fallback_x: Any = None,
+        fallback_y: Any = None,
+        click_count: Any = 1,
+    ) -> dict[str, Any]:
+        return browser.click(
+            selector,
+            fallback_x=fallback_x,
+            fallback_y=fallback_y,
+            click_count=click_count,
+            foreground_fallback=lambda x, y, count: self._with_foreground_lock(
+                "browser.click",
+                lambda: desktop.desktop_click(x, y, click_count=count),
+            ),
+        )
 
     def browser_type_text(self, selector: str, text: str) -> dict[str, Any]:
         return browser.type_text(

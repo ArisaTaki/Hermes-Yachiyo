@@ -316,6 +316,19 @@ def test_desktop_click_schema_accepts_coordinates_and_rejects_bad_payload() -> N
         )
 
 
+def test_browser_click_schema_accepts_optional_fallback_coordinates() -> None:
+    ToolDescriptorRegistry.validate_payload(
+        "browser.click",
+        {"selector": "#submit", "fallback_x": 12, "fallback_y": 34.5, "click_count": 2},
+    )
+
+    with pytest.raises(AgentRuntimeError, match="browser.click 参数 fallback_x 必须是非负坐标数字"):
+        ToolDescriptorRegistry.validate_payload(
+            "browser.click",
+            {"selector": "#submit", "fallback_x": -1, "fallback_y": 34},
+        )
+
+
 def test_compile_tool_policy_accepts_browser_tools_without_marking_them_high_risk() -> None:
     compiler = RuntimePolicyCompiler()
 
@@ -383,6 +396,14 @@ def test_tool_dispatch_registry_routes_browser_tools(tmp_path, monkeypatch) -> N
     )
     monkeypatch.setattr(
         broker,
+        "browser_click",
+        lambda selector, *, fallback_x=None, fallback_y=None, click_count=1: calls.append(
+            ("click", selector, fallback_x, fallback_y, click_count)
+        )
+        or {"ok": True},
+    )
+    monkeypatch.setattr(
+        broker,
         "browser_type_text",
         lambda selector, text: calls.append(("type", selector, text)) or {"ok": True},
     )
@@ -394,10 +415,19 @@ def test_tool_dispatch_registry_routes_browser_tools(tmp_path, monkeypatch) -> N
     ) == {"ok": True}
     assert dispatch_tool_call(
         broker,
+        "browser.click",
+        {"selector": "#go", "fallback_x": 12, "fallback_y": 34, "click_count": 2},
+    ) == {"ok": True}
+    assert dispatch_tool_call(
+        broker,
         "browser.type_text",
         {"selector": "#q", "text": "八千代"},
     ) == {"ok": True}
-    assert calls == [("open", "https://example.com"), ("type", "#q", "八千代")]
+    assert calls == [
+        ("open", "https://example.com"),
+        ("click", "#go", 12, 34, 2),
+        ("type", "#q", "八千代"),
+    ]
 
 
 def test_screen_capture_tool_writes_artifact_metadata(tmp_path, monkeypatch) -> None:

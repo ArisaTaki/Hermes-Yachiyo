@@ -179,7 +179,12 @@ def _browser_current_page(
 
 
 def _browser_click(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
-    return broker.browser_click(str(payload.get("selector") or ""))
+    return broker.browser_click(
+        str(payload.get("selector") or ""),
+        fallback_x=payload.get("fallback_x"),
+        fallback_y=payload.get("fallback_y"),
+        click_count=payload.get("click_count", 1),
+    )
 
 
 def _browser_type_text(

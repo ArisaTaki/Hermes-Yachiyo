@@ -55,7 +55,14 @@ def current_page() -> dict[str, Any]:
     }
 
 
-def click(selector: str) -> dict[str, Any]:
+def click(
+    selector: str,
+    *,
+    fallback_x: Any = None,
+    fallback_y: Any = None,
+    click_count: Any = 1,
+    foreground_fallback: Callable[[Any, Any, Any], dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     clean_selector = _clean_required(selector, "selector")
     expression = f"""
     (() => {{
@@ -71,7 +78,15 @@ def click(selector: str) -> dict[str, Any]:
     try:
         value = _evaluate_current_page(expression)
     except Exception as exc:
-        return _cdp_unavailable("browser.click", exc)
+        fallback = foreground_fallback or _click_foreground_fallback
+        return _click_fallback(
+            clean_selector,
+            fallback_x,
+            fallback_y,
+            click_count,
+            exc,
+            fallback,
+        )
     if not value.get("ok"):
         return {
             "ok": False,
@@ -89,6 +104,103 @@ def click(selector: str) -> dict[str, Any]:
         "permission_error": False,
         "fallback_used": False,
     }
+
+
+def _click_fallback(
+    selector: str,
+    fallback_x: Any,
+    fallback_y: Any,
+    click_count: Any,
+    cdp_error: Any,
+    foreground_fallback: Callable[[Any, Any, Any], dict[str, Any]],
+) -> dict[str, Any]:
+    if fallback_x in (None, "") or fallback_y in (None, ""):
+        return {
+            "ok": False,
+            "action": "browser.click",
+            "summary": (
+                "Chrome CDP is unavailable; browser.click needs explicit screen coordinates "
+                "for foreground fallback."
+            ),
+            "error": "browser_click_fallback_coordinates_required",
+            "data": {
+                "selector": selector,
+                "required_fallback_fields": ["fallback_x", "fallback_y"],
+                "recommended_tools": ["screen.capture", "desktop.click"],
+            },
+            "permission_error": True,
+            "fallback_used": False,
+            "fallback": "desktop.click",
+            "missing_permissions": ["chrome_cdp"],
+            "permission_targets": ["chrome_cdp"],
+            "detail": str(cdp_error),
+        }
+    try:
+        fallback_result = foreground_fallback(fallback_x, fallback_y, click_count)
+    except Exception as exc:
+        return _click_fallback_unavailable(cdp_error, exc)
+    if not fallback_result.get("ok"):
+        return _click_fallback_unavailable(
+            cdp_error,
+            fallback_result.get("error") or fallback_result.get("summary") or fallback_result,
+            fallback_result=fallback_result,
+        )
+    data = dict(fallback_result.get("data") or {})
+    data["selector"] = selector
+    payload = {
+        "ok": True,
+        "action": "browser.click",
+        "summary": "Clicked foreground desktop coordinate as browser fallback",
+        "data": data,
+        "permission_error": False,
+        "fallback_used": True,
+        "fallback": "desktop.click",
+        "fallback_reason": str(cdp_error),
+        "missing_permissions": ["chrome_cdp"],
+        "permission_targets": ["chrome_cdp"],
+    }
+    if fallback_result.get("foreground_lock"):
+        payload["foreground_lock"] = fallback_result["foreground_lock"]
+    return payload
+
+
+def _click_foreground_fallback(x: Any, y: Any, click_count: Any) -> dict[str, Any]:
+    from apps.shell.agent.tools import desktop
+
+    return desktop.desktop_click(x, y, click_count=click_count)
+
+
+def _click_fallback_unavailable(
+    cdp_error: Any,
+    fallback_error: Any,
+    *,
+    fallback_result: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    missing_permissions = ["chrome_cdp"]
+    permission_targets = ["chrome_cdp"]
+    result = fallback_result if isinstance(fallback_result, dict) else {}
+    missing_permissions.extend(_string_list(result.get("missing_permissions")))
+    permission_targets.extend(_string_list(result.get("permission_targets")))
+    if not result and _looks_like_foreground_permission_error(fallback_error):
+        missing_permissions.append("accessibility")
+        permission_targets.append("accessibility")
+    payload = {
+        "ok": False,
+        "action": "browser.click",
+        "summary": "Chrome CDP is unavailable and foreground click fallback failed",
+        "error": "browser_foreground_click_fallback_unavailable",
+        "permission_error": True,
+        "fallback_used": True,
+        "fallback": "desktop.click",
+        "missing_permissions": _dedupe(missing_permissions),
+        "permission_targets": _dedupe(permission_targets),
+        "detail": f"cdp: {cdp_error}; desktop.click: {fallback_error}",
+        "fallback_result": fallback_result or {},
+    }
+    for key in ("foreground_lock_busy", "locked_by", "foreground_lock"):
+        if key in result:
+            payload[key] = result[key]
+    return payload
 
 
 def type_text(

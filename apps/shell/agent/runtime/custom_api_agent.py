@@ -194,6 +194,8 @@ class RuntimeCustomApiAgentLoop:
             "For browser or web-page requests, prefer structured browser tools such as "
             "browser.open_url, browser.current_page, browser.click, browser.type_text, "
             "browser.extract_text, and browser.screenshot when they are allowed. "
+            "When browser.click has no Chrome CDP, use screen observation and explicit "
+            "fallback_x/fallback_y coordinates instead of guessing selector positions. "
             "Do not replace these structured desktop or browser actions with terminal.run. "
             "If a desktop or browser permission is missing, explain the exact missing permission "
             "and continue with the safest fallback. "

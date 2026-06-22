@@ -253,6 +253,9 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         "browser.open_url": [
             "Falls back to the system browser when Chrome CDP is unavailable.",
         ],
+        "browser.click": [
+            "Can fall back to foreground desktop clicking when fallback_x/fallback_y are provided.",
+        ],
         "screen.capture": [
             "Requires Screen Recording permission; denial is reported in readiness diagnostics.",
         ],

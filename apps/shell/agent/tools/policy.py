@@ -257,6 +257,27 @@ class ToolDescriptor:
             payload.get("selector") or ""
         ).strip():
             raise AgentRuntimeError(f"{self.name} 参数 selector 必须是非空字符串")
+        if self.name == "browser.click":
+            for key in ("fallback_x", "fallback_y"):
+                if key not in payload or payload.get(key) in (None, ""):
+                    continue
+                value = payload.get(key)
+                if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+                    raise AgentRuntimeError(f"browser.click 参数 {key} 必须是非负坐标数字")
+                try:
+                    coordinate = float(value)
+                except (TypeError, ValueError) as exc:
+                    raise AgentRuntimeError(
+                        f"browser.click 参数 {key} 必须是非负坐标数字"
+                    ) from exc
+                if coordinate < 0 or coordinate > 100000:
+                    raise AgentRuntimeError(f"browser.click 参数 {key} 必须是非负坐标数字")
+            click_count = payload.get("click_count", 1)
+            if click_count not in (None, ""):
+                if isinstance(click_count, bool) or not isinstance(click_count, int):
+                    raise AgentRuntimeError("browser.click 参数 click_count 必须是 1-3 的整数")
+                if click_count < 1 or click_count > 3:
+                    raise AgentRuntimeError("browser.click 参数 click_count 必须是 1-3 的整数")
         if self.name == "browser.type_text" and not str(payload.get("text") or "").strip():
             raise AgentRuntimeError("browser.type_text 参数 text 必须是非空字符串")
         if self.name in {"browser.extract_text", "browser.screenshot"}:
@@ -584,8 +605,30 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
     ),
     "browser.click": ToolDescriptor(
         name="browser.click",
-        description="Click an element in the current browser page by CSS selector.",
-        properties={"selector": {"type": "string", "description": "CSS selector to click."}},
+        description=(
+            "Click an element in the current browser page by CSS selector. "
+            "If Chrome CDP is unavailable, provide fallback_x and fallback_y after observing "
+            "the screen so the tool can safely fall back to foreground desktop clicking."
+        ),
+        properties={
+            "selector": {"type": "string", "description": "CSS selector to click."},
+            "fallback_x": {
+                "type": "number",
+                "minimum": 0,
+                "description": "Optional screen x coordinate for no-CDP foreground fallback.",
+            },
+            "fallback_y": {
+                "type": "number",
+                "minimum": 0,
+                "description": "Optional screen y coordinate for no-CDP foreground fallback.",
+            },
+            "click_count": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 3,
+                "description": "Optional foreground fallback click count. Defaults to 1.",
+            },
+        },
         required=("selector",),
     ),
     "browser.type_text": ToolDescriptor(
