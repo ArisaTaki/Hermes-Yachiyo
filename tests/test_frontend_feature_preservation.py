@@ -6430,9 +6430,11 @@ def test_agent_studio_agents_ui_smoke_uses_definition_crud_paths() -> None:
             "export async function getYachiyoAgentDesk",
             "export async function saveYachiyoAgentDeskNote",
             "export async function saveYachiyoAgentDeskFile",
+            "export async function triggerYachiyoAgentDeskFileEvent",
             "`/yachiyo/studio/agents/${encodeURIComponent(agentId)}/desk`",
             "`/yachiyo/studio/agents/${encodeURIComponent(agentId)}/desk/note`",
             "`/yachiyo/studio/agents/${encodeURIComponent(agentId)}/desk/files`",
+            "`/yachiyo/studio/agents/${encodeURIComponent(agentId)}/desk/file-events`",
         ],
     )
     _assert_contains(
@@ -6442,8 +6444,10 @@ def test_agent_studio_agents_ui_smoke_uses_definition_crud_paths() -> None:
             "getYachiyoAgentDesk(agentId)",
             "saveYachiyoAgentDeskNote(agentId, noteDraft)",
             "saveYachiyoAgentDeskFile(agentId, path, content)",
+            "triggerYachiyoAgentDeskFileEvent(agentId, path, eventType)",
             "Desk 便签已保存",
             "Desk 文件已写入",
+            "Desk 文件事件已创建任务",
         ],
     )
     _assert_contains(
@@ -6454,11 +6458,15 @@ def test_agent_studio_agents_ui_smoke_uses_definition_crud_paths() -> None:
             'data-testid="agent-desk-refresh"',
             'data-testid="agent-desk-note"',
             'data-testid="agent-desk-save-note"',
+            'data-testid="agent-desk-dropzone"',
+            'data-testid="agent-desk-file-import"',
+            'data-testid="agent-desk-import-status"',
             'data-testid="agent-desk-file-path"',
             'data-testid="agent-desk-file-content"',
             'data-testid="agent-desk-save-file"',
             'data-testid="agent-desk-item-list"',
             "useAgentDesk(agentId)",
+            "triggerFileEvent(path, 'created')",
             "selectedAgentReadOnly",
         ],
     )

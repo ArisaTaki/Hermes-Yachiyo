@@ -15937,6 +15937,48 @@ button.activity-item {
   line-height: 1.5;
 }
 
+.agent-desk-dropzone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px dashed var(--hy-border-soft);
+  border-radius: 8px;
+  background: oklch(255 0 0 / 0.02);
+}
+
+.agent-desk-dropzone.dragging {
+  border-color: oklch(66% 0.12 188 / 0.58);
+  background: oklch(66% 0.12 188 / 0.08);
+}
+
+.agent-desk-dropzone>div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.agent-desk-dropzone strong {
+  color: var(--hy-fg);
+  font-size: 12px;
+  font-weight: 660;
+}
+
+.agent-desk-dropzone span {
+  overflow: hidden;
+  color: var(--hy-faint);
+  font-family: var(--hy-mono);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-desk-dropzone input[type="file"] {
+  display: none;
+}
+
 .agent-desk-file-writer {
   display: grid;
   gap: 10px;

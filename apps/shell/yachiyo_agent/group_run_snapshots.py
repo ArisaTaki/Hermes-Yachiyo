@@ -312,6 +312,13 @@ def _participants_with_run_rollup(
         agent_id = _text(run.agent_id)
         if agent_id:
             by_agent_id.setdefault(agent_id, []).append(run)
+    all_member_run_ids = {
+        _text(run.run_id)
+        for member_runs in by_agent_id.values()
+        for run in member_runs
+        if _text(run.run_id)
+    }
+    single_participant = len(participants) == 1
 
     enriched: list[AgentGroupMemberSnapshot] = []
     for participant in participants:
@@ -350,6 +357,13 @@ def _participants_with_run_rollup(
                                     agent_id=participant.agent_id,
                                     run_ids=member_run_ids,
                                 )
+                                or (
+                                    single_participant
+                                    and _snapshot_is_group_scoped_without_member(
+                                        item,
+                                        child_run_ids=all_member_run_ids,
+                                    )
+                                )
                             ],
                         ],
                         lambda item: item.approval_id,
@@ -373,6 +387,14 @@ def _participants_with_run_rollup(
             )
         )
     return enriched
+
+
+def _snapshot_is_group_scoped_without_member(item: Any, *, child_run_ids: set[str]) -> bool:
+    if _text(getattr(item, "source_runnable_id", "")):
+        return False
+    item_run_id = _text(getattr(item, "run_id", ""))
+    source_run_id = _text(getattr(item, "source_run_id", ""))
+    return item_run_id not in child_run_ids and source_run_id not in child_run_ids
 
 
 def _snapshot_belongs_to_member(item: Any, *, agent_id: str, run_ids: set[str]) -> bool:

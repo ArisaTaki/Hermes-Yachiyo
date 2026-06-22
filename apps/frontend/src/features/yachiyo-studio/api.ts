@@ -128,6 +128,17 @@ export async function saveYachiyoAgentDeskFile(
   );
 }
 
+export async function triggerYachiyoAgentDeskFileEvent(
+  agentId: string,
+  path: string,
+  eventType: 'created' | 'modified' | 'deleted' | 'changed' = 'changed',
+): Promise<FutureTaskSnapshot> {
+  return apiPost<FutureTaskSnapshot>(
+    `/yachiyo/studio/agents/${encodeURIComponent(agentId)}/desk/file-events`,
+    { path, event_type: eventType },
+  );
+}
+
 export async function attachYachiyoAgentSkill(
   agentId: string,
   skillId: string,

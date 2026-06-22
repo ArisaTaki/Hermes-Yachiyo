@@ -4,10 +4,11 @@ import {
   getYachiyoAgentDesk,
   saveYachiyoAgentDeskFile,
   saveYachiyoAgentDeskNote,
+  triggerYachiyoAgentDeskFileEvent,
 } from '../../yachiyo-studio/api';
 import type { AgentDeskItemSnapshot, AgentDeskSnapshot } from '../../yachiyo-studio/types';
 
-type DeskBusyAction = '' | 'load' | 'note' | 'file';
+type DeskBusyAction = '' | 'load' | 'note' | 'file' | 'file-event';
 
 function deskNoteItem(desk: AgentDeskSnapshot | null): AgentDeskItemSnapshot | null {
   const notesPath = desk?.notes_path || 'desk-notes.md';
@@ -79,6 +80,25 @@ export function useAgentDesk(agentId: string) {
     }
   }, [agentId, applyDesk]);
 
+  const triggerFileEvent = useCallback(async (
+    path: string,
+    eventType: 'created' | 'modified' | 'deleted' | 'changed' = 'changed',
+  ) => {
+    if (!agentId || !path.trim()) return false;
+    setBusyAction('file-event');
+    setError('');
+    try {
+      const task = await triggerYachiyoAgentDeskFileEvent(agentId, path, eventType);
+      setStatus(`Desk 文件事件已创建任务：${task.title || task.future_task_id || path}`);
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '创建 Desk 文件事件任务失败');
+      return false;
+    } finally {
+      setBusyAction('');
+    }
+  }, [agentId]);
+
   useEffect(() => {
     void loadDesk();
   }, [loadDesk]);
@@ -93,9 +113,11 @@ export function useAgentDesk(agentId: string) {
     savingFile: busyAction === 'file',
     savingNote: busyAction === 'note',
     status,
+    triggeringFileEvent: busyAction === 'file-event',
     loadDesk,
     saveFile,
     saveNote,
+    triggerFileEvent,
     setNoteDraft,
   };
 }
