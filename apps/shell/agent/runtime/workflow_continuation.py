@@ -1027,39 +1027,24 @@ class WorkflowContinuationCoordinator:
         artifacts: list[dict[str, Any]],
         root_group: bool,
     ) -> dict[str, Any]:
-        child_workflow = self._workflow_for_node(node)
-        workflow_id = str(child_workflow.get("workflow_id") or "")
-        step_task = self._workflow_node_task(node)
-        child_goal = self._workflow_child_goal(workflow_goal, step_task)
-        child = self._insert_run(
-            kind="workflow_run",
-            runnable_id=workflow_id,
-            user_goal=child_goal,
-            run_group_id=run_group_id,
-        )
-        child_timeline, started_payload = self._workflow_run_started_projection(
-            workflow_id,
-            child_workflow,
-        )
-        self._append_run_event(child["run_id"], "workflow.run.started", started_payload)
-        child = self._continue_workflow_run(
-            child,
-            child_workflow,
-            context=child_goal,
-            timeline=child_timeline,
-            artifacts=[],
-            start_index=0,
-            root_group=False,
-        )
-        execution = WorkflowSubworkflowNodeExecution.from_child_run(
+        execution = WorkflowSubworkflowNodeExecution.from_node(
+            object(),
+            run,
             node,
-            child_workflow=child_workflow,
-            child_run=child,
             label=label,
             kind=kind,
-            step_task=step_task,
-            child_goal=child_goal,
-            artifact_count=len(self._workflow_child_artifact_refs(child, label)),
+            workflow_goal=workflow_goal,
+            run_group_id=run_group_id,
+            ports=WorkflowNodePortBundle(
+                workflow_for_node=self._workflow_for_node,
+                workflow_node_task=self._workflow_node_task,
+                workflow_child_goal=self._workflow_child_goal,
+                insert_run=self._insert_run,
+                workflow_run_started_projection=self._workflow_run_started_projection,
+                append_run_event=self._append_run_event,
+                continue_workflow_run=self._continue_workflow_run,
+                workflow_child_artifact_refs=self._workflow_child_artifact_refs,
+            ),
         )
         next_context = execution.next_context
         payload = execution.event_payload()

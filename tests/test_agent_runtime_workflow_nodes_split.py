@@ -354,6 +354,53 @@ def test_workflow_subworkflow_node_legacy_helper_accepts_port_bundle() -> None:
     ]
 
 
+def test_workflow_subworkflow_node_execution_reads_artifacts_after_child_continuation() -> None:
+    calls: list[tuple[str, str]] = []
+    child_workflow = {"workflow_id": "workflow_child", "name": "Child Flow"}
+    ports = WorkflowNodePortBundle(
+        workflow_for_node=lambda _node: child_workflow,
+        workflow_node_task=lambda _node: "Run child flow",
+        workflow_child_goal=lambda workflow_goal, step_task: f"{workflow_goal}\n\nStep: {step_task}",
+        insert_run=lambda **_kwargs: {"run_id": "child_workflow_run"},
+        workflow_run_started_projection=lambda workflow_id, _workflow: (
+            [],
+            {"workflow_id": workflow_id},
+        ),
+        append_run_event=lambda _run_id, _event_type, _payload: None,
+        continue_workflow_run=lambda run, _workflow, **_kwargs: calls.append(
+            ("continue", str(run["run_id"]))
+        )
+        or {
+            "run_id": run["run_id"],
+            "status": "completed",
+            "result": "Child flow result",
+            "artifacts": [{"kind": "workflow_artifact", "path": "child.md"}],
+        },
+        workflow_child_artifact_refs=lambda run, label: calls.append(
+            ("artifacts", f"{run['run_id']}:{run['status']}:{label}")
+        )
+        or run.get("artifacts", []),
+    )
+
+    execution = WorkflowSubworkflowNodeExecution.from_node(
+        object(),
+        {"run_id": "parent"},
+        {"id": "child-flow", "type": "workflow"},
+        label="Run Child Flow",
+        kind="workflow",
+        workflow_goal="Run parent flow",
+        run_group_id="workflow_group",
+        ports=ports,
+    )
+
+    assert execution.status == "completed"
+    assert execution.artifact_count == 1
+    assert calls == [
+        ("continue", "child_workflow_run"),
+        ("artifacts", "child_workflow_run:completed:Run Child Flow"),
+    ]
+
+
 def test_workflow_artifact_node_write_accepts_prepared_artifact() -> None:
     write = WorkflowArtifactNodeWrite.from_artifact(
         {
