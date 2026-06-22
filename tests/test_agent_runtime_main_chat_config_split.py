@@ -12,6 +12,7 @@ from apps.shell.agent.runtime.main_chat_config import (
 from apps.shell.agent.tools.policy import (
     DAILY_DESKTOP_TOOL_NAMES,
     FUTURE_TASK_TOOL_NAMES,
+    HIGH_RISK_AGENT_TOOLS,
     MEMORY_TOOL_NAMES,
     RuntimePolicyCompiler,
 )
@@ -56,6 +57,8 @@ def test_main_chat_config_builder_projects_daily_entrypoint_runtime(tmp_path) ->
     assert set(DAILY_DESKTOP_TOOL_NAMES).issubset(allowed_tools)
     assert set(MEMORY_TOOL_NAMES).issubset(allowed_tools)
     assert set(FUTURE_TASK_TOOL_NAMES).issubset(allowed_tools)
+    assert not (allowed_tools & set(HIGH_RISK_AGENT_TOOLS))
+    assert config["tool_policy"]["approval_required"] == {}
 
 
 def test_main_chat_config_builder_projects_virtual_agent_without_trusting_workspace(tmp_path) -> None:
