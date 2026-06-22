@@ -50,6 +50,7 @@ def is_replay_enrichment_event(event: dict[str, Any]) -> bool:
     event_type = str(event.get("event_type") or event.get("event") or "")
     return event_type.startswith(
         (
+            "agent.desktop.",
             "agent.tool.",
             "approval.",
             "artifact.",

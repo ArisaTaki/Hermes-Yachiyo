@@ -430,6 +430,10 @@ def test_custom_api_agent_loop_preplans_clear_daily_desktop_intent_before_text_r
     assert timeline[0] == {
         "event": "agent.desktop.intent_planned",
         "detail": "media.apple_music_play",
+        "tool": "media.apple_music_play",
+        "status": "planned",
+        "source": "daily_desktop_intent",
+        "planning_reason": "clear_daily_desktop_intent",
         "input_preview": {"query": "超时空辉夜姬"},
     }
 

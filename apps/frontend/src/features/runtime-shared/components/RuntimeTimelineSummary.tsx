@@ -77,6 +77,7 @@ function runtimeTimelineEventTypeLabel(type: string): string {
   if (type === 'model.request.failed') return '模型请求失败';
   if (type === 'model.output.ready') return '模型输出就绪';
   if (type === 'model.output.completed' || type === 'model.completed') return '模型完成';
+  if (type === 'agent.desktop.intent_planned') return '桌面意图已规划';
   if (type === 'tool.requested') return '工具请求';
   if (type === 'tool.started' || type === 'agent.tool.started') return '工具执行中';
   if (type === 'agent.tool.call') return '工具调用';

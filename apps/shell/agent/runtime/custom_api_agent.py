@@ -89,11 +89,17 @@ class RuntimeCustomApiAgentLoop:
         if default_messages:
             planned_tool_request = daily_desktop_intent_tool_request(context, allowed_tools)
             if planned_tool_request:
+                planned_tool = str(planned_tool_request.get("tool") or "")
+                planned_input = planned_tool_request.get("input") or {}
                 timeline.append(
                     self._timeline(
                         "agent.desktop.intent_planned",
-                        str(planned_tool_request.get("tool") or ""),
-                        input_preview=planned_tool_request.get("input") or {},
+                        planned_tool,
+                        tool=planned_tool,
+                        status="planned",
+                        source="daily_desktop_intent",
+                        planning_reason="clear_daily_desktop_intent",
+                        input_preview=planned_input,
                     )
                 )
                 self._run_tool_requests(

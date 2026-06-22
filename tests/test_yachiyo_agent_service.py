@@ -246,6 +246,16 @@ class _SensitiveTaskRuntimePort(_FakeRuntimePort):
         }
 
 
+class _DesktopIntentTaskRuntimePort(_FakeRuntimePort):
+    def get_task_snapshot(self, task_id: str) -> dict[str, Any]:
+        self.calls.append(("get_task_snapshot", task_id))
+        return _desktop_intent_task_payload(task_id=task_id)
+
+    def get_task_timeline(self, task_id: str) -> dict[str, Any]:
+        self.calls.append(("get_task_timeline", task_id))
+        return _desktop_intent_task_payload(task_id=task_id)
+
+
 def test_yachiyo_agent_service_maps_fake_runtime_to_task_snapshots() -> None:
     port = _FakeRuntimePort()
     service = YachiyoAgentService(port)
@@ -303,6 +313,31 @@ def test_yachiyo_agent_service_maps_task_timeline_snapshot() -> None:
     assert timeline.pending_approval.tool_name == "workspace.write_patch"
     assert timeline.tool_calls[0].tool_name == "workspace.write_patch"
     assert port.calls == [("get_task_timeline", "task-1")]
+
+
+def test_yachiyo_agent_service_preserves_desktop_intent_planning_event() -> None:
+    port = _DesktopIntentTaskRuntimePort()
+    service = YachiyoAgentService(port)
+
+    task = service.get_task_snapshot("task-music")
+    timeline = service.get_task_timeline("task-music")
+
+    assert task.recent_events[0].event_type == "agent.desktop.intent_planned"
+    assert task.recent_events[0].detail == "media.apple_music_play"
+    assert task.recent_events[0].payload == {
+        "input_preview": {"query": "超时空辉夜姬"},
+        "planning_reason": "clear_daily_desktop_intent",
+        "source": "daily_desktop_intent",
+        "status": "planned",
+        "tool": "media.apple_music_play",
+    }
+    assert timeline.events[0].event_type == "agent.desktop.intent_planned"
+    assert timeline.events[0].payload["tool"] == "media.apple_music_play"
+    assert timeline.tool_calls == []
+    assert port.calls == [
+        ("get_task_snapshot", "task-music"),
+        ("get_task_timeline", "task-music"),
+    ]
 
 
 def test_yachiyo_agent_service_pages_task_events() -> None:
@@ -486,3 +521,21 @@ def _task_payload(**overrides: Any) -> dict[str, Any]:
     }
     payload.update(overrides)
     return payload
+
+
+def _desktop_intent_task_payload(**overrides: Any) -> dict[str, Any]:
+    return _task_payload(
+        status="running",
+        timeline=[
+            {
+                "event": "agent.desktop.intent_planned",
+                "detail": "media.apple_music_play",
+                "tool": "media.apple_music_play",
+                "status": "planned",
+                "source": "daily_desktop_intent",
+                "planning_reason": "clear_daily_desktop_intent",
+                "input_preview": {"query": "超时空辉夜姬"},
+            }
+        ],
+        **overrides,
+    )

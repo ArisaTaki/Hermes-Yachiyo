@@ -37,6 +37,7 @@ export function timelineEventTitle(event: Record<string, unknown>): string {
   if (name === 'agent.runtime.compiled') return '运行环境已准备';
   if (name === 'agent.artifact.write') return '上下文/产物已写入';
   if (name === 'agent.model.response') return '模型响应';
+  if (name === 'agent.desktop.intent_planned') return detail ? `桌面意图已规划 · ${detail}` : '桌面意图已规划';
   if (name === 'agent.tool.call') return detail ? `工具调用 · ${detail}` : '工具调用';
   if (name === 'agent.tool.started') return detail ? `工具执行中 · ${detail}` : '工具执行中';
   if (name === 'agent.tool.skipped' || name === 'tool.skipped') return detail ? `工具已跳过 · ${detail}` : '工具已跳过';
@@ -123,6 +124,7 @@ export function timelineEventTone(event: Record<string, unknown>): string {
   if (name === 'group.run.completed') return 'ready';
   if (name === 'group.run.failed' || name === 'group.run.cancelled') return 'danger';
   if (name.startsWith('group.member.')) return name.includes('started') ? 'running' : 'ready';
+  if (name === 'agent.desktop.intent_planned') return 'tool';
   if (name.startsWith('skill.') || name.startsWith('memory.')) return 'tool';
   if (name.includes('tool')) return 'tool';
   if (name.startsWith('model.') || name.includes('model.response')) return 'model';

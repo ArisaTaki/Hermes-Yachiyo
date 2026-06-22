@@ -56,9 +56,18 @@ def test_legacy_run_replay_enrichment_merges_observable_runtime_facts() -> None:
     runtime = _ReplayRuntime(
         [
             {"event_type": "run.started", "sequence": 1, "payload": {"source": "replay"}},
-            {"event_type": "memory.retrieved", "sequence": 2, "payload": {"memory_id": "mem-1"}},
-            {"event_type": "skill.used", "sequence": 3, "payload": {"skill_id": "skill-1"}},
-            {"event_type": "agent.runtime.compiled", "sequence": 4, "payload": {"internal": True}},
+            {
+                "event_type": "agent.desktop.intent_planned",
+                "sequence": 2,
+                "payload": {
+                    "tool": "media.apple_music_play",
+                    "status": "planned",
+                    "input_preview": {"query": "超时空辉夜姬"},
+                },
+            },
+            {"event_type": "memory.retrieved", "sequence": 3, "payload": {"memory_id": "mem-1"}},
+            {"event_type": "skill.used", "sequence": 4, "payload": {"skill_id": "skill-1"}},
+            {"event_type": "agent.runtime.compiled", "sequence": 5, "payload": {"internal": True}},
         ]
     )
     run = {
@@ -70,10 +79,12 @@ def test_legacy_run_replay_enrichment_merges_observable_runtime_facts() -> None:
 
     assert [event["event_type"] for event in enriched["events"]] == [
         "run.started",
+        "agent.desktop.intent_planned",
         "memory.retrieved",
         "skill.used",
     ]
     assert runtime.requests == [{"run_id": "run-1", "limit": 500}]
+    assert is_replay_enrichment_event({"event_type": "agent.desktop.intent_planned"})
     assert is_replay_enrichment_event({"event_type": "memory.retrieved"})
     assert is_replay_enrichment_event({"event_type": "skill.used"})
 
