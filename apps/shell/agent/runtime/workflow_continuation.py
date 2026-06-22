@@ -14,6 +14,7 @@ from apps.shell.agent.runtime.workflow_approvals import WorkflowApprovalPausePro
 from apps.shell.agent.runtime.workflow_child_approvals import (
     WorkflowChildPendingApprovalProjection,
 )
+from apps.shell.agent.runtime.workflow_outcomes import WorkflowChildExecutionStatusProjection
 from apps.shell.agent.runtime.workflow_nodes import (
     WorkflowAgentNodeExecution,
     WorkflowAgentNodeHandoff,
@@ -935,65 +936,15 @@ class WorkflowContinuationCoordinator:
         )
         self._append_run_event(str(run["run_id"]), "workflow.node.agent", agent_payload)
         self._merge_workflow_child_run_outcome(timeline, artifacts, execution.child_run, label)
-        if execution.status == "approval_required":
-            event_payload = execution.status_event_payload()
-            timeline.append(
-                self._timeline(
-                    "workflow.run.approval_required",
-                    label,
-                    **event_payload,
-                )
-            )
-            self._append_run_event(
-                str(run["run_id"]),
-                "workflow.run.approval_required",
-                event_payload,
-            )
-            result = self._update_run(
-                str(run["run_id"]),
-                status="approval_required",
-                result=next_context,
-                timeline=timeline,
-                artifacts=artifacts,
-            )
-            if root_group:
-                self._update_run_group(
-                    run_group_id,
-                    status="approval_required",
-                    summary=next_context,
-                )
-                result = self._get_run(result["run_id"])
-            return {"done": True, "run": result}
-        if execution.status != "completed":
-            status = "cancelled" if execution.status == "cancelled" else "failed"
-            detail = f"{label}: {next_context or execution.status}"
-            timeline.append(
-                self._timeline(
-                    f"workflow.run.{status}",
-                    detail,
-                    **execution.status_event_payload(),
-                )
-            )
-            self._append_run_event(
-                str(run["run_id"]),
-                f"workflow.run.{status}",
-                {
-                    **execution.status_event_payload(),
-                    "result": tool_input_preview(next_context or execution.status, limit=1800),
-                },
-            )
-            result = self._update_run(
-                str(run["run_id"]),
-                status=status,
-                result=next_context,
-                timeline=timeline,
-                artifacts=artifacts,
-            )
-            if root_group:
-                self._update_run_group(run_group_id, status=status, summary=next_context)
-                result = self._get_run(result["run_id"])
-            return {"done": True, "run": result}
-        return {"done": False, "context": next_context}
+        return self._apply_child_execution_status(
+            run,
+            execution,
+            label=label,
+            run_group_id=run_group_id,
+            timeline=timeline,
+            artifacts=artifacts,
+            root_group=root_group,
+        )
 
     def _project_workflow_child_pending_context(
         self,
@@ -1013,6 +964,38 @@ class WorkflowContinuationCoordinator:
             return child
         updated = projection.project(self._update_run)
         return {**child, **updated}
+
+    def _apply_child_execution_status(
+        self,
+        run: dict[str, Any],
+        execution: Any,
+        *,
+        label: str,
+        run_group_id: str,
+        timeline: list[dict[str, Any]],
+        artifacts: list[dict[str, Any]],
+        root_group: bool,
+    ) -> dict[str, Any]:
+        projection = WorkflowChildExecutionStatusProjection.from_execution(
+            execution,
+            label=label,
+        )
+        if projection is None:
+            return {"done": False, "context": str(getattr(execution, "next_context") or "")}
+        timeline.append(projection.timeline_event(self._timeline))
+        self._append_run_event(
+            str(run["run_id"]),
+            projection.event_type,
+            projection.run_event_payload(),
+        )
+        result = self._update_run(
+            str(run["run_id"]),
+            **projection.update_fields(timeline=timeline, artifacts=artifacts),
+        )
+        if root_group:
+            self._update_run_group(run_group_id, **projection.run_group_update_fields())
+            result = self._get_run(result["run_id"])
+        return {"done": True, "run": result}
 
     def _run_workflow_node(
         self,
@@ -1046,62 +1029,19 @@ class WorkflowContinuationCoordinator:
                 workflow_child_artifact_refs=self._workflow_child_artifact_refs,
             ),
         )
-        next_context = execution.next_context
         payload = execution.event_payload()
         timeline.append(self._timeline("workflow.node.workflow", label, **payload))
         self._append_run_event(str(run["run_id"]), "workflow.node.workflow", payload)
         self._merge_workflow_child_run_outcome(timeline, artifacts, execution.child_run, label)
-        if execution.status == "approval_required":
-            event_payload = execution.status_event_payload()
-            timeline.append(
-                self._timeline(
-                    "workflow.run.approval_required",
-                    label,
-                    **event_payload,
-                )
-            )
-            self._append_run_event(str(run["run_id"]), "workflow.run.approval_required", event_payload)
-            result = self._update_run(
-                str(run["run_id"]),
-                status="approval_required",
-                result=next_context,
-                timeline=timeline,
-                artifacts=artifacts,
-            )
-            if root_group:
-                self._update_run_group(run_group_id, status="approval_required", summary=next_context)
-                result = self._get_run(result["run_id"])
-            return {"done": True, "run": result}
-        if execution.status != "completed":
-            status = "cancelled" if execution.status == "cancelled" else "failed"
-            detail = f"{label}: {next_context or execution.status}"
-            timeline.append(
-                self._timeline(
-                    f"workflow.run.{status}",
-                    detail,
-                    **execution.status_event_payload(),
-                )
-            )
-            self._append_run_event(
-                str(run["run_id"]),
-                f"workflow.run.{status}",
-                {
-                    **execution.status_event_payload(),
-                    "result": tool_input_preview(next_context or execution.status, limit=1800),
-                },
-            )
-            result = self._update_run(
-                str(run["run_id"]),
-                status=status,
-                result=next_context,
-                timeline=timeline,
-                artifacts=artifacts,
-            )
-            if root_group:
-                self._update_run_group(run_group_id, status=status, summary=next_context)
-                result = self._get_run(result["run_id"])
-            return {"done": True, "run": result}
-        return {"done": False, "context": next_context}
+        return self._apply_child_execution_status(
+            run,
+            execution,
+            label=label,
+            run_group_id=run_group_id,
+            timeline=timeline,
+            artifacts=artifacts,
+            root_group=root_group,
+        )
 
     def _pause_for_approval_node(
         self,

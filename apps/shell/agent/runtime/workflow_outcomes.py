@@ -225,6 +225,82 @@ class WorkflowChildStatusProjection:
 
 
 @dataclass(frozen=True)
+class WorkflowChildExecutionStatusProjection:
+    """Parent Workflow Run status projection for a terminal child node execution."""
+
+    label: str
+    child_status: str
+    parent_status: str
+    next_context: str
+    status_payload: dict[str, Any]
+
+    @classmethod
+    def from_execution(
+        cls,
+        execution: Any,
+        *,
+        label: str,
+    ) -> "WorkflowChildExecutionStatusProjection | None":
+        child_status = str(getattr(execution, "status") or "")
+        if child_status == "completed":
+            return None
+        parent_status = "approval_required" if child_status == "approval_required" else "failed"
+        if child_status == "cancelled":
+            parent_status = "cancelled"
+        return cls(
+            label=label,
+            child_status=child_status,
+            parent_status=parent_status,
+            next_context=str(getattr(execution, "next_context") or ""),
+            status_payload=dict(execution.status_event_payload()),
+        )
+
+    @property
+    def event_type(self) -> str:
+        return f"workflow.run.{self.parent_status}"
+
+    @property
+    def detail(self) -> str:
+        if self.parent_status == "approval_required":
+            return self.label
+        return f"{self.label}: {self.next_context or self.child_status}"
+
+    def timeline_event(self, timeline_factory: Any) -> dict[str, Any]:
+        return timeline_factory(
+            self.event_type,
+            self.detail,
+            **self.status_payload,
+        )
+
+    def run_event_payload(self) -> dict[str, Any]:
+        if self.parent_status == "approval_required":
+            return dict(self.status_payload)
+        return {
+            **self.status_payload,
+            "result": _tool_input_preview(self.next_context or self.child_status, limit=1800),
+        }
+
+    def update_fields(
+        self,
+        *,
+        timeline: list[dict[str, Any]],
+        artifacts: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        return {
+            "status": self.parent_status,
+            "result": self.next_context,
+            "timeline": timeline,
+            "artifacts": artifacts,
+        }
+
+    def run_group_update_fields(self) -> dict[str, Any]:
+        return {
+            "status": self.parent_status,
+            "summary": self.next_context,
+        }
+
+
+@dataclass(frozen=True)
 class WorkflowParentResumeFailureProjection:
     """Failure projection when a parent Workflow cannot resume after a child update."""
 

@@ -378,6 +378,7 @@ from apps.shell.agent.runtime.workflow_child_approvals import (
     WorkflowChildPendingApprovalProjection,
 )
 from apps.shell.agent.runtime.workflow_outcomes import (
+    WorkflowChildExecutionStatusProjection,
     WorkflowChildOutcomeCoordinator,
     WorkflowChildRunProjection,
     WorkflowChildStatusProjection,
