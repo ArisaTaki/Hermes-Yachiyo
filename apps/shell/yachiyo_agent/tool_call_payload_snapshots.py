@@ -27,7 +27,8 @@ def tool_call_snapshot_from_payload(
         or payload.get("arguments")
         or payload.get("args")
     )
-    status = _text(payload.get("status") or "completed")
+    output_preview = tool_output_preview(payload)
+    status = tool_status_from_payload(payload, output_preview=output_preview)
     completed_at = _optional_text(payload.get("completed_at"))
     if not completed_at and tool_call_status_is_terminal(status):
         completed_at = _optional_text(payload.get("created_at") or payload.get("started_at"))
@@ -76,7 +77,7 @@ def tool_call_snapshot_from_payload(
         status=status,
         risk_level=_optional_text(payload.get("risk_level") or payload.get("risk")),
         input_preview=input_preview,
-        output_preview=tool_output_preview(payload),
+        output_preview=output_preview,
         approval_id=_optional_text(payload.get("approval_id")),
         started_at=_text(payload.get("started_at") or payload.get("created_at")),
         completed_at=completed_at,
@@ -84,7 +85,20 @@ def tool_call_snapshot_from_payload(
 
 
 def tool_call_status_is_terminal(status: str) -> bool:
-    return status in {"completed", "failed", "denied", "skipped", "expired", "cancelled"}
+    return status in {"completed", "failed", "denied", "skipped", "expired", "cancelled", "blocked"}
+
+
+def tool_status_from_payload(
+    payload: Mapping[str, Any],
+    *,
+    output_preview: Mapping[str, Any],
+) -> str:
+    explicit = _text(payload.get("status"))
+    if explicit:
+        return explicit
+    if _foreground_lock_is_busy(payload) or _foreground_lock_is_busy(output_preview):
+        return "blocked"
+    return "completed"
 
 
 def tool_output_preview(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -97,6 +111,10 @@ def tool_output_preview(payload: Mapping[str, Any]) -> dict[str, Any]:
         return explicit
     error = payload.get("error")
     return _mapping({"error": error}) if error is not None else {}
+
+
+def _foreground_lock_is_busy(value: Any) -> bool:
+    return isinstance(value, Mapping) and value.get("foreground_lock_busy") is True
 
 
 def _redacted_tool_call_snapshot(snapshot: ToolCallSnapshot) -> ToolCallSnapshot:

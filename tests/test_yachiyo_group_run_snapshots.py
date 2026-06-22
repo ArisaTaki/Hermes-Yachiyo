@@ -74,3 +74,59 @@ def test_group_run_events_with_lifecycle_keeps_source_run_sequence_for_replay() 
     assert events[1]["payload"]["source_run_id"] == "child-run-1"
     assert events[1]["payload"]["source_sequence"] == 9
     assert "sequence" not in events[1]
+
+
+def test_group_run_snapshot_rolls_up_blocked_foreground_tool_calls() -> None:
+    group_run = group_run_snapshot_from_payload(
+        {
+            "group_run_id": "group-run-lock",
+            "group_id": "group-1",
+            "title": "Desktop handoff",
+            "status": "running",
+            "objective": "Coordinate foreground input",
+            "members": [
+                {"agent_id": "agent-1", "name": "Planner"},
+                {"agent_id": "agent-2", "name": "Operator"},
+            ],
+            "runs": [
+                {
+                    "run_id": "run-operator",
+                    "agent_id": "agent-2",
+                    "status": "running",
+                    "events": [
+                        {
+                            "event_type": "agent.tool.call",
+                            "detail": "desktop.type_text",
+                            "payload": {
+                                "tool_call_id": "call-foreground-lock",
+                                "member_agent_id": "agent-2",
+                                "member_agent_name": "Operator",
+                                "result": {
+                                    "ok": False,
+                                    "action": "foreground_lock",
+                                    "foreground_lock_busy": True,
+                                    "locked_by": "group-run-lock:run-planner",
+                                    "summary": "Foreground control is already held by Planner.",
+                                },
+                            },
+                            "created_at": "2026-06-22T00:00:01Z",
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    assert len(group_run.tool_calls) == 1
+    tool_call = group_run.tool_calls[0]
+    assert tool_call.run_id == "run-operator"
+    assert tool_call.group_run_id == "group-run-lock"
+    assert tool_call.source_runnable_id == "agent-2"
+    assert tool_call.status == "blocked"
+    assert tool_call.output_preview["foreground_lock_busy"] is True
+    assert tool_call.output_preview["locked_by"] == "group-run-lock:run-planner"
+
+    operator = next(participant for participant in group_run.participants if participant.agent_id == "agent-2")
+    assert len(operator.tool_calls) == 1
+    assert operator.tool_calls[0].tool_call_id == "call-foreground-lock"
+    assert operator.tool_calls[0].status == "blocked"

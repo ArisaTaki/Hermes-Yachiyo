@@ -236,11 +236,11 @@ function toolCallFromRunEvent(event: PublicRunEvent): ToolCallSnapshot | null {
   const policyReason = publicRunEventPayloadString(payload, 'policy_reason')
     || publicRunEventPayloadString(approval, 'policy_reason')
     || publicRunEventPayloadString(approval, 'reason');
-  const status = publicRunEventPayloadString(payload, 'status') || toolStatusFromRunEvent(event.event_type);
   const outputPreview = objectPreview(payload.output_preview)
     || objectPreview(payload.output)
     || objectPreview(payload.result)
     || (payload.error !== undefined ? { error: payload.error } : {});
+  const status = toolStatusFromRunEventPayload(event.event_type, payload, outputPreview);
   const toolName = publicRunEventPayloadString(payload, 'tool_name')
     || publicRunEventPayloadString(payload, 'tool')
     || event.detail
@@ -609,8 +609,27 @@ function toolStatusFromRunEvent(eventType: string): string {
   return 'completed';
 }
 
+function toolStatusFromRunEventPayload(
+  eventType: string,
+  payload: Record<string, unknown>,
+  outputPreview: Record<string, unknown>,
+): string {
+  const explicit = publicRunEventPayloadString(payload, 'status');
+  if (explicit) return explicit;
+  if (toolCallForegroundLockBusy(payload) || outputPreview.foreground_lock_busy === true) return 'blocked';
+  return toolStatusFromRunEvent(eventType);
+}
+
+function toolCallForegroundLockBusy(payload: Record<string, unknown>): boolean {
+  if (payload.foreground_lock_busy === true) return true;
+  return ['output_preview', 'output', 'result'].some((key) => {
+    const value = objectPreview(payload[key]);
+    return value?.foreground_lock_busy === true;
+  });
+}
+
 function toolCallStatusIsTerminal(status: string): boolean {
-  return ['completed', 'failed', 'denied', 'skipped', 'expired', 'cancelled'].includes(status);
+  return ['completed', 'failed', 'denied', 'skipped', 'expired', 'cancelled', 'blocked'].includes(status);
 }
 
 function toolCallCorrelationKey(event: PublicRunEvent, toolCall: ToolCallSnapshot): string {

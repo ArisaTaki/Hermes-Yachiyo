@@ -156,6 +156,60 @@ def test_tool_call_snapshot_from_payload_redacts_sensitive_previews() -> None:
     assert "[redacted]" in rendered
 
 
+def test_tool_call_snapshot_from_payload_marks_foreground_lock_busy_as_blocked() -> None:
+    snapshot = tool_call_snapshot_from_payload(
+        {
+            "tool_call_id": "call-foreground-lock",
+            "run_id": "run-desktop",
+            "tool_name": "desktop.type_text",
+            "result": {
+                "ok": False,
+                "action": "foreground_lock",
+                "foreground_lock_busy": True,
+                "locked_by": "group-run-1:run-planner",
+                "summary": "Foreground control is already held by Planner.",
+            },
+            "created_at": "2026-06-22T00:00:00Z",
+        }
+    )
+
+    assert snapshot.status == "blocked"
+    assert snapshot.completed_at == "2026-06-22T00:00:00Z"
+    assert snapshot.output_preview["foreground_lock_busy"] is True
+    assert snapshot.output_preview["locked_by"] == "group-run-1:run-planner"
+
+
+def test_tool_call_snapshots_from_events_marks_foreground_lock_busy_as_blocked() -> None:
+    snapshots = tool_call_snapshots_from_events(
+        [
+            PublicRunEvent(
+                event_id="evt-lock",
+                run_id="run-desktop",
+                sequence=1,
+                event_type="agent.tool.call",
+                detail="desktop.type_text",
+                payload={
+                    "tool_call_id": "call-foreground-lock",
+                    "result": {
+                        "ok": False,
+                        "action": "foreground_lock",
+                        "foreground_lock_busy": True,
+                        "locked_by": "group-run-1:run-planner",
+                        "summary": "Foreground control is already held by Planner.",
+                    },
+                },
+                created_at="2026-06-22T00:00:01Z",
+            )
+        ]
+    )
+
+    assert len(snapshots) == 1
+    assert snapshots[0].tool_name == "desktop.type_text"
+    assert snapshots[0].status == "blocked"
+    assert snapshots[0].completed_at == "2026-06-22T00:00:01Z"
+    assert snapshots[0].output_preview["foreground_lock_busy"] is True
+
+
 def test_tool_call_snapshots_from_payloads_prefers_payload_list_over_event_fallback() -> None:
     snapshots = tool_call_snapshots_from_payloads(
         [

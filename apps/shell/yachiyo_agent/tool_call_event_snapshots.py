@@ -64,7 +64,7 @@ def tool_call_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
         "run_id": event.run_id,
         "sequence": event.sequence,
         "tool_name": tool_name_from_event(event),
-        "status": payload.get("status") or tool_status_from_event_type(event.event_type),
+        "status": tool_status_from_event_payload(event.event_type, payload),
         "created_at": event.created_at,
     }
     if approval_id:
@@ -255,6 +255,25 @@ def tool_status_from_event_type(event_type: str) -> str:
     if event_type in {"tool.cancelled"}:
         return "cancelled"
     return "completed"
+
+
+def tool_status_from_event_payload(event_type: str, payload: Mapping[str, Any]) -> str:
+    explicit = _text(payload.get("status"))
+    if explicit:
+        return explicit
+    if _payload_foreground_lock_is_busy(payload):
+        return "blocked"
+    return tool_status_from_event_type(event_type)
+
+
+def _payload_foreground_lock_is_busy(payload: Mapping[str, Any]) -> bool:
+    if payload.get("foreground_lock_busy") is True:
+        return True
+    for key in ("output_preview", "output", "result"):
+        value = payload.get(key)
+        if isinstance(value, Mapping) and value.get("foreground_lock_busy") is True:
+            return True
+    return False
 
 
 def _tool_call_correlation_preview(preview: Mapping[str, Any]) -> dict[str, Any]:
