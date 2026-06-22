@@ -787,6 +787,10 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "from '../features/yachiyo-chat/hooks/useLegacyChatRunnableResult';",
             "from '../features/yachiyo-chat/hooks/useChatRunnables';",
             "from '../features/yachiyo-chat/hooks/useChatSessions';",
+            "chatDesktopPermissionNotice",
+            "getYachiyoReadiness",
+            "desktopReadinessNoticeShownRef",
+            "const desktopNotice = chatDesktopPermissionNotice(readiness);",
             "import { deriveChatSessionState } from '../features/yachiyo-chat/sessionDerivedState';",
             "handleLegacyChatRunnableResult(result, { refreshTaskSnapshot: true })",
             "handleLegacyChatRunnableResult(result)",
@@ -1788,6 +1792,7 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
     _assert_contains(
         "apps/frontend/src/features/yachiyo-chat/api.ts",
         [
+            "export async function getYachiyoReadiness",
             "'/yachiyo/readiness'",
             "'/yachiyo/tasks'",
             "`/yachiyo/tasks",
@@ -1815,6 +1820,18 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "approveYachiyoTask",
             "rejectYachiyoTask",
             "cancelYachiyoTask",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/readiness.ts",
+        [
+            "export function chatDesktopPermissionNotice",
+            "export function missingDesktopPermissionLabels",
+            "screen_recording: '屏幕录制权限'",
+            "automation_or_accessibility: '自动化或辅助功能权限'",
+            "music_app: 'Music.app'",
+            "chrome_cdp: 'Chrome CDP 调试端口'",
+            "打开「诊断」中的桌面权限检查",
         ],
     )
     _assert_not_contains(

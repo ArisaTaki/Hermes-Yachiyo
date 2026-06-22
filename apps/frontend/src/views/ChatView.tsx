@@ -96,6 +96,7 @@ import { useYachiyoTaskSnapshots } from '../features/yachiyo-chat/hooks/useYachi
 import { useYachiyoTaskSubmit } from '../features/yachiyo-chat/hooks/useYachiyoTaskSubmit';
 import {
   createChatGroupSession,
+  getYachiyoReadiness,
   retryLegacyChatMessage,
   sendLegacyChatMessage,
   updateChatGroupSessionWithRecovery,
@@ -105,6 +106,7 @@ import {
   shouldContinueTyping,
   syncRenderStates,
 } from '../features/yachiyo-chat/renderState';
+import { chatDesktopPermissionNotice } from '../features/yachiyo-chat/readiness';
 import {
   CHAT_SIDEBAR_BASE_MAX_WIDTH,
   CHAT_SIDEBAR_MIN_WIDTH,
@@ -224,6 +226,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const highlightedScrollTargetRef = useRef('');
   const highlightClearTimerRef = useRef<number | null>(null);
   const approvalSessionIdRef = useRef('');
+  const desktopReadinessNoticeShownRef = useRef(false);
   const loadSessionsRef = useRef<() => Promise<void>>(async () => undefined);
   const transientEmptySessionIdRef = useRef('');
   const latestChatSnapshotRef = useRef({
@@ -445,6 +448,23 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     revealMessage,
     setStatus,
   });
+
+  useEffect(() => {
+    if (embedded || desktopReadinessNoticeShownRef.current) return undefined;
+    let cancelled = false;
+    void getYachiyoReadiness()
+      .then((readiness) => {
+        if (cancelled) return;
+        const desktopNotice = chatDesktopPermissionNotice(readiness);
+        if (!desktopNotice) return;
+        desktopReadinessNoticeShownRef.current = true;
+        showNotice(desktopNotice.title, desktopNotice.detail, desktopNotice.kind);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [embedded, showNotice]);
 
   useEffect(() => {
     const interval = isProcessing ? ACTIVE_POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS;
