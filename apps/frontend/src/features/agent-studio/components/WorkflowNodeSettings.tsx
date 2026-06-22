@@ -2,6 +2,22 @@ import type { Dispatch, SetStateAction } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 
 import type { AgentSpec, WorkflowSpec } from '../types';
+import {
+  appControlTools,
+  browserControlTools,
+  foregroundInputTools,
+  mediaControlTools,
+  screenContextTools,
+} from '../utils/agents';
+
+const workflowNodeToolCapabilities = [
+  { id: 'screen', label: 'Screen', tools: screenContextTools },
+  { id: 'app', label: 'App Control', tools: appControlTools },
+  { id: 'media', label: 'Media', tools: mediaControlTools },
+  { id: 'foreground', label: 'Foreground Input', tools: foregroundInputTools },
+  { id: 'browser', label: 'Browser', tools: browserControlTools },
+  { id: 'terminal', label: 'Terminal', tools: ['terminal.run'] },
+];
 
 type WorkflowNodeSettingsProps = {
   agents: AgentSpec[];
@@ -111,6 +127,47 @@ export function WorkflowNodeSettings({
                       onChange={(event) => setNodes((current) => current.map((item) => item.id === node.id ? { ...item, data: { ...item.data, task: event.target.value } } : item))}
                     />
                   </label>
+                  <div className="workflow-node-tool-policy" data-testid="workflow-node-tool-policy">
+                    <div className="workflow-node-tool-policy-head">
+                      <strong>Node Tools</strong>
+                      <button
+                        type="button"
+                        data-testid="workflow-node-tool-policy-inherit"
+                        disabled={busy || !workflowNodeHasToolPolicy(node)}
+                        onClick={() => setNodes((current) => current.map((item) => item.id === node.id ? {
+                          ...item,
+                          data: removeWorkflowNodeToolPolicy(item.data as Record<string, unknown> | undefined),
+                        } : item))}
+                      >
+                        继承 Agent
+                      </button>
+                    </div>
+                    <div className="workflow-node-tool-policy-grid">
+                      {workflowNodeToolCapabilities.map((capability) => (
+                        <label className="agent-checkbox-row" key={capability.id}>
+                          <input
+                            type="checkbox"
+                            data-testid={`workflow-node-tool-${capability.id}`}
+                            checked={workflowNodeCapabilityEnabled(node, selectedNodeAgent, capability.tools)}
+                            disabled={busy || !selectedNodeAgent}
+                            onChange={(event) => {
+                              const enabled = event.target.checked;
+                              setNodes((current) => current.map((item) => item.id === node.id ? {
+                                ...item,
+                                data: updateWorkflowNodeToolPolicy(
+                                  item.data as Record<string, unknown> | undefined,
+                                  selectedNodeAgent,
+                                  capability.tools,
+                                  enabled,
+                                ),
+                              } : item));
+                            }}
+                          />
+                          <span>{capability.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
                 </>
               ) : null}
               {kind === 'artifact' ? (
@@ -270,4 +327,94 @@ function workflowLoopMaxIterations(data: Record<string, unknown> | undefined): n
   const value = Number(raw);
   if (!Number.isFinite(value)) return 3;
   return Math.max(1, Math.min(Math.round(value), 25));
+}
+
+function workflowNodeHasToolPolicy(node: Node): boolean {
+  return Boolean(node.data?.tool_policy && typeof node.data.tool_policy === 'object');
+}
+
+function workflowNodeCapabilityEnabled(
+  node: Node,
+  agent: AgentSpec | null,
+  tools: string[],
+): boolean {
+  const allowed = workflowNodeAllowedTools(node.data as Record<string, unknown> | undefined, agent);
+  return tools.some((tool) => allowed.has(tool));
+}
+
+function workflowNodeAllowedTools(
+  data: Record<string, unknown> | undefined,
+  agent: AgentSpec | null,
+): Set<string> {
+  const nodePolicy = data?.tool_policy;
+  if (nodePolicy && typeof nodePolicy === 'object') {
+    return allowedToolsFromPolicy(nodePolicy as Record<string, unknown>);
+  }
+  return allowedToolsFromPolicy(agent?.tool_policy);
+}
+
+function updateWorkflowNodeToolPolicy(
+  data: Record<string, unknown> | undefined,
+  agent: AgentSpec | null,
+  tools: string[],
+  enabled: boolean,
+): Record<string, unknown> {
+  const nextData = { ...(data || {}) };
+  const allowed = workflowNodeAllowedTools(nextData, agent);
+  tools.forEach((tool) => {
+    if (enabled) allowed.add(tool);
+    else allowed.delete(tool);
+  });
+  nextData.tool_policy = {
+    allowed_tools: Array.from(allowed),
+    approval_required: workflowNodeApprovalRequired(nextData, agent, allowed),
+  };
+  return nextData;
+}
+
+function removeWorkflowNodeToolPolicy(data: Record<string, unknown> | undefined): Record<string, unknown> {
+  const nextData = { ...(data || {}) };
+  delete nextData.tool_policy;
+  return nextData;
+}
+
+function allowedToolsFromPolicy(policy: unknown): Set<string> {
+  const raw = policy && typeof policy === 'object'
+    ? (policy as { allowed_tools?: unknown })
+    : {};
+  return new Set(
+    Array.isArray(raw.allowed_tools)
+      ? raw.allowed_tools.map((tool) => String(tool || '').trim()).filter(Boolean)
+      : [],
+  );
+}
+
+function workflowNodeApprovalRequired(
+  data: Record<string, unknown>,
+  agent: AgentSpec | null,
+  allowed: Set<string>,
+): Record<string, boolean> {
+  const approvalRequired = {
+    ...approvalRequiredFromPolicy(agent?.tool_policy),
+    ...approvalRequiredFromPolicy(data.tool_policy),
+  };
+  if (allowed.has('terminal.run')) approvalRequired['terminal.run'] = true;
+  else delete approvalRequired['terminal.run'];
+  if (allowed.has('workspace.write_patch')) approvalRequired['workspace.write_patch'] = true;
+  else delete approvalRequired['workspace.write_patch'];
+  return approvalRequired;
+}
+
+function approvalRequiredFromPolicy(policy: unknown): Record<string, boolean> {
+  const raw = policy && typeof policy === 'object'
+    ? (policy as { approval_required?: unknown })
+    : {};
+  const approval = raw.approval_required && typeof raw.approval_required === 'object'
+    ? raw.approval_required as Record<string, unknown>
+    : {};
+  return Object.fromEntries(
+    Object.entries(approval)
+      .filter(([, value]) => value === true)
+      .map(([tool]) => [tool, true]),
+  );
 }
