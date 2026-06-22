@@ -25,7 +25,9 @@ from .contracts import (
 )
 from .task_snapshots import run_events_from_payload, task_status_from_value
 from .timeline_metadata_snapshots import (
+    merge_timeline_child_snapshots,
     run_timeline_agent_id_from_payload,
+    timeline_child_snapshots_from_events,
     run_timeline_rerun_provenance_from_payload,
     timeline_child_snapshots_from_payloads,
     workflow_run_id_from_payload,
@@ -97,8 +99,11 @@ def run_timeline_snapshot_from_payload(
             run_id=run_id,
             events=events,
         ),
-        children=timeline_child_snapshots_from_payloads(
-            payload.get("children") or payload.get("child_run_ids")
+        children=merge_timeline_child_snapshots(
+            timeline_child_snapshots_from_payloads(
+                payload.get("children") or payload.get("child_run_ids")
+            ),
+            timeline_child_snapshots_from_events(events),
         ),
         created_at=_text(payload.get("created_at")),
         updated_at=_text(payload.get("updated_at")),

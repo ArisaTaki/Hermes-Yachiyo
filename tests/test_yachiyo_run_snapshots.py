@@ -600,6 +600,56 @@ def test_workflow_run_snapshot_derives_context_from_replay_events() -> None:
     assert workflow_run.objective == "Review docs"
 
 
+def test_workflow_run_snapshot_derives_child_approval_bridge_from_replay_events() -> None:
+    workflow_run = workflow_run_snapshot_from_payload(
+        {
+            "run_id": "workflow-run-children",
+            "kind": "workflow_run",
+            "status": "approval_required",
+            "workflow_id": "workflow-1",
+            "user_goal": "Operate desktop",
+            "events": [
+                {
+                    "event_type": "workflow.run.approval_required",
+                    "payload": {
+                        "child_run_id": "child-agent-run",
+                        "status": "approval_required",
+                        "workflow_id": "workflow-1",
+                        "workflow_run_id": "workflow-run-children",
+                        "workflow_node_id": "type",
+                        "workflow_node_label": "Type in foreground app",
+                        "group_run_id": "group-run-1",
+                        "member_agent_id": "agent-typer",
+                        "member_agent_name": "Typer",
+                        "pending_approval": {
+                            "approval_id": "approval-child-agent",
+                            "tool": "desktop.type_text",
+                            "input_preview": {"text": "hello"},
+                        },
+                    },
+                    "created_at": "2026-06-22T00:00:01Z",
+                }
+            ],
+        }
+    )
+
+    child = workflow_run.children[0]
+
+    assert child.run_id == "child-agent-run"
+    assert child.parent_run_id == "workflow-run-children"
+    assert child.status == "approval_required"
+    assert child.kind == "agent_run"
+    assert child.group_run_id == "group-run-1"
+    assert child.workflow_run_id == "workflow-run-children"
+    assert child.workflow_node_id == "type"
+    assert child.workflow_node_label == "Type in foreground app"
+    assert child.agent_id == "agent-typer"
+    assert workflow_run.pending_approval is not None
+    assert workflow_run.pending_approval.approval_id == "approval-child-agent"
+    assert workflow_run.pending_approval.source_runnable_id == "agent-typer"
+    assert workflow_run.pending_approval.workflow_node_id == "type"
+
+
 def test_workflow_run_snapshot_adds_lifecycle_events_from_status() -> None:
     workflow_run = workflow_run_snapshot_from_payload(
         {

@@ -22,6 +22,17 @@ def timeline_child_snapshots_from_payloads(payloads: Any) -> list[RunTimelineChi
     return children
 
 
+def timeline_child_snapshots_from_events(
+    events: list[PublicRunEvent],
+) -> list[RunTimelineChildSnapshot]:
+    children: list[RunTimelineChildSnapshot] = []
+    for event in events:
+        child = timeline_child_snapshot_from_event(event)
+        if child is not None:
+            children.append(child)
+    return _unique_children(children)
+
+
 def timeline_child_snapshot_from_payload(payload: Mapping[str, Any]) -> RunTimelineChildSnapshot:
     kind = _optional_text(payload.get("kind"))
     runnable_id = _optional_text(payload.get("runnable_id"))
@@ -46,6 +57,50 @@ def timeline_child_snapshot_from_payload(payload: Mapping[str, Any]) -> RunTimel
             or (runnable_id if kind == "workflow_run" else "")
         ),
     )
+
+
+def timeline_child_snapshot_from_event(event: PublicRunEvent) -> RunTimelineChildSnapshot | None:
+    payload = event.payload
+    child_run_id = _text(payload.get("child_run_id") or payload.get("child_agent_run_id"))
+    if not child_run_id:
+        return None
+    return timeline_child_snapshot_from_payload({
+        "run_id": child_run_id,
+        "title": payload.get("child_run_title") or payload.get("workflow_node_label"),
+        "status": payload.get("child_run_status") or payload.get("status"),
+        "kind": payload.get("child_run_kind") or payload.get("child_kind") or "agent_run",
+        "parent_run_id": event.run_id,
+        "group_run_id": payload.get("group_run_id") or payload.get("run_group_id"),
+        "run_group_id": payload.get("run_group_id") or payload.get("group_run_id"),
+        "workflow_run_id": payload.get("workflow_run_id") or event.run_id,
+        "workflow_node_id": payload.get("workflow_node_id"),
+        "workflow_node_label": payload.get("workflow_node_label"),
+        "agent_id": (
+            payload.get("agent_id")
+            or payload.get("member_agent_id")
+            or payload.get("source_runnable_id")
+        ),
+        "workflow_id": payload.get("child_workflow_id") or payload.get("workflow_id"),
+    })
+
+
+def merge_timeline_child_snapshots(
+    explicit_children: list[RunTimelineChildSnapshot],
+    event_children: list[RunTimelineChildSnapshot],
+) -> list[RunTimelineChildSnapshot]:
+    return _unique_children([*explicit_children, *event_children])
+
+
+def _unique_children(children: list[RunTimelineChildSnapshot]) -> list[RunTimelineChildSnapshot]:
+    seen: set[str] = set()
+    unique: list[RunTimelineChildSnapshot] = []
+    for child in children:
+        key = _text(child.run_id)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        unique.append(child)
+    return unique
 
 
 def run_timeline_rerun_provenance_from_payload(
