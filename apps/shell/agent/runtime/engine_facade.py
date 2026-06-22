@@ -24,6 +24,9 @@ class RuntimeEngineFacadeMixin:
         self.shutdown()
 
     def shutdown(self, *, close_db: bool = True) -> None:
+        cleanup_plugins = getattr(self, "_shutdown_restricted_tool_plugins", None)
+        if callable(cleanup_plugins):
+            cleanup_plugins()
         self.runtime_shutdown.shutdown(close_db=close_db)
 
     def _ensure_row_factory(self) -> None:

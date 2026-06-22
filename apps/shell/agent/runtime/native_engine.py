@@ -12,6 +12,7 @@ from apps.shell.agent.runtime.model_facade import RuntimeModelFacadeMixin
 from apps.shell.agent.runtime.run_control_facade import RuntimeRunControlFacadeMixin
 from apps.shell.agent.runtime.run_facade import RuntimeRunFacadeMixin
 from apps.shell.agent.runtime.runnable_facade import RuntimeRunnableFacadeMixin
+from apps.shell.agent.runtime.restricted_plugins import RuntimeRestrictedPluginFacadeMixin
 from apps.shell.agent.runtime.studio_facade import RuntimeStudioFacadeMixin
 from apps.shell.agent.runtime.support_facade import RuntimeSupportFacadeMixin
 from apps.shell.agent.runtime.tool_facade import RuntimeToolFacadeMixin
@@ -29,6 +30,7 @@ class NativeRunEngine(
     RuntimeRunFacadeMixin,
     RuntimeAgentFacadeMixin,
     RuntimeToolFacadeMixin,
+    RuntimeRestrictedPluginFacadeMixin,
     RuntimeModelFacadeMixin,
     RuntimeWorkflowFacadeMixin,
     RuntimeRunControlFacadeMixin,
@@ -64,6 +66,7 @@ class NativeRunEngine(
             workspace_dir=workspace_dir,
             credential_store=credential_store,
         )
+        self._install_runtime_restricted_plugins()
         self._install_runtime_definition_layer()
         self._install_runtime_run_layer()
         runtime_timeline_factory = self._install_runtime_memory_and_core()
