@@ -32,6 +32,7 @@ def tool_call_snapshot_from_payload(
     completed_at = _optional_text(payload.get("completed_at"))
     if not completed_at and tool_call_status_is_terminal(status):
         completed_at = _optional_text(payload.get("created_at") or payload.get("started_at"))
+    foreground_lock_busy = tool_foreground_lock_is_busy(payload, output_preview)
     return ToolCallSnapshot(
         tool_call_id=tool_call_id,
         run_id=_optional_text(payload.get("run_id") or run_id),
@@ -78,6 +79,8 @@ def tool_call_snapshot_from_payload(
         risk_level=_optional_text(payload.get("risk_level") or payload.get("risk")),
         input_preview=input_preview,
         output_preview=output_preview,
+        foreground_lock_busy=foreground_lock_busy,
+        foreground_lock_holder=tool_foreground_lock_holder(payload, output_preview),
         approval_id=_optional_text(payload.get("approval_id")),
         started_at=_text(payload.get("started_at") or payload.get("created_at")),
         completed_at=completed_at,
@@ -124,6 +127,34 @@ def tool_output_preview(payload: Mapping[str, Any]) -> dict[str, Any]:
     return _mapping({"error": error}) if error is not None else {}
 
 
+def tool_foreground_lock_is_busy(
+    payload: Mapping[str, Any],
+    output_preview: Mapping[str, Any],
+) -> bool:
+    if _foreground_lock_is_busy(output_preview) or _foreground_lock_is_busy(payload):
+        return True
+    foreground_lock = output_preview.get("foreground_lock")
+    if not isinstance(foreground_lock, Mapping):
+        foreground_lock = payload.get("foreground_lock")
+    return isinstance(foreground_lock, Mapping) and bool(foreground_lock.get("busy"))
+
+
+def tool_foreground_lock_holder(
+    payload: Mapping[str, Any],
+    output_preview: Mapping[str, Any],
+) -> str | None:
+    holder = _text(output_preview.get("locked_by") or payload.get("locked_by"))
+    if holder:
+        return holder
+    for source in (output_preview, payload):
+        foreground_lock = source.get("foreground_lock")
+        if isinstance(foreground_lock, Mapping):
+            holder = _text(foreground_lock.get("holder") or foreground_lock.get("locked_by"))
+            if holder:
+                return holder
+    return None
+
+
 def _foreground_lock_is_busy(value: Any) -> bool:
     return isinstance(value, Mapping) and value.get("foreground_lock_busy") is True
 
@@ -147,6 +178,8 @@ def _redacted_tool_call_snapshot(snapshot: ToolCallSnapshot) -> ToolCallSnapshot
             "risk_level": _optional_text(snapshot.risk_level),
             "input_preview": _mapping(snapshot.input_preview),
             "output_preview": _mapping(snapshot.output_preview),
+            "foreground_lock_busy": bool(snapshot.foreground_lock_busy),
+            "foreground_lock_holder": _optional_text(snapshot.foreground_lock_holder),
             "approval_id": _optional_text(snapshot.approval_id),
             "started_at": _text(snapshot.started_at),
             "completed_at": _optional_text(snapshot.completed_at),

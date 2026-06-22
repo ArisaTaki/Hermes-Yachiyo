@@ -163,6 +163,8 @@ def merge_tool_call_snapshots(
         risk_level=current.risk_level or next_call.risk_level,
         input_preview={**current.input_preview, **next_call.input_preview},
         output_preview=output_preview,
+        foreground_lock_busy=current.foreground_lock_busy or next_call.foreground_lock_busy,
+        foreground_lock_holder=current.foreground_lock_holder or next_call.foreground_lock_holder,
         approval_id=current.approval_id or next_call.approval_id,
         started_at=current.started_at or next_call.started_at,
         completed_at=completed_at,

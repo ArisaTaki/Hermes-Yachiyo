@@ -175,6 +175,8 @@ def test_tool_call_snapshot_from_payload_marks_foreground_lock_busy_as_blocked()
 
     assert snapshot.status == "blocked"
     assert snapshot.completed_at == "2026-06-22T00:00:00Z"
+    assert snapshot.foreground_lock_busy is True
+    assert snapshot.foreground_lock_holder == "group-run-1:run-planner"
     assert snapshot.output_preview["foreground_lock_busy"] is True
     assert snapshot.output_preview["locked_by"] == "group-run-1:run-planner"
 
@@ -250,6 +252,8 @@ def test_tool_call_snapshots_from_events_marks_foreground_lock_busy_as_blocked()
     assert snapshots[0].tool_name == "desktop.type_text"
     assert snapshots[0].status == "blocked"
     assert snapshots[0].completed_at == "2026-06-22T00:00:01Z"
+    assert snapshots[0].foreground_lock_busy is True
+    assert snapshots[0].foreground_lock_holder == "group-run-1:run-planner"
     assert snapshots[0].output_preview["foreground_lock_busy"] is True
 
 

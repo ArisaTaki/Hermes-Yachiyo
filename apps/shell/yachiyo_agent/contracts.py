@@ -199,6 +199,8 @@ class ToolCallSnapshot(_PublicSnapshot):
     risk_level: str | None = None
     input_preview: dict[str, Any] = Field(default_factory=dict)
     output_preview: dict[str, Any] = Field(default_factory=dict)
+    foreground_lock_busy: bool = False
+    foreground_lock_holder: str | None = None
     approval_id: str | None = None
     started_at: str = ""
     completed_at: str | None = None

@@ -2086,6 +2086,55 @@ def test_group_run_snapshot_injects_group_context_into_child_run_facts() -> None
     assert group_run.skill_traces[0].group_run_id == "group-run-child-context"
 
 
+def test_group_run_snapshot_rolls_foreground_lock_waiting_tool_calls_to_member() -> None:
+    group_run = group_run_snapshot_from_payload(
+        {
+            "group_run_id": "group-run-lock",
+            "group_id": "group-desktop",
+            "title": "Desktop team",
+            "status": "running",
+            "members": [
+                {"agent_id": "agent-reviewer", "name": "Reviewer", "role": "reviewer"}
+            ],
+            "runs": [
+                {
+                    "run_id": "run-reviewer",
+                    "agent_id": "agent-reviewer",
+                    "status": "running",
+                    "timeline": [
+                        {
+                            "event_type": "agent.tool.call",
+                            "detail": "desktop.type_text",
+                            "payload": {
+                                "tool_call_id": "call-foreground-lock",
+                                "result": {
+                                    "ok": False,
+                                    "action": "foreground_lock",
+                                    "foreground_lock_busy": True,
+                                    "locked_by": "group-run-lock:run-planner",
+                                    "summary": "Foreground desktop action is already locked.",
+                                },
+                            },
+                            "created_at": "2026-06-22T00:00:01Z",
+                        },
+                    ],
+                },
+            ],
+        }
+    )
+
+    call = group_run.tool_calls[0]
+    participant_call = group_run.participants[0].tool_calls[0]
+
+    assert call.status == "blocked"
+    assert call.foreground_lock_busy is True
+    assert call.foreground_lock_holder == "group-run-lock:run-planner"
+    assert call.group_id == "group-desktop"
+    assert call.group_run_id == "group-run-lock"
+    assert participant_call.tool_call_id == "call-foreground-lock"
+    assert participant_call.foreground_lock_busy is True
+
+
 def test_group_run_snapshot_accepts_members_as_participants() -> None:
     group_run = group_run_snapshot_from_payload(
         {
