@@ -7,7 +7,9 @@ import type {
   FutureTaskSnapshot,
   FutureTaskTriggerResultSnapshot,
   GroupRunSnapshot,
+  InstallRestrictedToolPluginRequest,
   MemorySnapshot,
+  RestrictedToolPluginSnapshot,
   RunEventPageSnapshot,
   RerunRunRequest,
   SaveAgentGroupRequest,
@@ -15,6 +17,7 @@ import type {
   SkillSnapshot,
   SkillSourceRootSnapshot,
   ToolCatalogSnapshot,
+  UpdateRestrictedToolPluginRequest,
   WorkflowRunSnapshot,
   WorkflowSnapshot,
   YachiyoRunTimelineSnapshot,
@@ -55,6 +58,40 @@ export type YachiyoSkillInstallResponse = {
 
 export async function getYachiyoStudioToolCatalog(): Promise<ToolCatalogSnapshot> {
   return apiGet<ToolCatalogSnapshot>('/yachiyo/studio/tools');
+}
+
+export async function listYachiyoRestrictedToolPlugins(): Promise<RestrictedToolPluginSnapshot[]> {
+  const payload = await apiGet<{ plugins?: RestrictedToolPluginSnapshot[] }>(
+    '/yachiyo/studio/tools/restricted-plugins',
+  );
+  return payload.plugins || [];
+}
+
+export async function installYachiyoRestrictedToolPlugin(
+  request: InstallRestrictedToolPluginRequest,
+): Promise<RestrictedToolPluginSnapshot> {
+  return apiPost<RestrictedToolPluginSnapshot>(
+    '/yachiyo/studio/tools/restricted-plugins',
+    request,
+  );
+}
+
+export async function updateYachiyoRestrictedToolPlugin(
+  pluginId: string,
+  request: UpdateRestrictedToolPluginRequest,
+): Promise<RestrictedToolPluginSnapshot> {
+  return apiPatch<RestrictedToolPluginSnapshot>(
+    `/yachiyo/studio/tools/restricted-plugins/${encodeURIComponent(pluginId)}`,
+    request,
+  );
+}
+
+export async function uninstallYachiyoRestrictedToolPlugin(
+  pluginId: string,
+): Promise<RestrictedToolPluginSnapshot> {
+  return apiDelete<RestrictedToolPluginSnapshot>(
+    `/yachiyo/studio/tools/restricted-plugins/${encodeURIComponent(pluginId)}`,
+  );
 }
 
 export async function listYachiyoStudioAgents(): Promise<AgentDefinitionSnapshot[]> {

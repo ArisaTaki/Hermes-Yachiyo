@@ -14,6 +14,8 @@ from apps.bridge.routes.yachiyo_models import (
     FutureTaskTriggerBody,
     MemoryBody,
     RerunRunBody,
+    RestrictedToolPluginInstallBody,
+    RestrictedToolPluginUpdateBody,
     SkillFolderBody,
     SkillImportBody,
     SkillInstallBody,
@@ -189,6 +191,48 @@ async def list_studio_agents(http_request: Request = None) -> dict[str, Any]:  #
 @router.get("/studio/tools")
 async def list_studio_tools(http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
     return await yachiyo_studio_handlers.list_tool_catalog(http_request)
+
+
+@router.get("/studio/tools/restricted-plugins")
+async def list_studio_restricted_tool_plugins(
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    return await yachiyo_studio_handlers.list_restricted_tool_plugins(http_request)
+
+
+@router.post("/studio/tools/restricted-plugins")
+async def install_studio_restricted_tool_plugin(
+    request: RestrictedToolPluginInstallBody,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    return await yachiyo_studio_handlers.install_restricted_tool_plugin(
+        request,
+        http_request,
+    )
+
+
+@router.patch("/studio/tools/restricted-plugins/{plugin_id}")
+async def update_studio_restricted_tool_plugin(
+    plugin_id: str,
+    request: RestrictedToolPluginUpdateBody,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    return await yachiyo_studio_handlers.update_restricted_tool_plugin(
+        plugin_id,
+        request,
+        http_request,
+    )
+
+
+@router.delete("/studio/tools/restricted-plugins/{plugin_id}")
+async def uninstall_studio_restricted_tool_plugin(
+    plugin_id: str,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    return await yachiyo_studio_handlers.uninstall_restricted_tool_plugin(
+        plugin_id,
+        http_request,
+    )
 
 
 @router.post("/studio/agents")

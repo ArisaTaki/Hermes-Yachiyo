@@ -58,6 +58,15 @@ class SkillInstallBody(BaseModel):
     folder_id: str | None = Field(default=None, max_length=160)
 
 
+class RestrictedToolPluginInstallBody(BaseModel):
+    plugin_id: str = Field(..., min_length=1, max_length=160)
+    enabled: bool = True
+
+
+class RestrictedToolPluginUpdateBody(BaseModel):
+    enabled: bool | None = None
+
+
 class MemoryBody(BaseModel):
     content: str | None = Field(default=None, max_length=60000)
     old_content: str | None = Field(default=None, max_length=60000)

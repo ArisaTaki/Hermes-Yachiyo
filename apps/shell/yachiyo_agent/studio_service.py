@@ -17,11 +17,13 @@ from .contracts import (
     FutureTaskSnapshot,
     FutureTaskTriggerResultSnapshot,
     GroupRunSnapshot,
+    InstallRestrictedToolPluginRequest,
     MemorySnapshot,
     PublicRunEvent,
     RerunRunRequest,
     RunEventPageSnapshot,
     RunTimelineSnapshot,
+    RestrictedToolPluginSnapshot,
     SaveAgentGroupRequest,
     SaveAgentDeskFileRequest,
     SaveAgentDeskNoteRequest,
@@ -34,9 +36,11 @@ from .contracts import (
     StartGroupRunRequest,
     StartWorkflowRunRequest,
     ToolCatalogSnapshot,
+    UpdateRestrictedToolPluginRequest,
     WorkflowRunSnapshot,
     WorkflowSnapshot,
 )
+from apps.shell.agent.runtime.errors import AgentRuntimeError
 from .desk import agent_desk_snapshot_from_payload
 from .events import public_run_event_from_payload, public_run_event_page_from_payload
 from .future_tasks import (
@@ -52,7 +56,11 @@ from .skills import (
     skill_source_root_snapshot_from_payload,
 )
 from .timelines import run_timeline_snapshot_from_payload
-from .tool_catalog import runtime_tool_catalog_snapshot, tool_catalog_snapshot_from_payload
+from .tool_catalog import (
+    restricted_tool_plugin_snapshot_from_payload,
+    runtime_tool_catalog_snapshot,
+    tool_catalog_snapshot_from_payload,
+)
 from .workflows import (
     is_workflow_run_payload,
     workflow_run_snapshot_from_payload,
@@ -77,6 +85,44 @@ class AgentStudioService:
         if callable(list_catalog):
             return tool_catalog_snapshot_from_payload(list_catalog())
         return runtime_tool_catalog_snapshot()
+
+    def list_restricted_tool_plugins(self) -> list[RestrictedToolPluginSnapshot]:
+        list_plugins = getattr(self._studio_port, "list_restricted_tool_plugins", None)
+        if callable(list_plugins):
+            return [
+                restricted_tool_plugin_snapshot_from_payload(item)
+                for item in _payload_items(list_plugins(), "plugins")
+            ]
+        return self.list_tool_catalog().plugins
+
+    def install_restricted_tool_plugin(
+        self,
+        request: InstallRestrictedToolPluginRequest | Mapping[str, Any],
+    ) -> RestrictedToolPluginSnapshot:
+        install_plugin = getattr(self._studio_port, "install_restricted_tool_plugin", None)
+        if not callable(install_plugin):
+            raise AgentRuntimeError("Restricted tool plugin install is not available")
+        return restricted_tool_plugin_snapshot_from_payload(
+            install_plugin(_request_payload(request))
+        )
+
+    def update_restricted_tool_plugin(
+        self,
+        plugin_id: str,
+        request: UpdateRestrictedToolPluginRequest | Mapping[str, Any],
+    ) -> RestrictedToolPluginSnapshot:
+        update_plugin = getattr(self._studio_port, "update_restricted_tool_plugin", None)
+        if not callable(update_plugin):
+            raise AgentRuntimeError("Restricted tool plugin update is not available")
+        return restricted_tool_plugin_snapshot_from_payload(
+            update_plugin(plugin_id, _request_payload(request))
+        )
+
+    def uninstall_restricted_tool_plugin(self, plugin_id: str) -> RestrictedToolPluginSnapshot:
+        uninstall_plugin = getattr(self._studio_port, "uninstall_restricted_tool_plugin", None)
+        if not callable(uninstall_plugin):
+            raise AgentRuntimeError("Restricted tool plugin uninstall is not available")
+        return restricted_tool_plugin_snapshot_from_payload(uninstall_plugin(plugin_id))
 
     def get_agent(self, agent_id: str) -> AgentDefinitionSnapshot:
         return agent_definition_snapshot_from_payload(self._studio_port.get_agent(agent_id))

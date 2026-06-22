@@ -35,6 +35,7 @@ from apps.shell.yachiyo_agent import (
     FutureTaskSnapshot,
     FutureTaskTriggerResultSnapshot,
     GroupRunSnapshot,
+    InstallRestrictedToolPluginRequest,
     MemorySnapshot,
     MemoryTraceSnapshot,
     PublicRunEvent,
@@ -57,6 +58,7 @@ from apps.shell.yachiyo_agent import (
     ToolCatalogItemSnapshot,
     ToolCatalogSnapshot,
     ToolCallSnapshot,
+    UpdateRestrictedToolPluginRequest,
     WorkflowRunSnapshot,
     WorkflowSnapshot,
     approval_is_pending,
@@ -522,6 +524,17 @@ def test_tool_catalog_snapshot_json_shape_is_stable() -> None:
         )
     with pytest.raises(ValidationError):
         RestrictedToolPluginSnapshot(plugin_id="notes", unknown=True)
+
+    install_request = _json(
+        InstallRestrictedToolPluginRequest(plugin_id="notes", enabled=False)
+    )
+    update_request = _json(UpdateRestrictedToolPluginRequest(enabled=True))
+    assert install_request == {"plugin_id": "notes", "enabled": False}
+    assert update_request == {"enabled": True}
+    with pytest.raises(ValidationError):
+        InstallRestrictedToolPluginRequest(plugin_id="notes", unknown=True)
+    with pytest.raises(ValidationError):
+        UpdateRestrictedToolPluginRequest(enabled=True, unknown=True)
 
 
 def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> None:

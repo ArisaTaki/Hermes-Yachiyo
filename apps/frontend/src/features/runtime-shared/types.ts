@@ -52,6 +52,15 @@ export type RestrictedToolPluginSnapshot = {
   source?: string;
 };
 
+export type InstallRestrictedToolPluginRequest = {
+  plugin_id: string;
+  enabled?: boolean;
+};
+
+export type UpdateRestrictedToolPluginRequest = {
+  enabled?: boolean | null;
+};
+
 export type ToolCatalogSnapshot = {
   tools: ToolCatalogItemSnapshot[];
   capabilities?: Record<string, DesktopExecutionCapabilitySnapshot>;

@@ -99,6 +99,18 @@ def tool_catalog_snapshot_from_payload(payload: Any) -> ToolCatalogSnapshot:
     )
 
 
+def restricted_tool_plugin_snapshot_from_payload(
+    payload: Any,
+) -> RestrictedToolPluginSnapshot:
+    if isinstance(payload, RestrictedToolPluginSnapshot):
+        return payload
+    if isinstance(payload, Mapping):
+        snapshots = _restricted_plugin_snapshots_from_payload([payload])
+        if snapshots:
+            return snapshots[0]
+    return RestrictedToolPluginSnapshot(plugin_id="")
+
+
 def _catalog_item_from_descriptor(
     tool_name: str,
     *,
@@ -343,11 +355,15 @@ def _restricted_plugin_snapshots(
         plugin_id = _optional_string(_field_value(state, "plugin_id"))
         if plugin_id is None:
             continue
+        tools = _restricted_plugin_tools_from_payload(_field_value(state, "tools"))
         by_plugin[plugin_id] = {
             "plugin_id": plugin_id,
             "enabled": bool(_field_value(state, "enabled")),
-            "tool_names": _string_list(_field_value(state, "tool_names")),
-            "tools": [],
+            "tool_names": _unique([
+                *_string_list(_field_value(state, "tool_names")),
+                *(tool.tool_name for tool in tools),
+            ]),
+            "tools": tools,
             "skill_docs": str(_field_value(state, "skill_docs") or ""),
             "source": "restricted_tool_plugin",
         }
@@ -373,15 +389,16 @@ def _restricted_plugin_snapshots(
             record["tool_names"] = _unique([*record["tool_names"], tool_name])
         if not record["skill_docs"]:
             record["skill_docs"] = str(getattr(plugin_tool, "skill_docs", "") or "")
-        record["tools"].append(
-            RestrictedPluginToolSnapshot(
-                tool_name=tool_name,
-                tool_id=str(getattr(plugin_tool, "tool_id", "") or ""),
-                function_name=str(getattr(plugin_tool, "function_name", "") or ""),
-                risk_level=_optional_string(getattr(plugin_tool, "risk_level", None)),
-                enabled=True,
+        if not any(tool.tool_name == tool_name for tool in record["tools"]):
+            record["tools"].append(
+                RestrictedPluginToolSnapshot(
+                    tool_name=tool_name,
+                    tool_id=str(getattr(plugin_tool, "tool_id", "") or ""),
+                    function_name=str(getattr(plugin_tool, "function_name", "") or ""),
+                    risk_level=_optional_string(getattr(plugin_tool, "risk_level", None)),
+                    enabled=True,
+                )
             )
-        )
 
     return [
         RestrictedToolPluginSnapshot(

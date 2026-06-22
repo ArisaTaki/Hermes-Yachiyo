@@ -24,6 +24,9 @@ from apps.shell.yachiyo_agent import (
 class _FakeStudioPort:
     def __init__(self) -> None:
         self.calls: list[tuple[str, Any]] = []
+        self.plugins: dict[str, dict[str, Any]] = {
+            "notes": _restricted_plugin_payload(enabled=False)
+        }
 
     def list_agents(self) -> dict[str, Any]:
         self.calls.append(("list_agents", None))
@@ -58,25 +61,48 @@ class _FakeStudioPort:
                     "diagnostic_route": "/ui/native-agent/diagnostics/cache",
                 }
             },
-            "plugins": [
-                {
-                    "plugin_id": "notes",
-                    "enabled": False,
-                    "tool_names": ["plugin.notes.echo"],
-                    "tools": [
-                        {
-                            "tool_name": "plugin.notes.echo",
-                            "tool_id": "echo",
-                            "function_name": "plugin_notes_echo",
-                            "risk_level": "medium",
-                            "enabled": False,
-                        }
-                    ],
-                    "skill_docs": "Use echo for notes.",
-                    "source": "restricted_tool_plugin",
-                }
-            ],
+            "plugins": list(self.plugins.values()),
         }
+
+    def list_restricted_tool_plugins(self) -> dict[str, Any]:
+        self.calls.append(("list_restricted_tool_plugins", None))
+        return {"ok": True, "plugins": list(self.plugins.values())}
+
+    def install_restricted_tool_plugin(self, request: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append(("install_restricted_tool_plugin", request))
+        plugin_id = str(request["plugin_id"])
+        plugin = _restricted_plugin_payload(
+            plugin_id=plugin_id,
+            enabled=bool(request.get("enabled", True)),
+        )
+        self.plugins[plugin_id] = plugin
+        return plugin
+
+    def update_restricted_tool_plugin(
+        self,
+        plugin_id: str,
+        request: dict[str, Any],
+    ) -> dict[str, Any]:
+        self.calls.append(
+            (
+                "update_restricted_tool_plugin",
+                {"plugin_id": plugin_id, "request": request},
+            )
+        )
+        plugin = self.plugins[plugin_id]
+        if "enabled" in request:
+            plugin = {**plugin, "enabled": bool(request["enabled"])}
+            plugin["tools"] = [
+                {**tool, "enabled": bool(request["enabled"])}
+                for tool in plugin.get("tools") or []
+            ]
+            self.plugins[plugin_id] = plugin
+        return plugin
+
+    def uninstall_restricted_tool_plugin(self, plugin_id: str) -> dict[str, Any]:
+        self.calls.append(("uninstall_restricted_tool_plugin", plugin_id))
+        plugin = self.plugins.pop(plugin_id)
+        return {**plugin, "enabled": False, "tools": []}
 
     def get_agent(self, agent_id: str) -> dict[str, Any]:
         self.calls.append(("get_agent", agent_id))
@@ -438,6 +464,12 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
 
     agents = service.list_agents()
     tool_catalog = service.list_tool_catalog()
+    restricted_plugins = service.list_restricted_tool_plugins()
+    installed_plugin = service.install_restricted_tool_plugin(
+        {"plugin_id": "desk", "enabled": True}
+    )
+    updated_plugin = service.update_restricted_tool_plugin("desk", {"enabled": False})
+    uninstalled_plugin = service.uninstall_restricted_tool_plugin("desk")
     agent = service.get_agent("agent-1")
     saved_agent = service.save_agent(
         SaveAgentRequest(
@@ -527,6 +559,14 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
     assert tool_catalog.plugins[0].plugin_id == "notes"
     assert tool_catalog.plugins[0].enabled is False
     assert tool_catalog.plugins[0].tools[0].risk_level == "medium"
+    assert restricted_plugins[0].plugin_id == "notes"
+    assert installed_plugin.plugin_id == "desk"
+    assert installed_plugin.enabled is True
+    assert updated_plugin.enabled is False
+    assert updated_plugin.tools[0].enabled is False
+    assert uninstalled_plugin.plugin_id == "desk"
+    assert uninstalled_plugin.enabled is False
+    assert uninstalled_plugin.tools == []
     assert agent.name == "Fetched"
     assert saved_agent.agent_id == "agent-2"
     assert deleted_agent == {"ok": True, "agent_id": "agent-2"}
@@ -573,6 +613,13 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
     assert workflow.workflow_id == "workflow-1"
     assert saved_workflow.name == "Saved workflow"
     assert deleted_workflow == {"ok": True, "workflow_id": "workflow-2"}
+    assert ("list_restricted_tool_plugins", None) in port.calls
+    assert ("install_restricted_tool_plugin", {"plugin_id": "desk", "enabled": True}) in port.calls
+    assert (
+        "update_restricted_tool_plugin",
+        {"plugin_id": "desk", "request": {"enabled": False}},
+    ) in port.calls
+    assert ("uninstall_restricted_tool_plugin", "desk") in port.calls
     assert (
         "save_agent",
         {
@@ -1419,6 +1466,28 @@ def _desk_payload(
             },
         ],
         "updated_at": "2026-06-22T00:00:02Z",
+    }
+
+
+def _restricted_plugin_payload(
+    plugin_id: str = "notes",
+    enabled: bool = False,
+) -> dict[str, Any]:
+    return {
+        "plugin_id": plugin_id,
+        "enabled": enabled,
+        "tool_names": [f"plugin.{plugin_id}.echo"],
+        "tools": [
+            {
+                "tool_name": f"plugin.{plugin_id}.echo",
+                "tool_id": "echo",
+                "function_name": f"plugin_{plugin_id}_echo",
+                "risk_level": "medium",
+                "enabled": enabled,
+            }
+        ],
+        "skill_docs": "Use echo for notes.",
+        "source": "restricted_tool_plugin",
     }
 
 

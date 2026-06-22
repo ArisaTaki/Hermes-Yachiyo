@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from apps.shell.chat_api import ChatAPI
+from apps.shell.agent.runtime.errors import AgentRuntimeError
 
 from .legacy_event_pages import (
     is_replay_enrichment_event as _is_replay_enrichment_event,
@@ -121,9 +122,55 @@ class LegacyStudioPort:
             missing_permissions = desktop_permission_missing_by_capability()
         except Exception:
             missing_permissions = {"desktop_execution": ["permission_probe_failed"]}
+        plugin_states = None
+        list_plugins = getattr(self._runtime, "list_restricted_tool_plugins", None)
+        if callable(list_plugins):
+            try:
+                payload = list_plugins()
+                plugin_states = payload.get("plugins") if isinstance(payload, dict) else payload
+            except Exception:
+                plugin_states = None
         return runtime_tool_catalog_snapshot(
             missing_permissions=missing_permissions,
+            plugin_states=plugin_states,
         ).model_dump(mode="json")
+
+    def list_restricted_tool_plugins(self) -> dict[str, Any]:
+        list_plugins = getattr(self._runtime, "list_restricted_tool_plugins", None)
+        if callable(list_plugins):
+            payload = list_plugins()
+            if isinstance(payload, dict):
+                return dict(payload)
+            if isinstance(payload, (list, tuple)):
+                return {"ok": True, "plugins": list(payload)}
+            return {"ok": True, "plugins": []}
+        catalog = runtime_tool_catalog_snapshot()
+        return {
+            "ok": True,
+            "plugins": [plugin.model_dump(mode="json") for plugin in catalog.plugins],
+        }
+
+    def install_restricted_tool_plugin(self, request: dict[str, Any]) -> dict[str, Any]:
+        install_plugin = getattr(self._runtime, "install_restricted_tool_plugin", None)
+        if callable(install_plugin):
+            return dict(install_plugin(dict(request)))
+        raise AgentRuntimeError("Restricted tool plugin install is not available")
+
+    def update_restricted_tool_plugin(
+        self,
+        plugin_id: str,
+        request: dict[str, Any],
+    ) -> dict[str, Any]:
+        update_plugin = getattr(self._runtime, "update_restricted_tool_plugin", None)
+        if callable(update_plugin):
+            return dict(update_plugin(plugin_id, dict(request)))
+        raise AgentRuntimeError("Restricted tool plugin update is not available")
+
+    def uninstall_restricted_tool_plugin(self, plugin_id: str) -> dict[str, Any]:
+        uninstall_plugin = getattr(self._runtime, "uninstall_restricted_tool_plugin", None)
+        if callable(uninstall_plugin):
+            return dict(uninstall_plugin(plugin_id))
+        raise AgentRuntimeError("Restricted tool plugin uninstall is not available")
 
     def get_agent(self, agent_id: str) -> dict[str, Any]:
         return self._runtime.get_agent(agent_id)

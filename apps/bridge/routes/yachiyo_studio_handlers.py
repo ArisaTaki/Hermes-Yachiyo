@@ -60,7 +60,13 @@ from apps.bridge.routes.yachiyo_studio_skill_handlers import (
     update_skill,
     update_skill_folder,
 )
-from apps.bridge.routes.yachiyo_studio_tool_handlers import list_tool_catalog
+from apps.bridge.routes.yachiyo_studio_tool_handlers import (
+    install_restricted_tool_plugin,
+    list_restricted_tool_plugins,
+    list_tool_catalog,
+    uninstall_restricted_tool_plugin,
+    update_restricted_tool_plugin,
+)
 from apps.bridge.routes.yachiyo_studio_workflow_handlers import (
     delete_workflow,
     get_workflow,
@@ -93,6 +99,7 @@ __all__ = [
     "get_run_timeline",
     "get_workflow",
     "import_skill",
+    "install_restricted_tool_plugin",
     "install_skill",
     "list_agents",
     "list_future_tasks",
@@ -103,6 +110,7 @@ __all__ = [
     "list_skill_folders",
     "list_skill_sources",
     "list_skills",
+    "list_restricted_tool_plugins",
     "list_tool_catalog",
     "list_workflows",
     "read_run_artifact",
@@ -121,6 +129,8 @@ __all__ = [
     "update_agent",
     "update_group",
     "update_memory",
+    "uninstall_restricted_tool_plugin",
+    "update_restricted_tool_plugin",
     "update_skill",
     "update_skill_folder",
     "update_workflow",

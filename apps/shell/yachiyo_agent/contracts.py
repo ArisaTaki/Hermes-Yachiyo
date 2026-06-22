@@ -85,6 +85,15 @@ class RestrictedToolPluginSnapshot(_PublicSnapshot):
     source: str = "restricted_tool_plugin"
 
 
+class InstallRestrictedToolPluginRequest(_PublicSnapshot):
+    plugin_id: str
+    enabled: bool = True
+
+
+class UpdateRestrictedToolPluginRequest(_PublicSnapshot):
+    enabled: bool | None = None
+
+
 class ToolCatalogSnapshot(_PublicSnapshot):
     tools: list[ToolCatalogItemSnapshot] = Field(default_factory=list)
     capabilities: dict[str, DesktopExecutionCapabilitySnapshot] = Field(default_factory=dict)

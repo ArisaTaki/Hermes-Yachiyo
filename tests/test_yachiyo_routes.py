@@ -17,6 +17,9 @@ class _FakeAgentRuntime:
         self.calls: list[tuple[str, Any]] = []
         self.task_links: dict[str, dict[str, Any]] = {}
         self.runs: dict[str, dict[str, Any]] = {}
+        self.restricted_plugins: dict[str, dict[str, Any]] = {
+            "notes": _restricted_plugin_payload(enabled=False)
+        }
 
     def list_runnables(self) -> dict[str, Any]:
         self.calls.append(("list_runnables", None))
@@ -153,6 +156,46 @@ class _FakeAgentRuntime:
     def list_agents(self) -> dict[str, Any]:
         self.calls.append(("list_agents", None))
         return {"ok": True, "agents": [_agent_payload()]}
+
+    def list_restricted_tool_plugins(self) -> dict[str, Any]:
+        self.calls.append(("list_restricted_tool_plugins", None))
+        return {"ok": True, "plugins": list(self.restricted_plugins.values())}
+
+    def install_restricted_tool_plugin(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append(("install_restricted_tool_plugin", payload))
+        plugin_id = str(payload["plugin_id"])
+        plugin = _restricted_plugin_payload(
+            plugin_id=plugin_id,
+            enabled=bool(payload.get("enabled", True)),
+        )
+        self.restricted_plugins[plugin_id] = plugin
+        return plugin
+
+    def update_restricted_tool_plugin(
+        self,
+        plugin_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        self.calls.append(
+            (
+                "update_restricted_tool_plugin",
+                {"plugin_id": plugin_id, "payload": payload},
+            )
+        )
+        plugin = self.restricted_plugins[plugin_id]
+        if "enabled" in payload:
+            plugin = {**plugin, "enabled": bool(payload["enabled"])}
+            plugin["tools"] = [
+                {**tool, "enabled": bool(payload["enabled"])}
+                for tool in plugin.get("tools") or []
+            ]
+            self.restricted_plugins[plugin_id] = plugin
+        return plugin
+
+    def uninstall_restricted_tool_plugin(self, plugin_id: str) -> dict[str, Any]:
+        self.calls.append(("uninstall_restricted_tool_plugin", plugin_id))
+        plugin = self.restricted_plugins.pop(plugin_id)
+        return {**plugin, "enabled": False, "tools": []}
 
     def get_agent(self, agent_id: str) -> dict[str, Any]:
         self.calls.append(("get_agent", agent_id))
@@ -1332,6 +1375,7 @@ async def test_yachiyo_studio_tool_catalog_route_surfaces_desktop_tool_metadata(
 
     catalog = await yachiyo.list_studio_tools(request)
     tools = {tool["tool_name"]: tool for tool in catalog["tools"]}
+    plugins = {plugin["plugin_id"]: plugin for plugin in catalog["plugins"]}
 
     assert tools["media.apple_music_play"]["capability_id"] == "media_control"
     assert tools["media.apple_music_play"]["risk_level"] == "low"
@@ -1344,6 +1388,43 @@ async def test_yachiyo_studio_tool_catalog_route_surfaces_desktop_tool_metadata(
     assert tools["terminal.run"]["risk_level"] == "high"
     assert tools["terminal.run"]["approval_required"] is True
     assert catalog["capabilities"]["browser_control"]["missing_permissions"] == ["chrome_cdp"]
+    assert plugins["notes"]["enabled"] is False
+    assert plugins["notes"]["tool_names"] == ["plugin.notes.echo"]
+    assert plugins["notes"]["tools"][0]["risk_level"] == "medium"
+
+
+@pytest.mark.asyncio
+async def test_yachiyo_studio_restricted_plugin_routes_manage_port_state() -> None:
+    runtime = _FakeAgentRuntime()
+    request = _request(runtime)
+
+    listed = await yachiyo.list_studio_restricted_tool_plugins(request)
+    installed = await yachiyo.install_studio_restricted_tool_plugin(
+        yachiyo.RestrictedToolPluginInstallBody(plugin_id="desk", enabled=True),
+        request,
+    )
+    updated = await yachiyo.update_studio_restricted_tool_plugin(
+        "desk",
+        yachiyo.RestrictedToolPluginUpdateBody(enabled=False),
+        request,
+    )
+    uninstalled = await yachiyo.uninstall_studio_restricted_tool_plugin("desk", request)
+
+    assert listed["plugins"][0]["plugin_id"] == "notes"
+    assert installed["plugin_id"] == "desk"
+    assert installed["enabled"] is True
+    assert updated["enabled"] is False
+    assert updated["tools"][0]["enabled"] is False
+    assert uninstalled["plugin_id"] == "desk"
+    assert uninstalled["enabled"] is False
+    assert uninstalled["tools"] == []
+    assert ("list_restricted_tool_plugins", None) in runtime.calls
+    assert ("install_restricted_tool_plugin", {"plugin_id": "desk", "enabled": True}) in runtime.calls
+    assert (
+        "update_restricted_tool_plugin",
+        {"plugin_id": "desk", "payload": {"enabled": False}},
+    ) in runtime.calls
+    assert ("uninstall_restricted_tool_plugin", "desk") in runtime.calls
 
 
 @pytest.mark.asyncio
@@ -1408,6 +1489,10 @@ def test_yachiyo_public_routes_delegate_to_chat_and_studio_handlers() -> None:
     assert "return await yachiyo_studio_handlers.write_agent_desk_file(agent_id, request, http_request)" in source
     assert "trigger_agent_desk_file_event(" in source
     assert "return await yachiyo_studio_handlers.list_tool_catalog(http_request)" in source
+    assert "return await yachiyo_studio_handlers.list_restricted_tool_plugins(http_request)" in source
+    assert "install_restricted_tool_plugin(" in source
+    assert "update_restricted_tool_plugin(" in source
+    assert "uninstall_restricted_tool_plugin(" in source
     assert "return await yachiyo_studio_handlers.update_group(group_id, request, http_request)" in source
     assert "return await yachiyo_studio_handlers.update_workflow(workflow_id, request, http_request)" in source
     assert "return await yachiyo_studio_handlers.start_agent_run(agent_id, request, http_request)" in source
@@ -1482,6 +1567,28 @@ def _request(runtime: _FakeAgentRuntime) -> SimpleNamespace:
             state=SimpleNamespace(runtime=SimpleNamespace(agent_runtime_service=runtime))
         )
     )
+
+
+def _restricted_plugin_payload(
+    plugin_id: str = "notes",
+    enabled: bool = False,
+) -> dict[str, Any]:
+    return {
+        "plugin_id": plugin_id,
+        "enabled": enabled,
+        "tool_names": [f"plugin.{plugin_id}.echo"],
+        "tools": [
+            {
+                "tool_name": f"plugin.{plugin_id}.echo",
+                "tool_id": "echo",
+                "function_name": f"plugin_{plugin_id}_echo",
+                "risk_level": "medium",
+                "enabled": enabled,
+            }
+        ],
+        "skill_docs": "Use echo for notes.",
+        "source": "restricted_tool_plugin",
+    }
 
 
 def _agent_payload(
