@@ -32,6 +32,7 @@ from apps.shell.agent.runtime.workflow_projections import (
     WorkflowEdgeFollowedProjection,
     WorkflowLoopNodeProjection,
     WorkflowParallelNodeProjection,
+    WorkflowProjectionPortBundle,
     WorkflowRunCompletionProjection,
     WorkflowStartNodeProjection,
 )
@@ -1163,12 +1164,16 @@ class WorkflowContinuationCoordinator:
         context: str,
         timeline: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        selection = self._workflow_condition_selection(workflow, node, context)
-        projection = WorkflowConditionNodeProjection.from_selection(
+        projection = WorkflowConditionNodeProjection.from_node(
+            object(),
+            workflow,
             node,
-            selection,
             label=label,
             kind=kind,
+            context=context,
+            ports=WorkflowProjectionPortBundle(
+                workflow_condition_selection=self._workflow_condition_selection,
+            ),
         )
         timeline.append(projection.timeline_event(self._timeline))
         self._append_run_event(str(run["run_id"]), "workflow.node.condition", projection.event_payload())
@@ -1189,17 +1194,17 @@ class WorkflowContinuationCoordinator:
         previous_iterations: int,
         timeline: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        selection = self._workflow_loop_selection(
+        projection = WorkflowLoopNodeProjection.from_node(
+            object(),
             workflow,
             node,
-            context,
-            previous_iterations=previous_iterations,
-        )
-        projection = WorkflowLoopNodeProjection.from_selection(
-            node,
-            selection,
             label=label,
             kind=kind,
+            context=context,
+            previous_iterations=previous_iterations,
+            ports=WorkflowProjectionPortBundle(
+                workflow_loop_selection=self._workflow_loop_selection,
+            ),
         )
         timeline.append(projection.timeline_event(self._timeline))
         self._append_run_event(str(run["run_id"]), "workflow.node.loop", projection.event_payload())

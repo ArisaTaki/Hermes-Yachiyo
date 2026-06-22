@@ -108,6 +108,9 @@ def test_workflow_condition_projection_legacy_helper_accepts_port_bundle() -> No
     assert calls == [("route", "skip")]
     assert projection.branch == "false"
     assert projection.target_node_id == "skip"
+    assert projection.timeline_event(
+        lambda event, detail, **payload: {"event": event, "detail": detail, **payload}
+    )["event"] == "workflow.node.condition"
 
 
 def test_workflow_loop_projection_accepts_selection_payload() -> None:
@@ -178,6 +181,11 @@ def test_workflow_loop_projection_legacy_helper_accepts_port_bundle() -> None:
     assert calls == [("repeat", "again", 1)]
     assert projection.branch == "continue"
     assert projection.iteration == 2
+    timeline_event = projection.timeline_event(
+        lambda event, detail, **payload: {"event": event, "detail": detail, **payload}
+    )
+    assert timeline_event["event"] == "workflow.node.loop"
+    assert timeline_event["workflow_node_loop_iteration"] == 2
 
 
 def test_workflow_parallel_projection_accepts_plan_payload() -> None:
