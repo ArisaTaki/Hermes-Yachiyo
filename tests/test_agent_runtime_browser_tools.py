@@ -57,6 +57,18 @@ def test_browser_open_url_falls_back_to_system_browser_without_cdp(monkeypatch) 
     assert calls[0][0] == ["open", "https://example.com/fallback"]
 
 
+def test_browser_cdp_unavailable_returns_recovery_target(monkeypatch) -> None:
+    monkeypatch.setattr(browser_mod, "_configured_browser_cdp_url", lambda: "")
+    monkeypatch.setattr(browser_mod.sys, "platform", "linux")
+
+    result = browser_mod.open_url("https://example.com/no-cdp")
+
+    assert result["ok"] is False
+    assert result["permission_error"] is True
+    assert result["missing_permissions"] == ["chrome_cdp"]
+    assert result["permission_targets"] == ["chrome_cdp"]
+
+
 def test_browser_extract_text_uses_current_page_evaluation(monkeypatch) -> None:
     monkeypatch.setattr(
         browser_mod,

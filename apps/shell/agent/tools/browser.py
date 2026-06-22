@@ -341,6 +341,7 @@ def _cdp_unavailable(action: str, detail: Any = None) -> dict[str, Any]:
         "permission_error": True,
         "fallback_used": False,
         "missing_permissions": ["chrome_cdp"],
+        "permission_targets": ["chrome_cdp"],
     }
     if detail:
         payload["detail"] = str(detail)

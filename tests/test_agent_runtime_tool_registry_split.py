@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import subprocess
+
 import pytest
 
+from apps.shell.agent.tools import desktop as desktop_mod
 from apps.shell.agent.runtime.errors import AgentRuntimeError
 from apps.shell.agent.tools.broker import ToolBroker
 from apps.shell.agent.tools.policy import (
@@ -330,3 +333,75 @@ def test_screen_capture_tool_writes_artifact_metadata(tmp_path, monkeypatch) -> 
         "height": 200,
     }
     assert (tmp_path / "artifacts" / "screenshots" / "current-screen.png").read_bytes() == b"png"
+
+
+def test_desktop_active_window_permission_failure_returns_recovery_targets(monkeypatch) -> None:
+    def fake_run(command, **kwargs):
+        return subprocess.CompletedProcess(
+            command,
+            1,
+            stdout="",
+            stderr="Not authorized to send Apple events to System Events.",
+        )
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.active_window()
+
+    assert result["ok"] is False
+    assert result["action"] == "desktop.active_window"
+    assert result["permission_error"] is True
+    assert result["missing_permissions"] == ["automation_or_accessibility"]
+    assert result["permission_targets"] == ["automation", "accessibility"]
+
+
+def test_desktop_type_text_permission_failure_returns_accessibility_target(monkeypatch) -> None:
+    def fake_run(command, **kwargs):
+        return subprocess.CompletedProcess(
+            command,
+            1,
+            stdout="",
+            stderr="System Events got an error: osascript is not allowed assistive access.",
+        )
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.desktop_type_text("hello")
+
+    assert result["ok"] is False
+    assert result["action"] == "desktop.type_text"
+    assert result["permission_error"] is True
+    assert result["missing_permissions"] == ["accessibility"]
+    assert result["permission_targets"] == ["accessibility"]
+
+
+def test_apple_music_permission_failure_returns_music_and_automation_targets(monkeypatch) -> None:
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_osascript",
+        lambda _script, _args=None: {
+            "ok": False,
+            "action": "osascript",
+            "summary": "osascript failed",
+            "error": "Not authorized to send Apple events to Music.",
+            "permission_error": True,
+            "fallback_used": False,
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "app_open",
+        lambda app_name: {"ok": True, "action": "app.open", "data": {"app_name": app_name}},
+    )
+
+    result = desktop_mod.apple_music_play("超时空辉夜姬")
+
+    assert result["ok"] is False
+    assert result["action"] == "media.apple_music_play"
+    assert result["permission_error"] is True
+    assert result["missing_permissions"] == ["music_app", "automation"]
+    assert result["permission_targets"] == ["music_app", "automation"]
+    assert result["fallback_used"] is True

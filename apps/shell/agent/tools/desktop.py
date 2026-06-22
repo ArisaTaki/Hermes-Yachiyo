@@ -45,7 +45,10 @@ def active_window() -> dict[str, Any]:
     """
     result = _run_osascript(script)
     if not result["ok"]:
-        return result
+        return _with_permission_metadata(
+            "desktop.active_window",
+            {**result, "action": "desktop.active_window", "summary": "desktop.active_window failed"},
+        )
     parts = str(result.get("stdout") or "").strip().split("|", 2)
     app_name = parts[0] if len(parts) > 0 else ""
     pid_text = parts[1] if len(parts) > 1 else ""
@@ -105,7 +108,10 @@ def app_focus(app_name: str) -> dict[str, Any]:
         [clean_name],
     )
     if not result["ok"]:
-        return result
+        return _with_permission_metadata(
+            "app.focus",
+            {**result, "action": "app.focus", "summary": "app.focus failed"},
+        )
     return {
         "ok": True,
         "action": "app.focus",
@@ -147,7 +153,14 @@ def apple_music_play(query: str) -> dict[str, Any]:
     if not result["ok"]:
         fallback = app_open("Music")
         return {
-            **result,
+            **_with_permission_metadata(
+                "media.apple_music_play",
+                {
+                    **result,
+                    "action": "media.apple_music_play",
+                    "summary": "media.apple_music_play failed",
+                },
+            ),
             "action": "media.apple_music_play",
             "fallback_used": bool(fallback.get("ok")),
             "fallback_result": fallback,
@@ -164,16 +177,17 @@ def apple_music_play(query: str) -> dict[str, Any]:
             "fallback_used": False,
         }
     fallback = app_open("Music")
-    return {
+    payload = {
         "ok": False,
         "action": "media.apple_music_play",
         "summary": f"Could not directly play {clean_query}; opened Music for manual search.",
         "error": second or first or "Music did not return a playable track",
         "data": {"query": clean_query, "status": status},
-        "permission_error": status == "error",
+        "permission_error": status == "error" and _looks_like_permission_error(f"{first}\n{second}"),
         "fallback_used": bool(fallback.get("ok")),
         "fallback_result": fallback,
     }
+    return _with_permission_metadata("media.apple_music_play", payload)
 
 
 def desktop_type_text(text: str) -> dict[str, Any]:
@@ -191,7 +205,10 @@ def desktop_type_text(text: str) -> dict[str, Any]:
         [clean_text],
     )
     if not result["ok"]:
-        return result
+        return _with_permission_metadata(
+            "desktop.type_text",
+            {**result, "action": "desktop.type_text", "summary": "desktop.type_text failed"},
+        )
     return {
         "ok": True,
         "action": "desktop.type_text",
@@ -221,7 +238,10 @@ def desktop_hotkey(key: str, modifiers: list[str] | None = None) -> dict[str, An
         [clean_key],
     )
     if not result["ok"]:
-        return result
+        return _with_permission_metadata(
+            "desktop.hotkey",
+            {**result, "action": "desktop.hotkey", "summary": "desktop.hotkey failed"},
+        )
     return {
         "ok": True,
         "action": "desktop.hotkey",
@@ -276,7 +296,7 @@ def _unsupported(action: str) -> dict[str, Any]:
 
 
 def _error(action: str, exc: Exception) -> dict[str, Any]:
-    return {
+    payload = {
         "ok": False,
         "action": action,
         "summary": f"{action} failed",
@@ -284,6 +304,7 @@ def _error(action: str, exc: Exception) -> dict[str, Any]:
         "permission_error": _looks_like_permission_error(str(exc)),
         "fallback_used": False,
     }
+    return _with_permission_metadata(action, payload)
 
 
 def _failed(action: str, result: subprocess.CompletedProcess[str]) -> dict[str, Any]:
@@ -292,7 +313,7 @@ def _failed(action: str, result: subprocess.CompletedProcess[str]) -> dict[str, 
         for part in (result.stderr, result.stdout)
         if isinstance(part, str) and part.strip()
     )
-    return {
+    payload = {
         "ok": False,
         "action": action,
         "summary": f"{action} failed",
@@ -301,6 +322,7 @@ def _failed(action: str, result: subprocess.CompletedProcess[str]) -> dict[str, 
         "permission_error": _looks_like_permission_error(output),
         "fallback_used": False,
     }
+    return _with_permission_metadata(action, payload)
 
 
 def _clean_required(value: str, field: str) -> str:
@@ -349,3 +371,39 @@ def _looks_like_permission_error(value: str) -> bool:
             "tcc",
         )
     )
+
+
+def _with_permission_metadata(action: str, payload: dict[str, Any]) -> dict[str, Any]:
+    if not payload.get("permission_error"):
+        return payload
+    missing_permissions = _missing_permissions_for_action(action)
+    permission_targets = _permission_targets_for_action(action)
+    if missing_permissions:
+        payload["missing_permissions"] = missing_permissions
+    if permission_targets:
+        payload["permission_targets"] = permission_targets
+    return payload
+
+
+def _missing_permissions_for_action(action: str) -> list[str]:
+    return {
+        "screen.capture": ["screen_recording"],
+        "desktop.active_window": ["automation_or_accessibility"],
+        "app.focus": ["automation"],
+        "media.apple_music_play": ["music_app", "automation"],
+        "desktop.type_text": ["accessibility"],
+        "desktop.hotkey": ["accessibility"],
+        "osascript": ["automation"],
+    }.get(action, [])
+
+
+def _permission_targets_for_action(action: str) -> list[str]:
+    return {
+        "screen.capture": ["screen_recording"],
+        "desktop.active_window": ["automation", "accessibility"],
+        "app.focus": ["automation"],
+        "media.apple_music_play": ["music_app", "automation"],
+        "desktop.type_text": ["accessibility"],
+        "desktop.hotkey": ["accessibility"],
+        "osascript": ["automation"],
+    }.get(action, [])
