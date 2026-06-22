@@ -146,6 +146,95 @@ def test_legacy_studio_port_updates_existing_chat_group_and_starts_member_runs(
     assert event_calls[-1][1]["payload"]["group_mode"] == "debate"
 
 
+def test_legacy_group_run_inherits_builtin_desktop_policy_for_member_runs(
+    monkeypatch,
+) -> None:
+    store = _FakeChatStore()
+    runtime = _FakeRuntime()
+    monkeypatch.setattr("apps.core.chat_store.get_chat_store", lambda: store)
+    port = LegacyStudioPort(runtime)
+
+    group = port.save_group(
+        {
+            "name": "Desktop Team",
+            "tool_policy_id": "desktop_execution",
+            "participant_ids": ["agent-reviewer"],
+        }
+    )
+    started = port.start_group_run(
+        {
+            "group_id": group["group_id"],
+            "objective": "Read the screen and open Music",
+        }
+    )
+    create_call = next(
+        call[1]
+        for call in runtime.calls
+        if call[0] == "create_run_for_runnable_async"
+    )
+    member_started = next(
+        call[1]
+        for call in runtime.calls
+        if call[0] == "append_run_event"
+        and call[1]["event_type"] == "group.member.started"
+    )
+
+    inherited_policy = create_call["agent_override"]["tool_policy"]
+    allowed_tools = inherited_policy["allowed_tools"]
+    assert create_call["agent_override"]["agent_id"] == "agent-reviewer"
+    assert create_call["agent_override"]["inherited_tool_policy_id"] == "desktop_execution"
+    assert "workspace.read" in allowed_tools
+    assert "screen.capture" in allowed_tools
+    assert "media.apple_music_play" in allowed_tools
+    assert "desktop.type_text" in allowed_tools
+    assert "browser.click" in allowed_tools
+    assert "terminal.run" not in allowed_tools
+    assert started["participants"][0]["inherited_tool_policy_id"] == "desktop_execution"
+    assert member_started["payload"]["inherited_tool_policy_id"] == "desktop_execution"
+    assert member_started["payload"]["member_allowed_tools"] == allowed_tools
+    assert runtime.private_agents["agent-reviewer"]["tool_policy"]["allowed_tools"] == [
+        "workspace.read",
+    ]
+
+
+def test_legacy_group_run_keeps_unknown_group_policy_id_as_metadata_only(
+    monkeypatch,
+) -> None:
+    store = _FakeChatStore()
+    runtime = _FakeRuntime()
+    monkeypatch.setattr("apps.core.chat_store.get_chat_store", lambda: store)
+    port = LegacyStudioPort(runtime)
+
+    group = port.save_group(
+        {
+            "name": "Metadata Policy Team",
+            "tool_policy_id": "policy-review",
+            "participant_ids": ["agent-reviewer"],
+        }
+    )
+    port.start_group_run(
+        {
+            "group_id": group["group_id"],
+            "objective": "Review the plan",
+        }
+    )
+    create_call = next(
+        call[1]
+        for call in runtime.calls
+        if call[0] == "create_run_for_runnable_async"
+    )
+    member_started = next(
+        call[1]
+        for call in runtime.calls
+        if call[0] == "append_run_event"
+        and call[1]["event_type"] == "group.member.started"
+    )
+
+    assert "agent_override" not in create_call
+    assert member_started["payload"]["group_tool_policy_id"] == "policy-review"
+    assert "member_allowed_tools" not in member_started["payload"]
+
+
 def test_legacy_group_run_fallback_records_mode_specific_orchestration(
     monkeypatch,
 ) -> None:
@@ -300,10 +389,31 @@ class _FakeRuntime:
                 "enabled": True,
             },
         }
+        self.private_agents = {
+            agent_id: {
+                "agent_id": agent_id,
+                "kind": "agent",
+                "name": str(agent.get("name") or agent_id),
+                "enabled": True,
+                "model_mode": "profile",
+                "execution_backend": "native_profile",
+                "tool_policy": {
+                    "allowed_tools": ["workspace.read"],
+                    "approval_required": {},
+                },
+                "workspace_policy": {},
+                "skill_ids": [],
+            }
+            for agent_id, agent in self.runnables.items()
+        }
 
     def resolve_runnable(self, *, runnable_id: str) -> dict[str, Any]:
         self.calls.append(("resolve_runnable", runnable_id))
         return self.runnables[runnable_id]
+
+    def _get_agent_private(self, agent_id: str) -> dict[str, Any]:
+        self.calls.append(("_get_agent_private", agent_id))
+        return dict(self.private_agents[agent_id])
 
     def create_run_for_runnable_async(self, **payload: Any) -> dict[str, Any]:
         self.calls.append(("create_run_for_runnable_async", payload))

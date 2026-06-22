@@ -111,6 +111,24 @@ DESKTOP_CAPABILITY_DIAGNOSTIC_ROUTES: dict[str, str | None] = {
     "browser_control": "/ui/native-agent/diagnostics/cache",
 }
 
+GROUP_TOOL_POLICY_PRESETS: dict[str, tuple[str, ...]] = {
+    "desktop_execution": DESKTOP_CAPABILITY_TOOLS["desktop_execution"],
+    "desktop": DESKTOP_CAPABILITY_TOOLS["desktop_execution"],
+    "daily_desktop": DESKTOP_CAPABILITY_TOOLS["desktop_execution"],
+    "desktop_low_medium": DESKTOP_CAPABILITY_TOOLS["desktop_execution"],
+    "screen_capture": DESKTOP_CAPABILITY_TOOLS["screen_capture"],
+    "screen": DESKTOP_CAPABILITY_TOOLS["screen_capture"],
+    "active_window": DESKTOP_CAPABILITY_TOOLS["active_window"],
+    "app_control": DESKTOP_CAPABILITY_TOOLS["app_control"],
+    "app": DESKTOP_CAPABILITY_TOOLS["app_control"],
+    "media_control": DESKTOP_CAPABILITY_TOOLS["media_control"],
+    "media": DESKTOP_CAPABILITY_TOOLS["media_control"],
+    "foreground_input": DESKTOP_CAPABILITY_TOOLS["foreground_input"],
+    "input": DESKTOP_CAPABILITY_TOOLS["foreground_input"],
+    "browser_control": DESKTOP_CAPABILITY_TOOLS["browser_control"],
+    "browser": DESKTOP_CAPABILITY_TOOLS["browser_control"],
+}
+
 
 def approval_is_pending(approval: ApprovalCardSnapshot) -> bool:
     return approval.status == "pending"
@@ -128,6 +146,54 @@ def desktop_tool_risk_level(tool_name: str) -> DesktopExecutionRisk | None:
 
 def is_high_risk_desktop_action(action_name: str) -> bool:
     return str(action_name or "").strip() in HIGH_RISK_DESKTOP_ACTIONS
+
+
+def group_tool_policy_for_id(policy_id: str | None) -> dict[str, Any]:
+    """Return the built-in group-level tool policy for a stable policy id."""
+
+    token = _group_policy_token(policy_id)
+    tools = GROUP_TOOL_POLICY_PRESETS.get(token, ())
+    if not tools:
+        return {}
+    return {"allowed_tools": list(tools), "approval_required": {}}
+
+
+def merge_tool_policies(
+    base_policy: Mapping[str, Any] | None,
+    inherited_policy: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Union two runtime tool policies without weakening explicit approvals."""
+
+    base = base_policy if isinstance(base_policy, Mapping) else {}
+    inherited = inherited_policy if isinstance(inherited_policy, Mapping) else {}
+    allowed_tools: list[str] = []
+    for policy in (base, inherited):
+        raw_allowed = policy.get("allowed_tools")
+        if isinstance(raw_allowed, str):
+            raw_allowed = [raw_allowed]
+        if not isinstance(raw_allowed, Iterable):
+            continue
+        for tool in raw_allowed:
+            clean = str(tool or "").strip()
+            if clean and clean not in allowed_tools:
+                allowed_tools.append(clean)
+
+    approval_required: dict[str, bool] = {}
+    for policy in (base, inherited):
+        raw_approval = policy.get("approval_required")
+        if not isinstance(raw_approval, Mapping):
+            continue
+        for tool, required in raw_approval.items():
+            clean = str(tool or "").strip()
+            if clean and bool(required):
+                approval_required[clean] = True
+            elif clean and clean not in approval_required:
+                approval_required[clean] = False
+
+    return {
+        "allowed_tools": allowed_tools,
+        "approval_required": approval_required,
+    }
 
 
 def desktop_execution_capability_snapshots(
@@ -187,6 +253,16 @@ def _desktop_platform(platform_name: str | None = None) -> str:
     if raw == "linux":
         return "linux"
     return raw or "unknown"
+
+
+def _group_policy_token(policy_id: str | None) -> str:
+    token = str(policy_id or "").strip().lower()
+    token = token.replace("-", "_").replace(" ", "_")
+    if token.startswith("policy_"):
+        token = token.removeprefix("policy_")
+    if token.endswith("_v1"):
+        token = token.removesuffix("_v1")
+    return token
 
 
 def _missing_permissions(

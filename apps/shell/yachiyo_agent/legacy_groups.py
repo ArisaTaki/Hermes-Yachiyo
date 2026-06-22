@@ -6,6 +6,8 @@ import json
 from typing import Any
 from uuid import uuid4
 
+from .policy import group_tool_policy_for_id, merge_tool_policies
+
 _GROUP_CONFIG_KIND = "group_config"
 _GROUP_MODES = {"moderated", "round_robin", "debate", "pipeline", "parallel", "custom"}
 _MEMORY_SCOPES = {"shared", "per_agent", "hybrid"}
@@ -119,20 +121,24 @@ def create_runnable_run(
     run_group_id: str = "",
     client_run_id: str = "",
     on_complete: Any | None = None,
+    agent_override: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     create_async = getattr(runtime, "create_run_for_runnable_async", None)
+    payload = {
+        "runnable_id": runnable_id,
+        "user_goal": user_goal,
+        "run_group_id": run_group_id,
+    }
+    if agent_override is not None:
+        payload["agent_override"] = agent_override
     if callable(create_async):
+        payload["on_complete"] = on_complete
         return create_async(
-            runnable_id=runnable_id,
-            user_goal=user_goal,
-            run_group_id=run_group_id,
-            on_complete=on_complete,
+            **payload,
         )
+    payload["client_run_id"] = client_run_id
     return runtime.create_run_for_runnable(
-        runnable_id=runnable_id,
-        user_goal=user_goal,
-        run_group_id=run_group_id,
-        client_run_id=client_run_id,
+        **payload,
     )
 
 
@@ -168,6 +174,18 @@ def append_group_member_event(
     }
     if group:
         payload.update(_group_event_context(group))
+    inherited_policy_id = _optional_text(member.get("inherited_tool_policy_id"))
+    if inherited_policy_id:
+        payload["inherited_tool_policy_id"] = inherited_policy_id
+    inherited_policy = member.get("tool_policy")
+    if isinstance(inherited_policy, dict):
+        allowed_tools = inherited_policy.get("allowed_tools")
+        if isinstance(allowed_tools, list):
+            payload["member_allowed_tools"] = [
+                str(tool or "").strip()
+                for tool in allowed_tools
+                if str(tool or "").strip()
+            ]
     if client_run_id:
         payload["client_run_id"] = client_run_id
     if child_client_run_id:
@@ -483,6 +501,66 @@ def _participant_for_runnable(runnable: dict[str, Any]) -> dict[str, Any]:
     if isinstance(tool_policy, dict):
         participant["tool_policy"] = dict(tool_policy)
     return participant
+
+
+def group_member_agent_override(
+    runtime: Any,
+    member: dict[str, Any],
+    group: dict[str, Any],
+) -> dict[str, Any] | None:
+    inherited_policy = group_tool_policy_for_id(_optional_text(group.get("tool_policy_id")))
+    if not inherited_policy:
+        return None
+    agent_id = str(member.get("agent_id") or member.get("id") or "").strip()
+    if not agent_id:
+        return None
+    agent = _private_agent_for_group_member(runtime, agent_id)
+    if agent is None:
+        return None
+    merged_policy = merge_tool_policies(agent.get("tool_policy"), inherited_policy)
+    return {
+        **agent,
+        "tool_policy": merged_policy,
+        "inherited_tool_policy_id": _optional_text(group.get("tool_policy_id")),
+    }
+
+
+def group_member_with_inherited_policy(
+    runtime: Any,
+    member: dict[str, Any],
+    group: dict[str, Any],
+) -> dict[str, Any]:
+    override = group_member_agent_override(runtime, member, group)
+    if override is None:
+        return member
+    return {
+        **member,
+        "tool_policy": dict(override.get("tool_policy") or {}),
+        "inherited_tool_policy_id": _optional_text(group.get("tool_policy_id")),
+    }
+
+
+def _private_agent_for_group_member(
+    runtime: Any,
+    agent_id: str,
+) -> dict[str, Any] | None:
+    get_private = getattr(runtime, "_get_agent_private", None)
+    if callable(get_private):
+        try:
+            agent = get_private(agent_id)
+        except KeyError:
+            return None
+        if isinstance(agent, dict):
+            return dict(agent)
+    get_agent = getattr(runtime, "get_agent", None)
+    if callable(get_agent):
+        try:
+            agent = get_agent(agent_id)
+        except KeyError:
+            return None
+        if isinstance(agent, dict):
+            return dict(agent)
+    return None
 
 
 def _main_participant(runtime: Any) -> dict[str, Any]:

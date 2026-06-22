@@ -8,6 +8,8 @@ from .legacy_groups import (
     append_group_member_event,
     append_group_run_event,
     create_runnable_run,
+    group_member_agent_override,
+    group_member_with_inherited_policy,
 )
 from .legacy_group_orchestration import (
     active_speaker_agent_id as _active_speaker_agent_id,
@@ -47,7 +49,10 @@ def start_legacy_group_run(
     if not members:
         raise NotImplementedError("这个 legacy run group 没有可复用的成员定义")
     orchestration_plan = group_orchestration_plan(group, members)
-    members = orchestration_plan["members"]
+    members = [
+        group_member_with_inherited_policy(runtime, member, group)
+        for member in orchestration_plan["members"]
+    ]
 
     child_runs: list[dict[str, Any]] = []
     run_group_id = ""
@@ -92,6 +97,7 @@ def start_legacy_group_run(
             run_group_id=run_group_id,
             client_run_id=child_client_run_id,
             on_complete=on_member_complete,
+            agent_override=group_member_agent_override(runtime, member, group),
         )
         if not run_group_id:
             run_group_id = str(child_run.get("run_group_id") or "")

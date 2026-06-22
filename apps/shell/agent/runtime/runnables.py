@@ -219,6 +219,7 @@ class RuntimeRunnableRunCoordinator:
         upstream: str = "",
         client_run_id: str = "",
         client_request_id: str = "",
+        agent_override: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         runnable = self._required_runnable(runnable_id=runnable_id, name=name, message="未找到指定 Agent 或 Workflow")
         request_id = client_run_id or client_request_id
@@ -230,6 +231,7 @@ class RuntimeRunnableRunCoordinator:
                 "run_group_id": run_group_id,
                 "upstream": upstream,
                 "client_run_id": request_id,
+                "agent_override": agent_override,
             })
             run["agent_run_id"] = run["run_id"]
             run["runnable"] = runnable
@@ -253,6 +255,7 @@ class RuntimeRunnableRunCoordinator:
         user_goal: str = "",
         run_group_id: str = "",
         upstream: str = "",
+        agent_override: dict[str, Any] | None = None,
         on_complete: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         runnable = self._required_runnable(runnable_id=runnable_id, name=name, message="未找到指定 Agent 或 Workflow")
@@ -264,6 +267,7 @@ class RuntimeRunnableRunCoordinator:
                     "source": "agent",
                     "run_group_id": run_group_id,
                     "upstream": upstream,
+                    "agent_override": agent_override,
                 },
                 on_complete=on_complete,
             )

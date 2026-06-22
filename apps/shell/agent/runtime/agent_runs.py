@@ -183,7 +183,7 @@ class RuntimeAgentRunCoordinator:
             raise self._error_type("缺少 agent_id")
         if not user_goal:
             raise self._error_type("运行目标不能为空")
-        agent = self._get_agent_private(agent_id)
+        agent = self._agent_for_payload(payload, agent_id)
         self._validate_agent_run_readiness(agent)
         start = self._starter.start_sync(payload, agent=agent, lock=self._lock)
         if start.existing:
@@ -199,6 +199,15 @@ class RuntimeAgentRunCoordinator:
         if start.root_group:
             result = self._project_agent_run_group_if_root(result)
         return result
+
+    def _agent_for_payload(self, payload: dict[str, Any], agent_id: str) -> dict[str, Any]:
+        override = payload.get("agent_override")
+        if not isinstance(override, dict):
+            return self._get_agent_private(agent_id)
+        override_agent_id = str(override.get("agent_id") or override.get("id") or agent_id)
+        if override_agent_id != agent_id:
+            raise self._error_type("agent_override 与 agent_id 不一致")
+        return {**override, "agent_id": agent_id}
 
 
 class RuntimeAgentRunAsyncCoordinator:
@@ -247,7 +256,7 @@ class RuntimeAgentRunAsyncCoordinator:
             raise self._error_type("缺少 agent_id")
         if not user_goal:
             raise self._error_type("运行目标不能为空")
-        agent = self._get_agent_private(agent_id)
+        agent = self._agent_for_payload(payload, agent_id)
         self._validate_agent_run_readiness(agent)
         start = self._starter.start_async(payload, agent=agent)
         run = start.run
@@ -297,3 +306,12 @@ class RuntimeAgentRunAsyncCoordinator:
         )
         thread.start()
         return result
+
+    def _agent_for_payload(self, payload: dict[str, Any], agent_id: str) -> dict[str, Any]:
+        override = payload.get("agent_override")
+        if not isinstance(override, dict):
+            return self._get_agent_private(agent_id)
+        override_agent_id = str(override.get("agent_id") or override.get("id") or agent_id)
+        if override_agent_id != agent_id:
+            raise self._error_type("agent_override 与 agent_id 不一致")
+        return {**override, "agent_id": agent_id}
