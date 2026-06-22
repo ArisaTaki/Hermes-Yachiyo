@@ -199,6 +199,7 @@ class WorkflowAgentNodeExecution:
         *,
         run_group_id: str,
         workflow_run_id: str = "",
+        prepare_child_run: Any | None = None,
         ports: WorkflowNodePortBundle | None = None,
     ) -> "WorkflowAgentNodeExecution":
         insert_run = _port_callback(ports, "insert_run", engine, "_insert_run")
@@ -231,6 +232,8 @@ class WorkflowAgentNodeExecution:
             handoff.child_goal,
             **execute_kwargs,
         )
+        if callable(prepare_child_run):
+            child = prepare_child_run(child)
         return cls.from_child_run(
             handoff,
             child,

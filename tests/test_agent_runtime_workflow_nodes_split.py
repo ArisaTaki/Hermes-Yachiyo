@@ -212,6 +212,48 @@ def test_workflow_agent_node_execution_keeps_legacy_execute_callback_signature()
     assert calls == [("execute", "child_run:Previous result")]
 
 
+def test_workflow_agent_node_execution_prepares_child_before_artifact_refs() -> None:
+    calls: list[tuple[str, str]] = []
+    handoff = WorkflowAgentNodeHandoff.from_agent(
+        {"id": "research", "type": "agent"},
+        agent={"agent_id": "agent_research"},
+        label="Research",
+        kind="agent",
+        step_task="Summarize launch risk.",
+        child_goal="Ship release candidate\n\nStep: Summarize launch risk.",
+        context="Previous result",
+        has_agent_upstream=True,
+    )
+    ports = WorkflowNodePortBundle(
+        insert_run=lambda **_kwargs: {"run_id": "child_run"},
+        execute_agent_run=lambda run_id, _agent, _goal, *, upstream, run_group_id="": {
+            "run_id": run_id,
+            "status": "approval_required",
+            "result": "waiting",
+        },
+        workflow_child_artifact_refs=lambda run, label: calls.append(
+            ("artifacts", f"{run['run_id']}:{run['status']}:{label}")
+        )
+        or run.get("artifacts", []),
+    )
+
+    execution = WorkflowAgentNodeExecution.from_handoff(
+        object(),
+        handoff,
+        run_group_id="workflow_group",
+        prepare_child_run=lambda child: calls.append(("prepare", str(child["run_id"])))
+        or {**child, "status": "completed", "artifacts": [{"kind": "artifact"}]},
+        ports=ports,
+    )
+
+    assert execution.status == "completed"
+    assert execution.artifact_count == 1
+    assert calls == [
+        ("prepare", "child_run"),
+        ("artifacts", "child_run:completed:Research"),
+    ]
+
+
 def test_workflow_subworkflow_node_execution_accepts_prepared_child_run() -> None:
     child_workflow = {"workflow_id": "workflow_child", "name": "Child Flow"}
     child_run = {

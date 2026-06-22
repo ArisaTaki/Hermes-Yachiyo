@@ -18,6 +18,7 @@ from apps.shell.agent.runtime.workflow_nodes import (
     WorkflowAgentNodeExecution,
     WorkflowAgentNodeHandoff,
     WorkflowArtifactNodeWrite,
+    WorkflowNodePortBundle,
     WorkflowSubworkflowNodeExecution,
 )
 from apps.shell.agent.runtime.workflow_ports import WorkflowContinuationPortBundle
@@ -904,30 +905,22 @@ class WorkflowContinuationCoordinator:
             has_agent_upstream=has_agent_upstream,
             node_info_extra=node_info_extra,
         )
-        child = self._insert_run(
-            kind="agent_run",
-            runnable_id=handoff.agent_id,
-            user_goal=handoff.child_goal,
-            run_group_id=run_group_id,
-        )
-        child = self._execute_agent_run(
-            child["run_id"],
-            handoff.agent,
-            handoff.child_goal,
-            upstream=handoff.upstream,
+        execution = WorkflowAgentNodeExecution.from_handoff(
+            object(),
+            handoff,
             run_group_id=run_group_id,
             workflow_run_id=str(run["run_id"]),
-        )
-        child = self._project_workflow_child_pending_context(
-            child,
-            run,
-            handoff,
-            run_group_id=run_group_id,
-        )
-        execution = WorkflowAgentNodeExecution.from_child_run(
-            handoff,
-            child,
-            artifact_count=len(self._workflow_child_artifact_refs(child, handoff.node_label)),
+            prepare_child_run=lambda child: self._project_workflow_child_pending_context(
+                child,
+                run,
+                handoff,
+                run_group_id=run_group_id,
+            ),
+            ports=WorkflowNodePortBundle(
+                insert_run=self._insert_run,
+                execute_agent_run=self._execute_agent_run,
+                workflow_child_artifact_refs=self._workflow_child_artifact_refs,
+            ),
         )
         next_context = execution.next_context
         agent_payload = execution.agent_event_payload()
