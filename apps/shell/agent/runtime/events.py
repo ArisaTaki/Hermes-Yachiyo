@@ -565,18 +565,64 @@ class RuntimeToolCallEventRecorder:
         )
 
 
+def _artifact_size_bytes(tool_result: dict[str, Any], artifact: dict[str, Any]) -> int:
+    raw_size = (
+        artifact.get("size_bytes")
+        if artifact.get("size_bytes") is not None
+        else artifact.get("bytes")
+    )
+    if raw_size is None:
+        raw_size = tool_result.get("size_bytes")
+    if raw_size is None:
+        raw_size = tool_result.get("bytes")
+    try:
+        return max(0, int(raw_size or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 def artifact_created_payload(
     tool_result: dict[str, Any],
     *,
     run_id: str,
+    source_tool: str = "",
 ) -> dict[str, Any]:
+    artifact = tool_result.get("artifact") if isinstance(tool_result.get("artifact"), dict) else {}
+    path = str(artifact.get("path") or tool_result.get("path") or "")
+    artifact_id = str(
+        artifact.get("artifact_id")
+        or artifact.get("id")
+        or tool_result.get("artifact_id")
+        or path
+        or ""
+    )
+    kind = str(artifact.get("kind") or tool_result.get("kind") or "tool_artifact")
+    size_bytes = _artifact_size_bytes(tool_result, artifact)
+    source = str(
+        source_tool
+        or artifact.get("source_tool")
+        or tool_result.get("source_tool")
+        or "artifact.write"
+    )
+    nested_artifact: dict[str, Any] = {
+        "artifact_id": artifact_id,
+        "kind": kind,
+        "path": path,
+        "size_bytes": size_bytes,
+        "source_tool": source,
+    }
+    for key in ("title", "mime_type", "content_type", "width", "height"):
+        value = artifact.get(key)
+        if value is not None:
+            nested_artifact[key] = value
     return {
-        "artifact_id": str(tool_result.get("artifact_id") or tool_result.get("path") or ""),
+        "artifact_id": artifact_id,
         "run_id": run_id,
-        "kind": "tool_artifact",
-        "path": str(tool_result.get("path") or ""),
-        "size_bytes": int(tool_result.get("bytes") or 0),
-        "source_tool": "artifact.write",
+        "kind": kind,
+        "path": path,
+        "size_bytes": size_bytes,
+        "source_tool": source,
+        "artifact": nested_artifact,
     }
 
 
@@ -664,8 +710,13 @@ class RuntimeTraceEventBuilder:
         tool_result: dict[str, Any],
         *,
         run_id: str,
+        source_tool: str = "",
     ) -> dict[str, Any]:
-        return artifact_created_payload(tool_result, run_id=run_id)
+        return artifact_created_payload(
+            tool_result,
+            run_id=run_id,
+            source_tool=source_tool,
+        )
 
     def memory_skill_trace_event(
         self,

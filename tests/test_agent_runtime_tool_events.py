@@ -8,6 +8,7 @@ from apps.shell import agent_runtime
 from apps.shell.agent.runtime.events import (
     RuntimeToolCallEventRecorder,
     ToolEventPayloadBuilder,
+    artifact_created_payload,
     runtime_trace_input_preview,
 )
 from apps.shell.agent_runtime import AgentRuntimeService
@@ -53,6 +54,40 @@ def test_tool_event_payload_builder_projects_result_and_error() -> None:
     assert payload["status"] == "failed"
     assert payload["output_preview"] == {"ok": True, "content": "hello"}
     assert "sk-secret-value" not in payload["error"]
+
+
+def test_artifact_created_payload_projects_structured_tool_artifacts() -> None:
+    payload = artifact_created_payload(
+        {
+            "ok": True,
+            "summary": "Captured screen",
+            "artifact": {
+                "path": "screenshots/current-screen.png",
+                "kind": "image",
+                "mime_type": "image/png",
+                "size_bytes": 321,
+                "width": 800,
+                "height": 600,
+            },
+        },
+        run_id="run-screen",
+        source_tool="screen.capture",
+    )
+
+    assert payload["source_tool"] == "screen.capture"
+    assert payload["kind"] == "image"
+    assert payload["path"] == "screenshots/current-screen.png"
+    assert payload["size_bytes"] == 321
+    assert payload["artifact"] == {
+        "artifact_id": "screenshots/current-screen.png",
+        "kind": "image",
+        "path": "screenshots/current-screen.png",
+        "size_bytes": 321,
+        "source_tool": "screen.capture",
+        "mime_type": "image/png",
+        "width": 800,
+        "height": 600,
+    }
 
 
 def test_runtime_tool_call_event_recorder_records_lifecycle_events() -> None:

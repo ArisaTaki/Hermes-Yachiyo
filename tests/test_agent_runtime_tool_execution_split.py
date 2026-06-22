@@ -75,12 +75,17 @@ class FakeTraceEvents:
         tool_result: dict[str, Any],
         *,
         run_id: str,
+        source_tool: str = "artifact.write",
     ) -> dict[str, Any]:
-        return {
+        artifact = tool_result.get("artifact") if isinstance(tool_result.get("artifact"), dict) else {}
+        payload = {
             "run_id": run_id,
-            "path": tool_result.get("path"),
-            "source_tool": "artifact.write",
+            "path": artifact.get("path") or tool_result.get("path"),
+            "source_tool": source_tool,
         }
+        if artifact:
+            payload["artifact"] = {**artifact, "source_tool": source_tool}
+        return payload
 
 
 class FakeBroker:
@@ -306,6 +311,44 @@ def test_runtime_tool_call_executor_projects_trace_and_artifact_events() -> None
     assert artifacts == [{"kind": "tool_artifact", **artifact_result}]
     assert ("run-1", "artifact.created", {"run_id": "run-1", "path": "notes.md", "source_tool": "artifact.write"}) in run_events
     assert ("run-1", "memory.write.add", {"tool": "memory.add", "input_preview": {"content": "remember"}, "ok": True}) in run_events
+
+
+def test_runtime_tool_call_executor_projects_structured_tool_artifact_events() -> None:
+    events = FakeToolCallEvents()
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+    executor = _executor(tool_call_events=events, run_events=run_events)
+    artifacts: list[dict[str, Any]] = []
+    screen_artifact = {
+        "path": "screenshots/current-screen.png",
+        "kind": "image",
+        "mime_type": "image/png",
+        "size_bytes": 321,
+        "width": 800,
+        "height": 600,
+    }
+
+    result = executor.execute(
+        {"tool": "screen.capture", "input": {"display": "main"}},
+        ["screen.capture"],
+        FakeBroker({"ok": True, "summary": "Captured screen", "artifact": screen_artifact}),
+        [],
+        artifacts=artifacts,
+        run_id="run-screen",
+        budget=FakeBudget(),
+    )
+
+    assert result["ok"] is True
+    assert artifacts == [{**screen_artifact, "source_tool": "screen.capture"}]
+    assert (
+        "run-screen",
+        "artifact.created",
+        {
+            "run_id": "run-screen",
+            "path": "screenshots/current-screen.png",
+            "source_tool": "screen.capture",
+            "artifact": {**screen_artifact, "source_tool": "screen.capture"},
+        },
+    ) in run_events
 
 
 def test_runtime_tool_call_executor_routes_restricted_plugin_tools_through_timeline(

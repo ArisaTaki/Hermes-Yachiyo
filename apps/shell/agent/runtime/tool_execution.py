@@ -13,6 +13,20 @@ def _default_allows_tool(tool_name: str, allowed_tools: list[str]) -> bool:
     return tool_name in set(str(tool or "").strip() for tool in allowed_tools)
 
 
+def _tool_result_artifact(tool_name: str, tool_result: dict[str, Any]) -> dict[str, Any] | None:
+    if not tool_result.get("ok"):
+        return None
+    if tool_name == "artifact.write":
+        return {"kind": "tool_artifact", **tool_result}
+    raw_artifact = tool_result.get("artifact")
+    if not isinstance(raw_artifact, dict):
+        return None
+    artifact = {"kind": "tool_artifact", "source_tool": tool_name, **raw_artifact}
+    if not artifact.get("source_tool"):
+        artifact["source_tool"] = tool_name
+    return artifact
+
+
 class RuntimeToolCallExecutor:
     """Executes one tool call while preserving policy, budget, and event gates."""
 
@@ -158,19 +172,20 @@ class RuntimeToolCallExecutor:
                     trace_event["event_type"],
                     trace_event["payload"],
                 )
-        if artifacts is not None and tool_name == "artifact.write" and tool_result.get("ok"):
-            artifact = {"kind": "tool_artifact", **tool_result}
+        artifact = _tool_result_artifact(tool_name, tool_result)
+        if artifact is not None and artifacts is not None:
             if artifact not in artifacts:
                 artifacts.append(artifact)
-            if run_id:
-                self._append_run_event(
-                    run_id,
-                    "artifact.created",
-                    self._trace_events.artifact_created_payload(
-                        tool_result,
-                        run_id=run_id,
-                    ),
-                )
+        if artifact is not None and run_id:
+            self._append_run_event(
+                run_id,
+                "artifact.created",
+                self._trace_events.artifact_created_payload(
+                    tool_result,
+                    run_id=run_id,
+                    source_tool=tool_name,
+                ),
+            )
         return tool_result
 
 
