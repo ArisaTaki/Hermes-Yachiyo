@@ -105,11 +105,13 @@ class AgentContextBuilder:
         load_agent_skills: Callable[[list[str]], list[dict[str, Any]]],
         long_term_memory_context: Callable[[], str],
         operating_doctrine: str,
+        agent_desk_context: Callable[[dict[str, Any]], str] | None = None,
     ) -> None:
         self._compile_agent_runtime = compile_agent_runtime
         self._load_agent_skills = load_agent_skills
         self._long_term_memory_context = long_term_memory_context
         self._operating_doctrine = operating_doctrine
+        self._agent_desk_context = agent_desk_context
 
     def build(
         self,
@@ -141,21 +143,28 @@ class AgentContextBuilder:
             else "No mounted skills."
         )
         memory_context = self._long_term_memory_context()
-        return "\n\n".join(
+        sections = [
+            f"# Agent\nName: {agent['name']}\nNickname: {agent.get('nickname') or agent['name']}\nCategory: {agent.get('category') or 'custom'}",
+            f"# Functional Instructions\n{agent.get('instructions') or 'No extra functional instructions.'}",
+            f"# Persona Prompt\n{agent.get('persona_prompt') or 'No persona override.'}",
+            f"# Operating Doctrine\n{self._operating_doctrine}",
+            f"# Mounted Skills\n{mounted_skills}",
+            f"# Long-term Memory\n{memory_context}",
+            "# Runtime\n"
+            "Runtime: Oha Agent Runtime\n"
+            f"Allowed tools: {', '.join(tool_policy.get('allowed_tools') or [])}\n"
+            f"Approval required: {json.dumps(tool_policy.get('approval_required') or {}, ensure_ascii=False)}\n"
+            f"Workspace: {json.dumps(workspace_policy, ensure_ascii=False)}",
+        ]
+        if self._agent_desk_context is not None:
+            desk_context = self._agent_desk_context(agent).strip()
+            if desk_context:
+                sections.append(f"# Agent Desk\n{desk_context}")
+        sections.extend(
             [
-                f"# Agent\nName: {agent['name']}\nNickname: {agent.get('nickname') or agent['name']}\nCategory: {agent.get('category') or 'custom'}",
-                f"# Functional Instructions\n{agent.get('instructions') or 'No extra functional instructions.'}",
-                f"# Persona Prompt\n{agent.get('persona_prompt') or 'No persona override.'}",
-                f"# Operating Doctrine\n{self._operating_doctrine}",
-                f"# Mounted Skills\n{mounted_skills}",
-                f"# Long-term Memory\n{memory_context}",
-                "# Runtime\n"
-                "Runtime: Oha Agent Runtime\n"
-                f"Allowed tools: {', '.join(tool_policy.get('allowed_tools') or [])}\n"
-                f"Approval required: {json.dumps(tool_policy.get('approval_required') or {}, ensure_ascii=False)}\n"
-                f"Workspace: {json.dumps(workspace_policy, ensure_ascii=False)}",
                 f"# Upstream Context\n{upstream or 'None'}",
                 f"# User Goal\n{user_goal}",
                 f"# Output Contract\n{agent_output_contract_rules(agent.get('output_contract'))}",
             ]
         )
+        return "\n\n".join(sections)

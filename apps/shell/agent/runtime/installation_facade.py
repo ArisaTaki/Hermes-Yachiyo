@@ -11,6 +11,7 @@ from packages.security import redact_api_error_text
 from apps.shell.agent.runtime.agent_chat_entrypoints import (
     build_runtime_agent_chat_entrypoint_setup,
 )
+from apps.shell.agent.runtime.agent_desk_context import build_agent_desk_context
 from apps.shell.agent.runtime.agent_runs import RuntimeAgentRunExecutor
 from apps.shell.agent.runtime.agent_services import build_runtime_agent_services
 from apps.shell.agent.runtime.clock import iso_epoch, utc_now_iso
@@ -357,6 +358,7 @@ class RuntimeInstallationFacadeMixin:
             model_output_metadata=model_output_metadata,
             redact_secrets=redact_secrets,
             tool_brokers=self.tool_brokers,
+            agent_desk_context=build_agent_desk_context,
         )
         self._install_runtime_agent_services(agent_services)
         approval_services = build_runtime_approval_services(

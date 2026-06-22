@@ -61,6 +61,7 @@ def test_build_runtime_agent_services_wires_skill_context_preparation_and_outcom
         model_output_metadata=lambda _value: {},
         redact_secrets=lambda value: str(value),
         tool_brokers=tool_brokers,
+        agent_desk_context=lambda _agent: "Desk",
     )
 
     assert isinstance(bundle, RuntimeAgentServiceBundle)
@@ -69,6 +70,7 @@ def test_build_runtime_agent_services_wires_skill_context_preparation_and_outcom
     assert isinstance(bundle.agent_run_preparer, RuntimeAgentRunPreparer)
     assert isinstance(bundle.agent_run_outcomes, RuntimeAgentRunOutcomeProjector)
     assert bundle.agent_context_builder._operating_doctrine == "Follow approval gates."
+    assert bundle.agent_context_builder._agent_desk_context is not None
     assert bundle.agent_run_preparer._agent_artifacts_dir == tmp_path / "artifacts"
     assert bundle.agent_run_preparer._runtime_agent_timeline is runtime_agent_timeline
     assert bundle.agent_run_preparer._runtime_agent_run_events is runtime_agent_run_events

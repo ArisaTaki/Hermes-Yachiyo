@@ -488,6 +488,10 @@ def test_installation_facade_installs_agent_and_approval_services(monkeypatch) -
         is installation_facade_mod.model_output_metadata
     )
     assert engine.agent_run_preparer.kwargs["redact_secrets"] is installation_facade_mod.redact_secrets
+    assert (
+        engine.agent_run_preparer.kwargs["agent_desk_context"]
+        is installation_facade_mod.build_agent_desk_context
+    )
     assert engine.approval_pause == "approval-pause"
     assert engine.approvals == "approvals"
     assert engine.approval_resume == "approval-resume"

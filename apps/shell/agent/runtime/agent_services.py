@@ -45,6 +45,7 @@ def build_runtime_agent_services(
     redact_secrets: Callable[[Any], str],
     tool_broker_factory: Callable[..., Any] | None = None,
     tool_brokers: Any | None = None,
+    agent_desk_context: Callable[[dict[str, Any]], str] | None = None,
 ) -> RuntimeAgentServiceBundle:
     return RuntimeAgentServiceBundle(
         agent_skill_loader=RuntimeAgentSkillLoader(
@@ -56,6 +57,7 @@ def build_runtime_agent_services(
             load_agent_skills=load_agent_skills,
             long_term_memory_context=long_term_memory_context,
             operating_doctrine=operating_doctrine,
+            agent_desk_context=agent_desk_context,
         ),
         agent_run_preparer=RuntimeAgentRunPreparer(
             agent_artifacts_dir=agent_artifacts_dir,

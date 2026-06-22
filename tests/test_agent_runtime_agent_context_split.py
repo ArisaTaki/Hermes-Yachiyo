@@ -11,6 +11,7 @@ from apps.shell.agent.runtime.agent_context import (
     agent_output_contract_rules,
     user_goal_from_agent_messages,
 )
+from apps.shell.agent.runtime.agent_desk_context import build_agent_desk_context
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
 
@@ -78,6 +79,37 @@ def test_agent_context_builder_projects_model_visible_runtime_context() -> None:
     assert "# Upstream Context\nParent run summary." in context
     assert "# User Goal\nReview the current plan." in context
     assert "Contract: report" in context
+
+
+def test_agent_context_builder_includes_agent_desk_context(tmp_path) -> None:
+    desk_root = tmp_path / "desk"
+    (desk_root / "inputs").mkdir(parents=True)
+    (desk_root / "desk-notes.md").write_text("Read the uploaded brief first.", encoding="utf-8")
+    (desk_root / "inputs" / "brief.md").write_text("# Brief", encoding="utf-8")
+    (desk_root / ".yachiyo-desk.json").write_text("{}", encoding="utf-8")
+    builder = AgentContextBuilder(
+        compile_agent_runtime=_compile_agent_runtime,
+        load_agent_skills=lambda _skill_ids: [],
+        long_term_memory_context=lambda: "None",
+        operating_doctrine="Follow approval gates.",
+        agent_desk_context=lambda agent: build_agent_desk_context(agent, max_items=10),
+    )
+
+    context = builder.build(
+        {
+            "name": "Desk Agent",
+            "workspace_policy": {"default_workdir": str(desk_root)},
+            "skill_ids": [],
+        },
+        "Use the desk.",
+    )
+
+    assert "# Agent Desk" in context
+    assert f"Root: {desk_root}" in context
+    assert "Desk notes:\nRead the uploaded brief first." in context
+    assert "- desk-notes.md (note" in context
+    assert "- inputs/brief.md (file" in context
+    assert ".yachiyo-desk.json" not in context
 
 
 def test_agent_goal_helpers_remain_behaviorally_compatible() -> None:
