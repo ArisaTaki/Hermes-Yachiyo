@@ -13,7 +13,23 @@ from apps.shell.agent.tools.policy import (
     RuntimePolicyCompiler,
     ToolDescriptorRegistry,
 )
+from apps.shell.agent.tools.plugins import (
+    RestrictedPluginTool,
+    RestrictedToolPlugin,
+    clear_restricted_tool_plugins,
+    list_restricted_plugin_tools,
+    register_restricted_tool_plugin,
+    restricted_plugin_tool_risk,
+    unregister_restricted_tool_plugin,
+)
 from apps.shell.agent.tools.registry import TOOL_DISPATCH_REGISTRY, dispatch_tool_call
+
+
+@pytest.fixture(autouse=True)
+def _clear_plugin_tools():
+    clear_restricted_tool_plugins()
+    yield
+    clear_restricted_tool_plugins()
 
 
 def _broker(tmp_path):
@@ -52,6 +68,130 @@ def test_tool_dispatch_registry_keeps_terminal_approval_gate(tmp_path) -> None:
 def test_tool_dispatch_registry_rejects_unknown_tool(tmp_path) -> None:
     with pytest.raises(AgentRuntimeError, match="未知工具"):
         dispatch_tool_call(_broker(tmp_path), "unknown.tool", {})
+
+
+def test_restricted_plugin_tool_registers_schema_policy_and_dispatch(tmp_path) -> None:
+    def echo_tool(payload, context):
+        return {
+            "ok": True,
+            "echo": payload["text"],
+            "tool": "plugin.spoof.echo",
+            "plugin_id": "spoof",
+            "risk_level": "high",
+            "context": {
+                "tool_name": context.tool_name,
+                "plugin_id": context.plugin_id,
+                "risk_level": context.risk_level,
+                "workdir": str(context.workdir),
+            },
+        }
+
+    registered = register_restricted_tool_plugin(
+        RestrictedToolPlugin(
+            plugin_id="notes",
+            tools=(
+                RestrictedPluginTool(
+                    tool_id="echo",
+                    description="Echo text through a restricted test plugin.",
+                    properties={"text": {"type": "string"}},
+                    required=("text",),
+                    risk_level="low",
+                    execute=echo_tool,
+                ),
+            ),
+            skill_docs="Use echo for tests only.",
+        )
+    )
+    tool_name = "plugin.notes.echo"
+
+    assert registered[0].name == tool_name
+    assert registered[0].function_name == "plugin_notes_echo"
+    assert registered[0].skill_docs == "Use echo for tests only."
+    assert list_restricted_plugin_tools()[0].name == tool_name
+    assert restricted_plugin_tool_risk(tool_name) == "low"
+    assert tool_name in KNOWN_AGENT_TOOLS
+    assert tool_name in TOOL_DISPATCH_REGISTRY
+
+    schemas = ToolDescriptorRegistry.model_tool_schemas([tool_name])
+    assert schemas[0]["function"]["name"] == "plugin_notes_echo"
+    assert schemas[0]["function"]["parameters"]["additionalProperties"] is False
+    ToolDescriptorRegistry.validate_payload(tool_name, {"text": "hello"})
+    with pytest.raises(AgentRuntimeError, match="未声明"):
+        ToolDescriptorRegistry.validate_payload(tool_name, {"text": "hello", "extra": True})
+
+    policy = RuntimePolicyCompiler().compile_tool_policy(
+        "custom",
+        {"allowed_tools": [tool_name, "unknown.tool"]},
+    )
+    assert policy == {"allowed_tools": [tool_name], "approval_required": {}}
+    result = dispatch_tool_call(_broker(tmp_path), tool_name, {"text": "hello"})
+    assert result["ok"] is True
+    assert result["echo"] == "hello"
+    assert result["tool"] == tool_name
+    assert result["plugin_id"] == "notes"
+    assert result["risk_level"] == "low"
+    assert result["context"]["tool_name"] == tool_name
+
+    unregister_restricted_tool_plugin("notes")
+
+    assert tool_name not in KNOWN_AGENT_TOOLS
+    assert tool_name not in TOOL_DISPATCH_REGISTRY
+    assert restricted_plugin_tool_risk(tool_name) is None
+    with pytest.raises(AgentRuntimeError, match="未知工具"):
+        dispatch_tool_call(_broker(tmp_path), tool_name, {"text": "hello"})
+
+
+def test_high_risk_restricted_plugin_tool_uses_existing_approval_gate(tmp_path) -> None:
+    def delete_like_tool(payload, context):
+        return {
+            "ok": True,
+            "approved": context.approved,
+            "target": payload["target"],
+        }
+
+    register_restricted_tool_plugin(
+        RestrictedToolPlugin(
+            plugin_id="ops",
+            tools=(
+                RestrictedPluginTool(
+                    tool_id="delete_file",
+                    description="High-risk mock plugin tool.",
+                    properties={"target": {"type": "string"}},
+                    required=("target",),
+                    risk_level="high",
+                    execute=delete_like_tool,
+                ),
+            ),
+        )
+    )
+    tool_name = "plugin.ops.delete_file"
+
+    policy = RuntimePolicyCompiler().compile_tool_policy(
+        "custom",
+        {"allowed_tools": [tool_name]},
+    )
+    assert policy == {"allowed_tools": [tool_name], "approval_required": {tool_name: True}}
+    assert tool_name in HIGH_RISK_AGENT_TOOLS
+
+    approval = dispatch_tool_call(_broker(tmp_path), tool_name, {"target": "notes.md"})
+    assert approval == {
+        "ok": False,
+        "approval_required": True,
+        "tool": tool_name,
+        "risk_level": "high",
+        "plugin_id": "ops",
+    }
+
+    result = dispatch_tool_call(
+        _broker(tmp_path),
+        tool_name,
+        {"target": "notes.md"},
+        approved=True,
+    )
+    assert result["ok"] is True
+    assert result["approved"] is True
+    assert result["plugin_id"] == "ops"
+    assert result["risk_level"] == "high"
 
 
 def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None:

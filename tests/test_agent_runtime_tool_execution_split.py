@@ -13,6 +13,14 @@ from apps.shell.agent.runtime.tool_execution import (
     RuntimeToolRequestRunner,
 )
 from apps.shell.agent.runtime.tool_loop import RuntimeToolLoopProjectionBuilder
+from apps.shell.agent.tools.broker import ToolBroker
+from apps.shell.agent.tools.plugins import (
+    RestrictedPluginTool,
+    RestrictedToolPlugin,
+    clear_restricted_tool_plugins,
+    register_restricted_tool_plugin,
+)
+from apps.shell.agent.tools.policy import ToolDescriptorRegistry
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
 
@@ -298,6 +306,162 @@ def test_runtime_tool_call_executor_projects_trace_and_artifact_events() -> None
     assert artifacts == [{"kind": "tool_artifact", **artifact_result}]
     assert ("run-1", "artifact.created", {"run_id": "run-1", "path": "notes.md", "source_tool": "artifact.write"}) in run_events
     assert ("run-1", "memory.write.add", {"tool": "memory.add", "input_preview": {"content": "remember"}, "ok": True}) in run_events
+
+
+def test_runtime_tool_call_executor_routes_restricted_plugin_tools_through_timeline(
+    tmp_path,
+) -> None:
+    clear_restricted_tool_plugins()
+
+    def echo_tool(payload, context):
+        return {
+            "ok": True,
+            "summary": f"Echoed {payload['text']}",
+            "context_tool": context.tool_name,
+        }
+
+    try:
+        register_restricted_tool_plugin(
+            RestrictedToolPlugin(
+                plugin_id="notes",
+                tools=(
+                    RestrictedPluginTool(
+                        tool_id="echo",
+                        description="Echo text through a restricted plugin.",
+                        properties={"text": {"type": "string"}},
+                        required=("text",),
+                        risk_level="low",
+                        execute=echo_tool,
+                    ),
+                ),
+            )
+        )
+        tool_name = "plugin.notes.echo"
+        events = FakeToolCallEvents()
+        executor = RuntimeToolCallExecutor(
+            normalize_tool_name=lambda value: str(value or "").strip(),
+            input_preview=lambda value: value,
+            run_budget=lambda _run_id, _timeline: FakeBudget(),
+            validate_tool_payload=ToolDescriptorRegistry.validate_payload,
+            limit_tool_result=lambda result: result,
+            timeline_factory=_timeline,
+            tool_call_events=events,
+            trace_events=FakeTraceEvents(),
+            append_run_event=lambda _run_id, _event_type, _payload: None,
+        )
+        broker = ToolBroker(
+            {
+                "default_workdir": str(tmp_path),
+                "readable_scopes": ["."],
+                "writable_scopes": [],
+            },
+            tmp_path / "artifacts",
+        )
+        timeline: list[dict[str, Any]] = []
+
+        result = executor.execute(
+            {"tool": tool_name, "input": {"text": "hello"}},
+            [tool_name],
+            broker,
+            timeline,
+            run_id="run-1",
+            budget=FakeBudget(),
+        )
+
+        assert result["ok"] is True
+        assert result["summary"] == "Echoed hello"
+        assert result["plugin_id"] == "notes"
+        assert result["risk_level"] == "low"
+        assert timeline[-1]["event"] == "agent.tool.call"
+        assert timeline[-1]["detail"] == tool_name
+        assert timeline[-1]["result"] == result
+        assert [call[0] for call in events.calls] == [
+            "requested",
+            "started",
+            "result",
+            "agent_tool_call",
+        ]
+    finally:
+        clear_restricted_tool_plugins()
+
+
+def test_runtime_tool_request_runner_pauses_for_high_risk_restricted_plugin(
+    tmp_path,
+) -> None:
+    clear_restricted_tool_plugins()
+
+    def destructive_tool(payload, context):
+        return {"ok": True, "approved": context.approved, "target": payload["target"]}
+
+    try:
+        register_restricted_tool_plugin(
+            RestrictedToolPlugin(
+                plugin_id="ops",
+                tools=(
+                    RestrictedPluginTool(
+                        tool_id="delete_file",
+                        description="High-risk restricted plugin test tool.",
+                        properties={"target": {"type": "string"}},
+                        required=("target",),
+                        risk_level="high",
+                        execute=destructive_tool,
+                    ),
+                ),
+            )
+        )
+        tool_name = "plugin.ops.delete_file"
+        events = FakeToolCallEvents()
+        executor = RuntimeToolCallExecutor(
+            normalize_tool_name=lambda value: str(value or "").strip(),
+            input_preview=lambda value: value,
+            run_budget=lambda _run_id, _timeline: FakeBudget(),
+            validate_tool_payload=ToolDescriptorRegistry.validate_payload,
+            limit_tool_result=lambda result: result,
+            timeline_factory=_timeline,
+            tool_call_events=events,
+            trace_events=FakeTraceEvents(),
+            append_run_event=lambda _run_id, _event_type, _payload: None,
+        )
+        runner = _runner(
+            call_agent_tool=executor.execute,
+            pending_approval_builder=FakePendingApprovalBuilder(),
+        )
+        broker = ToolBroker(
+            {
+                "default_workdir": str(tmp_path),
+                "readable_scopes": ["."],
+                "writable_scopes": [],
+            },
+            tmp_path / "artifacts",
+        )
+        timeline: list[dict[str, Any]] = []
+        messages = [{"role": "user", "content": "delete the file"}]
+
+        with pytest.raises(AgentApprovalRequired) as exc_info:
+            runner.run(
+                [{"tool": tool_name, "input": {"target": "notes.md"}}],
+                [tool_name],
+                broker,
+                messages,
+                timeline,
+                [],
+                next_iteration=4,
+                run_id="run-1",
+                budget=FakeBudget(),
+            )
+
+        assert exc_info.value.pending_approval["tool"] == tool_name
+        assert timeline[-1]["event"] == "agent.tool.call"
+        assert timeline[-1]["result"]["approval_required"] is True
+        assert timeline[-1]["result"]["risk_level"] == "high"
+        assert [call[0] for call in events.calls] == [
+            "requested",
+            "started",
+            "result",
+            "agent_tool_call",
+        ]
+    finally:
+        clear_restricted_tool_plugins()
 
 
 def test_native_runtime_uses_split_tool_call_executor(tmp_path) -> None:

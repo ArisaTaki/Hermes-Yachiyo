@@ -27,6 +27,11 @@ from apps.shell.agent.tools.policy import (
     RuntimePolicyCompiler,
     ToolDescriptorRegistry,
 )
+from apps.shell.agent.tools.plugins import (
+    RestrictedPluginTool,
+    RestrictedToolPlugin,
+    register_restricted_tool_plugin,
+)
 from apps.shell.agent.tools.registry import TOOL_DISPATCH_REGISTRY, dispatch_tool_call
 
 
@@ -54,6 +59,9 @@ def test_tools_package_exports_broker_policy_and_dispatch_boundaries() -> None:
     assert tools.PolicyGate is PolicyGate
     assert tools.RuntimePolicyCompiler is RuntimePolicyCompiler
     assert tools.ToolDescriptorRegistry is ToolDescriptorRegistry
+    assert tools.RestrictedPluginTool is RestrictedPluginTool
+    assert tools.RestrictedToolPlugin is RestrictedToolPlugin
+    assert tools.register_restricted_tool_plugin is register_restricted_tool_plugin
     assert tools.TOOL_DISPATCH_REGISTRY is TOOL_DISPATCH_REGISTRY
     assert tools.dispatch_tool_call is dispatch_tool_call
     assert {"terminal.run", "workspace.write_patch"} <= set(HIGH_RISK_AGENT_TOOLS)

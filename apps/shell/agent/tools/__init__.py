@@ -1,6 +1,18 @@
 """Tool policy and broker boundaries for the Agent runtime."""
 
 from apps.shell.agent.tools.broker import ToolBroker, cancel_terminal_process_groups
+from apps.shell.agent.tools.plugins import (
+    RegisteredPluginTool,
+    RestrictedPluginTool,
+    RestrictedPluginToolContext,
+    RestrictedToolPlugin,
+    call_restricted_plugin_tool,
+    clear_restricted_tool_plugins,
+    list_restricted_plugin_tools,
+    register_restricted_tool_plugin,
+    restricted_plugin_tool_risk,
+    unregister_restricted_tool_plugin,
+)
 from apps.shell.agent.tools.policy import (
     DAILY_BROWSER_TOOL_NAMES,
     DAILY_DESKTOP_TOOL_NAMES,
@@ -38,6 +50,10 @@ __all__ = [
     "MEMORY_SCOPES",
     "MEMORY_TOOL_NAMES",
     "PolicyGate",
+    "RegisteredPluginTool",
+    "RestrictedPluginTool",
+    "RestrictedPluginToolContext",
+    "RestrictedToolPlugin",
     "RuntimePolicyCompiler",
     "TOOL_DESCRIPTORS",
     "TOOL_DISPATCH_REGISTRY",
@@ -46,6 +62,12 @@ __all__ = [
     "ToolBroker",
     "ToolDescriptor",
     "ToolDescriptorRegistry",
+    "call_restricted_plugin_tool",
     "cancel_terminal_process_groups",
+    "clear_restricted_tool_plugins",
     "dispatch_tool_call",
+    "list_restricted_plugin_tools",
+    "register_restricted_tool_plugin",
+    "restricted_plugin_tool_risk",
+    "unregister_restricted_tool_plugin",
 ]
