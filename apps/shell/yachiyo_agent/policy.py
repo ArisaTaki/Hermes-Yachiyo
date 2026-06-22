@@ -33,6 +33,15 @@ LOW_RISK_DESKTOP_TOOLS = frozenset(
     }
 )
 MEDIUM_RISK_DESKTOP_TOOLS = frozenset({"desktop.hotkey", "desktop.type_text"})
+LOW_RISK_BROWSER_TOOLS = frozenset(
+    {
+        "browser.open_url",
+        "browser.current_page",
+        "browser.extract_text",
+        "browser.screenshot",
+    }
+)
+MEDIUM_RISK_BROWSER_TOOLS = frozenset({"browser.click", "browser.type_text"})
 HIGH_RISK_DESKTOP_ACTIONS = frozenset(
     {
         "delete_or_overwrite_user_file",
@@ -47,6 +56,8 @@ HIGH_RISK_DESKTOP_ACTIONS = frozenset(
 DESKTOP_TOOL_RISK_LEVELS: dict[str, DesktopExecutionRisk] = {
     **{tool: "low" for tool in LOW_RISK_DESKTOP_TOOLS},
     **{tool: "medium" for tool in MEDIUM_RISK_DESKTOP_TOOLS},
+    **{tool: "low" for tool in LOW_RISK_BROWSER_TOOLS},
+    **{tool: "medium" for tool in MEDIUM_RISK_BROWSER_TOOLS},
 }
 
 DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {

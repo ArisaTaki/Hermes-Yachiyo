@@ -379,6 +379,8 @@ def test_desktop_execution_capability_policy_applies_missing_permissions() -> No
 def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_risk_level("screen.capture") == "low"
     assert desktop_tool_risk_level("desktop.type_text") == "medium"
+    assert desktop_tool_risk_level("browser.open_url") == "low"
+    assert desktop_tool_risk_level("browser.click") == "medium"
     assert desktop_tool_risk_level("terminal.run") is None
     assert is_high_risk_desktop_action("raw_shell") is True
     assert is_high_risk_desktop_action("play_music") is False
