@@ -406,6 +406,7 @@ from apps.shell.agent.runtime.workflow_parallel import (
 from apps.shell.agent.runtime.workflow_projections import (
     WorkflowConditionNodeProjection,
     WorkflowContinuationFailureProjection,
+    WorkflowEdgeFollowedCoordinator,
     WorkflowEdgeFollowedProjection,
     WorkflowLoopNodeProjection,
     WorkflowParallelBranchProjection,

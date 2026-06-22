@@ -32,7 +32,7 @@ from apps.shell.agent.runtime.workflow_ports import WorkflowContinuationPortBund
 from apps.shell.agent.runtime.workflow_projections import (
     WorkflowConditionNodeProjection,
     WorkflowContinuationFailureProjection,
-    WorkflowEdgeFollowedProjection,
+    WorkflowEdgeFollowedCoordinator,
     WorkflowLoopNodeProjection,
     WorkflowParallelNodeProjection,
     WorkflowProjectionPortBundle,
@@ -202,6 +202,10 @@ class WorkflowContinuationCoordinator:
             update_run=self._update_run,
             update_run_group=self._update_run_group,
             get_run=self._get_run,
+        )
+        self._edge_followed = WorkflowEdgeFollowedCoordinator(
+            node_kind=self._node_kind,
+            append_run_event=self._append_run_event,
         )
 
     def _workflow_path(self, workflow: dict[str, Any]) -> list[dict[str, Any]]:
@@ -578,25 +582,6 @@ class WorkflowContinuationCoordinator:
                     path,
                 )
 
-            def append_edge_followed(current_node: dict[str, Any], next_node_id: str, branch: str = "") -> None:
-                source_node_id = str(current_node.get("id") or "")
-                if not source_node_id or not next_node_id:
-                    return
-                source_kind = self._node_kind(current_node)
-                source_label = str((current_node.get("data") or {}).get("label") or source_node_id)
-                projection = WorkflowEdgeFollowedProjection.from_node(
-                    current_node,
-                    label=source_label,
-                    kind=source_kind,
-                    target_node_id=next_node_id,
-                    branch=branch,
-                )
-                self._append_run_event(
-                    str(run["run_id"]),
-                    "workflow.edge.followed",
-                    projection.event_payload(),
-                )
-
             if start_node_id:
                 node = nodes_by_id.get(start_node_id)
                 if node is None:
@@ -637,7 +622,7 @@ class WorkflowContinuationCoordinator:
                         projection.event_payload(),
                     )
                     next_id = next_node_id_for(node, context)
-                    append_edge_followed(node, next_id)
+                    self._edge_followed.append(run, node, next_id)
                     node = nodes_by_id.get(next_id) if next_id else None
                     current_node_id = next_id
                     continue
@@ -660,7 +645,7 @@ class WorkflowContinuationCoordinator:
                     context = str(result.get("context") or "")
                     has_agent_upstream = True
                     next_id = next_node_id_for(node, context)
-                    append_edge_followed(node, next_id)
+                    self._edge_followed.append(run, node, next_id)
                     node = nodes_by_id.get(next_id) if next_id else None
                     current_node_id = next_id
                     continue
@@ -675,7 +660,7 @@ class WorkflowContinuationCoordinator:
                         timeline=timeline,
                     )
                     next_id = str(result.get("next_node_id") or "")
-                    append_edge_followed(node, next_id, str(result.get("branch") or ""))
+                    self._edge_followed.append(run, node, next_id, branch=str(result.get("branch") or ""))
                     node = nodes_by_id.get(next_id) if next_id else None
                     current_node_id = next_id
                     continue
@@ -692,7 +677,7 @@ class WorkflowContinuationCoordinator:
                     )
                     loop_iterations[current_node_id] = int(result.get("iteration") or 0)
                     next_id = str(result.get("next_node_id") or "")
-                    append_edge_followed(node, next_id, str(result.get("branch") or ""))
+                    self._edge_followed.append(run, node, next_id, branch=str(result.get("branch") or ""))
                     node = nodes_by_id.get(next_id) if next_id else None
                     current_node_id = next_id
                     continue
@@ -716,7 +701,7 @@ class WorkflowContinuationCoordinator:
                     context = str(result.get("context") or "")
                     has_agent_upstream = True
                     next_id = str(result.get("next_node_id") or "")
-                    append_edge_followed(node, next_id, "join")
+                    self._edge_followed.append(run, node, next_id, branch="join")
                     node = nodes_by_id.get(next_id) if next_id else None
                     current_node_id = next_id
                     continue
@@ -737,7 +722,7 @@ class WorkflowContinuationCoordinator:
                     context = str(result.get("context") or "")
                     has_agent_upstream = True
                     next_id = next_node_id_for(node, context)
-                    append_edge_followed(node, next_id)
+                    self._edge_followed.append(run, node, next_id)
                     node = nodes_by_id.get(next_id) if next_id else None
                     current_node_id = next_id
                     continue
@@ -767,7 +752,7 @@ class WorkflowContinuationCoordinator:
                         timeline=timeline,
                     )
                     next_id = next_node_id_for(node, context)
-                    append_edge_followed(node, next_id)
+                    self._edge_followed.append(run, node, next_id)
                     node = nodes_by_id.get(next_id) if next_id else None
                     current_node_id = next_id
                     continue

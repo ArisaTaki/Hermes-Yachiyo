@@ -6,6 +6,7 @@ from apps.shell import agent_runtime
 from apps.shell.agent.runtime.workflow_projections import (
     WorkflowConditionNodeProjection,
     WorkflowContinuationFailureProjection,
+    WorkflowEdgeFollowedCoordinator,
     WorkflowEdgeFollowedProjection,
     WorkflowLoopNodeProjection,
     WorkflowParallelBranchProjection,
@@ -18,6 +19,7 @@ from apps.shell.agent.runtime.workflow_projections import (
 
 def test_workflow_timeline_projections_remain_exported_from_legacy_module() -> None:
     assert agent_runtime.WorkflowStartNodeProjection is WorkflowStartNodeProjection
+    assert agent_runtime.WorkflowEdgeFollowedCoordinator is WorkflowEdgeFollowedCoordinator
     assert agent_runtime.WorkflowEdgeFollowedProjection is WorkflowEdgeFollowedProjection
     assert agent_runtime.WorkflowConditionNodeProjection is WorkflowConditionNodeProjection
     assert agent_runtime.WorkflowParallelBranchProjection is WorkflowParallelBranchProjection
@@ -51,6 +53,36 @@ def test_workflow_edge_followed_projection_builds_replay_payload() -> None:
         "workflow_edge_branch": "true",
         "status": "completed",
     }
+
+
+def test_workflow_edge_followed_coordinator_appends_only_valid_edges() -> None:
+    events: list[tuple[str, str, dict[str, object]]] = []
+    coordinator = WorkflowEdgeFollowedCoordinator(
+        node_kind=lambda node: str(node["type"]),
+        append_run_event=lambda run_id, event_type, payload: events.append(
+            (run_id, event_type, payload)
+        ),
+    )
+
+    coordinator.append(
+        {"run_id": "workflow_run"},
+        {"id": "condition", "type": "condition", "data": {"label": "Decision"}},
+        "ship",
+        branch="true",
+    )
+    coordinator.append(
+        {"run_id": "workflow_run"},
+        {"id": "condition", "type": "condition"},
+        "",
+    )
+
+    assert len(events) == 1
+    run_id, event_type, payload = events[0]
+    assert run_id == "workflow_run"
+    assert event_type == "workflow.edge.followed"
+    assert payload["workflow_edge_source_node_id"] == "condition"
+    assert payload["workflow_edge_target_node_id"] == "ship"
+    assert payload["workflow_edge_branch"] == "true"
 
 
 def test_workflow_condition_projection_accepts_selection_payload() -> None:

@@ -119,6 +119,45 @@ class WorkflowEdgeFollowedProjection:
         }
 
 
+class WorkflowEdgeFollowedCoordinator:
+    """Appends replayable Workflow edge-followed events."""
+
+    def __init__(
+        self,
+        *,
+        node_kind: Any,
+        append_run_event: Any,
+    ) -> None:
+        self._node_kind = node_kind
+        self._append_run_event = append_run_event
+
+    def append(
+        self,
+        run: dict[str, Any],
+        current_node: dict[str, Any],
+        next_node_id: str,
+        *,
+        branch: str = "",
+    ) -> None:
+        source_node_id = str(current_node.get("id") or "")
+        if not source_node_id or not next_node_id:
+            return
+        source_kind = self._node_kind(current_node)
+        source_label = str((current_node.get("data") or {}).get("label") or source_node_id)
+        projection = WorkflowEdgeFollowedProjection.from_node(
+            current_node,
+            label=source_label,
+            kind=source_kind,
+            target_node_id=next_node_id,
+            branch=branch,
+        )
+        self._append_run_event(
+            str(run["run_id"]),
+            "workflow.edge.followed",
+            projection.event_payload(),
+        )
+
+
 @dataclass(frozen=True)
 class WorkflowConditionNodeProjection:
     """Replay payload for a completed Workflow condition node."""
