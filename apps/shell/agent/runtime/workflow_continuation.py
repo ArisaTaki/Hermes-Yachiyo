@@ -45,6 +45,7 @@ from apps.shell.agent.runtime.workflow_state import (
     parallel_completed_artifact_exists,
     parallel_node_resume_context,
     workflow_context_chars,
+    workflow_initial_cursor,
     workflow_path_index,
     workflow_steps_used,
 )
@@ -574,8 +575,6 @@ class WorkflowContinuationCoordinator:
         try:
             workflow_goal = str(run.get("user_goal") or context)
             path = self._workflow_path(workflow)
-            if start_index < 0 or start_index > len(path):
-                raise AgentRuntimeError("Workflow Run 待审批恢复位置无效")
             nodes_by_id = self._workflow_nodes_by_id(workflow, path)
 
             def next_node_id_for(current_node: dict[str, Any], current_context: str) -> str:
@@ -586,20 +585,15 @@ class WorkflowContinuationCoordinator:
                     path,
                 )
 
-            if start_node_id:
-                node = nodes_by_id.get(start_node_id)
-                if node is None:
-                    raise AgentRuntimeError("Workflow Run 待审批恢复节点不存在")
-                current_node_id = start_node_id
-                has_agent_upstream = True
-            elif start_index < len(path):
-                node = path[start_index]
-                current_node_id = str(node.get("id") or "")
-                has_agent_upstream = start_index > 0
-            else:
-                node = None
-                current_node_id = ""
-                has_agent_upstream = start_index > 0
+            cursor = workflow_initial_cursor(
+                path,
+                nodes_by_id,
+                start_index=start_index,
+                start_node_id=start_node_id,
+            )
+            node = cursor.node
+            current_node_id = cursor.current_node_id
+            has_agent_upstream = cursor.has_agent_upstream
             loop_iterations = self._workflow_loop_iterations_from_timeline(timeline)
             max_step_count = self._workflow_loop_step_limit(workflow, nodes_by_id)
             budget = self._workflow_budget(run, timeline)

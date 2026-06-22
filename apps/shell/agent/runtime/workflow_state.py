@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from apps.shell.agent.runtime.budget import json_chars
+from apps.shell.agent.runtime.errors import AgentRuntimeError
 from apps.shell.agent.runtime.events import redact_json_value
 
 _STEP_COUNTER_EXCLUDED_EVENTS = {
@@ -32,6 +34,47 @@ def workflow_path_index(path: list[dict[str, Any]], node_id: str) -> int:
         if str(node.get("id") or "") == node_id:
             return index
     return len(path)
+
+
+@dataclass(frozen=True)
+class WorkflowContinuationCursor:
+    """Initial cursor for continuing a Workflow run."""
+
+    node: dict[str, Any] | None
+    current_node_id: str
+    has_agent_upstream: bool
+
+
+def workflow_initial_cursor(
+    path: list[dict[str, Any]],
+    nodes_by_id: dict[str, dict[str, Any]],
+    *,
+    start_index: int,
+    start_node_id: str = "",
+) -> WorkflowContinuationCursor:
+    if start_index < 0 or start_index > len(path):
+        raise AgentRuntimeError("Workflow Run 待审批恢复位置无效")
+    if start_node_id:
+        node = nodes_by_id.get(start_node_id)
+        if node is None:
+            raise AgentRuntimeError("Workflow Run 待审批恢复节点不存在")
+        return WorkflowContinuationCursor(
+            node=node,
+            current_node_id=start_node_id,
+            has_agent_upstream=True,
+        )
+    if start_index < len(path):
+        node = path[start_index]
+        return WorkflowContinuationCursor(
+            node=node,
+            current_node_id=str(node.get("id") or ""),
+            has_agent_upstream=start_index > 0,
+        )
+    return WorkflowContinuationCursor(
+        node=None,
+        current_node_id="",
+        has_agent_upstream=start_index > 0,
+    )
 
 
 def parallel_node_resume_context(
@@ -98,7 +141,9 @@ __all__ = [
     "parallel_completed_agent_context",
     "parallel_completed_artifact_exists",
     "parallel_node_resume_context",
+    "WorkflowContinuationCursor",
     "workflow_context_chars",
+    "workflow_initial_cursor",
     "workflow_path_index",
     "workflow_steps_used",
 ]
