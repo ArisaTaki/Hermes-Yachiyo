@@ -13,6 +13,7 @@ from apps.shell.agent.tools.policy import (
     TOOL_DESCRIPTORS,
     TOOL_FUNCTION_NAMES,
 )
+from apps.shell.agent.tools.plugins import list_restricted_plugin_tools, restricted_plugin_tool_risk
 
 from .contracts import (
     DesktopExecutionCapabilitySnapshot,
@@ -116,6 +117,7 @@ def _catalog_item_from_descriptor(
         ),
         fallback_notes=_fallback_notes_for_tool(tool_name),
         diagnostic_route=_diagnostic_route_for_tool(capability_id),
+        source=_source_for_tool(tool_name),
     )
 
 
@@ -198,12 +200,17 @@ def _capability_id_for_tool(tool_name: str) -> str | None:
         return "skill"
     if tool_name.startswith("artifact."):
         return "artifact"
+    if tool_name.startswith("plugin."):
+        return "plugin_tool"
     return None
 
 
 def _risk_level_for_tool(tool_name: str) -> str | None:
     if tool_name in HIGH_RISK_AGENT_TOOLS:
         return "high"
+    plugin_risk = restricted_plugin_tool_risk(tool_name)
+    if plugin_risk is not None:
+        return plugin_risk
     desktop_risk = desktop_tool_risk_level(tool_name)
     if desktop_risk is not None:
         return desktop_risk
@@ -280,6 +287,11 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         "browser.screenshot",
     }:
         notes.append("Requires a reachable Chrome CDP endpoint.")
+    plugin_tool = _registered_plugin_tool(tool_name)
+    if plugin_tool is not None:
+        notes.append(f"Restricted tool-only plugin: {plugin_tool.plugin_id}.")
+        if plugin_tool.skill_docs:
+            notes.append(f"Plugin skill docs: {_truncate_note(plugin_tool.skill_docs)}")
     return notes
 
 
@@ -291,6 +303,28 @@ def _diagnostic_route_for_tool(capability_id: str | None) -> str | None:
 
 def _is_desktop_or_browser_tool(tool_name: str) -> bool:
     return tool_name in DESKTOP_CAPABILITY_TOOLS["desktop_execution"]
+
+
+def _source_for_tool(tool_name: str) -> str:
+    plugin_tool = _registered_plugin_tool(tool_name)
+    if plugin_tool is not None:
+        return f"plugin:{plugin_tool.plugin_id}"
+    return "runtime"
+
+
+def _registered_plugin_tool(tool_name: str) -> Any | None:
+    clean_tool_name = str(tool_name or "").strip()
+    for plugin_tool in list_restricted_plugin_tools():
+        if plugin_tool.name == clean_tool_name:
+            return plugin_tool
+    return None
+
+
+def _truncate_note(value: str, *, limit: int = 240) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) <= limit:
+        return text
+    return f"{text[: limit - 1]}..."
 
 
 def _optional_string(value: Any) -> str | None:

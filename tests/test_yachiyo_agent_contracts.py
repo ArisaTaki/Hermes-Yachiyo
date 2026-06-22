@@ -7,6 +7,13 @@ import json
 import pytest
 from pydantic import ValidationError
 
+from apps.shell.agent.tools.plugins import (
+    RestrictedPluginTool,
+    RestrictedToolPlugin,
+    clear_restricted_tool_plugins,
+    register_restricted_tool_plugin,
+    unregister_restricted_tool_plugin,
+)
 from apps.shell.yachiyo_agent import (
     AgentDefinitionSnapshot,
     AgentDeskFileEventRequest,
@@ -456,6 +463,49 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     assert any("Chrome CDP" in note for note in browser.fallback_notes)
     assert terminal.risk_level == "high"
     assert terminal.approval_required is True
+
+
+def test_runtime_tool_catalog_surfaces_restricted_plugin_metadata_and_uninstall() -> None:
+    clear_restricted_tool_plugins()
+
+    def echo_tool(payload, context):
+        return {"ok": True, "text": payload["text"], "plugin_id": context.plugin_id}
+
+    try:
+        register_restricted_tool_plugin(
+            RestrictedToolPlugin(
+                plugin_id="notes",
+                tools=(
+                    RestrictedPluginTool(
+                        tool_id="echo",
+                        description="Echo text through a restricted test plugin.",
+                        properties={"text": {"type": "string"}},
+                        required=("text",),
+                        risk_level="medium",
+                        execute=echo_tool,
+                    ),
+                ),
+                skill_docs="Use this plugin when an Agent Desk note needs a short echo.",
+            )
+        )
+        tools = {tool.tool_name: tool for tool in runtime_tool_catalog_snapshot().tools}
+        plugin_tool = tools["plugin.notes.echo"]
+
+        assert plugin_tool.capability_id == "plugin_tool"
+        assert plugin_tool.risk_level == "medium"
+        assert plugin_tool.approval_required is False
+        assert plugin_tool.source == "plugin:notes"
+        assert plugin_tool.input_schema["required"] == ["text"]
+        assert "Restricted tool-only plugin: notes." in plugin_tool.fallback_notes
+        assert any("Agent Desk note" in note for note in plugin_tool.fallback_notes)
+
+        unregister_restricted_tool_plugin("notes")
+        tools_after_unregister = {
+            tool.tool_name for tool in runtime_tool_catalog_snapshot().tools
+        }
+        assert "plugin.notes.echo" not in tools_after_unregister
+    finally:
+        clear_restricted_tool_plugins()
 
 
 def test_agent_desk_snapshot_json_shape_is_stable() -> None:
