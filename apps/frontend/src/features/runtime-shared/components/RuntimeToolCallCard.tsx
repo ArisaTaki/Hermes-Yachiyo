@@ -4,6 +4,7 @@ import {
   runtimeToolDisplayLabelOrName,
   runtimeToolFamily,
 } from '../approval';
+import { runtimeToolRecoveryHintsFromRecords } from '../toolRecoveryHints';
 import { ExpandableRuntimeContent } from './ExpandableRuntimeContent';
 
 export type RuntimeToolCallCardSnapshot = {
@@ -55,6 +56,7 @@ export function RuntimeToolCallCard({
   const output = approvalPreviewValue(outputPreview, ['summary', 'result', 'output', 'stdout', 'path']);
   const inputPreviewContent = formatToolPreview(inputPreview);
   const outputPreviewContent = formatToolPreview(outputPreview);
+  const recoveryHints = runtimeToolRecoveryHintsFromRecords([outputPreview, inputPreview]);
   const metadata = toolCallMetadataItems(toolCall);
   return (
     <div
@@ -90,6 +92,13 @@ export function RuntimeToolCallCard({
             </div>
           ))}
         </dl>
+      ) : null}
+      {recoveryHints.length ? (
+        <ul className="runtime-tool-call-recovery-hints" data-testid={`${testId}-recovery-hints`}>
+          {recoveryHints.map((hint) => (
+            <li key={hint}>{hint}</li>
+          ))}
+        </ul>
       ) : null}
       {inputPreviewContent || outputPreviewContent ? (
         <div className="runtime-tool-call-previews">

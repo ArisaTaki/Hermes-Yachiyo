@@ -1,5 +1,6 @@
 import { UiIcon } from '../../../components/UiIcon';
 import { RuntimeTimelineSummary } from '../../runtime-shared/components/RuntimeTimelineSummary';
+import { runtimeToolRecoveryHintsFromRecords } from '../../runtime-shared/toolRecoveryHints';
 import { useYachiyoTaskEventReplay } from '../hooks/useYachiyoTaskEventReplay';
 import {
   yachiyoTaskApprovalStudioTarget,
@@ -278,20 +279,7 @@ function recoveryHintsFromEvent(event: NonNullable<AgentTaskSnapshot['recent_eve
   const payload = objectValue(event.payload);
   const result = objectValue(payload.result);
   const sources = [result, payload].filter(Boolean);
-  return sources.flatMap((source) => recoveryHintsFromSource(source));
-}
-
-function recoveryHintsFromSource(source: Record<string, unknown>): string[] {
-  const error = String(source.error || '').trim();
-  if (error !== 'browser_click_fallback_coordinates_required') return [];
-  const data = objectValue(source.data);
-  const fields = stringList(data.required_fallback_fields);
-  const tools = stringList(data.recommended_tools);
-  const fieldText = fields.length ? fields.join('/') : 'fallback_x/fallback_y';
-  const toolText = tools.length ? tools.join(' -> ') : 'screen.capture -> desktop.click';
-  return [
-    `Chrome CDP 不可用时不能直接用 CSS selector 点击；请先用 ${toolText} 观察目标位置，再提供 ${fieldText} 坐标。`,
-  ];
+  return runtimeToolRecoveryHintsFromRecords(sources);
 }
 
 function objectValue(value: unknown): Record<string, unknown> {

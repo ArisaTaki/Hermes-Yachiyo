@@ -1431,9 +1431,7 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "source.permission_targets",
             "source.missing_permissions",
             "recoveryHintsFromEvent",
-            "browser_click_fallback_coordinates_required",
-            "required_fallback_fields",
-            "recommended_tools",
+            "runtimeToolRecoveryHintsFromRecords",
             "command: 'native doctor'",
             "return_to: 'chat'",
         ],
@@ -1470,6 +1468,7 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             ".hy-content .open-chat-shell .yachiyo-agent-task-permission-recovery",
             ".hy-content .open-chat-shell .yachiyo-agent-task-permission-recovery .yachiyo-agent-task-recovery-hint",
             ".hy-content .open-chat-shell .yachiyo-agent-task-permission-recovery a",
+            ".runtime-tool-call-recovery-hints",
         ],
     )
     _assert_contains(
@@ -3170,6 +3169,7 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
         "apps/frontend/src/features/runtime-shared/components/RuntimeToolCallCard.tsx",
         [
             "export function RuntimeToolCallCard",
+            "runtimeToolRecoveryHintsFromRecords",
             "data-tool-call-id={toolCall.tool_call_id}",
             "data-tool-family={runtimeToolFamily(toolCall.tool_name)}",
             "data-tool-status={toolCall.status}",
@@ -3190,12 +3190,26 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
             "approvalPreviewRecord",
             "ExpandableRuntimeContent",
             "runtime-tool-call-metadata",
+            "runtime-tool-call-recovery-hints",
+            "data-testid={`${testId}-recovery-hints`}",
             "runtime-tool-call-previews",
             "toolCallMetadataItems",
             "toolCall.workflow_node_label || toolCall.workflow_node_id || toolCall.workflow_run_id || toolCall.workflow_id",
             "label=\"展开输入预览\"",
             "label=\"展开输出预览\"",
             "formatToolPreview",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/runtime-shared/toolRecoveryHints.ts",
+        [
+            "export function runtimeToolRecoveryHintsFromRecords",
+            "export function runtimeToolRecoveryHintsFromRecord",
+            "browser_click_fallback_coordinates_required",
+            "required_fallback_fields",
+            "recommended_tools",
+            "fallback_x/fallback_y",
+            "screen.capture -> desktop.click",
         ],
     )
     _assert_contains(

@@ -18435,6 +18435,26 @@ button.activity-item {
   font-family: var(--hy-font-mono);
 }
 
+.runtime-tool-call-recovery-hints {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.runtime-tool-call-recovery-hints li {
+  padding: 6px 7px;
+  border: 1px solid oklch(82% 0.135 76 / 0.24);
+  border-radius: 7px;
+  background: oklch(82% 0.135 76 / 0.075);
+  color: var(--hy-muted);
+  font-size: 11px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
 .runtime-tool-call-previews {
   display: grid;
   grid-column: 1 / -1;
