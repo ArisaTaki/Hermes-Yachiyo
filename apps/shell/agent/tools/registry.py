@@ -154,6 +154,18 @@ def _desktop_type_text(
     return broker.desktop_type_text(str(payload.get("text") or ""))
 
 
+def _desktop_click(
+    broker: Any,
+    payload: dict[str, Any],
+    _approved: bool,
+) -> dict[str, Any]:
+    return broker.desktop_click(
+        payload.get("x"),
+        payload.get("y"),
+        click_count=payload.get("click_count", 1),
+    )
+
+
 def _browser_open_url(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
     return broker.browser_open_url(str(payload.get("url") or ""))
 
@@ -217,6 +229,7 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "media.apple_music_play": _media_apple_music_play,
     "desktop.hotkey": _desktop_hotkey,
     "desktop.type_text": _desktop_type_text,
+    "desktop.click": _desktop_click,
     "browser.open_url": _browser_open_url,
     "browser.current_page": _browser_current_page,
     "browser.click": _browser_click,

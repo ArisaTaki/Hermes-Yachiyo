@@ -271,6 +271,10 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         "desktop.type_text": [
             "Requires Accessibility permission and is recorded in the Run Timeline.",
         ],
+        "desktop.click": [
+            "Requires Accessibility permission, should be used after observing the screen, "
+            "and is recorded in the Run Timeline.",
+        ],
         "terminal.run": [
             "Always requires approval before command execution.",
         ],

@@ -187,7 +187,7 @@ class RuntimeCustomApiAgentLoop:
         desktop_tool_guidance = (
             "For desktop requests, prefer structured desktop tools such as screen.capture, "
             "desktop.active_window, app.open/app.focus, media.apple_music_play, "
-            "desktop.hotkey, and desktop.type_text when they are allowed. "
+            "desktop.click, desktop.hotkey, and desktop.type_text when they are allowed. "
             "For explicit daily commands, map 'play <song>' or '播放<歌曲>' to "
             "media.apple_music_play, screen capture requests to screen.capture, and current "
             "or foreground window questions to desktop.active_window before answering. "

@@ -404,6 +404,12 @@ class ToolBroker:
             lambda: desktop.desktop_type_text(text),
         )
 
+    def desktop_click(self, x: Any, y: Any, *, click_count: Any = 1) -> dict[str, Any]:
+        return self._with_foreground_lock(
+            "desktop.click",
+            lambda: desktop.desktop_click(x, y, click_count=click_count),
+        )
+
     def browser_open_url(self, url: str) -> dict[str, Any]:
         return browser.open_url(url)
 

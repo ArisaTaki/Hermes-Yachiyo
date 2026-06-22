@@ -63,7 +63,7 @@ function policyTools(agent: AgentSpec): Set<string> {
 export const screenContextTools = ['screen.capture', 'desktop.active_window'];
 export const appControlTools = ['app.open', 'app.focus'];
 export const mediaControlTools = ['media.apple_music_play'];
-export const foregroundInputTools = ['desktop.hotkey', 'desktop.type_text'];
+export const foregroundInputTools = ['desktop.hotkey', 'desktop.type_text', 'desktop.click'];
 export const browserControlTools = [
   'browser.open_url',
   'browser.current_page',

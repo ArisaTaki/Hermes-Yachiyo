@@ -33,7 +33,9 @@ LOW_RISK_DESKTOP_TOOLS = frozenset(
         "media.apple_music_play",
     }
 )
-MEDIUM_RISK_DESKTOP_TOOLS = frozenset({"desktop.hotkey", "desktop.type_text"})
+MEDIUM_RISK_DESKTOP_TOOLS = frozenset(
+    {"desktop.hotkey", "desktop.type_text", "desktop.click"}
+)
 LOW_RISK_BROWSER_TOOLS = frozenset(
     {
         "browser.open_url",
@@ -110,7 +112,7 @@ DESKTOP_ACTION_TOOL_HINTS: dict[str, tuple[str, ...]] = {
     "open_app": ("app.open",),
     "focus_app": ("app.focus",),
     "play_or_pause_media": ("media.apple_music_play",),
-    "foreground_click": ("browser.click",),
+    "foreground_click": ("desktop.click", "browser.click"),
     "foreground_type_text": ("desktop.type_text", "browser.type_text"),
     "foreground_hotkey": ("desktop.hotkey",),
     "delete_or_overwrite_user_file": ("workspace.write_patch",),
@@ -182,6 +184,7 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "media.apple_music_play",
         "desktop.hotkey",
         "desktop.type_text",
+        "desktop.click",
         "browser.open_url",
         "browser.current_page",
         "browser.click",
@@ -193,7 +196,7 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
     "active_window": ("desktop.active_window",),
     "app_control": ("app.open", "app.focus"),
     "media_control": ("media.apple_music_play",),
-    "foreground_input": ("desktop.hotkey", "desktop.type_text"),
+    "foreground_input": ("desktop.hotkey", "desktop.type_text", "desktop.click"),
     "browser_control": (
         "browser.open_url",
         "browser.current_page",

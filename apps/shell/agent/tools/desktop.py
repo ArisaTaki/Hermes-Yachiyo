@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import platform
 import subprocess
 from pathlib import Path
@@ -219,6 +220,42 @@ def desktop_type_text(text: str) -> dict[str, Any]:
     }
 
 
+def desktop_click(x: Any, y: Any, *, click_count: Any = 1) -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("desktop.click")
+    clean_x = _clean_coordinate(x, "x")
+    clean_y = _clean_coordinate(y, "y")
+    clean_count = _clean_click_count(click_count)
+    result = _run_osascript(
+        """
+        on run argv
+            set xCoord to item 1 of argv as integer
+            set yCoord to item 2 of argv as integer
+            set clickCount to item 3 of argv as integer
+            repeat clickCount times
+                tell application "System Events" to click at {xCoord, yCoord}
+                delay 0.05
+            end repeat
+            return "clicked"
+        end run
+        """,
+        [str(clean_x), str(clean_y), str(clean_count)],
+    )
+    if not result["ok"]:
+        return _with_permission_metadata(
+            "desktop.click",
+            {**result, "action": "desktop.click", "summary": "desktop.click failed"},
+        )
+    return {
+        "ok": True,
+        "action": "desktop.click",
+        "summary": f"Clicked foreground desktop at ({clean_x}, {clean_y})",
+        "data": {"x": clean_x, "y": clean_y, "click_count": clean_count},
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
 def desktop_hotkey(key: str, modifiers: list[str] | None = None) -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("desktop.hotkey")
@@ -334,6 +371,32 @@ def _clean_required(value: str, field: str) -> str:
     return clean
 
 
+def _clean_coordinate(value: Any, field: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{field} must be a non-negative screen coordinate")
+    try:
+        coordinate = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field} must be a non-negative screen coordinate") from exc
+    if not math.isfinite(coordinate) or coordinate < 0 or coordinate > 100000:
+        raise ValueError(f"{field} must be a non-negative screen coordinate")
+    return int(round(coordinate))
+
+
+def _clean_click_count(value: Any) -> int:
+    if value in (None, ""):
+        return 1
+    if isinstance(value, bool):
+        raise ValueError("click_count must be an integer from 1 to 3")
+    try:
+        count = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("click_count must be an integer from 1 to 3") from exc
+    if count < 1 or count > 3:
+        raise ValueError("click_count must be an integer from 1 to 3")
+    return count
+
+
 def _clean_modifiers(modifiers: list[str]) -> list[str]:
     aliases = {
         "cmd": "command",
@@ -393,6 +456,7 @@ def _missing_permissions_for_action(action: str) -> list[str]:
         "desktop.active_window": ["automation_or_accessibility"],
         "app.focus": ["automation"],
         "media.apple_music_play": ["music_app", "automation"],
+        "desktop.click": ["accessibility"],
         "desktop.type_text": ["accessibility"],
         "desktop.hotkey": ["accessibility"],
         "osascript": ["automation"],
@@ -405,6 +469,7 @@ def _permission_targets_for_action(action: str) -> list[str]:
         "desktop.active_window": ["automation", "accessibility"],
         "app.focus": ["automation"],
         "media.apple_music_play": ["music_app", "automation"],
+        "desktop.click": ["accessibility"],
         "desktop.type_text": ["accessibility"],
         "desktop.hotkey": ["accessibility"],
         "osascript": ["automation"],

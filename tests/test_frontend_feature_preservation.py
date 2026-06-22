@@ -2699,6 +2699,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "screen.capture",
             "media.apple_music_play",
             "desktop.type_text",
+            "desktop.click",
         ],
     )
     _assert_contains(

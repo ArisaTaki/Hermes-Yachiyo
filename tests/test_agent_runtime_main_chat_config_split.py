@@ -49,6 +49,7 @@ def test_main_chat_config_builder_projects_daily_entrypoint_runtime(tmp_path) ->
     assert "media.apple_music_play" in config["instructions"]
     assert "screen.capture" in config["instructions"]
     assert "desktop.active_window" in config["instructions"]
+    assert "desktop.click" in config["instructions"]
     assert "低/中风险桌面动作默认直接执行" in config["instructions"]
     assert "权限缺失" in config["instructions"]
     assert "approval/policy gate" in config["instructions"]

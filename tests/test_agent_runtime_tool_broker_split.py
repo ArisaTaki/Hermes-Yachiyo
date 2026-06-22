@@ -172,3 +172,39 @@ def test_tool_broker_foreground_lock_releases_after_action(tmp_path: Path, monke
         assert foreground_lock.owner == "workflow-run-1:node-b"
     finally:
         next_lease.release()
+
+
+def test_tool_broker_desktop_click_uses_foreground_lock(tmp_path: Path, monkeypatch) -> None:
+    foreground_lock = ForegroundActionLock()
+    broker = ToolBroker(
+        {"default_workdir": str(tmp_path), "readable_scopes": ["."], "writable_scopes": []},
+        tmp_path / "artifacts",
+        foreground_lock=foreground_lock,
+        foreground_lock_owner="group-run-1:run-1",
+    )
+    monkeypatch.setattr(
+        broker_module.desktop,
+        "desktop_click",
+        lambda x, y, *, click_count=1: {
+            "ok": True,
+            "data": {"x": x, "y": y, "click_count": click_count},
+        },
+    )
+
+    result = broker.call("desktop.click", {"x": 12, "y": 34, "click_count": 2})
+    next_lease = foreground_lock.acquire(
+        holder="group-run-1:run-2",
+        tool_name="desktop.type_text",
+    )
+    try:
+        assert result == {
+            "ok": True,
+            "data": {"x": 12, "y": 34, "click_count": 2},
+            "foreground_lock": {
+                "holder": "group-run-1:run-1",
+                "tool": "desktop.click",
+            },
+        }
+        assert next_lease.acquired is True
+    finally:
+        next_lease.release()

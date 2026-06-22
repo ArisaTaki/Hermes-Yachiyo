@@ -272,6 +272,7 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
         "media_apple_music_play",
         "desktop_hotkey",
         "desktop_type_text",
+        "desktop_click",
         "browser_open_url",
         "browser_current_page",
         "browser_click",
@@ -288,11 +289,31 @@ def test_compile_tool_policy_accepts_desktop_tools_without_marking_them_high_ris
 
     policy = compiler.compile_tool_policy(
         "custom",
-        {"allowed_tools": ["screen.capture", "desktop.type_text", "terminal.run"]},
+        {"allowed_tools": ["screen.capture", "desktop.click", "desktop.type_text", "terminal.run"]},
     )
 
-    assert policy["allowed_tools"] == ["screen.capture", "desktop.type_text", "terminal.run"]
+    assert policy["allowed_tools"] == [
+        "screen.capture",
+        "desktop.click",
+        "desktop.type_text",
+        "terminal.run",
+    ]
     assert policy["approval_required"] == {"terminal.run": True}
+
+
+def test_desktop_click_schema_accepts_coordinates_and_rejects_bad_payload() -> None:
+    ToolDescriptorRegistry.validate_payload(
+        "desktop.click",
+        {"x": 12, "y": 34.5, "click_count": 2},
+    )
+
+    with pytest.raises(AgentRuntimeError, match="desktop.click 参数 x 必须是非负坐标数字"):
+        ToolDescriptorRegistry.validate_payload("desktop.click", {"x": -1, "y": 34})
+    with pytest.raises(AgentRuntimeError, match="desktop.click 参数 click_count 必须是 1-3"):
+        ToolDescriptorRegistry.validate_payload(
+            "desktop.click",
+            {"x": 12, "y": 34, "click_count": 4},
+        )
 
 
 def test_compile_tool_policy_accepts_browser_tools_without_marking_them_high_risk() -> None:
@@ -322,6 +343,12 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         lambda key, *, modifiers=None: calls.append(("hotkey", key, modifiers))
         or {"ok": True},
     )
+    monkeypatch.setattr(
+        broker,
+        "desktop_click",
+        lambda x, y, *, click_count=1: calls.append(("click", x, y, click_count))
+        or {"ok": True},
+    )
 
     assert dispatch_tool_call(
         broker,
@@ -333,7 +360,16 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         "desktop.hotkey",
         {"key": "l", "modifiers": ["command"]},
     ) == {"ok": True}
-    assert calls == [("music", "超时空辉夜姬"), ("hotkey", "l", ["command"])]
+    assert dispatch_tool_call(
+        broker,
+        "desktop.click",
+        {"x": 12, "y": 34, "click_count": 2},
+    ) == {"ok": True}
+    assert calls == [
+        ("music", "超时空辉夜姬"),
+        ("hotkey", "l", ["command"]),
+        ("click", 12, 34, 2),
+    ]
 
 
 def test_tool_dispatch_registry_routes_browser_tools(tmp_path, monkeypatch) -> None:
@@ -455,6 +491,51 @@ def test_desktop_type_text_permission_failure_returns_accessibility_target(monke
 
     assert result["ok"] is False
     assert result["action"] == "desktop.type_text"
+    assert result["permission_error"] is True
+    assert result["missing_permissions"] == ["accessibility"]
+    assert result["permission_targets"] == ["accessibility"]
+
+
+def test_desktop_click_uses_system_events_with_coordinates(monkeypatch) -> None:
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="clicked\n", stderr="")
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.desktop_click(12.2, "34.6", click_count=2)
+
+    assert result == {
+        "ok": True,
+        "action": "desktop.click",
+        "summary": "Clicked foreground desktop at (12, 35)",
+        "data": {"x": 12, "y": 35, "click_count": 2},
+        "permission_error": False,
+        "fallback_used": False,
+    }
+    assert calls[0][0][0:2] == ["osascript", "-e"]
+    assert calls[0][0][-3:] == ["12", "35", "2"]
+
+
+def test_desktop_click_permission_failure_returns_accessibility_target(monkeypatch) -> None:
+    def fake_run(command, **kwargs):
+        return subprocess.CompletedProcess(
+            command,
+            1,
+            stdout="",
+            stderr="System Events got an error: not allowed assistive access.",
+        )
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.desktop_click(12, 34)
+
+    assert result["ok"] is False
+    assert result["action"] == "desktop.click"
     assert result["permission_error"] is True
     assert result["missing_permissions"] == ["accessibility"]
     assert result["permission_targets"] == ["accessibility"]

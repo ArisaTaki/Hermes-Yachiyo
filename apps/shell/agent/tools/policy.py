@@ -33,6 +33,7 @@ TOOL_FUNCTION_NAMES = {
     "media.apple_music_play": "media_apple_music_play",
     "desktop.hotkey": "desktop_hotkey",
     "desktop.type_text": "desktop_type_text",
+    "desktop.click": "desktop_click",
     "browser.open_url": "browser_open_url",
     "browser.current_page": "browser_current_page",
     "browser.click": "browser_click",
@@ -52,7 +53,7 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "app.focus",
     "media.apple_music_play",
 )
-MEDIUM_RISK_DESKTOP_TOOL_NAMES = ("desktop.hotkey", "desktop.type_text")
+MEDIUM_RISK_DESKTOP_TOOL_NAMES = ("desktop.hotkey", "desktop.type_text", "desktop.click")
 LOW_RISK_BROWSER_TOOL_NAMES = (
     "browser.open_url",
     "browser.current_page",
@@ -112,6 +113,10 @@ class ToolDescriptor:
         if extra_fields:
             raise AgentRuntimeError(f"{self.name} 参数包含未声明字段：{', '.join(extra_fields)}")
         for key in self.required:
+            if self.name == "desktop.click" and key in {"x", "y"}:
+                if payload.get(key) in (None, ""):
+                    raise AgentRuntimeError(f"{self.name} 参数 {key} 必须是非负坐标数字")
+                continue
             if not isinstance(payload.get(key), str) or not str(payload.get(key) or "").strip():
                 raise AgentRuntimeError(f"{self.name} 参数 {key} 必须是非空字符串")
         if self.name == "workspace.write_patch":
@@ -210,6 +215,25 @@ class ToolDescriptor:
             raise AgentRuntimeError("media.apple_music_play 参数 query 必须是非空字符串")
         if self.name == "desktop.type_text" and not str(payload.get("text") or "").strip():
             raise AgentRuntimeError("desktop.type_text 参数 text 必须是非空字符串")
+        if self.name == "desktop.click":
+            for key in ("x", "y"):
+                value = payload.get(key)
+                if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+                    raise AgentRuntimeError(f"desktop.click 参数 {key} 必须是非负坐标数字")
+                try:
+                    coordinate = float(value)
+                except (TypeError, ValueError) as exc:
+                    raise AgentRuntimeError(
+                        f"desktop.click 参数 {key} 必须是非负坐标数字"
+                    ) from exc
+                if coordinate < 0 or coordinate > 100000:
+                    raise AgentRuntimeError(f"desktop.click 参数 {key} 必须是非负坐标数字")
+            click_count = payload.get("click_count", 1)
+            if click_count not in (None, ""):
+                if isinstance(click_count, bool) or not isinstance(click_count, int):
+                    raise AgentRuntimeError("desktop.click 参数 click_count 必须是 1-3 的整数")
+                if click_count < 1 or click_count > 3:
+                    raise AgentRuntimeError("desktop.click 参数 click_count 必须是 1-3 的整数")
         if self.name == "desktop.hotkey":
             if not str(payload.get("key") or "").strip():
                 raise AgentRuntimeError("desktop.hotkey 参数 key 必须是非空字符串")
@@ -517,6 +541,32 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
         description="Type text into the current foreground app.",
         properties={"text": {"type": "string", "description": "Text to type."}},
         required=("text",),
+    ),
+    "desktop.click": ToolDescriptor(
+        name="desktop.click",
+        description=(
+            "Click a screen coordinate in the current foreground desktop session. "
+            "Use after observing the screen; this is a medium-risk foreground input action."
+        ),
+        properties={
+            "x": {
+                "type": "number",
+                "minimum": 0,
+                "description": "Screen x coordinate in pixels.",
+            },
+            "y": {
+                "type": "number",
+                "minimum": 0,
+                "description": "Screen y coordinate in pixels.",
+            },
+            "click_count": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 3,
+                "description": "Optional click count. Defaults to 1.",
+            },
+        },
+        required=("x", "y"),
     ),
     "browser.open_url": ToolDescriptor(
         name="browser.open_url",
