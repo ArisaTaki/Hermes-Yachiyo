@@ -63,14 +63,33 @@ export function useAgentRunReadiness({
     if (draft.allow_terminal) {
       notices.push({ tone: 'warn', text: '`terminal.run` 已启用；每次运行命令都会先进入审批。' });
     }
-    if (!draft.allow_workspace_read && !draft.allow_workspace_write && !draft.allow_terminal && !draft.allow_artifacts) {
-      notices.push({ tone: 'info', text: '当前 Agent 只会调用模型，不会获得工作区、命令或 artifact 工具。' });
+    if (draft.allow_foreground_input) {
+      notices.push({ tone: 'info', text: '前台输入会作用在当前桌面焦点窗口；适合明确的点击后输入或快捷键任务。' });
+    }
+    if (draft.allow_browser_control) {
+      notices.push({ tone: 'info', text: 'Browser/CDP 工具将在下一批执行能力中启用。' });
+    }
+    const hasTools = draft.allow_workspace_read
+      || draft.allow_workspace_write
+      || draft.allow_terminal
+      || draft.allow_artifacts
+      || draft.allow_screen_context
+      || draft.allow_app_control
+      || draft.allow_media_control
+      || draft.allow_foreground_input;
+    if (!hasTools) {
+      notices.push({ tone: 'info', text: '当前 Agent 只会调用模型，不会获得工作区、桌面执行、命令或 artifact 工具。' });
     }
     return notices;
   }, [
     chatModelProfiles,
     disabledMountedSkills.length,
+    draft.allow_app_control,
     draft.allow_artifacts,
+    draft.allow_browser_control,
+    draft.allow_foreground_input,
+    draft.allow_media_control,
+    draft.allow_screen_context,
     draft.allow_terminal,
     draft.allow_workspace_read,
     draft.allow_workspace_write,

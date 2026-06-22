@@ -284,6 +284,11 @@ export type AgentDraft = {
   allow_workspace_write: boolean;
   allow_terminal: boolean;
   allow_artifacts: boolean;
+  allow_screen_context: boolean;
+  allow_app_control: boolean;
+  allow_media_control: boolean;
+  allow_foreground_input: boolean;
+  allow_browser_control: boolean;
   default_workdir: string;
   readable_scopes: string;
   writable_scopes: string;

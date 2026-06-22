@@ -204,6 +204,26 @@ export function AgentEditorPanel({
         <p className="agent-section-help">这里会实际写入 ToolBroker 允许工具；写文件和运行命令即使开启，也仍然需要 Run 审批。</p>
         <div className="agent-capability-grid">
           <label className="agent-checkbox-row">
+            <input type="checkbox" checked={draft.allow_screen_context} disabled={selectedAgentReadOnly} onChange={(event) => updateDraft({ allow_screen_context: event.target.checked })} />
+            <span>Screen</span>
+          </label>
+          <label className="agent-checkbox-row">
+            <input type="checkbox" checked={draft.allow_app_control} disabled={selectedAgentReadOnly} onChange={(event) => updateDraft({ allow_app_control: event.target.checked })} />
+            <span>App Control</span>
+          </label>
+          <label className="agent-checkbox-row">
+            <input type="checkbox" checked={draft.allow_media_control} disabled={selectedAgentReadOnly} onChange={(event) => updateDraft({ allow_media_control: event.target.checked })} />
+            <span>Media</span>
+          </label>
+          <label className="agent-checkbox-row">
+            <input type="checkbox" checked={draft.allow_foreground_input} disabled={selectedAgentReadOnly} onChange={(event) => updateDraft({ allow_foreground_input: event.target.checked })} />
+            <span>Foreground Input</span>
+          </label>
+          <label className="agent-checkbox-row disabled" title="Browser/CDP tools are planned for the next execution batch.">
+            <input type="checkbox" checked={draft.allow_browser_control} disabled />
+            <span>Browser</span>
+          </label>
+          <label className="agent-checkbox-row">
             <input type="checkbox" checked={draft.allow_workspace_read} disabled={selectedAgentReadOnly} onChange={(event) => updateDraft({ allow_workspace_read: event.target.checked })} />
             <span>Read workspace</span>
           </label>

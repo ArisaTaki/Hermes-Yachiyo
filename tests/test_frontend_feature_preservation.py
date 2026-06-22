@@ -2540,6 +2540,11 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "export type AgentDraft",
             "model_mode: 'profile' | 'custom_api';",
             "allow_workspace_write: boolean;",
+            "allow_screen_context: boolean;",
+            "allow_app_control: boolean;",
+            "allow_media_control: boolean;",
+            "allow_foreground_input: boolean;",
+            "allow_browser_control: boolean;",
             "output_contract: string;",
             "policy_reason?: string;",
             "risk_level?: string;",
@@ -2570,6 +2575,9 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "export function agentRunReadinessIssue",
             "export function runnableCapabilityLine",
             "export function agentCapabilityLine",
+            "screen.capture",
+            "media.apple_music_play",
+            "desktop.type_text",
         ],
     )
     _assert_contains(
@@ -2581,6 +2589,8 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "Custom API 尚未保存 API Key。",
             "`workspace.write_patch` 已启用；每次写文件都会先进入审批。",
             "`terminal.run` 已启用；每次运行命令都会先进入审批。",
+            "前台输入会作用在当前桌面焦点窗口",
+            "Browser/CDP 工具将在下一批执行能力中启用。",
         ],
     )
     _assert_contains(

@@ -60,6 +60,40 @@ function policyTools(agent: AgentSpec): Set<string> {
   return new Set(Array.isArray(allowed) ? allowed.map((item) => String(item)) : []);
 }
 
+const screenContextTools = ['screen.capture', 'desktop.active_window'];
+const appControlTools = ['app.open', 'app.focus'];
+const mediaControlTools = ['media.apple_music_play'];
+const foregroundInputTools = ['desktop.hotkey', 'desktop.type_text'];
+const browserControlTools = [
+  'browser.open_url',
+  'browser.current_page',
+  'browser.click',
+  'browser.type_text',
+  'browser.extract_text',
+  'browser.screenshot',
+];
+const coreToolLabels = new Set([
+  'workspace.read',
+  'workspace.list',
+  'workspace.write_patch',
+  'terminal.run',
+  'artifact.write',
+  ...screenContextTools,
+  ...appControlTools,
+  ...mediaControlTools,
+  ...foregroundInputTools,
+  ...browserControlTools,
+]);
+
+function addTools(target: Set<string>, enabled: boolean, tools: string[]) {
+  if (!enabled) return;
+  tools.forEach((tool) => target.add(tool));
+}
+
+function hasAnyTool(tools: Set<string>, wanted: string[]): boolean {
+  return wanted.some((tool) => tools.has(tool));
+}
+
 export function draftToolPolicy(draft: AgentDraft): Record<string, unknown> {
   const allowed = new Set<string>();
   if (draft.allow_workspace_read) {
@@ -69,6 +103,11 @@ export function draftToolPolicy(draft: AgentDraft): Record<string, unknown> {
   if (draft.allow_workspace_write) allowed.add('workspace.write_patch');
   if (draft.allow_terminal) allowed.add('terminal.run');
   if (draft.allow_artifacts) allowed.add('artifact.write');
+  addTools(allowed, draft.allow_screen_context, screenContextTools);
+  addTools(allowed, draft.allow_app_control, appControlTools);
+  addTools(allowed, draft.allow_media_control, mediaControlTools);
+  addTools(allowed, draft.allow_foreground_input, foregroundInputTools);
+  addTools(allowed, draft.allow_browser_control, browserControlTools);
   return {
     allowed_tools: Array.from(allowed),
     approval_required: {
@@ -101,6 +140,11 @@ export function agentToDraft(agent: AgentSpec): AgentDraft {
     allow_workspace_write: tools.has('workspace.write_patch'),
     allow_terminal: tools.has('terminal.run'),
     allow_artifacts: agent.tool_policy?.allowed_tools === undefined ? true : tools.has('artifact.write'),
+    allow_screen_context: hasAnyTool(tools, screenContextTools),
+    allow_app_control: hasAnyTool(tools, appControlTools),
+    allow_media_control: hasAnyTool(tools, mediaControlTools),
+    allow_foreground_input: hasAnyTool(tools, foregroundInputTools),
+    allow_browser_control: hasAnyTool(tools, browserControlTools),
     default_workdir: String(workspace.default_workdir || ''),
     readable_scopes: scopesToText(workspace.readable_scopes || ['.']),
     writable_scopes: scopesToText(workspace.writable_scopes || []),
@@ -131,8 +175,13 @@ export function toolPolicyCapabilityLine(policy: unknown): string {
   if (tools.includes('workspace.write_patch')) add(needsApproval('workspace.write_patch') ? '写补丁需审批' : '写补丁');
   if (tools.includes('terminal.run')) add(needsApproval('terminal.run') ? '终端需审批' : '终端');
   if (tools.includes('artifact.write')) add('产物');
+  if (hasAnyTool(new Set(tools), screenContextTools)) add('屏幕上下文');
+  if (hasAnyTool(new Set(tools), appControlTools)) add('App 控制');
+  if (hasAnyTool(new Set(tools), mediaControlTools)) add('媒体控制');
+  if (hasAnyTool(new Set(tools), foregroundInputTools)) add('前台输入');
+  if (hasAnyTool(new Set(tools), browserControlTools)) add('浏览器控制');
   tools.forEach((tool) => {
-    if (['workspace.read', 'workspace.list', 'workspace.write_patch', 'terminal.run', 'artifact.write'].includes(tool)) return;
+    if (coreToolLabels.has(tool)) return;
     add(needsApproval(tool) ? `${tool} 需审批` : tool);
   });
   return labels.length ? `工具 ${labels.join('、')}` : '';
