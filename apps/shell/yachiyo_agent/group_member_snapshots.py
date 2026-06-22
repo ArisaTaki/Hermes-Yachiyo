@@ -17,6 +17,11 @@ def agent_group_member_from_payload(payload: Mapping[str, Any]) -> AgentGroupMem
         role=_optional_text(payload.get("role")),
         sort_order=_int(payload.get("sort_order")),
         enabled=bool(payload.get("enabled", True)),
+        run_id=_optional_text(payload.get("run_id")),
+        run_status=_optional_text(payload.get("run_status") or payload.get("status")),
+        tool_calls=_list(payload.get("tool_calls")),
+        pending_approvals=_list(payload.get("pending_approvals") or payload.get("approvals")),
+        artifacts=_list(payload.get("artifacts")),
     )
 
 
@@ -47,3 +52,7 @@ def _int(value: Any) -> int:
         return int(value)
     except (TypeError, ValueError):
         return 0
+
+
+def _list(value: Any) -> list[Any]:
+    return list(value) if isinstance(value, list) else []

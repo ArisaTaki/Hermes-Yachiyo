@@ -53,6 +53,7 @@ from apps.shell.yachiyo_agent import (
     task_requires_user_action,
 )
 from apps.shell.yachiyo_agent.events import public_run_event_from_payload
+from apps.shell.yachiyo_agent.group_run_snapshots import group_run_snapshot_from_payload
 from apps.shell.yachiyo_agent.task_cards import agent_task_light_snapshot_from_task
 
 
@@ -1080,6 +1081,63 @@ def test_group_run_and_workflow_snapshots_keep_group_and_workflow_fields() -> No
     assert _json(workflow_run)["workflow_id"] == "workflow-1"
     assert _json(workflow_run)["events"][0]["event_type"] == "workflow.node.started"
     assert _json(workflow_run)["children"][0]["run_id"] == "agent-run-1"
+
+
+def test_group_run_snapshot_rolls_child_debug_state_into_participants() -> None:
+    group_run = group_run_snapshot_from_payload(
+        {
+            "group_run_id": "group-run-1",
+            "group_id": "group-1",
+            "title": "Desktop team",
+            "status": "approval_required",
+            "objective": "Open Music and report back",
+            "participants": [
+                {"agent_id": "agent-1", "name": "Music Agent", "role": "operator"},
+                {"agent_id": "agent-2", "name": "Reviewer", "role": "reviewer"},
+            ],
+            "runs": [
+                {
+                    "run_id": "run-1",
+                    "agent_id": "agent-1",
+                    "status": "approval_required",
+                    "user_goal": "Play a song",
+                    "tool_calls": [
+                        {
+                            "tool_call_id": "tool-1",
+                            "tool_name": "media.apple_music_play",
+                            "status": "completed",
+                            "source_runnable_id": "agent-1",
+                        }
+                    ],
+                    "pending_approval": {
+                        "approval_id": "approval-1",
+                        "title": "Approve message send",
+                        "tool_name": "desktop.type_text",
+                        "status": "pending",
+                    },
+                    "artifacts": [
+                        {
+                            "artifact_id": "artifact-1",
+                            "title": "Music search",
+                            "kind": "screenshot",
+                            "path": "music.png",
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    music_agent = group_run.participants[0]
+    reviewer = group_run.participants[1]
+    assert music_agent.run_id == "run-1"
+    assert music_agent.run_status == "approval_required"
+    assert music_agent.tool_calls[0].tool_name == "media.apple_music_play"
+    assert music_agent.pending_approvals[0].approval_id == "approval-1"
+    assert music_agent.artifacts[0].path == "music.png"
+    assert reviewer.tool_calls == []
+    assert [approval.approval_id for approval in group_run.pending_approvals] == ["approval-1"]
+    assert [artifact.path for artifact in group_run.shared_artifacts] == ["music.png"]
 
 
 def test_agent_definition_snapshot_serializes_model_config_alias() -> None:

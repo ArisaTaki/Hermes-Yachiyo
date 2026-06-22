@@ -415,6 +415,11 @@ class AgentGroupMemberSnapshot(_PublicSnapshot):
     role: str | None = None
     sort_order: int = 0
     enabled: bool = True
+    run_id: str | None = None
+    run_status: str | None = None
+    tool_calls: list[ToolCallSnapshot] = Field(default_factory=list)
+    pending_approvals: list[ApprovalCardSnapshot] = Field(default_factory=list)
+    artifacts: list[ArtifactSnapshot] = Field(default_factory=list)
 
 
 class AgentGroupSnapshot(_PublicSnapshot):

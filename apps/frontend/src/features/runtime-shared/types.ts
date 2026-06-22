@@ -387,6 +387,11 @@ export type AgentGroupMemberSnapshot = {
   role?: string | null;
   sort_order?: number;
   enabled?: boolean;
+  run_id?: string | null;
+  run_status?: string | null;
+  tool_calls?: ToolCallSnapshot[];
+  pending_approvals?: ApprovalCardSnapshot[];
+  artifacts?: ArtifactSnapshot[];
 };
 
 export type AgentGroupSnapshot = {

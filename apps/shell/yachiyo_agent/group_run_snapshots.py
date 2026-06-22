@@ -8,6 +8,8 @@ from typing import Any
 from apps.shell.agent.runtime.events import redact_secrets
 
 from .contracts import (
+    AgentGroupMemberSnapshot,
+    ApprovalCardSnapshot,
     ArtifactSnapshot,
     GroupRunSnapshot,
     MemoryTraceSnapshot,
@@ -57,6 +59,20 @@ def group_run_snapshot_from_payload(
         for item in runs_payload
         if isinstance(item, Mapping)
     ]
+    tool_calls = _group_run_tool_calls(payload, runs, events, group_run_id=group_run_id)
+    shared_artifacts = _group_run_shared_artifacts(
+        payload,
+        runs,
+        events,
+        group_run_id=group_run_id,
+        group_id=group_id,
+    )
+    pending_approvals = _group_run_pending_approvals(
+        payload,
+        runs,
+        events,
+        group_run_id=group_run_id,
+    )
     return GroupRunSnapshot(
         group_run_id=group_run_id,
         run_group_id=legacy_run_group_id or group_run_id or None,
@@ -64,32 +80,22 @@ def group_run_snapshot_from_payload(
         title=_text(payload.get("title") or "Group run"),
         status=_text(payload.get("status") or "unknown"),
         objective=_text(payload.get("objective") or payload.get("user_goal")),
-        participants=participants,
+        participants=_participants_with_run_rollup(
+            participants,
+            runs,
+            tool_calls,
+            pending_approvals,
+            shared_artifacts,
+        ),
         active_speaker_agent_id=_optional_text(payload.get("active_speaker_agent_id")),
         events=events,
         runs=runs,
         child_run_ids=child_run_ids,
-        tool_calls=_group_run_tool_calls(payload, runs, events, group_run_id=group_run_id),
+        tool_calls=tool_calls,
         memory_traces=_group_run_memory_traces(runs, events),
         skill_traces=_group_run_skill_traces(runs, events),
-        shared_artifacts=_group_run_shared_artifacts(
-            payload,
-            runs,
-            events,
-            group_run_id=group_run_id,
-            group_id=group_id,
-        ),
-        pending_approvals=[
-            approval
-            for approval in _RUN_PROJECTOR.approvals_from_payload(
-                payload,
-                run_id=group_run_id,
-                group_run_id=group_run_id,
-                keys=("pending_approvals", "pending_approval"),
-                events=events,
-            )
-            if approval.status == "pending"
-        ],
+        shared_artifacts=shared_artifacts,
+        pending_approvals=pending_approvals,
         final_answer=_optional_text(payload.get("final_answer") or payload.get("summary")),
         created_at=_text(payload.get("created_at")),
         updated_at=_text(payload.get("updated_at")),
@@ -248,6 +254,36 @@ def _group_run_shared_artifacts(
     )
 
 
+def _group_run_pending_approvals(
+    payload: Mapping[str, Any],
+    runs: list[RunTimelineSnapshot],
+    events: list[Any],
+    *,
+    group_run_id: str,
+) -> list[ApprovalCardSnapshot]:
+    direct_and_event_approvals = [
+        approval
+        for approval in _RUN_PROJECTOR.approvals_from_payload(
+            payload,
+            run_id=group_run_id,
+            group_run_id=group_run_id,
+            keys=("pending_approvals", "pending_approval"),
+            events=events,
+        )
+        if approval.status == "pending"
+    ]
+    child_approvals = [
+        approval
+        for run in runs
+        for approval in [*run.approvals, *([run.pending_approval] if run.pending_approval else [])]
+        if approval.status == "pending"
+    ]
+    return _unique_by(
+        [*child_approvals, *direct_and_event_approvals],
+        lambda approval: approval.approval_id,
+    )
+
+
 def _group_context_artifact(
     artifact: ArtifactSnapshot,
     *,
@@ -259,6 +295,93 @@ def _group_context_artifact(
             "group_run_id": artifact.group_run_id or group_run_id or None,
             "group_id": artifact.group_id or group_id or None,
         }
+    )
+
+
+def _participants_with_run_rollup(
+    participants: list[AgentGroupMemberSnapshot],
+    runs: list[RunTimelineSnapshot],
+    tool_calls: list[ToolCallSnapshot],
+    approvals: list[ApprovalCardSnapshot],
+    artifacts: list[ArtifactSnapshot],
+) -> list[AgentGroupMemberSnapshot]:
+    if not participants:
+        return []
+    by_agent_id: dict[str, list[RunTimelineSnapshot]] = {}
+    for run in runs:
+        agent_id = _text(run.agent_id)
+        if agent_id:
+            by_agent_id.setdefault(agent_id, []).append(run)
+
+    enriched: list[AgentGroupMemberSnapshot] = []
+    for participant in participants:
+        member_runs = by_agent_id.get(participant.agent_id, [])
+        member_run_ids = {_text(run.run_id) for run in member_runs if _text(run.run_id)}
+        primary_run = member_runs[0] if member_runs else None
+        enriched.append(
+            participant.model_copy(
+                update={
+                    "run_id": participant.run_id or (primary_run.run_id if primary_run else None),
+                    "run_status": participant.run_status
+                    or (primary_run.status if primary_run else None),
+                    "tool_calls": _unique_by(
+                        [
+                            *participant.tool_calls,
+                            *[
+                                item
+                                for item in tool_calls
+                                if _snapshot_belongs_to_member(
+                                    item,
+                                    agent_id=participant.agent_id,
+                                    run_ids=member_run_ids,
+                                )
+                            ],
+                        ],
+                        lambda item: item.tool_call_id,
+                    ),
+                    "pending_approvals": _unique_by(
+                        [
+                            *participant.pending_approvals,
+                            *[
+                                item
+                                for item in approvals
+                                if _snapshot_belongs_to_member(
+                                    item,
+                                    agent_id=participant.agent_id,
+                                    run_ids=member_run_ids,
+                                )
+                            ],
+                        ],
+                        lambda item: item.approval_id,
+                    ),
+                    "artifacts": _unique_by(
+                        [
+                            *participant.artifacts,
+                            *[
+                                item
+                                for item in artifacts
+                                if _snapshot_belongs_to_member(
+                                    item,
+                                    agent_id=participant.agent_id,
+                                    run_ids=member_run_ids,
+                                )
+                            ],
+                        ],
+                        _artifact_identity,
+                    ),
+                }
+            )
+        )
+    return enriched
+
+
+def _snapshot_belongs_to_member(item: Any, *, agent_id: str, run_ids: set[str]) -> bool:
+    if not agent_id:
+        return False
+    return (
+        _text(getattr(item, "source_runnable_id", "")) == agent_id
+        or _text(getattr(item, "run_id", "")) in run_ids
+        or _text(getattr(item, "source_run_id", "")) in run_ids
     )
 
 

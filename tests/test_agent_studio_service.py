@@ -882,6 +882,11 @@ def test_agent_studio_service_maps_group_run_workflow_run_timeline_and_events() 
     assert group_run.events[0].payload["group_run_id"] == "group-run-1"
     assert group_run.events[1].payload["member_agent_id"] == "agent-1"
     assert group_run.runs[0].events[0].event_type == "agent.tool.call"
+    assert group_run.participants[0].run_id == "run-1"
+    assert group_run.participants[0].run_status == "approval_required"
+    assert group_run.participants[0].tool_calls[0].tool_name == "workspace.read"
+    assert group_run.participants[0].pending_approvals[0].approval_id == "approval-1"
+    assert group_run.participants[0].artifacts[0].path == "report.md"
     assert group_run.pending_approvals[0].approval_id == "approval-1"
     assert [artifact.path for artifact in group_run.shared_artifacts] == ["team.md", "report.md"]
     assert group_run.shared_artifacts[1].source_run_id == "run-1"
