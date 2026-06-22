@@ -192,6 +192,115 @@ def test_custom_api_agent_loop_delegates_tool_requests_without_bypassing_runner(
     assert messages[1] == {"role": "assistant", "content": "need tool"}
 
 
+def test_custom_api_agent_loop_routes_daily_desktop_intents_to_structured_tools() -> None:
+    budget = FakeBudget()
+    tool_runs: list[dict[str, Any]] = []
+    timeline: list[dict[str, Any]] = []
+    goals = [
+        (
+            "播放超时空辉夜姬",
+            "media.apple_music_play",
+            {"query": "超时空辉夜姬"},
+        ),
+        (
+            "截个图看看",
+            "screen.capture",
+            {"reason": "user asked to capture the screen"},
+        ),
+        (
+            "当前窗口是什么",
+            "desktop.active_window",
+            {},
+        ),
+    ]
+    responses = []
+    for _goal, tool, payload in goals:
+        responses.extend([
+            {"role": "assistant", "content": tool, "tool_payload": payload},
+            {"role": "assistant", "content": f"{tool} done"},
+        ])
+
+    def tool_requests_from_message(message: dict[str, Any], content: str) -> list[dict[str, Any]]:
+        tool = content.strip()
+        if tool in {"media.apple_music_play", "screen.capture", "desktop.active_window"}:
+            return [
+                {
+                    "tool": tool,
+                    "input": dict(message.get("tool_payload") or {}),
+                    "protocol": "tool_calls",
+                }
+            ]
+        return []
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local",
+            "model": "m",
+            "api_key": "k",
+        },
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {
+                "allowed_tools": [
+                    "media.apple_music_play",
+                    "screen.capture",
+                    "desktop.active_window",
+                ]
+            },
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=4,
+        operating_doctrine="Use desktop tools for desktop intents.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: responses.pop(0),
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=tool_requests_from_message,
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=lambda tool_requests, allowed_tools, broker, messages_arg, timeline_arg, artifacts, **kwargs: tool_runs.append(
+            {
+                "tool_requests": tool_requests,
+                "allowed_tools": allowed_tools,
+                "broker": broker,
+                "messages": list(messages_arg),
+                "timeline": timeline_arg,
+                "artifacts": artifacts,
+                "kwargs": kwargs,
+            }
+        ),
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    for goal, tool, payload in goals:
+        result = loop.run(
+            {"name": "Yachiyo"},
+            goal,
+            broker={"broker": True},
+            timeline=timeline,
+            artifacts=[],
+            run_id=f"run-{tool}",
+        )
+
+        assert str(result) == f"{tool} done"
+        assert tool_runs[-1]["tool_requests"] == [
+            {"tool": tool, "input": payload, "protocol": "tool_calls"}
+        ]
+        assert tool_runs[-1]["allowed_tools"] == [
+            "media.apple_music_play",
+            "screen.capture",
+            "desktop.active_window",
+        ]
+        assert "terminal.run" not in tool_runs[-1]["allowed_tools"]
+        assert goal in tool_runs[-1]["messages"][1]["content"]
+
+
 def test_native_runtime_installs_custom_api_agent_loop(tmp_path) -> None:
     service = AgentRuntimeService(
         db_path=tmp_path / "agent-runtime.db",
