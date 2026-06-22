@@ -30,6 +30,19 @@ export function runtimeToolDisplayLabel(toolName: string): string {
   if (tool === 'artifact.write') return '生成产物';
   if (tool === 'workflow.approval') return 'Workflow 人工确认';
   if (tool === 'group.approval') return '群组人工确认';
+  if (tool === 'screen.capture') return '截取屏幕';
+  if (tool === 'desktop.active_window') return '读取当前窗口';
+  if (tool === 'app.open') return '打开应用';
+  if (tool === 'app.focus') return '聚焦应用';
+  if (tool === 'media.apple_music_play') return '播放 Apple Music';
+  if (tool === 'desktop.hotkey') return '发送快捷键';
+  if (tool === 'desktop.type_text') return '输入前台文字';
+  if (tool === 'browser.open_url') return '打开网页';
+  if (tool === 'browser.current_page') return '读取当前网页';
+  if (tool === 'browser.click') return '点击网页元素';
+  if (tool === 'browser.type_text') return '填写网页输入';
+  if (tool === 'browser.extract_text') return '提取网页文本';
+  if (tool === 'browser.screenshot') return '截取网页';
   return '工具调用';
 }
 
@@ -39,6 +52,29 @@ export function runtimeToolDisplayLabelOrName(toolName: string): string {
   if (display !== '工具调用') return display;
   if (runtimeToolLooksInternalId(tool)) return display;
   return tool || display;
+}
+
+export function runtimeToolFamily(toolName: string): string {
+  const tool = String(toolName || '').trim();
+  if (
+    tool === 'screen.capture'
+    || tool === 'desktop.active_window'
+    || tool === 'app.open'
+    || tool === 'app.focus'
+    || tool === 'media.apple_music_play'
+    || tool === 'desktop.hotkey'
+    || tool === 'desktop.type_text'
+  ) {
+    return 'desktop';
+  }
+  if (tool.startsWith('browser.')) return 'browser';
+  if (tool.startsWith('workspace.')) return 'workspace';
+  if (tool.startsWith('terminal.')) return 'terminal';
+  if (tool.startsWith('memory.')) return 'memory';
+  if (tool.startsWith('skill.')) return 'skill';
+  if (tool.startsWith('artifact.')) return 'artifact';
+  if (tool.startsWith('future_task.')) return 'future_task';
+  return 'tool';
 }
 
 function runtimeToolLooksInternalId(toolName: string): boolean {

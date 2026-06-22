@@ -9427,6 +9427,14 @@ body.electron-window .hy-traffic {
   color: var(--hy-success);
 }
 
+.hy-content .open-chat-shell .yachiyo-agent-task-tool[data-tool-family="desktop"] {
+  border-color: oklch(70% 0.12 188 / 0.32);
+}
+
+.hy-content .open-chat-shell .yachiyo-agent-task-tool[data-tool-family="browser"] {
+  border-color: oklch(74% 0.13 260 / 0.32);
+}
+
 .hy-content .open-chat-shell .yachiyo-agent-task-timeline {
   display: grid;
   gap: 5px;
@@ -18007,7 +18015,8 @@ button.activity-item {
 }
 
 .studio-runtime-tool-call span,
-.studio-runtime-tool-call em {
+.studio-runtime-tool-call em,
+.studio-runtime-tool-call small {
   color: var(--hy-faint);
   font-size: 11px;
   font-style: normal;
@@ -18021,6 +18030,21 @@ button.activity-item {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.studio-runtime-tool-call small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.studio-runtime-tool-call[data-tool-family="desktop"] {
+  border-color: oklch(70% 0.12 188 / 0.34);
+}
+
+.studio-runtime-tool-call[data-tool-family="browser"] {
+  border-color: oklch(74% 0.13 260 / 0.34);
 }
 
 .studio-runtime-tool-call code,

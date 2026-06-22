@@ -1,4 +1,9 @@
-import { approvalPreviewRecord, approvalPreviewValue } from '../approval';
+import {
+  approvalPreviewRecord,
+  approvalPreviewValue,
+  runtimeToolDisplayLabelOrName,
+  runtimeToolFamily,
+} from '../approval';
 import { ExpandableRuntimeContent } from './ExpandableRuntimeContent';
 
 export type RuntimeToolCallCardSnapshot = {
@@ -32,7 +37,21 @@ export function RuntimeToolCallCard({
 }) {
   const inputPreview = approvalPreviewRecord(toolCall.input_preview);
   const outputPreview = approvalPreviewRecord(toolCall.output_preview);
-  const target = approvalPreviewValue(inputPreview, ['command', 'cmd', 'path', 'file', 'target']);
+  const displayName = runtimeToolDisplayLabelOrName(toolCall.tool_name);
+  const rawToolName = String(toolCall.tool_name || '').trim();
+  const target = approvalPreviewValue(inputPreview, [
+    'command',
+    'cmd',
+    'path',
+    'file',
+    'target',
+    'app_name',
+    'query',
+    'url',
+    'selector',
+    'key',
+    'reason',
+  ]);
   const output = approvalPreviewValue(outputPreview, ['summary', 'result', 'output', 'stdout', 'path']);
   const inputPreviewContent = formatToolPreview(inputPreview);
   const outputPreviewContent = formatToolPreview(outputPreview);
@@ -49,6 +68,7 @@ export function RuntimeToolCallCard({
       data-source-run-id={toolCall.source_run_id || ''}
       data-testid={testId}
       data-tool-call-id={toolCall.tool_call_id}
+      data-tool-family={runtimeToolFamily(toolCall.tool_name)}
       data-tool-name={toolCall.tool_name}
       data-tool-status={toolCall.status}
       data-workflow-id={toolCall.workflow_id || ''}
@@ -56,7 +76,8 @@ export function RuntimeToolCallCard({
       data-workflow-run-id={toolCall.workflow_run_id || ''}
     >
       <span>{toolCall.status || 'tool'}</span>
-      <strong>{toolCall.tool_name || 'tool'}</strong>
+      <strong>{displayName}</strong>
+      {rawToolName && rawToolName !== displayName ? <small>{rawToolName}</small> : null}
       {toolCall.risk_level ? <em>{toolCall.risk_level}</em> : null}
       {target ? <code>{target}</code> : null}
       {output ? <p>{output}</p> : null}

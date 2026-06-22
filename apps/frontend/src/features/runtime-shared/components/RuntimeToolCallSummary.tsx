@@ -1,5 +1,5 @@
 import type { PublicRunEvent } from '../types';
-import { runtimeToolDisplayLabelOrName } from '../approval';
+import { runtimeToolDisplayLabelOrName, runtimeToolFamily } from '../approval';
 import { publicRunEventIsSecret } from '../runEvents';
 
 export type RuntimeToolCallSummaryItem = {
@@ -70,6 +70,7 @@ export function RuntimeToolCallSummary({
           <span
             className={`${itemClassName} status-${tool.status}`}
             data-testid={itemTestId}
+            data-tool-family={runtimeToolFamily(tool.name)}
             data-tool-name={tool.name}
             data-tool-status={tool.status}
             key={tool.name}
