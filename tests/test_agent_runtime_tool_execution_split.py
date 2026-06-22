@@ -575,6 +575,9 @@ def test_runtime_tool_request_runner_raises_pending_approval_with_remaining_requ
             "ok": False,
             "approval_required": True,
             "tool": "terminal.run",
+            "risk_level": "high",
+            "policy_reason": "Terminal commands need review.",
+            "plugin_id": "ops",
         },
     )
     messages = [{"role": "user", "content": "run command"}]
@@ -599,6 +602,9 @@ def test_runtime_tool_request_runner_raises_pending_approval_with_remaining_requ
     assert exc.value.pending_approval["approval_id"] == "approval-1"
     assert exc.value.pending_approval["next_iteration"] == 7
     assert exc.value.pending_approval["remaining_tool_requests"] == [requests[1]]
+    assert exc.value.pending_approval["risk_level"] == "high"
+    assert exc.value.pending_approval["policy_reason"] == "Terminal commands need review."
+    assert exc.value.pending_approval["plugin_id"] == "ops"
 
 
 def test_runtime_tool_request_runner_projects_fatal_failures_and_success_messages() -> None:

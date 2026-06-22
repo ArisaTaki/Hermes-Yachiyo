@@ -56,6 +56,7 @@ export function RuntimeApprovalCard({
     ? compactApprovalTitle(approval.title, toolName, displayTool)
     : approval.title || toolName;
   const metadata = variant === 'inspector' ? approvalMetadataItems(approval, toolName) : [];
+  const reason = variant === 'inspector' ? approvalReasonText(approval, toolName, preview) : '';
   return (
     <div
       className={className}
@@ -78,6 +79,12 @@ export function RuntimeApprovalCard({
       <strong>{title}</strong>
       {approval.description ? <p>{approval.description}</p> : null}
       {target || displayTool ? <code>{target || displayTool}</code> : null}
+      {reason ? (
+        <div className="runtime-approval-reason" data-testid={`${testId}-reason`}>
+          <small>为什么需要确认</small>
+          <p>{reason}</p>
+        </div>
+      ) : null}
       {metadata.length ? (
         <div className="runtime-approval-meta" data-testid={`${testId}-metadata`}>
           {metadata.map(({ label, value }) => (
@@ -118,6 +125,25 @@ function approvalMetadataItems(approval: RuntimeApprovalCardSnapshot, toolName: 
     { label: 'policy', value: approval.policy_reason || '' },
   ];
   return items.filter((item) => String(item.value || '').trim());
+}
+
+function approvalReasonText(
+  approval: RuntimeApprovalCardSnapshot,
+  toolName: string,
+  preview: Record<string, unknown>,
+) {
+  const policyReason = String(approval.policy_reason || '').trim();
+  if (policyReason) return policyReason;
+  const criteria = approvalPreviewValue(preview, ['criteria']);
+  if (toolName === 'workflow.approval') {
+    return criteria
+      ? `Workflow 审批条件：${criteria}`
+      : '这个 Workflow 节点被配置为人工审批检查点。';
+  }
+  if (approval.risk_level === 'high') {
+    return '高风险工具调用会被当前工具策略拦截，需要人工确认。';
+  }
+  return '';
 }
 
 function approvalStatusLabel(status: string) {

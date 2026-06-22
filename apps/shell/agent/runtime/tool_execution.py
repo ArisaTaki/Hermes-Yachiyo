@@ -287,14 +287,17 @@ class RuntimeToolRequestRunner:
                 budget=budget,
             )
             if tool_result.get("approval_required"):
-                raise AgentApprovalRequired(
-                    self._pending_approval_builder.build(
-                        tool_request,
-                        messages=messages,
-                        next_iteration=next_iteration,
-                        remaining_tool_requests=tool_requests[index + 1 :],
-                    )
+                pending_approval = self._pending_approval_builder.build(
+                    tool_request,
+                    messages=messages,
+                    next_iteration=next_iteration,
+                    remaining_tool_requests=tool_requests[index + 1 :],
                 )
+                for key in ("risk_level", "policy_reason", "plugin_id"):
+                    value = str(tool_result.get(key) or "").strip()
+                    if value:
+                        pending_approval[key] = value
+                raise AgentApprovalRequired(pending_approval)
             fatal_failure = self._tool_loop_projection.fatal_failure_detail(
                 tool_name,
                 tool_request,
