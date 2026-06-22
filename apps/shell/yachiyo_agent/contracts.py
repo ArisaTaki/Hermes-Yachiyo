@@ -44,6 +44,15 @@ class DesktopExecutionCapabilitySnapshot(_PublicSnapshot):
     diagnostic_route: str | None = None
 
 
+class DesktopActionRiskSnapshot(_PublicSnapshot):
+    action_id: str
+    risk_level: DesktopExecutionRisk
+    title: str
+    description: str = ""
+    tools: list[str] = Field(default_factory=list)
+    requires_approval: bool = False
+
+
 class ToolCatalogItemSnapshot(_PublicSnapshot):
     tool_name: str
     function_name: str

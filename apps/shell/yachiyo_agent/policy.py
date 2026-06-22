@@ -9,6 +9,7 @@ from typing import Any
 from .contracts import (
     AgentTaskSnapshot,
     ApprovalCardSnapshot,
+    DesktopActionRiskSnapshot,
     DesktopExecutionCapabilitySnapshot,
     DesktopExecutionRisk,
 )
@@ -42,16 +43,128 @@ LOW_RISK_BROWSER_TOOLS = frozenset(
     }
 )
 MEDIUM_RISK_BROWSER_TOOLS = frozenset({"browser.click", "browser.type_text"})
+LOW_RISK_DESKTOP_ACTIONS = frozenset(
+    {
+        "read_screen",
+        "read_active_window",
+        "open_app",
+        "focus_app",
+        "play_or_pause_media",
+    }
+)
+MEDIUM_RISK_DESKTOP_ACTIONS = frozenset(
+    {
+        "foreground_click",
+        "foreground_type_text",
+        "foreground_hotkey",
+    }
+)
 HIGH_RISK_DESKTOP_ACTIONS = frozenset(
     {
         "delete_or_overwrite_user_file",
+        "delete_user_file",
+        "overwrite_user_file",
         "send_external_message",
+        "send_message",
         "payment_or_purchase",
+        "payment",
         "system_settings_change",
+        "system_settings",
         "raw_shell",
+        "terminal_shell",
         "credential_access",
     }
 )
+
+DESKTOP_ACTION_RISK_LEVELS: dict[str, DesktopExecutionRisk] = {
+    **{action: "low" for action in LOW_RISK_DESKTOP_ACTIONS},
+    **{action: "medium" for action in MEDIUM_RISK_DESKTOP_ACTIONS},
+    **{action: "high" for action in HIGH_RISK_DESKTOP_ACTIONS},
+}
+DESKTOP_ACTION_RISK_ORDER = (
+    "read_screen",
+    "read_active_window",
+    "open_app",
+    "focus_app",
+    "play_or_pause_media",
+    "foreground_click",
+    "foreground_type_text",
+    "foreground_hotkey",
+    "delete_or_overwrite_user_file",
+    "delete_user_file",
+    "overwrite_user_file",
+    "send_external_message",
+    "send_message",
+    "payment_or_purchase",
+    "payment",
+    "system_settings_change",
+    "system_settings",
+    "raw_shell",
+    "terminal_shell",
+    "credential_access",
+)
+
+DESKTOP_ACTION_TOOL_HINTS: dict[str, tuple[str, ...]] = {
+    "read_screen": ("screen.capture",),
+    "read_active_window": ("desktop.active_window",),
+    "open_app": ("app.open",),
+    "focus_app": ("app.focus",),
+    "play_or_pause_media": ("media.apple_music_play",),
+    "foreground_click": ("browser.click",),
+    "foreground_type_text": ("desktop.type_text", "browser.type_text"),
+    "foreground_hotkey": ("desktop.hotkey",),
+    "delete_or_overwrite_user_file": ("workspace.write_patch",),
+    "delete_user_file": ("workspace.write_patch",),
+    "overwrite_user_file": ("workspace.write_patch",),
+    "raw_shell": ("terminal.run",),
+    "terminal_shell": ("terminal.run",),
+}
+
+DESKTOP_ACTION_TITLES: dict[str, str] = {
+    "read_screen": "Read screen",
+    "read_active_window": "Read active window",
+    "open_app": "Open app",
+    "focus_app": "Focus app",
+    "play_or_pause_media": "Play or pause media",
+    "foreground_click": "Click foreground UI",
+    "foreground_type_text": "Type into foreground UI",
+    "foreground_hotkey": "Send foreground hotkey",
+    "delete_or_overwrite_user_file": "Delete or overwrite user file",
+    "delete_user_file": "Delete user file",
+    "overwrite_user_file": "Overwrite user file",
+    "send_external_message": "Send external message",
+    "send_message": "Send message",
+    "payment_or_purchase": "Payment or purchase",
+    "payment": "Payment",
+    "system_settings_change": "Change system settings",
+    "system_settings": "System settings",
+    "raw_shell": "Run raw shell",
+    "terminal_shell": "Run terminal shell",
+    "credential_access": "Access credentials",
+}
+
+DESKTOP_ACTION_DESCRIPTIONS: dict[str, str] = {
+    "read_screen": "Capture or inspect visible desktop state.",
+    "read_active_window": "Read the foreground application and window title.",
+    "open_app": "Launch a local desktop application.",
+    "focus_app": "Bring a local desktop application to the foreground.",
+    "play_or_pause_media": "Control local media playback such as Apple Music.",
+    "foreground_click": "Click in the foreground application or browser page.",
+    "foreground_type_text": "Enter text into the current foreground target.",
+    "foreground_hotkey": "Send a keyboard shortcut to the foreground target.",
+    "delete_or_overwrite_user_file": "Delete or overwrite user-controlled files.",
+    "delete_user_file": "Delete a user-controlled file.",
+    "overwrite_user_file": "Overwrite a user-controlled file.",
+    "send_external_message": "Send a message or notification to another person or service.",
+    "send_message": "Send a message to another person or service.",
+    "payment_or_purchase": "Spend money, purchase, subscribe, or transfer value.",
+    "payment": "Spend money, purchase, subscribe, or transfer value.",
+    "system_settings_change": "Change operating system or application settings.",
+    "system_settings": "Change operating system or application settings.",
+    "raw_shell": "Run arbitrary shell or terminal commands.",
+    "terminal_shell": "Run arbitrary shell or terminal commands.",
+    "credential_access": "Read, reveal, export, or use credentials and secrets.",
+}
 
 DESKTOP_TOOL_RISK_LEVELS: dict[str, DesktopExecutionRisk] = {
     **{tool: "low" for tool in LOW_RISK_DESKTOP_TOOLS},
@@ -144,8 +257,29 @@ def desktop_tool_risk_level(tool_name: str) -> DesktopExecutionRisk | None:
     return DESKTOP_TOOL_RISK_LEVELS.get(str(tool_name or "").strip())
 
 
+def desktop_action_risk_level(action_name: str) -> DesktopExecutionRisk | None:
+    return DESKTOP_ACTION_RISK_LEVELS.get(str(action_name or "").strip())
+
+
 def is_high_risk_desktop_action(action_name: str) -> bool:
-    return str(action_name or "").strip() in HIGH_RISK_DESKTOP_ACTIONS
+    return desktop_action_risk_level(action_name) == "high"
+
+
+def desktop_action_risk_snapshots() -> list[DesktopActionRiskSnapshot]:
+    """Return the product-level desktop action risk catalog."""
+
+    return [
+        DesktopActionRiskSnapshot(
+            action_id=action_id,
+            risk_level=DESKTOP_ACTION_RISK_LEVELS[action_id],
+            title=DESKTOP_ACTION_TITLES.get(action_id, action_id.replace("_", " ").title()),
+            description=DESKTOP_ACTION_DESCRIPTIONS.get(action_id, ""),
+            tools=list(DESKTOP_ACTION_TOOL_HINTS.get(action_id, ())),
+            requires_approval=DESKTOP_ACTION_RISK_LEVELS[action_id] == "high",
+        )
+        for action_id in DESKTOP_ACTION_RISK_ORDER
+        if action_id in DESKTOP_ACTION_RISK_LEVELS
+    ]
 
 
 def group_tool_policy_for_id(policy_id: str | None) -> dict[str, Any]:

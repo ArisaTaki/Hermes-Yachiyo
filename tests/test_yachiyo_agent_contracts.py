@@ -29,6 +29,7 @@ from apps.shell.yachiyo_agent import (
     ChatRunnableCatalogSnapshot,
     ChatRunnableParticipantSnapshot,
     ChatRunnableSnapshot,
+    DesktopActionRiskSnapshot,
     DesktopExecutionCapabilitySnapshot,
     FutureTaskSnapshot,
     FutureTaskTriggerResultSnapshot,
@@ -56,6 +57,8 @@ from apps.shell.yachiyo_agent import (
     WorkflowRunSnapshot,
     WorkflowSnapshot,
     approval_is_pending,
+    desktop_action_risk_level,
+    desktop_action_risk_snapshots,
     desktop_execution_capability_snapshots,
     desktop_tool_risk_level,
     is_high_risk_desktop_action,
@@ -328,6 +331,36 @@ def test_desktop_execution_capability_snapshot_json_shape_is_stable() -> None:
         )
 
 
+def test_desktop_action_risk_snapshot_json_shape_is_stable() -> None:
+    snapshot = DesktopActionRiskSnapshot(
+        action_id="foreground_type_text",
+        risk_level="medium",
+        title="Type into foreground UI",
+        description="Enter text into the current foreground target.",
+        tools=["desktop.type_text"],
+        requires_approval=False,
+    )
+
+    payload = _json(snapshot)
+
+    assert list(payload) == [
+        "action_id",
+        "risk_level",
+        "title",
+        "description",
+        "tools",
+        "requires_approval",
+    ]
+    assert payload["risk_level"] == "medium"
+    with pytest.raises(ValidationError):
+        DesktopActionRiskSnapshot(
+            action_id="read_screen",
+            risk_level="low",
+            title="Read screen",
+            unknown=True,
+        )
+
+
 def test_desktop_execution_capability_policy_marks_registered_tools_available() -> None:
     capabilities = desktop_execution_capability_snapshots(
         platform_name="Darwin",
@@ -389,8 +422,35 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_risk_level("browser.open_url") == "low"
     assert desktop_tool_risk_level("browser.click") == "medium"
     assert desktop_tool_risk_level("terminal.run") is None
+    assert desktop_action_risk_level("read_screen") == "low"
+    assert desktop_action_risk_level("foreground_type_text") == "medium"
+    assert desktop_action_risk_level("send_message") == "high"
     assert is_high_risk_desktop_action("raw_shell") is True
+    assert is_high_risk_desktop_action("system_settings") is True
     assert is_high_risk_desktop_action("play_music") is False
+
+
+def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
+    catalog = {item.action_id: item for item in desktop_action_risk_snapshots()}
+
+    assert list(catalog)[:8] == [
+        "read_screen",
+        "read_active_window",
+        "open_app",
+        "focus_app",
+        "play_or_pause_media",
+        "foreground_click",
+        "foreground_type_text",
+        "foreground_hotkey",
+    ]
+    assert catalog["read_screen"].risk_level == "low"
+    assert catalog["read_screen"].tools == ["screen.capture"]
+    assert catalog["play_or_pause_media"].tools == ["media.apple_music_play"]
+    assert catalog["foreground_click"].risk_level == "medium"
+    assert catalog["foreground_click"].requires_approval is False
+    assert catalog["delete_or_overwrite_user_file"].risk_level == "high"
+    assert catalog["delete_or_overwrite_user_file"].requires_approval is True
+    assert catalog["credential_access"].requires_approval is True
 
 
 def test_tool_catalog_snapshot_json_shape_is_stable() -> None:
