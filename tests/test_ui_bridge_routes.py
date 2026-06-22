@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import subprocess
 import threading
 import zipfile
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -352,6 +353,48 @@ async def test_proactive_screen_permission_route_checks_real_capture(monkeypatch
 
     assert result == {"ok": False, "allowed": False, "permission_denied": True, "settings_opened": True}
     assert calls == [True]
+
+
+@pytest.mark.asyncio
+async def test_yachiyo_desktop_permission_settings_route_opens_macos_pane(monkeypatch):
+    calls = []
+    cache_cleared = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(ui.sys, "platform", "darwin")
+    monkeypatch.setattr(ui.subprocess, "run", fake_run)
+    monkeypatch.setattr(ui, "clear_desktop_permission_probe_cache", lambda: cache_cleared.append(True))
+
+    result = await ui.open_yachiyo_desktop_permission_settings(
+        ui.DesktopPermissionSettingsRequest(target="screen_recording")
+    )
+
+    assert result["ok"] is True
+    assert result["opened"] is True
+    assert result["target"] == "screen_recording"
+    assert "Privacy_Screen" in result["settings_url"]
+    assert calls[0][0][0] == "open"
+    assert cache_cleared == [True]
+
+
+@pytest.mark.asyncio
+async def test_yachiyo_desktop_permission_settings_route_reports_unsupported_platform(monkeypatch):
+    monkeypatch.setattr(ui.sys, "platform", "linux")
+
+    result = await ui.open_yachiyo_desktop_permission_settings(
+        ui.DesktopPermissionSettingsRequest(target="accessibility")
+    )
+
+    assert result == {
+        "ok": False,
+        "opened": False,
+        "target": "accessibility",
+        "label": "辅助功能",
+        "message": "当前平台不支持自动打开 macOS 系统设置。",
+    }
 
 
 @pytest.mark.asyncio

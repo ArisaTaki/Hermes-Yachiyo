@@ -129,6 +129,16 @@ type ScreenshotProbe = {
   captured_at?: string;
 };
 
+type DesktopPermissionSettingsResult = {
+  ok?: boolean;
+  opened?: boolean;
+  target?: string;
+  label?: string;
+  settings_url?: string;
+  message?: string;
+  error?: string;
+};
+
 type ActiveWindowProbe = {
   title?: string;
   app_name?: string;
@@ -664,6 +674,23 @@ export function DiagnosticsView() {
     }
   }
 
+  async function openDesktopPermissionSettings(target: string) {
+    if (runtimeBusy) return;
+    setRuntimeBusy(`permission-${target}`);
+    setStatus('正在打开系统权限设置...');
+    try {
+      const result = await apiPost<DesktopPermissionSettingsResult>(
+        '/ui/yachiyo/desktop-permissions/open-settings',
+        { target },
+      );
+      setStatus(result.message || result.error || (result.ok ? '已打开系统权限设置' : '未能打开系统权限设置'));
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '打开系统权限设置失败');
+    } finally {
+      setRuntimeBusy('');
+    }
+  }
+
   async function probeActiveWindow() {
     if (runtimeBusy) return;
     setRuntimeBusy('active-window');
@@ -902,6 +929,10 @@ export function DiagnosticsView() {
           <div className="diagnostic-result-actions">
             <button type="button" className="hy-btn hy-btn-ghost" data-testid="diagnostics-screen-probe" disabled={Boolean(runtimeBusy)} onClick={() => void probeScreen()}>{runtimeBusy === 'screen' ? '探测中...' : '截图摘要'}</button>
             <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(runtimeBusy)} onClick={() => void probeActiveWindow()}>{runtimeBusy === 'active-window' ? '探测中...' : '活动窗口'}</button>
+            <button type="button" className="hy-btn hy-btn-ghost" data-testid="diagnostics-open-screen-recording-settings" disabled={Boolean(runtimeBusy)} onClick={() => void openDesktopPermissionSettings('screen_recording')}>屏幕录制权限</button>
+            <button type="button" className="hy-btn hy-btn-ghost" data-testid="diagnostics-open-accessibility-settings" disabled={Boolean(runtimeBusy)} onClick={() => void openDesktopPermissionSettings('accessibility')}>辅助功能权限</button>
+            <button type="button" className="hy-btn hy-btn-ghost" data-testid="diagnostics-open-automation-settings" disabled={Boolean(runtimeBusy)} onClick={() => void openDesktopPermissionSettings('automation')}>自动化权限</button>
+            <button type="button" className="hy-btn hy-btn-ghost" data-testid="diagnostics-open-browser-cdp-settings" disabled={Boolean(runtimeBusy)} onClick={() => navigateTo('tools', { tool: 'browser-cdp' })}>Chrome CDP</button>
           </div>
         </div>
         <div className="diagnostic-probe-grid">

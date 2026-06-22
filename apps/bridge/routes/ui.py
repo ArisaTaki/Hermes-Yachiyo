@@ -44,6 +44,7 @@ from apps.shell.mode_settings import apply_settings_changes, serialize_mode_wind
 from apps.shell.proactive import ProactiveDesktopService, get_proactive_chat_session
 from apps.shell.tts import TTSService
 from apps.shell.tts_resources import get_tts_voice_resource_info, import_tts_voice_archive_draft
+from apps.shell.yachiyo_agent import clear_desktop_permission_probe_cache
 from packages.security import redact_api_error_text
 
 router = APIRouter(prefix="/ui", tags=["UI"])
@@ -169,6 +170,10 @@ class ScreenPermissionRequest(BaseModel):
     open_settings: bool = True
 
 
+class DesktopPermissionSettingsRequest(BaseModel):
+    target: str = "screen_recording"
+
+
 class ProactiveTestRequest(BaseModel):
     mode: str = "bubble"
 
@@ -194,6 +199,94 @@ class Live2DResourcePathRequest(BaseModel):
 
 class TtsResourcePathRequest(BaseModel):
     path: str
+
+
+_DESKTOP_PERMISSION_SETTINGS: dict[str, tuple[str, tuple[str, ...]]] = {
+    "screen_recording": (
+        "屏幕录制",
+        (
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenRecording",
+        ),
+    ),
+    "accessibility": (
+        "辅助功能",
+        ("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",),
+    ),
+    "automation": (
+        "自动化 / Apple Events",
+        ("x-apple.systempreferences:com.apple.preference.security?Privacy_Automation",),
+    ),
+}
+_DESKTOP_PERMISSION_TARGET_ALIASES = {
+    "screen": "screen_recording",
+    "screen_capture": "screen_recording",
+    "screen_recording": "screen_recording",
+    "accessibility": "accessibility",
+    "foreground_input": "accessibility",
+    "active_window": "automation",
+    "app_control": "automation",
+    "automation": "automation",
+    "automation_or_accessibility": "automation",
+    "media_control": "automation",
+}
+
+
+def _open_desktop_permission_settings(target: str) -> dict[str, Any]:
+    normalized = _DESKTOP_PERMISSION_TARGET_ALIASES.get(str(target or "").strip(), "")
+    if not normalized:
+        return {
+            "ok": False,
+            "opened": False,
+            "target": str(target or "").strip(),
+            "error": "unsupported_desktop_permission_target",
+            "message": "当前权限项没有可打开的系统设置入口。",
+        }
+    label, urls = _DESKTOP_PERMISSION_SETTINGS[normalized]
+    if sys.platform != "darwin":
+        return {
+            "ok": False,
+            "opened": False,
+            "target": normalized,
+            "label": label,
+            "message": "当前平台不支持自动打开 macOS 系统设置。",
+        }
+    last_error = ""
+    for url in urls:
+        try:
+            result = subprocess.run(
+                ["open", url],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+        except Exception as exc:
+            last_error = redact_api_error_text(exc, fallback="打开系统设置失败")
+            continue
+        if result.returncode == 0:
+            clear_desktop_permission_probe_cache()
+            return {
+                "ok": True,
+                "opened": True,
+                "target": normalized,
+                "label": label,
+                "settings_url": url,
+                "message": f"已打开 macOS {label}权限设置。",
+            }
+        last_error = redact_api_error_text(
+            result.stderr or result.stdout or f"open exited {result.returncode}",
+            fallback="打开系统设置失败",
+        )
+    return {
+        "ok": False,
+        "opened": False,
+        "target": normalized,
+        "label": label,
+        "settings_url": urls[0] if urls else "",
+        "error": last_error,
+        "message": f"未能打开 macOS {label}权限设置。",
+    }
 
 
 @router.get("/dashboard")
@@ -341,6 +434,13 @@ async def check_proactive_screen_permission(request: ScreenPermissionRequest) ->
         return check_screen_capture_permission(open_settings=request.open_settings)
 
     return await asyncio.to_thread(_check)
+
+
+@router.post("/yachiyo/desktop-permissions/open-settings")
+async def open_yachiyo_desktop_permission_settings(
+    request: DesktopPermissionSettingsRequest,
+) -> dict[str, Any]:
+    return await asyncio.to_thread(_open_desktop_permission_settings, request.target)
 
 
 @router.post("/native-agent/terminal-command")
