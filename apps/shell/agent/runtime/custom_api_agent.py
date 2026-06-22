@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from apps.shell.agent.tools.policy import DAILY_DESKTOP_TOOL_NAMES
+
 
 class RuntimeCustomApiAgentLoop:
     """Runs the model/tool loop for native-profile and custom API Agents."""
@@ -153,6 +155,15 @@ class RuntimeCustomApiAgentLoop:
             if any(tool in allowed_tools for tool in self._future_task_tool_names)
             else ""
         )
+        desktop_tool_guidance = (
+            "For desktop requests, prefer structured desktop tools such as screen.capture, "
+            "desktop.active_window, app.open/app.focus, media.apple_music_play, "
+            "desktop.hotkey, and desktop.type_text when they are allowed. "
+            "Do not replace these with terminal.run. If a desktop permission is missing, "
+            "explain the exact missing permission and continue with the safest fallback. "
+            if any(tool in allowed_tools for tool in DAILY_DESKTOP_TOOL_NAMES)
+            else ""
+        )
         system_prompt = (
             "You are running inside Oha-Yachiyo Agent Runtime. "
             "Follow the Agent functional instructions, persona prompt, user goal, and exact output requests. "
@@ -168,6 +179,7 @@ class RuntimeCustomApiAgentLoop:
             "or an explicit deliverable requires them. "
             f"{memory_tool_guidance}"
             f"{future_task_guidance}"
+            f"{desktop_tool_guidance}"
             "If the user asks not to create, save, write, or modify files, provide the content inline and do "
             "not request file-writing tools. If the user asks not to run or execute commands, do not request "
             "command-execution tools. "
