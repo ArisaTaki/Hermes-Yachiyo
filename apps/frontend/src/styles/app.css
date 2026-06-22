@@ -15444,6 +15444,7 @@ button.activity-item {
 
 .agent-config-box,
 .agent-capability-box,
+.agent-desk-panel,
 .agent-skill-mounts,
 .agent-quick-run,
 .workflow-node-settings {
@@ -15475,6 +15476,121 @@ button.activity-item {
 
 .agent-capability-box {
   align-content: start;
+}
+
+.agent-desk-panel {
+  align-content: start;
+}
+
+.agent-desk-heading {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.agent-desk-heading>div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.agent-desk-heading p {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--hy-faint);
+  font-family: var(--hy-mono);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-desk-note {
+  min-height: 116px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.agent-desk-file-writer {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--hy-line);
+}
+
+.agent-desk-file-content {
+  min-height: 96px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.agent-desk-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.agent-desk-list {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.agent-desk-item {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 8px;
+  background: oklch(255 0 0 / 0.025);
+}
+
+.agent-desk-item.note {
+  border-color: oklch(66% 0.12 188 / 0.28);
+  background: oklch(66% 0.12 188 / 0.07);
+}
+
+.agent-desk-item.directory {
+  background: oklch(68% 0.15 155 / 0.06);
+}
+
+.agent-desk-item>div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.agent-desk-item strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--hy-fg);
+  font-family: var(--hy-mono);
+  font-size: 12px;
+  font-weight: 620;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-desk-item span {
+  color: var(--hy-faint);
+  font-size: 11px;
+}
+
+.agent-desk-item p {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 0;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  color: var(--hy-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .agent-capability-grid {

@@ -284,6 +284,25 @@ export type AgentDefinitionSnapshot = {
   updated_at?: string;
 };
 
+export type AgentDeskItemSnapshot = {
+  path: string;
+  name: string;
+  kind: 'file' | 'directory' | 'note';
+  size_bytes?: number | null;
+  mime_type?: string | null;
+  preview_text?: string | null;
+  updated_at?: string;
+};
+
+export type AgentDeskSnapshot = {
+  agent_id: string;
+  root_path: string;
+  notes_path?: string;
+  metadata_path?: string;
+  items?: AgentDeskItemSnapshot[];
+  updated_at?: string;
+};
+
 export type SkillSnapshot = {
   skill_id: string;
   name: string;

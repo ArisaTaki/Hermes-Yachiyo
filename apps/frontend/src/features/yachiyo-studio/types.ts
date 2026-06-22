@@ -7,6 +7,8 @@ import type {
 
 export type {
   AgentDefinitionSnapshot,
+  AgentDeskItemSnapshot,
+  AgentDeskSnapshot,
   AgentGroupMemberSnapshot,
   AgentGroupSnapshot,
   AgentTaskSnapshot,

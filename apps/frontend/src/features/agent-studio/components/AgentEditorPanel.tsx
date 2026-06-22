@@ -1,6 +1,7 @@
 import type { ModelProfile } from '../../../lib/modelProfiles';
 import type { SkillFolderSpec, SkillSpec } from '../types';
 import type { AgentDraft } from '../types';
+import { AgentDeskPanel } from './AgentDeskPanel';
 import { AgentSkillMountsPanel } from './AgentSkillMountsPanel';
 
 type AgentReadinessNotice = {
@@ -270,6 +271,13 @@ export function AgentEditorPanel({
         <input className="hy-input" value={draft.readable_scopes} onChange={(event) => updateDraft({ readable_scopes: event.target.value })} readOnly={selectedAgentReadOnly} />
         <small className="agent-field-help">允许 `workspace.list/read` 访问的相对目录，默认 `.` 表示工作区内可读。</small>
       </label>
+      {draft.agent_id ? (
+        <AgentDeskPanel
+          agentId={draft.agent_id}
+          busy={busy}
+          selectedAgentReadOnly={selectedAgentReadOnly}
+        />
+      ) : null}
       <div className="agent-inline-note">可行性验证：保存后先用“测试模型”检查模型连接，再用 Quick Run 做端到端验证；工具权限和 scopes 会在运行时强制校验。</div>
       <div className="agent-editor-actions">
         <button type="submit" className="primary-action" data-testid="agent-save" disabled={busy || selectedAgentReadOnly}>保存 Agent</button>

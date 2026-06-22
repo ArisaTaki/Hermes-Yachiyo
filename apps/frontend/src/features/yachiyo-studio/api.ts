@@ -1,6 +1,7 @@
 import { apiDelete, apiGet, apiPatch, apiPost } from '../../lib/bridge';
 import type {
   AgentDefinitionSnapshot,
+  AgentDeskSnapshot,
   AgentGroupSnapshot,
   ArtifactContentSnapshot,
   FutureTaskSnapshot,
@@ -95,6 +96,31 @@ export async function testYachiyoStudioAgentModel(
   return apiPost<{ ok?: boolean; message?: string; missing?: string[] }>(`/yachiyo/studio/agents/${encodedAgentId}/test-model`, {}).catch(() => (
     apiPost<{ ok?: boolean; message?: string; missing?: string[] }>(`/ui/agents/${encodedAgentId}/test-model`, {})
   ));
+}
+
+export async function getYachiyoAgentDesk(agentId: string): Promise<AgentDeskSnapshot> {
+  return apiGet<AgentDeskSnapshot>(`/yachiyo/studio/agents/${encodeURIComponent(agentId)}/desk`);
+}
+
+export async function saveYachiyoAgentDeskNote(
+  agentId: string,
+  content: string,
+): Promise<AgentDeskSnapshot> {
+  return apiPost<AgentDeskSnapshot>(
+    `/yachiyo/studio/agents/${encodeURIComponent(agentId)}/desk/note`,
+    { content },
+  );
+}
+
+export async function saveYachiyoAgentDeskFile(
+  agentId: string,
+  path: string,
+  content: string,
+): Promise<AgentDeskSnapshot> {
+  return apiPost<AgentDeskSnapshot>(
+    `/yachiyo/studio/agents/${encodeURIComponent(agentId)}/desk/files`,
+    { path, content },
+  );
 }
 
 export async function attachYachiyoAgentSkill(

@@ -6215,6 +6215,60 @@ def test_workflow_management_ui_smoke_uses_bulk_and_single_delete_paths() -> Non
 def test_agent_studio_agents_ui_smoke_uses_definition_crud_paths() -> None:
     smoke_script = "scripts/smoke_agent_studio_agents_ui.mjs"
     _assert_contains(
+        "apps/frontend/src/features/runtime-shared/types.ts",
+        [
+            "export type AgentDeskItemSnapshot",
+            "kind: 'file' | 'directory' | 'note';",
+            "export type AgentDeskSnapshot",
+            "items?: AgentDeskItemSnapshot[];",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-studio/types.ts",
+        [
+            "AgentDeskItemSnapshot",
+            "AgentDeskSnapshot",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-studio/api.ts",
+        [
+            "export async function getYachiyoAgentDesk",
+            "export async function saveYachiyoAgentDeskNote",
+            "export async function saveYachiyoAgentDeskFile",
+            "`/yachiyo/studio/agents/${encodeURIComponent(agentId)}/desk`",
+            "`/yachiyo/studio/agents/${encodeURIComponent(agentId)}/desk/note`",
+            "`/yachiyo/studio/agents/${encodeURIComponent(agentId)}/desk/files`",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useAgentDesk.ts",
+        [
+            "export function useAgentDesk(agentId: string)",
+            "getYachiyoAgentDesk(agentId)",
+            "saveYachiyoAgentDeskNote(agentId, noteDraft)",
+            "saveYachiyoAgentDeskFile(agentId, path, content)",
+            "Desk 便签已保存",
+            "Desk 文件已写入",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/AgentDeskPanel.tsx",
+        [
+            "export function AgentDeskPanel",
+            'data-testid="agent-desk-panel"',
+            'data-testid="agent-desk-refresh"',
+            'data-testid="agent-desk-note"',
+            'data-testid="agent-desk-save-note"',
+            'data-testid="agent-desk-file-path"',
+            'data-testid="agent-desk-file-content"',
+            'data-testid="agent-desk-save-file"',
+            'data-testid="agent-desk-item-list"',
+            "useAgentDesk(agentId)",
+            "selectedAgentReadOnly",
+        ],
+    )
+    _assert_contains(
         "apps/frontend/src/views/AgentStudioView.tsx",
         [
             "AgentDefinitionsTab",
@@ -6257,6 +6311,7 @@ def test_agent_studio_agents_ui_smoke_uses_definition_crud_paths() -> None:
     _assert_contains(
         "apps/frontend/src/features/agent-studio/components/AgentEditorPanel.tsx",
         [
+            "AgentDeskPanel",
             "AgentSkillMountsPanel",
             'data-testid="agent-editor"',
             'data-testid="agent-name-input"',
@@ -6273,6 +6328,7 @@ def test_agent_studio_agents_ui_smoke_uses_definition_crud_paths() -> None:
             "readOnly={selectedAgentReadOnly}",
             "disabled={selectedAgentReadOnly || draft.model_mode === 'custom_api'}",
             "disabled={busy || selectedAgentReadOnly}",
+            "agentId={draft.agent_id}",
             "系统 Agent 由 oha-yachiyo 管理，可查看但不能编辑、删除或直接挂载 Skill。",
         ],
     )
