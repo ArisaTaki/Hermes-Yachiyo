@@ -932,6 +932,7 @@ export function DiagnosticsView() {
             <button type="button" className="hy-btn hy-btn-ghost" data-testid="diagnostics-open-screen-recording-settings" disabled={Boolean(runtimeBusy)} onClick={() => void openDesktopPermissionSettings('screen_recording')}>屏幕录制权限</button>
             <button type="button" className="hy-btn hy-btn-ghost" data-testid="diagnostics-open-accessibility-settings" disabled={Boolean(runtimeBusy)} onClick={() => void openDesktopPermissionSettings('accessibility')}>辅助功能权限</button>
             <button type="button" className="hy-btn hy-btn-ghost" data-testid="diagnostics-open-automation-settings" disabled={Boolean(runtimeBusy)} onClick={() => void openDesktopPermissionSettings('automation')}>自动化权限</button>
+            <button type="button" className="hy-btn hy-btn-ghost" data-testid="diagnostics-open-music-app" disabled={Boolean(runtimeBusy)} onClick={() => void openDesktopPermissionSettings('music_app')}>Music.app</button>
             <button type="button" className="hy-btn hy-btn-ghost" data-testid="diagnostics-open-browser-cdp-settings" disabled={Boolean(runtimeBusy)} onClick={() => navigateTo('tools', { tool: 'browser-cdp' })}>Chrome CDP</button>
           </div>
         </div>

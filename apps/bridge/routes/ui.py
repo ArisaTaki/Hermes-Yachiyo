@@ -229,6 +229,9 @@ _DESKTOP_PERMISSION_TARGET_ALIASES = {
     "automation": "automation",
     "automation_or_accessibility": "automation",
     "media_control": "automation",
+    "music": "music_app",
+    "music_app": "music_app",
+    "apple_music": "music_app",
 }
 
 
@@ -242,6 +245,8 @@ def _open_desktop_permission_settings(target: str) -> dict[str, Any]:
             "error": "unsupported_desktop_permission_target",
             "message": "当前权限项没有可打开的系统设置入口。",
         }
+    if normalized == "music_app":
+        return _open_music_app_for_permission_probe()
     label, urls = _DESKTOP_PERMISSION_SETTINGS[normalized]
     if sys.platform != "darwin":
         return {
@@ -286,6 +291,56 @@ def _open_desktop_permission_settings(target: str) -> dict[str, Any]:
         "settings_url": urls[0] if urls else "",
         "error": last_error,
         "message": f"未能打开 macOS {label}权限设置。",
+    }
+
+
+def _open_music_app_for_permission_probe() -> dict[str, Any]:
+    label = "Music.app"
+    if sys.platform != "darwin":
+        return {
+            "ok": False,
+            "opened": False,
+            "target": "music_app",
+            "label": label,
+            "message": "当前平台不支持自动打开 Music.app。",
+        }
+    try:
+        result = subprocess.run(
+            ["open", "-a", "Music"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except Exception as exc:
+        return {
+            "ok": False,
+            "opened": False,
+            "target": "music_app",
+            "label": label,
+            "error": redact_api_error_text(exc, fallback="打开 Music.app 失败"),
+            "message": "未能打开 Music.app，请确认系统已安装 Apple Music。",
+        }
+    if result.returncode == 0:
+        clear_desktop_permission_probe_cache()
+        return {
+            "ok": True,
+            "opened": True,
+            "target": "music_app",
+            "label": label,
+            "app_name": "Music",
+            "message": "已打开 Music.app，请确认它可启动并允许自动化控制。",
+        }
+    return {
+        "ok": False,
+        "opened": False,
+        "target": "music_app",
+        "label": label,
+        "error": redact_api_error_text(
+            result.stderr or result.stdout or f"open exited {result.returncode}",
+            fallback="打开 Music.app 失败",
+        ),
+        "message": "未能打开 Music.app，请确认系统已安装 Apple Music。",
     }
 
 

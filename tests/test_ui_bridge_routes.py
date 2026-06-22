@@ -381,6 +381,35 @@ async def test_yachiyo_desktop_permission_settings_route_opens_macos_pane(monkey
 
 
 @pytest.mark.asyncio
+async def test_yachiyo_desktop_permission_settings_route_opens_music_app(monkeypatch):
+    calls = []
+    cache_cleared = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(ui.sys, "platform", "darwin")
+    monkeypatch.setattr(ui.subprocess, "run", fake_run)
+    monkeypatch.setattr(ui, "clear_desktop_permission_probe_cache", lambda: cache_cleared.append(True))
+
+    result = await ui.open_yachiyo_desktop_permission_settings(
+        ui.DesktopPermissionSettingsRequest(target="music_app")
+    )
+
+    assert result == {
+        "ok": True,
+        "opened": True,
+        "target": "music_app",
+        "label": "Music.app",
+        "app_name": "Music",
+        "message": "已打开 Music.app，请确认它可启动并允许自动化控制。",
+    }
+    assert calls[0][0] == ["open", "-a", "Music"]
+    assert cache_cleared == [True]
+
+
+@pytest.mark.asyncio
 async def test_yachiyo_desktop_permission_settings_route_reports_unsupported_platform(monkeypatch):
     monkeypatch.setattr(ui.sys, "platform", "linux")
 

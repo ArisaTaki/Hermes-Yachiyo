@@ -3482,6 +3482,8 @@ def test_diagnostics_screenshot_ui_smoke_uses_local_screen_probe_path() -> None:
             'data-testid="diagnostics-open-screen-recording-settings"',
             'data-testid="diagnostics-open-accessibility-settings"',
             'data-testid="diagnostics-open-automation-settings"',
+            'data-testid="diagnostics-open-music-app"',
+            "openDesktopPermissionSettings('music_app')",
             "navigateTo('tools', { tool: 'browser-cdp' })",
             'data-testid="diagnostics-screen-probe-card"',
             'data-testid="diagnostics-screen-probe-summary"',
