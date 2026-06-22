@@ -59,6 +59,49 @@ def test_tool_call_payload_from_event_preserves_approval_trace_context() -> None
     }
 
 
+def test_tool_call_payload_from_event_projects_desktop_result_status() -> None:
+    failed = tool_call_payload_from_event(
+        PublicRunEvent(
+            run_id="run-tool-status",
+            sequence=1,
+            event_type="agent.tool.call",
+            detail="media.apple_music_play",
+            created_at="2026-06-22T00:00:00Z",
+            payload={
+                "tool_call_id": "call-music",
+                "result": {
+                    "ok": False,
+                    "permission_error": True,
+                    "permission_targets": ["music_app", "automation"],
+                    "fallback_used": True,
+                },
+            },
+        )
+    )
+    waiting = tool_call_payload_from_event(
+        PublicRunEvent(
+            run_id="run-tool-status",
+            sequence=2,
+            event_type="agent.tool.call",
+            detail="terminal.run",
+            created_at="2026-06-22T00:00:01Z",
+            payload={
+                "tool_call_id": "call-terminal",
+                "result": {
+                    "ok": False,
+                    "approval_required": True,
+                    "tool": "terminal.run",
+                },
+            },
+        )
+    )
+
+    assert failed["status"] == "failed"
+    assert failed["tool_name"] == "media.apple_music_play"
+    assert waiting["status"] == "waiting_approval"
+    assert waiting["tool_name"] == "terminal.run"
+
+
 def test_tool_call_status_from_event_type_covers_terminal_approval_aliases() -> None:
     assert tool_status_from_event_type("tool.approval_timeout") == "expired"
     assert tool_status_from_event_type("agent.tool.approval_cancelled") == "cancelled"

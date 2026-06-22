@@ -179,6 +179,49 @@ def test_tool_call_snapshot_from_payload_marks_foreground_lock_busy_as_blocked()
     assert snapshot.output_preview["locked_by"] == "group-run-1:run-planner"
 
 
+def test_tool_call_snapshot_from_payload_marks_failed_desktop_result() -> None:
+    snapshot = tool_call_snapshot_from_payload(
+        {
+            "tool_call_id": "call-music",
+            "run_id": "run-desktop",
+            "tool_name": "media.apple_music_play",
+            "result": {
+                "ok": False,
+                "action": "media.apple_music_play",
+                "permission_error": True,
+                "permission_targets": ["music_app", "automation"],
+                "fallback_used": True,
+            },
+            "created_at": "2026-06-22T00:00:00Z",
+        }
+    )
+
+    assert snapshot.status == "failed"
+    assert snapshot.completed_at == "2026-06-22T00:00:00Z"
+    assert snapshot.output_preview["permission_error"] is True
+    assert snapshot.output_preview["fallback_used"] is True
+
+
+def test_tool_call_snapshot_from_payload_marks_approval_result_waiting() -> None:
+    snapshot = tool_call_snapshot_from_payload(
+        {
+            "tool_call_id": "call-terminal",
+            "run_id": "run-approval",
+            "tool_name": "terminal.run",
+            "result": {
+                "ok": False,
+                "approval_required": True,
+                "tool": "terminal.run",
+            },
+            "created_at": "2026-06-22T00:00:00Z",
+        }
+    )
+
+    assert snapshot.status == "waiting_approval"
+    assert snapshot.completed_at is None
+    assert snapshot.output_preview["approval_required"] is True
+
+
 def test_tool_call_snapshots_from_events_marks_foreground_lock_busy_as_blocked() -> None:
     snapshots = tool_call_snapshots_from_events(
         [
@@ -208,6 +251,37 @@ def test_tool_call_snapshots_from_events_marks_foreground_lock_busy_as_blocked()
     assert snapshots[0].status == "blocked"
     assert snapshots[0].completed_at == "2026-06-22T00:00:01Z"
     assert snapshots[0].output_preview["foreground_lock_busy"] is True
+
+
+def test_tool_call_snapshots_from_events_marks_failed_desktop_result() -> None:
+    snapshots = tool_call_snapshots_from_events(
+        [
+            PublicRunEvent(
+                event_id="evt-music-failed",
+                run_id="run-desktop",
+                sequence=1,
+                event_type="agent.tool.call",
+                detail="media.apple_music_play",
+                payload={
+                    "tool_call_id": "call-music",
+                    "result": {
+                        "ok": False,
+                        "action": "media.apple_music_play",
+                        "permission_error": True,
+                        "permission_targets": ["music_app", "automation"],
+                        "fallback_used": True,
+                    },
+                },
+                created_at="2026-06-22T00:00:01Z",
+            )
+        ]
+    )
+
+    assert len(snapshots) == 1
+    assert snapshots[0].tool_name == "media.apple_music_play"
+    assert snapshots[0].status == "failed"
+    assert snapshots[0].completed_at == "2026-06-22T00:00:01Z"
+    assert snapshots[0].output_preview["permission_error"] is True
 
 
 def test_tool_call_snapshots_from_payloads_prefers_payload_list_over_event_fallback() -> None:

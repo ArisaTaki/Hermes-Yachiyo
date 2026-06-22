@@ -12,6 +12,7 @@ from .contracts import PublicRunEvent, ToolCallSnapshot
 from .tool_call_payload_snapshots import (
     tool_call_snapshot_from_payload,
     tool_call_status_is_terminal,
+    tool_result_status,
 )
 
 
@@ -263,6 +264,14 @@ def tool_status_from_event_payload(event_type: str, payload: Mapping[str, Any]) 
         return explicit
     if _payload_foreground_lock_is_busy(payload):
         return "blocked"
+    result = payload.get("result")
+    if isinstance(result, Mapping):
+        result_status = tool_result_status(result)
+        if result_status:
+            return result_status
+    result_status = tool_result_status(payload)
+    if result_status:
+        return result_status
     return tool_status_from_event_type(event_type)
 
 

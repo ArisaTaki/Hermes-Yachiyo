@@ -96,9 +96,20 @@ def tool_status_from_payload(
     explicit = _text(payload.get("status"))
     if explicit:
         return explicit
-    if _foreground_lock_is_busy(payload) or _foreground_lock_is_busy(output_preview):
-        return "blocked"
+    result_status = tool_result_status(output_preview) or tool_result_status(payload)
+    if result_status:
+        return result_status
     return "completed"
+
+
+def tool_result_status(value: Mapping[str, Any]) -> str:
+    if _foreground_lock_is_busy(value):
+        return "blocked"
+    if value.get("approval_required") is True:
+        return "waiting_approval"
+    if value.get("ok") is False:
+        return "failed"
+    return ""
 
 
 def tool_output_preview(payload: Mapping[str, Any]) -> dict[str, Any]:
