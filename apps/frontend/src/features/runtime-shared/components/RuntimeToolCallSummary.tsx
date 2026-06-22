@@ -34,6 +34,7 @@ const TOOL_EVENT_TYPES = new Set([
   'agent.tool.completed',
   'tool.failed',
   'tool.cancelled',
+  'agent.desktop.intent_planned',
   'skill.selected',
   'skill.dispatch.read',
   'memory.retrieved',
@@ -75,7 +76,7 @@ export function RuntimeToolCallSummary({
             data-tool-status={tool.status}
             key={tool.name}
           >
-            <strong>{runtimeToolSummaryDisplayName(tool.name)}</strong>
+            <strong>{runtimeToolSummaryDisplayName(tool.name, tool.status)}</strong>
             {tool.count > 1 ? <em>x{tool.count}</em> : null}
             <small>{runtimeToolStatusLabel(tool.status)}</small>
           </span>
@@ -190,6 +191,7 @@ function runtimeToolStatusFromEvent(event: PublicRunEvent): string {
   }
   if (eventType === 'tool.started') return 'running';
   if (eventType === 'tool.requested') return 'queued';
+  if (eventType === 'agent.desktop.intent_planned') return 'planned';
   return 'running';
 }
 
@@ -198,6 +200,7 @@ function normalizeRuntimeToolStatus(status: string): string {
   if (status === 'approval_required') return 'waiting_approval';
   const knownStatuses = [
     'queued',
+    'planned',
     'running',
     'waiting_approval',
     'approved',
@@ -228,6 +231,7 @@ function objectPayload(payload: Record<string, unknown> | undefined, key: string
 
 function runtimeToolStatusLabel(status: string): string {
   if (status === 'queued') return '已请求';
+  if (status === 'planned') return '已规划';
   if (status === 'running') return '执行中';
   if (status === 'waiting_approval') return '待审批';
   if (status === 'approved') return '已批准';
@@ -240,6 +244,27 @@ function runtimeToolStatusLabel(status: string): string {
   return status || '工具';
 }
 
-function runtimeToolSummaryDisplayName(name: string): string {
+function runtimeToolSummaryDisplayName(name: string, status: string): string {
+  const activeLabel = runtimeToolActiveSummaryLabel(name, status);
+  if (activeLabel) return activeLabel;
   return runtimeToolDisplayLabelOrName(name);
+}
+
+function runtimeToolActiveSummaryLabel(name: string, status: string): string {
+  if (!['queued', 'planned', 'running'].includes(status)) return '';
+  const tool = String(name || '').trim();
+  if (tool === 'screen.capture') return '正在截图';
+  if (tool === 'desktop.active_window') return '正在读取前台窗口';
+  if (tool === 'app.open') return '正在打开应用';
+  if (tool === 'app.focus') return '正在聚焦应用';
+  if (tool === 'media.apple_music_play') return '正在打开 Music';
+  if (tool === 'desktop.hotkey') return '正在发送快捷键';
+  if (tool === 'desktop.type_text') return '正在输入前台文字';
+  if (tool === 'browser.open_url') return '正在打开网页';
+  if (tool === 'browser.current_page') return '正在读取当前网页';
+  if (tool === 'browser.click') return '正在点击网页';
+  if (tool === 'browser.type_text') return '正在填写网页输入';
+  if (tool === 'browser.extract_text') return '正在提取网页文本';
+  if (tool === 'browser.screenshot') return '正在截取网页';
+  return '';
 }
