@@ -7,6 +7,7 @@ import pytest
 from apps.shell import agent_runtime
 from apps.shell.agent.runtime.errors import AgentRuntimeError
 from apps.shell.agent.runtime.run_readiness import RuntimeRunReadinessValidator, native_agent_readiness
+from apps.shell.agent.tools.policy import RuntimePolicyCompiler
 
 
 def test_run_readiness_validator_remains_exported_from_legacy_module() -> None:
@@ -97,6 +98,39 @@ def test_run_readiness_validator_projects_workflow_agent_node() -> None:
     assert agent["name"] == "Research"
     with pytest.raises(AgentRuntimeError, match="没有选择 Agent"):
         validator.workflow_agent_for_node({"id": "empty", "type": "agent", "data": {}})
+
+
+def test_workflow_agent_node_can_override_tool_policy_without_mutating_agent() -> None:
+    stored_agent = {
+        "agent_id": "agent-1",
+        "name": "Research",
+        "enabled": True,
+        "tool_policy": {"allowed_tools": ["workspace.read"]},
+    }
+    validator = _validator(agents={"agent-1": stored_agent})
+
+    agent = validator.workflow_agent_for_node(
+        {
+            "id": "screen-review",
+            "type": "agent",
+            "data": {
+                "agent_id": "agent-1",
+                "tool_policy": {
+                    "allowed_tools": ["screen.capture", "terminal.run"],
+                    "approval_required": {},
+                },
+            },
+        }
+    )
+    compiled = RuntimePolicyCompiler().compile_tool_policy(
+        str(agent.get("category") or "custom"),
+        agent.get("tool_policy"),
+    )
+
+    assert agent["tool_policy"]["allowed_tools"] == ["screen.capture", "terminal.run"]
+    assert stored_agent["tool_policy"]["allowed_tools"] == ["workspace.read"]
+    assert compiled["allowed_tools"] == ["screen.capture", "terminal.run"]
+    assert compiled["approval_required"] == {"terminal.run": True}
 
 
 def test_run_readiness_validator_rejects_self_referencing_subworkflow() -> None:

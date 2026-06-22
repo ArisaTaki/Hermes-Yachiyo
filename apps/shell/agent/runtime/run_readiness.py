@@ -112,6 +112,9 @@ class RuntimeRunReadinessValidator:
             raise AgentRuntimeError(f"Agent 节点 {label} 引用了不存在的 Agent") from exc
         if not agent.get("enabled", True):
             raise AgentRuntimeError(f"Agent 节点 {label} 选择的 Agent 已停用")
+        tool_policy = data.get("tool_policy")
+        if isinstance(tool_policy, dict):
+            return {**agent, "tool_policy": dict(tool_policy)}
         return agent
 
     @staticmethod
