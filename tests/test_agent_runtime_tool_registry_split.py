@@ -396,6 +396,28 @@ def test_screen_capture_tool_writes_artifact_metadata(tmp_path, monkeypatch) -> 
     assert (tmp_path / "artifacts" / "screenshots" / "current-screen.png").read_bytes() == b"png"
 
 
+def test_app_open_failure_returns_unified_desktop_result(monkeypatch) -> None:
+    def fake_run(command, **kwargs):
+        return subprocess.CompletedProcess(
+            command,
+            1,
+            stdout="",
+            stderr="Application not found.",
+        )
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.app_open("Missing App")
+
+    assert result["ok"] is False
+    assert result["action"] == "app.open"
+    assert result["summary"] == "app.open failed"
+    assert result["data"] == {}
+    assert result["permission_error"] is False
+    assert result["fallback_used"] is False
+
+
 def test_desktop_active_window_permission_failure_returns_recovery_targets(monkeypatch) -> None:
     def fake_run(command, **kwargs):
         return subprocess.CompletedProcess(
