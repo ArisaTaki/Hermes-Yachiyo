@@ -13,12 +13,14 @@ from apps.shell.agent.runtime.workflow_projections import (
     WorkflowParallelNodeProjection,
     WorkflowProjectionPortBundle,
     WorkflowRunCompletionProjection,
+    WorkflowStartNodeCoordinator,
     WorkflowStartNodeProjection,
 )
 
 
 def test_workflow_timeline_projections_remain_exported_from_legacy_module() -> None:
     assert agent_runtime.WorkflowStartNodeProjection is WorkflowStartNodeProjection
+    assert agent_runtime.WorkflowStartNodeCoordinator is WorkflowStartNodeCoordinator
     assert agent_runtime.WorkflowEdgeFollowedCoordinator is WorkflowEdgeFollowedCoordinator
     assert agent_runtime.WorkflowEdgeFollowedProjection is WorkflowEdgeFollowedProjection
     assert agent_runtime.WorkflowConditionNodeProjection is WorkflowConditionNodeProjection
@@ -53,6 +55,51 @@ def test_workflow_edge_followed_projection_builds_replay_payload() -> None:
         "workflow_edge_branch": "true",
         "status": "completed",
     }
+
+
+def test_workflow_start_node_coordinator_appends_timeline_and_run_event() -> None:
+    timeline_events: list[dict[str, object]] = []
+    run_events: list[tuple[str, str, dict[str, object]]] = []
+    coordinator = WorkflowStartNodeCoordinator(
+        timeline_factory=lambda event, detail="", **payload: timeline_events.append(
+            {"event": event, "detail": detail, **payload}
+        )
+        or timeline_events[-1],
+        append_run_event=lambda run_id, event_type, payload: run_events.append(
+            (run_id, event_type, payload)
+        ),
+    )
+    timeline: list[dict[str, object]] = []
+
+    coordinator.append(
+        {"run_id": "workflow_run"},
+        {"id": "start", "type": "start"},
+        label="Start",
+        kind="start",
+        timeline=timeline,
+    )
+
+    assert timeline == timeline_events
+    assert timeline == [
+        {
+            "event": "workflow.node.start",
+            "detail": "Start",
+            "workflow_node_id": "start",
+            "status": "completed",
+        }
+    ]
+    assert run_events == [
+        (
+            "workflow_run",
+            "workflow.node.start",
+            {
+                "workflow_node_id": "start",
+                "workflow_node_kind": "start",
+                "workflow_node_label": "Start",
+                "status": "completed",
+            },
+        )
+    ]
 
 
 def test_workflow_edge_followed_coordinator_appends_only_valid_edges() -> None:

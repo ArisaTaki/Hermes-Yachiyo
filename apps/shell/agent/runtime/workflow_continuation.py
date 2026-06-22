@@ -37,7 +37,7 @@ from apps.shell.agent.runtime.workflow_projections import (
     WorkflowParallelNodeProjection,
     WorkflowProjectionPortBundle,
     WorkflowRunCompletionProjection,
-    WorkflowStartNodeProjection,
+    WorkflowStartNodeCoordinator,
 )
 from apps.shell.agent.runtime.workflow_run_outcomes import WorkflowRunOutcomeProjector
 from apps.shell.agent.runtime.workflow_state import (
@@ -205,6 +205,10 @@ class WorkflowContinuationCoordinator:
         )
         self._edge_followed = WorkflowEdgeFollowedCoordinator(
             node_kind=self._node_kind,
+            append_run_event=self._append_run_event,
+        )
+        self._start_node = WorkflowStartNodeCoordinator(
+            timeline_factory=self._timeline,
             append_run_event=self._append_run_event,
         )
 
@@ -614,12 +618,12 @@ class WorkflowContinuationCoordinator:
                 budget.check_context(self._workflow_context_chars(context))
                 budget.claim_step()
                 if kind == "start":
-                    projection = WorkflowStartNodeProjection.from_node(node, label=label, kind=kind)
-                    timeline.append(projection.timeline_event(self._timeline))
-                    self._append_run_event(
-                        str(run["run_id"]),
-                        "workflow.node.start",
-                        projection.event_payload(),
+                    self._start_node.append(
+                        run,
+                        node,
+                        label=label,
+                        kind=kind,
+                        timeline=timeline,
                     )
                     next_id = next_node_id_for(node, context)
                     self._edge_followed.append(run, node, next_id)

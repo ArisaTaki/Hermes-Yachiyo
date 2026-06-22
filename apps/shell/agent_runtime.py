@@ -413,6 +413,7 @@ from apps.shell.agent.runtime.workflow_projections import (
     WorkflowParallelNodeProjection,
     WorkflowProjectionPortBundle,
     WorkflowRunCompletionProjection,
+    WorkflowStartNodeCoordinator,
     WorkflowStartNodeProjection,
 )
 from apps.shell.agent.runtime.workflow_resume import (

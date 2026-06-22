@@ -77,6 +77,36 @@ class WorkflowStartNodeProjection:
         )
 
 
+class WorkflowStartNodeCoordinator:
+    """Appends Workflow start-node timeline and run events."""
+
+    def __init__(
+        self,
+        *,
+        timeline_factory: Any,
+        append_run_event: Any,
+    ) -> None:
+        self._timeline = timeline_factory
+        self._append_run_event = append_run_event
+
+    def append(
+        self,
+        run: dict[str, Any],
+        node: dict[str, Any],
+        *,
+        label: str,
+        kind: str,
+        timeline: list[dict[str, Any]],
+    ) -> None:
+        projection = WorkflowStartNodeProjection.from_node(node, label=label, kind=kind)
+        timeline.append(projection.timeline_event(self._timeline))
+        self._append_run_event(
+            str(run["run_id"]),
+            "workflow.node.start",
+            projection.event_payload(),
+        )
+
+
 @dataclass(frozen=True)
 class WorkflowEdgeFollowedProjection:
     """Replay payload for a Workflow edge routing decision."""
