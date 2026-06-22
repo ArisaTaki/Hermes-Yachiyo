@@ -745,6 +745,8 @@ def test_runtime_core_split_acceptance_paths_are_guarded() -> None:
             "def tool_call_snapshot_from_payload",
             "return _redacted_tool_call_snapshot(payload)",
             "def tool_output_preview",
+            "def tool_foreground_lock_is_busy",
+            "foreground_lock_holder",
         ],
     )
     _assert_contains(
@@ -755,6 +757,7 @@ def test_runtime_core_split_acceptance_paths_are_guarded() -> None:
             "def merge_tool_call_snapshots",
             "def tool_call_correlation_key",
             "def tool_status_from_event_type",
+            "foreground_lock_busy=current.foreground_lock_busy",
         ],
     )
     _assert_contains(
@@ -767,6 +770,8 @@ def test_runtime_core_split_acceptance_paths_are_guarded() -> None:
             "memory_trace_snapshots_from_events(events)",
             "skill_trace_snapshots_from_events(events)",
             "timeline_child_snapshots_from_payloads(",
+            "timeline_child_snapshots_from_events(events)",
+            "merge_timeline_child_snapshots(",
         ],
     )
     _assert_contains(
@@ -783,11 +788,21 @@ def test_runtime_core_split_acceptance_paths_are_guarded() -> None:
         "apps/shell/yachiyo_agent/timeline_metadata_snapshots.py",
         [
             "def timeline_child_snapshots_from_payloads",
+            "def timeline_child_snapshots_from_events",
+            "def timeline_child_snapshot_from_event",
+            "def merge_timeline_child_snapshots",
             "def run_timeline_rerun_provenance_from_payload",
             "def run_timeline_agent_id_from_payload",
             "def workflow_run_id_from_payload",
             "\"run.rerun.started\"",
             "RunTimelineChildSnapshot",
+        ],
+    )
+    _assert_contains(
+        "tests/test_yachiyo_run_snapshots.py",
+        [
+            "test_workflow_run_snapshot_derives_child_approval_bridge_from_replay_events",
+            "test_group_run_snapshot_rolls_foreground_lock_waiting_tool_calls_to_member",
         ],
     )
     _assert_contains(
@@ -1347,7 +1362,7 @@ def test_run_replay_rerun_and_workflow_branch_acceptance_paths_are_guarded() -> 
         ],
     )
     _assert_contains(
-        "apps/shell/agent/runtime/workflow_continuation.py",
+        "apps/shell/agent/runtime/workflow_projections.py",
         [
             '"workflow.edge.followed"',
             "WorkflowEdgeFollowedProjection.from_node",
