@@ -9,6 +9,7 @@ from apps.shell.yachiyo_agent.legacy_group_runs import (
     group_run_status_from_child_runs,
     group_run_summary_from_child_runs,
 )
+from apps.shell.yachiyo_agent import legacy_group_orchestration
 
 
 def test_legacy_group_run_plan_orders_debate_members_before_moderator() -> None:
@@ -42,6 +43,29 @@ def test_legacy_group_run_plan_orders_debate_members_before_moderator() -> None:
     assert group_member_orchestration_context(plan, plan["members"][2], 2)[
         "group_member_phase"
     ] == "moderator_summary"
+
+
+def test_legacy_group_run_wrappers_delegate_to_split_orchestration_module() -> None:
+    group = {"mode": "parallel"}
+    members = [
+        {"agent_id": "agent-b", "sort_order": 2},
+        {"agent_id": "agent-a", "sort_order": 1},
+    ]
+
+    legacy_plan = group_orchestration_plan(group, members)
+    split_plan = legacy_group_orchestration.group_orchestration_plan(group, members)
+
+    assert legacy_plan == split_plan
+    assert group_run_orchestration_context(legacy_plan) == (
+        legacy_group_orchestration.group_run_orchestration_context(split_plan)
+    )
+    assert group_member_orchestration_context(legacy_plan, legacy_plan["members"][0], 0) == (
+        legacy_group_orchestration.group_member_orchestration_context(
+            split_plan,
+            split_plan["members"][0],
+            0,
+        )
+    )
 
 
 def test_legacy_group_run_status_and_summary_project_from_child_runs() -> None:
