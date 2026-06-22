@@ -977,10 +977,14 @@ def test_tool_call_snapshot_keeps_runtime_trace_fields() -> None:
         "risk_level",
         "input_preview",
         "output_preview",
+        "foreground_lock_busy",
+        "foreground_lock_holder",
         "approval_id",
         "started_at",
         "completed_at",
     ]
+    assert payload["foreground_lock_busy"] is False
+    assert payload["foreground_lock_holder"] is None
     assert payload["source_runnable_name"] == "Planner"
     assert payload["workflow_node_id"] == "read"
     assert payload["group_run_id"] == "group-run-1"

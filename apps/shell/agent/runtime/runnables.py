@@ -224,15 +224,17 @@ class RuntimeRunnableRunCoordinator:
         runnable = self._required_runnable(runnable_id=runnable_id, name=name, message="未找到指定 Agent 或 Workflow")
         request_id = client_run_id or client_request_id
         if runnable["kind"] == "agent":
-            run = self._create_agent_run({
+            payload = {
                 "agent_id": runnable["id"],
                 "user_goal": user_goal,
                 "source": "agent",
                 "run_group_id": run_group_id,
                 "upstream": upstream,
                 "client_run_id": request_id,
-                "agent_override": agent_override,
-            })
+            }
+            if agent_override is not None:
+                payload["agent_override"] = agent_override
+            run = self._create_agent_run(payload)
             run["agent_run_id"] = run["run_id"]
             run["runnable"] = runnable
             return run
@@ -260,15 +262,17 @@ class RuntimeRunnableRunCoordinator:
     ) -> dict[str, Any]:
         runnable = self._required_runnable(runnable_id=runnable_id, name=name, message="未找到指定 Agent 或 Workflow")
         if runnable["kind"] == "agent":
+            payload = {
+                "agent_id": runnable["id"],
+                "user_goal": user_goal,
+                "source": "agent",
+                "run_group_id": run_group_id,
+                "upstream": upstream,
+            }
+            if agent_override is not None:
+                payload["agent_override"] = agent_override
             run = self._create_agent_run_async(
-                {
-                    "agent_id": runnable["id"],
-                    "user_goal": user_goal,
-                    "source": "agent",
-                    "run_group_id": run_group_id,
-                    "upstream": upstream,
-                    "agent_override": agent_override,
-                },
+                payload,
                 on_complete=on_complete,
             )
             run["agent_run_id"] = run["run_id"]
