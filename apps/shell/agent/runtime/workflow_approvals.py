@@ -252,3 +252,52 @@ class WorkflowApprovalPauseProjection:
             "artifacts": artifacts,
             "pending_approval": self.pending_approval(),
         }
+
+
+class WorkflowApprovalPauseCoordinator:
+    """Applies Workflow approval pause projections to run state and root groups."""
+
+    def __init__(
+        self,
+        *,
+        timeline_factory: Any,
+        append_run_event: Any,
+        update_run: Any,
+        update_run_group: Any,
+        get_run: Any,
+    ) -> None:
+        self._timeline = timeline_factory
+        self._append_run_event = append_run_event
+        self._update_run = update_run
+        self._update_run_group = update_run_group
+        self._get_run = get_run
+
+    def pause(
+        self,
+        run: dict[str, Any],
+        projection: WorkflowApprovalPauseProjection,
+        *,
+        run_group_id: str,
+        timeline: list[dict[str, Any]],
+        artifacts: list[dict[str, Any]],
+        root_group: bool,
+    ) -> dict[str, Any]:
+        run_id = str(run["run_id"])
+        timeline.append(projection.timeline_event(self._timeline))
+        self._append_run_event(
+            run_id,
+            "workflow.node.approval_required",
+            projection.event_payload(),
+        )
+        result = self._update_run(
+            run_id,
+            **projection.update_fields(timeline=timeline, artifacts=artifacts),
+        )
+        if root_group:
+            self._update_run_group(
+                run_group_id,
+                status="approval_required",
+                summary=projection.result_text(),
+            )
+            result = self._get_run(result["run_id"])
+        return result

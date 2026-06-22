@@ -369,6 +369,7 @@ from apps.shell.agent.runtime.workflow_approval_execution import (
     RuntimeWorkflowApprovalExecutionService,
 )
 from apps.shell.agent.runtime.workflow_approvals import (
+    WorkflowApprovalPauseCoordinator,
     WorkflowApprovalPauseProjection,
     WorkflowApprovalResumeContext,
     WorkflowApprovalResumeCoordinator,

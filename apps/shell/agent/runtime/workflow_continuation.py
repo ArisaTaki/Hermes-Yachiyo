@@ -9,7 +9,10 @@ from apps.shell.agent.runtime.callbacks import supports_keyword
 from apps.shell.agent.runtime.clock import iso_epoch as _iso_epoch
 from apps.shell.agent.runtime.errors import AgentRuntimeError
 from apps.shell.agent.runtime.tool_brokers import write_artifact_with_tool_broker
-from apps.shell.agent.runtime.workflow_approvals import WorkflowApprovalPauseProjection
+from apps.shell.agent.runtime.workflow_approvals import (
+    WorkflowApprovalPauseCoordinator,
+    WorkflowApprovalPauseProjection,
+)
 from apps.shell.agent.runtime.workflow_child_approvals import (
     WorkflowChildPendingApprovalProjection,
 )
@@ -187,6 +190,13 @@ class WorkflowContinuationCoordinator:
         self._node_kind_callback = port_value(node_kind, "node_kind")
         self._outcomes = WorkflowRunOutcomeProjector(
             engine,
+            timeline_factory=self._timeline,
+            append_run_event=self._append_run_event,
+            update_run=self._update_run,
+            update_run_group=self._update_run_group,
+            get_run=self._get_run,
+        )
+        self._approval_pause = WorkflowApprovalPauseCoordinator(
             timeline_factory=self._timeline,
             append_run_event=self._append_run_event,
             update_run=self._update_run,
@@ -1071,24 +1081,14 @@ class WorkflowContinuationCoordinator:
             next_index=node_index + 1,
             next_node_id=next_node_id,
         )
-        timeline.append(projection.timeline_event(self._timeline))
-        self._append_run_event(
-            str(run["run_id"]),
-            "workflow.node.approval_required",
-            projection.event_payload(),
+        return self._approval_pause.pause(
+            run,
+            projection,
+            run_group_id=run_group_id,
+            timeline=timeline,
+            artifacts=artifacts,
+            root_group=root_group,
         )
-        result = self._update_run(
-            str(run["run_id"]),
-            **projection.update_fields(timeline=timeline, artifacts=artifacts),
-        )
-        if root_group:
-            self._update_run_group(
-                run_group_id,
-                status="approval_required",
-                summary=projection.result_text(),
-            )
-            result = self._get_run(result["run_id"])
-        return result
 
     def _run_parallel_node(
         self,
