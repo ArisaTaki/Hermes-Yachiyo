@@ -279,7 +279,7 @@ def _group_run_pending_approvals(
         if approval.status == "pending"
     ]
     return _unique_by(
-        [*child_approvals, *direct_and_event_approvals],
+        [*direct_and_event_approvals, *child_approvals],
         lambda approval: approval.approval_id,
     )
 
