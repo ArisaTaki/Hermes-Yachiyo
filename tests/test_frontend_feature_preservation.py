@@ -3474,6 +3474,12 @@ def test_diagnostics_screenshot_ui_smoke_uses_local_screen_probe_path() -> None:
             "if (payload.dashboard) setOverview(payload.dashboard);",
             "void loadModelProfileSnapshot();",
             "function modelDiagnosticStatus(",
+            "currentParam('permission_targets')",
+            "diagnosticPermissionTargets",
+            "diagnosticPermissionTargetAction",
+            "diagnosticPermissionTargetSummary",
+            "diagnosticPermissionActionClass",
+            'data-testid="diagnostics-permission-targets"',
             "defaultChatProfile(modelProfiles)",
             "availableChatProfiles(modelProfiles)",
             "await copyText(text);",
@@ -3487,6 +3493,7 @@ def test_diagnostics_screenshot_ui_smoke_uses_local_screen_probe_path() -> None:
             'data-testid="diagnostics-open-accessibility-settings"',
             'data-testid="diagnostics-open-automation-settings"',
             'data-testid="diagnostics-open-music-app"',
+            "diagnostic-targeted-action",
             "openDesktopPermissionSettings('music_app')",
             "navigateTo('tools', { tool: 'browser-cdp' })",
             'data-testid="diagnostics-screen-probe-card"',
@@ -3500,6 +3507,13 @@ def test_diagnostics_screenshot_ui_smoke_uses_local_screen_probe_path() -> None:
             "const detail = data?.detail;",
             "typeof detail?.message === 'string'",
             "typeof detail?.error === 'string'",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/styles/app.css",
+        [
+            ".diagnostic-targeted-caption",
+            ".diagnostic-result-actions .diagnostic-targeted-action",
         ],
     )
     _assert_contains(

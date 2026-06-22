@@ -406,6 +406,8 @@ const HIDDEN_NATIVE_TOOLS = new Set(['vision', 'vision_analyze']);
 
 export function DiagnosticsView() {
   const initialCommand = normalizeDiagnosticCommand(currentParam('command'));
+  const permissionTargets = diagnosticPermissionTargets(currentParam('permission_targets'));
+  const permissionTargetSummary = diagnosticPermissionTargetSummary(permissionTargets);
   const [selectedCommand, setSelectedCommand] = useState(initialCommand || DIAGNOSTIC_ACTIONS[0].command);
   const [result, setResult] = useState<DiagnosticResult | null>(null);
   const [diagnosticCache, setDiagnosticCache] = useState<DiagnosticCache | null>(null);
@@ -925,15 +927,20 @@ export function DiagnosticsView() {
           <div>
             <h2>本地能力探测</h2>
             <p className="section-caption">手动调用截图与活动窗口接口；截图只显示本地缩略预览和尺寸。</p>
+            {permissionTargetSummary ? (
+              <p className="section-caption diagnostic-targeted-caption" data-testid="diagnostics-permission-targets">
+                Chat 提示的恢复目标：{permissionTargetSummary}
+              </p>
+            ) : null}
           </div>
           <div className="diagnostic-result-actions">
             <button type="button" className="hy-btn hy-btn-ghost" data-testid="diagnostics-screen-probe" disabled={Boolean(runtimeBusy)} onClick={() => void probeScreen()}>{runtimeBusy === 'screen' ? '探测中...' : '截图摘要'}</button>
             <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(runtimeBusy)} onClick={() => void probeActiveWindow()}>{runtimeBusy === 'active-window' ? '探测中...' : '活动窗口'}</button>
-            <button type="button" className="hy-btn hy-btn-ghost" data-testid="diagnostics-open-screen-recording-settings" disabled={Boolean(runtimeBusy)} onClick={() => void openDesktopPermissionSettings('screen_recording')}>屏幕录制权限</button>
-            <button type="button" className="hy-btn hy-btn-ghost" data-testid="diagnostics-open-accessibility-settings" disabled={Boolean(runtimeBusy)} onClick={() => void openDesktopPermissionSettings('accessibility')}>辅助功能权限</button>
-            <button type="button" className="hy-btn hy-btn-ghost" data-testid="diagnostics-open-automation-settings" disabled={Boolean(runtimeBusy)} onClick={() => void openDesktopPermissionSettings('automation')}>自动化权限</button>
-            <button type="button" className="hy-btn hy-btn-ghost" data-testid="diagnostics-open-music-app" disabled={Boolean(runtimeBusy)} onClick={() => void openDesktopPermissionSettings('music_app')}>Music.app</button>
-            <button type="button" className="hy-btn hy-btn-ghost" data-testid="diagnostics-open-browser-cdp-settings" disabled={Boolean(runtimeBusy)} onClick={() => navigateTo('tools', { tool: 'browser-cdp' })}>Chrome CDP</button>
+            <button type="button" className={diagnosticPermissionActionClass(permissionTargets, 'screen_recording')} data-testid="diagnostics-open-screen-recording-settings" disabled={Boolean(runtimeBusy)} onClick={() => void openDesktopPermissionSettings('screen_recording')}>屏幕录制权限</button>
+            <button type="button" className={diagnosticPermissionActionClass(permissionTargets, 'accessibility')} data-testid="diagnostics-open-accessibility-settings" disabled={Boolean(runtimeBusy)} onClick={() => void openDesktopPermissionSettings('accessibility')}>辅助功能权限</button>
+            <button type="button" className={diagnosticPermissionActionClass(permissionTargets, 'automation')} data-testid="diagnostics-open-automation-settings" disabled={Boolean(runtimeBusy)} onClick={() => void openDesktopPermissionSettings('automation')}>自动化权限</button>
+            <button type="button" className={diagnosticPermissionActionClass(permissionTargets, 'music_app')} data-testid="diagnostics-open-music-app" disabled={Boolean(runtimeBusy)} onClick={() => void openDesktopPermissionSettings('music_app')}>Music.app</button>
+            <button type="button" className={diagnosticPermissionActionClass(permissionTargets, 'chrome_cdp')} data-testid="diagnostics-open-browser-cdp-settings" disabled={Boolean(runtimeBusy)} onClick={() => navigateTo('tools', { tool: 'browser-cdp' })}>Chrome CDP</button>
           </div>
         </div>
         <div className="diagnostic-probe-grid">
@@ -976,6 +983,57 @@ export function DiagnosticsView() {
 function normalizeDiagnosticCommand(value: string): string {
   const normalized = value.trim().replace(/\s+/g, ' ');
   return DIAGNOSTIC_ACTIONS.find((action) => action.command === normalized || action.id === normalized)?.command || '';
+}
+
+type DiagnosticPermissionAction = 'screen_recording' | 'accessibility' | 'automation' | 'music_app' | 'chrome_cdp';
+
+const diagnosticPermissionLabels: Record<DiagnosticPermissionAction, string> = {
+  accessibility: '辅助功能权限',
+  automation: '自动化权限',
+  chrome_cdp: 'Chrome CDP',
+  music_app: 'Music.app',
+  screen_recording: '屏幕录制权限',
+};
+
+function diagnosticPermissionTargets(value: string): Set<DiagnosticPermissionAction> {
+  const targets = new Set<DiagnosticPermissionAction>();
+  value.split(',').forEach((item) => {
+    const token = item.trim();
+    if (!token) return;
+    const action = diagnosticPermissionTargetAction(token);
+    if (action) targets.add(action);
+  });
+  return targets;
+}
+
+function diagnosticPermissionTargetAction(token: string): DiagnosticPermissionAction | null {
+  if (token === 'screen_recording' || token === 'screen_capture_probe_failed') return 'screen_recording';
+  if (token === 'accessibility' || token === 'foreground_input') return 'accessibility';
+  if (
+    token === 'automation'
+    || token === 'automation_or_accessibility'
+    || token === 'active_window'
+    || token === 'app_control'
+    || token === 'open_command'
+  ) {
+    return 'automation';
+  }
+  if (token === 'music' || token === 'music_app' || token === 'apple_music' || token === 'media_control') return 'music_app';
+  if (token === 'chrome_cdp' || token === 'browser_control') return 'chrome_cdp';
+  return null;
+}
+
+function diagnosticPermissionTargetSummary(targets: Set<DiagnosticPermissionAction>): string {
+  return Array.from(targets).map((target) => diagnosticPermissionLabels[target]).join('、');
+}
+
+function diagnosticPermissionActionClass(
+  targets: Set<DiagnosticPermissionAction>,
+  action: DiagnosticPermissionAction,
+): string {
+  return targets.has(action)
+    ? 'hy-btn hy-btn-ghost diagnostic-targeted-action'
+    : 'hy-btn hy-btn-ghost';
 }
 
 function diagnosticNoticeClass(message: string) {

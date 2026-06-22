@@ -3131,6 +3131,16 @@ button:hover {
   gap: 8px;
 }
 
+.diagnostic-targeted-caption {
+  color: oklch(82% 0.12 86);
+}
+
+.diagnostic-result-actions .diagnostic-targeted-action {
+  border-color: oklch(78% 0.14 86 / 0.46);
+  background: oklch(78% 0.14 86 / 0.12);
+  color: oklch(88% 0.12 86);
+}
+
 .diagnostic-task-list {
   display: grid;
   gap: 10px;
