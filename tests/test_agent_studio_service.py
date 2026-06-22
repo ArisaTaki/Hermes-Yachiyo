@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from apps.shell.yachiyo_agent import (
+    AgentDeskFileEventRequest,
     AgentStudioService,
     ApprovalDecision,
     RerunRunRequest,
@@ -59,6 +60,26 @@ class _FakeStudioPort:
             file_path=request.get("path") or "inputs/brief.md",
             file_text=request.get("content") or "",
         )
+
+    def trigger_agent_desk_file_event(
+        self,
+        agent_id: str,
+        request: dict[str, Any],
+    ) -> dict[str, Any]:
+        self.calls.append(
+            ("trigger_agent_desk_file_event", {"agent_id": agent_id, "request": request})
+        )
+        return {
+            "ok": True,
+            "future_task": _future_task_payload(
+                future_task_id="future-desk-1",
+                prompt=f"Review {request.get('path')}",
+            ) | {
+                "title": "Review Agent Desk file: inputs/brief.md",
+                "runnable_id": agent_id,
+                "source_run_id": "agent_desk_file_event",
+            },
+        }
 
     def attach_skill(self, agent_id: str, skill_id: str) -> dict[str, Any]:
         self.calls.append(("attach_skill", {"agent_id": agent_id, "skill_id": skill_id}))
@@ -388,6 +409,14 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
         "agent-2",
         SaveAgentDeskFileRequest(path="inputs/brief.md", content="Brief"),
     )
+    desk_file_event_task = service.trigger_agent_desk_file_event(
+        "agent-2",
+        AgentDeskFileEventRequest(
+            path="inputs/brief.md",
+            event_type="modified",
+            delay_seconds=0,
+        ),
+    )
     agent_with_skill = service.attach_skill("agent-2", "skill-2")
     agent_without_skill = service.detach_skill("agent-2", "skill-2")
     skills = service.list_skills()
@@ -448,6 +477,10 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
     assert desk_with_note.items[0].preview_text == "# Notes"
     assert desk_with_file.items[-1].path == "inputs/brief.md"
     assert desk_with_file.items[-1].preview_text == "Brief"
+    assert desk_file_event_task.future_task_id == "future-desk-1"
+    assert desk_file_event_task.title == "Review Agent Desk file: inputs/brief.md"
+    assert desk_file_event_task.runnable_id == "agent-2"
+    assert desk_file_event_task.source_run_id == "agent_desk_file_event"
     assert agent_with_skill.skill_ids == ["skill-2"]
     assert agent_without_skill.skill_ids == []
     assert skills[0].skill_id == "skill-1"
@@ -501,6 +534,17 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
     assert (
         "write_agent_desk_file",
         {"agent_id": "agent-2", "request": {"path": "inputs/brief.md", "content": "Brief"}},
+    ) in port.calls
+    assert (
+        "trigger_agent_desk_file_event",
+        {
+            "agent_id": "agent-2",
+            "request": {
+                "path": "inputs/brief.md",
+                "event_type": "modified",
+                "delay_seconds": 0,
+            },
+        },
     ) in port.calls
     assert ("attach_skill", {"agent_id": "agent-2", "skill_id": "skill-2"}) in port.calls
     assert ("detach_skill", {"agent_id": "agent-2", "skill_id": "skill-2"}) in port.calls

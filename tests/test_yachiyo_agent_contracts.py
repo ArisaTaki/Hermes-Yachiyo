@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from apps.shell.yachiyo_agent import (
     AgentDefinitionSnapshot,
+    AgentDeskFileEventRequest,
     AgentDeskItemSnapshot,
     AgentDeskSnapshot,
     AgentGroupMemberSnapshot,
@@ -426,6 +427,20 @@ def test_agent_desk_snapshot_json_shape_is_stable() -> None:
         SaveAgentDeskNoteRequest(content="note", unknown=True)
     with pytest.raises(ValidationError):
         SaveAgentDeskFileRequest(path="brief.md", content="body", unknown=True)
+    with pytest.raises(ValidationError):
+        AgentDeskFileEventRequest(path="brief.md", unknown=True)
+    file_event = _json(
+        AgentDeskFileEventRequest(
+            path="inputs/brief.md",
+            event_type="modified",
+            delay_seconds=0,
+        )
+    )
+    assert file_event == {
+        "path": "inputs/brief.md",
+        "event_type": "modified",
+        "delay_seconds": 0,
+    }
 
 
 def test_chat_runnable_catalog_snapshot_json_shape_is_stable() -> None:

@@ -15,6 +15,7 @@ from apps.bridge.routes.yachiyo_services import (
 )
 from apps.shell.agent_runtime import AgentRuntimeError
 from apps.shell.yachiyo_agent import (
+    AgentDeskFileEventRequest,
     SaveAgentDeskFileRequest,
     SaveAgentDeskNoteRequest,
     SaveAgentRequest,
@@ -127,6 +128,24 @@ async def write_agent_desk_file(
             request,
         )
         return snapshot(desk_snapshot)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Agent 不存在") from exc
+    except AgentRuntimeError as exc:
+        raise bad_request(exc) from exc
+
+
+async def trigger_agent_desk_file_event(
+    agent_id: str,
+    request: AgentDeskFileEventRequest,
+    http_request: Request | None = None,
+) -> dict[str, Any]:
+    try:
+        future_task = await asyncio.to_thread(
+            studio_service(http_request).trigger_agent_desk_file_event,
+            agent_id,
+            request,
+        )
+        return snapshot(future_task)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Agent 不存在") from exc
     except AgentRuntimeError as exc:

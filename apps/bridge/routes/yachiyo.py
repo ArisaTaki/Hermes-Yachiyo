@@ -24,6 +24,7 @@ from apps.bridge.routes.yachiyo_models import (
     TaskApprovalRequest,
 )
 from apps.shell.yachiyo_agent import (
+    AgentDeskFileEventRequest,
     SaveAgentDeskFileRequest,
     SaveAgentDeskNoteRequest,
     SaveAgentGroupRequest,
@@ -250,6 +251,19 @@ async def write_studio_agent_desk_file(
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
     return await yachiyo_studio_handlers.write_agent_desk_file(agent_id, request, http_request)
+
+
+@router.post("/studio/agents/{agent_id}/desk/file-events")
+async def trigger_studio_agent_desk_file_event(
+    agent_id: str,
+    request: AgentDeskFileEventRequest,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    return await yachiyo_studio_handlers.trigger_agent_desk_file_event(
+        agent_id,
+        request,
+        http_request,
+    )
 
 
 @router.post("/studio/agents/{agent_id}/skills")

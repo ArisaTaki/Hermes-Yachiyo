@@ -2,6 +2,7 @@
 
 from .contracts import (
     AgentDefinitionSnapshot,
+    AgentDeskFileEventRequest,
     AgentDeskItemSnapshot,
     AgentDeskSnapshot,
     AgentGroupMemberSnapshot,
@@ -68,6 +69,7 @@ from .studio_service import AgentStudioService
 
 __all__ = [
     "AgentDefinitionSnapshot",
+    "AgentDeskFileEventRequest",
     "AgentDeskItemSnapshot",
     "AgentDeskSnapshot",
     "AgentGroupMemberSnapshot",

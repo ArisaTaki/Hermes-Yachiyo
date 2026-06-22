@@ -31,6 +31,33 @@ class _FakeRuntime:
             "workspace_policy": {"default_workdir": str(self.agent_root)},
         }
 
+    def schedule_future_task(
+        self,
+        payload: dict[str, Any],
+        *,
+        source_run_id: str = "",
+    ) -> dict[str, Any]:
+        self.calls.append(
+            (
+                "schedule_future_task",
+                {"payload": payload, "source_run_id": source_run_id},
+            )
+        )
+        return {
+            "ok": True,
+            "future_task": {
+                "future_task_id": "future-desk-1",
+                "title": payload["title"],
+                "prompt": payload["prompt"],
+                "runnable_id": payload["runnable_id"],
+                "status": "scheduled",
+                "scheduled_at_epoch": 1781433600.0,
+                "source_run_id": source_run_id,
+                "created_at": "2026-06-22T00:00:00Z",
+                "updated_at": "2026-06-22T00:00:01Z",
+            },
+        }
+
 
 def test_local_agent_desk_store_writes_notes_files_and_metadata(tmp_path: Path) -> None:
     runtime = _FakeRuntime(tmp_path)
@@ -67,6 +94,45 @@ def test_local_agent_desk_store_rejects_unsafe_file_paths(tmp_path: Path) -> Non
     for path in ("", "/tmp/secret.md", "../secret.md", "safe/../secret.md", "."):
         with pytest.raises(AgentRuntimeError):
             store.write_agent_desk_file("agent-1", path, "secret")
+
+
+def test_local_agent_desk_store_schedules_low_risk_file_event_task(tmp_path: Path) -> None:
+    runtime = _FakeRuntime(tmp_path)
+    store = LocalAgentDeskStore(runtime=runtime)
+
+    result = store.trigger_agent_desk_file_event(
+        "agent-1",
+        {"path": "inputs/brief.md", "event_type": "modified", "delay_seconds": 0},
+    )
+
+    assert result["future_task"]["future_task_id"] == "future-desk-1"
+    assert result["future_task"]["title"] == "Review Agent Desk file: inputs/brief.md"
+    assert result["future_task"]["runnable_id"] == "agent-1"
+    assert (
+        "schedule_future_task",
+        {
+            "payload": {
+                "title": "Review Agent Desk file: inputs/brief.md",
+                "prompt": (
+                    "Agent Desk file event for agent-1: modified inputs/brief.md\n\n"
+                    "Review the Agent Desk notes and file list, then decide whether "
+                    "a short follow-up is useful. Use read-only tools first. Do not "
+                    "modify files, send messages, or run terminal commands unless "
+                    "the user explicitly asks and approval policy allows it."
+                ),
+                "runnable_id": "agent-1",
+                "delay_seconds": 0,
+            },
+            "source_run_id": "agent_desk_file_event",
+        },
+    ) in runtime.calls
+
+
+def test_local_agent_desk_store_rejects_unsafe_file_event_paths(tmp_path: Path) -> None:
+    store = LocalAgentDeskStore(runtime=_FakeRuntime(tmp_path))
+
+    with pytest.raises(AgentRuntimeError):
+        store.trigger_agent_desk_file_event("agent-1", {"path": "../secret.md"})
 
 
 def test_local_agent_desk_store_uses_sanitized_default_workspace(tmp_path: Path) -> None:

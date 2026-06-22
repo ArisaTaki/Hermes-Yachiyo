@@ -76,6 +76,30 @@ class LocalAgentDeskStore:
         self._write_metadata(agent, root)
         return self._snapshot(agent_id, root)
 
+    def trigger_agent_desk_file_event(
+        self,
+        agent_id: str,
+        request: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        clean_agent_id = str(agent_id or "").strip()
+        if not clean_agent_id:
+            raise AgentRuntimeError("Agent Desk 文件事件需要 agent_id")
+        self._runtime.get_agent(clean_agent_id)
+        rel = _safe_rel_path(str(request.get("path") or "")).as_posix()
+        event_type = _desk_event_type(request.get("event_type"))
+        schedule_future_task = getattr(self._runtime, "schedule_future_task", None)
+        if not callable(schedule_future_task):
+            raise AgentRuntimeError("Agent Desk 文件事件需要 FutureTask runtime")
+
+        delay_seconds = request.get("delay_seconds")
+        payload = {
+            "title": f"Review Agent Desk file: {rel}",
+            "prompt": _desk_file_event_prompt(clean_agent_id, rel, event_type),
+            "runnable_id": clean_agent_id,
+            "delay_seconds": delay_seconds if delay_seconds is not None else 0,
+        }
+        return schedule_future_task(payload, source_run_id="agent_desk_file_event")
+
     def _agent_and_root(self, agent_id: str) -> tuple[dict[str, Any], Path]:
         clean_agent_id = str(agent_id or "").strip()
         if not clean_agent_id:
@@ -173,6 +197,21 @@ def _safe_rel_path(value: str) -> Path:
     ):
         raise AgentRuntimeError("Agent Desk 文件路径必须是安全的相对路径")
     return Path(*pure.parts)
+
+
+def _desk_event_type(value: Any) -> str:
+    raw = str(value or "changed").strip().lower()
+    return raw if raw in {"created", "modified", "deleted", "changed"} else "changed"
+
+
+def _desk_file_event_prompt(agent_id: str, path: str, event_type: str) -> str:
+    return (
+        f"Agent Desk file event for {agent_id}: {event_type} {path}\n\n"
+        "Review the Agent Desk notes and file list, then decide whether a short "
+        "follow-up is useful. Use read-only tools first. Do not modify files, "
+        "send messages, or run terminal commands unless the user explicitly asks "
+        "and approval policy allows it."
+    )
 
 
 def _preview_text(path: Path, limit: int = 4000) -> str | None:

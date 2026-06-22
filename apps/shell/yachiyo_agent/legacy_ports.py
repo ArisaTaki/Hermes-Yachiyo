@@ -149,6 +149,13 @@ class LegacyStudioPort:
             str(request.get("content") or ""),
         )
 
+    def trigger_agent_desk_file_event(
+        self,
+        agent_id: str,
+        request: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self._desk_store.trigger_agent_desk_file_event(agent_id, request)
+
     def attach_skill(self, agent_id: str, skill_id: str) -> dict[str, Any]:
         return self._runtime.attach_skill(agent_id, skill_id)
 

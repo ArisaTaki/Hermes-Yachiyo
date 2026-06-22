@@ -9,6 +9,7 @@ from .adapters import agent_definition_snapshot_from_payload
 from .artifacts import artifact_content_snapshot_from_payload
 from .contracts import (
     AgentDefinitionSnapshot,
+    AgentDeskFileEventRequest,
     AgentDeskSnapshot,
     AgentGroupSnapshot,
     ApprovalDecision,
@@ -106,6 +107,18 @@ class AgentStudioService:
         return agent_desk_snapshot_from_payload(
             self._studio_port.write_agent_desk_file(agent_id, _request_payload(request))
         )
+
+    def trigger_agent_desk_file_event(
+        self,
+        agent_id: str,
+        request: AgentDeskFileEventRequest | Mapping[str, Any],
+    ) -> FutureTaskSnapshot:
+        payload = self._studio_port.trigger_agent_desk_file_event(
+            agent_id,
+            _request_payload(request),
+        )
+        raw = payload.get("future_task") if isinstance(payload, Mapping) else None
+        return future_task_snapshot_from_payload(raw if isinstance(raw, Mapping) else payload)
 
     def attach_skill(self, agent_id: str, skill_id: str) -> AgentDefinitionSnapshot:
         return agent_definition_snapshot_from_payload(

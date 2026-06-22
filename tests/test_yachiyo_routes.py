@@ -325,6 +325,29 @@ class _FakeAgentRuntime:
             ],
         }
 
+    def schedule_future_task(
+        self,
+        payload: dict[str, Any],
+        *,
+        source_run_id: str = "",
+    ) -> dict[str, Any]:
+        self.calls.append(
+            (
+                "schedule_future_task",
+                {"payload": payload, "source_run_id": source_run_id},
+            )
+        )
+        return {
+            "ok": True,
+            "future_task": _future_task_payload(
+                future_task_id="future-desk-1",
+                title=payload["title"],
+                prompt=payload["prompt"],
+                runnable_id=payload["runnable_id"],
+                source_run_id=source_run_id,
+            ),
+        }
+
     def create_agent_run(self, payload: dict[str, Any]) -> dict[str, Any]:
         self.calls.append(("create_agent_run", payload))
         return _run_payload(
@@ -934,6 +957,11 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes(tmp_path: Path) 
         yachiyo.SaveAgentDeskFileRequest(path="inputs/brief.md", content="Brief"),
         request,
     )
+    agent_desk_file_event = await yachiyo.trigger_studio_agent_desk_file_event(
+        "agent-1",
+        yachiyo.AgentDeskFileEventRequest(path="inputs/brief.md", event_type="modified"),
+        request,
+    )
     agent_with_skill = await yachiyo.attach_studio_agent_skill(
         "agent-1",
         yachiyo.AgentSkillBody(skill_id="skill-1"),
@@ -1075,6 +1103,10 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes(tmp_path: Path) 
     assert (Path(agent_desk_file["root_path"]) / "inputs" / "brief.md").read_text(
         encoding="utf-8"
     ) == "Brief"
+    assert agent_desk_file_event["future_task_id"] == "future-desk-1"
+    assert agent_desk_file_event["title"] == "Review Agent Desk file: inputs/brief.md"
+    assert agent_desk_file_event["runnable_id"] == "agent-1"
+    assert agent_desk_file_event["source_run_id"] == "agent_desk_file_event"
     assert agent_with_skill["skill_ids"] == ["skill-1"]
     assert agent_without_skill["skill_ids"] == []
     assert skills["skills"][0]["skill_id"] == "skill-1"
@@ -1231,6 +1263,12 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes(tmp_path: Path) 
         "trigger_due_future_tasks",
         {"now_epoch": None, "limit": 3},
     ) in runtime.calls
+    desk_file_event_calls = [call for call in runtime.calls if call[0] == "schedule_future_task"]
+    assert desk_file_event_calls
+    assert desk_file_event_calls[0][1]["source_run_id"] == "agent_desk_file_event"
+    assert desk_file_event_calls[0][1]["payload"]["runnable_id"] == "agent-1"
+    assert desk_file_event_calls[0][1]["payload"]["delay_seconds"] == 0
+    assert "Use read-only tools first" in desk_file_event_calls[0][1]["payload"]["prompt"]
     assert (
         "update_workflow",
         {"workflow_id": "workflow-1", "payload": {"workflow_id": "workflow-1", "name": "Updated Workflow"}},
@@ -1337,6 +1375,7 @@ def test_yachiyo_public_routes_delegate_to_chat_and_studio_handlers() -> None:
     assert "return await yachiyo_studio_handlers.get_agent_desk(agent_id, http_request)" in source
     assert "return await yachiyo_studio_handlers.write_agent_desk_note(agent_id, request, http_request)" in source
     assert "return await yachiyo_studio_handlers.write_agent_desk_file(agent_id, request, http_request)" in source
+    assert "trigger_agent_desk_file_event(" in source
     assert "return await yachiyo_studio_handlers.update_group(group_id, request, http_request)" in source
     assert "return await yachiyo_studio_handlers.update_workflow(workflow_id, request, http_request)" in source
     assert "return await yachiyo_studio_handlers.start_agent_run(agent_id, request, http_request)" in source
@@ -1364,6 +1403,7 @@ def test_yachiyo_studio_routes_include_run_action_facade() -> None:
     assert '@router.get("/studio/agents/{agent_id}/desk")' in source
     assert '@router.post("/studio/agents/{agent_id}/desk/note")' in source
     assert '@router.post("/studio/agents/{agent_id}/desk/files")' in source
+    assert '@router.post("/studio/agents/{agent_id}/desk/file-events")' in source
     assert '@router.post("/studio/agents/{agent_id}/skills")' in source
     assert '@router.delete("/studio/agents/{agent_id}/skills/{skill_id}")' in source
     assert '@router.get("/studio/skills")' in source
@@ -1505,21 +1545,25 @@ def _memory_payload(
 
 def _future_task_payload(
     future_task_id: str = "future-1",
+    title: str = "Follow up later",
+    prompt: str = "Follow up on the report",
+    runnable_id: str = "agent-1",
     status: str = "scheduled",
     last_run_id: str = "",
     run_count: int = 0,
     cancelled_at: str = "",
+    source_run_id: str = "run-source-1",
 ) -> dict[str, Any]:
     return {
         "future_task_id": future_task_id,
-        "title": "Follow up later",
-        "prompt": "Follow up on the report",
-        "runnable_id": "agent-1",
+        "title": title,
+        "prompt": prompt,
+        "runnable_id": runnable_id,
         "runnable_name": "Planner",
         "status": status,
         "scheduled_at_epoch": 1781433600.0,
         "cron": "",
-        "source_run_id": "run-source-1",
+        "source_run_id": source_run_id,
         "last_run_id": last_run_id,
         "run_count": run_count,
         "error": "",

@@ -583,6 +583,14 @@ class SaveAgentDeskFileRequest(BaseModel):
     content: str = ""
 
 
+class AgentDeskFileEventRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: str
+    event_type: Literal["created", "modified", "deleted", "changed"] = "changed"
+    delay_seconds: int | float | None = 0
+
+
 class SaveAgentGroupRequest(BaseModel):
     model_config = ConfigDict(extra="allow")
 
