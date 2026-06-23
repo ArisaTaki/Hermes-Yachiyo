@@ -732,6 +732,31 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "browser.open_url",
         "input": {"url": "https://github.com"},
     }
+    assert daily_desktop_intent_tool_request("what page am I on?", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.current_page",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("read this page", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.extract_text",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("screenshot this page", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.screenshot",
+        "input": {"reason": "user asked to capture the browser page"},
+    }
+    assert daily_desktop_intent_tool_request("what app am I using?", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.active_window",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("bring Chrome to front", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.focus",
+        "input": {"app_name": "Google Chrome"},
+    }
     assert daily_desktop_intent_tool_request("打开 GitHub 并读一下页面", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.open_url_and_extract_text",

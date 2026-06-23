@@ -437,7 +437,7 @@ def test_chat_bridge_quick_message_executes_active_window_without_model(
     result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
         monkeypatch,
-        "当前窗口是什么",
+        "what app am I using?",
     )
 
     assert result["ok"] is True
@@ -1400,7 +1400,7 @@ def test_chat_bridge_quick_message_executes_browser_extract_text_for_launcher_en
     _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
         monkeypatch,
-        "读一下这个网页",
+        "read this page",
     )
 
     assert extract_calls == [""]
@@ -1444,7 +1444,7 @@ def test_chat_bridge_quick_message_executes_browser_screenshot_for_launcher_entr
     _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
         monkeypatch,
-        "截取当前网页",
+        "screenshot this page",
     )
 
     assert screenshot_targets

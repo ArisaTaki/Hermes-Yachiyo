@@ -1596,6 +1596,15 @@ def _is_browser_current_page_request(text: str) -> bool:
         or "current page" in lowered
         or "current browser tab" in lowered
         or "active browser tab" in lowered
+        or re.search(
+            r"\b(?:what|which)\s+(?:page|site|website|tab)\s+(?:am\s+i|are\s+we)\s+on\b",
+            lowered,
+        )
+        or re.search(
+            r"\b(?:what|which)\s+(?:page|site|website|tab)\s+is\s+(?:open|active|current)\b",
+            lowered,
+        )
+        or re.search(r"\bwhat(?:'s|\s+is)\s+(?:the\s+)?current\s+(?:url|page|tab)\b", lowered)
     )
 
 
@@ -1614,8 +1623,11 @@ def _is_browser_extract_text_request(text: str) -> bool:
             text,
         )
         or "extract text from the current page" in lowered
+        or "extract text from this page" in lowered
         or "read the current page" in lowered
         or "read current page" in lowered
+        or "read this page" in lowered
+        or "read the page" in lowered
     )
 
 
@@ -1634,6 +1646,9 @@ def _is_browser_screenshot_request(text: str) -> bool:
         or "browser screenshot" in lowered
         or "page screenshot" in lowered
         or "screenshot the current page" in lowered
+        or "screenshot this page" in lowered
+        or "screenshot the page" in lowered
+        or re.search(r"\btake\s+(?:a\s+)?screenshot\s+of\s+(?:this|the|current)\s+page\b", lowered)
     )
 
 
@@ -2110,6 +2125,7 @@ def _app_focus_name(text: str) -> str:
         r"(?:\s*(?:前台|前面|最前面|最前|前台来))?",
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:切换到|切到|切回|回到|聚焦|激活|置前)\s*(?P<app>[^。！？!?，,]+)",
         r"(?:focus|activate|switch to|bring up)\s+(?P<app>[^.!?]+)",
+        r"bring\s+(?P<app>[^.!?]+?)\s+to\s+(?:the\s+)?(?:front|foreground)",
     )
     for pattern in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
@@ -3705,6 +3721,9 @@ def _is_active_window_request(text: str) -> bool:
         or "active window" in lowered
         or "foreground window" in lowered
         or "current window" in lowered
+        or re.search(r"\b(?:what|which)\s+(?:app|application)\s+am\s+i\s+using\b", lowered)
+        or re.search(r"\bwhat(?:'s|\s+is)\s+(?:the\s+)?(?:active|foreground|frontmost)\s+(?:app|application)\b", lowered)
+        or re.search(r"\b(?:what|which)\s+window\s+is\s+(?:active|current|foreground)\b", lowered)
     )
 
 
