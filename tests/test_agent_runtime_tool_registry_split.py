@@ -720,6 +720,16 @@ def test_app_open_handles_system_settings_permission_aliases(monkeypatch) -> Non
         "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
     ]
 
+    result = desktop_mod.app_open("桌面权限")
+
+    assert result["ok"] is True
+    assert result["summary"] == "Opened System Settings: Privacy & Security"
+    assert result["data"]["settings_label"] == "Privacy & Security"
+    assert calls[1][0] == [
+        "open",
+        "x-apple.systempreferences:com.apple.preference.security?Privacy",
+    ]
+
 
 def test_app_open_system_settings_tries_fallback_url(monkeypatch) -> None:
     calls = []
@@ -939,6 +949,37 @@ def test_desktop_permissions_reports_missing_targets_and_affected_tools(monkeypa
         "active_window": ["automation_or_accessibility"],
         "media_control": ["music_app", "automation"],
     }
+    assert result["recovery_actions"] == [
+        {
+            "label": "打开屏幕录制权限",
+            "tool": "app.open",
+            "input": {"app_name": "屏幕录制权限"},
+            "permission_target": "screen_recording",
+            "risk_level": "low",
+        },
+        {
+            "label": "打开自动化权限",
+            "tool": "app.open",
+            "input": {"app_name": "自动化权限"},
+            "permission_target": "automation",
+            "risk_level": "low",
+        },
+        {
+            "label": "打开辅助功能权限",
+            "tool": "app.open",
+            "input": {"app_name": "辅助功能权限"},
+            "permission_target": "accessibility",
+            "risk_level": "low",
+        },
+        {
+            "label": "打开 Apple Music",
+            "tool": "app.open",
+            "input": {"app_name": "Music"},
+            "permission_target": "music_app",
+            "risk_level": "low",
+        },
+    ]
+    assert result["data"]["recovery_actions"] == result["recovery_actions"]
     assert any("Screen Recording permission" in hint for hint in result["recovery_hints"])
 
 

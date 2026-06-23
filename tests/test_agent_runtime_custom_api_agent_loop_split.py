@@ -753,6 +753,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.open",
         "input": {"app_name": "辅助功能权限"},
     }
+    assert daily_desktop_intent_tool_request("打开桌面权限设置", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "隐私与安全性"},
+    }
+    assert daily_desktop_intent_tool_request("打开需要的权限设置", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "隐私与安全性"},
+    }
     assert daily_desktop_intent_tool_request("检查桌面权限", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.permissions",
@@ -1499,6 +1509,18 @@ def test_main_chat_desktop_intent_summarizes_desktop_permissions() -> None:
             "summary": "Missing desktop permissions",
             "permission_targets": ["screen_recording", "automation"],
             "affected_tools": ["screen.capture", "media.apple_music_play"],
+            "recovery_actions": [
+                {
+                    "label": "打开屏幕录制权限",
+                    "tool": "app.open",
+                    "input": {"app_name": "屏幕录制权限"},
+                },
+                {
+                    "label": "打开自动化权限",
+                    "tool": "app.open",
+                    "input": {"app_name": "自动化权限"},
+                },
+            ],
         },
     )
 
@@ -1506,6 +1528,7 @@ def test_main_chat_desktop_intent_summarizes_desktop_permissions() -> None:
     assert missing == (
         "桌面执行权限还缺少：screen_recording, automation。"
         "受影响工具：screen.capture, media.apple_music_play。"
+        "可直接打开：打开屏幕录制权限、打开自动化权限。"
     )
 
 

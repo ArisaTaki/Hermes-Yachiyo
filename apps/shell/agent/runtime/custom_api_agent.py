@@ -715,10 +715,39 @@ def _desktop_permissions_summary(result: dict[str, Any]) -> str:
     target_text = ", ".join(targets[:6])
     target_suffix = " 等" if len(targets) > 6 else ""
     if not affected_tools:
-        return f"桌面执行权限还缺少：{target_text}{target_suffix}。"
+        return _append_recovery_action_summary(
+            f"桌面执行权限还缺少：{target_text}{target_suffix}。",
+            result,
+        )
     tool_text = ", ".join(affected_tools[:6])
     tool_suffix = " 等" if len(affected_tools) > 6 else ""
-    return f"桌面执行权限还缺少：{target_text}{target_suffix}。受影响工具：{tool_text}{tool_suffix}。"
+    return _append_recovery_action_summary(
+        f"桌面执行权限还缺少：{target_text}{target_suffix}。受影响工具：{tool_text}{tool_suffix}。",
+        result,
+    )
+
+
+def _append_recovery_action_summary(text: str, result: dict[str, Any]) -> str:
+    labels = _recovery_action_labels(result)
+    if not labels:
+        return text
+    return f"{text}可直接打开：{'、'.join(labels[:4])}。"
+
+
+def _recovery_action_labels(result: dict[str, Any]) -> list[str]:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    raw_actions = result.get("recovery_actions") or data.get("recovery_actions") or []
+    if not isinstance(raw_actions, list):
+        return []
+    labels: list[str] = []
+    for action in raw_actions:
+        if isinstance(action, dict):
+            label = str(action.get("label") or action.get("tool") or "").strip()
+        else:
+            label = str(action or "").strip()
+        if label and label not in labels:
+            labels.append(label)
+    return labels
 
 
 def _running_apps_summary(result: dict[str, Any]) -> str:

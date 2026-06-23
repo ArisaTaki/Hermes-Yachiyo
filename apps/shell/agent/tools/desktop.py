@@ -44,6 +44,10 @@ _SYSTEM_SETTINGS_TARGETS = {
     "隐私安全": ("Privacy & Security", _PRIVACY_SECURITY_URLS),
     "安全性与隐私": ("Privacy & Security", _PRIVACY_SECURITY_URLS),
     "安全与隐私": ("Privacy & Security", _PRIVACY_SECURITY_URLS),
+    "桌面权限": ("Privacy & Security", _PRIVACY_SECURITY_URLS),
+    "桌面执行权限": ("Privacy & Security", _PRIVACY_SECURITY_URLS),
+    "本地工具权限": ("Privacy & Security", _PRIVACY_SECURITY_URLS),
+    "权限诊断": ("Privacy & Security", _PRIVACY_SECURITY_URLS),
     "accessibility": (
         "Accessibility Permission",
         ("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",),
@@ -167,6 +171,79 @@ _PERMISSION_CAPABILITY_TOOLS = {
     ),
 }
 
+_PERMISSION_RECOVERY_ACTIONS = {
+    "screen_recording": (
+        {
+            "label": "打开屏幕录制权限",
+            "tool": "app.open",
+            "input": {"app_name": "屏幕录制权限"},
+            "permission_target": "screen_recording",
+            "risk_level": "low",
+        },
+    ),
+    "screen_capture_probe_failed": (
+        {
+            "label": "打开屏幕录制权限",
+            "tool": "app.open",
+            "input": {"app_name": "屏幕录制权限"},
+            "permission_target": "screen_recording",
+            "risk_level": "low",
+        },
+    ),
+    "automation": (
+        {
+            "label": "打开自动化权限",
+            "tool": "app.open",
+            "input": {"app_name": "自动化权限"},
+            "permission_target": "automation",
+            "risk_level": "low",
+        },
+    ),
+    "automation_or_accessibility": (
+        {
+            "label": "打开自动化权限",
+            "tool": "app.open",
+            "input": {"app_name": "自动化权限"},
+            "permission_target": "automation",
+            "risk_level": "low",
+        },
+        {
+            "label": "打开辅助功能权限",
+            "tool": "app.open",
+            "input": {"app_name": "辅助功能权限"},
+            "permission_target": "accessibility",
+            "risk_level": "low",
+        },
+    ),
+    "accessibility": (
+        {
+            "label": "打开辅助功能权限",
+            "tool": "app.open",
+            "input": {"app_name": "辅助功能权限"},
+            "permission_target": "accessibility",
+            "risk_level": "low",
+        },
+    ),
+    "music_app": (
+        {
+            "label": "打开 Apple Music",
+            "tool": "app.open",
+            "input": {"app_name": "Music"},
+            "permission_target": "music_app",
+            "risk_level": "low",
+        },
+    ),
+    "chrome_cdp": (
+        {
+            "label": "打开 Google Chrome",
+            "tool": "app.open",
+            "input": {"app_name": "Google Chrome"},
+            "permission_target": "chrome_cdp",
+            "risk_level": "low",
+        },
+    ),
+}
+
 
 def screen_capture(target_path: Path) -> dict[str, Any]:
     if _desktop_platform() != "macos":
@@ -250,6 +327,7 @@ def permissions() -> dict[str, Any]:
     ready = not missing_targets
     summary = _desktop_permissions_summary(missing_targets, affected_tools)
     recovery_hints = _permission_recovery_hints_for_targets(missing_targets)
+    recovery_actions = _permission_recovery_actions_for_targets(missing_targets)
     return {
         "ok": True,
         "action": "desktop.permissions",
@@ -259,12 +337,14 @@ def permissions() -> dict[str, Any]:
             "missing_permissions": clean_missing,
             "permission_targets": missing_targets,
             "affected_tools": affected_tools,
+            "recovery_actions": recovery_actions,
             "diagnostic_route": "/yachiyo/readiness",
         },
         "missing_permissions": missing_targets,
         "permission_targets": missing_targets,
         "affected_tools": affected_tools,
         "recovery_hints": recovery_hints,
+        "recovery_actions": recovery_actions,
         "diagnostic_route": "/yachiyo/readiness",
         "permission_error": not ready,
         "fallback_used": False,
@@ -1267,6 +1347,32 @@ def _desktop_permissions_summary(
     return f"Missing desktop permissions: {targets}{target_suffix}. Affected tools: {tools}{tool_suffix}"
 
 
+def _permission_recovery_actions_for_targets(targets: list[str]) -> list[dict[str, Any]]:
+    seen: set[tuple[str, tuple[tuple[str, str], ...]]] = set()
+    actions: list[dict[str, Any]] = []
+    for target in targets:
+        for action in _PERMISSION_RECOVERY_ACTIONS.get(str(target or "").strip(), ()):
+            tool_name = str(action.get("tool") or "").strip()
+            raw_input = action.get("input") if isinstance(action.get("input"), dict) else {}
+            input_key = tuple(
+                sorted((str(key), str(value)) for key, value in raw_input.items())
+            )
+            key = (tool_name, input_key)
+            if not tool_name or key in seen:
+                continue
+            seen.add(key)
+            actions.append(
+                {
+                    "label": str(action.get("label") or tool_name),
+                    "tool": tool_name,
+                    "input": dict(raw_input),
+                    "permission_target": str(action.get("permission_target") or target),
+                    "risk_level": str(action.get("risk_level") or "low"),
+                }
+            )
+    return actions
+
+
 def _ordered_unique(values: Any) -> list[str]:
     seen: set[str] = set()
     result: list[str] = []
@@ -1363,6 +1469,10 @@ def _permission_recovery_hints_for_targets(targets: list[str]) -> list[str]:
             "Grant Automation permission so Oha-Yachiyo can control System Events "
             "or the target app in macOS System Settings > Privacy & Security > Automation."
         ),
+        "automation_or_accessibility": (
+            "Grant Automation and Accessibility permissions to Oha-Yachiyo or the current "
+            "runtime in macOS System Settings > Privacy & Security."
+        ),
         "music_app": (
             "Open Music.app once, confirm the track exists in the local library, "
             "and allow Automation when macOS asks for Music control."
@@ -1370,6 +1480,21 @@ def _permission_recovery_hints_for_targets(targets: list[str]) -> list[str]:
         "screen_recording": (
             "Grant Screen Recording permission to Oha-Yachiyo or the current terminal "
             "in macOS System Settings > Privacy & Security > Screen Recording."
+        ),
+        "screen_capture_probe_failed": (
+            "Open Screen Recording permission in macOS System Settings and confirm "
+            "Oha-Yachiyo or the current runtime is allowed."
+        ),
+        "chrome_cdp": (
+            "Open or configure Google Chrome with a reachable Chrome DevTools/CDP endpoint "
+            "before retrying browser control."
+        ),
+        "open_command": (
+            "macOS open command is unavailable in this environment, so local app launch "
+            "cannot be recovered from System Settings."
+        ),
+        "unsupported_platform": (
+            "Desktop execution is currently implemented for macOS in this runtime."
         ),
     }
     hints: list[str] = []

@@ -271,6 +271,16 @@ def _looks_like_negative_request(text: str) -> bool:
 def _is_desktop_permissions_request(text: str) -> bool:
     lowered = text.lower()
     if re.search(
+        r"(?:打开|启动|开启|拉起).{0,8}"
+        r"(?:桌面权限|桌面执行权限|本地工具权限|需要的权限|缺少的权限|权限设置|权限页面)",
+        text,
+    ) or re.search(
+        r"\b(?:open|launch|show)\s+(?:desktop|missing|required|permission|permissions)"
+        r".{0,24}(?:settings|page|pane)\b",
+        lowered,
+    ):
+        return False
+    if re.search(
         r"(?:检查|诊断|查看|看看|确认).{0,12}"
         r"(?:桌面执行|本地工具|自动化|辅助功能|屏幕录制|权限).{0,12}"
         r"(?:权限|状态|问题)?",
@@ -680,6 +690,9 @@ def _app_open_name(text: str) -> str:
     media_app = _media_app_open_name(text)
     if media_app:
         return media_app
+    permission_settings = _permission_settings_open_name(text)
+    if permission_settings:
+        return permission_settings
     if (
         _looks_like_search_request(text)
         or _is_running_apps_request(text)
@@ -705,6 +718,23 @@ def _app_open_name(text: str) -> str:
             continue
         if app_name:
             return app_name
+    return ""
+
+
+def _permission_settings_open_name(text: str) -> str:
+    lowered = text.lower()
+    if re.search(
+        r"(?:打开|启动|开启|拉起).{0,8}"
+        r"(?:桌面权限|桌面执行权限|本地工具权限|需要的权限|缺少的权限|权限设置|权限页面)",
+        text,
+    ):
+        return "隐私与安全性"
+    if re.search(
+        r"\b(?:open|launch|show)\s+(?:desktop|missing|required|permission|permissions)"
+        r".{0,24}(?:settings|page|pane)\b",
+        lowered,
+    ):
+        return "Privacy & Security"
     return ""
 
 
