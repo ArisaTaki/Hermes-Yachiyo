@@ -48,6 +48,7 @@ def _run_launcher_daily_desktop_quick_message(
     text: str,
     permission_probe: Any | None = None,
     permission_preflight: Any | None = None,
+    seed_messages: list[tuple[str, str]] | None = None,
 ) -> tuple[dict, dict, dict, list[str]]:
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
     runtime = _runtime_with_chat_store(store)
@@ -58,6 +59,11 @@ def _run_launcher_daily_desktop_quick_message(
         seed_templates=False,
     )
     runtime.agent_runtime_service = service
+    for role, content in seed_messages or []:
+        if role == "user":
+            runtime.chat_session.add_user_message(content)
+        elif role == "assistant":
+            runtime.chat_session.add_assistant_message(content)
     monkeypatch.setattr(
         "apps.shell.agent_runtime.get_model_profile_service",
         lambda: _FakeNoDefaultProfileService(),
@@ -96,8 +102,8 @@ def _run_launcher_daily_desktop_quick_message(
         events = service.list_run_events(run["run_id"])["events"]
         event_types = [event["event_type"] for event in events]
         messages = store.load_messages("session-current", limit=10)
-        user = next(message for message in messages if message.role == "user")
-        assistant = next(message for message in messages if message.role == "assistant")
+        user = [message for message in messages if message.role == "user"][-1]
+        assistant = [message for message in messages if message.role == "assistant"][-1]
         user_metadata = json.loads(user.metadata_json)
 
         assert result["ok"] is True
@@ -851,6 +857,59 @@ def test_chat_bridge_quick_message_executes_natural_music_request_for_launcher_e
     assert timeline_event_types.index("agent.desktop.intent_planned") < timeline_event_types.index(
         "agent.tool.call"
     ) < timeline_event_types.index("agent.desktop.intent_completed")
+    assert run["status"] == "completed"
+    assert "agent.desktop.intent_planned" in event_types
+    assert "agent.tool.call" in event_types
+    assert "agent.desktop.intent_completed" in event_types
+    assert "model.request.started" not in event_types
+    assert "model.requested" not in event_types
+
+
+def test_chat_bridge_quick_message_executes_music_followup_for_launcher_entrypoints(
+    tmp_path,
+    monkeypatch,
+):
+    play_calls: list[str] = []
+
+    def fake_apple_music_play(query: str) -> dict:
+        play_calls.append(query)
+        return {
+            "ok": True,
+            "action": "media.apple_music_play",
+            "summary": f"Apple Music playing {query}",
+            "data": {
+                "query": query,
+                "track": query,
+                "artist": "Yachiyo",
+            },
+        }
+
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.apple_music_play",
+        fake_apple_music_play,
+    )
+    result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "超时空辉夜姬吧",
+        seed_messages=[
+            ("user", "能否帮我播放 Apple Music?"),
+            ("assistant", "想听哪首歌？"),
+        ],
+    )
+
+    assert result["ok"] is True
+    assert play_calls == ["超时空辉夜姬"]
+    assert agent_task["summary"] == "已在 Apple Music 播放：超时空辉夜姬 - Yachiyo。"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "media.apple_music_play"
+    assert agent_task["tool_calls"][-1]["status"] == "completed"
+    assert result["_task_timeline"]["tool_calls"][-1]["tool_name"] == "media.apple_music_play"
+    assert result["_task_timeline"]["tool_calls"][-1]["status"] == "completed"
+    assert result["_task_timeline"]["tool_calls"][-1]["output_preview"]["data"]["track"] == "超时空辉夜姬"
+    run_event_types = [event["event_type"] for event in result["_events"]]
+    assert run_event_types.index("agent.desktop.intent_planned") < run_event_types.index(
+        "agent.tool.call"
+    ) < run_event_types.index("agent.desktop.intent_completed")
     assert run["status"] == "completed"
     assert "agent.desktop.intent_planned" in event_types
     assert "agent.tool.call" in event_types

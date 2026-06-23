@@ -289,6 +289,92 @@ def test_send_message_executes_direct_daily_desktop_music_play_task(tmp_path, mo
         store.close()
 
 
+def test_send_message_executes_music_followup_song_before_model(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    play_calls: list[str] = []
+    runtime.chat_session.add_user_message("能否帮我播放 Apple Music?")
+    runtime.chat_session.add_assistant_message("想听哪首歌？")
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("music follow-up desktop task should not call model")
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.chat_api.desktop_permission_missing_by_capability",
+        lambda use_cache=True: {},
+    )
+
+    def fake_apple_music_play(query: str) -> dict:
+        play_calls.append(query)
+        return {
+            "ok": True,
+            "action": "media.apple_music_play",
+            "summary": f"Apple Music playing {query}",
+            "data": {
+                "query": query,
+                "track": query,
+                "artist": "Yachiyo",
+            },
+        }
+
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.apple_music_play",
+        fake_apple_music_play,
+    )
+    try:
+        result = api.send_message("超时空辉夜姬吧")
+        task = runtime.state.get_task(result["task_id"])
+        link = service.get_task_run_link(result["task_id"])
+        run = service.get_run(link["run_id"])
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        messages = store.load_messages(runtime.chat_session.session_id, limit=10)
+        latest_user = [message for message in messages if message.role == "user"][-1]
+        assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert result["run_id"] == run["run_id"]
+        assert result["agent_task"]["status"] == "completed"
+        assert result["agent_task"]["summary"] == "已在 Apple Music 播放：超时空辉夜姬 - Yachiyo。"
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "media.apple_music_play"
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert task.result == "已在 Apple Music 播放：超时空辉夜姬 - Yachiyo。"
+        assert assistant is not None
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == "已在 Apple Music 播放：超时空辉夜姬 - Yachiyo。"
+        assert latest_user.content == "超时空辉夜姬吧"
+        assert play_calls == ["超时空辉夜姬"]
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
+def test_daily_desktop_music_followup_query_stays_conservative():
+    assert ChatAPI._daily_desktop_music_followup_query("超时空辉夜姬吧") == "超时空辉夜姬"
+    assert ChatAPI._daily_desktop_music_followup_query("算了吧") == ""
+    assert ChatAPI._daily_desktop_music_followup_query("这是为什么？") == ""
+    assert ChatAPI._daily_desktop_music_followup_query("打开微信") == ""
+    assert ChatAPI._daily_desktop_music_followup_query("播放超时空辉夜姬") == ""
+
+
 def test_send_message_executes_multi_step_daily_desktop_task_before_model(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)

@@ -65,6 +65,8 @@ _MAX_ATTACHMENT_CACHE_AGE_SECONDS = int(
 )
 _DATA_URL_RE = re.compile(r"^data:(image/[A-Za-z0-9.+-]+);base64,(.*)$", re.DOTALL)
 _VISION_ATTACHMENT_TOKEN_ESTIMATE = 85
+_DAILY_DESKTOP_MUSIC_FOLLOWUP_RECENT_LIMIT = 6
+_DAILY_DESKTOP_MUSIC_FOLLOWUP_MAX_CHARS = 80
 _IMAGE_EXTENSIONS_BY_MIME = {
     "image/png": ".png",
     "image/jpeg": ".jpg",
@@ -633,6 +635,113 @@ class ChatAPI:
         except Exception:
             logger.debug("刷新桌面执行权限缓存失败", exc_info=True)
 
+    def _daily_desktop_followup_goal_text(
+        self,
+        text: str,
+        current_context: dict[str, Any],
+    ) -> str:
+        """Resolve short music follow-ups into executable desktop intents."""
+
+        if current_context.get("conversation_kind") != "main":
+            return text
+        query = self._daily_desktop_music_followup_query(text)
+        if not query:
+            return text
+        if daily_desktop_entrypoint_tool_requests(text, list(DAILY_DESKTOP_TOOL_NAMES)):
+            return text
+        if not self._has_recent_daily_desktop_music_context():
+            return text
+        return f"播放{query}"
+
+    @staticmethod
+    def _daily_desktop_music_followup_query(text: str) -> str:
+        value = " ".join(str(text or "").split()).strip()
+        if not value or len(value) > _DAILY_DESKTOP_MUSIC_FOLLOWUP_MAX_CHARS:
+            return ""
+        if "\n" in str(text or "") or re.search(r"https?://|www\.|/|\\", value, flags=re.IGNORECASE):
+            return ""
+        lowered = value.lower()
+        if lowered in {"算了", "算了吧", "不用了", "不要了", "取消", "不了", "不用", "no", "nope", "never mind"}:
+            return ""
+        if re.search(r"[?？]", value):
+            return ""
+        if re.search(
+            r"(?:怎么|如何|为什么|为何|为啥|教程|说明|解释|how\s+to|why|explain|tutorial)",
+            lowered,
+        ):
+            return ""
+        if re.search(
+            r"(?:打开|启动|运行|拉起|开启|播放|放|搜索|查找|点击|输入|关闭|退出|隐藏|最小化|"
+            r"open|launch|start|play|search|click|type|close|quit|hide|minimi[sz]e)",
+            lowered,
+        ):
+            return ""
+        query = re.sub(
+            r"\s*(?:可以吗|好吗|好么|行吗|吗|嘛|呢|吧|please)[。！!]*$",
+            "",
+            value,
+            flags=re.IGNORECASE,
+        ).strip()
+        if len(query) < 2:
+            return ""
+        if re.fullmatch(r"[\W_]+", query, flags=re.IGNORECASE):
+            return ""
+        return query
+
+    def _has_recent_daily_desktop_music_context(self) -> bool:
+        try:
+            messages = self._chat_store().load_messages(
+                self._session.session_id,
+                limit=_DAILY_DESKTOP_MUSIC_FOLLOWUP_RECENT_LIMIT,
+            )
+        except Exception:
+            messages = []
+        if not messages:
+            try:
+                messages = list(self._session.get_messages())[-_DAILY_DESKTOP_MUSIC_FOLLOWUP_RECENT_LIMIT:]
+            except Exception:
+                messages = []
+        for message in reversed(messages):
+            raw_role = getattr(message, "role", "") or ""
+            role = str(getattr(raw_role, "value", raw_role) or "").strip().lower()
+            content = str(getattr(message, "content", "") or "").strip()
+            if not content:
+                continue
+            if role == MessageRole.USER.value and self._message_has_daily_desktop_music_intent(content):
+                return True
+            if role == MessageRole.ASSISTANT.value and self._assistant_mentions_music_followup(content):
+                return True
+        return False
+
+    @staticmethod
+    def _message_has_daily_desktop_music_intent(content: str) -> bool:
+        requests = daily_desktop_entrypoint_tool_requests(
+            ChatAPI._main_model_goal_text(content),
+            list(DAILY_DESKTOP_TOOL_NAMES),
+        )
+        for request in requests:
+            tool = str(request.get("tool") or "").strip()
+            payload = request.get("input") if isinstance(request.get("input"), dict) else {}
+            if tool in {
+                "media.apple_music_open_and_play",
+                "media.apple_music_play",
+                "media.apple_music_control",
+            }:
+                return True
+            if tool in {"app.open", "app.focus", "app.show"} and str(payload.get("app_name") or "") == "Music":
+                return True
+        return False
+
+    @staticmethod
+    def _assistant_mentions_music_followup(content: str) -> bool:
+        text = " ".join(str(content or "").split()).strip()
+        if not text:
+            return False
+        return bool(
+            re.search(r"(?:apple\s*music|music|音乐|歌曲|歌)", text, flags=re.IGNORECASE)
+            and re.search(r"(?:播放|想听|哪首|哪一首|歌名|曲名|song|track)", text, flags=re.IGNORECASE)
+        )
+
     def _with_session(self, session_id: str, callback):
         """Run a small ChatAPI mutation against a specific persisted session."""
         session_id = str(session_id or "").strip()
@@ -719,6 +828,7 @@ class ChatAPI:
                 self._sync_current_session_status(notify_group_summary=False)
                 current_context = self._session_context()
             task_text = self._main_model_goal_text(text)
+            task_text = self._daily_desktop_followup_goal_text(task_text, current_context)
             daily_desktop_requests = daily_desktop_entrypoint_tool_requests(
                 task_text,
                 list(DAILY_DESKTOP_TOOL_NAMES),
