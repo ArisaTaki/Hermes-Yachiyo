@@ -217,7 +217,7 @@ function escapeRegExp(value: string): string {
 const DESKTOP_INTENT_HELP_RE = /(?:怎么|如何|教程|步骤|只告诉我|不要真的|别真的|不要执行|别执行|不要操作|无需执行|不用执行)/i;
 const DESKTOP_PERMISSION_DIAGNOSIS_RE = /(?:(?:打开|检查|诊断|查看).{0,8}(?:权限|permission)|(?:为什么|为何|为啥|怎么(?:回事)?).{0,24}(?:不能|无法|没法|不会).{0,24}(?:控制|操作|执行|打开|启动|播放|点击|输入|截图|截屏|读取窗口)|desktop permissions?|check desktop permissions|why\s+can(?:not|'t)\s+(?:you|yachiyo|the agent).{0,40}(?:control|operate|open apps?|launch apps?|play music|click|type|capture the screen|read windows?))/i;
 const URL_RE = /(?:https?:\/\/|www\.|[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.(?:com|net|org|io|dev|app|ai|cn|jp|co|me|gg|tv|xyz|site|tech)\b)/i;
-const LOCAL_PATH_RE = /(?:~\/|\.{1,2}\/|\/(?:Users|Applications|Volumes|tmp|var|private)\b|(?:下载|桌面|应用程序)(?:文件夹)?)/i;
+const LOCAL_PATH_RE = /(?:~\/|\.{1,2}\/|\/(?:Users|Applications|Volumes|tmp|var|private)\b|(?:我的)?(?:下载|桌面|文档|文稿)|(?:下载|桌面|文档|文稿|应用程序)(?:文件夹|目录)?)/i;
 const WEB_SITE_NAME_RE = new RegExp([
   'chatgpt', 'claude', 'perplexity',
   'github', 'google', '谷歌', 'youtube', 'yt',
@@ -229,10 +229,12 @@ const WEB_SITE_NAME_RE = new RegExp([
   '淘宝', 'taobao', '京东', 'jd', 'jingdong',
 ].join('|'), 'i');
 const DESKTOP_APP_NAME_RE = new RegExp([
-  'apple\\s*music', 'music', '音乐',
+  'apple\\s*music', 'music', '音乐', '音乐播放器',
+  'qq\\s*音乐', 'qq\\s*music', '网易云音乐', 'netease\\s*(?:cloud\\s*)?music',
   'google\\s*chrome', 'chrome', 'chrome浏览器', '谷歌浏览器', '浏览器',
   'safari', 'finder', '访达', 'terminal', '终端', '命令行',
-  'system\\s*settings', 'settings', '系统设置', '设置',
+  'system\\s*settings', 'system\\s*preferences', 'settings', '系统设置', '系统偏好', '系统偏好设置', '设置',
+  '文件管理器', '文件浏览器',
   'notes', '备忘录', 'calendar', '日历', 'reminders', '提醒事项',
   'mail', '邮件', '邮箱', 'messages', '信息', 'facetime',
   'contacts', '联系人', 'maps', '地图', 'photos', '照片',
@@ -281,6 +283,7 @@ function looksLikeDailyDesktopIntent(prompt: string): boolean {
   if (/(?:(?:播放|播一下|放一下)\s*\S+|(?:play)\s+\S+)/i.test(value)) return true;
   if (/(?:(?:暂停|停止播放|继续播放|恢复播放|接着播放|播放暂停|切换播放|切换暂停)(?:\s*(?:音乐|歌曲|apple\s*music|music))?|(?:下一首|上一首|切歌|来点音乐|来些音乐|来点歌|放首歌)|(?:pause|resume|continue|next|previous|skip)(?:\s+(?:music|song|apple\s*music))?)/i.test(value)) return true;
   if (/(?:(?:在\s*(?:Finder|访达)(?:中|里)?显示)|(?:show|reveal).+(?:in|with)\s+finder)/i.test(value) && LOCAL_PATH_RE.test(value)) return true;
+  if (/(?:(?:显示|显示一下|定位|找一下|找到)\s*\S+|(?:show|reveal|locate)\s+\S+)/i.test(value) && LOCAL_PATH_RE.test(value)) return true;
   if (/(?:打开\s*|open\s+)/i.test(value) && LOCAL_PATH_RE.test(value)) return true;
   if (/(?:(?:开着吗|在运行吗|打开了吗)|(?:is|check).*(?:running|open))/i.test(value) && DESKTOP_APP_NAME_RE.test(value)) return true;
   if (/(?:(?:打开|启动|运行|切换到|切到|切回|回到|聚焦|激活|置前)\s*\S+|(?:focus|activate|switch to|bring up|launch|open)\s+\S+)/i.test(value) && DESKTOP_APP_NAME_RE.test(value)) return true;
