@@ -486,6 +486,8 @@ def test_desktop_execution_capability_policy_reports_tool_level_degradation() ->
             "desktop.type_text",
             "desktop.click",
             "browser.open_url",
+            "browser.open_url_and_extract_text",
+            "browser.open_url_and_screenshot",
             "browser.current_page",
             "browser.click",
             "browser.type_text",
@@ -522,6 +524,8 @@ def test_desktop_execution_capability_policy_reports_tool_level_degradation() ->
     assert browser_control["available"] is False
     assert browser_control["degraded_tools"] == [
         "browser.open_url",
+        "browser.open_url_and_extract_text",
+        "browser.open_url_and_screenshot",
         "browser.click",
         "browser.type_text",
         "browser.screenshot",
@@ -558,6 +562,8 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_risk_level("system.volume") == "low"
     assert desktop_tool_risk_level("clipboard.write") == "low"
     assert desktop_tool_risk_level("browser.open_url") == "low"
+    assert desktop_tool_risk_level("browser.open_url_and_extract_text") == "low"
+    assert desktop_tool_risk_level("browser.open_url_and_screenshot") == "low"
     assert desktop_tool_risk_level("browser.click") == "medium"
     assert desktop_tool_risk_level("terminal.run") is None
     assert desktop_action_risk_level("read_screen") == "low"
@@ -760,6 +766,8 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     minimize_window = tools["desktop.minimize_window"]
     close_window = tools["desktop.close_window"]
     browser = tools["browser.open_url"]
+    browser_open_extract = tools["browser.open_url_and_extract_text"]
+    browser_open_screenshot = tools["browser.open_url_and_screenshot"]
     terminal = tools["terminal.run"]
 
     assert music.capability_id == "media_control"
@@ -822,6 +830,14 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     assert browser.risk_level == "low"
     assert browser.missing_permissions == ["chrome_cdp"]
     assert any("Chrome CDP" in note for note in browser.fallback_notes)
+    assert browser_open_extract.capability_id == "browser_control"
+    assert browser_open_extract.risk_level == "low"
+    assert browser_open_extract.input_schema["required"] == ["url"]
+    assert any("text extraction" in note for note in browser_open_extract.fallback_notes)
+    assert browser_open_screenshot.capability_id == "browser_control"
+    assert browser_open_screenshot.risk_level == "low"
+    assert browser_open_screenshot.input_schema["required"] == ["url"]
+    assert any("captures the page" in note for note in browser_open_screenshot.fallback_notes)
     assert terminal.risk_level == "high"
     assert terminal.approval_required is True
 

@@ -56,6 +56,8 @@ TOOL_FUNCTION_NAMES = {
     "desktop.type_text": "desktop_type_text",
     "desktop.click": "desktop_click",
     "browser.open_url": "browser_open_url",
+    "browser.open_url_and_extract_text": "browser_open_url_and_extract_text",
+    "browser.open_url_and_screenshot": "browser_open_url_and_screenshot",
     "browser.current_page": "browser_current_page",
     "browser.click": "browser_click",
     "browser.type_text": "browser_type_text",
@@ -115,6 +117,8 @@ MEDIUM_RISK_DESKTOP_TOOL_NAMES = (
 )
 LOW_RISK_BROWSER_TOOL_NAMES = (
     "browser.open_url",
+    "browser.open_url_and_extract_text",
+    "browser.open_url_and_screenshot",
     "browser.current_page",
     "browser.extract_text",
     "browser.screenshot",
@@ -389,12 +393,16 @@ class ToolDescriptor:
                         "desktop.hotkey 参数 modifiers 只能包含 command/cmd、shift、"
                         "option/alt、control/ctrl"
                     )
-        if self.name == "browser.open_url":
+        if self.name in {
+            "browser.open_url",
+            "browser.open_url_and_extract_text",
+            "browser.open_url_and_screenshot",
+        }:
             value = str(payload.get("url") or "").strip()
             if not value:
-                raise AgentRuntimeError("browser.open_url 参数 url 必须是非空字符串")
+                raise AgentRuntimeError(f"{self.name} 参数 url 必须是非空字符串")
             if not re.match(r"^https?://[^\s]+$", value):
-                raise AgentRuntimeError("browser.open_url 参数 url 必须是绝对 http(s) URL")
+                raise AgentRuntimeError(f"{self.name} 参数 url 必须是绝对 http(s) URL")
         if self.name in {"browser.click", "browser.type_text"} and not str(
             payload.get("selector") or ""
         ).strip():
@@ -422,7 +430,12 @@ class ToolDescriptor:
                     raise AgentRuntimeError("browser.click 参数 click_count 必须是 1-3 的整数")
         if self.name == "browser.type_text" and not str(payload.get("text") or "").strip():
             raise AgentRuntimeError("browser.type_text 参数 text 必须是非空字符串")
-        if self.name in {"browser.extract_text", "browser.screenshot"}:
+        if self.name in {
+            "browser.extract_text",
+            "browser.screenshot",
+            "browser.open_url_and_extract_text",
+            "browser.open_url_and_screenshot",
+        }:
             for key in ("selector", "reason"):
                 if key in payload and not isinstance(payload.get(key), str):
                     raise AgentRuntimeError(f"{self.name} 参数 {key} 必须是字符串")
@@ -978,6 +991,35 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             "Falls back to the system browser when Chrome CDP is unavailable."
         ),
         properties={"url": {"type": "string", "description": "Absolute http(s) URL."}},
+        required=("url",),
+    ),
+    "browser.open_url_and_extract_text": ToolDescriptor(
+        name="browser.open_url_and_extract_text",
+        description=(
+            "Open an absolute http(s) URL, then extract visible text from that browser page. "
+            "Opening may fall back to the system browser; text extraction requires Chrome CDP."
+        ),
+        properties={
+            "url": {"type": "string", "description": "Absolute http(s) URL."},
+            "selector": {
+                "type": "string",
+                "description": "Optional CSS selector. Defaults to document.body.",
+            },
+        },
+        required=("url",),
+    ),
+    "browser.open_url_and_screenshot": ToolDescriptor(
+        name="browser.open_url_and_screenshot",
+        description=(
+            "Open an absolute http(s) URL, then capture the resulting browser page as a run artifact."
+        ),
+        properties={
+            "url": {"type": "string", "description": "Absolute http(s) URL."},
+            "reason": {
+                "type": "string",
+                "description": "Optional short reason shown in the Run Timeline.",
+            },
+        },
         required=("url",),
     ),
     "browser.current_page": ToolDescriptor(

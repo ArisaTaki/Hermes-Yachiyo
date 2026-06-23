@@ -1173,6 +1173,83 @@ def test_send_message_executes_direct_browser_open_url_tasks(tmp_path, monkeypat
         store.close()
 
 
+def test_send_message_executes_direct_browser_open_url_and_extract_text_task(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("direct browser open+extract task should not call model")
+        ),
+    )
+
+    def fake_open_url(url: str) -> dict:
+        calls.append(("open", url))
+        return {
+            "ok": True,
+            "action": "browser.open_url",
+            "summary": f"Opened {url}",
+            "data": {"url": url, "browser": "Google Chrome"},
+        }
+
+    def fake_extract_text(selector: str = "") -> dict:
+        calls.append(("extract", selector))
+        return {
+            "ok": True,
+            "action": "browser.extract_text",
+            "summary": "Extracted 31 characters from browser page",
+            "data": {
+                "selector": selector,
+                "text": "GitHub page text for Yachiyo",
+                "truncated": False,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.browser.open_url", fake_open_url)
+    monkeypatch.setattr("apps.shell.agent.tools.browser.extract_text", fake_extract_text)
+    try:
+        result = api.send_message("打开 GitHub 并读一下页面")
+        task = runtime.state.get_task(result["task_id"])
+        run = service.get_run(result["run_id"])
+        event_types = [
+            event["event_type"]
+            for event in service.list_run_events(run["run_id"])["events"]
+        ]
+        assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+
+        assert calls == [("open", "https://github.com"), ("extract", "")]
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert result["agent_task"]["status"] == "completed"
+        assert result["agent_task"]["summary"] == "GitHub page text for Yachiyo"
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "browser.open_url_and_extract_text"
+        assert result["agent_task"]["tool_calls"][-1]["input_preview"]["url"] == "https://github.com"
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert task.result == "GitHub page text for Yachiyo"
+        assert assistant is not None
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == "GitHub page text for Yachiyo"
+        assert run["status"] == "completed"
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_send_message_executes_direct_system_volume_task(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)

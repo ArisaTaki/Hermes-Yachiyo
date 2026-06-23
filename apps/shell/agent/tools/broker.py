@@ -535,6 +535,54 @@ class ToolBroker:
     def browser_extract_text(self, selector: str = "") -> dict[str, Any]:
         return browser.extract_text(selector)
 
+    def browser_open_url_and_extract_text(
+        self,
+        url: str,
+        *,
+        selector: str = "",
+    ) -> dict[str, Any]:
+        open_result = self.browser_open_url(url)
+        open_data = open_result.get("data") if isinstance(open_result.get("data"), dict) else {}
+        opened_url = str(open_data.get("url") or url or "").strip()
+        if not open_result.get("ok"):
+            data = dict(open_data)
+            if opened_url:
+                data["url"] = opened_url
+            return {
+                **open_result,
+                "action": "browser.open_url_and_extract_text",
+                "summary": open_result.get("summary") or "Could not open browser page before extracting text",
+                "data": data,
+                "fallback_result": {"open": open_result},
+            }
+
+        extract_result = self.browser_extract_text(selector)
+        extract_data = extract_result.get("data") if isinstance(extract_result.get("data"), dict) else {}
+        data = dict(extract_data)
+        if opened_url:
+            data["url"] = opened_url
+        data["selector"] = str(selector or "")
+        fallback_used = bool(open_result.get("fallback_used") or extract_result.get("fallback_used"))
+        if extract_result.get("ok"):
+            result = {
+                **extract_result,
+                "action": "browser.open_url_and_extract_text",
+                "summary": extract_result.get("summary") or "Opened browser page and extracted text",
+                "data": data,
+                "fallback_used": fallback_used,
+            }
+            if open_result.get("fallback_used"):
+                result["fallback_result"] = {"open": open_result}
+            return result
+        return {
+            **extract_result,
+            "action": "browser.open_url_and_extract_text",
+            "summary": "Opened browser page but could not extract text",
+            "data": data,
+            "fallback_used": fallback_used,
+            "fallback_result": {"open": open_result, "extract_text": extract_result},
+        }
+
     def browser_screenshot(self, *, reason: str = "") -> dict[str, Any]:
         rel = Path("browser") / "current-page.png"
         target = (self.artifact_root / rel).resolve()
@@ -557,6 +605,50 @@ class ToolBroker:
                 "size_bytes": data.get("size") or data.get("size_bytes"),
             },
             "data": data,
+        }
+
+    def browser_open_url_and_screenshot(self, url: str, *, reason: str = "") -> dict[str, Any]:
+        open_result = self.browser_open_url(url)
+        open_data = open_result.get("data") if isinstance(open_result.get("data"), dict) else {}
+        opened_url = str(open_data.get("url") or url or "").strip()
+        if not open_result.get("ok"):
+            data = dict(open_data)
+            if opened_url:
+                data["url"] = opened_url
+            return {
+                **open_result,
+                "action": "browser.open_url_and_screenshot",
+                "summary": open_result.get("summary") or "Could not open browser page before screenshot",
+                "data": data,
+                "fallback_result": {"open": open_result},
+            }
+
+        screenshot_result = self.browser_screenshot(reason=reason)
+        screenshot_data = (
+            screenshot_result.get("data") if isinstance(screenshot_result.get("data"), dict) else {}
+        )
+        data = dict(screenshot_data)
+        if opened_url:
+            data["url"] = opened_url
+        fallback_used = bool(open_result.get("fallback_used") or screenshot_result.get("fallback_used"))
+        if screenshot_result.get("ok"):
+            result = {
+                **screenshot_result,
+                "action": "browser.open_url_and_screenshot",
+                "summary": screenshot_result.get("summary") or "Opened browser page and captured screenshot",
+                "data": data,
+                "fallback_used": fallback_used,
+            }
+            if open_result.get("fallback_used"):
+                result["fallback_result"] = {"open": open_result}
+            return result
+        return {
+            **screenshot_result,
+            "action": "browser.open_url_and_screenshot",
+            "summary": "Opened browser page but could not capture screenshot",
+            "data": data,
+            "fallback_used": fallback_used,
+            "fallback_result": {"open": open_result, "screenshot": screenshot_result},
         }
 
     def call(self, name: str, payload: dict[str, Any], *, approved: bool = False) -> dict[str, Any]:

@@ -309,6 +309,28 @@ def _browser_open_url(broker: Any, payload: dict[str, Any], _approved: bool) -> 
     return broker.browser_open_url(str(payload.get("url") or ""))
 
 
+def _browser_open_url_and_extract_text(
+    broker: Any,
+    payload: dict[str, Any],
+    _approved: bool,
+) -> dict[str, Any]:
+    return broker.browser_open_url_and_extract_text(
+        str(payload.get("url") or ""),
+        selector=str(payload.get("selector") or ""),
+    )
+
+
+def _browser_open_url_and_screenshot(
+    broker: Any,
+    payload: dict[str, Any],
+    _approved: bool,
+) -> dict[str, Any]:
+    return broker.browser_open_url_and_screenshot(
+        str(payload.get("url") or ""),
+        reason=str(payload.get("reason") or ""),
+    )
+
+
 def _browser_current_page(
     broker: Any,
     _payload: dict[str, Any],
@@ -396,6 +418,8 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "desktop.type_text": _desktop_type_text,
     "desktop.click": _desktop_click,
     "browser.open_url": _browser_open_url,
+    "browser.open_url_and_extract_text": _browser_open_url_and_extract_text,
+    "browser.open_url_and_screenshot": _browser_open_url_and_screenshot,
     "browser.current_page": _browser_current_page,
     "browser.click": _browser_click,
     "browser.type_text": _browser_type_text,

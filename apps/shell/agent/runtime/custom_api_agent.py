@@ -36,6 +36,8 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
     "desktop.reveal_path",
     "desktop.open_path",
     "browser.open_url",
+    "browser.open_url_and_extract_text",
+    "browser.open_url_and_screenshot",
     "browser.current_page",
     "browser.extract_text",
     "browser.screenshot",
@@ -78,6 +80,8 @@ _DAILY_DESKTOP_TOOL_LABELS = {
     "desktop.type_text": "输入前台文字",
     "desktop.click": "点击前台界面",
     "browser.open_url": "打开网页",
+    "browser.open_url_and_extract_text": "打开并读取网页",
+    "browser.open_url_and_screenshot": "打开并截取网页",
     "browser.current_page": "读取当前网页",
     "browser.extract_text": "提取网页文本",
     "browser.screenshot": "截取网页",
@@ -582,6 +586,14 @@ class RuntimeCustomApiAgentLoop:
                 if result.get("fallback_used") and result.get("fallback") == "system_browser":
                     return f"已用系统浏览器打开网页：{url}。" if url else (result_summary or "已用系统浏览器打开网页。")
                 return f"已打开网页：{url}。" if url else (result_summary or "已打开网页。")
+            if tool_name == "browser.open_url_and_extract_text":
+                if result.get("ok") is True:
+                    return _browser_text_summary(result)
+                return result_summary or _browser_text_summary(result)
+            if tool_name == "browser.open_url_and_screenshot":
+                if result.get("ok") is True:
+                    return "已打开网页并截取当前网页。"
+                return result_summary or "已打开网页，但没能截取当前网页。"
             if tool_name == "browser.current_page":
                 if result.get("ok") is True:
                     return _browser_page_summary(result)
@@ -619,6 +631,22 @@ class RuntimeCustomApiAgentLoop:
 
         error = str(result.get("error") or result_summary or "工具返回失败").strip()
         permission_targets = result.get("permission_targets")
+        fallback = result.get("fallback_result") if isinstance(result.get("fallback_result"), dict) else {}
+        if tool_name in {"browser.open_url_and_extract_text", "browser.open_url_and_screenshot"}:
+            opened = fallback.get("open") if isinstance(fallback.get("open"), dict) else {}
+            if opened.get("ok"):
+                targets = ", ".join(str(item) for item in permission_targets or [] if str(item))
+                diagnostics = _permission_diagnostics(result)
+                suffix = f" 缺少权限：{targets}。" if targets else ""
+                partial_summary = (
+                    "已打开网页，但没能读取网页文本。"
+                    if tool_name == "browser.open_url_and_extract_text"
+                    else "已打开网页，但没能截取当前网页。"
+                )
+                return _append_recovery_action_summary(
+                    f"{partial_summary}{suffix}{diagnostics}".strip(),
+                    result,
+                )
         if result.get("permission_error") or permission_targets:
             targets = ", ".join(str(item) for item in permission_targets or [] if str(item))
             diagnostics = _permission_diagnostics(result)
@@ -627,7 +655,6 @@ class RuntimeCustomApiAgentLoop:
                 f"桌面操作未完成：{_sentence(error)}{suffix}{diagnostics}".strip(),
                 result,
             )
-        fallback = result.get("fallback_result") if isinstance(result.get("fallback_result"), dict) else {}
         if tool_name == "media.apple_music_play" and fallback.get("ok"):
             query = _payload_text(result, planned_input, "query")
             if str(fallback.get("action") or "") == "media.apple_music.search":
@@ -785,8 +812,9 @@ class RuntimeCustomApiAgentLoop:
             "Map explicit current/foreground window minimize requests to desktop.minimize_window. "
             "Map explicit current/foreground window close requests to desktop.close_window. "
             "For browser or web-page requests, prefer structured browser tools such as "
-            "browser.open_url, browser.current_page, browser.click, browser.type_text, "
-            "browser.extract_text, and browser.screenshot when they are allowed. "
+            "browser.open_url, browser.open_url_and_extract_text, browser.open_url_and_screenshot, "
+            "browser.current_page, browser.click, browser.type_text, browser.extract_text, "
+            "and browser.screenshot when they are allowed. "
             "When browser.click has no Chrome CDP, use screen observation and explicit "
             "fallback_x/fallback_y coordinates instead of guessing selector positions. "
             "Do not replace these structured desktop or browser actions with terminal.run. "

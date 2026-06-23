@@ -127,6 +127,8 @@ export function runtimeToolDisplayLabel(toolName: string): string {
   if (tool === 'desktop.type_text') return '输入前台文字';
   if (tool === 'desktop.click') return '点击前台界面';
   if (tool === 'browser.open_url') return '打开网页';
+  if (tool === 'browser.open_url_and_extract_text') return '打开并读取网页';
+  if (tool === 'browser.open_url_and_screenshot') return '打开并截取网页';
   if (tool === 'browser.current_page') return '读取当前网页';
   if (tool === 'browser.click') return '点击网页元素';
   if (tool === 'browser.type_text') return '填写网页输入';

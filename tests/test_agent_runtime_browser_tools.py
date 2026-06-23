@@ -366,6 +366,93 @@ def test_browser_screenshot_tool_writes_artifact_metadata(tmp_path, monkeypatch)
     assert (tmp_path / "artifacts" / "browser" / "current-page.png").read_bytes() == png_bytes
 
 
+def test_browser_open_url_and_extract_text_runs_open_then_extract(tmp_path, monkeypatch) -> None:
+    broker = _broker(tmp_path)
+    calls: list[tuple[str, str]] = []
+
+    def fake_open_url(url: str) -> dict[str, object]:
+        calls.append(("open", url))
+        return {
+            "ok": True,
+            "action": "browser.open_url",
+            "summary": f"Opened {url}",
+            "data": {"url": url},
+        }
+
+    def fake_extract_text(selector: str = "") -> dict[str, object]:
+        calls.append(("extract", selector))
+        return {
+            "ok": True,
+            "action": "browser.extract_text",
+            "summary": "Extracted page text",
+            "data": {"selector": selector, "text": "GitHub page text", "truncated": False},
+        }
+
+    monkeypatch.setattr(browser_mod, "open_url", fake_open_url)
+    monkeypatch.setattr(browser_mod, "extract_text", fake_extract_text)
+
+    result = broker.call(
+        "browser.open_url_and_extract_text",
+        {"url": "https://github.com", "selector": "main"},
+    )
+
+    assert calls == [("open", "https://github.com"), ("extract", "main")]
+    assert result["ok"] is True
+    assert result["action"] == "browser.open_url_and_extract_text"
+    assert result["data"]["url"] == "https://github.com"
+    assert result["data"]["selector"] == "main"
+    assert result["data"]["text"] == "GitHub page text"
+
+
+def test_browser_open_url_and_screenshot_preserves_artifact(tmp_path, monkeypatch) -> None:
+    broker = _broker(tmp_path)
+    png_bytes = b"open-browser-png"
+    calls: list[tuple[str, str]] = []
+
+    def fake_open_url(url: str) -> dict[str, object]:
+        calls.append(("open", url))
+        return {
+            "ok": True,
+            "action": "browser.open_url",
+            "summary": f"Opened {url}",
+            "data": {"url": url},
+        }
+
+    def fake_screenshot(target_path: Path) -> dict[str, object]:
+        calls.append(("screenshot", str(target_path)))
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_path.write_bytes(png_bytes)
+        return {
+            "ok": True,
+            "action": "browser.screenshot",
+            "summary": "Captured current browser page",
+            "data": {
+                "path": str(target_path),
+                "mime_type": "image/png",
+                "format": "png",
+                "size": len(png_bytes),
+            },
+        }
+
+    monkeypatch.setattr(browser_mod, "open_url", fake_open_url)
+    monkeypatch.setattr(browser_mod, "screenshot", fake_screenshot)
+
+    result = broker.call(
+        "browser.open_url_and_screenshot",
+        {"url": "https://github.com", "reason": "capture GitHub"},
+    )
+
+    assert calls[0] == ("open", "https://github.com")
+    assert calls[1][0] == "screenshot"
+    assert result["ok"] is True
+    assert result["action"] == "browser.open_url_and_screenshot"
+    assert result["reason"] == "capture GitHub"
+    assert result["artifact"]["path"] == "browser/current-page.png"
+    assert result["data"]["url"] == "https://github.com"
+    assert result["data"]["path"] == "browser/current-page.png"
+    assert (tmp_path / "artifacts" / "browser" / "current-page.png").read_bytes() == png_bytes
+
+
 def test_browser_screenshot_falls_back_to_screen_capture_artifact(tmp_path, monkeypatch) -> None:
     broker = _broker(tmp_path)
     fallback_bytes = b"fallback-browser-png"

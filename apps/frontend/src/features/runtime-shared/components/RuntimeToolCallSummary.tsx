@@ -325,6 +325,8 @@ function runtimeToolActiveSummaryLabel(name: string, status: string): string {
   if (tool === 'desktop.hotkey') return '正在发送快捷键';
   if (tool === 'desktop.type_text') return '正在输入前台文字';
   if (tool === 'browser.open_url') return '正在打开网页';
+  if (tool === 'browser.open_url_and_extract_text') return '正在打开并读取网页';
+  if (tool === 'browser.open_url_and_screenshot') return '正在打开并截取网页';
   if (tool === 'browser.current_page') return '正在读取当前网页';
   if (tool === 'browser.click') return '正在点击网页';
   if (tool === 'browser.type_text') return '正在填写网页输入';

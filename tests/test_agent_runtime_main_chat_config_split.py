@@ -59,6 +59,8 @@ def test_main_chat_config_builder_projects_daily_entrypoint_runtime(tmp_path) ->
     assert "app.status" in config["instructions"]
     assert "desktop.reveal_path" in config["instructions"]
     assert "browser.open_url" in config["instructions"]
+    assert "browser.open_url_and_extract_text" in config["instructions"]
+    assert "browser.open_url_and_screenshot" in config["instructions"]
     assert "常见网站名或搜索查询" in config["instructions"]
     assert "desktop.click" in config["instructions"]
     assert "低风险桌面动作默认直接执行" in config["instructions"]

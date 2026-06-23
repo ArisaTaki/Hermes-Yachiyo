@@ -269,6 +269,8 @@ _PERMISSION_CAPABILITY_TOOLS = {
     ),
     "browser_control": (
         "browser.open_url",
+        "browser.open_url_and_extract_text",
+        "browser.open_url_and_screenshot",
         "browser.current_page",
         "browser.click",
         "browser.type_text",

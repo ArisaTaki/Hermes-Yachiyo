@@ -31,6 +31,8 @@ export const agentGroupToolPolicyPresets: AgentGroupToolPolicyPreset[] = [
       'desktop.hotkey',
       'desktop.type_text',
       'browser.open_url',
+      'browser.open_url_and_extract_text',
+      'browser.open_url_and_screenshot',
       'browser.current_page',
       'browser.click',
       'browser.type_text',
@@ -86,6 +88,8 @@ export const agentGroupToolPolicyPresets: AgentGroupToolPolicyPreset[] = [
     risk: 'medium',
     tools: [
       'browser.open_url',
+      'browser.open_url_and_extract_text',
+      'browser.open_url_and_screenshot',
       'browser.current_page',
       'browser.click',
       'browser.type_text',

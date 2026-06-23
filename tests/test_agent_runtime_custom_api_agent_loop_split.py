@@ -602,6 +602,8 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "desktop.windows",
         "app.status",
         "browser.open_url",
+        "browser.open_url_and_extract_text",
+        "browser.open_url_and_screenshot",
         "browser.current_page",
         "browser.extract_text",
         "browser.screenshot",
@@ -678,6 +680,43 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "browser.open_url",
         "input": {"url": "https://github.com"},
     }
+    assert daily_desktop_intent_tool_request("打开 GitHub 并读一下页面", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url_and_extract_text",
+        "input": {"url": "https://github.com"},
+    }
+    assert daily_desktop_intent_tool_request("打开 https://example.com/docs 并读一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url_and_extract_text",
+        "input": {"url": "https://example.com/docs"},
+    }
+    assert daily_desktop_intent_tool_request("open github.com and read the page", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url_and_extract_text",
+        "input": {"url": "https://github.com"},
+    }
+    assert daily_desktop_intent_tool_request("打开 GitHub 并截个图", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url_and_screenshot",
+        "input": {
+            "url": "https://github.com",
+            "reason": "user asked to capture the browser page after opening a URL",
+        },
+    }
+    assert daily_desktop_intent_tool_request("open github.com and take a screenshot", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url_and_screenshot",
+        "input": {
+            "url": "https://github.com",
+            "reason": "user asked to capture the browser page after opening a URL",
+        },
+    }
+    assert daily_desktop_intent_tool_request("打开 GitHub 并读一下页面", ["browser.open_url"]) == {
+        "protocol": "json_fallback",
+        "tool": "browser.open_url",
+        "input": {"url": "https://github.com"},
+    }
+    assert daily_desktop_intent_tool_request("打开 GitHub 并读一下页面", ["browser.extract_text"]) is None
     assert daily_desktop_intent_tool_request("打开 Chrome 并访问 github.com", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.open_url",
@@ -2639,6 +2678,48 @@ def test_main_chat_desktop_intent_summarizes_browser_extract_text_and_screenshot
     assert text == "Yachiyo desktop agent runtime"
     assert screenshot == "已截取当前网页。"
     assert failed == "桌面操作未完成：Chrome CDP unavailable。"
+
+
+def test_main_chat_desktop_intent_summarizes_browser_open_composites() -> None:
+    text = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "browser.open_url_and_extract_text",
+        {"url": "https://github.com"},
+        {
+            "ok": True,
+            "summary": "Extracted 29 characters from browser page",
+            "data": {"url": "https://github.com", "text": "GitHub: Let us build from here"},
+        },
+    )
+    screenshot = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "browser.open_url_and_screenshot",
+        {"url": "https://github.com"},
+        {
+            "ok": True,
+            "summary": "Opened browser page and captured screenshot",
+            "data": {"url": "https://github.com", "path": "browser/current-page.png"},
+        },
+    )
+    partial_text = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "browser.open_url_and_extract_text",
+        {"url": "https://github.com"},
+        {
+            "ok": False,
+            "summary": "Opened browser page but could not extract text",
+            "permission_error": True,
+            "permission_targets": ["chrome_cdp"],
+            "fallback_result": {
+                "open": {"ok": True, "data": {"url": "https://github.com"}},
+                "extract_text": {"ok": False, "error": "Chrome CDP unavailable"},
+            },
+        },
+    )
+
+    assert text == "GitHub: Let us build from here"
+    assert screenshot == "已打开网页并截取当前网页。"
+    assert partial_text == (
+        "已打开网页，但没能读取网页文本。 缺少权限：chrome_cdp。 "
+        "你可以这样处理：启动或配置 Chrome DevTools/CDP 连接后再重试浏览器控制。"
+    )
 
 
 def test_main_chat_desktop_intent_summarizes_running_apps() -> None:

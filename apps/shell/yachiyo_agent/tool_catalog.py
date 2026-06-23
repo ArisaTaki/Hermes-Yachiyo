@@ -287,6 +287,12 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         "browser.open_url": [
             "Falls back to the system browser when Chrome CDP is unavailable.",
         ],
+        "browser.open_url_and_extract_text": [
+            "Opens the URL first; text extraction requires a reachable Chrome CDP endpoint.",
+        ],
+        "browser.open_url_and_screenshot": [
+            "Opens the URL first, then captures the page through the browser screenshot path.",
+        ],
         "browser.click": [
             "Can fall back to foreground desktop clicking when fallback_x/fallback_y are provided.",
         ],
@@ -373,6 +379,8 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
     notes = list(notes_by_tool.get(tool_name, []))
     if tool_name in {
         "browser.current_page",
+        "browser.open_url_and_extract_text",
+        "browser.open_url_and_screenshot",
         "browser.click",
         "browser.type_text",
         "browser.extract_text",

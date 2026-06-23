@@ -57,6 +57,8 @@ _DESKTOP_TOOL_PROGRESS_LABELS = {
     "desktop.type_text": "输入前台文字",
     "desktop.click": "点击前台界面",
     "browser.open_url": "打开网页",
+    "browser.open_url_and_extract_text": "打开并读取网页",
+    "browser.open_url_and_screenshot": "打开并截取网页",
     "browser.current_page": "读取当前网页",
     "browser.extract_text": "提取网页文本",
     "browser.screenshot": "截取网页",

@@ -541,6 +541,14 @@ def test_apple_music_control_schema_accepts_safe_playback_actions() -> None:
 
 def test_browser_click_schema_accepts_optional_fallback_coordinates() -> None:
     ToolDescriptorRegistry.validate_payload(
+        "browser.open_url_and_extract_text",
+        {"url": "https://example.com/docs", "selector": "main"},
+    )
+    ToolDescriptorRegistry.validate_payload(
+        "browser.open_url_and_screenshot",
+        {"url": "https://example.com/docs", "reason": "capture docs"},
+    )
+    ToolDescriptorRegistry.validate_payload(
         "browser.click",
         {"selector": "#submit", "fallback_x": 12, "fallback_y": 34.5, "click_count": 2},
     )
@@ -796,6 +804,16 @@ def test_tool_dispatch_registry_routes_browser_tools(tmp_path, monkeypatch) -> N
     )
     monkeypatch.setattr(
         broker,
+        "browser_open_url_and_extract_text",
+        lambda url, *, selector="": calls.append(("open_extract", url, selector)) or {"ok": True},
+    )
+    monkeypatch.setattr(
+        broker,
+        "browser_open_url_and_screenshot",
+        lambda url, *, reason="": calls.append(("open_screenshot", url, reason)) or {"ok": True},
+    )
+    monkeypatch.setattr(
+        broker,
         "browser_click",
         lambda selector, *, fallback_x=None, fallback_y=None, click_count=1: calls.append(
             ("click", selector, fallback_x, fallback_y, click_count)
@@ -815,6 +833,16 @@ def test_tool_dispatch_registry_routes_browser_tools(tmp_path, monkeypatch) -> N
     ) == {"ok": True}
     assert dispatch_tool_call(
         broker,
+        "browser.open_url_and_extract_text",
+        {"url": "https://example.com/docs", "selector": "main"},
+    ) == {"ok": True}
+    assert dispatch_tool_call(
+        broker,
+        "browser.open_url_and_screenshot",
+        {"url": "https://example.com/docs", "reason": "capture docs"},
+    ) == {"ok": True}
+    assert dispatch_tool_call(
+        broker,
         "browser.click",
         {"selector": "#go", "fallback_x": 12, "fallback_y": 34, "click_count": 2},
     ) == {"ok": True}
@@ -825,6 +853,8 @@ def test_tool_dispatch_registry_routes_browser_tools(tmp_path, monkeypatch) -> N
     ) == {"ok": True}
     assert calls == [
         ("open", "https://example.com"),
+        ("open_extract", "https://example.com/docs", "main"),
+        ("open_screenshot", "https://example.com/docs", "capture docs"),
         ("click", "#go", 12, 34, 2),
         ("type", "#q", "八千代"),
     ]

@@ -58,6 +58,8 @@ MEDIUM_RISK_DESKTOP_TOOLS = frozenset(
 LOW_RISK_BROWSER_TOOLS = frozenset(
     {
         "browser.open_url",
+        "browser.open_url_and_extract_text",
+        "browser.open_url_and_screenshot",
         "browser.current_page",
         "browser.extract_text",
         "browser.screenshot",
@@ -317,6 +319,8 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "desktop.type_text",
         "desktop.click",
         "browser.open_url",
+        "browser.open_url_and_extract_text",
+        "browser.open_url_and_screenshot",
         "browser.current_page",
         "browser.click",
         "browser.type_text",
@@ -353,6 +357,8 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
     ),
     "browser_control": (
         "browser.open_url",
+        "browser.open_url_and_extract_text",
+        "browser.open_url_and_screenshot",
         "browser.current_page",
         "browser.click",
         "browser.type_text",
@@ -383,6 +389,8 @@ DESKTOP_CAPABILITY_DIAGNOSTIC_ROUTES: dict[str, str | None] = {
 
 DEGRADED_DESKTOP_TOOL_PERMISSION_FALLBACKS: dict[str, tuple[str, ...]] = {
     "browser.open_url": ("chrome_cdp",),
+    "browser.open_url_and_extract_text": ("chrome_cdp",),
+    "browser.open_url_and_screenshot": ("chrome_cdp",),
     "browser.screenshot": ("chrome_cdp",),
     "browser.click": ("chrome_cdp",),
     "browser.type_text": ("chrome_cdp",),
@@ -682,7 +690,7 @@ def _tool_missing_permissions(
         values.extend(_missing_permissions(missing_by_capability, "foreground_input"))
     else:
         values.extend(capability_missing)
-    if tool == "browser.screenshot":
+    if tool in {"browser.screenshot", "browser.open_url_and_screenshot"}:
         values.extend(_missing_permissions(missing_by_capability, "screen_capture"))
     if tool in {"browser.click", "browser.type_text"}:
         values.extend(_missing_permissions(missing_by_capability, "foreground_input"))
@@ -709,7 +717,7 @@ def _tool_degrades_with_permissions(
     fallback_permissions = set(DEGRADED_DESKTOP_TOOL_PERMISSION_FALLBACKS.get(tool, ()))
     if not missing_values or not fallback_permissions or not missing_values <= fallback_permissions:
         return False
-    if tool == "browser.screenshot":
+    if tool in {"browser.screenshot", "browser.open_url_and_screenshot"}:
         return not _missing_permissions(missing_by_capability, "screen_capture")
     if tool in {"browser.click", "browser.type_text"}:
         return not _missing_permissions(missing_by_capability, "foreground_input")

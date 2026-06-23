@@ -835,6 +835,51 @@ def test_chat_bridge_quick_message_executes_browser_open_url_for_launcher_entryp
     assert "model.request.started" not in event_types
 
 
+def test_chat_bridge_quick_message_executes_browser_open_url_and_extract_text(
+    tmp_path,
+    monkeypatch,
+):
+    calls: list[tuple[str, str]] = []
+
+    def fake_open_url(url: str) -> dict:
+        calls.append(("open", url))
+        return {
+            "ok": True,
+            "action": "browser.open_url",
+            "summary": f"Opened {url}",
+            "data": {"url": url},
+        }
+
+    def fake_extract_text(selector: str = "") -> dict:
+        calls.append(("extract", selector))
+        return {
+            "ok": True,
+            "action": "browser.extract_text",
+            "summary": "Extracted 31 characters from browser page",
+            "data": {
+                "selector": selector,
+                "text": "GitHub page text for Yachiyo",
+                "truncated": False,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.browser.open_url", fake_open_url)
+    monkeypatch.setattr("apps.shell.agent.tools.browser.extract_text", fake_extract_text)
+    _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "打开 GitHub 并读一下页面",
+    )
+
+    assert calls == [("open", "https://github.com"), ("extract", "")]
+    assert agent_task["status"] == "completed"
+    assert agent_task["summary"] == "GitHub page text for Yachiyo"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "browser.open_url_and_extract_text"
+    assert run["status"] == "completed"
+    assert "agent.desktop.intent_completed" in event_types
+    assert "model.request.started" not in event_types
+
+
 def test_chat_bridge_quick_message_executes_system_volume_for_launcher_entrypoints(
     tmp_path,
     monkeypatch,

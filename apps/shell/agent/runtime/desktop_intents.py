@@ -239,6 +239,8 @@ _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "browser.current_page",
     "browser.extract_text",
     "browser.open_url",
+    "browser.open_url_and_extract_text",
+    "browser.open_url_and_screenshot",
     "browser.screenshot",
     "clipboard.write",
     "desktop.active_window",
@@ -340,18 +342,22 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     if safe_shortcut_action:
         candidates.append(_request("desktop.safe_shortcut", {"action": safe_shortcut_action}))
 
-    url = _browser_composite_open_url(text) or _browser_open_url(text)
-    if url:
-        candidates.append(_request("browser.open_url", {"url": url}))
+    open_extract_payload = _browser_open_url_and_extract_text_request(text)
+    if open_extract_payload:
+        candidates.append(_request("browser.open_url_and_extract_text", open_extract_payload))
 
-    named_site_url = _browser_named_site_url(text)
-    if named_site_url:
-        candidates.append(_request("browser.open_url", {"url": named_site_url}))
+    open_screenshot_payload = _browser_open_url_and_screenshot_request(text)
+    if open_screenshot_payload:
+        candidates.append(_request("browser.open_url_and_screenshot", open_screenshot_payload))
 
-    if _is_browser_extract_text_request(text):
+    browser_open_target_url = _browser_open_target_url(text)
+    if browser_open_target_url:
+        candidates.append(_request("browser.open_url", {"url": browser_open_target_url}))
+
+    if _is_browser_extract_text_request(text) and not browser_open_target_url:
         candidates.append(_request("browser.extract_text", {}))
 
-    if _is_browser_screenshot_request(text):
+    if _is_browser_screenshot_request(text) and not browser_open_target_url:
         candidates.append(
             _request("browser.screenshot", {"reason": "user asked to capture the browser page"})
         )
@@ -615,8 +621,72 @@ def _browser_composite_open_url(text: str) -> str:
     return ""
 
 
+def _browser_open_target_url(text: str) -> str:
+    return _browser_composite_open_url(text) or _browser_open_url(text) or _browser_named_site_url(text)
+
+
+def _browser_open_url_and_extract_text_request(text: str) -> dict[str, str] | None:
+    if not _is_browser_open_followup_extract_text_request(text):
+        return None
+    url = _browser_open_target_url(text)
+    if not url:
+        return None
+    return {"url": url}
+
+
+def _browser_open_url_and_screenshot_request(text: str) -> dict[str, str] | None:
+    if not _is_browser_open_followup_screenshot_request(text):
+        return None
+    url = _browser_open_target_url(text)
+    if not url:
+        return None
+    return {
+        "url": url,
+        "reason": "user asked to capture the browser page after opening a URL",
+    }
+
+
+def _is_browser_open_followup_extract_text_request(text: str) -> bool:
+    if not _browser_open_target_url(text):
+        return False
+    lowered = text.lower()
+    return bool(
+        _is_browser_extract_text_request(text)
+        or re.search(
+            r"(?:并且|并|然后|之后|后|再)\s*"
+            r"(?:读取|读一下|读下|读一读|提取|抓取|获取)"
+            r"(?:一下|下|它|网页|页面|网站|正文|文字|文本|内容)?",
+            text,
+        )
+        or re.search(
+            r"\b(?:and|then)\s+(?:read|extract|get)\s+"
+            r"(?:the\s+)?(?:page|webpage|website|site|text|content)?\b",
+            lowered,
+        )
+    )
+
+
+def _is_browser_open_followup_screenshot_request(text: str) -> bool:
+    if not _browser_open_target_url(text):
+        return False
+    lowered = text.lower()
+    return bool(
+        _is_browser_screenshot_request(text)
+        or re.search(
+            r"(?:打开|访问|浏览|前往|去).{0,80}"
+            r"(?:截图|截屏|屏幕截图|抓屏|截一下|截个图|截取)",
+            text,
+        )
+        or re.search(
+            r"\b(?:open|visit|browse|go to)\b.{0,80}"
+            r"(?:take\s+a\s+screenshot|screenshot|capture)",
+            lowered,
+        )
+    )
+
+
 def _browser_target_url(value: str) -> str:
-    target = _strip_query(value)
+    target = _strip_browser_followup(_strip_query(value))
     target = re.sub(r"^(?:一下|下|这个|那个)\s*", "", target)
     return (
         _normalize_url(target)
@@ -684,7 +754,7 @@ def _browser_named_site_url(text: str) -> str:
 
 
 def _normalize_site_name(value: str) -> str:
-    site = _strip_polite_suffix(_strip_query(value))
+    site = _strip_polite_suffix(_strip_browser_followup(_strip_query(value)))
     site = re.sub(r"^(?:一下|下|这个|那个)\s*", "", site)
     site = re.sub(r"\s*(?:官网|官方网站|官方站|网页|网站|站点|site|website)$", "", site, flags=re.IGNORECASE)
     compact = re.sub(r"[\s._-]+", "", site.lower())
@@ -735,7 +805,7 @@ def _has_browser_open_context(text: str) -> bool:
 
 
 def _normalize_browser_site_name(value: str) -> str:
-    site = _strip_polite_suffix(_strip_query(value))
+    site = _strip_polite_suffix(_strip_browser_followup(_strip_query(value)))
     site = re.sub(r"\s*(?:官网|官方网站|官方站|网页|网站|站点|site|website)$", "", site, flags=re.IGNORECASE)
     compact = re.sub(r"[\s._-]+", "", site.lower())
     aliases = {
@@ -2279,6 +2349,26 @@ def _percentage_value(value: str) -> int | None:
 
 def _strip_query(value: str) -> str:
     return str(value or "").strip(" 「」『』“”\"'`，,。.!?？！？ ")
+
+
+def _strip_browser_followup(value: str) -> str:
+    text = str(value or "").strip()
+    text = re.sub(
+        r"\s*(?:并且|并|然后|之后|后|再)\s*"
+        r"(?:读取|读一下|读下|读一读|提取|抓取|获取|查看|看看|看一下|"
+        r"截取|截图|截屏|截一下|截个图|截|抓屏).*$",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"\s+(?:and|then)\s+"
+        r"(?:read|extract|get|take\s+a\s+screenshot|screenshot|capture).*$",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    return text.strip()
 
 
 def _strip_polite_suffix(value: str) -> str:
