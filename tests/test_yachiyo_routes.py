@@ -9,7 +9,14 @@ from typing import Any
 import pytest
 
 from apps.bridge.routes import yachiyo, yachiyo_chat_handlers, yachiyo_studio_run_handlers
+from apps.core.chat_session import ChatSession, MessageStatus
+from apps.core.chat_store import ChatStore
+from apps.core.state import AppState
+from apps.shell.agent_runtime import AgentRuntimeService
+from apps.shell.chat_api import ChatAPI
+from apps.shell.credential_store import MemoryCredentialStore
 from apps.shell.yachiyo_agent import AgentTaskSnapshot, RunTimelineSnapshot, legacy_ports
+from packages.protocol.enums import TaskStatus
 
 
 class _FakeAgentRuntime:
@@ -653,6 +660,92 @@ async def test_yachiyo_task_approve_preserves_approval_decision_payload(monkeypa
             },
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_yachiyo_task_approve_syncs_main_chat_desktop_approval_to_chat(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime.db",
+        workspace_dir=tmp_path / "agent-runtime",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id="chat-main-approval")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    app_runtime = SimpleNamespace(
+        agent_runtime_service=service,
+        chat_session=session,
+        state=state,
+        store=store,
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
+    hotkey_calls: list[tuple[str, list[str] | None]] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("desktop approval should not call model")
+        ),
+    )
+
+    def fake_desktop_hotkey(key: str, *, modifiers: list[str] | None = None) -> dict:
+        hotkey_calls.append((key, modifiers))
+        return {
+            "ok": True,
+            "action": "desktop.hotkey",
+            "summary": "Sent hotkey",
+            "data": {
+                "key": key,
+                "modifiers": list(modifiers or []),
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_hotkey", fake_desktop_hotkey)
+    try:
+        sent = ChatAPI(app_runtime).send_message("按 Command+L")
+        task = state.get_task(sent["task_id"])
+        waiting_message = session.get_assistant_message_for_task(sent["task_id"])
+
+        assert sent["ok"] is True
+        assert sent["status"] == "waiting_approval"
+        assert task is not None
+        assert task.status == TaskStatus.RUNNING
+        assert waiting_message is not None
+        assert waiting_message.status == MessageStatus.PROCESSING
+        assert hotkey_calls == []
+
+        approved = await yachiyo.approve_task(sent["task_id"], None, request)
+        completed_task = state.get_task(sent["task_id"])
+        completed_message = session.get_assistant_message_for_task(sent["task_id"])
+        run = service.get_run(sent["run_id"])
+
+        assert approved["status"] == "completed"
+        assert approved["summary"] == "已发送快捷键：Command+L。"
+        assert hotkey_calls == [("l", ["command"])]
+        assert completed_task is not None
+        assert completed_task.status == TaskStatus.COMPLETED
+        assert completed_task.result == "已发送快捷键：Command+L。"
+        assert completed_message is not None
+        assert completed_message.status == MessageStatus.COMPLETED
+        assert completed_message.content == "已发送快捷键：Command+L。"
+        assert completed_message.metadata["pending_approval"] == {}
+        assert completed_message.metadata["run_status"] == "completed"
+        assert run["status"] == "completed"
+        assert run["pending_approval"] == {}
+    finally:
+        service.close()
+        store.close()
 
 
 @pytest.mark.asyncio
