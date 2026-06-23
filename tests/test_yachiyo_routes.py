@@ -3211,6 +3211,12 @@ async def test_yachiyo_task_route_executes_browser_screenshot_without_model(
             {"app_name": "Slack"},
             "apps.shell.agent.tools.desktop.app_quit",
         ),
+        (
+            "双击 120 240",
+            "desktop.click",
+            {"x": 120, "y": 240, "click_count": 2},
+            "apps.shell.agent.tools.desktop.desktop_click",
+        ),
     ],
 )
 async def test_yachiyo_task_route_pauses_medium_risk_desktop_intent_for_approval(
