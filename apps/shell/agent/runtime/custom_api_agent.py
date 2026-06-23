@@ -31,6 +31,7 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
     "browser.current_page",
     "browser.extract_text",
     "browser.screenshot",
+    "desktop.close_window",
     "desktop.hotkey",
     "desktop.type_text",
     "desktop.click",
@@ -52,6 +53,7 @@ _DAILY_DESKTOP_TOOL_LABELS = {
     "media.apple_music_control": "控制 Apple Music",
     "system.volume": "控制系统音量",
     "clipboard.write": "写入剪贴板",
+    "desktop.close_window": "关闭当前窗口",
     "desktop.hotkey": "发送快捷键",
     "desktop.type_text": "输入前台文字",
     "desktop.click": "点击前台界面",
@@ -470,6 +472,8 @@ class RuntimeCustomApiAgentLoop:
                 return f"已在 Finder 中显示：{path}。" if path else (result_summary or "已在 Finder 中显示。")
             if tool_name == "desktop.open_path":
                 return _desktop_open_path_summary(result, planned_input) or result_summary or "已打开本地路径。"
+            if tool_name == "desktop.close_window":
+                return "已关闭当前窗口。"
             if tool_name == "browser.open_url":
                 url = _payload_text(result, planned_input, "url")
                 if result.get("fallback_used") and result.get("fallback") == "system_browser":
@@ -624,7 +628,7 @@ class RuntimeCustomApiAgentLoop:
         desktop_tool_guidance = (
             "For desktop requests, prefer structured desktop tools such as screen.capture, "
             "desktop.permissions, desktop.active_window, desktop.running_apps, desktop.windows, app.status, app.open/app.focus/app.quit, desktop.reveal_path, desktop.open_path, media.apple_music_play, "
-            "media.apple_music_control, system.volume, clipboard.write, desktop.click, desktop.hotkey, and desktop.type_text "
+            "media.apple_music_control, system.volume, clipboard.write, desktop.close_window, desktop.click, desktop.hotkey, and desktop.type_text "
             "when they are allowed. For explicit daily commands, map 'play <song>' or "
             "'播放<歌曲>' to media.apple_music_play; map pause/resume/next/previous media "
             "commands to media.apple_music_control; map volume status/set/up/down/mute/unmute "
@@ -639,6 +643,7 @@ class RuntimeCustomApiAgentLoop:
             "questions to desktop.permissions; "
             "map 'show/reveal in Finder' requests to desktop.reveal_path and safe local "
             "file or folder open requests to desktop.open_path. "
+            "Map explicit current/foreground window close requests to desktop.close_window. "
             "For browser or web-page requests, prefer structured browser tools such as "
             "browser.open_url, browser.current_page, browser.click, browser.type_text, "
             "browser.extract_text, and browser.screenshot when they are allowed. "

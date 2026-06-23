@@ -233,7 +233,12 @@ _PERMISSION_CAPABILITY_TOOLS = {
         "desktop.open_path",
     ),
     "media_control": ("media.apple_music_play", "media.apple_music_control"),
-    "foreground_input": ("desktop.hotkey", "desktop.type_text", "desktop.click"),
+    "foreground_input": (
+        "desktop.close_window",
+        "desktop.hotkey",
+        "desktop.type_text",
+        "desktop.click",
+    ),
     "browser_control": (
         "browser.open_url",
         "browser.current_page",
@@ -1264,6 +1269,36 @@ def clipboard_write(text: str) -> dict[str, Any]:
     }
 
 
+def desktop_close_window() -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("desktop.close_window")
+    result = _run_osascript(
+        """
+        on run argv
+            tell application "System Events" to keystroke "w" using {command down}
+            return "closed_window"
+        end run
+        """,
+    )
+    if not result["ok"]:
+        return _with_permission_metadata(
+            "desktop.close_window",
+            {
+                **result,
+                "action": "desktop.close_window",
+                "summary": "desktop.close_window failed",
+            },
+        )
+    return {
+        "ok": True,
+        "action": "desktop.close_window",
+        "summary": "Closed the foreground window",
+        "data": {"key": "w", "modifiers": ["command"]},
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
 def desktop_type_text(text: str) -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("desktop.type_text")
@@ -1865,6 +1900,7 @@ def _missing_permissions_for_action(action: str) -> list[str]:
         "app.quit": ["automation"],
         "media.apple_music_play": ["music_app", "automation"],
         "media.apple_music_control": ["music_app", "automation"],
+        "desktop.close_window": ["accessibility"],
         "desktop.click": ["accessibility"],
         "desktop.type_text": ["accessibility"],
         "desktop.hotkey": ["accessibility"],
@@ -1882,6 +1918,7 @@ def _permission_targets_for_action(action: str) -> list[str]:
         "app.quit": ["automation"],
         "media.apple_music_play": ["music_app", "automation"],
         "media.apple_music_control": ["music_app", "automation"],
+        "desktop.close_window": ["accessibility"],
         "desktop.click": ["accessibility"],
         "desktop.type_text": ["accessibility"],
         "desktop.hotkey": ["accessibility"],

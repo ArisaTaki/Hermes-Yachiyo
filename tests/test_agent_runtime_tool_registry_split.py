@@ -280,6 +280,7 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
         "media_apple_music_control",
         "system_volume",
         "clipboard_write",
+        "desktop_close_window",
         "desktop_hotkey",
         "desktop_type_text",
         "desktop_click",
@@ -365,6 +366,10 @@ def test_clipboard_write_schema_requires_text() -> None:
         ToolDescriptorRegistry.validate_payload("clipboard.write", {"text": ""})
 
 
+def test_desktop_close_window_schema_accepts_empty_payload() -> None:
+    ToolDescriptorRegistry.validate_payload("desktop.close_window", {})
+
+
 def test_compile_tool_policy_accepts_desktop_tools_with_foreground_approval() -> None:
     compiler = RuntimePolicyCompiler()
 
@@ -374,6 +379,7 @@ def test_compile_tool_policy_accepts_desktop_tools_with_foreground_approval() ->
             "allowed_tools": [
                 "screen.capture",
                 "app.quit",
+                "desktop.close_window",
                 "desktop.click",
                 "desktop.type_text",
                 "terminal.run",
@@ -384,12 +390,14 @@ def test_compile_tool_policy_accepts_desktop_tools_with_foreground_approval() ->
     assert policy["allowed_tools"] == [
         "screen.capture",
         "app.quit",
+        "desktop.close_window",
         "desktop.click",
         "desktop.type_text",
         "terminal.run",
     ]
     assert policy["approval_required"] == {
         "app.quit": True,
+        "desktop.close_window": True,
         "desktop.click": True,
         "desktop.type_text": True,
         "terminal.run": True,
@@ -1281,6 +1289,30 @@ def test_app_status_reports_not_running_state(monkeypatch) -> None:
         "running": False,
         "status": "not_running",
     }
+
+
+def test_desktop_close_window_uses_standard_foreground_shortcut(monkeypatch) -> None:
+    calls = []
+
+    def fake_osascript(script, args=None):
+        calls.append((script, args))
+        return {"ok": True, "stdout": "closed_window", "stderr": ""}
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_run_osascript", fake_osascript)
+
+    result = desktop_mod.desktop_close_window()
+
+    assert result == {
+        "ok": True,
+        "action": "desktop.close_window",
+        "summary": "Closed the foreground window",
+        "data": {"key": "w", "modifiers": ["command"]},
+        "permission_error": False,
+        "fallback_used": False,
+    }
+    assert "keystroke \"w\" using {command down}" in calls[0][0]
+    assert calls[0][1] is None
 
 
 def test_desktop_type_text_permission_failure_returns_accessibility_target(monkeypatch) -> None:

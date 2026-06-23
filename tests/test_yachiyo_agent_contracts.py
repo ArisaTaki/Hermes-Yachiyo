@@ -412,6 +412,7 @@ def test_desktop_execution_capability_policy_marks_registered_tools_available() 
     assert capabilities["screen_capture"]["available_tools"] == ["screen.capture"]
     assert capabilities["foreground_input"]["available"] is False
     assert capabilities["foreground_input"]["unavailable_tools"] == [
+        "desktop.close_window",
         "desktop.hotkey",
         "desktop.type_text",
         "desktop.click",
@@ -514,6 +515,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_risk_level("desktop.windows") == "low"
     assert desktop_tool_risk_level("app.status") == "low"
     assert desktop_tool_risk_level("app.quit") == "medium"
+    assert desktop_tool_risk_level("desktop.close_window") == "medium"
     assert desktop_tool_risk_level("desktop.type_text") == "medium"
     assert desktop_tool_risk_level("desktop.click") == "medium"
     assert desktop_tool_risk_level("desktop.reveal_path") == "low"
@@ -529,6 +531,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_action_risk_level("control_system_volume") == "low"
     assert desktop_action_risk_level("write_clipboard") == "low"
     assert desktop_action_risk_level("quit_app") == "medium"
+    assert desktop_action_risk_level("foreground_close_window") == "medium"
     assert desktop_action_risk_level("foreground_type_text") == "medium"
     assert desktop_action_risk_level("send_message") == "high"
     assert is_high_risk_desktop_action("raw_shell") is True
@@ -539,7 +542,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
 def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     catalog = {item.action_id: item for item in desktop_action_risk_snapshots()}
 
-    assert list(catalog)[:17] == [
+    assert list(catalog)[:18] == [
         "read_screen",
         "diagnose_permissions",
         "read_active_window",
@@ -555,6 +558,7 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
         "control_system_volume",
         "write_clipboard",
         "foreground_click",
+        "foreground_close_window",
         "foreground_type_text",
         "foreground_hotkey",
     ]
@@ -582,6 +586,8 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     assert catalog["write_clipboard"].tools == ["clipboard.write"]
     assert catalog["foreground_click"].risk_level == "medium"
     assert catalog["foreground_click"].requires_approval is False
+    assert catalog["foreground_close_window"].risk_level == "medium"
+    assert catalog["foreground_close_window"].tools == ["desktop.close_window"]
     assert catalog["delete_or_overwrite_user_file"].risk_level == "high"
     assert catalog["delete_or_overwrite_user_file"].requires_approval is True
     assert catalog["credential_access"].requires_approval is True
@@ -677,6 +683,7 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     music = tools["media.apple_music_play"]
     permissions = tools["desktop.permissions"]
     quit_app = tools["app.quit"]
+    close_window = tools["desktop.close_window"]
     browser = tools["browser.open_url"]
     terminal = tools["terminal.run"]
 
@@ -693,6 +700,10 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     assert quit_app.approval_required is False
     assert quit_app.input_schema["required"] == ["app_name"]
     assert any("approval" in note for note in quit_app.fallback_notes)
+    assert close_window.capability_id == "foreground_input"
+    assert close_window.risk_level == "medium"
+    assert close_window.input_schema["properties"] == {}
+    assert any("foreground window" in note for note in close_window.fallback_notes)
     assert browser.capability_id == "browser_control"
     assert browser.risk_level == "low"
     assert browser.missing_permissions == ["chrome_cdp"]

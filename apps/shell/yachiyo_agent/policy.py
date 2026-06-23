@@ -43,7 +43,7 @@ LOW_RISK_DESKTOP_TOOLS = frozenset(
     }
 )
 MEDIUM_RISK_DESKTOP_TOOLS = frozenset(
-    {"app.quit", "desktop.hotkey", "desktop.type_text", "desktop.click"}
+    {"app.quit", "desktop.close_window", "desktop.hotkey", "desktop.type_text", "desktop.click"}
 )
 LOW_RISK_BROWSER_TOOLS = frozenset(
     {
@@ -74,6 +74,7 @@ LOW_RISK_DESKTOP_ACTIONS = frozenset(
 MEDIUM_RISK_DESKTOP_ACTIONS = frozenset(
     {
         "foreground_click",
+        "foreground_close_window",
         "foreground_type_text",
         "foreground_hotkey",
         "quit_app",
@@ -117,6 +118,7 @@ DESKTOP_ACTION_RISK_ORDER = (
     "control_system_volume",
     "write_clipboard",
     "foreground_click",
+    "foreground_close_window",
     "foreground_type_text",
     "foreground_hotkey",
     "delete_or_overwrite_user_file",
@@ -149,6 +151,7 @@ DESKTOP_ACTION_TOOL_HINTS: dict[str, tuple[str, ...]] = {
     "control_system_volume": ("system.volume",),
     "write_clipboard": ("clipboard.write",),
     "foreground_click": ("desktop.click", "browser.click"),
+    "foreground_close_window": ("desktop.close_window",),
     "foreground_type_text": ("desktop.type_text", "browser.type_text"),
     "foreground_hotkey": ("desktop.hotkey",),
     "delete_or_overwrite_user_file": ("workspace.write_patch",),
@@ -170,6 +173,7 @@ DESKTOP_ACTION_TITLES: dict[str, str] = {
     "control_system_volume": "Control system volume",
     "write_clipboard": "Write clipboard",
     "foreground_click": "Click foreground UI",
+    "foreground_close_window": "Close foreground window",
     "foreground_type_text": "Type into foreground UI",
     "foreground_hotkey": "Send foreground hotkey",
     "delete_or_overwrite_user_file": "Delete or overwrite user file",
@@ -198,6 +202,7 @@ DESKTOP_ACTION_DESCRIPTIONS: dict[str, str] = {
     "control_system_volume": "Read or adjust local system output volume.",
     "write_clipboard": "Write explicit user-provided text to the system clipboard.",
     "foreground_click": "Click in the foreground application or browser page.",
+    "foreground_close_window": "Close the current foreground window after approval.",
     "foreground_type_text": "Enter text into the current foreground target.",
     "foreground_hotkey": "Send a keyboard shortcut to the foreground target.",
     "delete_or_overwrite_user_file": "Delete or overwrite user-controlled files.",
@@ -238,6 +243,7 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "media.apple_music_control",
         "system.volume",
         "clipboard.write",
+        "desktop.close_window",
         "desktop.hotkey",
         "desktop.type_text",
         "desktop.click",
@@ -252,7 +258,12 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
     "active_window": ("desktop.active_window", "desktop.running_apps", "desktop.windows"),
     "app_control": ("app.status", "app.open", "app.focus", "app.quit"),
     "media_control": ("media.apple_music_play", "media.apple_music_control"),
-    "foreground_input": ("desktop.hotkey", "desktop.type_text", "desktop.click"),
+    "foreground_input": (
+        "desktop.close_window",
+        "desktop.hotkey",
+        "desktop.type_text",
+        "desktop.click",
+    ),
     "browser_control": (
         "browser.open_url",
         "browser.current_page",

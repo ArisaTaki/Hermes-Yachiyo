@@ -664,9 +664,16 @@ def test_chat_bridge_quick_message_requires_approval_for_foreground_input_tools(
             AssertionError("click should wait for approval")
         ),
     )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_close_window",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("close_window should wait for approval")
+        ),
+    )
     bridge = ChatBridge(runtime)
     try:
         cases = [
+            ("关闭当前窗口", "desktop.close_window", {}),
             ("输入 你好八千代", "desktop.type_text", {"text": "你好八千代"}),
             ("点击 120, 240", "desktop.click", {"x": 120, "y": 240, "click_count": 1}),
         ]

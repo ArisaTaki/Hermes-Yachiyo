@@ -428,6 +428,12 @@ class ToolBroker:
     def clipboard_write(self, text: str) -> dict[str, Any]:
         return desktop.clipboard_write(text)
 
+    def desktop_close_window(self) -> dict[str, Any]:
+        return self._with_foreground_lock(
+            "desktop.close_window",
+            desktop.desktop_close_window,
+        )
+
     def desktop_hotkey(self, key: str, *, modifiers: list[str] | None = None) -> dict[str, Any]:
         return self._with_foreground_lock(
             "desktop.hotkey",

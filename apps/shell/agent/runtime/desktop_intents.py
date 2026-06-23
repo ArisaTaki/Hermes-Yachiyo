@@ -236,6 +236,9 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     if app_quit_name:
         candidates.append(_request("app.quit", {"app_name": app_quit_name}))
 
+    if _is_close_current_window_request(text):
+        candidates.append(_request("desktop.close_window", {}))
+
     if not _looks_like_app_status_request(text):
         search_url = _browser_search_url(text)
         if search_url:
@@ -1263,6 +1266,22 @@ def _desktop_click(text: str) -> dict[str, Any] | None:
         "click_count": 2 if match.group("double") else 1,
     }
     return payload
+
+
+def _is_close_current_window_request(text: str) -> bool:
+    lowered = text.lower()
+    return bool(
+        re.search(
+            r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:关闭|关掉)\s*(?:当前|现在|前台|这个|该)?\s*(?:窗口|window)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:close|dismiss)\s+(?:the\s+)?(?:current|foreground|active|this)\s+window\b",
+            lowered,
+        )
+    )
 
 
 def _number_value(value: str) -> int | float:

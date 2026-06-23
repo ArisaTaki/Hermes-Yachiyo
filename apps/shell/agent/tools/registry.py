@@ -202,6 +202,14 @@ def _clipboard_write(
     return broker.clipboard_write(str(payload.get("text") or ""))
 
 
+def _desktop_close_window(
+    broker: Any,
+    _payload: dict[str, Any],
+    _approved: bool,
+) -> dict[str, Any]:
+    return broker.desktop_close_window()
+
+
 def _desktop_hotkey(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
     modifiers = payload.get("modifiers")
     return broker.desktop_hotkey(
@@ -306,6 +314,7 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "media.apple_music_control": _media_apple_music_control,
     "system.volume": _system_volume,
     "clipboard.write": _clipboard_write,
+    "desktop.close_window": _desktop_close_window,
     "desktop.hotkey": _desktop_hotkey,
     "desktop.type_text": _desktop_type_text,
     "desktop.click": _desktop_click,

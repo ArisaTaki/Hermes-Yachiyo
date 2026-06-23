@@ -126,6 +126,8 @@ def _medium_risk_foreground_reason(tool_name: str, public_input_preview: Any) ->
         if app_name:
             return f"将退出应用 {app_name}，可能导致未保存内容丢失，按工具策略需要人工确认。"
         return "将退出本地应用，可能导致未保存内容丢失，按工具策略需要人工确认。"
+    if tool_name == "desktop.close_window":
+        return "将关闭当前前台窗口，可能影响未保存内容，按工具策略需要人工确认。"
     if tool_name == "desktop.hotkey":
         hotkey = _hotkey_preview(record)
         if hotkey:

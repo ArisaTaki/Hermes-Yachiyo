@@ -41,6 +41,7 @@ TOOL_FUNCTION_NAMES = {
     "media.apple_music_control": "media_apple_music_control",
     "system.volume": "system_volume",
     "clipboard.write": "clipboard_write",
+    "desktop.close_window": "desktop_close_window",
     "desktop.hotkey": "desktop_hotkey",
     "desktop.type_text": "desktop_type_text",
     "desktop.click": "desktop_click",
@@ -74,6 +75,7 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
 )
 MEDIUM_RISK_DESKTOP_TOOL_NAMES = (
     "app.quit",
+    "desktop.close_window",
     "desktop.hotkey",
     "desktop.type_text",
     "desktop.click",
@@ -743,6 +745,14 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             }
         },
         required=("text",),
+    ),
+    "desktop.close_window": ToolDescriptor(
+        name="desktop.close_window",
+        description=(
+            "Close the current foreground window using the standard system shortcut. "
+            "Requires approval because unsaved work in that window may be affected."
+        ),
+        properties={},
     ),
     "desktop.hotkey": ToolDescriptor(
         name="desktop.hotkey",
