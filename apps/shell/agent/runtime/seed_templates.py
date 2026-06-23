@@ -2,7 +2,17 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any, Callable
+
+from apps.shell.agent.tools.policy import (
+    FUTURE_TASK_TOOL_NAMES,
+    LOW_RISK_BROWSER_TOOL_NAMES,
+    LOW_RISK_DESKTOP_TOOL_NAMES,
+    MEMORY_TOOL_NAMES,
+)
+
+_DAILY_LOW_RISK_AGENT_CATEGORIES = {"custom", "design", "office", "orchestrator", "research"}
 
 
 DEFAULT_AGENT_TEMPLATES: tuple[tuple[str, str, str, str, str, str], ...] = (
@@ -253,6 +263,8 @@ class RuntimeSeedTemplateService:
         existing_agent_ids = {str(row["agent_id"]) for row in agent_rows}
         existing_agent_names = {str(row["name"]).strip().lower() for row in agent_rows}
         for agent_id, name, description, category, instructions, output_contract in self._agent_templates:
+            if agent_id in existing_agent_ids and not self._has_studio_deletion("agent", agent_id):
+                self._backfill_existing_agent_tool_policy(agent_id, category)
             if (
                 agent_id in existing_agent_ids
                 or name.strip().lower() in existing_agent_names
@@ -274,6 +286,36 @@ class RuntimeSeedTemplateService:
                 },
                 seed=True,
             )
+
+    def _backfill_existing_agent_tool_policy(self, agent_id: str, category: str) -> None:
+        if category not in _DAILY_LOW_RISK_AGENT_CATEGORIES:
+            return
+        if not self._has_column("agents", "tool_policy_json"):
+            return
+        row = self._conn.execute(
+            "SELECT tool_policy_json FROM agents WHERE agent_id=?",
+            (agent_id,),
+        ).fetchone()
+        if row is None:
+            return
+        policy = _json_policy(row["tool_policy_json"])
+        allowed_tools = _string_list(policy.get("allowed_tools"))
+        if allowed_tools != _legacy_default_allowed_tools(category):
+            return
+
+        next_policy = {
+            **policy,
+            "allowed_tools": _unique([*allowed_tools, *_daily_low_risk_tools()]),
+        }
+        self._conn.execute(
+            "UPDATE agents SET tool_policy_json=? WHERE agent_id=?",
+            (json.dumps(next_policy, ensure_ascii=False, sort_keys=True), agent_id),
+        )
+        self._conn.commit()
+
+    def _has_column(self, table: str, column: str) -> bool:
+        rows = self._conn.execute(f"PRAGMA table_info({table})").fetchall()
+        return any(str(row["name"] if isinstance(row, dict) else row[1]) == column for row in rows)
 
     def seed_workflows(self) -> None:
         agent_ids = {
@@ -300,3 +342,46 @@ class RuntimeSeedTemplateService:
             if any(agent_id and agent_id not in agent_ids for agent_id in referenced_agents):
                 continue
             self._create_workflow(workflow, seed=True)
+
+
+def _legacy_default_allowed_tools(category: str) -> list[str]:
+    memory_tools = list(MEMORY_TOOL_NAMES)
+    future_task_tools = list(FUTURE_TASK_TOOL_NAMES)
+    if category in {"design", "office", "orchestrator", "research"}:
+        return [
+            "workspace.list",
+            "workspace.read",
+            *memory_tools,
+            *future_task_tools,
+            "artifact.write",
+        ]
+    return [*memory_tools, *future_task_tools, "artifact.write"]
+
+
+def _daily_low_risk_tools() -> list[str]:
+    return [*LOW_RISK_DESKTOP_TOOL_NAMES, *LOW_RISK_BROWSER_TOOL_NAMES]
+
+
+def _json_policy(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    try:
+        loaded = json.loads(str(value or "{}"))
+    except (TypeError, ValueError):
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item or "").strip() for item in value if str(item or "").strip()]
+
+
+def _unique(values: list[str]) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        clean = str(value or "").strip()
+        if clean and clean not in result:
+            result.append(clean)
+    return result
