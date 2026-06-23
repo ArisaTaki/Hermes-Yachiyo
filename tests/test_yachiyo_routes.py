@@ -3219,6 +3219,113 @@ async def test_yachiyo_task_route_executes_safe_shortcut_without_model(
 
 
 @pytest.mark.asyncio
+async def test_yachiyo_task_route_executes_safe_key_without_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / "chat-route-safe-key.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-route-safe-key.db",
+        workspace_dir=tmp_path / "agent-runtime-route-safe-key",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id="chat-main-safe-key")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    app_runtime = SimpleNamespace(
+        agent_runtime_service=service,
+        chat_session=session,
+        state=state,
+        store=store,
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
+    key_calls: list[tuple[str, int]] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("safe key public task should not call model")
+        ),
+    )
+
+    def fake_safe_key(action: str, *, repeat_count: int = 1) -> dict[str, Any]:
+        key_calls.append((action, repeat_count))
+        return {
+            "ok": True,
+            "action": "desktop.safe_key",
+            "summary": "Pressed safe foreground key: Down Arrow x3",
+            "data": {
+                "key_action": action,
+                "key_label": "Down Arrow",
+                "key_code": 125,
+                "repeat_count": repeat_count,
+                "explicit_user_key": True,
+            },
+        }
+
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_safe_key",
+        fake_safe_key,
+    )
+    try:
+        started = await yachiyo.start_task(
+            yachiyo.StartChatTaskRequest(
+                prompt="按三次下箭头",
+                conversation_id="chat-main-safe-key",
+                agent_id="builtin:yachiyo-main",
+                metadata={
+                    "client_message_id": "route-main-safe-key-1",
+                    "source": "chat",
+                    "runnable_kind": "main",
+                    "daily_desktop_intent": True,
+                },
+            ),
+            request,
+        )
+        timeline = await yachiyo.get_task_timeline(started["task_id"], request)
+        events = await yachiyo.get_task_events(started["task_id"], request)
+        event_types = [event["event_type"] for event in events["events"]]
+        assistant = next(
+            message
+            for message in store.load_messages("chat-main-safe-key", limit=10)
+            if message.role == "assistant"
+        )
+
+        assert key_calls == [("arrow_down", 3)]
+        assert started["status"] == "completed"
+        assert started["summary"] == "已按下箭头（3 次）。"
+        assert started["needs_user_action"] is False
+        assert started["pending_approvals"] == []
+        assert started["tool_calls"][-1]["tool_name"] == "desktop.safe_key"
+        assert started["tool_calls"][-1]["status"] == "completed"
+        assert started["tool_calls"][-1]["input_preview"] == {
+            "action": "arrow_down",
+            "repeat_count": 3,
+        }
+        assert timeline["tool_calls"][-1]["tool_name"] == "desktop.safe_key"
+        assert timeline["tool_calls"][-1]["output_preview"]["data"]["explicit_user_key"] is True
+        assert "agent.desktop.intent_planned" in event_types
+        assert "agent.tool.call" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.desktop.intent_approval_required" not in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert assistant.task_id == started["task_id"]
+        assert assistant.status == MessageStatus.COMPLETED
+        assert assistant.content == started["summary"]
+    finally:
+        service.close()
+        store.close()
+
+
+@pytest.mark.asyncio
 async def test_yachiyo_task_route_executes_hide_current_app_without_model(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -6346,6 +6453,15 @@ async def test_yachiyo_studio_tool_catalog_route_surfaces_desktop_tool_metadata(
     assert any(
         "whitelisted common shortcut" in note
         for note in tools["desktop.safe_shortcut"]["fallback_notes"]
+    )
+    assert tools["desktop.safe_key"]["capability_id"] == "foreground_input"
+    assert tools["desktop.safe_key"]["risk_level"] == "low"
+    assert tools["desktop.safe_key"]["input_schema"]["required"] == ["action"]
+    assert "tab" in tools["desktop.safe_key"]["input_schema"]["properties"]["action"]["enum"]
+    assert "return" not in tools["desktop.safe_key"]["input_schema"]["properties"]["action"]["enum"]
+    assert any(
+        "whitelisted foreground navigation keys" in note
+        for note in tools["desktop.safe_key"]["fallback_notes"]
     )
     assert tools["desktop.safe_type_text"]["capability_id"] == "foreground_input"
     assert tools["desktop.safe_type_text"]["risk_level"] == "low"

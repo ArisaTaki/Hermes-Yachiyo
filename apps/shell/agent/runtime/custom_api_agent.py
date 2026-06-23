@@ -30,6 +30,7 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
     "system.volume",
     "clipboard.write",
     "desktop.safe_shortcut",
+    "desktop.safe_key",
     "desktop.safe_type_text",
     "desktop.safe_click",
     "desktop.safe_scroll",
@@ -87,6 +88,7 @@ _DAILY_DESKTOP_TOOL_LABELS = {
     "system.volume": "控制系统音量",
     "clipboard.write": "写入剪贴板",
     "desktop.safe_shortcut": "执行快捷动作",
+    "desktop.safe_key": "按前台导航键",
     "desktop.safe_type_text": "输入前台文字",
     "desktop.safe_click": "点击前台界面",
     "desktop.safe_scroll": "滚动前台界面",
@@ -785,6 +787,8 @@ class RuntimeCustomApiAgentLoop:
                 return result_summary or "已截取当前网页。"
             if tool_name == "desktop.safe_shortcut":
                 return _safe_shortcut_summary(result, planned_input) or result_summary or "已执行快捷动作。"
+            if tool_name == "desktop.safe_key":
+                return _safe_key_summary(result, planned_input) or result_summary or "已按前台导航键。"
             if tool_name == "desktop.safe_type_text":
                 text = _payload_text(result, planned_input, "text")
                 if text:
@@ -1046,7 +1050,7 @@ class RuntimeCustomApiAgentLoop:
         desktop_tool_guidance = (
             "For desktop requests, prefer structured desktop tools such as screen.capture, "
             "desktop.permissions, desktop.active_window, desktop.running_apps, desktop.windows, desktop.ui_elements, app.status, app.open/app.focus/app.focus_window/app.open_and_safe_type_text/app.focus_and_safe_type_text/app.open_and_safe_shortcut/app.focus_and_safe_shortcut/app.show/app.hide/app.minimize/app.quit, desktop.reveal_path, desktop.open_path, media.apple_music_play, "
-            "media.apple_music_open_and_play, media.apple_music_control, system.volume, clipboard.write, desktop.safe_shortcut, desktop.safe_type_text, desktop.safe_click, desktop.safe_scroll, desktop.click_ui_element, desktop.type_into_ui_element, desktop.hide_app, desktop.minimize_window, desktop.close_window, desktop.click, desktop.hotkey, and desktop.type_text "
+            "media.apple_music_open_and_play, media.apple_music_control, system.volume, clipboard.write, desktop.safe_shortcut, desktop.safe_key, desktop.safe_type_text, desktop.safe_click, desktop.safe_scroll, desktop.click_ui_element, desktop.type_into_ui_element, desktop.hide_app, desktop.minimize_window, desktop.close_window, desktop.click, desktop.hotkey, and desktop.type_text "
             "when they are allowed. For explicit daily commands, map 'play <song>' or "
             "'播放<歌曲>' to media.apple_music_play; map generic Apple Music or music playback "
             "requests to media.apple_music_open_and_play when allowed, and map pause/resume/next/previous media "
@@ -1062,6 +1066,7 @@ class RuntimeCustomApiAgentLoop:
             "map single app running/open status questions to app.status; "
             "map explicit app window focus requests with a title substring to app.focus_window; "
             "map common whitelisted foreground shortcuts such as copy/paste/select all/undo/redo/find/new tab/new window/refresh/browser back/browser forward to desktop.safe_shortcut; "
+            "map explicit foreground navigation keys such as Escape, Tab, arrow keys, Home, End, Page Up, and Page Down to desktop.safe_key; "
             "map explicit user-provided foreground typing requests to desktop.safe_type_text; "
             "map explicit user-provided single-click coordinates to desktop.safe_click; "
             "map explicit current foreground scroll/page up/page down requests to desktop.safe_scroll; "
@@ -1545,6 +1550,31 @@ def _safe_shortcut_summary(result: dict[str, Any], planned_input: dict[str, Any]
         "browser_forward": "前进一页",
     }.get(action, "")
     return f"已{label}。" if label else ""
+
+
+def _safe_key_summary(result: dict[str, Any], planned_input: dict[str, Any]) -> str:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    action = str(data.get("key_action") or planned_input.get("action") or "").strip()
+    label = {
+        "escape": "Escape",
+        "tab": "Tab",
+        "arrow_up": "上箭头",
+        "arrow_down": "下箭头",
+        "arrow_left": "左箭头",
+        "arrow_right": "右箭头",
+        "home": "Home",
+        "end": "End",
+        "page_up": "Page Up",
+        "page_down": "Page Down",
+    }.get(action, "")
+    try:
+        repeat_count = int(data.get("repeat_count") or planned_input.get("repeat_count") or 1)
+    except (TypeError, ValueError):
+        repeat_count = 1
+    if not label:
+        return ""
+    suffix = "" if repeat_count == 1 else f"（{repeat_count} 次）"
+    return f"已按{label}{suffix}。"
 
 
 def _safe_scroll_summary(result: dict[str, Any], planned_input: dict[str, Any]) -> str:

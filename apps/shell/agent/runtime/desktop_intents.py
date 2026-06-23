@@ -319,6 +319,7 @@ _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "desktop.reveal_path",
     "desktop.running_apps",
     "desktop.safe_click",
+    "desktop.safe_key",
     "desktop.safe_scroll",
     "desktop.safe_shortcut",
     "desktop.safe_type_text",
@@ -354,6 +355,7 @@ _FOREGROUND_SEQUENCE_TOOLS = {
     "desktop.hide_app",
     "desktop.minimize_window",
     "desktop.safe_click",
+    "desktop.safe_key",
     "desktop.safe_scroll",
     "desktop.click_ui_element",
     "desktop.type_into_ui_element",
@@ -383,6 +385,7 @@ _FOREGROUND_ACTION_TOOLS = {
     "desktop.close_window",
     "desktop.hotkey",
     "desktop.safe_click",
+    "desktop.safe_key",
     "desktop.safe_scroll",
     "desktop.safe_shortcut",
     "desktop.safe_type_text",
@@ -617,6 +620,10 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
     safe_scroll = _desktop_safe_scroll(text)
     if safe_scroll:
         candidates.append(_request("desktop.safe_scroll", safe_scroll))
+
+    safe_key = _desktop_safe_key(text)
+    if safe_key:
+        candidates.append(_request("desktop.safe_key", safe_key))
 
     open_extract_payload = _browser_open_url_and_extract_text_request(text)
     if open_extract_payload:
@@ -2725,6 +2732,112 @@ def _desktop_safe_shortcut_action(text: str) -> str:
         "newwindow": "new_window",
     }
     return mapping.get(phrase, "")
+
+
+def _desktop_safe_key(text: str) -> dict[str, Any] | None:
+    count = r"(?P<{name}>\d+|[一二两三四五六七八九十]|one|two|three|four|five|six|seven|eight|nine|ten)"
+    key = (
+        r"(?P<{name}>esc|escape|tab|home|end|page\s*up|page\s*down|pageup|pagedown|"
+        r"up\s+arrow|down\s+arrow|left\s+arrow|right\s+arrow|arrow\s+up|arrow\s+down|"
+        r"arrow\s+left|arrow\s+right|up|down|left|right|"
+        r"退出|取消|制表键|制表|上箭头|下箭头|左箭头|右箭头|上|下|左|右|"
+        r"上一页键|下一页键|上一页|下一页|home\s*键|end\s*键)"
+    )
+    patterns = (
+        (
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:按一下|按下|按|发送|触发)\s*"
+            rf"(?:{count.format(name='count_before')}\s*(?:次|下)\s*)?"
+            rf"{key.format(name='key')}"
+            rf"(?:\s*{count.format(name='count_after')}\s*(?:次|下))?"
+            r"\s*(?:键)?(?:一下|下)?(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$"
+        ),
+        (
+            r"^(?:please\s+)?(?:press|send|hit)\s+(?:the\s+)?"
+            rf"{key.format(name='key_en')}"
+            rf"(?:\s+{count.format(name='count_en')}\s*(?:times?)?)?\s*$"
+        ),
+        (
+            rf"^(?:please\s+)?{count.format(name='count_en_before')}\s*(?:times?\s+)?"
+            r"(?:press|send|hit)\s+(?:the\s+)?"
+            rf"{key.format(name='key_en_before')}\s*$"
+        ),
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        groups = match.groupdict()
+        raw_key = (
+            groups.get("key")
+            or groups.get("key_en")
+            or groups.get("key_en_before")
+            or ""
+        )
+        action = _safe_key_action(raw_key)
+        repeat_count = _safe_key_repeat_count(
+            groups.get("count_before")
+            or groups.get("count_after")
+            or groups.get("count_en")
+            or groups.get("count_en_before")
+        )
+        if action and repeat_count:
+            return {"action": action, "repeat_count": repeat_count}
+    return None
+
+
+def _safe_key_action(value: str) -> str:
+    compact = re.sub(r"[\s._-]+", "", str(value or "").strip().lower())
+    return {
+        "esc": "escape",
+        "escape": "escape",
+        "退出": "escape",
+        "取消": "escape",
+        "tab": "tab",
+        "制表": "tab",
+        "制表键": "tab",
+        "up": "arrow_up",
+        "uparrow": "arrow_up",
+        "arrowup": "arrow_up",
+        "上": "arrow_up",
+        "上箭头": "arrow_up",
+        "down": "arrow_down",
+        "downarrow": "arrow_down",
+        "arrowdown": "arrow_down",
+        "下": "arrow_down",
+        "下箭头": "arrow_down",
+        "left": "arrow_left",
+        "leftarrow": "arrow_left",
+        "arrowleft": "arrow_left",
+        "左": "arrow_left",
+        "左箭头": "arrow_left",
+        "right": "arrow_right",
+        "rightarrow": "arrow_right",
+        "arrowright": "arrow_right",
+        "右": "arrow_right",
+        "右箭头": "arrow_right",
+        "home": "home",
+        "home键": "home",
+        "end": "end",
+        "end键": "end",
+        "pageup": "page_up",
+        "上一页键": "page_up",
+        "上一页": "page_up",
+        "pagedown": "page_down",
+        "下一页键": "page_down",
+        "下一页": "page_down",
+    }.get(compact, "")
+
+
+def _safe_key_repeat_count(value: str | None) -> int:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return 1
+    if raw.isdigit():
+        count = int(raw)
+    else:
+        count = _SCROLL_PAGE_COUNTS.get(raw, 0)
+    return count if 1 <= count <= 20 else 0
 
 
 _SCROLL_PAGE_COUNTS = {

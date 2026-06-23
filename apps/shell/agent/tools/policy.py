@@ -54,6 +54,7 @@ TOOL_FUNCTION_NAMES = {
     "system.volume": "system_volume",
     "clipboard.write": "clipboard_write",
     "desktop.safe_shortcut": "desktop_safe_shortcut",
+    "desktop.safe_key": "desktop_safe_key",
     "desktop.safe_type_text": "desktop_safe_type_text",
     "desktop.safe_click": "desktop_safe_click",
     "desktop.safe_scroll": "desktop_safe_scroll",
@@ -90,6 +91,18 @@ SAFE_SHORTCUT_ACTIONS = (
     "browser_back",
     "browser_forward",
 )
+SAFE_KEY_ACTIONS = (
+    "escape",
+    "tab",
+    "arrow_up",
+    "arrow_down",
+    "arrow_left",
+    "arrow_right",
+    "home",
+    "end",
+    "page_up",
+    "page_down",
+)
 LOW_RISK_DESKTOP_TOOL_NAMES = (
     "screen.capture",
     "desktop.permissions",
@@ -116,6 +129,7 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "system.volume",
     "clipboard.write",
     "desktop.safe_shortcut",
+    "desktop.safe_key",
     "desktop.safe_type_text",
     "desktop.safe_click",
     "desktop.safe_scroll",
@@ -380,6 +394,18 @@ class ToolDescriptor:
                     "desktop.safe_shortcut 参数 action 必须是 "
                     + "、".join(SAFE_SHORTCUT_ACTIONS)
                 )
+        if self.name == "desktop.safe_key":
+            action = str(payload.get("action") or "").strip().lower()
+            if action not in SAFE_KEY_ACTIONS:
+                raise AgentRuntimeError(
+                    "desktop.safe_key 参数 action 必须是 "
+                    + "、".join(SAFE_KEY_ACTIONS)
+                )
+            repeat_count = payload.get("repeat_count", 1)
+            if isinstance(repeat_count, bool) or not isinstance(repeat_count, int):
+                raise AgentRuntimeError("desktop.safe_key 参数 repeat_count 必须是 1-20 的整数")
+            if repeat_count < 1 or repeat_count > 20:
+                raise AgentRuntimeError("desktop.safe_key 参数 repeat_count 必须是 1-20 的整数")
         if self.name == "desktop.safe_type_text" and not str(
             payload.get("text") or ""
         ).strip():
@@ -1081,6 +1107,28 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
                 "enum": list(SAFE_SHORTCUT_ACTIONS),
                 "description": "Whitelisted shortcut action to execute.",
             }
+        },
+        required=("action",),
+    ),
+    "desktop.safe_key": ToolDescriptor(
+        name="desktop.safe_key",
+        description=(
+            "Press a whitelisted foreground navigation key explicitly requested by the user, "
+            "such as Escape, Tab, arrow keys, Home, End, Page Up, or Page Down. This does "
+            "not accept committing keys like Return or destructive keys like Delete."
+        ),
+        properties={
+            "action": {
+                "type": "string",
+                "enum": list(SAFE_KEY_ACTIONS),
+                "description": "Whitelisted foreground key action to press.",
+            },
+            "repeat_count": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 20,
+                "description": "Number of times to press the key. Defaults to 1.",
+            },
         },
         required=("action",),
     ),

@@ -426,6 +426,7 @@ def test_desktop_execution_capability_policy_marks_registered_tools_available() 
         "desktop.minimize_window",
         "desktop.close_window",
         "desktop.safe_shortcut",
+        "desktop.safe_key",
         "desktop.safe_type_text",
         "desktop.safe_click",
         "desktop.safe_scroll",
@@ -565,6 +566,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_risk_level("desktop.hide_app") == "low"
     assert desktop_tool_risk_level("desktop.minimize_window") == "low"
     assert desktop_tool_risk_level("desktop.safe_shortcut") == "low"
+    assert desktop_tool_risk_level("desktop.safe_key") == "low"
     assert desktop_tool_risk_level("desktop.safe_type_text") == "low"
     assert desktop_tool_risk_level("desktop.safe_click") == "low"
     assert desktop_tool_risk_level("desktop.safe_scroll") == "low"
@@ -594,6 +596,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_action_risk_level("foreground_hide_app") == "low"
     assert desktop_action_risk_level("foreground_minimize_window") == "low"
     assert desktop_action_risk_level("foreground_safe_shortcut") == "low"
+    assert desktop_action_risk_level("foreground_safe_key") == "low"
     assert desktop_action_risk_level("foreground_safe_type_text") == "low"
     assert desktop_action_risk_level("foreground_safe_click") == "low"
     assert desktop_action_risk_level("foreground_safe_scroll") == "low"
@@ -611,7 +614,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
 def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     catalog = {item.action_id: item for item in desktop_action_risk_snapshots()}
 
-    assert list(catalog)[:23] == [
+    assert list(catalog)[:24] == [
         "read_screen",
         "diagnose_permissions",
         "read_active_window",
@@ -632,6 +635,7 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
         "control_system_volume",
         "write_clipboard",
         "foreground_safe_shortcut",
+        "foreground_safe_key",
         "foreground_safe_type_text",
         "foreground_safe_click",
         "foreground_safe_scroll",
@@ -671,6 +675,8 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     assert catalog["write_clipboard"].tools == ["clipboard.write"]
     assert catalog["foreground_safe_shortcut"].risk_level == "low"
     assert catalog["foreground_safe_shortcut"].tools == ["desktop.safe_shortcut"]
+    assert catalog["foreground_safe_key"].risk_level == "low"
+    assert catalog["foreground_safe_key"].tools == ["desktop.safe_key"]
     assert catalog["foreground_safe_type_text"].risk_level == "low"
     assert catalog["foreground_safe_type_text"].tools == ["desktop.safe_type_text"]
     assert catalog["foreground_safe_click"].risk_level == "low"
@@ -792,6 +798,7 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     named_minimize_app = tools["app.minimize"]
     hide_app = tools["desktop.hide_app"]
     safe_shortcut = tools["desktop.safe_shortcut"]
+    safe_key = tools["desktop.safe_key"]
     safe_type_text = tools["desktop.safe_type_text"]
     safe_click = tools["desktop.safe_click"]
     safe_scroll = tools["desktop.safe_scroll"]
@@ -853,6 +860,12 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     assert safe_shortcut.input_schema["required"] == ["action"]
     assert "copy" in safe_shortcut.input_schema["properties"]["action"]["enum"]
     assert any("whitelisted common shortcut" in note for note in safe_shortcut.fallback_notes)
+    assert safe_key.capability_id == "foreground_input"
+    assert safe_key.risk_level == "low"
+    assert safe_key.input_schema["required"] == ["action"]
+    assert "tab" in safe_key.input_schema["properties"]["action"]["enum"]
+    assert "return" not in safe_key.input_schema["properties"]["action"]["enum"]
+    assert any("whitelisted foreground navigation keys" in note for note in safe_key.fallback_notes)
     assert safe_type_text.capability_id == "foreground_input"
     assert safe_type_text.risk_level == "low"
     assert safe_type_text.input_schema["required"] == ["text"]

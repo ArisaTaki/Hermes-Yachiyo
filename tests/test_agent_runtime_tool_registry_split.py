@@ -287,6 +287,7 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
         "system_volume",
         "clipboard_write",
         "desktop_safe_shortcut",
+        "desktop_safe_key",
         "desktop_safe_type_text",
         "desktop_safe_click",
         "desktop_safe_scroll",
@@ -469,6 +470,21 @@ def test_desktop_safe_shortcut_schema_accepts_only_whitelisted_actions() -> None
         ToolDescriptorRegistry.validate_payload("desktop.safe_shortcut", {"action": "close_tab"})
 
 
+def test_desktop_safe_key_schema_accepts_only_whitelisted_navigation_keys() -> None:
+    ToolDescriptorRegistry.validate_payload("desktop.safe_key", {"action": "tab"})
+    ToolDescriptorRegistry.validate_payload(
+        "desktop.safe_key",
+        {"action": "arrow_down", "repeat_count": 3},
+    )
+
+    with pytest.raises(AgentRuntimeError, match="desktop.safe_key 参数 action 必须是"):
+        ToolDescriptorRegistry.validate_payload("desktop.safe_key", {"action": "return"})
+    with pytest.raises(AgentRuntimeError, match="desktop.safe_key 参数 repeat_count 必须是"):
+        ToolDescriptorRegistry.validate_payload("desktop.safe_key", {"action": "tab", "repeat_count": 0})
+    with pytest.raises(AgentRuntimeError, match="desktop.safe_key 参数 repeat_count 必须是"):
+        ToolDescriptorRegistry.validate_payload("desktop.safe_key", {"action": "tab", "repeat_count": True})
+
+
 def test_desktop_safe_type_text_schema_requires_user_text() -> None:
     ToolDescriptorRegistry.validate_payload("desktop.safe_type_text", {"text": "hello"})
 
@@ -571,6 +587,7 @@ def test_compile_tool_policy_accepts_desktop_tools_with_foreground_approval() ->
                 "app.minimize",
                 "desktop.hide_app",
                 "desktop.minimize_window",
+                "desktop.safe_key",
                 "desktop.safe_scroll",
                 "app.quit",
                 "desktop.close_window",
@@ -591,6 +608,7 @@ def test_compile_tool_policy_accepts_desktop_tools_with_foreground_approval() ->
         "app.minimize",
         "desktop.hide_app",
         "desktop.minimize_window",
+        "desktop.safe_key",
         "desktop.safe_scroll",
         "app.quit",
         "desktop.close_window",
@@ -715,6 +733,12 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         broker,
         "desktop_safe_shortcut",
         lambda action: calls.append(("safe_shortcut", action)) or {"ok": True},
+    )
+    monkeypatch.setattr(
+        broker,
+        "desktop_safe_key",
+        lambda action, *, repeat_count=1: calls.append(("safe_key", action, repeat_count))
+        or {"ok": True},
     )
     monkeypatch.setattr(
         broker,
@@ -873,6 +897,11 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
     ) == {"ok": True}
     assert dispatch_tool_call(
         broker,
+        "desktop.safe_key",
+        {"action": "arrow_down", "repeat_count": 3},
+    ) == {"ok": True}
+    assert dispatch_tool_call(
+        broker,
         "desktop.safe_type_text",
         {"text": "hello"},
     ) == {"ok": True}
@@ -982,6 +1011,7 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         ("music_control", "pause"),
         ("music_open_and_play",),
         ("safe_shortcut", "copy"),
+        ("safe_key", "arrow_down", 3),
         ("safe_type_text", "hello"),
         ("safe_click", 12, 34),
         ("safe_scroll", "down", 2),
@@ -2672,6 +2702,36 @@ def test_desktop_safe_shortcut_uses_whitelisted_system_events_keystroke(monkeypa
     assert calls[0][0][-1] == "]"
 
 
+def test_desktop_safe_key_uses_whitelisted_system_events_key_code(monkeypatch) -> None:
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="pressed\n", stderr="")
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.desktop_safe_key("arrow_down", repeat_count=3)
+
+    assert result == {
+        "ok": True,
+        "action": "desktop.safe_key",
+        "summary": "Pressed safe foreground key: Down Arrow x3",
+        "data": {
+            "key_action": "arrow_down",
+            "key_label": "Down Arrow",
+            "key_code": 125,
+            "repeat_count": 3,
+            "explicit_user_key": True,
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+    assert calls[0][0][0:2] == ["osascript", "-e"]
+    assert calls[0][0][-2:] == ["125", "3"]
+
+
 def test_desktop_click_permission_failure_returns_accessibility_target(monkeypatch) -> None:
     def fake_run(command, **kwargs):
         return subprocess.CompletedProcess(
@@ -2715,6 +2775,27 @@ def test_desktop_safe_scroll_permission_failure_returns_accessibility_target(mon
 
     assert result["ok"] is False
     assert result["action"] == "desktop.safe_scroll"
+    assert result["permission_error"] is True
+    assert result["missing_permissions"] == ["accessibility"]
+    assert result["permission_targets"] == ["accessibility"]
+
+
+def test_desktop_safe_key_permission_failure_returns_accessibility_target(monkeypatch) -> None:
+    def fake_run(command, **kwargs):
+        return subprocess.CompletedProcess(
+            command,
+            1,
+            stdout="",
+            stderr="System Events got an error: not allowed assistive access.",
+        )
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.desktop_safe_key("tab")
+
+    assert result["ok"] is False
+    assert result["action"] == "desktop.safe_key"
     assert result["permission_error"] is True
     assert result["missing_permissions"] == ["accessibility"]
     assert result["permission_targets"] == ["accessibility"]

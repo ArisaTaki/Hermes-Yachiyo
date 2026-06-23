@@ -116,6 +116,19 @@ _SAFE_SHORTCUTS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "browser_forward": ("]", ("command",), "browser forward"),
 }
 
+_SAFE_KEYS: dict[str, tuple[int, str]] = {
+    "escape": (53, "Escape"),
+    "tab": (48, "Tab"),
+    "arrow_up": (126, "Up Arrow"),
+    "arrow_down": (125, "Down Arrow"),
+    "arrow_left": (123, "Left Arrow"),
+    "arrow_right": (124, "Right Arrow"),
+    "home": (115, "Home"),
+    "end": (119, "End"),
+    "page_up": (116, "Page Up"),
+    "page_down": (121, "Page Down"),
+}
+
 _PRIVACY_SECURITY_URLS = (
     "x-apple.systempreferences:com.apple.preference.security?Privacy",
     "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension",
@@ -269,6 +282,7 @@ _PERMISSION_CAPABILITY_TOOLS = {
         "desktop.minimize_window",
         "desktop.close_window",
         "desktop.safe_shortcut",
+        "desktop.safe_key",
         "desktop.safe_type_text",
         "desktop.safe_click",
         "desktop.safe_scroll",
@@ -2172,6 +2186,51 @@ def desktop_close_window() -> dict[str, Any]:
     }
 
 
+def desktop_safe_key(action: str, *, repeat_count: Any = 1) -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("desktop.safe_key")
+    clean_action = _clean_safe_key_action(action)
+    clean_repeat_count = _clean_key_repeat_count(repeat_count)
+    key_code, label = _SAFE_KEYS[clean_action]
+    result = _run_osascript(
+        """
+        on run argv
+            set keyCodeValue to item 1 of argv as integer
+            set repeatCount to item 2 of argv as integer
+            repeat repeatCount times
+                tell application "System Events" to key code keyCodeValue
+                delay 0.05
+            end repeat
+            return "pressed"
+        end run
+        """,
+        [str(key_code), str(clean_repeat_count)],
+    )
+    if not result["ok"]:
+        return _with_permission_metadata(
+            "desktop.safe_key",
+            {**result, "action": "desktop.safe_key", "summary": "desktop.safe_key failed"},
+        )
+    return {
+        "ok": True,
+        "action": "desktop.safe_key",
+        "summary": (
+            f"Pressed safe foreground key: {label}"
+            if clean_repeat_count == 1
+            else f"Pressed safe foreground key: {label} x{clean_repeat_count}"
+        ),
+        "data": {
+            "key_action": clean_action,
+            "key_label": label,
+            "key_code": key_code,
+            "repeat_count": clean_repeat_count,
+            "explicit_user_key": True,
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
 def desktop_type_text(text: str) -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("desktop.type_text")
@@ -2751,6 +2810,58 @@ def _clean_safe_shortcut_action(action: str) -> str:
     return clean
 
 
+def _clean_safe_key_action(action: str) -> str:
+    clean = str(action or "").strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "esc": "escape",
+        "退出": "escape",
+        "取消": "escape",
+        "tab_key": "tab",
+        "制表": "tab",
+        "制表键": "tab",
+        "up": "arrow_up",
+        "down": "arrow_down",
+        "left": "arrow_left",
+        "right": "arrow_right",
+        "arrowup": "arrow_up",
+        "arrowdown": "arrow_down",
+        "arrowleft": "arrow_left",
+        "arrowright": "arrow_right",
+        "上": "arrow_up",
+        "下": "arrow_down",
+        "左": "arrow_left",
+        "右": "arrow_right",
+        "上箭头": "arrow_up",
+        "下箭头": "arrow_down",
+        "左箭头": "arrow_left",
+        "右箭头": "arrow_right",
+        "home_key": "home",
+        "end_key": "end",
+        "pageup": "page_up",
+        "page_up_key": "page_up",
+        "pagedown": "page_down",
+        "page_down_key": "page_down",
+    }
+    clean = aliases.get(clean, clean)
+    if clean not in _SAFE_KEYS:
+        raise ValueError(f"unsupported safe key action: {action}")
+    return clean
+
+
+def _clean_key_repeat_count(value: Any) -> int:
+    if value in (None, ""):
+        return 1
+    if isinstance(value, bool):
+        raise ValueError("repeat_count must be an integer from 1 to 20")
+    try:
+        count = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("repeat_count must be an integer from 1 to 20") from exc
+    if count < 1 or count > 20:
+        raise ValueError("repeat_count must be an integer from 1 to 20")
+    return count
+
+
 def _parse_running_apps(value: Any) -> list[dict[str, Any]]:
     apps: list[dict[str, Any]] = []
     for raw_line in str(value or "").splitlines():
@@ -3169,6 +3280,7 @@ def _missing_permissions_for_action(action: str) -> list[str]:
         "desktop.minimize_window": ["accessibility"],
         "desktop.close_window": ["accessibility"],
         "desktop.safe_shortcut": ["accessibility"],
+        "desktop.safe_key": ["accessibility"],
         "desktop.safe_type_text": ["accessibility"],
         "desktop.safe_click": ["accessibility"],
         "desktop.safe_scroll": ["accessibility"],
@@ -3203,6 +3315,7 @@ def _permission_targets_for_action(action: str) -> list[str]:
         "desktop.minimize_window": ["accessibility"],
         "desktop.close_window": ["accessibility"],
         "desktop.safe_shortcut": ["accessibility"],
+        "desktop.safe_key": ["accessibility"],
         "desktop.safe_type_text": ["accessibility"],
         "desktop.safe_click": ["accessibility"],
         "desktop.safe_scroll": ["accessibility"],

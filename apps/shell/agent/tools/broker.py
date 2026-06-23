@@ -538,6 +538,12 @@ class ToolBroker:
             lambda: desktop.desktop_safe_shortcut(action),
         )
 
+    def desktop_safe_key(self, action: str, *, repeat_count: Any = 1) -> dict[str, Any]:
+        return self._with_foreground_lock(
+            "desktop.safe_key",
+            lambda: desktop.desktop_safe_key(action, repeat_count=repeat_count),
+        )
+
     def desktop_safe_type_text(self, text: str) -> dict[str, Any]:
         return self._with_foreground_lock(
             "desktop.safe_type_text",

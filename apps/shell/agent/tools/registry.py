@@ -362,6 +362,17 @@ def _desktop_safe_type_text(
     return broker.desktop_safe_type_text(str(payload.get("text") or ""))
 
 
+def _desktop_safe_key(
+    broker: Any,
+    payload: dict[str, Any],
+    _approved: bool,
+) -> dict[str, Any]:
+    return broker.desktop_safe_key(
+        str(payload.get("action") or ""),
+        repeat_count=payload.get("repeat_count", 1),
+    )
+
+
 def _desktop_click(
     broker: Any,
     payload: dict[str, Any],
@@ -510,6 +521,7 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "desktop.minimize_window": _desktop_minimize_window,
     "desktop.close_window": _desktop_close_window,
     "desktop.hotkey": _desktop_hotkey,
+    "desktop.safe_key": _desktop_safe_key,
     "desktop.safe_type_text": _desktop_safe_type_text,
     "desktop.safe_click": _desktop_safe_click,
     "desktop.safe_scroll": _desktop_safe_scroll,
