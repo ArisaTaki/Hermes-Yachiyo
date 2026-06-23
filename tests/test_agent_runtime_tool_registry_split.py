@@ -462,6 +462,33 @@ def test_screen_capture_tool_writes_artifact_metadata(tmp_path, monkeypatch) -> 
     assert (tmp_path / "artifacts" / "screenshots" / "current-screen.png").read_bytes() == b"png"
 
 
+def test_screen_capture_permission_failure_returns_recovery_targets(tmp_path, monkeypatch) -> None:
+    broker = _broker(tmp_path)
+
+    class ScreenCapturePermissionError(RuntimeError):
+        pass
+
+    def fake_capture(_target):
+        raise ScreenCapturePermissionError("screen recording permission denied")
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop._desktop_platform", lambda: "macos")
+    monkeypatch.setattr("apps.locald.screenshot.capture_screenshot_to_file", fake_capture)
+
+    result = broker.call("screen.capture", {"reason": "check desktop"})
+
+    assert result["ok"] is False
+    assert result["action"] == "screen.capture"
+    assert result["permission_error"] is True
+    assert result["missing_permissions"] == ["screen_recording"]
+    assert result["permission_targets"] == ["screen_recording"]
+    assert result["recovery_hints"] == [
+        (
+            "Grant Screen Recording permission to Oha-Yachiyo or the current terminal "
+            "in macOS System Settings > Privacy & Security > Screen Recording."
+        )
+    ]
+
+
 def test_app_open_failure_returns_unified_desktop_result(monkeypatch) -> None:
     def fake_run(command, **kwargs):
         return subprocess.CompletedProcess(
@@ -503,6 +530,16 @@ def test_desktop_active_window_permission_failure_returns_recovery_targets(monke
     assert result["permission_error"] is True
     assert result["missing_permissions"] == ["automation_or_accessibility"]
     assert result["permission_targets"] == ["automation", "accessibility"]
+    assert result["recovery_hints"] == [
+        (
+            "Grant Automation permission so Oha-Yachiyo can control System Events "
+            "or the target app in macOS System Settings > Privacy & Security > Automation."
+        ),
+        (
+            "Grant Accessibility permission to Oha-Yachiyo or the current terminal "
+            "in macOS System Settings > Privacy & Security > Accessibility."
+        ),
+    ]
 
 
 def test_desktop_type_text_permission_failure_returns_accessibility_target(monkeypatch) -> None:
@@ -524,6 +561,12 @@ def test_desktop_type_text_permission_failure_returns_accessibility_target(monke
     assert result["permission_error"] is True
     assert result["missing_permissions"] == ["accessibility"]
     assert result["permission_targets"] == ["accessibility"]
+    assert result["recovery_hints"] == [
+        (
+            "Grant Accessibility permission to Oha-Yachiyo or the current terminal "
+            "in macOS System Settings > Privacy & Security > Accessibility."
+        )
+    ]
 
 
 def test_desktop_click_uses_system_events_with_coordinates(monkeypatch) -> None:
@@ -569,6 +612,12 @@ def test_desktop_click_permission_failure_returns_accessibility_target(monkeypat
     assert result["permission_error"] is True
     assert result["missing_permissions"] == ["accessibility"]
     assert result["permission_targets"] == ["accessibility"]
+    assert result["recovery_hints"] == [
+        (
+            "Grant Accessibility permission to Oha-Yachiyo or the current terminal "
+            "in macOS System Settings > Privacy & Security > Accessibility."
+        )
+    ]
 
 
 def test_apple_music_permission_failure_returns_music_and_automation_targets(monkeypatch) -> None:
@@ -598,4 +647,14 @@ def test_apple_music_permission_failure_returns_music_and_automation_targets(mon
     assert result["permission_error"] is True
     assert result["missing_permissions"] == ["music_app", "automation"]
     assert result["permission_targets"] == ["music_app", "automation"]
+    assert result["recovery_hints"] == [
+        (
+            "Open Music.app once, confirm the track exists in the local library, "
+            "and allow Automation when macOS asks for Music control."
+        ),
+        (
+            "Grant Automation permission so Oha-Yachiyo can control System Events "
+            "or the target app in macOS System Settings > Privacy & Security > Automation."
+        ),
+    ]
     assert result["fallback_used"] is True

@@ -14,7 +14,10 @@ def screen_capture(target_path: Path) -> dict[str, Any]:
         return _unsupported("screen.capture")
     from apps.locald.screenshot import capture_screenshot_to_file
 
-    metadata = capture_screenshot_to_file(target_path)
+    try:
+        metadata = capture_screenshot_to_file(target_path)
+    except Exception as exc:
+        return _error("screen.capture", exc)
     return {
         "ok": True,
         "action": "screen.capture",
@@ -422,7 +425,9 @@ def _split_status(value: Any) -> tuple[str, str, str]:
     return parts[0], parts[1], parts[2]
 
 
-def _looks_like_permission_error(value: str) -> bool:
+def _looks_like_permission_error(value: Any) -> bool:
+    if value.__class__.__name__ == "ScreenCapturePermissionError":
+        return True
     normalized = str(value or "").lower()
     return any(
         marker in normalized
@@ -433,6 +438,8 @@ def _looks_like_permission_error(value: str) -> bool:
             "accessibility",
             "automation",
             "privacy",
+            "screen capture",
+            "screen recording",
             "tcc",
         )
     )
@@ -447,6 +454,9 @@ def _with_permission_metadata(action: str, payload: dict[str, Any]) -> dict[str,
         payload["missing_permissions"] = missing_permissions
     if permission_targets:
         payload["permission_targets"] = permission_targets
+    recovery_hints = _permission_recovery_hints_for_targets(permission_targets)
+    if recovery_hints:
+        payload["recovery_hints"] = recovery_hints
     return payload
 
 
@@ -474,3 +484,30 @@ def _permission_targets_for_action(action: str) -> list[str]:
         "desktop.hotkey": ["accessibility"],
         "osascript": ["automation"],
     }.get(action, [])
+
+
+def _permission_recovery_hints_for_targets(targets: list[str]) -> list[str]:
+    hints_by_target = {
+        "accessibility": (
+            "Grant Accessibility permission to Oha-Yachiyo or the current terminal "
+            "in macOS System Settings > Privacy & Security > Accessibility."
+        ),
+        "automation": (
+            "Grant Automation permission so Oha-Yachiyo can control System Events "
+            "or the target app in macOS System Settings > Privacy & Security > Automation."
+        ),
+        "music_app": (
+            "Open Music.app once, confirm the track exists in the local library, "
+            "and allow Automation when macOS asks for Music control."
+        ),
+        "screen_recording": (
+            "Grant Screen Recording permission to Oha-Yachiyo or the current terminal "
+            "in macOS System Settings > Privacy & Security > Screen Recording."
+        ),
+    }
+    hints: list[str] = []
+    for target in targets:
+        hint = hints_by_target.get(str(target or "").strip())
+        if hint and hint not in hints:
+            hints.append(hint)
+    return hints

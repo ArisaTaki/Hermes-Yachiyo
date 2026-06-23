@@ -3313,11 +3313,18 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
         [
             "export function runtimeToolRecoveryHintsFromRecords",
             "export function runtimeToolRecoveryHintsFromRecord",
+            "stringList(source.recovery_hints)",
             "browser_click_fallback_coordinates_required",
             "required_fallback_fields",
             "recommended_tools",
             "fallback_x/fallback_y",
             "screen.capture -> desktop.click",
+            "function permissionRecoveryHints",
+            "source.permission_error !== true",
+            "PERMISSION_RECOVERY_HINTS",
+            "screen_recording:",
+            "chrome_cdp:",
+            "music_app:",
         ],
     )
     _assert_contains(

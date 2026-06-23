@@ -192,6 +192,7 @@ def test_tool_call_snapshot_from_payload_marks_failed_desktop_result() -> None:
                 "action": "media.apple_music_play",
                 "permission_error": True,
                 "permission_targets": ["music_app", "automation"],
+                "recovery_hints": ["Open Music.app and allow Automation."],
                 "fallback_used": True,
             },
             "created_at": "2026-06-22T00:00:00Z",
@@ -202,6 +203,9 @@ def test_tool_call_snapshot_from_payload_marks_failed_desktop_result() -> None:
     assert snapshot.completed_at == "2026-06-22T00:00:00Z"
     assert snapshot.output_preview["permission_error"] is True
     assert snapshot.output_preview["fallback_used"] is True
+    assert snapshot.output_preview["recovery_hints"] == [
+        "Open Music.app and allow Automation."
+    ]
 
 
 def test_tool_call_snapshot_from_payload_marks_approval_result_waiting() -> None:
