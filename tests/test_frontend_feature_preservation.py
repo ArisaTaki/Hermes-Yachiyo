@@ -1108,6 +1108,7 @@ def test_chat_routes_daily_desktop_intents_to_public_task_entry() -> None:
             "search|google|look up",
             "读一下|读取|阅读|提取",
             "(?:这个|当前)?网页",
+            "打开\\s*|open\\s+",
             "当前音量",
             "剪贴板",
             "复制(?:选中|当前选中)?内容?",
