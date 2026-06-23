@@ -222,7 +222,13 @@ def _desktop_intent_progress_text(
             result = payload.get("result") if isinstance(payload.get("result"), Mapping) else {}
             return _desktop_tool_result_progress_text(label, result)
         if event.event_type == _UNAVAILABLE_DESKTOP_INTENT_EVENT_TYPE:
-            return f"无法执行 · {label}" if label else "无法执行桌面动作"
+            payload = event.payload if isinstance(event.payload, Mapping) else {}
+            return _progress_text(
+                "无法执行",
+                label,
+                "无法执行桌面动作",
+                detail=_unavailable_desktop_intent_detail(payload),
+            )
         if event.event_type == _PLANNED_DESKTOP_INTENT_EVENT_TYPE:
             return f"准备执行 · {label}" if label else "准备执行桌面动作"
     return None
@@ -315,6 +321,15 @@ def _failure_detail(result: Mapping[str, Any]) -> str:
         return error_labels.get(error_code, error_code)
     error = _text(result.get("error") or result.get("summary"))
     return error_labels.get(error, error)
+
+
+def _unavailable_desktop_intent_detail(payload: Mapping[str, Any]) -> str:
+    if _text(payload.get("reason")) == "tool_not_allowed":
+        return "工具未开启"
+    blocked_by = _text(payload.get("blocked_by"))
+    if blocked_by:
+        return blocked_by
+    return _text(payload.get("reason"))
 
 
 def _result_text_list(result: Mapping[str, Any], *keys: str) -> list[str]:

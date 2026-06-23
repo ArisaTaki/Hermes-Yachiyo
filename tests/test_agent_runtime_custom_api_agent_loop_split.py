@@ -1329,10 +1329,8 @@ def test_custom_api_agent_loop_records_unavailable_desktop_intent_when_tool_is_m
     def run_tool_requests(*_args, **_kwargs):
         raise AssertionError("unavailable desktop intent must not bypass allowed_tools")
 
-    def call_model(_base_url, _model, _api_key, messages, **_kwargs):
-        order.append("model")
-        assert "Desktop intent for media.apple_music_play was not executed" in messages[-1]["content"]
-        return {"role": "assistant", "content": "缺少 media.apple_music_play 工具权限。"}
+    def call_model(*_args, **_kwargs):
+        raise AssertionError("unavailable desktop intent should return a runtime policy summary")
 
     loop = RuntimeCustomApiAgentLoop(
         agent_model_config_private=lambda _agent: {
@@ -1380,8 +1378,12 @@ def test_custom_api_agent_loop_records_unavailable_desktop_intent_when_tool_is_m
         run_id="run-missing-tool",
     )
 
-    assert str(result) == "缺少 media.apple_music_play 工具权限。"
-    assert order == ["model"]
+    assert str(result) == (
+        "这个 Agent 当前没有开启 media.apple_music_play，所以不能直接执行「播放 Apple Music」。"
+        "请改用八千代日常入口，或在 Agent Studio 给该 Agent 开启桌面执行能力。"
+        "当前允许的工具：workspace.read。"
+    )
+    assert order == []
     assert timeline[0] == {
         "event": "agent.desktop.intent_unavailable",
         "detail": "media.apple_music_play",
@@ -1389,6 +1391,16 @@ def test_custom_api_agent_loop_records_unavailable_desktop_intent_when_tool_is_m
         "status": "unavailable",
         "source": "daily_desktop_intent",
         "reason": "tool_not_allowed",
+        "blocked_by": "agent_tool_policy",
+        "blocked_summary": (
+            "这个 Agent 当前没有开启 media.apple_music_play，所以不能直接执行「播放 Apple Music」。"
+            "请改用八千代日常入口，或在 Agent Studio 给该 Agent 开启桌面执行能力。"
+            "当前允许的工具：workspace.read。"
+        ),
+        "recovery_actions": [
+            "改用八千代日常入口执行这个桌面指令。",
+            "在 Agent Studio 为该 Agent 开启桌面执行能力。",
+        ],
         "input_preview": {"query": "超时空辉夜姬"},
         "allowed_tools": ["workspace.read"],
     }
@@ -1401,6 +1413,16 @@ def test_custom_api_agent_loop_records_unavailable_desktop_intent_when_tool_is_m
                 "status": "unavailable",
                 "source": "daily_desktop_intent",
                 "reason": "tool_not_allowed",
+                "blocked_by": "agent_tool_policy",
+                "blocked_summary": (
+                    "这个 Agent 当前没有开启 media.apple_music_play，所以不能直接执行「播放 Apple Music」。"
+                    "请改用八千代日常入口，或在 Agent Studio 给该 Agent 开启桌面执行能力。"
+                    "当前允许的工具：workspace.read。"
+                ),
+                "recovery_actions": [
+                    "改用八千代日常入口执行这个桌面指令。",
+                    "在 Agent Studio 为该 Agent 开启桌面执行能力。",
+                ],
                 "input_preview": {"query": "超时空辉夜姬"},
                 "allowed_tools": ["workspace.read"],
             },

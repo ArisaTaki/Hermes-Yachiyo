@@ -25,6 +25,24 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
     "browser.screenshot",
 }
 
+_DAILY_DESKTOP_TOOL_LABELS = {
+    "screen.capture": "截取屏幕",
+    "desktop.active_window": "读取当前窗口",
+    "app.open": "打开应用",
+    "app.focus": "聚焦应用",
+    "media.apple_music_play": "播放 Apple Music",
+    "media.apple_music_control": "控制 Apple Music",
+    "desktop.hotkey": "发送快捷键",
+    "desktop.type_text": "输入前台文字",
+    "desktop.click": "点击前台界面",
+    "browser.open_url": "打开网页",
+    "browser.current_page": "读取当前网页",
+    "browser.extract_text": "提取网页文本",
+    "browser.screenshot": "截取网页",
+    "browser.click": "点击网页元素",
+    "browser.type_text": "填写网页输入",
+}
+
 
 class RuntimeCustomApiAgentLoop:
     """Runs the model/tool loop for native-profile and custom API Agents."""
@@ -167,13 +185,15 @@ class RuntimeCustomApiAgentLoop:
             else:
                 candidates = daily_desktop_intent_candidates(planning_context)
                 if candidates:
-                    self._record_unavailable_desktop_intent(
+                    unavailable_summary = self._record_unavailable_desktop_intent(
                         candidates[0],
                         allowed_tools=allowed_tools,
                         messages=messages,
                         timeline=timeline,
                         run_id=run_id,
                     )
+                    if unavailable_summary:
+                        return unavailable_summary
         for iteration in range(start_iteration, self._max_tool_iterations):
             self._check_context_budget(budget, messages)
             budget.claim_model_call()
@@ -239,14 +259,21 @@ class RuntimeCustomApiAgentLoop:
         messages: list[dict[str, Any]],
         timeline: list[dict[str, Any]],
         run_id: str,
-    ) -> None:
+    ) -> str:
         tool_name = str(candidate.get("tool") or "").strip()
         payload = candidate.get("input") if isinstance(candidate.get("input"), dict) else {}
+        summary = self._unavailable_desktop_intent_summary(tool_name, allowed_tools)
         event_payload = {
             "tool": tool_name,
             "status": "unavailable",
             "source": "daily_desktop_intent",
             "reason": "tool_not_allowed",
+            "blocked_by": "agent_tool_policy",
+            "blocked_summary": summary,
+            "recovery_actions": [
+                "改用八千代日常入口执行这个桌面指令。",
+                "在 Agent Studio 为该 Agent 开启桌面执行能力。",
+            ],
             "input_preview": payload,
             "allowed_tools": [str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()],
         }
@@ -268,6 +295,18 @@ class RuntimeCustomApiAgentLoop:
                     f"{', '.join(event_payload['allowed_tools']) or 'none'}."
                 ),
             }
+        )
+        return summary
+
+    @staticmethod
+    def _unavailable_desktop_intent_summary(tool_name: str, allowed_tools: list[str]) -> str:
+        label = _DAILY_DESKTOP_TOOL_LABELS.get(tool_name) or tool_name or "桌面动作"
+        allowed = ", ".join(str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip())
+        allowed_suffix = f"当前允许的工具：{allowed}。" if allowed else "当前没有开启可执行工具。"
+        return (
+            f"这个 Agent 当前没有开启 {tool_name}，所以不能直接执行「{label}」。"
+            "请改用八千代日常入口，或在 Agent Studio 给该 Agent 开启桌面执行能力。"
+            f"{allowed_suffix}"
         )
 
     def _record_desktop_intent_approval_required(

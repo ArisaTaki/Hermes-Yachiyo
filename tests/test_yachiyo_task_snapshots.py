@@ -127,8 +127,8 @@ def test_agent_task_snapshot_derives_progress_from_unavailable_desktop_intent() 
         }
     )
 
-    assert task.current_step == "无法执行 · 播放 Apple Music"
-    assert task.progress_text == "无法执行 · 播放 Apple Music"
+    assert task.current_step == "无法执行 · 播放 Apple Music · 工具未开启"
+    assert task.progress_text == "无法执行 · 播放 Apple Music · 工具未开启"
 
 
 def test_agent_task_snapshot_derives_progress_from_approval_required_desktop_intent() -> None:
