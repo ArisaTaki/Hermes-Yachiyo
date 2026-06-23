@@ -218,7 +218,7 @@ def daily_desktop_intent_tool_request(
     context: str,
     allowed_tools: list[str],
 ) -> dict[str, Any] | None:
-    """Return a structured low-risk desktop tool request for clear daily Chat intents."""
+    """Return a structured desktop tool request for clear daily Chat intents."""
 
     requests = daily_desktop_intent_tool_requests(context, allowed_tools)
     return requests[0] if requests else None
@@ -241,7 +241,7 @@ def daily_desktop_intent_tool_requests(
 
 
 def daily_desktop_intent_sequence_candidates(context: str) -> list[dict[str, Any]]:
-    """Return ordered low-risk foreground desktop tool requests for explicit multi-step intents."""
+    """Return ordered foreground desktop tool requests for explicit multi-step intents."""
 
     text = _clean_text(context)
     if (
@@ -263,7 +263,7 @@ def daily_desktop_intent_sequence_candidates(context: str) -> list[dict[str, Any
     requests = _coalesce_app_foreground_sequence(requests)
     if len(requests) < 2:
         return []
-    if not _is_low_risk_foreground_sequence(requests):
+    if not _is_foreground_desktop_sequence(requests):
         return []
     return requests
 
@@ -310,7 +310,7 @@ _DIRECT_DAILY_DESKTOP_METADATA_TOOLS = {
     "system.volume",
 }
 
-_LOW_RISK_FOREGROUND_SEQUENCE_TOOLS = {
+_FOREGROUND_SEQUENCE_TOOLS = {
     "app.open",
     "app.focus",
     "app.show",
@@ -323,6 +323,10 @@ _LOW_RISK_FOREGROUND_SEQUENCE_TOOLS = {
     "desktop.safe_click",
     "desktop.safe_shortcut",
     "desktop.safe_type_text",
+    "desktop.click",
+    "desktop.close_window",
+    "desktop.hotkey",
+    "desktop.type_text",
 }
 
 _APP_SEQUENCE_CONTEXT_TOOLS = {
@@ -336,9 +340,13 @@ _APP_SEQUENCE_CONTEXT_TOOLS = {
 }
 
 _FOREGROUND_ACTION_TOOLS = {
+    "desktop.click",
+    "desktop.close_window",
+    "desktop.hotkey",
     "desktop.safe_click",
     "desktop.safe_shortcut",
     "desktop.safe_type_text",
+    "desktop.type_text",
 }
 
 
@@ -401,7 +409,7 @@ def daily_desktop_recovery_prompt(metadata: Mapping[str, Any] | None) -> str:
 
 def _split_daily_desktop_sequence(text: str) -> list[str]:
     parts = re.split(
-        r"(?:[，,；;。]\s*|\s+(?:and then|then)\s+|(?:然后|接着|之后|随后|并且)\s*)",
+        r"(?:[，,；;。]\s*|\s+(?:and then|then)\s+|(?:然后|接着|之后|随后|并且|并)\s*)",
         str(text or "").strip(),
         flags=re.IGNORECASE,
     )
@@ -410,7 +418,7 @@ def _split_daily_desktop_sequence(text: str) -> list[str]:
 
 def _strip_sequence_clause_prefix(text: str) -> str:
     return re.sub(
-        r"^(?:再|然后|接着|之后|随后|并且|and then|then)\s*",
+        r"^(?:再|然后|接着|之后|随后|并且|并|and then|then)\s*",
         "",
         str(text or "").strip(),
         flags=re.IGNORECASE,
@@ -420,7 +428,7 @@ def _strip_sequence_clause_prefix(text: str) -> str:
 def _first_daily_desktop_candidate(text: str) -> dict[str, Any] | None:
     for request in daily_desktop_intent_candidates(text):
         tool = str(request.get("tool") or "")
-        if tool in _LOW_RISK_FOREGROUND_SEQUENCE_TOOLS:
+        if tool in _FOREGROUND_SEQUENCE_TOOLS:
             return request
     return None
 
@@ -476,9 +484,9 @@ def _app_foreground_sequence_composite(
     return None
 
 
-def _is_low_risk_foreground_sequence(requests: list[dict[str, Any]]) -> bool:
+def _is_foreground_desktop_sequence(requests: list[dict[str, Any]]) -> bool:
     tools = [str(request.get("tool") or "") for request in requests]
-    if not tools or any(tool not in _LOW_RISK_FOREGROUND_SEQUENCE_TOOLS for tool in tools):
+    if not tools or any(tool not in _FOREGROUND_SEQUENCE_TOOLS for tool in tools):
         return False
     if tools[0] not in _APP_SEQUENCE_CONTEXT_TOOLS:
         return False

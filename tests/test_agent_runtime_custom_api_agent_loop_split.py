@@ -927,6 +927,23 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
             "input": {"action": "paste"},
         },
     ]
+    assert daily_desktop_intent_tool_requests("打开 Notes，然后按 Command+L，再复制", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Notes"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.hotkey",
+            "input": {"key": "l", "modifiers": ["command"]},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+        },
+    ]
     assert daily_desktop_intent_tool_requests("打开 Notes 并输入 hello，再复制", ["app.open"]) == [
         {
             "protocol": "json_fallback",
@@ -3795,6 +3812,148 @@ def test_main_chat_daily_hotkey_resume_summarizes_approved_tool_without_replanni
     assert str(result) == "已发送快捷键：Command+L。"
     assert timeline[-1]["event"] == "agent.desktop.intent_completed"
     assert appended_events[-1]["event_type"] == "agent.desktop.intent_completed"
+
+
+def test_main_chat_daily_sequence_resume_summarizes_approved_and_remaining_tools() -> None:
+    budget = FakeBudget()
+    timeline = [
+        {
+            "event": "agent.desktop.intent_planned",
+            "detail": "app.open",
+            "tool": "app.open",
+            "status": "planned",
+            "source": "daily_desktop_intent",
+            "planning_reason": "clear_daily_desktop_intent",
+            "input_preview": {"app_name": "Notes"},
+        },
+        {
+            "event": "agent.desktop.intent_planned",
+            "detail": "desktop.hotkey",
+            "tool": "desktop.hotkey",
+            "status": "planned",
+            "source": "daily_desktop_intent",
+            "planning_reason": "clear_daily_desktop_intent",
+            "input_preview": {"key": "l", "modifiers": ["command"]},
+        },
+        {
+            "event": "agent.desktop.intent_planned",
+            "detail": "desktop.safe_shortcut",
+            "tool": "desktop.safe_shortcut",
+            "status": "planned",
+            "source": "daily_desktop_intent",
+            "planning_reason": "clear_daily_desktop_intent",
+            "input_preview": {"action": "copy"},
+        },
+        {
+            "event": "agent.tool.call",
+            "detail": "app.open",
+            "input_preview": {"app_name": "Notes"},
+            "result": {
+                "ok": True,
+                "action": "app.open",
+                "data": {"app_name": "Notes", "launch_verified": True},
+            },
+        },
+        {
+            "event": "agent.desktop.intent_approval_required",
+            "detail": "desktop.hotkey",
+            "tool": "desktop.hotkey",
+            "status": "approval_required",
+            "source": "daily_desktop_intent",
+            "reason": "tool_policy_requires_approval",
+            "input_preview": {"key": "l", "modifiers": ["command"]},
+        },
+        {
+            "event": "agent.tool.call",
+            "detail": "desktop.hotkey",
+            "input_preview": {"key": "l", "modifiers": ["command"]},
+            "result": {
+                "ok": True,
+                "action": "desktop.hotkey",
+                "data": {"key": "l", "modifiers": ["command"]},
+            },
+        },
+        {
+            "event": "agent.tool.call",
+            "detail": "desktop.safe_shortcut",
+            "input_preview": {"action": "copy"},
+            "result": {
+                "ok": True,
+                "action": "desktop.safe_shortcut",
+                "data": {"action": "copy"},
+            },
+        },
+    ]
+    appended_events: list[dict[str, Any]] = []
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local",
+            "model": "m",
+            "api_key": "k",
+        },
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {
+                "allowed_tools": [
+                    "app.open",
+                    "desktop.hotkey",
+                    "desktop.safe_shortcut",
+                ]
+            }
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=3,
+        operating_doctrine="Use desktop tools for desktop intents.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("approved daily sequence resume should not call the model")
+        ),
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("approved daily sequence resume should not re-run the planner")
+        ),
+        error_type=agent_runtime.AgentRuntimeError,
+        append_run_event=lambda run_id, event_type, payload: appended_events.append(
+            {"run_id": run_id, "event_type": event_type, "payload": payload}
+        ),
+    )
+
+    result = loop.run(
+        {"agent_id": MAIN_CHAT_AGENT_ID, "name": "Yachiyo"},
+        "",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        messages=[
+            {"role": "user", "content": "打开 Notes，然后按 Command+L，再复制"},
+            {"role": "user", "content": "Tool result for desktop.hotkey: ok"},
+        ],
+        start_iteration=0,
+        run_id="run-sequence-resume",
+        budget=budget,
+    )
+
+    assert str(result) == "已打开 Notes。 已发送快捷键：Command+L。 已复制选中内容。"
+    assert timeline[-1]["event"] == "agent.desktop.intent_completed"
+    assert timeline[-1]["tools"] == ["app.open", "desktop.hotkey", "desktop.safe_shortcut"]
+    assert [step["tool"] for step in timeline[-1]["steps"]] == [
+        "app.open",
+        "desktop.hotkey",
+        "desktop.safe_shortcut",
+    ]
+    assert appended_events[-1]["event_type"] == "agent.desktop.intent_completed"
+    assert appended_events[-1]["payload"]["summary"] == str(result)
 
 
 def test_custom_api_agent_loop_records_desktop_intent_approval_required_before_pause() -> None:

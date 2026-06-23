@@ -175,7 +175,7 @@ class RuntimeCustomApiAgentLoop:
         budget = budget or self._run_budget(run_id, timeline)
         self._check_context_budget(budget, messages)
         start_iteration = self._normalize_tool_iteration(start_iteration)
-        if not default_messages and start_iteration == 0:
+        if not default_messages:
             resumed_result = self._direct_existing_daily_desktop_result(
                 agent,
                 timeline,
@@ -548,6 +548,11 @@ class RuntimeCustomApiAgentLoop:
                 candidate = tool_events[event_index]
                 event_index += 1
                 if str(candidate.get("detail") or "") == planned_tool:
+                    candidate_result = (
+                        candidate.get("result") if isinstance(candidate.get("result"), dict) else {}
+                    )
+                    if candidate_result.get("approval_required"):
+                        continue
                     tool_event = candidate
                     break
             if tool_event is None:
@@ -859,6 +864,12 @@ class RuntimeCustomApiAgentLoop:
         *,
         run_id: str = "",
     ) -> str:
+        sequence_result = self._direct_existing_daily_desktop_sequence_result(
+            timeline,
+            run_id=run_id,
+        )
+        if sequence_result:
+            return sequence_result
         tool_event = self._latest_tool_call_event_for_daily_desktop_intent(timeline)
         if not tool_event:
             return ""
@@ -873,6 +884,55 @@ class RuntimeCustomApiAgentLoop:
             timeline,
             run_id=run_id,
         )
+
+    def _direct_existing_daily_desktop_sequence_result(
+        self,
+        timeline: list[dict[str, Any]],
+        *,
+        run_id: str = "",
+    ) -> str:
+        sequence = self._latest_uncompleted_daily_desktop_sequence(timeline)
+        if sequence is None:
+            return ""
+        return self._direct_daily_desktop_sequence_result(
+            sequence["requests"],
+            timeline,
+            tool_timeline_start=sequence["start_index"] + 1,
+            run_id=run_id,
+        )
+
+    @staticmethod
+    def _latest_uncompleted_daily_desktop_sequence(
+        timeline: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        requests: list[dict[str, Any]] = []
+        start_index = -1
+        for index, event in enumerate(timeline):
+            event_type = str(event.get("event") or "").strip()
+            if event_type == "agent.desktop.intent_completed":
+                requests = []
+                start_index = -1
+                continue
+            if event_type != "agent.desktop.intent_planned":
+                continue
+            if str(event.get("source") or "").strip() != "daily_desktop_intent":
+                continue
+            tool_name = str(event.get("tool") or event.get("detail") or "").strip()
+            if not tool_name:
+                continue
+            input_preview = event.get("input_preview")
+            if start_index < 0:
+                start_index = index
+            requests.append(
+                {
+                    "protocol": "json_fallback",
+                    "tool": tool_name,
+                    "input": dict(input_preview) if isinstance(input_preview, dict) else {},
+                }
+            )
+        if start_index < 0 or len(requests) < 2:
+            return None
+        return {"start_index": start_index, "requests": requests}
 
     @staticmethod
     def _latest_tool_call_event_for_daily_desktop_intent(
