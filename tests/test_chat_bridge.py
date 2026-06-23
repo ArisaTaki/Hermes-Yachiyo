@@ -39,6 +39,65 @@ def _runtime_with_chat_store(store: ChatStore) -> SimpleNamespace:
     )
 
 
+def _run_launcher_daily_desktop_quick_message(
+    tmp_path,
+    monkeypatch,
+    text: str,
+) -> tuple[dict, dict, dict, list[str]]:
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _runtime_with_chat_store(store)
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime.db",
+        workspace_dir=tmp_path / "runtime",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    runtime.agent_runtime_service = service
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: _FakeNoDefaultProfileService(),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("launcher daily desktop quick message should not call model")
+        ),
+    )
+    bridge = ChatBridge(runtime)
+    try:
+        result = bridge.send_quick_message(
+            text,
+            metadata={
+                "source": "launcher",
+                "launcher_mode": "live2d",
+                "launcher_surface": "quick_message",
+            },
+        )
+        agent_task = result["agent_task"]
+        link = service.get_task_run_link(result["task_id"])
+        run = service.get_run(link["run_id"])
+        event_types = [
+            event["event_type"]
+            for event in service.list_run_events(run["run_id"])["events"]
+        ]
+        messages = store.load_messages("session-current", limit=10)
+        user = next(message for message in messages if message.role == "user")
+        assistant = next(message for message in messages if message.role == "assistant")
+        user_metadata = json.loads(user.metadata_json)
+
+        assert result["ok"] is True
+        assert agent_task["task_id"] == result["task_id"]
+        assert agent_task["conversation_id"] == "session-current"
+        assert agent_task["open_in_studio_url"] == f"#/agents?run_id={run['run_id']}"
+        assert user_metadata["source"] == "launcher"
+        assert user_metadata["launcher_mode"] == "live2d"
+        assert assistant.content == agent_task["summary"]
+        return result, agent_task, run, event_types
+    finally:
+        service.close()
+        store.close()
+
+
 def test_chat_bridge_conversation_overview_preserves_session_summary(tmp_path, monkeypatch):
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
     runtime = _runtime_with_chat_store(store)
@@ -114,26 +173,7 @@ def test_chat_bridge_quick_message_executes_daily_desktop_task_for_launcher_entr
     tmp_path,
     monkeypatch,
 ):
-    store = ChatStore(db_path=str(tmp_path / "chat.db"))
-    runtime = _runtime_with_chat_store(store)
-    service = AgentRuntimeService(
-        db_path=tmp_path / "agent-runtime.db",
-        workspace_dir=tmp_path / "runtime",
-        credential_store=MemoryCredentialStore(),
-        seed_templates=False,
-    )
-    runtime.agent_runtime_service = service
     open_calls: list[str] = []
-    monkeypatch.setattr(
-        "apps.shell.agent_runtime.get_model_profile_service",
-        lambda: _FakeNoDefaultProfileService(),
-    )
-    monkeypatch.setattr(
-        "apps.shell.agent_runtime.openai_compatible_chat_message",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("launcher daily desktop quick message should not call model")
-        ),
-    )
 
     def fake_app_open(app_name: str) -> dict:
         open_calls.append(app_name)
@@ -148,49 +188,127 @@ def test_chat_bridge_quick_message_executes_daily_desktop_task_for_launcher_entr
         }
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
-    bridge = ChatBridge(runtime)
-    try:
-        result = bridge.send_quick_message(
-            "打开 Apple Music",
-            metadata={
-                "source": "launcher",
-                "launcher_mode": "live2d",
-                "launcher_surface": "quick_message",
-            },
-        )
-        agent_task = result["agent_task"]
-        link = service.get_task_run_link(result["task_id"])
-        run = service.get_run(link["run_id"])
-        event_types = [
-            event["event_type"]
-            for event in service.list_run_events(run["run_id"])["events"]
-        ]
-        messages = store.load_messages("session-current", limit=10)
-        user = next(message for message in messages if message.role == "user")
-        assistant = next(message for message in messages if message.role == "assistant")
-        user_metadata = json.loads(user.metadata_json)
+    result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "打开 Apple Music",
+    )
 
-        assert result["ok"] is True
-        assert open_calls == ["Music"]
-        assert agent_task["task_id"] == result["task_id"]
-        assert agent_task["conversation_id"] == "session-current"
-        assert agent_task["status"] == "completed"
-        assert agent_task["summary"] == "已打开 Music。"
-        assert agent_task["open_in_studio_url"] == f"#/agents?run_id={run['run_id']}"
-        assert agent_task["tool_calls"][-1]["tool_name"] == "app.open"
-        assert agent_task["tool_calls"][-1]["status"] == "completed"
-        assert run["status"] == "completed"
-        assert "agent.desktop.intent_planned" in event_types
-        assert "agent.tool.call" in event_types
-        assert "agent.desktop.intent_completed" in event_types
-        assert "model.request.started" not in event_types
-        assert "model.requested" not in event_types
-        assert user_metadata["source"] == "launcher"
-        assert user_metadata["launcher_mode"] == "live2d"
-        assert assistant.content == "已打开 Music。"
-    finally:
-        service.close()
-        store.close()
+    assert result["ok"] is True
+    assert open_calls == ["Music"]
+    assert agent_task["summary"] == "已打开 Music。"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "app.open"
+    assert agent_task["tool_calls"][-1]["status"] == "completed"
+    assert run["status"] == "completed"
+    assert "agent.desktop.intent_planned" in event_types
+    assert "agent.tool.call" in event_types
+    assert "agent.desktop.intent_completed" in event_types
+    assert "model.request.started" not in event_types
+    assert "model.requested" not in event_types
+
+
+def test_chat_bridge_quick_message_executes_browser_search_for_launcher_entrypoints(
+    tmp_path,
+    monkeypatch,
+):
+    opened_urls: list[str] = []
+
+    def fake_open_url(url: str) -> dict:
+        opened_urls.append(url)
+        return {
+            "ok": True,
+            "action": "browser.open_url",
+            "summary": f"Opened {url}",
+            "data": {"url": url},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.browser.open_url", fake_open_url)
+    _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "搜索 open hanako",
+    )
+
+    assert opened_urls == ["https://www.google.com/search?q=open+hanako"]
+    assert agent_task["status"] == "completed"
+    assert agent_task["summary"] == "已打开网页：https://www.google.com/search?q=open+hanako。"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "browser.open_url"
+    assert run["status"] == "completed"
+    assert "agent.desktop.intent_completed" in event_types
+    assert "model.request.started" not in event_types
+
+
+def test_chat_bridge_quick_message_executes_screen_capture_for_launcher_entrypoints(
+    tmp_path,
+    monkeypatch,
+):
+    capture_targets: list[str] = []
+
+    def fake_screen_capture(target_path) -> dict:
+        capture_targets.append(str(target_path))
+        return {
+            "ok": True,
+            "action": "screen.capture",
+            "summary": "已截取当前屏幕。",
+            "data": {
+                "path": str(target_path),
+                "mime_type": "image/png",
+                "size_bytes": 10,
+                "width": 100,
+                "height": 80,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.screen_capture", fake_screen_capture)
+    _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "帮我看看现在屏幕",
+    )
+
+    assert capture_targets
+    assert capture_targets[0].endswith("screenshots/current-screen.png")
+    assert agent_task["status"] == "completed"
+    assert agent_task["summary"] == "已截取当前屏幕。"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "screen.capture"
+    assert agent_task["artifacts"][-1]["path"] == "screenshots/current-screen.png"
+    assert run["status"] == "completed"
+    assert "artifact.created" in event_types
+    assert "agent.desktop.intent_completed" in event_types
+
+
+def test_chat_bridge_quick_message_executes_permission_diagnosis_for_launcher_entrypoints(
+    tmp_path,
+    monkeypatch,
+):
+    permission_calls: list[bool] = []
+
+    def fake_permissions() -> dict:
+        permission_calls.append(True)
+        return {
+            "ok": True,
+            "action": "desktop.permissions",
+            "summary": "Desktop permissions ready",
+            "data": {
+                "permission_targets": [],
+                "affected_tools": [],
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.permissions", fake_permissions)
+    _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "检查桌面权限",
+    )
+
+    assert permission_calls == [True]
+    assert agent_task["status"] == "completed"
+    assert agent_task["summary"] == "桌面执行权限已就绪。"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "desktop.permissions"
+    assert run["status"] == "completed"
+    assert "agent.desktop.intent_completed" in event_types
+    assert "model.request.started" not in event_types
 
 
 def test_chat_bridge_quick_message_waits_briefly_for_daily_desktop_snapshot(tmp_path, monkeypatch):
