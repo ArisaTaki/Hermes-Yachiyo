@@ -1104,6 +1104,8 @@ def test_chat_routes_daily_desktop_intents_to_public_task_entry() -> None:
             "'word', 'microsoft\\\\s*word', 'excel', 'microsoft\\\\s*excel'",
             "'zoom', 'teams', 'microsoft\\\\s*teams'",
             "'iterm', 'iterm2'",
+            "搜索|搜一下|搜|查一下|查查|检索",
+            "search|google|look up",
             "读一下|读取|阅读|提取",
             "(?:这个|当前)?网页",
             "当前音量",
