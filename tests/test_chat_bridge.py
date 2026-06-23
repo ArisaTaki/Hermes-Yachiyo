@@ -209,6 +209,49 @@ def test_chat_bridge_quick_message_executes_daily_desktop_task_for_launcher_entr
     assert "model.requested" not in event_types
 
 
+def test_chat_bridge_quick_message_executes_natural_music_request_for_launcher_entrypoints(
+    tmp_path,
+    monkeypatch,
+):
+    control_calls: list[str] = []
+
+    def fake_apple_music_control(action: str) -> dict:
+        control_calls.append(action)
+        return {
+            "ok": True,
+            "action": "media.apple_music_control",
+            "summary": f"Apple Music {action} executed",
+            "data": {
+                "control": action,
+                "player_state": "playing",
+                "track": "超时空辉夜姬",
+                "artist": "Yachiyo",
+            },
+        }
+
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.apple_music_control",
+        fake_apple_music_control,
+    )
+    result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "能否帮我播放apple Music?",
+    )
+
+    assert result["ok"] is True
+    assert control_calls == ["play"]
+    assert agent_task["summary"] == "已继续播放 Apple Music。当前：超时空辉夜姬 - Yachiyo。"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "media.apple_music_control"
+    assert agent_task["tool_calls"][-1]["status"] == "completed"
+    assert run["status"] == "completed"
+    assert "agent.desktop.intent_planned" in event_types
+    assert "agent.tool.call" in event_types
+    assert "agent.desktop.intent_completed" in event_types
+    assert "model.request.started" not in event_types
+    assert "model.requested" not in event_types
+
+
 def test_chat_bridge_quick_message_executes_browser_search_for_launcher_entrypoints(
     tmp_path,
     monkeypatch,
