@@ -229,6 +229,7 @@ _PERMISSION_CAPABILITY_TOOLS = {
         "app.open",
         "app.focus",
         "app.hide",
+        "app.minimize",
         "app.quit",
         "desktop.reveal_path",
         "desktop.open_path",
@@ -999,6 +1000,97 @@ def app_hide(app_name: str) -> dict[str, Any]:
     }
 
 
+def app_minimize(app_name: str) -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("app.minimize")
+    clean_name = _clean_required(app_name, "app_name")
+    result = _run_osascript(
+        """
+        on run argv
+            set appName to item 1 of argv
+            tell application "System Events"
+                if not (exists application process appName) then
+                    return "not_running|" & appName & "|0"
+                end if
+                tell application process appName
+                    set windowCount to count of windows
+                    if windowCount is 0 then
+                        return "no_windows|" & appName & "|0"
+                    end if
+                    repeat with windowRef in windows
+                        try
+                            set value of attribute "AXMinimized" of windowRef to true
+                        on error
+                            try
+                                set miniaturized of windowRef to true
+                            end try
+                        end try
+                    end repeat
+                    return "minimized|" & appName & "|" & windowCount
+                end tell
+            end tell
+        end run
+        """,
+        [clean_name],
+    )
+    if not result["ok"]:
+        return _with_permission_metadata(
+            "app.minimize",
+            {
+                **result,
+                "action": "app.minimize",
+                "summary": "app.minimize failed",
+                "data": {"app_name": clean_name},
+            },
+        )
+    stdout = str(result.get("stdout") or "").strip()
+    parts = stdout.split("|") if stdout else []
+    status = parts[0] if parts else "unknown"
+    window_count = _int_value(parts[2] if len(parts) > 2 else 0)
+    if status == "not_running":
+        return {
+            "ok": False,
+            "action": "app.minimize",
+            "summary": f"{clean_name} is not running",
+            "error": "app_not_running",
+            "error_code": "app_not_running",
+            "data": {
+                "app_name": clean_name,
+                "minimize_status": status,
+                "window_count": window_count,
+            },
+            "permission_error": False,
+            "fallback_used": False,
+        }
+    if status == "no_windows":
+        return {
+            "ok": False,
+            "action": "app.minimize",
+            "summary": f"{clean_name} has no windows to minimize",
+            "error": "app_no_windows",
+            "error_code": "app_no_windows",
+            "data": {
+                "app_name": clean_name,
+                "minimize_status": status,
+                "window_count": window_count,
+            },
+            "permission_error": False,
+            "fallback_used": False,
+        }
+    return {
+        "ok": True,
+        "action": "app.minimize",
+        "summary": f"Minimized {clean_name}",
+        "data": {
+            "app_name": clean_name,
+            "minimize_status": status,
+            "window_count": window_count,
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
 def app_quit(app_name: str) -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("app.quit")
@@ -1650,6 +1742,13 @@ def _clean_required(value: str, field: str) -> str:
     return clean
 
 
+def _int_value(value: Any) -> int:
+    try:
+        return int(float(str(value or 0).strip()))
+    except (TypeError, ValueError):
+        return 0
+
+
 def _clean_music_control_action(value: str) -> str:
     aliases = {
         "toggle": "toggle",
@@ -2013,6 +2112,7 @@ def _missing_permissions_for_action(action: str) -> list[str]:
         "desktop.windows": ["automation_or_accessibility"],
         "app.focus": ["automation"],
         "app.hide": ["accessibility"],
+        "app.minimize": ["accessibility"],
         "app.quit": ["automation"],
         "media.apple_music_play": ["music_app", "automation"],
         "media.apple_music_control": ["music_app", "automation"],
@@ -2034,6 +2134,7 @@ def _permission_targets_for_action(action: str) -> list[str]:
         "desktop.windows": ["automation", "accessibility"],
         "app.focus": ["automation"],
         "app.hide": ["accessibility"],
+        "app.minimize": ["accessibility"],
         "app.quit": ["automation"],
         "media.apple_music_play": ["music_app", "automation"],
         "media.apple_music_control": ["music_app", "automation"],

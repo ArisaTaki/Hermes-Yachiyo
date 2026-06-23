@@ -274,6 +274,7 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
         "app_open",
         "app_focus",
         "app_hide",
+        "app_minimize",
         "app_quit",
         "desktop_reveal_path",
         "desktop_open_path",
@@ -333,6 +334,13 @@ def test_app_hide_schema_requires_app_name() -> None:
 
     with pytest.raises(AgentRuntimeError, match="app.hide 参数 app_name 必须是非空字符串"):
         ToolDescriptorRegistry.validate_payload("app.hide", {"app_name": ""})
+
+
+def test_app_minimize_schema_requires_app_name() -> None:
+    ToolDescriptorRegistry.validate_payload("app.minimize", {"app_name": "Slack"})
+
+    with pytest.raises(AgentRuntimeError, match="app.minimize 参数 app_name 必须是非空字符串"):
+        ToolDescriptorRegistry.validate_payload("app.minimize", {"app_name": ""})
 
 
 def test_desktop_reveal_path_schema_accepts_local_path() -> None:
@@ -397,6 +405,7 @@ def test_compile_tool_policy_accepts_desktop_tools_with_foreground_approval() ->
             "allowed_tools": [
                 "screen.capture",
                 "app.hide",
+                "app.minimize",
                 "desktop.hide_app",
                 "desktop.minimize_window",
                 "app.quit",
@@ -411,6 +420,7 @@ def test_compile_tool_policy_accepts_desktop_tools_with_foreground_approval() ->
     assert policy["allowed_tools"] == [
         "screen.capture",
         "app.hide",
+        "app.minimize",
         "desktop.hide_app",
         "desktop.minimize_window",
         "app.quit",
@@ -560,6 +570,12 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         lambda app_name: calls.append(("hide_named_app", app_name))
         or {"ok": True, "app_name": app_name},
     )
+    monkeypatch.setattr(
+        broker,
+        "app_minimize",
+        lambda app_name: calls.append(("minimize_named_app", app_name))
+        or {"ok": True, "app_name": app_name},
+    )
 
     assert dispatch_tool_call(
         broker,
@@ -583,6 +599,10 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
     ) == {"ok": True}
     assert dispatch_tool_call(broker, "desktop.hide_app", {}) == {"ok": True}
     assert dispatch_tool_call(broker, "app.hide", {"app_name": "Slack"}) == {
+        "ok": True,
+        "app_name": "Slack",
+    }
+    assert dispatch_tool_call(broker, "app.minimize", {"app_name": "Slack"}) == {
         "ok": True,
         "app_name": "Slack",
     }
@@ -617,6 +637,7 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         ("click", 12, 34, 2),
         ("hide_app",),
         ("hide_named_app", "Slack"),
+        ("minimize_named_app", "Slack"),
         ("minimize_window",),
         ("close_window",),
         ("reveal", "~/Downloads/report.pdf"),
@@ -1108,6 +1129,55 @@ def test_app_hide_reports_not_running(monkeypatch) -> None:
     assert result["summary"] == "Slack is not running"
     assert result["error_code"] == "app_not_running"
     assert result["data"] == {"app_name": "Slack", "hide_status": "not_running"}
+
+
+def test_app_minimize_uses_system_events_window_minimize(monkeypatch) -> None:
+    calls = []
+
+    def fake_osascript(script, args=None):
+        calls.append((script, args))
+        return {"ok": True, "stdout": "minimized|Slack|2", "stderr": ""}
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_run_osascript", fake_osascript)
+
+    result = desktop_mod.app_minimize("Slack")
+
+    assert result == {
+        "ok": True,
+        "action": "app.minimize",
+        "summary": "Minimized Slack",
+        "data": {
+            "app_name": "Slack",
+            "minimize_status": "minimized",
+            "window_count": 2,
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+    assert 'attribute "AXMinimized"' in calls[0][0]
+    assert calls[0][1] == ["Slack"]
+
+
+def test_app_minimize_reports_no_windows(monkeypatch) -> None:
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_osascript",
+        lambda _script, args=None: {"ok": True, "stdout": "no_windows|Slack|0", "stderr": ""},
+    )
+
+    result = desktop_mod.app_minimize("Slack")
+
+    assert result["ok"] is False
+    assert result["action"] == "app.minimize"
+    assert result["summary"] == "Slack has no windows to minimize"
+    assert result["error_code"] == "app_no_windows"
+    assert result["data"] == {
+        "app_name": "Slack",
+        "minimize_status": "no_windows",
+        "window_count": 0,
+    }
 
 
 def test_desktop_active_window_permission_failure_returns_recovery_targets(monkeypatch) -> None:

@@ -404,6 +404,9 @@ class ToolBroker:
     def app_hide(self, app_name: str) -> dict[str, Any]:
         return desktop.app_hide(app_name)
 
+    def app_minimize(self, app_name: str) -> dict[str, Any]:
+        return desktop.app_minimize(app_name)
+
     def app_quit(self, app_name: str) -> dict[str, Any]:
         return desktop.app_quit(app_name)
 

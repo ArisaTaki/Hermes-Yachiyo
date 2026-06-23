@@ -15,6 +15,7 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
     "app.open",
     "app.focus",
     "app.hide",
+    "app.minimize",
     "app.quit",
     "media.apple_music_play",
     "media.apple_music_control",
@@ -52,6 +53,7 @@ _DAILY_DESKTOP_TOOL_LABELS = {
     "app.open": "打开应用",
     "app.focus": "聚焦应用",
     "app.hide": "隐藏应用",
+    "app.minimize": "最小化应用",
     "app.quit": "退出应用",
     "media.apple_music_play": "播放 Apple Music",
     "media.apple_music_control": "控制 Apple Music",
@@ -444,6 +446,9 @@ class RuntimeCustomApiAgentLoop:
             if tool_name == "app.hide":
                 app_name = _payload_text(result, planned_input, "app_name")
                 return f"已隐藏 {app_name}。" if app_name else (result_summary or "已隐藏应用。")
+            if tool_name == "app.minimize":
+                app_name = _payload_text(result, planned_input, "app_name")
+                return f"已最小化 {app_name}。" if app_name else (result_summary or "已最小化应用。")
             if tool_name == "app.quit":
                 app_name = _payload_text(result, planned_input, "app_name")
                 data = result.get("data") if isinstance(result.get("data"), dict) else {}
@@ -640,7 +645,7 @@ class RuntimeCustomApiAgentLoop:
         )
         desktop_tool_guidance = (
             "For desktop requests, prefer structured desktop tools such as screen.capture, "
-            "desktop.permissions, desktop.active_window, desktop.running_apps, desktop.windows, app.status, app.open/app.focus/app.hide/app.quit, desktop.reveal_path, desktop.open_path, media.apple_music_play, "
+            "desktop.permissions, desktop.active_window, desktop.running_apps, desktop.windows, app.status, app.open/app.focus/app.hide/app.minimize/app.quit, desktop.reveal_path, desktop.open_path, media.apple_music_play, "
             "media.apple_music_control, system.volume, clipboard.write, desktop.hide_app, desktop.minimize_window, desktop.close_window, desktop.click, desktop.hotkey, and desktop.type_text "
             "when they are allowed. For explicit daily commands, map 'play <song>' or "
             "'播放<歌曲>' to media.apple_music_play; map pause/resume/next/previous media "
@@ -651,7 +656,7 @@ class RuntimeCustomApiAgentLoop:
             "before answering; map running/open app list questions to desktop.running_apps; "
             "map open window list questions to desktop.windows; "
             "map single app running/open status questions to app.status; "
-            "map explicit named app hide requests to app.hide and app quit/close/exit requests to app.quit; "
+            "map explicit named app hide requests to app.hide, named app minimize requests to app.minimize, and app quit/close/exit requests to app.quit; "
             "map desktop permission diagnostics and 'why can't you control/open/click/play' "
             "questions to desktop.permissions; "
             "map 'show/reveal in Finder' requests to desktop.reveal_path and safe local "

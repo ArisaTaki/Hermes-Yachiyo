@@ -584,6 +584,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "app.open",
         "app.focus",
         "app.hide",
+        "app.minimize",
         "app.quit",
         "media.apple_music_play",
         "media.apple_music_control",
@@ -717,6 +718,22 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "input": {"app_name": "Slack"},
     }
     assert daily_desktop_intent_tool_request("隐藏 Slack", ["desktop.hide_app"]) is None
+    assert daily_desktop_intent_tool_request("最小化 Slack", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.minimize",
+        "input": {"app_name": "Slack"},
+    }
+    assert daily_desktop_intent_tool_request("minimize Slack", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.minimize",
+        "input": {"app_name": "Slack"},
+    }
+    assert daily_desktop_intent_tool_request("最小化当前窗口", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "desktop.minimize_window",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("最小化 Slack", ["desktop.minimize_window"]) is None
     assert daily_desktop_intent_tool_request("关闭当前窗口", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.close_window",
@@ -725,11 +742,6 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_request("close current window", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.close_window",
-        "input": {},
-    }
-    assert daily_desktop_intent_tool_request("最小化当前窗口", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "desktop.minimize_window",
         "input": {},
     }
     assert daily_desktop_intent_tool_request("minimize current window", allowed_tools) == {
@@ -1842,6 +1854,15 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
             "data": {"app_name": "Slack"},
         },
     )
+    app_minimize = RuntimeCustomApiAgentLoop._daily_desktop_summary(
+        "app.minimize",
+        {"app_name": "Slack"},
+        {
+            "ok": True,
+            "summary": "Minimized Slack",
+            "data": {"app_name": "Slack", "window_count": 2},
+        },
+    )
     close_window = RuntimeCustomApiAgentLoop._daily_desktop_summary(
         "desktop.close_window",
         {},
@@ -1863,6 +1884,7 @@ def test_main_chat_desktop_intent_summarizes_app_and_browser_execution_details()
     assert app_quit == "已退出 Slack。"
     assert app_quit_still_running == "已向 Slack 发送退出请求，但它可能仍在运行。"
     assert app_hide == "已隐藏 Slack。"
+    assert app_minimize == "已最小化 Slack。"
     assert close_window == "已关闭当前窗口。"
     assert minimize_window == "已最小化当前窗口。"
     assert hide_app == "已隐藏当前应用。"

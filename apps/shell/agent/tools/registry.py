@@ -158,6 +158,10 @@ def _app_hide(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str
     return broker.app_hide(str(payload.get("app_name") or ""))
 
 
+def _app_minimize(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
+    return broker.app_minimize(str(payload.get("app_name") or ""))
+
+
 def _app_quit(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
     return broker.app_quit(str(payload.get("app_name") or ""))
 
@@ -328,6 +332,7 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "app.open": _app_open,
     "app.focus": _app_focus,
     "app.hide": _app_hide,
+    "app.minimize": _app_minimize,
     "app.quit": _app_quit,
     "desktop.reveal_path": _desktop_reveal_path,
     "desktop.open_path": _desktop_open_path,
