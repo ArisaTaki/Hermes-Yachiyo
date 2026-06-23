@@ -11,7 +11,12 @@ from apps.shell.agent.runtime.desktop_intents import (
     daily_desktop_intent_candidates,
     daily_desktop_intent_tool_request,
 )
+from apps.shell.agent.runtime.events import tool_input_preview
+from apps.shell.agent.runtime.tool_execution import RuntimeToolCallExecutor, RuntimeToolRequestRunner
+from apps.shell.agent.runtime.tool_loop import RuntimeToolLoopProjectionBuilder
 from apps.shell.agent.runtime.tool_operations import RuntimeToolOperations
+from apps.shell.agent.runtime.tool_requests import normalize_tool_name
+from apps.shell.agent.tools.policy import PolicyGate
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
 
@@ -19,9 +24,13 @@ from apps.shell.credential_store import MemoryCredentialStore
 class FakeBudget:
     def __init__(self) -> None:
         self.claims = 0
+        self.tool_claims: list[tuple[str, bool]] = []
 
     def claim_model_call(self) -> None:
         self.claims += 1
+
+    def claim_tool_call(self, tool_name: str, *, terminal_execution: bool = False) -> None:
+        self.tool_claims.append((tool_name, terminal_execution))
 
 
 class FakeToolLoopProjection:
@@ -40,6 +49,145 @@ class FakeToolLoopProjection:
 
 def _timeline(event: str, detail: str = "", **extra: Any) -> dict[str, Any]:
     return {"event": event, "detail": detail, **extra}
+
+
+class RecordingDesktopBroker:
+    def __init__(self, order: list[str]) -> None:
+        self.order = order
+        self.calls: list[tuple[str, dict[str, Any], bool]] = []
+
+    def call(self, tool_name: str, payload: dict[str, Any], *, approved: bool = False) -> dict[str, Any]:
+        self.order.append("tool")
+        self.calls.append((tool_name, payload, approved))
+        return {
+            "ok": True,
+            "action": tool_name,
+            "summary": "Playing 超时空辉夜姬",
+            "data": {"query": payload.get("query"), "track": "超时空辉夜姬"},
+            "permission_error": False,
+            "fallback_used": False,
+        }
+
+
+class RecordingToolCallEvents:
+    def __init__(self, events: list[dict[str, Any]]) -> None:
+        self.events = events
+
+    def denied(self, run_id: str, tool_name: str, input_preview: Any) -> None:
+        self._append(run_id, "agent.tool.denied", tool_name, input_preview, "denied")
+
+    def requested(self, run_id: str, tool_name: str, input_preview: Any, *, approved: bool = False) -> None:
+        self._append(run_id, "tool.requested", tool_name, input_preview, "requested", approved=approved)
+
+    def failed(self, run_id: str, tool_name: str, input_preview: Any, **_kwargs: Any) -> None:
+        self._append(run_id, "tool.failed", tool_name, input_preview, "failed")
+
+    def started(self, run_id: str, tool_name: str, input_preview: Any, *, approved: bool = False) -> None:
+        self._append(run_id, "tool.started", tool_name, input_preview, "running", approved=approved)
+
+    def result(
+        self,
+        run_id: str,
+        tool_name: str,
+        input_preview: Any,
+        tool_result: dict[str, Any],
+        *,
+        approved: bool = False,
+    ) -> None:
+        self._append(
+            run_id,
+            "tool.completed" if tool_result.get("ok") else "tool.failed",
+            tool_name,
+            input_preview,
+            "completed" if tool_result.get("ok") else "failed",
+            approved=approved,
+            output_preview=tool_result,
+        )
+
+    def agent_tool_call(
+        self,
+        run_id: str,
+        tool_name: str,
+        input_preview: Any,
+        tool_result: dict[str, Any],
+        *,
+        approved: bool = False,
+    ) -> None:
+        if not run_id:
+            return
+        self.events.append(
+            {
+                "run_id": run_id,
+                "event_type": "agent.tool.call",
+                "payload": {
+                    "tool": tool_name,
+                    "input_preview": input_preview,
+                    "result": tool_result,
+                    "approved": approved,
+                },
+            }
+        )
+
+    def _append(
+        self,
+        run_id: str,
+        event_type: str,
+        tool_name: str,
+        input_preview: Any,
+        status: str,
+        **extra: Any,
+    ) -> None:
+        if not run_id:
+            return
+        self.events.append(
+            {
+                "run_id": run_id,
+                "event_type": event_type,
+                "payload": {
+                    "tool": tool_name,
+                    "input_preview": input_preview,
+                    "status": status,
+                    **extra,
+                },
+            }
+        )
+
+
+class NoopTraceEvents:
+    @staticmethod
+    def memory_skill_trace_event(
+        _tool_name: str,
+        _input_preview: Any,
+        _tool_result: dict[str, Any],
+    ) -> None:
+        return None
+
+    @staticmethod
+    def artifact_created_payload(
+        tool_result: dict[str, Any],
+        *,
+        run_id: str,
+        source_tool: str = "",
+    ) -> dict[str, Any]:
+        return {"run_id": run_id, "source_tool": source_tool, "path": tool_result.get("path")}
+
+
+class NoopPendingApprovalBuilder:
+    @staticmethod
+    def build(
+        tool_request: dict[str, Any],
+        *,
+        messages: list[dict[str, Any]],
+        next_iteration: int,
+        remaining_tool_requests: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        return {
+            "approval_id": "approval-1",
+            "tool": tool_request.get("tool"),
+            "messages": messages,
+            "next_iteration": next_iteration,
+            "remaining_tool_requests": remaining_tool_requests,
+        }
 
 
 def test_custom_api_agent_loop_builds_runtime_prompt_and_returns_model_output() -> None:
@@ -507,6 +655,129 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_request("打开 github.com", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("按 Command+L", ["app.open"]) is None
     assert daily_desktop_intent_tool_request("点击发送按钮", allowed_tools) is None
+
+
+def test_custom_api_agent_loop_executes_desktop_intent_with_real_tool_runner_before_model() -> None:
+    budget = FakeBudget()
+    order: list[str] = []
+    timeline: list[dict[str, Any]] = []
+    artifacts: list[dict[str, Any]] = []
+    run_events: list[dict[str, Any]] = []
+    broker = RecordingDesktopBroker(order)
+    projection = RuntimeToolLoopProjectionBuilder()
+    tool_call_events = RecordingToolCallEvents(run_events)
+    trace_events = NoopTraceEvents()
+    executor = RuntimeToolCallExecutor(
+        normalize_tool_name=normalize_tool_name,
+        input_preview=tool_input_preview,
+        run_budget=lambda _run_id, _timeline_value: budget,
+        validate_tool_payload=RuntimeToolOperations.validate_tool_payload,
+        limit_tool_result=lambda value: value,
+        timeline_factory=_timeline,
+        tool_call_events=tool_call_events,
+        trace_events=trace_events,
+        append_run_event=lambda run_id, event_type, payload: run_events.append(
+            {"run_id": run_id, "event_type": event_type, "payload": payload}
+        ),
+        allows_tool=PolicyGate.allows_tool,
+    )
+    runner = RuntimeToolRequestRunner(
+        normalize_tool_name=normalize_tool_name,
+        input_preview=tool_input_preview,
+        run_budget=lambda _run_id, _timeline_value: budget,
+        user_goal_from_messages=lambda messages: str(messages[1].get("content") or ""),
+        goal_disallows_tool=lambda _goal, _tool: "",
+        timeline_factory=_timeline,
+        append_run_event=lambda run_id, event_type, payload: run_events.append(
+            {"run_id": run_id, "event_type": event_type, "payload": payload}
+        ),
+        tool_loop_projection=projection,
+        pending_approval_builder=NoopPendingApprovalBuilder(),
+        call_agent_tool=executor.execute,
+    )
+    operations = RuntimeToolOperations(
+        tool_request_runner=runner,
+        tool_call_executor=executor,
+    )
+
+    def call_model(_base_url, _model, _api_key, messages, **_kwargs):
+        order.append("model")
+        assert broker.calls == [
+            ("media.apple_music_play", {"query": "超时空辉夜姬"}, False)
+        ]
+        assert "Tool result for media.apple_music_play" in messages[-1]["content"]
+        assert "Playing 超时空辉夜姬" in messages[-1]["content"]
+        return {"role": "assistant", "content": "已播放超时空辉夜姬。"}
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local",
+            "model": "m",
+            "api_key": "k",
+        },
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {"allowed_tools": ["media.apple_music_play"]}
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=RuntimeToolOperations.model_tool_schemas,
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=3,
+        operating_doctrine="Use desktop tools for desktop intents.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=call_model,
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=RuntimeToolOperations.tool_requests_from_message,
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=projection,
+        run_tool_requests=operations.run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+        append_run_event=lambda run_id, event_type, payload: run_events.append(
+            {"run_id": run_id, "event_type": event_type, "payload": payload}
+        ),
+    )
+
+    result = loop.run(
+        {"name": "Yachiyo"},
+        "播放超时空辉夜姬",
+        broker=broker,
+        timeline=timeline,
+        artifacts=artifacts,
+        run_id="run-real-desktop-intent",
+        budget=budget,
+    )
+
+    assert str(result) == "已播放超时空辉夜姬。"
+    assert order == ["tool", "model"]
+    assert budget.tool_claims == [("media.apple_music_play", False)]
+    assert budget.claims == 1
+    assert [event["event"] for event in timeline] == [
+        "agent.desktop.intent_planned",
+        "agent.tool.call",
+        "agent.model.response",
+    ]
+    assert timeline[1]["detail"] == "media.apple_music_play"
+    assert timeline[1]["result"]["ok"] is True
+    assert [event["event_type"] for event in run_events] == [
+        "agent.desktop.intent_planned",
+        "tool.requested",
+        "tool.started",
+        "tool.completed",
+        "agent.tool.call",
+    ]
+    assert run_events[0]["payload"] == {
+        "tool": "media.apple_music_play",
+        "status": "planned",
+        "source": "daily_desktop_intent",
+        "planning_reason": "clear_daily_desktop_intent",
+        "input_preview": {"query": "超时空辉夜姬"},
+    }
+    assert run_events[-1]["payload"]["result"]["summary"] == "Playing 超时空辉夜姬"
 
 
 def test_custom_api_agent_loop_preplans_main_chat_message_desktop_intent() -> None:
