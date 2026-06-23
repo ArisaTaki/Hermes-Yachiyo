@@ -207,8 +207,68 @@ def test_agent_task_snapshot_derives_progress_from_permission_blocked_desktop_in
         }
     )
 
-    assert task.current_step == "需要权限 · 播放 Apple Music"
-    assert task.progress_text == "需要权限 · 播放 Apple Music"
+    assert task.current_step == "需要权限 · 播放 Apple Music · music_app, automation"
+    assert task.progress_text == "需要权限 · 播放 Apple Music · music_app, automation"
+
+
+def test_agent_task_snapshot_derives_progress_from_app_not_found_desktop_intent() -> None:
+    task = agent_task_snapshot_from_payload(
+        {
+            "task_id": "task-app",
+            "run_id": "run-app",
+            "status": "running",
+            "current_step": "",
+            "progress_text": "",
+            "timeline": [
+                {
+                    "event_type": "agent.desktop.intent_completed",
+                    "detail": "app.open",
+                    "payload": {
+                        "tool": "app.open",
+                        "result": {
+                            "ok": False,
+                            "error": "Application not found.",
+                            "error_code": "app_not_found",
+                            "recovery_hints": ["确认应用已安装，或换用精确应用名。"],
+                        },
+                    },
+                }
+            ],
+        }
+    )
+
+    assert task.current_step == "应用未找到 · 打开应用"
+    assert task.progress_text == "应用未找到 · 打开应用"
+
+
+def test_agent_task_snapshot_derives_progress_from_browser_open_fallback() -> None:
+    task = agent_task_snapshot_from_payload(
+        {
+            "task_id": "task-browser",
+            "run_id": "run-browser",
+            "status": "running",
+            "current_step": "",
+            "progress_text": "",
+            "timeline": [
+                {
+                    "event_type": "agent.desktop.intent_completed",
+                    "detail": "browser.open_url",
+                    "payload": {
+                        "tool": "browser.open_url",
+                        "result": {
+                            "ok": True,
+                            "fallback_used": True,
+                            "fallback": "system_browser",
+                            "data": {"url": "https://example.com"},
+                        },
+                    },
+                }
+            ],
+        }
+    )
+
+    assert task.current_step == "已回退执行 · 打开网页 · 系统浏览器"
+    assert task.progress_text == "已回退执行 · 打开网页 · 系统浏览器"
 
 
 def test_agent_task_snapshot_derives_progress_from_approved_desktop_tool_call() -> None:
@@ -266,8 +326,8 @@ def test_agent_task_snapshot_derives_permission_progress_from_desktop_tool_call(
         }
     )
 
-    assert task.current_step == "需要权限 · 输入前台文字"
-    assert task.progress_text == "需要权限 · 输入前台文字"
+    assert task.current_step == "需要权限 · 输入前台文字 · accessibility"
+    assert task.progress_text == "需要权限 · 输入前台文字 · accessibility"
 
 
 def test_agent_task_snapshot_derives_foreground_lock_progress_from_desktop_tool_call() -> None:
@@ -295,8 +355,8 @@ def test_agent_task_snapshot_derives_foreground_lock_progress_from_desktop_tool_
         }
     )
 
-    assert task.current_step == "前台被占用 · 点击前台界面"
-    assert task.progress_text == "前台被占用 · 点击前台界面"
+    assert task.current_step == "前台被占用 · 点击前台界面 · run-other"
+    assert task.progress_text == "前台被占用 · 点击前台界面 · run-other"
 
 
 def test_agent_task_snapshot_preserves_explicit_progress_over_desktop_intent() -> None:

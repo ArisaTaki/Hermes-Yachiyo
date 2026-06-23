@@ -230,14 +230,116 @@ def _desktop_intent_progress_text(
 
 def _desktop_tool_result_progress_text(label: str, result: Mapping[str, Any]) -> str:
     if result.get("approval_required"):
-        return f"等待批准 · {label}" if label else "等待批准桌面动作"
+        return _progress_text("等待批准", label, "等待批准桌面动作")
     if result.get("foreground_lock_busy"):
-        return f"前台被占用 · {label}" if label else "前台动作被占用"
-    if result.get("permission_error"):
-        return f"需要权限 · {label}" if label else "需要桌面权限"
+        holder = _foreground_lock_holder(result)
+        return _progress_text("前台被占用", label, "前台动作被占用", detail=holder)
+    permission_targets = _result_text_list(result, "permission_targets", "missing_permissions")
+    if result.get("permission_error") or permission_targets:
+        return _progress_text(
+            "需要权限",
+            label,
+            "需要桌面权限",
+            detail=", ".join(permission_targets),
+        )
+    if _text(result.get("error_code")) == "app_not_found":
+        return _progress_text("应用未找到", label, "应用未找到")
+    if result.get("fallback_used"):
+        return _progress_text(
+            "已回退执行",
+            label,
+            "已回退执行桌面动作",
+            detail=_fallback_detail(result),
+        )
     if result.get("ok") is False:
-        return f"执行失败 · {label}" if label else "桌面动作失败"
-    return f"已执行 · {label}" if label else "已执行桌面动作"
+        return _progress_text(
+            "执行失败",
+            label,
+            "桌面动作失败",
+            detail=_failure_detail(result),
+        )
+    return _progress_text("已执行", label, "已执行桌面动作")
+
+
+def _progress_text(
+    status: str,
+    label: str,
+    fallback: str,
+    *,
+    detail: str = "",
+) -> str:
+    if not label:
+        return fallback
+    parts = [status, label]
+    clean_detail = _short_detail(detail)
+    if clean_detail:
+        parts.append(clean_detail)
+    return " · ".join(parts)
+
+
+def _foreground_lock_holder(result: Mapping[str, Any]) -> str:
+    holder = _text(result.get("locked_by"))
+    if holder:
+        return holder
+    foreground_lock = result.get("foreground_lock")
+    if isinstance(foreground_lock, Mapping):
+        return _text(foreground_lock.get("holder") or foreground_lock.get("locked_by"))
+    return ""
+
+
+def _fallback_detail(result: Mapping[str, Any]) -> str:
+    fallback = _text(result.get("fallback") or result.get("fallback_tool"))
+    fallback_labels = {
+        "system_browser": "系统浏览器",
+        "desktop.click": "桌面点击",
+        "desktop.type_text": "桌面输入",
+        "app.open": "打开应用",
+    }
+    if fallback:
+        return fallback_labels.get(fallback, fallback)
+    fallback_result = result.get("fallback_result")
+    if isinstance(fallback_result, Mapping):
+        action = _text(fallback_result.get("action"))
+        if action:
+            return fallback_labels.get(action, action)
+    return ""
+
+
+def _failure_detail(result: Mapping[str, Any]) -> str:
+    error_code = _text(result.get("error_code"))
+    error_labels = {
+        "chrome_cdp_unavailable": "chrome_cdp",
+        "app_not_found": "应用未找到",
+    }
+    if error_code:
+        return error_labels.get(error_code, error_code)
+    error = _text(result.get("error") or result.get("summary"))
+    return error_labels.get(error, error)
+
+
+def _result_text_list(result: Mapping[str, Any], *keys: str) -> list[str]:
+    for key in keys:
+        value = result.get(key)
+        if isinstance(value, list):
+            items = [_text(item) for item in value]
+        elif isinstance(value, tuple):
+            items = [_text(item) for item in value]
+        else:
+            items = [_text(value)] if value is not None else []
+        items = [item for item in items if item]
+        if items:
+            return items
+    return []
+
+
+def _short_detail(value: str, *, limit: int = 80) -> str:
+    text = _text(value)
+    if not text:
+        return ""
+    compact = " ".join(text.split())
+    if len(compact) > limit:
+        return f"{compact[:limit]}..."
+    return compact
 
 
 def _event_tool_name(event: PublicRunEvent) -> str:
