@@ -338,6 +338,123 @@ def test_send_message_executes_common_folder_with_reveal_path(tmp_path, monkeypa
         store.close()
 
 
+def test_send_message_executes_direct_screen_capture_task(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    capture_targets: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("direct screen task should not call model")
+        ),
+    )
+
+    def fake_screen_capture(target_path) -> dict:
+        capture_targets.append(str(target_path))
+        return {
+            "ok": True,
+            "action": "screen.capture",
+            "summary": "已截取当前屏幕。",
+            "data": {
+                "path": str(target_path),
+                "mime_type": "image/png",
+                "size_bytes": 10,
+                "width": 100,
+                "height": 80,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.screen_capture", fake_screen_capture)
+    try:
+        result = api.send_message("当前屏幕是什么")
+        task = runtime.state.get_task(result["task_id"])
+        link = service.get_task_run_link(result["task_id"])
+        run = service.get_run(link["run_id"])
+        event_types = [
+            event["event_type"]
+            for event in service.list_run_events(run["run_id"])["events"]
+        ]
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert result["agent_task"]["summary"] == "已截取当前屏幕。"
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "screen.capture"
+        assert result["agent_task"]["artifacts"][-1]["path"] == "screenshots/current-screen.png"
+        assert task is not None
+        assert task.status == TaskStatus.COMPLETED
+        assert task.result == "已截取当前屏幕。"
+        assert capture_targets
+        assert capture_targets[0].endswith("screenshots/current-screen.png")
+        assert run["status"] == "completed"
+        assert "artifact.created" in event_types
+        assert "agent.desktop.intent_completed" in event_types
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
+def test_send_message_requires_approval_for_direct_type_text_task(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    typed_texts: list[str] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("direct foreground input task should not call model")
+        ),
+    )
+
+    def fake_type_text(text: str) -> dict:
+        typed_texts.append(text)
+        return {
+            "ok": True,
+            "action": "desktop.type_text",
+            "summary": "Typed text",
+            "data": {"text": text},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_type_text", fake_type_text)
+    try:
+        result = api.send_message("输入 你好八千代")
+        task = runtime.state.get_task(result["task_id"])
+        run = service.get_run(result["run_id"])
+        assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
+
+        assert result["ok"] is True
+        assert result["status"] == "waiting_approval"
+        assert result["agent_task"]["status"] == "waiting_approval"
+        assert result["agent_task"]["needs_user_action"] is True
+        assert result["agent_task"]["pending_approvals"][0]["tool_name"] == "desktop.type_text"
+        assert task is not None
+        assert task.status == TaskStatus.RUNNING
+        assert assistant is not None
+        assert assistant.status == MessageStatus.PROCESSING
+        assert run["status"] == "approval_required"
+        assert run["pending_approval"]["tool"] == "desktop.type_text"
+        assert typed_texts == []
+    finally:
+        service.close()
+        store.close()
+
+
 def test_send_message_is_idempotent_for_client_message_id(tmp_path):
     api, runtime, store = _make_api(tmp_path)
     try:

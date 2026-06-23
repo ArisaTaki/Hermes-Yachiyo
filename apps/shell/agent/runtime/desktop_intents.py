@@ -1054,6 +1054,7 @@ def _is_screen_capture_request(text: str) -> bool:
     return bool(
         re.search(r"(?:截个?图|截图|截屏|屏幕截图|抓屏|拍屏)", text)
         or re.search(r"(?:看一下|看看|看下|查看|读取).{0,8}(?:当前|现在|这个)?(?:屏幕|桌面)", text)
+        or re.search(r"(?:当前|现在|这个)?(?:屏幕|桌面).{0,8}(?:是什么|是啥|内容|画面)", text)
         or "take a screenshot" in lowered
         or "capture the screen" in lowered
         or "screen capture" in lowered

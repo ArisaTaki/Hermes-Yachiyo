@@ -898,6 +898,11 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "screen.capture",
         "input": {"reason": "user asked to capture the screen"},
     }
+    assert daily_desktop_intent_tool_request("当前屏幕是什么", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "screen.capture",
+        "input": {"reason": "user asked to capture the screen"},
+    }
     assert daily_desktop_intent_tool_request("当前窗口是什么", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "desktop.active_window",

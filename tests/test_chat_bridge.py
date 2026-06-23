@@ -308,7 +308,7 @@ def test_chat_bridge_quick_message_executes_screen_capture_for_launcher_entrypoi
     _result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
         monkeypatch,
-        "帮我看看现在屏幕",
+        "当前屏幕是什么",
     )
 
     assert capture_targets
