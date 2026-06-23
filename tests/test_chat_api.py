@@ -184,7 +184,7 @@ def test_send_message_executes_direct_daily_desktop_music_task(tmp_path, monkeyp
         fake_apple_music_control,
     )
     try:
-        result = api.send_message("随便放点音乐")
+        result = api.send_message("能否帮我播放apple Music?")
         task = runtime.state.get_task(result["task_id"])
         link = service.get_task_run_link(result["task_id"])
         run = service.get_run(link["run_id"])

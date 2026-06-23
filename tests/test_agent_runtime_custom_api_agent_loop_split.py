@@ -1267,6 +1267,26 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "media.apple_music_control",
         "input": {"action": "play"},
     }
+    assert daily_desktop_intent_tool_request("Apple Music 播放一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_control",
+        "input": {"action": "play"},
+    }
+    assert daily_desktop_intent_tool_request("Apple Music 放一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_control",
+        "input": {"action": "play"},
+    }
+    assert daily_desktop_intent_tool_request("音乐放一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_control",
+        "input": {"action": "play"},
+    }
+    assert daily_desktop_intent_tool_request("Music 放一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "media.apple_music_control",
+        "input": {"action": "play"},
+    }
     assert daily_desktop_intent_tool_request("放首歌", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "media.apple_music_control",
@@ -1336,6 +1356,16 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "protocol": "json_fallback",
         "tool": "media.apple_music_control",
         "input": {"action": "play"},
+    }
+    assert daily_desktop_intent_tool_request("Spotify 播放一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "Spotify"},
+    }
+    assert daily_desktop_intent_tool_request("网易云音乐播放一下", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {"app_name": "网易云音乐"},
     }
     assert daily_desktop_intent_tool_request("当前音量是多少", allowed_tools) == {
         "protocol": "json_fallback",

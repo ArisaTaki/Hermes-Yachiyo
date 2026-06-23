@@ -1365,6 +1365,18 @@ def _media_app_open_name(text: str) -> str:
     if generic_play_app:
         return generic_play_app
     for pattern in (
+        r"^(?P<app>[^。！？!?，,]+?)\s*"
+        r"(?:播放一下|播一下|放一下|播放|播|放|打开|启动|运行)"
+        r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?[?？。！!]*$",
+        r"^(?P<app>[^.!?]+?)\s+(?:play|start|open|launch)[.!?]*$",
+    ):
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        app_name = _known_music_app_name(match.group("app"))
+        if app_name:
+            return app_name
+    for pattern in (
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:播放|放|打开|启动|运行|拉起|开启)\s*(?:一下\s*)?(?P<app>[^。！？!?，,]+)",
         r"(?:open|launch|start|play)\s+(?P<app>[^.!?]+)",
@@ -1644,6 +1656,19 @@ def _music_control_action(text: str) -> str:
     ) or re.search(r"\b(?:resume|continue|start)\s+(?:music|apple\s*music|playback)\b", lowered):
         return "play"
     if _music_app_generic_play_open_name(text) == "Music":
+        return "play"
+    if re.search(
+        r"^(?:apple\s*music|music|音乐)(?:应用|app|软件|程序)?\s*"
+        r"(?:播放一下|播一下|放一下|播放|播|放|开始播放|继续播放)"
+        r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢|please)?[?？。！!]*$",
+        lowered,
+    ):
+        return "play"
+    if re.search(
+        r"^(?:音乐|歌曲|歌|music|songs?)\s*(?:播放|播|放)(?:一下|一首|首)?"
+        r"(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢|please)?[?？。！!]*$",
+        lowered,
+    ):
         return "play"
     if re.search(
         r"^(?:能否|能不能|可以)?(?:帮我|请|麻烦)?(?:直接)?(?:播放|放)一下"
