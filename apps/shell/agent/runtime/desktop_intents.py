@@ -761,10 +761,17 @@ def _is_browser_current_page_request(text: str) -> bool:
     lowered = text.lower()
     if re.search(r"(?:刷新|重新加载|reload|refresh)", text, flags=re.IGNORECASE):
         return False
+    if re.search(r"(?:总结|摘要|概括|summari[sz]e|summary)", text, flags=re.IGNORECASE):
+        return False
     return bool(
         re.search(
-            r"(?:当前|现在|前台).{0,8}(?:网页|网站|页面|浏览器).{0,8}"
+            r"(?:当前|现在|前台).{0,8}(?:网页|网站|页面|浏览器|标签页).{0,8}"
             r"(?:是什么|是啥|哪个|地址|标题|url)?",
+            text,
+        )
+        or re.search(
+            r"(?:看一下|看看|看下|查看).{0,8}"
+            r"(?:当前|现在|前台|这个|该)?(?:网页|网站|页面|浏览器|标签页)",
             text,
         )
         or "current page" in lowered
@@ -778,7 +785,13 @@ def _is_browser_extract_text_request(text: str) -> bool:
     return bool(
         re.search(
             r"(?:读取|读一下|提取|抓取|获取).{0,10}"
-            r"(?:当前|现在|前台|这个|该)?(?:网页|网站|页面|浏览器).{0,10}(?:正文|文字|文本|内容)?",
+            r"(?:当前|现在|前台|这个|该)?(?:网页|网站|页面|浏览器|标签页).{0,10}(?:正文|文字|文本|内容)?",
+            text,
+        )
+        or re.search(
+            r"(?:把|将)?\s*(?:当前|现在|前台|这个|该)?(?:网页|网站|页面|浏览器|标签页)"
+            r".{0,8}(?:读取|读一下|读下|读一读|提取|抓取|获取)"
+            r"(?:正文|文字|文本|内容)?",
             text,
         )
         or "extract text from the current page" in lowered

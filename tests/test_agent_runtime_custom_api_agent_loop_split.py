@@ -704,7 +704,22 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "browser.current_page",
         "input": {},
     }
+    assert daily_desktop_intent_tool_request("当前标签页是什么", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.current_page",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("看下这个网页", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.current_page",
+        "input": {},
+    }
     assert daily_desktop_intent_tool_request("读取当前网页正文", allowed_tools) == {
+        "protocol": "json_fallback",
+        "tool": "browser.extract_text",
+        "input": {},
+    }
+    assert daily_desktop_intent_tool_request("把当前网页读一下", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "browser.extract_text",
         "input": {},
@@ -1634,6 +1649,7 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_request("怎么打开 github.com？", allowed_tools) is None
     assert daily_desktop_intent_tool_request("怎么搜索 GitHub？", allowed_tools) is None
     assert daily_desktop_intent_tool_request("怎么播放 Apple Music？", allowed_tools) is None
+    assert daily_desktop_intent_tool_request("总结当前网页", allowed_tools) is None
     assert daily_desktop_intent_tool_request("不要真的播放超时空辉夜姬，只告诉我怎么做", allowed_tools) is None
     assert daily_desktop_intent_tool_request("不要真的点击 120, 240，只告诉我怎么做", allowed_tools) is None
     assert daily_desktop_intent_tool_request("不要打开 Slack", allowed_tools) is None

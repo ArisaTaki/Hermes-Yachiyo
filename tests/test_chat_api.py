@@ -1375,7 +1375,7 @@ def test_send_message_executes_direct_browser_extract_text_task(tmp_path, monkey
 
     monkeypatch.setattr("apps.shell.agent.tools.browser.extract_text", fake_extract_text)
     try:
-        result = api.send_message("读一下这个网页")
+        result = api.send_message("把当前网页读一下")
         task = runtime.state.get_task(result["task_id"])
         run = service.get_run(result["run_id"])
         event_types = [
@@ -1688,7 +1688,7 @@ def test_send_message_projects_browser_cdp_recovery_actions(tmp_path, monkeypatc
     )
     monkeypatch.setattr("apps.shell.agent.tools.browser._configured_browser_cdp_url", lambda: "")
     try:
-        result = api.send_message("当前网页是什么")
+        result = api.send_message("当前标签页是什么")
         task = runtime.state.get_task(result["task_id"])
         link = service.get_task_run_link(result["task_id"])
         run = service.get_run(link["run_id"])
