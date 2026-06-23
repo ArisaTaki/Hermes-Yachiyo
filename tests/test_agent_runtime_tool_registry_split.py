@@ -613,6 +613,15 @@ def test_screen_capture_permission_failure_returns_recovery_targets(tmp_path, mo
             "in macOS System Settings > Privacy & Security > Screen Recording."
         )
     ]
+    assert result["recovery_actions"] == [
+        {
+            "label": "打开屏幕录制权限",
+            "tool": "app.open",
+            "input": {"app_name": "屏幕录制权限"},
+            "permission_target": "screen_recording",
+            "risk_level": "low",
+        }
+    ]
 
 
 def test_app_open_failure_returns_unified_desktop_result(monkeypatch) -> None:
@@ -1255,6 +1264,22 @@ def test_apple_music_permission_failure_returns_music_and_automation_targets(mon
             "Grant Automation permission so Oha-Yachiyo can control System Events "
             "or the target app in macOS System Settings > Privacy & Security > Automation."
         ),
+    ]
+    assert result["recovery_actions"] == [
+        {
+            "label": "打开 Apple Music",
+            "tool": "app.open",
+            "input": {"app_name": "Music"},
+            "permission_target": "music_app",
+            "risk_level": "low",
+        },
+        {
+            "label": "打开自动化权限",
+            "tool": "app.open",
+            "input": {"app_name": "自动化权限"},
+            "permission_target": "automation",
+            "risk_level": "low",
+        },
     ]
     assert result["fallback_used"] is True
 

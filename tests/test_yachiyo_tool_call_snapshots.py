@@ -193,6 +193,15 @@ def test_tool_call_snapshot_from_payload_marks_failed_desktop_result() -> None:
                 "permission_error": True,
                 "permission_targets": ["music_app", "automation"],
                 "recovery_hints": ["Open Music.app and allow Automation."],
+                "recovery_actions": [
+                    {
+                        "label": "打开自动化权限",
+                        "tool": "app.open",
+                        "input": {"app_name": "自动化权限"},
+                        "permission_target": "automation",
+                        "risk_level": "low",
+                    }
+                ],
                 "fallback_used": True,
             },
             "created_at": "2026-06-22T00:00:00Z",
@@ -205,6 +214,15 @@ def test_tool_call_snapshot_from_payload_marks_failed_desktop_result() -> None:
     assert snapshot.output_preview["fallback_used"] is True
     assert snapshot.output_preview["recovery_hints"] == [
         "Open Music.app and allow Automation."
+    ]
+    assert snapshot.output_preview["recovery_actions"] == [
+        {
+            "label": "打开自动化权限",
+            "tool": "app.open",
+            "input": {"app_name": "自动化权限"},
+            "permission_target": "automation",
+            "risk_level": "low",
+        }
     ]
 
 

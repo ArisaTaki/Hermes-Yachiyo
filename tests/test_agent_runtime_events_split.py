@@ -62,6 +62,32 @@ def test_runtime_event_redaction_helpers_match_runtime_json_alias() -> None:
     assert agent_runtime.redact_secrets is redact_secrets
 
 
+def test_run_event_redaction_preserves_recovery_action_input_shape() -> None:
+    payload = {
+        "result": {
+            "recovery_actions": [
+                {
+                    "label": "打开屏幕录制权限",
+                    "tool": "app.open",
+                    "input": {
+                        "app_name": "屏幕录制权限",
+                        "token": "sk-runtime-recovery-secret123456",
+                    },
+                    "permission_target": "screen_recording",
+                    "risk_level": "low",
+                }
+            ]
+        }
+    }
+
+    redacted = redact_run_event_payload(payload)
+    action = redacted["result"]["recovery_actions"][0]
+
+    assert action["input"]["app_name"] == "屏幕录制权限"
+    assert action["input"]["token"] == "[redacted]"
+    assert "sk-runtime-recovery-secret123456" not in json.dumps(redacted, ensure_ascii=False)
+
+
 def test_runtime_run_event_recorder_appends_compatibility_aliases() -> None:
     class FakeRunEvents:
         def __init__(self) -> None:

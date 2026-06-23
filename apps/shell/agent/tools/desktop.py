@@ -1424,6 +1424,9 @@ def _with_permission_metadata(action: str, payload: dict[str, Any]) -> dict[str,
     recovery_hints = _permission_recovery_hints_for_targets(permission_targets)
     if recovery_hints:
         payload["recovery_hints"] = recovery_hints
+    recovery_actions = _permission_recovery_actions_for_targets(permission_targets)
+    if recovery_actions:
+        payload["recovery_actions"] = recovery_actions
     return payload
 
 

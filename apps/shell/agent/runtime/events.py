@@ -42,13 +42,55 @@ def redact_json_value(value: Any) -> Any:
 
 
 def redact_run_event_payload(value: Any) -> Any:
-    return sanitize_sensitive_value(
+    sanitized = sanitize_sensitive_value(
         value,
         text_limit=0,
         max_items=RUNTIME_JSON_REDACTION_MAX_ITEMS,
         collapse_whitespace=False,
         trim=False,
     )
+    return _restore_recovery_action_inputs(value, sanitized)
+
+
+def _restore_recovery_action_inputs(source: Any, target: Any) -> Any:
+    if isinstance(source, dict) and isinstance(target, dict):
+        result = dict(target)
+        for key, source_item in source.items():
+            target_key = str(key)
+            if target_key not in result:
+                continue
+            target_item = result.get(target_key)
+            if target_key == "recovery_actions":
+                result[target_key] = _restore_recovery_actions(source_item, target_item)
+            else:
+                result[target_key] = _restore_recovery_action_inputs(source_item, target_item)
+        return result
+    if isinstance(source, list) and isinstance(target, list):
+        return [
+            _restore_recovery_action_inputs(
+                source[index] if index < len(source) else None,
+                target_item,
+            )
+            for index, target_item in enumerate(target)
+        ]
+    return target
+
+
+def _restore_recovery_actions(source: Any, target: Any) -> Any:
+    if not isinstance(source, list) or not isinstance(target, list):
+        return target
+    restored = []
+    for index, target_action in enumerate(target):
+        source_action = source[index] if index < len(source) else None
+        if not isinstance(source_action, dict) or not isinstance(target_action, dict):
+            restored.append(target_action)
+            continue
+        action = dict(target_action)
+        source_input = source_action.get("input")
+        if isinstance(source_input, dict):
+            action["input"] = redact_json_value(source_input)
+        restored.append(action)
+    return restored
 
 
 def tool_input_preview(value: Any, *, limit: int = 1200) -> Any:
